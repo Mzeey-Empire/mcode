@@ -25,6 +25,7 @@ import { TURN_FILE_EFFECTS, TurnFileEffects } from "../turns/turn-file-effects.j
 import type { WorkspaceEnvironmentAutomaticSetupDispatch } from "../../projects/environment/workspace-environment-service.js";
 import { MemoryPressureService, type MemoryPressureSnapshot } from "../../../runtime/memory/memory-pressure-service.js";
 import { broadcast } from "../../../application/transport/push.js";
+import { publishTurnPersisted } from "../execution/turn-persisted-publication.js";
 import {
   InternalThreadControlMcpRuntime,
   ThreadControlMutationReservationService,
@@ -824,19 +825,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const persisted = result.kind === "committed" ? result.terminalPersistence : undefined;
     if (!persisted || active.persistedPublished) return;
     active.persistedPublished = true;
-    broadcast("thread.status", { threadId: active.execution.threadId,
-      status: persisted.outcome === "cancelled" ? "interrupted" : persisted.outcome });
-    broadcast("turn.persisted", {
-      threadId: active.execution.threadId,
-      turnId: active.execution.turnId,
-      messageId: persisted.messageId,
-      settledMessage: persisted.settledMessage,
-      toolCallCount: persisted.toolCallCount,
-      filesChanged: [...persisted.filesChanged],
-      outcome: persisted.outcome,
-      executionId: active.execution.executionId,
-      ...(persisted.fileEffects ? { fileEffects: persisted.fileEffects } : {}),
-    });
+    publishTurnPersisted(active.execution, persisted);
   }
 
   private async releaseWorkerTurn(active: WorkerOwnedTurn): Promise<void> {

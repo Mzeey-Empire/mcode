@@ -158,7 +158,6 @@ export interface ExecutionAcceptedReceipt {
   readonly eventCount: number;
   readonly livePublication?: readonly ExecutionLivePublicationReceipt[];
   readonly planQuestions?: ExecutionPlanQuestionsReceipt;
-  readonly terminalAcceptance?: ExecutionTerminalPersistenceReceipt;
 }
 
 /**

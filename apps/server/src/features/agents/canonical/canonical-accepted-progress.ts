@@ -17,7 +17,8 @@ import { broadcast, subscribedThreadIds } from "../../../application/transport/p
 import { BoundedProgressRetention } from "../execution/progress-retention-budget.js";
 import { ThreadProgressOwner } from "../execution/thread-progress-owner.js";
 import type { AcceptedProgressBatch, SavedProgressReceipt, ProgressSaveFailure } from "../execution/thread-progress-types.js";
-import type { ExecutionAcceptedReceipt, ExecutionSemanticOperation } from "../execution/execution-worker-handler.js";
+import type { ExecutionAcceptedReceipt, ExecutionSemanticOperation, ExecutionTerminalPersistenceReceipt } from "../execution/execution-worker-handler.js";
+import { publishTurnPersisted } from "../execution/turn-persisted-publication.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
 import { syntheticThreadExecutionId } from "./canonical-thread-execution.js";
 import { CanonicalWriterAcknowledgementCapacity, type CanonicalAgentWriterClient } from "./canonical-agent-writer-client.js";
@@ -44,7 +45,8 @@ import type { StoredTask } from "../orchestration/persistence/task-repo.js";
 import { mergePlanVersions } from "../planning/merge-plan-versions.js";
 import type { PlanFileWriter } from "../planning/plan-file-writer.js";
 
-type AcceptedExecutionWriteIntent = ({ readonly kind: "execution"; readonly operation: ExecutionSemanticOperation }
+type AcceptedExecutionWriteIntent = ({ readonly kind: "execution"; readonly operation: ExecutionSemanticOperation;
+    readonly terminal?: ExecutionTerminalPersistenceReceipt }
   | { readonly kind: "plan-answer"; readonly assistant: Message }
   | { readonly kind: "control" }) & {
   readonly phase: string;
@@ -203,16 +205,18 @@ export class CanonicalAcceptedProgress {
     prependObservationEvents(prepared.events, [...collaboration.events, ...features.events]);
     const nextHead = advanceAcceptedExecution(head, operation, prepared.terminalMessage);
     let candidate = thread.state;
+    const terminal = acceptedTerminalPersistence(operation, prepared.terminalMessage);
     const admission = thread.owner.accept({ operationId: operation.operationId, execution: operation.execution,
       events: prepared.events, write: { kind: "execution", operation: prepared.storageOperation ?? operation,
-        phase: nextHead.phase, nativeCursor: nextHead.nativeCursor, features: featureWriteMetadata(features) },
+        phase: nextHead.phase, nativeCursor: nextHead.nativeCursor, features: featureWriteMetadata(features),
+        ...(terminal ? { terminal } : {}) },
       admission: isControl(operation) ? "control" : "progress" }, (batch) => {
       if (operation.ordinal !== head.ordinal + 1) return false;
       const reduction = reduceAgentEventBatch(thread.state, acceptedEnvelopes(batch));
       if (reduction.outcome !== "applied") return false;
       candidate = compactReduction(reduction.state);
       return true;
-    }, { inputHash, receipt: (batch) => this.acceptedReceipt(operation, batch, prepared) });
+    }, { inputHash, receipt: (batch) => this.acceptedReceipt(operation, batch) });
     if (admission.kind === "rejected") throw new ProgressAdmissionError(admission.reason);
     if (admission.kind === "duplicate") throw new Error("Accepted operation has no original producer receipt");
     thread.state = candidate;
@@ -306,17 +310,10 @@ export class CanonicalAcceptedProgress {
     return { kind: "new", head, inputHash };
   }
 
-  private acceptedReceipt(operation: ExecutionSemanticOperation, batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>,
-    prepared: ReturnType<typeof prepareAcceptedParentEvents>): ExecutionAcceptedReceipt {
+  private acceptedReceipt(operation: ExecutionSemanticOperation, batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>): ExecutionAcceptedReceipt {
     return { kind: "accepted", operationId: operation.operationId, progressPosition: batch.through,
       acceptedThrough: batch.events.at(-1)?.acceptedSequence ?? 0,
       eventCount: operation.mutation.kind === "append-events" ? operation.mutation.events.length : 0,
-      ...(prepared.terminalMessage && operation.mutation.kind === "finish-live-event" ? { terminalAcceptance: {
-        messageId: prepared.terminalMessage.id, outcome: operation.mutation.outcome,
-        settledMessage: null,
-        toolCallCount: operation.mutation.projection.narrative.filter((item) => item.kind === "toolCall").length,
-        filesChanged: [...operation.mutation.input.fileEvidence?.filesChanged ?? []],
-      } } : {}),
     };
   }
 
@@ -824,12 +821,24 @@ export class CanonicalAcceptedProgress {
     const completed = this.pendingSaved;
     this.pendingSaved = [];
     this.publishSaving(batch.execution.threadId);
+    this.publishSavedTerminal(batch);
     if (thread.owner.recoveryCut().retained.length === 0) {
       for (const waiter of thread.waiters) waiter.resolve();
       thread.waiters.clear();
     }
     await this.projectSavedPlans(batch);
     await this.retireSavedReceipts(batch, completed, thread);
+  }
+
+  /** Accepted finishes release no committed receipt, so the save acknowledgement is their only persisted signal. */
+  private publishSavedTerminal(batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>): void {
+    if (batch.write.kind !== "execution" || !batch.write.terminal) return;
+    try {
+      publishTurnPersisted(batch.execution, batch.write.terminal);
+    } catch (error) {
+      logger.warn("Saved terminal publication failed", { threadId: batch.execution.threadId,
+        executionId: batch.execution.executionId, errorType: error instanceof Error ? error.name : "unknown" });
+    }
   }
 
   private async projectSavedPlans(batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>): Promise<void> {
@@ -992,6 +1001,16 @@ function compatibilityFields(write: AcceptedExecutionWriteIntent, final: boolean
   const operation = write.operation;
   return isTerminal(operation) ? { compatibility: operation, terminalOutcome: operation.mutation.outcome, features: write.features }
     : { compatibility: operation, features: write.features };
+}
+
+function acceptedTerminalPersistence(operation: ExecutionSemanticOperation, message?: Message):
+  ExecutionTerminalPersistenceReceipt | undefined {
+  const mutation = operation.mutation;
+  if (mutation.kind !== "finish-live-event") return undefined;
+  const fileEvidence = mutation.input.fileEvidence;
+  return { messageId: message?.id ?? null, settledMessage: message ? { id: message.id, sequence: message.sequence } : null,
+    outcome: mutation.outcome, toolCallCount: mutation.projection.narrative.filter((item) => item.kind === "toolCall").length,
+    filesChanged: [...fileEvidence?.filesChanged ?? []], ...(fileEvidence ? { fileEffects: fileEvidence.fileEffects } : {}) };
 }
 
 function featureWriteMetadata(features: AcceptedFeatureObservations): AcceptedFeatureWriteMetadata {
