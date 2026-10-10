@@ -1,132 +1,157 @@
-/**
- * Data access for the `plans` table.
- *
- * Each plan is tied to a thread + message and carries a monotonically
- * increasing version number within that thread.
- */
-
 import type { Database } from "bun:sqlite";
 import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import * as NodeCrypto from "node:crypto";
-import type { PlanRecord, PlanStatus } from "@mcode/contracts";
-import { plans } from "../../../../runtime/persistence/sqlite/schema.js";
+import { logger } from "@mcode/shared";
+import { PlanVersionSchema, type PlanSaveVersion, type PlanVersion, type ProviderId } from "@mcode/contracts";
+import { plans, canonicalAgentItems } from "../../../../runtime/persistence/sqlite/schema.js";
+import { readCanonicalPlan } from "../legacy-plan-record.js";
+import { mergePlanVersions } from "../merge-plan-versions.js";
+import { planTitle } from "../plan-title.js";
+import type { PlanPersistenceReady } from "../plan-execution-state.js";
+import type { PlanSaveResult, PlanSnapshotResult } from "./plan-write-operations.js";
 
-type Row = typeof plans.$inferSelect;
-
+/** Plan queries and transactional operations, used on the application's sole writer. */
 export class PlanStore {
   private readonly orm: BunSQLiteDatabase;
 
-  constructor(db: Database) {
-    this.orm = drizzle(db);
+  constructor(private readonly db: Database) { this.orm = drizzle(db); }
+
+  /** Allocate an agent version and retire its mutable/reviewable predecessors. */
+  create(threadId: string, messageId: string, capture: PlanPersistenceReady, providerId: ProviderId | null): PlanVersion {
+    return this.db.transaction(() => {
+      const prior = this.listByThread(threadId);
+      const now = new Date().toISOString();
+      for (const plan of prior) {
+        if (plan.status === "draft" || plan.status === "ready") {
+          this.orm.update(plans).set({ status: "superseded", updatedAt: now }).where(eq(plans.id, plan.id)).run();
+        }
+      }
+      const version: PlanVersion = { id: NodeCrypto.randomUUID(), threadId, messageId,
+        version: (prior.at(-1)?.version ?? 0) + 1, title: capture.title, contentMd: capture.contentMd,
+        status: "ready", author: "agent", providerId, captureSource: capture.captureSource,
+        baseVersionId: null, revision: 0, createdAt: now, updatedAt: now, acceptedAt: null, acceptedMessageId: null };
+      this.insert(version, capture.nativePlanFile ? JSON.stringify(capture.nativePlanFile) : null);
+      return version;
+    })();
   }
 
-  /** Insert a new plan, auto-assigning the next version number. */
-  create(
-    threadId: string,
-    messageId: string,
-    title: string,
-    contentMd: string,
-    sectionsJson: string | null,
-    changeSummary: string | null,
-  ): PlanRecord {
-    const id = NodeCrypto.randomUUID();
-    const versionRow = this.orm
-      .select({ next: sql<number>`COALESCE(MAX(${plans.version}), 0) + 1` })
-      .from(plans)
-      .where(eq(plans.threadId, threadId))
-      .get();
-    const version = versionRow?.next ?? 1;
-
-    this.orm
-      .update(plans)
-      .set({ status: "superseded" })
-      .where(and(eq(plans.threadId, threadId), eq(plans.status, "draft")))
-      .run();
-
-    this.orm
-      .insert(plans)
-      .values({
-        id,
-        threadId,
-        messageId,
-        version,
-        title,
-        contentMd,
-        sectionsJson,
-        changeSummary,
-        status: "draft",
-      })
-      .run();
-
-    const row = this.orm
-      .select()
-      .from(plans)
-      .where(eq(plans.id, id))
-      .get();
-    return this.toRecord(row as Row);
+  /** Checks busy and revision preconditions in the same transaction as the save. */
+  saveVersion(input: PlanSaveVersion): PlanSaveResult {
+    return this.db.transaction((): PlanSaveResult => {
+      if (!this.threadExists(input.threadId)) return { ok: false, code: "thread_not_found", latestVersion: null };
+      const latest = this.listByThread(input.threadId).at(-1) ?? null;
+      if (this.db.prepare(`SELECT 1 FROM canonical_agent_ingest_checkpoints checkpoint
+        JOIN canonical_agent_turns turn ON turn.id = checkpoint.turn_id
+        WHERE checkpoint.thread_id = ? AND checkpoint.terminal_outcome IS NULL
+          AND turn.status IN ('Pending', 'Running') LIMIT 1`).get(input.threadId)) {
+        return { ok: false, code: "plan_busy", latestVersion: latest };
+      }
+      return this.saveAvailableVersion(input, latest);
+    })();
   }
 
-  /** Update a plan's status (draft -> accepted, etc.). */
-  updateStatus(planId: string, status: PlanStatus): void {
-    this.orm
-      .update(plans)
-      .set({ status })
-      .where(eq(plans.id, planId))
-      .run();
+  private saveAvailableVersion(input: PlanSaveVersion, latest: PlanVersion | null): PlanSaveResult {
+    const existing = this.getById(input.versionId);
+    const base = this.getById(input.baseVersionId);
+    if (isAcceptedVersion(input.threadId, base) || isAcceptedVersion(input.threadId, existing)) {
+      return { ok: false, code: "plan_read_only", latestVersion: latest };
+    }
+    if (existing) return this.saveDraft(input, existing, latest);
+    if (!latest || latest.id !== input.baseVersionId || latest.status !== "ready" || latest.revision !== input.baseRevision) {
+      return { ok: false, code: "plan_conflict", latestVersion: latest };
+    }
+    const now = new Date().toISOString();
+    const version: PlanVersion = { id: input.versionId, threadId: input.threadId, messageId: null,
+      version: latest.version + 1, title: planTitle(input.contentMd), contentMd: input.contentMd,
+      status: "draft", author: "user", providerId: null, captureSource: "edit", baseVersionId: latest.id,
+      revision: 1, createdAt: now, updatedAt: now, acceptedAt: null, acceptedMessageId: null };
+    this.insert(version);
+    return { ok: true, version };
   }
 
-  /** All plan versions for a thread, oldest first. */
-  listByThread(threadId: string): PlanRecord[] {
-    const rows = this.orm
-      .select()
-      .from(plans)
-      .where(eq(plans.threadId, threadId))
-      .orderBy(asc(plans.version))
-      .all();
-    return rows.map(this.toRecord);
+  private saveDraft(input: PlanSaveVersion, existing: PlanVersion, latest: PlanVersion | null): PlanSaveResult {
+    const conflict: PlanSaveResult = { ok: false, code: "plan_conflict", latestVersion: latest };
+    if (existing.threadId !== input.threadId || existing.status !== "draft" || existing.id !== latest?.id) return conflict;
+    if (existing.revision === input.baseRevision + 1 && existing.contentMd === input.contentMd) return { ok: true, version: existing };
+    if (existing.revision !== input.baseRevision) return conflict;
+    const version = { ...existing, title: planTitle(input.contentMd), contentMd: input.contentMd,
+      revision: existing.revision + 1, updatedAt: new Date().toISOString() };
+    this.orm.update(plans).set({ title: version.title, contentMd: version.contentMd,
+      revision: version.revision, updatedAt: version.updatedAt }).where(eq(plans.id, existing.id)).run();
+    return { ok: true, version };
   }
 
-  /** Most recent non-superseded plan for a thread, or null. */
-  getLatestForThread(threadId: string): PlanRecord | null {
-    const row = this.orm
-      .select()
-      .from(plans)
-      .where(and(eq(plans.threadId, threadId), ne(plans.status, "superseded")))
-      .orderBy(desc(plans.version))
-      .limit(1)
-      .get();
-    return row ? this.toRecord(row) : null;
+  /** Serializes the snapshot behind preceding writes and merges retained canonical history. */
+  snapshot(threadId: string): PlanSnapshotResult {
+    return this.db.transaction((): PlanSnapshotResult => {
+      if (!this.threadExists(threadId)) return { ok: false, code: "thread_not_found", latestVersion: null };
+      return { ok: true, versions: this.listWithHistory(threadId) };
+    })();
   }
 
-  /** Single plan by ID. */
-  getById(planId: string): PlanRecord | null {
-    const row = this.orm
-      .select()
-      .from(plans)
-      .where(eq(plans.id, planId))
-      .get();
-    return row ? this.toRecord(row) : null;
+  /** Read retained plan projections alongside the authoritative version rows. */
+  listWithHistory(threadId: string): PlanVersion[] {
+    const historic: PlanVersion[] = [];
+    const items = this.orm.select().from(canonicalAgentItems).where(and(
+      eq(canonicalAgentItems.threadId, threadId),
+      sql`CASE WHEN json_valid(${canonicalAgentItems.payloadJson}) THEN json_extract(${canonicalAgentItems.payloadJson}, '$.projection') END = 'plan'`,
+    )).orderBy(asc(canonicalAgentItems.updatedAt)).all();
+    for (const item of items) {
+      try {
+        const payload: unknown = JSON.parse(item.payloadJson);
+        if (typeof payload === "object" && payload !== null) {
+          const plan = readCanonicalPlan("plan" in payload ? payload.plan : undefined);
+          if (plan.threadId !== threadId) throw new Error("Canonical plan belongs to another thread");
+          historic.push(plan);
+        }
+      } catch (error) {
+        logger.warn("Skipping unreadable historic plan", {
+          threadId, itemId: item.id, error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return mergePlanVersions(historic, this.listByThread(threadId));
   }
 
-  /** Find the plan bound to one durable assistant message. */
-  getByMessageId(messageId: string): PlanRecord | null {
+  private threadExists(threadId: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM threads WHERE id = ? AND deleted_at IS NULL").get(threadId));
+  }
+
+  /** Insert an assigned version without allocating another identity. */
+  insert(version: PlanVersion, nativePlanFileJson: string | null = null): void {
+    this.orm.insert(plans).values({ ...version, nativePlanFileJson }).run();
+  }
+
+  /** All durable versions in their per-thread order. */
+  listByThread(threadId: string): PlanVersion[] {
+    return this.orm.select().from(plans).where(eq(plans.threadId, threadId)).orderBy(asc(plans.version)).all().map(toVersion);
+  }
+
+  /** Latest version eligible for the Mcode plan-file projection. */
+  getLatestForThread(threadId: string): PlanVersion | null {
+    const row = this.orm.select().from(plans).where(and(eq(plans.threadId, threadId), ne(plans.status, "superseded")))
+      .orderBy(desc(plans.version)).get();
+    return row ? toVersion(row) : null;
+  }
+
+  /** Find one assigned version. */
+  getById(id: string): PlanVersion | null {
+    const row = this.orm.select().from(plans).where(eq(plans.id, id)).get();
+    return row ? toVersion(row) : null;
+  }
+
+  /** Find the agent version tied to an assistant message. */
+  getByMessageId(messageId: string): PlanVersion | null {
     const row = this.orm.select().from(plans).where(eq(plans.messageId, messageId)).get();
-    return row ? this.toRecord(row) : null;
+    return row ? toVersion(row) : null;
   }
+}
 
-  private toRecord(row: Row): PlanRecord {
-    return {
-      id: row.id,
-      threadId: row.threadId,
-      messageId: row.messageId,
-      version: row.version,
-      title: row.title,
-      contentMd: row.contentMd,
-      sectionsJson: row.sectionsJson ? JSON.parse(row.sectionsJson) : null,
-      changeSummary: row.changeSummary,
-      status: row.status as PlanRecord["status"],
-      createdAt: row.createdAt,
-    };
-  }
+function toVersion(row: typeof plans.$inferSelect): PlanVersion {
+  return PlanVersionSchema().parse({ ...row, acceptedMessageId: null });
+}
+
+function isAcceptedVersion(threadId: string, version: PlanVersion | null): boolean {
+  return version?.threadId === threadId && version.status === "accepted";
 }

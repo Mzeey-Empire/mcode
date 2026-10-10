@@ -91,19 +91,19 @@ describe("agent storage through the application writer", () => {
     expect(messages.findById(message.id)?.attachments).toEqual([first, second]);
   });
 
-  it("allocates concurrent plan versions atomically and preserves drafts after a failed command", async () => {
+  it("allocates concurrent plan versions atomically and preserves ready versions after a failed command", async () => {
     const messages = new MessageRepo(reader, writer);
     const plans = new PlanRepo(reader, writer);
     const message = await messages.create("thread", "assistant", "Plan", 1);
-    const first = await plans.create("thread", message.id, "First", "First", null, null);
-    await expect(plans.create("thread", "missing-message", "Invalid", "Invalid", null, null)).rejects.toThrow("FOREIGN KEY");
-    expect(plans.getLatestForThread("thread")?.status).toBe("draft");
+    const first = await plans.create("thread", message.id, { title: "First", contentMd: "First", captureSource: "fence" }, null);
+    await expect(plans.create("thread", "missing-message", { title: "Invalid", contentMd: "Invalid", captureSource: "fence" }, null)).rejects.toThrow("FOREIGN KEY");
+    expect(plans.getLatestForThread("thread")?.status).toBe("ready");
     const results = await Promise.all([
-      plans.create("thread", message.id, "Second", "Second", null, null),
-      plans.create("thread", message.id, "Third", "Third", null, null),
+      plans.create("thread", message.id, { title: "Second", contentMd: "Second", captureSource: "fence" }, null),
+      plans.create("thread", message.id, { title: "Third", contentMd: "Third", captureSource: "fence" }, null),
     ]);
     expect([first.version, ...results.map(plan => plan.version)]).toEqual([1, 2, 3]);
-    expect(plans.listByThread("thread").map(plan => plan.status)).toEqual(["superseded", "superseded", "draft"]);
+    expect(plans.listByThread("thread").map(plan => plan.status)).toEqual(["superseded", "superseded", "ready"]);
   });
 
   it("commits bounded narrative prefixes and validates every row before the first write", async () => {

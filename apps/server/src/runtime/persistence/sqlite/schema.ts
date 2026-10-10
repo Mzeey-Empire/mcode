@@ -989,18 +989,23 @@ export const plans = sqliteTable(
       .notNull()
       .references(() => threads.id, { onDelete: "cascade" }),
     messageId: text("message_id")
-      .notNull()
       .references(() => messages.id, { onDelete: "cascade" }),
     version: integer("version").notNull().default(1),
     title: text("title").notNull(),
     contentMd: text("content_md").notNull(),
-    sectionsJson: text("sections_json"),
-    changeSummary: text("change_summary"),
+    author: text("author").notNull(),
+    providerId: text("provider_id"),
+    captureSource: text("capture_source").notNull(),
+    baseVersionId: text("base_version_id"),
+    revision: integer("revision").notNull().default(0),
+    nativePlanFileJson: text("native_plan_file_json"),
     status: text("status").notNull().default("draft"),
     createdAt: text("created_at").notNull().default(timestampDefault),
+    updatedAt: text("updated_at").notNull().default(timestampDefault),
+    acceptedAt: text("accepted_at"),
   },
   (table) => [
     index("idx_plans_thread").on(table.threadId),
-    index("idx_plans_thread_version").on(table.threadId, table.version),
+    uniqueIndex("idx_plans_thread_version").on(table.threadId, table.version),
   ],
 );

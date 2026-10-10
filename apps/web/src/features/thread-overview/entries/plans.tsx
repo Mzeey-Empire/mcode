@@ -5,13 +5,13 @@ import { cn } from "@/lib/utils";
 import { useDiffStore } from "@/stores/diffStore";
 import { usePlanStore } from "@/stores/planStore";
 import { type Thread } from "@/transport";
-import type { PlanRecord } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts";
 import { ListChecks } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { OVERVIEW_ROW_CLASS, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 
 /** Stable empty plans reference so closed Overview selectors never allocate. */
-const EMPTY_PLANS: readonly PlanRecord[] = [];
+const EMPTY_PLANS: readonly PlanVersion[] = [];
 
 function PlansEntry({ thread }: { thread: Thread }) {
 

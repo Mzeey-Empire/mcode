@@ -1,4 +1,7 @@
-import type { PlanCapture, PlanQuestion } from "@mcode/contracts";
+import { PLAN_MAX_CONTENT_CHARS, type PlanCapture, type PlanQuestion } from "@mcode/contracts";
+import type { z } from "zod";
+import { PlanPersistenceReadySchema } from "./plan-capture-schema.js";
+import { planTitle } from "./plan-title.js";
 import { PlanFenceParser } from "@mcode/shared";
 import { PlanQuestionParser } from "./plan-question-parser.js";
 
@@ -8,12 +11,7 @@ export interface PlanQuestionsReady {
 }
 
 /** Plan data ready for the service to persist against an assistant message. */
-export interface PlanPersistenceReady {
-  title: string;
-  contentMd: string;
-  sectionsJson: string;
-  changeSummary: string | null;
-}
+export type PlanPersistenceReady = z.infer<ReturnType<typeof PlanPersistenceReadySchema>>;
 
 /** A planning turn explicitly reports when no plan was captured. */
 export type PlanCaptureOutcome = { outcome: "captured" } | { outcome: "missing" };
@@ -22,7 +20,7 @@ export type PlanCaptureOutcome = { outcome: "captured" } | { outcome: "missing" 
 export class PlanExecutionState {
   private questionParser: PlanQuestionParser | undefined;
   private fenceParser: PlanFenceParser | undefined;
-  private pendingCapture: Pick<PlanCapture, "markdown" | "source"> | undefined;
+  private pendingCapture: Omit<PlanCapture, "threadId"> | undefined;
   private planning = false;
   private captured = false;
 
@@ -60,8 +58,8 @@ export class PlanExecutionState {
   }
 
   /** Native output takes precedence over a pending fence capture. */
-  handlePlanCapture(capture: Pick<PlanCapture, "markdown" | "source">): void {
-    if (!this.planning || this.captured || !capture.markdown.trim() || capture.markdown.length > 256 * 1024
+  handlePlanCapture(capture: Omit<PlanCapture, "threadId">): void {
+    if (!this.planning || this.captured || !capture.markdown.trim() || capture.markdown.length > PLAN_MAX_CONTENT_CHARS
       || this.pendingCapture?.source === "native") return;
     this.pendingCapture = capture;
   }
@@ -89,7 +87,8 @@ export class PlanExecutionState {
     this.fenceParser = new PlanFenceParser();
     const capture = this.pendingCapture;
     this.pendingCapture = undefined;
-    return capture ? extractMarkdown(capture.markdown) : null;
+    return capture ? { title: planTitle(capture.markdown), contentMd: capture.markdown,
+      captureSource: capture.source, ...(capture.nativePlanFile ? { nativePlanFile: capture.nativePlanFile } : {}) } : null;
   }
 
   /** Return the planning result without creating a persisted phase. */
@@ -105,54 +104,5 @@ export class PlanExecutionState {
   /** Prevent a second version after the first capture was accepted. */
   markPlanPersisted(): void {
     this.captured = true;
-  }
-}
-
-function extractMarkdown(content: string): PlanPersistenceReady | null {
-  const headings = [...markdownHeadings(content)];
-  const titleHeading = headings.find((heading) => heading.level === 1);
-  const title = titleHeading?.title ?? headings[0]?.title ?? firstProseLine(content) ?? "Plan";
-  return title ? { title: title.slice(0, 200), contentMd: content,
-    sectionsJson: planNavigation(headings.filter((heading) => heading !== titleHeading)), changeSummary: null } : null;
-}
-
-function planNavigation(headings: Array<{ title: string; level: number }>): string {
-  let sectionsLength = 2;
-  const sections: Array<{ id: string; title: string; level: number }> = [];
-  for (const heading of headings) {
-    const section = { id: `s${sections.length + 1}`, ...heading };
-    const length = JSON.stringify(section).length + Number(sections.length > 0);
-    if (sections.length >= 128 || sectionsLength + length > 64 * 1024) break;
-    sections.push(section);
-    sectionsLength += length;
-  }
-  return JSON.stringify(sections);
-}
-
-function firstProseLine(content: string): string | undefined {
-  for (const line of proseLines(content)) if (line.trim()) return line.trim();
-  return undefined;
-}
-
-function* markdownHeadings(content: string): Generator<{ title: string; level: number }> {
-  for (const line of proseLines(content)) {
-    const match = /^ {0,3}(#{1,3})[ \t]+(.+)/.exec(line);
-    if (!match) continue;
-    const title = match[2].replace(/\s+#+\s*$/, "").trim().slice(0, 200);
-    if (title) yield { title, level: match[1].length };
-  }
-}
-
-/** Lines outside code fences, so code never supplies a title or section. */
-function* proseLines(content: string): Generator<string> {
-  let fence: { marker: string; length: number } | null = null;
-  for (const line of content.split("\n")) {
-    const code = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-    if (code) {
-      if (!fence) fence = { marker: code[1][0], length: code[1].length };
-      else if (code[1][0] === fence.marker && code[1].length >= fence.length && !code[2].trim()) fence = null;
-      continue;
-    }
-    if (!fence) yield line;
   }
 }

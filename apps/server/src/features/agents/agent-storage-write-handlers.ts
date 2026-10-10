@@ -86,7 +86,8 @@ function planAndTurnHandlers(db: Database): ReadonlyMap<string, (input: unknown)
   const diff = turnDiffWriteOperations;
   return new Map([
     [plan.create.name, databaseWriteHandler(plan.create, input => plans.create(...input))],
-    [plan.updateStatus.name, databaseWriteHandler(plan.updateStatus, input => plans.updateStatus(...input))],
+    [plan.saveVersion.name, databaseWriteHandler(plan.saveVersion, input => plans.saveVersion(input))],
+    [plan.snapshot.name, databaseWriteHandler(plan.snapshot, input => plans.snapshot(input.threadId))],
     [answer.markAnswered.name, databaseWriteHandler(answer.markAnswered, input => answers.markAnswered(...input))],
     [snapshot.create.name, databaseWriteHandler(snapshot.create, input => snapshots.create(...input))],
     [snapshot.deleteExpired.name, databaseWriteHandler(snapshot.deleteExpired, input => snapshots.deleteExpired(...input))],

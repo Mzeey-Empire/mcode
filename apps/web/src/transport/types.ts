@@ -744,7 +744,7 @@ export interface McodeTransport {
   getThreadTasks(threadId: string): Promise<Array<{ id?: string; content: string; status: "pending" | "in_progress" | "completed" | "cancelled"; activeForm?: string; group?: string }> | null>;
 
   /** Fetch persisted plans for a thread (hydration on page load). */
-  getThreadPlans(threadId: string): Promise<import("@mcode/contracts").PlanRecord[]>;
+  getThreadPlans(threadId: string): Promise<import("@mcode/contracts").PlanVersion[]>;
 
   // Snapshots
   /** Get a unified diff for a specific file from a turn snapshot. */

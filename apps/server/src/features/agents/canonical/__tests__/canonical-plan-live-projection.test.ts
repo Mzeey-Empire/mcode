@@ -30,7 +30,7 @@ const questions = [{ id: "q1", category: "AUTH", question: "Which login?", optio
   { id: "o2", title: "Password", description: "Use passwords." },
 ] }];
 const planOutput = { title: "Login plan", contentMd: "# Login plan\n## Build\nUse passkeys.",
-  sectionsJson: '[{"id":"s1","title":"Build","level":2}]', changeSummary: null };
+  captureSource: "native" as const, nativePlanFile: { path: "C:/fixture/plan.md", sessionId: "session-plan", sha256: "a".repeat(64) } };
 
 function seedThread(db: Database): void {
   db.prepare("INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
@@ -147,10 +147,14 @@ describe("Codex live plan projections on the sole writer", () => {
 
     const receipt = await writer.transact(write);
     expect(receipt).toMatchObject({ kind: "committed", planOutput: {
-      threadId: THREAD_ID, messageId, title: planOutput.title, version: 1,
+      threadId: THREAD_ID, messageId, title: planOutput.title, version: 1, status: "ready",
+      author: "agent", providerId: "codex", captureSource: "native", revision: 0,
     }, livePublication: [{ event }] });
     expect(db.prepare("SELECT is_internal FROM messages WHERE id = ?").get(messageId)).toEqual({ is_internal: 1 });
     expect(new PlanRepo(db).getByMessageId(messageId)).toEqual(receipt.kind === "committed" ? receipt.planOutput : null);
+    expect(db.prepare("SELECT native_plan_file_json FROM plans WHERE message_id = ?").get(messageId))
+      .toEqual({ native_plan_file_json: JSON.stringify(planOutput.nativePlanFile) });
+    expect(receipt.kind === "committed" && receipt.planOutput).not.toHaveProperty("nativePlanFile");
     db.close(true);
     db = openDatabase({ dbPath: path });
     writer = new CanonicalExecutionSemanticWriter(db, () => {});

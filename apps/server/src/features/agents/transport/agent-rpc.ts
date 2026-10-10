@@ -29,7 +29,7 @@ import type { AgentTurnContinuationPort } from "../orchestration/agent-runtime-i
 import type { TaskRepo } from "../orchestration/persistence/task-repo.js";
 import type { AgentPermissionService } from "../permissions/agent-permission-service.js";
 import type { PlanTurnService } from "../planning/plan-turn-service.js";
-import type { PlanRepo } from "../planning/persistence/plan-repo.js";
+import type { PlanService } from "../planning/plan-service.js";
 import type { RecapService } from "../recap/recap-service.js";
 import type { TurnRecoveryService } from "../recovery/turn-recovery-service.js";
 import type { ToolCallRecordRepo } from "../tools/persistence/tool-call-record-repo.js";
@@ -49,8 +49,8 @@ type AgentRpcMethod =
   | "agent.dismissPlanQuestions"
   | "agent.child.stop"
   | "canonicalAgent.roster"
-  | "plan.updateStatus"
-  | "plan.list"
+  | "plan.saveVersion"
+  | "plan.snapshot"
   | "message.list"
   | "conversation.page"
   | "conversation.olderPage"
@@ -74,7 +74,7 @@ type AgentRpcParams<Method extends AgentRpcMethod> = Method extends "canonicalAg
 /** Defines the services required to route validated Agent RPC calls. */
 export interface AgentRouterDeps {
   canonicalProgress?: Pick<import("../canonical/canonical-accepted-progress.js").CanonicalAcceptedProgress,
-    "retry" | "listPlans" | "getTasks" | "updatePlanStatus">;
+    "retry" | "getTasks">;
   agentService: Pick<
     AgentService,
     "sendMessage" | "createAndSend" | "stopSession" | "runtimeAccess"
@@ -89,7 +89,7 @@ export interface AgentRouterDeps {
   messageRepo: ConversationPageDeps["messageRepo"] & Pick<MessageRepo, "confirmUserMessage">;
   narrativeStore: Pick<NarrativeStore, "load">;
   planQuestionAnswersRepo: ConversationPageDeps["planQuestionAnswersRepo"];
-  planRepo: Pick<PlanRepo, "updateStatus" | "listByThread">;
+  planService: Pick<PlanService, "saveVersion" | "snapshot">;
   planTurnService: Pick<PlanTurnService, "answerQuestions" | "dismissQuestions">;
   recapService: Pick<RecapService, "generate">;
   subagentLifecycleService: Pick<SubagentLifecycleService, "loadRoster" | "stop">;
@@ -198,11 +198,8 @@ const agentHandlers: AgentRpcHandlerMap = {
   },
   "agent.child.stop": (deps, params) => deps.subagentLifecycleService.stop(params),
   "canonicalAgent.roster": (deps, params) => deps.subagentLifecycleService.loadRoster(params),
-  "plan.updateStatus": async (deps, params) => {
-    if (deps.canonicalProgress?.updatePlanStatus(params.planId, params.status)) return;
-    await deps.planRepo.updateStatus(params.planId, params.status);
-  },
-  "plan.list": (deps, params) => deps.canonicalProgress?.listPlans(params.threadId) ?? deps.planRepo.listByThread(params.threadId),
+  "plan.saveVersion": (deps, params) => deps.planService.saveVersion(params),
+  "plan.snapshot": (deps, params) => deps.planService.snapshot(params),
   "message.list": (deps, params) => ({
     ...deps.messageRepo.listByThread(params.threadId, params.limit, params.before),
     answeredPlanMessageIds: deps.planQuestionAnswersRepo.listAnsweredForThread(params.threadId),

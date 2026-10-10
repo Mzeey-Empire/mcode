@@ -4,6 +4,7 @@ import { TurnOutcomeSchema } from "../models/turn-outcome.js";
 import { AgentEventSchema, type AgentEvent } from "./agent-event.js";
 import { lazySchema } from "../utils/lazySchema.js";
 import { ProviderIdentitySchema } from "../compat/agent-model.js";
+import { NativePlanFileRefSchema, PLAN_MAX_CONTENT_CHARS } from "../models/plan.js";
 
 /** Native Codex evidence used to route a private child interaction. */
 export const CodexChildEvidenceSchema = lazySchema(() => z
@@ -79,8 +80,9 @@ export const ProviderRuntimeEventSchema = lazySchema(() =>
     parentEvidence: ProviderParentEvidenceSchema().optional(),
     /** Private capture evidence bound to the assistant message that materializes it. */
     planCapture: z.object({
-      markdown: z.string().min(1).max(256 * 1024),
+      markdown: z.string().min(1).max(PLAN_MAX_CONTENT_CHARS),
       source: z.enum(["native", "fence"]),
+      nativePlanFile: NativePlanFileRefSchema().optional(),
     }).strict().optional(),
   }).strict(),
 );

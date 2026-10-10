@@ -6,10 +6,13 @@ import * as NodePath from "node:path";
 
 describe("extractCursorCreatePlanMarkdown", () => {
   const fixture = loadProviderFixtureManifest(NodePath.resolve(import.meta.dirname, "../../../../conformance/fixtures/cursor-core.synthetic.json"));
-  it("drops oversized native capture at the bridge without failing the request", async () => {
-    expect(await replayCursorPlanRequest(fixture, { plan: "x".repeat(256 * 1024 + 1) })).toEqual([]);
-    expect(await replayCursorPlanRequest(fixture, { plan: "x".repeat(256 * 1024) })).toEqual([
-      { threadId: "CURSOR_TRACE_THREAD", markdown: "x".repeat(256 * 1024), source: "native" },
+  it("rejects oversized native capture with feedback and accepts the exact limit", async () => {
+    const responses: unknown[] = [];
+    expect(await replayCursorPlanRequest(fixture, { plan: "x".repeat(64 * 1024 + 1) }, (response) => responses.push(response))).toEqual([]);
+    expect(responses).toEqual([{ outcome: { outcome: "rejected" },
+      message: "The plan is too long for the client to capture. Shorten it and call create_plan again." }]);
+    expect(await replayCursorPlanRequest(fixture, { plan: "x".repeat(64 * 1024) })).toEqual([
+      { threadId: "CURSOR_TRACE_THREAD", markdown: "x".repeat(64 * 1024), source: "native" },
     ]);
   });
   it("reads the S07-00 captured top-level plan field", () => {

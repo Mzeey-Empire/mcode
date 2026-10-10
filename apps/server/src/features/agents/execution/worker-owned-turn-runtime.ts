@@ -14,6 +14,7 @@ import { ExecutionWorkerLossCoordinator, workerLossIncidentId } from "./executio
 import type { ExecutionWorkCommand, ExecutionWorkerResult } from "./execution-worker-handler.js";
 import { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
 import type { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
+import { PlanFileWriter } from "../planning/plan-file-writer.js";
 
 const EXECUTION_WORKER_COUNT = 4;
 const EXECUTION_MAILBOX_LIMITS: ExecutionMailboxLimits = {
@@ -32,6 +33,7 @@ export class WorkerOwnedTurnRuntime {
   readonly writer: CanonicalAgentWriterClient;
   readonly writerPort: CanonicalExecutionWriterPort;
   readonly progress: CanonicalAcceptedProgress | undefined;
+  readonly planFiles: PlanFileWriter | undefined;
   readonly workerLoss: ExecutionWorkerLossCoordinator;
   readonly scheduler: ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>;
   readonly owner: ExecutionMailboxOwner;
@@ -42,7 +44,8 @@ export class WorkerOwnedTurnRuntime {
 
   constructor(writer: CanonicalAgentWriterClient, publication: AgentEventPublicationRegistry, canonical?: CanonicalAgentBoundary) {
     this.writer = writer;
-    this.progress = canonical ? new CanonicalAcceptedProgress(canonical, this.writer) : undefined;
+    this.planFiles = canonical ? new PlanFileWriter((threadId) => canonical.loadAcceptedFeatureSeed(threadId).plans) : undefined;
+    this.progress = canonical ? new CanonicalAcceptedProgress(canonical, this.writer, this.planFiles) : undefined;
     this.writerPort = new CanonicalExecutionWriterPort(
       this.writer,
       publishCanonicalAgentEvents,

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useCallback, useState, lazy, Suspense } from "react";
 import type { Components } from "react-markdown";
-import type { PlanRecord, PlanSectionNav } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts";
 import { cn } from "@/lib/utils";
 import { PlanAnnotation } from "./PlanAnnotation";
 
@@ -13,7 +13,7 @@ export interface PlanComment {
 }
 
 interface PlanDocumentProps {
-  plan: PlanRecord;
+  plan: PlanVersion;
   /** Current pending annotations. Managed by parent. */
   comments: PlanComment[];
   /** Called when user adds or updates a comment on a heading. */
@@ -30,15 +30,14 @@ function getHeadingClass(level: number): string {
   return cn(HEADING_BASE, levelClass);
 }
 
-function PlanHeading({ level, children, sectionMap, commentMap, activeHeading, onHeadingClick, onCommit, onSave, onDiscard }: { level: number; children: React.ReactNode; sectionMap: Map<string, string>; commentMap: Map<string, string>; activeHeading: string | null; onHeadingClick: (title: string) => void; onCommit: (title: string, value: string) => void; onSave: (title: string, value: string) => void; onDiscard: (title: string) => void }) {
+function PlanHeading({ level, children, commentMap, activeHeading, onHeadingClick, onCommit, onSave, onDiscard }: { level: number; children: React.ReactNode; commentMap: Map<string, string>; activeHeading: string | null; onHeadingClick: (title: string) => void; onCommit: (title: string, value: string) => void; onSave: (title: string, value: string) => void; onDiscard: (title: string) => void }) {
   const text = typeof children === "string" ? children : String(children);
   const key = text.toLowerCase();
-  const sectionId = sectionMap.get(key);
   const Tag = `h${level}` as keyof React.JSX.IntrinsicElements;
   const hasComment = (commentMap.get(key) ?? "").length > 0;
   const isOpen = activeHeading === key;
   return <>
-    <Tag id={sectionId ?? undefined} tabIndex={0} aria-expanded={isOpen} aria-label={`${text}. Activate to ${isOpen ? "close" : "add"} a section note.`} className={getHeadingClass(level)} onClick={() => onHeadingClick(text)} onKeyDown={(event) => {
+    <Tag tabIndex={0} aria-expanded={isOpen} aria-label={`${text}. Activate to ${isOpen ? "close" : "add"} a section note.`} className={getHeadingClass(level)} onClick={() => onHeadingClick(text)} onKeyDown={(event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       onHeadingClick(text);
@@ -64,15 +63,6 @@ export function PlanDocument({
 }: PlanDocumentProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeHeading, setActiveHeading] = useState<string | null>(null);
-
-  const sectionMap = useMemo(() => {
-    if (!plan.sectionsJson) return new Map<string, string>();
-    const map = new Map<string, string>();
-    for (const s of plan.sectionsJson as PlanSectionNav[]) {
-      map.set(s.title.toLowerCase(), s.id);
-    }
-    return map;
-  }, [plan.sectionsJson]);
 
   const commentMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -131,8 +121,8 @@ export function PlanDocument({
   );
 
   const headingRenderer = useCallback(
-    (level: number, children: React.ReactNode) => <PlanHeading level={level} children={children} sectionMap={sectionMap} commentMap={commentMap} activeHeading={activeHeading} onHeadingClick={handleHeadingClick} onCommit={handleCommitNote} onSave={handleSaveNote} onDiscard={handleDiscardNote} />,
-    [sectionMap, commentMap, activeHeading, handleHeadingClick, handleCommitNote, handleSaveNote, handleDiscardNote],
+    (level: number, children: React.ReactNode) => <PlanHeading level={level} children={children} commentMap={commentMap} activeHeading={activeHeading} onHeadingClick={handleHeadingClick} onCommit={handleCommitNote} onSave={handleSaveNote} onDiscard={handleDiscardNote} />,
+    [commentMap, activeHeading, handleHeadingClick, handleCommitNote, handleSaveNote, handleDiscardNote],
   );
 
   const componentOverrides = useMemo<Partial<Components>>(

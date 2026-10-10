@@ -599,7 +599,7 @@ export class CanonicalAgentStore {
     const publication = this.db.prepare("SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?").get(threadId);
     const publicationSequence = publication && typeof publication === "object" && "last_sequence" in publication
       && typeof publication.last_sequence === "number" ? publication.last_sequence : 0;
-    return { plans: new PlanRepo(this.db).listByThread(threadId), tasks: new TaskRepo(this.db).get(threadId) ?? [],
+    return { plans: new PlanRepo(this.db).listWithHistory(threadId), tasks: new TaskRepo(this.db).get(threadId) ?? [],
       noticeSessionId: row?.noticeSessionId ?? undefined, publicationSequence };
   }
 

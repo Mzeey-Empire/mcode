@@ -155,7 +155,7 @@ function handleTerminalData(data: unknown): void {
  * - `branch.changed` -- refreshes branch list and updates current branch if not manually overridden
  * - `plan.questions` -- model-proposed plan questions forwarded to threadStore wizard
  * - `plan.answered` -- server committed an answered marker; dismisses the wizard on this client
- * - `plan.generated` -- server extracted a structured plan; updates planStore and shows live preview for the active thread
+ * - `plan.versionUpserted` -- updates planStore and previews new agent versions in the active thread
  * - `permission.request` -- tool permission awaiting user decision
  * - `permission.resolved` -- a permission was settled (by user or session stop)
  * - `providers.availability` -- server-pushed provider availability snapshot forwarded to providerAvailabilityStore
@@ -570,17 +570,12 @@ export function startPushListeners(): void {
     }),
   );
 
-  // plan.generated: server extracted a structured plan from agent output
   unsubs.push(
-    pushEmitter.on("plan.generated", (data) => {
-      const { threadId, plan } = data as {
-        threadId: string;
-        plan: import("@mcode/contracts").PlanRecord;
-      };
-      if (!threadId || !plan) return;
+    pushEmitter.on("plan.versionUpserted", (data) => {
+      const { threadId, version: plan } = WS_CHANNELS["plan.versionUpserted"].parse(data);
 
       usePlanStore.getState().addPlan(threadId, plan);
-      if (useWorkspaceStore.getState().activeThreadId === threadId) {
+      if (plan.author === "agent" && plan.status === "ready" && useWorkspaceStore.getState().activeThreadId === threadId) {
         usePlanStore.getState().showLivePreview(threadId, plan);
       }
     }),

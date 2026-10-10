@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import type { Database } from "bun:sqlite";
-import { type PlanRecord } from "@mcode/contracts";
+import { type PlanVersion } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { ThreadStore as ThreadRepo } from "../../../thread-control/persistence/thread-store.js";
@@ -12,11 +12,12 @@ const FOREIGN = "foreign-thread";
 const STARTED_AT = "2026-09-30T10:00:00.000Z";
 const ACCEPTED_AT = "2026-09-30T11:02:03.125+01:00";
 
-function plan(overrides: Partial<PlanRecord> = {}): PlanRecord {
+function plan(overrides: Partial<PlanVersion> = {}): PlanVersion {
   return { id: "00000000-0000-4000-8000-000000000001", threadId: THREAD, messageId: "assistant-1", version: 7,
     title: "Assigned plan", contentMd: "# Assigned plan\n## Build\nUse passkeys.",
-    sectionsJson: [{ id: "build", title: "Build", level: 2 }], changeSummary: "Accepted change",
-    status: "draft", createdAt: ACCEPTED_AT, ...overrides };
+    author: "agent", providerId: "codex", captureSource: "fence", baseVersionId: null,
+    revision: 0, acceptedAt: null, acceptedMessageId: null,
+    status: "ready", createdAt: ACCEPTED_AT, updatedAt: ACCEPTED_AT, ...overrides };
 }
 
 function seedMessage(db: Database, id: string, role = "assistant", threadId = THREAD, systemNotice = false): void {
@@ -54,8 +55,8 @@ describe("persistAcceptedFeatureWrite", () => {
     const assigned = plan();
     persistAcceptedFeatureWrite(db, THREAD, { planRecords: [assigned] });
     expect(new PlanRepo(db).getById(assigned.id)).toEqual(assigned);
-    expect(new PlanRepo(db).getByMessageId(assigned.messageId)).toEqual(assigned);
-    expect(db.prepare("SELECT is_internal FROM messages WHERE id = ?").get(assigned.messageId)).toEqual({ is_internal: 1 });
+    expect(new PlanRepo(db).getByMessageId("assistant-1")).toEqual(assigned);
+    expect(db.prepare("SELECT is_internal FROM messages WHERE id = ?").get("assistant-1")).toEqual({ is_internal: 1 });
     persistAcceptedFeatureWrite(db, THREAD, { planRecords: [assigned] });
     expect(new PlanRepo(db).listByThread(THREAD)).toEqual([assigned]);
     expect(db.prepare("SELECT COUNT(*) AS count FROM plans").get()).toEqual({ count: 1 });
@@ -92,8 +93,8 @@ describe("persistAcceptedFeatureWrite", () => {
     expect(() => persistAcceptedFeatureWrite(db, THREAD, { planRecords: [plan({ threadId: FOREIGN, messageId: "foreign-assistant" })] })).toThrow("another thread");
     const assigned = plan();
     persistAcceptedFeatureWrite(db, THREAD, { planRecords: [assigned] });
-    expect(() => persistAcceptedFeatureWrite(db, THREAD, { planRecords: [plan({ id: "different-plan", messageId: "assistant-2" })] })).toThrow("version has conflicting identity");
-    expect(() => persistAcceptedFeatureWrite(db, THREAD, { planRecords: [plan({ id: "different-plan", version: 8 })] })).toThrow("assistant already has another plan");
+    expect(() => persistAcceptedFeatureWrite(db, THREAD, { planRecords: [plan({ id: "00000000-0000-4000-8000-000000000002", messageId: "assistant-2" })] })).toThrow("version has conflicting identity");
+    expect(() => persistAcceptedFeatureWrite(db, THREAD, { planRecords: [plan({ id: "00000000-0000-4000-8000-000000000002", version: 8 })] })).toThrow("assistant already has another plan");
     expect(new PlanRepo(db).listByThread(THREAD)).toEqual([assigned]);
   });
 
@@ -153,8 +154,8 @@ describe("persistAcceptedFeatureWrite", () => {
       { planRecords: [plan({ threadId: ` ${THREAD} ` })] },
       { expiredNoticeMessageIds: ["notice-1", "notice-1"] }, { planRecords: [plan(), plan()] },
       { expiredNoticeMessageIds: Array.from({ length: 8_193 }, (_, index) => String(index)) },
-      { planRecords: Array.from({ length: 257 }, (_, index) => plan({ id: String(index), version: index + 1 })) },
-      { planRecords: Array.from({ length: 9 }, (_, index) => plan({ id: String(index), version: index + 1, contentMd: "x".repeat(256 * 1024) })) },
+      { planRecords: Array.from({ length: 257 }, (_, index) => plan({ id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, version: index + 1 })) },
+      { planRecords: Array.from({ length: 33 }, (_, index) => plan({ id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, version: index + 1, contentMd: "x".repeat(64 * 1024) })) },
       { threadPatch: { compactSummary: "x".repeat(2 * 1024 * 1024) } },
     ]) {
       expect(AcceptedFeatureWriteMetadataSchema().safeParse(metadata).success).toBe(false);
@@ -165,9 +166,8 @@ describe("persistAcceptedFeatureWrite", () => {
     expect(new PlanRepo(db).listByThread(THREAD)).toEqual([]);
   });
 
-  it("retains valid legacy plan fields and larger compaction summaries within the aggregate budget", () => {
-    const legacy = plan({ title: "Legacy", contentMd: "x".repeat(300 * 1024),
-      sectionsJson: [{ id: "section", title: "x".repeat(70 * 1024), level: 1 }] });
+  it("retains maximum-length plan content and larger compaction summaries within the aggregate budget", () => {
+    const legacy = plan({ contentMd: "x".repeat(64 * 1024) });
     persistAcceptedFeatureWrite(db, THREAD, { planRecords: [legacy], threadPatch: { compactSummary: "s".repeat(300 * 1024) } });
     expect(new PlanRepo(db).getById(legacy.id)).toEqual(legacy);
     expect(new ThreadRepo(db).findById(THREAD)?.last_compact_summary).toBe("s".repeat(300 * 1024));

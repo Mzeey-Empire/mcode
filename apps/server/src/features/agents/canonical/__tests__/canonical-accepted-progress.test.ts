@@ -716,9 +716,9 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     const content = '````mcode-plan\n# Plan\n\n## Build\nBuild it\n````';
     await send(3, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 2, "textDelta", { delta: content, isFinalResponse: true })] });
     await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 3, "message", { content, tokens: null })] });
-    const plan = progress.listPlans(execution.threadId)?.[0];
+    const plan = progress.reloadPlans(execution.threadId)?.[0];
     if (!plan) throw new Error("Expected accepted plan before saving");
-    expect(progress.updatePlanStatus(plan.id, "accepted")).toBe(true);
+    expect(progress.reloadPlans(execution.threadId)).toEqual([plan]);
     await send(5, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 4, "system", {
       subtype: "provider.notice.test", message: "Notice", systemNotice: { kind: "diagnostic", presentation: "timeline", scope: "turn", sessionId: "session" } })] });
     const notice = frames().flatMap((frame) => frame.phase === "accepted" ? frame.events : []).map(acceptedMessage)
@@ -728,61 +728,23 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     release?.();
     await expect.poll(() => progress.depth().pending).toBe(0);
     expect(db.prepare("SELECT id, message_id, version, status, created_at FROM plans WHERE id = ?").get(plan.id))
-      .toEqual({ id: plan.id, message_id: plan.messageId, version: plan.version, status: "accepted", created_at: plan.createdAt });
+      .toEqual({ id: plan.id, message_id: plan.messageId, version: plan.version, status: "ready", created_at: plan.createdAt });
     expect(db.prepare("SELECT id FROM messages WHERE id = ?").get(notice.id)).toEqual({ id: notice.id });
     expect(progress.getTasks(execution.threadId)).toEqual(new (await import("../../orchestration/persistence/task-repo.js")).TaskRepo(db, databaseWriter).get(execution.threadId));
   });
 
-  it("orders a saved plan status change under its original turn after the live owner restarts", async () => {
-    const admission = start("codex");
-    await send(1, { ...admission, parentLive: { ...admission.parentLive, precedingMessageId: `${execution.turnId}:user`, planFeature: "output" } });
-    const content = '````mcode-plan\n# Plan\n\n## Build\nBuild it\n````';
-    await send(2, { kind: "event", phase: "running", nativeCursor: null,
-      events: [draft("codex", 1, "textDelta", { delta: content, isFinalResponse: true })] });
-    await send(3, { kind: "event", phase: "running", nativeCursor: null,
-      events: [draft("codex", 2, "message", { content, tokens: null })] });
-    await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 3, "turnComplete")],
-      terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
-    await expect.poll(() => progress.depth().pending).toBe(0);
-    const original = progress.listPlans(execution.threadId)?.[0];
-    if (!original) throw new Error("Expected saved canonical plan");
-    await progress.close();
-    progress = new CanonicalAcceptedProgress(new MainCanonicalAgentBoundary(reader, databaseWriter, writer, () => {}), writer);
-    await progress.beforeDurableCommand(execution.threadId);
-    progress.cancelDurableCommand(execution.threadId);
-    holdWrites();
-
-    expect(progress.updatePlanStatus(original.id, "accepted")).toBe(true);
-    expect(progress.listPlans(execution.threadId)).toEqual([{ ...original, status: "accepted" }]);
-    expect(db.prepare("SELECT status FROM plans WHERE id = ?").get(original.id)).toEqual({ status: "draft" });
-    const accepted = recovery().retained;
-    expect(accepted).toHaveLength(1);
-    const event = accepted[0];
-    if (event?.payload.type !== "item.recorded") throw new Error("Expected accepted plan item");
-    expect(event.routing).toEqual({ ...execution, itemId: event.payload.item.id });
-    expect(event.payload.item.turnId).toBe(execution.turnId);
-    expect(event.payload.item.payload).toEqual({ projection: "plan", plan: { ...original, status: "accepted" } });
-    release?.();
-    await expect.poll(() => progress.depth().pending).toBe(0);
-    expect(db.prepare("SELECT status FROM plans WHERE id = ?").get(original.id)).toEqual({ status: "accepted" });
-    expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Completed" });
-  });
-
-  it("leaves a legacy plan without canonical ownership to its existing durable repository", async () => {
+  it("reloads saved versions without a canonical assistant owner", async () => {
     const { PlanRepo } = await import("../../planning/persistence/plan-repo.js");
     db.prepare("INSERT INTO messages (id, thread_id, role, content, sequence, timestamp) VALUES (?, ?, ?, ?, ?, ?)")
       .run("legacy-plan-message", execution.threadId, "assistant", "Legacy plan", 1, NOW);
     const plans = new PlanRepo(reader, databaseWriter);
-    const plan = await plans.create(execution.threadId, "legacy-plan-message", "Legacy plan", "Build", "[]", null);
     await progress.beforeDurableCommand(execution.threadId);
     progress.cancelDurableCommand(execution.threadId);
-
-    expect(progress.updatePlanStatus(plan.id, "accepted")).toBe(false);
+    const plan = await plans.create(execution.threadId, "legacy-plan-message",
+      { title: "Legacy plan", contentMd: "# Legacy plan", captureSource: "fence" }, null);
+    expect(progress.reloadPlans(execution.threadId)).toEqual([plan]);
     expect(progress.depth().pending).toBe(0);
-    expect(plans.getById(plan.id)?.status).toBe("draft");
-    await plans.updateStatus(plan.id, "accepted");
-    expect(plans.getById(plan.id)?.status).toBe("accepted");
-    expect(progress.listPlans(execution.threadId)).toEqual([{ ...plan, status: "accepted" }]);
+    expect(plans.getById(plan.id)?.status).toBe("ready");
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_turns").get()).toEqual({ count: 0 });
   });
 

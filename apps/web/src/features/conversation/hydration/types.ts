@@ -1,5 +1,5 @@
 import type { Message, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport";
-import type { TurnSnapshot, PermissionRequest, PlanRecord, NarrativeEntry, TurnRange, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationPage, ConversationTail, GoalLookupResult } from "@mcode/contracts";
+import type { TurnSnapshot, PermissionRequest, PlanVersion, NarrativeEntry, TurnRange, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationPage, ConversationTail, GoalLookupResult } from "@mcode/contracts";
 import type { TaskItem } from "@/stores/taskStore";
 import type { PlanQuestion } from "@mcode/contracts";
 import type { ThreadRecord } from "@/stores/thread-record";
@@ -56,7 +56,7 @@ export interface ThreadHydratorTransport {
   getThreadTasks(
     threadId: string,
   ): Promise<Array<{ id?: string; content: string; status: string; activeForm?: string; group?: string }> | null>;
-  getThreadPlans(threadId: string): Promise<PlanRecord[]>;
+  getThreadPlans(threadId: string): Promise<PlanVersion[]>;
 }
 
 /** Workspace thread row fields consulted during hydration. */
@@ -96,7 +96,7 @@ export interface ThreadHydratorDeps {
   ) => PlanQuestion[] | null;
   getTasksForThread: (threadId: string) => readonly TaskItem[];
   setTasksForThread: (threadId: string, tasks: readonly TaskItem[]) => void;
-  addPlanForThread: (threadId: string, plan: PlanRecord) => void;
+  addPlanForThread: (threadId: string, plan: PlanVersion) => void;
   shallowEqualBy: <T>(a: readonly T[], b: readonly T[], keys: (keyof T)[]) => boolean;
   coerceTaskStatus: (status: string) => TaskItem["status"];
   getWorkspaceThreadSettings: (threadId: string) => import("@/stores/thread-record").ThreadSettings;

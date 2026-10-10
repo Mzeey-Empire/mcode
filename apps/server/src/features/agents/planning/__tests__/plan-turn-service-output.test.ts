@@ -1,5 +1,8 @@
 import "reflect-metadata";
-import { logger } from "@mcode/shared";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import { logger, resolveThreadPlanFile } from "@mcode/shared";
 import { AgentEventType, type AgentEvent } from "@mcode/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -13,6 +16,7 @@ import { PlanQuestionAnswersRepo } from "../persistence/plan-question-answers-re
 import { PlanRepo } from "../persistence/plan-repo.js";
 import { PlanQuestionService } from "../plan-question-service.js";
 import { PlanTurnService } from "../plan-turn-service.js";
+import { PlanFileWriter } from "../plan-file-writer.js";
 
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
 import { broadcast } from "../../../../application/transport/push.js";
@@ -20,6 +24,39 @@ import { broadcast } from "../../../../application/transport/push.js";
 afterEach(closeAgentStorageTestDatabases);
 
 describe("PlanTurnService output", () => {
+  it("retains and publishes a capture with an unknown provider when the file fails", async () => {
+    const db = openMemoryDatabase();
+    const writer = agentStorageTestWriter(db);
+    const workspace = await new WorkspaceRepo(db, writer).create("plans", process.cwd(), false);
+    const threads = new ThreadRepo(db, writer);
+    const thread = await threads.create(workspace.id, "plan", "direct", "main", false, "codex");
+    db.prepare("UPDATE threads SET provider = ? WHERE id = ?").run("unknown-provider", thread.id);
+    const messages = new MessageRepo(db, writer);
+    const plans = new PlanRepo(db, writer);
+    const service = new PlanTurnService(threads, new ProviderRegistry([]),
+      new PlanQuestionService(messages, new PlanQuestionAnswersRepo(db, writer)), plans,
+      new AgentTurnCommandPort(new AgentRuntimeCommandPort()));
+    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-plan-file-failure-"));
+    NodeFS.mkdirSync(resolveThreadPlanFile(directory, thread.id), { recursive: true });
+    const files = new PlanFileWriter((id) => plans.listByThread(id), () => directory);
+    service.bindPlanProjection(undefined, files);
+    const log = vi.spyOn(logger, "error").mockImplementation(() => logger);
+    try {
+      service.beginOutputGeneration(thread.id);
+      service.handlePlanCaptured({ threadId: thread.id, markdown: "# Kept plan", source: "native" });
+      const assistant = await messages.create(thread.id, "assistant", "Plan summary", 1);
+      await service.persistAssistantMessage({ type: AgentEventType.Message, threadId: thread.id,
+        messageId: assistant.id, content: assistant.content, tokens: null });
+      const saved = plans.getLatestForThread(thread.id);
+      expect(saved).toMatchObject({ contentMd: "# Kept plan", providerId: null, status: "ready", revision: 0 });
+      expect(broadcast).toHaveBeenCalledWith("plan.versionUpserted", { threadId: thread.id, version: saved });
+      expect(log).toHaveBeenCalledWith("Failed to project committed plan file", expect.objectContaining({ threadId: thread.id }));
+    } finally {
+      NodeFS.rmSync(directory, { recursive: true, force: true });
+      log.mockRestore();
+    }
+  });
+
   it("publishes parsed questions and persists the plan at its assistant message", async () => {
     const db = openMemoryDatabase();
     const workspace = await new WorkspaceRepo(db, agentStorageTestWriter(db)).create("plans", process.cwd(), false);
@@ -63,7 +100,7 @@ describe("PlanTurnService output", () => {
       messageId: assistant.id,
       title: "Login plan",
       contentMd: output,
-      sectionsJson: [{ id: "s1", title: "Implement", level: 2 }],
+      status: "ready", author: "agent", providerId: "codex", captureSource: "fence", revision: 0,
     });
     expect(service.needsAssistantMaterialization(event)).toBe(false);
     service.clearTurn(thread.id);

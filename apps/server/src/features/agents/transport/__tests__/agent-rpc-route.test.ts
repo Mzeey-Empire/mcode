@@ -2,6 +2,8 @@ import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
 import { routeMessage, type RouterDeps } from "../../../../application/transport/ws-router.js";
 import { routeAgentRpc, type AgentRouterDeps } from "../agent-rpc.js";
+import { PlanServiceError } from "../../planning/plan-service.js";
+import type { PlanVersion } from "@mcode/contracts";
 import type { SendMessageCommand } from "../../turns/turn-admission-dispatch-coordinator.js";
 
 function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMessage"]): {
@@ -15,7 +17,7 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
     messageRepo: { listByThread: unused, listByThreadAfter: unused, listSessionNotices: unused, confirmUserMessage: unused },
     narrativeStore: { load: unused },
     planQuestionAnswersRepo: { listAnsweredForThread: unused },
-    planRepo: { updateStatus: unused, listByThread: unused },
+    planService: { saveVersion: unused, snapshot: unused },
     planTurnService: { answerQuestions: unused, dismissQuestions: unused },
     recapService: { generate: unused },
     subagentLifecycleService: { loadRoster: unused, stop: unused },
@@ -29,30 +31,37 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
 }
 
 describe("routeMessage Agent RPCs", () => {
-  it("acknowledges a legacy plan-status update only after its save completes", async () => {
+  it("returns the saved version only after the plan service commits", async () => {
     const fixture = admissionFixture(async () => {});
+    const version: PlanVersion = { id: "00000000-0000-4000-8000-000000000002", threadId: "thread-one",
+      version: 2, title: "Edited", contentMd: "# Edited", status: "draft", author: "user",
+      providerId: null, captureSource: "edit", messageId: null,
+      baseVersionId: "00000000-0000-4000-8000-000000000001", revision: 1,
+      createdAt: "2026-10-09T00:00:00Z", updatedAt: "2026-10-09T00:00:00Z", acceptedAt: null, acceptedMessageId: null };
+    const input = { threadId: version.threadId, versionId: version.id, baseVersionId: "00000000-0000-4000-8000-000000000001",
+      baseRevision: 0, contentMd: version.contentMd };
     let confirm: (() => void) | undefined;
-    fixture.deps.planRepo.updateStatus = vi.fn(async () => {
+    fixture.deps.planService.saveVersion = async (params) => {
+      expect(params).toEqual(input);
       await new Promise<void>((resolve) => { confirm = resolve; });
-    });
-    try {
-      let settled = false;
-      const pending = routeAgentRpc("plan.updateStatus", { planId: "plan-one", status: "accepted" }, fixture.deps)
-        .then((result) => { settled = true; return result; });
-      expect(settled).toBe(false);
-      confirm?.();
-      await expect(pending).resolves.toBeUndefined();
-      expect(fixture.deps.planRepo.updateStatus).toHaveBeenCalledWith("plan-one", "accepted");
-    } finally { fixture.close(); }
+      return version;
+    };
+    let settled = false;
+    const pending = routeAgentRpc("plan.saveVersion", input, fixture.deps).then((result) => { settled = true; return result; });
+    expect(settled).toBe(false);
+    confirm?.();
+    await expect(pending).resolves.toEqual(version);
+    fixture.deps.planService.snapshot = async () => ({ versions: [version] });
+    await expect(routeAgentRpc("plan.snapshot", { threadId: version.threadId }, fixture.deps)).resolves.toEqual({ versions: [version] });
   });
 
-  it("reports a failed legacy plan-status save through the RPC", async () => {
+  it.each(["plan_busy", "plan_read_only", "plan_conflict"] as const)("preserves the typed %s save failure", async (code) => {
     const fixture = admissionFixture(async () => {});
-    const failure = new Error("Plan save failed");
-    fixture.deps.planRepo.updateStatus = vi.fn().mockRejectedValue(failure);
-    try {
-      await expect(routeAgentRpc("plan.updateStatus", { planId: "plan-one", status: "accepted" }, fixture.deps)).rejects.toBe(failure);
-    } finally { fixture.close(); }
+    const failure = new PlanServiceError({ code, latestVersion: null });
+    fixture.deps.planService.saveVersion = async () => { throw failure; };
+    await expect(routeAgentRpc("plan.saveVersion", { threadId: "thread-one",
+      versionId: "00000000-0000-4000-8000-000000000002", baseVersionId: "00000000-0000-4000-8000-000000000001",
+      baseRevision: 0, contentMd: "# Edited" }, fixture.deps)).rejects.toBe(failure);
   });
 
   it("retries the recovered command with its raw display content", async () => {

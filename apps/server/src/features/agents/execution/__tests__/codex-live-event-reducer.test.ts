@@ -57,7 +57,7 @@ describe("CodexLiveEventReducer", () => {
     const message = reduceEvent(reducer, "message", { content: "Summary.", tokens: null });
     expect(message.writer).toContainEqual({ kind: "plan-captured", output: {
       title: "Native-sized plan", contentMd: "## Native-sized plan",
-      sectionsJson: '[{"id":"s1","title":"Native-sized plan","level":2}]', changeSummary: null,
+      captureSource: "fence",
     } });
   });
 
@@ -96,7 +96,7 @@ describe("CodexLiveEventReducer", () => {
     if (result.kind !== "parent") throw new Error("Native capture was rejected");
     expect(result.prepared.effects.planOutput).toEqual({
       title: "Native plan", contentMd: "# Native plan\n## Build\nShip it.",
-      sectionsJson: '[{"id":"s1","title":"Build","level":2}]', changeSummary: null,
+      captureSource: "native",
     });
     const duplicate = state.prepare([{ ...runtimeDraft(event("message", { content: "# More prose", tokens: null }), 2), sourceProviderId: providerId }]);
     if (duplicate.kind !== "parent") throw new Error("Follow-up message was rejected");
@@ -303,7 +303,7 @@ describe("CodexLiveEventReducer", () => {
     if (message.kind !== "reduced") return;
     expect(message.writer).toContainEqual({ kind: "plan-captured", output: {
       title: "Login plan", contentMd: plan,
-      sectionsJson: '[{"id":"s1","title":"Implementation","level":2}]', changeSummary: null,
+      captureSource: "fence",
     } });
     expect(message.writer[0]).toMatchObject({ kind: "assistant-body", content: "Provider prose" });
 

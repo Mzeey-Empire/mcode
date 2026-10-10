@@ -1,4 +1,4 @@
-import { ProviderRuntimeEventSchema, type AgentEvent, type AgentProgressPosition, type ParentNarrativeRecoveryItem, type PlanQuestion, type PlanRecord, type TurnFileEffectSummary, type TurnOutcome } from "@mcode/contracts";
+import { ProviderRuntimeEventSchema, type AgentEvent, type AgentProgressPosition, type ParentNarrativeRecoveryItem, type PlanQuestion, type PlanVersion, type TurnFileEffectSummary, type TurnOutcome } from "@mcode/contracts";
 import type { ProviderEventDraft } from "@mcode/providers";
 
 import type {
@@ -145,7 +145,7 @@ export interface ExecutionTerminalPersistenceReceipt {
 /** Accepted replies retain immutable saving work; committed replies certify an actual transaction. */
 export type ExecutionWriteReceipt =
   | ExecutionAcceptedReceipt
-  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[]; readonly assistantTextCheckpoint?: ParentAssistantTextCheckpointResult; readonly livePublication?: readonly ExecutionLivePublicationReceipt[]; readonly planQuestions?: ExecutionPlanQuestionsReceipt; readonly planOutput?: PlanRecord; readonly terminalPersistence?: ExecutionTerminalPersistenceReceipt }
+  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[]; readonly assistantTextCheckpoint?: ParentAssistantTextCheckpointResult; readonly livePublication?: readonly ExecutionLivePublicationReceipt[]; readonly planQuestions?: ExecutionPlanQuestionsReceipt; readonly planOutput?: PlanVersion; readonly terminalPersistence?: ExecutionTerminalPersistenceReceipt }
   | { readonly kind: "conflict"; readonly operationId: string; readonly recoveryState?: "not-started" | "already-terminal" };
 
 /** Live acceptance has immutable order and retains saving work without claiming a disk commit. */

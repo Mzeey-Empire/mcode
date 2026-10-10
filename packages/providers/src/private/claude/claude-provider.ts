@@ -22,6 +22,7 @@ import type {
 import { logger } from "@mcode/shared";
 import {
   AgentEventType,
+  PLAN_MAX_CONTENT_CHARS,
   isVirtualBrowserContextAttachment,
   providerRuntimeEvent,
 } from "@mcode/contracts";
@@ -1060,7 +1061,7 @@ export class ClaudeProvider
     }
     const planMarkdown =
       typeof input.plan === "string" ? input.plan.trim() : "";
-    if (planMarkdown.length > 256 * 1024) {
+    if (planMarkdown.length > PLAN_MAX_CONTENT_CHARS) {
       logger.warn("Ignoring oversized native plan capture", { threadId, length: planMarkdown.length });
       return {
         behavior: "deny" as const,

@@ -132,7 +132,7 @@ import type { HookExecutionRepo } from "../../features/agents/events/persistence
 import type { TurnSnapshotRepo } from "../../features/agents/turns/persistence/turn-snapshot-repo.js";
 import type { TaskRepo } from "../../features/agents/orchestration/persistence/task-repo.js";
 import type { PlanQuestionAnswersRepo } from "../../features/agents/planning/persistence/plan-question-answers-repo.js";
-import type { PlanRepo } from "../../features/agents/planning/persistence/plan-repo.js";
+import { PlanServiceError, type PlanService } from "../../features/agents/planning/plan-service.js";
 import type { SnapshotService } from "../../features/projects/diffs/snapshots/snapshot-service.js";
 import type { MemoryPressureService } from "../../runtime/memory/memory-pressure-service.js";
 import type { ThreadRepo } from "../../features/thread-control/persistence/thread-repo.js";
@@ -287,7 +287,7 @@ export interface RouterDeps {
   /** Repository for the plan-question wizard answered marker (sidecar table). */
   planQuestionAnswersRepo: PlanQuestionAnswersRepo;
   /** Repository for structured plan records. */
-  planRepo: PlanRepo;
+  planService: Pick<PlanService, "saveVersion" | "snapshot">;
   /** Registry of AI provider adapters for model discovery. */
   providerRegistry: IProviderRegistry;
   /** Tracks per-provider enabled flag and CLI verification state. */
@@ -448,6 +448,9 @@ function validateRpcParameters(
 
 function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResponse {
   const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof PlanServiceError) {
+    return { id: request.id, error: { code: error.code, message, data: { latestVersion: error.latestVersion } } };
+  }
   if (error instanceof DraftImageMissingError) {
     return { id: request.id, error: { code: error.code, message, data: { stagingId: error.stagingId } } };
   }

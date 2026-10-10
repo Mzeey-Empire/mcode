@@ -1,4 +1,4 @@
-import type { PlanRecord } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePlanStore } from "@/stores/planStore";
@@ -16,8 +16,8 @@ import {
 import { formatRelative } from "@/lib/format-relative";
 
 interface PlanChromeProps {
-  plan: PlanRecord;
-  allVersions: readonly PlanRecord[];
+  plan: PlanVersion;
+  allVersions: readonly PlanVersion[];
   threadId: string;
   onRevise: () => void;
   onImplement: () => void;
@@ -104,9 +104,6 @@ export function PlanChrome({
                       </span>
                     )}
                   </span>
-                  {p.changeSummary && (
-                    <span className="text-caption leading-relaxed text-muted/80">{p.changeSummary}</span>
-                  )}
                 </Button>
               );
             })}
@@ -114,18 +111,6 @@ export function PlanChrome({
         </PopoverContent>
       </Popover>
 
-      {plan.changeSummary && (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span className="min-w-0 text-fade text-caption text-muted">
-                {plan.changeSummary}
-              </span>
-            }
-          />
-          <TooltipContent>{plan.changeSummary}</TooltipContent>
-        </Tooltip>
-      )}
 
       <span className="min-w-0 flex-1" aria-hidden />
 
