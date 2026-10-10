@@ -104,3 +104,29 @@ describe("ClaudeEventMapper native dispatch", () => {
     expect(events.map((event) => event.type)).toEqual([AgentEventType.QuotaUpdate, AgentEventType.TurnComplete]);
   });
 });
+
+describe("ClaudeEventMapper tool results", () => {
+  async function outputOf(content: unknown): Promise<unknown> {
+    const { events, mapper } = createMapper();
+    await mapper.map({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "TOOL_1", content }] } });
+    const result = events.find((event) => event.type === AgentEventType.ToolResult);
+    return result && "output" in result ? result.output : undefined;
+  }
+
+  it("keeps string results unchanged", async () => {
+    await expect(outputOf("plain output")).resolves.toBe("plain output");
+  });
+
+  it("joins text blocks instead of storing their JSON", async () => {
+    await expect(outputOf([
+      { type: "text", text: "[Subagent hand-back] Found the cause" },
+      { type: "image", source: { type: "base64", data: "AAAA" } },
+      { type: "text", text: "in auth.ts" },
+    ])).resolves.toBe("[Subagent hand-back] Found the cause\nin auth.ts");
+  });
+
+  it("falls back to JSON when no block carries text", async () => {
+    const blocks = [{ type: "image", source: { type: "base64", data: "AAAA" } }];
+    await expect(outputOf(blocks)).resolves.toBe(JSON.stringify(blocks));
+  });
+});

@@ -470,10 +470,7 @@ export class ClaudeEventMapper {
       type: AgentEventType.ToolResult,
       threadId: this.threadId,
       toolCallId,
-      output:
-        typeof message.content === "string"
-          ? message.content
-          : JSON.stringify(message.content ?? ""),
+      output: toolResultText(message.content),
       isError: Boolean(message.is_error),
     });
     if (toolCallId)
@@ -614,6 +611,16 @@ function readParentEvidence(message: Message): ClaudeParentEvidence {
   const id = validIdentity(message.parent_tool_use_id);
   if (!id) throw new Error("Invalid Claude native parent identity");
   return { kind: "native", id };
+}
+
+/** Claude sends rich results as content blocks; keep their text so stored summaries read as prose, not JSON. */
+function toolResultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const texts = content.map(objectValue).filter((block) => block.type === "text").map((block) => stringValue(block.text));
+    if (texts.length > 0) return texts.join("\n");
+  }
+  return JSON.stringify(content ?? "");
 }
 
 function stringValue(value: unknown): string {
