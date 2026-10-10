@@ -1,6 +1,6 @@
-import type { AgentTurnStatus, TurnOutcome, TurnRuntimePhase } from "@mcode/contracts";
+import type { AgentTurnStatus, ApprovalReceiptRecord, TurnOutcome, TurnRuntimePhase } from "@mcode/contracts";
 import type { Message, ToolCall, HookExecution, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport/types";
-import type { NarrativeCounts, ThoughtSegment, TurnSummary } from "../narrative/types";
+import type { ApprovalReceipt, NarrativeCounts, ThoughtSegment, TurnSummary } from "../narrative/types";
 import { buildNarrativeItems, computeLiveStreamingText } from "../narrative/build-narrative";
 import { buildPersistedNarrativeItems } from "../narrative/build-persisted-narrative";
 import { currentActivityHeading } from "../narrative/activity-label";
@@ -23,6 +23,7 @@ function isPlanQuestionsMessage(content: string): boolean {
 }
 
 const EMPTY_HOOKS: readonly HookExecution[] = [];
+const EMPTY_APPROVALS: readonly ApprovalReceipt[] = [];
 const EMPTY_THOUGHT_SEGMENTS: readonly ThoughtSegment[] = [];
 
 /** Cached persisted narrative rows for an assistant message. */
@@ -30,6 +31,7 @@ export type PersistedNarrativeRecords = {
   tools: ToolCallRecord[];
   thoughts: ThoughtSegmentRecord[];
   hooks: HookExecutionRecord[];
+  approvals: ApprovalReceiptRecord[];
 } | undefined;
 
 /** Persisted narrative cache keyed by assistant message id. */
@@ -147,6 +149,8 @@ export interface TranscriptProjectionInput {
   permissions?: Parameters<typeof buildVolatileItems>[4];
   /** Hook events for the active turn. */
   hooks?: readonly HookExecution[];
+  /** Approvals decided during the active turn. */
+  approvals?: readonly ApprovalReceipt[];
   /** Reasoning segments for the active turn. */
   thoughtSegments?: readonly ThoughtSegment[];
   /** Persisted assistant text that remains visible while volatile rows settle. */
@@ -240,6 +244,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       input.committedAssistantBody,
       input.responseTextIsStreaming,
       input.holdingSignals,
+      input.approvals,
     );
     const responseMessageId = input.messages.find((message) => message.role === "assistant" && isCurrentResponse(message, stableInput))?.id;
     return buildVirtual(stableItems, volatileItems, hasLiveNarrative(input), responseMessageId);
@@ -315,6 +320,7 @@ export type ChatVirtualItem =
       type: "narrative-flow";
       toolCalls: readonly ToolCall[];
       hooks: readonly HookExecution[];
+      approvals: readonly ApprovalReceipt[];
       thoughtSegments: readonly ThoughtSegment[];
       streamingText: string;
       isAgentRunning: boolean;
@@ -520,6 +526,7 @@ export function buildVolatileItems(
   committedAssistantBody?: string,
   responseTextIsStreaming?: boolean,
   holdingSignals?: RunHoldingSignals,
+  approvals?: readonly ApprovalReceipt[],
 ): ChatVirtualItem[] {
   const isAgentRunning = isAgentDisplayActive(agentDisplayState);
   const resolvedHooks = hooks ?? EMPTY_HOOKS;
@@ -533,15 +540,15 @@ export function buildVolatileItems(
   });
 
   return [
-    narrativeFlowItem(toolCalls, resolvedHooks, resolvedThoughtSegments, resolvedStreamingText, liveText, isAgentRunning, agentStartTime, committedAssistantBody),
+    narrativeFlowItem(toolCalls, resolvedHooks, approvals ?? EMPTY_APPROVALS, resolvedThoughtSegments, resolvedStreamingText, liveText, isAgentRunning, agentStartTime, committedAssistantBody),
     liveResponseItem(liveText, currentTurn, agentDisplayState, responseTextIsStreaming),
     narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime: agentStartTime, thoughts: resolvedThoughtSegments, answering: liveText.length > 0, holdingSignals }),
     ...permissionRequestItems(permissions),
   ].filter((item): item is ChatVirtualItem => item !== undefined);
 }
 
-function narrativeFlowItem(toolCalls: readonly ToolCall[], hooks: readonly HookExecution[], thoughts: readonly ThoughtSegment[], streamingText: string, liveText: string, isAgentRunning: boolean, startTime: number | undefined, committedAssistantBody: string | undefined): ChatVirtualItem | undefined {
-  return isAgentRunning || toolCalls.length > 0 || thoughts.length > 0 ? { key: "narrative-flow", type: "narrative-flow", toolCalls, hooks, thoughtSegments: thoughts, streamingText: liveText.length > 0 ? "" : streamingText, isAgentRunning, startTime, committedAssistantBody } : undefined;
+function narrativeFlowItem(toolCalls: readonly ToolCall[], hooks: readonly HookExecution[], approvals: readonly ApprovalReceipt[], thoughts: readonly ThoughtSegment[], streamingText: string, liveText: string, isAgentRunning: boolean, startTime: number | undefined, committedAssistantBody: string | undefined): ChatVirtualItem | undefined {
+  return isAgentRunning || toolCalls.length > 0 || thoughts.length > 0 ? { key: "narrative-flow", type: "narrative-flow", toolCalls, hooks, approvals, thoughtSegments: thoughts, streamingText: liveText.length > 0 ? "" : streamingText, isAgentRunning, startTime, committedAssistantBody } : undefined;
 }
 
 function liveResponseItem(liveText: string, currentTurn: CurrentTurnResponseIdentity | undefined, agentDisplayState: AgentDisplayState | undefined, textIsStreaming?: boolean): ChatVirtualItem | undefined {
@@ -577,7 +584,8 @@ function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts
 }
 
 function permissionRequestItems(permissions: Parameters<typeof buildVolatileItems>[4]): ChatVirtualItem[] {
-  return permissions?.map((request) => ({ key: `permission-${request.requestId}`, type: "permission-request" as const, request })) ?? [];
+  // A settled request is a tombstone; its durable receipt renders in the narrative.
+  return permissions?.filter((request) => !request.settled).map((request) => ({ key: `permission-${request.requestId}`, type: "permission-request" as const, request })) ?? [];
 }
 
 function sameAgentDisplayState(
@@ -625,7 +633,7 @@ function sameApprovalRequestItem(left: ChatVirtualItem, right: ChatVirtualItem):
 }
 
 function sameNarrativeFlowItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "narrative-flow" && right.type === "narrative-flow" && [left.toolCalls === right.toolCalls, left.hooks === right.hooks, left.thoughtSegments === right.thoughtSegments, left.streamingText === right.streamingText, left.isAgentRunning === right.isAgentRunning, left.startTime === right.startTime, left.committedAssistantBody === right.committedAssistantBody].every(Boolean);
+  return left.type === "narrative-flow" && right.type === "narrative-flow" && [left.toolCalls === right.toolCalls, left.hooks === right.hooks, left.approvals === right.approvals, left.thoughtSegments === right.thoughtSegments, left.streamingText === right.streamingText, left.isAgentRunning === right.isAgentRunning, left.startTime === right.startTime, left.committedAssistantBody === right.committedAssistantBody].every(Boolean);
 }
 
 function sameWorkFoldItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {

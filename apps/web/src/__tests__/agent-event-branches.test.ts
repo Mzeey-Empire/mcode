@@ -384,7 +384,7 @@ describe("handleAgentEvent branches", () => {
       records: patchThreadRecord(state.records, "thread-1", (record) => ({
         narrativeByMessage: {
           ...record.narrativeByMessage,
-          "assistant-persisted": { tools: [], thoughts: [], hooks: [] },
+          "assistant-persisted": { tools: [], thoughts: [], approvals: [], hooks: [] },
         },
       })),
     }));

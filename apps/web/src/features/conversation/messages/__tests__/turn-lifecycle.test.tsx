@@ -35,7 +35,7 @@ const NO_FOLDS = new Set<string>();
 /** Gives every saved answer one tool so each settled turn earns a work fold. */
 function oneToolPerAnswer(messages: readonly Message[]): PersistedNarrativeRecordsByMessage {
   return Object.fromEntries(messages.map((message) => [message.id, {
-    hooks: [], thoughts: [],
+    approvals: [], hooks: [], thoughts: [],
     tools: [{
       id: `${message.id}-tool`, message_id: message.id, parent_tool_call_id: null, tool_name: "Read",
       input_summary: "", output_summary: "", status: "completed", started_at: NOW, completed_at: NOW, sort_order: 0,
@@ -254,11 +254,11 @@ describe("work fold presence", () => {
   }
 
   it("omits the fold when the only thought is the answer itself", () => {
-    expect(foldKeys({ [settled.id]: { tools: [], hooks: [], thoughts: [thought("Saved answer", 1)] } })).toEqual([]);
+    expect(foldKeys({ [settled.id]: { tools: [], approvals: [], hooks: [], thoughts: [thought("Saved answer", 1)] } })).toEqual([]);
   });
 
   it("keeps the fold when a thought precedes the answer", () => {
-    expect(foldKeys({ [settled.id]: { tools: [], hooks: [], thoughts: [thought("Checking the README first.", 0)] } }))
+    expect(foldKeys({ [settled.id]: { tools: [], approvals: [], hooks: [], thoughts: [thought("Checking the README first.", 0)] } }))
       .toEqual(["work-fold:settled-answer"]);
   });
 });

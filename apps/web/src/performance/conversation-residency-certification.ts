@@ -188,6 +188,7 @@ function createRepresentativeRecord(threadId: string, messageCount: number): Thr
           ended_at: "2026-08-11T00:00:01.000Z",
         }],
         hooks: [],
+        approvals: [],
       }]),
   );
   return {

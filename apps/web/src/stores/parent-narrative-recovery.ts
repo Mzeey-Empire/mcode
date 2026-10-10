@@ -1,5 +1,5 @@
 import { MessageSchema, ParentNarrativeRecoveryItemSchema, type AgentItem, type AgentModelState, type AgentTurn, type Message, type ParentNarrativeRecoveryItem } from "@mcode/contracts";
-import { recordToHookExecution, recordToToolCall } from "@/features/conversation/narrative/build-persisted-narrative";
+import { recordToApprovalReceipt, recordToHookExecution, recordToToolCall } from "@/features/conversation/narrative/build-persisted-narrative";
 import type { ThreadRecord } from "./thread-record";
 import { getCanonicalRuntimeTurn } from "./thread-lifecycle";
 
@@ -40,13 +40,14 @@ function emptyOwnedNarrativePatch(turn: AgentTurn, state: AgentModelState, recor
     ...(discarded.some((item) => item.kind === "narrationSegment") ? { thoughtSegments: [] } : {}),
     ...(discarded.some((item) => item.kind === "toolCall") ? { toolCalls: [] } : {}),
     ...(discarded.some((item) => item.kind === "hook") ? { hooks: [] } : {}),
+    ...(discarded.some((item) => item.kind === "approval") ? { approvals: [] } : {}),
   };
 }
 
 function parentNarrativeRecord(item: AgentItem): ParentNarrativeRecoveryItem[] {
   const projection = item.payload.projection;
   if (projection === "narrativeRecovery") return [ParentNarrativeRecoveryItemSchema().parse(item.payload.narrative)];
-  if (projection === "toolCall" || projection === "narrationSegment" || projection === "hook") {
+  if (projection === "toolCall" || projection === "narrationSegment" || projection === "hook" || projection === "approval") {
     return [ParentNarrativeRecoveryItemSchema().parse({ kind: projection, record: item.payload.record })];
   }
   return [];
@@ -71,6 +72,7 @@ function recoveredNarrative(turn: AgentTurn, items: readonly ParentNarrativeReco
   const tools = items.filter((item) => item.kind === "toolCall");
   const thoughts = items.filter((item) => item.kind === "narrationSegment");
   const hooks = items.filter((item) => item.kind === "hook");
+  const approvals = items.filter((item) => item.kind === "approval");
   const streaming = thoughts.filter((item) => item.record.is_final_response === 1)
     .map((item) => item.record.text).join("");
   const terminal = turn.status !== "Pending" && turn.status !== "Running";
@@ -85,6 +87,7 @@ function recoveredNarrative(turn: AgentTurn, items: readonly ParentNarrativeReco
       isExplicitNonFinal: record.is_final_response === 0 || record.ended_at !== null,
     })),
     hooks: hooks.map((item) => recordToHookExecution(item.record)),
+    approvals: approvals.map((item) => recordToApprovalReceipt(item.record)),
     streaming: terminal ? "" : streaming, streamingPreview: terminal ? "" : streaming.slice(-200),
     responseTextIsStreaming: !terminal && thoughts.some((item) => item.record.is_final_response === 1
       && item.record.ended_at === null && item.record.text.length > 0),

@@ -1119,7 +1119,7 @@ describe("SubagentsPanel", () => {
     function seedNarrativeThread(tools: ReturnType<typeof narrativeRecord>[]) {
       const record = createEmptyThreadRecord();
       record.narrativeByMessage = {
-        "message-1": { tools: tools as never, thoughts: [], hooks: [] },
+        "message-1": { tools: tools as never, thoughts: [], approvals: [], hooks: [] },
       };
       useThreadStore.setState({
         currentThreadId: "thread-1",

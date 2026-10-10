@@ -1,5 +1,5 @@
 import type { Message, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport";
-import type { TurnSnapshot, ApprovalRequest, PlanVersion, NarrativeEntry, TurnRange, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationPage, ConversationTail, GoalLookupResult } from "@mcode/contracts";
+import type { TurnSnapshot, ApprovalReceiptRecord, ApprovalRequest, PlanVersion, NarrativeEntry, TurnRange, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationPage, ConversationTail, GoalLookupResult } from "@mcode/contracts";
 import type { TaskItem } from "@/stores/taskStore";
 import type { PlanQuestion } from "@mcode/contracts";
 import type { ThreadRecord } from "@/stores/thread-record";
@@ -37,6 +37,7 @@ export type NarrativeBatchResult = Record<
     tools: ToolCallRecord[];
     thoughts: ThoughtSegmentRecord[];
     hooks: HookExecutionRecord[];
+    approvals: ApprovalReceiptRecord[];
   }
 >;
 

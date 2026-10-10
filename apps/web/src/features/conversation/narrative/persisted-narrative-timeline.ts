@@ -5,6 +5,7 @@ import {
   decodeSubagentAliasDetailTarget,
   resolveBrowserNarrativeTool,
 } from "@mcode/contracts";
+import type { ApprovalReceiptRecord } from "@mcode/contracts";
 import type {
   HookExecution,
   HookExecutionRecord,
@@ -26,13 +27,15 @@ import {
   createToolGroupItem,
 } from "./narrative-builder-helpers";
 import { filterPersistedFinalResponseThoughts } from "./narrative-thought-classification";
-import type { NarrativeItem, SubagentActivity, ThoughtSegment } from "./types";
+import type { ApprovalReceipt, NarrativeItem, SubagentActivity, ThoughtSegment } from "./types";
 
 /** Inputs that reconstruct a persisted turn narrative from durable records. */
 export interface PersistedNarrativeInputs {
   tools: readonly ToolCallRecord[];
   thoughts: readonly ThoughtSegmentRecord[];
   hooks: readonly HookExecutionRecord[];
+  /** Persisted approval receipts; absent when the message has none. */
+  approvals?: readonly ApprovalReceiptRecord[];
   messageContent?: string;
 }
 
@@ -41,7 +44,8 @@ export type PersistedTimelineEvent =
   | { kind: "thought"; segment: ThoughtSegment; sortOrder: number }
   | { kind: "tool"; call: ToolCall; sortOrder: number }
   | { kind: "subagent"; call: ToolCall; marker?: ToolCall; lifecycle: SubagentLifecycle; sortOrder: number }
-  | { kind: "hook"; hook: HookExecution; sortOrder: number };
+  | { kind: "hook"; hook: HookExecution; sortOrder: number }
+  | { kind: "approval"; receipt: ApprovalReceipt; sortOrder: number };
 
 /** Normalized persisted state that preserves durable ordering and parent groups. */
 export interface PersistedNarrativePreparation {
@@ -55,6 +59,7 @@ export interface PersistedNarrativePreparation {
 const toolCallCache = new WeakMap<ToolCallRecord, ToolCall>();
 const thoughtSegmentCache = new WeakMap<ThoughtSegmentRecord, ThoughtSegment>();
 const hookExecutionCache = new WeakMap<HookExecutionRecord, HookExecution>();
+const approvalReceiptCache = new WeakMap<ApprovalReceiptRecord, ApprovalReceipt>();
 
 /** Maps one persisted tool record to the live row model. */
 export function recordToToolCall(record: ToolCallRecord): ToolCall {
@@ -104,6 +109,20 @@ export function recordToHookExecution(record: HookExecutionRecord): HookExecutio
   return hook;
 }
 
+/** Maps one persisted approval receipt to the row model, keeping its identity stable across renders. */
+export function recordToApprovalReceipt(record: ApprovalReceiptRecord): ApprovalReceipt {
+  const cached = approvalReceiptCache.get(record);
+  if (cached) return cached;
+  const receipt: ApprovalReceipt = {
+    requestId: record.id,
+    subjectLabel: record.subject_label,
+    outcome: record.outcome,
+    decidedAt: isoToMs(record.decided_at),
+  };
+  approvalReceiptCache.set(record, receipt);
+  return receipt;
+}
+
 /** Formats persisted hook metadata into the bounded detail lines used by HookRow. */
 export function persistedHookDetailLines(record: HookExecutionRecord): string[] {
   const lines: string[] = [`phase: ${record.phase}`];
@@ -141,6 +160,7 @@ export function preparePersistedNarrative(
       toolRecords,
       hierarchy.childrenByParent,
       inputs.hooks,
+      inputs.approvals ?? [],
     ),
   };
 }
@@ -162,6 +182,10 @@ export function projectPersistedNarrativeItems(
       case "hook":
         flushToolGroup(items, pendingToolCalls);
         items.push({ type: "hook", hook: event.hook });
+        break;
+      case "approval":
+        flushToolGroup(items, pendingToolCalls);
+        items.push({ type: "approval", receipt: event.receipt });
         break;
       case "subagent": {
         flushToolGroup(items, pendingToolCalls);
@@ -311,11 +335,13 @@ function createPersistedTimeline(
   toolRecords: readonly ToolCallRecord[],
   childrenByParent: ReadonlyMap<string, readonly ToolCallRecord[]>,
   hooks: readonly HookExecutionRecord[],
+  approvals: readonly ApprovalReceiptRecord[],
 ): PersistedTimelineEvent[] {
   const timeline = createPersistedThoughtEvents(thoughts)
     .concat(createPersistedTopLevelToolEvents(topLevelRecords))
     .concat(createPersistedSubagentEvents(toolRecords, childrenByParent))
-    .concat(createPersistedHookEvents(hooks));
+    .concat(createPersistedHookEvents(hooks))
+    .concat(approvals.map((record) => ({ kind: "approval" as const, receipt: recordToApprovalReceipt(record), sortOrder: record.sort_order })));
   return timeline.sort((left, right) => left.sortOrder - right.sortOrder);
 }
 

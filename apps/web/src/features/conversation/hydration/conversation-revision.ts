@@ -23,6 +23,7 @@ export function serializeConversationRevisionSnapshot(record: ThreadRecord): str
     toolCalls: record.toolCalls,
     thoughtSegments: record.thoughtSegments,
     hooks: record.hooks,
+    approvals: record.approvals,
     currentTurnMessageId: record.currentTurnMessageId,
     pendingTurnPersistMessageIds: record.pendingTurnPersistMessageIds,
     currentTurnResponseKey: record.currentTurnResponseKey,

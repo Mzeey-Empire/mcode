@@ -169,6 +169,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const approvals = useApprovalStore((state) => state.approvals);
   const permissions = useMemo(() => approvals.filter((request) => request.threadId === renderedThreadId), [approvals, renderedThreadId]);
   const hooks = useThreadRecord(renderedThreadId, (record) => record.hooks);
+  const decidedApprovals = useThreadRecord(renderedThreadId, (record) => record.approvals);
   const stopPending = useThreadStore((state) => renderedThreadId ? (state.pendingStopCounts[renderedThreadId] ?? 0) > 0 : false);
   const compacting = useThreadRecord(renderedThreadId, (record) => record.isCompacting);
   const retry = useThreadRecord(renderedThreadId, (record): RunHoldingSignals["retry"] =>
@@ -217,6 +218,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
     transcriptThreadId: canonicalContent.messages[0]?.thread_id ?? null,
     permissions,
     hooks,
+    approvals: decidedApprovals,
     holdingSignals,
     persistedNarrativeByMessage,
     currentTurnMessageId: canonicalTurnIdentity.currentTurnMessageId,

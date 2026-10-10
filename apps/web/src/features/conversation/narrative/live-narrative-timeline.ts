@@ -12,12 +12,14 @@ import {
   createToolGroupItem,
 } from "./narrative-builder-helpers";
 import { filterThoughtsMatchingAssistantBody } from "./narrative-thought-classification";
-import type { NarrativeItem, SubagentActivity, ThoughtSegment } from "./types";
+import type { ApprovalReceipt, NarrativeItem, SubagentActivity, ThoughtSegment } from "./types";
 
 /** Inputs that describe the volatile narrative state for one live turn. */
 export interface LiveNarrativeInputs {
   toolCalls: readonly ToolCall[];
   hooks: readonly HookExecution[];
+  /** Decided approvals for this turn; absent when the turn has none. */
+  approvals?: readonly ApprovalReceipt[];
   thoughtSegments: readonly ThoughtSegment[];
   streamingText: string;
   isAgentRunning: boolean;
@@ -29,7 +31,8 @@ export type LiveTimelineEvent =
   | { kind: "thought"; segment: ThoughtSegment; startedAt: number }
   | { kind: "tool"; call: ToolCall; startedAt: number }
   | { kind: "subagent"; call: ToolCall; marker?: ToolCall; lifecycle: SubagentLifecycle; startedAt: number }
-  | { kind: "hook"; hook: HookExecution; startedAt: number };
+  | { kind: "hook"; hook: HookExecution; startedAt: number }
+  | { kind: "approval"; receipt: ApprovalReceipt; startedAt: number };
 
 /** Normalized live state that preserves parent grouping before row projection. */
 export interface LiveNarrativePreparation {
@@ -71,6 +74,7 @@ export function prepareLiveNarrative(
       hierarchy.childrenByParent,
       thoughtSegments,
       inputs.hooks,
+      inputs.approvals ?? [],
     ),
     activeToolCalls,
     hasRunningTopLevelTool,
@@ -123,11 +127,13 @@ function createLiveTimeline(
   childrenByParent: ReadonlyMap<string, readonly ToolCall[]>,
   thoughtSegments: readonly ThoughtSegment[],
   hooks: readonly HookExecution[],
+  approvals: readonly ApprovalReceipt[],
 ): LiveTimelineEvent[] {
   const timeline = createThoughtEvents(thoughtSegments)
     .concat(createTopLevelToolEvents(topLevelCalls))
     .concat(createSubagentEvents(toolCalls, childrenByParent))
-    .concat(createHookEvents(hooks));
+    .concat(createHookEvents(hooks))
+    .concat(approvals.map((receipt) => ({ kind: "approval" as const, receipt, startedAt: receipt.decidedAt })));
   return timeline.sort((left, right) => left.startedAt - right.startedAt);
 }
 
@@ -196,6 +202,7 @@ function isEmptyLiveNarrative(
 ): boolean {
   return preparation.thoughtSegments.length === 0
     && preparation.toolCalls.length === 0
+    && preparation.timeline.length === 0
     && hooks.length === 0;
 }
 
@@ -232,9 +239,13 @@ function projectLiveTimeline(
 
   for (let index = 0; index < preparation.timeline.length; index += 1) {
     const event = preparation.timeline[index]!;
+    if (event.kind === "tool") {
+      if (event.call.isComplete) pendingToolCalls.push(event.call);
+      continue;
+    }
+    flushToolGroup(items, pendingToolCalls);
     switch (event.kind) {
       case "thought":
-        flushToolGroup(items, pendingToolCalls);
         if (projectThoughtEvent(
           items,
           event.segment,
@@ -246,12 +257,7 @@ function projectLiveTimeline(
           emittedFinalDeltaFromTape = true;
         }
         break;
-      case "hook":
-        flushToolGroup(items, pendingToolCalls);
-        items.push({ type: "hook", hook: event.hook });
-        break;
       case "subagent": {
-        flushToolGroup(items, pendingToolCalls);
         const groupedEvents = collectSiblingSubagentEvents(preparation.timeline, index);
         items.push(createSubagentItem(createLiveSubagentActivities(
           groupedEvents.events,
@@ -262,13 +268,20 @@ function projectLiveTimeline(
         index = groupedEvents.lastIndex;
         break;
       }
-      case "tool":
-        if (event.call.isComplete) pendingToolCalls.push(event.call);
-        break;
+      default:
+        items.push(standaloneItem(event));
     }
   }
   flushToolGroup(items, pendingToolCalls);
   return { items, emittedFinalDeltaFromTape };
+}
+
+function standaloneItem(
+  event: Extract<LiveTimelineEvent, { kind: "hook" | "approval" }>,
+): NarrativeItem {
+  return event.kind === "hook"
+    ? { type: "hook", hook: event.hook }
+    : { type: "approval", receipt: event.receipt };
 }
 
 function projectThoughtEvent(

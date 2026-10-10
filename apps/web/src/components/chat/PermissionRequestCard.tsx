@@ -1,21 +1,10 @@
 import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { Shield, Check, X } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { getTransport } from "@/transport";
 import { useThreadStore } from "@/stores/threadStore";
 import { useApprovalStore, type StoredApproval } from "@/stores/approvalStore";
-import type { ApprovalOutcome, ApprovalQuestion, ApprovalAnswers, ApprovalSubject } from "@mcode/contracts";
-
-function decisionLabel(outcome: ApprovalOutcome): string {
-  switch (outcome.status) {
-    case "allowed": return outcome.choiceLabel;
-    case "denied": return outcome.choiceLabel;
-    case "answered": return "Answered";
-    case "cancelled": return outcome.reason === "unanswerable" ? "Stopped · Mcode couldn't answer this request" : "Cancelled";
-    case "auto_denied": return outcome.reason === "too_large" ? "Denied automatically · too large to show" : "Denied automatically · Mcode couldn't read this request";
-  }
-}
+import type { ApprovalQuestion, ApprovalAnswers, ApprovalSubject } from "@mcode/contracts";
 
 function subjectPreview(subject: ApprovalSubject): string {
   switch (subject.kind) {
@@ -132,7 +121,7 @@ function PendingQuestionRequest({
 }
 
 
-/** Temporary inline approval card backed by adapter-owned v2 choices. */
+/** Inline card for a pending approval; once decided, the narrative receipt replaces it. */
 export function PermissionRequestCard({ request }: { request: StoredApproval }) {
   const [responding, setResponding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -158,12 +147,6 @@ export function PermissionRequestCard({ request }: { request: StoredApproval }) 
   };
   const label = request.reason ?? (request.subject.kind === "tool" ? request.subject.toolName : request.subject.kind.replace(/_/g, " "));
   const icon = <Shield size={13} className="shrink-0" />;
-  if (request.settled && request.outcome) {
-    return <div className="flex items-center gap-2 border-l-2 border-border/30 pl-3 py-1 text-xs text-muted/70">
-      {icon}<span className="font-medium">{label}</span>
-      <Badge variant="outline" size="compact">{decisionLabel(request.outcome)}</Badge>
-    </div>;
-  }
   if (request.subject.kind === "question") {
     return <PendingQuestionRequest requestId={request.requestId} icon={icon} label={label}
       questions={request.subject.questions} responding={responding} ready={ready} error={error}

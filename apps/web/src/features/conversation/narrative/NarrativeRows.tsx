@@ -31,6 +31,8 @@ export function narrativeRowKey(item: NarrativeItem, index: number): string {
       return `tool-group-${item.group.calls[0]?.id ?? index}`;
     case "hook":
       return `hook-${item.hook.hookName}-${item.hook.startedAt}-${index}`;
+    case "approval":
+      return `approval-${item.receipt.requestId}`;
     case "subagent":
       return `subagent-${item.toolCall.id}-${item.lifecycle}-${index}`;
     case "active-tool":

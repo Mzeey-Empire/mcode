@@ -718,11 +718,12 @@ export interface McodeTransport {
   listToolCallRecords(messageId: string): Promise<ToolCallRecord[]>;
   /** Fetch child tool call records for a parent tool call. */
   listToolCallRecordsByParent(parentToolCallId: string): Promise<ToolCallRecord[]>;
-  /** Fetch the full persisted narrative (tools, thoughts, hooks) for an assistant message. */
+  /** Fetch the full persisted narrative (tools, thoughts, hooks, approval receipts) for an assistant message. */
   listNarrative(messageId: string): Promise<{
     tools: ToolCallRecord[];
     thoughts: ThoughtSegmentRecord[];
     hooks: HookExecutionRecord[];
+    approvals: import("@mcode/contracts").ApprovalReceiptRecord[];
   }>;
   /** Fetch one bounded, server-ordered narrative window. */
   loadTurn(
