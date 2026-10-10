@@ -48,7 +48,7 @@ export function WorkspaceTargetMenu({ mode, isGitRepo, folder, onModeChange, cla
             variant="ghost"
             size="compact"
             data-testid="workspace-target-trigger"
-            className={cn(TARGET_TRIGGER_CLASS, "min-w-[15.2rem]", className)}
+            className={cn(TARGET_TRIGGER_CLASS, "min-w-[15.2rem] justify-start", className)}
           >
             <Icon className="size-4" />
             <span>{label}</span>
