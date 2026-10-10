@@ -268,10 +268,10 @@ export async function captureChild(run, { expectedOutcome, maxMs = 5000 } = {}) 
   const native = await waitFile(run, 'child-prefix', 5000);
   const deadline = Date.now() + maxMs;
   for (;;) {
-    const roster = await run.socket.rpc('canonicalAgent.roster', { owningParentThreadId: run.thread.id }, Date.now() + 3000);
-    const row = exactNativeChild(roster, native.threadId);
+    const roster = await run.socket.rpc('subagent.roster', { owningParentThreadId: run.thread.id }, Date.now() + 3000);
+    const row = await onlyMarkedChild(run, roster);
     if (childOutcomeMatches(row, expectedOutcome)) {
-      const transcript = await run.socket.rpc('conversation.tail', { threadId: row.id, limit: 2 }, Date.now() + 3000);
+      const transcript = await run.socket.rpc('conversation.tail', { threadId: row.childThreadId, limit: 2 }, Date.now() + 3000);
       const parent = (await run.socket.rpc('agent.listRunning', {})).find(item => item.threadId === run.thread.id);
       const result = { at: new Date().toISOString(), native, row, roster, transcript, parent };
       run.receipt.childCaptures ??= []; run.receipt.childCaptures.push(result); writeReceipt(run);
@@ -286,21 +286,27 @@ function requireChildCapture(run, maxMs) {
   if (run.provider !== 'codex' || !run.receipt.fixtureControl?.childMode || maxMs > 8000) throw new Error('Choose a bounded controlled Codex child');
 }
 
-function exactNativeChild(roster, nativeId) {
-  const matches = [...roster.active, ...roster.done].filter(row => [...row.providerIdentities, ...row.sourceProviderIdentities]
-    .some(identity => identity.providerId === 'codex' && identity.scope === 'thread' && identity.value === nativeId));
-  if (matches.length > 1) throw new Error('Native child matched multiple server aliases');
-  return matches[0];
+// The roster no longer exposes native identities, so the fixture's single child is
+// bound by its server alias and confirmed through this run's transcript marker.
+async function onlyMarkedChild(run, roster) {
+  const children = roster.entries.filter(row => row.provider === 'codex' && row.childThreadId);
+  if (children.length > 1) throw new Error('Controlled fixture produced multiple server child aliases');
+  const row = children[0];
+  if (!row) return undefined;
+  const tail = await run.socket.rpc('conversation.tail', { threadId: row.childThreadId, limit: 20 }, Date.now() + 3000);
+  return JSON.stringify(tail).includes('LIVE_DURABILITY ' + run.id + ' CHILD_PREFIX') ? row : undefined;
 }
 
-function childOutcomeMatches(row, expected) { return row && (!expected || row.terminalOutcome === expected); }
+const CHILD_STATUS_BY_OUTCOME = { Completed: 'done', Interrupted: 'stopped', Cancelled: 'stopped', Errored: 'failed' };
+
+function childOutcomeMatches(row, expected) { return row && (!expected || row.status === CHILD_STATUS_BY_OUTCOME[expected]); }
 
 /** Stops the observed child through its real detail control while the parent and saving lock remain active. */
 export async function stopChildUI(run, { detailButtonLabel, detailRegionLabel }) {
   assertHeldLock(run);
   requireChildStop(run, detailButtonLabel, detailRegionLabel);
   const before = await captureChild(run);
-  if (!before.row.canStop || before.row.terminalOutcome) throw new Error('Observed child is not stoppable');
+  if (!before.row.canStop || before.row.status !== 'running') throw new Error('Observed child is not stoppable');
   await run.page.getByRole('button', { name: detailButtonLabel, exact: true }).click({ timeout: 5000 });
   const detail = run.page.getByRole('region', { name: detailRegionLabel, exact: true });
   if (!(await detail.innerText({ timeout: 5000 })).includes('LIVE_DURABILITY ' + run.id + ' CHILD_PREFIX')) throw new Error('Opened detail does not contain this exact native child marker');

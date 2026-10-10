@@ -60,7 +60,7 @@ import type { ThreadService } from "../../../thread-control/index.js";
 import type { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
 import { ThreadControlMutationReservationService } from "../../../thread-control/index.js";
 import { publishParentProviderEvent } from "../../events/provider-event-publication.js";
-import { SubagentLifecycleService } from "../../collaboration/subagent-lifecycle-service.js";
+import { SubagentRosterService } from "../../collaboration/subagent-roster-service.js";
 
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn(), subscribedThreadIds: () => new Set<string>() }));
 
@@ -1499,7 +1499,7 @@ describe("AgentService Ended finalization", () => {
       undefined,
       planTurns,
       undefined,
-      new SubagentLifecycleService(canonicalSink, providerRegistry),
+      new SubagentRosterService(canonicalSink, providerRegistry),
     );
     const fixtureService = service;
     registerAgentStorageTestProducer(db, async () => {

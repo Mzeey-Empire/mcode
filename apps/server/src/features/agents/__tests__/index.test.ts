@@ -12,7 +12,7 @@ describe("agents feature boundary", () => {
       "GoalLifecycleService",
       "ParentAssistantTextCheckpointService",
       "PlanTurnService",
-      "SubagentLifecycleService",
+      "SubagentRosterService",
       "TurnRecoveryService",
       "publishCanonicalAgentEvents",
       "startAgentOrchestration",

@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
 import type { IAgentProvider } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
-import { SubagentLifecycleService } from "../../collaboration/subagent-lifecycle-service.js";
+import { SubagentRosterService } from "../../collaboration/subagent-roster-service.js";
 
 type StopTarget = {
   childThread: { providerId: string };
@@ -12,7 +12,7 @@ type StopTarget = {
 };
 
 type ServiceHarness = {
-  stop: SubagentLifecycleService["stop"];
+  stop: SubagentRosterService["stop"];
   durability: {
     loadSubagentStopTarget: ReturnType<typeof vi.fn>;
     finishSubagentTurn: ReturnType<typeof vi.fn>;
@@ -61,7 +61,7 @@ function makeHarness(options: {
     stopSession: ReturnType<typeof vi.fn>;
   };
   const finishSubagentTurn = vi.fn().mockResolvedValue({ status: "Interrupted" });
-  const service = Object.create(SubagentLifecycleService.prototype) as ServiceHarness;
+  const service = Object.create(SubagentRosterService.prototype) as ServiceHarness;
   service.durability = {
     loadSubagentStopTarget: vi.fn(() => target),
     finishSubagentTurn,
@@ -76,7 +76,7 @@ const request = {
   childThreadId: "child-thread",
 };
 
-describe("SubagentLifecycleService.stop", () => {
+describe("SubagentRosterService.stop", () => {
   it("keeps stop pending until the child interruption is durable", async () => {
     const { service, finishSubagentTurn } = makeHarness();
     let confirm: ((result: { status: string }) => void) | undefined;

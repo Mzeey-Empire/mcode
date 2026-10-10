@@ -20,7 +20,7 @@ import { TurnDiffRepo } from "../turns/persistence/turn-diff-repo.js";
 import {
   SUBAGENT_LIFECYCLE_DURABILITY,
 } from "../collaboration/subagent-lifecycle-durability.js";
-import { SubagentLifecycleService } from "../collaboration/subagent-lifecycle-service.js";
+import { SubagentRosterService } from "../collaboration/subagent-roster-service.js";
 import { GoalLifecycleService } from "../goals/goal-lifecycle-service.js";
 import { PlanTurnService } from "../planning/plan-turn-service.js";
 import { TaskPersistenceService } from "../tasks/task-persistence-service.js";
@@ -177,13 +177,13 @@ export function registerAgentServices(container: DependencyContainer): void {
   });
   container.register(PlanTurnService, { useClass: PlanTurnService }, { lifecycle: Lifecycle.Singleton });
   container.register(GoalLifecycleService, { useClass: GoalLifecycleService }, { lifecycle: Lifecycle.Singleton });
-  container.register(SubagentLifecycleService, { useClass: SubagentLifecycleService }, { lifecycle: Lifecycle.Singleton });
+  container.register(SubagentRosterService, { useClass: SubagentRosterService }, { lifecycle: Lifecycle.Singleton });
   container.register(TaskPersistenceService, { useClass: TaskPersistenceService }, { lifecycle: Lifecycle.Singleton });
   container.register<TurnFeatureEffects>(TURN_FEATURE_EFFECTS, {
     useFactory: instanceCachingFactory((c) => new TurnFeatureEffects(
       c.resolve(PlanTurnService),
       c.resolve(GoalLifecycleService),
-      c.resolve(SubagentLifecycleService),
+      c.resolve(SubagentRosterService),
       c.resolve(TaskPersistenceService),
     )),
   });

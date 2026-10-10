@@ -1,5 +1,5 @@
 import type {
-  CanonicalSubagentRosterRequest,
+  SubagentRosterRequest,
   CanonicalSubagentStopRequest,
   PreviewAnnotationBundle,
   WsMethodName,
@@ -10,7 +10,7 @@ import * as NodePerfHooks from "node:perf_hooks";
 import type { z } from "zod";
 import type { GitWatcherService } from "../../projects/git/git-watcher-service.js";
 import type { ThreadControlService } from "../../thread-control/authority/thread-control-service.js";
-import type { SubagentLifecycleService } from "../collaboration/subagent-lifecycle-service.js";
+import type { SubagentRosterService } from "../collaboration/subagent-roster-service.js";
 import {
   loadConversationPage,
   loadConversationTail,
@@ -48,7 +48,8 @@ type AgentRpcMethod =
   | "agent.answerQuestions"
   | "agent.dismissPlanQuestions"
   | "agent.child.stop"
-  | "canonicalAgent.roster"
+  | "subagent.roster"
+  | "subagent.detail"
   | "plan.saveVersion"
   | "plan.snapshot"
   | "message.list"
@@ -65,8 +66,8 @@ type AgentRpcMethod =
   | "approval.listPending"
   | "recap.generate";
 
-type AgentRpcParams<Method extends AgentRpcMethod> = Method extends "canonicalAgent.roster"
-  ? CanonicalSubagentRosterRequest
+type AgentRpcParams<Method extends AgentRpcMethod> = Method extends "subagent.roster"
+  ? SubagentRosterRequest
   : Method extends "agent.child.stop"
     ? CanonicalSubagentStopRequest
     : z.output<ReturnType<typeof WS_METHODS>[Method]["params"]>;
@@ -92,7 +93,7 @@ export interface AgentRouterDeps {
   planService: Pick<PlanService, "saveVersion" | "snapshot">;
   planTurnService: Pick<PlanTurnService, "answerQuestions" | "dismissQuestions">;
   recapService: Pick<RecapService, "generate">;
-  subagentLifecycleService: Pick<SubagentLifecycleService, "loadRoster" | "stop">;
+  subagentRosterService: Pick<SubagentRosterService, "loadRoster" | "loadDetail" | "stop">;
   taskRepo: Pick<TaskRepo, "get">;
   thoughtSegmentRepo: Pick<ThoughtSegmentRepo, "listByMessage">;
   threadControlService: Pick<
@@ -196,8 +197,9 @@ const agentHandlers: AgentRpcHandlerMap = {
   "agent.dismissPlanQuestions": (deps, params) => {
     deps.planTurnService.dismissQuestions(params.threadId);
   },
-  "agent.child.stop": (deps, params) => deps.subagentLifecycleService.stop(params),
-  "canonicalAgent.roster": (deps, params) => deps.subagentLifecycleService.loadRoster(params),
+  "agent.child.stop": (deps, params) => deps.subagentRosterService.stop(params),
+  "subagent.roster": (deps, params) => deps.subagentRosterService.loadRoster(params),
+  "subagent.detail": (deps, params) => deps.subagentRosterService.loadDetail(params),
   "plan.saveVersion": (deps, params) => deps.planService.saveVersion(params),
   "plan.snapshot": (deps, params) => deps.planService.snapshot(params),
   "message.list": (deps, params) => ({

@@ -1,6 +1,7 @@
 /** Public Sub-agents feature surface for app composition and workbench consumers. */
 export { SubagentsPanel } from "./roster/SubagentsPanel";
-export { projectSubagents } from "./roster/subagent-projection";
+export { useSubagentRoster, useSubagentRosterStore } from "./state/subagentRosterStore";
+export { subagentStatusLabel, subagentChipStatus, subagentOverviewCounts } from "./subagent-status";
 export { SubagentLifecycleStatus } from "./lifecycle/SubagentLifecycleStatus";
 export type {
   SubagentLifecycleStatusProps,

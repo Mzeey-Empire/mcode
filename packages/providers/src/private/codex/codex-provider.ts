@@ -1,3 +1,4 @@
+import { SUBAGENT_REPORTING } from "@mcode/contracts";
 /**
  * Codex provider adapter using the persistent `codex app-server` subprocess.
  *
@@ -574,6 +575,7 @@ function completedAssistantText(item: CompletedItem | undefined): string {
 /** Codex provider adapter implementing IAgentProvider with a persistent app-server process per session. */
 export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProvider, IApprovalReviewCapable, IGoalCapable, ISessionEvictable, ProtocolAdapter<CodexSessionState> {
   readonly id = "codex" as const;
+  readonly subagentReporting = SUBAGENT_REPORTING.codex;
   readonly descriptor = Object.freeze({
     id: "codex" as const,
     capabilities: CODEX_SUPPORTED_CAPABILITIES.map((name) => ({ name, support: "supported" as const })),

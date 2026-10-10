@@ -1,40 +1,21 @@
 import { Button } from "@/components/ui/button";
 import { ProviderDiscStack } from "@/components/ui/provider-icon";
-import { openSubagentsRoster, projectSubagents } from "@/features/subagents";
+import { openSubagentsRoster } from "@/features/subagents";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
-import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { cn } from "@/lib/utils";
-import { useThreadStore } from "@/stores/threadStore";
+import { useSubagentRoster } from "@/features/subagents/state/subagentRosterStore";
+import { subagentOverviewCounts } from "@/features/subagents/subagent-status";
 import { type Thread } from "@/transport";
-import { useMemo } from "react";
 import { OVERVIEW_ROW_CLASS, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 
 function SubagentsEntry({ thread }: { thread: Thread }) {
-  const { open } = useOverviewContext();
-  const overviewToolCalls = useThreadStore((state) => (
-    open ? state.records.get(thread.id)?.toolCalls : undefined
-  ));
-  const overviewNarrative = useThreadStore((state) => (
-    open ? state.records.get(thread.id)?.narrativeByMessage : undefined
-  ));
-  const subagentRoster = useMemo(
-    () => projectSubagents(
-      overviewToolCalls,
-      overviewNarrative
-        ? Object.values(overviewNarrative).map((entry) => entry?.tools)
-        : undefined,
-    ),
-    [overviewNarrative, overviewToolCalls],
-  );
-  const subagentTotal = subagentRoster.active.length + subagentRoster.finished.length;
-  // Subagent threads are provider-native, so every subagent shows the thread's provider.
-  const subagentProviders = useMemo(
-    () => Array.from({ length: subagentTotal }, () => thread.provider),
-    [subagentTotal, thread.provider],
-  );
+  const roster = useSubagentRoster(thread.id);
+  const counts = subagentOverviewCounts(roster?.entries ?? []);
+  const subagentTotal = counts.active + counts.done;
+  const subagentProviders = roster?.entries.map((entry) => entry.provider) ?? [];
   const subagentStateCopy = [
-    subagentRoster.active.length > 0 ? `${subagentRoster.active.length} active` : null,
-    `${subagentRoster.finished.length} done`,
+    counts.active > 0 ? `${counts.active} active` : null,
+    `${counts.done} done`,
   ].filter(Boolean).join(", ");
   return (<ThreadOverviewWhen when={subagentTotal > 0}>
     <>
@@ -47,7 +28,7 @@ function SubagentsEntry({ thread }: { thread: Thread }) {
         type="button"
         data-testid="thread-overview-subagents"
         onClick={() => openSubagentsRoster()}
-        aria-label={`Subagents, ${subagentRoster.active.length} active, ${subagentRoster.finished.length} done`}
+        aria-label={`Subagents, ${counts.active} active, ${counts.done} done`}
         className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-start gap-2")}
       >
         <ProviderDiscStack providers={subagentProviders} />

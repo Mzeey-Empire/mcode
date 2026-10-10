@@ -22,6 +22,17 @@ import type { Provider } from "../compat/agent-model.js";
  */
 export type ProviderId = "claude" | "codex" | "gemini" | "copilot" | "cursor" | "opencode" | "devin";
 
+/** Child evidence currently reported by each adapter, including unavailable providers. */
+export const SUBAGENT_REPORTING: Record<ProviderId, { childTranscript: boolean; childSteps: boolean } | null> = {
+  codex: { childTranscript: true, childSteps: false },
+  claude: { childTranscript: false, childSteps: true },
+  devin: { childTranscript: false, childSteps: true },
+  cursor: { childTranscript: false, childSteps: false },
+  copilot: null,
+  opencode: null,
+  gemini: null,
+};
+
 /** How a provider's `resume` mechanism behaves when used to fork a session. */
 export type SessionForkBehavior = "clean" | "unsupported";
 
@@ -151,6 +162,8 @@ export interface IAgentProvider {
   readonly id: ProviderId;
   /** Static provider capabilities supplied to clients before dispatch. */
   readonly descriptor: Provider;
+  /** Persisted child evidence reported by this adapter today. */
+  readonly subagentReporting: { childTranscript: boolean; childSteps: boolean } | null;
 
   /**
    * Whether this provider supports one-shot text completion (e.g. PR draft generation).

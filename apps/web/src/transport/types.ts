@@ -65,7 +65,8 @@ import type {
   ConversationOlderPage,
   ConversationOlderPageRequest,
   ConversationTail,
-  CanonicalSubagentRoster,
+  SubagentRoster,
+  SubagentDetail,
   CanonicalSubagentStopResult,
   SetThreadSubscriptionsInput,
   SetThreadSubscriptionsResult,
@@ -524,10 +525,11 @@ export interface McodeTransport {
   /** Fetch persisted messages and grouped narrative for one thread page. */
   loadConversationPage(threadId: string, limit: number, before?: number): Promise<ConversationPage>;
   /** Fetch the canonical descendant roster rooted at one owning parent thread. */
-  loadCanonicalSubagentRoster(
+  loadSubagentRoster(
     owningParentThreadId: string,
-    limit?: number,
-  ): Promise<CanonicalSubagentRoster>;
+  ): Promise<SubagentRoster>;
+  /** Read the last 32 persisted steps for one roster entry. */
+  loadSubagentDetail(owningParentThreadId: string, entryId: string): Promise<SubagentDetail>;
   /** Stop one exact active canonical child turn. */
   stopCanonicalSubagent(
     owningParentThreadId: string,

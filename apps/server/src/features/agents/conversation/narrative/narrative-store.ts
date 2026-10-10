@@ -35,9 +35,10 @@ import { NarrativeReadStore } from "./narrative-read-store.js";
  *   the persisted rows verbatim and changes no counts.
  */
 import { injectable, inject } from "tsyringe";
+import { rosterToolCall, type RosterToolCall } from "../../collaboration/subagent-roster-projection.js";
 import type { Database } from "bun:sqlite";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import { and, asc, desc, eq, gt, gte, lt, ne, sql, type SQL, type SQLWrapper } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, lt, ne, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import {
   hookExecutions,
   messages,
@@ -52,6 +53,7 @@ import {
   type NarrativeDetailCursor,
   type ParentNarrativeRecoveryItem,
   type TurnRange,
+  type ToolCallRecord,
 } from "@mcode/contracts";
 import { MessageRepo } from "../persistence/message-repo.js";
 import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
@@ -131,6 +133,59 @@ interface PersistedNarrativeRows {
 
 @injectable()
 export class NarrativeStore {
+  /** Read persisted calls with their original message provider, overlaid by the active turn. */
+  loadSubagentCalls(threadId: string): RosterToolCall[] {
+    if (!this.db) throw new Error("Subagent reads require the narrative database");
+    const records = this.db.prepare<ToolCallRecord & { provider: string | null; outcome: string | null }, [string, string]>(`
+      WITH RECURSIVE subagent_calls(id) AS (
+        SELECT tool.id FROM messages AS owner
+        JOIN tool_call_records AS tool ON tool.message_id = owner.id
+        WHERE owner.thread_id = ? AND tool.tool_name = 'Agent'
+        UNION
+        SELECT child.id FROM subagent_calls AS parent
+        JOIN tool_call_records AS child ON child.parent_tool_call_id = parent.id
+        JOIN messages AS owner ON owner.id = child.message_id
+        WHERE owner.thread_id = ?
+      )
+      SELECT tool.*, owner.provider, owner.outcome FROM subagent_calls
+      JOIN tool_call_records AS tool ON tool.id = subagent_calls.id
+      JOIN messages AS owner ON owner.id = tool.message_id
+    `).all(threadId, threadId);
+    const buffered = this.getBufferedToolCalls(threadId);
+    const messageIds = [...new Set(buffered.map((call) => call.messageId).filter(Boolean))];
+    const messageRows = messageIds.length === 0 ? [] : drizzle(this.db).select({
+      id: messages.id, provider: messages.provider, outcome: messages.outcome,
+    }).from(messages).where(and(eq(messages.threadId, threadId), inArray(messages.id, messageIds))).all();
+    const calls = new Map(records.map((record) => [record.id, rosterToolCall(record, record.provider, record.outcome)]));
+    const owners = new Map(messageRows.map((message) => [message.id, message]));
+    buffered.forEach((call) => {
+      if (!call.toolCallId || !call.startedAt) return;
+      const saved = calls.get(call.toolCallId) ?? { messageId: "", provider: null, parentStopped: false };
+      const owner = owners.get(call.messageId);
+      calls.set(call.toolCallId, {
+        ...call, toolCallId: call.toolCallId, startedAt: call.startedAt,
+        messageId: call.messageId || saved.messageId,
+        provider: owner?.provider ?? saved.provider,
+        parentStopped: saved.parentStopped || ["cancelled", "interrupted"].includes(owner?.outcome ?? ""),
+        presentation: call._subagentPresentation,
+      });
+    });
+    return [...calls.values()].sort((left, right) =>
+      left.startedAt.localeCompare(right.startedAt) || left.sortOrder - right.sortOrder);
+  }
+
+  /** Check for roster work without hydrating the thread's narrative history. */
+  hasSubagentCalls(threadId: string): boolean {
+    if (this.getBufferedToolCalls(threadId).some((call) => call.toolName === "Agent")) return true;
+    if (!this.db) throw new Error("Subagent reads require the narrative database");
+    return this.db.prepare<{ id: string }, [string]>(`
+      SELECT tool.id FROM messages AS owner
+      JOIN tool_call_records AS tool ON tool.message_id = owner.id
+      WHERE owner.thread_id = ? AND tool.tool_name = 'Agent'
+      LIMIT 1
+    `).get(threadId) !== null;
+  }
+
   constructor(
     @inject(MessageRepo) private readonly messageRepo: MessageRepo,
     @inject(ToolCallRecordRepo) private readonly toolCallRecordRepo: ToolCallRecordRepo,

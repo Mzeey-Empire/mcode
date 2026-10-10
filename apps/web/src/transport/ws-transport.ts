@@ -70,7 +70,7 @@ import type {
   TerminalCustomProfile,
   TerminalProfileReference,
 } from "@mcode/contracts";
-import type { PaginatedMessages, ConversationPage, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationTail, CanonicalSubagentRoster, CanonicalSubagentStopResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability, GoalLookupResult } from "@mcode/contracts";
+import type { PaginatedMessages, ConversationPage, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationTail, SubagentRoster, SubagentDetail, CanonicalSubagentStopResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability, GoalLookupResult } from "@mcode/contracts";
 import {
   TERMINAL_DATA_TAG,
   decodeTerminalDataFrame,
@@ -1247,11 +1247,11 @@ export function createWsTransport(
       rpc<PaginatedMessages>("message.list", { threadId, limit, ...(before != null ? { before } : {}) }),
     loadConversationPage: (threadId, limit, before?) =>
       rpc<ConversationPage>("conversation.page", { threadId, limit, ...(before != null ? { before } : {}) }),
-    loadCanonicalSubagentRoster: (owningParentThreadId, limit?) =>
-      rpc<CanonicalSubagentRoster>("canonicalAgent.roster", {
+    loadSubagentRoster: (owningParentThreadId) =>
+      rpc<SubagentRoster>("subagent.roster", {
         owningParentThreadId,
-        ...(limit !== undefined ? { limit } : {}),
       }),
+    loadSubagentDetail: (owningParentThreadId, entryId) => rpc<SubagentDetail>("subagent.detail", { owningParentThreadId, entryId }),
     stopCanonicalSubagent: (owningParentThreadId, childThreadId) =>
       rpc<CanonicalSubagentStopResult>("agent.child.stop", {
         owningParentThreadId,
