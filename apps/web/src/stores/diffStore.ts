@@ -645,8 +645,8 @@ interface DiffState {
   setSnapshotsLoading: (threadId: string, loading: boolean) => void;
   /** Store the server's turn list for a thread. */
   setReviewTurns: (threadId: string, turns: ReviewTurn[]) => void;
-  /** Record that the thread's turn list could not be loaded. */
-  setReviewTurnsError: (threadId: string, detail: string) => void;
+  /** Record that the thread's turn list could not be loaded, or clear it with null when a new request starts. */
+  setReviewTurnsError: (threadId: string, detail: string | null) => void;
   /** Open or close the Review view menu. */
   setReviewViewMenuOpen: (open: boolean) => void;
   /** Cache a fetched inline diff so it survives component unmounts. */
@@ -1015,7 +1015,13 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       return { reviewTurnsByThread: { ...s.reviewTurnsByThread, [threadId]: turns }, reviewTurnsErrorByThread };
     }),
   setReviewTurnsError: (threadId, detail) =>
-    set((s) => ({ reviewTurnsErrorByThread: { ...s.reviewTurnsErrorByThread, [threadId]: detail } })),
+    set((s) => {
+      if (detail !== null) return { reviewTurnsErrorByThread: { ...s.reviewTurnsErrorByThread, [threadId]: detail } };
+      if (!(threadId in s.reviewTurnsErrorByThread)) return s;
+      const reviewTurnsErrorByThread = { ...s.reviewTurnsErrorByThread };
+      delete reviewTurnsErrorByThread[threadId];
+      return { reviewTurnsErrorByThread };
+    }),
   setReviewViewMenuOpen: (open) => set({ reviewViewMenuOpen: open }),
   cacheInlineDiff: (threadId, source, id, filePath, data, cacheVersion) =>
     set((s) => ({

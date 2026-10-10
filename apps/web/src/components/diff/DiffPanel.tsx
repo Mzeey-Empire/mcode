@@ -85,6 +85,17 @@ function isAwaitingTurnSelection(input: ComparisonLoadInput): boolean {
   return input.reviewTurns === undefined ? input.reviewTurnsError === null : input.reviewTurns.length > 0;
 }
 
+/**
+ * Only an unpicked Turn view whose list never arrived is blocked by the list
+ * error. A picked turn, or a list kept from an earlier load, still compares.
+ */
+function isTurnListBlocking(input: ComparisonLoadInput): boolean {
+  return input.viewMode === "turn" &&
+    !input.selectedTurnMessageId &&
+    input.reviewTurns === undefined &&
+    input.reviewTurnsError !== null;
+}
+
 function isUnavailableBranchComparison(input: ComparisonLoadInput): boolean {
   return input.viewMode === "branch" &&
     !input.branchComparison?.isUnborn &&
@@ -180,7 +191,7 @@ async function loadTurnDiffComparison(input: ComparisonLoadInput): Promise<Loade
   // all: operand-less requests resolve live/latest state the user never chose.
   if (input.viewMode === "turn" && !input.selectedTurnMessageId) {
     return {
-      outcome: input.reviewTurns === undefined && input.reviewTurnsError !== null
+      outcome: isTurnListBlocking(input) && input.reviewTurnsError !== null
         ? { status: "request-failed", detail: input.reviewTurnsError }
         : { status: "unselected" },
       git: null,
@@ -382,7 +393,12 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
   } = store;
   const comparisonIdentityRef = useRef("");
   const refreshRequestRef = useRef(0);
-  const mutableComparisonRevision = getMutableComparisonRevision(store.viewMode, store.diffRevision);
+  const settledRevisionRef = useRef(0);
+  const mutableComparisonRevision = getMutableComparisonRevision(
+    store.viewMode,
+    store.diffRevision,
+    isPickedTurnLive(store.reviewTurns, store.selectedTurnMessageId),
+  );
   const branchRange = useMemo(
     () => getBranchRange(store.branchComparison),
     [store.branchComparison],
@@ -424,7 +440,11 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     store.viewMode,
   ]);
   const currentSettled = currentSettledComparison(settled, mutableComparisonRevision);
-  const visibleSettled = getVisibleSettledComparison(currentSettled, comparisonIdentity);
+  // While the Turn view waits for its list, an earlier list failure is not
+  // the answer; the pulse shows instead.
+  const visibleSettled = isAwaitingTurnSelection(comparisonLoadInput)
+    ? null
+    : getVisibleSettledComparison(currentSettled, comparisonIdentity);
   const visibleComparison = readyComparison(visibleSettled?.outcome);
   const comparisonFiles = visibleComparison?.files ?? [];
 
@@ -443,10 +463,12 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     setComparisonLoading(true);
     void loadComparison(comparisonLoadInput).then((next) => {
       if (cancelled) return;
+      settledRevisionRef.current += 1;
       setSettled({ identity: comparisonIdentity, ...next });
       setComparisonLoading(false);
     }).catch((error: unknown) => {
       if (cancelled) return;
+      settledRevisionRef.current += 1;
       setSettled({ identity: comparisonIdentity, outcome: requestFailedOutcome(error), git: null, cacheVersion: "" });
       setComparisonLoading(false);
     });
@@ -466,6 +488,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
       return;
     }
     if (!activeThreadId) return;
+    const settledRevision = settledRevisionRef.current;
     refreshSnapshots({
       activeThreadId,
       comparisonIdentity,
@@ -475,6 +498,8 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
       setSnapshotRefreshRevision,
       setSnapshots,
       onFailed: (error) => {
+        // A comparison that settled after this refresh began is newer than the failure.
+        if (settledRevisionRef.current !== settledRevision) return;
         setSettled({ identity: comparisonIdentity, outcome: requestFailedOutcome(error), git: null, cacheVersion: "" });
       },
     });
@@ -490,11 +515,9 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
 
   // Retry reruns the same comparison even where Refresh is hidden: a failed
   // commit comparison is immutable but still worth asking again.
-  // Only a list that never arrived blocks the body; a failed background
-  // refetch keeps the loaded list, so Retry then reruns the comparison.
-  const turnListFailed = store.reviewTurns === undefined && store.reviewTurnsError !== null;
+  const turnListBlocking = isTurnListBlocking(comparisonLoadInput);
   const onRetryComparison = useCallback(() => {
-    if (viewMode === "turn" && turnListFailed) {
+    if (turnListBlocking) {
       setTurnListRevision((revision) => revision + 1);
       return;
     }
@@ -503,7 +526,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
       return;
     }
     onRefreshComparison();
-  }, [onRefreshComparison, turnListFailed, viewMode]);
+  }, [onRefreshComparison, turnListBlocking, viewMode]);
 
   useEffect(() => () => {
     refreshRequestRef.current += 1;
@@ -529,8 +552,14 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
   };
 }
 
-function getMutableComparisonRevision(viewMode: DiffViewMode, diffRevision: number): number {
+/** A running turn's evidence moves with the worktree, so it refetches on each mutation; a settled turn never changes. */
+function getMutableComparisonRevision(viewMode: DiffViewMode, diffRevision: number, pickedTurnLive: boolean): number {
+  if (viewMode === "turn") return pickedTurnLive ? diffRevision : 0;
   return viewMode === "last-turn" || (isGitView(viewMode) && viewMode !== "commit") ? diffRevision : 0;
+}
+
+function isPickedTurnLive(reviewTurns: readonly ReviewTurn[] | undefined, selectedTurnMessageId: string | null): boolean {
+  return reviewTurns?.some((turn) => turn.messageId === selectedTurnMessageId && turn.phase === "live") ?? false;
 }
 
 function getBranchRange(
@@ -664,6 +693,8 @@ function useReviewTurns(
   useEffect(() => {
     if (!threadId || viewMode !== "turn") return;
     let cancelled = false;
+    // A retry is in flight, so the old failure no longer describes the list.
+    setReviewTurnsError(threadId, null);
     void getTransport().listReviewTurns(threadId).then((turns) => {
       if (!cancelled) setReviewTurns(threadId, turns);
     }).catch((error: unknown) => {
@@ -811,7 +842,7 @@ function DiffPanelView({
       scopeId={scopeId}
       refreshable={viewMode !== "commit"}
       refreshing={comparison.comparisonLoading}
-      onRefresh={comparison.onRefreshComparison}
+      onRefresh={comparison.onRetryComparison}
     />
   );
   if (!body || !comparison.visibleSettled) {
