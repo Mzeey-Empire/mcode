@@ -275,6 +275,23 @@ describe("useComposerSubmissionController selected-text comments", () => {
     });
   });
 
+  it("sends once when Enter is pressed twice before the draft clears", async () => {
+    routeMocks.dispatchComposerTarget.mockResolvedValue(undefined);
+    const { result } = renderHook(useHarness);
+
+    act(() => {
+      result.current.form.replaceDraft("first message");
+    });
+    await waitFor(() => expect(result.current.form.state.text).toBe("first message"));
+    act(() => {
+      void result.current.controller.submit();
+      void result.current.controller.submit();
+    });
+
+    await waitFor(() => expect(result.current.form.state.text).toBe(""));
+    expect(routeMocks.dispatchComposerTarget).toHaveBeenCalledTimes(1);
+  });
+
   it("consumes the queue edit while a dispatch is in flight and releases it when the dispatch fails", async () => {
     const consumeEditForDispatch = vi.fn();
     const releaseConsumedEdit = vi.fn();

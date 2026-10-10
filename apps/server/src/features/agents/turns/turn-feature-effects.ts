@@ -1,7 +1,7 @@
 import type { AgentEvent, ProviderId } from "@mcode/contracts";
 import { GoalLifecycleService } from "../goals/goal-lifecycle-service.js";
 import { PlanTurnService } from "../planning/plan-turn-service.js";
-import { SubagentLifecycleService } from "../collaboration/subagent-lifecycle-service.js";
+import { SubagentRosterService } from "../collaboration/subagent-roster-service.js";
 import { TaskPersistenceService } from "../tasks/task-persistence-service.js";
 
 type AgentMessage = Extract<AgentEvent, { type: "message" }>;
@@ -14,7 +14,7 @@ export class TurnFeatureEffects {
   constructor(
     private readonly plans: PlanTurnService,
     private readonly goals: GoalLifecycleService,
-    private readonly subagents: SubagentLifecycleService,
+    private readonly subagents: SubagentRosterService,
     private readonly tasks: TaskPersistenceService,
   ) {}
 
@@ -54,6 +54,12 @@ export class TurnFeatureEffects {
   /** Refresh goal state after the terminal turn reaches durable completion. */
   refreshAfterTurn(threadId: string): void {
     this.goals.refreshAfterTurn(threadId);
+    this.subagents.turnFinished(threadId);
+  }
+
+  /** Notify the roster after narrative tool state has been applied. */
+  subagentToolChanged(threadId: string, toolCallId: string): void {
+    this.subagents.toolChanged(threadId, toolCallId);
   }
 
   /** Stop every descendant before the parent provider session is stopped. */

@@ -11,7 +11,7 @@ export { PlanTurnService } from "./planning/plan-turn-service.js";
 export { GoalLifecycleService } from "./goals/goal-lifecycle-service.js";
 
 /** Owns sub-agent roster and stop operations. */
-export { SubagentLifecycleService } from "./collaboration/subagent-lifecycle-service.js";
+export { SubagentRosterService } from "./collaboration/subagent-roster-service.js";
 
 /** Full canonical agent system boundary used by the server composition roots. */
 export { CanonicalAgentBoundary } from "./canonical/canonical-agent-boundary.js";

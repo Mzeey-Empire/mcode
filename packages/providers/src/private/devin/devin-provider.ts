@@ -1,3 +1,4 @@
+import { SUBAGENT_REPORTING } from "@mcode/contracts";
 import * as NodeEvents from "node:events";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -158,6 +159,7 @@ function turnOutcomeFor(
  */
 export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProvider, ISessionEvictable {
   readonly id = "devin" as const;
+  readonly subagentReporting = SUBAGENT_REPORTING.devin;
   readonly descriptor: Provider = {
     id: "devin",
     capabilities: [

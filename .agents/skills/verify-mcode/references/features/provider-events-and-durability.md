@@ -129,7 +129,7 @@ Prepared native Codex child journeys use `childMode:'completed'` or
 After the saved prefix, hold the writer and release the native gate. The fixture
 binds a raw `spawnAgent` receiver before the child's native turn and streams a
 child tool and message. `captureChild` reads the server-produced alias through
-`canonicalAgent.roster` and its public `conversation.tail`; never invent an alias.
+`subagent.roster` and its public `conversation.tail`; never invent an alias.
 Require CHILD_PREFIX in the real detail UI and the parent still Running.
 For completion, release `finishChild` and require child Completed while the parent
 remains paused. For Stop, pass the actual observed detail button and region labels

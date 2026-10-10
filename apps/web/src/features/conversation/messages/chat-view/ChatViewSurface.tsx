@@ -1,4 +1,4 @@
-import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useState, type ComponentProps, type ReactNode, type Ref } from "react";
 import { GitFork } from "lucide-react";
 import type { Message, RecoveryIncident, SelectedTextComment, ThreadStartup, ThreadStartupKind } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,7 @@ import { useThreadDraftStore, type ThreadDraftPayload } from "@/stores/threadDra
 import { OverviewLayer } from "@/features/thread-overview/overview-layer";
 import { ProjectAutomaticSetupCard, useProjectAutomaticSetup } from "@/features/projects/environment";
 import { ProjectCommandApprovalDialog } from "@/features/projects/environment/ProjectCommandApprovalDialog";
-import { StartupStepsTrail, editStartupSetupScript, openStartupSetupTerminal, useThreadStartup } from "@/features/thread-startup";
+import { StartupStepsTrail, editStartupSetupScript, openStartupSetupTerminal, useFirstSendMotion, useThreadStartup } from "@/features/thread-startup";
 import { useThreadStartupLookup, useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { type WorkspaceThread, type ClientPreparingContext } from "@/lib/workspace-thread";
 import type { PendingStartup } from "@/features/projects/state/workspaceStore";
@@ -186,8 +186,8 @@ function ThreadStartupTrail({ thread, startup, pendingStartup, actions }: {
 }
 
 /** One row laid out like a MessageList row, so the durable thread opens without a jump. */
-function PreparingTranscriptRow({ children }: { readonly children: ReactNode }) {
-  return <div className="w-full px-4 py-2 sm:px-8"><div className={cn(PRIMARY_CONTENT_RAIL_CLASS, "min-w-0")}>{children}</div></div>;
+function PreparingTranscriptRow({ children, ref }: { readonly children: ReactNode; readonly ref?: Ref<HTMLDivElement> }) {
+  return <div ref={ref} className="w-full px-4 py-2 sm:px-8"><div className={cn(PRIMARY_CONTENT_RAIL_CLASS, "min-w-0")}>{children}</div></div>;
 }
 
 /** Whether a resolved startup is stuck in a state the automatic-setup card can recover from. */
@@ -212,6 +212,7 @@ function PreparingThreadSurface({
   pendingStartup: PendingStartup | undefined;
 }) {
   const echoedStartup = useEchoedPendingStartup(thread, pendingStartup);
+  const motion = useFirstSendMotion(thread.id);
   const needsSetupRecovery = startupNeedsSetupRecovery(startup);
   const automaticSetup = useProjectAutomaticSetup(
     thread.id,
@@ -221,16 +222,18 @@ function PreparingThreadSurface({
     <div className="flex h-full flex-col bg-background" data-testid="thread-preparing-shell">
       <ThreadHeader state={state} />
       <div className="min-h-0 flex-1 overflow-y-auto pt-4">
-        <PreparingTranscriptRow>
+        <PreparingTranscriptRow ref={motion.message}>
           <MessageBubble message={preparingUserMessage(thread, echoedStartup)} />
         </PreparingTranscriptRow>
-        <PreparingTranscriptRow>
+        <PreparingTranscriptRow ref={motion.steps}>
           {thread.clientError && !showsAuthoritativeCancellation(thread, startup)
             ? <CollapsibleError error={thread.clientError} onRetry={() => { void useWorkspaceStore.getState().retryPreparingThread(thread.id); }} onDismiss={() => useWorkspaceStore.getState().dismissPreparingThread(thread.id)} />
             : <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={pendingStartup} actions={<StartupAutomaticSetupActions automaticSetup={automaticSetup} thread={thread} startup={startup} pendingStartup={pendingStartup} />} />}
         </PreparingTranscriptRow>
       </div>
-      <Composer threadId={thread.id} workspaceId={state.activeWorkspaceId ?? undefined} />
+      <div ref={motion.composer}>
+        <Composer threadId={thread.id} workspaceId={state.activeWorkspaceId ?? undefined} />
+      </div>
     </div>
   );
 }

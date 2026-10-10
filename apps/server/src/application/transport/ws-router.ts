@@ -27,7 +27,7 @@ import type {
   CanonicalAgentBoundary,
   GoalLifecycleService,
   PlanTurnService,
-  SubagentLifecycleService,
+  SubagentRosterService,
   TurnRecoveryService,
 } from "../../features/agents/index.js";
 import {
@@ -236,7 +236,7 @@ export interface RouterDeps {
   /** Owns thread goal commands and goal lifecycle reads. */
   goalLifecycleService: GoalLifecycleService;
   /** Owns sub-agent roster and independent cancellation. */
-  subagentLifecycleService: SubagentLifecycleService;
+  subagentRosterService: SubagentRosterService;
   /** Owns restart reconciliation and explicit turn recovery actions. */
   turnRecoveryService: TurnRecoveryService;
   /** Owns durable approvals for protected delegated-thread mutations. */

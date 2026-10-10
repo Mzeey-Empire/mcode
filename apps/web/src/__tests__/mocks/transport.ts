@@ -224,12 +224,14 @@ export const mockTransport: McodeTransport = {
   }),
   getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
   loadConversationPage: vi.fn(),
-  loadCanonicalSubagentRoster: vi.fn().mockResolvedValue({
+  loadSubagentRoster: vi.fn().mockResolvedValue({
     owningParentThreadId: "thread-1",
-    rosterRevision: 0,
-    active: [],
-    done: [],
+    epoch: "test-boot",
+    revision: 0,
+    entries: [],
+    truncated: false,
   }),
+  loadSubagentDetail: vi.fn().mockResolvedValue({ entryId: "", steps: [], totalSteps: 0, summary: null }),
   stopCanonicalSubagent: vi.fn().mockResolvedValue({
     childThreadId: "child-1",
     status: "interrupted",
