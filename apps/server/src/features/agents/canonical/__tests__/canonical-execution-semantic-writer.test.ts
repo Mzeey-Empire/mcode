@@ -405,10 +405,14 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     const terminal = await send(2, empty);
     expect(terminal).toMatchObject({ kind: "committed", terminalPersistence: {
       outcome: "completed", messageId: null, toolCallCount: 0,
+      settledMessage: { id: "user-1", sequence: 1 },
     } });
     expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE role = 'assistant'").get()).toEqual({ count: 0 });
     expect(new CanonicalAgentBoundary(db).loadTerminalProjection(TURN_ID)).toEqual({ message: null, toolCallCount: 0 });
     const { livePublication, ...mutation } = empty;
+    expect(await writer.transact({ ...operation(2, mutation), livePublication })).toEqual(terminal);
+    db.prepare("INSERT INTO messages (id, thread_id, role, content, sequence) VALUES (?, ?, 'user', 'Later prompt', 2)")
+      .run("later-prompt", THREAD_ID);
     expect(await writer.transact({ ...operation(2, mutation), livePublication })).toEqual(terminal);
     expect(writer.interruptWorkerLoss(loss)).toMatchObject({ kind: "conflict", recoveryState: "already-terminal" });
   });

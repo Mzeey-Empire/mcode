@@ -480,9 +480,11 @@ Legacy thread status still maps cancelled turns to `interrupted`.
 
 ### Thread attention
 Server facts combining a live wait, the last settled turn outcome, and a
-seen marker. The marker is an acknowledged settled message sequence and
-the server time it advanced. A focused, visible client acknowledges only
-the settled sequence it has rendered.
+seen marker. The marker is an acknowledged server message sequence and
+the server time it advanced. A turn ends at its newest persisted message,
+including its user prompt when no assistant output was saved. A focused,
+visible client acknowledges only server-confirmed messages it has rendered,
+up to the newest settled message or the last turn's ending sequence.
 
 ### Needs you
 A live condition waiting for the user's input, such as an approval.

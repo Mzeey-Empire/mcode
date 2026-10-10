@@ -3,6 +3,7 @@ import type { AcknowledgeSeenResult, ThreadAttention } from "@mcode/contracts";
 import { mockTransport, createMockMessage, createMockThread } from "@/__tests__/mocks/transport";
 import { useThreadStore } from "@/stores/threadStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
+import { snapshotBuilder } from "@/features/conversation/hydration/snapshot-builder";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { threadAttentionStore } from "../thread-attention-store";
 import { startThreadAttentionTracking } from "../thread-attention-tracking";
@@ -20,7 +21,8 @@ let stop: (() => void) | undefined;
 
 function renderSettled(sequence: number, threadId = "a"): void {
   useThreadStore.setState((state) => ({ records: new Map(state.records).set(threadId, {
-    ...createEmptyThreadRecord(), messages: [createMockMessage({ id: `message-${sequence}`, thread_id: threadId, role: "assistant", sequence, outcome: "completed" })],
+    ...createEmptyThreadRecord(), ...snapshotBuilder.build({ hasMore: false,
+      messages: [createMockMessage({ id: `message-${sequence}`, thread_id: threadId, role: "assistant", sequence, outcome: "completed" })] }),
   }) }));
 }
 
@@ -45,6 +47,47 @@ afterEach(() => {
 });
 
 describe("on-screen thread acknowledgements", () => {
+  it("uses the server sequence after a client-only error row and on the following turn", async () => {
+    useThreadStore.setState({ currentThreadId: "a", runningThreadIds: new Set(["a"]), records: new Map([["a", {
+      ...createEmptyThreadRecord(), runtimePhase: "running", turnExecutionId: "execution-1",
+      messages: [createMockMessage({ id: "prompt-1", thread_id: "a", role: "user", sequence: 4 })],
+    }]]) });
+    stop = startThreadAttentionTracking();
+    useThreadStore.getState().handleAgentEvent({ type: "error", threadId: "a", turnExecutionId: "execution-1", error: "Provider failed" });
+    expect(useThreadStore.getState().records.get("a")?.messages.map(({ role, sequence }) => ({ role, sequence })))
+      .toEqual([{ role: "user", sequence: 4 }, { role: "system", sequence: 5 }]);
+    threadAttentionStore.getState().apply({ ...attention, lastTurn: { outcome: "errored", endedAt: NOW, sequence: 3, changedFileCount: null } });
+    await vi.advanceTimersByTimeAsync(150);
+    expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([]);
+    useThreadStore.getState().handleTurnPersisted({ threadId: "a", messageId: null,
+      settledMessage: { id: "prompt-1", sequence: 3 }, outcome: "errored", executionId: "execution-1", toolCallCount: 0, filesChanged: [] });
+    await vi.advanceTimersByTimeAsync(150);
+    expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([["a", 3]]);
+    expect(useThreadStore.getState().records.get("a")?.messages[0]?.sequence).toBe(3);
+
+    useThreadStore.getState().addMessage(createMockMessage({ id: "assistant-2", thread_id: "a", role: "assistant", sequence: 7, outcome: "completed" }));
+    await vi.advanceTimersByTimeAsync(150);
+    expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([["a", 3]]);
+    useThreadStore.getState().handleTurnPersisted({ threadId: "a", messageId: "assistant-2",
+      settledMessage: { id: "assistant-2", sequence: 5 }, outcome: "completed", toolCallCount: 0, filesChanged: [] });
+    await vi.advanceTimersByTimeAsync(150);
+    expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([["a", 3], ["a", 5]]);
+  });
+
+  it("acknowledges a reloaded empty ending only after its actual server prompt is rendered", async () => {
+    threadAttentionStore.getState().apply({ ...attention, lastTurn: { outcome: "errored", endedAt: NOW, sequence: 3, changedFileCount: null } });
+    stop = startThreadAttentionTracking();
+    useThreadStore.getState().handleTurnPersisted({ threadId: "a", messageId: null,
+      settledMessage: { id: "unloaded-prompt", sequence: 3 }, outcome: "errored", toolCallCount: 0, filesChanged: [] });
+    await vi.advanceTimersByTimeAsync(150);
+    expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([]);
+    useThreadStore.setState({ records: new Map([["a", { ...createEmptyThreadRecord(),
+      ...snapshotBuilder.build({ hasMore: false, messages: [createMockMessage({ id: "unloaded-prompt", thread_id: "a", role: "user", sequence: 3 })] }),
+    }]]) });
+    await vi.advanceTimersByTimeAsync(150);
+    expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([["a", 3]]);
+  });
+
   it("waits 150ms and acknowledges loaded settled sequence 4, not server sequence 8", async () => {
     renderSettled(4); stop = startThreadAttentionTracking();
     await vi.advanceTimersByTimeAsync(149);

@@ -47,8 +47,7 @@ import type { ConversationPage, GoalLookupResult, GoalState, TurnSnapshot } from
 import { CONVERSATION_OLDER_PAGE_MAX_BYTES } from "@mcode/contracts";
 import { clearScrollMemory, rememberScrollTop } from "@/components/chat/scrollPositionMemory";
 
-vi.mock("@/transport", async () => ({
-  ...(await vi.importActual("@/transport")),
+vi.mock("@/transport", () => ({
   getTransport: () => mockTransport,
 }));
 
@@ -245,7 +244,7 @@ describe("ThreadHydrator", () => {
     useThreadStore.getState().handleAgentEvent({ type: "system", threadId: THREAD_A, subtype: "provider.session.started", systemNotice: { kind: "diagnostic", presentation: "timeline", scope: "session", sessionId: "new-session" } });
     await hydrator.hydrate(THREAD_A, "active");
     expect(useThreadStore.getState().records.get(THREAD_A)!.sessionNotices).toEqual([]);
-    expect(getTestActiveMessages()).toEqual([msgA]);
+    expect(getTestActiveMessages()).toEqual([{ ...msgA, serverSequence: 1 }]);
   });
 
   it("cache hit restores synchronously with loading false and skips conversation.page", async () => {
@@ -314,7 +313,7 @@ describe("ThreadHydrator", () => {
     await Promise.all([firstHydration, remountedHydration]);
 
     expect(mockTransport.loadConversationPage).toHaveBeenCalledTimes(2);
-    expect(getTestThreadMessages(THREAD_A)).toEqual([childMessage]);
+    expect(getTestThreadMessages(THREAD_A)).toEqual(([childMessage]).map((message) => ({ ...message, serverSequence: message.sequence })));
   });
 
   it("preserves resident auxiliary state on an idle cache hit", async () => {
@@ -482,9 +481,9 @@ describe("ThreadHydrator", () => {
 
     expect(mockTransport.loadConversationPage).toHaveBeenCalledWith(THREAD_A, MESSAGE_FETCH_SIZE);
     expect(mockTransport.getMessages).not.toHaveBeenCalled();
-    expect(getTestActiveMessages()).toEqual([msgA]);
+    expect(getTestActiveMessages()).toEqual([{ ...msgA, serverSequence: 1 }]);
     expect(readActiveThreadField((r) => r.loading)).toBe(false);
-    expect(getCachedRecord(THREAD_A)?.messages).toEqual([msgA]);
+    expect(getCachedRecord(THREAD_A)?.messages).toEqual([{ ...msgA, serverSequence: 1 }]);
   });
 
   it("warms tail narrative detail for assistant messages during activation", async () => {
@@ -655,7 +654,7 @@ describe("ThreadHydrator", () => {
     const visibleTail = history.slice(-MESSAGE_FETCH_SIZE);
     const historyCursor = visibleTail[0].sequence;
     expect(mockTransport.loadConversationPage).toHaveBeenNthCalledWith(1, THREAD_A, MESSAGE_FETCH_SIZE);
-    expect(getTestActiveMessages()).toEqual(visibleTail);
+    expect(getTestActiveMessages()).toEqual(visibleTail.map((message) => ({ ...message, serverSequence: message.sequence })));
 
     await vi.waitFor(() => {
       expect(mockTransport.loadConversationPage).toHaveBeenNthCalledWith(
@@ -665,11 +664,11 @@ describe("ThreadHydrator", () => {
         historyCursor,
       );
     });
-    expect(getTestActiveMessages()).toEqual(visibleTail);
+    expect(getTestActiveMessages()).toEqual(visibleTail.map((message) => ({ ...message, serverSequence: message.sequence })));
 
     await useThreadStore.getState().loadOlderMessages(THREAD_A);
 
-    expect(getTestActiveMessages()).toEqual(history);
+    expect(getTestActiveMessages()).toEqual(history.map((message) => ({ ...message, serverSequence: message.sequence })));
     expect(mockTransport.loadConversationPage).toHaveBeenCalledTimes(2);
   });
 
@@ -894,7 +893,7 @@ describe("ThreadHydrator", () => {
       persistedTail[0],
       persistedTail[1],
       persistedTail[2],
-      refreshedPersisted,
+      { ...refreshedPersisted, serverSequence: 100 },
       resident,
     ]);
   });
@@ -1123,7 +1122,7 @@ describe("ThreadHydrator", () => {
       expect(mockTransport.loadConversationPage).toHaveBeenCalledWith(THREAD_A, MESSAGE_FETCH_SIZE);
     });
     expect(readActiveThreadField((record) => record.hasMoreMessages)).toBe(true);
-    expect(getTestThreadMessages(THREAD_A)).toEqual([msgA]);
+    expect(getTestThreadMessages(THREAD_A)).toEqual([{ ...msgA, serverSequence: 1 }]);
     expect(getTestThreadStreaming(THREAD_A)).toBe("partial...");
     expect(getTestThreadToolCalls(THREAD_A)).toHaveLength(1);
   });
@@ -1140,7 +1139,7 @@ describe("ThreadHydrator", () => {
     await hydrator.hydrate(THREAD_A, "active");
 
     expect(useThreadStore.getState().currentThreadId).toBe(THREAD_A);
-    expect(getTestActiveMessages()).toEqual([msgA]);
+    expect(getTestActiveMessages()).toEqual([{ ...msgA, serverSequence: 1 }]);
     expect(mockTransport.loadConversationPage).toHaveBeenCalledWith(THREAD_A, MESSAGE_FETCH_SIZE);
   });
 
@@ -1238,7 +1237,7 @@ describe("ThreadHydrator", () => {
 
     // The cached snapshot never committed a history window, so activation must
     // fetch to learn whether older pages exist; the live message is preserved.
-    expect(getTestActiveMessages()).toEqual([msgA]);
+    expect(getTestActiveMessages()).toEqual([{ ...msgA, serverSequence: 1 }]);
     expect(mockTransport.loadConversationPage).toHaveBeenCalledWith(THREAD_A, MESSAGE_FETCH_SIZE);
   });
 
@@ -1342,7 +1341,7 @@ describe("ThreadHydrator", () => {
     resolveFetch({ messages: [msgA, freshMessage], hasMore: false, narrativeByMessage: {} });
     await hydrate;
 
-    expect(getTestActiveMessages()).toEqual([msgA, freshMessage]);
+    expect(getTestActiveMessages()).toEqual(([msgA, freshMessage]).map((message) => ({ ...message, serverSequence: message.sequence })));
     expect(getTestThreadStreaming(THREAD_A)).toBe("current activity");
     expect(getTestThreadToolCalls(THREAD_A)).toHaveLength(1);
   });
@@ -1432,7 +1431,7 @@ describe("ThreadHydrator", () => {
     resolveAuthoritative({ messages: [resident, authoritative], hasMore: false, narrativeByMessage: {} });
     await Promise.all([background, force]);
 
-    expect(getTestActiveMessages()).toEqual([resident, authoritative]);
+    expect(getTestActiveMessages()).toEqual(([resident, authoritative]).map((message) => ({ ...message, serverSequence: message.sequence })));
     expect(getTestActiveMessages()).not.toContainEqual(speculative);
     expect(getTestThreadStreaming(THREAD_A)).toBe("current activity");
     expect(getTestThreadToolCalls(THREAD_A)).toHaveLength(1);
@@ -1524,13 +1523,13 @@ describe("ThreadHydrator", () => {
     await hydrator.hydrate(THREAD_B, "active");
 
     expect(useThreadStore.getState().currentThreadId).toBe(THREAD_B);
-    expect(getTestActiveMessages()).toEqual([msgB]);
+    expect(getTestActiveMessages()).toEqual([{ ...msgB, serverSequence: 1 }]);
 
     resolveA({ messages: [msgA], hasMore: false, narrativeByMessage: {} });
     await loadA;
 
     expect(useThreadStore.getState().currentThreadId).toBe(THREAD_B);
-    expect(getTestActiveMessages()).toEqual([msgB]);
+    expect(getTestActiveMessages()).toEqual([{ ...msgB, serverSequence: 1 }]);
   });
 
   it("reselects an in-flight thread immediately during A to B to A navigation", async () => {
@@ -1557,7 +1556,7 @@ describe("ThreadHydrator", () => {
     await Promise.all([loadA, loadB, reselectA]);
 
     expect(useThreadStore.getState().currentThreadId).toBe(THREAD_A);
-    expect(getTestActiveMessages()).toEqual([msgA]);
+    expect(getTestActiveMessages()).toEqual([{ ...msgA, serverSequence: 1 }]);
     expect(readActiveThreadField((record) => record.loading)).toBe(false);
   });
 
@@ -1587,7 +1586,7 @@ describe("ThreadHydrator", () => {
     await Promise.all(loads);
 
     expect(useThreadStore.getState().currentThreadId).toBe(THREAD_B);
-    expect(getTestActiveMessages()).toEqual([msgB]);
+    expect(getTestActiveMessages()).toEqual([{ ...msgB, serverSequence: 1 }]);
     expect(readActiveThreadField((record) => record.loading)).toBe(false);
   });
 
@@ -1614,7 +1613,7 @@ describe("ThreadHydrator", () => {
     const hydration = hydrator.hydrate(THREAD_A, "active");
 
     await vi.waitFor(() => {
-      expect(getTestActiveMessages()).toEqual([msgA]);
+      expect(getTestActiveMessages()).toEqual([{ ...msgA, serverSequence: 1 }]);
       expect(readActiveThreadField((record) => record.loading)).toBe(false);
     });
 
@@ -1717,7 +1716,7 @@ describe("ThreadHydrator", () => {
     await Promise.all([loadA, reselectA]);
 
     expect(mockTransport.loadConversationPage).toHaveBeenCalledTimes(2);
-    expect(getTestActiveMessages()).toEqual([msgA]);
+    expect(getTestActiveMessages()).toEqual([{ ...msgA, serverSequence: 1 }]);
     expect(readActiveThreadField((record) => record.loading)).toBe(false);
   });
 
@@ -1755,7 +1754,7 @@ describe("ThreadHydrator", () => {
     await hydrator.hydrate(THREAD_A, "active");
 
     expect(mockTransport.loadConversationPage).toHaveBeenCalledTimes(3);
-    expect(getTestActiveMessages()).toEqual([msgA]);
+    expect(getTestActiveMessages()).toEqual([{ ...msgA, serverSequence: 1 }]);
     expect(readActiveThreadField((record) => record.loading)).toBe(false);
   });
 
@@ -1799,7 +1798,7 @@ describe("ThreadHydrator", () => {
     await hydrator.hydrate(THREAD_A, "active");
 
     expect(mockTransport.loadConversationPage).toHaveBeenCalledTimes(3);
-    expect(getTestActiveMessages()).toEqual([msgA]);
+    expect(getTestActiveMessages()).toEqual([{ ...msgA, serverSequence: 1 }]);
   });
 
   it("keeps repeated cache-hit switches bounded without refetching loaded history", async () => {
@@ -1841,7 +1840,7 @@ describe("ThreadHydrator", () => {
 
     await hydrator.hydrate(THREAD_A, "background");
 
-    expect(getCachedRecord(THREAD_A)?.messages).toEqual([msgA]);
+    expect(getCachedRecord(THREAD_A)?.messages).toEqual([{ ...msgA, serverSequence: 1 }]);
     expect(useThreadStore.getState().currentThreadId).toBe(THREAD_B);
     expect(getTestActiveMessages()).toEqual([msgB]);
   });
@@ -2245,14 +2244,14 @@ describe("ThreadHydrator", () => {
 
     expect(getCachedRecord(THREAD_A)?.messages).toEqual([
       expect.objectContaining({ id: "resident-websocket-message", content: "fresh WebSocket response" }),
-      staleMessage,
+      { ...staleMessage, serverSequence: staleMessage.sequence },
     ]);
 
     await hydrator.hydrate(THREAD_A, "active");
 
     expect(getTestActiveMessages()).toEqual([
       expect.objectContaining({ id: "resident-websocket-message", content: "fresh WebSocket response" }),
-      staleMessage,
+      { ...staleMessage, serverSequence: staleMessage.sequence },
     ]);
   });
 
@@ -2402,8 +2401,8 @@ describe("ThreadHydrator", () => {
     resolvePage({ messages: [msgA], hasMore: false, narrativeByMessage: {} });
     await Promise.all([first, second]);
 
-    expect(getTestActiveMessages()).toEqual([msgA]);
-    expect(getCachedRecord(THREAD_A)?.messages).toEqual([msgA]);
+    expect(getTestActiveMessages()).toEqual([{ ...msgA, serverSequence: 1 }]);
+    expect(getCachedRecord(THREAD_A)?.messages).toEqual([{ ...msgA, serverSequence: 1 }]);
   });
 
   it("reuses an in-flight background prefetch when the same thread becomes active", async () => {
@@ -2435,8 +2434,8 @@ describe("ThreadHydrator", () => {
     resolvePage({ messages: [msgA], hasMore: false, narrativeByMessage: {} });
     await Promise.all([background, active]);
 
-    expect(getTestActiveMessages()).toEqual([msgA]);
-    expect(getCachedRecord(THREAD_A)?.messages).toEqual([msgA]);
+    expect(getTestActiveMessages()).toEqual([{ ...msgA, serverSequence: 1 }]);
+    expect(getCachedRecord(THREAD_A)?.messages).toEqual([{ ...msgA, serverSequence: 1 }]);
   });
 
   it("keeps a resident layer visible while reusing an in-flight background prefetch", async () => {
@@ -2486,8 +2485,8 @@ describe("ThreadHydrator", () => {
     resolvePage({ messages: [refreshed], hasMore: false, narrativeByMessage: {} });
     await Promise.all([background, active]);
 
-    expect(getTestActiveMessages()).toEqual([refreshed]);
-    expect(getCachedRecord(THREAD_A)?.messages).toEqual([refreshed]);
+    expect(getTestActiveMessages()).toEqual(([refreshed]).map((message) => ({ ...message, serverSequence: message.sequence })));
+    expect(getCachedRecord(THREAD_A)?.messages).toEqual(([refreshed]).map((message) => ({ ...message, serverSequence: message.sequence })));
   });
 
   it("bumps load epoch on each hydrate so stale pagination is discarded", async () => {

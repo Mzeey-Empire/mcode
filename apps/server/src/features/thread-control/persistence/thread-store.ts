@@ -531,14 +531,14 @@ export class ThreadStore {
     return result.changes > 0;
   }
 
-  /** Persist a terminal outcome and its settled sequence without replaying an older ending. */
+  /** Persist a terminal outcome at the newest message, including an unanswered prompt. */
   recordTurnOutcome(id: string, outcome: TurnOutcome, endedAt: string): boolean {
     return this.db.transaction(() => this.db.query(`
       UPDATE threads SET status = ?, updated_at = ?, last_turn_outcome = ?,
         last_turn_ended_at = ?, last_turn_sequence = (
-          SELECT MAX(sequence) FROM messages WHERE thread_id = ? AND outcome IS NOT NULL
+          SELECT MAX(sequence) FROM messages WHERE thread_id = ?
         )
-      WHERE id = ? AND (last_turn_ended_at IS NULL OR last_turn_ended_at <= ?)
+      WHERE id = ? AND (last_turn_ended_at IS NULL OR julianday(last_turn_ended_at) <= julianday(?))
     `).run(outcome === "cancelled" ? "interrupted" : outcome, endedAt, outcome, endedAt, id, id, endedAt).changes > 0)();
   }
 
@@ -548,9 +548,12 @@ export class ThreadStore {
       const row = this.orm.select({ sequence: threads.seenThroughSequence, at: threads.seenAt })
         .from(threads).where(and(eq(threads.id, id), isNull(threads.deletedAt))).get();
       if (!row) throw new Error("Thread not found");
-      const newest = this.db.query<{ sequence: number | null }, [string]>(
-        "SELECT MAX(sequence) AS sequence FROM messages WHERE thread_id = ? AND outcome IS NOT NULL",
-      ).get(id)?.sequence;
+      const newest = this.db.query<{ sequence: number | null }, [string, string]>(
+        `SELECT MAX(sequence) AS sequence FROM (
+          SELECT sequence FROM messages WHERE thread_id = ? AND outcome IS NOT NULL
+          UNION ALL SELECT last_turn_sequence FROM threads WHERE id = ?
+        )`,
+      ).get(id, id)?.sequence;
       if (newest == null || throughSequence > newest) {
         throw Object.assign(new Error("Acknowledged sequence is ahead of settled history"), { code: "sequence_ahead" });
       }

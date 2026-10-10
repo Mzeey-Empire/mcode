@@ -1,3 +1,6 @@
+/** A rendered message keeps server sequence provenance separate from live ordering guesses. */
+export type Message = import("@mcode/contracts").Message & { serverSequence?: number };
+
 // Import shared types for local use in the McodeTransport interface.
 import type {
   DiffStats,
@@ -131,7 +134,6 @@ export type {
   WorkspaceEnvironmentActionRun,
   Thread,
   RecentThread,
-  Message,
   AttachmentMeta,
   StoredAttachment,
   GitBranch,

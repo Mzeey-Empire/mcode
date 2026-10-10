@@ -53,6 +53,11 @@ export class MessageRepo {
     return this.reader.getLatestSequenceIncludingInternal(threadId);
   }
 
+  /** Return the newest durable message identity and sequence for terminal publication. */
+  latestSequenceMessage(threadId: string): ReturnType<MessageStore["latestSequenceMessage"]> {
+    return this.reader.latestSequenceMessage(threadId);
+  }
+
   isLatestNonSystemMessage(threadId: Parameters<MessageStore["isLatestNonSystemMessage"]>[0], messageId: Parameters<MessageStore["isLatestNonSystemMessage"]>[1]): ReturnType<MessageStore["isLatestNonSystemMessage"]> {
     return this.reader.isLatestNonSystemMessage(threadId, messageId);
   }

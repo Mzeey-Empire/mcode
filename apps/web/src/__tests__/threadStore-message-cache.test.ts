@@ -66,9 +66,9 @@ await activateTestConversation("t1");
 
     expect(mockTransport.loadConversationPage).toHaveBeenCalledWith("t1", MESSAGE_FETCH_SIZE);
     expect(mockTransport.getMessages).not.toHaveBeenCalled();
-    expect(getTestActiveMessages()).toEqual(fakeMessages);
+    expect(getTestActiveMessages()).toEqual([{ ...fakeMessages[0], serverSequence: 1 }]);
     expect(getCachedRecord("t1")).toBeDefined();
-    expect(getCachedRecord("t1")?.messages).toEqual(fakeMessages);
+    expect(getCachedRecord("t1")?.messages).toEqual([{ ...fakeMessages[0], serverSequence: 1 }]);
   });
 
   it("loads one bounded turn detail window without refetching the conversation page", async () => {
@@ -401,7 +401,7 @@ await activateTestConversation("t1");
     // Switch back -- should hit cache
     await activateTestConversation("t1");
     expect(mockTransport.loadConversationPage).toHaveBeenCalledTimes(1); // unchanged
-    expect(getTestActiveMessages()).toEqual(fakeMessages);
+    expect(getTestActiveMessages()).toEqual([{ ...fakeMessages[0], serverSequence: 1 }]);
     expect(useThreadStore.getState().currentThreadId).toBe("t1");
   });
 
@@ -516,6 +516,7 @@ describe("loadMessages cache synchronization", () => {
     expect(getCachedRecord("t1")).toBeDefined();
 
     useThreadStore.getState().handleTurnPersisted({
+      settledMessage: null,
       threadId: "t1",
       messageId: "m1",
       toolCallCount: 0,

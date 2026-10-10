@@ -593,6 +593,13 @@ export class MessageStore {
     return row?.sequence ?? 0;
   }
 
+  /** Return the durable sequence anchor, including a prompt for a turn without output. */
+  latestSequenceMessage(threadId: string): { id: string; sequence: number } | null {
+    return this.db.query<{ id: string; sequence: number }, [string]>(
+      "SELECT id, sequence FROM messages WHERE thread_id = ? ORDER BY sequence DESC LIMIT 1",
+    ).get(threadId);
+  }
+
   /** Provider system notices may follow a user prompt without starting another conversation turn. */
   isLatestNonSystemMessage(threadId: string, messageId: string): boolean {
     const latest = this.orm.select({ id: messages.id }).from(messages)

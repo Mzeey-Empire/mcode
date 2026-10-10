@@ -616,11 +616,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   }
 
   private publish(event: AgentEvent): void {
-    this.publication.publish(
-      event.type === AgentEventType.Ended && event.outcome === "cancelled"
-        ? { ...event, outcome: "interrupted" }
-        : event,
-    );
+    this.publication.publish(event);
   }
 
   /** Retain terminal durability from its scheduling point until every dependent publication observes it. */

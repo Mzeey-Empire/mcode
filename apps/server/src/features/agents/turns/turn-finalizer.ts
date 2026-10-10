@@ -294,21 +294,29 @@ export class TurnFinalizer {
     anchor: AssistantMaterializationAnchor,
   ): Promise<void> {
     if (!this.hasRecordableActivity(threadId)) {
-      await this.discardUnmaterializedTurn(threadId, turnRef);
+      await this.discardUnmaterializedTurn(threadId, turnRef, outcome, executionId);
       return;
     }
     const materialized = await this.materializeAssistantRow(threadId, true, false, false, anchor);
     if (!materialized) {
-      await this.discardUnmaterializedTurn(threadId, turnRef);
+      await this.discardUnmaterializedTurn(threadId, turnRef, outcome, executionId);
       return;
     }
     await this.persistCompatibilityFinalize(threadId, executionId, outcome, turnRef, materialized, settleDiff);
   }
 
-  private async discardUnmaterializedTurn(threadId: string, turnRef: TurnRef | undefined): Promise<void> {
+  private async discardUnmaterializedTurn(threadId: string, turnRef: TurnRef | undefined, outcome: TurnOutcome, executionId: string | undefined): Promise<void> {
     this.lastPersistedMessageIdByThread.delete(threadId);
     await this.settleBaselinePin(turnRef, null);
+    this.publishEmptyTurn(threadId, outcome, executionId, null);
     this.clearTurn(threadId, turnRef);
+  }
+
+  private publishEmptyTurn(threadId: string, outcome: TurnOutcome, executionId: string | undefined, turnId: string | null): void {
+    broadcast("turn.persisted", {
+      threadId, turnId, messageId: null, settledMessage: this.messageRepo.latestSequenceMessage(threadId),
+      toolCallCount: 0, filesChanged: [], outcome, executionId: executionId ?? null,
+    });
   }
 
   private async persistCompatibilityFinalize(
@@ -334,6 +342,7 @@ export class TurnFinalizer {
       threadId,
       turnId: turnRef?.fileTrackerGeneration !== undefined ? String(turnRef.fileTrackerGeneration) : null,
       messageId: materialized.id,
+      settledMessage: this.messageRepo.latestSequenceMessage(threadId),
       toolCallCount,
       filesChanged,
       outcome,
@@ -386,6 +395,7 @@ export class TurnFinalizer {
     const materialized = this.recoverCanonicalProjection(canonical.sink, turnId, projection, commitResult);
     if (!materialized) {
       await this.discardCanonicalProjection(threadId, executionId, turnRef);
+      this.publishEmptyTurn(threadId, outcome, executionId, turnId);
       return;
     }
     await this.completeCanonicalFinalize(
@@ -510,6 +520,7 @@ export class TurnFinalizer {
       threadId,
       turnId,
       messageId: materialized.id,
+      settledMessage: this.messageRepo.latestSequenceMessage(threadId),
       toolCallCount: projection.toolCallCount,
       filesChanged,
       outcome,

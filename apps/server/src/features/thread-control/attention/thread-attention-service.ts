@@ -62,7 +62,7 @@ export class ThreadAttentionService {
     this.publish(attention);
   }
 
-  /** Atomically acknowledge precisely the settled sequence rendered by the client. */
+  /** Atomically acknowledge a rendered server sequence up to a settled turn boundary. */
   async acknowledgeSeen(threadId: string, throughSequence: number) {
     const result = await this.writer.execute(threadWriteOperations.acknowledgeSeen, [threadId, throughSequence]);
     if (result.previous.sequence !== result.current.sequence) this.invalidate(threadId);

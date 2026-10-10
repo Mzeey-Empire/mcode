@@ -6,3 +6,5 @@ ALTER TABLE `threads` ADD `last_turn_sequence` integer;--> statement-breakpoint
 UPDATE threads SET seen_through_sequence = (
   SELECT MAX(sequence) FROM messages WHERE messages.thread_id = threads.id AND outcome IS NOT NULL
 ), seen_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');
+--> statement-breakpoint
+UPDATE threads SET status = 'paused' WHERE status = 'completed';

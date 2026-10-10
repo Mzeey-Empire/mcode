@@ -306,6 +306,7 @@ export class CanonicalAcceptedProgress {
       eventCount: operation.mutation.kind === "append-events" ? operation.mutation.events.length : 0,
       ...(prepared.terminalMessage && operation.mutation.kind === "finish-live-event" ? { terminalAcceptance: {
         messageId: prepared.terminalMessage.id, outcome: operation.mutation.outcome,
+        settledMessage: null,
         toolCallCount: operation.mutation.projection.narrative.filter((item) => item.kind === "toolCall").length,
         filesChanged: [...operation.mutation.input.fileEvidence?.filesChanged ?? []],
       } } : {}),

@@ -281,7 +281,11 @@ export class TurnAdmissionDispatchCoordinator {
 
   /** Mark a failed provider dispatch after the runtime retry policy gives up. */
   async markDispatchErrored(threadId: string): Promise<void> {
-    await this.threads.updateStatus(threadId, "errored");
+    await this.threads.recordTurnOutcome(threadId, "errored", new Date().toISOString());
+    broadcast("turn.persisted", {
+      threadId, messageId: null, settledMessage: this.messages.latestSequenceMessage(threadId),
+      outcome: "errored", toolCallCount: 0, filesChanged: [],
+    });
   }
 
   /** Mark a committed turn active before its provider receives TurnStarted. */

@@ -141,6 +141,7 @@ const storedReceiptSchema = z.object({
   operationId: z.string(),
   durableRevision: z.number().int(),
   publicationVersion: z.literal(1),
+  settledMessage: z.object({ id: z.string(), sequence: z.number().int().nonnegative() }).nullable().optional(),
   livePublication: z.array(z.object({
     publicationId: z.string().regex(/^[1-9]\d*$/).max(16),
     after: z.enum(["writer", "terminal"]),
@@ -757,7 +758,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         const current = this.requireNextHead(operation);
         if (current.providerId !== mutation.input.providerId) throw new SemanticConflict();
         const receipt = committed(operation, batch.durableSequence, providerCommit, providerCommit ? [] : undefined);
-        this.threads.recordTurnOutcome(operation.execution.threadId, mutation.outcome, mutation.projection.endedAt);
+        const recorded = this.threads.recordTurnOutcome(operation.execution.threadId, mutation.outcome, mutation.projection.endedAt);
+        if (!recorded && !this.threads.findById(operation.execution.threadId)) throw new SemanticConflict();
         this.storeHead({ ...current, ordinal: operation.ordinal, durableRevision: receipt.durableRevision, terminal: true });
         this.storeReceipt(operation, hash, receipt);
       }
@@ -1061,7 +1063,11 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const publication = this.numberLivePublication(operation, publicationOverride);
     if (publication?.length) this.commitLivePublicationEvents(operation, hash, publication);
     const storedReceipt = publication ? { ...receipt, livePublication: publication } : receipt;
-    const receiptJson = JSON.stringify({ ...storedReceipt, publicationVersion: 1 });
+    const receiptJson = JSON.stringify({ ...storedReceipt, publicationVersion: 1,
+      ...(isFinishMutation(operation.mutation) ? { settledMessage: this.db.query<{ id: string; sequence: number }, [string]>(
+        "SELECT id, sequence FROM messages WHERE thread_id = ? ORDER BY sequence DESC LIMIT 1",
+      ).get(operation.execution.threadId) } : {}),
+    });
     if (operation.livePublication && Buffer.byteLength(receiptJson, "utf8") > MAX_LIVE_RECEIPT_BYTES) {
       throw new SemanticConflict();
     }
@@ -1167,10 +1173,10 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const committedReceipt = committed(operation, receipt.durableRevision, receipt.providerCommit, receipt.providerEvents,
       receipt.assistantTextCheckpoint, receipt.livePublication, receipt.planQuestions, receipt.planOutput);
     return operation.mutation.kind === "finish-live-event"
-      ? { ...committedReceipt, terminalPersistence: this.terminalPersistence(operation) } : committedReceipt;
+      ? { ...committedReceipt, terminalPersistence: this.terminalPersistence(operation, receipt.settledMessage) } : committedReceipt;
   }
 
-  private terminalPersistence(operation: ExecutionSemanticOperation): ExecutionTerminalPersistenceReceipt {
+  private terminalPersistence(operation: ExecutionSemanticOperation, settledMessage: ExecutionTerminalPersistenceReceipt["settledMessage"] = null): ExecutionTerminalPersistenceReceipt {
     const mutation = operation.mutation;
     if (mutation.kind !== "finish-live-event") throw new SemanticConflict();
     const persisted = this.canonical.loadTerminalProjection(operation.execution.turnId);
@@ -1181,6 +1187,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const fileEvidence = mutation.input.fileEvidence;
     return {
       messageId: message?.id ?? null,
+      settledMessage,
       outcome: mutation.outcome,
       toolCallCount: persisted.toolCallCount,
       filesChanged: [...fileEvidence?.filesChanged ?? []],

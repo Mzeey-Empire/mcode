@@ -787,6 +787,7 @@ describe("handleAgentEvent branches", () => {
 
     useThreadStore.setState({ currentThreadId: backgroundThreadId });
     useThreadStore.getState().handleTurnPersisted({
+      settledMessage: null,
       threadId: backgroundThreadId,
       messageId: "server-message",
       toolCallCount: 0,
@@ -904,6 +905,7 @@ describe("handleAgentEvent branches", () => {
 
     useThreadStore.setState({ currentThreadId: backgroundThreadId });
     useThreadStore.getState().handleTurnPersisted({
+      settledMessage: null,
       threadId: backgroundThreadId,
       messageId: "server-message",
       toolCallCount: 0,

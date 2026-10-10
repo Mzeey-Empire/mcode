@@ -44,6 +44,79 @@ async function fixture() {
 }
 
 describe("thread attention through real SQLite and the serialized writer", () => {
+  async function beginEmptyTurn(t: Awaited<ReturnType<typeof fixture>>) {
+    const execution = { threadId: t.a.id, turnId: "empty-turn", executionId: "00000000-0000-4000-8000-000000000002" };
+    const lease = { ownerEpoch: 1, workerIndex: 0, workerGeneration: 1, leaseId: "empty-lease" };
+    const handler = new ExecutionWorkerHandler(new CanonicalExecutionSemanticWriter(t.database, () => {}));
+    const started = await handler.handle({ requestId: 1, execution, lease, ordinal: 1, command: { kind: "start", providerId: "codex", input: {
+      thread: { id: t.a.id, workspaceId: t.workspace.id, providerId: "codex", createdAt: BEFORE }, ...execution,
+      permissionMode: "supervised", providerIdentities: [], userMessage: { kind: "create", messageId: "empty-prompt", content: "Next question", sequence: 3 },
+    } } });
+    expect(started.result.kind).toBe("committed");
+    return () => handler.handle({ requestId: 2, execution, lease, ordinal: 2, command: {
+      kind: "finish-live-event", outcome: "errored",
+      projection: { threadId: t.a.id, executionId: execution.executionId, outcome: "errored", endedAt: ENDED,
+        assistant: { content: "", model: null, attachments: [] }, narrative: [] },
+      input: { ...execution, providerId: "codex", providerIdentities: [], outcome: "errored", error: "Dispatch failed", projection: { kind: "writer-staged" } },
+      livePublication: [{ after: "terminal", event: { type: "ended", threadId: t.a.id, turnExecutionId: execution.executionId, outcome: "errored" } }],
+    } });
+  }
+
+  it("surfaces an empty failed turn at its own prompt sequence and clears only that rendered sequence", async () => {
+    const t = await fixture();
+    t.settle(2); t.markBefore();
+    const finish = await beginEmptyTurn(t);
+    await expect(t.service.acknowledgeSeen(t.a.id, 3)).rejects.toMatchObject({ code: "sequence_ahead" });
+    const result = await finish();
+    expect(result.result).toMatchObject({ kind: "committed", terminalPersistence: {
+      messageId: null, settledMessage: { id: "empty-prompt", sequence: 3 }, outcome: "errored", toolCallCount: 0,
+    } });
+    expect(t.service.listInteresting().map(({ lastTurn }) => lastTurn)).toEqual([
+      { sequence: 3, outcome: "errored", endedAt: ENDED, changedFileCount: null },
+    ]);
+    expect(t.database.query("SELECT id, sequence FROM messages WHERE thread_id = ? ORDER BY sequence").all(t.a.id))
+      .toEqual([{ id: "message-2", sequence: 2 }, { id: "empty-prompt", sequence: 3 }]);
+    await expect(t.service.acknowledgeSeen(t.a.id, 4)).rejects.toMatchObject({ code: "sequence_ahead" });
+    const seen = await t.service.acknowledgeSeen(t.a.id, 3);
+    expect(seen.previous).toEqual({ sequence: 2, at: BEFORE });
+    expect(seen.current.sequence).toBe(3);
+    expect(t.service.listInteresting()).toEqual([]);
+  });
+
+  it("rejects the semantic finish when its compatibility thread is missing", async () => {
+    const t = await fixture();
+    const finish = await beginEmptyTurn(t);
+    t.database.run("PRAGMA foreign_keys = OFF");
+    t.database.query("DELETE FROM threads WHERE id = ?").run(t.a.id);
+    t.database.run("PRAGMA foreign_keys = ON");
+    const result = await finish();
+    expect(result.result).toEqual({ kind: "rejected", reason: "writer-conflict" });
+    expect(t.database.query("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
+      .get("00000000-0000-4000-8000-000000000002")).toEqual({ terminal_outcome: null });
+  });
+
+  it("orders mixed-precision endings by instant and ignores an older replay", async () => {
+    const t = await fixture();
+    t.settle(2);
+    expect(await t.threads.recordTurnOutcome(t.a.id, "completed", "2026-10-10T10:00:01Z")).toBe(true);
+    expect(await t.threads.recordTurnOutcome(t.a.id, "errored", "2026-10-10T10:00:01.500Z")).toBe(true);
+    expect(await t.threads.recordTurnOutcome(t.a.id, "completed", "2026-10-10T10:00:01Z")).toBe(false);
+    expect(t.service.get(t.a.id)?.lastTurn).toEqual({
+      sequence: 2, outcome: "errored", endedAt: "2026-10-10T10:00:01.500Z", changedFileCount: null,
+    });
+  });
+
+  it("allows a stale semantic finish without overwriting a newer ending", async () => {
+    const t = await fixture();
+    const finish = await beginEmptyTurn(t);
+    await t.threads.recordTurnOutcome(t.a.id, "completed", "2026-10-10T10:02:00.000Z");
+    const result = await finish();
+    expect(result.result.kind).toBe("committed");
+    expect(t.service.get(t.a.id)?.lastTurn).toEqual({
+      sequence: 3, outcome: "completed", endedAt: "2026-10-10T10:02:00.000Z", changedFileCount: null,
+    });
+  });
+
   it("advances once, returns both marks, and pauses completed status atomically", async () => {
     const t = await fixture();
     t.settle(2); t.settle(4); t.markBefore();
@@ -139,6 +212,8 @@ describe("thread attention through real SQLite and the serialized writer", () =>
   it("backfills existing threads from the actual migration SQL without manufacturing last turns", async () => {
     const t = await fixture();
     t.settle(2); t.settle(4);
+    await t.threads.updateStatus(t.a.id, "completed");
+    await t.threads.complete(t.a.id, BEFORE, null);
     t.database.query("INSERT INTO messages (id, thread_id, role, content, sequence) VALUES ('unsettled', ?, 'assistant', '', 6)").run(t.a.id);
     for (const column of ["seen_through_sequence", "seen_at", "last_turn_outcome", "last_turn_ended_at", "last_turn_sequence"]) {
       t.database.run(`ALTER TABLE threads DROP COLUMN ${column}`);
@@ -147,6 +222,8 @@ describe("thread attention through real SQLite and the serialized writer", () =>
     expect(t.service.get(t.a.id)?.seen.sequence).toBe(4);
     expect(t.service.get(t.b.id)?.seen.sequence).toBeNull();
     expect(t.service.get(t.a.id)?.lastTurn).toBeNull();
+    expect(t.threads.findById(t.a.id)?.status).toBe("paused");
+    expect(t.threads.findById(t.a.id)?.user_completed_at).toBe(BEFORE);
     expect(t.service.get(t.a.id)?.seen.at).toMatch(/^\d{4}-\d\d-\d\dT/);
     expect(t.service.listInteresting()).toEqual([]);
   });

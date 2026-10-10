@@ -157,16 +157,17 @@ export const WS_CHANNELS = {
   /** Sidebar project order changed on the server; clients should refresh `workspace.list`. */
   "workspace.orderChanged": z.object({}),
   "turn.diffChanged": z.object({ threadId: z.string() }),
-  "turn.persisted": z.object({
+  "turn.persisted": lazySchema(() => z.object({
     threadId: z.string(),
     turnId: z.string().nullable().optional(),
     messageId: z.string().nullable(),
+    settledMessage: z.object({ id: z.string(), sequence: z.number().int().nonnegative() }).nullable(),
     toolCallCount: z.number(),
     filesChanged: z.array(z.string()),
     fileEffects: TurnFileEffectSummarySchema().optional(),
     outcome: TurnOutcomeSchema.optional(),
     executionId: z.string().nullable().optional(),
-  }),
+  }))(),
   /** Reports whether live assistant text remains recoverable or needs explicit risk acceptance. */
   "turn.savingStatus": TurnSavingStatusSchema(),
   /** Live net file effects attributed to explicit agent mutation tools. */
