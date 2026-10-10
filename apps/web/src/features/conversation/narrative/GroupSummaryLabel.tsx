@@ -1,3 +1,4 @@
+import { projectBrowserNarrativeResult } from "@mcode/contracts";
 import type { ToolCall } from "@/transport/types";
 import { isCancelledCall } from "./narrative-builder-helpers";
 
@@ -8,7 +9,17 @@ export type ToolCallOutcome = "completed" | "failed" | "cancelled";
 export function toolCallOutcome(toolCall: ToolCall): ToolCallOutcome {
   if (toolCall.isError) return "failed";
   if (isCancelledCall(toolCall)) return "cancelled";
-  return "completed";
+  return hasFailedBrowserResult(toolCall) ? "failed" : "completed";
+}
+
+/**
+ * Browser tools can report a failure inside a successful tool result. An
+ * interrupted result stays uncounted because the user taking control is not a failure.
+ */
+function hasFailedBrowserResult(toolCall: ToolCall): boolean {
+  if (!toolCall.output) return false;
+  const result = projectBrowserNarrativeResult(toolCall.toolName, toolCall.output, toolCall.isError);
+  return result?.outcome === "failed";
 }
 
 /** A group summary that fades in a narrow column while its failure counts always stay readable. */

@@ -169,7 +169,7 @@ describe("BrowserActivityRow", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Used the browser" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Used the browser ?· 1 failed$/ }));
     expect(screen.getByText("Browser action failed")).toBeTruthy();
     expect(screen.queryByText("Completed Browser actions")).toBeNull();
     expect(container.textContent).not.toContain("SECRET");
