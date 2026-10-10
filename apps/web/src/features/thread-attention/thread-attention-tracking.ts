@@ -1,16 +1,33 @@
+import { MessageSchema } from "@mcode/contracts";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
+import type { ThreadRecord } from "@/stores/thread-record";
 import { threadAttentionStore } from "./thread-attention-store";
+
+/**
+ * Accepted executions settle through saved canonical batches without a `turn.persisted`
+ * patch, so their committed messages carry the server sequence directly.
+ */
+function serverSequencedMessages(record: ThreadRecord | undefined): { sequence: number; outcome?: string | null }[] {
+  if (!record) return [];
+  const durable = Object.values(record.canonicalAgent.durableState.items).flatMap((item) => {
+    if (item.payload.projection !== "message") return [];
+    const parsed = MessageSchema().safeParse(item.payload.message);
+    return parsed.success ? [parsed.data] : [];
+  });
+  const patched = record.messages.flatMap((message) => message.serverSequence === undefined ? []
+    : [{ sequence: message.serverSequence, outcome: message.outcome }]);
+  return [...patched, ...durable];
+}
 
 /** Observe loaded settled records only for the selected, focused conversation. */
 export function startThreadAttentionTracking(): () => void {
   const refresh = (): void => {
     const threadId = useWorkspaceStore.getState().activeThreadId;
-    const messages = threadId ? useThreadStore.getState().records.get(threadId)?.messages : undefined;
+    const record = threadId ? useThreadStore.getState().records.get(threadId) : undefined;
     const lastTurn = threadId ? threadAttentionStore.getState().byThreadId[threadId]?.lastTurn : null;
-    const settled = messages?.flatMap((message) => message.serverSequence !== undefined
-      && (message.outcome != null || message.serverSequence === lastTurn?.sequence)
-      ? [message.serverSequence] : []) ?? [];
+    const settled = serverSequencedMessages(record).flatMap((message) =>
+      message.outcome != null || message.sequence === lastTurn?.sequence ? [message.sequence] : []);
     threadAttentionStore.getState().refreshOnScreen(threadId, settled.length ? Math.max(...settled) : null);
   };
   const unsubscribeThread = useThreadStore.subscribe(refresh);

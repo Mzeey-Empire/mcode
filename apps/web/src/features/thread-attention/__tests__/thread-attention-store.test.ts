@@ -90,6 +90,18 @@ describe("on-screen thread acknowledgements", () => {
     expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([["a", 3]]);
   });
 
+  it("acknowledges a turn settled only through a saved canonical batch", async () => {
+    const message = createMockMessage({ id: "assistant-8", thread_id: "a", role: "assistant", sequence: 8, outcome: "completed" });
+    const record = createEmptyThreadRecord();
+    useThreadStore.setState({ records: new Map([["a", { ...record, canonicalAgent: { ...record.canonicalAgent, durableState: {
+      ...record.canonicalAgent.durableState, items: { [message.id]: { id: message.id, threadId: "a", turnId: "turn-1", kind: "message",
+        providerIdentities: [], payload: { projection: "message", message }, createdAt: NOW, updatedAt: NOW } },
+    } } }]]) });
+    stop = startThreadAttentionTracking();
+    await vi.advanceTimersByTimeAsync(150);
+    expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([["a", 8]]);
+  });
+
   it("waits 150ms and acknowledges loaded settled sequence 4, not server sequence 8", async () => {
     renderSettled(4); stop = startThreadAttentionTracking();
     await vi.advanceTimersByTimeAsync(149);
