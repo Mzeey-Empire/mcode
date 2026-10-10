@@ -10,6 +10,7 @@ vi.mock("@/transport", () => ({
   getTransport: () => startupTransport,
 }));
 
+import { useThreadStartupStore } from "../state/thread-startup-store";
 import { useStartupCancel } from "../useStartupActions";
 
 const startupId = "00000000-0000-4000-8000-000000000001";
@@ -40,6 +41,7 @@ function startup(overrides: Partial<ThreadStartup> = {}): ThreadStartup {
 describe("useStartupCancel", () => {
   beforeEach(() => {
     startupTransport.cancelThreadStartup.mockReset();
+    useThreadStartupStore.setState({ cancelRequestByStartupId: {} });
   });
 
   it("withholds cancel while a request is in flight", () => {
@@ -69,6 +71,17 @@ describe("useStartupCancel", () => {
     rerender({ record: startup({ cancellation: "requested", revision: 2 }) });
 
     await waitFor(() => expect(result.current).toBeTypeOf("function"));
+  });
+
+  it("offers the retry on every surface, not only the one whose cancel failed", async () => {
+    startupTransport.cancelThreadStartup.mockRejectedValueOnce(new Error("agent stop failed"));
+    const requested = startup({ cancellation: "requested", revision: 2 });
+    const composer = renderHook(() => useStartupCancel(startup(), undefined));
+    const trail = renderHook(() => useStartupCancel(requested, undefined));
+
+    act(() => composer.result.current!());
+
+    await waitFor(() => expect(trail.result.current).toBeTypeOf("function"));
   });
 
   it("withholds cancel once the startup has ended", () => {

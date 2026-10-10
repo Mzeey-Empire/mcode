@@ -9,13 +9,22 @@ import { patchThreadRecord } from "@/stores/thread-record";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { createDefaultComposerAgentSelection } from "@/features/conversation/composer/draft/composer-selection-state";
 
+/** The state of this client's own request to cancel a startup. */
+export type StartupCancelRequest = "in-flight" | "failed";
+
 interface ThreadStartupState {
   readonly recordsByStartupId: Readonly<Record<string, ThreadStartup>>;
   readonly startupIdByThreadId: Readonly<Record<string, string>>;
   /** Cancelled startups the user dismissed; the preparing shell stops pinning them. */
   readonly dismissedStartupIds: ReadonlySet<string>;
+  /**
+   * This client's own cancel requests. Shared so the trail and the composer agree on whether a
+   * failed stop can be retried, since the server records `requested` before it attempts the stop.
+   */
+  readonly cancelRequestByStartupId: Readonly<Record<string, StartupCancelRequest>>;
   apply: (startup: ThreadStartup) => void;
   dismissStartup: (startupId: string) => void;
+  setCancelRequest: (startupId: string, request: StartupCancelRequest) => void;
   recover: (input: { readonly startupId?: string; readonly workspaceId?: string }) => Promise<void>;
 }
 
@@ -100,6 +109,7 @@ export const useThreadStartupStore = create<ThreadStartupState>((set, get) => ({
   recordsByStartupId: {},
   startupIdByThreadId: {},
   dismissedStartupIds: new Set<string>(),
+  cancelRequestByStartupId: {},
   apply: (startup) => {
     // Reject stale records before side effects: recover() re-applies stored
     // terminal records on every lookup mount, and replaying them must not
@@ -137,6 +147,9 @@ export const useThreadStartupStore = create<ThreadStartupState>((set, get) => ({
   },
   dismissStartup: (startupId) => {
     set((state) => ({ dismissedStartupIds: new Set([...state.dismissedStartupIds, startupId]) }));
+  },
+  setCancelRequest: (startupId, request) => {
+    set((state) => ({ cancelRequestByStartupId: { ...state.cancelRequestByStartupId, [startupId]: request } }));
   },
   recover: async ({ startupId, workspaceId }) => {
     const transport = getTransport();

@@ -5,7 +5,7 @@ import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { useDiffStore } from "@/stores/diffStore";
 import { useToastStore } from "@/stores/toastStore";
 import { getTransport } from "@/transport";
-import { useThreadStartupStore } from "./state/thread-startup-store";
+import { type StartupCancelRequest, useThreadStartupStore } from "./state/thread-startup-store";
 
 const TERMINAL_STATES: ReadonlySet<ThreadStartup["state"]> = new Set(["completed", "failed", "cancelled", "interrupted"]);
 const SCRIPT_RETRY_MS = 1_000;
@@ -48,19 +48,20 @@ export function useStartupSetupScript(startup: ThreadStartup | undefined): strin
  * Cancels a live startup from the trail, the composer Stop and Esc.
  *
  * Returns no callback once the startup has ended or a cancellation is in flight. A request that failed
- * offers the callback again, even though the server may already hold the intent: the server re-runs
- * containment on a repeated cancel, so retrying is the only way out of a failed stop.
+ * offers the callback again, even though the server already holds the intent: a failed agent stop or
+ * transport error can succeed on retry. A failed setup containment cannot; the retry reports it again.
  */
 export function useStartupCancel(startup: ThreadStartup | undefined, startupId: string | undefined): (() => void) | undefined {
-  const [request, setRequest] = useState<{ readonly id: string; readonly failed: boolean } | null>(null);
   const id = startup?.startupId ?? startupId;
+  const ownRequest = useThreadStartupStore((state) => (id ? state.cancelRequestByStartupId[id] : undefined));
   const cancel = useCallback(() => {
     if (!id) return;
-    setRequest({ id, failed: false });
+    const store = useThreadStartupStore.getState();
+    store.setCancelRequest(id, "in-flight");
     getTransport().cancelThreadStartup(id).then(
-      (next) => useThreadStartupStore.getState().apply(next),
+      (next) => store.apply(next),
       (error: unknown) => {
-        setRequest({ id, failed: true });
+        store.setCancelRequest(id, "failed");
         useToastStore.getState().show({
           kind: "failed",
           title: "Could not cancel startup",
@@ -70,12 +71,12 @@ export function useStartupCancel(startup: ThreadStartup | undefined, startupId: 
     );
   }, [id]);
   if (!id) return undefined;
-  return canOfferCancel(startup, request?.id === id ? request : null) ? cancel : undefined;
+  return canOfferCancel(startup, ownRequest) ? cancel : undefined;
 }
 
-function canOfferCancel(startup: ThreadStartup | undefined, ownRequest: { readonly failed: boolean } | null): boolean {
+function canOfferCancel(startup: ThreadStartup | undefined, ownRequest: StartupCancelRequest | undefined): boolean {
   if (startup && TERMINAL_STATES.has(startup.state)) return false;
-  if (ownRequest) return ownRequest.failed;
+  if (ownRequest) return ownRequest === "failed";
   return startup?.cancellation !== "requested";
 }
 
