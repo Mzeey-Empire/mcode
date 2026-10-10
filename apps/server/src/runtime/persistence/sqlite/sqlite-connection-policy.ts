@@ -29,8 +29,10 @@ export function applySQLiteConnectionPolicy(
   isFileBacked: boolean,
 ): void {
   if (isFileBacked) {
-    db.run("PRAGMA journal_mode = WAL");
+    // The busy handler must exist before the first statement. Reading the schema
+    // for the WAL pragma waits on a lock held by another connection's final close.
     db.run("PRAGMA busy_timeout = 5000");
+    db.run("PRAGMA journal_mode = WAL");
     applySQLiteCacheBudget(db, "active");
     db.run("PRAGMA mmap_size = 0");
   }
