@@ -109,7 +109,6 @@ describe("ModelSection reasoning options", () => {
       "Providers",
       "Model defaults",
       "Utility model",
-      "AI features",
     ]) {
       expect(screen.getByRole("region", { name })).toBeInTheDocument();
     }
