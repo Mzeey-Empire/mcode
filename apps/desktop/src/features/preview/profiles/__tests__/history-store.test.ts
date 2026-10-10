@@ -3,12 +3,14 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BrowserHistoryStore } from "../history-store.js";
+import { BrowserHistoryStore, flattenOntoWhite } from "../history-store.js";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
-const image = { resize: vi.fn(() => ({ toJPEG: vi.fn(() => jpeg) })) };
+const transparentPixel = [0, 0, 0, 0];
+const image = { resize: vi.fn(() => ({ toBitmap: () => Buffer.from(transparentPixel), getSize: () => ({ width: 1, height: 1 }) })) };
+const encodeJpeg = vi.fn(() => jpeg);
 
 class Guest extends NodeEvents.EventEmitter {
   public url = "about:blank";
@@ -35,7 +37,7 @@ function owner(): BrowserHistoryStore {
   return new BrowserHistoryStore({
     userDataPath: () => root,
     isRemoved: (id) => removed.has(id),
-    now: () => Date.now(), setTimeout, clearTimeout, capturePage,
+    now: () => Date.now(), setTimeout, clearTimeout, capturePage, encodeJpeg,
   });
 }
 
@@ -114,7 +116,7 @@ describe("BrowserHistoryStore", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(capturePage).toHaveBeenCalledTimes(1);
     expect(image.resize).toHaveBeenCalledWith({ width: 320 });
-    expect(image.resize.mock.results[0]?.value.toJPEG).toHaveBeenCalledWith(70);
+    expect(encodeJpeg).toHaveBeenCalledWith(Buffer.from([255, 255, 255, 255]), { width: 1, height: 1 });
     const expected = [{ origin: "http://localhost:5173", capturedAt: 101_500, dataUrl: `data:image/jpeg;base64,${jpeg.toString("base64")}` }];
     expect(store.list(A).thumbnails).toEqual(expected);
     expect(owner().list(A).thumbnails).toEqual(expected);
@@ -190,5 +192,18 @@ describe("BrowserHistoryStore", () => {
     guest.emit("destroyed");
     expect(vi.getTimerCount()).toBe(0);
     expect(guest.eventNames()).toEqual([]);
+  });
+});
+
+describe("flattenOntoWhite", () => {
+  it("shows white through transparent and half-covered pixels and keeps opaque ones", () => {
+    const transparent = [0, 0, 0, 0];
+    const halfRed = [0, 0, 128, 128];
+    const opaqueBlue = [200, 10, 20, 255];
+    expect([...flattenOntoWhite(Buffer.from([...transparent, ...halfRed, ...opaqueBlue]))]).toEqual([
+      255, 255, 255, 255,
+      127, 127, 255, 255,
+      200, 10, 20, 255,
+    ]);
   });
 });

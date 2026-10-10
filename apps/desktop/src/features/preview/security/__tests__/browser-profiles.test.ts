@@ -26,6 +26,7 @@ const electron = vi.hoisted(() => {
       return profile;
     }) },
     ipcMain: { on: vi.fn() },
+    nativeImage: { createFromBitmap: vi.fn(() => ({ toJPEG: () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]) })) },
   };
 });
 vi.mock("electron", () => electron);
@@ -71,7 +72,7 @@ afterEach(() => {
 });
 
 function historyGuest(id: number, url: string) {
-  const image = { resize: () => ({ toJPEG: () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]) }) };
+  const image = { resize: () => ({ toBitmap: () => Buffer.alloc(4), getSize: () => ({ width: 1, height: 1 }) }) };
   return Object.assign(new NodeEvents.EventEmitter(), {
     id, getURL: () => url, getTitle: () => "Fixture", isDestroyed: () => false,
     capturePage: vi.fn(async () => image),

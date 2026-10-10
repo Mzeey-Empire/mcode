@@ -76,7 +76,7 @@ function makeGuest(
   const guest: FakeWebContents = {
     id: fakeGuests.length + 1,
     getTitle() { return this.title; },
-    capturePage: vi.fn(async () => ({ resize: () => ({ toJPEG: () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]) }) })),
+    capturePage: vi.fn(async () => ({ resize: () => ({ toBitmap: () => Buffer.alloc(4), getSize: () => ({ width: 1, height: 1 }) }) })),
     on(event, listener) {
       const bag = listeners.get(event) ?? new Set();
       listeners.set(event, bag);
@@ -118,6 +118,7 @@ vi.mock("electron", () => ({
     fromWebContents: vi.fn((sender: unknown) => allWindows.find((window) => window.webContents === sender) ?? null),
   },
   app: { getPath: () => profileRoot },
+  nativeImage: { createFromBitmap: vi.fn(() => ({ toJPEG: () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]) })) },
   ipcMain: {
     on: vi.fn(),
     handle: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => { ipcHandlers[channel] = handler; }),

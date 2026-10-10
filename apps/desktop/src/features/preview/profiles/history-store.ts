@@ -2,13 +2,14 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeNet from "node:net";
 import * as NodePath from "node:path";
-import type { WebContents } from "electron";
+import { nativeImage, type WebContents } from "electron";
 import { BrowserHistorySchema, type BrowserHistory, type BrowserHistoryEntry, type BrowserServerThumbnail } from "@mcode/contracts";
 import { browserPartitionFor } from "@mcode/shared/browser-partition";
 import { normalizePreviewPageIdentity } from "@mcode/shared/browser-page-identity";
 import { logger } from "@mcode/shared";
 
-type CaptureImage = { resize(options: { width: number }): { toJPEG(quality: number): Buffer } };
+type BitmapSize = { width: number; height: number };
+type CaptureImage = { resize(options: { width: number }): { toBitmap(): Buffer; getSize(): BitmapSize } };
 type Guest = Pick<WebContents, "id" | "on" | "removeListener" | "isDestroyed" | "getURL" | "getTitle"> & { capturePage(): Promise<CaptureImage> };
 
 /** Clock and Electron boundaries used by history capture tests. */
@@ -19,6 +20,7 @@ export interface BrowserHistoryStoreOptions {
   readonly setTimeout?: typeof setTimeout;
   readonly clearTimeout?: typeof clearTimeout;
   readonly capturePage?: (guest: Guest) => Promise<CaptureImage>;
+  readonly encodeJpeg?: (bitmap: Buffer, size: BitmapSize) => Buffer;
 }
 
 interface WorkspaceHistory {
@@ -48,6 +50,22 @@ export function sanitizeHistoryUrl(raw: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Composites a premultiplied BGRA bitmap onto white. JPEG has no alpha, so a page that
+ * never paints a background would otherwise encode as black, where a browser shows white.
+ */
+export function flattenOntoWhite(bitmap: Buffer): Buffer {
+  const flat = Buffer.from(bitmap);
+  for (let offset = 0; offset + 3 < flat.length; offset += 4) {
+    const cover = 255 - flat[offset + 3]!;
+    flat[offset] = Math.min(255, flat[offset]! + cover);
+    flat[offset + 1] = Math.min(255, flat[offset + 1]! + cover);
+    flat[offset + 2] = Math.min(255, flat[offset + 2]! + cover);
+    flat[offset + 3] = 255;
+  }
+  return flat;
 }
 
 function thumbnailOrigin(raw: string): string | null {
@@ -93,6 +111,7 @@ export class BrowserHistoryStore {
   private readonly schedule: typeof setTimeout;
   private readonly cancel: typeof clearTimeout;
   private readonly capturePage: (guest: Guest) => Promise<CaptureImage>;
+  private readonly encodeJpeg: (bitmap: Buffer, size: BitmapSize) => Buffer;
 
   /** Creates an isolated history owner; constructing it performs no disk access. */
   public constructor(private readonly options: BrowserHistoryStoreOptions) {
@@ -100,6 +119,7 @@ export class BrowserHistoryStore {
     this.schedule = options.setTimeout ?? setTimeout;
     this.cancel = options.clearTimeout ?? clearTimeout;
     this.capturePage = options.capturePage ?? ((guest) => guest.capturePage());
+    this.encodeJpeg = options.encodeJpeg ?? ((bitmap, size) => nativeImage.createFromBitmap(bitmap, size).toJPEG(70));
   }
 
   private id(workspaceId: string): string {
@@ -219,7 +239,8 @@ export class BrowserHistoryStore {
     try {
       const image = await this.capturePage(observed.guest);
       if (!this.canSaveCapture(observed, state, revision) || state.attempts.get(origin) !== capturedAt) return;
-      const jpeg = image.resize({ width: 320 }).toJPEG(70);
+      const thumbnail = image.resize({ width: 320 });
+      const jpeg = this.encodeJpeg(flattenOntoWhite(thumbnail.toBitmap()), thumbnail.getSize());
       NodeFS.mkdirSync(NodePath.dirname(path), { recursive: true });
       NodeFS.writeFileSync(`${path}.tmp`, jpeg);
       NodeFS.renameSync(`${path}.tmp`, path);
