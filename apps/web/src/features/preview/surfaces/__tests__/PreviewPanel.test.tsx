@@ -2042,6 +2042,26 @@ describe("PreviewPanel: full panel state", () => {
     });
   });
 
+  it("keeps the color picker open when annotation autofocus runs after the user opens it", async () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
+    try {
+      const user = userEvent.setup();
+      installDraftAnnotation({ elementStyle: { textColor: "rgb(255, 255, 255)" } });
+      render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
+
+      await user.click(screen.getByLabelText("Open annotation visual controls"));
+      await user.click(screen.getByLabelText("Open Text color picker"));
+      expect(screen.getByLabelText("Use HEX for Text color")).toBeInTheDocument();
+
+      await act(async () => { vi.advanceTimersToNextFrame(); });
+
+      expect(screen.getByLabelText("Use HEX for Text color")).toBeInTheDocument();
+      expect(screen.getByLabelText("Annotation note")).not.toHaveFocus();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("closes only the open annotation bubble on Escape", async () => {
     installDraftAnnotation();
 

@@ -74,7 +74,9 @@ export function useDesignPicker({
 }: DesignPickerOptions) {
   useEffect(() => {
     if (!openBubbleFocusKey) return;
+    const focusAtOpen = document.activeElement;
     const frame = window.requestAnimationFrame(() => {
+      if (document.activeElement !== focusAtOpen) return;
       bubbleNoteInputRef.current?.focus();
     });
     return () => window.cancelAnimationFrame(frame);
