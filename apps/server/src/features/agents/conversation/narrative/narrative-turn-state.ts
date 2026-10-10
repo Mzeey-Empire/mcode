@@ -98,6 +98,7 @@ const NARRATIVE_INPUT_SUMMARIZERS: Record<string, (input: Record<string, unknown
   read: fileInputSummary,
   edit: fileInputSummary,
   write: fileInputSummary,
+  file_change: changedFilesInputSummary,
   move: renameInputSummary,
   rename: renameInputSummary,
   bash: commandInputSummary,
@@ -112,6 +113,11 @@ const NARRATIVE_INPUT_SUMMARIZERS: Record<string, (input: Record<string, unknown
 
 function fileInputSummary(input: Record<string, unknown>): string {
   return String(firstProvidedInputValue(input, ["file_path", "filePath"]) ?? "");
+}
+
+/** Codex file changes keep their paths; the generic JSON summary truncates mid-path. */
+function changedFilesInputSummary(input: Record<string, unknown>): string {
+  return typeof input.files === "string" ? input.files : "";
 }
 
 function renameInputSummary(input: Record<string, unknown>): string {

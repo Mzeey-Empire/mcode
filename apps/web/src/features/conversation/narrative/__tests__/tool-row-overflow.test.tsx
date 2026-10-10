@@ -386,6 +386,20 @@ describe("narrative tool row layout classes", () => {
     expect(screen.getByText("Edited file").parentElement).toHaveTextContent(/^Edited filetime\.ts$/);
   });
 
+  it("names a persisted file change by the file in its stored summary", () => {
+    render(<ToolSummaryLine group={{ calls: [makeBashCall({ toolName: "file_change", toolInput: { _summary: "F:\\dev\\fixture-repo\\README.md" }, isComplete: true })] }} />);
+
+    expect(screen.getByText("Edited file").parentElement).toHaveTextContent(/^Edited fileREADME\.md$/);
+  });
+
+  it("does not read a path out of an older truncated JSON summary", () => {
+    const path = "F:\\dev\\worktrees\\t3\\mcode\\t3-49c74bf1\\.dev\\fixture-repo\\README.md";
+    const _summary = JSON.stringify({ files: path, changes: [{ path, kind: { type: "update" } }] }).slice(0, 200);
+    render(<ToolSummaryLine group={{ calls: [makeBashCall({ toolName: "file_change", toolInput: { _summary }, isComplete: true })] }} />);
+
+    expect(screen.getByText("Edited file").parentElement).toHaveTextContent(/^Edited filefile_change$/);
+  });
+
   it("summarizes several calls with their failures and lists each on open", () => {
     render(
       <ToolSummaryLine
