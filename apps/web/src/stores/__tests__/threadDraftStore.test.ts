@@ -32,7 +32,6 @@ const target: ThreadDraftTarget = {
   customBranchName: "",
   autoPreviewBranch: "",
   selectedWorktree: null,
-  branchManuallySelected: false,
 };
 
 function payload(overrides: Partial<ThreadDraftPayload> = {}): ThreadDraftPayload {
@@ -99,6 +98,26 @@ describe("threadDraftStore", () => {
     const persisted = JSON.parse(localStorage.getItem("mcode-thread-drafts") ?? "{}");
     expect(persisted.state.drafts[legacyDraft.id].selection).toEqual({ ...selection, thinking: true });
     expect(persisted.state.drafts[legacyDraft.id].draft.input).toBe("continue the saved draft");
+  });
+
+  it("restores drafts saved with the retired branchManuallySelected flag", async () => {
+    const savedDraft = {
+      id: "saved-with-flag",
+      workspaceId: "ws-1",
+      createdAt: 100,
+      updatedAt: 200,
+      draft: composerDraft,
+      selection,
+      target: { ...target, branchManuallySelected: true },
+    };
+    localStorage.setItem("mcode-thread-drafts", JSON.stringify({
+      version: 1,
+      state: { drafts: { [savedDraft.id]: savedDraft } },
+    }));
+
+    await useThreadDraftStore.persist.rehydrate();
+
+    expect(useThreadDraftStore.getState().drafts[savedDraft.id]?.target).toMatchObject(target);
   });
 
   it("removes the entity when the draft empties and ignores fresh empty saves", () => {

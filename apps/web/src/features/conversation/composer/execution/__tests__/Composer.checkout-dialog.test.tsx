@@ -946,7 +946,6 @@ describe("Composer checkout confirmation", () => {
         customBranchName: "",
         autoPreviewBranch: "",
         selectedWorktree: null,
-        branchManuallySelected: false,
       },
     });
     expect(draftId).not.toBeNull();

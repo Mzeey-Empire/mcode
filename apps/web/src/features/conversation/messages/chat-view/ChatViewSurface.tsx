@@ -533,7 +533,6 @@ function preserveIncompleteDraft(thread: WorkspaceThread, draft: ThreadDraftPayl
       customBranchName: "",
       autoPreviewBranch,
       selectedWorktree: null,
-      branchManuallySelected: true,
     },
   });
   if (!id) throw new Error("Could not keep this draft");

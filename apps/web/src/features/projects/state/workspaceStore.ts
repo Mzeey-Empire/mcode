@@ -607,8 +607,6 @@ interface WorkspaceState {
   openPrs: PrDetail[];
   openPrsLoading: boolean;
   fetchingBranch: string | null;
-  /** Whether the user has explicitly picked a branch in BranchPicker. Prevents live updates from overriding the user's selection. */
-  branchManuallySelected: boolean;
   /** In-memory map of thread ID → PR URL, populated immediately on PR creation so the header can link without waiting for the next poll. */
   prUrlsByThreadId: Record<string, string>;
   /** In-memory map of thread ID → latest CI check status, updated by the thread.checksUpdated push channel. */
@@ -717,8 +715,6 @@ interface WorkspaceState {
   setNewThreadMode: (mode: "direct" | "worktree" | "existing-worktree") => void;
   setNewThreadBranch: (branch: string) => void;
   setNewThreadBranchFromPr: (branch: string, pullRequestNumber: number) => void;
-  /** Set whether the user has explicitly picked a branch, preventing live branch updates from overriding it. */
-  setBranchManuallySelected: (value: boolean) => void;
 
   // Worktree actions
   loadWorktrees: (workspaceId: string) => Promise<void>;
@@ -913,7 +909,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       },
       activeDraftId: null,
       pendingNewThread: false,
-      branchManuallySelected: false,
       newThreadBranchSource: "branch",
       newThreadPullRequestNumber: undefined,
       error: null,
@@ -1123,7 +1118,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   openPrs: [],
   openPrsLoading: false,
   fetchingBranch: null,
-  branchManuallySelected: false,
   // Branch-from-chat fields — safe defaults; always reset by initBranchMode before use.
   branchExecMode: "direct" as const,
   branchTargetBranch: "",
@@ -1273,7 +1267,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       openPrs: [],
       openPrsLoading: false,
       fetchingBranch: null,
-      branchManuallySelected: false,
     });
     reconcileSelectedConversation();
     if (id) {
@@ -1830,7 +1823,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       customBranchName: entity.target.customBranchName,
       autoPreviewBranch: entity.target.autoPreviewBranch,
       selectedWorktree: entity.target.selectedWorktree,
-      branchManuallySelected: entity.target.branchManuallySelected,
     });
   },
 
@@ -1855,7 +1847,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             customBranchName: "",
             autoPreviewBranch: generateBranchId(),
             selectedWorktree: null,
-            branchManuallySelected: false,
           }
         : {}),
     });
@@ -1914,10 +1905,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
   setNewThreadBranchFromPr: (branch, pullRequestNumber) => {
     set({ newThreadBranch: branch, newThreadBranchSource: "pr", newThreadPullRequestNumber: pullRequestNumber });
-  },
-
-  setBranchManuallySelected: (value) => {
-    set({ branchManuallySelected: value });
   },
 
   loadWorktrees: async (workspaceId) => {

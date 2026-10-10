@@ -178,7 +178,6 @@ function snapshotDraftTarget(state: WorkspaceStoreState): ThreadDraftTarget {
     customBranchName: state.customBranchName,
     autoPreviewBranch: state.autoPreviewBranch,
     selectedWorktree: state.selectedWorktree,
-    branchManuallySelected: state.branchManuallySelected,
   };
 }
 
@@ -309,7 +308,6 @@ export function useComposerFormController({
       customBranchName: state.customBranchName,
       autoPreviewBranch: state.autoPreviewBranch,
       selectedWorktree: state.selectedWorktree,
-      branchManuallySelected: state.branchManuallySelected,
     })),
   );
   const markAgentSettingsTouched = useCallback(() => {

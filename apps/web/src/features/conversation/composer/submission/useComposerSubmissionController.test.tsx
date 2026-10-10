@@ -177,7 +177,6 @@ describe("useComposerSubmissionController selected-text comments", () => {
         customBranchName: "",
         autoPreviewBranch: "",
         selectedWorktree: null,
-        branchManuallySelected: false,
       },
     });
     expect(draftId).not.toBeNull();

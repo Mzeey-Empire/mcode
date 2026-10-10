@@ -30,7 +30,6 @@ export interface ThreadDraftTarget {
   customBranchName: string;
   autoPreviewBranch: string;
   selectedWorktree: AttachedWorktree | null;
-  branchManuallySelected: boolean;
 }
 
 /** Agent-selection fields that live outside ComposerDraft for new-thread drafts. */
@@ -117,8 +116,7 @@ function isValidStoredTarget(raw: unknown): raw is ThreadDraftTarget {
   const validMode = t.mode === "direct" || t.mode === "worktree" || t.mode === "existing-worktree";
   return validMode
     && isValidTargetBranch(t)
-    && (t.selectedWorktree === null || typeof t.selectedWorktree === "object")
-    && typeof t.branchManuallySelected === "boolean";
+    && (t.selectedWorktree === null || typeof t.selectedWorktree === "object");
 }
 
 function isValidStoredThreadDraft(raw: unknown): raw is ThreadDraft {
