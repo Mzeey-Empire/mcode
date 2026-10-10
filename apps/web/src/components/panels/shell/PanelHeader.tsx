@@ -74,12 +74,15 @@ export function PanelHeaderSlotScope({
 }
 
 /**
- * Whether this tool's header is in the shell now. An inactive tool stays
- * mounted, so its body-portaled menus would float over the active tool unless
- * the tool closes them; outside the shell the header is always live.
+ * Open state for a menu or popover in a tool's header. An inactive tool stays
+ * mounted, and its body-portaled popup would float over the active tool, so the
+ * menu closes when its tool leaves the shell and stays closed on return.
  */
-export function usePanelHeaderActive(): boolean {
-  return useContext(PanelHeaderSlotContext)?.active ?? true;
+export function usePanelHeaderMenuOpen(): readonly [boolean, (open: boolean) => void] {
+  const [open, setOpen] = useState(false);
+  const active = useContext(PanelHeaderSlotContext)?.active ?? true;
+  if (open && !active) setOpen(false);
+  return [open, setOpen];
 }
 
 /** Renders a tool's header content into row 1's leading slot or into row 2. */

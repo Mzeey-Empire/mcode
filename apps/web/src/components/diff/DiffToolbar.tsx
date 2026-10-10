@@ -18,7 +18,7 @@ import { CommitPicker } from "./CommitPicker";
 import { TurnPicker } from "./TurnPicker";
 import { ReviewActions } from "./ReviewActions";
 import { DiffStat } from "./DiffStat";
-import { PanelHeaderSlot, usePanelHeaderActive } from "@/components/panels/shell/PanelHeader";
+import { PanelHeaderSlot, usePanelHeaderMenuOpen } from "@/components/panels/shell/PanelHeader";
 
 type CommitAvailability = "loading" | "available" | "empty";
 type BranchAvailability = "loading" | "available" | "empty";
@@ -54,9 +54,7 @@ export function DiffToolbar({
   const setViewMode = useDiffStore((s) => s.setViewMode);
   const setReviewViewForThread = useDiffStore((s) => s.setReviewViewForThread);
   const getReviewView = useDiffStore((s) => s.getReviewView);
-  const [viewMenuOpen, setViewMenuOpen] = useState(false);
-  const headerActive = usePanelHeaderActive();
-  if (viewMenuOpen && !headerActive) setViewMenuOpen(false);
+  const [viewMenuOpen, setViewMenuOpen] = usePanelHeaderMenuOpen();
   const [reviewProbeNonce, setReviewProbeNonce] = useState(0);
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);

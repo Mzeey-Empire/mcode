@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import type { TurnSnapshot } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/time";
 import { useDiffStore } from "@/stores/diffStore";
+import { usePanelHeaderMenuOpen } from "@/components/panels/shell/PanelHeader";
 
 // Mirrors the server's render rule in turn-diff-rpc: workspace-scoped effects
 // win; when none exist the comparison falls back to files_changed. Only a
@@ -58,7 +59,7 @@ export function TurnPicker({ threadId }: { threadId: string }) {
     (s) => s.selectedTurnMessageIdByThread[threadId],
   );
   const setReviewTurnForThread = useDiffStore((s) => s.setReviewTurnForThread);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = usePanelHeaderMenuOpen();
 
   const turns = useMemo(
     () => diffTurns(snapshots ?? []).sort(byCreatedAt).reverse(),

@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { getTransport } from "@/transport";
 import { useDiffStore } from "@/stores/diffStore";
+import { usePanelHeaderMenuOpen } from "@/components/panels/shell/PanelHeader";
 
 /** The scope key a comparison is resolved against (`workspaceId:threadId`). */
 function scopeKey(workspaceId: string, threadId?: string): string {
@@ -187,7 +188,7 @@ function RefCombobox({
   refs: readonly GitBranch[];
   onSelect: (ref: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = usePanelHeaderMenuOpen();
   const groups = useMemo(() => groupRefs(refs), [refs]);
 
   return (

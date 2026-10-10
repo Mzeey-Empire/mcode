@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TurnSnapshot } from "@mcode/contracts";
 import { useDiffStore } from "@/stores/diffStore";
+import { PanelHeaderSlotScope } from "@/components/panels/shell/PanelHeader";
 import { TurnPicker } from "../TurnPicker";
 
 class ObserverMock {
@@ -127,4 +128,25 @@ describe("TurnPicker", () => {
     expect(screen.getByText("No turns yet")).toBeInTheDocument();
     expect(useDiffStore.getState().selectedTurnMessageIdByThread["thread-1"]).toBeUndefined();
   });
+
+  it("closes when another tool takes the panel header and stays closed on return", async () => {
+    useDiffStore.setState({
+      snapshotsByThread: { "thread-1": [snapshot("msg-new", "2026-09-20T12:00:00Z", 3)] },
+    });
+    const elements = { leading: document.createElement("div"), row2: document.createElement("div") };
+    const picker = (active: boolean) => (
+      <PanelHeaderSlotScope active={active} elements={elements}>
+        <TurnPicker threadId="thread-1" />
+      </PanelHeaderSlotScope>
+    );
+    const { rerender } = render(picker(true));
+    await userEvent.click(screen.getByTestId("turn-picker"));
+    expect(screen.getByTestId("turn-picker-item-msg-new")).toBeInTheDocument();
+
+    rerender(picker(false));
+    await waitFor(() => expect(screen.queryByTestId("turn-picker-item-msg-new")).not.toBeInTheDocument());
+
+    rerender(picker(true));
+    expect(screen.queryByTestId("turn-picker-item-msg-new")).not.toBeInTheDocument();
+  }, 15_000);
 });
