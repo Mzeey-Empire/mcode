@@ -13,6 +13,7 @@ import type {
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import type { GitExecutor } from "./execution/index.js";
 import { GitRepositoryService } from "./git-repository-service.js";
+import { batchLiteralPaths } from "./literal-paths.js";
 
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const MAX_REVIEW_COMPARISON_FILES = 10_000;
@@ -222,6 +223,25 @@ export class GitComparisonService {
     return this.readReviewComparisonWithCommitFallback(cwd, view, opts.sha, suffix);
   }
 
+  /**
+   * Read the `--stat` summary and patch of `paths` from HEAD (the empty tree when unborn) to the
+   * worktree, with untracked files included. Batches keep each command within the Windows limit.
+   */
+  async readSelectedPathsDiff(cwd: string, paths: readonly string[]): Promise<{ stat: string; patch: string }> {
+    const base = (await this.hasCommits(cwd)) ? "HEAD" : EMPTY_TREE;
+    return this.withIntentToAddIndex(cwd, async (env) => {
+      const stat: string[] = [];
+      const patch: string[] = [];
+      for (const batch of batchLiteralPaths(paths)) {
+        const args = ["-C", cwd, "-c", "diff.autoRefreshIndex=false", "diff", "--find-renames", base];
+        const pathspecs = ["--", ...batch.map((path) => `:(literal)${path}`)];
+        stat.push((await this.gitExecutor.exec([...args, "--stat", ...pathspecs], { env, timeout: 30_000 })).stdout);
+        patch.push((await this.gitExecutor.exec([...args, ...pathspecs], { env, timeout: 30_000 })).stdout);
+      }
+      return { stat: stat.join("").trimEnd(), patch: patch.join("") };
+    });
+  }
+
   private async withIntentToAddIndex<T>(
     cwd: string,
     run: (env: NodeJS.ProcessEnv, untracked: ReadonlySet<string>) => Promise<T>,
@@ -259,7 +279,7 @@ export class GitComparisonService {
     const add = (batch: string[]) => this.gitExecutor.exec(
       ["-C", cwd, "add", "-N", "--", ...batch.map((path) => `:(literal)${path}`)], { env, timeout: 10_000 },
     );
-    for (const batch of batchReviewPaths(filePath ? [filePath] : paths)) {
+    for (const batch of batchLiteralPaths(filePath ? [filePath] : paths)) {
       try {
         await add(batch);
       } catch (error) {
@@ -623,25 +643,6 @@ function hasErrorCode(error: unknown, code: string): boolean {
 function gitErrorDetail(error: unknown): string {
   if (error instanceof Error && "stderr" in error && typeof error.stderr === "string") return error.stderr;
   return String(error);
-}
-
-function batchReviewPaths(paths: readonly string[]): string[][] {
-  const batches: string[][] = [];
-  let batch: string[] = [];
-  let chars = 0;
-  for (const path of paths) {
-    // Leave room for quoting and separators within the Windows command-line limit.
-    const length = `:(literal)${path}`.length + 3;
-    if (batch.length && (batch.length >= 128 || chars + length > 20_000)) {
-      batches.push(batch);
-      batch = [];
-      chars = 0;
-    }
-    batch.push(path);
-    chars += length;
-  }
-  if (batch.length) batches.push(batch);
-  return batches;
 }
 
 async function isMissingReviewFile(cwd: string, filePath: string): Promise<boolean> {

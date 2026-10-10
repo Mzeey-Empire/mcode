@@ -11,6 +11,21 @@ const UTILITY_MODEL_DEFAULTS: Record<string, string> = {
   copilot: "gpt-4.1-mini",
 };
 
+/** Neither the configured utility provider nor the Claude fallback can run completions. */
+export class NoCompletionProviderError extends Error {
+  constructor() {
+    super("No completion-capable provider available for utility tasks");
+    this.name = "NoCompletionProviderError";
+  }
+}
+
+/** One finished utility completion and the provider and model that produced it. */
+export interface UtilityCompletion {
+  text: string;
+  provider: ProviderId;
+  model: string;
+}
+
 /**
  * Middleware that resolves the configured utility provider+model
  * and exposes a single `complete()` method for all lightweight AI tasks.
@@ -28,9 +43,9 @@ export class UtilityCompletionService {
 
   /**
    * Run a one-shot completion using the configured utility model.
-   * Returns the generated text and the model ID that produced it.
+   * Returns the generated text and the provider and model ID that produced it.
    */
-  async complete(prompt: string, cwd: string, options: CompletionOptions = {}): Promise<{ text: string; model: string }> {
+  async complete(prompt: string, cwd: string, options: CompletionOptions = {}): Promise<UtilityCompletion> {
     const settings = this.settingsService.get();
     const { provider: resolvedProvider, model: resolvedModel } =
       this.resolveProviderAndModel(settings);
@@ -51,14 +66,14 @@ export class UtilityCompletionService {
       agent = this.providerRegistry.resolve(provider);
 
       if (!isCompletionCapable(agent)) {
-        throw new Error("No completion-capable provider available for utility tasks");
+        throw new NoCompletionProviderError();
       }
     }
 
     model = model || UTILITY_MODEL_DEFAULTS[provider] || "claude-haiku-4-5-20251001";
 
     const text = await agent.complete(prompt, model, cwd, options);
-    return { text, model };
+    return { text, provider, model };
   }
 
   private resolveProviderAndModel(settings: {

@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 import { validateBranchName } from "@mcode/shared";
 import type { WorkspaceRepo } from "../../persistence/workspace-repo.js";
 import { GitComparisonService } from "../git-comparison-service.js";
+import { GitPushService } from "../git-push-service.js";
 import { GitRepositoryService } from "../git-repository-service.js";
 import { GitWorktreeService } from "../git-worktree-service.js";
 
@@ -70,6 +71,129 @@ describe("GitRepositoryService.push", () => {
     await expect(gitService.push("/repo", "--force")).rejects.toThrow(
       "Branch name cannot start with '-'",
     );
+    expect(execFn).not.toHaveBeenCalled();
+  });
+});
+
+describe("GitPushService", () => {
+  const sha = "d".repeat(40);
+  const reviewTarget = {
+    workspaceId: "workspace-1",
+    worktreePath: "/review",
+    localBranch: "mcode/pr-42",
+    pushRemote: "contrib",
+    pushRef: "feature/review",
+    expectedHeadRepositoryUrl: "https://github.com/contributor/mcode",
+  };
+
+  function createPushService(options: { upstream?: boolean; review?: boolean } = {}) {
+    const mock = createMockGitExecutor();
+    mock.execFn.mockImplementation(async (args) => {
+      if (args.includes("--symbolic-full-name") && !options.upstream) {
+        throw Object.assign(new Error("no upstream configured"), { code: 128 });
+      }
+      return { stdout: "", stderr: "" };
+    });
+    const pushPullRequestReviewBranch = vi.fn().mockResolvedValue(undefined);
+    const scheduleBumpAfterPush = vi.fn();
+    const service = new GitPushService(
+      mock.executor,
+      { push: vi.fn(), getCurrentBranchAt: vi.fn() },
+      { pushPullRequestReviewBranch },
+      {
+        resolvePushTarget: () => options.review
+          ? { kind: "review", target: reviewTarget }
+          : { kind: "standard" },
+      },
+      { findByWorkspaceBranch: () => ["thread-ci"], scheduleBumpAfterPush },
+      { findById: vi.fn() },
+    );
+    return { service, execFn: mock.execFn, pushPullRequestReviewBranch, scheduleBumpAfterPush };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(validateBranchName).mockImplementation(() => undefined);
+  });
+
+  it("pushes the captured SHA to the captured branch without force, then sets a missing upstream", async () => {
+    const { service, execFn, scheduleBumpAfterPush } = createPushService();
+    const destination = service.captureDestination("workspace-1", null, "feat/x");
+
+    await service.pushCommit({ workspaceId: "workspace-1", repoPath: "/repo", sha, destination });
+
+    const calls = execFn.mock.calls.map(([args]) => args);
+    expect(calls).toContainEqual(["-C", "/repo", "push", "origin", `${sha}:refs/heads/feat/x`]);
+    expect(calls.flat()).not.toContain("--force");
+    expect(calls.at(-1)).toEqual(["-C", "/repo", "branch", "--set-upstream-to=origin/feat/x", "feat/x"]);
+    expect(scheduleBumpAfterPush).toHaveBeenCalledWith("thread-ci");
+  });
+
+  it("leaves an existing upstream alone", async () => {
+    const { service, execFn } = createPushService({ upstream: true });
+
+    await service.pushCommit({
+      workspaceId: "workspace-1",
+      repoPath: "/repo",
+      sha,
+      destination: { kind: "standard", remote: "origin", branch: "feat/x" },
+    });
+
+    expect(execFn.mock.calls.some(([args]) => args.includes("--set-upstream-to=origin/feat/x"))).toBe(false);
+  });
+
+  it("does not report a landed push as failed when setting the upstream fails", async () => {
+    const { service, execFn } = createPushService();
+    execFn.mockImplementation(async (args) => {
+      if (args.includes("--symbolic-full-name")) throw Object.assign(new Error("no upstream"), { code: 128 });
+      if (args.includes("branch")) throw new Error("branch config is locked");
+      return { stdout: "", stderr: "" };
+    });
+
+    await expect(service.pushCommit({
+      workspaceId: "workspace-1",
+      repoPath: "/repo",
+      sha,
+      destination: { kind: "standard", remote: "origin", branch: "feat/x" },
+    })).resolves.toBeUndefined();
+  });
+
+  it("pushes a commit to a linked Review task's captured target by SHA", async () => {
+    const { service, pushPullRequestReviewBranch } = createPushService({ review: true });
+    const destination = service.captureDestination("workspace-1", "thread-42", "mcode/pr-42");
+
+    await service.pushCommit({ workspaceId: "workspace-1", repoPath: "/review", sha, destination });
+
+    expect(destination).toEqual({
+      kind: "review",
+      worktreePath: "/review",
+      remote: "contrib",
+      pushRef: "feature/review",
+      localBranch: "mcode/pr-42",
+      expectedHeadRepositoryUrl: reviewTarget.expectedHeadRepositoryUrl,
+    });
+    expect(pushPullRequestReviewBranch).toHaveBeenCalledWith(
+      "/review", "contrib", "feature/review", reviewTarget.expectedHeadRepositoryUrl, sha,
+    );
+  });
+
+  it("refuses to capture a Review target for another branch", () => {
+    const { service } = createPushService({ review: true });
+
+    expect(() => service.captureDestination("workspace-1", "thread-42", "main")).toThrow(
+      "Review task push target does not match",
+    );
+  });
+
+  it("refuses to push anything but a full object id", async () => {
+    const { service, execFn } = createPushService();
+
+    await expect(service.pushCommit({
+      workspaceId: "workspace-1",
+      repoPath: "/repo",
+      sha: "HEAD",
+      destination: { kind: "standard", remote: "origin", branch: "feat/x" },
+    })).rejects.toThrow("Invalid commit SHA");
     expect(execFn).not.toHaveBeenCalled();
   });
 });

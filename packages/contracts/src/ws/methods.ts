@@ -87,6 +87,12 @@ import { HookExecutionRecordSchema } from "../models/hook-execution.js";
 import { NarrativeEntrySchema, TurnRangeSchema } from "../models/narrative-entry.js";
 import { WorktreeSchema, BranchComparisonSchema, GitRefNameSchema, GitRemoteUrlSchema, GitBranchNameSchema, GitRefsListParamsSchema, GitRefsListResultSchema } from "../git.js";
 import { GitCommitSchema } from "../models/git-commit.js";
+import {
+  GitCommitParamsSchema,
+  GitCommitResultSchema,
+  GitGenerateCommitMessageParamsSchema,
+  GitGenerateCommitMessageResultSchema,
+} from "../git-commit.js";
 import { PrInfoSchema, PrDraftSchema, CreatePrResultSchema, ChecksStatusSchema, PullRequestTargetsListParamsSchema, PullRequestTargetsListResultSchema } from "../github.js";
 import { TurnSnapshotSchema } from "../models/turn-snapshot.js";
 import { AgentStopResultSchema, TurnRuntimeSnapshotSchema } from "../models/turn-runtime.js";
@@ -1297,6 +1303,16 @@ export const WS_METHODS = lazySchema(() => ({
       threadId: z.string().optional(),
     }),
     result: z.object({ success: z.boolean() }),
+  },
+  /** Generate a commit subject and body from the selected Review paths with the utility model. */
+  "git.generateCommitMessage": {
+    params: GitGenerateCommitMessageParamsSchema(),
+    result: GitGenerateCommitMessageResultSchema(),
+  },
+  /** Commit the selected paths once per requestId, then optionally push the new SHA. */
+  "git.commit": {
+    params: GitCommitParamsSchema(),
+    result: GitCommitResultSchema(),
   },
   "github.generatePrDraft": {
     params: z.object({
