@@ -1,3 +1,4 @@
+import { SUBAGENT_REPORTING } from "@mcode/contracts";
 /**
  * Claude Agent SDK provider adapter.
  * Implements IAgentProvider using the v1 query() API with a prompt queue pattern.
@@ -487,6 +488,7 @@ export class ClaudeProvider
     ProtocolAdapter<ClaudeSessionState>
 {
   readonly id = "claude" as const;
+  readonly subagentReporting = SUBAGENT_REPORTING.claude;
   readonly descriptor = Object.freeze({ id: "claude" as const, capabilities: [
     ...(["build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "clean-fork", "orchestration", "browser-access", "thread-control"] as const).map((name) => ({ name, support: "supported" as const })),
     { name: "provider-continuation" as const, support: "unsupported" as const },
