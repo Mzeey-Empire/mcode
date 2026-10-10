@@ -6,6 +6,7 @@
 
 import { injectable, inject, delay } from "tsyringe";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
+import { FILE_LIST_MAX_PATHS, FILE_VIEW_TEXT_MAX_BYTES, FILE_CHANGES_MAX_ENTRIES, WORKSPACE_IMAGE_MAX_BYTES, type WorkspaceFileList, type WorkspaceFileChanges, type FileReadResult } from "@mcode/contracts";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
@@ -17,6 +18,15 @@ const MAX_CHANGED_PATHS = 100;
 const LIST_WALK_MAX_DEPTH = 8;
 const LIST_WALK_MAX_ENTRIES = 5000;
 const LIST_WALK_SKIPPED_DIRS = new Set([".git", "node_modules"]);
+
+/** Missing workspace file, preserved as a typed error by the RPC router. */
+export class WorkspaceFileNotFoundError extends Error {
+  readonly code = "not_found";
+
+  constructor() {
+    super("This file no longer exists.");
+  }
+}
 
 /** Handles file listing and content reading for workspaces and threads. */
 @injectable()
@@ -37,17 +47,22 @@ export class FileService {
    * untracked files that are not gitignored. The `-z` output is NUL-delimited
    * and unquoted, so non-ASCII and whitespace-bearing names arrive verbatim.
    */
-  async list(workspaceId: string, threadId?: string): Promise<string[]> {
+  async list(workspaceId: string, threadId?: string): Promise<WorkspaceFileList> {
     const cwd = this.resolveWorkingDir(workspaceId, threadId);
 
     try {
-      const { stdout } = await this.gitExecutor.exec(
+      const paths = new Set<string>();
+      let truncated = false;
+      await this.readGitRecords(
         ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-        { cwd },
+        cwd,
+        (path) => {
+          if (paths.has(path)) return;
+          if (paths.size < FILE_LIST_MAX_PATHS) paths.add(path);
+          else truncated = true;
+        },
       );
-      return stdout
-        .split("\0")
-        .filter((line: string) => line.length > 0);
+      return { paths: [...paths], truncated };
     } catch (err) {
       // Non-git folders have no ls-files source; a real repo failure still throws.
       if (NodeFS.existsSync(NodePath.join(cwd, ".git"))) {
@@ -57,6 +72,54 @@ export class FileService {
       }
       return listDirectoryTree(cwd);
     }
+  }
+
+  /** Returns bounded file marks relative to HEAD for the selected checkout. */
+  async changes(workspaceId: string, threadId?: string): Promise<WorkspaceFileChanges> {
+    const status = await this.readStatus(this.resolveWorkingDir(workspaceId, threadId));
+    if (status === null) return { git: false, entries: [], truncated: false };
+    const entries: WorkspaceFileChanges["entries"] = [];
+    for (const { path, status: mark } of status) {
+      if (mark.includes("D")) continue;
+      entries.push({ path, mark: /[?AR]/.test(mark) ? "A" : "M" });
+      if (entries.length > FILE_CHANGES_MAX_ENTRIES) break;
+    }
+    return { git: true, entries: entries.slice(0, FILE_CHANGES_MAX_ENTRIES), truncated: entries.length > FILE_CHANGES_MAX_ENTRIES };
+  }
+
+  private async readStatus(cwd: string): Promise<Array<{ path: string; status: string }> | null> {
+    try {
+      const entries: Array<{ path: string; status: string }> = [];
+      let skipSource = false;
+      await this.readGitRecords(
+        ["status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd,
+        (record) => {
+          if (skipSource) { skipSource = false; return; }
+          if (record.length < 4) return;
+          const status = record.slice(0, 2);
+          entries.push({ path: record.slice(3), status });
+          skipSource = /[RC]/.test(status);
+        },
+      );
+      return entries;
+    } catch (error) {
+      if (NodeFS.existsSync(NodePath.join(cwd, ".git"))) throw error;
+      return null;
+    }
+  }
+
+  private async readGitRecords(args: string[], cwd: string, onRecord: (record: string) => void): Promise<void> {
+    let pending = "";
+    await this.gitExecutor.exec(args, {
+      cwd,
+      retainStdout: false,
+      onStdout(chunk) {
+        const records = (pending + chunk).split("\0");
+        pending = records.pop() ?? "";
+        for (const record of records) if (record) onRecord(record);
+      },
+    });
+    if (pending) onRecord(pending);
   }
 
   /**
@@ -78,15 +141,12 @@ export class FileService {
 
     let paths: string[];
     try {
-      const { stdout } = await this.gitExecutor.exec(
-        ["status", "--porcelain", "--untracked-files=all", "-z"],
-        { cwd },
-      );
-      paths = parsePorcelainZ(stdout);
+      const status = await this.readStatus(cwd);
+      paths = status === null ? listDirectoryTree(cwd).paths : status.map((entry) => entry.path);
     } catch {
       // Non-git folders fingerprint the same bounded listing `list` falls back to.
       if (NodeFS.existsSync(NodePath.join(cwd, ".git"))) return null;
-      paths = listDirectoryTree(cwd);
+      paths = listDirectoryTree(cwd).paths;
     }
 
     // Paths may legally contain "\n" on POSIX filesystems, so fingerprints
@@ -102,18 +162,62 @@ export class FileService {
    * Read file content by relative path within a workspace root.
    * Validates path stays within root to prevent traversal attacks.
    */
-  read(
+  async read(
     workspaceId: string,
     relativePath: string,
     threadId?: string,
-  ): string {
-    const canonicalPath = this.validateWorkspaceRelativePath(
-      workspaceId,
-      relativePath,
-      threadId,
-    );
+    as?: "text",
+  ): Promise<FileReadResult> {
+    const cwd = this.resolveWorkingDir(workspaceId, threadId);
+    const { path, fullPath } = validateWorkspaceFilePath(cwd, relativePath, this.hostRuntime.platform);
+    const size = NodeFS.statSync(fullPath).size;
+    const mime = workspaceImageMime(path);
+    if (mime && as !== "text") {
+      if (size > WORKSPACE_IMAGE_MAX_BYTES.file) return { kind: "too-large", path, size, limit: WORKSPACE_IMAGE_MAX_BYTES.file };
+      const query = new URLSearchParams({ path, use: "file" });
+      if (threadId) query.set("threadId", threadId);
+      return { kind: "image", path, size, mime, url: `/workspace-images/${encodeURIComponent(workspaceId)}?${query}` };
+    }
+    const [bytes, changedLines] = await Promise.all([
+      readWorkspaceFileBytes(fullPath, FILE_VIEW_TEXT_MAX_BYTES), this.readChangedLines(cwd, path),
+    ]);
+    const oversized = bytes.length > FILE_VIEW_TEXT_MAX_BYTES;
+    const text = decodeText(bytes, oversized);
+    if (text && oversized) return { kind: "too-large", path, size: Math.max(size, bytes.length), limit: FILE_VIEW_TEXT_MAX_BYTES };
+    return text === null
+      ? { kind: "binary", path, size: Math.max(size, bytes.length) }
+      : { kind: "text", path, size: bytes.length, ...text, changedLines };
+  }
 
-    return NodeFS.readFileSync(canonicalPath, "utf-8");
+  private async readChangedLines(cwd: string, path: string): Promise<Array<[number, number]> | null> {
+    let pending = "";
+    let added = false;
+    let hasDiff = false;
+    const ranges: Array<[number, number]> = [];
+    try {
+      await this.gitExecutor.exec(
+        ["diff", "--no-color", "--no-ext-diff", "-U0", "HEAD", "--", path],
+        {
+          cwd, env: { GIT_LITERAL_PATHSPECS: "1" }, retainStdout: false,
+          onStdout(chunk) {
+            if (chunk) hasDiff = true;
+            const lines = (pending + chunk).split("\n");
+            pending = lines.pop() ?? "";
+            for (const line of lines) {
+              if (line.startsWith("new file mode ")) added = true;
+              const range = changedLineRange(line);
+              if (range) ranges.push(range);
+            }
+          },
+        },
+      );
+      // Empty diffs include untracked files; new-file diffs are staged additions.
+      return !hasDiff || added ? null : ranges;
+    } catch (error) {
+      const details = error instanceof Error && "stderr" in error ? String(error.stderr) : String(error);
+      if (/not a git repository|bad revision 'HEAD'|ambiguous argument 'HEAD'/.test(details)) return null;
+      throw error;
+    }
   }
 
   /**
@@ -125,26 +229,9 @@ export class FileService {
     relativePath: string,
     threadId?: string,
   ): void {
-    this.validateWorkspaceRelativePath(workspaceId, relativePath, threadId);
-  }
-
-  private validateWorkspaceRelativePath(
-    workspaceId: string,
-    relativePath: string,
-    threadId?: string,
-  ): string {
-    assertRelativeFilePath(relativePath);
     const rootDir = this.resolveWorkingDir(workspaceId, threadId);
-    const fullPath = NodePath.resolve(rootDir, relativePath);
-    assertFileExists(fullPath, relativePath);
-    const canonicalPath = assertPathWithinRoot(
-      rootDir,
-      fullPath,
-      relativePath,
-      this.hostRuntime.platform,
-    );
+    const { fullPath } = validateWorkspaceFilePath(rootDir, relativePath, this.hostRuntime.platform);
     assertFileSize(fullPath, relativePath);
-    return canonicalPath;
   }
 
   /**
@@ -152,7 +239,6 @@ export class FileService {
    * Validates that the thread exists and belongs to the given workspace to prevent
    * cross-workspace file access.
    */
-  /** Resolves the local root used for direct file operations in one workspace scope. */
   resolveWorkingDir(
     workspaceId: string,
     threadId?: string,
@@ -181,38 +267,100 @@ export class FileService {
   }
 }
 
-function assertRelativeFilePath(relativePath: string): void {
-  if (NodePath.isAbsolute(relativePath) || relativePath.includes("..") || relativePath.includes("\0")) {
-    throw new Error(`Invalid file path: ${relativePath}`);
-  }
-}
-
-function assertFileExists(fullPath: string, relativePath: string): void {
-  if (!NodeFS.existsSync(fullPath)) {
-    throw new Error(`File not found: ${relativePath}`);
-  }
-}
-
-function assertPathWithinRoot(
+/** Validates an existing file and returns its normalized relative and canonical paths. */
+export function validateWorkspaceFilePath(
   rootDir: string,
-  fullPath: string,
   relativePath: string,
-  platform: NodeJS.Platform,
-): string {
-  const canonicalRoot = normalizePathForComparison(NodeFS.realpathSync(rootDir), platform);
-  const canonicalPath = normalizePathForComparison(NodeFS.realpathSync(fullPath), platform);
-  const rootWithSeparator = canonicalRoot.endsWith(NodePath.sep)
-    ? canonicalRoot
-    : canonicalRoot + NodePath.sep;
-
-  if (!canonicalPath.startsWith(rootWithSeparator) && canonicalPath !== canonicalRoot) {
-    throw new Error(`File path escapes workspace root: ${relativePath}`);
+  platform?: NodeJS.Platform,
+): { path: string; fullPath: string } {
+  const segments = relativePath.split(/[\\/]/);
+  if (NodePath.isAbsolute(relativePath) || /[:\0]/.test(relativePath) || segments.some((segment) => segment === ".." || segment === "")) {
+    throw new Error("Invalid file path");
   }
-
-  return canonicalPath;
+  const path = segments.join("/");
+  const fullPath = NodePath.resolve(rootDir, path);
+  try {
+    return { path, fullPath: assertPathWithinRoot(rootDir, fullPath, platform) };
+  } catch (error) {
+    if (isMissingFile(error)) throw new WorkspaceFileNotFoundError();
+    throw error;
+  }
 }
 
-function normalizePathForComparison(path: string, platform: NodeJS.Platform): string {
+function assertPathWithinRoot(rootDir: string, fullPath: string, platform?: NodeJS.Platform): string {
+  const canonicalRoot = normalizePathForComparison(NodeFS.realpathSync(rootDir), platform);
+  const realPath = NodeFS.realpathSync(fullPath);
+  const canonicalPath = normalizePathForComparison(realPath, platform);
+  const relative = NodePath.relative(canonicalRoot, canonicalPath);
+  if (relative === ".." || relative.startsWith(`..${NodePath.sep}`) || NodePath.isAbsolute(relative)) {
+    throw new Error("File path escapes workspace root");
+  }
+  if (!NodeFS.statSync(realPath).isFile()) throw new WorkspaceFileNotFoundError();
+  return realPath;
+}
+
+function isMissingFile(error: unknown): boolean {
+  return error instanceof Error && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR");
+}
+
+const IMAGE_MIME_TYPES: Readonly<Record<string, string>> = {
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+  ".webp": "image/webp", ".avif": "image/avif", ".bmp": "image/bmp", ".ico": "image/x-icon", ".svg": "image/svg+xml",
+};
+
+/** MIME allowlist shared by structured reads and the workspace image route. */
+export function workspaceImageMime(path: string): string | undefined {
+  return IMAGE_MIME_TYPES[NodePath.extname(path).toLowerCase()];
+}
+
+/** Reads at most limit + 1 bytes so callers can reject oversized or growing files. */
+export async function readWorkspaceFileBytes(path: string, limit: number): Promise<Buffer> {
+  try {
+    const file = await NodeFS.promises.open(path, "r");
+    try {
+      const buffer = Buffer.alloc(limit + 1);
+      let length = 0;
+      while (length < buffer.length) {
+        const { bytesRead } = await file.read(buffer, length, buffer.length - length, length);
+        if (bytesRead === 0) break;
+        length += bytesRead;
+      }
+      return buffer.subarray(0, length);
+    } finally {
+      await file.close();
+    }
+  } catch (error) {
+    if (isMissingFile(error)) throw new WorkspaceFileNotFoundError();
+    throw error;
+  }
+}
+
+function decodeText(bytes: Buffer, partial: boolean): Pick<Extract<FileReadResult, { kind: "text" }>, "content" | "encoding"> | null {
+  const encoding = textEncoding(bytes);
+  if (encoding === null) return null;
+  try {
+    return { encoding, content: new TextDecoder(encoding, { fatal: true }).decode(bytes, { stream: partial }) };
+  } catch {
+    return null;
+  }
+}
+
+function changedLineRange(line: string): [number, number] | null {
+  const match = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line);
+  if (!match) return null;
+  const start = Number(match[1]);
+  const count = Number(match[2] ?? 1);
+  return count > 0 ? [start, start + count - 1] : null;
+}
+
+function textEncoding(bytes: Buffer): "utf-8" | "utf-16le" | "utf-16be" | null {
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return "utf-16le";
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return "utf-16be";
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return "utf-8";
+  return bytes.subarray(0, 8192).includes(0) ? null : "utf-8";
+}
+
+function normalizePathForComparison(path: string, platform?: NodeJS.Platform): string {
   return platform === "win32" ? path.toLowerCase() : path;
 }
 
@@ -224,25 +372,6 @@ function assertFileSize(fullPath: string, relativePath: string): void {
       `File too large for injection: ${relativePath} (${size} bytes, max ${maxFileSize})`,
     );
   }
-}
-
-/**
- * Parses `git status --porcelain -z` output into the current path of each entry.
- * Entries are `XY <path>` NUL-terminated with no quoting; rename/copy entries
- * append a second NUL field holding the source path, which is consumed so it
- * is not reported as a separate path.
- */
-function parsePorcelainZ(stdout: string): string[] {
-  const tokens = stdout.split("\0").filter((token) => token.length > 0);
-  const paths: string[] = [];
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]!;
-    if (token.length < 4) continue;
-    const status = token.slice(0, 2);
-    paths.push(token.slice(3));
-    if (status.includes("R") || status.includes("C")) i += 1;
-  }
-  return paths;
 }
 
 /** Reports the symmetric difference between a stored fingerprint and the current path list. */
@@ -265,12 +394,13 @@ function diffFingerprints(
  * cannot provide an ignore-aware listing. Skips `.git` and `node_modules`
  * and stops at the depth/entry caps so huge trees stay cheap.
  */
-function listDirectoryTree(root: string): string[] {
+function listDirectoryTree(root: string): WorkspaceFileList {
   const results: string[] = [];
+  let truncated = false;
   const walk = (dir: string, depth: number): void => {
-    if (depth > LIST_WALK_MAX_DEPTH || results.length >= LIST_WALK_MAX_ENTRIES) return;
+    if (depth > LIST_WALK_MAX_DEPTH) { truncated = true; return; }
     for (const entry of NodeFS.readdirSync(dir, { withFileTypes: true })) {
-      if (results.length >= LIST_WALK_MAX_ENTRIES) return;
+      if (results.length >= LIST_WALK_MAX_ENTRIES) { truncated = true; return; }
       if (entry.isDirectory() && LIST_WALK_SKIPPED_DIRS.has(entry.name)) continue;
       const relative = NodePath.relative(root, NodePath.join(dir, entry.name)).replaceAll(NodePath.sep, "/");
       if (entry.isDirectory()) {
@@ -281,5 +411,5 @@ function listDirectoryTree(root: string): string[] {
     }
   };
   walk(root, 0);
-  return results;
+  return { paths: results, truncated };
 }

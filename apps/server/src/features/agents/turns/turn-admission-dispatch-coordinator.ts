@@ -512,7 +512,7 @@ export class TurnAdmissionDispatchCoordinator {
   ): Promise<PreparedTurnDispatch> {
     const sourceTurnId = prepared.command.sourceTurnId ?? NodeCrypto.randomUUID();
     const parentStartInput = this.prepareParentTurnStartInput(prepared, lease, sourceTurnId, attachmentData, review);
-    const wirePayload = this.buildWirePayload(prepared);
+    const wirePayload = await this.buildWirePayload(prepared);
     await this.commitParentStart(prepared, lease, sourceTurnId, parentStartInput);
     await this.publishCommittedEffects(prepared, sourceTurnId);
     const request = await this.buildTurnRequest(prepared, lease, sourceTurnId, attachmentData, cwd, wirePayload, review);
@@ -957,7 +957,7 @@ export class TurnAdmissionDispatchCoordinator {
     if (providerId === "devin" && value !== undefined) target.devin_mode = value;
   }
 
-  private buildWirePayload(prepared: PreparedCommand): string {
+  private async buildWirePayload(prepared: PreparedCommand): Promise<string> {
     let payload = this.withPlanInstructions(prepared);
     if (this.effectiveInteractionMode(prepared.command) === "plan" && prepared.command.providerWireOverride === undefined) {
       payload = this.plans.buildQuestionPrompt(payload);
@@ -992,14 +992,17 @@ export class TurnAdmissionDispatchCoordinator {
     return `<reply-to role="${target.role}" sequence="${target.sequence}">\n${escapeXml(body)}${suffix}\n</reply-to>\n\n${payload}`;
   }
 
-  private injectMentionFileContents(prepared: PreparedCommand, text: string): string {
+  private async injectMentionFileContents(prepared: PreparedCommand, text: string): Promise<string> {
     const paths = new Set<string>();
     const files: Array<{ path: string; content: string }> = [];
     for (const mention of [...prepared.mentions, ...prepared.commentMentions]) {
       if (mention.kind !== "file" || paths.has(mention.path)) continue;
       if (!this.files) throw new Error("File mention injection is unavailable");
       paths.add(mention.path);
-      files.push({ path: mention.path, content: this.files.read(prepared.workspace.id, mention.path, prepared.command.threadId) });
+      this.files.validateMentionPath(prepared.workspace.id, mention.path, prepared.command.threadId);
+      const result = await this.files.read(prepared.workspace.id, mention.path, prepared.command.threadId, "text");
+      if (result.kind !== "text") throw new Error(`Cannot include a ${result.kind} file mention`);
+      files.push({ path: mention.path, content: result.content });
     }
     return buildInjectedFileMessage(text, files);
   }

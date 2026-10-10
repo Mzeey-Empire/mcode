@@ -100,7 +100,7 @@ import {
   isThreadStartupRpcMethod,
   routeThreadStartupRpc,
 } from "../../features/thread-startup/transport/thread-startup-rpc.js";
-import type { FileService } from "../../features/projects/files/file-service.js";
+import { WorkspaceFileNotFoundError, type FileService } from "../../features/projects/files/file-service.js";
 import { isFileRpcMethod, routeFileRpc } from "../../features/projects/files/transport/file-rpc.js";
 import { isAttachmentRpcMethod, routeAttachmentRpc } from "../../features/attachments/transport/attachment-rpc.js";
 import type { AttachmentService } from "../../features/attachments/storage/attachment-service.js";
@@ -453,6 +453,9 @@ function validateRpcParameters(
 
 function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResponse {
   const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof WorkspaceFileNotFoundError) {
+    return { id: request.id, error: { code: error.code, message } };
+  }
   if (error instanceof PlanServiceError) {
     return { id: request.id, error: { code: error.code, message, data: { latestVersion: error.latestVersion } } };
   }

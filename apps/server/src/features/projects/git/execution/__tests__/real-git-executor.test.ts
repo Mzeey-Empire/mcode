@@ -186,6 +186,19 @@ describe("RealGitExecutor", () => {
     await expect(result).rejects.toMatchObject({ code: 128, stderr: "fatal: denied\n" });
   });
 
+  it("streams split UTF-8 paths without retaining the full listing", async () => {
+    const child = fakeChild();
+    spawnMock.mockReturnValue(child);
+    const output: string[] = [];
+    const result = executor.exec(["ls-files", "-z"], { retainStdout: false, onStdout: (chunk) => output.push(chunk) });
+    await waitForSpawn();
+    child.stdout.emit("data", Buffer.from([0x63, 0x61, 0x66, 0xc3]));
+    child.stdout.emit("data", Buffer.from([0xa9, 0x2e, 0x74, 0x73, 0]));
+    child.emit("close", 0, null);
+    await expect(result).resolves.toEqual({ stdout: "", stderr: "" });
+    expect(output.join("")).toBe("café.ts\0");
+  });
+
   it("kills an observed command when its timeout expires", async () => {
     vi.useFakeTimers();
     try {

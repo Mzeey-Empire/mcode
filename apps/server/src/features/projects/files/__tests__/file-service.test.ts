@@ -4,21 +4,28 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FileService } from "../file-service.js";
+import type { GitExecOptions } from "../../git/execution/types.js";
 
 function makeService(overrides?: {
   exec?: ReturnType<typeof vi.fn>;
+  root?: string;
 }): { service: FileService; exec: ReturnType<typeof vi.fn> } {
   const exec = overrides?.exec ?? vi.fn().mockResolvedValue({ stdout: "" });
-  const workspaceRepo = { findById: vi.fn().mockReturnValue({ path: "C:/workspace" }) };
+  const root = overrides?.root ?? "C:/workspace";
+  const workspaceRepo = { findById: vi.fn().mockReturnValue({ path: root }) };
   const threadRepo = {
     findById: vi.fn().mockReturnValue({ id: "thread-1", workspace_id: "workspace-1" }),
   };
-  const gitWorktrees = { resolveWorkingDir: vi.fn().mockReturnValue("C:/workspace") };
+  const gitWorktrees = { resolveWorkingDir: vi.fn().mockReturnValue(root) };
   const service = new FileService(
     workspaceRepo as never,
     threadRepo as never,
     gitWorktrees as never,
-    { exec } as never,
+    { exec: async (args: string[], opts?: GitExecOptions) => {
+      const result = await exec(args, opts);
+      opts?.onStdout?.(result.stdout);
+      return result;
+    } },
     { platform: process.platform } as never,
   );
   return { service, exec };
@@ -41,8 +48,8 @@ describe("FileService.refresh", () => {
     });
     expect(exec).toHaveBeenCalledTimes(3);
     expect(exec).toHaveBeenLastCalledWith(
-      ["status", "--porcelain", "--untracked-files=all", "-z"],
-      { cwd: "C:/workspace" },
+      ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+      { cwd: "C:/workspace", retainStdout: false, onStdout: expect.any(Function) },
     );
   });
 
@@ -144,9 +151,8 @@ describe("FileService.list non-git fallback", () => {
 
     const files = await makeTreeService(root).list("workspace-1");
 
-    expect(files).toContain("src/a.ts");
-    expect(files).toContain("README.md");
-    expect(files).not.toContain("node_modules/pkg/x.js");
+    expect(files.paths.sort()).toEqual(["README.md", "src/a.ts"]);
+    expect(files.truncated).toBe(false);
   });
 
   it("rethrows the git error when the workspace is a repository", async () => {
@@ -155,5 +161,136 @@ describe("FileService.list non-git fallback", () => {
     NodeFS.mkdirSync(NodePath.join(root, ".git"));
 
     await expect(makeTreeService(root).list("workspace-1")).rejects.toThrow("Failed to list files");
+  });
+});
+
+describe("FileService viewer", () => {
+  const tempDirs: string[] = [];
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) NodeFS.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function fixture() {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-file-view-"));
+    tempDirs.push(root);
+    return { root, ...makeService({ root }) };
+  }
+
+  it.each(["../x", "a/../../x", "a\\..\\x", "/absolute", "C:\\file.ts", "C:file.ts", "\\\\host\\share", "a//b", "a\\\\b", "", "x\0y", "file.ts:stream"])("rejects unsafe path %j", async (path) => {
+    const { service } = fixture();
+    await expect(service.read("workspace-1", path)).rejects.toThrow("Invalid file path");
+  });
+
+  it("accepts dots inside names and normalizes nested separators", async () => {
+    const { root, service } = fixture();
+    NodeFS.mkdirSync(NodePath.join(root, "src"));
+    NodeFS.writeFileSync(NodePath.join(root, "src/a..b.ts"), "legal");
+    await expect(service.read("workspace-1", "src\\a..b.ts")).resolves.toEqual({
+      kind: "text", path: "src/a..b.ts", size: 5, encoding: "utf-8", content: "legal", changedLines: null,
+    });
+  });
+
+  it("rejects escaping symlinks and returns a typed missing-file error", async () => {
+    const { root, service } = fixture();
+    const outside = fixture().root;
+    NodeFS.writeFileSync(NodePath.join(outside, "secret.ts"), "secret");
+    NodeFS.symlinkSync(outside, NodePath.join(root, "escape"), "junction");
+    await expect(service.read("workspace-1", "escape/secret.ts")).rejects.toThrow("escapes workspace root");
+    await expect(service.read("workspace-1", "missing.ts")).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("reads 1 MB text while retaining the 256 KB mention cap", async () => {
+    const { root, service } = fixture();
+    const content = "x".repeat(1024 * 1024);
+    NodeFS.writeFileSync(NodePath.join(root, "large.txt"), content);
+    await expect(service.read("workspace-1", "large.txt")).resolves.toEqual({
+      kind: "text", path: "large.txt", size: 1048576, encoding: "utf-8", content, changedLines: null,
+    });
+    expect(() => service.validateMentionPath("workspace-1", "large.txt")).toThrow("too large for injection");
+  });
+
+  it("returns too-large for 3 MB text and images above 20 MB", async () => {
+    const { root, service } = fixture();
+    NodeFS.writeFileSync(NodePath.join(root, "large.txt"), Buffer.alloc(3 * 1024 * 1024, 120));
+    await expect(service.read("workspace-1", "large.txt")).resolves.toEqual({ kind: "too-large", path: "large.txt", size: 3145728, limit: 2097152 });
+    NodeFS.writeFileSync(NodePath.join(root, "large.png"), Buffer.alloc(20 * 1024 * 1024 + 1));
+    await expect(service.read("workspace-1", "large.png")).resolves.toEqual({ kind: "too-large", path: "large.png", size: 20971521, limit: 20971520 });
+  });
+
+  it("accepts text at exactly 2 MB and classifies oversized NUL-bearing files as binary", async () => {
+    const { root, service } = fixture();
+    const content = "x".repeat(2 * 1024 * 1024);
+    NodeFS.writeFileSync(NodePath.join(root, "limit.txt"), content);
+    await expect(service.read("workspace-1", "limit.txt")).resolves.toEqual({ kind: "text", path: "limit.txt", size: 2097152, encoding: "utf-8", content, changedLines: null });
+    NodeFS.writeFileSync(NodePath.join(root, "large.bin"), Buffer.alloc(3 * 1024 * 1024));
+    await expect(service.read("workspace-1", "large.bin")).resolves.toEqual({ kind: "binary", path: "large.bin", size: 3145728 });
+  });
+
+  it.each([
+    ["utf8.txt", Buffer.from([0xef, 0xbb, 0xbf, 0x61]), "utf-8", "a"],
+    ["le.txt", Buffer.from([0xff, 0xfe, 0x61, 0]), "utf-16le", "a"],
+    ["be.txt", Buffer.from([0xfe, 0xff, 0, 0x61]), "utf-16be", "a"],
+    ["empty.txt", Buffer.alloc(0), "utf-8", ""],
+  ])("decodes %s from its BOM", async (path, bytes, encoding, content) => {
+    const { root, service } = fixture();
+    NodeFS.writeFileSync(NodePath.join(root, path), bytes);
+    await expect(service.read("workspace-1", path)).resolves.toEqual({ kind: "text", path, size: bytes.length, encoding, content, changedLines: null });
+  });
+
+  it.each([Buffer.from([65, 0, 66]), Buffer.from([0xc3, 0x28])])("detects binary bytes %j", async (bytes) => {
+    const { root, service } = fixture();
+    NodeFS.writeFileSync(NodePath.join(root, "data.bin"), bytes);
+    await expect(service.read("workspace-1", "data.bin")).resolves.toEqual({ kind: "binary", path: "data.bin", size: bytes.length });
+  });
+
+  it("returns an encoded image URL and supports SVG source", async () => {
+    const { root, service } = fixture();
+    NodeFS.writeFileSync(NodePath.join(root, "a b.svg"), "<svg/>");
+    await expect(service.read("workspace-1", "a b.svg", "thread-1")).resolves.toEqual({
+      kind: "image", path: "a b.svg", size: 6, mime: "image/svg+xml",
+      url: "/workspace-images/workspace-1?path=a+b.svg&use=file&threadId=thread-1",
+    });
+    await expect(service.read("workspace-1", "a b.svg", undefined, "text")).resolves.toEqual({
+      kind: "text", path: "a b.svg", size: 6, encoding: "utf-8", content: "<svg/>", changedLines: null,
+    });
+  });
+
+  it("caps Git listings at 100,000 paths and reports truncation", async () => {
+    const paths = Array.from({ length: 100001 }, (_, i) => `file-${i}.ts`);
+    const { service } = makeService({ exec: vi.fn().mockResolvedValue({ stdout: paths.join("\0") }) });
+    const result = await service.list("workspace-1");
+    expect(result.paths).toEqual(paths.slice(0, 100000));
+    expect(result.truncated).toBe(true);
+  });
+
+  it("does not report truncation at the exact listing cap", async () => {
+    const paths = Array.from({ length: 100000 }, (_, i) => `file-${i}.ts`);
+    const { service } = makeService({ exec: vi.fn().mockResolvedValue({ stdout: paths.join("\0") }) });
+    const result = await service.list("workspace-1");
+    expect(result.paths.length).toBe(100000);
+    expect(result.paths[99999]).toBe("file-99999.ts");
+    expect(result.truncated).toBe(false);
+  });
+
+  it("caps change marks after filtering deleted paths", async () => {
+    const entries = Array.from({ length: 5001 }, (_, i) => `?? file-${i}.ts\0`).join("");
+    const { service } = makeService({ exec: vi.fn().mockResolvedValue({ stdout: ` D gone.ts\0${entries}` }) });
+    const result = await service.changes("workspace-1");
+    expect(result.entries).toEqual(Array.from({ length: 5000 }, (_, i) => ({ path: `file-${i}.ts`, mark: "A" })));
+    expect(result.truncated).toBe(true);
+    expect(result.git).toBe(true);
+  });
+
+  it("returns no marks for a non-git folder", async () => {
+    const { root } = fixture();
+    const { service } = makeService({ root, exec: vi.fn().mockRejectedValue(new Error("not a repo")) });
+    await expect(service.changes("workspace-1")).resolves.toEqual({ git: false, entries: [], truncated: false });
+  });
+
+  it("surfaces unexpected Git failures instead of silently removing change bars", async () => {
+    const { root } = fixture();
+    NodeFS.writeFileSync(NodePath.join(root, "file.txt"), "content");
+    const { service } = makeService({ root, exec: vi.fn().mockRejectedValue(new Error("Git permission denied")) });
+    await expect(service.read("workspace-1", "file.txt")).rejects.toThrow("Git permission denied");
   });
 });

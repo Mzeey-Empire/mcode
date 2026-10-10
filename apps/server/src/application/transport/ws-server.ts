@@ -21,7 +21,8 @@ import { routeMessage, type RouterDeps } from "./ws-router.js";
 import { addClient, removeClient } from "./push.js";
 import { handleBinaryUpload } from "../../features/attachments/transport/binary-upload.js";
 import * as NodeCrypto from "node:crypto";
-import { extractToken, buildAuthCookie } from "./auth.js";
+import { extractToken, buildAuthCookie, matchesAuthToken } from "./auth.js";
+import { handleWorkspaceImageRequest } from "../../features/projects/files/transport/workspace-image-route.js";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { getMcodeDir } from "@mcode/shared";
@@ -160,11 +161,6 @@ function matchesInstanceAttachment(
     && matchesWorktreeIdentity(presentedWorktree, expected.worktreeIdentity);
 }
 
-/** Checks the regular authenticated connection token. */
-function matchesAuthToken(presented: string | null | undefined, expected: string): boolean {
-  return typeof presented === "string" && safeTokenEqual(presented, expected);
-}
-
 /** Checks the per-instance attachment token. */
 function matchesInstanceToken(presented: string | null, expected: string | null | undefined): boolean {
   return typeof presented === "string" && typeof expected === "string" && safeTokenEqual(presented, expected);
@@ -190,6 +186,7 @@ export function createWsServer(deps: WsServerDeps): {
     if (handleHealthRequest(req, res, deps)) return;
     if (handleShutdownRequest(req, res, deps)) return;
     if (handleAttachmentRequest(req, res, deps)) return;
+    if (handleWorkspaceImageRequest(req, res, deps)) return;
 
     res.writeHead(404);
     res.end("Not found");

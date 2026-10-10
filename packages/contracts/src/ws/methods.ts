@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AgentProgressPositionSchema, AgentThreadIdSchema } from "../compat/agent-model.js";
 import { WorkspaceSchema, WorkspaceEnrichmentSchema } from "../models/workspace.js";
+import { WorkspaceFileListSchema, WorkspaceFileChangesSchema, FileReadResultSchema } from "../models/workspace-file.js";
 import {
   WorkspaceEnvironmentReadResultSchema,
   WorkspaceEnvironmentReadInputSchema,
@@ -1213,15 +1214,20 @@ export const WS_METHODS = lazySchema(() => ({
       workspaceId: z.string(),
       threadId: z.string().optional(),
     }),
-    result: z.array(z.string()),
+    result: WorkspaceFileListSchema(),
+  },
+  "file.changes": {
+    params: z.object({ workspaceId: z.string(), threadId: z.string().optional() }),
+    result: WorkspaceFileChangesSchema(),
   },
   "file.read": {
     params: z.object({
       workspaceId: z.string(),
       relativePath: z.string(),
       threadId: z.string().optional(),
+      as: z.literal("text").optional(),
     }),
-    result: z.string(),
+    result: FileReadResultSchema(),
   },
   "file.refresh": {
     params: z.object({
