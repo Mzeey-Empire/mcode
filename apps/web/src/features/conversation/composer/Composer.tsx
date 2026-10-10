@@ -310,7 +310,7 @@ export function Composer({
     return panel.visible && panel.activeTab === "tasks" && panel.openTabs.includes("tasks");
   });
   const taskBubbleTasks = useTaskStore((s) =>
-    threadId ? s.taskBubbleByThread[threadId] ?? EMPTY_TASK_BUBBLE_TASKS : EMPTY_TASK_BUBBLE_TASKS,
+    threadId ? s.taskBubbleByThread[threadId]?.tasks ?? EMPTY_TASK_BUBBLE_TASKS : EMPTY_TASK_BUBBLE_TASKS,
   );
   const fileEffectSummary = useThreadStore((s) =>
     threadId ? s.records.get(threadId)?.fileEffectSummary : undefined,
