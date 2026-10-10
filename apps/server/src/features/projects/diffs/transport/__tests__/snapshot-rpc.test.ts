@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TurnSnapshotSchema } from "@mcode/contracts";
 import { routeSnapshotRpc } from "../snapshot-rpc.js";
 import { createSnapshotRangeFixture } from "../../snapshots/__tests__/turn-snapshot-range-fixture.js";
@@ -24,6 +24,15 @@ describe("snapshot RPC whole-turn evidence", { timeout: 30_000 }, () => {
     fixture.db.prepare("UPDATE turn_snapshots SET ref_before = ? WHERE message_id = 'message-two'").run("0".repeat(40));
     expect(await routeSnapshotRpc("snapshot.getCumulativeDiffStats", { threadId: "thread" }, fixture.deps))
       .toEqual({ status: "unavailable", reason: "snapshot-pruned" });
+  });
+
+  it("reports a cumulative range above the Review file bound as too many files", async () => {
+    await fixture.attempt({ id: "one", edits: { "a.ts": "a\n" } });
+    vi.spyOn(fixture.deps.snapshotService, "getDiffStats").mockResolvedValue(
+      Array.from({ length: 10_001 }, (_, index) => ({ filePath: `file-${index}.ts`, additions: 1, deletions: 0, changeType: "modified" as const })),
+    );
+    expect(await routeSnapshotRpc("snapshot.getCumulativeDiffStats", { threadId: "thread" }, fixture.deps))
+      .toEqual({ status: "too-many-files", fileCount: 10_001, limit: 10_000 });
   });
 
   it.each([

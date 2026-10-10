@@ -190,8 +190,6 @@ export async function routeGitRpc<Method extends GitRpcMethod>(
   deps: GitRouterDeps,
 ): Promise<unknown> {
   try {
-    const allowDraftThread = method === "git.reviewComparison" || method === "git.reviewState" || method === "git.workingTreeDiff";
-    if ("threadId" in params && params.threadId) resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, allowDraftThread);
     return await gitHandlers[method](deps, params);
   } catch (error) {
     if (method === "git.reviewComparison" && error instanceof ReviewWorktreeMissingError) return reviewComparisonFailure(error);
@@ -263,7 +261,7 @@ async function routeGitPush(
   if (!workspace) throw new Error(`Workspace ${params.workspaceId} not found`);
   if (!workspace.is_git_repo) return;
 
-  await pushToResolvedTarget(deps, params, resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId));
+  await pushToResolvedTarget(deps, params, workspace.path);
   schedulePushBumps(deps, params.workspaceId, params.branch);
   return { success: true };
 }
