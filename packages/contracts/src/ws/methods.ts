@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { ApprovalReceiptRecordSchema } from "../models/approval-receipt.js";
 import { AcknowledgeSeenResultSchema, ThreadAttentionSchema } from "../models/thread-attention.js";
 import { AgentProgressPositionSchema, AgentThreadIdSchema } from "../compat/agent-model.js";
 import { WorkspaceSchema, WorkspaceEnrichmentSchema } from "../models/workspace.js";
@@ -55,7 +54,7 @@ import { ApprovalReviewModeSchema, DevinModeSchema, ThreadModeSchema, Permission
 import { PaginatedMessagesSchema } from "../models/message.js";
 import { MessageMentionsSchema } from "../models/mention.js";
 import { SelectedTextCommentsSchema } from "../models/selected-text-comment.js";
-import { ConversationPageSchema } from "../models/conversation-page.js";
+import { ConversationNarrativeBatchSchema, ConversationPageSchema } from "../models/conversation-page.js";
 import {
   ConversationOlderPageRequestSchema,
   ConversationOlderPageSchema,
@@ -81,8 +80,6 @@ import { AttachmentMetaSchema } from "../models/attachment.js";
 import { StagedDraftImageSchema } from "../models/next-message-draft.js";
 import { MAX_ATTACHMENTS } from "../models/file-types.js";
 import { ToolCallRecordSchema } from "../models/tool-call-record.js";
-import { ThoughtSegmentRecordSchema } from "../models/thought-segment.js";
-import { HookExecutionRecordSchema } from "../models/hook-execution.js";
 import { NarrativeEntrySchema, TurnRangeSchema } from "../models/narrative-entry.js";
 import { WorktreeSchema, BranchComparisonSchema, GitRefNameSchema, GitRemoteUrlSchema, GitBranchNameSchema, GitRefsListParamsSchema, GitRefsListResultSchema } from "../git.js";
 import { GitCommitSchema } from "../models/git-commit.js";
@@ -1379,12 +1376,7 @@ export const WS_METHODS = lazySchema(() => ({
   /** Replay the full persisted narrative (tools, thoughts, hooks) for an assistant message. */
   "narrative.list": {
     params: z.object({ messageId: z.string() }),
-    result: z.object({
-      tools: z.array(ToolCallRecordSchema()),
-      thoughts: z.array(ThoughtSegmentRecordSchema()),
-      hooks: z.array(HookExecutionRecordSchema()),
-      approvals: z.array(ApprovalReceiptRecordSchema()),
-    }),
+    result: ConversationNarrativeBatchSchema(),
   },
   "thread.getTasks": {
     params: z.object({ threadId: z.string() }),

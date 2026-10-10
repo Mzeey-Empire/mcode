@@ -1,13 +1,14 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
 import { MessageSchema, SessionNoticesSchema, type Message } from "./message.js";
-import { ToolCallRecordSchema } from "./tool-call-record.js";
-import { ThoughtSegmentRecordSchema } from "./thought-segment.js";
-import { HookExecutionRecordSchema } from "./hook-execution.js";
-import { ApprovalReceiptRecordSchema } from "./approval-receipt.js";
+import { ToolCallRecordSchema, type ToolCallRecord } from "./tool-call-record.js";
+import { ThoughtSegmentRecordSchema, type ThoughtSegmentRecord } from "./thought-segment.js";
+import { HookExecutionRecordSchema, type HookExecutionRecord } from "./hook-execution.js";
+import { ApprovalReceiptRecordSchema, type ApprovalReceiptRecord } from "./approval-receipt.js";
 
 /** Persisted narrative records grouped under one assistant message. */
-export const ConversationNarrativeBatchSchema = lazySchema(() =>
+// The explicit type keeps WS_METHODS under the compiler's declaration size limit.
+export const ConversationNarrativeBatchSchema = lazySchema<z.ZodType<ConversationNarrativeBatch>>(() =>
   z.object({
     tools: z.array(ToolCallRecordSchema()),
     thoughts: z.array(ThoughtSegmentRecordSchema()),
@@ -28,7 +29,12 @@ export const ConversationPageSchema = lazySchema<z.ZodType<ConversationPage>>(()
 );
 
 /** Persisted narrative records grouped under one assistant message. */
-export type ConversationNarrativeBatch = z.infer<ReturnType<typeof ConversationNarrativeBatchSchema>>;
+export interface ConversationNarrativeBatch {
+  tools: ToolCallRecord[];
+  thoughts: ThoughtSegmentRecord[];
+  hooks: HookExecutionRecord[];
+  approvals: ApprovalReceiptRecord[];
+}
 
 /** Thread conversation page returned by `conversation.page`. */
 export interface ConversationPage {
