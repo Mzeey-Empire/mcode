@@ -14,13 +14,13 @@ export function recoverParentNarrative(threadId: string, state: AgentModelState,
     .sort((left, right) => left.record.sort_order - right.record.sort_order);
   if (items.length === 0 && !record) return {};
   const narrative = recoveredNarrative(turn, items);
-  const owned = items.length > 0 ? { ...narrative.patch, ...recoveredStartTime(turn, record) } : emptyOwnedNarrativePatch(turn, state, record);
+  const owned = ownedNarrativePatch(turn, state, record, items, narrative.patch);
   const text = recoveredAssistantText(turn, state);
   const response = record ? recoveredResponse(threadId, turn, state, record, narrative.streaming, narrative.terminal) : {};
   return {
     ...owned,
     ...text,
-    ...(record && text.streaming !== undefined && !serverOwnsThoughtTape(items, owned) ? syncedThoughtTape(record, text.streaming) : {}),
+    ...(record && !serverOwnsThoughtTape(items, owned) ? syncedThoughtTape(record, text.streaming) : {}),
     ...response,
     ...(record && narrative.terminal ? finishedNarrativeCache(record, response.currentTurnMessageId ?? record.currentTurnMessageId, items) : {}),
   };
@@ -82,13 +82,17 @@ function serverOwnsThoughtTape(items: readonly ParentNarrativeRecoveryItem[], ow
  * but has no record of that tape, so the local tape is kept and extended with the text missed while
  * disconnected. Otherwise the earlier text renders as a thought and the answer restarts at the next chunk.
  */
-function syncedThoughtTape(record: ThreadRecord, streaming: string): Partial<ThreadRecord> {
+function syncedThoughtTape(record: ThreadRecord, streaming: string | undefined): Partial<ThreadRecord> {
   const segments = record.thoughtSegments;
   const last = segments.at(-1);
-  if (!last || last.id?.startsWith("assistant-text:")) return {};
+  if (streaming === undefined || !last || last.id?.startsWith("assistant-text:")) return {};
   const tape = segments.filter((segment) => !segment.id?.startsWith("assistant-text:")).map((segment) => segment.text).join("");
   if (record.streaming !== tape || !streaming.startsWith(tape)) return {};
   return { thoughtSegments: appendThoughtSegment(segments, streaming.slice(tape.length), false) };
+}
+
+function ownedNarrativePatch(turn: AgentTurn, state: AgentModelState, record: ThreadRecord | undefined, items: readonly ParentNarrativeRecoveryItem[], patch: Partial<ThreadRecord>): Partial<ThreadRecord> {
+  return items.length > 0 ? { ...patch, ...recoveredStartTime(turn, record) } : emptyOwnedNarrativePatch(turn, state, record);
 }
 
 function recoveredAssistantText(turn: AgentTurn, state: AgentModelState): Partial<ThreadRecord> {
