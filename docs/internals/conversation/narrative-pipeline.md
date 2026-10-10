@@ -15,16 +15,24 @@ The icon shows a warning when a hook blocks or fails. Hooks come from the owning
 narrative cache, including hooks that arrive after turn persistence. Hooks still
 separate tool groups in the chronological data; only their inline display is removed.
 
-Active and completed commands use the same expandable Shell row. Active rows
-show the activity animation in the command label and open automatically. A manual
-close remains in effect while output changes. A tool result completes its
-matched call; a new tool call or assistant message does not complete other calls.
-Turn termination settles any outstanding calls. Completed calls retain the
-existing command groups and remain available through manual expansion.
+Tool calls render as collapsed rows built on `NarrativeToolRow`: icon, label,
+detail, meta, and a chevron only when the row has more to show. Rows never open
+themselves. A running command stays collapsed until clicked, and a manual open
+survives output arrival. A lone running call is an `active-tool` row and
+remounts as a `tool-group` row when it completes, so its open state does not
+carry across completion. A tool result completes its matched call; a new tool
+call or assistant message does not complete other calls. Turn termination
+settles any outstanding calls.
 
-New live tool rows animate open. Completed rows animate closed before joining
-their command group. This short visual transition does not delay completion
-status or other tool updates. Reduced motion removes the transition.
+A group of one call renders that call's own row, so a failed edit reads
+"Edit failed" with its file. Larger groups show a summary with failure and
+cancellation counts and expand into one row per call. Failure shows as text in
+the row meta, never as red rows or badges.
+
+Task-list tools (`TodoWrite`, `TaskCreate`, `TaskUpdate`, `update_plan`) feed the
+task panel and never become narrative rows or steps. The server reducer, the
+thread store, and both timeline builders read the one name list in
+`@mcode/contracts`, so a new task tool needs adding only there.
 
 Shell cards show the call status at the bottom right, outside the output viewport.
 Hover over the command or output to copy that section. Keyboard focus also reveals
