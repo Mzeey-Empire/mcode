@@ -36,5 +36,6 @@ export {
 } from "./model-effort/index.js";
 
 export { redactMcodeBrowserCaptureV2 } from "./browser-preview/redact.js";
+export { browserPartitionFor } from "./browser-preview/browser-partition.js";
 
 export { PlanFenceParser, isPlanFenceOpener } from "./plan-fence-parser.js";

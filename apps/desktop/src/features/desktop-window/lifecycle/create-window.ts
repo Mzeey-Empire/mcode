@@ -50,7 +50,8 @@ export interface DesktopWindowLifecycleHooks {
     webPreferences: PreviewWebviewPreferences,
     params: PreviewWebviewAttachParams,
     guestPreloadPath: string,
-  ) => void;
+    windowId: number,
+  ) => boolean;
   /** Resolve the fixed Preview guest preload path. */
   readonly resolvePreviewGuestPreloadPath: (mainBundleDirectory: string) => string;
   /** Attach Spellcheck to a created window. */
@@ -129,12 +130,14 @@ export function createWindow(
     dependencies.hooks.disposeBrowserAutomationForWindow(window.id);
   });
 
-  window.webContents.on("will-attach-webview", (_event, webPreferences, params) => {
-    dependencies.hooks.hardenPreviewWebviewAttachment(
+  window.webContents.on("will-attach-webview", (event, webPreferences, params) => {
+    const allowed = dependencies.hooks.hardenPreviewWebviewAttachment(
       webPreferences,
       params,
       dependencies.hooks.resolvePreviewGuestPreloadPath(__dirname),
+      window.id,
     );
+    if (!allowed) event.preventDefault();
   });
 
   const showFallback = setTimeout(() => {

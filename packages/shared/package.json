@@ -11,6 +11,7 @@
     "./model-context": "./src/model-context/index.ts",
     "./usage": "./src/usage/index.ts",
     "./browser-preview-redact": "./src/browser-preview/redact.ts",
+    "./browser-partition": "./src/browser-preview/browser-partition.ts",
     "./plan-fence": "./src/plan-fence-parser.ts"
   },
   "scripts": {

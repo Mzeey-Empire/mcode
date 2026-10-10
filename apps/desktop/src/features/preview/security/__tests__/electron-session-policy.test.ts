@@ -1,33 +1,35 @@
 import { describe, expect, it, vi } from "vitest";
+import type { WebContents, Event as ElectronEvent } from "electron";
 
-const previewSession = {
-  on: vi.fn(),
-  clearStorageData: vi.fn(async () => undefined),
-  clearCache: vi.fn(async () => undefined),
-};
-
-vi.mock("electron", () => ({
-  ipcMain: { on: vi.fn() },
-  session: {
-    fromPartition: vi.fn((partition: string) => {
-      if (partition !== "persist:mcode-preview") throw new Error(`unexpected partition ${partition}`);
-      return previewSession;
-    }),
+const fake = vi.hoisted(() => ({
+  profile: {
+    on: vi.fn<(name: string, handler: (event: ElectronEvent) => void) => void>(),
+    webRequest: { onCompleted: vi.fn() },
+    setPermissionCheckHandler: vi.fn(),
+    setPermissionRequestHandler: vi.fn(),
   },
+  guest: {
+    setWindowOpenHandler: vi.fn<WebContents["setWindowOpenHandler"]>(),
+    once: vi.fn<(name: string, listener: () => void) => void>(),
+    removeListener: vi.fn(),
+    isDestroyed: () => false,
+  },
+  ipcMain: { on: vi.fn() },
+}));
+vi.mock("electron", () => ({
+  ipcMain: fake.ipcMain,
+  session: { fromPartition: () => fake.profile },
+  webContents: { fromId: () => fake.guest },
 }));
 
-vi.mock("../clipboard-trust.js", () => ({
-  registerPreviewClipboardPermissionHandlers: vi.fn(),
-}));
+import { session, webContents } from "electron";
+import { bindGuestPopup, installBrowserSessionPolicy } from "../electron-session-policy.js";
 
-import { session } from "electron";
-import { PreviewSessionAdapter } from "../electron-session-policy.js";
-
-describe("PreviewSessionAdapter", () => {
+describe("workspace session policy", () => {
   const surface = {
     sourceSurface: {
       identity: {
-        workspaceId: "workspace",
+        workspaceId: "22222222-2222-4222-8222-222222222222",
         scope: { kind: "thread" as const, id: "thread" },
         tabId: "tab",
       },
@@ -35,77 +37,47 @@ describe("PreviewSessionAdapter", () => {
     },
   };
 
-  it("uses one fixed partition and denies guest popup creation", () => {
-    const adapter = new PreviewSessionAdapter();
-    const guest = {
-      setWindowOpenHandler: vi.fn(),
-      once: vi.fn(),
-      removeListener: vi.fn(),
-      isDestroyed: () => false,
-    };
-
-    expect(adapter.session).toBe(previewSession);
-    expect(session.fromPartition).toHaveBeenCalledWith("persist:mcode-preview");
-
-    adapter.bindGuestPopup(guest as never, {
-      ...surface,
-      emitPopup: vi.fn(),
-      isAgentOperationActive: () => false,
-    });
-
-    const handler = guest.setWindowOpenHandler.mock.calls[0]?.[0] as ((details: { url: string }) => unknown) | undefined;
-    expect(handler?.({ url: "https://example.test" })).toEqual({ action: "deny" });
-  });
-
-  it("owns cookies, cache, clipboard policy, and denied downloads", async () => {
-    const adapter = new PreviewSessionAdapter({ previewSession: previewSession as never });
-    adapter.registerPolicy();
-    adapter.registerPolicy();
-    expect(previewSession.on).toHaveBeenCalledTimes(1);
-    const downloadEvent = { preventDefault: vi.fn() };
-    const downloadHandler = previewSession.on.mock.calls[0]?.[1] as ((event: typeof downloadEvent) => void);
-    downloadHandler(downloadEvent);
+  it("installs clipboard, download and failed-request policy once before first use", () => {
+    const profile = session.fromPartition("persist:mcode-browser-22222222-2222-4222-8222-222222222222");
+    installBrowserSessionPolicy(profile);
+    installBrowserSessionPolicy(profile);
+    expect(fake.profile.on).toHaveBeenCalledTimes(1);
+    expect(fake.profile.setPermissionCheckHandler).toHaveBeenCalledTimes(1);
+    expect(fake.profile.setPermissionRequestHandler).toHaveBeenCalledTimes(1);
+    expect(fake.profile.webRequest.onCompleted).toHaveBeenCalledWith(
+      { urls: ["http://*/*", "https://*/*"] }, expect.any(Function),
+    );
+    const downloadEvent = { preventDefault: vi.fn(), defaultPrevented: false };
+    fake.profile.on.mock.calls[0]![1](downloadEvent);
     expect(downloadEvent.preventDefault).toHaveBeenCalledTimes(1);
-    await adapter.clearCookies();
-    await adapter.clearCache();
-    expect(previewSession.clearStorageData).toHaveBeenCalledWith({ storages: ["cookies"] });
-    expect(previewSession.clearCache).toHaveBeenCalledTimes(1);
   });
 
-  it("emits only bounded credential-free HTTP(S) popups and unbinds stale guests", () => {
-    let destroyed: (() => void) | undefined;
-    const setWindowOpenHandler = vi.fn();
-    const guest = {
-      setWindowOpenHandler,
-      once: vi.fn((_event: string, listener: () => void) => { destroyed = listener; }),
-      removeListener: vi.fn(),
-      isDestroyed: () => false,
-    };
+  it("mediates non-default project popups and rejects unsafe and stale requests", () => {
     const emitPopup = vi.fn();
     let agent = false;
-    const adapter = new PreviewSessionAdapter({ previewSession: previewSession as never });
-    const unbind = adapter.bindGuestPopup(guest as never, {
-      ...surface,
-      emitPopup,
-      isAgentOperationActive: () => agent,
+    const unbind = bindGuestPopup(webContents.fromId(1)!, {
+      ...surface, emitPopup, isAgentOperationActive: () => agent,
     });
-    const handler = setWindowOpenHandler.mock.calls[0]?.[0] as ((details: { url: string }) => unknown);
+    const handler = fake.guest.setWindowOpenHandler.mock.calls[0]![0];
+    const request = (url: string) => handler({
+      url, frameName: "", features: "", disposition: "new-window",
+      referrer: { url: "", policy: "no-referrer" },
+    });
     for (const address of ["file:///tmp/x", "javascript:alert(1)", "data:text/html,hello", "custom:test", "https://user:pass@example.test", "not a url", `https://example.test/${"x".repeat(4096)}`]) {
-      expect(handler({ url: address })).toEqual({ action: "deny" });
+      expect(request(address)).toEqual({ action: "deny" });
     }
     expect(emitPopup).not.toHaveBeenCalled();
     agent = true;
-    expect(handler({ url: "https://example.test/agent" })).toEqual({ action: "deny" });
+    expect(request("https://example.test/agent")).toEqual({ action: "deny" });
     expect(emitPopup).toHaveBeenCalledWith({ ...surface, address: "https://example.test/agent", initiator: "agent" });
     agent = false;
-    expect(handler({ url: "http://example.test/human" })).toEqual({ action: "deny" });
+    expect(request("http://example.test/human")).toEqual({ action: "deny" });
     expect(emitPopup).toHaveBeenLastCalledWith({ ...surface, address: "http://example.test/human", initiator: "human" });
     emitPopup.mockImplementationOnce(() => { throw new Error("renderer unavailable"); });
-    expect(handler({ url: "https://example.test/delivery-failure" })).toEqual({ action: "deny" });
-    destroyed?.();
-    expect(handler({ url: "https://example.test/stale" })).toEqual({ action: "deny" });
+    expect(request("https://example.test/delivery-failure")).toEqual({ action: "deny" });
+    fake.guest.once.mock.calls[0]![1]();
+    expect(request("https://example.test/stale")).toEqual({ action: "deny" });
     expect(emitPopup).toHaveBeenCalledTimes(3);
     unbind();
-    expect(setWindowOpenHandler).toHaveBeenLastCalledWith(expect.any(Function));
   });
 });

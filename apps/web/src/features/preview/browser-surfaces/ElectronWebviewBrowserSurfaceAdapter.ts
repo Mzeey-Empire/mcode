@@ -1,4 +1,5 @@
 import { BROWSER_TAB_INFO_STRING_MAX } from "@mcode/contracts";
+import { browserPartitionFor } from "@mcode/shared/browser-partition";
 import type {
   PreviewSurfaceBridge,
   PreviewSurfaceBridgeResult,
@@ -117,6 +118,7 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
   private readonly adoptionWaiters = new Set<(adopted: boolean) => void>();
   private pendingAddress: string | null = null;
   private adopted = false;
+  private unavailable = false;
   private disposed = false;
   private readonly frame: ElectronWebviewElement;
   private readonly controlIndicator: BrowserSurfaceControlIndicator;
@@ -139,7 +141,7 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     this.frame.src = `${INERT_URL_PREFIX}${this.adoptionToken}`;
     this.frame.setAttribute("src", this.frame.src);
     this.frame.title = options.title ?? "Browser surface";
-    this.frame.setAttribute("partition", "persist:mcode-preview");
+    this.frame.setAttribute("partition", browserPartitionFor(identity.workspaceId));
     this.frame.setAttribute("allowpopups", "");
     this.frame.setAttribute("aria-hidden", "true");
     this.frame.dataset.testid = "electron-browser-surface-webview";
@@ -173,8 +175,17 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
       adoptionToken: this.adoptionToken,
     })).catch(() => ({ ok: false as const, error: "Surface preparation failed" }));
     const root = options.root ?? this.documentRef.body;
-    root?.appendChild(this.frame);
     this.controlIndicator = new BrowserSurfaceControlIndicator(this.documentRef, root);
+    void this.preparePromise.then((result) => {
+      if (this.disposed) return;
+      if (!result.ok) {
+        if (result.error !== "stale-generation") this.attachmentFailed();
+        return;
+      }
+      root?.appendChild(this.frame);
+      // A refused Electron attachment emits no did-attach. Bounded discovery also covers that failure.
+      this.onDidAttach();
+    });
   }
 
   /** Returns the owned webview for host placement and lifecycle integration. */
@@ -182,7 +193,7 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     return this.frame;
   }
 
-  /** Materializes this adapter; construction already owns and attaches its webview. */
+  /** Materializes this adapter; preparation gates attachment of its webview. */
   public create(): void {
     if (this.disposed) return;
     void this.preparePromise.then((result) => {
@@ -276,6 +287,7 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
 
   private waitForAdoption(): Promise<boolean> {
     if (this.adopted) return Promise.resolve(true);
+    if (this.unavailable) return Promise.resolve(false);
     return new Promise((resolve) => this.adoptionWaiters.add(resolve));
   }
 
@@ -284,8 +296,14 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     this.adoptionWaiters.clear();
   }
 
+  private attachmentFailed(): void {
+    this.unavailable = true;
+    this.resolveAdoptionWaiters(false);
+    this.emit({ type: "load-failed", mainFrame: true, error: "Preview is unavailable" });
+  }
+
   private readonly onDidAttach = (): void => {
-    if (this.disposed || this.adoptionPromise) return;
+    if (this.disposed || this.unavailable || this.adoptionPromise) return;
     this.adoptionPromise = this.adoptAfterPreparation();
   };
 
@@ -307,7 +325,7 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
       await new Promise((resolve) => window.setTimeout(resolve, ADOPTION_DISCOVERY_RETRY_MS));
     }
     if (!asResult(result) || this.disposed) {
-      this.resolveAdoptionWaiters(false);
+      this.attachmentFailed();
       return false;
     }
     this.adopted = true;

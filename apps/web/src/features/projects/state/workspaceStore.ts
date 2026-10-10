@@ -1120,6 +1120,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     try {
       const workspaces = await getTransport().listWorkspaces();
       set({ workspaces, loading: false });
+      void window.desktopBridge?.preview?.profiles?.reconcile(workspaces.map((workspace) => workspace.id)).catch((error: unknown) => {
+        console.error("Browser profile reconciliation failed", error);
+      });
     } catch (e) {
       set({ error: String(e), loading: false });
     }

@@ -13,7 +13,7 @@ import type { PreviewSurfaceBridge } from "@/transport/desktop-bridge";
 import { runBrowserSurfaceContract } from "./browserSurfaceContract";
 
 const IDENTITY: BrowserSurfaceIdentity = {
-  workspaceId: "workspace-electron",
+  workspaceId: "11111111-1111-4111-8111-111111111111",
   scope: { kind: "thread", id: "thread-electron" },
   tabId: "tab-electron",
 };
@@ -40,6 +40,50 @@ runBrowserSurfaceContract(
 );
 
 describe("ElectronWebviewBrowserSurfaceAdapter", () => {
+  it("appends only after prepare succeeds and uses the workspace partition", async () => {
+    const surfaceBridge = bridge();
+    let finish: (result: { ok: true }) => void = () => { throw new Error("prepare not called"); };
+    surfaceBridge.prepare.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 1, { root: document.body, bridge: surfaceBridge });
+    expect(adapter.element.isConnected).toBe(false);
+    expect(adapter.element.getAttribute("partition")).toBe("persist:mcode-browser-11111111-1111-4111-8111-111111111111");
+    finish({ ok: true });
+    await vi.waitFor(() => expect(adapter.element.isConnected).toBe(true));
+    adapter.dispose();
+  });
+
+  it("reports a rejected preparation without appending the webview", async () => {
+    const surfaceBridge = bridge();
+    surfaceBridge.prepare.mockResolvedValue({ ok: false, error: "invalid-surface" });
+    const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 1, { root: document.body, bridge: surfaceBridge });
+    const events: BrowserSurfaceAdapterEvent[] = [];
+    adapter.subscribe((event) => events.push(event));
+    await vi.waitFor(() => expect(events).toContainEqual({
+      type: "load-failed", mainFrame: true, error: "Preview is unavailable", identity: IDENTITY, generation: 1,
+    }));
+    expect(adapter.element.isConnected).toBe(false);
+    expect(surfaceBridge.adopt).not.toHaveBeenCalled();
+    adapter.dispose();
+  });
+
+  it("reports an attachment that never emits did-attach", async () => {
+    vi.useFakeTimers();
+    const surfaceBridge = bridge();
+    surfaceBridge.adopt.mockResolvedValue({ ok: false, error: "guest-not-found" });
+    const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 1, { root: document.body, bridge: surfaceBridge });
+    const events: BrowserSurfaceAdapterEvent[] = [];
+    adapter.subscribe((event) => events.push(event));
+    try {
+      await vi.advanceTimersByTimeAsync(2100);
+      expect(events).toContainEqual({
+        type: "load-failed", mainFrame: true, error: "Preview is unavailable", identity: IDENTITY, generation: 1,
+      });
+    } finally {
+      adapter.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("does not retain its private adoption URL when a cold tab is restored", () => {
     const adapters: ElectronWebviewBrowserSurfaceAdapter[] = [];
     const host = new BrowserSurfaceHost({

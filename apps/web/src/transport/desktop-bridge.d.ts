@@ -214,9 +214,16 @@ interface PreviewBridge {
   reload(): Promise<void>;
   /** Hard reload that bypasses the guest's HTTP cache (Force reload). */
   forceReload(): Promise<void>;
-  /** Clear the preview session's cookies. */
+  /** Lifecycle of local per-workspace Browser profiles. */
+  profiles: {
+    /** Remove a server-deleted workspace's browser data. */
+    remove(workspaceId: string): Promise<void>;
+    /** Remove profiles missing from the complete server workspace list. */
+    reconcile(workspaceIds: readonly string[]): Promise<void>;
+  };
+  /** Clear the current workspace's cookies. */
   clearCookies(): Promise<void>;
-  /** Clear the preview session's HTTP cache. */
+  /** Clear the current workspace's HTTP cache. */
   clearCache(): Promise<void>;
   /** Read the guest's current zoom factor (1 = 100%). */
   getZoom(): Promise<number>;

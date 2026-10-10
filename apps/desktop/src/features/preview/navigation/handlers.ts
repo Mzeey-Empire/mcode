@@ -9,7 +9,7 @@ import { isAllowedHttpUrl, isAllowedPreviewUrl } from "./policy.js";
 import { resolvePreviewNavigationTarget, type PreviewResolveNavigationResult } from "./resolve-target.js";
 import { loadPreviewGuestUrl } from "./guest-navigation.js";
 import { onPreviewHidden, onPreviewVisible } from "../tabs/discard-scheduler.js";
-import { previewSessionAdapter } from "../security/electron-session-policy.js";
+import { browserProfiles } from "../security/browser-profiles.js";
 import { findAdoptedWebContentsForWindow } from "../surfaces/registry.js";
 
 const MIN_ZOOM_FACTOR = 0.25;
@@ -142,9 +142,11 @@ function reloadActiveGuest(event: IpcMainInvokeEvent, ignoreCache: boolean): voi
 }
 
 async function clearPreviewStorage(event: IpcMainInvokeEvent, operation: "cookies" | "cache"): Promise<void> {
-  if (!getWindow(event)) return;
-  if (operation === "cookies") await previewSessionAdapter.clearCookies();
-  else await previewSessionAdapter.clearCache();
+  const context = getNavigableGuest(event);
+  const workspaceId = context?.session.workspaceId;
+  if (!context || !workspaceId) return;
+  if (context.guest.session !== browserProfiles.sessionForWorkspace(workspaceId)) return;
+  await browserProfiles.clear(workspaceId, operation);
 }
 
 function getZoom(event: IpcMainInvokeEvent): number {

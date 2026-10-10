@@ -5,6 +5,7 @@ import {
 } from "electron";
 import type { IpcMainInvokeEvent, WebContents } from "electron";
 import { logger } from "@mcode/shared";
+import { browserPartitionFor } from "@mcode/shared/browser-partition";
 import {
   applyPageStatus,
   emitTabsUpdated,
@@ -19,7 +20,8 @@ import {
   registerPreviewClipboardGuest,
   unregisterPreviewClipboardGuest,
 } from "../security/clipboard-trust.js";
-import { previewSessionAdapter } from "../security/electron-session-policy.js";
+import { bindGuestPopup } from "../security/electron-session-policy.js";
+import { browserProfiles } from "../security/browser-profiles.js";
 import { PREVIEW_POPUP_REQUESTED_CHANNEL } from "../contracts/popup.js";
 import type { PreviewPopupSurfaceRef } from "../contracts/popup.js";
 import { isBrowserAutomationAgentOperationActive } from "../automation/active-operation.js";
@@ -77,6 +79,11 @@ export interface PreviewSurfacePrepareInput {
   readonly adoptionToken: string;
 }
 
+/** Prepared attachment bound to an exact workspace partition and adoption token. */
+export interface PendingPreviewSurface extends PreviewSurfacePrepareInput {
+  readonly partition: string;
+}
+
 /** Input accepted by preview.surface.adopt. */
 export interface PreviewSurfaceAdoptInput extends PreviewSurfacePrepareInput {}
 
@@ -94,7 +101,7 @@ export interface PreviewSurfaceNavigateInput {
 
 /** Per-window adopted and pending Preview surfaces. */
 const adoptedByWindow = new Map<number, Map<string, AdoptionRecord>>();
-const pendingByWindow = new Map<number, Map<string, PreviewSurfacePrepareInput>>();
+const pendingByWindow = new Map<number, Map<string, PendingPreviewSurface>>();
 const generationByWindow = new Map<number, Map<string, number>>();
 
 function surfaceKey(identity: PreviewSurfaceIdentity): string {
@@ -127,6 +134,11 @@ function validateSurfaceIdentity(value: unknown): PreviewSurfaceIdentity | null 
   const identity = value as Partial<PreviewSurfaceIdentity>;
   const scope = validateSurfaceScope(identity.scope);
   if (!validBoundedId(identity.workspaceId) || !validBoundedId(identity.tabId) || !scope) return null;
+  try {
+    browserPartitionFor(identity.workspaceId);
+  } catch {
+    return null;
+  }
   return { workspaceId: identity.workspaceId.trim(), scope, tabId: identity.tabId.trim() };
 }
 
@@ -180,8 +192,16 @@ function findOwnedTab(
   return found;
 }
 
-function pendingForWindow(windowId: number, surface: PreviewSurfaceRef): PreviewSurfacePrepareInput | null {
+function pendingForWindow(windowId: number, surface: PreviewSurfaceRef): PendingPreviewSurface | null {
   return pendingByWindow.get(windowId)?.get(surfaceKey(surface.identity)) ?? null;
+}
+
+/** Finds only this window's prepared attachment for the exact inert URL token. */
+export function findPendingPreviewAttachment(windowId: number, src: string | undefined): PendingPreviewSurface | null {
+  for (const pending of pendingByWindow.get(windowId)?.values() ?? []) {
+    if (src === `about:blank#${pending.adoptionToken}`) return pending;
+  }
+  return null;
 }
 
 function adoptedForWindow(windowId: number, surface: PreviewSurfaceRef): AdoptionRecord | null {
@@ -197,20 +217,18 @@ function isInertGuestUrl(url: string, adoptionToken: string): boolean {
 function guestMatchesPending(
   guest: WebContents,
   sender: WebContents,
-  adoptionToken: string,
+  pending: PreviewSurfacePrepareInput,
 ): boolean {
   if (guest.isDestroyed() || guest.getType() !== "webview") return false;
   if (guest.hostWebContents !== sender) return false;
-  // The main window's will-attach-webview hook replaces the preload and
-  // partition before this guest exists. Electron omits preload from
-  // getLastWebPreferences(), so the enforced partition is the runtime proof.
-  if (guest.session !== previewSessionAdapter.session) return false;
-  return isInertGuestUrl(guest.getURL(), adoptionToken);
+  // A different project's valid session is still outside this surface's trust boundary.
+  if (guest.session !== browserProfiles.sessionForWorkspace(pending.surface.identity.workspaceId)) return false;
+  return isInertGuestUrl(guest.getURL(), pending.adoptionToken);
 }
 
-function findPendingGuest(sender: WebContents, adoptionToken: string): WebContents | null {
+function findPendingGuest(sender: WebContents, pending: PreviewSurfacePrepareInput): WebContents | null {
   const guests = electronWebContents.getAllWebContents().filter((candidate) =>
-    guestMatchesPending(candidate, sender, adoptionToken));
+    guestMatchesPending(candidate, sender, pending));
   return guests.length === 1 ? guests[0]! : null;
 }
 
@@ -342,6 +360,34 @@ export function disposePreviewSurfacesForWindow(windowId: number): void {
   generationByWindow.delete(windowId);
 }
 
+function closePendingGuest(windowId: number, pending: PendingPreviewSurface): void {
+  for (const guest of electronWebContents.getAllWebContents()) {
+    if (guest.isDestroyed() || guest.getType() !== "webview") continue;
+    if (!isInertGuestUrl(guest.getURL(), pending.adoptionToken) || !guest.hostWebContents) continue;
+    if (BrowserWindow.fromWebContents(guest.hostWebContents)?.id === windowId) {
+      guest.close({ waitForBeforeUnload: false });
+    }
+  }
+}
+
+/** Retires pending attachments and closes this workspace's guests in every window. */
+export function disposePreviewSurfacesForWorkspace(workspaceId: string): void {
+  for (const [windowId, records] of pendingByWindow) {
+    for (const [key, pending] of records) {
+      if (pending.surface.identity.workspaceId.toLowerCase() !== workspaceId) continue;
+      dropPending(windowId, key);
+      closePendingGuest(windowId, pending);
+    }
+  }
+  for (const [windowId, records] of adoptedByWindow) {
+    for (const [key, record] of records) {
+      if (record.surface.identity.workspaceId.toLowerCase() !== workspaceId) continue;
+      dropAdoption(windowId, key);
+      if (!record.webContents.isDestroyed()) record.webContents.close({ waitForBeforeUnload: false });
+    }
+  }
+}
+
 function adoptionTokenExists(records: Iterable<Map<string, { adoptionToken: string }>>, token: string): boolean {
   for (const entries of records) {
     for (const candidate of entries.values()) {
@@ -382,7 +428,11 @@ function prepareSurface(event: IpcMainInvokeEvent, inputValue: unknown): Preview
   if (hasExistingToken(input.adoptionToken)) return errorResult("duplicate-adoption-token");
   replacePreparedSurface(win.id, generation.key, generation.adopted, generation.pending);
   windowMap(generationByWindow, win.id).set(generation.key, surface.generation);
-  windowMap(pendingByWindow, win.id).set(generation.key, { surface, adoptionToken: input.adoptionToken });
+  windowMap(pendingByWindow, win.id).set(generation.key, {
+    surface,
+    adoptionToken: input.adoptionToken,
+    partition: browserPartitionFor(surface.identity.workspaceId),
+  });
   return { ok: true };
 }
 
@@ -398,11 +448,11 @@ function validateAdoptionSlot(
   return adoptedByWindow.get(win.id)?.has(key) ? errorResult("duplicate-adoption") : null;
 }
 
-function guestForAdoption(sender: WebContents, adoptionToken: string): WebContents | PreviewSurfaceResult {
-  const guest = findPendingGuest(sender, adoptionToken);
+function guestForAdoption(sender: WebContents, pending: PreviewSurfacePrepareInput): WebContents | PreviewSurfaceResult {
+  const guest = findPendingGuest(sender, pending);
   if (guest) return guest;
   const matches = electronWebContents.getAllWebContents().filter((candidate) =>
-    candidate.getURL() === `about:blank#${adoptionToken}` && candidate.hostWebContents === sender);
+    candidate.getURL() === `about:blank#${pending.adoptionToken}` && candidate.hostWebContents === sender);
   return errorResult(matches.length > 1 ? "non-unique-adoption" : "guest-not-found");
 }
 
@@ -419,7 +469,7 @@ function registerAdoptedGuest(
     setRendererResidency(win, owner, null);
   };
   guest.once("destroyed", onDestroyed);
-  const disposePopup = previewSessionAdapter.bindGuestPopup(guest, {
+  const disposePopup = bindGuestPopup(guest, {
     sourceSurface: surface,
     emitPopup: (request) => emitPreviewPopup(event.sender, win, request),
     isAgentOperationActive: isBrowserAutomationAgentOperationActive,
@@ -455,7 +505,7 @@ function adoptSurface(event: IpcMainInvokeEvent, inputValue: unknown): PreviewSu
   const key = surfaceKey(surface.identity);
   const slotError = validateAdoptionSlot(win, surface, input.adoptionToken, key);
   if (slotError) return slotError;
-  const guest = guestForAdoption(event.sender, input.adoptionToken);
+  const guest = guestForAdoption(event.sender, { surface, adoptionToken: input.adoptionToken });
   if (isSurfaceResult(guest)) return guest;
   const record = registerAdoptedGuest(event, win, surface, owner, key, guest);
   windowMap(adoptedByWindow, win.id).set(key, { ...record, adoptionToken: input.adoptionToken });

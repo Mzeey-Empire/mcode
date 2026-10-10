@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   BrowserSurfaceHost,
   type BrowserSurfaceAdapterEvent,
@@ -9,7 +9,7 @@ import {
 } from "../BrowserSurfaceHost";
 
 const IDENTITY: BrowserSurfaceIdentity = {
-  workspaceId: "contract-workspace",
+  workspaceId: "11111111-1111-4111-8111-111111111111",
   scope: { kind: "thread", id: "contract-thread" },
   tabId: "contract-tab",
 };
@@ -130,7 +130,7 @@ export function runBrowserSurfaceContract(name: string, adapterFactory: BrowserS
       const fixture = contractFixture(adapterFactory);
       const { host, scheduling } = fixture;
       const variants: BrowserSurfaceIdentity[] = [
-        { ...IDENTITY, workspaceId: "other-workspace" },
+        { ...IDENTITY, workspaceId: "22222222-2222-4222-8222-222222222222" },
         { ...IDENTITY, scope: { kind: "workspace", id: IDENTITY.scope.id } },
         { ...IDENTITY, scope: { kind: "thread", id: "other-thread" } },
         { ...IDENTITY, tabId: "other-tab" },
@@ -159,7 +159,7 @@ export function runBrowserSurfaceContract(name: string, adapterFactory: BrowserS
       host.disposeHost();
     });
 
-    it("creates, presents, and hides without remounting", () => {
+    it("creates, presents, and hides without remounting", async () => {
       const baselineChildren = document.body.childElementCount;
       const fixture = contractFixture(adapterFactory);
       const { host } = fixture;
@@ -173,7 +173,7 @@ export function runBrowserSurfaceContract(name: string, adapterFactory: BrowserS
       expect(fixture.records[0]?.subscribeCalls).toBe(1);
       expect(fixture.activeAdapterCount()).toBe(1);
       expect(fixture.activeSubscriptionCount()).toBe(1);
-      expect(document.body.childElementCount).toBe(baselineChildren + 2);
+      await vi.waitFor(() => expect(document.body.childElementCount).toBe(baselineChildren + 2));
 
       host.dispose(IDENTITY);
       expect(fixture.activeAdapterCount()).toBe(0);
@@ -287,7 +287,7 @@ export function runBrowserSurfaceContract(name: string, adapterFactory: BrowserS
       };
       const otherWorkspace: BrowserSurfaceIdentity = {
         ...IDENTITY,
-        workspaceId: "other-workspace",
+        workspaceId: "22222222-2222-4222-8222-222222222222",
         tabId: "other-workspace-tab",
       };
       for (const identity of [IDENTITY, sibling, otherScope, otherWorkspace]) host.create(identity);

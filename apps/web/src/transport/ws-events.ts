@@ -512,6 +512,9 @@ export function startPushListeners(): void {
         store.setActiveWorkspace(null);
       }
       store.removeWorkspaceFromState(workspaceId);
+      void window.desktopBridge?.preview?.profiles?.remove(workspaceId).catch((error: unknown) => {
+        console.error("Browser profile removal failed", error);
+      });
     }),
   );
 

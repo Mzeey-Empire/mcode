@@ -1002,6 +1002,50 @@ describe("Workspace Behavior", () => {
     expect(state.loading).toBe(false);
   });
 
+  describe("Browser profile reconciliation", () => {
+    const reconcile = vi.fn(async (_workspaceIds: readonly string[]) => undefined);
+    const originalBridge = Object.getOwnPropertyDescriptor(window, "desktopBridge");
+
+    beforeEach(() => {
+      reconcile.mockClear();
+      Object.defineProperty(window, "desktopBridge", { configurable: true, value: { preview: { profiles: { reconcile } } } });
+    });
+    afterEach(() => {
+      if (originalBridge) Object.defineProperty(window, "desktopBridge", originalBridge);
+      else delete window.desktopBridge;
+    });
+
+    it("passes the complete successful list on every load, including reconnect and an empty list", async () => {
+      const a = createMockWorkspace({ id: "11111111-1111-4111-8111-111111111111" });
+      const b = createMockWorkspace({ id: "22222222-2222-4222-8222-222222222222" });
+      vi.mocked(mockTransport.listWorkspaces).mockResolvedValueOnce([a, b]).mockResolvedValueOnce([b]).mockResolvedValueOnce([]);
+      await useWorkspaceStore.getState().loadWorkspaces();
+      await useWorkspaceStore.getState().loadWorkspaces();
+      await useWorkspaceStore.getState().loadWorkspaces();
+      expect(reconcile.mock.calls).toEqual([
+        [["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"]],
+        [["22222222-2222-4222-8222-222222222222"]],
+        [[]],
+      ]);
+    });
+
+    it("keeps profiles when the workspace list fails", async () => {
+      vi.mocked(mockTransport.listWorkspaces).mockRejectedValueOnce(new Error("disconnected"));
+      await useWorkspaceStore.getState().loadWorkspaces();
+      expect(reconcile).not.toHaveBeenCalled();
+      expect(useWorkspaceStore.getState().loading).toBe(false);
+    });
+
+    it("loads workspace state without a desktop bridge", async () => {
+      delete window.desktopBridge;
+      const workspace = createMockWorkspace();
+      vi.mocked(mockTransport.listWorkspaces).mockResolvedValueOnce([workspace]);
+      await useWorkspaceStore.getState().loadWorkspaces();
+      expect(useWorkspaceStore.getState().workspaces).toEqual([workspace]);
+      expect(reconcile).not.toHaveBeenCalled();
+    });
+  });
+
   it("when deleteWorkspace RPC fails, workspace and threads remain in state", async () => {
     const ws = createMockWorkspace();
     const thread = createMockThread({ workspace_id: ws.id });
