@@ -12,7 +12,8 @@ import type {
   PreviewPictureReferenceResult,
 } from "@/transport/desktop-bridge";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
-import { normalizePreviewPageIdentity, usePreviewAnnotationStore } from "../state/previewAnnotationStore";
+import { usePreviewAnnotationStore } from "../state/previewAnnotationStore";
+import { normalizePreviewPageIdentity } from "@mcode/shared/browser-page-identity";
 
 type CaptureResult = PreviewPictureReferenceResult;
 

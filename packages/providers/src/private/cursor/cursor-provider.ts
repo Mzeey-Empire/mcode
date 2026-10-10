@@ -1,3 +1,4 @@
+import { SUBAGENT_REPORTING } from "@mcode/contracts";
 /**
  * @internal
  * Cursor CLI provider via long-lived `cursor-agent acp` (Agent Client Protocol).
@@ -147,6 +148,7 @@ export class CursorProvider
   implements IAgentProvider, ISessionEvictable, ProtocolAdapter<CursorSessionState>
 {
   readonly id = "cursor" as const;
+  readonly subagentReporting = SUBAGENT_REPORTING.cursor;
   readonly descriptor = Object.freeze({
     id: "cursor" as const,
     capabilities: [

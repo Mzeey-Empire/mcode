@@ -27,7 +27,7 @@ import type {
   CanonicalAgentBoundary,
   GoalLifecycleService,
   PlanTurnService,
-  SubagentLifecycleService,
+  SubagentRosterService,
   TurnRecoveryService,
 } from "../../features/agents/index.js";
 import {
@@ -101,6 +101,7 @@ import {
   routeThreadStartupRpc,
 } from "../../features/thread-startup/transport/thread-startup-rpc.js";
 import type { FileService } from "../../features/projects/files/file-service.js";
+import { WorkspaceFileNotFoundError } from "../../features/projects/files/workspace-file-access.js";
 import { isFileRpcMethod, routeFileRpc } from "../../features/projects/files/transport/file-rpc.js";
 import { isAttachmentRpcMethod, routeAttachmentRpc } from "../../features/attachments/transport/attachment-rpc.js";
 import type { AttachmentService } from "../../features/attachments/storage/attachment-service.js";
@@ -235,7 +236,7 @@ export interface RouterDeps {
   /** Owns thread goal commands and goal lifecycle reads. */
   goalLifecycleService: GoalLifecycleService;
   /** Owns sub-agent roster and independent cancellation. */
-  subagentLifecycleService: SubagentLifecycleService;
+  subagentRosterService: SubagentRosterService;
   /** Owns restart reconciliation and explicit turn recovery actions. */
   turnRecoveryService: TurnRecoveryService;
   /** Owns durable approvals for protected delegated-thread mutations. */
@@ -453,6 +454,9 @@ function validateRpcParameters(
 
 function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResponse {
   const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof WorkspaceFileNotFoundError) {
+    return { id: request.id, error: { code: error.code, message } };
+  }
   if (error instanceof PlanServiceError) {
     return { id: request.id, error: { code: error.code, message, data: { latestVersion: error.latestVersion } } };
   }

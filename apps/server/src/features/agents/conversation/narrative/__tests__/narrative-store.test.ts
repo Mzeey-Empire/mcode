@@ -384,6 +384,64 @@ describe("NarrativeStore.load (read seam)", () => {
     );
   });
 
+  it("loads only Agent trees through indexed links and isolates other threads", () => {
+    insertMessage(db, "m1", "assistant", "", 1);
+    insertMessage(db, "m2", "assistant", "", 2);
+    db.prepare("UPDATE messages SET provider = 'devin', outcome = 'cancelled' WHERE id = 'm2'").run();
+    const insert = db.prepare(`INSERT INTO tool_call_records
+      (id, message_id, tool_name, parent_tool_call_id, input_summary, output_summary, status, sort_order, started_at)
+      VALUES (?, ?, ?, ?, '', '', 'completed', ?, '2026-10-10T10:00:00.000Z')`);
+    db.transaction(() => {
+      for (let index = 0; index < 200; index++) {
+        insert.run(`unrelated-${index}`, "m1", "Read", null, index);
+      }
+      insert.run("agent", "m1", "Agent", null, 201);
+      insert.run("nested-agent", "m2", "Agent", "agent", 202);
+      insert.run("step", "m2", "Read", "nested-agent", 203);
+      insert.run("grandchild", "m2", "Read", "step", 204);
+    })();
+    db.prepare(`INSERT INTO threads (id, workspace_id, title, branch, created_at, updated_at)
+      SELECT 'other', workspace_id, title, branch, created_at, updated_at FROM threads WHERE id = 'thread-1'`).run();
+    db.prepare(`INSERT INTO messages (id, thread_id, role, content, timestamp, sequence)
+      VALUES ('foreign', 'other', 'assistant', '', '2026-10-10T10:00:00.000Z', 1)`).run();
+    insert.run("foreign-agent", "foreign", "Agent", null, 0);
+    insert.run("foreign-step", "foreign", "Read", "agent", 1);
+    const captured: CapturedStatement[] = [];
+    const traced = new NarrativeStore(
+      new MessageRepo(db, agentStorageTestWriter(db)), new ToolCallRecordRepo(db, agentStorageTestWriter(db)),
+      new ThoughtSegmentRepo(db, agentStorageTestWriter(db)), new HookExecutionRepo(db, agentStorageTestWriter(db)),
+      traceStatements(db, captured),
+    );
+    const calls = traced.loadSubagentCalls("thread-1");
+    expect(calls.map((call) => call.toolCallId)).toEqual(["agent", "nested-agent", "step", "grandchild"]);
+    expect(calls.slice(1).map((call) => [call.provider, call.parentStopped])).toEqual([
+      ["devin", true], ["devin", true], ["devin", true],
+    ]);
+    expect(captured).toHaveLength(1);
+    const statement = captured[0]!;
+    const plan = db.prepare<{ detail: string }, SQLQueryBindings[]>(`EXPLAIN QUERY PLAN ${statement.sql}`)
+      .all(...statement.parameters).map((row) => row.detail).join("\n");
+    expect(plan).toContain("idx_messages_thread");
+    expect(plan).toContain("idx_tool_call_records_message_sort_order_id");
+    expect(plan).toContain("idx_tool_call_records_parent");
+    expect(plan).not.toMatch(/SCAN (tool|child|owner)\b/);
+  });
+
+  it("overlays live Agent calls without losing persisted ownership", () => {
+    insertMessage(db, "m1", "assistant", "", 1);
+    db.prepare("UPDATE messages SET provider = 'devin', outcome = 'cancelled' WHERE id = 'm1'").run();
+    db.prepare(`INSERT INTO tool_call_records
+      (id, message_id, tool_name, input_summary, output_summary, status, sort_order, started_at)
+      VALUES ('agent', 'm1', 'Agent', '', '', 'running', 0, '2026-10-10T10:00:00.000Z')`).run();
+    store.beginTurn("thread-1");
+    store.bufferToolCall("thread-1", { toolCallId: "agent", toolName: "Agent", toolInput: { prompt: "Live task" } });
+    store.bufferToolCall("thread-1", { toolCallId: "step", toolName: "Read", toolInput: {}, parentToolCallId: "agent" });
+    expect(store.hasSubagentCalls("thread-1")).toBe(true);
+    expect(store.loadSubagentCalls("thread-1").map((call) => [call.toolCallId, call.messageId, call.provider, call.parentStopped])).toEqual([
+      ["agent", "m1", "devin", true], ["step", "", null, false],
+    ]);
+  });
+
   it("returns one list interleaved by (sequence, sortOrder), final response as the message body", async () => {
     // One assistant message: preamble narration (0), tool call (1), hook (2),
     // final-response segment (3). The body must surface at sortOrder 3.

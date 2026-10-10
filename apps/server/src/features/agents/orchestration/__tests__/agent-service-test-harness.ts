@@ -30,7 +30,7 @@ import { GoalLifecycleService } from "../../goals/goal-lifecycle-service.js";
 import { PlanTurnService } from "../../planning/plan-turn-service.js";
 import { ScopedPreGrantService } from "../../permissions/scoped-pre-grant.js";
 import { TaskPersistenceService } from "../../tasks/task-persistence-service.js";
-import { SubagentLifecycleService } from "../../collaboration/subagent-lifecycle-service.js";
+import { SubagentRosterService } from "../../collaboration/subagent-roster-service.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { ParentTurnDurability } from "../../turns/parent-turn-durability.js";
 import { PARENT_TURN_DURABILITY } from "../../turns/parent-turn-durability.js";
@@ -213,7 +213,7 @@ export function createAgentServiceForTest(
   providerEventIngress?: ProviderEventIngress,
   planTurns?: PlanTurnService,
   goals?: GoalLifecycleService,
-  subagents?: SubagentLifecycleService,
+  subagents?: SubagentRosterService,
   taskPersistence?: TaskPersistenceService,
   threadBranching?: ThreadBranchingService,
   eventPublication?: AgentEventPublicationRegistry,
@@ -348,7 +348,7 @@ export function createAgentServiceForTest(
 function createTestFeatureEffects({ threadRepo, providerRegistry, writer, runtimeCommands, parentDurability, planTurns, goals, subagents, taskPersistence }: {
   threadRepo: ThreadRepo; providerRegistry: IProviderRegistry; writer: ApplicationDatabaseWriter;
   runtimeCommands: AgentRuntimeCommandPort; parentDurability: ParentTurnDurability;
-  planTurns?: PlanTurnService; goals?: GoalLifecycleService; subagents?: SubagentLifecycleService; taskPersistence?: TaskPersistenceService;
+  planTurns?: PlanTurnService; goals?: GoalLifecycleService; subagents?: SubagentRosterService; taskPersistence?: TaskPersistenceService;
 }) {
   const resolvedPlans = planTurns ?? Object.assign(Object.create(PlanTurnService.prototype), {
     beginOutputGeneration: () => undefined,
@@ -370,7 +370,7 @@ function createTestFeatureEffects({ threadRepo, providerRegistry, writer, runtim
   const featureEffects = new TurnFeatureEffects(
     resolvedPlans,
     resolvedGoals,
-    subagents ?? ({ stopDescendants: () => undefined } as unknown as SubagentLifecycleService),
+    subagents ?? ({ stopDescendants: () => undefined, toolChanged: () => undefined, turnFinished: () => undefined } as unknown as SubagentRosterService),
     taskPersistence ?? ({ onToolUse: () => undefined, onToolResult: () => undefined } as unknown as TaskPersistenceService),
   );
   return { plans: resolvedPlans, goals: resolvedGoals, effects: featureEffects };

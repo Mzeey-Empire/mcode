@@ -69,7 +69,7 @@ import {
   CanonicalAgentBoundary,
   GoalLifecycleService,
   PlanTurnService,
-  SubagentLifecycleService,
+  SubagentRosterService,
   TurnRecoveryService,
   startAgentOrchestration,
 } from "../../features/agents";
@@ -335,7 +335,8 @@ workspaceEnvironmentService.setAutomaticSetupDispatcher({
   const approvalService = container.resolve(ApprovalService);
   const planTurnService = container.resolve(PlanTurnService);
   const goalLifecycleService = container.resolve(GoalLifecycleService);
-  const subagentLifecycleService = container.resolve(SubagentLifecycleService);
+  const subagentRosterService = container.resolve(SubagentRosterService);
+  const stopObservingSubagentRosters = subagentRosterService.observeCommittedEvents();
 const turnRecoveryService = container.resolve(TurnRecoveryService);
 const threadControlService = container.resolve(ThreadControlService);
 const threadStartupService = container.resolve(ThreadStartupService);
@@ -386,7 +387,7 @@ const canonicalSink = container.resolve(CanonicalAgentBoundary);
 if (workerOwnedTurnRuntime.progress) {
   const progress = workerOwnedTurnRuntime.progress;
   container.resolve(PlanQuestionService).bindAcceptedProgress(progress);
-  container.resolve(SubagentLifecycleService).bindAcceptedProgress(progress);
+  container.resolve(SubagentRosterService).bindAcceptedProgress(progress);
   container.resolve(ThreadService).bindAcceptedProgress(progress);
   container.resolve(PostTerminalHookCompletionEffect).bindAcceptedProgress(progress);
   canonicalSink.bindAcceptedSynthesizedPublications((threadId, events) =>
@@ -736,7 +737,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   approvalService,
   planTurnService,
   goalLifecycleService,
-  subagentLifecycleService,
+  subagentRosterService,
   turnRecoveryService,
   threadControlService,
   threadStartupService,
@@ -1069,6 +1070,7 @@ async function shutdown(): Promise<void> {
   await captureCleanupFailure(() => workerOwnedTurnRuntime.close());
   // Turns are drained, so no further turn facts arrive; finish startup writes before the writer closes.
   await captureCleanupFailure(() => startupAgentPhaseObserver.stop());
+  stopObservingSubagentRosters();
   shutdownCoordinator.setPhase("close application database writer");
   await captureCleanupFailure(() => databaseWriter.close());
 

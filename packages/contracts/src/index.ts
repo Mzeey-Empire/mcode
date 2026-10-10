@@ -40,9 +40,12 @@ export type { TurnOutcome } from "./models/turn-outcome.js";
 
 export { WorkspaceSchema, WorkspaceEnrichmentSchema } from "./models/workspace.js";
 export type { Workspace, WorkspaceEnrichment } from "./models/workspace.js";
+export { FILE_LIST_MAX_PATHS, FILE_VIEW_TEXT_MAX_BYTES, FILE_CHANGES_MAX_ENTRIES, WORKSPACE_IMAGE_MAX_BYTES, WorkspaceFileListSchema, WorkspaceFileChangesSchema, FileReadResultSchema } from "./models/workspace-file.js";
+export type { WorkspaceFileList, WorkspaceFileChanges, FileReadResult } from "./models/workspace-file.js";
 
 export {
   WORKSPACE_ENVIRONMENT_VERSION,
+  WORKSPACE_ENVIRONMENT_LEGACY_VERSION,
   WORKSPACE_ENVIRONMENT_APPROVAL_CONTRACT_VERSION,
   WORKSPACE_ENVIRONMENT_SCRIPT_MAX_BYTES,
   WORKSPACE_ENVIRONMENT_COMMAND_MAX_BYTES,
@@ -85,7 +88,10 @@ export {
   WorkspaceEnvironmentAutomaticSetupTerminalInputSchema,
   WorkspaceEnvironmentAutomaticSetupTerminalSchema,
   WorkspaceEnvironmentActionSchema,
+  WorkspaceEnvironmentActionIdSchema,
+  WorkspaceEnvironmentActionIconIdSchema,
   WorkspaceEnvironmentDocumentSchema,
+  encodeEnvironmentDocument,
   DEFAULT_WORKSPACE_ENVIRONMENT_DOCUMENT,
   WorkspaceEnvironmentReadResultSchema,
   WorkspaceEnvironmentReadInputSchema,
@@ -377,21 +383,15 @@ export {
   CANONICAL_SUBAGENT_LINEAGE_MAX_DEPTH,
   CANONICAL_SUBAGENT_ROSTER_MAX_CHILDREN,
   CANONICAL_SUBAGENT_TASK_MAX_LENGTH,
-  CanonicalSubagentRosterRequestSchema,
   CanonicalSubagentStopRequestSchema,
   CanonicalSubagentTerminalOutcomeSchema,
   CanonicalSubagentStopResultSchema,
-  CanonicalSubagentRosterRowSchema,
-  CanonicalSubagentRosterSchema,
   canonicalSubagentTerminalOutcome,
 } from "./models/canonical-subagent-roster.js";
 export type {
-  CanonicalSubagentRosterRequest,
   CanonicalSubagentStopRequest,
   CanonicalSubagentTerminalOutcome,
   CanonicalSubagentStopResult,
-  CanonicalSubagentRosterRow,
-  CanonicalSubagentRoster,
 } from "./models/canonical-subagent-roster.js";
 export {
   CONVERSATION_OLDER_PAGE_MAX_BYTES,
@@ -453,7 +453,7 @@ export {
   SUBAGENT_IDENTITY_KEY_MAX_LENGTH,
   SUBAGENT_METADATA_MAX_LENGTH,
   SUBAGENT_PROMPT_MAX_LENGTH,
-  SubagentDetailSchema,
+  SubagentDetailTargetSchema,
   SubagentPresentationSchema,
   createCanonicalSubagentPresentation,
   createSubagentPresentation,
@@ -473,7 +473,7 @@ export {
 export type {
   ToolCallRecord,
   ToolCallStatus,
-  SubagentDetail,
+  SubagentDetailTarget,
   SubagentPresentation,
 } from "./models/tool-call-record.js";
 
@@ -1541,4 +1541,10 @@ export type {
 } from "./providers/usage.js";
 
 export { LegacyTerminalRecordSchema } from "./ws/terminal-legacy.js";
+export { BrowserHistoryEntrySchema, BrowserServerThumbnailSchema, BrowserHistorySchema } from "./models/browser-preview.js";
+export type { BrowserHistoryEntry, BrowserServerThumbnail, BrowserHistory } from "./models/browser-preview.js";
 export type { LegacyTerminalRecord, LegacyTerminalCreateResult } from "./ws/terminal-legacy.js";
+
+
+export * from "./models/subagent-roster.js";
+export { SUBAGENT_REPORTING } from "./providers/interfaces.js";

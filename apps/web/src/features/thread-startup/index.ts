@@ -6,3 +6,5 @@ export { editStartupSetupScript, openStartupSetupTerminal } from "./useStartupAc
 export { useStartingThread } from "./useStartupActions";
 /** Authoritative startup record state and recovery hook. */
 export { useThreadStartup, useThreadStartupStore } from "./state/thread-startup-store";
+/** The 04g first-send motion: the start column records, the docked surface and the sidebar play. */
+export { recordFirstSend, useFirstSendMotion, usePreparingRowEntrance } from "./first-send-motion";

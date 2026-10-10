@@ -23,12 +23,14 @@ function bridge(): PreviewSurfaceBridge & {
   adopt: ReturnType<typeof vi.fn>;
   navigate: ReturnType<typeof vi.fn>;
   release: ReturnType<typeof vi.fn>;
+  hidden: ReturnType<typeof vi.fn>;
 } {
   return {
     prepare: vi.fn().mockResolvedValue({ ok: true }),
     adopt: vi.fn().mockResolvedValue({ ok: true }),
     navigate: vi.fn().mockResolvedValue({ ok: true }),
     release: vi.fn().mockResolvedValue({ ok: true }),
+    hidden: vi.fn().mockResolvedValue({ ok: true }),
     onPopupRequested: vi.fn(() => () => undefined),
     onDiscardRequested: vi.fn(() => () => undefined),
   };
@@ -38,6 +40,30 @@ runBrowserSurfaceContract(
   "Electron webview BrowserSurfaceHost contract",
   createElectronWebviewBrowserSurfaceAdapterFactory({ root: document.body, bridge: bridge() }),
 );
+
+it("notifies main once per hide transition and retains the adopted guest until close capture finishes", async () => {
+  const surfaceBridge = bridge();
+  const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 9, { root: document.body, bridge: surfaceBridge });
+  await vi.waitFor(() => expect(adapter.element.isConnected).toBe(true));
+  adapter.element.dispatchEvent(new Event("did-attach"));
+  await adapter.navigate("http://localhost:5173/fixture");
+  adapter.present({ left: 0, top: 0, width: 640, height: 480 });
+  adapter.hide();
+  adapter.hide();
+  expect(surfaceBridge.hidden.mock.calls).toEqual([[{ surface: { identity: IDENTITY, generation: 9 } }]]);
+  adapter.present({ left: 0, top: 0, width: 640, height: 480 });
+  expect(adapter.element.style.visibility).toBe("visible");
+  let finish: (result: PreviewSurfaceBridgeResult) => void = () => { throw new Error("release not started"); };
+  surfaceBridge.release.mockImplementation(() => new Promise<PreviewSurfaceBridgeResult>((resolve) => { finish = resolve; }));
+  adapter.dispose();
+  expect(adapter.element.isConnected).toBe(true);
+  expect(adapter.element.style.visibility).toBe("hidden");
+  expect(adapter.element.style.pointerEvents).toBe("none");
+  expect(adapter.element.getAttribute("aria-hidden")).toBe("true");
+  expect(surfaceBridge.release.mock.calls).toEqual([[{ surface: { identity: IDENTITY, generation: 9 }, reason: "dispose" }]]);
+  finish({ ok: true });
+  await vi.waitFor(() => expect(adapter.element.isConnected).toBe(false));
+});
 
 describe("ElectronWebviewBrowserSurfaceAdapter", () => {
   afterEach(() => vi.useRealTimers());

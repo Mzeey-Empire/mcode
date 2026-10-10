@@ -124,6 +124,23 @@ describe("plan file admission", () => {
 });
 
 describe("draft image admission", () => {
+  it.each(["claude", "cursor"] as const)("keeps image and binary mentions without injecting their bytes for %s", async (providerId) => {
+    const f = await fixture(providerId);
+    NodeFS.writeFileSync(NodePath.join(directory, "image.png"), Buffer.from([137, 80, 78, 71, 0]));
+    NodeFS.writeFileSync(NodePath.join(directory, "data.bin"), Buffer.from([0, 1, 2]));
+    const mentions = [
+      { kind: "file" as const, id: "image", path: "image.png", label: "image.png", range: { start: 0, end: 10 } },
+      { kind: "file" as const, id: "binary", path: "data.bin", label: "data.bin", range: { start: 11, end: 20 } },
+    ];
+    const result = await f.send([], { content: "@image.png @data.bin", mentions });
+    if (result.kind !== "dispatch") throw new Error("Expected admission");
+    expect(result.request.message).toBe("@image.png @data.bin");
+    expect(result.request.mentions).toEqual(mentions);
+
+    NodeFS.writeFileSync(NodePath.join(directory, "data.bin"), Buffer.alloc(262145));
+    await expect(f.send([], { content: "@image.png @data.bin", mentions })).rejects.toThrow("File too large for injection");
+  });
+
   it("copies the staged image into the admitted message and keeps it after a cross-window discard", async () => {
     const gate = Promise.withResolvers<void>();
     const copied = Promise.withResolvers<void>();

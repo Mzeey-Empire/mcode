@@ -15,6 +15,7 @@ const clients = new Set<WebSocket>();
 const queuedPushBytes = new Map<WebSocket, number>();
 const threadSubscriptions = new Map<WebSocket, Set<string>>();
 const SUBSCRIPTION_SCOPED_CHANNELS = new Set<WsChannelName>([
+  "subagents.changed",
   "agent.canonical",
   "turn.fileEffectsUpdated",
   "turn.diffChanged",

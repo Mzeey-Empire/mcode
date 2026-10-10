@@ -1,4 +1,4 @@
-import type { DiffStats, FilesystemBrowseResult, ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn, WorkspaceCreateResult } from "@mcode/contracts";
+import type { DiffStats, FileReadResult, FilesystemBrowseResult, ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn, WorkspaceCreateResult, WorkspaceFileChanges, WorkspaceFileList } from "@mcode/contracts";
 import type {
   McodeTransport,
   Workspace,
@@ -70,7 +70,7 @@ import type {
   TerminalCustomProfile,
   TerminalProfileReference,
 } from "@mcode/contracts";
-import type { PaginatedMessages, ConversationPage, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationTail, CanonicalSubagentRoster, CanonicalSubagentStopResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability, GoalLookupResult } from "@mcode/contracts";
+import type { PaginatedMessages, ConversationPage, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationTail, SubagentRoster, SubagentDetail, CanonicalSubagentStopResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability, GoalLookupResult } from "@mcode/contracts";
 import {
   TERMINAL_DATA_TAG,
   decodeTerminalDataFrame,
@@ -1237,11 +1237,11 @@ export function createWsTransport(
       rpc<PaginatedMessages>("message.list", { threadId, limit, ...(before != null ? { before } : {}) }),
     loadConversationPage: (threadId, limit, before?) =>
       rpc<ConversationPage>("conversation.page", { threadId, limit, ...(before != null ? { before } : {}) }),
-    loadCanonicalSubagentRoster: (owningParentThreadId, limit?) =>
-      rpc<CanonicalSubagentRoster>("canonicalAgent.roster", {
+    loadSubagentRoster: (owningParentThreadId) =>
+      rpc<SubagentRoster>("subagent.roster", {
         owningParentThreadId,
-        ...(limit !== undefined ? { limit } : {}),
       }),
+    loadSubagentDetail: (owningParentThreadId, entryId) => rpc<SubagentDetail>("subagent.detail", { owningParentThreadId, entryId }),
     stopCanonicalSubagent: (owningParentThreadId, childThreadId) =>
       rpc<CanonicalSubagentStopResult>("agent.child.stop", {
         owningParentThreadId,
@@ -1263,9 +1263,11 @@ export function createWsTransport(
 
     // Files
     listWorkspaceFiles: (workspaceId, threadId?) =>
-      rpc<string[]>("file.list", { workspaceId, threadId }),
-    readFileContent: (workspaceId, relativePath, threadId?) =>
-      rpc<string>("file.read", { workspaceId, relativePath, threadId }),
+      rpc<WorkspaceFileList>("file.list", { workspaceId, threadId }),
+    getWorkspaceFileChanges: (workspaceId, threadId?) =>
+      rpc<WorkspaceFileChanges>("file.changes", { workspaceId, threadId }),
+    readFileContent: (workspaceId, relativePath, threadId?, as?) =>
+      rpc<FileReadResult>("file.read", { workspaceId, relativePath, threadId, as }),
     refreshWorkspaceFiles: (workspaceId, threadId?) =>
       rpc<void>("file.refresh", { workspaceId, threadId }),
 

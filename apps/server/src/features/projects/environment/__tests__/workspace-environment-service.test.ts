@@ -74,6 +74,110 @@ function requireTestValue<T>(value: T | null | undefined, message: string): T {
 }
 
 describe("WorkspaceEnvironmentService", () => {
+  it.each(["0.0.1", "0.1.0"])("discovers and round-trips a shared %s document", async (version) => {
+    const { root } = await service();
+    const path = NodePath.join(root, ".mcode", "environment.json");
+    await NodeFSPromises.mkdir(NodePath.dirname(path), { recursive: true });
+    const original = { ...document, version, actions: [{ ...document.actions[0], futureAction: { enabled: true } }] };
+    await NodeFSPromises.writeFile(path, JSON.stringify(original));
+    const instance = new WorkspaceEnvironmentService({
+      mcodeDir: NodePath.join(root, "system"),
+      workspaces: { findById: (id) => id === workspaceId ? { id, path: root } : null },
+    });
+    const read = await instance.read(workspaceId);
+    expect(read.storageMode).toBe("shared");
+    expect(read.document).toEqual(original);
+    const saved = await instance.save({ workspaceId, sourceRevision: read.revision, document: read.document });
+    expect(saved.document).toEqual({ ...original, version: "0.1.0" });
+    expect(JSON.parse(await NodeFSPromises.readFile(path, "utf8"))).toEqual({ ...original, version: "0.1.0" });
+    expect(await instance.read(workspaceId)).toEqual(saved);
+  });
+
+  it("round-trips a legacy file including Setup and platform overrides without changing its meaning", async () => {
+    const { root, instance } = await service();
+    const path = NodePath.join(root, "projects", workspaceId, "environment.json");
+    await NodeFSPromises.mkdir(NodePath.dirname(path), { recursive: true });
+    const original = {
+      version: "0.0.1",
+      setup: { default: "bun install", windows: "bun install --frozen-lockfile" },
+      actions: [{ id: "run", name: "Run", command: { default: "bun run dev", linux: "./dev.sh" } }],
+    };
+    await NodeFSPromises.writeFile(path, JSON.stringify(original, null, 2));
+    const read = await instance.read(workspaceId);
+    expect(read.document).toEqual(original);
+    const saved = await instance.save({ workspaceId, sourceRevision: read.revision, document: read.document });
+    expect(saved.document).toEqual(original);
+    expect(JSON.parse(await NodeFSPromises.readFile(path, "utf8"))).toEqual(original);
+    expect(await instance.read(workspaceId)).toEqual(saved);
+  });
+
+  it("promotes a legacy file to 0.1.0 for startup and downgrades again when the field is removed", async () => {
+    const { root, instance } = await service();
+    const first = await instance.save({ workspaceId, sourceRevision: null, document });
+    const read = await instance.read(workspaceId);
+    const withStartup = { ...read.document, actions: read.document.actions.map((action) => ({ ...action, runOnStartup: true })) };
+    const saved = await instance.save({ workspaceId, sourceRevision: read.revision, document: withStartup });
+    const expected = { version: "0.1.0", actions: [{ id: "action-1", name: "Run app", command: { default: "bun run dev" }, runOnStartup: true }] };
+    expect(saved.document).toEqual(expected);
+    expect(saved.revision).not.toBe(first.revision);
+    const path = NodePath.join(root, "projects", workspaceId, "environment.json");
+    expect(JSON.parse(await NodeFSPromises.readFile(path, "utf8"))).toEqual(expected);
+    expect(await instance.read(workspaceId)).toEqual(saved);
+    const downgraded = await instance.save({ workspaceId, sourceRevision: saved.revision, document: { ...document, version: "0.1.0" } });
+    expect(downgraded.document).toEqual(document);
+    expect(JSON.parse(await NodeFSPromises.readFile(path, "utf8"))).toEqual(document);
+    expect(await instance.read(workspaceId)).toEqual(downgraded);
+  });
+
+  it("preserves unknown top-level and action keys from a 0.1.0 file on save", async () => {
+    const { root, instance } = await service();
+    const path = NodePath.join(root, "projects", workspaceId, "environment.json");
+    await NodeFSPromises.mkdir(NodePath.dirname(path), { recursive: true });
+    const original = {
+      version: "0.1.0",
+      futureDocument: { order: ["run"] },
+      actions: [{ id: "run", name: "Run", command: { default: "bun run dev" }, futureAction: [1, "two"] }],
+    };
+    await NodeFSPromises.writeFile(path, JSON.stringify(original));
+    const read = await instance.read(workspaceId);
+    expect(read.document).toEqual(original);
+    const saved = await instance.save({ workspaceId, sourceRevision: read.revision, document: read.document });
+    expect(saved.document).toEqual(original);
+    expect(JSON.parse(await NodeFSPromises.readFile(path, "utf8"))).toEqual(original);
+    expect(await instance.read(workspaceId)).toEqual(saved);
+  });
+
+  it("rejects a 0.2.0 file on read and save without changing its bytes", async () => {
+    const { root, instance } = await service();
+    const path = NodePath.join(root, "projects", workspaceId, "environment.json");
+    await NodeFSPromises.mkdir(NodePath.dirname(path), { recursive: true });
+    const bytes = '{"version":"0.2.0","actions":[]}';
+    await NodeFSPromises.writeFile(path, bytes);
+    const expectedError = {
+      code: "WORKSPACE_ENVIRONMENT_UNSUPPORTED_VERSION",
+      issues: [expect.objectContaining({ path: ["version"], reason: "unsupported_version" })],
+    };
+    await expect(instance.read(workspaceId)).rejects.toMatchObject(expectedError);
+    await expect(instance.save({ workspaceId, sourceRevision: null, document })).rejects.toMatchObject(expectedError);
+    expect(await NodeFSPromises.readFile(path, "utf8")).toBe(bytes);
+  });
+
+  it("rejects promotion of legacy Setup before changing the persisted document", async () => {
+    const { root, instance } = await service();
+    const first = await instance.save({ workspaceId, sourceRevision: null, document: { ...document, setup: { default: "bun install" } } });
+    await expect(instance.save({
+      workspaceId,
+      sourceRevision: first.revision,
+      document: { ...first.document, actions: first.document.actions.map((action) => ({ ...action, icon: "bun" })) },
+    })).rejects.toMatchObject({
+      code: "WORKSPACE_ENVIRONMENT_VALIDATION",
+      issues: [{ path: ["setup"], code: "INVALID_VALUE", reason: "invalid_value", message: "Move Setup into an action first." }],
+    });
+    const path = NodePath.join(root, "projects", workspaceId, "environment.json");
+    expect(JSON.parse(await NodeFSPromises.readFile(path, "utf8"))).toEqual(first.document);
+    expect(await instance.read(workspaceId)).toEqual(first);
+  });
+
   it("reads an absent default and saves at projects/<workspace-id>/environment.json", async () => {
     const { root, instance } = await service();
     const absent = await instance.read(workspaceId);
@@ -82,6 +186,16 @@ describe("WorkspaceEnvironmentService", () => {
     expect(saved.document).toEqual(document);
     expect(saved.revision).toBeTruthy();
     expect(await NodeFSPromises.readFile(NodePath.join(root, "projects", workspaceId, "environment.json"), "utf8")).toContain('"version":"0.0.1"');
+  });
+
+  it("saves an untouched default as 0.0.1", async () => {
+    const { root, instance } = await service();
+    const absent = await instance.read(workspaceId);
+    const saved = await instance.save({ workspaceId, sourceRevision: absent.revision, document: absent.document });
+    expect(saved.document).toEqual({ version: "0.0.1", actions: [] });
+    expect(await NodeFSPromises.readFile(NodePath.join(root, "projects", workspaceId, "environment.json"), "utf8"))
+      .toBe('{"version":"0.0.1","actions":[]}');
+    expect(await instance.read(workspaceId)).toEqual(saved);
   });
 
   it("replaces atomically and rejects stale saves without changing newer bytes", async () => {

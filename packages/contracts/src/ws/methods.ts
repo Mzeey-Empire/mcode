@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AgentProgressPositionSchema, AgentThreadIdSchema } from "../compat/agent-model.js";
 import { WorkspaceSchema, WorkspaceEnrichmentSchema } from "../models/workspace.js";
+import { WorkspaceFileListSchema, WorkspaceFileChangesSchema, FileReadResultSchema } from "../models/workspace-file.js";
 import {
   WorkspaceEnvironmentReadResultSchema,
   WorkspaceEnvironmentReadInputSchema,
@@ -127,9 +128,8 @@ import {
 } from "../models/canonical-agent-reconnect.js";
 import { CanonicalAgentProgressRecoverySchema } from "../models/canonical-agent-progress.js";
 import {
-  CanonicalSubagentRosterRequestSchema,
-  CanonicalSubagentRosterSchema,
 } from "../models/canonical-subagent-roster.js";
+import { SubagentRosterRequestSchema, SubagentRosterSchema, SubagentDetailRequestSchema, SubagentDetailSchema } from "../models/subagent-roster.js";
 import { PreviewAnnotationBundleSchema } from "../models/browser-preview.js";
 import {
   ThreadControlReadInputSchema,
@@ -1175,9 +1175,10 @@ export const WS_METHODS = lazySchema(() => ({
     result: ConversationPageSchema(),
   },
   /** Read the canonical descendant roster rooted at one owning parent thread. */
-  "canonicalAgent.roster": {
-    params: CanonicalSubagentRosterRequestSchema() as z.ZodTypeAny,
-    result: CanonicalSubagentRosterSchema() as z.ZodTypeAny,
+  "subagent.detail": { params: SubagentDetailRequestSchema(), result: SubagentDetailSchema() },
+  "subagent.roster": {
+    params: SubagentRosterRequestSchema(),
+    result: SubagentRosterSchema(),
   },
   /** Stop one active canonical child without closing its provider session. */
   "agent.child.stop": {
@@ -1199,15 +1200,20 @@ export const WS_METHODS = lazySchema(() => ({
       workspaceId: z.string(),
       threadId: z.string().optional(),
     }),
-    result: z.array(z.string()),
+    result: WorkspaceFileListSchema(),
+  },
+  "file.changes": {
+    params: z.object({ workspaceId: z.string(), threadId: z.string().optional() }),
+    result: WorkspaceFileChangesSchema(),
   },
   "file.read": {
     params: z.object({
       workspaceId: z.string(),
       relativePath: z.string(),
       threadId: z.string().optional(),
+      as: z.literal("text").optional(),
     }),
-    result: z.string(),
+    result: FileReadResultSchema(),
   },
   "file.refresh": {
     params: z.object({

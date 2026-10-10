@@ -3,11 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReviewDiffView } from "@/components/diff/ReviewDiffView";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { parsePatchFiles, type BaseDiffOptions } from "@pierre/diffs";
 
 const transport = vi.hoisted(() => ({
   getWorkingTreeDiff: vi.fn(),
   getBranchDiff: vi.fn(),
+  readFileContent: vi.fn(),
+  readFileAtRef: vi.fn(),
 }));
+const observeOptions = vi.hoisted(() => vi.fn<(options: BaseDiffOptions) => void>());
 
 vi.mock("@/transport", async (original) => ({
   ...(await original<object>()),
@@ -19,17 +23,21 @@ vi.mock("@/transport", async (original) => ({
 // pierre's paint pass.
 vi.mock("@pierre/diffs/react", async (original) => ({
   ...(await original<object>()),
-  CodeView: ({ items, renderAnnotation }: {
+  CodeView: ({ items, options, renderAnnotation }: {
     items: readonly { annotations?: readonly { metadata?: unknown }[] }[];
+    options: BaseDiffOptions;
     renderAnnotation: (annotation: { metadata?: unknown }) => React.ReactNode;
-  }) => (
-    <>
-      <pre data-testid="items">{JSON.stringify(items)}</pre>
-      {items.flatMap((item) => item.annotations ?? []).map((annotation, index) => (
-        <div key={index}>{renderAnnotation(annotation)}</div>
-      ))}
-    </>
-  ),
+  }) => {
+    observeOptions(options);
+    return (
+      <>
+        <pre data-testid="items">{JSON.stringify(items)}</pre>
+        {items.flatMap((item) => item.annotations ?? []).map((annotation, index) => (
+          <div key={index}>{renderAnnotation(annotation)}</div>
+        ))}
+      </>
+    );
+  },
 }));
 
 const patch = (text: string) =>
@@ -55,6 +63,8 @@ beforeEach(() => {
   useDiffStore.setState({ inlineDiffCache: {}, bulkDiffExpand: null });
   transport.getWorkingTreeDiff.mockResolvedValue(patch("FIRST_VERSION"));
   transport.getBranchDiff.mockResolvedValue(patch("NEW_BRANCH"));
+  transport.readFileAtRef.mockResolvedValue("before\n");
+  transport.readFileContent.mockResolvedValue({ kind: "text", path: "file.txt", size: 6, encoding: "utf-8", content: "after\n", changedLines: [[1, 1]] });
 });
 
 afterEach(cleanup);
@@ -72,6 +82,36 @@ describe("ReviewDiffView refresh", () => {
     await waitFor(() => expect(screen.getByTestId("items").textContent).toContain("FIRST_VERSION"));
     expect(screen.queryByText("Couldn't load this file")).not.toBeInTheDocument();
     expect(transport.getWorkingTreeDiff).toHaveBeenCalledTimes(2);
+  });
+
+  async function contextLoader() {
+    render(<ReviewDiffView {...props} />);
+    await waitFor(() => expect(screen.getByTestId("items").textContent).toContain("FIRST_VERSION"));
+    const loader = observeOptions.mock.lastCall?.[0].loadDiffFiles;
+    const file = parsePatchFiles(patch("after"))[0]?.files[0];
+    if (!loader || !file) throw new Error("Missing context expansion callback");
+    return () => loader(file);
+  }
+
+  it("expands context using the content of a structured text read", async () => {
+    const load = await contextLoader();
+    await expect(load()).resolves.toEqual({
+      oldFile: { name: "file.txt", contents: "before\n" },
+      newFile: { name: "file.txt", contents: "after\n" },
+    });
+    expect(transport.readFileContent).toHaveBeenCalledWith("workspace-fixture", "file.txt", undefined, "text");
+    expect(transport.readFileAtRef).toHaveBeenCalledWith("workspace-fixture", "", "file.txt", undefined);
+  });
+
+  it.each([
+    { kind: "binary", path: "file.txt", size: 4 },
+    { kind: "image", path: "file.txt", size: 4, mime: "image/png", url: "/image" },
+    { kind: "too-large", path: "file.txt", size: 3145728, limit: 2097152 },
+  ])("rejects context expansion for $kind without fabricating text", async (result) => {
+    transport.readFileContent.mockResolvedValue(result);
+    const load = await contextLoader();
+    await expect(load()).rejects.toThrow(/Cannot expand context/);
+    expect(screen.getByTestId("items").textContent).toContain("FIRST_VERSION");
   });
 
   it("fetches both paths when an untracked file is a rename", async () => {
