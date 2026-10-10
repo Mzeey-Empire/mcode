@@ -382,6 +382,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   private applyToolUse(event: Extract<AgentEvent, { type: "toolUse" }>): boolean {
     this.narrative.closeOpenThought(event.threadId);
     const parentToolCallId = this.narrative.bufferToolCall(event.threadId, event);
+    this.featureEffects.subagentToolChanged(event.threadId, event.toolCallId);
     this.observePersistence(event.threadId, this.featureEffects.onToolUse(event.threadId, { ...event, parentToolCallId }), "Task request persistence");
     if (!this.runtime.consumeEarlyFileEffect(event)) this.fileEffects.observeToolUse(event);
     return true;
@@ -437,6 +438,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       event.subagentPresentation,
     );
     this.observePersistence(event.threadId, this.featureEffects.onToolResult(event.threadId, event.toolCallId, event.output, event.isError), "Task result persistence");
+    this.featureEffects.subagentToolChanged(event.threadId, event.toolCallId);
     return true;
   }
 

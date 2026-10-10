@@ -164,7 +164,7 @@ describe("routeMessage agent.child.stop", () => {
         childThreadId: "child-thread",
       },
     }), {
-      subagentLifecycleService: { stop },
+      subagentRosterService: { stop },
     } as unknown as RouterDeps);
 
     expect(response).toEqual({

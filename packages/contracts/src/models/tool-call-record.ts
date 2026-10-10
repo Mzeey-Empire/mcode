@@ -111,7 +111,7 @@ export function formatSubagentDisplayName(identity: string): string {
 }
 
 /** Detail availability for one provider-reported sub-agent. */
-export const SubagentDetailSchema = lazySchema(() => z.discriminatedUnion("kind", [
+export const SubagentDetailTargetSchema = lazySchema(() => z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("canonical-child"),
     /** Durable Mcode thread ID used to open this child's transcript. */
@@ -129,7 +129,7 @@ export const SubagentDetailSchema = lazySchema(() => z.discriminatedUnion("kind"
 ]));
 
 /** Detail availability for one provider-reported sub-agent. */
-export type SubagentDetail = z.infer<ReturnType<typeof SubagentDetailSchema>>;
+export type SubagentDetailTarget = z.infer<ReturnType<typeof SubagentDetailTargetSchema>>;
 
 /** Presentation model consumed by sub-agent UI surfaces. */
 export const SubagentPresentationSchema = lazySchema(() => z.object({
@@ -137,7 +137,7 @@ export const SubagentPresentationSchema = lazySchema(() => z.object({
   task: z.string().max(SUBAGENT_PROMPT_MAX_LENGTH).optional(),
   hasExplicitIdentity: z.boolean(),
   identityKey: z.string().min(1).max(SUBAGENT_IDENTITY_KEY_MAX_LENGTH),
-  detail: SubagentDetailSchema(),
+  detail: SubagentDetailTargetSchema(),
   providerAgentKey: z.string().max(PROVIDER_AGENT_KEY_MAX_LENGTH).optional(),
   model: z.string().max(SUBAGENT_METADATA_MAX_LENGTH).optional(),
   reasoningEffort: z.string().max(SUBAGENT_METADATA_MAX_LENGTH).optional(),
@@ -221,7 +221,7 @@ export function createSubagentPresentation(
 function createSubagentDetail(
   exactIdentity: string | undefined,
   providerName: string | undefined,
-): SubagentDetail {
+): SubagentDetailTarget {
   if (exactIdentity) return { kind: "canonical-alias", identityKey: exactIdentity };
   return {
     kind: "transcript-unavailable",
@@ -230,9 +230,9 @@ function createSubagentDetail(
 }
 
 function mergeSubagentDetail(
-  current: SubagentDetail,
-  incoming: SubagentDetail,
-): SubagentDetail {
+  current: SubagentDetailTarget,
+  incoming: SubagentDetailTarget,
+): SubagentDetailTarget {
   if (current.kind === "canonical-child") return current;
   if (incoming.kind === "canonical-child") return incoming;
   if (current.kind === "canonical-alias") return current;

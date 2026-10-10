@@ -68,6 +68,24 @@ function fakeOpenSocket(received: Array<{ buf: Buffer; binary: boolean }>, compl
 }
 
 describe("broadcastTerminalData", () => {
+  it("scopes subagent changes to subscribers of the owning parent", () => {
+    const parent: Array<{ buf: Buffer; binary: boolean }> = [];
+    const other: Array<{ buf: Buffer; binary: boolean }> = [];
+    const child: Array<{ buf: Buffer; binary: boolean }> = [];
+    const parentSocket = fakeOpenSocket(parent);
+    const otherSocket = fakeOpenSocket(other);
+    const childSocket = fakeOpenSocket(child);
+    addClient(parentSocket); addClient(otherSocket); addClient(childSocket);
+    subscribeClientToThread(parentSocket, "parent");
+    subscribeClientToThread(otherSocket, "other");
+    subscribeClientToThread(childSocket, "child");
+    broadcast("subagents.changed", { threadId: "parent", epoch: "boot-one", revision: 4 });
+    expect(parent.map((frame) => JSON.parse(frame.buf.toString()))).toEqual([{
+      type: "push", channel: "subagents.changed", data: { threadId: "parent", epoch: "boot-one", revision: 4 },
+    }]);
+    expect(other).toEqual([]);
+    expect(child).toEqual([]);
+  });
   beforeEach(() => {
     _resetForTest();
     resetTransportPayloadValidatorForTest();

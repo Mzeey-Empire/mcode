@@ -1,80 +1,89 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
 import { useDiffStore } from "@/stores/diffStore";
-import { createEmptyThreadRecord, getThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
+import { pushEmitter } from "@/transport";
+import { useSubagentRosterStore } from "../../state/subagentRosterStore";
 import { SubagentsPanel } from "../SubagentsPanel";
 
-vi.mock("@/transport", async () => ({
-  ...(await vi.importActual("@/transport")),
-  getTransport: () => ({
-    loadCanonicalSubagentRoster: vi.fn().mockResolvedValue({
-      owningParentThreadId: "thread-1",
-      rosterRevision: 1,
-      active: [],
-      done: [],
-    }),
-  }),
+const transport = vi.hoisted(() => ({ loadSubagentRoster: vi.fn(), loadSubagentDetail: vi.fn(), stopCanonicalSubagent: vi.fn() }));
+vi.mock("@/transport", async (original) => ({
+  ...await original<typeof import("@/transport")>(), getTransport: () => transport,
 }));
 
-describe("SubagentsPanel real thread store path", () => {
+function row(id: string, status: SubagentRosterEntry["status"] = "running"): SubagentRosterEntry {
+  return {
+    id: `call:${id}`, provider: "claude", title: id, prompt: "Inspect the project",
+    subagentType: "Explore", model: null, stepCount: 0, status,
+    startedAt: "2026-10-10T10:00:00.000Z", endedAt: null, tier: "steps", canStop: false,
+    sourceToolCallId: id, childThreadId: null, sourceMessageId: "message", parentEntryId: null,
+  };
+}
+function roster(entries: SubagentRosterEntry[], revision = 1): SubagentRoster {
+  return { owningParentThreadId: "thread-1", epoch: "panel-boot", revision, entries, truncated: false };
+}
+
+describe("SubagentsPanel real roster store", () => {
   beforeEach(() => {
+    useSubagentRosterStore.setState({ rosters: new Map(), errors: new Set() });
     useDiffStore.setState({ subagentDetailByThread: {} });
-    useThreadStore.setState({
-      currentThreadId: "thread-1",
-      records: new Map(),
-    });
+    useThreadStore.setState({ currentThreadId: "thread-1", records: new Map() });
+    transport.loadSubagentRoster.mockReset();
+    transport.loadSubagentDetail.mockReset();
   });
 
-  it("renders the canonical empty state while the thread record is not hydrated", async () => {
-    expect(() => render(<SubagentsPanel threadId="thread-1" />)).not.toThrow();
-    await waitFor(() => expect(screen.getByTestId("subagents-empty")).toBeInTheDocument());
+  it("shows an empty roster without requiring a hydrated conversation", async () => {
+    transport.loadSubagentRoster.mockResolvedValue(roster([]));
+    render(<SubagentsPanel threadId="thread-1" />);
+    await screen.findByTestId("subagents-empty");
+    expect(transport.loadSubagentRoster.mock.calls).toEqual([["thread-1"]]);
   });
 
-  it("survives a transient record missing hydrated narrative data", async () => {
-    const record = createEmptyThreadRecord();
-    const partialRecord = { ...record, narrativeByMessage: undefined } as unknown as typeof record;
-    useThreadStore.setState({
-      currentThreadId: "thread-1",
-      records: new Map([["thread-1", partialRecord as typeof record]]),
+  it("renders both Claude calls and updates them on push without an interval", async () => {
+    const interval = vi.spyOn(window, "setInterval");
+    transport.loadSubagentRoster.mockResolvedValueOnce(roster([row("Inspect UI"), row("Inspect API")]))
+      .mockResolvedValueOnce(roster([row("Inspect UI", "done"), row("Inspect API", "done")], 2));
+    await act(async () => { render(<SubagentsPanel threadId="thread-1" />); });
+    expect(screen.getAllByTestId("subagent-active-row")).toHaveLength(2);
+    expect(interval).not.toHaveBeenCalled();
+    await act(async () => {
+      pushEmitter.emit("subagents.changed", { threadId: "thread-1", epoch: "panel-boot", revision: 2 });
+      await useSubagentRosterStore.getState().refresh("thread-1");
     });
-
-    expect(() => render(<SubagentsPanel threadId="thread-1" />)).not.toThrow();
-    await waitFor(() => expect(screen.getByTestId("subagents-empty")).toBeInTheDocument());
+    expect(screen.queryAllByTestId("subagent-active-row")).toHaveLength(0);
+    expect(screen.getAllByTestId("subagent-finished-row")).toHaveLength(2);
+    expect(transport.loadSubagentRoster).toHaveBeenCalledTimes(2);
+    interval.mockRestore();
   });
 
-  it("normalizes null narrative data and pending persistence ids", () => {
-    const record = createEmptyThreadRecord();
-    const partialRecord = {
-      ...record,
-      narrativeByMessage: null,
-      pendingTurnPersistMessageIds: null,
-    } as unknown as typeof record;
-    useThreadStore.setState({
-      currentThreadId: "thread-1",
-      records: new Map([["thread-1", partialRecord]]),
+  it("keeps an open entry selected after refresh and loads server steps", async () => {
+    transport.loadSubagentRoster.mockResolvedValue(roster([row("Inspect UI")]));
+    transport.loadSubagentDetail.mockResolvedValue({
+      entryId: "call:Inspect UI", totalSteps: 0, steps: [], summary: "No issues found",
     });
-
-    expect(() => render(<SubagentsPanel threadId="thread-1" />)).not.toThrow();
-    const normalized = getThreadRecord(useThreadStore.getState().records, "thread-1");
-    expect(normalized.narrativeByMessage).toEqual({});
-    expect(normalized.pendingTurnPersistMessageIds).toEqual([]);
+    render(<SubagentsPanel threadId="thread-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open Inspect UI details, Running" }));
+    await screen.findByText("No issues found");
+    expect(useDiffStore.getState().subagentDetailByThread["thread-1"]?.id).toBe("call:Inspect UI");
+    transport.loadSubagentRoster.mockResolvedValue(roster([row("Inspect UI", "stopped")], 3));
+    await act(async () => { await useSubagentRosterStore.getState().refresh("thread-1"); });
+    expect(screen.getByRole("status")).toHaveTextContent("Stopped");
+    expect(transport.loadSubagentDetail.mock.calls).toEqual([
+      ["thread-1", "call:Inspect UI"], ["thread-1", "call:Inspect UI"],
+    ]);
   });
 
-  it("normalizes missing pending persistence ids when narrative data exists", () => {
-    const record = createEmptyThreadRecord();
-    const partialRecord = {
-      ...record,
-      pendingTurnPersistMessageIds: undefined,
-    } as unknown as typeof record;
-    useThreadStore.setState({
-      currentThreadId: "thread-1",
-      records: new Map([["thread-1", partialRecord]]),
-    });
-
-    expect(() => render(<SubagentsPanel threadId="thread-1" />)).not.toThrow();
-    expect(
-      getThreadRecord(useThreadStore.getState().records, "thread-1").pendingTurnPersistMessageIds,
-    ).toEqual([]);
+  it("offers Retry after an error and retains the last good rows", async () => {
+    transport.loadSubagentRoster.mockResolvedValueOnce(roster([row("Inspect UI")]))
+      .mockRejectedValueOnce(new Error("Disconnected")).mockResolvedValueOnce(roster([row("Inspect UI", "done")], 2));
+    render(<SubagentsPanel threadId="thread-1" />);
+    await screen.findByRole("button", { name: "Open Inspect UI details, Running" });
+    await act(async () => { await useSubagentRosterStore.getState().refresh("thread-1"); });
+    expect(screen.getByRole("alert")).toHaveTextContent("Couldn't load subagents");
+    expect(screen.getByTestId("subagent-active-row")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await screen.findByRole("button", { name: "Open Inspect UI details, Done" });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

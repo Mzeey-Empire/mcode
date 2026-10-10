@@ -1,3 +1,4 @@
+import { type CanonicalChildRosterRequest } from "./canonical-child-roster.js";
 import * as NodeCrypto from "node:crypto";
 import { logger } from "@mcode/shared";
 import {
@@ -7,7 +8,7 @@ import {
   type CanonicalAgentEventEnvelope,
   type Message, type CanonicalAgentProgressFrame,
   type AgentEvent,
-  type CanonicalSubagentRosterRequest, type CanonicalSubagentStopRequest, type CollaborationObservationChange,
+  type CanonicalSubagentStopRequest, type CollaborationObservationChange,
   AgentEventSchema,
   MessageSchema, HookExecutionRecordSchema,
   type PlanVersion,
@@ -74,6 +75,12 @@ interface ProgressThread {
 
 /** One bounded live owner retains accepted progress after its execution worker releases. */
 export class CanonicalAcceptedProgress {
+  private rosterChangeListener: ((threadId: string, revision: number) => void) | undefined;
+
+  /** Observe accepted canonical roster revisions without coupling projections to reads. */
+  onSubagentRosterChange(listener: (threadId: string, revision: number) => void): void {
+    this.rosterChangeListener = listener;
+  }
   readonly epoch = NodeCrypto.randomUUID();
   private readonly threads = new Map<string, ProgressThread>();
   private readonly budget = new BoundedProgressRetention({ maxEvents: 98_304, maxBytes: 96 * 1024 * 1024,
@@ -319,7 +326,7 @@ export class CanonicalAcceptedProgress {
   }
 
   /** Roster reads use accepted child identities while the family save stream is pending. */
-  loadSubagentRoster(request: CanonicalSubagentRosterRequest) {
+  loadSubagentRoster(request: CanonicalChildRosterRequest) {
     const thread = this.threads.get(request.owningParentThreadId);
     return thread ? this.canonical.projectAcceptedSubagentRoster(request, thread.state) : undefined;
   }
@@ -922,6 +929,10 @@ export class CanonicalAcceptedProgress {
   }
 
   private publishFamily(frame: CanonicalAgentProgressFrame): void {
+    const state = this.threads.get(frame.threadId)?.state;
+    for (const thread of Object.values(state?.threads ?? {})) {
+      this.rosterChangeListener?.(thread.id, thread.rosterRevision);
+    }
     broadcast("agent.canonical", frame);
     const thread = this.threads.get(frame.threadId);
     if (!thread) return;

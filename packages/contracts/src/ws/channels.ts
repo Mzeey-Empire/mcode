@@ -29,6 +29,10 @@ export const CANONICAL_AGENT_EVENT_BATCH_MAX = 256;
 
 /** All push channel definitions keyed by channel name. */
 export const WS_CHANNELS = {
+  /** Invalidates the owning parent's unified subagent roster. */
+  "subagents.changed": z.object({
+    threadId: z.string().min(1), epoch: z.string().min(1), revision: z.number().int().nonnegative(),
+  }).strict(),
   /** Directs browser creation to a host when no visible target exists yet. */
   "browserAutomation.bootstrap": z
     .object({

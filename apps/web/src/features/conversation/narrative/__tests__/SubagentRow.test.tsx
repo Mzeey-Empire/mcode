@@ -1,465 +1,111 @@
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { SubagentRow } from "../SubagentRow";
+import { createSubagentPresentation, type SubagentRosterEntry } from "@mcode/contracts";
 import type { ToolCall } from "@/transport/types";
-import { createMockThread } from "@/__tests__/mocks/transport";
-import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { useSubagentRosterStore } from "@/features/subagents/state/subagentRosterStore";
+import { SubagentRow } from "../SubagentRow";
 import { SubagentProviderScope } from "../subagent-provider";
-import { createSubagentPresentation } from "@mcode/contracts";
 
-const { openSubagentDetail } = vi.hoisted(() => ({ openSubagentDetail: vi.fn() }));
-
-function agent(overrides: Partial<ToolCall> = {}): ToolCall {
-  const toolCall: ToolCall = {
-    id: "agent-1",
-    toolName: "Agent",
-    toolInput: { agentName: "Explorer", description: "Read detection module" },
-    output: null,
-    isError: false,
-    isComplete: false,
-    ...overrides,
-  };
-  return {
-    ...toolCall,
-    subagentPresentation: overrides.subagentPresentation
-      ?? createSubagentPresentation(toolCall.toolInput, toolCall.id),
-  };
+function agent(id = "agent-1", overrides: Partial<ToolCall> = {}): ToolCall {
+  return { id, toolName: "Agent", toolInput: { agentName: "Untrusted raw identity" }, output: "Private summary",
+    isError: false, isComplete: false,
+    subagentPresentation: createSubagentPresentation({ description: "Provisional task" }, id), ...overrides };
 }
 
-function renderRow(toolCall: ToolCall, children: readonly ToolCall[] = []) {
-  return render(
-    <SubagentRow
-      toolCall={toolCall}
-      participants={[toolCall]}
-      lifecycle="started"
-      children={children}
-      hooks={[]}
-      onSubagentSelect={openSubagentDetail}
-    />,
-  );
+function entry(id = "agent-1", overrides: Partial<SubagentRosterEntry> = {}): SubagentRosterEntry {
+  return { id: `call:${id}`, provider: "claude", title: "Read detection module", prompt: "Private prompt",
+    subagentType: "Explore", model: null, stepCount: 2, status: "running",
+    startedAt: "2026-10-10T10:00:00.000Z", endedAt: null, tier: "steps", canStop: false,
+    sourceToolCallId: id, sourceMessageId: "message", childThreadId: null, parentEntryId: null, ...overrides };
 }
 
-describe("SubagentRow", () => {
-  beforeEach(() => {
-    openSubagentDetail.mockReset();
-  });
+function seed(entries: SubagentRosterEntry[], revision = 1): void {
+  useSubagentRosterStore.setState({ rosters: new Map([["parent", {
+    owningParentThreadId: "parent", epoch: "chips-boot", revision, entries, truncated: false,
+  }]]), errors: new Set() });
+}
 
-  it("uses the parent task as the row title", () => {
-    renderRow(agent());
+function mount(call = agent(), onSelect = vi.fn()) {
+  render(<SubagentProviderScope threadId="parent">
+    <SubagentRow toolCall={call} participants={[call]} lifecycle="finished" children={[]} hooks={[]} onSubagentSelect={onSelect} />
+  </SubagentProviderScope>);
+  return onSelect;
+}
 
-    expect(screen.getByRole("button", { name: "Show Read detection module subagent details" })).toBeInTheDocument();
-    expect(screen.getByText("started working")).toBeInTheDocument();
-    expect(screen.queryByTestId("subagent-lifecycle-dot")).not.toBeInTheDocument();
-    expect(screen.getByText("Read detection module")).toBeInTheDocument();
-  });
+describe("SubagentRow authoritative roster", () => {
+  beforeEach(() => seed([entry()]));
 
-  it("shows the owning thread's provider icon", () => {
-    useWorkspaceStore.setState({ threads: [createMockThread({ id: "codex-thread", provider: "codex" })] });
-    const toolCall = agent();
-    render(
-      <SubagentProviderScope threadId="codex-thread">
-        <SubagentRow toolCall={toolCall} participants={[toolCall]} lifecycle="started" children={[]} hooks={[]} />
-      </SubagentProviderScope>,
-    );
-
+  it("takes title, per-entry provider and status from the roster despite conflicting raw call state", () => {
+    seed([entry("agent-1", { provider: "codex" })]);
+    mount(agent("agent-1", { isComplete: true, isError: true }));
+    expect(screen.getByRole("button", { name: "Open Read detection module subagent details" })).toBeEnabled();
+    expect(screen.getByRole("status")).toHaveTextContent("working");
     expect(document.querySelector('[data-provider-icon="codex"]')).toBeInTheDocument();
+    expect(screen.queryByText("Untrusted raw identity")).not.toBeInTheDocument();
+    expect(screen.queryByText("Private prompt")).not.toBeInTheDocument();
+    expect(screen.queryByText("Private summary")).not.toBeInTheDocument();
   });
-
-  it("formats an underscored parent task as a sentence title", () => {
-    renderRow(agent({
-      subagentPresentation: {
-        displayName: "Franklin",
-        task: "verify_ui_child",
-        hasExplicitIdentity: true,
-        identityKey: "child-franklin",
-        detail: { kind: "canonical-child", threadId: "canonical-child-franklin" },
-      },
-    }));
-
-    expect(screen.getByRole("button", { name: "Open Verify ui child subagent details" })).toBeInTheDocument();
-    expect(screen.queryByText("verify_ui_child")).not.toBeInTheDocument();
-  });
-
-  it("formats a provider identity as a sentence title", () => {
-    renderRow(agent({ toolInput: { agentName: "direct_detail_worker" } }));
-
-    expect(screen.getByRole("button", { name: "Show Direct detail worker subagent details" })).toBeInTheDocument();
-    expect(screen.queryByText("direct_detail_worker")).not.toBeInTheDocument();
-  });
-
-  it("renders only the normalized presentation when raw provider input conflicts", () => {
-    renderRow(agent({
-      toolInput: { agentName: "wrong_raw_identity", prompt: "Private task" },
-      subagentPresentation: {
-        displayName: "Correct identity",
-        hasExplicitIdentity: true,
-        identityKey: "child-correct",
-        detail: { kind: "canonical-child", threadId: "canonical-child-correct" },
-      },
-    }));
-
-    expect(screen.getByRole("button", { name: "Open Correct identity subagent details" })).toBeInTheDocument();
-    expect(screen.queryByText("wrong_raw_identity")).not.toBeInTheDocument();
-    expect(screen.queryByText("Private task")).not.toBeInTheDocument();
-  });
-
-  it("shows updated without exposing provider output", () => {
-    const updatedAgent = agent({ output: "Provider update" });
-    render(<SubagentRow toolCall={updatedAgent} participants={[updatedAgent]} lifecycle="updated" children={[]} hooks={[]} onSubagentSelect={openSubagentDetail} />);
-
-    expect(screen.getByText("updated")).toBeInTheDocument();
-    expect(screen.queryByText("Provider update")).not.toBeInTheDocument();
-  });
-
-  it.each([{ isComplete: true }, { isComplete: true, isError: true }, { isComplete: true, isCancelled: true }] as const)(
-    "uses finished for every terminal state in chat",
-    (overrides) => {
-      const finishedAgent = agent(overrides);
-      render(<SubagentRow toolCall={finishedAgent} participants={[finishedAgent]} lifecycle="finished" children={[]} hooks={[]} onSubagentSelect={openSubagentDetail} />);
-      expect(screen.getByText("finished")).toBeInTheDocument();
-    },
-  );
 
   it.each([
-    [{ isComplete: true }, "Completed"],
-    [{ isComplete: true, isError: true }, "Failed"],
-    [{ isComplete: true, isCancelled: true }, "Interrupted"],
-  ] as const)("announces the canonical terminal status", (overrides, status) => {
-    const finishedAgent = agent(overrides);
-    render(<SubagentRow toolCall={finishedAgent} participants={[finishedAgent]} lifecycle="finished" children={[]} hooks={[]} onSubagentSelect={openSubagentDetail} />);
-    expect(screen.getByRole("status")).toHaveTextContent(status);
+    ["running", "working"], ["done", "finished"], ["failed", "failed"], ["stopped", "stopped"],
+  ] as const)("announces %s as %s", (status, word) => {
+    seed([entry("agent-1", { status })]);
+    mount();
+    expect(screen.getByRole("status")).toHaveTextContent(word);
   });
 
-  it("does not infer interruption from child output text", () => {
-    const finishedAgent = agent({ isComplete: true, output: "The word cancelled appears in the report." });
-    render(<SubagentRow toolCall={finishedAgent} participants={[finishedAgent]} lifecycle="finished" children={[]} hooks={[]} onSubagentSelect={openSubagentDetail} />);
-    expect(screen.getByRole("status")).toHaveTextContent("Completed");
+  it("opens the stable entry id before and after a canonical child arrives", () => {
+    const onSelect = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Open Read detection module subagent details" }));
+    act(() => seed([entry("agent-1", { provider: "codex", tier: "transcript", childThreadId: "child-42" })], 2));
+    fireEvent.click(screen.getByRole("button", { name: "Open Read detection module subagent details" }));
+    expect(onSelect.mock.calls).toEqual([["call:agent-1", "active"], ["call:agent-1", "active"]]);
   });
 
-  it("uses the parent task without treating it as the agent identity", () => {
-    const anonymousAgent = agent({ toolInput: { prompt: "Private prompt", description: "Private task" }, isComplete: true });
-    render(<SubagentRow toolCall={anonymousAgent} participants={[anonymousAgent]} lifecycle="finished" children={[]} hooks={[]} onSubagentSelect={openSubagentDetail} />);
-
-    expect(screen.getByRole("button", { name: "Show Private task subagent details" })).toBeInTheDocument();
-    expect(screen.queryByText("Private prompt")).not.toBeInTheDocument();
-    expect(screen.getByText("Private task")).toBeInTheDocument();
+  it("ignores a fake provider alias and resolves an old nested marker through its exact parent call", () => {
+    seed([entry("root", { provider: "devin" })]);
+    const onSelect = mount(agent("nested", {
+      parentToolCallId: "root",
+      subagentPresentation: createSubagentPresentation({ nativeThreadId: "fake-native" }, "nested"),
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Read detection module subagent details" }));
+    expect(onSelect.mock.calls).toEqual([["call:root", "active"]]);
   });
 
-  it("shows unavailable detail when the presentation is absent", async () => {
-    const missingPresentation = {
-      ...agent(),
-      subagentPresentation: undefined,
-    };
-    renderRow(missingPresentation);
-
-    await userEvent.click(screen.getByRole("button", { name: "Show Subagent subagent details" }));
-
-    expect(openSubagentDetail).not.toHaveBeenCalled();
-    expect(screen.getByTestId("subagent-transcript-unavailable")).toBeInTheDocument();
-  });
-
-  it("uses the canonical child ID for navigation", async () => {
-    const firstTurn = agent({
-      id: "spawn-worker",
-      toolInput: { receiverThreadIds: ["child-worker"] },
-      subagentPresentation: {
-        displayName: "Subagent",
-        hasExplicitIdentity: false,
-        identityKey: "child-worker",
-        detail: { kind: "canonical-child", threadId: "thread:codex-child:worker" },
-      },
-    });
-    const secondTurn = agent({
-      id: "follow-up-worker",
-      toolInput: { receiverThreadIds: ["child-worker"] },
-      subagentPresentation: {
-        displayName: "Subagent",
-        hasExplicitIdentity: false,
-        identityKey: "child-worker",
-        detail: { kind: "canonical-child", threadId: "thread:codex-child:worker" },
-      },
-    });
-    render(
-      <SubagentRow
-        toolCall={firstTurn}
-        participants={[firstTurn, secondTurn]}
-        lifecycle="finished"
-        children={[]}
-        hooks={[]}
-        onSubagentSelect={openSubagentDetail}
-      />,
-    );
-
-    await userEvent.click(screen.getAllByRole("button", { name: "Open Subagent subagent details" })[1]!);
-    expect(openSubagentDetail).toHaveBeenLastCalledWith("thread:codex-child:worker", "finished");
-  });
-
-  it("opens the marker's projected detail when its in-thread child carries the identity", async () => {
-    const marker = agent({
-      id: "run-subagent",
-      toolInput: { description: "Explore the codebase" },
-    });
-    const started = agent({
-      id: "agent-1",
-      toolInput: { description: "Explore the codebase", nativeThreadId: "agent-1" },
-      parentToolCallId: "run-subagent",
-    });
-    render(
-      <SubagentRow
-        toolCall={marker}
-        participants={[marker]}
-        lifecycle="started"
-        children={[started]}
-        hooks={[]}
-        allToolCalls={[marker, started]}
-        onSubagentSelect={openSubagentDetail}
-      />,
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: /Explore the codebase subagent details/ }));
-
-    expect(openSubagentDetail).toHaveBeenCalledWith("run-subagent", "active");
+  it("opens meta details without claiming a transcript", () => {
+    seed([entry("agent-1", { provider: "cursor", tier: "meta", status: "done" })]);
+    const onSelect = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Open Read detection module subagent details" }));
+    expect(onSelect.mock.calls).toEqual([["call:agent-1", "finished"]]);
     expect(screen.queryByTestId("subagent-transcript-unavailable")).not.toBeInTheDocument();
   });
 
-  it("keeps the transcript notice on a nested marker with no top-level row", async () => {
-    const nested = agent({
-      id: "nested-run",
-      toolInput: { description: "Nested explore" },
-      parentToolCallId: "run-subagent",
-    });
-    const nestedStarted = agent({
-      id: "agent-2",
-      toolInput: { nativeThreadId: "agent-2" },
-      parentToolCallId: "nested-run",
-    });
-    render(
-      <SubagentRow
-        toolCall={nested}
-        participants={[nested]}
-        lifecycle="started"
-        children={[nestedStarted]}
-        hooks={[]}
-        allToolCalls={[nested, nestedStarted]}
-        onSubagentSelect={openSubagentDetail}
-      />,
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: /Nested explore subagent details/ }));
-
-    expect(openSubagentDetail).not.toHaveBeenCalled();
-    expect(screen.getByTestId("subagent-transcript-unavailable")).toBeInTheDocument();
+  it("waits for the roster before enabling a provisional chip", () => {
+    seed([]);
+    mount();
+    expect(screen.getByRole("button", { name: "Show Provisional task subagent details" })).toBeDisabled();
+    expect(screen.getByRole("status").textContent).toBe("");
+    act(() => seed([entry()], 2));
+    expect(screen.getByRole("button", { name: "Open Read detection module subagent details" })).toBeEnabled();
   });
 
-  it("explains unavailable Cursor detail without selecting a canonical child", async () => {
-    const cursorAgent = agent({
-      toolInput: {
-        description: "Read the current module",
-        agentId: "cursor-agent-1",
-        subagentProviderName: "Cursor",
-      },
-    });
-    renderRow(cursorAgent);
-
-    await userEvent.click(screen.getByRole("button", { name: "Show Read the current module subagent details" }));
-
-    expect(screen.getByTestId("subagent-transcript-unavailable"))
-      .toHaveTextContent("Cursor did not provide this subagent’s transcript.");
-    expect(openSubagentDetail).not.toHaveBeenCalled();
-  });
-
-  it("keeps child calls and settled output out of chat", () => {
-    const child: ToolCall = {
-      id: "shell-1",
-      toolName: "Shell",
-      toolInput: { command: "git status --short" },
-      output: " M file.ts",
-      isError: false,
-      isComplete: true,
-      parentToolCallId: "agent-1",
-    };
-    renderRow(agent({ output: "Final report", isComplete: true }), [child]);
-
-    expect(screen.queryByText("git status --short")).not.toBeInTheDocument();
-    expect(screen.queryByText("M file.ts", { exact: false })).not.toBeInTheDocument();
-    expect(screen.queryByText("Final report")).not.toBeInTheDocument();
-  });
-
-  it("renders source and target as independent compact controls without a chevron", async () => {
-    const source = agent({
-      id: "agent-source",
-      toolInput: {
-        agentName: "Explorer with a deliberately long identity",
-        nativeThreadId: "child-source",
-      },
-      subagentPresentation: {
-        displayName: "Explorer with a deliberately long identity",
-        hasExplicitIdentity: true,
-        identityKey: "child-source",
-        detail: { kind: "canonical-child", threadId: "canonical-child-source" },
-      },
-      isComplete: true,
-    });
-    const target = agent({
-      id: "agent-target",
-      toolInput: { agentName: "Implementer", nativeThreadId: "child-target" },
-      subagentPresentation: {
-        displayName: "Implementer",
-        hasExplicitIdentity: true,
-        identityKey: "child-target",
-        detail: { kind: "canonical-child", threadId: "canonical-child-target" },
-      },
-      isComplete: true,
-    });
-
-    const { container } = render(
-      <SubagentRow
-        toolCall={target}
-        participants={[source, target]}
-        lifecycle="finished"
-        children={[]}
-        hooks={[]}
-        onSubagentSelect={openSubagentDetail}
-      />,
-    );
-
-    const sourceButton = screen.getByRole("button", {
-      name: "Open Explorer with a deliberately long identity subagent details",
-    });
-    const targetButton = screen.getByRole("button", {
-      name: "Open Implementer subagent details",
-    });
-    expect(sourceButton).toHaveClass("h-8");
-    expect(targetButton).toHaveClass("h-8");
-    expect(sourceButton).toHaveClass("gap-1", "rounded-full", "px-2");
-    expect(targetButton).toHaveClass("gap-1", "rounded-full", "px-2");
-    expect(sourceButton.parentElement).toHaveClass("gap-1");
-    expect(sourceButton.parentElement?.parentElement).toHaveClass("gap-2");
-    expect(sourceButton).toHaveTextContent("Explorer with a deliberately long identity");
-    for (const lifecycle of screen.getAllByText("finished")) {
-      expect(lifecycle).toHaveClass("shrink-0");
-      expect(lifecycle).not.toHaveAttribute("role", "button");
-    }
-    expect(targetButton.querySelector("[data-provider-icon]")).toBeInTheDocument();
-    expect(container.querySelector("[data-lucide='chevron-right']")).not.toBeInTheDocument();
-
-    await userEvent.click(sourceButton);
-    await userEvent.click(targetButton);
-    expect(openSubagentDetail).toHaveBeenNthCalledWith(1, "canonical-child-source", "finished");
-    expect(openSubagentDetail).toHaveBeenNthCalledWith(2, "canonical-child-target", "finished");
-  });
-
-  it("caps sibling names at two and aggregates remaining lifecycle counts", async () => {
-    const rosterOpen = vi.fn();
-    const activities = [
-      agent({ id: "child-a", toolInput: { agentName: "Explorer" }, isComplete: false }),
-      agent({ id: "child-b", toolInput: { agentName: "Reviewer" }, isComplete: true }),
-      agent({ id: "child-c", toolInput: { agentName: "Implementer" }, isComplete: false }),
-      agent({ id: "child-d", toolInput: { agentName: "Tester" }, isComplete: true }),
-    ].map((toolCall, index) => ({
-      toolCall,
-      participants: [toolCall],
-      lifecycle: index === 1 || index === 3 ? "finished" as const : "updated" as const,
-      children: [],
-      hooks: [],
-    }));
-
-    render(
-      <SubagentRow
-        toolCall={activities[0]!.toolCall}
-        participants={activities[0]!.participants}
-        lifecycle={activities[0]!.lifecycle}
-        children={[]}
-        hooks={[]}
-        activities={activities}
-        onSubagentSelect={openSubagentDetail}
-        onOpenSubagents={rosterOpen}
-      />,
-    );
-
-    expect(screen.getByRole("button", { name: "Show Explorer subagent details" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Show Reviewer subagent details" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Show Implementer subagent details" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Show Tester subagent details" })).not.toBeInTheDocument();
-    const aggregate = screen.getByRole("button", { name: "Open full Subagents roster, +1 working, 1 finished" });
-    expect(aggregate).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Show Explorer subagent details" })).not.toHaveTextContent("updated");
-
-    await userEvent.click(aggregate);
-    expect(rosterOpen).toHaveBeenCalledTimes(1);
-    expect(rosterOpen).toHaveBeenCalledWith("active");
-  });
-
-  it("keeps identity controls content-sized and permits truncation only when space is constrained", () => {
-    const activities = [
-      agent({ id: "child-a", toolInput: {}, isComplete: false }),
-      agent({ id: "child-b", toolInput: {}, isComplete: false }),
-      agent({ id: "child-c", toolInput: {}, isComplete: true }),
-      agent({ id: "child-d", toolInput: {}, isComplete: true }),
-    ].map((toolCall) => ({
-      toolCall,
-      participants: [toolCall],
-      lifecycle: toolCall.isComplete ? "finished" as const : "updated" as const,
-      children: [],
-      hooks: [],
-    }));
-
-    render(
-      <SubagentRow
-        toolCall={activities[0]!.toolCall}
-        participants={activities[0]!.participants}
-        lifecycle={activities[0]!.lifecycle}
-        children={[]}
-        hooks={[]}
-        activities={activities}
-        onSubagentSelect={openSubagentDetail}
-        onOpenSubagents={vi.fn()}
-      />,
-    );
-
-    const identityButtons = screen.getAllByRole("button", { name: "Show Subagent subagent details" });
-    expect(identityButtons).toHaveLength(2);
-    for (const button of identityButtons) {
-      expect(button).toHaveClass("shrink");
-      expect(button).not.toHaveClass("flex-1");
-      expect(button).not.toHaveClass("max-w-40");
-      expect(button.parentElement).toHaveClass("shrink");
-      expect(button.parentElement).not.toHaveClass("flex-1");
-      expect(button.parentElement).not.toHaveClass("max-w-40");
-    }
-    expect(screen.getByRole("button", { name: "Open full Subagents roster, +2 finished" })).toHaveClass("shrink-0");
-    expect(screen.getAllByText("updated")).toHaveLength(2);
-  });
-
-  it("opens the finished roster for a finished-only remaining group", async () => {
-    const rosterOpen = vi.fn();
-    const activities = [
-      agent({ id: "child-a", toolInput: { agentName: "Explorer" }, isComplete: true }),
-      agent({ id: "child-b", toolInput: { agentName: "Reviewer" }, isComplete: true }),
-      agent({ id: "child-c", toolInput: { agentName: "Tester" }, isComplete: true }),
-    ].map((toolCall) => ({
-      toolCall,
-      participants: [toolCall],
-      lifecycle: "finished" as const,
-      children: [],
-      hooks: [],
-    }));
-
-    render(
-      <SubagentRow
-        toolCall={activities[0]!.toolCall}
-        participants={activities[0]!.participants}
-        lifecycle="finished"
-        children={[]}
-        hooks={[]}
-        activities={activities}
-        onOpenSubagents={rosterOpen}
-      />,
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "Open full Subagents roster, +1 finished" }));
-    expect(rosterOpen).toHaveBeenCalledTimes(1);
-    expect(rosterOpen).toHaveBeenCalledWith("finished");
+  it("keeps two compact chips and aggregates remaining authoritative outcomes", () => {
+    const calls = ["one", "two", "three", "four"].map((id) => agent(id));
+    seed([
+      entry("one", { title: "First" }), entry("two", { title: "Second" }),
+      entry("three", { title: "Third", status: "stopped" }), entry("four", { title: "Fourth", status: "done" }),
+    ]);
+    const onOpen = vi.fn();
+    const first = calls[0];
+    render(<SubagentProviderScope threadId="parent">
+      <SubagentRow toolCall={first} participants={calls} lifecycle="started" children={[]} hooks={[]}
+        activities={calls.map((call) => ({ toolCall: call, participants: [call], lifecycle: "started", children: [], hooks: [] }))}
+        onOpenSubagents={onOpen} />
+    </SubagentProviderScope>);
+    expect(screen.getByRole("button", { name: "Open First subagent details" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open Second subagent details" })).toBeInTheDocument();
+    expect(screen.queryByText("Third")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open full Subagents roster, +2 finished" }));
+    expect(onOpen.mock.calls).toEqual([["finished"]]);
   });
 });

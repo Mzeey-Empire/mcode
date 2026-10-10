@@ -35,6 +35,7 @@ import { NarrativeReadStore } from "./narrative-read-store.js";
  *   the persisted rows verbatim and changes no counts.
  */
 import { injectable, inject } from "tsyringe";
+import { rosterToolCall, type RosterToolCall } from "../../collaboration/subagent-roster-projection.js";
 import type { Database } from "bun:sqlite";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { and, asc, desc, eq, gt, gte, lt, ne, sql, type SQL, type SQLWrapper } from "drizzle-orm";
@@ -131,6 +132,33 @@ interface PersistedNarrativeRows {
 
 @injectable()
 export class NarrativeStore {
+  /** Read persisted calls with their original message provider, overlaid by the active turn. */
+  loadSubagentCalls(threadId: string): RosterToolCall[] {
+    if (!this.db) throw new Error("Subagent reads require the narrative database");
+    const messageRows = drizzle(this.db).select({
+      id: messages.id, provider: messages.provider, outcome: messages.outcome,
+    }).from(messages).where(eq(messages.threadId, threadId)).all();
+    const records = this.toolCallRecordRepo.listByMessages(messageRows.map((message) => message.id));
+    const calls = new Map<string, RosterToolCall>();
+    const owners = new Map(messageRows.map((message) => [message.id, message]));
+    messageRows.forEach((message) => (records.get(message.id) ?? []).forEach((record) =>
+      calls.set(record.id, rosterToolCall(record, message.provider, message.outcome))));
+    this.getBufferedToolCalls(threadId).forEach((call) => {
+      if (!call.toolCallId || !call.startedAt) return;
+      const saved = calls.get(call.toolCallId) ?? { messageId: "", provider: null, parentStopped: false };
+      const owner = owners.get(call.messageId);
+      calls.set(call.toolCallId, {
+        ...call, toolCallId: call.toolCallId, startedAt: call.startedAt,
+        messageId: call.messageId || saved.messageId,
+        provider: owner?.provider ?? saved.provider,
+        parentStopped: saved.parentStopped || ["cancelled", "interrupted"].includes(owner?.outcome ?? ""),
+        presentation: call._subagentPresentation,
+      });
+    });
+    return [...calls.values()].sort((left, right) =>
+      left.startedAt.localeCompare(right.startedAt) || left.sortOrder - right.sortOrder);
+  }
+
   constructor(
     @inject(MessageRepo) private readonly messageRepo: MessageRepo,
     @inject(ToolCallRecordRepo) private readonly toolCallRecordRepo: ToolCallRecordRepo,

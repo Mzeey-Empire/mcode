@@ -1,3 +1,4 @@
+import { SUBAGENT_REPORTING } from "@mcode/contracts";
 import * as NodeEvents from "node:events";
 import * as NodeCrypto from "node:crypto";
 import { CopilotClient, approveAll } from "@github/copilot-sdk";
@@ -36,6 +37,7 @@ interface CopilotSessionState {
 /** Private SDK protocol adapter; SessionRuntime is its sole session lifecycle owner. */
 export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentProvider, ISessionEvictable, ProtocolAdapter<CopilotSessionState> {
   readonly id = "copilot" as const;
+  readonly subagentReporting = SUBAGENT_REPORTING.copilot;
   readonly descriptor = Object.freeze({ id: this.id, capabilities: (["build", "plan", "completion", "permissions", "usage", "session-eviction", "clean-fork", "browser-access", "thread-control"] as const).map((name) => ({ name, support: "supported" as const })) });
   readonly supportsCompletion = true;
   readonly sessionForkOnResume = "clean" as const;

@@ -1,11 +1,13 @@
+import { useSubagentRoster } from "@/features/subagents/state/subagentRosterStore";
+import { subagentChipStatus, subagentOverviewCounts } from "@/features/subagents/subagent-status";
 import { useState } from "react";
-import { formatSubagentDisplayName } from "@mcode/contracts";
+import { formatSubagentDisplayName, type SubagentRosterEntry } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import type { HookExecution, ToolCall } from "@/transport/types";
 import { NARRATIVE_TOOL_ROW } from "./narrative-layout";
 import type { SubagentLifecycle } from "./subagent-lifecycle";
-import { useSubagentProvider } from "./subagent-provider";
+import { useSubagentThreadId } from "./subagent-provider";
 import type { SubagentActivity, SubagentRosterTarget } from "./types";
 
 interface SubagentRowProps {
@@ -42,7 +44,6 @@ interface SubagentParticipantView {
 
 interface SubagentParticipantProps extends VisibleSubagentParticipant {
   unavailableDetailId: string | undefined;
-  allToolCalls: readonly ToolCall[] | undefined;
   onSubagentSelect: SubagentRowProps["onSubagentSelect"];
   onUnavailableDetail: (id: string) => void;
 }
@@ -53,26 +54,9 @@ interface AggregateSubagentButtonProps {
   onOpenSubagents: SubagentRowProps["onOpenSubagents"];
 }
 
-function terminalStatus(toolCall: ToolCall): "Completed" | "Interrupted" | "Failed" {
-  if (toolCall.isCancelled) {
-    return "Interrupted";
-  }
-  return toolCall.isError ? "Failed" : "Completed";
-}
-
-function lifecycleLabel(lifecycle: SubagentLifecycle): string {
-  if (lifecycle === "started") return "started working";
-  if (lifecycle === "updated") return "updated";
-  return "finished";
-}
-
-function remainingLabel(activities: readonly SubagentActivity[]): string {
-  const working = activities.filter((activity) => activity.lifecycle !== "finished").length;
-  const finished = activities.length - working;
-  const labels: string[] = [];
-  if (working > 0) labels.push(`${working} working`);
-  if (finished > 0) labels.push(`${finished} finished`);
-  return labels.map((label, index) => index === 0 ? `+${label}` : label).join(", ");
+function remainingLabel(entries: readonly SubagentRosterEntry[]): string {
+  const { active, done } = subagentOverviewCounts(entries);
+  return [active > 0 ? `+${active} working` : "", done > 0 ? `${active > 0 ? "" : "+"}${done} finished` : ""].filter(Boolean).join(", ");
 }
 
 function transcriptUnavailableMessage(providerName: string | undefined): string {
@@ -102,14 +86,6 @@ function visibleSubagentParticipants(
   return participants.slice(0, 2).map((participant) => ({ participant, lifecycle }));
 }
 
-function aggregateSubagentTarget(
-  activities: readonly SubagentActivity[],
-): SubagentRosterTarget {
-  return activities.some((activity) => activity.lifecycle !== "finished")
-    ? "active"
-    : "finished";
-}
-
 function participantTranscriptUnavailableMessage(participant: ToolCall): string {
   const detail = participant.subagentPresentation?.detail;
   return transcriptUnavailableMessage(
@@ -126,42 +102,19 @@ function participantTitle(participant: ToolCall): string {
   return task ? formatSubagentDisplayName(task) : participantIdentity(participant);
 }
 
-function participantDetailTarget(participant: ToolCall, allToolCalls: readonly ToolCall[] | undefined): string | undefined {
-  const detail = participant.subagentPresentation?.detail;
-  if (detail?.kind === "canonical-child") return detail.threadId;
-  if (detail?.kind === "canonical-alias") return detail.identityKey;
-  return narrativeRowTarget(participant, allToolCalls);
-}
-
-/**
- * In-thread providers stamp the subagent's identity on a child lifecycle call
- * that lands after the invocation marker, so a top-level marker resolves
- * through its own roster row once it has an in-thread subtree.
- */
-function narrativeRowTarget(participant: ToolCall, allToolCalls: readonly ToolCall[] | undefined): string | undefined {
-  if (participant.parentToolCallId || !allToolCalls) return undefined;
-  return allToolCalls.some((call) => call.parentToolCallId === participant.id)
-    ? participant.id
-    : undefined;
-}
-
-function participantStatus(participant: ToolCall, lifecycle: SubagentLifecycle): string {
-  return lifecycle === "finished" ? terminalStatus(participant) : "Active";
-}
-
-function projectSubagentParticipant(
-  participant: ToolCall,
-  lifecycle: SubagentLifecycle,
-  allToolCalls: readonly ToolCall[] | undefined,
-): SubagentParticipantView {
-  const detailTarget = participantDetailTarget(participant, allToolCalls);
+function projectSubagentParticipant(participant: ToolCall, entry: SubagentRosterEntry | undefined): SubagentParticipantView {
   return {
-    title: participantTitle(participant),
-    detailTarget,
-    hasDetailTarget: detailTarget !== undefined,
-    status: participantStatus(participant, lifecycle),
+    title: entry?.title ?? participantTitle(participant),
+    detailTarget: entry?.id,
+    hasDetailTarget: entry !== undefined,
+    status: entry ? subagentChipStatus(entry.status) : "",
     unavailableMessage: participantTranscriptUnavailableMessage(participant),
   };
+}
+
+function entryForParticipant(entries: readonly SubagentRosterEntry[], participant: ToolCall): SubagentRosterEntry | undefined {
+  return entries.find((entry) => entry.sourceToolCallId === participant.id)
+    ?? entries.find((entry) => entry.sourceToolCallId === participant.parentToolCallId);
 }
 
 function handleSubagentSelection(
@@ -201,14 +154,14 @@ function SubagentTranscriptNotice({
 
 function SubagentParticipant({
   participant,
-  lifecycle,
   unavailableDetailId,
-  allToolCalls,
   onSubagentSelect,
   onUnavailableDetail,
 }: SubagentParticipantProps) {
-  const view = projectSubagentParticipant(participant, lifecycle, allToolCalls);
-  const provider = useSubagentProvider();
+  const roster = useSubagentRoster(useSubagentThreadId());
+  const entry = entryForParticipant(roster?.entries ?? [], participant);
+  const view = projectSubagentParticipant(participant, entry);
+  const provider = entry?.provider ?? "";
 
   return (
     <span className="flex min-w-0 shrink items-center gap-1">
@@ -218,13 +171,14 @@ function SubagentParticipant({
         size="compact"
         onClick={() => handleSubagentSelection(
           participant,
-          lifecycle,
+          entry?.status === "running" ? "started" : "finished",
           view.detailTarget,
           onSubagentSelect,
           onUnavailableDetail,
         )}
         className="min-w-0 shrink gap-1 rounded-full px-2 text-left transition-colors duration-150 motion-reduce:transition-none hover:bg-hover/30"
         aria-label={`${view.hasDetailTarget ? "Open" : "Show"} ${view.title} subagent details`}
+        disabled={!entry}
         aria-describedby={`subagent-status-${participant.id}`}
       >
         <ProviderIcon provider={provider} size={16} />
@@ -241,7 +195,7 @@ function SubagentParticipant({
         message={view.unavailableMessage}
       />
       <span className="shrink-0 text-xs text-muted">
-        {lifecycleLabel(lifecycle)}
+        {view.status}
       </span>
     </span>
   );
@@ -272,7 +226,6 @@ function AggregateSubagentButton({
 export function SubagentRow({
   participants,
   lifecycle,
-  allToolCalls,
   onSubagentSelect,
   onOpenSubagents,
   activities,
@@ -285,8 +238,13 @@ export function SubagentRow({
     lifecycle,
   );
   const remainingActivities = groupedActivities?.slice(2) ?? [];
-  const aggregateLabel = remainingActivities.length > 0 ? remainingLabel(remainingActivities) : "";
-  const aggregateTarget = aggregateSubagentTarget(remainingActivities);
+  const roster = useSubagentRoster(useSubagentThreadId());
+  const remainingEntries = remainingActivities.flatMap((activity) => {
+    const entry = entryForParticipant(roster?.entries ?? [], activity.toolCall);
+    return entry ? [entry] : [];
+  });
+  const aggregateLabel = remainingLabel(remainingEntries);
+  const aggregateTarget = remainingEntries.some((entry) => entry.status === "running") ? "active" : "finished";
 
   return (
     <div className={`${NARRATIVE_TOOL_ROW} min-w-0 gap-2`}>
@@ -297,7 +255,6 @@ export function SubagentRow({
             participant={participant}
             lifecycle={participantLifecycle}
             unavailableDetailId={unavailableDetailId}
-            allToolCalls={allToolCalls}
             onSubagentSelect={onSubagentSelect}
             onUnavailableDetail={setUnavailableDetailId}
           />
