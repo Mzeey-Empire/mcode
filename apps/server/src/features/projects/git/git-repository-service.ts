@@ -145,11 +145,6 @@ export class GitRepositoryService {
     @inject("GitExecutor") private readonly gitExecutor: GitExecutor,
   ) {}
 
-  /** List all branches for a workspace. */
-  async listBranches(workspaceId: string): Promise<GitBranch[]> {
-    return this.listBranchesAt(this.requireWorkspace(workspaceId).path);
-  }
-
   /** Get the current branch name for a workspace. */
   async getCurrentBranch(workspaceId: string): Promise<string | null> {
     return this.getCurrentBranchAt(this.requireWorkspace(workspaceId).path);

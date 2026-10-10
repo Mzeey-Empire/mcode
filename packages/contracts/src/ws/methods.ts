@@ -85,9 +85,9 @@ import { ToolCallRecordSchema } from "../models/tool-call-record.js";
 import { ThoughtSegmentRecordSchema } from "../models/thought-segment.js";
 import { HookExecutionRecordSchema } from "../models/hook-execution.js";
 import { NarrativeEntrySchema, TurnRangeSchema } from "../models/narrative-entry.js";
-import { GitBranchSchema, WorktreeSchema, BranchComparisonSchema, GitRefNameSchema, GitRemoteUrlSchema, GitBranchNameSchema, GitRefsListParamsSchema, GitRefsListResultSchema } from "../git.js";
+import { WorktreeSchema, BranchComparisonSchema, GitRefNameSchema, GitRemoteUrlSchema, GitBranchNameSchema, GitRefsListParamsSchema, GitRefsListResultSchema } from "../git.js";
 import { GitCommitSchema } from "../models/git-commit.js";
-import { PrInfoSchema, PrDetailSchema, PrDraftSchema, CreatePrResultSchema, ChecksStatusSchema, PullRequestTargetsListParamsSchema, PullRequestTargetsListResultSchema } from "../github.js";
+import { PrInfoSchema, PrDraftSchema, CreatePrResultSchema, ChecksStatusSchema, PullRequestTargetsListParamsSchema, PullRequestTargetsListResultSchema } from "../github.js";
 import { TurnSnapshotSchema } from "../models/turn-snapshot.js";
 import { AgentStopResultSchema, TurnRuntimeSnapshotSchema } from "../models/turn-runtime.js";
 import { CanonicalSubagentStopRequestSchema, CanonicalSubagentStopResultSchema } from "../models/canonical-subagent-roster.js";
@@ -871,10 +871,6 @@ export const WS_METHODS = lazySchema(() => ({
     params: GitRefsListParamsSchema(),
     result: GitRefsListResultSchema(),
   },
-  "git.listBranches": {
-    params: z.object({ workspaceId: z.string() }),
-    result: z.array(GitBranchSchema()),
-  },
   "git.currentBranch": {
     params: z.object({ workspaceId: z.string() }),
     result: z.string().nullable(),
@@ -901,14 +897,6 @@ export const WS_METHODS = lazySchema(() => ({
       threadId: z.string().optional(),
     }),
     result: GitRemoteUrlSchema(),
-  },
-  "git.fetchBranch": {
-    params: z.object({
-      workspaceId: z.string(),
-      branch: z.string(),
-      prNumber: z.number().int().positive().optional(),
-    }),
-    result: z.void(),
   },
   "git.log": {
     params: z.object({
@@ -1209,10 +1197,6 @@ export const WS_METHODS = lazySchema(() => ({
   "github.pullRequestTargets.list": {
     params: PullRequestTargetsListParamsSchema(),
     result: PullRequestTargetsListResultSchema(),
-  },
-  "github.listOpenPrs": {
-    params: z.object({ workspaceId: z.string() }),
-    result: z.array(PrDetailSchema()),
   },
   "pullRequest.capabilities": {
     params: PullRequestCapabilitiesRequestSchema(),

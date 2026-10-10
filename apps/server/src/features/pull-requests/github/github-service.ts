@@ -6,7 +6,7 @@
 
 import { injectable, inject } from "tsyringe";
 import * as NodeChildProcess from "node:child_process";
-import type { PrInfo, PrDetail, ChecksStatus, CheckRun, PullRequestTargetsListParams, PullRequestTargetsListResult } from "@mcode/contracts";
+import type { PrInfo, ChecksStatus, CheckRun, PullRequestTargetsListParams, PullRequestTargetsListResult } from "@mcode/contracts";
 import { PrInfoSchema } from "@mcode/contracts";
 import { GitRepositoryService } from "../../projects/git/git-repository-service.js";
 import { GithubPullRequestClient, GithubPullRequestClientError } from "./github-pull-request-client.js";
@@ -252,33 +252,6 @@ export class GithubService {
         ...(error.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: error.retryAfterSeconds }),
       } };
     }
-  }
-
-  /** List open PRs for a workspace's repository. */
-  async listOpenPrs(workspaceId: string): Promise<PrDetail[]> {
-    const workspace = this.workspaceRepo.findById(workspaceId);
-    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
-
-    return new Promise((resolve) => {
-      let tracked: TrackedGithubProcess | null = null;
-      const child = NodeChildProcess.execFile(
-        "gh",
-        [
-          "pr",
-          "list",
-          "--json",
-          "number,title,headRefName,author,url,state",
-          "--limit",
-          "30",
-        ],
-        { cwd: workspace.path, encoding: "utf-8", timeout: 15_000, windowsHide: true },
-        (error, stdout) => {
-          tracked?.finish();
-          resolve(error || !stdout ? [] : parseGithubPrDetails(stdout));
-        },
-      );
-      tracked = this.trackProcess(child, { repoPath: workspace.path });
-    });
   }
 
   /**
@@ -698,15 +671,6 @@ interface GithubCheckRunInput {
   appId?: number | null;
 }
 
-interface GithubPrDetailInput {
-  number?: number;
-  title?: string;
-  headRefName?: string;
-  author?: { login?: string };
-  url?: string;
-  state?: string;
-}
-
 type GithubCheckRun = CheckRun & { appId: number };
 
 const githubCheckConclusionMap: Record<string, CheckRun["conclusion"]> = {
@@ -721,30 +685,6 @@ const githubCheckConclusionMap: Record<string, CheckRun["conclusion"]> = {
 
 function noChecks(): ChecksStatus {
   return noChecksAt(Date.now());
-}
-
-function parseGithubPrDetails(stdout: string): PrDetail[] {
-  try {
-    const items = JSON.parse(stdout) as GithubPrDetailInput[];
-    return items.flatMap((item) => {
-      const detail = githubPrDetailFromInput(item);
-      return detail ? [detail] : [];
-    });
-  } catch {
-    return [];
-  }
-}
-
-function githubPrDetailFromInput(input: GithubPrDetailInput): PrDetail | null {
-  if (typeof input.number !== "number" || typeof input.headRefName !== "string") return null;
-  return {
-    number: input.number,
-    title: input.title ?? "",
-    branch: input.headRefName,
-    author: input.author?.login ?? "",
-    url: input.url ?? "",
-    state: input.state ?? "OPEN",
-  };
 }
 
 function noChecksAt(fetchedAt: number): ChecksStatus {

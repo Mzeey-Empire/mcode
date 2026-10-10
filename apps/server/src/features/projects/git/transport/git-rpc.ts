@@ -41,12 +41,10 @@ export interface GitRouterDeps {
   >;
   gitRepository: Pick<
     GitRepositoryService,
-    | "listBranches"
     | "listRefsAt"
     | "getCurrentBranch"
     | "checkout"
     | "getRemoteUrl"
-    | "fetchBranch"
     | "getCurrentBranchAt"
     | "push"
   >;
@@ -71,10 +69,6 @@ const gitHandlers: GitHandlerMap = {
   "git.refs.list": (deps, params) => deps.gitRepository.listRefsAt(
     resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId), params,
   ),
-  "git.listBranches": (deps, params) =>
-    isGitWorkspace(deps, params.workspaceId)
-      ? deps.gitRepository.listBranches(params.workspaceId)
-      : [],
   "git.currentBranch": (deps, params) =>
     isGitWorkspace(deps, params.workspaceId)
       ? deps.gitRepository.getCurrentBranch(params.workspaceId)
@@ -92,10 +86,6 @@ const gitHandlers: GitHandlerMap = {
     deps.gitRepository.getRemoteUrl(
       resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
     ),
-  "git.fetchBranch": async (deps, params) => {
-    if (!isGitWorkspace(deps, params.workspaceId)) return;
-    await deps.gitRepository.fetchBranch(params.workspaceId, params.branch, params.prNumber);
-  },
   "git.log": (deps, params) =>
     isGitWorkspace(deps, params.workspaceId)
       ? deps.gitComparison.listCommits(

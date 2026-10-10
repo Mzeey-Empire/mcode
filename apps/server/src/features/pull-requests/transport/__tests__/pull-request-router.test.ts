@@ -5,10 +5,9 @@ import { routeMessage, type RouterDeps } from "../../../../application/transport
 describe("pull request WebSocket routing", () => {
   it("routes legacy pull-request lookups and draft generation", async () => {
     const getBranchPr = vi.fn().mockResolvedValue(null);
-    const listOpenPrs = vi.fn().mockResolvedValue([]);
     const generateDraft = vi.fn().mockResolvedValue({ title: "Draft", body: "Body" });
     const deps = {
-      githubService: { getBranchPr, listOpenPrs },
+      githubService: { getBranchPr },
       prDraftService: { generateDraft },
     } as unknown as RouterDeps;
 
@@ -18,18 +17,12 @@ describe("pull request WebSocket routing", () => {
       params: { branch: "feat/pull-request-routes", cwd: "C:/repo" },
     }), deps);
     await routeMessage(JSON.stringify({
-      id: "open-prs",
-      method: "github.listOpenPrs",
-      params: { workspaceId: "workspace-1" },
-    }), deps);
-    await routeMessage(JSON.stringify({
       id: "pr-draft",
       method: "github.generatePrDraft",
       params: { workspaceId: "workspace-1", threadId: "thread-42", baseBranch: "main" },
     }), deps);
 
     expect(getBranchPr).toHaveBeenCalledWith("feat/pull-request-routes", "C:/repo");
-    expect(listOpenPrs).toHaveBeenCalledWith("workspace-1");
     expect(generateDraft).toHaveBeenCalledWith("workspace-1", "thread-42", "main");
   });
 
