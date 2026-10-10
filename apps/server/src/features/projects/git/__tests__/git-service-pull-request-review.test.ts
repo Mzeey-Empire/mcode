@@ -485,4 +485,15 @@ describe("PullRequestReviewGitService", () => {
     });
     expect(executor.calls.some((call) => call.args.includes("push"))).toBe(false);
   });
+
+  it("pushes an explicit commit SHA instead of whatever HEAD is checked out", async () => {
+    const sha = "c".repeat(40);
+
+    await service.pushPullRequestReviewBranch(repoPath, "contrib", "feature/review", source.headRepositoryUrl, sha);
+
+    const args = executor.calls.map((call) => call.args);
+    expect(args).toContainEqual(expect.arrayContaining(["merge-base", "--is-ancestor", "FETCH_HEAD", sha]));
+    expect(args).toContainEqual(["-C", repoPath, "push", "contrib", `${sha}:refs/heads/feature/review`]);
+    expect(args.some((call) => call.includes("push") && call.some((arg) => arg.startsWith("HEAD:")))).toBe(false);
+  });
 });

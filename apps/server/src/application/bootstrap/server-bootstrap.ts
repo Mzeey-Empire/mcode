@@ -15,6 +15,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import * as NodeChildProcess from "node:child_process";
+import { GitPushService } from "../../features/projects/git/git-push-service.js";
 import { killOrphanedServer, reapOrphanedPtys } from "../../runtime/process/orphan-cleanup.js";
 import { PtyPidRegistry } from "../../features/terminal/host/pty-pid-registry.js";
 
@@ -497,6 +498,7 @@ const ciWatcherService = new CiWatcherService(githubService, (channel, data) => 
   portPush.send("thread.prLinked", payload);
 });
 container.registerInstance(CiWatcherService, ciWatcherService);
+const gitPush = container.resolve(GitPushService);
 const threadDeletionTeardownService = container.resolve(ThreadDeletionTeardownService);
 if (workerOwnedTurnRuntime.progress) {
   threadDeletionTeardownService.bindAcceptedProgress(workerOwnedTurnRuntime.progress);
@@ -731,6 +733,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   gitComparison,
   gitRepository,
   gitWorktrees,
+  gitPush,
   pullRequestReviews,
   githubService,
   pullRequestService,

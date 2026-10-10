@@ -51,9 +51,7 @@ function routerDeps(workspaceRepo: WorkspaceRepo, threadRepo: ThreadRepo): GitRo
       resolveBranchComparison: unexpected, readReviewState: unexpected, readReviewComparison: unexpected,
     },
     handoffCheckoutService: { createBranchForThread: unexpected },
-    pullRequestReviews: { pushPullRequestReviewBranch: unexpected },
-    reviewWorktreeService: { resolvePushTarget: unexpected },
-    ciWatcherService: { findByWorkspaceBranch: unexpected, scheduleBumpAfterPush: unexpected },
+    gitPush: { pushCheckedOutBranch: unexpected },
   };
 }
 
