@@ -27,6 +27,8 @@ export interface ClaudeEventEvidence {
   nativeEventId?: string;
 }
 const MAX_TRACKED_TOOLS = 4_096;
+// A warning reports usage while requests still succeed, so only a rejection is a block.
+const RATE_LIMIT_ACTIVE_BY_STATUS: ReadonlyMap<string, boolean> = new Map([["allowed", false], ["allowed_warning", false], ["rejected", true]]);
 
 /** State read by the Claude SDK event mapper. */
 export interface ClaudeMappedSession {
@@ -558,14 +560,10 @@ export class ClaudeEventMapper {
           utilization?: number;
         }
       | undefined;
-    if (info?.status === "allowed")
-      this.emit({
-        type: AgentEventType.RateLimited,
-        threadId: this.threadId,
-        active: false,
-      });
-    if (info?.status === "allowed_warning" || info?.status === "rejected")
-      this.emit({
+    const active = info?.status === undefined ? undefined : RATE_LIMIT_ACTIVE_BY_STATUS.get(info.status);
+    if (!info || active === undefined) return "none";
+    this.emit(active
+      ? {
         type: AgentEventType.RateLimited,
         threadId: this.threadId,
         active: true,
@@ -574,7 +572,8 @@ export class ClaudeEventMapper {
           : undefined,
         limitType: info.rateLimitType,
         utilization: info.utilization,
-      });
+      }
+      : { type: AgentEventType.RateLimited, threadId: this.threadId, active: false });
     return "none";
   }
   private emit(event: AgentEvent): void {
