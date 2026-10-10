@@ -9,6 +9,8 @@ import type { WorkspaceRepo } from "../../persistence/workspace-repo.js";
 import type { GitComparisonService } from "../git-comparison-service.js";
 import type { GitRepositoryService } from "../git-repository-service.js";
 import type { GitPushService } from "../git-push-service.js";
+import type { CommitMessageGenerator } from "../commits/commit-message-generator.js";
+import type { GitCommitService } from "../commits/git-commit-service.js";
 import type { GitWorktreeService } from "../git-worktree-service.js";
 
 type GitRpcMethod = Extract<WsMethodName, `git.${string}`>;
@@ -45,6 +47,8 @@ export interface GitRouterDeps {
   threadRepo: Pick<ThreadRepo, "findById">;
   workspaceRepo: Pick<WorkspaceRepo, "findById">;
   gitPush: Pick<GitPushService, "pushCheckedOutBranch">;
+  gitCommit: Pick<GitCommitService, "commit">;
+  commitMessages: Pick<CommitMessageGenerator, "generate">;
 }
 
 type GitHandlerMap = {
@@ -164,6 +168,20 @@ const gitHandlers: GitHandlerMap = {
       )
       : { files: [], additions: 0, deletions: 0 },
   "git.push": routeGitPush,
+  "git.generateCommitMessage": (deps, params) => deps.commitMessages.generate(
+    resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
+    params.paths,
+  ),
+  "git.commit": (deps, params) => deps.gitCommit.commit({
+    requestId: params.requestId,
+    workspaceId: params.workspaceId,
+    threadId: params.threadId ?? null,
+    repoPath: resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
+    expectedHead: params.expectedHead,
+    files: params.files,
+    message: params.message,
+    push: params.push,
+  }),
 };
 
 /** Checks whether a method belongs to the Git RPC family. */

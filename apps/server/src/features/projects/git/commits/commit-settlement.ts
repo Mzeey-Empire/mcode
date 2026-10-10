@@ -30,21 +30,23 @@ export type CommitAttemptSettlement =
 /** Settle a request from what this process saw `git commit` do. */
 export function settleCommit(observation: CommitObservation): CommitAttemptSettlement {
   const { exit, originalHead, currentHead, currentHeadFirstParent } = observation;
+  const succeeded = exitedCleanly(exit);
   const headMoved = currentHead !== originalHead;
-  if (exit.kind === "exited" && exit.code === 0 && headMoved && currentHead !== null
-    && currentHeadFirstParent === originalHead) {
+  if (succeeded && headMoved && currentHead !== null && currentHeadFirstParent === originalHead) {
     return { state: "committed", commitSha: currentHead };
   }
-  if (!(exit.kind === "exited" && exit.code === 0) && !headMoved) {
-    return { state: "rejected", rejection: classifyCommitFailure(exit) };
-  }
+  if (!succeeded && !headMoved) return { state: "rejected", rejection: classifyCommitFailure(exit) };
   return {
     state: "unknown",
     head: currentHead,
-    detail: exit.kind === "exited" && exit.code === 0
+    detail: succeeded
       ? "git commit succeeded, but HEAD is not a child of the commit this request started from."
       : `git commit failed after HEAD moved.\n${exit.output}`.trimEnd(),
   };
+}
+
+function exitedCleanly(exit: CommitExit): boolean {
+  return exit.kind === "exited" && exit.code === 0;
 }
 
 /** Repository state read when a `prepared` row is found with nobody left to settle it. */

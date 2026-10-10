@@ -52,6 +52,8 @@ function routerDeps(workspaceRepo: WorkspaceRepo, threadRepo: ThreadRepo): GitRo
     },
     handoffCheckoutService: { createBranchForThread: unexpected },
     gitPush: { pushCheckedOutBranch: unexpected },
+    gitCommit: { commit: unexpected },
+    commitMessages: { generate: unexpected },
   };
 }
 
