@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ApprovalReceiptRecordSchema } from "../models/approval-receipt.js";
 import { AgentProgressPositionSchema, AgentThreadIdSchema } from "../compat/agent-model.js";
 import { WorkspaceSchema, WorkspaceEnrichmentSchema } from "../models/workspace.js";
 import {
@@ -1385,6 +1386,7 @@ export const WS_METHODS = lazySchema(() => ({
       tools: z.array(ToolCallRecordSchema()),
       thoughts: z.array(ThoughtSegmentRecordSchema()),
       hooks: z.array(HookExecutionRecordSchema()),
+      approvals: z.array(ApprovalReceiptRecordSchema()),
     }),
   },
   "thread.getTasks": {

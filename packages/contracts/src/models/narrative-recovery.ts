@@ -3,6 +3,7 @@ import { lazySchema } from "../utils/lazySchema.js";
 import { ToolCallRecordSchema } from "./tool-call-record.js";
 import { ThoughtSegmentRecordSchema } from "./thought-segment.js";
 import { HookExecutionRecordSchema } from "./hook-execution.js";
+import { ApprovalReceiptRecordSchema } from "./approval-receipt.js";
 
 /**
  * One bounded, user-visible narrative record retained while a parent turn is
@@ -10,6 +11,7 @@ import { HookExecutionRecordSchema } from "./hook-execution.js";
  */
 export const ParentNarrativeRecoveryItemSchema = lazySchema(() =>
   z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("approval"), record: ApprovalReceiptRecordSchema() }),
     z.object({
       kind: z.literal("toolCall"),
       record: ToolCallRecordSchema(),

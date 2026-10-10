@@ -6,6 +6,7 @@ import { StoredAttachmentSchema } from "../models/attachment.js";
 import { GoalStateSchema } from "../models/goal.js";
 import { SubagentPresentationSchema } from "../models/tool-call-record.js";
 import { TurnOutcomeSchema } from "../models/turn-outcome.js";
+import { ApprovalDecidedPayloadSchema } from "../models/approval-receipt.js";
 
 
 /**
@@ -17,6 +18,7 @@ import { TurnOutcomeSchema } from "../models/turn-outcome.js";
  * if (event.type === AgentEventType.ToolUse) { ... }
  */
 export const AgentEventType = {
+  ApprovalDecided: "approvalDecided",
   TurnStarted: "turnStarted",
   Message: "message",
   GeneratedAttachment: "generatedAttachment",
@@ -51,6 +53,7 @@ export type AgentEventType = typeof AgentEventType[keyof typeof AgentEventType];
 
 /** Discriminated union of all events emitted by an agent provider. */
 const AgentEventPayloadSchema = z.discriminatedUnion("type", [
+    ApprovalDecidedPayloadSchema().extend({ type: z.literal(AgentEventType.ApprovalDecided) }),
     z.object({
       /** Emitted at the start of a new turn, before any other events. Mirrors TurnComplete/Ended.
        *  Used by the client to populate `runningThreadIds` for live-session UI indicators. */
