@@ -12,7 +12,7 @@ import {
 import type { ToolCall } from "@/transport/types";
 import type { ToolGroup } from "./types";
 import { extractToolInputDetail } from "./tool-detail";
-import { isCancelledCall } from "./narrative-builder-helpers";
+import { GroupSummaryLabel, type ToolCallOutcome, toolCallOutcome } from "./GroupSummaryLabel";
 import { ToolOutputTruncationNotice } from "./ToolOutputTruncationNotice";
 import { ShellToolCallRow } from "./ShellToolCallRow";
 import { NarrativeToolRow, NarrativeToolRowDetail, useRowExpansion, type RowExpansion } from "./NarrativeToolRow";
@@ -26,14 +26,6 @@ interface ToolSummaryLineProps {
   virtualExpansion?: RowExpansion;
   /** The group of consecutive tool calls to summarize. */
   group: ToolGroup;
-}
-
-type ToolCallOutcome = "completed" | "failed" | "cancelled";
-
-function toolCallOutcome(toolCall: ToolCall): ToolCallOutcome {
-  if (toolCall.isError) return "failed";
-  if (isCancelledCall(toolCall)) return "cancelled";
-  return "completed";
 }
 
 function toolCallLabel(toolCall: ToolCall, outcome: ToolCallOutcome): string {
@@ -116,22 +108,6 @@ export function ToolCallDetailRow({ toolCall, expansion }: { toolCall: ToolCall;
   );
 }
 
-/** The summary fades in a narrow column, but the failure counts always stay readable. */
-function GroupSummaryLabel({ calls }: { calls: readonly ToolCall[] }) {
-  const failed = calls.filter((call) => toolCallOutcome(call) === "failed").length;
-  const cancelled = calls.filter((call) => toolCallOutcome(call) === "cancelled").length;
-  const outcomes = [
-    failed > 0 ? `${failed} failed` : null,
-    cancelled > 0 ? `${cancelled} cancelled` : null,
-  ].filter(Boolean);
-  return (
-    <>
-      <span className="text-fade">{buildToolSummaryText(calls)}</span>
-      {outcomes.length > 0 ? <span className="shrink-0 whitespace-pre">{` · ${outcomes.join(" · ")}`}</span> : null}
-    </>
-  );
-}
-
 function ToolGroupRow({ calls, open, onToggle, listsChildren }: {
   calls: readonly ToolCall[];
   open: boolean;
@@ -143,7 +119,7 @@ function ToolGroupRow({ calls, open, onToggle, listsChildren }: {
   const LeadingIcon = firstCall ? (TOOL_ICONS[resolveToolName(firstCall.toolName)] ?? DEFAULT_ICON) : DEFAULT_ICON;
   return (
     <>
-      <NarrativeToolRow icon={LeadingIcon} label={<GroupSummaryLabel calls={calls} />} disclosure={{ open, onToggle }} />
+      <NarrativeToolRow icon={LeadingIcon} label={<GroupSummaryLabel text={buildToolSummaryText(calls)} calls={calls} />} disclosure={{ open, onToggle }} />
       {open && listsChildren ? (
         <AnimatedCollapsible open>
           <ul className="mt-1 min-w-0 max-w-full space-y-1 pb-2 pl-6">

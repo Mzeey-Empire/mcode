@@ -11,6 +11,7 @@ import {
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import type { ToolCall } from "@/transport/types";
 import { buildToolSummaryText } from "@/components/chat/tool-renderers/constants";
+import { GroupSummaryLabel } from "./GroupSummaryLabel";
 import { NarrativeToolRow } from "./NarrativeToolRow";
 
 interface BrowserActivitySummaryProps {
@@ -347,7 +348,7 @@ export function BrowserActivitySummary({
     <div className="min-w-0 max-w-full">
       <NarrativeToolRow
         icon={SquareMousePointer}
-        label={buildBrowserActivitySummary(calls, active)}
+        label={<GroupSummaryLabel text={buildBrowserActivitySummary(calls, active)} calls={calls} />}
         disclosure={{ open, onToggle: virtualExpansion?.onToggle ?? (() => setOpen((current) => !current)) }}
       />
       {!virtualExpansion ? <AnimatedCollapsible open={open}>

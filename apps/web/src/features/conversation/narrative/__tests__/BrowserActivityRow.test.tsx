@@ -57,6 +57,13 @@ describe("BrowserActivityRow", () => {
     expect(container.textContent).not.toContain("Clicked the page");
   });
 
+  it("counts a failed call in a browser group summary", () => {
+    render(<ToolSummaryLine group={{ calls: [browserCall(), { ...editCall(), isError: true }] }} />);
+
+    // jsdom drops the count's leading space from the name; Chromium keeps it.
+    expect(screen.getByRole("button", { name: /^Used the browser, edited a file ?· 1 failed$/ })).toBeTruthy();
+  });
+
   it("renders the accepted grouped summary and chronological safe details", () => {
     const { container } = render(
       <ToolSummaryLine
@@ -136,7 +143,7 @@ describe("BrowserActivityRow", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Used the browser" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Used the browser ?· 1 failed$/ }));
     expect(screen.getByText("Page changed before the action")).toBeTruthy();
     expect(container.textContent).not.toContain("SECRET");
     expect(screen.queryByText("errored")).toBeNull();
@@ -177,7 +184,7 @@ describe("BrowserActivityRow", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Used the browser" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Used the browser ?· 1 cancelled$/ }));
     expect(screen.getByText("Browser action cancelled")).toBeTruthy();
     expect(screen.queryByText("Completed Browser actions")).toBeNull();
   });
