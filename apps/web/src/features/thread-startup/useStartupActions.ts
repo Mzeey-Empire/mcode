@@ -47,18 +47,20 @@ export function useStartupSetupScript(startup: ThreadStartup | undefined): strin
 /**
  * Cancels a live startup from the trail, the composer Stop and Esc.
  *
- * Returns no callback once the startup has ended or cancellation is already requested.
+ * Returns no callback once the startup has ended or a cancellation is in flight. A request that failed
+ * offers the callback again, even though the server may already hold the intent: the server re-runs
+ * containment on a repeated cancel, so retrying is the only way out of a failed stop.
  */
 export function useStartupCancel(startup: ThreadStartup | undefined, startupId: string | undefined): (() => void) | undefined {
-  const [requested, setRequested] = useState<string | null>(null);
+  const [request, setRequest] = useState<{ readonly id: string; readonly failed: boolean } | null>(null);
   const id = startup?.startupId ?? startupId;
   const cancel = useCallback(() => {
     if (!id) return;
-    setRequested(id);
+    setRequest({ id, failed: false });
     getTransport().cancelThreadStartup(id).then(
       (next) => useThreadStartupStore.getState().apply(next),
       (error: unknown) => {
-        setRequested(null);
+        setRequest({ id, failed: true });
         useToastStore.getState().show({
           kind: "failed",
           title: "Could not cancel startup",
@@ -67,9 +69,14 @@ export function useStartupCancel(startup: ThreadStartup | undefined, startupId: 
       },
     );
   }, [id]);
-  if (!id || requested === id) return undefined;
-  if (startup && (TERMINAL_STATES.has(startup.state) || startup.cancellation === "requested")) return undefined;
-  return cancel;
+  if (!id) return undefined;
+  return canOfferCancel(startup, request?.id === id ? request : null) ? cancel : undefined;
+}
+
+function canOfferCancel(startup: ThreadStartup | undefined, ownRequest: { readonly failed: boolean } | null): boolean {
+  if (startup && TERMINAL_STATES.has(startup.state)) return false;
+  if (ownRequest) return ownRequest.failed;
+  return startup?.cancellation !== "requested";
 }
 
 /**
