@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo } from "react";
 import type { Thread } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { isDetachedWorktree, normalizeWorktreePath } from "@/lib/worktree";
-import { rememberComposerMode } from "@/lib/composer-mode-preference";
 import type { ComposerMode } from "./composer-mode";
+import { newThreadComposerMode, selectNewThreadMode } from "./new-thread-mode";
 import { useForkTargetBranch, useNewThreadTargetBranch, type TargetBranch } from "./useTargetBranch";
 
 /** The selected execution target for the current Composer session. */
@@ -91,7 +91,7 @@ export function useComposerExecutionTarget({
   const isGitRepo = activeWorkspace?.is_git_repo ?? false;
   const needsWorkspace = isNewThread && !workspaceId;
   const composerMode = isNewThread
-    ? (isGitRepo ? newThreadMode : "direct")
+    ? newThreadComposerMode(isGitRepo, newThreadMode)
     : (activeThread?.mode === "worktree" ? "worktree" : "direct");
   const branchSelectedWorktree = useMemo(() => {
     const normalizedPath = normalizeWorktreePath(branchWorktreePath);
@@ -106,16 +106,7 @@ export function useComposerExecutionTarget({
     return !worktrees.some((worktree) => normalizePath(worktree.path) === normalizePath(activeThread.worktree_path!));
   }, [activeThread, worktrees, worktreesLoadedForWorkspace]);
 
-  const setMode = useCallback(
-    (mode: ComposerMode) => {
-      setNewThreadMode(mode);
-      rememberComposerMode(mode);
-      if (mode === "existing-worktree" && workspaceId) {
-        loadWorktrees(workspaceId);
-      }
-    },
-    [loadWorktrees, setNewThreadMode, workspaceId],
-  );
+  const setMode = useCallback((mode: ComposerMode) => selectNewThreadMode(workspaceId, mode), [workspaceId]);
 
   useEffect(() => {
     if (!branchFromMessageId || !workspaceId) return;

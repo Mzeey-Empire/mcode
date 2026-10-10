@@ -57,21 +57,34 @@ export function WorkspaceTargetMenu({ mode, isGitRepo, folder, onModeChange, cla
         }
       />
       <DropdownMenuContent align="start" className="w-[28.8rem]">
-        <DropdownMenuGroup>
-          <DropdownMenuGroupLabel>Workspace</DropdownMenuGroupLabel>
-          {composerModeOptions(true).map((option) => (
-            <DropdownMenuItem
-              key={option.mode}
-              label={option.label}
-              icon={<option.Icon />}
-              checked={option.mode === mode}
-              trailing={option.mode === "direct" ? <FolderMeta folder={folder} /> : undefined}
-              onClick={() => onModeChange(option.mode)}
-            />
-          ))}
-        </DropdownMenuGroup>
+        <WorkspaceModeMenuGroup mode={mode} folder={folder} onModeChange={onModeChange} />
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** Props for {@link WorkspaceModeMenuGroup}. */
+export type WorkspaceModeMenuGroupProps = Pick<WorkspaceTargetMenuProps, "mode" | "folder" | "onModeChange">;
+
+/**
+ * The "Workspace" menu rows for a git project, shared by the rail trigger and the Overview row so
+ * both list the same names, order and folder meta. Render inside a `DropdownMenuContent`.
+ */
+export function WorkspaceModeMenuGroup({ mode, folder, onModeChange }: WorkspaceModeMenuGroupProps) {
+  return (
+    <DropdownMenuGroup>
+      <DropdownMenuGroupLabel>Workspace</DropdownMenuGroupLabel>
+      {composerModeOptions(true).map((option) => (
+        <DropdownMenuItem
+          key={option.mode}
+          label={option.label}
+          icon={<option.Icon />}
+          checked={option.mode === mode}
+          trailing={option.mode === "direct" ? <FolderMeta folder={folder} /> : undefined}
+          onClick={() => onModeChange(option.mode)}
+        />
+      ))}
+    </DropdownMenuGroup>
   );
 }
 
