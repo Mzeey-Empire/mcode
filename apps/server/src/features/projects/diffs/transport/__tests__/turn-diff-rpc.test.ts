@@ -1,6 +1,7 @@
 import "reflect-metadata";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { routeTurnDiffRpc } from "../turn-diff-rpc.js";
+import { deriveTurnAssistantMessageId } from "../../../../agents/turns/turn-assistant-message-id.js";
 import { createSnapshotRangeFixture } from "../../snapshots/__tests__/turn-snapshot-range-fixture.js";
 
 describe("turn diff route outcomes", { timeout: 30_000 }, () => {
@@ -48,6 +49,23 @@ describe("turn diff route outcomes", { timeout: 30_000 }, () => {
     await fixture.attempt({ id: "one", missing: true });
     expect(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: "thread" }, fixture.deps))
       .toEqual({ status: "unavailable", reason: "snapshot-expired" });
+  });
+
+  it("answers a picked running turn with its live evidence, never an earlier attempt", async () => {
+    await fixture.attempt({ id: "one", status: "Errored", edits: { "a.ts": "a\n" } });
+    await fixture.attempt({ id: "retry", attemptOf: "one", status: "Running", missing: true });
+    const liveMessageId = deriveTurnAssistantMessageId("thread", "user-retry");
+    const request = { threadId: "thread", messageId: liveMessageId };
+
+    expect(await routeTurnDiffRpc("turnDiff.getComparison", request, fixture.deps))
+      .toEqual({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } });
+    expect(await routeTurnDiffRpc("turnDiff.listTurns", { threadId: "thread" }, fixture.deps))
+      .toMatchObject([{ messageId: liveMessageId, phase: "live", fileCount: 0, availability: "available" }]);
+
+    const live = { files: [{ path: "b.ts", previousPath: null, changeType: "added" as const, binary: false, additions: 1, deletions: 0, untracked: false }],
+      additions: 1, deletions: 0, turnDiff: { id: "live-1", phase: "live" as const, source: "native" as const, fidelity: "agent" as const, revision: 1 } };
+    vi.spyOn(fixture.deps.turnDiffs, "liveComparison").mockReturnValue(live);
+    expect(await routeTurnDiffRpc("turnDiff.getComparison", request, fixture.deps)).toEqual({ status: "ready", comparison: live });
   });
 
   it("lists replacements once, includes unchanged turns, and keeps ordinals after expiry", async () => {

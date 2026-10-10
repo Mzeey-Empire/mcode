@@ -30,10 +30,8 @@ export async function routeTurnDiffRpc<M extends TurnDiffMethod>(method: M, para
 }
 
 async function comparison(deps: TurnDiffRouterDeps, threadId: string, includeLive = true, messageId?: string): Promise<ReviewComparisonResult> {
-  if (!messageId && includeLive) {
-    const live = deps.turnDiffs.liveComparison(threadId);
-    if (live) return { status: "ready", comparison: live };
-  }
+  const live = liveResult(deps, threadId, includeLive, messageId);
+  if (live) return live;
   const selected = messageId ?? latestSettledMessage(deps, threadId);
   if (!selected) return deps.turnSnapshotRanges.listTurns(threadId).length === 0
     ? { status: "ready", comparison: { files: [], additions: 0, deletions: 0 } }
@@ -41,6 +39,25 @@ async function comparison(deps: TurnDiffRouterDeps, threadId: string, includeLiv
   const range = deps.turnSnapshotRanges.turnSnapshotRange(threadId, selected);
   if (range.status !== "ready") return range;
   return settledComparison(deps, threadId, range);
+}
+
+function liveResult(deps: TurnDiffRouterDeps, threadId: string, includeLive: boolean, messageId?: string): ReviewComparisonResult | null {
+  if (messageId) return isLiveTurn(deps, threadId, messageId) ? liveTurnComparison(deps, threadId) : null;
+  const live = includeLive ? deps.turnDiffs.liveComparison(threadId) : null;
+  return live ? { status: "ready", comparison: live } : null;
+}
+
+function isLiveTurn(deps: TurnDiffRouterDeps, threadId: string, messageId: string): boolean {
+  return deps.turnSnapshotRanges.listTurns(threadId).find((turn) => turn.messageIds.includes(messageId))?.phase === "live";
+}
+
+/**
+ * A running turn has no snapshot of its own yet; its range would resolve to an
+ * earlier attempt's rows. Only live evidence describes it, and none means no
+ * recorded changes so far.
+ */
+function liveTurnComparison(deps: TurnDiffRouterDeps, threadId: string): ReviewComparisonResult {
+  return { status: "ready", comparison: deps.turnDiffs.liveComparison(threadId) ?? { files: [], additions: 0, deletions: 0 } };
 }
 
 function latestSettledMessage(deps: TurnDiffRouterDeps, threadId: string): string | undefined {
@@ -115,9 +132,12 @@ async function settledFileDiff(deps: TurnDiffRouterDeps, params: TurnDiffParams[
 
 function listEntry(deps: TurnDiffRouterDeps, threadId: string, turn: SnapshotTurn): ReviewTurn {
   const base = { messageId: turn.messageId, ordinal: turn.ordinal, createdAt: turn.createdAt, phase: turn.phase };
-  const live = turn.phase === "live" ? deps.turnDiffs.liveComparison(threadId) : null;
-  if (live) return { ...base, fileCount: live.files.length, additions: live.additions, deletions: live.deletions,
-    evidence: "native", availability: "available" };
+  if (turn.phase === "live") {
+    const live = deps.turnDiffs.liveComparison(threadId);
+    return live
+      ? { ...base, fileCount: live.files.length, additions: live.additions, deletions: live.deletions, evidence: "native", availability: "available" }
+      : { ...base, fileCount: 0, additions: null, deletions: null, evidence: null, availability: "available" };
+  }
   if (!turn.complete || turn.rows.length === 0) return { ...base, fileCount: 0, additions: null, deletions: null, evidence: null, availability: "snapshot-expired" };
   const range = snapshotRange(turn.rows);
   if (range.status !== "ready") return { ...base, fileCount: 0, additions: null, deletions: null, evidence: null, availability: "snapshot-expired" };
