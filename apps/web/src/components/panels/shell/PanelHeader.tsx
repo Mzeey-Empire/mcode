@@ -23,6 +23,7 @@ type PanelHeaderSlotName = "leading" | "row2";
  * automation dock) the context is null and the header stays inline.
  */
 interface PanelHeaderSlotTarget {
+  readonly active: boolean;
   readonly hosts: Readonly<Record<PanelHeaderSlotName, HTMLElement>>;
   /** Marks a slot as used until the returned release runs, so empty rows stay out of the shell. */
   readonly claim: (slot: PanelHeaderSlotName) => () => void;
@@ -68,8 +69,17 @@ export function PanelHeaderSlotScope({
   const row2Row = active && claims.row2 > 0 ? elements.row2 : null;
   useLayoutEffect(() => attachSlotHost(leadingRow, hosts.leading), [leadingRow, hosts]);
   useLayoutEffect(() => attachSlotHost(row2Row, hosts.row2), [row2Row, hosts]);
-  const target = useMemo<PanelHeaderSlotTarget>(() => ({ hosts, claim }), [hosts, claim]);
+  const target = useMemo<PanelHeaderSlotTarget>(() => ({ active, hosts, claim }), [active, hosts, claim]);
   return <PanelHeaderSlotContext.Provider value={target}>{children}</PanelHeaderSlotContext.Provider>;
+}
+
+/**
+ * Whether this tool's header is in the shell now. An inactive tool stays
+ * mounted, so its body-portaled menus would float over the active tool unless
+ * the tool closes them; outside the shell the header is always live.
+ */
+export function usePanelHeaderActive(): boolean {
+  return useContext(PanelHeaderSlotContext)?.active ?? true;
 }
 
 /** Renders a tool's header content into row 1's leading slot or into row 2. */

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { usePanelHeaderActive } from "@/components/panels/shell/PanelHeader";
 import {
   CodeXml,
   Cookie,
@@ -86,6 +87,8 @@ export function BrowserOverflowMenu({
   onStopAutomation,
 }: BrowserOverflowMenuProps) {
   const [open, setOpen] = useState(false);
+  const headerActive = usePanelHeaderActive();
+  if (open && !headerActive) setOpen(false);
   const [zoom, setZoom] = useState(1);
   // Read the live zoom factor when the menu opens so the readout reflects the
   // guest's actual state (which navigation can reset) rather than a stale value.
