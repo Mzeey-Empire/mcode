@@ -34,7 +34,7 @@ export function NewThreadTargetRail({ workspaceId, mode, overviewPresentation, o
   return (
     <div
       data-testid="new-thread-target-rail"
-      className="mx-auto flex w-full max-w-[65.2rem] min-w-0 items-center gap-1 overflow-x-auto rounded-t-xl border border-b-0 border-border bg-background px-2 py-1.5"
+      className="mx-[1.4rem] flex min-w-0 items-center gap-1 overflow-x-auto rounded-t-xl border border-b-0 border-border bg-background px-2 py-1.5"
     >
       <WorkspaceTargetMenu mode={mode} isGitRepo={isGitRepo} folder={basename(workspace.path)} onModeChange={onModeChange} />
       {isGitRepo ? <ComposerTargetSelection scope="new-thread" mode={mode} workspaceId={workspace.id} /> : null}
