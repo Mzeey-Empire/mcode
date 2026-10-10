@@ -397,13 +397,13 @@ function ComposerInlineStopButton({
       <TooltipTrigger
         render={
           <Button
-            variant="ink"
+            variant="ghost"
             shape="round"
             size="icon-compact"
             onClick={actions.onStop}
             aria-label="Stop agent"
           >
-            <div className="h-2.5 w-2.5 rounded-sm bg-current" />
+            <div className="size-2.5 rounded-[2px] bg-ink" />
           </Button>
         }
       />
@@ -512,8 +512,8 @@ export function isComposerSendButtonDisabled({
     || isThreadScaffold || isStopPending || (hasContent ? targetPending : !isAgentRunning);
 }
 
-// Send is the round primary; Stop is neutral by rule: an ink circle with a background-colour square.
-const SEND_BUTTON_VARIANT: Record<ComposerSendButtonVisualState, "default" | "ink"> = {
+/** Button variant per send state. Send is the round primary; Stop is neutral by rule: an ink circle with a background-colour square. */
+export const SEND_BUTTON_VARIANT: Record<ComposerSendButtonVisualState, "default" | "ink"> = {
   scaffold: "default",
   queue: "default",
   stop: "ink",
@@ -549,7 +549,7 @@ function ComposerSendButton({
       type="button"
       variant={SEND_BUTTON_VARIANT[visualState]}
       shape="round"
-      size="icon-compact"
+      size="icon-default"
       onClick={onClick}
       disabled={disabled}
       aria-label={SEND_BUTTON_COPY[copy]}
@@ -557,7 +557,7 @@ function ComposerSendButton({
       {visualState === "scaffold" || visualState === "stopping" ? (
         <Spinner size={16} className="text-current" />
       ) : visualState === "stop" ? (
-        <div className="h-4 w-4 rounded-sm bg-current" />
+        <div className="size-3.5 rounded-[2px] bg-current" />
       ) : (
         <ArrowUp />
       )}
