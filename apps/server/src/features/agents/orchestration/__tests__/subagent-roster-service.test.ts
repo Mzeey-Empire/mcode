@@ -294,6 +294,7 @@ describe("subagentStatusFrom", () => {
     ["completed", "done"], ["failed", "failed"],
     ["Active", "running"], ["legacy-status", "failed"], [null, "failed"],
     ["Pending", "running"], ["Starting", "running"],
+    ["Idle", "done"], ["Closed", "stopped"], ["Unavailable", "failed"],
     ["constructor", "failed"], ["__proto__", "failed"],
   ])("normalizes %s to %s", (input, expected) => expect(subagentStatusFrom(input)).toBe(expected));
   it("normalizes parent cancellation without changing an already successful result", () => {

@@ -43,6 +43,8 @@ export function subagentStatusFrom(status: string | null, parentStopped = false)
 const NORMALIZED_STATUS = new Map<string, SubagentStatus>([
   ["running", "running"], ["active", "running"],
   ["pending", "running"], ["starting", "running"],
+  // Canonical children with no turn yet report their thread activity state instead.
+  ["idle", "done"], ["closed", "stopped"], ["unavailable", "failed"],
   ["cancelled", "stopped"], ["interrupted", "stopped"], ["stopped", "stopped"],
   ["completed", "done"], ["done", "done"], ["success", "done"],
   ["errored", "failed"], ["error", "failed"], ["failed", "failed"],
