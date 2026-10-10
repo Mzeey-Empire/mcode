@@ -40,13 +40,14 @@ const partitionB = "persist:mcode-browser-22222222-2222-4222-8222-222222222222";
 let root: string;
 const releaseWorkspace = vi.fn();
 
-function owner(): BrowserProfiles {
+function owner(removeLegacyPartition?: (path: string) => void): BrowserProfiles {
   return new BrowserProfiles({
     userDataPath: () => root,
     sessionDataPath: () => NodePath.join(root, "session-data"),
     sessionFromPartition: (partition) => session.fromPartition(partition),
     installPolicy: installBrowserSessionPolicy,
     releaseWorkspace,
+    removeLegacyPartition,
   });
 }
 
@@ -66,6 +67,31 @@ beforeEach(() => {
 afterEach(() => NodeFS.rmSync(root, { recursive: true, force: true }));
 
 describe("BrowserProfiles", () => {
+  it("continues startup when the legacy partition is locked and retries next launch", () => {
+    const legacy = NodePath.join(root, "session-data", "Partitions", `mcode-preview`);
+    const marker = NodePath.join(root, "browser-profiles-migrated");
+    NodeFS.mkdirSync(legacy, { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(legacy, "Cookies"), "legacy cookies");
+    const error = Object.assign(new Error("Locked file"), { code: "EBUSY" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const remove = vi.fn(() => { throw error; });
+    try {
+      const profiles = owner(remove);
+      expect(() => profiles.initialize()).not.toThrow();
+      expect(NodeFS.existsSync(marker)).toBe(false);
+      expect(NodeFS.readFileSync(NodePath.join(legacy, "Cookies"), "utf8")).toBe("legacy cookies");
+      expect(() => profiles.sessionForWorkspace(A)).not.toThrow();
+      expect(electron.session.fromPartition.mock.calls).toEqual([[partitionA]]);
+      expect(remove.mock.calls).toEqual([[legacy]]);
+      expect(warn).toHaveBeenCalledWith("Could not remove the legacy Browser partition; retrying next launch", error);
+      owner((path) => NodeFS.rmSync(path, { recursive: true, force: true })).initialize();
+      expect(NodeFS.existsSync(legacy)).toBe(false);
+      expect(NodeFS.readFileSync(marker, "utf8")).toBe("1\n");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("installs policy before returning each workspace session, once", () => {
     const profiles = owner();
     const a = profiles.sessionForWorkspace(A);

@@ -8,6 +8,7 @@ const profileRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-reg
 afterAll(() => NodeFS.rmSync(profileRoot, { recursive: true, force: true }));
 import { resolvePreviewGuestPreloadPath } from "../../security/webview-attachment-policy.js";
 import { BrowserWindow } from "electron";
+import { browserProfiles } from "../../security/browser-profiles.js";
 
 const ipcHandlers: Record<string, (...args: unknown[]) => unknown> = {};
 const fakeGuests: FakeWebContents[] = [];
@@ -169,6 +170,35 @@ afterEach(() => {
 });
 
 describe("preview typed surface bridge", () => {
+  it("returns typed failures when a pending workspace is removed during guest discovery", async () => {
+    const workspaceId = "ABCDEFAB-1234-4234-8234-ABCDEFABCDEF";
+    const win = BrowserWindow.fromId(1);
+    if (!win) throw new Error("Missing fixture window");
+    const state = getSession(win);
+    state.workspaceId = workspaceId;
+    state.tabsByThread.set(previewTabScopeKey(workspaceId, "thread-A"), {
+      threadId: "thread-A", activeTabId: "tab-1",
+      tabs: [{ id: "tab-1", threadId: "thread-A", resumeUrl: null, title: null, faviconUrl: null, lastActiveAt: 0 }],
+    });
+    const removedSurface = { ...surface(), identity: { ...surface().identity, workspaceId } };
+    const payload = { surface: removedSurface, adoptionToken: "token-removed" };
+    const guest = makeGuest(allWindows[0]!, { session: otherPartition });
+    guest.url = "about:blank#token-removed";
+    guest.close.mockImplementation(() => undefined);
+    expect(invoke("preview.surface.prepare", payload)).toEqual({ ok: true });
+    let removal = Promise.resolve();
+    guest.getType = vi.fn(() => "webview").mockImplementationOnce(() => {
+      removal = browserProfiles.remove(workspaceId);
+      return "webview";
+    });
+    expect(invoke("preview.surface.adopt", payload)).toEqual({ ok: false, error: "guest-not-found" });
+    await removal;
+    expect(findPendingPreviewAttachment(1, "about:blank#token-removed")).toBeNull();
+    expect(invoke("preview.surface.adopt", payload)).toEqual({ ok: false, error: "adoption-not-prepared" });
+    expect(invoke("preview.surface.prepare", { ...payload, surface: { ...removedSurface, generation: 2 } }))
+      .toEqual({ ok: false, error: "workspace-removed" });
+  });
+
   it("closes an attached guest that has not yet been adopted when its workspace is removed", () => {
     const guest = makeGuest(allWindows[0]!);
     expect(invoke("preview.surface.prepare", { surface: surface(), adoptionToken: "token-1234" })).toEqual({ ok: true });

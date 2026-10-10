@@ -12,6 +12,7 @@ export interface BrowserProfilesOptions {
   readonly sessionFromPartition: (partition: string) => Session;
   readonly installPolicy: (profile: Session) => void;
   readonly releaseWorkspace: (workspaceId: string) => void;
+  readonly removeLegacyPartition?: (path: string) => void;
 }
 
 function canonicalWorkspaceId(workspaceId: string): string {
@@ -56,7 +57,15 @@ export class BrowserProfiles {
     const marker = NodePath.join(this.options.userDataPath(), "browser-profiles-migrated");
     if (!NodeFS.existsSync(marker)) {
       // Opening the retired session would lock its files; deleting its unopened directory clears every store.
-      NodeFS.rmSync(NodePath.join(this.options.sessionDataPath(), "Partitions", `mcode-preview`), { recursive: true, force: true });
+      const legacyPath = NodePath.join(this.options.sessionDataPath(), "Partitions", `mcode-preview`);
+      try {
+        if (this.options.removeLegacyPartition) this.options.removeLegacyPartition(legacyPath);
+        else NodeFS.rmSync(legacyPath, { recursive: true, force: true });
+      } catch (error) {
+        console.warn("Could not remove the legacy Browser partition; retrying next launch", error);
+        this.initialized = true;
+        return;
+      }
       NodeFS.mkdirSync(this.options.userDataPath(), { recursive: true });
       NodeFS.writeFileSync(marker, "1\n");
     }
@@ -74,6 +83,11 @@ export class BrowserProfiles {
     this.options.installPolicy(profile);
     this.sessions.set(id, profile);
     return profile;
+  }
+
+  /** Reports whether this workspace was removed during this launch. */
+  public isRemoved(workspaceId: string): boolean {
+    return this.removed.has(canonicalWorkspaceId(workspaceId));
   }
 
   /** Clears only the requested store in this workspace's session. */

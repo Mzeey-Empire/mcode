@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { WebContents, Event as ElectronEvent } from "electron";
+import type { Session, WebContents, Event as ElectronEvent } from "electron";
+import * as NodeEvents from "node:events";
 
 const fake = vi.hoisted(() => ({
   profile: {
@@ -8,6 +9,16 @@ const fake = vi.hoisted(() => ({
     setPermissionCheckHandler: vi.fn(),
     setPermissionRequestHandler: vi.fn(),
   },
+  secondProfile: {
+    on: vi.fn(),
+    webRequest: { onCompleted: vi.fn() },
+    setPermissionCheckHandler: vi.fn<Session["setPermissionCheckHandler"]>(),
+    setPermissionRequestHandler: vi.fn<Session["setPermissionRequestHandler"]>(),
+  },
+  clipboardGuests: [1, 2].map((id) => ({
+    id, mainFrame: {}, on: vi.fn(), once: vi.fn(), removeListener: vi.fn(),
+    isDestroyed: () => false, getURL: () => `https://project-${id}.test/page`,
+  })),
   guest: {
     setWindowOpenHandler: vi.fn<WebContents["setWindowOpenHandler"]>(),
     once: vi.fn<(name: string, listener: () => void) => void>(),
@@ -18,12 +29,14 @@ const fake = vi.hoisted(() => ({
 }));
 vi.mock("electron", () => ({
   ipcMain: fake.ipcMain,
-  session: { fromPartition: () => fake.profile },
-  webContents: { fromId: () => fake.guest },
+  session: { fromPartition: (partition: string) => partition === "second" ? fake.secondProfile : fake.profile },
+  webContents: { fromId: (id: number) => id > 1 ? fake.clipboardGuests[id - 2] : fake.guest },
 }));
 
 import { session, webContents } from "electron";
 import { bindGuestPopup, installBrowserSessionPolicy } from "../electron-session-policy.js";
+import { registerPreviewClipboardGuest } from "../clipboard-trust.js";
+import { PREVIEW_GUEST_CLIPBOARD_TRUST_CHANNEL } from "../../contracts/guest-input.js";
 
 describe("workspace session policy", () => {
   const surface = {
@@ -79,5 +92,29 @@ describe("workspace session policy", () => {
     expect(request("https://example.test/stale")).toEqual({ action: "deny" });
     expect(emitPopup).toHaveBeenCalledTimes(3);
     unbind();
+  });
+
+  it("registers one IPC listener for two sessions and grants each guest one trusted write", () => {
+    const ipc = new NodeEvents.EventEmitter();
+    const first = session.fromPartition("second");
+    const second = session.fromPartition("first");
+    // Use fresh policy sessions so this assertion is independent of earlier installations.
+    const firstCheck = vi.fn<Session["setPermissionCheckHandler"]>();
+    const secondCheck = vi.fn<Session["setPermissionCheckHandler"]>();
+    installBrowserSessionPolicy({ ...first, setPermissionCheckHandler: firstCheck }, ipc);
+    installBrowserSessionPolicy({ ...second, setPermissionCheckHandler: secondCheck }, ipc);
+    expect(ipc.listenerCount(PREVIEW_GUEST_CLIPBOARD_TRUST_CHANNEL)).toBe(1);
+    for (const [index, check] of [firstCheck, secondCheck].entries()) {
+      const guest = webContents.fromId(index + 2);
+      const handler = check.mock.calls[0]?.[0];
+      if (!guest || !handler) throw new Error("Missing clipboard fixture");
+      const dispose = registerPreviewClipboardGuest(guest, () => true);
+      ipc.emit(PREVIEW_GUEST_CLIPBOARD_TRUST_CHANNEL, { sender: guest, senderFrame: guest.mainFrame });
+      const origin = index === 0 ? "https://project-1.test" : "https://project-2.test";
+      const details = { isMainFrame: true, requestingUrl: `${origin}/page` };
+      expect(handler(guest, "clipboard-sanitized-write", origin, details)).toBe(true);
+      expect(handler(guest, "clipboard-sanitized-write", origin, details)).toBe(false);
+      dispose();
+    }
   });
 });

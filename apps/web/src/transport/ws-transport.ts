@@ -394,6 +394,7 @@ export function createWsTransport(
   const freshTurnDiffThreads = new Set<string>();
   let closed = false;
   let reconnectDelay = MIN_RECONNECT_MS;
+  let hasConnected = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let heartbeatGeneration = 0;
@@ -557,6 +558,8 @@ export function createWsTransport(
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
+      const reconnecting = hasConnected;
+      hasConnected = true;
       reconnectDelay = MIN_RECONNECT_MS;
       consecutiveAuthFailures = 0;
       setAttachmentTransportWsUrl(url);
@@ -592,6 +595,7 @@ export function createWsTransport(
       // Deferred import avoids a circular dependency at module evaluation time.
       const nowForThreads = Date.now();
       import("@/features/projects/state/workspaceStore").then(({ useWorkspaceStore }) => {
+        if (reconnecting) void useWorkspaceStore.getState().loadWorkspaces();
         const { activeWorkspaceId, loadThreads, refreshActiveConversation, recoverPreparingThreads } = useWorkspaceStore.getState();
         void recoverPreparingThreads();
         if (!activeWorkspaceId) return;

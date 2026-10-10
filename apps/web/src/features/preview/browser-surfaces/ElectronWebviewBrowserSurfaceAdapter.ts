@@ -54,6 +54,7 @@ const PREVIEW_GUEST_HUMAN_INPUT_CHANNEL = "mcode:browser-human-input";
 const HUMAN_INPUT_KINDS = new Set(["keyboard", "pointer", "touch", "wheel"]);
 const ADOPTION_DISCOVERY_ATTEMPTS = 40;
 const ADOPTION_DISCOVERY_RETRY_MS = 50;
+const ATTACHMENT_TIMEOUT_MS = 30_000;
 
 /** Validates an absolute address that Electron main will authorize again before loading. */
 export function normalizeElectronWebviewSurfaceAddress(address: string): string {
@@ -115,6 +116,9 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
   private readonly adoptionToken: string;
   private readonly preparePromise: Promise<PreviewSurfaceBridgeResult>;
   private adoptionPromise: Promise<boolean> | null = null;
+  private attachmentTimer: number | undefined;
+  private attached = false;
+  private discoveryAttemptsRemaining = 0;
   private readonly adoptionWaiters = new Set<(adopted: boolean) => void>();
   private pendingAddress: string | null = null;
   private adopted = false;
@@ -179,12 +183,16 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     void this.preparePromise.then((result) => {
       if (this.disposed) return;
       if (!result.ok) {
-        if (result.error !== "stale-generation") this.attachmentFailed();
+        if (result.error === "stale-generation") {
+          this.unavailable = true;
+          this.resolveAdoptionWaiters(false);
+        } else this.attachmentFailed();
         return;
       }
+      this.attachmentTimer = window.setTimeout(() => this.attachmentFailed(), ATTACHMENT_TIMEOUT_MS);
       root?.appendChild(this.frame);
-      // A refused Electron attachment emits no did-attach. Bounded discovery also covers that failure.
-      this.onDidAttach();
+      // Refused attachments emit no did-attach; cold session setup gets its own deadline.
+      this.startAdoption();
     });
   }
 
@@ -267,6 +275,7 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
   public dispose(reason: BrowserSurfaceDisposalReason = "dispose"): void {
     if (this.disposed) return;
     this.disposed = true;
+    window.clearTimeout(this.attachmentTimer);
     this.resolveAdoptionWaiters(false);
     this.frame.removeEventListener("did-attach", this.onDidAttach);
     this.frame.removeEventListener("did-start-loading", this.onLoadStarted);
@@ -297,38 +306,57 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
   }
 
   private attachmentFailed(): void {
+    window.clearTimeout(this.attachmentTimer);
     this.unavailable = true;
     this.resolveAdoptionWaiters(false);
     this.emit({ type: "load-failed", mainFrame: true, error: "Preview is unavailable" });
   }
 
   private readonly onDidAttach = (): void => {
-    if (this.disposed || this.unavailable || this.adoptionPromise) return;
-    this.adoptionPromise = this.adoptAfterPreparation();
+    if (this.disposed || this.adopted || this.unavailable) return;
+    window.clearTimeout(this.attachmentTimer);
+    this.attached = true;
+    this.discoveryAttemptsRemaining = ADOPTION_DISCOVERY_ATTEMPTS;
+    this.startAdoption();
   };
+
+  private startAdoption(): void {
+    if (this.disposed || this.adopted || this.unavailable || this.adoptionPromise) return;
+    this.discoveryAttemptsRemaining = ADOPTION_DISCOVERY_ATTEMPTS;
+    this.adoptionPromise = this.adoptAfterPreparation().finally(() => { this.adoptionPromise = null; });
+  }
+
+  private async discoverGuest(): Promise<PreviewSurfaceBridgeResult> {
+    let result: PreviewSurfaceBridgeResult = {
+      ok: false,
+      error: "Surface adoption failed",
+    };
+    while (this.discoveryAttemptsRemaining > 0) {
+      this.discoveryAttemptsRemaining -= 1;
+      result = await Promise.resolve(this.bridge.adopt({
+        surface: this.surface,
+        adoptionToken: this.adoptionToken,
+      })).catch(() => ({ ok: false as const, error: "Surface adoption failed" }));
+      if (result.ok || result.error !== "guest-not-found" || this.disposed || this.unavailable) break;
+      await new Promise((resolve) => window.setTimeout(resolve, ADOPTION_DISCOVERY_RETRY_MS));
+    }
+    return result;
+  }
 
   private async adoptAfterPreparation(): Promise<boolean> {
     if (!asResult(await this.preparePromise) || this.disposed) {
       this.resolveAdoptionWaiters(false);
       return false;
     }
-    let result: PreviewSurfaceBridgeResult = {
-      ok: false,
-      error: "Surface adoption failed",
-    };
-    for (let attempt = 0; attempt < ADOPTION_DISCOVERY_ATTEMPTS; attempt += 1) {
-      result = await Promise.resolve(this.bridge.adopt({
-        surface: this.surface,
-        adoptionToken: this.adoptionToken,
-      })).catch(() => ({ ok: false as const, error: "Surface adoption failed" }));
-      if (result.ok || result.error !== "guest-not-found" || this.disposed) break;
-      await new Promise((resolve) => window.setTimeout(resolve, ADOPTION_DISCOVERY_RETRY_MS));
-    }
-    if (!asResult(result) || this.disposed) {
+    const result = await this.discoverGuest();
+    if (this.disposed || this.unavailable) return false;
+    if (!result.ok) {
+      if (result.error === "guest-not-found" && !this.attached) return false;
       this.attachmentFailed();
       return false;
     }
     this.adopted = true;
+    window.clearTimeout(this.attachmentTimer);
     const pendingAddress = this.pendingAddress;
     this.pendingAddress = null;
     if (pendingAddress) await this.sendNavigation(pendingAddress);

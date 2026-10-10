@@ -26,6 +26,7 @@ interface ClipboardPermissionContext {
 }
 
 const guests = new Map<number, ClipboardGuestState>();
+const registeredClipboardIpc = new WeakSet<Pick<IpcMain, "on">>();
 let nextGuestGeneration = 0;
 
 function documentUrl(value: string): string | null {
@@ -118,6 +119,8 @@ export function registerPreviewClipboardPermissionHandlers(
       );
     },
   );
+  if (registeredClipboardIpc.has(clipboardIpc)) return;
+  registeredClipboardIpc.add(clipboardIpc);
   clipboardIpc.on(
     PREVIEW_GUEST_CLIPBOARD_TRUST_CHANNEL,
     (event: IpcMainEvent) => {

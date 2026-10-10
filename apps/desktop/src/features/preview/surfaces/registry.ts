@@ -221,6 +221,7 @@ function guestMatchesPending(
 ): boolean {
   if (guest.isDestroyed() || guest.getType() !== "webview") return false;
   if (guest.hostWebContents !== sender) return false;
+  if (browserProfiles.isRemoved(pending.surface.identity.workspaceId)) return false;
   // A different project's valid session is still outside this surface's trust boundary.
   if (guest.session !== browserProfiles.sessionForWorkspace(pending.surface.identity.workspaceId)) return false;
   return isInertGuestUrl(guest.getURL(), pending.adoptionToken);
@@ -423,6 +424,7 @@ function prepareSurface(event: IpcMainInvokeEvent, inputValue: unknown): Preview
   const validated = validateSenderAndSurface(event, input.surface);
   if (isSurfaceResult(validated)) return validated;
   const { win, surface } = validated;
+  if (browserProfiles.isRemoved(surface.identity.workspaceId)) return errorResult("workspace-removed");
   const generation = prepareGeneration(win, surface);
   if (isSurfaceResult(generation)) return generation;
   if (hasExistingToken(input.adoptionToken)) return errorResult("duplicate-adoption-token");

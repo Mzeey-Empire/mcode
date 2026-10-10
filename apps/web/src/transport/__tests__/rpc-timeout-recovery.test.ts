@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import * as transportRegistry from "@/transport";
 import {
   createWsTransport,
   parseLateTerminalCreateId,
@@ -101,8 +102,37 @@ describe("interactive RPC timeout recovery", () => {
 
   afterEach(() => {
     transport.close();
+    vi.restoreAllMocks();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("reconciles the server workspace list on reconnect without listing twice on first connect", async () => {
+    const reconcile = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(transportRegistry, "getTransport").mockReturnValue(transport);
+    vi.stubGlobal("desktopBridge", { preview: { profiles: { reconcile } } });
+    useWorkspaceStore.setState({ activeWorkspaceId: null, activeThreadId: null });
+    expect(socket.requests.filter((request) => request.method === "workspace.list")).toEqual([]);
+    const initialLoad = useWorkspaceStore.getState().loadWorkspaces();
+    await vi.advanceTimersByTimeAsync(0);
+    socket.respond(latestRequest(socket, "workspace.list"), [{ id: "11111111-1111-4111-8111-111111111111" }]);
+    await initialLoad;
+    expect(reconcile.mock.calls).toEqual([[["11111111-1111-4111-8111-111111111111"]]]);
+    expect(socket.requests.filter((request) => request.method === "workspace.list")).toHaveLength(1);
+
+    socket.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const reconnected = TimeoutSocket.instances[1];
+    if (!reconnected) throw new Error("Expected reconnect socket");
+    reconnected.open();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reconnected.requests.filter((request) => request.method === "workspace.list")).toHaveLength(1);
+    reconnected.respond(latestRequest(reconnected, "workspace.list"), [{ id: "22222222-2222-4222-8222-222222222222" }]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reconcile.mock.calls).toEqual([
+      [["11111111-1111-4111-8111-111111111111"]],
+      [["22222222-2222-4222-8222-222222222222"]],
+    ]);
   });
 
   it("restores server records on the first connection and refreshes them after reconnect", async () => {

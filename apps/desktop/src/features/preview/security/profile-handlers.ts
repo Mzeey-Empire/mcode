@@ -10,7 +10,7 @@ function validateSender(event: IpcMainInvokeEvent): void {
 function workspaceId(value: unknown): string {
   if (typeof value !== "string") throw new TypeError("Expected a workspace UUID");
   browserPartitionFor(value);
-  return value;
+  return value.toLowerCase();
 }
 
 /** Registers UUID-validated profile deletion and bounded complete-list reconciliation. */

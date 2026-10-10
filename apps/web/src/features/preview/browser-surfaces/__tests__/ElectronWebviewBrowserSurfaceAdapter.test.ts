@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createElectronWebviewBrowserSurfaceAdapterFactory,
   ElectronWebviewBrowserSurfaceAdapter,
@@ -9,7 +9,7 @@ import {
   type BrowserSurfaceAdapterEvent,
   type BrowserSurfaceIdentity,
 } from "../BrowserSurfaceHost";
-import type { PreviewSurfaceBridge } from "@/transport/desktop-bridge";
+import type { PreviewSurfaceBridge, PreviewSurfaceBridgeResult } from "@/transport/desktop-bridge";
 import { runBrowserSurfaceContract } from "./browserSurfaceContract";
 
 const IDENTITY: BrowserSurfaceIdentity = {
@@ -40,6 +40,53 @@ runBrowserSurfaceContract(
 );
 
 describe("ElectronWebviewBrowserSurfaceAdapter", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("adopts a cold guest after early discovery expires without reporting a load failure", async () => {
+    vi.useFakeTimers();
+    const surfaceBridge = bridge();
+    surfaceBridge.adopt.mockResolvedValue({ ok: false, error: "guest-not-found" });
+    const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 1, { bridge: surfaceBridge });
+    const events: BrowserSurfaceAdapterEvent[] = [];
+    adapter.subscribe((event) => events.push(event));
+    const navigation = adapter.navigate("https://example.test/cold");
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(surfaceBridge.adopt).toHaveBeenCalledTimes(40);
+    expect(events.filter((event) => event.type === "load-failed")).toEqual([]);
+    surfaceBridge.adopt.mockResolvedValue({ ok: true });
+    adapter.element.dispatchEvent(new Event("did-attach"));
+    await navigation;
+    expect(surfaceBridge.adopt).toHaveBeenCalledTimes(41);
+    expect(surfaceBridge.navigate.mock.calls).toEqual([[{
+      surface: { identity: IDENTITY, generation: 1 },
+      navigation: { kind: "address", address: "https://example.test/cold" },
+    }]]);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(events.filter((event) => event.type === "load-failed")).toEqual([]);
+    adapter.dispose();
+  });
+
+  it("settles current and future navigation when preparation rejects a stale generation", async () => {
+    const surfaceBridge = bridge();
+    let finish: (result: PreviewSurfaceBridgeResult) => void = () => { throw new Error("prepare not called"); };
+    surfaceBridge.prepare.mockImplementation(() => new Promise<PreviewSurfaceBridgeResult>((resolve) => { finish = resolve; }));
+    const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 1, { bridge: surfaceBridge });
+    const events: BrowserSurfaceAdapterEvent[] = [];
+    adapter.subscribe((event) => events.push(event));
+    adapter.create();
+    const navigation = adapter.navigate("https://example.test/stale");
+    finish({ ok: false, error: "stale-generation", nextGeneration: 12 });
+    await navigation;
+    await adapter.navigate("https://example.test/also-stale");
+    expect(events.filter((event) => event.type === "load-failed")).toEqual([]);
+    expect(events.filter((event) => event.type === "surface-lost")).toEqual([{
+      type: "surface-lost", identity: IDENTITY, generation: 1, nextGeneration: 12,
+    }]);
+    expect(surfaceBridge.adopt).not.toHaveBeenCalled();
+    expect(surfaceBridge.navigate).not.toHaveBeenCalled();
+    adapter.dispose();
+  });
+
   it("appends only after prepare succeeds and uses the workspace partition", async () => {
     const surfaceBridge = bridge();
     let finish: (result: { ok: true }) => void = () => { throw new Error("prepare not called"); };
@@ -73,11 +120,14 @@ describe("ElectronWebviewBrowserSurfaceAdapter", () => {
     const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 1, { root: document.body, bridge: surfaceBridge });
     const events: BrowserSurfaceAdapterEvent[] = [];
     adapter.subscribe((event) => events.push(event));
+    const navigation = adapter.navigate("https://example.test/refused");
     try {
-      await vi.advanceTimersByTimeAsync(2100);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await navigation;
       expect(events).toContainEqual({
         type: "load-failed", mainFrame: true, error: "Preview is unavailable", identity: IDENTITY, generation: 1,
       });
+      expect(surfaceBridge.navigate).not.toHaveBeenCalled();
     } finally {
       adapter.dispose();
       vi.useRealTimers();
