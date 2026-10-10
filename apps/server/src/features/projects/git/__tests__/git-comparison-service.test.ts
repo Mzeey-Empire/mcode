@@ -32,7 +32,7 @@ describe("GitComparisonService unified output", () => {
     owned = createOwnedTestDatabase();
     db = openReadOnlyDatabase(owned.db.filename);
     workspaceRepo = new WorkspaceRepo(db, owned.writer);
-    workspaceId = (await workspaceRepo.create("Patch test", "/repo")).id;
+    workspaceId = (await workspaceRepo.create("Patch test", process.cwd())).id;
   });
 
   afterAll(async () => {
@@ -43,6 +43,57 @@ describe("GitComparisonService unified output", () => {
   beforeEach(() => {
     fake = new FakeGitExecutor();
     service = new GitComparisonService(workspaceRepo, fake);
+  });
+
+  it.each([
+    { error: Object.assign(new Error("Git command timed out after 5000 ms"), { killed: true, stderr: "" }), kind: "timeout", detail: "Git command timed out after 5000 ms" },
+    { error: Object.assign(new Error("Git command timed out after 5000 ms"), { killed: true, stderr: " \n" }), kind: "timeout", detail: "Git command timed out after 5000 ms" },
+    { error: Object.assign(new Error("timeout"), { killed: true, stderr: "git timed out\n" }), kind: "timeout", detail: "git timed out\n" },
+    { error: Object.assign(new Error("exit 128"), { stderr: "fatal: bad object\n" }), kind: "git-error", detail: "fatal: bad object\n" },
+  ])("returns $kind and preserves raw stderr", async ({ error, kind, detail }) => {
+    fake.setResponse(["diff", "--name-status", "-z", "--find-renames", "--find-copies", "--cached"], error);
+    expect(await service.readReviewComparison(workspaceId, "staged", {})).toMatchObject({ status: "failed", failure: { kind, detail } });
+  });
+
+  it("reports the shortstat count rather than the parser's first over-limit record", async () => {
+    fake.setResponse(["diff", "--name-status", "-z", "--find-renames", "--find-copies", "--cached"],
+      { stdout: Array.from({ length: 10_001 }, (_, index) => `M\0file-${index}.ts\0`).join(""), stderr: "" });
+    fake.setResponse(["diff", "--shortstat", "--find-renames", "--find-copies", "--cached"], { stdout: " 12480 files changed, 12480 insertions(+)\n", stderr: "" });
+    expect(await service.readReviewComparison(workspaceId, "staged", {})).toEqual({ status: "too-many-files", fileCount: 12_480, limit: 10_000 });
+  });
+
+  it("rejects too many untracked files before preparing a temporary index", async () => {
+    fake.setResponse(["ls-files", "--others", "--exclude-standard", "-z"],
+      { stdout: Array.from({ length: 10_001 }, (_, index) => `file-${index}.ts\0`).join(""), stderr: "" });
+    expect(await service.readReviewComparison(workspaceId, "unstaged", {}))
+      .toEqual({ status: "too-many-files", fileCount: 10_001, limit: 10_000 });
+    expect(fake.calls.map((call) => call.args)).toEqual([["-C", process.cwd(), "ls-files", "--others", "--exclude-standard", "-z"]]);
+  });
+
+  it.each([
+    { error: Object.assign(new Error("Git command timed out after 5000 ms"), { killed: true, code: null, stderr: "" }), kind: "timeout" },
+    { error: Object.assign(new Error("not a repository"), { code: 128, stderr: "fatal: not a git repository" }), kind: "git-error" },
+  ])("preserves $kind from the HEAD probe", async ({ error, kind }) => {
+    fake.setResponse(["rev-parse", "--verify", "--quiet", "HEAD"], error);
+    expect(await service.readReviewComparison(workspaceId, "uncommitted", {}))
+      .toMatchObject({ status: "failed", failure: { kind } });
+  });
+
+  it("recognizes only the quiet missing-HEAD exit as an unborn branch", async () => {
+    fake.setResponse(["rev-parse", "--verify", "--quiet", "HEAD"], Object.assign(new Error("exit 1"), { code: 1, stderr: "" }));
+    expect(await service.readReviewComparison(workspaceId, "branch", {})).toEqual({ status: "unavailable", reason: "unborn" });
+  });
+
+  it("returns unsafe-ref before executing the comparison", async () => {
+    expect(await service.readReviewComparison(workspaceId, "branch", { base: "--output=outside", target: "HEAD" })).toMatchObject({ status: "failed", failure: { kind: "unsafe-ref" } });
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("distinguishes an empty comparison from a missing checkout", async () => {
+    expect(await service.readReviewComparison(workspaceId, "staged", {})).toEqual({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } });
+    fake.reset();
+    expect(await service.readReviewComparison(workspaceId, "staged", {}, `${process.cwd()}/missing-review-checkout`)).toMatchObject({ status: "failed", failure: { kind: "worktree-missing" } });
+    expect(fake.calls).toEqual([]);
   });
 
   describe.each([
@@ -124,19 +175,12 @@ describe("GitComparisonService unified output", () => {
       stdout: "3\t0\tnotes.md\0" + "2\t1\t\0old.txt\0new.txt\0-\t-\timage.bin\0", stderr: "",
     });
     expect(await service.readReviewComparison(workspaceId, "staged", {})).toEqual({
-      files: [
+      status: "ready", comparison: { files: [
         { path: "image.bin", previousPath: null, changeType: "modified", binary: true, additions: null, deletions: null, untracked: false },
         { path: "new.txt", previousPath: "old.txt", changeType: "renamed", binary: false, additions: 2, deletions: 1, untracked: false },
         { path: "notes.md", previousPath: null, changeType: "added", binary: false, additions: 3, deletions: 0, untracked: false },
-      ], additions: 5, deletions: 1,
+      ], additions: 5, deletions: 1 },
     });
   });
 
-  it("rejects over 10,000 untracked files before resolving or building an index", async () => {
-    fake.setResponse(["ls-files", "--others", "--exclude-standard", "-z"], {
-      stdout: Array.from({ length: 10_001 }, (_, index) => `file-${index}\0`).join(""), stderr: "",
-    });
-    await expect(service.readReviewComparison(workspaceId, "unstaged", {})).rejects.toThrow();
-    expect(fake.calls.map((call) => call.args)).toEqual([["-C", "/repo", "ls-files", "--others", "--exclude-standard", "-z"]]);
-  });
 });

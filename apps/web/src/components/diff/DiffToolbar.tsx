@@ -53,8 +53,15 @@ export function DiffToolbar({
   const setViewMode = useDiffStore((s) => s.setViewMode);
   const setReviewViewForThread = useDiffStore((s) => s.setReviewViewForThread);
   const getReviewView = useDiffStore((s) => s.getReviewView);
-  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const viewMenuOpen = useDiffStore((s) => s.reviewViewMenuOpen);
+  const setViewMenuOpen = useDiffStore((s) => s.setReviewViewMenuOpen);
   const [reviewProbeNonce, setReviewProbeNonce] = useState(0);
+  // The menu can also be opened from a review state body ("Choose another
+  // view"), so the availability probe follows the shared open flag.
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- Opening the view menu must re-probe repository state, whichever surface opened it.
+    if (viewMenuOpen) setReviewProbeNonce((nonce) => nonce + 1);
+  }, [viewMenuOpen]);
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const activeThread = useWorkspaceStore(
@@ -123,12 +130,7 @@ export function DiffToolbar({
       branchAvailability={branchAvailability}
       commitAvailability={commitAvailability}
       diffScopeRevision={diffScopeRevision}
-      onViewMenuOpenChange={(open) => {
-        setViewMenuOpen(open);
-        if (open) {
-          setReviewProbeNonce((nonce) => nonce + 1);
-        }
-      }}
+      onViewMenuOpenChange={setViewMenuOpen}
       reviewDiffStat={reviewDiffStat}
       reviewFileCount={reviewFileCount}
       setReviewViewForThread={setReviewViewForThread}

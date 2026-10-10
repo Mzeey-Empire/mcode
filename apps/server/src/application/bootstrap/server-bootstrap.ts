@@ -103,6 +103,7 @@ import { ThoughtSegmentRepo } from "../../features/agents/conversation/narrative
 import { HookExecutionRepo } from "../../features/agents/events/persistence/hook-execution-repo.js";
 import { TurnSnapshotRepo } from "../../features/agents/turns/persistence/turn-snapshot-repo.js";
 import { TurnDiffService } from "../../features/agents/turns/turn-diff-service.js";
+import { TurnSnapshotRangeReader } from "../../features/projects/diffs/snapshots/turn-snapshot-range.js";
 import { TaskRepo } from "../../features/agents/orchestration/persistence/task-repo.js";
 import { PlanQuestionAnswersRepo } from "../../features/agents/planning/persistence/plan-question-answers-repo.js";
 import { PlanQuestionService } from "../../features/agents/planning/plan-question-service.js";
@@ -123,7 +124,6 @@ import { ProviderRegistry } from "../../features/providers/composition/provider-
 import { ProviderEventIngress } from "../../features/providers/composition/provider-event-ingress.js";
 import type { CursorProviderBoundary } from "@mcode/providers";
 import { ModelCacheService, startupModelProviderIds } from "../../features/providers/models/model-cache-service.js";
-import { DiffSummaryService } from "../../features/projects/diffs/summaries/diff-summary-service.js";
 import { RecapService } from "../../features/agents/recap/recap-service.js";
 import { seedAgentRuntimeWorkspace } from "../../runtime/startup/dev-agent-seed.js";
 import { WebSocket } from "ws";
@@ -462,7 +462,6 @@ function warmCodexVersionGate(s = settingsService.get()): void {
 }
 
 const prDraftService = container.resolve(PrDraftService);
-const diffSummaryService = container.resolve(DiffSummaryService);
 const recapService = container.resolve(RecapService);
 const handoffStorage = container.resolve(HandoffStorage);
 const handoffCheckoutService = container.resolve(HandoffCheckoutService);
@@ -774,6 +773,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   turnSnapshotRepo,
   sweepSnapshotPins,
   turnDiffs: container.resolve(TurnDiffService),
+  turnSnapshotRanges: container.resolve(TurnSnapshotRangeReader),
   snapshotService,
   settingsService,
   gitWatcherService,
@@ -791,7 +791,6 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   workspaceRepo,
   enricher,
   filesystemBrowser,
-  diffSummaryService,
   recapService,
   handoffStorage,
   handoffCheckoutService,

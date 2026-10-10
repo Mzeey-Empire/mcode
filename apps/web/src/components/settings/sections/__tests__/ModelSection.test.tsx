@@ -23,7 +23,6 @@ vi.mock("@/stores/settingsStore", () => {
             utility: { provider: "", id: "" },
           },
           provider: { cli: { codex: "", claude: "", copilot: "", cursor: "" } },
-          diffSummary: { enabled: false },
         },
       }),
       setState: vi.fn(),
@@ -66,7 +65,6 @@ function makeState(provider: string, modelId: string, reasoning = "high") {
         utility: { provider: "", id: "" },
       },
       provider: { cli: { codex: "", claude: "", copilot: "", cursor: "" } },
-      diffSummary: { enabled: false },
     },
     update: vi.fn(),
   };
@@ -111,7 +109,6 @@ describe("ModelSection reasoning options", () => {
       "Providers",
       "Model defaults",
       "Utility model",
-      "AI features",
     ]) {
       expect(screen.getByRole("region", { name })).toBeInTheDocument();
     }

@@ -19,8 +19,16 @@ vi.mock("@/transport", async (original) => ({
 // pierre's paint pass.
 vi.mock("@pierre/diffs/react", async (original) => ({
   ...(await original<object>()),
-  CodeView: ({ items }: { items: unknown }) => (
-    <pre data-testid="items">{JSON.stringify(items)}</pre>
+  CodeView: ({ items, renderAnnotation }: {
+    items: readonly { annotations?: readonly { metadata?: unknown }[] }[];
+    renderAnnotation: (annotation: { metadata?: unknown }) => React.ReactNode;
+  }) => (
+    <>
+      <pre data-testid="items">{JSON.stringify(items)}</pre>
+      {items.flatMap((item) => item.annotations ?? []).map((annotation, index) => (
+        <div key={index}>{renderAnnotation(annotation)}</div>
+      ))}
+    </>
   ),
 }));
 
@@ -52,6 +60,20 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("ReviewDiffView refresh", () => {
+  it("shows a failed file load as failed, not empty, and retries it", async () => {
+    transport.getWorkingTreeDiff.mockRejectedValueOnce(new Error("socket closed"));
+    render(<ReviewDiffView {...props} />);
+
+    expect(await screen.findByText("Couldn't load this file")).toBeInTheDocument();
+    expect(screen.queryByText("No diff content")).not.toBeInTheDocument();
+    expect(transport.getWorkingTreeDiff).toHaveBeenCalledTimes(1);
+
+    act(() => screen.getByRole("button", { name: "Retry" }).click());
+    await waitFor(() => expect(screen.getByTestId("items").textContent).toContain("FIRST_VERSION"));
+    expect(screen.queryByText("Couldn't load this file")).not.toBeInTheDocument();
+    expect(transport.getWorkingTreeDiff).toHaveBeenCalledTimes(2);
+  });
+
   it("fetches both paths when an untracked file is a rename", async () => {
     transport.getWorkingTreeDiff.mockResolvedValue("diff --git a/old.txt b/file.txt\nsimilarity index 100%\nrename from old.txt\nrename to file.txt\n");
     render(<ReviewDiffView {...props} files={[{

@@ -22,7 +22,7 @@ vi.mock("@/transport", async (importOriginal) => ({
 }));
 
 function mockLoadedEntries() {
-  vi.mocked(mockTransport.getReviewComparison).mockResolvedValue({ files: [{ path: "src/example.ts", previousPath: null, changeType: "added", binary: false, additions: null, deletions: null, untracked: true }], additions: 7, deletions: 2 });
+  vi.mocked(mockTransport.getReviewComparison).mockResolvedValue({ status: "ready", comparison: { files: [{ path: "src/example.ts", previousPath: null, changeType: "added", binary: false, additions: null, deletions: null, untracked: true }], additions: 7, deletions: 2 } });
   vi.mocked(mockTransport.getRemoteUrl).mockResolvedValue({ label: "example/repo", webUrl: "https://github.com/example/repo" });
 }
 
@@ -39,7 +39,7 @@ describe("overview registry", () => {
     vi.clearAllMocks();
     resetThreadRecapRequestStateForTest();
     vi.mocked(mockTransport.getRemoteUrl).mockReset().mockResolvedValue({ label: "test-project", webUrl: null });
-    vi.mocked(mockTransport.getReviewComparison).mockReset().mockResolvedValue({ files: [{ path: "src/example.ts", previousPath: null, changeType: "added", binary: false, additions: null, deletions: null, untracked: true }], additions: 0, deletions: 0 });
+    vi.mocked(mockTransport.getReviewComparison).mockReset().mockResolvedValue({ status: "ready", comparison: { files: [{ path: "src/example.ts", previousPath: null, changeType: "added", binary: false, additions: null, deletions: null, untracked: true }], additions: 0, deletions: 0 } });
     useWorkspaceStore.setState({
       workspaces: [createMockWorkspace({ id: thread.workspace_id })],
       threads: [thread],
@@ -212,7 +212,7 @@ describe("overview registry", () => {
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
     await screen.findByTestId("thread-overview-change-summary");
     await closeOverview();
-    vi.mocked(mockTransport.getReviewComparison).mockResolvedValue({ files: [{ path: "src/example.ts", previousPath: null, changeType: "added", binary: false, additions: null, deletions: null, untracked: true }], additions: 11, deletions: 3 });
+    vi.mocked(mockTransport.getReviewComparison).mockResolvedValue({ status: "ready", comparison: { files: [{ path: "src/example.ts", previousPath: null, changeType: "added", binary: false, additions: null, deletions: null, untracked: true }], additions: 11, deletions: 3 } });
     vi.mocked(mockTransport.getSnapshotDiffStats).mockResolvedValue([
       { filePath: "src/example.ts", additions: 11, deletions: 3, changeType: "modified" },
     ]);
@@ -222,7 +222,7 @@ describe("overview registry", () => {
       } else {
         useDiffStore.getState().setSnapshots(thread.id, [{
           id: "new-snapshot", thread_id: thread.id, message_id: "message",
-          ref_before: "before", ref_after: "after", files_changed: ["src/example.ts"],
+          ref_before: "before", ref_after: "after", attempt_count: 1, files_changed: ["src/example.ts"],
           worktree_path: null, created_at: "2026-10-08T12:00:00Z",
         }]);
       }
@@ -246,7 +246,7 @@ describe("overview registry", () => {
     await screen.findByTestId("thread-overview-change-summary");
     await closeOverview();
     const nextThread = createMockThread({ ...thread, id: "next-thread" });
-    vi.mocked(mockTransport.getReviewComparison).mockResolvedValue({ files: [{ path: "src/example.ts", previousPath: null, changeType: "added", binary: false, additions: null, deletions: null, untracked: true }], additions: 19, deletions: 5 });
+    vi.mocked(mockTransport.getReviewComparison).mockResolvedValue({ status: "ready", comparison: { files: [{ path: "src/example.ts", previousPath: null, changeType: "added", binary: false, additions: null, deletions: null, untracked: true }], additions: 19, deletions: 5 } });
     vi.mocked(mockTransport.getRemoteUrl).mockResolvedValue({ label: "example/next", webUrl: "https://github.com/example/next" });
     act(() => useDiffStore.getState().setSnapshots(nextThread.id, []));
     rerender(<ThreadOverview thread={nextThread} threadPaneWidth={600} />);

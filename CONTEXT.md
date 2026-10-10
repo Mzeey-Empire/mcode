@@ -805,9 +805,7 @@ The split keeps "spawn a copy" (Fork) visually distinct from "change this
 thread's driver" (Switch provider); the two can re-merge into one list later if
 the distinction does not earn its place.
 
-_Avoid_: calling this surface "Summary." [[Summary]] is the AI prose lens of
-the Cumulative diff (a diff-to-prose toggle inside the Review tab), a different
-surface. The Overview is a status-and-actions card, not a diff lens.
+The Overview is a status-and-actions card.
 
 ### Recap
 A short AI-generated one-line "what you're working on" for the active thread,
@@ -820,10 +818,8 @@ thread is stale for Recap when its last completed turn is old enough (default:
 about five minutes), the conversation signature changed, and no turn is
 running. See ADR-0013.
 
-_Avoid_: confusing the Recap with [[Summary]] or [[Overview]]. [[Summary]]
-summarizes the **code diff** (a Review-tab lens); the Recap summarizes
-**conversational intent**. [[Overview]] is the **surface** that hosts the Recap,
-not the recap text itself.
+The Recap summarizes **conversational intent**. [[Overview]] is the **surface**
+that hosts the Recap, not the recap text itself.
 
 ### Re-orientation
 The moment a user returns to a thread and needs to remember what it is about.
@@ -982,12 +978,6 @@ One picked turn's diff — the turn comparison whose operand is a selected turn.
 Written by the change summary on a transcript turn (its "View diff" and file
 rows) or by the toolbar's turn picker, which lists the thread's turns that
 changed files and seeds the operand to the latest when none is picked.
-
-### Summary
-An AI-written prose recap of the **Cumulative** diff. Not a comparison — a
-**lens**: a toggle that re-renders the Cumulative view's changes as prose in
-place (diff ⇄ summary), rather than a separate view you pick in the switcher.
-Gated behind the diff-summary setting.
 
 ### Cumulative
 A thread's **net effect since it started**, committed *and* uncommitted, as

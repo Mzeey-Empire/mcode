@@ -101,7 +101,7 @@ import { RecoveryIncidentSchema } from "../models/turn-recovery.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
 import { PlanSaveVersionSchema, PlanVersionSchema, PlanActionSchema } from "../models/plan.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
-import { ReviewComparisonSchema, ReviewStateSchema } from "../models/review-comparison.js";
+import { ReviewComparisonResultSchema, ReviewComparisonUnavailableSchema, ReviewFileDiffResultSchema, ReviewTurnSchema, ReviewStateSchema } from "../models/review-comparison.js";
 import {
   SettingsSchema,
   PartialSettingsSchema,
@@ -1031,7 +1031,7 @@ export const WS_METHODS = lazySchema(() => ({
       sha: z.string().optional(),
       threadId: z.string().optional(),
     }),
-    result: ReviewComparisonSchema(),
+    result: ReviewComparisonResultSchema(),
   },
   "agent.send": {
     params: SendMessageSchema() as z.ZodType<SendMessageInput>,
@@ -1402,17 +1402,21 @@ export const WS_METHODS = lazySchema(() => ({
       }))
       .nullable(),
   },
+  "turnDiff.listTurns": {
+    params: z.object({ threadId: AgentThreadIdSchema }),
+    result: z.array(ReviewTurnSchema()),
+  },
   "turnDiff.getComparison": {
     params: z.object({
       threadId: AgentThreadIdSchema,
       includeLive: z.boolean().optional(),
       messageId: z.string().min(1).max(512).optional(),
     }),
-    result: ReviewComparisonSchema().nullable(),
+    result: ReviewComparisonResultSchema(),
   },
   "turnDiff.getFileDiff": {
     params: z.object({ threadId: AgentThreadIdSchema, comparisonId: z.string().min(1).max(TURN_DIFF_COMPARISON_ID_MAX_LENGTH), filePath: z.string().min(1).max(4096) }),
-    result: z.string(),
+    result: ReviewFileDiffResultSchema(),
   },
   "snapshot.getDiff": {
     params: z.object({
@@ -1420,11 +1424,11 @@ export const WS_METHODS = lazySchema(() => ({
       filePath: z.string().optional(),
       maxLines: z.number().int().positive().optional(),
     }),
-    result: z.string(),
+    result: ReviewFileDiffResultSchema(),
   },
   "snapshot.getDiffStats": {
     params: z.object({ snapshotId: z.string() }),
-    result: z.array(DiffStatsSchema()),
+    result: z.union([z.array(DiffStatsSchema()), ReviewComparisonUnavailableSchema()]),
   },
   "snapshot.cleanup": {
     params: z.object({}),
@@ -1440,11 +1444,11 @@ export const WS_METHODS = lazySchema(() => ({
       filePath: z.string().optional(),
       maxLines: z.number().int().positive().optional(),
     }),
-    result: z.string(),
+    result: ReviewFileDiffResultSchema(),
   },
   "snapshot.getCumulativeDiffStats": {
     params: z.object({ threadId: z.string() }),
-    result: z.array(DiffStatsSchema()).max(10_000),
+    result: ReviewComparisonResultSchema(),
   },
   "clipboard.saveFile": {
     params: z.object({
@@ -1500,23 +1504,6 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({}),
     result: z.array(ProviderAvailabilitySchema()),
   },
-  /** Retrieve the stored diff summary for a thread (null if none exists). */
-  "diffSummary.get": {
-    params: z.object({
-      threadId: z.string(),
-    }),
-    result: z
-      .object({
-        id: z.string(),
-        threadId: z.string(),
-        content: z.string(),
-        turnCount: z.number(),
-        lastTurnId: z.string().nullable(),
-        model: z.string(),
-        createdAt: z.string(),
-      })
-      .nullable(),
-  },
   /**
    * v1 stub for regenerating a handoff document via the live AI path.
    * Live regeneration is deferred to a follow-on plan.
@@ -1563,21 +1550,6 @@ export const WS_METHODS = lazySchema(() => ({
         })),
       }),
     }).nullable(),
-  },
-  /** Generate (or regenerate) an AI-powered diff summary for a thread. */
-  "diffSummary.generate": {
-    params: z.object({
-      threadId: z.string(),
-    }),
-    result: z.object({
-      id: z.string(),
-      threadId: z.string(),
-      content: z.string(),
-      turnCount: z.number(),
-      lastTurnId: z.string().nullable(),
-      model: z.string(),
-      createdAt: z.string(),
-    }),
   },
   /** Generate a stateless one-line conversational recap from caller-supplied messages. */
   "recap.generate": {

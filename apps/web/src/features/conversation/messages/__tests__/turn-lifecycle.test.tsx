@@ -24,7 +24,7 @@ function answer(id: string, executionId: string): Message & { outcome: TurnOutco
 function canonicalTurn(status: AgentTurn["status"], trigger: AgentTurn["trigger"]): AgentTurn {
   return {
     id: "canonical-turn", threadId: THREAD, status, trigger, permissionMode: "full",
-    approvalReviewMode: "manual", approvalReviewReason: "manual-requested",
+    approvalReviewMode: "manual", approvalReviewReason: "manual-requested", attemptOf: null,
     executionId: "00000000-0000-4000-8000-000000000042",
     providerIdentities: [], startedAt: NOW, providerStartedAt: null, endedAt: null, createdAt: NOW, updatedAt: NOW,
   };

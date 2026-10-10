@@ -178,44 +178,6 @@ describe("routeMessage agent.child.stop", () => {
   });
 });
 
-describe("routeMessage snapshot.getCumulativeDiffStats", () => {
-  it("rejects results above the Review comparison file bound before returning them", async () => {
-    const getDiffStats = vi.fn().mockResolvedValue(
-      Array.from({ length: 10_001 }, (_, index) => ({
-        filePath: `file-${index}.ts`,
-        additions: 1,
-        deletions: 0,
-      })),
-    );
-    const deps = {
-      turnSnapshotRepo: {
-        listByThread: vi.fn().mockReturnValue([{
-          id: "snapshot-1",
-          thread_id: "thread-1",
-          ref_before: "before",
-          ref_after: "after",
-          files_changed: [],
-          worktree_path: "C:/repo",
-          created_at: "2026-07-20T12:00:00.000Z",
-        }]),
-      },
-      snapshotService: { getDiffStats },
-    } as unknown as RouterDeps;
-
-    const response = await routeMessage(JSON.stringify({
-      id: "cumulative-stats-bound",
-      method: "snapshot.getCumulativeDiffStats",
-      params: { threadId: "thread-1" },
-    }), deps);
-
-    expect(response.error).toEqual({
-      code: "INTERNAL_ERROR",
-      message: "Cumulative Review comparison is limited to 10000 files",
-    });
-    expect(getDiffStats).toHaveBeenCalledOnce();
-  });
-});
-
 describe("routeMessage provider.catalog", () => {
   it("merges scoped standalone agents and non-colliding config registrations", async () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-provider-catalog-ws-"));
@@ -880,7 +842,9 @@ describe("routeMessage git.getRemoteUrl", () => {
       webUrl: "https://github.com/Mzeey-Empire/mcode",
       label: "Mzeey-Empire/mcode",
     });
-    const resolveWorkingDir = vi.fn().mockReturnValue("C:/repo-worktree");
+    // The resolver requires the checkout to exist on disk.
+    const worktreePath = process.cwd();
+    const resolveWorkingDir = vi.fn().mockReturnValue(worktreePath);
     const deps = {
       workspaceService: {
         findById: vi.fn().mockReturnValue({ id: "ws-1", path: "C:/repo" }),
@@ -890,7 +854,7 @@ describe("routeMessage git.getRemoteUrl", () => {
           id: "thread-1",
           workspace_id: "ws-1",
           mode: "worktree",
-          worktree_path: "C:/repo-worktree",
+          worktree_path: worktreePath,
         }),
       },
       gitRepository: { getRemoteUrl },
@@ -913,9 +877,9 @@ describe("routeMessage git.getRemoteUrl", () => {
     expect(resolveWorkingDir).toHaveBeenCalledWith(
       "C:/repo",
       "worktree",
-      "C:/repo-worktree",
+      worktreePath,
     );
-    expect(getRemoteUrl).toHaveBeenCalledWith("C:/repo-worktree");
+    expect(getRemoteUrl).toHaveBeenCalledWith(worktreePath);
   });
 
   it("rejects a thread from another workspace before running git", async () => {

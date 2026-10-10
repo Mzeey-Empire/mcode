@@ -645,7 +645,7 @@ function sameAction(left: CollaborationAction, right: CollaborationAction): bool
 }
 function startedTurn(id: string, executionId: string, threadId: string, action: CollaborationAction,
   permissionMode: AgentTurn["permissionMode"], providerIdentities: ProviderIdentity[], now: string): AgentTurn {
-  return { id, executionId, threadId, status: "Running", trigger: { kind: "child", sourceThreadId: action.source.threadId,
+  return { id, executionId, threadId, attemptOf: null, status: "Running", trigger: { kind: "child", sourceThreadId: action.source.threadId,
     sourceTurnId: action.source.turnId, sourceItemId: action.source.itemId }, permissionMode,
     approvalReviewMode: "manual", approvalReviewReason: "manual-requested", providerIdentities,
     startedAt: now, providerStartedAt: null, endedAt: null, createdAt: now, updatedAt: now };

@@ -31,7 +31,7 @@ function snapshot(id: string, messageId: string): TurnSnapshot {
     worktree_path: null,
     message_id: messageId,
     ref_before: `${id}-before`,
-    ref_after: `${id}-after`,
+    ref_after: `${id}-after`, attempt_count: 1,
     files_changed: [],
     created_at: "2026-07-20T12:00:00.000Z",
   };
@@ -120,7 +120,7 @@ describe("TurnChangeSummary", () => {
     expect(useDiffStore.getState().selectedTurnMessageIdByThread["thread-1"]).toBe("msg-1");
   });
 
-  it("falls back to All turns when the turn cannot be resolved to a snapshot", async () => {
+  it("selects a turn whose snapshot is gone so the Turn view can report it", async () => {
     const user = userEvent.setup();
     render(<TurnChangeSummary messageId="msg-unknown" filesChanged={["src/App.tsx"]} isLatestTurn={false} />);
 
@@ -129,8 +129,8 @@ describe("TurnChangeSummary", () => {
     await waitFor(() => {
       expect(showRightPanelAdaptive).toHaveBeenCalledWith("workspace-1", "thread-1");
     });
-    expect(useDiffStore.getState().reviewViewByThread["thread-1"]).toBe("cumulative");
-    expect(useDiffStore.getState().selectedTurnMessageIdByThread["thread-1"]).toBeUndefined();
+    expect(useDiffStore.getState().reviewViewByThread["thread-1"]).toBe("turn");
+    expect(useDiffStore.getState().selectedTurnMessageIdByThread["thread-1"]).toBe("msg-unknown");
   });
 
   it("restores manual expansion across remounts via manualExpandRef", () => {

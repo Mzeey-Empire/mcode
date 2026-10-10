@@ -520,11 +520,18 @@ export {
   ReviewFileChangeSchema,
   ReviewStateSchema,
   ReviewComparisonSchema,
+  ReviewComparisonResultSchema,
+  ReviewComparisonUnavailableSchema,
+  ReviewFileDiffResultSchema,
+  ReviewTurnSchema,
 } from "./models/review-comparison.js";
 export type {
   ReviewFileChange,
   ReviewState,
   ReviewComparison,
+  ReviewComparisonResult,
+  ReviewFileDiffResult,
+  ReviewTurn,
 } from "./models/review-comparison.js";
 
 export {
