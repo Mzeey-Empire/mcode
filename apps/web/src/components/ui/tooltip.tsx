@@ -2,6 +2,7 @@ import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 
 import { Kbd } from "@/components/ui/kbd"
 import { cn } from "@/lib/utils"
+import { useGatedOpen } from "./overlay-gate"
 
 function TooltipProvider({
   delay = 0,
@@ -16,8 +17,9 @@ function TooltipProvider({
   )
 }
 
-function Tooltip({ ...props }: TooltipPrimitive.Root.Props) {
-  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />
+function Tooltip({ open, defaultOpen, onOpenChange, ...props }: TooltipPrimitive.Root.Props) {
+  const gated = useGatedOpen({ open, defaultOpen, onOpenChange })
+  return <TooltipPrimitive.Root data-slot="tooltip" {...props} {...gated} />
 }
 
 function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props) {

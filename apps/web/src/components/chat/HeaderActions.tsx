@@ -59,31 +59,28 @@ export function HeaderActions({ thread, threadPaneWidth }: HeaderActionsProps) {
 
       <ThreadOverview thread={thread} threadPaneWidth={threadPaneWidth} />
 
-      {/* Dedicated right-panel toggle for the workspace-global panel. */}
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon-compact"
-              onClick={togglePanel}
-              aria-label="Toggle panel"
-              aria-pressed={panelVisible}
-              data-testid="header-panel-toggle"
-              className={
-                panelVisible
-                  ? "cursor-pointer text-ink bg-hover/40"
-                  : "cursor-pointer text-ink/70 hover:text-ink hover:bg-hover/40"
-              }
-            >
-              <PanelRight size={14} />
-            </Button>
-          }
-        />
-        <TooltipContent side="bottom" shortcut={panelShortcut}>
-          Toggle panel
-        </TooltipContent>
-      </Tooltip>
+      {/* While open, the panel header owns this toggle at the same spot. */}
+      {panelVisible ? null : (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-compact"
+                onClick={togglePanel}
+                aria-label="Toggle panel"
+                data-testid="header-panel-toggle"
+                className="cursor-pointer text-ink/70 hover:text-ink hover:bg-hover/40"
+              >
+                <PanelRight size={14} />
+              </Button>
+            }
+          />
+          <TooltipContent side="bottom" shortcut={panelShortcut}>
+            Toggle panel
+          </TooltipContent>
+        </Tooltip>
+      )}
     </div>
   );
 }

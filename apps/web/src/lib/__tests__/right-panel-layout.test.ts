@@ -7,44 +7,10 @@ import {
 import { useDiffStore } from "@/stores/diffStore";
 import { useUiStore } from "@/stores/uiStore";
 
-function resetDiffStore() {
-  useDiffStore.setState({
-    previewUrlByThread: {},
-    rightPanelByThread: {},
-    rightPanelFallbackByWorkspace: {},
-    snapshotsByThread: {},
-    snapshotsLoadingByThread: {},
-    reviewTurnsByThread: {},
-    viewMode: "last-turn",
-    reviewViewByThread: {},
-    reviewViewManuallySelectedByThread: {},
-    selectedCommitSha: null,
-    renderMode: "unified",
-    lineWrapByThread: {},
-    inlineDiffCache: {},
-    diffRevisionByScope: {},
-    branchComparison: null,
-    branchComparisonKey: null,
-    branchManuallySelectedByScope: {},
-    branchResolvedRevisionByScope: {},
-  });
-}
-
-function resetUiStore() {
-  useUiStore.setState({
-    sidebarCollapsed: false,
-    sidebarCollapsedByLayout: false,
-    sidebarFloating: false,
-    shortcutHelpOpen: false,
-    rightPanelMaximized: false,
-    rightPanelMaximizedByLayout: false,
-  });
-}
-
 describe("right-panel-layout", () => {
   beforeEach(() => {
-    resetDiffStore();
-    resetUiStore();
+    useDiffStore.setState({ rightPanelByThread: {}, rightPanelFallbackByWorkspace: {} });
+    useUiStore.setState({ rightPanelMaximized: false, rightPanelMaximizedByLayout: false });
     setLayoutMeasurements(1200, 1200);
   });
 

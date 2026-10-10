@@ -29,15 +29,13 @@
   padding-right: 0.8rem;
 }
 
-.caption-strip {
-  display: none;
-}
-
-:root[data-window-chrome="caption-overlay"] .caption-strip {
-  display: block;
-  height: var(--spacing-row-comfortable);
-  flex-shrink: 0;
-  padding-right: var(--caption-reserve);
+/*
+ * The panel header's row 1 sits left of the 48px rail, and the caption buttons
+ * overhang both, so row 1 only clears the part of the reserve the rail does not
+ * already absorb.
+ */
+[data-panel-header-row-1] {
+  padding-right: calc(max(var(--caption-reserve) - var(--container-right-rail), 0px) + 0.8rem);
 }
 
 .window-drag .window-no-drag {

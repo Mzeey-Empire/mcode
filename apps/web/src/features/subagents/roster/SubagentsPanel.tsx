@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { SubagentRoster, SubagentRosterEntry, CanonicalSubagentStopResult } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
+import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -64,12 +65,11 @@ function TranscriptDetail({ row, childThreadId, onBack, onStop, onTerminal }: {
     return () => residency.unmountDisplayConversation(childThreadId);
   }, [childThreadId]);
   return <section className="flex min-h-0 flex-1 flex-col" aria-label={`${row.title} subagent details`}>
-    <header className="flex shrink-0 items-center gap-2 border-b border-border/50 px-4 py-3">
-      <Button type="button" variant="ghost" size="icon-compact" onClick={onBack} aria-label="Back to subagents"><ArrowLeft size={15} aria-hidden /></Button>
-      <ProviderIcon provider={row.provider} size={20} />
-      <h2 className="text-fade text-sm font-semibold">{row.title}</h2>
-      <span role="status" className="sr-only">{subagentStatusLabel(row.status)}</span>
-    </header>
+    <PanelHeaderSlot slot="leading">
+      <Button type="button" variant="ghost" size="icon-compact" onClick={onBack} aria-label="Back to subagents" className="shrink-0"><ArrowLeft size={15} aria-hidden /></Button>
+      <PanelTitlePill headingLevel={2} icon={<ProviderIcon provider={row.provider} size={16} />}>{row.title}</PanelTitlePill>
+    </PanelHeaderSlot>
+    <span role="status" className="sr-only">{subagentStatusLabel(row.status)}</span>
     <div className="min-h-0 flex-1"><MessageList displayThreadId={childThreadId} onSubagentSelect={openSubagentDetail} onOpenSubagents={openSubagentsRoster} /></div>
     {row.status === "running" && row.canStop && <div data-testid="subagent-detail-actions" className="flex shrink-0 justify-end border-t border-border/40 px-4 py-2">
       <SubagentStopControl active canStop label={row.title} onStop={onStop} onTerminal={onTerminal} />
@@ -345,6 +345,7 @@ function SubagentRosterList({ roster, error, stopAll, viewportRef, refresh, stop
   const active = rows.filter((row) => row.status === "running");
   const done = rows.filter((row) => row.status !== "running");
   return <section ref={stopAll.panelRef} tabIndex={-1} className="flex min-h-0 flex-1 flex-col" aria-label="Subagents">
+    <PanelHeaderSlot slot="leading"><PanelTitlePill>Subagents</PanelTitlePill></PanelHeaderSlot>
     {error && <div data-testid="subagents-error" role="alert" className="px-4 py-3">Couldn't load subagents <Button variant="ghost" onClick={() => void refresh()}>Retry</Button></div>}
     {!roster && !error && <p className="px-4 py-6 text-sm text-muted">Loading subagents…</p>}
     <ScrollArea className="min-h-0 flex-1" viewportRef={viewportRef}>

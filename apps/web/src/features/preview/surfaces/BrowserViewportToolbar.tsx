@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ChevronDown, RotateCw, Smartphone, X } from "lucide-react";
+import { usePanelHeaderMenuOpen } from "@/components/panels/shell/PanelHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -152,8 +153,8 @@ export function BrowserViewportToolbar({
     width: String(requested.width),
     height: String(requested.height),
   }));
-  const [presetOpen, setPresetOpen] = useState(false);
-  const [scaleOpen, setScaleOpen] = useState(false);
+  const [presetOpen, setPresetOpen] = usePanelHeaderMenuOpen();
+  const [scaleOpen, setScaleOpen] = usePanelHeaderMenuOpen();
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const dimensions = sameSize(dimensionDraft.requested, requested)
     ? dimensionDraft

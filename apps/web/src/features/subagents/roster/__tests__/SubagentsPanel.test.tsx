@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { SubagentRosterEntry } from "@mcode/contracts";
 import { useDiffStore } from "@/stores/diffStore";
+import { PanelHeaderSlotScope } from "@/components/panels/shell/PanelHeader";
 import { useSubagentRosterStore } from "../../state/subagentRosterStore";
 import { SubagentsPanel } from "../SubagentsPanel";
 
@@ -88,5 +89,17 @@ describe("SubagentsPanel stop controls", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Stop all" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(transport.stopCanonicalSubagent.mock.calls).toEqual([["parent", "child-one"], ["parent", "child-two"]]);
+  });
+
+  it("puts the roster title and the detail title with Back in the shell header", async () => {
+    const elements = { leading: document.body.appendChild(document.createElement("div")), row2: document.createElement("div") };
+    onTestFinished(() => elements.leading.remove());
+    render(<PanelHeaderSlotScope active elements={elements}><SubagentsPanel threadId="parent" /></PanelHeaderSlotScope>);
+    await screen.findByRole("button", { name: "Stop all" });
+    expect(elements.leading).toHaveTextContent("Subagents");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open one details, Running" }));
+    await waitFor(() => expect(within(elements.leading).getByRole("heading", { level: 2 })).toHaveTextContent("one"));
+    expect(within(elements.leading).getByRole("button", { name: "Back to subagents" })).toBeInTheDocument();
   });
 });

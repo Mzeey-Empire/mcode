@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import type { ReviewTurn } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/time";
 import { useDiffStore } from "@/stores/diffStore";
+import { usePanelHeaderMenuOpen } from "@/components/panels/shell/PanelHeader";
 
 function statLabel(turn: ReviewTurn): string {
   if (turn.availability === "snapshot-expired") return "changes gone";
@@ -44,7 +45,7 @@ export function TurnPicker({ threadId }: { threadId: string }) {
     (s) => s.selectedTurnMessageIdByThread[threadId],
   );
   const setReviewTurnForThread = useDiffStore((s) => s.setReviewTurnForThread);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = usePanelHeaderMenuOpen();
 
   const turns = useMemo(
     () => [...(reviewTurns ?? [])].sort((a, b) => b.ordinal - a.ordinal),

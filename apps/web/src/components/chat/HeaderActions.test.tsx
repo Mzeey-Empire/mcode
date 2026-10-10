@@ -286,7 +286,7 @@ beforeEach(() => {
   mockGetProviderUsage.mockReset();
   mockGetProviderUsage.mockImplementation(() => new Promise(() => {}));
   mockGetRightPanel.mockClear();
-  mockGetRightPanelVisible.mockClear();
+  mockGetRightPanelVisible.mockReset().mockReturnValue(false);
   mockShowRightPanel.mockClear();
   mockSetRightPanelTab.mockClear();
   mockSetRightPanelWidth.mockClear();
@@ -788,11 +788,15 @@ describe("HeaderActions - consolidated header", () => {
     expect(mockSetPendingPrefill).toHaveBeenCalledWith(COMMIT_PREFILL);
   });
 
-  it("renders a single dedicated right-panel toggle", () => {
+  it("renders the right-panel toggle only while the panel is closed", () => {
+    mockGetRightPanelVisible.mockReturnValue(false);
+    const { unmount } = renderHeaderActions();
+    expect(screen.getByRole("button", { name: "Toggle panel" })).toBeInTheDocument();
+    unmount();
+
+    mockGetRightPanelVisible.mockReturnValue(true);
     renderHeaderActions();
-    const toggle = screen.getByTestId("header-panel-toggle");
-    expect(toggle).toBeInTheDocument();
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("button", { name: "Toggle panel" })).not.toBeInTheDocument();
   });
 
   it("collapses the old per-tab toggle icons (no terminal/preview/changes buttons)", () => {

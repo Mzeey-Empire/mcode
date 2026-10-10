@@ -13,6 +13,7 @@ import {
 import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useDiffStore } from "@/stores/diffStore";
+import { usePanelHeaderMenuOpen } from "@/components/panels/shell/PanelHeader";
 
 /** How many commits to load into the picker. Matches the Commits tab's window. */
 const COMMIT_LIMIT = 100;
@@ -94,7 +95,7 @@ function CommitPickerScope({
   const selectedSha = useDiffStore((s) => s.selectedCommitSha);
   const setSelectedSha = useDiffStore((s) => s.setSelectedCommitSha);
 
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = usePanelHeaderMenuOpen();
   const [commits, setCommits] = useState<GitCommit[]>([]);
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);

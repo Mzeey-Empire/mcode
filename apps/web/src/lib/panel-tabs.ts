@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Globe, Terminal, Files, Diff, ListChecks, Layers, Network, Settings } from "lucide-react";
+import { Globe, Terminal, Files, Diff, FileText, Layers, Network, Settings } from "lucide-react";
 import type { RightPanelTab } from "@/stores/diffStore";
 
 /**
@@ -104,7 +104,7 @@ export const PANEL_TAB_TYPES: readonly PanelTabType[] = [
   {
     id: "tasks",
     label: "Plan",
-    icon: ListChecks,
+    icon: FileText,
     blurb: "Read saved plans",
     needsThread: true,
     commandId: "tasks.toggle",
