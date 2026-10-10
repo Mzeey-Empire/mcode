@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { GitPullRequest, GitBranch, ChevronDown, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -10,21 +10,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { PICKER_PANEL_CLASS } from "@/components/ui/picker";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import {
-  Command,
-  CommandInput,
-  CommandList,
-  CommandEmpty,
-  CommandItem,
-} from "@/components/ui/command";
 import { Switch } from "@/components/ui/switch";
 import { SegmentedControl } from "@/components/ui/segmented-control";
+import { BranchTargetPicker } from "@/features/conversation/composer/execution/BranchTargetPicker";
+import type { BranchRefTarget } from "@/features/conversation/composer/execution/targets/branch-target";
+import { useBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";
 import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useToastStore } from "@/stores/toastStore";
-import type { GitBranch as GitBranchType } from "@mcode/contracts";
 
 const PreviewMarkdown = lazy(() => import("./MarkdownContent"));
 
@@ -33,17 +28,19 @@ const PreviewMarkdown = lazy(() => import("./MarkdownContent"));
 // ---------------------------------------------------------------------------
 
 interface BaseBranchSelectProps {
-  branches: GitBranchType[];
+  workspaceId: string;
+  threadId: string;
+  /** The PR's own branch: listed, but it cannot be its own base. */
+  headBranch: string;
   value: string;
+  /** Trigger copy while no base is chosen. */
+  placeholder: string;
   onChange: (name: string) => void;
   disabled?: boolean;
 }
 
-/**
- * Searchable dropdown for picking the PR base branch.
- * Uses Popover + Command for native keyboard navigation (arrow keys, Enter, Escape).
- */
-function BaseBranchSelect({ branches, value, onChange, disabled }: BaseBranchSelectProps) {
+/** Searchable, paged picker for the PR base branch, listed from the thread's checkout. */
+function BaseBranchSelect({ workspaceId, threadId, headBranch, value, placeholder, onChange, disabled }: BaseBranchSelectProps) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -61,7 +58,7 @@ function BaseBranchSelect({ branches, value, onChange, disabled }: BaseBranchSel
               open && "border-focus",
             )}
           >
-            <span className="text-fade">{value}</span>
+            <span className={cn("text-fade", !value && "text-muted")}>{value || placeholder}</span>
             <ChevronDown
               className={cn("size-3.5 text-muted transition-transform duration-150", open && "rotate-180")}
               aria-hidden="true"
@@ -69,29 +66,20 @@ function BaseBranchSelect({ branches, value, onChange, disabled }: BaseBranchSel
           </button>
         }
       />
-      <PopoverContent align="start" sideOffset={4} className="min-w-[200px] p-0">
-        <Command filter={(v, search) => (v.toLowerCase().includes(search.toLowerCase()) ? 1 : 0)}>
-          <CommandInput placeholder="Search branches…" />
-          <CommandList className="max-h-[200px]">
-            <CommandEmpty>No branches match</CommandEmpty>
-            {branches.map((b) => (
-              <CommandItem
-                key={b.name}
-                value={b.name}
-                onSelect={(name) => { onChange(name); setOpen(false); }}
-                className={cn(
-                  "flex justify-between text-xs",
-                  b.name === value && "bg-selected text-ink",
-                )}
-              >
-                <span className="text-fade">{b.name}</span>
-                {b.isCurrent && (
-                  <Badge variant="secondary" size="compact" className="ml-2 shrink-0">current</Badge>
-                )}
-              </CommandItem>
-            ))}
-          </CommandList>
-        </Command>
+      <PopoverContent align="start" sideOffset={4} className={PICKER_PANEL_CLASS}>
+        <BranchTargetPicker
+          workspaceId={workspaceId}
+          threadId={threadId}
+          list="branches"
+          value={value ? { kind: "branch", name: value } : null}
+          disabledReason={(target) => (target.kind === "branch" && target.branchName === headBranch ? "Head branch" : undefined)}
+          onSelect={(target) => {
+            if (target.kind !== "branch") return;
+            // A PR base is a GitHub branch name, so a remote-only ref drops its remote.
+            onChange(target.branchName);
+            setOpen(false);
+          }}
+        />
       </PopoverContent>
     </Popover>
   );
@@ -119,10 +107,11 @@ interface PrDialogForm {
 }
 
 interface BaseBranchSelection {
-  baseBranches: GitBranchType[];
   baseBranch: string;
   setBaseBranch: (branch: string) => void;
   hasValidBase: boolean;
+  /** Trigger copy while no base is chosen. */
+  placeholder: string;
 }
 
 interface PrDialogHeaderProps {
@@ -133,7 +122,11 @@ interface PrDialogHeaderProps {
 
 interface PrDialogSidebarProps {
   form: PrDialogForm;
+  workspaceId: string;
+  threadId: string;
+  headBranch: string;
   baseBranchSelection: BaseBranchSelection;
+  /** A load, submit or draft is in flight, so the form holds still. */
   isDisabled: boolean;
   onSubmit: () => void;
   onCancel: () => void;
@@ -142,6 +135,8 @@ interface PrDialogSidebarProps {
 interface PrDescriptionPanelProps {
   form: PrDialogForm;
   isDisabled: boolean;
+  /** A draft is written against a base, so Generate waits for one. */
+  hasValidBase: boolean;
   onRegenerate: () => void;
 }
 
@@ -188,91 +183,82 @@ function usePrDialogForm(): PrDialogForm {
   };
 }
 
-function getBaseBranches(branches: GitBranchType[], branch: string): GitBranchType[] {
-  const seen = new Set<string>();
-  const baseBranches: GitBranchType[] = [];
-
-  for (const candidate of branches) {
-    if (candidate.type === "worktree") continue;
-
-    const name = candidate.type === "remote" ? candidate.name.replace(/^[^/]+\//, "") : candidate.name;
-    if (name === branch || seen.has(name)) continue;
-
-    seen.add(name);
-    baseBranches.push({ ...candidate, name });
-  }
-
-  return baseBranches;
+/**
+ * The repository default branch, read from the thread's first branch page. Not the checked-out branch, which in
+ * this dialog is the PR's head. `undefined` while that page loads; null when it failed or names no default.
+ */
+function useRepositoryDefaultBranch(request: { workspaceId: string; threadId: string } | null): string | null | undefined {
+  const list = useBranchTargets(request && { ...request, purpose: "new-thread" });
+  if (request === null) return undefined;
+  const repositoryDefault = list.items.find((item): item is BranchRefTarget => item.kind === "branch" && item.isDefault);
+  if (repositoryDefault) return repositoryDefault.branchName;
+  return list.status.kind === "loading" ? undefined : null;
 }
 
-function getDefaultBaseBranch(baseBranches: GitBranchType[], preferredBaseBranch?: string | null): string {
-  return (
-    baseBranches.find((candidate) => candidate.name === preferredBaseBranch) ??
-    baseBranches.find((candidate) => candidate.name === "main") ??
-    baseBranches.find((candidate) => candidate.name === "master") ??
-    baseBranches[0]
-  )?.name ?? "";
+/** The base a PR session opens with: the caller's preference, else the repository default. Undefined until known. */
+function initialBaseBranch(
+  preferredBaseBranch: string | null | undefined,
+  repositoryDefault: string | null | undefined,
+  headBranch: string,
+): string | undefined {
+  if (preferredBaseBranch && preferredBaseBranch !== headBranch) return preferredBaseBranch;
+  if (repositoryDefault === undefined) return undefined;
+  return repositoryDefault === null || repositoryDefault === headBranch ? "" : repositoryDefault;
+}
+
+interface BaseBranchSession {
+  readonly key: string | null;
+  readonly base: string;
+}
+
+/** Holds the chosen base per PR session; `base` is undefined while the session waits for its starting base. */
+function useBaseBranchSession(sessionKey: string | null, initialBase: string | undefined) {
+  const [session, setSession] = useState<BaseBranchSession>({ key: null, base: "" });
+  const waiting = session.key !== sessionKey;
+  // Snapshot the starting base once per session, during render so the first painted frame already shows it.
+  // A later pick, or a branch list refresh, never resets it.
+  if (waiting && (sessionKey === null || initialBase !== undefined)) {
+    setSession({ key: sessionKey, base: initialBase ?? "" });
+  }
+  return {
+    base: waiting ? undefined : session.base,
+    select: (base: string) => setSession({ key: sessionKey, base }),
+  };
 }
 
 function useBaseBranchSelection(
   open: boolean,
-  branches: GitBranchType[],
+  workspaceId: string,
   threadId: string,
   branch: string,
   preferredBaseBranch?: string | null,
 ): BaseBranchSelection {
-  const baseBranches = useMemo(() => getBaseBranches(branches, branch), [branches, branch]);
-  const defaultBaseBranch = getDefaultBaseBranch(baseBranches, preferredBaseBranch);
-  const [baseBranch, setBaseBranch] = useState(defaultBaseBranch);
-  const baseInitializationKey = `${threadId}:${branch}:${preferredBaseBranch ?? ""}`;
-  const initializedBaseKeyRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!open) {
-      initializedBaseKeyRef.current = null;
-      return;
-    }
-    if (!defaultBaseBranch) return;
-
-    if (initializedBaseKeyRef.current !== baseInitializationKey) {
-      initializedBaseKeyRef.current = baseInitializationKey;
-      // oxlint-disable-next-line react/set-state-in-effect -- Opening a distinct PR session snapshots its default base branch while preserving the user's later selection.
-      setBaseBranch(defaultBaseBranch);
-      return;
-    }
-    if (!baseBranches.some((candidate) => candidate.name === baseBranch)) {
-      // oxlint-disable-next-line react/set-state-in-effect -- A refreshed branch list can invalidate the selected branch, so the dialog must restore its session default.
-      setBaseBranch(defaultBaseBranch);
-    }
-  }, [baseBranches, baseBranch, baseInitializationKey, defaultBaseBranch, open]);
+  const repositoryDefault = useRepositoryDefaultBranch(open ? { workspaceId, threadId } : null);
+  const sessionKey = open ? `${threadId}:${branch}:${preferredBaseBranch ?? ""}` : null;
+  const session = useBaseBranchSession(sessionKey, initialBaseBranch(preferredBaseBranch, repositoryDefault, branch));
+  const baseBranch = session.base ?? "";
 
   return {
-    baseBranches,
     baseBranch,
-    setBaseBranch,
-    hasValidBase: baseBranches.some((candidate) => candidate.name === baseBranch),
+    setBaseBranch: session.select,
+    hasValidBase: baseBranch !== "" && baseBranch !== branch,
+    placeholder: session.base === undefined ? "Loading branches" : "Choose branch",
   };
 }
 
-function isDialogDisabled(
-  state: DialogState,
-  branchesLoading: boolean,
-  hasValidBase: boolean,
-  isRegenerating: boolean,
-): boolean {
-  return state === "loading" || state === "submitting" || branchesLoading || !hasValidBase || isRegenerating;
+function isDialogBusy(state: DialogState, isRegenerating: boolean): boolean {
+  return state === "loading" || state === "submitting" || isRegenerating;
 }
 
 function shouldAutoGenerateDraft(
   open: boolean,
   hasValidBase: boolean,
-  branchesLoading: boolean,
   title: string,
   body: string,
   isRegenerating: boolean,
   wasAutoGenerated: boolean,
 ): boolean {
-  return open && hasValidBase && !branchesLoading && !title.trim() && !body.trim() && !isRegenerating && !wasAutoGenerated;
+  return open && hasValidBase && !title.trim() && !body.trim() && !isRegenerating && !wasAutoGenerated;
 }
 
 /**
@@ -288,10 +274,6 @@ export function CreatePrDialog({
   branch,
   preferredBaseBranch,
 }: CreatePrDialogProps) {
-  const branches = useWorkspaceStore((s) => s.branches);
-  const branchesLoading = useWorkspaceStore((s) => s.branchesLoading);
-  const loadBranches = useWorkspaceStore((s) => s.loadBranches);
-
   const form = usePrDialogForm();
   const {
     state: formState,
@@ -304,20 +286,13 @@ export function CreatePrDialog({
   } = form;
   const baseBranchSelection = useBaseBranchSelection(
     open,
-    branches,
+    workspaceId,
     threadId,
     branch,
     preferredBaseBranch,
   );
   const autoGeneratedSessionKeyRef = useRef<string | null>(null);
   const baseInitializationKey = `${threadId}:${branch}:${preferredBaseBranch ?? ""}`;
-
-  // Load branches when the dialog opens.
-  useEffect(() => {
-    if (open && workspaceId) {
-      loadBranches(workspaceId);
-    }
-  }, [open, workspaceId, loadBranches]);
 
   // Reset ephemeral fields when the dialog closes — but not during an in-flight
   // submission, since the close could be a forced unmount while createPr() is pending.
@@ -396,7 +371,6 @@ export function CreatePrDialog({
     if (!shouldAutoGenerateDraft(
       open,
       baseBranchSelection.hasValidBase,
-      branchesLoading,
       form.title,
       form.body,
       form.isRegenerating,
@@ -408,7 +382,6 @@ export function CreatePrDialog({
   }, [
     open,
     baseBranchSelection.hasValidBase,
-    branchesLoading,
     form.title,
     form.body,
     form.isRegenerating,
@@ -416,12 +389,7 @@ export function CreatePrDialog({
     handleRegenerate,
   ]);
 
-  const isDisabled = isDialogDisabled(
-    form.state,
-    branchesLoading,
-    baseBranchSelection.hasValidBase,
-    form.isRegenerating,
-  );
+  const isDisabled = isDialogBusy(form.state, form.isRegenerating);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -438,6 +406,9 @@ export function CreatePrDialog({
         <div className="flex min-h-[320px] max-h-[min(480px,70vh)] max-sm:max-h-[min(640px,85vh)] max-sm:flex-col">
           <PrDialogSidebar
             form={form}
+            workspaceId={workspaceId}
+            threadId={threadId}
+            headBranch={branch}
             baseBranchSelection={baseBranchSelection}
             isDisabled={isDisabled}
             onSubmit={handleSubmit}
@@ -447,6 +418,7 @@ export function CreatePrDialog({
           <PrDescriptionPanel
             form={form}
             isDisabled={isDisabled}
+            hasValidBase={baseBranchSelection.hasValidBase}
             onRegenerate={handleRegenerate}
           />
         </div>
@@ -484,6 +456,9 @@ function PrDialogHeader({ branch, baseBranch, isDraft }: PrDialogHeaderProps) {
 
 function PrDialogSidebar({
   form,
+  workspaceId,
+  threadId,
+  headBranch,
   baseBranchSelection,
   isDisabled,
   onSubmit,
@@ -510,8 +485,11 @@ function PrDialogSidebar({
           Base branch
         </label>
         <BaseBranchSelect
-          branches={baseBranchSelection.baseBranches}
+          workspaceId={workspaceId}
+          threadId={threadId}
+          headBranch={headBranch}
           value={baseBranchSelection.baseBranch}
+          placeholder={baseBranchSelection.placeholder}
           onChange={baseBranchSelection.setBaseBranch}
           disabled={isDisabled}
         />
@@ -546,7 +524,7 @@ function PrDialogSidebar({
       <div className="flex flex-col gap-2">
         <Button
           onClick={onSubmit}
-          disabled={isDisabled || !form.title.trim()}
+          disabled={isDisabled || !baseBranchSelection.hasValidBase || !form.title.trim()}
           className="w-full gap-1.5"
         >
           {form.state === "submitting" && <Spinner size={16} className="text-current" />}
@@ -565,7 +543,7 @@ function PrDialogSidebar({
   );
 }
 
-function PrDescriptionPanel({ form, isDisabled, onRegenerate }: PrDescriptionPanelProps) {
+function PrDescriptionPanel({ form, isDisabled, hasValidBase, onRegenerate }: PrDescriptionPanelProps) {
   if (form.isRegenerating && !form.body) {
     return <PrDraftLoadingState />;
   }
@@ -574,6 +552,7 @@ function PrDescriptionPanel({ form, isDisabled, onRegenerate }: PrDescriptionPan
     <PrDescriptionEditor
       form={form}
       isDisabled={isDisabled}
+      hasValidBase={hasValidBase}
       onRegenerate={onRegenerate}
     />
   );
@@ -592,7 +571,7 @@ function PrDraftLoadingState() {
   );
 }
 
-function PrDescriptionEditor({ form, isDisabled, onRegenerate }: PrDescriptionPanelProps) {
+function PrDescriptionEditor({ form, isDisabled, hasValidBase, onRegenerate }: PrDescriptionPanelProps) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-5">
       <div className="flex items-center justify-between">
@@ -603,7 +582,7 @@ function PrDescriptionEditor({ form, isDisabled, onRegenerate }: PrDescriptionPa
           <PrDraftGenerationButton
             isRegenerating={form.isRegenerating}
             hasDraftContent={Boolean(form.title || form.body)}
-            disabled={isDisabled}
+            disabled={isDisabled || !hasValidBase}
             onRegenerate={onRegenerate}
           />
           <SegmentedControl

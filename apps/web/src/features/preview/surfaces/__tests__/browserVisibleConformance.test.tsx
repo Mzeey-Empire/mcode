@@ -46,7 +46,6 @@ const {
     threads: [] as Thread[],
     prUrlsByThreadId: {},
     checksById: {},
-    openPrs: [],
     worktreesLoadedForWorkspace: "workspace-visible",
   },
 }));

@@ -3,9 +3,9 @@ import type {
   PullRequestDetail,
   PullRequestError,
   PullRequestWorkspaceCandidate,
-  WorktreeInfo,
 } from "@mcode/contracts";
 import type { Thread } from "@/transport";
+import type { AttachedWorktree } from "@/lib/worktree";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { GitFork } from "lucide-react";
 import { ErrorIcon } from "@/components/ui/icon-map";
@@ -45,7 +45,7 @@ interface ForkTarget {
   workspaceId: string;
   mode: "worktree" | "existing-worktree";
   branch: string;
-  worktree: WorktreeInfo | null;
+  worktree: AttachedWorktree | null;
 }
 
 interface PreviousWorkspaceContext {
@@ -102,7 +102,6 @@ function targetFromResult(
         name: result.reviewLink.localBranch,
         path: result.reviewLink.worktreePath,
         branch: result.reviewLink.localBranch,
-        managed: result.reviewLink.worktreeManaged,
       },
     };
   }
@@ -115,7 +114,6 @@ function targetFromResult(
         name: result.worktree.name,
         path: result.worktree.path,
         branch: result.worktree.branch,
-        managed: result.worktree.managed,
       },
     };
   }

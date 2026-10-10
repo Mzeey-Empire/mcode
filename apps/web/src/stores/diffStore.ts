@@ -432,8 +432,8 @@ interface DiffState {
   /**
    * Per-thread "the user picked a view" override flag, keyed by thread ID. While
    * unset, the Review default re-evaluates live from the thread's change state;
-   * once set, the pick sticks and auto-defaulting stops for that thread. Mirrors
-   * the `branchManuallySelected` guard in workspaceStore. See ADR-0011.
+   * once set, the pick sticks and auto-defaulting stops for that thread. See
+   * ADR-0011.
    */
   readonly reviewViewManuallySelectedByThread: Record<string, boolean>;
   /**

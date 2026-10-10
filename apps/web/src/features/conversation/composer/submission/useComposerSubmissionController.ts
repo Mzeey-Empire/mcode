@@ -58,7 +58,6 @@ export interface UseComposerSubmissionControllerOptions {
   workspaceId?: string;
   isNewThread: boolean;
   branchFromMessageId?: string;
-  activeThread?: Thread;
   isAgentRunning: boolean;
   isThreadScaffold: boolean;
   annotationScopeId?: string;
@@ -79,7 +78,6 @@ export function useComposerSubmissionController({
   workspaceId,
   isNewThread,
   branchFromMessageId,
-  activeThread,
   isAgentRunning,
   isThreadScaffold,
   annotationScopeId,
@@ -151,7 +149,6 @@ export function useComposerSubmissionController({
         threadId,
         workspaceId,
         branchFromMessageId,
-        activeThread,
         target,
         execution,
         submission,
@@ -187,11 +184,12 @@ export function useComposerSubmissionController({
         finishEditing: queue.finishEditing,
       });
     },
-    [activeThread, annotationScopeId, branchFromMessageId, execution, form, isAgentRunning, isNewThread, onBranchModeExit, onThreadCreated, onThreadCreationFailed, onThreadPreparing, queue, queuePrepared, threadId, workspaceId],
+    [annotationScopeId, branchFromMessageId, execution, form, isAgentRunning, isNewThread, onBranchModeExit, onThreadCreated, onThreadCreationFailed, onThreadPreparing, queue, queuePrepared, threadId, workspaceId],
   );
 
   const runSubmissionAttempt = useCallback(async (): Promise<SubmitAttemptOutcome> => {
-    if (!canSubmitWithoutWorkspace(isNewThread, workspaceId)) return "complete";
+    // Enter submits even while Send is disabled. A pending target keeps the draft until its branch is known.
+    if (execution.targetPending || !canSubmitWithoutWorkspace(isNewThread, workspaceId)) return "complete";
     const submission = await prepareComposerSubmission({
       annotationScopeId,
       form,

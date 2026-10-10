@@ -154,7 +154,6 @@ export const mockTransport: McodeTransport = {
   reopenThread: vi.fn().mockResolvedValue(createMockThread()),
   countBlockedThreadCleanupCandidates: vi.fn().mockResolvedValue({ count: 0 }),
   retryThreadCleanup: vi.fn().mockResolvedValue(createMockThread()),
-  listBranches: vi.fn().mockResolvedValue([]),
   listRefs: vi.fn().mockResolvedValue({ ok: true, items: [], total: 0, nextCursor: null }),
   listPullRequestTargets: vi.fn().mockResolvedValue({ ok: true, items: [], total: 0, nextCursor: null }),
   getCurrentBranch: vi.fn().mockResolvedValue("main"),
@@ -257,8 +256,6 @@ export const mockTransport: McodeTransport = {
   closePullRequest: vi.fn(),
   mergePullRequest: vi.fn(),
   cancelPullRequestOperation: vi.fn().mockResolvedValue({ ok: true, cancelled: false }),
-  listOpenPrs: vi.fn().mockResolvedValue([]),
-  fetchBranch: vi.fn().mockResolvedValue(undefined),
   checkStatus: vi.fn().mockResolvedValue({ aggregate: "no_checks", runs: [], fetchedAt: 0 }),
   getProviderCatalog: vi.fn().mockImplementation(async (request: ProviderCatalogRequest) => ({
     providerId: request.providerId,

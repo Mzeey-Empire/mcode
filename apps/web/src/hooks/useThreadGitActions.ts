@@ -43,12 +43,10 @@ function useThreadPrState(thread: Thread) {
   );
   const cachedPrUrl = useWorkspaceStore((state) => state.prUrlsByThreadId[thread.id]);
   const checks = useWorkspaceStore((state) => state.checksById[thread.id]) ?? null;
-  const openPrDetail = useWorkspaceStore((state) => {
-    if (thread.pr_number === null) return null;
-    return state.openPrs.find((candidate) => candidate.number === thread.pr_number) ?? null;
-  });
   const storePr = resolveStoredPr(thread, cachedPrUrl);
   const pr = resolveCurrentPr(polledPr, storePr);
+  // Only a polled PR carries a title; one this client just created shows none until the next poll.
+  const openPrDetail = pr && "title" in pr ? { title: pr.title } : null;
 
   useEffect(() => {
     if (!pr) return;

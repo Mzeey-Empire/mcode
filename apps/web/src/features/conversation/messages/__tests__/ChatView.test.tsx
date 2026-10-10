@@ -333,7 +333,6 @@ function defaultWorkspaceState(overrides: Partial<{
     customBranchName: "",
     autoPreviewBranch: "preview",
     selectedWorktree: null,
-    branchManuallySelected: false,
     worktrees: [],
     worktreesLoadedForWorkspace: null,
     checksById: {},

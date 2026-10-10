@@ -1,256 +1,142 @@
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import type { ComposerMode } from "@/components/chat/ModeSelector";
-import type { GitBranch, PrDetail, Thread } from "@/transport";
-import type { WorktreeInfo } from "@/transport/types";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { isDetachedWorktree, normalizeWorktreePath } from "@/lib/worktree";
+import { attachedWorktreeFromTarget, isDetachedWorktree, normalizeWorktreePath, type AttachedWorktree } from "@/lib/worktree";
+import type { BranchTargetList } from "./BranchTargetPicker";
+import { newThreadTargetLabel } from "./new-thread-target-copy";
+import type { BranchTarget, BranchTargetValue } from "./targets/branch-target";
+import { useForkTargetBranch, useNewThreadTargetBranch, type ForkSourceThread, type TargetBranch } from "./useTargetBranch";
 
 /** The product flow that owns an execution target. */
 export type ComposerTargetScope = "new-thread" | "branch";
 
-/** Props for shared branch and worktree target selection. */
+/** Props for shared branch and worktree target selection. Rendered only for a git project. */
 export type ComposerTargetSelectionProps =
   | {
     scope: "new-thread";
     mode: ComposerMode;
     workspaceId: string | undefined;
-    variant: "context-strip" | "status-bar";
   }
   | {
     scope: "branch";
     mode: ComposerMode;
-    sourceThread?: Pick<Thread, "base_branch" | "branch">;
-    variant: "context-strip" | "status-bar";
+    sourceThread: ForkSourceThread | undefined;
   };
 
-interface TargetScopeContext {
-  isNewThread: boolean;
-  workspaceId: string | undefined;
-  sourceThread: Pick<Thread, "base_branch" | "branch"> | undefined;
-}
-
-interface ComposerTargetStoreState {
-  branches: GitBranch[];
-  branchesLoading: boolean;
-  newThreadBranch: string;
-  branchTargetBranch: string;
-  branchWorktreePath: string;
-  selectedWorktree: WorktreeInfo | null;
-  worktrees: WorktreeInfo[];
-  worktreesLoading: boolean;
-  openPrs: PrDetail[];
-  openPrsLoading: boolean;
-  fetchingBranch: string | null;
-  setNewThreadBranch(branch: string): void;
-  setNewThreadBranchFromPr(branch: string, pullRequestNumber: number): void;
-  setSelectedWorktree(worktree: WorktreeInfo | null): void;
-  setBranchTargetBranch(branch: string): void;
-  setBranchWorktreePath(path: string): void;
-}
-
-interface BranchSelection {
-  selectedBranch: string;
-  existingWorktreeBranch: string;
-}
-
-interface PullRequestSelection {
-  openPrs: PrDetail[] | undefined;
-  openPrsLoading: boolean | undefined;
-  fetchingBranch: string | null | undefined;
-}
-
-interface TargetPresentation {
-  triggerClassName: string | undefined;
-  iconSize: number | undefined;
-}
-
-function resolveTargetScopeContext(props: ComposerTargetSelectionProps): TargetScopeContext {
-  if (props.scope === "new-thread") {
-    return { isNewThread: true, workspaceId: props.workspaceId, sourceThread: undefined };
-  }
-  return { isNewThread: false, workspaceId: undefined, sourceThread: props.sourceThread };
-}
-
-function useComposerTargetStoreState(): ComposerTargetStoreState {
-  return {
-    branches: useWorkspaceStore((state) => state.branches),
-    branchesLoading: useWorkspaceStore((state) => state.branchesLoading),
-    newThreadBranch: useWorkspaceStore((state) => state.newThreadBranch),
-    branchTargetBranch: useWorkspaceStore((state) => state.branchTargetBranch),
-    branchWorktreePath: useWorkspaceStore((state) => state.branchWorktreePath),
-    selectedWorktree: useWorkspaceStore((state) => state.selectedWorktree),
-    worktrees: useWorkspaceStore((state) => state.worktrees),
-    worktreesLoading: useWorkspaceStore((state) => state.worktreesLoading),
-    openPrs: useWorkspaceStore((state) => state.openPrs),
-    openPrsLoading: useWorkspaceStore((state) => state.openPrsLoading),
-    fetchingBranch: useWorkspaceStore((state) => state.fetchingBranch),
-    setNewThreadBranch: useWorkspaceStore((state) => state.setNewThreadBranch),
-    setNewThreadBranchFromPr: useWorkspaceStore((state) => state.setNewThreadBranchFromPr),
-    setSelectedWorktree: useWorkspaceStore((state) => state.setSelectedWorktree),
-    setBranchTargetBranch: useWorkspaceStore((state) => state.setBranchTargetBranch),
-    setBranchWorktreePath: useWorkspaceStore((state) => state.setBranchWorktreePath),
-  };
-}
-
-function getSelectedThreadBranch(
-  branchTargetBranch: string,
-  sourceThread: TargetScopeContext["sourceThread"],
-): string {
-  if (branchTargetBranch) return branchTargetBranch;
-  return sourceThread?.branch || "";
-}
-
-function getExistingWorktreeBranch(
-  branchTargetBranch: string,
-  sourceThread: TargetScopeContext["sourceThread"],
-): string {
-  if (branchTargetBranch) return branchTargetBranch;
-  if (sourceThread?.base_branch) return sourceThread.base_branch;
-  return sourceThread?.branch || "main";
-}
-
-function getBranchSelection(
-  isNewThread: boolean,
-  newThreadBranch: string,
-  branchTargetBranch: string,
-  sourceThread: TargetScopeContext["sourceThread"],
-): BranchSelection {
-  if (isNewThread) {
-    const selectedBranch = newThreadBranch || "main";
-    return { selectedBranch, existingWorktreeBranch: selectedBranch };
-  }
-  return {
-    selectedBranch: getSelectedThreadBranch(branchTargetBranch, sourceThread),
-    existingWorktreeBranch: getExistingWorktreeBranch(branchTargetBranch, sourceThread),
-  };
-}
-
-function useSelectedWorktree(
-  isNewThread: boolean,
-  selectedWorktree: WorktreeInfo | null,
-  branchWorktreePath: string,
-  worktrees: WorktreeInfo[],
-): WorktreeInfo | null {
-  return useMemo(() => {
-    if (isNewThread) return selectedWorktree;
-    const normalizedPath = normalizeWorktreePath(branchWorktreePath);
-    return worktrees.find((worktree) => normalizeWorktreePath(worktree.path) === normalizedPath) ?? null;
-  }, [branchWorktreePath, isNewThread, selectedWorktree, worktrees]);
-}
-
-function getPullRequestSelection(
-  isNewThread: boolean,
-  openPrs: PrDetail[],
-  openPrsLoading: boolean,
-  fetchingBranch: string | null,
-): PullRequestSelection {
-  if (!isNewThread) {
-    return { openPrs: undefined, openPrsLoading: undefined, fetchingBranch: undefined };
-  }
-  return { openPrs, openPrsLoading, fetchingBranch };
-}
-
-function getTargetPresentation(variant: ComposerTargetSelectionProps["variant"]): TargetPresentation {
-  if (variant !== "context-strip") return { triggerClassName: undefined, iconSize: undefined };
-  return {
-    triggerClassName: "h-[28px] gap-[6px] rounded-md px-[10px] text-xs font-medium leading-none",
-    iconSize: 14,
-  };
-}
-
-function useTargetSelectionActions(
-  isNewThread: boolean,
-  store: ComposerTargetStoreState,
-) {
-  const {
-    setNewThreadBranch,
-    setNewThreadBranchFromPr,
-    setSelectedWorktree,
-    setBranchTargetBranch,
-    setBranchWorktreePath,
-  } = store;
-  const selectWorktree = useCallback((worktree: WorktreeInfo) => {
-    if (isNewThread) {
-      setSelectedWorktree(worktree);
-      return;
-    }
-    setBranchWorktreePath(worktree.path);
-  }, [isNewThread, setBranchWorktreePath, setSelectedWorktree]);
-  const selectPullRequest = useCallback(async (branch: string, pullRequestNumber: number) => {
-    setNewThreadBranchFromPr(branch, pullRequestNumber);
-  }, [setNewThreadBranchFromPr]);
-
-  return {
-    selectBranch: isNewThread ? setNewThreadBranch : setBranchTargetBranch,
-    selectWorktree,
-    selectPullRequest: isNewThread ? selectPullRequest : undefined,
-  };
+/** One trigger and the picker list it opens. */
+export interface TargetPick {
+  readonly label: string;
+  readonly list: BranchTargetList;
+  readonly value: BranchTargetValue | null;
+  readonly select: (target: BranchTarget) => void;
 }
 
 /** State and actions that drive a Composer execution target picker. */
 export interface ComposerTargetSelectionState {
-  mode: ComposerMode;
-  selectedBranch: string;
-  selectedWorktree: WorktreeInfo | null;
-  existingWorktreeBranch: string;
-  selectedPath: string;
-  branches: GitBranch[];
-  branchesLoading: boolean;
-  worktrees: WorktreeInfo[];
-  worktreesLoading: boolean;
-  openPrs: PrDetail[] | undefined;
-  openPrsLoading: boolean | undefined;
-  fetchingBranch: string | null | undefined;
-  selectBranch(branch: string): void;
-  selectWorktree(worktree: WorktreeInfo): void;
-  selectPullRequest: ((branch: string, pullRequestNumber: number) => Promise<void>) | undefined;
-  triggerClassName: string | undefined;
-  iconSize: number | undefined;
+  /** Undefined until a project is chosen; nothing is listed without one. */
+  readonly workspaceId: string | undefined;
+  /** The persisted thread whose checkout decides the current branch; absent for a new thread. */
+  readonly contextThreadId: string | undefined;
+  readonly target: TargetPick;
+  /** The branch a detached worktree starts from; null unless a detached worktree is attached. */
+  readonly baseBranch: TargetPick | null;
 }
 
-/** Owns target picker state, including worktree lookup and pull-request branch selection. */
-export function useComposerTargetSelection(
-  props: ComposerTargetSelectionProps,
-): ComposerTargetSelectionState {
-  const scope = resolveTargetScopeContext(props);
-  const store = useComposerTargetStoreState();
-  const branchSelection = getBranchSelection(
-    scope.isNewThread,
-    store.newThreadBranch,
-    store.branchTargetBranch,
-    scope.sourceThread,
-  );
-  const selectedWorktree = useSelectedWorktree(
-    scope.isNewThread,
-    store.selectedWorktree,
-    store.branchWorktreePath,
-    store.worktrees,
-  );
-  const actions = useTargetSelectionActions(scope.isNewThread, store);
-  const pullRequestSelection = getPullRequestSelection(
-    scope.isNewThread,
-    store.openPrs,
-    store.openPrsLoading,
-    store.fetchingBranch,
-  );
-  const presentation = getTargetPresentation(props.variant);
+type BranchPickMode = "direct" | "worktree";
 
+function unknownBranchLabel(branch: TargetBranch): string {
+  return branch.unknown === "loading" ? "Loading branches" : "Choose branch";
+}
+
+function branchPick(mode: BranchPickMode, branch: TargetBranch, select: (name: string) => void): TargetPick {
   return {
-    mode: props.mode,
-    ...branchSelection,
-    selectedWorktree,
-    selectedPath: selectedWorktree?.path ?? (scope.isNewThread ? "" : store.branchWorktreePath),
-    branches: store.branches,
-    branchesLoading: store.branchesLoading,
-    worktrees: store.worktrees,
-    worktreesLoading: store.worktreesLoading,
-    ...pullRequestSelection,
-    ...actions,
-    ...presentation,
+    label: newThreadTargetLabel({ mode, branch: branch.name }) ?? unknownBranchLabel(branch),
+    list: "branches",
+    value: branch.name ? { kind: "branch", name: branch.name } : null,
+    select: (target) => {
+      if (target.kind === "branch") select(target.name);
+    },
   };
 }
 
-/** Determines whether the selected worktree needs an explicit branch picker. */
-export function isDetachedTargetWorktree(worktree: WorktreeInfo | null): boolean {
-  return isDetachedWorktree(worktree);
+function worktreePick(worktree: AttachedWorktree | null, path: string, select: (worktree: AttachedWorktree) => void): TargetPick {
+  return {
+    label: newThreadTargetLabel({ mode: "existing-worktree", worktree }) ?? "Choose worktree",
+    list: "worktrees",
+    value: path ? { kind: "worktree", path } : null,
+    select: (target) => {
+      if (target.kind !== "pull-request") select(attachedWorktreeFromTarget(target));
+    },
+  };
+}
+
+interface PullRequestSource {
+  readonly number: number | undefined;
+  readonly select: (headRefName: string, number: number) => void;
+}
+
+/** New worktree also offers pull requests; a picked one names the trigger and the selected row by number. */
+function newWorktreePick(branch: TargetBranch, pullRequest: PullRequestSource, selectBranch: (name: string) => void): TargetPick {
+  const branchTarget = branchPick("worktree", branch, selectBranch);
+  const number = pullRequest.number;
+  return {
+    label: newThreadTargetLabel({ mode: "worktree", branch: branch.name, pullRequestNumber: number }) ?? unknownBranchLabel(branch),
+    list: "branches-and-pull-requests",
+    value: number === undefined ? branchTarget.value : { kind: "pull-request", number },
+    select: (target) => {
+      if (target.kind === "pull-request") pullRequest.select(target.headRefName, target.number);
+      else branchTarget.select(target);
+    },
+  };
+}
+
+/** Owns a new thread's target trigger: copy, picker list, selected row, and how a pick lands in the store. */
+export function useNewThreadTargetSelection(workspaceId: string | undefined, mode: ComposerMode): ComposerTargetSelectionState {
+  const branch = useNewThreadTargetBranch(workspaceId);
+  const branchSource = useWorkspaceStore((state) => state.newThreadBranchSource);
+  const pullRequestNumber = useWorkspaceStore((state) => state.newThreadPullRequestNumber);
+  const selectedWorktree = useWorkspaceStore((state) => state.selectedWorktree);
+  const setNewThreadBranch = useWorkspaceStore((state) => state.setNewThreadBranch);
+  const setNewThreadBranchFromPr = useWorkspaceStore((state) => state.setNewThreadBranchFromPr);
+  const setSelectedWorktree = useWorkspaceStore((state) => state.setSelectedWorktree);
+  const base = { workspaceId, contextThreadId: undefined };
+
+  if (mode === "existing-worktree") {
+    return {
+      ...base,
+      target: worktreePick(selectedWorktree, selectedWorktree?.path ?? "", setSelectedWorktree),
+      baseBranch: isDetachedWorktree(selectedWorktree) ? branchPick("worktree", branch, setNewThreadBranch) : null,
+    };
+  }
+  if (mode === "worktree") {
+    const pullRequest = {
+      number: branchSource === "pr" ? pullRequestNumber : undefined,
+      select: setNewThreadBranchFromPr,
+    };
+    return { ...base, target: newWorktreePick(branch, pullRequest, setNewThreadBranch), baseBranch: null };
+  }
+  return { ...base, target: branchPick("direct", branch, setNewThreadBranch), baseBranch: null };
+}
+
+/** Owns a fork's target trigger, listing from the checkout the parent thread runs in. */
+export function useForkTargetSelection(sourceThread: ForkSourceThread | undefined, mode: ComposerMode): ComposerTargetSelectionState {
+  const branch = useForkTargetBranch(sourceThread);
+  const branchWorktreePath = useWorkspaceStore((state) => state.branchWorktreePath);
+  const worktrees = useWorkspaceStore((state) => state.worktrees);
+  const setBranchTargetBranch = useWorkspaceStore((state) => state.setBranchTargetBranch);
+  const setBranchWorktreePath = useWorkspaceStore((state) => state.setBranchWorktreePath);
+  const worktree = useMemo(() => {
+    const normalizedPath = normalizeWorktreePath(branchWorktreePath);
+    return worktrees.find((candidate) => normalizeWorktreePath(candidate.path) === normalizedPath) ?? null;
+  }, [branchWorktreePath, worktrees]);
+  const base = { workspaceId: sourceThread?.workspace_id, contextThreadId: sourceThread?.id };
+
+  if (mode === "existing-worktree") {
+    return {
+      ...base,
+      target: worktreePick(worktree, branchWorktreePath, (picked) => setBranchWorktreePath(picked.path)),
+      baseBranch: isDetachedWorktree(worktree) ? branchPick("worktree", branch, setBranchTargetBranch) : null,
+    };
+  }
+  return { ...base, target: branchPick(mode, branch, setBranchTargetBranch), baseBranch: null };
 }

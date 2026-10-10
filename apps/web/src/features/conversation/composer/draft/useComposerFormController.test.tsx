@@ -162,7 +162,6 @@ function draftPayload(input: string): ThreadDraftPayload {
       customBranchName: "",
       autoPreviewBranch: "",
       selectedWorktree: null,
-      branchManuallySelected: false,
     },
   };
 }

@@ -4,7 +4,6 @@ import type {
   Workspace,
   WorkspaceEnrichment,
   Thread,
-  GitBranch,
   BranchComparison,
   WorktreeInfo,
   AttachmentMeta,
@@ -13,7 +12,6 @@ import type {
   PrInfo,
   GitRefsListResult,
   PullRequestTargetsListResult,
-  PrDetail,
   ToolCallRecord,
   ThoughtSegmentRecord,
   HookExecutionRecord,
@@ -1151,7 +1149,6 @@ export function createWsTransport(
       rpc<Array<{ threadId: string; prNumber: number; prStatus: string }>>("thread.syncPrs", { workspaceId }),
 
     // Git
-    listBranches: (workspaceId) => rpc<GitBranch[]>("git.listBranches", { workspaceId }),
     listRefs: (params) => rpc<GitRefsListResult>("git.refs.list", params),
     listPullRequestTargets: (params) => rpc<PullRequestTargetsListResult>("github.pullRequestTargets.list", params),
     getCurrentBranch: (workspaceId) => rpc<string | null>("git.currentBranch", { workspaceId }),
@@ -1319,9 +1316,6 @@ export function createWsTransport(
       rpc<PullRequestMergeResult>("pullRequest.merge", request),
     cancelPullRequestOperation: (request: PullRequestCancelRequest) =>
       rpc<PullRequestCancelResult>("pullRequest.cancel", request),
-    listOpenPrs: (workspaceId) => rpc<PrDetail[]>("github.listOpenPrs", { workspaceId }),
-    fetchBranch: (workspaceId, branch, prNumber?) =>
-      rpc<void>("git.fetchBranch", { workspaceId, branch, prNumber }),
     checkStatus: (threadId, force) =>
       rpc<ChecksStatus>("github.checkStatus", { threadId, force }),
 

@@ -68,7 +68,8 @@ interface ComposerContentSurfaceProps {
     } | null;
     readonly composerMode: ComponentProps<typeof ComposerNewThreadContext>["mode"];
     readonly isDragOver: boolean;
-    readonly fetchingBranch: boolean;
+    /** A new thread or fork has no branch to send yet, so Send waits. */
+    readonly targetPending: boolean;
     readonly effectiveProviderId: ProviderId;
     readonly providerReason: ProviderUnavailableReason | null;
     readonly goalPending: boolean;
@@ -508,6 +509,7 @@ export function isComposerSendButtonDisabled({
   isStopPending,
   hasContent,
   setupBlocked,
+  targetPending,
 }: {
   readonly needsWorkspace: boolean;
   readonly providerReason: ComposerContentSurfaceProps["model"]["providerReason"];
@@ -518,9 +520,11 @@ export function isComposerSendButtonDisabled({
   readonly isStopPending: boolean;
   readonly hasContent: boolean;
   readonly setupBlocked: boolean;
+  readonly targetPending: boolean;
 }) {
+  // With content the button sends, so it waits for a known target branch. Without content it stops a running agent.
   return setupBlocked || needsWorkspace || Boolean(providerReason) || isStaleWorktree || planPending
-    || isThreadScaffold || isStopPending || (!isAgentRunning && !hasContent);
+    || isThreadScaffold || isStopPending || (hasContent ? targetPending : !isAgentRunning);
 }
 
 // Send is the round primary; Stop is neutral by rule: an ink circle with a background-colour square.

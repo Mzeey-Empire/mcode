@@ -528,12 +528,12 @@ function preserveIncompleteDraft(thread: WorkspaceThread, draft: ThreadDraftPayl
     },
     target: {
       mode: "worktree",
-      branch: thread.base_branch || thread.branch || "main",
+      // An empty branch follows the project's current-else-default branch when the draft reopens.
+      branch: thread.base_branch || thread.branch,
       branchSource: "branch",
       customBranchName: "",
       autoPreviewBranch,
       selectedWorktree: null,
-      branchManuallySelected: true,
     },
   });
   if (!id) throw new Error("Could not keep this draft");

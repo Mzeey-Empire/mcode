@@ -81,7 +81,7 @@ function execution(target: ComposerExecutionTargetController["target"]): Compose
     branchTargetBranch: "main",
     branchWorktreePath: null,
     branchWorktreeIsDetached: false,
-    fetchingBranch: false,
+    targetPending: false,
     setMode: vi.fn(),
     setBranchMode: vi.fn(),
     setNewThreadMode: vi.fn(),
@@ -173,5 +173,57 @@ describe("dispatchComposerTarget selected-text comments", () => {
     });
 
     expect(controller.setNewThreadBranchFromPullRequest).toHaveBeenCalledWith("contributor/review", 42);
+  });
+});
+
+describe("dispatchComposerTarget fork branch", () => {
+  it("sends the picked branch as the base of a detached existing worktree", async () => {
+    workspaceActions.branchThread.mockResolvedValue({ id: "thread-2" });
+    const target = {
+      kind: "branch" as const,
+      mode: "existing-worktree" as const,
+      branch: "release/1.2",
+      worktreePath: "/repo/.worktrees/detached",
+      worktreeIsDetached: true,
+    };
+
+    await dispatchComposerTarget({
+      threadId: "thread-1",
+      branchFromMessageId: "message-1",
+      target,
+      execution: execution(target),
+      submission: submission("Continue here.", []),
+    });
+
+    expect(workspaceActions.branchThread).toHaveBeenCalledWith(expect.objectContaining({
+      mode: "existing-worktree",
+      branch: "release/1.2",
+      existingWorktreePath: "/repo/.worktrees/detached",
+      existingWorktreeBaseBranch: "release/1.2",
+    }));
+  });
+
+  it("sends no base branch for a worktree that has its own branch", async () => {
+    workspaceActions.branchThread.mockResolvedValue({ id: "thread-2" });
+    const target = {
+      kind: "branch" as const,
+      mode: "existing-worktree" as const,
+      branch: "feature/login",
+      worktreePath: "/repo/.worktrees/login",
+      worktreeIsDetached: false,
+    };
+
+    await dispatchComposerTarget({
+      threadId: "thread-1",
+      branchFromMessageId: "message-1",
+      target,
+      execution: execution(target),
+      submission: submission("Continue here.", []),
+    });
+
+    expect(workspaceActions.branchThread).toHaveBeenCalledWith(expect.objectContaining({
+      branch: "feature/login",
+      existingWorktreeBaseBranch: undefined,
+    }));
   });
 });

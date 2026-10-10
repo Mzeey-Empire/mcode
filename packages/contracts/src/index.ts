@@ -921,8 +921,8 @@ export type { GitBranch, WorktreeInfo, GitCommit, BranchComparison, GitRemoteUrl
 export { TargetWorktreeSchema, GitRefSchema, DetachedWorktreeTargetSchema, GitRefPurposeSchema, GitRefSideSchema, pagedTargetResultSchema, GitListErrorSchema, GitRefsListParamsSchema, GitRefsListResultSchema } from "./git.js";
 export type { TargetWorktree, GitRef, DetachedWorktreeTarget, GitRefPurpose, GitRefSide, GitListError, GitRefsListParams, GitRefsListResult } from "./git.js";
 
-export { PrInfoSchema, PrDetailSchema, PrDraftSchema, CreatePrParamsSchema, CreatePrResultSchema, CheckRunSchema, ChecksStatusSchema } from "./github.js";
-export type { PrInfo, PrDetail, PrDraft, CreatePrParams, CreatePrResult, CheckRun, ChecksStatus } from "./github.js";
+export { PrInfoSchema, PrDraftSchema, CreatePrParamsSchema, CreatePrResultSchema, CheckRunSchema, ChecksStatusSchema } from "./github.js";
+export type { PrInfo, PrDraft, CreatePrParams, CreatePrResult, CheckRun, ChecksStatus } from "./github.js";
 export { PullRequestTargetSchema, PullRequestTargetsListParamsSchema, PullRequestTargetsListResultSchema } from "./github.js";
 export type { PullRequestTarget, PullRequestTargetsListParams, PullRequestTargetsListResult } from "./github.js";
 

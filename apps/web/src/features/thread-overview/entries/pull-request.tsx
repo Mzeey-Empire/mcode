@@ -127,7 +127,7 @@ interface ThreadOverviewPrRowProps {
   pr: ThreadOverviewPr;
   hasCommitsAhead: boolean | null;
   checks: ChecksStatus | null;
-  openPrDetail: { title?: string; author?: string } | null;
+  openPrDetail: { title: string } | null;
   threadId: string;
   onCommitOrPush: () => void;
   onCreatePr: () => void;

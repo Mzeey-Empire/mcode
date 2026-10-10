@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, onTestFinished, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { useModelFavoritesStore } from "@/stores/modelFavoritesStore";
@@ -262,7 +262,7 @@ describe("ModelSelector", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it("shows the loading row while a catalog loads and keeps the cached models after a timeout", async () => {
+  it("keeps the cached models listed without a spinner row while a catalog loads and after a timeout", async () => {
     setProviders({ claude: true, codex: true });
     let rejectModelRequest: (reason?: unknown) => void = () => {
       throw new Error("Model request did not start");
@@ -276,11 +276,11 @@ describe("ModelSelector", () => {
     render(<ModelSelector selectedModelId="gpt-5.6-sol" selectedProviderId="codex"
       onSelect={vi.fn()} locked={false} />);
     const dialog = await openPicker();
-    expect(within(dialog).getByLabelText("Loading")).toBeInTheDocument();
-    rejectModelRequest(new Error("Request timed out. Try again."));
+    expect(within(dialog).getByRole("option", { name: /GPT-5.6 Sol/ })).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("Loading")).toBeNull();
+    await act(async () => rejectModelRequest(new Error("Request timed out. Try again.")));
 
-    await waitFor(() => expect(within(dialog).queryByLabelText("Loading")).toBeNull());
-    expect(dialog).toHaveTextContent("GPT-5.6 Sol");
+    expect(within(dialog).getByRole("option", { name: /GPT-5.6 Sol/ })).toBeInTheDocument();
   });
 
   it("shows the locked label instead of a picker while the agent runs", () => {

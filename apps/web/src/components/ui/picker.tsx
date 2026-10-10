@@ -43,6 +43,8 @@ export interface PickerRow {
   readonly action?: PickerRowAction;
   /** Rows sharing a group sit together; a divider marks where the group changes. */
   readonly group?: string;
+  /** Text heading drawn before the first row of this row's group, in place of the divider. */
+  readonly groupLabel?: string;
 }
 
 /** The shortcut that runs the highlighted row's action from the search field. */
@@ -200,7 +202,6 @@ export function Picker<T>(props: PickerProps<T>) {
           rows={rows}
           activeIndex={activeIndex}
           selectedKey={selectedKey}
-          loading={status === "loading"}
           onHighlight={highlightRow}
           onPick={select}
           onRunAction={runRowAction}
@@ -353,11 +354,12 @@ function useLoadMoreOnce<T>({ onLoadMore, items, total, status }: PickerProps<T>
   // moved away, so coming back must be able to ask again. Counted during render so it lands before any effect.
   const [visit, setVisit] = useState({ listKey, count: 0 });
   if (visit.listKey !== listKey) setVisit({ listKey, count: visit.count + 1 });
-  // A failed page must be askable again after Retry, even though the item count has not moved.
-  const failed = typeof status === "object";
+  // A failed page must be askable again after Retry, and a list that reloads from its first page can come back at
+  // a length already asked for, so any request the owner reports as settling frees the guard.
+  const settling = status !== "ready";
   useEffect(() => {
-    if (failed) requestedFor.current = null;
-  }, [failed]);
+    if (settling) requestedFor.current = null;
+  }, [settling]);
   return useCallback(() => {
     const page = `${visit.count}\u0000${items.length}`;
     const exhausted = total !== null && items.length >= total;
@@ -374,7 +376,6 @@ interface PickerListProps<T> {
   readonly rows: readonly ListRow<T>[];
   readonly activeIndex: number;
   readonly selectedKey?: string;
-  readonly loading: boolean;
   readonly onHighlight: (index: number) => void;
   readonly onPick: (entry: ListRow<T>) => void;
   readonly onRunAction: (index: number) => void;
@@ -420,11 +421,7 @@ function PickerList<T>(props: PickerListProps<T>) {
       >
         {rows.map((entry, index) => (
           <Fragment key={entry.row.key}>
-            {index > 0 && entry.row.group !== rows[index - 1]?.row.group ? (
-              <li role="presentation" aria-hidden className="shrink-0 py-1">
-                <div className="h-px bg-border" />
-              </li>
-            ) : null}
+            <PickerGroupStart row={entry.row} previous={rows[index - 1]?.row} />
             <PickerOption
               id={optionId(listId, index)}
               row={entry.row}
@@ -436,11 +433,6 @@ function PickerList<T>(props: PickerListProps<T>) {
             />
           </Fragment>
         ))}
-        {props.loading ? (
-          <li role="presentation" className="flex h-8 shrink-0 items-center px-2">
-            <Spinner size={12} aria-label="Loading" />
-          </li>
-        ) : null}
       </ul>
       {/* The fades say there is more to scroll, so each shows only while its edge is out of view. */}
       {atTop ? null : (
@@ -450,6 +442,24 @@ function PickerList<T>(props: PickerListProps<T>) {
         <div aria-hidden data-slot="picker-fade-bottom" className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-panel to-transparent" />
       )}
     </div>
+  );
+}
+
+/** Marks where a new group begins: its label when it has one, otherwise a divider. The first group needs a divider only when labelled. */
+function PickerGroupStart({ row, previous }: { readonly row: PickerRow; readonly previous: PickerRow | undefined }) {
+  if (previous !== undefined && row.group === previous.group) return null;
+  if (row.groupLabel) {
+    return (
+      <li role="presentation" data-slot="picker-group-label" className="shrink-0 px-2 pt-2 pb-1 text-caption font-medium text-muted">
+        {row.groupLabel}
+      </li>
+    );
+  }
+  if (previous === undefined) return null;
+  return (
+    <li role="presentation" aria-hidden className="shrink-0 py-1">
+      <div className="h-px bg-border" />
+    </li>
   );
 }
 
@@ -505,10 +515,11 @@ function PickerOptionItem({ id, row, active, selected, onHighlight, onPick, onRu
       aria-describedby={descriptions.describedBy}
       aria-keyshortcuts={descriptions.keyShortcuts}
       data-active={active || undefined}
+      data-selected={selected || undefined}
       // Keeps focus in the search field so typing and arrow keys keep working after a click.
       onMouseDown={(event) => event.preventDefault()}
       className={cn(
-        "group/option flex shrink-0 cursor-pointer select-none items-center gap-2 rounded-sm px-2 text-body-small text-ink data-active:bg-hover",
+        "group/option flex shrink-0 cursor-pointer select-none items-center gap-2 rounded-sm px-2 text-body-small text-ink data-active:bg-hover data-selected:bg-selected",
         row.description == null ? "h-8" : "min-h-8 py-1.5",
         row.disabled && "cursor-default opacity-50",
       )}

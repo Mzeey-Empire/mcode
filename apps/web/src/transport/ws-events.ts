@@ -23,6 +23,7 @@ import { emitPtyData, emitPtyExit } from "@/features/terminal/adapters/pty-data-
 import { useThreadControlStore } from "@/stores/threadControlStore";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useThreadStartupStore } from "@/features/thread-startup";
+import { invalidateBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";
 
 /** Unsubscribe handles for all push listeners. */
 let unsubs: (() => void)[] = [];
@@ -152,7 +153,7 @@ function handleTerminalData(data: unknown): void {
  * - `provider.modelsChanged` -- replaces one provider's cached model list after a server refresh diff
  * - `turn.persisted` -- tool call persistence confirmation forwarded to threadStore
  * - `settings.changed` -- server-pushed settings updates forwarded to settingsStore
- * - `branch.changed` -- refreshes branch list and updates current branch if not manually overridden
+ * - `branch.changed` -- refetches the workspace's branch target lists, which moves an unpicked default branch
  * - `plan.questions` -- model-proposed plan questions forwarded to threadStore wizard
  * - `plan.answered` -- server committed an answered marker; dismisses the wizard on this client
  * - `plan.versionUpserted` -- updates planStore and previews new agent versions in the active thread
@@ -476,18 +477,11 @@ export function startPushListeners(): void {
     }),
   );
 
-  // branch.changed: refresh branch list and update current branch if not manually overridden
+  // branch.changed: the composer derives an unpicked branch from these lists, so a refetch also moves that default.
   unsubs.push(
     pushEmitter.on("branch.changed", (data) => {
-      const { workspaceId, branch } = data as { workspaceId: string; branch: string | null };
-      const state = useWorkspaceStore.getState();
-      // Only refresh if this event is for the active workspace
-      if (state.activeWorkspaceId === workspaceId) {
-        state.loadBranches(workspaceId);
-        if (!state.branchManuallySelected && branch) {
-          state.setNewThreadBranch(branch);
-        }
-      }
+      const { workspaceId } = data as { workspaceId: string };
+      invalidateBranchTargets(workspaceId);
     }),
   );
 

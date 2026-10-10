@@ -44,7 +44,7 @@ const target = {
   hasWorktree: false,
 };
 
-function execution(): ComposerExecutionTargetController {
+function execution(overrides: Partial<ComposerExecutionTargetController> = {}): ComposerExecutionTargetController {
   return {
     target,
     mode: "direct",
@@ -59,16 +59,21 @@ function execution(): ComposerExecutionTargetController {
     branchTargetBranch: "main",
     branchWorktreePath: null,
     branchWorktreeIsDetached: false,
-    fetchingBranch: false,
+    targetPending: false,
     setMode: vi.fn(),
     setBranchMode: vi.fn(),
     setNewThreadMode: vi.fn(),
     setNewThreadBranch: vi.fn(),
     setNewThreadBranchFromPullRequest: vi.fn(),
+    ...overrides,
   };
 }
 
-function useHarness(queueOverrides: Partial<ComposerSubmissionQueue> = {}, draftId?: string) {
+function useHarness(
+  queueOverrides: Partial<ComposerSubmissionQueue> = {},
+  draftId?: string,
+  executionOverrides: Partial<ComposerExecutionTargetController> = {},
+) {
   const form = useComposerFormController({
     isNewThread: true,
     workspaceId: "workspace-1",
@@ -80,7 +85,7 @@ function useHarness(queueOverrides: Partial<ComposerSubmissionQueue> = {}, draft
     isAgentRunning: false,
     isThreadScaffold: false,
     form,
-    execution: execution(),
+    execution: execution(executionOverrides),
     queue: {
       editing: null,
       queueIfGenerating: () => false,
@@ -172,7 +177,6 @@ describe("useComposerSubmissionController selected-text comments", () => {
         customBranchName: "",
         autoPreviewBranch: "",
         selectedWorktree: null,
-        branchManuallySelected: false,
       },
     });
     expect(draftId).not.toBeNull();
@@ -314,5 +318,20 @@ describe("useComposerSubmissionController selected-text comments", () => {
 
     await waitFor(() => expect(routeMocks.dispatchComposerTarget).toHaveBeenCalled());
     expect(releaseConsumedEdit).not.toHaveBeenCalled();
+  });
+
+  it("keeps the draft and sends nothing while the target branch is unknown", async () => {
+    const { result } = renderHook(() => useHarness({}, undefined, { targetPending: true }));
+
+    act(() => {
+      result.current.form.replaceDraft("wait for the branch");
+    });
+    await waitFor(() => expect(result.current.form.state.text).toBe("wait for the branch"));
+    await act(async () => {
+      await result.current.controller.submit();
+    });
+
+    expect(routeMocks.dispatchComposerTarget).not.toHaveBeenCalled();
+    expect(result.current.form.state.text).toBe("wait for the branch");
   });
 });

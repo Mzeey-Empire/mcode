@@ -37,7 +37,6 @@ function entity(overrides: Partial<ThreadDraft> = {}): ThreadDraft {
       customBranchName: "",
       autoPreviewBranch: "",
       selectedWorktree: null,
-      branchManuallySelected: false,
     },
     ...overrides,
   };

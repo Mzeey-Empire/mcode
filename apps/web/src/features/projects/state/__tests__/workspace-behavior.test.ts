@@ -1978,7 +1978,6 @@ describe("Workspace Behavior", () => {
           name: "branchless-existing",
           path: "/repo/.worktrees/branchless-existing",
           branch: "(detached)",
-          managed: true,
         },
       });
       (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(
@@ -2028,7 +2027,6 @@ describe("Workspace Behavior", () => {
           name: "branchless-existing",
           path: "/repo/.worktrees/branchless-existing",
           branch: "(detached)",
-          managed: true,
         },
       });
 
@@ -2121,7 +2119,6 @@ describe("Workspace Behavior", () => {
           name: "feature-existing",
           path: "/repo/.worktrees/feature-existing",
           branch: "feat/existing",
-          managed: true,
         },
       });
       (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockReturnValue(rpcPromise);

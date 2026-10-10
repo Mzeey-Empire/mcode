@@ -3,8 +3,8 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import type {
   ApprovalReviewMode,
   OrchestrationMode,
-  WorktreeInfo,
 } from "@mcode/contracts";
+import type { AttachedWorktree } from "@/lib/worktree";
 import type {
   InteractionMode,
   PermissionMode,
@@ -29,8 +29,7 @@ export interface ThreadDraftTarget {
   pullRequestNumber?: number;
   customBranchName: string;
   autoPreviewBranch: string;
-  selectedWorktree: WorktreeInfo | null;
-  branchManuallySelected: boolean;
+  selectedWorktree: AttachedWorktree | null;
 }
 
 /** Agent-selection fields that live outside ComposerDraft for new-thread drafts. */
@@ -117,8 +116,7 @@ function isValidStoredTarget(raw: unknown): raw is ThreadDraftTarget {
   const validMode = t.mode === "direct" || t.mode === "worktree" || t.mode === "existing-worktree";
   return validMode
     && isValidTargetBranch(t)
-    && (t.selectedWorktree === null || typeof t.selectedWorktree === "object")
-    && typeof t.branchManuallySelected === "boolean";
+    && (t.selectedWorktree === null || typeof t.selectedWorktree === "object");
 }
 
 function isValidStoredThreadDraft(raw: unknown): raw is ThreadDraft {

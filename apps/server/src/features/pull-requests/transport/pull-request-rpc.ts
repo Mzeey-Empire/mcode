@@ -36,7 +36,6 @@ import type { CiWatcherService, WatchEntry } from "../status/ci-watcher.js";
 
 type GithubPullRequestMethod =
   | "github.branchPr"
-  | "github.listOpenPrs"
   | "github.pullRequestTargets.list"
   | "github.checkStatus"
   | "github.generatePrDraft"
@@ -61,7 +60,6 @@ type PullRequestOperationMethod =
 type PullRequestRpcMethod = GithubPullRequestMethod | PullRequestOperationMethod;
 
 type GithubBranchPrParams = { branch: string; cwd: string };
-type GithubListOpenPrsParams = { workspaceId: string };
 type GithubCheckStatusParams = { threadId: string; force?: boolean };
 type GithubGeneratePrDraftParams = { workspaceId: string; threadId: string; baseBranch: string };
 type GithubCreatePrParams = {
@@ -100,7 +98,6 @@ const DEFAULT_PULL_REQUEST_CONNECTION = {};
 
 const githubPullRequestMethods: Record<GithubPullRequestMethod, true> = {
   "github.branchPr": true,
-  "github.listOpenPrs": true,
   "github.pullRequestTargets.list": true,
   "github.checkStatus": true,
   "github.generatePrDraft": true,
@@ -194,10 +191,6 @@ export async function routePullRequestRpc(
       const request = githubParams<GithubBranchPrParams>(params);
       return deps.githubService.getBranchPr(request.branch, request.cwd);
     }
-    case "github.listOpenPrs":
-      return deps.githubService.listOpenPrs(
-        githubParams<GithubListOpenPrsParams>(params).workspaceId,
-      );
     case "github.pullRequestTargets.list":
       return deps.githubService.listPullRequestTargets(githubParams<PullRequestTargetsListParams>(params));
     case "github.checkStatus":

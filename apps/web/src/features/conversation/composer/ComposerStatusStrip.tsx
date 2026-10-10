@@ -59,24 +59,14 @@ function ComposerStatusTarget({
 
   if (isNewThread) {
     return (
-      <ComposerTargetSelection
-        scope="new-thread"
-        mode={composerMode}
-        workspaceId={workspaceId}
-        variant="status-bar"
-      />
+      <ComposerTargetSelection scope="new-thread" mode={composerMode} workspaceId={workspaceId} />
     );
   }
 
   if (!branchFromMessageId) return null;
 
   return (
-    <ComposerTargetSelection
-      scope="branch"
-      mode={branchExecMode}
-      sourceThread={activeThread}
-      variant="status-bar"
-    />
+    <ComposerTargetSelection scope="branch" mode={branchExecMode} sourceThread={activeThread} />
   );
 }
 

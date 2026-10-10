@@ -44,20 +44,6 @@ export const PullRequestTargetsListResultSchema = lazySchema(() => pagedTargetRe
 /** Pull request target listing result. */
 export type PullRequestTargetsListResult = z.infer<ReturnType<typeof PullRequestTargetsListResultSchema>>;
 
-/** Detailed PR metadata for branch picker and URL detection. */
-export const PrDetailSchema = lazySchema(() =>
-  z.object({
-    number: z.number(),
-    title: z.string(),
-    branch: z.string(),
-    author: z.string(),
-    url: z.string(),
-    state: z.string(),
-  }),
-);
-/** Detailed PR metadata for branch picker and URL detection. */
-export type PrDetail = z.infer<ReturnType<typeof PrDetailSchema>>;
-
 /** Parameters for AI-generated PR draft. */
 export const PrDraftSchema = lazySchema(() =>
   z.object({
