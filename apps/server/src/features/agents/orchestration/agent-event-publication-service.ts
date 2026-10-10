@@ -1,4 +1,4 @@
-import { AgentEventType, type AgentEvent } from "@mcode/contracts";
+import { AgentEventType, type AgentEvent, type TurnOutcome } from "@mcode/contracts";
 import type { TurnPullRequestCompletionEffect } from "../../pull-requests/index.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { publishParentProviderEvent } from "../events/provider-event-publication.js";
@@ -16,7 +16,7 @@ export interface AgentEventPublicationRuntime {
 /** Dependencies required to publish already-normalized provider events. */
 export interface AgentEventPublicationDependencies {
   runtime: AgentEventPublicationRuntime;
-  threads: Pick<ThreadRepo, "updateStatus">;
+  threads: Pick<ThreadRepo, "recordTurnOutcome" | "attention">;
   pullRequests: Pick<TurnPullRequestCompletionEffect, "schedule">;
   publishThreadStatus(payload: { threadId: string; status: "completed" | "errored" | "interrupted" }): void;
 }
@@ -37,8 +37,11 @@ export class AgentEventPublicationService {
 
   private publishCore(event: AgentEvent): void {
     if (this.shouldSuppress(event)) return;
+    if (event.publicationId !== undefined && (event.type === "turnComplete" || event.type === "error" || event.type === "ended")) {
+      this.dependencies.threads.attention?.invalidate(event.threadId);
+    }
     const published = publishParentProviderEvent(event, {
-      updateThreadStatus: (threadId, status) => this.observeStatus(threadId, status),
+      recordTurnOutcome: (threadId, outcome) => this.observeStatus(threadId, outcome),
       publishThreadStatus: this.dependencies.publishThreadStatus,
     });
     if (published && event.type === AgentEventType.TurnComplete) this.dependencies.pullRequests.schedule(event.threadId);
@@ -51,8 +54,8 @@ export class AgentEventPublicationService {
     if (failures.length > 0) throw new AggregateError(failures, "Agent publication status saves failed");
   }
 
-  private observeStatus(threadId: string, status: "completed" | "errored" | "interrupted"): void {
-    const pending = this.dependencies.threads.updateStatus(threadId, status);
+  private observeStatus(threadId: string, status: TurnOutcome): void {
+    const pending = this.dependencies.threads.recordTurnOutcome(threadId, status, new Date().toISOString());
     this.pendingStatuses.add(pending);
     void pending.then(() => this.pendingStatuses.delete(pending), (error: unknown) => {
       this.pendingStatuses.delete(pending);

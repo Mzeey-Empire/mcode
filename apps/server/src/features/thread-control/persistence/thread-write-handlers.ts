@@ -9,6 +9,8 @@ export function buildThreadStoreWriteHandlers(db: Database): ReadonlyMap<string,
   return new Map<string, (input: unknown) => unknown>([
     [threadWriteOperations.create.name, databaseWriteHandler(threadWriteOperations.create, (input) => store.create(...input))],
     [threadWriteOperations.updateStatus.name, databaseWriteHandler(threadWriteOperations.updateStatus, (input) => store.updateStatus(...input))],
+    [threadWriteOperations.recordTurnOutcome.name, databaseWriteHandler(threadWriteOperations.recordTurnOutcome, (input) => store.recordTurnOutcome(...input))],
+    [threadWriteOperations.acknowledgeSeen.name, databaseWriteHandler(threadWriteOperations.acknowledgeSeen, (input) => store.acknowledgeSeen(...input))],
     [threadWriteOperations.complete.name, databaseWriteHandler(threadWriteOperations.complete, (input) => store.complete(...input))],
     [threadWriteOperations.updateCompletedThreadDeadlines.name, databaseWriteHandler(threadWriteOperations.updateCompletedThreadDeadlines, (input) => store.updateCompletedThreadDeadlines(...input))],
     [threadWriteOperations.reopen.name, databaseWriteHandler(threadWriteOperations.reopen, (input) => store.reopen(...input))],

@@ -176,13 +176,6 @@ export class ThreadService {
     }
   }
 
-  /** Mark a thread as viewed, dismissing the completed badge if present. */
-  async markViewed(threadId: string): Promise<void> {
-    const thread = this.threadRepo.findById(threadId);
-    if (!thread || thread.status !== "completed") return;
-    await this.threadRepo.updateStatus(threadId, "paused");
-  }
-
   /** Find a thread by its primary key. */
   findById(threadId: string): Thread | null {
     return this.threadRepo.findById(threadId);

@@ -629,11 +629,12 @@ export class TurnFinalizer {
           refBefore,
           refAfter: refAfterTree,
           filesChanged,
-          ...(fileEffects ? { fileEffects } : {}),
+          fileEffects,
           worktreePath: null,
         },
         markFilesChanged: hasFileEffects || filesChanged.length > 0,
       }));
+      this.threadRepo.attention?.invalidate(threadId);
     } catch (err) {
       if (err instanceof DatabaseWriteOutcomeUnknown) throw err;
       logger.warn("Failed to capture turn snapshot", {

@@ -136,6 +136,7 @@ import { PlanServiceError, type PlanService } from "../../features/agents/planni
 import type { SnapshotService } from "../../features/projects/diffs/snapshots/snapshot-service.js";
 import type { MemoryPressureService } from "../../runtime/memory/memory-pressure-service.js";
 import type { ThreadRepo } from "../../features/thread-control/persistence/thread-repo.js";
+import type { ThreadAttentionService } from "../../features/thread-control/attention/thread-attention-service.js";
 import type { WorkspaceRepo } from "../../features/projects/persistence/workspace-repo.js";
 import {
   isPushSubscriptionRpcMethod,
@@ -309,6 +310,7 @@ export interface RouterDeps {
   ciWatcherService: CiWatcherService;
   /** Thread repository for resolving worktree paths in git operations. */
   threadRepo: ThreadRepo;
+  threadAttentionService: ThreadAttentionService;
   /** Stages draft images for the next message. */
   attachmentService: Pick<AttachmentService, "stageDraft">;
   /** Workspace repository for resolving repo paths in git operations. */
@@ -464,6 +466,9 @@ function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResp
   }
   if (isProviderAvailabilityError(error)) return providerAvailabilityRouteError(request, error, message);
   if (error instanceof WorkspaceEnvironmentServiceError) return workspaceEnvironmentRouteError(request.id, error, message);
+  if (error instanceof Error && "code" in error && error.code === "sequence_ahead") {
+    return { id: request.id, error: { code: "sequence_ahead", message } };
+  }
   logger.error("RPC handler error", { method: request.method, error: message });
   return { id: request.id, error: { code: "INTERNAL_ERROR", message } };
 }

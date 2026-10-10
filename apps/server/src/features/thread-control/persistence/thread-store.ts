@@ -7,7 +7,7 @@ import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { and, asc, desc, eq, getTableColumns, gt, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import { DevinModeSchema, ReasoningLevelSchema } from "@mcode/contracts";
+import { DevinModeSchema, ReasoningLevelSchema, type AcknowledgeSeenResult, type TurnOutcome } from "@mcode/contracts";
 import type { DevinMode, Thread, RecentThread, ThreadMode, ThreadStatus, ReasoningLevel, InteractionMode, OrchestrationMode, PermissionMode, ContextWindowMode } from "@mcode/contracts";
 import {
   canonicalAgentThreads,
@@ -529,6 +529,39 @@ export class ThreadStore {
       );
 
     return result.changes > 0;
+  }
+
+  /** Persist a terminal outcome and its settled sequence without replaying an older ending. */
+  recordTurnOutcome(id: string, outcome: TurnOutcome, endedAt: string): boolean {
+    return this.db.transaction(() => this.db.query(`
+      UPDATE threads SET status = ?, updated_at = ?, last_turn_outcome = ?,
+        last_turn_ended_at = ?, last_turn_sequence = (
+          SELECT MAX(sequence) FROM messages WHERE thread_id = ? AND outcome IS NOT NULL
+        )
+      WHERE id = ? AND (last_turn_ended_at IS NULL OR last_turn_ended_at <= ?)
+    `).run(outcome === "cancelled" ? "interrupted" : outcome, endedAt, outcome, endedAt, id, id, endedAt).changes > 0)();
+  }
+
+  /** Compare and advance inside the writer transaction so concurrent clients cannot regress it. */
+  acknowledgeSeen(id: string, throughSequence: number): AcknowledgeSeenResult {
+    return this.db.transaction(() => {
+      const row = this.orm.select({ sequence: threads.seenThroughSequence, at: threads.seenAt })
+        .from(threads).where(and(eq(threads.id, id), isNull(threads.deletedAt))).get();
+      if (!row) throw new Error("Thread not found");
+      const newest = this.db.query<{ sequence: number | null }, [string]>(
+        "SELECT MAX(sequence) AS sequence FROM messages WHERE thread_id = ? AND outcome IS NOT NULL",
+      ).get(id)?.sequence;
+      if (newest == null || throughSequence > newest) {
+        throw Object.assign(new Error("Acknowledged sequence is ahead of settled history"), { code: "sequence_ahead" });
+      }
+      const previous = row;
+      if (previous.sequence !== null && throughSequence <= previous.sequence) return { previous, current: previous };
+      const current = { sequence: throughSequence, at: new Date().toISOString() };
+      this.db.query(`UPDATE threads SET seen_through_sequence = ?, seen_at = ?,
+        status = CASE WHEN status = 'completed' THEN 'paused' ELSE status END
+        WHERE id = ?`).run(current.sequence, current.at, id);
+      return { previous, current };
+    })();
   }
 
   /** Persist the first user-completion timestamp and its deletion deadline. */

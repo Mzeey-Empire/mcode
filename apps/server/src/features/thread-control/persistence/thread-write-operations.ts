@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ContextWindowModeSchema, ThreadModeSchema, ThreadSchema, ThreadStatusSchema } from "@mcode/contracts";
+import { AcknowledgeSeenResultSchema, ContextWindowModeSchema, ThreadModeSchema, ThreadSchema, ThreadStatusSchema, TurnOutcomeSchema } from "@mcode/contracts";
 import { databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 
 const settings = z.object({
@@ -29,6 +29,8 @@ export const threadWriteOperations = {
     z.enum(["named", "branchless"]).optional(), z.string().nullable().optional(),
   ]), thread),
   updateStatus: databaseWriteOperation("thread.updateStatus", z.tuple([z.string(), ThreadStatusSchema]), z.boolean()),
+  recordTurnOutcome: databaseWriteOperation("thread.recordTurnOutcome", z.tuple([z.string(), TurnOutcomeSchema, z.string().datetime()]), z.boolean()),
+  acknowledgeSeen: databaseWriteOperation("thread.acknowledgeSeen", z.tuple([z.string(), z.number().int().nonnegative()]), AcknowledgeSeenResultSchema()),
   complete: databaseWriteOperation("thread.complete", z.tuple([z.string(), z.string(), z.string().nullable()]), thread.nullable()),
   updateCompletedThreadDeadlines: databaseWriteOperation("thread.updateCompletedThreadDeadlines", z.tuple([z.array(deadlineUpdate).readonly()]), z.array(thread)),
   reopen: databaseWriteOperation("thread.reopen", z.tuple([z.string(), z.string().optional()]), thread.nullable()),

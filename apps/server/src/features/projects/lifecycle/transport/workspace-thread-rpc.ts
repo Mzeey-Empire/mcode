@@ -10,6 +10,7 @@ import type { CiWatcherService } from "../../../pull-requests/status/ci-watcher.
 import type { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import type { ThreadCompletionService } from "../../../thread-control/lifecycle/thread-completion-service.js";
 import type { ThreadService } from "../../../thread-control/lifecycle/thread-service.js";
+import type { ThreadAttentionService } from "../../../thread-control/attention/thread-attention-service.js";
 import type { ThreadDeletionTeardownService } from "../../../thread-control/lifecycle/thread-deletion-teardown-service.js";
 import type { ProjectActionService } from "../../environment/project-action-service.js";
 import type { WorkspaceEnvironmentService } from "../../environment/workspace-environment-service.js";
@@ -55,7 +56,8 @@ export interface WorkspaceThreadRouterDeps {
     "beginThreadDeletion" | "beginWorkspaceDeletion" | "cancelSetupForThread" | "cancelSetupForWorkspace" | "clearApprovals" | "read"
   >;
   projectActionService: Pick<ProjectActionService, "beginThreadTeardown" | "beginWorkspaceTeardown" | "reopenThread" | "stopForThread">;
-  threadService: Pick<ThreadService, "create" | "delete" | "findById" | "linkPr" | "list" | "listRecent" | "markViewed" | "search" | "updateSettings" | "updateTitle">;
+  threadService: Pick<ThreadService, "create" | "delete" | "findById" | "linkPr" | "list" | "listRecent" | "search" | "updateSettings" | "updateTitle">;
+  threadAttentionService: Pick<ThreadAttentionService, "listInteresting" | "acknowledgeSeen">;
   goalLifecycleService: Pick<GoalLifecycleService, "clear" | "get">;
   threadCompletionService: Pick<ThreadCompletionService, "cleanupBlockedCount" | "complete" | "reopen" | "retryCleanup">;
   threadDeletionTeardownService: Pick<ThreadDeletionTeardownService, "teardownThread">;
@@ -103,7 +105,8 @@ const workspaceThreadHandlers = {
   "thread.retryCleanup": (deps, params) => retryThreadCleanup(deps, params.threadId),
   "thread.updateTitle": (deps, params) => deps.threadService.updateTitle(params.threadId, params.title),
   "thread.updateSettings": updateThreadSettings,
-  "thread.markViewed": (deps, params) => deps.threadService.markViewed(params.threadId),
+  "thread.listAttention": (deps) => deps.threadAttentionService.listInteresting(),
+  "thread.acknowledgeSeen": (deps, params) => deps.threadAttentionService.acknowledgeSeen(params.threadId, params.throughSequence),
   "thread.goal.get": (deps, params) => deps.goalLifecycleService.get(params.threadId),
   "thread.goal.clear": (deps, params) => deps.goalLifecycleService.clear(params.threadId),
   "thread.search": (deps, params) => deps.threadService.search({

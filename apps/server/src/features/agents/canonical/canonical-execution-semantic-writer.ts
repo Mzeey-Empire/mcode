@@ -757,8 +757,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         const current = this.requireNextHead(operation);
         if (current.providerId !== mutation.input.providerId) throw new SemanticConflict();
         const receipt = committed(operation, batch.durableSequence, providerCommit, providerCommit ? [] : undefined);
-        const status = mutation.outcome === "cancelled" ? "interrupted" : mutation.outcome;
-        if (!this.threads.updateStatus(operation.execution.threadId, status)) throw new SemanticConflict();
+        this.threads.recordTurnOutcome(operation.execution.threadId, mutation.outcome, mutation.projection.endedAt);
         this.storeHead({ ...current, ordinal: operation.ordinal, durableRevision: receipt.durableRevision, terminal: true });
         this.storeReceipt(operation, hash, receipt);
       }
