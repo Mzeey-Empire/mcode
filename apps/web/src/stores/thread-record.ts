@@ -12,7 +12,7 @@ import type {
   TurnRuntimePhase,
   TurnSavingStatus,
 } from "@mcode/contracts";
-import type { PermissionRequest, PermissionDecision, DevinMode } from "@mcode/contracts";
+import type { DevinMode } from "@mcode/contracts";
 import { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
 import type { ThoughtSegment } from "@/features/conversation/narrative/types";
 import {
@@ -44,13 +44,6 @@ export interface ThreadSettings {
   defaultOpenInApp?: string | null;
 }
 
-/** A permission request with its current resolution state. */
-export interface StoredPermission extends PermissionRequest {
-  settled: boolean;
-  decision?: PermissionDecision;
-  /** Verbatim label of the provider-native option the user picked, when one was offered. */
-  optionLabel?: string;
-}
 
 /** Per-thread token/usage snapshot for one provider (keys are providerId). */
 export type ThreadUsageByProvider = Record<string, ProviderUsageInfo>;
@@ -177,7 +170,6 @@ export interface ThreadRecord {
   activeQuestionIndex: number;
   planQuestionsStatus: "idle" | "pending" | "answered";
 
-  permissions: StoredPermission[];
   handoffMeta?: HandoffMeta;
   forkMode: ThreadForkMode | null;
 }
@@ -266,7 +258,6 @@ export function createEmptyThreadRecord(): ThreadRecord {
     activeQuestionIndex: 0,
     planQuestionsStatus: "idle",
 
-    permissions: [],
     forkMode: null,
   };
 }

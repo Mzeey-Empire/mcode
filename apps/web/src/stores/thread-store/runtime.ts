@@ -83,7 +83,6 @@ function runtimeNarrativePatch(
       placeholder.currentTurnResponseKey,
       (value) => value.length === 0,
     ) || createTurnResponseKey(persistedId),
-    permissions: persisted.permissions.length > 0 ? persisted.permissions : placeholder.permissions,
     narrativeByMessage: { ...placeholder.narrativeByMessage, ...persisted.narrativeByMessage },
   };
 }

@@ -407,7 +407,7 @@ function mapNextStepFailed(properties: Record<string, unknown>, ctx: MapperConte
  * Permission and question asks surface as inline cards through the existing
  * permission flow, not as timeline events. The mapper claims them as mapped
  * with no canonical events; the provider synthesizes the card from the same
- * envelope and emits `permission_request`. The reply lifecycle
+ * envelope and emits `approval_request`. The reply lifecycle
  * (`permission.v2.replied`, `question.v2.replied/rejected`) is state-only.
  */
 function mapAskRouted(reason: "permission-request" | "question-request"): OpenCodeMappedOutput {

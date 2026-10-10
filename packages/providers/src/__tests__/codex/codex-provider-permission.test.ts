@@ -6,14 +6,15 @@ vi.mock("@mcode/shared", () => ({
 }));
 
 import { CodexProvider, stubEnvService } from "./codex-provider-test-fixture.js";
+import type { CodexApprovalRequest } from "../../private/codex/codex-app-server.js";
 import { CodexAppServer } from "../../private/codex/codex-app-server.js";
-import type { PermissionRequest, PermissionDecision, ProviderRuntimeEvent } from "@mcode/contracts";
+import type { ApprovalRequestEnvelope, ApprovalOutcome, ProviderRuntimeEvent } from "@mcode/contracts";
 import { AgentEventType } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 
 /**
  * These tests exercise the provider-level permission plumbing in isolation:
- * handleApprovalRequest, resolvePermission, listPendingPermissions,
+ * handleApprovalRequest, resolveApproval, listPendingApprovals,
  * stopSession drain, shutdown drain. They do NOT spawn a codex child
  * process; we call handleApprovalRequest directly as if CodexAppServer
  * had invoked our handler.
@@ -90,62 +91,66 @@ describe("CodexProvider permission flow", () => {
     }
   });
 
-  it("emits permission_request and lists the pending entry when handler is invoked", async () => {
-    const emitted: PermissionRequest[] = [];
-    provider.on("permission_request", (r) => emitted.push(r));
+  it.each(["ls -la", "x".repeat(70_000)])("emits and lists the entire command scope %#", async (command) => {
+    const emitted: ApprovalRequestEnvelope[] = [];
+    provider.on("approval_request", (r) => emitted.push(r));
 
-    const resultPromise = (provider as unknown as {
-      handleApprovalRequest: (sessionId: string, threadId: string, req: unknown) => Promise<unknown>;
-    }).handleApprovalRequest(sessionId, threadId, {
+    const nativeRequest: CodexApprovalRequest = {
       rpcId: 42,
       method: "item/commandExecution/requestApproval",
-      params: { command: "ls -la", cwd: "/tmp" },
-    });
+      params: { command, cwd: "/tmp" },
+    };
+    const resultPromise = (provider as unknown as {
+      handleApprovalRequest: (sessionId: string, threadId: string, req: unknown) => Promise<unknown>;
+    }).handleApprovalRequest(sessionId, threadId, nativeRequest);
 
     expect(emitted).toHaveLength(1);
-    expect(emitted[0].toolName).toBe("Shell");
+    expect(emitted[0].body).toMatchObject({ subject: { kind: "command", command, cwd: "/tmp" } });
     expect(emitted[0].threadId).toBe(threadId);
-    expect(emitted[0].input).toEqual({ command: "ls -la", cwd: "/tmp" });
 
-    const pending = provider.listPendingPermissions!(threadId);
+    const pending = provider.listPendingApprovals!(threadId);
     expect(pending).toHaveLength(1);
     expect(pending[0].requestId).toBe(emitted[0].requestId);
 
     // Resolve and assert the handler's promise produces the mapped response.
-    const resolved = provider.resolvePermission!(emitted[0].requestId, "allow");
-    expect(resolved).toBe(true);
+    const resolved = provider.resolveApproval!(emitted[0].requestId, { choiceId: "allow" });
 
     const response = await resultPromise;
+    nativeRequest.responseWritten?.(true);
+    expect(await resolved).toEqual({ status: "resolved" });
     expect(response).toEqual({ decision: "accept" });
-    expect(provider.listPendingPermissions!(threadId)).toHaveLength(0);
+    expect(provider.listPendingApprovals!(threadId)).toHaveLength(0);
   });
 
-  it("emits permission_resolved when resolvePermission fires", async () => {
-    const resolved: Array<{ requestId: string; decision: PermissionDecision }> = [];
-    provider.on("permission_resolved", (p) => resolved.push(p));
+  it("emits approval_resolved when resolveApproval fires", async () => {
+    const resolved: Array<{ requestId: string; threadId: string; outcome: ApprovalOutcome }> = [];
+    provider.on("approval_resolved", (p) => resolved.push(p));
 
-    const p = (provider as unknown as {
-      handleApprovalRequest: (sessionId: string, threadId: string, req: unknown) => Promise<unknown>;
-    }).handleApprovalRequest(sessionId, threadId, {
+    const nativeRequest: CodexApprovalRequest = {
       rpcId: 7,
       method: "item/fileChange/requestApproval",
       params: { itemId: "x" },
-    });
+    };
+    const p = (provider as unknown as {
+      handleApprovalRequest: (sessionId: string, threadId: string, req: unknown) => Promise<unknown>;
+    }).handleApprovalRequest(sessionId, threadId, nativeRequest);
 
-    const pending = provider.listPendingPermissions!(threadId);
-    provider.resolvePermission!(pending[0].requestId, "deny");
+    const pending = provider.listPendingApprovals!(threadId);
+    const delivery = provider.resolveApproval!(pending[0].requestId, { choiceId: "deny" });
 
     await p;
-    expect(resolved).toEqual([{ requestId: pending[0].requestId, decision: "deny" }]);
+    nativeRequest.responseWritten?.(true);
+    expect(await delivery).toEqual({ status: "resolved" });
+    expect(resolved).toEqual([{ requestId: pending[0].requestId, threadId, outcome: { status: "denied", choiceLabel: "Deny" } }]);
   });
 
-  it("returns false from resolvePermission when requestId is unknown", () => {
-    expect(provider.resolvePermission!("does-not-exist", "allow")).toBe(false);
+  it("returns not_pending when requestId is unknown", async () => {
+    expect(await provider.resolveApproval!("does-not-exist", { choiceId: "allow" })).toEqual({ status: "not_pending" });
   });
 
   it("stopSession drains pending permissions as cancelled and emits events", async () => {
-    const resolved: Array<{ requestId: string; decision: PermissionDecision }> = [];
-    provider.on("permission_resolved", (p) => resolved.push(p));
+    const resolved: Array<{ requestId: string; threadId: string; outcome: ApprovalOutcome }> = [];
+    provider.on("approval_resolved", (p) => resolved.push(p));
 
     const p = (provider as unknown as {
       handleApprovalRequest: (sessionId: string, threadId: string, req: unknown) => Promise<unknown>;
@@ -155,7 +160,7 @@ describe("CodexProvider permission flow", () => {
       params: { command: "sleep 999", cwd: "/" },
     });
 
-    const pending = provider.listPendingPermissions!(threadId);
+    const pending = provider.listPendingApprovals!(threadId);
     expect(pending).toHaveLength(1);
     const requestId = pending[0].requestId;
 
@@ -173,8 +178,8 @@ describe("CodexProvider permission flow", () => {
 
     const response = await p;
     expect(response).toEqual({ decision: "cancel" });
-    expect(resolved).toEqual([{ requestId, decision: "cancelled" }]);
-    expect(provider.listPendingPermissions!(threadId)).toHaveLength(0);
+    expect(resolved).toEqual([{ requestId, threadId, outcome: { status: "cancelled", reason: "session_stopped" } }]);
+    expect(provider.listPendingApprovals!(threadId)).toHaveLength(0);
 
     releaseInterrupt();
     await stopPromise;
@@ -189,19 +194,19 @@ describe("CodexProvider permission flow", () => {
       params: {},
     });
 
-    const pending = provider.listPendingPermissions!(threadId);
+    const pending = provider.listPendingApprovals!(threadId);
     expect(pending).toHaveLength(1);
 
     await provider.shutdown();
 
     const response = await p;
     expect(response).toEqual({ decision: "abort" });
-    expect(provider.listPendingPermissions!(threadId)).toHaveLength(0);
+    expect(provider.listPendingApprovals!(threadId)).toHaveLength(0);
   });
 
   it("drains pending permissions when the fatal handler fires on the app-server", async () => {
-    const resolved: Array<{ requestId: string; decision: string }> = [];
-    provider.on("permission_resolved", (p) => resolved.push(p as never));
+    const resolved: Array<{ requestId: string; outcome: ApprovalOutcome }> = [];
+    provider.on("approval_resolved", (p) => resolved.push(p as never));
 
     // Re-register session with a fake server that we can drive fatal from.
     const fakeServer = new (require("events").EventEmitter)();
@@ -233,7 +238,7 @@ describe("CodexProvider permission flow", () => {
     const response = await p;
     expect(response).toEqual({ decision: "cancel" });
     expect(resolved).toHaveLength(1);
-    expect(resolved[0].decision).toBe("cancelled");
+    expect(resolved[0].outcome).toEqual({ status: "cancelled", reason: "session_stopped" });
   });
 
   it("logs fatal breadcrumbs and preserves failure events from the app-server", async () => {
@@ -325,8 +330,8 @@ describe("CodexProvider permission flow", () => {
   });
 
   it("drains pending permissions when sendMessage detects a permission mode swap", async () => {
-    const resolved: Array<{ requestId: string; decision: string }> = [];
-    provider.on("permission_resolved", (p) => resolved.push(p as never));
+    const resolved: Array<{ requestId: string; outcome: ApprovalOutcome }> = [];
+    provider.on("approval_resolved", (p) => resolved.push(p as never));
 
     // Queue a pending permission on the existing workspace-write session.
     const pendingPromise = (provider as unknown as {
@@ -336,7 +341,7 @@ describe("CodexProvider permission flow", () => {
       method: "item/commandExecution/requestApproval",
       params: { command: "x", cwd: "/" },
     });
-    expect(provider.listPendingPermissions!(threadId)).toHaveLength(1);
+    expect(provider.listPendingApprovals!(threadId)).toHaveLength(1);
 
     // Point the settings stub at a bogus cliPath so checkCodexVersion fails
     // fast and sendMessage exits before spawning a real child process. The
@@ -367,7 +372,7 @@ describe("CodexProvider permission flow", () => {
     const response = await pendingPromise;
     expect(response).toEqual({ decision: "cancel" });
     expect(resolved).toHaveLength(1);
-    expect(resolved[0].decision).toBe("cancelled");
-    expect(provider.listPendingPermissions!(threadId)).toHaveLength(0);
+    expect(resolved[0].outcome).toEqual({ status: "cancelled", reason: "session_stopped" });
+    expect(provider.listPendingApprovals!(threadId)).toHaveLength(0);
   });
 });

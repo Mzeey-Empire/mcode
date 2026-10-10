@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowRight, Check, ExternalLink, Square, X } from "lucide-react";
+import { ArrowRight, ExternalLink, Square } from "lucide-react";
 import type {
   ThreadControlIdentity,
   ThreadControlProjection,
@@ -230,7 +230,31 @@ function CoordinationChildrenSection({ children, identity, onRefresh }: { childr
 
 function CoordinationApprovalsSection({ approvals, onRefresh }: { approvals: ThreadControlProjection["approvals"]; onRefresh: () => void }) {
   if (approvals.length === 0) return null;
-  return <section aria-labelledby="coordination-approvals-heading"><h3 id="coordination-approvals-heading" className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted">Approval requests ({approvals.length})</h3>{approvals.map((approval) => <div key={approval.requestId} className="border-b border-border/40 px-4 py-3" data-testid="coordination-approval"><p className="text-sm font-medium">{approval.title ?? approval.toolName}</p><p className="mt-1 text-xs text-muted">Owned by {approval.ownerThreadId ?? approval.threadId}</p><div className="mt-2 flex gap-2"><Button type="button" size="compact" onClick={() => void getTransport().respondToPermission(approval.requestId, "allow").then(onRefresh)}><Check size={13} aria-hidden />Allow</Button><Button type="button" variant="ghost" size="compact" onClick={() => void getTransport().respondToPermission(approval.requestId, "deny").then(onRefresh)}><X size={13} aria-hidden />Deny</Button></div></div>)}</section>;
+  return <section aria-labelledby="coordination-approvals-heading">
+    <h3 id="coordination-approvals-heading" className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted">Approval requests ({approvals.length})</h3>
+    {approvals.map((approval) => <CoordinationApproval key={approval.requestId} approval={approval} onRefresh={onRefresh} />)}
+  </section>;
+}
+
+function CoordinationApproval({ approval, onRefresh }: { approval: ThreadControlProjection["approvals"][number]; onRefresh: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const respond = async (choiceId: string) => {
+    try {
+      const result = await getTransport().respondToApproval(approval.requestId, { choiceId });
+      if (result.status === "failed") setError("Failed to send response. Please try again.");
+      else { setError(null); onRefresh(); }
+    } catch {
+      setError("Failed to send response. Please try again.");
+    }
+  };
+  const titles = { thread_send: "Send a message to another thread", thread_stop: "Stop another thread", thread_create_batch: "Create a new worktree" };
+  const title = approval.subject.kind === "thread_operation" ? titles[approval.subject.operation] : "Approval required";
+  return <div className="border-b border-border/40 px-4 py-3" data-testid="coordination-approval">
+    <p className="text-sm font-medium">{title}</p><p className="mt-1 text-xs text-muted">Owned by {approval.threadId}</p>
+    <div className="mt-2 flex gap-2">{approval.choices.map((choice) =>
+      <Button key={choice.id} type="button" size="compact" variant={choice.intent === "deny" ? "ghost" : "default"} onClick={() => void respond(choice.id)}>{choice.label}</Button>)}</div>
+    {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+  </div>;
 }
 
 function CoordinationOriginsSection({ messages }: { messages: ThreadControlProjection["messages"] }) {

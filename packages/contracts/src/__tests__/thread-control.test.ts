@@ -161,13 +161,15 @@ describe("user-facing coordination schemas", () => {
       approvals: [{
         requestId: "approval-1",
         threadId: "thread-1",
-        toolName: "thread_send",
-        title: "Send a message to another thread",
-        input: { threadId: "thread-2", message: "Follow up" },
-        ownerWorkspaceId: "workspace-1",
-        ownerThreadId: "thread-1",
-        sourceThreadId: "source-thread",
-        operation: "thread_send" as const,
+        providerId: "claude" as const,
+        requestedAt: "2026-07-29T00:00:00.000Z",
+        subject: { kind: "thread_operation" as const, operation: "thread_send" as const, targetThreadId: "thread-2", message: "Follow up" },
+        choices: [
+          { id: "allow", intent: "allow_once" as const, label: "Allow" },
+          { id: "deny", intent: "deny" as const, label: "Deny" },
+        ],
+        noteDelivery: "none" as const,
+        origin: { kind: "agent" as const },
       }],
     };
     expect(ThreadControlProjectionSchema().parse(projection)).toEqual(projection);

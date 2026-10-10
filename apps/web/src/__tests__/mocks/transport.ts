@@ -6,7 +6,18 @@ import type {
   ProviderCatalogRequest,
 } from "@/transport/types";
 import { getDefaultSettings } from "@mcode/contracts";
+import type { ApprovalRequest } from "@mcode/contracts";
 import { vi } from "vitest";
+
+/** A valid approval used to arrange transport and store tests. */
+export function createMockApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
+  return {
+    requestId: "req-1", threadId: "thread-1", providerId: "codex", requestedAt: "2026-10-10T10:00:00Z",
+    subject: { kind: "command", command: "git status" },
+    choices: [{ id: "allow", intent: "allow_once", label: "Allow once" }, { id: "deny", intent: "deny", label: "Deny" }],
+    noteDelivery: "steer", noteChoiceId: "deny", origin: { kind: "agent" }, ...overrides,
+  };
+}
 
 /**
  * Build a mock {@link Workspace} with stable defaults for web unit tests.
@@ -175,8 +186,8 @@ export const mockTransport: McodeTransport = {
     status: "already-terminal",
     dispatchState: "unknown",
   })),
-  respondToPermission: vi.fn().mockResolvedValue(undefined),
-  listPendingPermissions: vi.fn().mockResolvedValue([]),
+  respondToApproval: vi.fn().mockResolvedValue(undefined),
+  listPendingApprovals: vi.fn().mockResolvedValue([]),
   answerPlanQuestions: vi.fn().mockResolvedValue(undefined),
   dismissPlanQuestions: vi.fn().mockResolvedValue(undefined),
   getActiveAgentCount: vi.fn().mockResolvedValue(0),

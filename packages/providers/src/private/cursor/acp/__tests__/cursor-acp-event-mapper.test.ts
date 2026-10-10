@@ -720,7 +720,7 @@ describe("Cursor ACP client-factory session-update seam", () => {
       settings: { get: () => ({ provider: { cursor: { traceSessionUpdates: false } } }) } as any,
       publishEvent: (_entry, event) => { events.push(event); },
       publishNativeTurnDiff: (_entry, update) => { diffUpdates.push(update); },
-      emitPermissionRequest: () => {},
+      emitApprovalRequest: () => {},
       emitPermissionResolved: () => {},
       emitPlanCaptured: () => {},
     });
@@ -814,7 +814,7 @@ describe("Cursor ACP client-factory session-update seam", () => {
       settings: { get: () => ({ provider: { cursor: { traceSessionUpdates: false } } }) } as any,
       publishEvent: (_entry, event) => { events.push(event); },
       publishNativeTurnDiff: (_entry, update) => { diffUpdates.push(update); },
-      emitPermissionRequest: () => {},
+      emitApprovalRequest: () => {},
       emitPermissionResolved: () => {},
       emitPlanCaptured: () => {},
     });

@@ -8,7 +8,6 @@ import { getConversationResidency } from "@/features/conversation/residency/conv
 import {
   createEmptyThreadRecord,
   patchThreadRecord,
-  type StoredPermission,
   type ThreadRecord,
   type ThreadSettings,
 } from "./thread-record";
@@ -46,6 +45,7 @@ export function resetThreadStoreForTests(opts?: {
   recentlyAnsweredPlanMessageIds?: Set<string>;
 }) {
   stableAgentEventPublications.reset();
+  useApprovalStore.setState({ approvals: [], revision: 0 });
   const baseline = createEmptyThreadStoreState();
   useThreadStore.setState({
     ...baseline,
@@ -121,8 +121,8 @@ export function getTestThreadError(threadId: string): string | undefined {
   return readExistingThreadField(threadId, (r) => r.error ?? undefined);
 }
 
-export function getTestThreadPermissions(threadId: string): StoredPermission[] {
-  return readThreadField(threadId, (r) => r.permissions);
+export function getTestThreadPermissions(threadId: string): StoredApproval[] {
+  return useApprovalStore.getState().approvals.filter((request) => request.threadId === threadId);
 }
 
 export function getTestThreadAgentStartTime(threadId: string): number | undefined {
@@ -215,3 +215,4 @@ export function getTestActiveLoading(): boolean {
 export function getTestActiveLatestTurnWithChanges(): string | null {
   return readActiveThreadField((r) => r.latestTurnWithChanges) ?? null;
 }
+import { useApprovalStore, type StoredApproval } from "./approvalStore";

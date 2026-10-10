@@ -107,7 +107,7 @@ describe("loadMessages (cache-hit) - hydration staleness gate", () => {
     resetState();
   });
 
-  it("skips listPendingPermissions and getThreadTasks on a cache-hit within the staleness window", async () => {
+  it("skips listPendingApprovals and getThreadTasks on a cache-hit within the staleness window", async () => {
     const thread = createMockThread({ id: THREAD_ID, has_file_changes: false });
     useWorkspaceStore.setState({ threads: [thread] });
 
@@ -128,7 +128,7 @@ describe("loadMessages (cache-hit) - hydration staleness gate", () => {
 
     expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
     expect(mockTransport.getMessages).not.toHaveBeenCalled();
-    expect(mockTransport.listPendingPermissions).not.toHaveBeenCalled();
+    expect(mockTransport.listPendingApprovals).not.toHaveBeenCalled();
     expect(mockTransport.getThreadTasks).not.toHaveBeenCalled();
   });
 
@@ -156,7 +156,7 @@ describe("loadMessages (cache-hit) - hydration staleness gate", () => {
     await activateTestConversation(THREAD_ID);
 
     await vi.waitFor(() => {
-      expect(mockTransport.listPendingPermissions).toHaveBeenCalledWith(THREAD_ID);
+      expect(mockTransport.listPendingApprovals).toHaveBeenCalledWith(THREAD_ID);
       expect(mockTransport.getThreadTasks).toHaveBeenCalledWith(THREAD_ID);
     });
   });

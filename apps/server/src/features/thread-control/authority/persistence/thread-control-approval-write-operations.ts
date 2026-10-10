@@ -6,9 +6,9 @@ const identity = z.object({ threadId: z.string(), workspaceId: z.string(), execu
 const placement = ThreadPlacementSchema().options[1];
 const create = identity.extend({ prompt: z.string(), placement });
 const send = identity.extend({ message: z.string(), sourceTurnId: z.string().optional(), sourceProviderId: z.string().optional() });
-const createApproval = create.extend({ operation: z.literal("thread_create_batch"), approvalId: z.string(), operationPhase: z.enum(["pre_provision", "provisioning", "provisioned", "dispatching", "dispatched"]) });
-const sendApproval = send.extend({ operation: z.literal("thread_send"), approvalId: z.string(), operationPhase: z.enum(["pre_dispatch", "dispatching", "dispatched"]) });
-const stopApproval = identity.extend({ operation: z.literal("thread_stop"), approvalId: z.string(), operationPhase: z.enum(["pre_dispatch", "dispatching", "dispatched"]) });
+const createApproval = create.extend({ createdAt: z.string(), operation: z.literal("thread_create_batch"), approvalId: z.string(), operationPhase: z.enum(["pre_provision", "provisioning", "provisioned", "dispatching", "dispatched"]) });
+const sendApproval = send.extend({ createdAt: z.string(), operation: z.literal("thread_send"), approvalId: z.string(), operationPhase: z.enum(["pre_dispatch", "dispatching", "dispatched"]) });
+const stopApproval = identity.extend({ createdAt: z.string(), operation: z.literal("thread_stop"), approvalId: z.string(), operationPhase: z.enum(["pre_dispatch", "dispatching", "dispatched"]) });
 
 /** Validate the claimed approval before any external side effect is permitted. */
 export const pendingThreadControlApprovalSchema = z.discriminatedUnion("operation", [createApproval, sendApproval, stopApproval]);

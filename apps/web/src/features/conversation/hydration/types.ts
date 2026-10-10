@@ -1,5 +1,5 @@
 import type { Message, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport";
-import type { TurnSnapshot, PermissionRequest, PlanVersion, NarrativeEntry, TurnRange, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationPage, ConversationTail, GoalLookupResult } from "@mcode/contracts";
+import type { TurnSnapshot, ApprovalRequest, PlanVersion, NarrativeEntry, TurnRange, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationPage, ConversationTail, GoalLookupResult } from "@mcode/contracts";
 import type { TaskItem } from "@/stores/taskStore";
 import type { PlanQuestion } from "@mcode/contracts";
 import type { ThreadRecord } from "@/stores/thread-record";
@@ -52,7 +52,7 @@ export interface ThreadHydratorTransport {
   listNarrative(messageId: string): Promise<NarrativeBatchResult[string]>;
   loadTurn(threadId: string, range?: TurnRange): Promise<NarrativeEntry[]>;
   getThreadGoal(threadId: string): Promise<GoalLookupResult>;
-  listPendingPermissions(threadId: string): Promise<PermissionRequest[]>;
+  listPendingApprovals(threadId: string): Promise<ApprovalRequest[]>;
   getThreadTasks(
     threadId: string,
   ): Promise<Array<{ id?: string; content: string; status: string; activeForm?: string; group?: string }> | null>;

@@ -11,7 +11,7 @@ import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { MessageRepo } from "../../../agents/conversation/persistence/message-repo.js";
 import { getDefaultSettings, type CompletedThreadRetentionDays, type Settings } from "@mcode/contracts";
 import type { AgentService } from "../../../agents/index.js";
-import type { AgentPermissionService } from "../../../agents/permissions/agent-permission-service.js";
+import type { ApprovalService } from "../../../agents/approvals/approval-service.js";
 import type { SettingsService } from "../../../settings/settings-service.js";
 import type { ThreadTeardownService } from "../thread-teardown-service.js";
 import { ThreadControlMutationReservationService } from "../../authority/thread-control-mutation-reservation-service.js";
@@ -29,7 +29,7 @@ describe("ThreadCompletionService", () => {
   let db: Database;
   let threadRepo: ThreadRepo;
   let agentService: AgentService;
-  let permissions: AgentPermissionService;
+  let permissions: ApprovalService;
   let teardownService: ThreadTeardownService;
   let settingsService: SettingsService;
   let service: ThreadCompletionService;
@@ -56,8 +56,8 @@ describe("ThreadCompletionService", () => {
       runtimeAccess: () => ({ activeThreadIds }),
     } as unknown as AgentService;
     permissions = {
-      listPendingPermissions: vi.fn(() => []),
-    } as unknown as AgentPermissionService;
+      listPendingApprovals: vi.fn(() => []),
+    } as unknown as ApprovalService;
     teardownService = {
       teardownThread: vi.fn().mockResolvedValue(undefined),
     } as unknown as ThreadTeardownService;
@@ -409,7 +409,7 @@ describe("ThreadCompletionService", () => {
   });
 
   it("rejects completion while permission is pending", async () => {
-    vi.mocked(permissions.listPendingPermissions).mockReturnValue([
+    vi.mocked(permissions.listPendingApprovals).mockReturnValue([
       { requestId: "permission-1" },
     ] as never);
 

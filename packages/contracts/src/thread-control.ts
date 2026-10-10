@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { lazySchema } from "./utils/lazySchema.js";
 import { InteractionModeSchema, PermissionModeSchema } from "./models/enums.js";
-import { PermissionRequestSchema } from "./models/permission.js";
+import { ApprovalRequestSchema } from "./models/approval.js";
 
 /** Maximum characters accepted for an opaque thread-control identifier. */
 export const THREAD_CONTROL_OPAQUE_ID_MAX_LENGTH = 128;
@@ -469,7 +469,7 @@ export const ThreadControlProjectionSchema = lazySchema(() => z.object({
   hasMoreMessages: z.boolean(),
   relation: ThreadControlRelationSchema().nullable(),
   children: z.array(ThreadControlRelationSchema()).max(THREAD_SEARCH_LIMIT_MAX),
-  approvals: z.array(PermissionRequestSchema()).max(THREAD_SEARCH_LIMIT_MAX),
+  approvals: z.array(ApprovalRequestSchema()).max(THREAD_SEARCH_LIMIT_MAX),
 }).strict());
 /** Canonical coordination projection. */
 export type ThreadControlProjection = z.infer<ReturnType<typeof ThreadControlProjectionSchema>>;

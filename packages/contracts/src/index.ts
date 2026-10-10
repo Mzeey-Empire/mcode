@@ -899,21 +899,30 @@ export type {
 
 // Permissions
 export {
-  PermissionDecisionSchema,
-  PermissionQuestionOptionSchema,
-  PermissionQuestionSchema,
-  PermissionResponseAnswersSchema,
-  PermissionRequestOptionSchema,
-  PermissionRequestSchema,
-} from "./models/permission.js";
+  ApprovalRequestBodySchema,
+  ApprovalOutcomeSchema,
+  ApprovalSubjectSchema,
+  ApprovalResponseSchema,
+  ApprovalRespondResultSchema,
+  ApprovalQuestionOptionSchema,
+  ApprovalQuestionSchema,
+  ApprovalAnswersSchema,
+  ApprovalChoiceSchema,
+  ApprovalRequestSchema,
+} from "./models/approval.js";
 export type {
-  PermissionDecision,
-  PermissionQuestionOption,
-  PermissionQuestion,
-  PermissionResponseAnswers,
-  PermissionRequestOption,
-  PermissionRequest,
-} from "./models/permission.js";
+  ApprovalRequestBody,
+  ApprovalRequestEnvelope,
+  ApprovalOutcome,
+  ApprovalSubject,
+  ApprovalResponse,
+  ApprovalRespondResult,
+  ApprovalQuestionOption,
+  ApprovalQuestion,
+  ApprovalAnswers,
+  ApprovalChoice,
+  ApprovalRequest,
+} from "./models/approval.js";
 
 // Git / GitHub
 export { GitBranchSchema, WorktreeSchema, GitCommitSchema, BranchComparisonSchema, GitRemoteUrlSchema } from "./git.js";

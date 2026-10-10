@@ -1,3 +1,5 @@
+import { useApprovalStore } from "@/stores/approvalStore";
+import { createMockApproval } from "./mocks/transport";
 import type { AgentEvent } from "@mcode/contracts";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
@@ -149,6 +151,7 @@ describe("handleTurnPersisted", () => {
       runningThreadIds: new Set([THREAD_ID]),
     });
 
+    useApprovalStore.getState().add(createMockApproval({ requestId: "permission-1", threadId: THREAD_ID }));
     useThreadStore.getState().handleTurnPersisted({
       threadId: THREAD_ID,
       messageId: "assistant-1",
@@ -193,13 +196,6 @@ describe("handleTurnPersisted", () => {
           isError: false,
           isComplete: false,
         }],
-        permissions: [{
-          requestId: "permission-1",
-          threadId: THREAD_ID,
-          toolName: "Bash",
-          input: { command: "bun test" },
-          settled: false,
-        }],
         rateLimit: { retryAfterMs: 5000 },
       }),
       runningThreadIds: new Set([THREAD_ID]),
@@ -220,7 +216,7 @@ describe("handleTurnPersisted", () => {
     expect(readThreadField(THREAD_ID, (record) => record.toolCalls)).toEqual([
       expect.objectContaining({ id: "tool-1", isComplete: true }),
     ]);
-    expect(readThreadField(THREAD_ID, (record) => record.permissions)).toEqual([]);
+    expect(useApprovalStore.getState().approvals).toEqual([]);
     expect(readThreadField(THREAD_ID, (record) => record.rateLimit)).toBeUndefined();
     expect(useTaskStore.getState().taskBubbleByThread[THREAD_ID]).toBeUndefined();
     expect(useTaskStore.getState().pendingTaskBubbleReplacementByThread[THREAD_ID]).toBeUndefined();

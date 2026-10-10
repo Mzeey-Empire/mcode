@@ -1,4 +1,4 @@
-import type { AgentTurnStatus, PermissionDecision, TurnOutcome, TurnRuntimePhase } from "@mcode/contracts";
+import type { AgentTurnStatus, TurnOutcome, TurnRuntimePhase } from "@mcode/contracts";
 import type { Message, ToolCall, HookExecution, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport/types";
 import type { NarrativeCounts, ThoughtSegment, TurnSummary } from "../narrative/types";
 import { buildNarrativeItems, computeLiveStreamingText } from "../narrative/build-narrative";
@@ -308,17 +308,7 @@ export type ChatVirtualItem =
   | {
       key: string;
       type: "permission-request";
-      requestId: string;
-      toolName: string;
-      input: unknown;
-      title?: string;
-      questions?: import("@mcode/contracts").PermissionQuestion[];
-      /** Provider-native selectable options rendered verbatim when present. */
-      options?: import("@mcode/contracts").PermissionRequestOption[];
-      settled: boolean;
-      decision?: PermissionDecision;
-      /** Verbatim label of the provider-native option the user picked, when one was offered. */
-      optionLabel?: string;
+      request: import("@/stores/approvalStore").StoredApproval;
     }
   | {
       key: string;
@@ -523,17 +513,7 @@ export function buildVolatileItems(
   agentDisplayState: AgentDisplayState | undefined,
   agentStartTime: number | undefined,
   streamingText: string | undefined,
-  permissions?: readonly {
-    requestId: string;
-    toolName: string;
-    input?: unknown;
-    title?: string;
-    questions?: import("@mcode/contracts").PermissionQuestion[];
-    options?: import("@mcode/contracts").PermissionRequestOption[];
-    settled: boolean;
-    decision?: PermissionDecision;
-    optionLabel?: string;
-  }[],
+  permissions?: readonly import("@/stores/approvalStore").StoredApproval[],
   hooks?: readonly HookExecution[],
   thoughtSegments?: readonly ThoughtSegment[],
   currentTurn?: CurrentTurnResponseIdentity,
@@ -597,7 +577,7 @@ function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts
 }
 
 function permissionRequestItems(permissions: Parameters<typeof buildVolatileItems>[4]): ChatVirtualItem[] {
-  return permissions?.map((permission) => ({ key: `permission-${permission.requestId}`, type: "permission-request" as const, requestId: permission.requestId, toolName: permission.toolName, input: permission.input, title: permission.title, questions: permission.questions, options: permission.options, settled: permission.settled, decision: permission.decision, optionLabel: permission.optionLabel })) ?? [];
+  return permissions?.map((request) => ({ key: `permission-${request.requestId}`, type: "permission-request" as const, request })) ?? [];
 }
 
 function sameAgentDisplayState(
@@ -640,8 +620,8 @@ function sameTurnChangesItem(left: ChatVirtualItem, right: ChatVirtualItem): boo
   return left.type === "turn-changes" && right.type === "turn-changes" && [left.messageId === right.messageId, left.filesChanged === right.filesChanged, left.isLatestTurn === right.isLatestTurn].every(Boolean);
 }
 
-function samePermissionRequestItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "permission-request" && right.type === "permission-request" && [left.requestId === right.requestId, left.toolName === right.toolName, left.input === right.input, left.title === right.title, left.questions === right.questions, left.options === right.options, left.settled === right.settled, left.decision === right.decision, left.optionLabel === right.optionLabel].every(Boolean);
+function sameApprovalRequestItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
+  return left.type === "permission-request" && right.type === "permission-request" && left.request === right.request;
 }
 
 function sameNarrativeFlowItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
@@ -663,7 +643,7 @@ function sameNarrativeIndicatorItem(left: ChatVirtualItem, right: ChatVirtualIte
 const VIRTUAL_ITEM_EQUALITY: Record<ChatVirtualItem["type"], (left: ChatVirtualItem, right: ChatVirtualItem) => boolean> = {
   message: sameMessageVirtualItem,
   "turn-changes": sameTurnChangesItem,
-  "permission-request": samePermissionRequestItem,
+  "permission-request": sameApprovalRequestItem,
   "narrative-flow": sameNarrativeFlowItem,
   "work-fold": sameWorkFoldItem,
   "turn-meta-line": sameTurnMetaLineItem,

@@ -80,11 +80,9 @@ vi.mock("@/features/conversation", async (importOriginal) => ({
   prefetchOnPointerDown: vi.fn(),
 }));
 
-// Mutable holder so individual tests can inject unsettled permission requests
-// and running-thread state into the mocked thread store without re-registering
+// Mutable holder so individual tests can inject running-thread state into the mocked thread store without re-registering
 // the mock.
 const threadStoreOverrides: {
-  permissionsByThread?: Record<string, Array<{ settled: boolean }>>;
   runningThreadIds?: Set<string>;
   pendingStopCounts?: Record<string, number>;
   runtimeByThread?: Record<string, { runtimePhase: string; turnExecutionId: string | null }>;
@@ -99,20 +97,14 @@ function buildMockThreadStoreState() {
   const records = new Map<
     string,
     {
-      permissions: Array<{ settled: boolean }>;
       runtimePhase?: string;
       turnExecutionId?: string | null;
     }
   >();
-  const recordIds = new Set([
-    ...Object.keys(threadStoreOverrides.permissionsByThread ?? {}),
-    ...Object.keys(threadStoreOverrides.runtimeByThread ?? {}),
-  ]);
-  for (const id of recordIds) {
+  for (const id of Object.keys(threadStoreOverrides.runtimeByThread ?? {})) {
     const runtime = threadStoreOverrides.runtimeByThread?.[id];
     records.set(id, {
       ...createEmptyThreadRecord(),
-      permissions: threadStoreOverrides.permissionsByThread?.[id] ?? [],
       ...runtime,
     });
   }
@@ -224,6 +216,16 @@ import { useUiStore } from "@/stores/uiStore";
 import { useRecoveryIncidentStore } from "@/features/recovery/state/recoveryIncidentStore";
 import { prefetchOnPointerDown } from "@/features/conversation";
 import { ProjectTree } from "../ProjectTree";
+import { useApprovalStore, type StoredApproval } from "@/stores/approvalStore";
+
+function seedApprovals(byThread: Record<string, Array<{ settled: boolean }>>): void {
+  const approvals = Object.entries(byThread).flatMap(([threadId, items]) => items.map(({ settled }, index): StoredApproval => ({
+    requestId: `${threadId}-approval-${index}`, threadId, providerId: "claude", requestedAt: "2026-07-29T00:00:00.000Z",
+    subject: { kind: "command", command: "bun run lint" }, choices: [{ id: "deny", intent: "deny", label: "Deny" }],
+    noteDelivery: "none", origin: { kind: "agent" }, settled,
+  })));
+  useApprovalStore.setState({ approvals, revision: 0 });
+}
 
 /** Build a minimal Thread fixture. */
 type TestWorkspaceThread = Thread & { clientPreparing?: boolean };
@@ -1481,7 +1483,7 @@ describe("ProjectTree action-required indicator", () => {
   }
 
   beforeEach(() => {
-    threadStoreOverrides.permissionsByThread = undefined;
+    useApprovalStore.setState({ approvals: [], revision: 0 });
     threadStoreOverrides.runningThreadIds = undefined;
     threadStoreOverrides.pendingStopCounts = undefined;
     threadStoreOverrides.runtimeByThread = undefined;
@@ -1537,23 +1539,23 @@ describe("ProjectTree action-required indicator", () => {
   });
 
   it("renders a ring indicator when the thread has an unsettled permission request", () => {
-    threadStoreOverrides.permissionsByThread = {
+    seedApprovals({
       "thread-pending": [{ settled: false }],
-    };
+    });
     render(<ProjectTree />);
     expect(screen.getByRole("img", { name: "Action required" })).toHaveAttribute("data-status-mark", "attention");
   });
 
   it("renders a solid dot (no action-required label) when there is no pending permission", () => {
-    threadStoreOverrides.permissionsByThread = {};
+    seedApprovals({});
     render(<ProjectTree />);
     expect(screen.queryByLabelText("Action required")).toBeNull();
   });
 
   it("clears the ring when the permission is resolved (settled=true)", () => {
-    threadStoreOverrides.permissionsByThread = {
+    seedApprovals({
       "thread-pending": [{ settled: true }],
-    };
+    });
     render(<ProjectTree />);
     expect(screen.queryByLabelText("Action required")).toBeNull();
   });
@@ -1561,9 +1563,9 @@ describe("ProjectTree action-required indicator", () => {
   it("renders the ring even when the thread is actively running", () => {
     // The amber ring must outrank the running-state primary pulse — otherwise
     // a user who is mid-run with a pending permission wouldn't see the affordance.
-    threadStoreOverrides.permissionsByThread = {
+    seedApprovals({
       "thread-pending": [{ settled: false }],
-    };
+    });
     threadStoreOverrides.runningThreadIds = new Set(["thread-pending"]);
     render(<ProjectTree />);
     expect(screen.getByRole("img", { name: "Action required" })).toHaveAttribute("data-status-mark", "attention");
@@ -1749,9 +1751,9 @@ describe("ProjectTree action-required indicator", () => {
 
   it("disables completion while running or waiting for permission", () => {
     threadStoreOverrides.runningThreadIds = new Set(["thread-pending"]);
-    threadStoreOverrides.permissionsByThread = {
+    seedApprovals({
       "thread-pending": [{ settled: false }],
-    };
+    });
     render(<ProjectTree />);
 
     expect(screen.getByRole("button", { name: "Complete My Thread" })).toBeDisabled();
@@ -1766,9 +1768,9 @@ describe("ProjectTree action-required indicator", () => {
       pr_status: "open",
     });
     installWorkspaceMock();
-    threadStoreOverrides.permissionsByThread = {
+    seedApprovals({
       "thread-pending": [{ settled: false }],
-    };
+    });
     render(<ProjectTree />);
     const indicator = screen.getByRole("img", { name: "Action required" });
     expect(indicator).toHaveAttribute("data-status-mark", "attention");
@@ -1792,9 +1794,9 @@ describe("ProjectTree action-required indicator", () => {
       },
     };
     installWorkspaceMock();
-    threadStoreOverrides.permissionsByThread = {
+    seedApprovals({
       "thread-pending": [{ settled: false }],
-    };
+    });
     render(<ProjectTree />);
     expect(screen.getByRole("img", { name: "Action required" })).toHaveAttribute("data-status-mark", "attention");
     expect(screen.queryByTestId("thread-pr-ci-thread-pending")).toBeNull();
@@ -1918,7 +1920,7 @@ describe("ProjectTree PR-ability gating by mode", () => {
   }
 
   beforeEach(() => {
-    threadStoreOverrides.permissionsByThread = undefined;
+    useApprovalStore.setState({ approvals: [], revision: 0 });
     threadStoreOverrides.runningThreadIds = undefined;
     threadStoreOverrides.runtimeByThread = undefined;
     window.localStorage.setItem(

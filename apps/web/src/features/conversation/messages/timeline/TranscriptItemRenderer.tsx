@@ -85,22 +85,9 @@ function TurnChangesTranscriptItemRenderer({ item, turnExpandRef }: TranscriptIt
 }
 
 /** Renders a permission request row. */
-function PermissionRequestTranscriptItemRenderer({ item, threadId }: TranscriptItemRendererProps) {
-  const request = item as Extract<ChatVirtualItem, { type: "permission-request" }>;
-  return (
-    <PermissionRequestCard
-      requestId={request.requestId}
-      toolName={request.toolName}
-      input={request.input}
-      title={request.title}
-      questions={request.questions}
-      options={request.options}
-      settled={request.settled}
-      decision={request.decision}
-      optionLabel={request.optionLabel}
-      threadId={threadId}
-    />
-  );
+function PermissionRequestTranscriptItemRenderer({ item }: TranscriptItemRendererProps) {
+  if (item.type !== "permission-request") return null;
+  return <PermissionRequestCard request={item.request} />;
 }
 
 /** Renders the live narrative flow. */

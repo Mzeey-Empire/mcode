@@ -3,7 +3,7 @@ import { logger } from "@mcode/shared";
 import type { CompletedThreadRetentionDays, Settings, Thread } from "@mcode/contracts";
 import { ThreadRepo } from "../persistence/thread-repo.js";
 import { AgentService } from "../../agents/index.js";
-import { AgentPermissionService } from "../../agents/permissions/agent-permission-service.js";
+import { ApprovalService } from "../../agents/approvals/approval-service.js";
 import { SettingsService } from "../../settings/settings-service.js";
 import { ThreadTeardownService } from "./thread-teardown-service.js";
 import { ThreadControlMutationReservationService } from "../authority/thread-control-mutation-reservation-service.js";
@@ -32,7 +32,7 @@ export class ThreadCompletionService {
   constructor(
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
     @inject(AgentService) private readonly agentService: AgentService,
-    @inject(AgentPermissionService) private readonly permissions: AgentPermissionService,
+    @inject(ApprovalService) private readonly permissions: ApprovalService,
     @inject(ThreadTeardownService) private readonly teardownService: ThreadTeardownService,
     @inject(ThreadControlMutationReservationService)
     private readonly mutationReservations: ThreadControlMutationReservationService,
@@ -118,7 +118,7 @@ export class ThreadCompletionService {
     if (this.agentService.runtimeAccess().activeThreadIds().includes(threadId)) {
       throw new Error("Thread cannot be completed while it is running");
     }
-    if (this.permissions.listPendingPermissions(threadId).length > 0) {
+    if (this.permissions.listPendingApprovals(threadId).length > 0) {
       throw new Error("Thread cannot be completed while permission is pending");
     }
   }

@@ -5,10 +5,11 @@ import type { AttachmentMeta } from "../models/attachment.js";
 import type { MessageMention } from "../models/mention.js";
 import type { GoalLookupResult, GoalState } from "../models/goal.js";
 import type {
-  PermissionDecision,
-  PermissionRequest,
-  PermissionResponseAnswers,
-} from "../models/permission.js";
+  ApprovalResponse,
+  ApprovalRespondResult,
+  ApprovalRequestEnvelope,
+  ApprovalOutcome,
+} from "../models/approval.js";
 import type { ContextWindowMode, ReasoningLevel } from "../models/settings.js";
 import type { ProviderModelInfo } from "./models.js";
 import type { ProviderUsageInfo } from "./usage.js";
@@ -219,21 +220,14 @@ export interface IAgentProvider {
   /** Return current usage/quota state for this provider. */
   getUsage?(): Promise<ProviderUsageInfo>;
 
-  /**
-   * Resolve a pending permission request.
-   * Returns true if the requestId was found and resolved, false otherwise.
-   * `optionId` carries the provider-native option the user picked when the
-   * request advertised verbatim {@link PermissionRequest.options}.
-   */
-  resolvePermission?(
+  /** Resolve only after the native answer is acknowledged. */
+  resolveApproval?(
     requestId: string,
-    decision: PermissionDecision,
-    answers?: PermissionResponseAnswers,
-    optionId?: string,
-  ): boolean;
+    response: ApprovalResponse,
+  ): Promise<ApprovalRespondResult>;
 
-  /** Return all pending permission requests for a given thread. */
-  listPendingPermissions?(threadId: string): PermissionRequest[];
+  /** Return unvalidated approval envelopes, optionally filtered by owning thread. */
+  listPendingApprovals?(threadId?: string): ApprovalRequestEnvelope[];
 
   /** Subscribe to provider runtime events before ingress projects them for renderer consumers. */
   on(event: "event", handler: (event: ProviderRuntimeEvent) => void): void;
@@ -241,12 +235,12 @@ export interface IAgentProvider {
   on(event: "file_mutation_start", handler: (event: ProviderFileMutationStart) => void): void;
   /** Subscribe to provider-level errors. */
   on(event: "error", handler: (error: Error) => void): void;
-  /** Subscribe to permission request events (emitted when canUseTool fires). */
-  on(event: "permission_request", handler: (request: PermissionRequest) => void): void;
-  /** Subscribe to permission resolved events (emitted on session stop cancellation). */
+  /** Subscribe to approval envelopes emitted when the provider needs a decision. */
+  on(event: "approval_request", handler: (request: ApprovalRequestEnvelope) => void): void;
+  /** Subscribe to acknowledged approval outcomes and session-stop cancellations. */
   on(
-    event: "permission_resolved",
-    handler: (payload: { requestId: string; decision: PermissionDecision; optionLabel?: string }) => void,
+    event: "approval_resolved",
+    handler: (payload: { requestId: string; threadId: string; outcome: ApprovalOutcome }) => void,
   ): void;
   /** Subscribe to complete native or fenced plan captures. */
   on(event: "plan_captured", handler: (payload: PlanCapture) => void): void;

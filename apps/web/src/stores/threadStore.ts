@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
 import type { AgentEvent, AgentModelState, AgentTurn, CanonicalAgentEventEnvelope, CanonicalAgentProgressFrame, CanonicalAgentProgressRecovery, CanonicalAgentReconnectRecovery, ContextWindowMode, MessageMention, NarrativeDetailCursor, NarrativeEntry, ReasoningLevel, OrchestrationMode, PlanQuestion, PlanAnswer, ProviderUsageInfo, GoalLookupResult, PreviewAnnotationBundle, SelectedTextComment, TurnFileEffectSummary, TurnRuntimeSnapshot, TurnOutcome } from "@mcode/contracts";
 import type { reduceAgentEventBatch } from "@mcode/contracts";
-import type { DevinMode, PermissionRequest, PermissionDecision } from "@mcode/contracts";
+import type { DevinMode } from "@mcode/contracts";
 import { recoverParentNarrative } from "./parent-narrative-recovery";
 import {
   AgentEventSchema,
@@ -393,7 +393,7 @@ function preserveRunningThreadIds(previous: Set<string>, next: Set<string>): Set
   return previous.size === next.size && [...next].every((id) => previous.has(id)) ? previous : next;
 }
 
-export type { HandoffMeta, ThreadSettings, StoredPermission } from "./thread-record";
+export type { HandoffMeta, ThreadSettings } from "./thread-record";
 export { getHandoffStatus } from "./thread-record";
 
 /** In-memory Recap cache entry for one thread, reset when the app restarts. */
@@ -490,9 +490,7 @@ interface ThreadState {
    */
   markPlanDismissed: (threadId: string, assistantMessageId: string) => void;
   /** Add a new pending permission request for a thread. */
-  addPermissionRequest: (request: PermissionRequest) => void;
   /** Mark a permission request as settled with its decision. */
-  resolvePermissionRequest: (requestId: string, decision: PermissionDecision, optionLabel?: string) => void;
   handleAgentEvent: (event: AgentEvent, canonicalPublication?: CanonicalPublicationIdentity) => void;
   /** Shared web and Electron progress receiver. */
   handleCanonicalProgress: (frame: CanonicalAgentProgressFrame) => void;
@@ -837,7 +835,7 @@ function discardLostProgress(record: ThreadRecord): Partial<ThreadRecord> {
   const volatileMessageIds = new Set([...record.pendingTurnPersistMessageIds, record.currentTurnMessageId]
     .filter((id) => id.length > 0 && !record.serverMessageIds[id]));
   return {
-    ...resetTurnEphemeral(record), runtimePhase: "interrupted", savingStatus: null, savingStatuses: [], permissions: [],
+    ...resetTurnEphemeral(record), runtimePhase: "interrupted", savingStatus: null, savingStatuses: [],
     messages: record.messages.filter((message) => !volatileMessageIds.has(message.id)),
     pendingTurnPersistMessageIds: [],
   };
@@ -2351,7 +2349,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     optimisticUserMessageId: null,
     toolCalls: completedToolCalls(record.toolCalls, phase),
     thoughtSegments: closeOpenThoughtSegment(record.thoughtSegments),
-    permissions: [],
     rateLimit: undefined,
   });
 
@@ -2501,6 +2498,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     threadId: string,
     phase: ThreadRecord["runtimePhase"],
   ): void => {
+    useApprovalStore.getState().clearThread(threadId);
     clearStreamingTextUsage(threadId);
     useTaskStore.getState().clearTaskBubbleIfAwaitingReplacement(threadId);
     synchronizeTerminalStatus(threadId, terminalStatusFor(phase));
@@ -3149,6 +3147,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   const canonicalProgressProjection = (frame: CanonicalAgentProgressFrame, record: ThreadRecord): Partial<ThreadRecord> => {
     if (frame.phase !== "recovery") return terminalCanonicalProjection(frame.threadId, record);
     if (frame.loss === "runtime-restarted") {
+      useApprovalStore.getState().clearThread(frame.threadId);
       const cleared = discardLostProgress(record);
       return { ...cleared, ...recoverParentNarrative(frame.threadId, record.canonicalAgent.state, { ...record, ...cleared }) };
     }
@@ -4121,42 +4120,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     });
   },
 
-  addPermissionRequest: (request) => {
-    threadHydrator.invalidatePermissionSnapshots(request.threadId);
-    set((s) => {
-      const existing = getThreadRecord(s.records, request.threadId).permissions;
-      if (existing.some((p) => p.requestId === request.requestId)) return s;
-      return {
-        records: patchThreadRecord(s.records, request.threadId, {
-          permissions: [...existing, { ...request, settled: false }],
-        }),
-      };
-    });
-  },
 
-  resolvePermissionRequest: (requestId, decision, optionLabel) => {
-    for (const [threadId, rec] of get().records) {
-      if (rec.permissions.some((permission) => permission.requestId === requestId)) {
-        threadHydrator.invalidatePermissionSnapshots(threadId);
-        break;
-      }
-    }
-    set((s) => {
-      let records = s.records;
-      for (const [threadId, rec] of s.records) {
-        const idx = rec.permissions.findIndex((p) => p.requestId === requestId);
-        if (idx >= 0) {
-          records = patchThreadRecord(records, threadId, {
-            permissions: rec.permissions.map((p, i) =>
-              i === idx ? { ...p, settled: true, decision, ...(optionLabel ? { optionLabel } : {}) } : p,
-            ),
-          });
-          break;
-        }
-      }
-      return { records };
-    });
-  },
 
   refreshThreadGoal: async (threadId) => {
     const lookup = await getTransport().getThreadGoal(threadId);
@@ -4400,11 +4364,4 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 });
 
-/**
- * Returns true if the given thread has any unsettled permission requests.
- * Use inside components: `useThreadStore(s => hasPendingPermissions(s, threadId))`.
- */
-export function hasPendingPermissions(state: ThreadState, threadId: string): boolean {
-  const perms = getThreadRecord(state.records, threadId).permissions;
-  return perms.some((p) => !p.settled);
-}
+import { useApprovalStore } from "./approvalStore";

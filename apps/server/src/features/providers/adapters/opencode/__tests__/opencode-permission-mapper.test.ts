@@ -1,88 +1,61 @@
 import { describe, expect, it } from "vitest";
 import {
-  mapPermissionDecisionToReply,
-  synthesizeOpenCodePermissionRequest,
+  mapApprovalChoiceToReply,
+  synthesizeOpenCodeApprovalRequest,
   synthesizeOpenCodeQuestionRequest,
 } from "../opencode-permission-mapper.js";
 
-describe("mapPermissionDecisionToReply", () => {
+describe("mapApprovalChoiceToReply", () => {
   it("maps approve-once to once, session approval to always, and deny/cancel to reject", () => {
-    expect(mapPermissionDecisionToReply("allow")).toBe("once");
-    expect(mapPermissionDecisionToReply("allow-session")).toBe("always");
-    expect(mapPermissionDecisionToReply("deny")).toBe("reject");
-    expect(mapPermissionDecisionToReply("cancelled")).toBe("reject");
+    expect(mapApprovalChoiceToReply("once")).toBe("once");
+    expect(mapApprovalChoiceToReply("always")).toBe("always");
+    expect(mapApprovalChoiceToReply("deny")).toBe("reject");
+    expect(mapApprovalChoiceToReply("cancelled")).toBe("reject");
   });
 });
 
-describe("synthesizeOpenCodePermissionRequest", () => {
-  it("builds a shell card from a v2 permission ask", () => {
-    const request = synthesizeOpenCodePermissionRequest({
-      threadId: "thread-1",
-      properties: {
-        id: "per_abc",
-        sessionID: "ses_1",
-        action: "bash",
-        resources: ["echo hi"],
-      },
-    });
-    expect(request).toEqual({
-      requestId: "per_abc",
-      threadId: "thread-1",
-      toolName: "bash",
-      input: { action: "bash", resources: ["echo hi"] },
-    });
+describe("synthesizeOpenCodeApprovalRequest", () => {
+  it("keeps all scope, the native tool id, and a complete always description", () => {
+    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", properties: { id: "per_1", action: "bash", resources: ["echo hi", "git status"], tool: { callID: "tool-1" } } });
+    expect(request?.requestId).toBe("per_1");
+    expect(request?.threadId).toBe("owner");
+    expect(request?.body.toolCallId).toBe("tool-1");
+    expect(request?.body.subject).toEqual({ kind: "tool", toolName: "bash", preview: '{"action":"bash","resources":["echo hi","git status"]}' });
+    expect(request?.body.choices).toEqual([
+      { id: "once", intent: "allow_once", label: "Allow once" },
+      { id: "always", intent: "allow_scoped", label: "Allow for this session", description: "echo hi, git status" },
+      { id: "reject", intent: "deny", label: "Deny" },
+    ]);
   });
 
-  it("omits resources when the ask carries none", () => {
-    const request = synthesizeOpenCodePermissionRequest({
-      threadId: "thread-1",
-      properties: { id: "per_1", sessionID: "ses_1", action: "edit" },
-    });
-    expect(request).toEqual({
-      requestId: "per_1",
-      threadId: "thread-1",
-      toolName: "edit",
-      input: { action: "edit" },
-    });
+  it("omits only the scoped choice when its whole description does not fit", () => {
+    const pattern = "x".repeat(501);
+    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", properties: { id: "per_1", action: "bash", resources: [pattern] } });
+    expect(request?.body.choices).toEqual([
+      { id: "once", intent: "allow_once", label: "Allow once" },
+      { id: "reject", intent: "deny", label: "Deny" },
+    ]);
+    expect(request?.body.subject).toEqual({ kind: "tool", toolName: "bash", preview: '{"action":"bash","resources":["' + pattern + '"]}' });
   });
 
-  it("builds a card from the legacy permission shape", () => {
-    const request = synthesizeOpenCodePermissionRequest({
-      threadId: "thread-1",
-      properties: { id: "per_legacy", sessionID: "ses_1", permission: "edit" },
-    });
-    expect(request?.toolName).toBe("edit");
-    expect(request?.requestId).toBe("per_legacy");
+  it("omits an unstatable always choice and supports the legacy action field", () => {
+    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", properties: { id: "per_1", permission: "edit", metadata: { secret: true } } });
+    expect(request?.body.subject).toEqual({ kind: "tool", toolName: "edit", preview: '{"action":"edit","resources":[]}' });
+    expect(request?.body.choices.map((choice) => choice.id)).toEqual(["once", "reject"]);
   });
 
-  it("keeps hostile-only fields out of the card input", () => {
-    const request = synthesizeOpenCodePermissionRequest({
-      threadId: "thread-1",
-      properties: {
-        id: "per_1",
-        action: "bash",
-        resources: ["ls"],
-        metadata: { exec: "rm -rf /", nested: { deep: true } },
-        save: ["*"],
-      },
-    });
-    expect(request?.input).toEqual({ action: "bash", resources: ["ls"] });
+  it("preserves oversized authorization scope for automatic denial", () => {
+    const action = "x".repeat(501);
+    const resource = "y".repeat(70_000);
+    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", properties: { id: "per_1", action, resources: [resource] } });
+    expect(request?.body.subject).toEqual({ kind: "tool", toolName: action, preview: '{"action":"' + action + '","resources":["' + resource + '"]}' });
   });
 
-  it("bounds long actions and resources instead of rejecting the card", () => {
-    const request = synthesizeOpenCodePermissionRequest({
-      threadId: "thread-1",
-      properties: { id: "per_1", action: `b${"a".repeat(500)}`, resources: [`r${"e".repeat(900)}`] },
-    });
-    expect(request?.toolName).toBe(`b${"a".repeat(127)}`);
-    expect(request?.input).toEqual({ action: `b${"a".repeat(127)}`, resources: [`r${"e".repeat(511)}`] });
-  });
-
-  it("returns null without a usable id or action", () => {
-    expect(synthesizeOpenCodePermissionRequest({ threadId: "t", properties: {} })).toBeNull();
-    expect(synthesizeOpenCodePermissionRequest({ threadId: "t", properties: { id: "per_1" } })).toBeNull();
-    expect(synthesizeOpenCodePermissionRequest({ threadId: "t", properties: { action: "bash" } })).toBeNull();
-    expect(synthesizeOpenCodePermissionRequest({ threadId: "t", properties: { id: "", action: "bash" } })).toBeNull();
+  it("retains a usable routing id even when display data is unreadable", () => {
+    expect(synthesizeOpenCodeApprovalRequest({ threadId: "owner", properties: { id: "per_1" } })?.requestId).toBe("per_1");
+    expect(synthesizeOpenCodeApprovalRequest({ threadId: "owner", properties: {} })).toBeNull();
+    expect(synthesizeOpenCodeApprovalRequest({ threadId: "owner", properties: { id: "", action: "bash" } })).toBeNull();
+    expect(synthesizeOpenCodeApprovalRequest({ threadId: "owner", properties: { id: "x".repeat(129), action: "bash" } })).toBeNull();
   });
 });
 
@@ -105,12 +78,10 @@ describe("synthesizeOpenCodeQuestionRequest", () => {
         }],
       },
     });
-    expect(result).toEqual({
-      requestId: "que_1",
-      threadId: "thread-1",
-      toolName: "Question",
-      input: {},
-      title: "Deploy",
+    expect(result?.requestId).toBe("que_1");
+    expect(result?.threadId).toBe("thread-1");
+    expect(result?.body.subject).toEqual({
+      kind: "question",
       questions: [{
         header: "Deploy",
         question: "Deploy now?",

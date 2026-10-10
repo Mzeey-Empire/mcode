@@ -1,3 +1,4 @@
+import { createMockApproval } from "@/__tests__/mocks/transport";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -5,8 +6,8 @@ import type { ThreadControlProjection } from "@mcode/contracts";
 import { CoordinationPanel } from "./CoordinationPanel";
 import { threadControlKey, useThreadControlStore } from "@/stores/threadControlStore";
 
-const { respondToPermissionMock, readThreadControlMock } = vi.hoisted(() => ({
-  respondToPermissionMock: vi.fn(async () => undefined),
+const { respondToApprovalMock, readThreadControlMock } = vi.hoisted(() => ({
+  respondToApprovalMock: vi.fn(async () => ({ status: "resolved" })),
   readThreadControlMock: vi.fn(),
 }));
 const { setActiveWorkspaceMock, loadThreadsMock, setActiveThreadMock } = vi.hoisted(() => ({
@@ -18,7 +19,7 @@ const { setActiveWorkspaceMock, loadThreadsMock, setActiveThreadMock } = vi.hois
 vi.mock("@/transport", () => ({
   getTransport: () => ({
     readThreadControl: readThreadControlMock,
-    respondToPermission: respondToPermissionMock,
+    respondToApproval: respondToApprovalMock,
     sendThreadControl: vi.fn(),
     stopThreadControl: vi.fn(),
   }),
@@ -112,24 +113,18 @@ const projection: ThreadControlProjection = {
     creatorToolCallId: "tool-2",
     creationKind: "thread_delegation",
   }],
-  approvals: [{
-    requestId: "approval-1",
-    threadId: "thread-1",
-    toolName: "thread_send",
-    title: "Send a message to another thread",
-    input: { threadId: "destination-thread", message: "Follow up" },
-    ownerWorkspaceId: "workspace-1",
-    ownerThreadId: "thread-1",
-    sourceThreadId: "source-thread",
-    operation: "thread_send",
-  }],
+  approvals: [createMockApproval({
+    requestId: "approval-1", threadId: "thread-1",
+    subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "destination-thread", message: "Follow up" },
+    choices: [{ id: "allow", intent: "allow_once", label: "Allow" }, { id: "deny", intent: "deny", label: "Deny" }],
+  })],
 };
 
 describe("CoordinationPanel", () => {
   beforeEach(() => {
     readThreadControlMock.mockReset();
     readThreadControlMock.mockResolvedValue({ status: "found", projection });
-    respondToPermissionMock.mockClear();
+    respondToApprovalMock.mockClear();
     useThreadControlStore.setState({
       entries: {
         [threadControlKey(IDENTITY)]: { projection, loading: false, error: null, epoch: 1 },
@@ -148,7 +143,7 @@ describe("CoordinationPanel", () => {
     expect(screen.getByText("Owned by thread-1")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Allow" }));
-    expect(respondToPermissionMock).toHaveBeenCalledWith("approval-1", "allow");
+    expect(respondToApprovalMock).toHaveBeenCalledWith("approval-1", { choiceId: "allow" });
   });
 
   it("navigates historical origin from persisted source identity without a relation", async () => {
