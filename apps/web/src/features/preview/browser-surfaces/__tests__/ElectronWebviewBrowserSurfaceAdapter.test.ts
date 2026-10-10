@@ -271,6 +271,39 @@ describe("ElectronWebviewBrowserSurfaceAdapter", () => {
     host.disposeHost();
   });
 
+  it("drops credentials from a guest-committed address so it can be navigated to and restored", () => {
+    const adapters: ElectronWebviewBrowserSurfaceAdapter[] = [];
+    const host = new BrowserSurfaceHost({
+      adapterFactory: (identity, generation) => {
+        const adapter = new ElectronWebviewBrowserSurfaceAdapter(identity, generation, {
+          root: document.body,
+          bridge: bridge(),
+        });
+        adapters.push(adapter);
+        return adapter;
+      },
+      normalizeAddress: normalizeElectronWebviewSurfaceAddress,
+    });
+
+    const first = host.create(IDENTITY, { address: "http://localhost:4321/start" });
+    adapters[0]!.element.dispatchEvent(Object.assign(new Event("did-navigate"), {
+      url: "http://user:pw@localhost:4321/three?q=1#top",
+      isMainFrame: true,
+    }));
+    adapters[0]!.element.dispatchEvent(Object.assign(new Event("did-stop-loading"), {
+      url: "http://user:pw@localhost:4321/three?q=1#top",
+      isMainFrame: true,
+    }));
+
+    const committed = host.getSnapshot(IDENTITY)?.committedAddress;
+    expect(committed).toBe("http://localhost:4321/three?q=1#top");
+    expect(host.inspect(IDENTITY)?.recoveryAddress).toBe("http://localhost:4321/three?q=1#top");
+    expect(() => host.navigate(IDENTITY, committed!)).not.toThrow();
+    expect(host.discard(IDENTITY, first.generation)).toBe(true);
+    expect(() => host.ensure(IDENTITY)).not.toThrow();
+    host.disposeHost();
+  });
+
   it("starts inert, adopts with an opaque complete identity, and navigates through the typed bridge", async () => {
     const surfaceBridge = bridge();
     const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 7, {
