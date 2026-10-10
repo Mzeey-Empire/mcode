@@ -7,6 +7,8 @@
 
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
+import type { BrowserHistory } from "@mcode/contracts";
+import type { PreviewSurfaceRef } from "../features/preview/surfaces/registry.js";
 import {
   PREVIEW_POPUP_REQUESTED_CHANNEL,
   type PreviewPopupRequest,
@@ -226,6 +228,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
    * without this namespace; the renderer checks `desktopBridge?.preview` before use.
    */
   preview: {
+    history: {
+      list(workspaceId: string): Promise<BrowserHistory> {
+        return ipcRenderer.invoke("preview:history.list", workspaceId);
+      },
+      remove(workspaceId: string, url: string): Promise<void> {
+        return ipcRenderer.invoke("preview:history.remove", workspaceId, url);
+      },
+    },
     profiles: {
       remove(workspaceId: string): Promise<void> {
         return ipcRenderer.invoke("preview:profiles.remove", workspaceId);
@@ -363,6 +373,9 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     },
     /** Typed generation-bound Electron surface operations. */
     surface: {
+      hidden(payload: { surface: PreviewSurfaceRef }): Promise<{ ok: true } | { ok: false; error: string }> {
+        return ipcRenderer.invoke("preview.surface.hidden", payload);
+      },
       prepare(payload: {
         surface: {
           identity: {
