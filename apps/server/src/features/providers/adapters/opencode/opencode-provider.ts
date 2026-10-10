@@ -24,7 +24,7 @@ import type {
 } from "@mcode/contracts";
 import { AgentEventType, providerRuntimeEvent } from "@mcode/contracts";
 import type { ProviderHostPorts } from "@mcode/providers";
-import { OpenCodeNativeTurnDiff, approvalChoice, approvalOutcome } from "@mcode/providers";
+import { OpenCodeNativeTurnDiff, approvalChoice, approvalOutcome, approvalReceipt } from "@mcode/providers";
 import { SettingsService } from "../../../settings/settings-service.js";
 import { EnvService } from "../../../../runtime/environment/env-service.js";
 import { CleanForker } from "../../../handoff/index.js";
@@ -94,6 +94,7 @@ const DEFAULT_IDLE_CONFIRM: OpenCodeIdleConfirm = {
 
 /** One upstream permission or question ask awaiting the user's decision. */
 interface OpenCodePendingAsk {
+  unanswerable?: boolean;
   request: ApprovalRequestEnvelope & { body: ApprovalRequestBody };
   sessionId: string;
   upstreamSessionId: string;
@@ -115,6 +116,7 @@ type OpenCodeServeLease =
   | { kind: "attached"; endpoint: OpenCodeEndpoint };
 
 interface OpenCodeTurnState {
+  receiptRequestIds: Set<string>;
   upstreamSessionId: string;
   /** Last lease this session ran on; stop aborts through it. */
   lease: OpenCodeServeLease | null;
@@ -414,6 +416,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   async resolveApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     const entry = this.pendingPermissions.get(requestId);
     if (!entry) return { status: "not_pending" };
+    if ("autoDeny" in response) entry.unanswerable = true;
     if (entry.replying) return { status: "failed", message: "An answer is already being sent" };
     const choice = approvalChoice(entry.request.body, response);
     if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
@@ -460,16 +463,16 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   }
 
   /** Clear pending cards for one session without upstream calls (abort covers it). */
-  private drainPendingForSession(sessionId: string): void {
+  private drainPendingForSession(sessionId: string, reason: "session_stopped" | "turn_ended" = "session_stopped"): void {
     for (const entry of this.pendingPermissions.values()) {
       if (entry.sessionId !== sessionId) continue;
-      this.resolvePendingAsk(entry, { status: "cancelled", reason: "session_stopped" });
+      this.resolvePendingAsk(entry, { status: "cancelled", reason: entry.unanswerable ? "unanswerable" : reason });
     }
   }
 
   /** Clear every unresolved ask while the owning provider is shutting down. */
   private drainAllPending(): void {
-    for (const entry of this.pendingPermissions.values()) this.resolvePendingAsk(entry, { status: "cancelled", reason: "session_stopped" });
+    for (const entry of this.pendingPermissions.values()) this.resolvePendingAsk(entry, { status: "cancelled", reason: entry.unanswerable ? "unanswerable" : "session_stopped" });
   }
 
   /** True only while this turn still exclusively owns the upstream ask. */
@@ -481,6 +484,11 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   private resolvePendingAsk(entry: OpenCodePendingAsk, outcome: ApprovalOutcome): boolean {
     if (this.pendingPermissions.get(entry.request.requestId) !== entry) return false;
     this.pendingPermissions.delete(entry.request.requestId);
+    const receipts = this.turnStateFor(entry.sessionId).receiptRequestIds;
+    if (!receipts.has(entry.request.requestId)) {
+      receipts.add(entry.request.requestId);
+      this.publishTurnEvent(entry.routing, entry.sessionId, approvalReceipt(entry.request, outcome));
+    }
     this.emit("approval_resolved", { requestId: entry.request.requestId, threadId: entry.request.threadId, outcome });
     return true;
   }
@@ -561,6 +569,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     const existing = this.turns.get(sessionId);
     if (existing) return existing;
     const created: OpenCodeTurnState = {
+      receiptRequestIds: new Set(),
       upstreamSessionId: "",
       lease: null,
       abortController: new AbortController(),
@@ -616,7 +625,10 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
 
   private async runTurn(req: TurnRequest<"opencode">, routing: CanonicalLiveEventRouting, state: OpenCodeTurnState): Promise<void> {
     const threadId = this.threadIdFor(req.sessionId);
-    const emit = (event: AgentEvent): void => this.publishTurnEvent(routing, req.sessionId, event);
+    const emit = (event: AgentEvent): void => {
+      if (event.type === "turnComplete" || event.type === "ended" || event.type === "error") this.drainPendingForSession(req.sessionId, "turn_ended");
+      this.publishTurnEvent(routing, req.sessionId, event);
+    };
     state.aborted = false;
     state.abortController = new AbortController();
     state.messageRoles.clear();
@@ -1058,11 +1070,18 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     const threadId = this.threadIdFor(req.sessionId);
     const request = synthesizeOpenCodeApprovalRequest({ threadId, properties: normalized.properties });
     if (!request) {
+      const requestId = NodeCrypto.randomUUID();
+      this.pendingPermissions.set(requestId, {
+        request: { requestId, threadId, body: {
+          requestedAt: new Date().toISOString(), subject: { kind: "tool", toolName: "Unreadable request" },
+          choices: [{ id: "deny", intent: "deny", label: "Deny" }], noteDelivery: "none", origin: { kind: "agent" },
+        } },
+        sessionId: req.sessionId, upstreamSessionId: upstreamId, endpoint, kind: "permission",
+        version: askVersion(normalized.type), signal: state.abortController.signal, routing, replying: false, unanswerable: true,
+      });
       void this.stopSession(req.sessionId).catch(() => {
         logger.error("Failed to stop OpenCode session for an unroutable approval", { providerId: this.id, sessionId: req.sessionId, threadId });
-      }).then(() => this.emit("approval_resolved", {
-        requestId: NodeCrypto.randomUUID(), threadId, outcome: { status: "cancelled", reason: "unanswerable" },
-      }));
+      }).finally(() => this.drainPendingForSession(req.sessionId));
       return;
     }
     if (this.pendingPermissions.has(request.requestId)) return;

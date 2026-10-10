@@ -238,6 +238,7 @@ export class ParentNarrativeRecoveryCoordinator {
       || event.type === AgentEventType.ToolUse
       || event.type === AgentEventType.ToolResult
       || event.type === AgentEventType.HookStarted
+      || event.type === AgentEventType.ApprovalDecided
       || event.type === AgentEventType.HookCompleted;
   }
 }

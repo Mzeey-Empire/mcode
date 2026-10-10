@@ -1,11 +1,11 @@
-import type { ParentNarrativeRecoveryItem } from "@mcode/contracts";
+import type { ParentNarrativeRecoveryItem, ApprovalReceiptRecord } from "@mcode/contracts";
 import type { CreateToolCallRecordInput } from "../../tools/persistence/tool-call-record-store.js";
 import type { CreateThoughtSegmentInput } from "./persistence/thought-segment-store.js";
 import type { CreateHookExecutionInput } from "../../events/persistence/hook-execution-store.js";
 type RecoveredToolCallItem = Extract<ParentNarrativeRecoveryItem, { kind: "toolCall" }>;
 
 /** Pure row projection shared by main recovery commands and worker transactions. */
-export interface RecoveredNarrativeRows { tools: CreateToolCallRecordInput[]; thoughts: CreateThoughtSegmentInput[]; hooks: CreateHookExecutionInput[]; }
+export interface RecoveredNarrativeRows { tools: CreateToolCallRecordInput[]; thoughts: CreateThoughtSegmentInput[]; hooks: CreateHookExecutionInput[]; approvals: ApprovalReceiptRecord[]; }
 class RecoveredNarrativeProjection {
 rows(
     messageId: string,
@@ -14,12 +14,14 @@ rows(
     const tools: CreateToolCallRecordInput[] = [];
     const thoughts: CreateThoughtSegmentInput[] = [];
     const hooks: CreateHookExecutionInput[] = [];
+    const approvals: ApprovalReceiptRecord[] = [];
     for (const item of items) {
       if (item.kind === "toolCall") tools.push(this.recoveredToolCall(messageId, item));
       if (item.kind === "narrationSegment") thoughts.push(this.recoveredThought(messageId, item));
       if (item.kind === "hook") hooks.push(this.recoveredHook(messageId, item));
+      if (item.kind === "approval") approvals.push({ ...item.record, message_id: messageId });
     }
-    return { tools, thoughts, hooks };
+    return { tools, thoughts, hooks, approvals };
   }
 
 private recoveredToolCall(

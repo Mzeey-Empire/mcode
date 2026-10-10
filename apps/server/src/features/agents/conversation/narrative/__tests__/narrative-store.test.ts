@@ -8,6 +8,7 @@ import { ThoughtSegmentRepo } from "../persistence/thought-segment-repo.js";
 import { HookExecutionRepo } from "../../../events/persistence/hook-execution-repo.js";
 import { NarrativeStore } from "../narrative-store.js";
 import { NarrativeTurnState } from "../narrative-turn-state.js";
+import { ApprovalReceiptStore } from "../../../approvals/approval-receipt-store.js";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "../../../turns/parent-assistant-text-checkpoint-service.js";
 import {
@@ -382,6 +383,21 @@ describe("NarrativeStore.load (read seam)", () => {
       new HookExecutionRepo(db, agentStorageTestWriter(db)),
       db,
     );
+  });
+
+  it("loads receipts between tool rows, including across a detail cursor", async () => {
+    insertMessage(db, "m1", "assistant", "Done", 1);
+    await new ToolCallRecordRepo(db, agentStorageTestWriter(db)).bulkCreate([
+      { toolCallId: "before", messageId: "m1", toolName: "Bash", inputSummary: "before", outputSummary: "ok", status: "completed", sortOrder: 0 },
+      { toolCallId: "after", messageId: "m1", toolName: "Bash", inputSummary: "after", outputSummary: "ok", status: "completed", sortOrder: 2 },
+    ]);
+    new ApprovalReceiptStore(db).create({ id: "decision", message_id: "m1", tool_call_id: "before", kind: "command",
+      subject_label: "bun run lint", outcome: { status: "auto_denied", reason: "unreadable" }, origin: null,
+      decided_at: "2026-10-10T10:00:00Z", sort_order: 1 });
+    expect(store.load("thread-1").map(narrativeEntryIdentity)).toEqual(["toolCall:before", "approval:decision", "toolCall:after", "assistant:m1"]);
+    expect(store.load("thread-1", { detail: { after: { sequence: 1, sortOrder: 1, kind: "approval", id: "decision" } } })
+      .map(narrativeEntryIdentity)).toEqual(["toolCall:after", "assistant:m1"]);
+    expect(store.listApprovals("m1")[0]?.outcome).toEqual({ status: "auto_denied", reason: "unreadable" });
   });
 
   it("returns one list interleaved by (sequence, sortOrder), final response as the message body", async () => {

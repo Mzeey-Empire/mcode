@@ -532,6 +532,19 @@ export const thoughtSegments = sqliteTable(
   ],
 );
 
+/** Durable provider decisions sharing their assistant message's narrative order. */
+export const approvalReceipts = sqliteTable("approval_receipts", {
+  id: text("id").primaryKey().notNull(),
+  messageId: text("message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+  toolCallId: text("tool_call_id"),
+  kind: text("kind").notNull(),
+  subjectLabel: text("subject_label").notNull(),
+  outcome: text("outcome").notNull(),
+  origin: text("origin"),
+  decidedAt: text("decided_at").notNull().default(timestampDefault),
+  sortOrder: integer("sort_order").notNull(),
+}, (table) => [index("idx_approval_receipts_message_sort_order_id").on(table.messageId, table.sortOrder, table.id)]);
+
 export const hookExecutions = sqliteTable(
   "hook_executions",
   {

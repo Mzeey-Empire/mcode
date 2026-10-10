@@ -1,4 +1,5 @@
 import * as NodeCrypto from "node:crypto";
+import * as NodeUtil from "node:util";
 import { logger } from "@mcode/shared";
 import {
   createSubagentPresentation, mergeSubagentPresentation, resolveBrowserNarrativeTool,
@@ -172,6 +173,7 @@ export class NarrativeTurnState {
   private readonly effectSink: ((effect: NarrativeTurnStateEffect) => void) | undefined;
   private readonly pendingEffects: NarrativeTurnStateEffect[] = [];
   private recoveryChanges = new Map<string, ParentNarrativeRecoveryItem>();
+  private approvals = new Map<string, Extract<ParentNarrativeRecoveryItem, { kind: "approval" }>>();
   private recoveryDiscards = new Set<string>();
   readonly threadId: string;
   readonly execution: ExecutionIdentity | undefined;
@@ -198,6 +200,7 @@ export class NarrativeTurnState {
     copy.turnHooks = [...this.turnHooks];
     copy.pendingEffects.push(...structuredClone(this.pendingEffects));
     copy.recoveryChanges = new Map(this.recoveryChanges);
+    copy.approvals = new Map(this.approvals);
     copy.recoveryDiscards = new Set(this.recoveryDiscards);
     return copy;
   }
@@ -236,6 +239,7 @@ export class NarrativeTurnState {
    */
   beginTurn(threadId: string): void {
     this.assertThread(threadId);
+    this.approvals.clear();
     this.turnToolCalls = [];
     this.turnOpenThought = null;
     this.turnThoughts = [];
@@ -781,6 +785,7 @@ export class NarrativeTurnState {
   private createRecoverySnapshot(threadId: string, enforceRetention: boolean): ParentNarrativeRecoveryItem[] {
     this.assertThread(threadId);
     const snapshot = [
+      ...this.approvals.values(),
       ...this.turnToolCalls.map((toolCall) => this.toolCallRecoveryItem(toolCall)),
       ...this.turnThoughts.map((thought) => this.thoughtRecoveryItem(thought)),
       ...(this.turnOpenThought ? [this.openThoughtRecoveryItem(this.turnOpenThought)] : []),
@@ -819,6 +824,27 @@ export class NarrativeTurnState {
     if (!this.execution) return;
     this.recoveryChanges.delete(id);
     this.recoveryDiscards.add(id);
+  }
+
+  /** Allocate one decision's position from the same counter as tools and hooks. */
+  recordApproval(event: Extract<AgentEvent, { type: "approvalDecided" }>): void {
+    this.assertThread(event.threadId);
+    const existing = this.approvals.get(event.requestId);
+    const record = {
+      id: event.requestId, message_id: "", tool_call_id: event.toolCallId ?? null,
+      kind: event.kind, subject_label: event.subjectLabel, outcome: event.outcome, origin: event.origin ?? null,
+      decided_at: existing?.record.decided_at ?? new Date().toISOString(),
+      sort_order: existing?.record.sort_order ?? this.nextSortOrder(event.threadId),
+    };
+    if (existing && !NodeUtil.isDeepStrictEqual(existing.record, record)) {
+      logger.error("Approval receipt identity conflicts with its saved content", { requestId: event.requestId });
+      throw new Error("Approval receipt identity conflicts with its saved content");
+    }
+    if (existing) return;
+    this.closeOpenThought(event.threadId);
+    const item = { kind: "approval", record } satisfies ParentNarrativeRecoveryItem;
+    this.approvals.set(event.requestId, item);
+    this.recordRecoveryChange(item);
   }
 
   private toolCallRecoveryItem(toolCall: BufferedToolCall): Extract<ParentNarrativeRecoveryItem, { kind: "toolCall" }> {
@@ -1297,6 +1323,7 @@ export class NarrativeTurnState {
    */
   clearTurn(threadId: string): void {
     this.assertThread(threadId);
+    this.approvals.clear();
     this.turnToolCalls = [];
     this.turnOpenThought = null;
     this.turnThoughts = [];

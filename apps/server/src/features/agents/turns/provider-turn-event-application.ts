@@ -293,6 +293,9 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
 
   private applyNarrativeEvent(providerId: ProviderId, event: AgentEvent): EventApplicationResult {
     switch (event.type) {
+      case AgentEventType.ApprovalDecided:
+        this.narrative.recordApproval(event);
+        return true;
       case AgentEventType.TextDelta: return this.applyTextDelta(event);
       case AgentEventType.GeneratedAttachment: return this.applyGeneratedAttachment(event);
       case AgentEventType.Message: return this.applyMessage(providerId, event);

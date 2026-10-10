@@ -58,6 +58,7 @@ const UNSUPPORTED_FEATURE_REASON = {
   hookStarted: null,
   hookProgress: null,
   hookCompleted: null,
+  approvalDecided: null,
   assistantMessageBoundary: null,
   goalUpdated: null,
   goalCleared: null,
@@ -257,6 +258,9 @@ export class CodexLiveEventReducer {
 
   private applyNarrative(event: AgentEvent, capture?: ProviderRuntimeEvent["planCapture"]): CodexLiveWriterIntent[] | undefined {
     switch (event.type) {
+      case "approvalDecided":
+        this.narrative.recordApproval(event);
+        return [this.recoveryIntent(this.narrativeDelta.prepareChanges(this.narrative.takeRecoveryChanges(event.threadId)))];
       case "textDelta": return this.textDelta(event);
       case "assistantMessageBoundary": return this.boundary(event);
       case "message": return this.message(event, capture);

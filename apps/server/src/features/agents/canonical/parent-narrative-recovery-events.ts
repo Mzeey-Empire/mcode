@@ -16,9 +16,9 @@ export function prepareParentNarrativeRecoveryEvents(input: {
       id: itemId, threadId: thread.id, turnId: turn.id,
       ...narrativeParent(entry), kind: narrativeKind(entry), providerIdentities: turn.providerIdentities,
       payload: recoveryPayload(entry, findItem(itemId)?.payload ?? {}),
-      createdAt: entry.record.started_at,
+      createdAt: entry.kind === "approval" ? entry.record.decided_at : entry.record.started_at,
       updatedAt: entry.kind === "toolCall" ? entry.record.completed_at ?? entry.record.started_at
-        : entry.record.ended_at ?? entry.record.started_at,
+        : entry.kind === "approval" ? entry.record.decided_at : entry.record.ended_at ?? entry.record.started_at,
     };
     return { eventId: `narrative:${recovery.executionId}:${itemId}:${fingerprint(item.payload)}`,
       routing: { threadId: thread.id, turnId: turn.id, executionId: recovery.executionId, itemId },
@@ -55,6 +55,7 @@ function narrativeKind(item: ParentNarrativeRecoveryItem): AgentItem["kind"] {
     case "toolCall": return "tool-call";
     case "narrationSegment": return "reasoning";
     case "hook": return "system";
+    case "approval": return "system";
   }
 }
 

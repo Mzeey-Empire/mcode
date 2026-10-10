@@ -8,11 +8,14 @@ import {
   canonicalConversationDisplayMappings,
   conversationDisplayMaterializationState,
   hookExecutions,
+  approvalReceipts,
   messages,
   thoughtSegments,
   toolCallRecords,
 } from "../../../../runtime/persistence/sqlite/schema.js";
 import type { Message } from "@mcode/contracts";
+import { ApprovalReceiptRecordSchema } from "@mcode/contracts";
+import { ApprovalReceiptStore } from "../../approvals/approval-receipt-store.js";
 import { terminalAssistantProjectionCondition, terminalProviderChildTurnCondition } from "../../canonical/canonical-conversation-visibility.js";
 
 const MATERIALIZATION_STATE_ID = 1;
@@ -449,6 +452,7 @@ export class ConversationDisplayMaterializationStore {
       case "toolCall": return this.materializeDirectNarrative(row, payload, "toolCall", resolver);
       case "narrationSegment": return this.materializeDirectNarrative(row, payload, "narrationSegment", resolver);
       case "hook": return this.materializeDirectNarrative(row, payload, "hook", resolver);
+      case "approval": return this.materializeDirectNarrative(row, payload, "approval", resolver);
       case "narrativeRecovery": return this.materializeRecoveryPayload(row, payload.narrative, resolver);
       case "codexChildReasoning": return this.materializeChildReasoning(row, payload, resolver);
       case "codexChildToolCall":
@@ -478,7 +482,7 @@ export class ConversationDisplayMaterializationStore {
   private materializeDirectNarrative(
     row: CanonicalItemRow,
     payload: NarrativePayload,
-    kind: "toolCall" | "narrationSegment" | "hook",
+    kind: "toolCall" | "narrationSegment" | "hook" | "approval",
     resolver?: NarrativeDisplayResolver,
   ): { kind: string; id: string } | null {
     if (!payload.record) return null;
@@ -487,10 +491,15 @@ export class ConversationDisplayMaterializationStore {
   }
 
   private materializeNarrativeRecord(
-    kind: "toolCall" | "narrationSegment" | "hook",
+    kind: "toolCall" | "narrationSegment" | "hook" | "approval",
     record: Record<string, unknown>,
   ): { kind: string; id: string } {
     switch (kind) {
+      case "approval": {
+        const receipt = ApprovalReceiptRecordSchema().parse(record);
+        new ApprovalReceiptStore(this.db).materialize(receipt);
+        return { kind, id: receipt.id };
+      }
       case "toolCall":
         this.materializeTool(record);
         return { kind, id: requiredString(record.id, "toolCall id") };
@@ -522,7 +531,7 @@ export class ConversationDisplayMaterializationStore {
       visibleRecord = this.withDisplayMessage(record, row, resolver);
     }
     if (!visibleRecord) return null;
-    return narrative.kind === "toolCall" || narrative.kind === "narrationSegment" || narrative.kind === "hook"
+    return narrative.kind === "toolCall" || narrative.kind === "narrationSegment" || narrative.kind === "hook" || narrative.kind === "approval"
       ? this.materializeNarrativeRecord(narrative.kind, visibleRecord)
       : null;
   }
@@ -863,7 +872,7 @@ export class ConversationDisplayMaterializationStore {
         eq(canonicalAgentItems.threadId, row.threadId),
         eq(canonicalAgentItems.turnId, row.turnId),
         sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') IN (
-          'toolCall', 'narrationSegment', 'hook',
+          'toolCall', 'narrationSegment', 'hook', 'approval',
           'codexChildReasoning', 'codexChildToolCall', 'codexChildToolResult', 'narrativeRecovery'
         )`,
       ))
@@ -914,11 +923,12 @@ function boundedMaterializationBatch(rows: readonly CanonicalItemRow[]): Canonic
 
 function displayTableFor(
   kind: string,
-): typeof messages | typeof toolCallRecords | typeof thoughtSegments | typeof hookExecutions | null {
+): typeof messages | typeof toolCallRecords | typeof thoughtSegments | typeof hookExecutions | typeof approvalReceipts | null {
   if (kind === "message") return messages;
   if (kind === "toolCall") return toolCallRecords;
   if (kind === "narrationSegment") return thoughtSegments;
   if (kind === "hook") return hookExecutions;
+  if (kind === "approval") return approvalReceipts;
   return null;
 }
 

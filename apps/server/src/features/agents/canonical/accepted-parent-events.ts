@@ -227,11 +227,13 @@ function narrativeEvent(input: PreparationInput, entry: ParentNarrativeRecoveryI
   identities: Readonly<AgentTurn["providerIdentities"]> = input.turn.providerIdentities): CanonicalAgentEventDraft {
   const parentItemId = entry.kind === "toolCall" && entry.record.parent_tool_call_id
     ? `toolCall:${entry.record.parent_tool_call_id}` : undefined;
-  const updatedAt = entry.kind === "toolCall" ? entry.record.completed_at : entry.record.ended_at;
+  const startedAt = entry.kind === "approval" ? entry.record.decided_at : entry.record.started_at;
+  const updatedAt = entry.kind === "toolCall" ? entry.record.completed_at
+    : entry.kind === "approval" ? entry.record.decided_at : entry.record.ended_at;
   return itemEvent(input, { id: `${entry.kind}:${entry.record.id}`, threadId: input.thread.id, turnId: input.turn.id,
     ...(parentItemId ? { parentItemId } : {}), kind: narrativeKind(entry), providerIdentities: [...identities],
     payload: { projection: entry.kind, record: entry.record },
-    createdAt: entry.record.started_at, updatedAt: updatedAt ?? entry.record.started_at });
+    createdAt: startedAt, updatedAt: updatedAt ?? startedAt });
 }
 
 function narrativeKind(entry: ParentNarrativeRecoveryItem): AgentItem["kind"] {
@@ -239,6 +241,7 @@ function narrativeKind(entry: ParentNarrativeRecoveryItem): AgentItem["kind"] {
     case "toolCall": return "tool-call";
     case "narrationSegment": return "reasoning";
     case "hook": return "system";
+    case "approval": return "system";
   }
 }
 
