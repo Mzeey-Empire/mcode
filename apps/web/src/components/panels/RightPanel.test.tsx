@@ -89,9 +89,11 @@ vi.mock("./ResizableRightPanel", () => ({
     testId?: string;
     "aria-hidden"?: boolean;
     "data-right-panel-root"?: string;
+    className?: string;
   }) => (
     <div
       data-testid={testId}
+      className={props.className}
       aria-hidden={props["aria-hidden"]}
       data-right-panel-root={props["data-right-panel-root"]}
       inert={inert ? true : undefined}
@@ -401,6 +403,20 @@ describe("RightPanel", () => {
     expect(toggle).not.toHaveFocus();
     expect(screen.getByTestId("right-panel")).toHaveAttribute("inert");
     expect(screen.getByTestId("right-panel")).not.toHaveAttribute("aria-hidden");
+  });
+
+  it("does not create a stacking context while visible", () => {
+    useDiffStore.setState({
+      rightPanelFallbackByWorkspace: {
+        "workspace-1": createRightPanelState({ visible: true, width: 400 }),
+      },
+    });
+
+    render(<RightPanel />);
+
+    // Any translate, including translate-x-0, traps Design overlays below the
+    // body-level Browser surface host that paints the hosted page.
+    expect(screen.getByTestId("right-panel").className).not.toMatch(/(^|\s)-?translate-/);
   });
 
   it("renders coordination content for an open active thread tab", () => {

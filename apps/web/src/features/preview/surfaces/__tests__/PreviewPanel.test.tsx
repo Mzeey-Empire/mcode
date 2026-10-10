@@ -116,6 +116,37 @@ import {
 import { ViewportCoordinator } from "../../automation/services/viewportCoordinator";
 import { browserSurfaceHost } from "../BrowserSurfaceHostRoot";
 import { pushEmitter } from "@/transport/ws-transport";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
+
+/** `--layer-*` values declared in index.css, keyed by variable name. */
+function declaredLayerValues(): Record<string, number> {
+  // Vitest's CSS handling yields an empty string for `index.css?raw`.
+  const here = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
+  const indexCss = NodeFS.readFileSync(NodePath.resolve(here, "../../../../index.css"), "utf8");
+  const layers: Record<string, number> = {};
+  for (const match of indexCss.matchAll(/(--layer-[a-z-]+):\s*(-?\d+);/g)) {
+    layers[match[1]!] = Number(match[2]);
+  }
+  return layers;
+}
+
+/**
+ * jsdom applies no Tailwind, so stacking is read from declared classes: the
+ * outermost positioned ancestor with a `z-(--layer-*)` class is the stacking
+ * context that competes with the Browser surface host root.
+ */
+function outermostLayerToken(element: HTMLElement): string | undefined {
+  let token: string | undefined;
+  for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) {
+    const className = node.getAttribute("class") ?? "";
+    if (!/(?:^|\s)(?:relative|absolute|fixed)(?:\s|$)/.test(className)) continue;
+    const layer = /(?:^|\s)-?z-\((--layer-[a-z-]+)\)/.exec(className)?.[1];
+    if (layer) token = layer;
+  }
+  return token;
+}
 
 function mockBridgeState(overrides: Record<string, unknown> = {}) {
   const state = {
@@ -856,7 +887,6 @@ describe("PreviewPanel: full panel state", () => {
     expect(screen.queryByTestId("preview-webview-surface")).not.toBeInTheDocument();
     expect(screen.getByTestId("browser-local-ports")).toBeInTheDocument();
     expect(screen.getByTestId("preview-surface")).toHaveClass(
-      "z-(--layer-base)",
       "overflow-hidden",
       "rounded-tl-md",
     );
@@ -872,7 +902,6 @@ describe("PreviewPanel: full panel state", () => {
     expect(screen.queryByTestId("preview-webview")).not.toBeInTheDocument();
     expect(screen.getByTestId("browser-local-ports")).toBeInTheDocument();
     expect(screen.getByTestId("preview-surface")).toHaveClass(
-      "z-(--layer-base)",
       "overflow-hidden",
       "rounded-tl-md",
     );
@@ -1934,6 +1963,19 @@ describe("PreviewPanel: full panel state", () => {
       width: "120px",
       height: "32px",
     });
+  });
+
+  it("layers the draft annotation bubble above the hosted page and below modals", () => {
+    installDraftAnnotation();
+
+    render(<PreviewPanel threadId="thread-1" />);
+
+    const layers = declaredLayerValues();
+    const bubbleLayer = outermostLayerToken(screen.getByTestId("preview-annotation-bubble"));
+    expect(bubbleLayer).toBe("--layer-browser-overlay");
+    // The Browser surface host root paints the hosted page at --layer-browser-surface (30).
+    expect(layers["--layer-browser-overlay"]).toBeGreaterThan(30);
+    expect(layers["--layer-browser-overlay"]).toBeLessThan(layers["--layer-modal-backdrop"]!);
   });
 
   it("shows annotation save only after note text or visual edits exist", () => {
