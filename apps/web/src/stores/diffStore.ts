@@ -854,6 +854,8 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         ...current,
         tabInstances,
         activeTabId: activeTabId === instanceId ? nextActive?.id ?? null : activeTabId,
+        // Closing the last tab closes the panel; reopening lands on the empty state.
+        visible: tabInstances.length > 0 && current.visible,
       });
     }),
 

@@ -295,7 +295,7 @@ describe("PreviewWebview", () => {
     );
     const { rerender } = render(
       <PreviewWebview
-        coveredLeft={112}
+        coveredRight={112}
         threadId="thread-covered"
         tabId="tab-covered"
         src="https://example.com"
@@ -306,19 +306,19 @@ describe("PreviewWebview", () => {
     expect(surface).toHaveStyle({
       left: "10px",
       width: "640px",
-      clipPath: "inset(0px 0px 0px 112px round 0px 0px 0px 0px)",
+      clipPath: "inset(0px 112px 0px 0px round 0px 0px 0px 0px)",
     });
 
     rerender(
       <PreviewWebview
-        coveredLeft={0}
+        coveredRight={0}
         threadId="thread-covered"
         tabId="tab-covered"
         src="https://example.com"
       />,
     );
     expect(surface.style.clipPath).toBe(
-      "inset(0px 0px 0px 0px round var(--radius-md) 0px 0px 0px)",
+      "inset(0px 0px 0px 0px round 0px var(--radius-md) 0px 0px)",
     );
     rect.mockRestore();
   });
@@ -486,7 +486,7 @@ describe("PreviewWebview", () => {
     browserSurfacePresentationCoordinator.setActivityRailOverlap(112);
 
     expect(await screen.findByTestId("electron-browser-surface-webview")).toHaveStyle({
-      clipPath: "inset(0px 0px 0px 112px round 0px 0px 0px 0px)",
+      clipPath: "inset(0px 112px 0px 0px round 0px 0px 0px 0px)",
     });
     releaseAnchor();
     rect.mockRestore();

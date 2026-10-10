@@ -808,11 +808,11 @@ describe("PreviewPanel: full panel state", () => {
       ]),
     });
 
-    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" coveredLeft={112} />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" coveredRight={112} />);
 
     const overlay = screen.getByTestId("browser-automation-overlay");
     expect(overlay.parentElement).toBe(screen.getByTestId("preview-surface"));
-    expect(overlay).toHaveStyle({ clipPath: "inset(0 0 0 112px)" });
+    expect(overlay).toHaveStyle({ clipPath: "inset(0 112px 0 0)" });
     expect(overlay).not.toHaveClass("border");
     expect(overlay).not.toHaveClass("border-2");
     expect(overlay).not.toHaveClass("border-primary");
@@ -888,7 +888,7 @@ describe("PreviewPanel: full panel state", () => {
     expect(screen.getByTestId("browser-local-ports")).toBeInTheDocument();
     expect(screen.getByTestId("preview-surface")).toHaveClass(
       "overflow-hidden",
-      "rounded-tl-md",
+      "rounded-tr-md",
     );
     expect(mockUsePreviewBridge).toHaveBeenLastCalledWith(
       expect.objectContaining({ threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }),
@@ -903,7 +903,7 @@ describe("PreviewPanel: full panel state", () => {
     expect(screen.getByTestId("browser-local-ports")).toBeInTheDocument();
     expect(screen.getByTestId("preview-surface")).toHaveClass(
       "overflow-hidden",
-      "rounded-tl-md",
+      "rounded-tr-md",
     );
     expect(screen.getByTestId("preview-surface")).not.toHaveClass(
       "mx-2",
@@ -913,7 +913,8 @@ describe("PreviewPanel: full panel state", () => {
       "border",
       "bg-hover/10",
     );
-    expect(screen.getByTestId("browser-header").parentElement).toHaveClass(
+    expect(screen.getByTestId("browser-chrome")).toContainElement(screen.getByTestId("browser-header"));
+    expect(screen.getByTestId("browser-chrome")).toHaveClass(
       "relative",
       "z-(--layer-dropdown)",
     );
@@ -923,10 +924,10 @@ describe("PreviewPanel: full panel state", () => {
   });
 
   it("clips the Browser chrome around the expanded activity rail", () => {
-    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" coveredLeft={112} />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" coveredRight={112} />);
 
-    expect(screen.getByTestId("browser-header").parentElement).toHaveStyle({
-      clipPath: "inset(0 0 0 112px)",
+    expect(screen.getByTestId("browser-chrome")).toHaveStyle({
+      clipPath: "inset(0 112px 0 0)",
     });
   });
 

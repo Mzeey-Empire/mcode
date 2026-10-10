@@ -46,7 +46,7 @@ export interface PreviewWebviewProps {
   /** Renderer path that owns this surface's presentation intent. */
   readonly presentationSource?: BrowserSurfacePresentationSource;
   /** Optional explicit overlap retained for focused renderer coverage. */
-  readonly coveredLeft?: number;
+  readonly coveredRight?: number;
   readonly viewport?: { readonly width: number; readonly height: number };
   readonly onPageStatus?: (status: PreviewPageStatus) => void;
   readonly onNavigationStateChange?: (state: {
@@ -135,7 +135,7 @@ export const PreviewWebview = forwardRef<PreviewWebviewHandle, PreviewWebviewPro
       allowHiddenPresentation,
       presentationActive,
       presentationSource,
-      coveredLeft,
+      coveredRight,
       viewport,
       onPageStatus,
       onNavigationStateChange,
@@ -145,7 +145,7 @@ export const PreviewWebview = forwardRef<PreviewWebviewHandle, PreviewWebviewPro
     const presentationIntentRef = useRef({
       active,
       allowHiddenPresentation,
-      coveredLeft,
+      coveredRight,
       presentationActive,
       presentationSource,
       viewport,
@@ -153,7 +153,7 @@ export const PreviewWebview = forwardRef<PreviewWebviewHandle, PreviewWebviewPro
     presentationIntentRef.current = {
       active,
       allowHiddenPresentation,
-      coveredLeft,
+      coveredRight,
       presentationActive,
       presentationSource,
       viewport,
@@ -179,7 +179,7 @@ export const PreviewWebview = forwardRef<PreviewWebviewHandle, PreviewWebviewPro
         anchor: placement,
         pageState,
         viewport: current.viewport,
-        ...(current.coveredLeft === undefined ? {} : { coveredLeft: current.coveredLeft }),
+        ...(current.coveredRight === undefined ? {} : { coveredRight: current.coveredRight }),
         inputEnabled: current.presentationSource === "panel",
         accessible: current.presentationSource === "panel",
       }, presentationRegistrationRef.current?.token);
@@ -345,7 +345,7 @@ export const PreviewWebview = forwardRef<PreviewWebviewHandle, PreviewWebviewPro
         observer?.disconnect();
         window.removeEventListener("resize", update);
       };
-    }, [active, allowHiddenPresentation, coveredLeft, identity, presentationActive, presentationSource, publishPresentation, viewport]);
+    }, [active, allowHiddenPresentation, coveredRight, identity, presentationActive, presentationSource, publishPresentation, viewport]);
 
     return (
       <div

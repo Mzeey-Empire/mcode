@@ -29,8 +29,6 @@ const browserTabSet: BrowserTabSet = {
 };
 
 const handlers = {
-  onTogglePanel: vi.fn(),
-  onToggleMaximized: vi.fn(),
   onSelect: vi.fn(),
   onClose: vi.fn(),
   onReorder: vi.fn(),
@@ -46,11 +44,9 @@ function railElement(openTabs: readonly RightPanelTab[] = ["terminal", "changes"
       workspaceId={workspaceId}
       activeTabId={rightPanelSingletonId("terminal")}
       scope="thread"
-      scopeProgress={{ done: 0, total: 0 }}
       changesCount={3}
       changesFresh={false}
       browserTabSet={null}
-      maximized={false}
       {...handlers}
     />
   );
@@ -111,17 +107,30 @@ describe("ActivityRail expansion", () => {
     expect(onExpandedChange).toHaveBeenLastCalledWith(false);
   });
 
-  it("keeps a fixed collapsed footprint above right-panel content", () => {
+  it("keeps a fixed footprint on the right edge and expands leftward over the body", () => {
     renderRail();
     const rail = screen.getByTestId("activity-rail");
+    const surface = rail.firstElementChild;
 
-    expect(rail).toHaveClass("z-(--layer-floating-panel)", "w-12", "flex-none");
-    expect(rail.firstElementChild).toHaveClass("absolute", "w-full");
+    expect(rail).toHaveClass("z-(--layer-floating-panel)", "w-(--container-right-rail)", "flex-none");
+    expect(surface).toHaveClass("absolute", "right-0", "border-l", "pt-14", "w-(--container-right-rail)");
 
     fireEvent.focus(screen.getByRole("button", { name: "Terminal" }));
 
-    expect(rail.firstElementChild).toHaveClass("w-full");
-    expect(rail).toHaveClass("w-40", "-mr-28");
+    expect(rail).toHaveClass("w-(--container-right-rail)");
+    expect(surface).toHaveClass("right-0", "w-(--container-right-rail-expanded)");
+  });
+
+  it("marks only the active entry with the selected fill and amber edge", () => {
+    renderRail();
+
+    expect(screen.getByRole("button", { name: "Terminal" })).toHaveClass("bg-selected", "text-ink");
+    expect(screen.getAllByTestId("rail-active-edge")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Terminal" }).parentElement).toContainElement(
+      screen.getByTestId("rail-active-edge"),
+    );
+    expect(screen.getByRole("button", { name: "Review, 3 files changed" })).toHaveClass("text-muted");
+    expect(screen.getByRole("button", { name: "Review, 3 files changed" })).not.toHaveClass("bg-selected");
   });
 
   it("anchors trailing controls right and reserves their label space", () => {
@@ -133,16 +142,7 @@ describe("ActivityRail expansion", () => {
       "right-0",
       "top-0",
     );
-    expect(screen.getByTestId("rail-maximize-toggle")).toHaveClass(
-      "absolute",
-      "right-0",
-      "top-0",
-    );
     expect(screen.getByRole("button", { name: "Terminal" }).querySelector("span")).toHaveClass(
-      "left-8",
-      "right-8",
-    );
-    expect(screen.getByTestId("rail-panel-toggle").querySelector("span")).toHaveClass(
       "left-8",
       "right-8",
     );
@@ -153,11 +153,9 @@ describe("ActivityRail expansion", () => {
         workspaceId={workspaceId}
         activeTabId={rightPanelSingletonId("preview")}
         scope="thread"
-        scopeProgress={{ done: 0, total: 0 }}
         changesCount={0}
         changesFresh={false}
         browserTabSet={browserTabSet}
-        maximized={false}
         {...handlers}
       />,
     );
@@ -194,47 +192,14 @@ describe("ActivityRail expansion", () => {
     expect(rail).toHaveAttribute("data-expanded", "true");
   });
 
-  it("keeps close and maximize as independent panel actions", () => {
-    const { rerender } = renderRail();
-
-    fireEvent.focus(screen.getByRole("button", { name: "Close panel" }));
-    fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
-    fireEvent.click(screen.getByRole("button", { name: "Maximize panel" }));
-
-    expect(handlers.onTogglePanel).toHaveBeenCalledTimes(1);
-    expect(handlers.onToggleMaximized).toHaveBeenCalledTimes(1);
-
-    rerender(
-      <ActivityRail
-        tabInstances={["terminal", "changes"].map((type) => ({
-          id: rightPanelSingletonId(type as RightPanelTab),
-          type: type as RightPanelTab,
-        }))}
-        workspaceId={workspaceId}
-        activeTabId={rightPanelSingletonId("terminal")}
-        scope="thread"
-        scopeProgress={{ done: 0, total: 0 }}
-        changesCount={3}
-        changesFresh={false}
-        browserTabSet={null}
-        maximized
-        {...handlers}
-      />,
-    );
-
-    expect(screen.getByRole("button", { name: "Restore panel" })).toBeInTheDocument();
-  });
-
-  it("shows the shared maximize tooltip while retaining the panel action", () => {
+  it("leaves panel-level actions to the panel header", () => {
     renderRail();
-    const maximize = screen.getByTestId("rail-maximize-toggle");
+    fireEvent.focus(screen.getByRole("button", { name: "Terminal" }));
 
-    fireEvent.focus(maximize);
-    act(() => vi.runAllTimers());
-    expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveTextContent("Maximize panel");
-
-    fireEvent.click(maximize);
-    expect(handlers.onToggleMaximized).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Close panel" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Maximize|Restore|Expand/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close Terminal" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New tab" })).toBeInTheDocument();
   });
 
   it("opens the remaining tab choices and creates the selected tab", () => {
@@ -300,16 +265,15 @@ describe("ActivityRail expansion", () => {
     const railOverlay = rail.firstElementChild;
     const guest = screen.getByTestId("renderer-guest");
     const terminal = screen.getByRole("button", { name: "Terminal" });
-    expect(rail).toHaveClass("w-12");
-    expect(rail).not.toHaveClass("-mr-28");
+    expect(railOverlay).toHaveClass("w-(--container-right-rail)");
 
     const originalElementFromPoint = document.elementFromPoint;
     Object.defineProperty(document, "elementFromPoint", {
       configurable: true,
       value: (x: number) => {
-        const expanded = rail.classList.contains("w-40");
-        if (expanded && x < 160) return terminal;
-        if (x >= 48) return guest;
+        const expanded = railOverlay?.classList.contains("w-(--container-right-rail-expanded)");
+        if (expanded && x >= 640) return terminal;
+        if (x < 752) return guest;
         return rail;
       },
     });
@@ -319,9 +283,9 @@ describe("ActivityRail expansion", () => {
       act(() => vi.advanceTimersByTime(EXPECTED_EXPAND_DELAY_MS));
 
       expect(rail).toHaveAttribute("data-expanded", "true");
-      expect(rail).toHaveClass("w-40", "-mr-28", "z-(--layer-floating-panel)");
-      expect(railOverlay).toHaveClass("absolute", "w-full");
-      expect(document.elementFromPoint(100, 200)).toBe(terminal);
+      expect(rail).toHaveClass("w-(--container-right-rail)", "z-(--layer-floating-panel)");
+      expect(railOverlay).toHaveClass("absolute", "right-0", "w-(--container-right-rail-expanded)");
+      expect(document.elementFromPoint(700, 200)).toBe(terminal);
       expect(document.elementFromPoint(300, 200)).toBe(guest);
       expect(guest).toBeVisible();
       expect(guest).not.toHaveClass("invisible", "pointer-events-none");
@@ -334,8 +298,7 @@ describe("ActivityRail expansion", () => {
       fireEvent.pointerLeave(rail, { pointerType: "mouse" });
       act(() => vi.advanceTimersByTime(EXPECTED_COLLAPSE_DELAY_MS));
       expect(rail).toHaveAttribute("data-expanded", "false");
-      expect(rail).toHaveClass("w-12");
-      expect(rail).not.toHaveClass("-mr-28");
+      expect(railOverlay).toHaveClass("w-(--container-right-rail)");
     } finally {
       Object.defineProperty(document, "elementFromPoint", {
         configurable: true,
@@ -377,11 +340,9 @@ describe("ActivityRail expansion", () => {
         workspaceId={workspaceId}
         activeTabId={rightPanelSingletonId("preview")}
         scope="thread"
-        scopeProgress={{ done: 0, total: 0 }}
         changesCount={0}
         changesFresh={false}
         browserTabSet={null}
-        maximized={false}
         terminalLabels={{ "action-terminal:build": "Build" }}
         {...handlers}
       />,
@@ -437,7 +398,7 @@ describe("ActivityRail expansion", () => {
     );
     expect(terminal).toHaveFocus();
 
-    fireEvent.keyDown(screen.getByRole("button", { name: "Close panel" }), {
+    fireEvent.keyDown(screen.getByRole("button", { name: "New tab" }), {
       key: "ArrowDown",
       altKey: true,
       shiftKey: true,

@@ -232,10 +232,10 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     this.frame.style.transformOrigin = "top left";
     this.frame.style.transform = presentation.scale === undefined ? "" : `scale(${presentation.scale})`;
     this.frame.style.zIndex = presentation.zIndex === undefined ? "" : String(presentation.zIndex);
-    const coveredLeft = presentation.coveredLeft ?? 0;
-    const topLeftRadius = coveredLeft > 0 ? "0px" : "var(--radius-md)";
+    const coveredRight = presentation.coveredRight ?? 0;
+    const topRightRadius = coveredRight > 0 ? "0px" : "var(--radius-md)";
     this.frame.style.clipPath =
-      `inset(0px 0px 0px ${coveredLeft}px round ${topLeftRadius} 0px 0px 0px)`;
+      `inset(0px ${coveredRight}px 0px 0px round 0px ${topRightRadius} 0px 0px)`;
     this.frame.style.visibility = "visible";
     this.frame.style.pointerEvents = presentation.inputEnabled === false ? "none" : "auto";
     this.frame.setAttribute("aria-hidden", presentation.accessible === false ? "true" : "false");

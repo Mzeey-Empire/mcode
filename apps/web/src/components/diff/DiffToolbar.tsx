@@ -18,6 +18,7 @@ import { CommitPicker } from "./CommitPicker";
 import { TurnPicker } from "./TurnPicker";
 import { ReviewActions } from "./ReviewActions";
 import { DiffStat } from "./DiffStat";
+import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 
 type CommitAvailability = "loading" | "available" | "empty";
 type BranchAvailability = "loading" | "available" | "empty";
@@ -278,86 +279,47 @@ function DiffToolbarContent({
   readonly viewMode: DiffStoreState["viewMode"];
   readonly viewModes: readonly ReviewViewMode[];
 }) {
+  // The view picker leads row 1 and the view's operands and file controls fill
+  // row 2. The branch picker is a full-width line, so it stays atop the body.
   return (
-    <div className="flex flex-wrap items-center gap-y-1.5 px-3 py-2 border-b border-border/30">
-      <ReviewToolbarStart
-        activeThreadId={activeThreadId}
-        activeView={activeView}
-        branchAvailability={branchAvailability}
-        commitAvailability={commitAvailability}
-        onViewMenuOpenChange={onViewMenuOpenChange}
-        reviewDiffStat={reviewDiffStat}
-        reviewFileCount={reviewFileCount}
-        setReviewViewForThread={setReviewViewForThread}
-        setViewMode={setViewMode}
-        viewMenuOpen={viewMenuOpen}
-        viewMode={viewMode}
-        viewModes={viewModes}
-      />
-      <div className="ml-auto flex items-center gap-1.5">
-        <div
-          ref={controlsSlotRef}
-          data-testid="review-file-controls-slot"
-          className="flex items-center gap-0.5"
+    <>
+      <PanelHeaderSlot slot="leading">
+        <ReviewViewMenu
+          activeThreadId={activeThreadId}
+          activeView={activeView}
+          branchAvailability={branchAvailability}
+          commitAvailability={commitAvailability}
+          onOpenChange={onViewMenuOpenChange}
+          reviewFileCount={reviewFileCount}
+          setReviewViewForThread={setReviewViewForThread}
+          setViewMode={setViewMode}
+          viewMenuOpen={viewMenuOpen}
+          viewMode={viewMode}
+          viewModes={viewModes}
         />
-        <ReviewToolbarActions activeThread={activeThread} />
-      </div>
+      </PanelHeaderSlot>
+      <PanelHeaderSlot slot="row2">
+        <div data-testid="review-toolbar" className="flex min-w-0 flex-1 items-center gap-2">
+          <ReviewDiffStat reviewDiffStat={reviewDiffStat} reviewFileCount={reviewFileCount} />
+          <CommitOperand activeView={activeView} />
+          <TurnOperand activeView={activeView} activeThreadId={activeThreadId} />
+          <div className="ml-auto flex items-center gap-1.5">
+            <div
+              ref={controlsSlotRef}
+              data-testid="review-file-controls-slot"
+              className="flex items-center gap-0.5"
+            />
+            <ReviewToolbarActions activeThread={activeThread} />
+          </div>
+        </div>
+      </PanelHeaderSlot>
       <BranchOperand
         activeThreadId={activeThreadId}
         activeView={activeView}
         activeWorkspaceId={activeWorkspaceId}
         diffScopeRevision={diffScopeRevision}
       />
-    </div>
-  );
-}
-
-function ReviewToolbarStart({
-  activeThreadId,
-  activeView,
-  branchAvailability,
-  commitAvailability,
-  onViewMenuOpenChange,
-  reviewDiffStat,
-  reviewFileCount,
-  setReviewViewForThread,
-  setViewMode,
-  viewMenuOpen,
-  viewMode,
-  viewModes,
-}: {
-  readonly activeThreadId: string | null;
-  readonly activeView: ReviewViewMode | undefined;
-  readonly branchAvailability: BranchAvailability;
-  readonly commitAvailability: CommitAvailability;
-  readonly onViewMenuOpenChange: (open: boolean) => void;
-  readonly reviewDiffStat: DiffStoreState["reviewDiffStat"];
-  readonly reviewFileCount: number | null;
-  readonly setReviewViewForThread: DiffStoreState["setReviewViewForThread"];
-  readonly setViewMode: DiffStoreState["setViewMode"];
-  readonly viewMenuOpen: boolean;
-  readonly viewMode: DiffStoreState["viewMode"];
-  readonly viewModes: readonly ReviewViewMode[];
-}) {
-  return (
-    <div className="flex min-w-0 items-center gap-2">
-      <ReviewViewMenu
-        activeThreadId={activeThreadId}
-        activeView={activeView}
-        branchAvailability={branchAvailability}
-        commitAvailability={commitAvailability}
-        onOpenChange={onViewMenuOpenChange}
-        reviewFileCount={reviewFileCount}
-        setReviewViewForThread={setReviewViewForThread}
-        setViewMode={setViewMode}
-        viewMenuOpen={viewMenuOpen}
-        viewMode={viewMode}
-        viewModes={viewModes}
-      />
-      <ReviewDiffStat reviewDiffStat={reviewDiffStat} reviewFileCount={reviewFileCount} />
-      <CommitOperand activeView={activeView} />
-      <TurnOperand activeView={activeView} activeThreadId={activeThreadId} />
-    </div>
+    </>
   );
 }
 
@@ -579,7 +541,7 @@ function BranchOperand({
   if (activeView?.operand !== "branch" || !activeWorkspaceId) return null;
   return (
     <div
-      className="flex w-full min-w-0 basis-full items-center"
+      className="flex w-full min-w-0 items-center border-b border-border/30 px-3 py-2"
       data-testid="review-operand-slot"
       data-operand="branch"
     >

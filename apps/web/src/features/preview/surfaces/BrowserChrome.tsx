@@ -2,6 +2,7 @@
  * Owns the existing Browser header, annotation header and viewport toolbar wiring, separate from the page surface and design overlays.
  */
 import type { ReactNode } from "react";
+import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { BrowserHeader } from "./BrowserHeader";
 import { BrowserViewportToolbar } from "./BrowserViewportToolbar";
 import { PreviewAnnotationHeader } from "./PreviewAnnotationHeader";
@@ -23,7 +24,7 @@ interface BrowserChromeProps {
   readonly responsiveViewportScale: number;
   readonly closeViewportToolbar: ReturnType<typeof usePreviewViewport>["closeViewportToolbar"];
   readonly invalidateActiveViewportObservation: ReturnType<typeof usePreviewViewport>["invalidateActiveViewportObservation"];
-  readonly coveredLeft: number | undefined;
+  readonly coveredRight: number | undefined;
   readonly showAnnotationCommandBar: boolean;
   readonly pageAnnotations: ReturnType<typeof useDesignAnnotationEditor>["pageAnnotations"];
   readonly bundleCount: ReturnType<typeof useDesignAnnotationEditor>["bundleCount"];
@@ -56,7 +57,7 @@ interface BrowserChromeProps {
   readonly activeAutomationRequest: ReturnType<typeof usePreviewPage>["activeAutomationRequest"];
 }
 
-/** Renders the existing header and toolbar without adding a DOM wrapper. */
+/** Puts the Browser or annotation header in the panel header's row 2; the viewport toolbar stays over the page. */
 export function BrowserChrome({
   viewportToolbarOpen,
   activeViewportState,
@@ -64,7 +65,7 @@ export function BrowserChrome({
   responsiveViewportScale,
   closeViewportToolbar,
   invalidateActiveViewportObservation,
-  coveredLeft,
+  coveredRight,
   showAnnotationCommandBar,
   pageAnnotations,
   bundleCount,
@@ -112,9 +113,13 @@ export function BrowserChrome({
 
   return (
     <div
+      data-testid="browser-chrome"
       className="pointer-events-auto relative z-(--layer-dropdown)"
-      style={coveredLeft ? { clipPath: `inset(0 0 0 ${coveredLeft}px)` } : undefined}
+      style={coveredRight ? { clipPath: `inset(0 ${coveredRight}px 0 0)` } : undefined}
     >
+      <PanelHeaderSlot slot="row2">
+        {/* A block wrapper so the header's own flex row spans the full row. */}
+        <div className="min-w-0 flex-1">
         {showAnnotationCommandBar ? (
           <PreviewAnnotationHeader
             pageCount={pageAnnotations.length}
@@ -203,6 +208,8 @@ export function BrowserChrome({
             }
           />
         )}
+        </div>
+      </PanelHeaderSlot>
       {renderViewportToolbar()}
     </div>
   );

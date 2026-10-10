@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -306,23 +307,24 @@ function CanonicalDetailView({
   }, [row.id]);
   return (
     <section className="flex min-h-0 flex-1 flex-col" aria-label={`${identity} subagent details`}>
-      <header className="flex shrink-0 items-center gap-2 border-b border-border/50 px-4 py-3">
+      <PanelHeaderSlot slot="leading">
         <Button type="button" variant="ghost" size="icon-compact" onClick={onBack} aria-label="Back to subagents" className="shrink-0">
           <ArrowLeft size={15} aria-hidden />
         </Button>
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <ProviderIcon provider={provider} size={20} />
-          <div className="min-w-0 flex-1">
-            <h2 className="text-fade text-sm font-semibold">{title}</h2>
-            {row.task && <p className="text-fade text-xs text-muted">{identity}</p>}
-            {lineage && <p className="text-fade text-xs text-muted">{lineage}</p>}
-          </div>
-          <span role="status" className="sr-only">
-            {canonicalStatus(row)}
-          </span>
-          {configuration && <span className="shrink-0 font-mono text-xs text-muted">{configuration}</span>}
+        <PanelTitlePill headingLevel={2} icon={<ProviderIcon provider={provider} size={16} />}>
+          {title}
+        </PanelTitlePill>
+      </PanelHeaderSlot>
+      <PanelHeaderSlot slot="row2">
+        <div className="flex min-w-0 flex-1 items-center gap-2 text-xs text-muted">
+          {row.task && <span className="text-fade min-w-0">{identity}</span>}
+          {lineage && <span className="text-fade min-w-0">{lineage}</span>}
+          {configuration && <span className="ml-auto shrink-0 font-mono">{configuration}</span>}
         </div>
-      </header>
+      </PanelHeaderSlot>
+      <span role="status" className="sr-only">
+        {canonicalStatus(row)}
+      </span>
       <div className="min-h-0 flex-1">
         {displayLeaseAcquired && (
           <MessageList
@@ -727,6 +729,9 @@ function SubagentRosterList({
     && narrative.active.length === 0 && narrative.finished.length === 0;
   return (
     <section ref={stopAll.panelRef} tabIndex={-1} className="flex min-h-0 flex-1 flex-col" aria-label="Subagents">
+      <PanelHeaderSlot slot="leading">
+        <PanelTitlePill>Subagents</PanelTitlePill>
+      </PanelHeaderSlot>
       <ScrollArea className="min-h-0 flex-1" viewportRef={detail.viewportRef}>
         {isEmpty ? (
           <p data-testid="subagents-empty" className="px-4 py-6 text-sm text-muted">

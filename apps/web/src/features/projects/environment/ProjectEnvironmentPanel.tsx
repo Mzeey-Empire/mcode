@@ -9,6 +9,7 @@ import type {
 } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
@@ -534,12 +535,12 @@ export function ProjectEnvironmentPanel({ workspaceId, threadId, active = true }
 
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden" aria-labelledby="project-environment-title">
+      <PanelHeaderSlot slot="leading">
+        <PanelTitlePill id="project-environment-title" headingLevel={1}>Project settings</PanelTitlePill>
+        <span className="text-fade min-w-0 text-xs text-muted">{projectName}</span>
+      </PanelHeaderSlot>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-5 pb-32">
         <div className="space-y-7">
-          <header className="space-y-1">
-            <h1 id="project-environment-title" className="text-base font-semibold">Project settings</h1>
-            <p className="text-xs text-muted">{projectName}</p>
-          </header>
           <EnvironmentMessages error={error} status={status} />
           {loading ? <p className="text-xs text-muted">Loading environment...</p> : (
             <>

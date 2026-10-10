@@ -6,6 +6,7 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
 import { createMockThread } from "@/__tests__/mocks/transport";
+import { PanelHeaderSlotScope } from "@/components/panels/shell/PanelHeader";
 
 const harness = vi.hoisted(() => ({
   loadCanonicalSubagentRoster: vi.fn(),
@@ -433,13 +434,20 @@ describe("SubagentsPanel", () => {
     });
     harness.loadCanonicalSubagentRoster.mockResolvedValue(canonicalRoster([child], []));
 
-    render(<SubagentsPanel threadId="thread-1" />);
+    const header = document.body.appendChild(document.createElement("div"));
+    const leading = header.appendChild(document.createElement("div"));
+    const row2 = header.appendChild(document.createElement("div"));
+    render(
+      <PanelHeaderSlotScope active elements={{ leading, row2 }}>
+        <SubagentsPanel threadId="thread-1" />
+      </PanelHeaderSlotScope>,
+    );
     fireEvent.click(await screen.findByRole("button", { name: /Open Detail layout child details, Active/ }));
 
-    const detail = await screen.findByRole("region", { name: "Detail layout child subagent details" });
-    const header = detail.querySelector("header");
+    await screen.findByRole("region", { name: "Detail layout child subagent details" });
+    expect(within(leading).getByRole("heading", { level: 2 })).toHaveTextContent("Inspect the parent request");
+    expect(within(leading).getByRole("button", { name: "Back to subagents" })).toBeInTheDocument();
     const stop = screen.getByRole("button", { name: "Stop Detail layout child" });
-    expect(header).toBeTruthy();
     expect(header).toHaveTextContent("Inspect the parent request");
     expect(header).not.toHaveTextContent("inspect_the_parent_request");
     expect(header).toHaveTextContent("Detail layout child");
@@ -453,7 +461,8 @@ describe("SubagentsPanel", () => {
     expect(screen.getByRole("status")).toHaveClass("sr-only");
     expect(screen.getByTestId("subagent-detail-actions")).toContainElement(stop);
     expect(screen.getByTestId("shared-message-list")).toHaveAttribute("data-show-parent-provenance", "true");
-    expect(header?.contains(stop)).toBe(false);
+    expect(header.contains(stop)).toBe(false);
+    header.remove();
   });
 
   it("passes exact parent and child IDs without selecting the child", async () => {

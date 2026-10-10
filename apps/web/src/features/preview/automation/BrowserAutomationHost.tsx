@@ -795,7 +795,7 @@ interface PersistentSurfaceLayout {
   readonly top: number;
   readonly width: number;
   readonly height: number;
-  readonly coveredLeft: number;
+  readonly coveredRight: number;
 }
 
 interface AutomationTargetRef {
@@ -826,7 +826,7 @@ function PersistentAutomationPreviewSurface({
     top: 0,
     width: 1_280,
     height: 720,
-    coveredLeft: 0,
+    coveredRight: 0,
   });
 
   useEffect(() => {
@@ -842,7 +842,7 @@ function PersistentAutomationPreviewSurface({
             top: rect.top,
             width: rect.width,
             height: rect.height,
-            coveredLeft: browserSurfacePresentationCoordinator.getActivityRailOverlap(),
+            coveredRight: browserSurfacePresentationCoordinator.getActivityRailOverlap(),
           }
         : {
             visible: false,
@@ -850,12 +850,12 @@ function PersistentAutomationPreviewSurface({
             top: 0,
             width: 1_280,
             height: 720,
-            coveredLeft: 0,
+            coveredRight: 0,
           };
       setLayout((current) => (
         current.visible === next.visible && current.left === next.left && current.top === next.top &&
         current.width === next.width && current.height === next.height &&
-        current.coveredLeft === next.coveredLeft ? current : next
+        current.coveredRight === next.coveredRight ? current : next
       ));
     };
     const unsubscribe = browserSurfacePresentationCoordinator.subscribe(update);
@@ -892,7 +892,7 @@ function PersistentAutomationPreviewSurface({
         threadId={scope.threadId}
         workspaceId={scope.workspaceId}
         automationOnly={!layout.visible}
-        coveredLeft={layout.visible ? layout.coveredLeft : 0}
+        coveredRight={layout.visible ? layout.coveredRight : 0}
       />
     </div>
   );

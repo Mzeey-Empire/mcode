@@ -57,16 +57,16 @@ vi.mock("@/transport", () => ({
 
 vi.mock("../../surfaces/PreviewPanel", () => ({
   WEB_RUNTIME_PREVIEW_TAB_ID: "web-preview",
-  PreviewPanel: ({ threadId, automationOnly, coveredLeft }: {
+  PreviewPanel: ({ threadId, automationOnly, coveredRight }: {
     readonly threadId: string;
     readonly automationOnly?: boolean;
-    readonly coveredLeft?: number;
+    readonly coveredRight?: number;
   }) => (
     <div
       data-testid="automation-preview-panel"
       data-thread-id={threadId}
       data-automation-only={String(automationOnly ?? false)}
-      data-covered-left={coveredLeft ?? 0}
+      data-covered-left={coveredRight ?? 0}
     />
   ),
 }));
