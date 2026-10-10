@@ -8,13 +8,10 @@ import * as NodeFS from 'node:fs';
 import * as NodeChildProcess from 'node:child_process';
 import * as NodePath from 'node:path';
 import * as NodeOS from 'node:os';
-import { resolveMainRoot } from './utils.mjs';
 import {
   isElectronBinaryInstalled,
   resolveElectronPackageDir,
 } from './ensure-electron.mjs';
-
-const mainRoot = resolveMainRoot();
 
 let passed = 0;
 let failed = 0;

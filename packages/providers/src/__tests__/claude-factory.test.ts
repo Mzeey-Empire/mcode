@@ -75,7 +75,23 @@ describe("Claude public factory core and capabilities", () => {
     expect(await provider.resolveApproval?.(pending[0]!.requestId, { choiceId: "deny" })).toEqual({ status: "resolved" });
     expect(await native).toMatchObject({ behavior: "deny" });
     expect(provider.listPendingApprovals?.()).toEqual([]);
-    const tooLarge = canUseTool("Bash", { command: "x".repeat(70_000) }, { signal: new AbortController().signal, toolUseID: "oversized" });
+  });
+
+  it("emits whole oversized commands and reasons for server validation", async () => {
+    const transport = installTransport(() => []);
+    const { provider } = fixture();
+    await provider.sendTurn(request());
+    await vi.waitFor(() => expect(transport.optionsSeen.length).toBe(1));
+    const canUseTool = transport.optionsSeen[0]?.canUseTool;
+    assert(canUseTool);
+    const emitted = vi.fn();
+    provider.on("approval_request", emitted);
+    const tooLarge = canUseTool("Bash", { command: "x".repeat(70_000) }, { signal: new AbortController().signal, toolUseID: "oversized", decisionReason: "r".repeat(1_001) });
+    const [oversized] = provider.listPendingApprovals?.() ?? [];
+    assert(oversized);
+    expect(oversized.body).toMatchObject({ subject: { kind: "command", command: "x".repeat(70_000) }, reason: "r".repeat(1_001) });
+    expect(emitted.mock.calls).toEqual([[oversized]]);
+    expect(await provider.resolveApproval?.(oversized.requestId, { autoDeny: "too_large" })).toEqual({ status: "resolved" });
     expect(await tooLarge).toMatchObject({ behavior: "deny" });
     expect(provider.listPendingApprovals?.()).toEqual([]);
   });

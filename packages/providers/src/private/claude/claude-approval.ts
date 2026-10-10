@@ -9,7 +9,7 @@ export function claudeApprovalBody(toolName: string, input: Record<string, unkno
   if (description && description.length <= 500) choices.push({ id: "allow-session", intent: "provider", label: "Allow suggested permissions", description });
   choices.push({ id: "deny", intent: "deny", label: "Deny" });
   return { requestedAt: new Date().toISOString(), toolCallId: options.toolUseID,
-    reason: options.decisionReason?.slice(0, 1_000), subject: claudeSubject(toolName, input),
+    reason: options.decisionReason, subject: claudeSubject(toolName, input),
     choices, noteDelivery: "native", noteChoiceId: "deny", origin: { kind: "agent" } };
 }
 

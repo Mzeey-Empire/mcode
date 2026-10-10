@@ -83,6 +83,7 @@ function createFakeRuntime(sessionId: string, pid: number): FakeRuntime {
   }) as unknown as NodeChildProcess.ChildProcess;
   const callbacks: CapturedAcpCallbacks = {};
   const connection = {
+    signal: new AbortController().signal,
     authenticate: vi.fn(async () => ({})),
     newSession: vi.fn(async () => ({ sessionId })),
     loadSession: vi.fn(async () => ({ sessionId })),
@@ -420,6 +421,67 @@ describe("DevinProvider", () => {
     expect(await p.resolveApproval(request.requestId, { choiceId: "reject_once" })).toEqual({ status: "resolved" });
     await sending;
     expect(resolvedEvents).toEqual([{ requestId: request.requestId, threadId: request.threadId, outcome: { status: "denied", choiceLabel: "Reject" } }]);
+  });
+
+  it.each(["connection", "session"])("does not acknowledge an approval on a closed %s", async (closed) => {
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    const controller = new AbortController();
+    Object.defineProperty(fake.connection, "signal", { value: controller.signal });
+    starts.push(mockAcpStart([fake]));
+    const p = createProvider(createHost());
+    await p.sendTurn(turn());
+    const resolved = vi.fn();
+    p.on("approval_resolved", resolved);
+    const native = fake.callbacks.onPermissionRequest!({ sessionId: "devin-acp-1",
+      toolCall: { toolCallId: "closed", title: "Bash" },
+      options: [{ optionId: "allow_once", name: "Allow once", kind: "allow_once" }] });
+    const answered = vi.fn();
+    void native.then(answered);
+    const [request] = p.listPendingApprovals();
+    if (!request) throw new Error("Expected a pending approval");
+    if (closed === "connection") controller.abort();
+    else fake.child.exitCode = 0;
+    expect(await p.resolveApproval(request.requestId, { choiceId: "allow_once" })).toMatchObject({ status: "failed" });
+    expect(answered.mock.calls).toEqual([]);
+    expect(resolved.mock.calls).toEqual([]);
+    expect(p.listPendingApprovals()).toEqual([request]);
+    await p.stopSession("mcode-thread-1");
+  });
+
+  it("uses a fallback for an empty title and reports synthetic denial as denied", async () => {
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    const p = createProvider(createHost());
+    await p.sendTurn(turn());
+    const resolved = vi.fn();
+    p.on("approval_resolved", resolved);
+    const native = fake.callbacks.onPermissionRequest!({ sessionId: "devin-acp-1",
+      toolCall: { toolCallId: "empty", title: "" },
+      options: [{ optionId: "allow_once", name: "Allow once", kind: "allow_once" }] });
+    const [request] = p.listPendingApprovals();
+    if (!request) throw new Error("Expected a pending approval");
+    expect(ApprovalRequestBodySchema().parse(request.body).subject).toEqual({ kind: "tool", toolName: "Tool", preview: "{}" });
+    expect(await p.resolveApproval(request.requestId, { choiceId: "mcode-deny" })).toEqual({ status: "resolved" });
+    await expect(native).resolves.toEqual({ outcome: { outcome: "cancelled" } });
+    expect(resolved.mock.calls).toEqual([[{ requestId: request.requestId, threadId: request.threadId, outcome: { status: "denied", choiceLabel: "Deny" } }]]);
+  });
+
+  it("emits an entire oversized command for server validation", async () => {
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    const p = createProvider(createHost());
+    await p.sendTurn(turn());
+    const emitted = vi.fn();
+    p.on("approval_request", emitted);
+    const native = fake.callbacks.onPermissionRequest!({ sessionId: "devin-acp-1",
+      toolCall: { toolCallId: "large", title: "Bash", _meta: { "cognition.ai/editableCommand": "x".repeat(70_000) } },
+      options: [{ optionId: "reject_once", name: "Reject", kind: "reject_once" }] });
+    const [request] = p.listPendingApprovals();
+    if (!request) throw new Error("Expected a pending approval");
+    expect(request.body).toMatchObject({ subject: { kind: "command", command: "x".repeat(70_000) } });
+    expect(emitted.mock.calls).toEqual([[request]]);
+    expect(await p.resolveApproval(request.requestId, { autoDeny: "too_large" })).toEqual({ status: "resolved" });
+    await expect(native).resolves.toEqual({ outcome: { outcome: "selected", optionId: "reject_once" } });
   });
 
   it("auto-allows permission requests while bypass mode is active", async () => {

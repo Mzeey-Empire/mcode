@@ -226,7 +226,7 @@ export interface IAgentProvider {
     response: ApprovalResponse,
   ): Promise<ApprovalRespondResult>;
 
-  /** Return all pending permission requests for a given thread. */
+  /** Return unvalidated approval envelopes, optionally filtered by owning thread. */
   listPendingApprovals?(threadId?: string): ApprovalRequestEnvelope[];
 
   /** Subscribe to provider runtime events before ingress projects them for renderer consumers. */
@@ -235,9 +235,9 @@ export interface IAgentProvider {
   on(event: "file_mutation_start", handler: (event: ProviderFileMutationStart) => void): void;
   /** Subscribe to provider-level errors. */
   on(event: "error", handler: (error: Error) => void): void;
-  /** Subscribe to permission request events (emitted when canUseTool fires). */
+  /** Subscribe to approval envelopes emitted when the provider needs a decision. */
   on(event: "approval_request", handler: (request: ApprovalRequestEnvelope) => void): void;
-  /** Subscribe to permission resolved events (emitted on session stop cancellation). */
+  /** Subscribe to acknowledged approval outcomes and session-stop cancellations. */
   on(
     event: "approval_resolved",
     handler: (payload: { requestId: string; threadId: string; outcome: ApprovalOutcome }) => void,

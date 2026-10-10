@@ -289,6 +289,31 @@ describe("ws-events provider.catalogChanged", () => {
 });
 
 describe("ws-events approval.requested", () => {
+  it.each(["approval.requested", "approval.resolved"] as const)("logs and drops malformed %s without changing state", (channel) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const refresh = vi.spyOn(useThreadControlStore.getState(), "refreshByThreadId").mockResolvedValue(undefined);
+    const rehydrate = vi.spyOn(useThreadControlStore.getState(), "rehydrate").mockResolvedValue(undefined);
+    const request = createMockApproval({ requestId: "pending", threadId: "thread-1" });
+    useApprovalStore.setState({ approvals: [{ ...request, settled: false }], revision: 0 });
+    const before = useApprovalStore.getState();
+    startPushListeners();
+    expect(() => pushEmitter.emit(channel, { requestId: "pending", secret: "private" })).not.toThrow();
+    expect(useApprovalStore.getState()).toBe(before);
+    expect(refresh.mock.calls).toEqual([]);
+    expect(rehydrate.mock.calls).toEqual([]);
+    expect(warn.mock.calls).toEqual([[`[ws-events] dropped invalid ${channel} message`]]);
+  });
+
+  it("refreshes the owner and target of a thread operation", () => {
+    const refresh = vi.spyOn(useThreadControlStore.getState(), "refreshByThreadId").mockResolvedValue(undefined);
+    const request = createMockApproval({ threadId: "owner", subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "target", message: "Hello" } });
+    useApprovalStore.setState({ approvals: [], revision: 0 });
+    startPushListeners();
+    pushEmitter.emit("approval.requested", request);
+    expect(refresh.mock.calls).toEqual([["owner"], ["target"]]);
+    expect(useApprovalStore.getState().approvals).toEqual([{ ...request, settled: false }]);
+  });
+
   afterEach(() => {
     stopPushListeners();
     vi.restoreAllMocks();

@@ -89,4 +89,4 @@ export {
   type OpenCodeFileDiff,
   type OpenCodeNativeTurnDiffResult,
 } from "./private/opencode/opencode-native-turn-diff.js";
-export { approvalScope, approvalChoice, approvalOutcome } from "./approval-scope.js";
+export { approvalChoice, approvalOutcome } from "./approval-scope.js";

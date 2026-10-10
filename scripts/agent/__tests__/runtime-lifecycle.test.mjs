@@ -289,7 +289,7 @@ NodeTest.test("agentUp removes stale PID files before launching server and web p
     },
     computeAvailablePorts: async () => ({ serverPort: 41_223, webPort: 41_224 }),
     getElectronBinary: () => process.execPath,
-    spawnLogged: (_command, _args, options) => {
+    spawnLogged: (_command, _args) => {
       spawnAttempted = true;
       NodeAssertStrict.default.equal(NodeFS.existsSync(NodePath.join(getRuntimePaths(repo).pidsDir, "server.pid")), false);
       throw new Error("stop before real launch");

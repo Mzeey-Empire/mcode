@@ -27,7 +27,7 @@ import {
   type TurnRequest,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
-import { acpApprovalChoices, acpNoteChoiceId, approvalChoice, approvalOutcome, approvalScope } from "../../approval-scope.js";
+import { acpApprovalChoices, acpNoteChoiceId, approvalChoice, approvalOutcome } from "../../approval-scope.js";
 import type { ProviderHostPorts } from "../../host-ports.js";
 import { SessionRuntime, type SpawnArgs, type SpawnResult } from "../session-runtime.js";
 import { AcpSessionRuntime } from "../protocols/acp/acp-session-runtime.js";
@@ -698,6 +698,9 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
   async resolveApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     const pending = this.pendingPermissions.get(requestId);
     if (!pending) return { status: "not_pending" };
+    if (pending.entry.connection.signal.aborted || pending.entry.child.exitCode !== null) {
+      return { status: "failed", message: "The ACP connection is closed" };
+    }
     const choice = approvalChoice(pending.request.body, response);
     if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
     const selected = "autoDeny" in response
@@ -709,7 +712,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     if (selected?.optionId === "switch_bypass") this.applyObservedDevinMode(pending.entry, "bypass");
     this.emit("approval_resolved", {
       requestId, threadId: pending.entry.threadId,
-      outcome: approvalOutcome(selected ? choice : undefined, response),
+      outcome: approvalOutcome(choice, response),
     });
     return { status: "resolved" };
   }
@@ -731,9 +734,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     const outcome = new Promise<AcpPermissionOutcome>((resolve) => {
       this.pendingPermissions.set(request.requestId, { entry, request, acpOptions: options, resolve });
     });
-    const autoDeny = approvalScope(request.body);
-    if (autoDeny) await this.resolveApproval(request.requestId, { autoDeny });
-    else this.emit("approval_request", request);
+    this.emit("approval_request", request);
     return outcome;
   }
 
@@ -749,7 +750,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       requestId: crypto.randomUUID(), threadId: entry.threadId,
       body: {
         toolCallId: params.toolCall.toolCallId, requestedAt: new Date().toISOString(),
-        subject: command ? { kind: "command", command } : { kind: "tool", toolName: snapshot?.toolName ?? params.toolCall.title ?? "Tool", preview: JSON.stringify(snapshot?.input ?? params.toolCall.rawInput ?? {}) },
+        subject: command ? { kind: "command", command } : { kind: "tool", toolName: snapshot?.toolName || params.toolCall.title || "Tool", preview: JSON.stringify(snapshot?.input ?? params.toolCall.rawInput ?? {}) },
         choices, noteDelivery: "next_turn", noteChoiceId: acpNoteChoiceId(options, choices), origin: { kind: "agent" },
       },
     };

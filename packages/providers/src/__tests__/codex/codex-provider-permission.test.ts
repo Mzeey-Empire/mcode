@@ -91,21 +91,21 @@ describe("CodexProvider permission flow", () => {
     }
   });
 
-  it("emits approval_request and lists the pending entry when handler is invoked", async () => {
+  it.each(["ls -la", "x".repeat(70_000)])("emits and lists the entire command scope %#", async (command) => {
     const emitted: ApprovalRequestEnvelope[] = [];
     provider.on("approval_request", (r) => emitted.push(r));
 
     const nativeRequest: CodexApprovalRequest = {
       rpcId: 42,
       method: "item/commandExecution/requestApproval",
-      params: { command: "ls -la", cwd: "/tmp" },
+      params: { command, cwd: "/tmp" },
     };
     const resultPromise = (provider as unknown as {
       handleApprovalRequest: (sessionId: string, threadId: string, req: unknown) => Promise<unknown>;
     }).handleApprovalRequest(sessionId, threadId, nativeRequest);
 
     expect(emitted).toHaveLength(1);
-    expect(emitted[0].body).toMatchObject({ subject: { kind: "command", command: "ls -la", cwd: "/tmp" } });
+    expect(emitted[0].body).toMatchObject({ subject: { kind: "command", command, cwd: "/tmp" } });
     expect(emitted[0].threadId).toBe(threadId);
 
     const pending = provider.listPendingApprovals!(threadId);

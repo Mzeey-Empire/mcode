@@ -24,7 +24,7 @@ import type {
 } from "@mcode/contracts";
 import { AgentEventType, providerRuntimeEvent } from "@mcode/contracts";
 import type { ProviderHostPorts } from "@mcode/providers";
-import { OpenCodeNativeTurnDiff, approvalChoice, approvalOutcome, approvalScope } from "@mcode/providers";
+import { OpenCodeNativeTurnDiff, approvalChoice, approvalOutcome } from "@mcode/providers";
 import { SettingsService } from "../../../settings/settings-service.js";
 import { EnvService } from "../../../../runtime/environment/env-service.js";
 import { CleanForker } from "../../../handoff/index.js";
@@ -1058,7 +1058,9 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     const threadId = this.threadIdFor(req.sessionId);
     const request = synthesizeOpenCodeApprovalRequest({ threadId, properties: normalized.properties });
     if (!request) {
-      void this.stopSession(req.sessionId).finally(() => this.emit("approval_resolved", {
+      void this.stopSession(req.sessionId).catch(() => {
+        logger.error("Failed to stop OpenCode session for an unroutable approval", { providerId: this.id, sessionId: req.sessionId, threadId });
+      }).then(() => this.emit("approval_resolved", {
         requestId: NodeCrypto.randomUUID(), threadId, outcome: { status: "cancelled", reason: "unanswerable" },
       }));
       return;
@@ -1070,15 +1072,6 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       signal: state.abortController.signal, routing, replying: false,
     };
     this.pendingPermissions.set(request.requestId, entry);
-    const autoDeny = approvalScope(request.body);
-    if (autoDeny) {
-      void this.resolveApproval(request.requestId, { autoDeny }).then(async (result) => {
-        if (result.status === "resolved") return;
-        this.resolvePendingAsk(entry, { status: "cancelled", reason: "unanswerable" });
-        await this.stopSession(req.sessionId);
-      });
-      return;
-    }
     if (req.permissionMode === "full") {
       entry.replying = true;
       void this.relayDecision(entry, { choiceId: "always" }).then(() => {

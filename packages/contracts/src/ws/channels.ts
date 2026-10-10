@@ -203,9 +203,9 @@ export const WS_CHANNELS = {
     threadId: z.string(),
     version: PlanVersionSchema(),
   }),
-  /** A tool permission request awaiting user decision. */
+  /** A validated approval request awaiting a user decision. */
   "approval.requested": ApprovalRequestSchema(),
-  /** Notification that a permission request has been settled. */
+  /** Notification that an approval request has been settled. */
   "approval.resolved": z.object({
     requestId: z.string(),
     threadId: z.string(),

@@ -22,7 +22,8 @@ function setup() {
   return { bridge, emitApprovalRequest, emitApprovalResolved };
 }
 
-const entry = { permissionMode: "default" as const, threadId: "owner", mcodeSessionId: "mcode-owner" };
+const entry = { permissionMode: "default" as const, threadId: "owner", mcodeSessionId: "mcode-owner",
+  connection: { signal: new AbortController().signal }, child: { exitCode: null } };
 const toolCall = { toolCallId: "tool-1", title: "Bash", kind: "execute" as const, rawInput: { command: "echo ok" } };
 
 describe("Cursor native approval boundary", () => {
@@ -60,16 +61,41 @@ describe("Cursor native approval boundary", () => {
     expect(await test.bridge.resolveApproval(request.requestId, { choiceId: "mcode-deny" })).toEqual({ status: "resolved" });
     await expect(native).resolves.toEqual({ outcome: { outcome: "cancelled" } });
     expect(test.emitApprovalResolved.mock.calls).toEqual([[{
-      requestId: request.requestId, threadId: "owner", outcome: { status: "cancelled", reason: "unanswerable" },
+      requestId: request.requestId, threadId: "owner", outcome: { status: "denied", choiceLabel: "Deny" },
     }]]);
   });
 
-  it("auto-denies a 70000-character command without publishing a shortened request", async () => {
+  it("emits the whole oversized command for server validation", async () => {
     const test = setup();
     const native = test.bridge.requestPermission(entry, { sessionId: "session-1", toolCall: { ...toolCall, rawInput: { command: "x".repeat(70_000) } }, options });
-    await expect(native).resolves.toEqual({ outcome: { outcome: "selected", optionId: "reject_once" } });
-    await vi.waitFor(() => expect(test.emitApprovalResolved.mock.calls.map(([event]) => event.outcome)).toEqual([{ status: "auto_denied", reason: "too_large" }]));
-    expect(test.emitApprovalRequest.mock.calls).toEqual([]);
+    await Promise.resolve();
+    const [request] = test.bridge.listPendingApprovals();
+    expect(test.emitApprovalRequest.mock.calls).toEqual([[request]]);
+    expect(request?.body).toMatchObject({ subject: { kind: "command", command: "x".repeat(70_000) } });
+    expect(test.emitApprovalResolved.mock.calls).toEqual([]);
+    test.bridge.cancelAllPending();
+    await expect(native).resolves.toEqual({ outcome: { outcome: "cancelled" } });
+  });
+
+  it.each(["connection", "session"])("fails without answering when the %s is closed", async (closed) => {
+    const test = setup();
+    const controller = new AbortController();
+    const child: { exitCode: number | null } = { exitCode: null };
+    const session = { ...entry, connection: { signal: controller.signal }, child };
+    const native = test.bridge.requestPermission(session, { sessionId: "session-1", toolCall, options });
+    const answered = vi.fn();
+    void native.then(answered);
+    await Promise.resolve();
+    const [request] = test.bridge.listPendingApprovals();
+    if (!request) throw new Error("Expected a pending request");
+    if (closed === "connection") controller.abort();
+    else session.child.exitCode = 0;
+    expect(await test.bridge.resolveApproval(request.requestId, { choiceId: "once" })).toMatchObject({ status: "failed" });
+    expect(answered.mock.calls).toEqual([]);
+    expect(test.emitApprovalResolved.mock.calls).toEqual([]);
+    expect(test.bridge.listPendingApprovals()).toEqual([request]);
+    test.bridge.cancelAllPending();
+    await native;
   });
 
   it("never substitutes allow_always for allow_once", () => {

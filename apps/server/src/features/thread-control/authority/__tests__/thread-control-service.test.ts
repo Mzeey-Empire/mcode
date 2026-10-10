@@ -158,15 +158,15 @@ describe("ThreadControlService", () => {
     const pending = new Map<string, PendingThreadCreateApproval | PendingThreadSendApproval | PendingThreadStopApproval>();
     approvals.listPending.mockImplementation(() => [...pending.values()]);
     approvals.create.mockImplementation((input: Omit<PendingThreadCreateApproval, "approvalId" | "operation">) => {
-      pending.set("approval-1", { ...input, approvalId: "approval-1", operation: "thread_create_batch" });
+      pending.set("approval-1", { ...input, createdAt: "2026-10-10T09:00:00Z", approvalId: "approval-1", operation: "thread_create_batch" });
       return "approval-1";
     });
     approvals.createSend.mockImplementation((input: Omit<PendingThreadSendApproval, "approvalId" | "operation">) => {
-      pending.set("approval-send", { ...input, approvalId: "approval-send", operation: "thread_send" });
+      pending.set("approval-send", { ...input, createdAt: "2026-10-10T09:00:00Z", approvalId: "approval-send", operation: "thread_send" });
       return "approval-send";
     });
     approvals.createStop.mockImplementation((input: Omit<PendingThreadStopApproval, "approvalId" | "operation">) => {
-      pending.set("approval-stop", { ...input, approvalId: "approval-stop", operation: "thread_stop" });
+      pending.set("approval-stop", { ...input, createdAt: "2026-10-10T09:00:00Z", approvalId: "approval-stop", operation: "thread_stop" });
       return "approval-stop";
     });
     mutationReservations = new ThreadControlMutationReservationService();
@@ -1286,12 +1286,19 @@ describe("ThreadControlService", () => {
     await expect(service.threadSend(authority, { threadId: target.id, message: "Needs approval." })).resolves.toMatchObject({ status: "pending_approval", approvalId: "approval-send" });
     expect(approvals.createSend).toHaveBeenCalledWith(expect.objectContaining({ message: "Needs approval.", sourceThreadId: authority.sourceThreadId }));
     expect(mockBroadcast).toHaveBeenCalledWith("approval.requested", {
-      requestId: "approval-send", threadId: "thread-1", providerId: "claude", requestedAt: expect.any(String),
+      requestId: "approval-send", threadId: "thread-1", providerId: "claude", requestedAt: "2026-10-10T09:00:00Z",
       subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "target-thread", message: "Needs approval." },
       choices: [{ id: "allow", intent: "allow_once", label: "Allow" }, { id: "deny", intent: "deny", label: "Deny" }],
       noteDelivery: "none", origin: { kind: "agent" },
     });
     expect(service.listPendingApprovals("target-thread")).toEqual([]);
+    const stored = approvals.listPending();
+    approvals.listPending.mockReturnValue([...stored, { ...stored[0], approvalId: "stale", sourceProviderId: "removed-provider" }]);
+    expect(service.listPendingApprovals().map(({ requestId, providerId, origin, requestedAt }) => ({ requestId, providerId, origin, requestedAt }))).toEqual([
+      { requestId: "approval-send", providerId: "claude", origin: { kind: "agent" }, requestedAt: "2026-10-10T09:00:00Z" },
+      { requestId: "stale", providerId: null, origin: { kind: "integration", label: "Integration" }, requestedAt: "2026-10-10T09:00:00Z" },
+    ]);
+    approvals.listPending.mockReturnValue(stored);
     expect(service.listPendingApprovals("thread-1").map(({ threadId, subject }) => ({ threadId, subject }))).toEqual([
       { threadId: "thread-1", subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "target-thread", message: "Needs approval." } },
     ]);

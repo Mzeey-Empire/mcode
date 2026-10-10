@@ -4,6 +4,8 @@ import { ApprovalRequestBodySchema } from "@mcode/contracts";
 import { OpenCodeProvider } from "../opencode-provider.js";
 import { OpenCodeServerPool } from "../opencode-server-pool.js";
 import { OpenCodeReplySessionNotFoundError } from "../opencode-http-client.js";
+import { ApprovalService, UNREADABLE_APPROVAL_TITLE } from "../../../../agents/approvals/approval-service.js";
+import { logger } from "@mcode/shared";
 import type { ApprovalRequestEnvelope, TurnRequest } from "@mcode/contracts";
 
 function testPool(): OpenCodeServerPool {
@@ -433,15 +435,20 @@ describe("OpenCodeProvider notice dedup", () => {
     await provider.shutdown();
   });
 
-  it("rejects oversized resources without publishing a shortened request", async () => {
+  it("emits oversized resources intact and lets the server publish a stand-in and deny", async () => {
     const http = fakeHttp([{ type: "permission.v2.asked", properties: { id: "per_large", sessionID: "ses_1", action: "bash", resources: ["x".repeat(70_000)] } }]);
     const { provider } = testProvider(http);
     const requested = vi.fn();
     const resolved = vi.fn();
     provider.on("approval_request", requested);
     provider.on("approval_resolved", resolved);
+    const publishApprovalRequest = vi.fn();
+    const publishApprovalResolved = vi.fn();
+    const service = new ApprovalService({ resolveAll: () => [provider] });
+    service.start({ publishApprovalRequest, publishApprovalResolved, stopSession: async () => provider.stopSession(turnRequest().sessionId) });
     await provider.sendTurn(turnRequest());
-    expect(requested.mock.calls).toEqual([]);
+    expect(requested.mock.calls[0]?.[0].body.subject).toEqual({ kind: "tool", toolName: "bash", preview: JSON.stringify({ action: "bash", resources: ["x".repeat(70_000)] }) });
+    expect(publishApprovalRequest.mock.calls.map(([request]) => request.subject)).toEqual([{ kind: "tool", toolName: UNREADABLE_APPROVAL_TITLE }]);
     expect(http.replyPermission.mock.calls.map((args) => args.slice(1, 5))).toEqual([["ses_1", "per_large", "reject", "v2"]]);
     expect(resolved.mock.calls).toEqual([[{ requestId: "per_large", threadId: "thread-1", outcome: { status: "auto_denied", reason: "too_large" } }]]);
     await provider.shutdown();
@@ -453,10 +460,35 @@ describe("OpenCodeProvider notice dedup", () => {
     const { provider } = testProvider(http);
     const resolved = vi.fn();
     provider.on("approval_resolved", resolved);
+    const publishApprovalResolved = vi.fn();
+    const service = new ApprovalService({ resolveAll: () => [provider] });
+    service.start({ publishApprovalRequest: vi.fn(), publishApprovalResolved, stopSession: async () => provider.stopSession(turnRequest().sessionId) });
     await provider.sendTurn(turnRequest());
-    expect(resolved.mock.calls).toEqual([[{ requestId: "per_large", threadId: "thread-1", outcome: { status: "cancelled", reason: "unanswerable" } }]]);
+    await vi.waitFor(() => expect(publishApprovalResolved.mock.calls).toEqual([[{ requestId: "per_large", threadId: "thread-1", outcome: { status: "cancelled", reason: "unanswerable" } }]]));
     expect(provider.listPendingApprovals()).toEqual([]);
     expect(http.abortSession.mock.calls.map((args) => args[1])).toEqual(["ses_1"]);
+    await provider.shutdown();
+  });
+
+  it("logs only ids and emits cancellation after a missing-id stop attempt fails", async () => {
+    const http = fakeHttp([{ type: "permission.v2.asked", properties: { sessionID: "ses_1" } }]);
+    const { provider } = testProvider(http);
+    const stopping = Promise.withResolvers<void>();
+    const stop = vi.spyOn(provider, "stopSession").mockReturnValueOnce(stopping.promise);
+    const log = vi.spyOn(logger, "error").mockImplementation(() => {});
+    const resolved = vi.fn();
+    provider.on("approval_resolved", resolved);
+    const sending = provider.sendTurn(turnRequest());
+    await vi.waitFor(() => expect(stop.mock.calls).toEqual([[turnRequest().sessionId]]));
+    expect(resolved.mock.calls).toEqual([]);
+    stopping.reject(new Error("private stop failure"));
+    await vi.waitFor(() => expect(resolved.mock.calls.map(([event]) => event.outcome)).toEqual([{ status: "cancelled", reason: "unanswerable" }]));
+    expect(log.mock.calls).toEqual([["Failed to stop OpenCode session for an unroutable approval", { providerId: "opencode", sessionId: turnRequest().sessionId, threadId: "thread-1" }]]);
+    expect(provider.listPendingApprovals()).toEqual([]);
+    stop.mockRestore();
+    log.mockRestore();
+    await provider.stopSession(turnRequest().sessionId);
+    await sending;
     await provider.shutdown();
   });
 });

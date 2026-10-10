@@ -5,7 +5,7 @@
  */
 
 import * as NodeEvents from "node:events";
-import { approvalChoice, approvalOutcome, approvalScope } from "../../approval-scope.js";
+import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
 import { claudeApprovalBody } from "./claude-approval.js";
 
 type ClaudeApprovalDecision = "allow" | "allow-session" | "deny" | "cancelled" | "auto-deny";
@@ -1163,9 +1163,7 @@ export class ClaudeProvider
         body,
         resolve,
       });
-      const autoDeny = approvalScope(body);
-      if (autoDeny) void this.resolveApproval(requestId, { autoDeny });
-      else this.emit("approval_request", { requestId, threadId, body } satisfies ApprovalRequestEnvelope);
+      this.emit("approval_request", { requestId, threadId, body } satisfies ApprovalRequestEnvelope);
       options?.signal?.addEventListener(
         "abort",
         () => this.cancelClaudePermission(requestId, resolve),

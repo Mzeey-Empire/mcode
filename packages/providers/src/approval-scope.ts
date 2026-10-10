@@ -1,11 +1,4 @@
-import { ApprovalRequestBodySchema, type ApprovalChoice, type ApprovalOutcome, type ApprovalRequestBody, type ApprovalResponse } from "@mcode/contracts";
-
-/** Check the whole authorization scope without shortening any field. */
-export function approvalScope(body: unknown): "unreadable" | "too_large" | undefined {
-  const parsed = ApprovalRequestBodySchema().safeParse(body);
-  if (parsed.success) return undefined;
-  return parsed.error.issues.some((issue) => issue.code === "too_big") ? "too_large" : "unreadable";
-}
+import type { ApprovalChoice, ApprovalOutcome, ApprovalRequestBody, ApprovalResponse } from "@mcode/contracts";
 
 /** Resolve a response against the choices the adapter actually advertised. */
 export function approvalChoice(body: ApprovalRequestBody, response: ApprovalResponse): ApprovalChoice | undefined {

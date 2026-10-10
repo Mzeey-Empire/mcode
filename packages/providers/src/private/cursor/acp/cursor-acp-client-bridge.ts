@@ -11,7 +11,7 @@ import type {
 import { logger } from "@mcode/shared";
 import { AgentEventType, PLAN_MAX_CONTENT_CHARS } from "@mcode/contracts";
 import type { AgentEvent, ApprovalOutcome, ApprovalRequestBody, ApprovalRequestEnvelope, ApprovalResponse, ApprovalRespondResult } from "@mcode/contracts";
-import { approvalChoice, approvalOutcome, approvalScope } from "../../../approval-scope.js";
+import { approvalChoice, approvalOutcome } from "../../../approval-scope.js";
 import type { CursorProviderPorts } from "../../../factory-types.js";
 import { buildCursorAskQuestionExtResponse } from "./cursor-acp-ask-question.js";
 import {
@@ -35,6 +35,7 @@ const UNSUPPORTED_RESULT = Object.freeze({ outcome: { outcome: "unsupported" as 
 type AcpExtMethodResponse = Awaited<ReturnType<NonNullable<Client["extMethod"]>>>;
 
 interface PendingAcpPermission {
+  entry: { connection: Pick<CursorAcpSessionEntry["connection"], "signal">; child: Pick<CursorAcpSessionEntry["child"], "exitCode"> };
   mcodeSessionId: string;
   threadId: string;
   options: PermissionOption[];
@@ -69,16 +70,16 @@ export class CursorAcpClientBridge {
   async resolveApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     const pending = this.pendingPermissions.get(requestId);
     if (!pending) return { status: "not_pending" };
+    if (pending.entry.connection.signal.aborted || pending.entry.child.exitCode !== null) {
+      return { status: "failed", message: "The ACP connection is closed" };
+    }
     const choice = approvalChoice(pending.request.body, response);
     if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
     this.pendingPermissions.delete(requestId);
     const outcome = mapResponseToAcpOutcome(response, pending.options);
     pending.resolve({ outcome });
     await Promise.resolve();
-    this.deps.emitApprovalResolved({ requestId, threadId: pending.threadId, outcome: "autoDeny" in response
-      ? { status: "auto_denied", reason: response.autoDeny }
-      : outcome.outcome === "cancelled" ? { status: "cancelled", reason: "unanswerable" }
-        : choice ? approvalOutcome(choice, response) : { status: "cancelled", reason: "unanswerable" } });
+    this.deps.emitApprovalResolved({ requestId, threadId: pending.threadId, outcome: approvalOutcome(choice, response) });
     return { status: "resolved" };
   }
 
@@ -234,7 +235,7 @@ export class CursorAcpClientBridge {
 
   /** Handles a protocol permission request for one live Cursor session. */
   async requestPermission(
-    entry: Pick<CursorAcpSessionEntry, "permissionMode" | "threadId" | "mcodeSessionId">,
+    entry: Pick<CursorAcpSessionEntry, "permissionMode" | "threadId" | "mcodeSessionId"> & PendingAcpPermission["entry"],
     params: RequestPermissionRequest,
   ): Promise<RequestPermissionResponse> {
     if (entry.permissionMode === "full") {
@@ -254,16 +255,15 @@ export class CursorAcpClientBridge {
     const request = { requestId, threadId: entry.threadId, body };
     return await new Promise((resolve) => {
       this.pendingPermissions.set(requestId, {
+        entry,
         mcodeSessionId: entry.mcodeSessionId,
         threadId: entry.threadId,
         options: params.options,
         request,
         resolve,
       });
-      const autoDeny = approvalScope(body);
       queueMicrotask(() => {
-        if (autoDeny) void this.resolveApproval(requestId, { autoDeny });
-        else this.deps.emitApprovalRequest(request);
+        this.deps.emitApprovalRequest(request);
       });
     });
   }

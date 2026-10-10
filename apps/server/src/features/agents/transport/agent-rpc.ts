@@ -220,7 +220,7 @@ const agentHandlers: AgentRpcHandlerMap = {
   "thread.getTasks": (deps, params) => deps.canonicalProgress?.getTasks(params.threadId) ?? deps.taskRepo.get(params.threadId),
   "approval.respond": async (deps, params) => {
     const { requestId, ...response } = params;
-      return deps.approvalService.respondToApproval(requestId, response);
+    return deps.approvalService.respondToApproval(requestId, response);
   },
   "approval.listPending": (deps, params) => deps.approvalService.listPendingApprovals(params.threadId),
   "recap.generate": (deps, params) => deps.recapService.generate(params),

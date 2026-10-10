@@ -56,7 +56,7 @@ import {
 import { checkCodexVersion, meetsMinVersion } from "./codex-version.js";
 import { CodexAppServer, warmCodexAppServer } from "./codex-app-server.js";
 import type { CodexApprovalRequest } from "./codex-app-server.js";
-import { approvalChoice, approvalOutcome, approvalScope } from "../../approval-scope.js";
+import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
 import { CodexEventMapper } from "./codex-event-mapper.js";
 import {
   CodexCanonicalEventPublisher,
@@ -2795,11 +2795,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       this.pendingPermissions.set(requestId, {
         sessionId, threadId, body, acknowledged, method: request.method, params: request.params, resolve,
       });
-      const autoDeny = approvalScope(body);
-      if (autoDeny) void this.resolveApproval(requestId, { autoDeny }).then((result) => {
-        if (result.status === "failed") void this.stopSession(sessionId);
-      });
-      else this.emit("approval_request", { requestId, threadId, body } satisfies ApprovalRequestEnvelope);
+      this.emit("approval_request", { requestId, threadId, body } satisfies ApprovalRequestEnvelope);
     });
   }
 

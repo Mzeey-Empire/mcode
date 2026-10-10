@@ -14,6 +14,7 @@ import { runChanges } from "../../../../runtime/persistence/sqlite/drizzle-chang
 
 /** Persisted input needed to resume a protected delegated-thread creation. */
 export interface PendingThreadCreateApproval {
+  createdAt: string;
   operation: "thread_create_batch";
   approvalId: string;
   threadId: string;
@@ -29,6 +30,7 @@ export interface PendingThreadCreateApproval {
 
 /** Persisted cross-thread send approval. */
 export interface PendingThreadSendApproval {
+  createdAt: string;
   operation: "thread_send";
   approvalId: string;
   threadId: string;
@@ -45,6 +47,7 @@ export interface PendingThreadSendApproval {
 
 /** Persisted cross-thread stop approval. */
 export interface PendingThreadStopApproval {
+  createdAt: string;
   operation: "thread_stop";
   approvalId: string;
   threadId: string;
@@ -73,8 +76,9 @@ export type RecoverableThreadCreateApproval = PendingThreadControlApproval | Mal
 /** Durable operation identifiers stored with thread-control approvals. */
 export type ThreadControlApprovalOperation = "thread_create_batch" | "thread_send" | "thread_stop";
 
-/** Columns read by approval recovery queries; status and timestamps are intentionally omitted. */
+/** Columns read by approval recovery and pending-request queries. */
 const APPROVAL_COLUMNS = {
+  createdAt: threadControlApprovals.createdAt,
   id: threadControlApprovals.id,
   threadId: threadControlApprovals.threadId,
   workspaceId: threadControlApprovals.workspaceId,
@@ -105,7 +109,7 @@ export class ThreadControlApprovalStore {
   }
 
   /** Persist one pending approval and return its opaque identity. */
-  create(input: Omit<PendingThreadCreateApproval, "approvalId" | "operation" | "operationPhase">): string {
+  create(input: Omit<PendingThreadCreateApproval, "approvalId" | "operation" | "operationPhase" | "createdAt">): string {
     const approvalId = NodeCrypto.randomUUID();
     this.orm.insert(threadControlApprovals).values({
       id: approvalId,
@@ -125,7 +129,7 @@ export class ThreadControlApprovalStore {
   }
 
   /** Persist a supervised cross-thread send before a human decision. */
-  createSend(input: Omit<PendingThreadSendApproval, "approvalId" | "operation" | "operationPhase"> & { approvalId?: string }): string {
+  createSend(input: Omit<PendingThreadSendApproval, "approvalId" | "operation" | "operationPhase" | "createdAt"> & { approvalId?: string }): string {
     return this.createMutation({
       operation: "thread_send",
       prompt: input.message,
@@ -135,7 +139,7 @@ export class ThreadControlApprovalStore {
   }
 
   /** Persist a supervised cross-thread stop before a human decision. */
-  createStop(input: Omit<PendingThreadStopApproval, "approvalId" | "operation" | "operationPhase"> & { approvalId?: string }): string {
+  createStop(input: Omit<PendingThreadStopApproval, "approvalId" | "operation" | "operationPhase" | "createdAt"> & { approvalId?: string }): string {
     return this.createMutation({
       operation: "thread_stop",
       prompt: "",
@@ -376,6 +380,7 @@ export class ThreadControlApprovalStore {
 }
 
 function approvalIdentity(row: ApprovalRow): {
+  createdAt: string;
   approvalId: string;
   threadId: string;
   workspaceId: string;
@@ -383,6 +388,7 @@ function approvalIdentity(row: ApprovalRow): {
   callerId: string;
 } {
   return {
+    createdAt: row.createdAt,
     approvalId: row.id,
     threadId: row.threadId,
     workspaceId: row.workspaceId,

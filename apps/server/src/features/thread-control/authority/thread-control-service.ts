@@ -80,7 +80,6 @@ import { ProviderRegistry } from "../../providers/composition/provider-registry.
 import { AgentService, DelegationTargetResolver } from "../../agents/index.js";
 import { ApprovalService } from "../../agents/approvals/approval-service.js";
 
-type ThreadApprovalDecision = "allow" | "deny" | "cancelled";
 import {
   ThreadControlMutationReservationService,
   type ThreadMutationReservationState,
@@ -92,6 +91,8 @@ import { ModelCacheService } from "../../providers/models/model-cache-service.js
 import { SettingsService } from "../../settings/settings-service.js";
 import { broadcast } from "../../../application/transport/push.js";
 import { DatabaseWriteOutcomeUnknown } from "../../../runtime/persistence/sqlite/application-database-writer.js";
+
+type ThreadApprovalDecision = "allow" | "deny" | "cancelled";
 
 const THREAD_WAIT_POLL_INTERVAL_MS = 250;
 
@@ -1171,19 +1172,20 @@ export class ThreadControlService {
   }
 
   private approvalRequestFor(approval: RecoverableThreadCreateApproval): ApprovalRequest | undefined {
+    const ownerThreadId = approval.sourceThreadId ?? approval.threadId;
     if ("invalid" in approval) {
-      this.approvalService.publish({ requestId: approval.approvalId, threadId: approval.sourceThreadId ?? approval.threadId, body: null }, {
+      this.approvalService.publish({ requestId: approval.approvalId, threadId: ownerThreadId, body: null }, {
         id: null, resolveApproval: (id, response) => this.respondToApproval(id, response),
       });
       return undefined;
     }
-    const ownerThreadId = approval.sourceThreadId ?? approval.threadId;
     const owner = approval.sourceThreadId ? this.threads.findById(approval.sourceThreadId) : undefined;
     const sourceProviderId = approval.operation === "thread_send" ? approval.sourceProviderId : undefined;
-    const providerId = sourceProviderId ? ProviderIdSchema.parse(sourceProviderId) : owner ? ProviderIdSchema.parse(owner.provider) : null;
+    const parsedProviderId = ProviderIdSchema.safeParse(sourceProviderId ?? owner?.provider);
+    const providerId = parsedProviderId.success ? parsedProviderId.data : null;
     return {
       requestId: approval.approvalId, threadId: ownerThreadId, providerId,
-      requestedAt: new Date().toISOString(),
+      requestedAt: approval.createdAt,
       subject: { kind: "thread_operation", operation: approval.operation, targetThreadId: approval.threadId,
         ...(approval.operation === "thread_send" ? { message: approval.message } : {}) },
       choices: [{ id: "allow", intent: "allow_once", label: "Allow" }, { id: "deny", intent: "deny", label: "Deny" }],

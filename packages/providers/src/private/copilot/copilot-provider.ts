@@ -4,7 +4,7 @@ import { CopilotClient, approveAll } from "@github/copilot-sdk";
 import type { CopilotSession, SessionEvent, ModelInfo, PermissionRequest as NativePermissionRequest, PermissionRequestResult } from "@github/copilot-sdk";
 import { z } from "zod";
 import type { AgentEvent, IAgentProvider, ISessionEvictable, ApprovalChoice, ApprovalResponse, ApprovalRespondResult, ApprovalRequestEnvelope, ProviderIdentity, ProviderModelInfo, TurnRequest, CompletionOptions } from "@mcode/contracts";
-import { approvalChoice, approvalOutcome, approvalScope } from "../../approval-scope.js";
+import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
 import { copilotApprovalBody } from "./copilot-approval.js";
 import { BROWSER_AUTOMATION_OPERATION_METADATA, providerRuntimeEvent } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
@@ -297,9 +297,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     const request = { requestId, threadId: state.request.threadId, body };
     return new Promise((resolve) => {
       turn.pendingPermissions.set(requestId, { request, resolve });
-      const autoDeny = approvalScope(body);
-      if (autoDeny) void this.resolveApproval(requestId, { autoDeny });
-      else this.emit("approval_request", request);
+      this.emit("approval_request", request);
     });
   }
   private consumePermissionGrant(state: CopilotSessionState, native: NativePermissionRequest): boolean {

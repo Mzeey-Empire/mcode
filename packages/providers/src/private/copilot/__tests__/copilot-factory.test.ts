@@ -79,7 +79,7 @@ describe("Copilot public factory", () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
 
-  it("keeps full native command scope and rejects oversized requests", async () => {
+  it("keeps full native command scope and acknowledges a user denial", async () => {
     await provider.sendTurn(request({ permissionMode: "supervised" }));
     const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
     const native = options.onPermissionRequest({ kind: "shell", fullCommandText: "bun run lint", toolCallId: "call-1" }, { sessionId: session.sessionId });
@@ -88,7 +88,21 @@ describe("Copilot public factory", () => {
     expect(pending[0]?.body).toMatchObject({ subject: { kind: "command", command: "bun run lint" }, toolCallId: "call-1", noteDelivery: "native" });
     expect(await provider.resolveApproval?.(pending[0]!.requestId, { choiceId: "deny" })).toEqual({ status: "resolved" });
     expect(await native).toEqual({ kind: "denied-interactively-by-user" });
-    expect(await options.onPermissionRequest({ kind: "shell", fullCommandText: "x".repeat(70_000) }, { sessionId: session.sessionId }))
+    await finish();
+  });
+
+  it("emits whole oversized commands and acknowledges the server's deny", async () => {
+    await provider.sendTurn(request({ permissionMode: "supervised" }));
+    const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
+    const emitted = vi.fn();
+    provider.on("approval_request", emitted);
+    const oversized = options.onPermissionRequest({ kind: "shell", fullCommandText: "x".repeat(70_000) }, { sessionId: session.sessionId });
+    const [large] = provider.listPendingApprovals?.() ?? [];
+    if (!large) throw new Error("Expected an oversized approval");
+    expect(large.body).toMatchObject({ subject: { kind: "command", command: "x".repeat(70_000) } });
+    expect(emitted.mock.calls).toEqual([[large]]);
+    expect(await provider.resolveApproval?.(large.requestId, { autoDeny: "too_large" })).toEqual({ status: "resolved" });
+    expect(await oversized)
       .toEqual({ kind: "denied-no-approval-rule-and-could-not-request-from-user" });
     expect(provider.listPendingApprovals?.()).toEqual([]);
     await finish();

@@ -34,7 +34,11 @@ export function synthesizeCodexApprovalRequest(input: {
   return {
     requestedAt: new Date().toISOString(),
     ...(typeof params.itemId === "string" ? { toolCallId: params.itemId } : {}),
-    ...(typeof params.reason === "string" ? { reason: params.reason.slice(0, 1_000) } : {}),
+    ...((typeof params.reason === "string" || params.networkApprovalContext) ? {
+      reason: [typeof params.reason === "string" ? params.reason : undefined,
+        params.networkApprovalContext ? `Network: ${JSON.stringify(params.networkApprovalContext)}` : undefined]
+        .filter((part) => part !== undefined).join("\n"),
+    } : {}),
     subject: codexSubject(method, params),
     choices: [
       { id: "allow", intent: "allow_once", label: "Allow once" },
@@ -47,8 +51,7 @@ export function synthesizeCodexApprovalRequest(input: {
 
 function codexSubject(method: string, params: CodexApprovalParams): ApprovalSubject {
   if ((method === "item/commandExecution/requestApproval" || method === "execCommandApproval") && typeof params.command === "string") {
-    return { kind: "command", command: params.command, ...(typeof params.cwd === "string" ? { cwd: params.cwd } : {}),
-      ...(params.networkApprovalContext ? { facts: [`Network: ${JSON.stringify(params.networkApprovalContext)}`] } : {}) };
+    return { kind: "command", command: params.command, ...(typeof params.cwd === "string" ? { cwd: params.cwd } : {}) };
   }
   if (method === "item/fileChange/requestApproval") {
     return { kind: "tool", toolName: "FileWrite", preview: JSON.stringify({ itemId: params.itemId, grantRoot: params.grantRoot }) };
