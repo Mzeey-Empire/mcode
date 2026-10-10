@@ -1,4 +1,4 @@
-import { ToolCallRecordSchema, type AgentItem, type AgentModelState, type AgentTurn, type Message, type TurnOutcome } from "@mcode/contracts";
+import { ToolCallRecordSchema, isTaskListToolName, type AgentItem, type AgentModelState, type AgentTurn, type Message, type TurnOutcome } from "@mcode/contracts";
 import type { ToolCall } from "@/transport/types";
 import { recordToToolCall } from "../narrative/build-persisted-narrative";
 import { collapseSubagentCalls } from "../narrative/subagent-lifecycle";
@@ -117,7 +117,8 @@ function summaryToolCalls(items: readonly AgentItem[]): ToolCall[] {
       ? [{ ...projectedToolCallStart(item, payloadString(item.payload, "nativeItemId") ?? item.id), parentToolCallId: item.parentItemId }]
       : [];
   });
-  return collapseSubagentCalls(calls).filter((call) => call.parentToolCallId == null);
+  return collapseSubagentCalls(calls)
+    .filter((call) => call.parentToolCallId == null && !isTaskListToolName(call.toolName));
 }
 
 function canonicalTurnSummary(turn: AgentTurn, items: readonly AgentItem[]): TurnSummary {
