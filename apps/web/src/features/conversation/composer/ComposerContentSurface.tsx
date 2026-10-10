@@ -395,7 +395,8 @@ function ComposerInlineStopButton({
   model,
   actions,
 }: Pick<ComposerContentSurfaceProps, "model" | "actions">) {
-  if (!model.isAgentRunning || !model.hasContent || model.planPending) return null;
+  // The starting Stop already cancels the dispatched first turn, so a second Stop would be redundant.
+  if (model.startingThread || !model.isAgentRunning || !model.hasContent || model.planPending) return null;
 
   return (
     <Tooltip>

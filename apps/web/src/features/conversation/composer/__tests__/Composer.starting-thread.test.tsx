@@ -173,6 +173,18 @@ describe("Composer while the thread is starting", () => {
     expect(onCancel).not.toHaveBeenCalled();
   });
 
+  it("shows one Stop when the first turn runs with a restored draft", () => {
+    resetThreadStoreForTests({ runningThreadIds: new Set(["thread-1"]) });
+    useComposerDraftStore.setState({
+      drafts: { "thread-1": { input: "Leftover", attachments: [], modelId: "", reasoning: "medium" } },
+      pendingPrefill: null,
+    });
+    renderStarting(vi.fn());
+
+    expect(screen.getByLabelText("Cancel startup")).toBeEnabled();
+    expect(screen.queryByLabelText("Stop agent")).not.toBeInTheDocument();
+  });
+
   it("ignores Esc while focus is outside the thread view", () => {
     const onCancel = vi.fn();
     renderStarting(onCancel);
