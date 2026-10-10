@@ -26,6 +26,7 @@ import {
   removeSlashCommandTrigger,
 } from "@/components/chat/lexical";
 import { usePlanStore } from "@/stores/planStore";
+import type { OverviewPresentation } from "@/stores/overviewStore";
 import { useDiffStore } from "@/stores/diffStore";
 
 import { handleSlashCommandPopupKey, useSlashCommand } from "@/components/chat/useSlashCommand";
@@ -258,6 +259,11 @@ interface ComposerProps {
   onOpenSelectedTextCommentSource?: (comment: SelectedTextComment) => void;
   /** Comment IDs whose transcript sources failed to load or reconstruct. */
   unavailableSelectedTextCommentIds?: readonly string[];
+  /**
+   * How the overview card shows the new thread's workspace and branch. The target rail stands in
+   * for the card only while it is hidden. Defaults to hidden because no caller mounts a new-thread card yet.
+   */
+  overviewPresentation?: OverviewPresentation;
 }
 
 /**
@@ -289,6 +295,7 @@ export function Composer({
   onSelectedTextCommentEditorUpdateConsumed,
   onOpenSelectedTextCommentSource,
   unavailableSelectedTextCommentIds = [],
+  overviewPresentation = "hidden",
 }: ComposerProps) {
   // Container-based (not viewport-based) so the layout responds to the right
   // panel opening, sidebar resizing, etc. — not just window resizes.
@@ -376,7 +383,6 @@ export function Composer({
   });
   const {
     mode: composerMode,
-    modeOptions,
     isGitRepo,
     needsWorkspace,
     isStaleWorktree,
@@ -650,6 +656,7 @@ export function Composer({
             needsWorkspace,
             editingFromQueue,
             composerMode,
+            overviewPresentation,
             isDragOver,
             targetPending,
             effectiveProviderId: surfaceState.effectiveProviderId,
@@ -751,14 +758,9 @@ export function Composer({
         <ComposerStatusStrip
           visible={showComposerStatusBar}
           isGitRepo={isGitRepo}
-          isNewThread={isNewThread === true}
-          branchFromMessageId={branchFromMessageId}
-          composerMode={composerMode}
           branchExecMode={branchExecMode}
-          modeOptions={modeOptions}
-          workspaceId={workspaceId}
+          workspacePath={workspacePath}
           activeThread={activeThread}
-          onComposerModeChange={setComposerMode}
           onBranchModeChange={setBranchExecMode}
         />
 

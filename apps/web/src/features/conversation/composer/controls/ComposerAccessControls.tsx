@@ -1,6 +1,6 @@
 import { Eye, KeyRound, Pencil, ShieldCheck } from "lucide-react";
 import {
-  AccessModeSelector,
+  AccessModeMenu,
   InlineComposerOptions,
   ComposerOptionsMenu,
   type AccessModeOption,
@@ -74,7 +74,7 @@ function DevinAccessControls({
     : DEVIN_ACCESS_MODES;
   const modes = advertisedModes.length > 0 ? advertisedModes : DEVIN_ACCESS_MODES;
   return (
-    <AccessModeSelector
+    <AccessModeMenu
       accessMode={devinMode}
       permissionLocked={false}
       approvalReviewSupported={false}

@@ -1,5 +1,6 @@
 import type { ComponentProps, DragEventHandler, ReactNode, RefObject } from "react";
 import { ArrowUp, X } from "lucide-react";
+import type { OverviewPresentation } from "@/stores/overviewStore";
 import { AttachmentPreview } from "@/components/chat/AttachmentPreview";
 import { ComposerAddMenu } from "@/components/chat/ComposerAddMenu";
 import { ComposerBranchBar } from "@/components/chat/ComposerBranchBar";
@@ -31,7 +32,8 @@ import type { Thread } from "@/transport";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { cn } from "@/lib/utils";
 import { ComposerAgentControls } from "./controls/ComposerAgentControls";
-import { ComposerNewThreadContext } from "./execution/ComposerNewThreadContext";
+import type { ComposerMode } from "./execution/composer-mode";
+import { NewThreadTargetRail } from "./execution/NewThreadTargetRail";
 import { ComposerTray } from "./ComposerTray";
 import { useDraftWriteFailureStore } from "@/lib/composer-draft-storage";
 import { DiffCommentsComposerAttachment } from "./DiffCommentsComposerAttachment";
@@ -63,7 +65,8 @@ interface ComposerContentSurfaceProps {
     readonly editingFromQueue: {
       readonly originalIndex: number;
     } | null;
-    readonly composerMode: ComponentProps<typeof ComposerNewThreadContext>["mode"];
+    readonly composerMode: ComposerMode;
+    readonly overviewPresentation: OverviewPresentation;
     readonly isDragOver: boolean;
     /** A new thread or fork has no branch to send yet, so Send waits. */
     readonly targetPending: boolean;
@@ -116,7 +119,7 @@ interface ComposerContentSurfaceProps {
   };
   readonly actions: {
     readonly onBranchModeExit?: () => void;
-    readonly onComposerModeChange: (mode: ComponentProps<typeof ComposerNewThreadContext>["mode"]) => void;
+    readonly onComposerModeChange: (mode: ComposerMode) => void;
     readonly onLoadIntoComposer: ComponentProps<typeof ComposerQueueList>["onLoadIntoComposer"];
     readonly onResumeQueuedMessage: () => Promise<void>;
     readonly onSendQueuedMessageNow: NonNullable<ComponentProps<typeof ComposerQueueList>["onSendNow"]>;
@@ -208,9 +211,10 @@ function ComposerNewThreadSurface({
   if (!model.isNewThread) return null;
 
   return (
-    <ComposerNewThreadContext
+    <NewThreadTargetRail
       workspaceId={model.workspaceId}
       mode={model.composerMode}
+      overviewPresentation={model.overviewPresentation}
       onModeChange={actions.onComposerModeChange}
     />
   );
