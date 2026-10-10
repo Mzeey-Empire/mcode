@@ -533,6 +533,13 @@
       "when": 1791652611535,
       "tag": "0074_closed_alex_power",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "6",
+      "when": 1791654083684,
+      "tag": "0075_legal_snowbird",
+      "breakpoints": true
     }
   ]
 }

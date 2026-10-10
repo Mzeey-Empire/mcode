@@ -380,6 +380,7 @@ describe("ws-events turn.persisted Review invalidation", () => {
     pushEmitter.emit("turn.persisted", {
       threadId: "thread-1",
       messageId: "message-1",
+      settledMessage: { id: "message-1", sequence: 1 },
       toolCallCount: 0,
       filesChanged: [],
     });
@@ -388,6 +389,7 @@ describe("ws-events turn.persisted Review invalidation", () => {
     pushEmitter.emit("turn.persisted", {
       threadId: "thread-1",
       messageId: "message-2",
+      settledMessage: { id: "message-2", sequence: 2 },
       toolCallCount: 0,
       filesChanged: ["src/changed.ts"],
     });

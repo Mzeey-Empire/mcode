@@ -16,6 +16,7 @@ import {
 } from "../../../../runtime/persistence/sqlite/schema.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { persistInterruptedAttemptSnapshot } from "../../../agents/turns/persistence/turn-finalization-write-operations.js";
+import type { ThreadAttentionService } from "../../../thread-control/attention/thread-attention-service.js";
 import type { GitExecutor } from "../../git/execution/index.js";
 import { RealGitExecutor } from "../../git/execution/real-git-executor.js";
 import { RepositoryGitMutationLock } from "../../git/repository-git-mutation-lock.js";
@@ -148,6 +149,8 @@ interface SweepRepository {
 /** Owns pin refs for the snapshot rows of the database this process opened. */
 @injectable()
 export class SnapshotRefPins {
+  /** Read-model invalidation connected by the application composition root. */
+  attention?: Pick<ThreadAttentionService, "invalidate">;
   private readonly orm: BunSQLiteDatabase;
   private readonly background = new Set<Promise<void>>();
 
@@ -301,6 +304,7 @@ export class SnapshotRefPins {
       }));
     });
     if (!written || !snapshotId) return;
+    this.attention?.invalidate(threadId);
     if (options.stopAt === "after-row-write") throw new SnapshotPinFaultStop("after-row-write");
     await this.transferToSnapshot(cwd, { id: snapshotId, refBefore: listed.tree, refAfter }, listed.pin);
   }

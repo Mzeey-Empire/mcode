@@ -1509,7 +1509,7 @@ describe("AgentService Ended finalization", () => {
     });
     startAgentServiceIngressForTest(service, (event) => {
       publishParentProviderEvent(event, {
-        updateThreadStatus: (threadId, status) => threadRepo.updateStatus(threadId, status),
+        recordTurnOutcome: (threadId, outcome) => threadRepo.recordTurnOutcome(threadId, outcome, new Date().toISOString()),
         publishThreadStatus: (payload) => broadcast("thread.status", payload),
       });
     });

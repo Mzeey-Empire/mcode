@@ -80,7 +80,7 @@ function buildService(): {
   providerEmitter: NodeEvents.EventEmitter;
   messageRepo: MessageRepo;
   mutationReservations: ThreadControlMutationReservationService;
-  threadRepo: ThreadRepo & { clearSdkSessionId: ReturnType<typeof vi.fn>; updateStatus: ReturnType<typeof vi.fn> };
+  threadRepo: ThreadRepo & { clearSdkSessionId: ReturnType<typeof vi.fn>; recordTurnOutcome: ReturnType<typeof vi.fn> };
   stopSession: ReturnType<typeof vi.fn>;
   canonicalDeliveryHandlers: Array<Parameters<ClaudeProviderBoundary["setCanonicalTurnDeliveryFailureHandler"]>[0]>;
 } {
@@ -107,6 +107,7 @@ function buildService(): {
   const threadRepo = {
     findById: vi.fn(() => thread),
     updateStatus: vi.fn(),
+    recordTurnOutcome: vi.fn().mockResolvedValue(true),
     updateModel: vi.fn(),
     updateProvider: vi.fn(),
     updateSettings: vi.fn(),
@@ -118,7 +119,7 @@ function buildService(): {
     clearSdkSessionId: vi.fn(),
     updateCompactSummary: vi.fn(),
     updateLineage: vi.fn(),
-  } as unknown as ThreadRepo & { clearSdkSessionId: ReturnType<typeof vi.fn>; updateStatus: ReturnType<typeof vi.fn> };
+  } as unknown as ThreadRepo & { clearSdkSessionId: ReturnType<typeof vi.fn>; recordTurnOutcome: ReturnType<typeof vi.fn> };
 
   const workspaceRepo = {
     findById: vi.fn(() => ({ id: "ws-1", path: "/workspace" })),
@@ -262,7 +263,7 @@ describe("Claude canonical delivery failure ownership", () => {
     expect(fixture.service.runtimeAccess().activeCount()).toBe(0);
     expect(fixture.sendTurn).toHaveBeenCalledTimes(1);
     expect(fixture.stopSession).toHaveBeenCalledWith(`mcode-${THREAD_ID}`);
-    expect(fixture.threadRepo.updateStatus).toHaveBeenCalledWith(THREAD_ID, "errored");
+    expect(fixture.threadRepo.recordTurnOutcome).toHaveBeenCalledWith(THREAD_ID, "errored", expect.any(String));
   });
 
   it.each([
@@ -341,7 +342,7 @@ describe("AgentService transient-failure auto-retry", () => {
     // sessionName, so the retry must also force-evict it to truly spawn fresh.
     expect(discardSession).toHaveBeenCalledWith(`mcode-${THREAD_ID}`);
     expect(threadRepo.clearSdkSessionId).toHaveBeenCalledWith(THREAD_ID);
-    expect(threadRepo.updateStatus).not.toHaveBeenCalledWith(THREAD_ID, "errored");
+    expect(threadRepo.recordTurnOutcome).not.toHaveBeenCalledWith(THREAD_ID, "errored", expect.any(String));
   });
 
   it("reactivates the same turn authority after retry discards its provider session", async () => {
@@ -384,7 +385,7 @@ describe("AgentService transient-failure auto-retry", () => {
     expect(sendTurn).toHaveBeenCalledTimes(1);
     expect(discardSession).not.toHaveBeenCalled();
     expect(threadRepo.clearSdkSessionId).not.toHaveBeenCalled();
-    expect(threadRepo.updateStatus).toHaveBeenCalledWith(THREAD_ID, "errored");
+    expect(threadRepo.recordTurnOutcome).toHaveBeenCalledWith(THREAD_ID, "errored", expect.any(String));
   });
 
   it("terminalizes exhausted provider retries with the active turn identity", async () => {
@@ -408,15 +409,15 @@ describe("AgentService transient-failure auto-retry", () => {
     expect(terminalEvents[0]?.turnExecutionId).toEqual(expect.any(String));
     expect(terminalEvents[1]?.turnExecutionId).toBe(terminalEvents[0]?.turnExecutionId);
     expect(service.runtimeAccess().runtimeSnapshots().find((snapshot) => snapshot.threadId === THREAD_ID)?.phase).toBe("errored");
-    expect(threadRepo.updateStatus).toHaveBeenCalledWith(THREAD_ID, "errored");
-    expect(threadRepo.updateStatus).not.toHaveBeenCalledWith(THREAD_ID, "interrupted");
+    expect(threadRepo.recordTurnOutcome).toHaveBeenCalledWith(THREAD_ID, "errored", expect.any(String));
+    expect(threadRepo.recordTurnOutcome).not.toHaveBeenCalledWith(THREAD_ID, "interrupted", expect.any(String));
   });
 
   it("does not publish an interrupted status for suppressed retry teardown", async () => {
     const { service, sendTurn, providerEmitter, threadRepo } = buildService();
     startAgentServiceIngressForTest(service, (event) => {
       publishParentProviderEvent(event, {
-        updateThreadStatus: threadRepo.updateStatus,
+        recordTurnOutcome: (threadId, outcome) => { void threadRepo.recordTurnOutcome(threadId, outcome, new Date().toISOString()); },
         publishThreadStatus: vi.fn(),
       });
     });
@@ -458,9 +459,9 @@ describe("AgentService transient-failure auto-retry", () => {
     });
 
     await vi.waitFor(() => {
-      expect(threadRepo.updateStatus).toHaveBeenCalledWith(THREAD_ID, "completed");
+      expect(threadRepo.recordTurnOutcome).toHaveBeenCalledWith(THREAD_ID, "completed", expect.any(String));
     });
-    expect(threadRepo.updateStatus).not.toHaveBeenCalledWith(THREAD_ID, "interrupted");
+    expect(threadRepo.recordTurnOutcome).not.toHaveBeenCalledWith(THREAD_ID, "interrupted", expect.any(String));
   });
 
   it("leaves a full-looking response unresolved when the provider ends without terminal proof", async () => {
@@ -1062,7 +1063,7 @@ describe("AgentService transient-failure auto-retry", () => {
 
     expect(sendTurn).toHaveBeenCalledTimes(2);
     expect((sendTurn.mock.calls[1][0] as TurnRequest).resumeFrom).toBeUndefined();
-    expect(threadRepo.updateStatus).not.toHaveBeenCalledWith(THREAD_ID, "errored");
+    expect(threadRepo.recordTurnOutcome).not.toHaveBeenCalledWith(THREAD_ID, "errored", expect.any(String));
     providerEmitter.emit("event", {
       type: "turnComplete",
       threadId: THREAD_ID,
@@ -1141,6 +1142,6 @@ describe("AgentService transient-failure auto-retry", () => {
 
     // Cap is 2: one original attempt plus one retry, then it gives up.
     expect(sendTurn).toHaveBeenCalledTimes(2);
-    expect(threadRepo.updateStatus).toHaveBeenCalledWith(THREAD_ID, "errored");
+    expect(threadRepo.recordTurnOutcome).toHaveBeenCalledWith(THREAD_ID, "errored", expect.any(String));
   });
 });

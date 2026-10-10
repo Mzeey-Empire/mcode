@@ -523,6 +523,7 @@ interface ThreadState {
   handleTurnPersisted: (payload: {
     threadId: string;
     messageId: string | null;
+    settledMessage: { id: string; sequence: number } | null;
     turnId?: string | null;
     executionId?: string | null;
     outcome?: TurnOutcome | null;
@@ -2485,10 +2486,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   const synchronizeTerminalStatus = (threadId: string, status: "completed" | "errored" | "interrupted"): void => {
-    if (useWorkspaceStore.getState().activeThreadId === threadId) {
-      void getTransport().markThreadViewed(threadId).catch(() => {});
-      return;
-    }
     useWorkspaceStore.setState((workspace) => ({
       threads: workspace.threads.map((thread) => thread.id === threadId ? { ...thread, status } : thread),
     }));
@@ -2937,6 +2934,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   ): Partial<ThreadRecord> => {
     if (payload.messageId === null) {
       return {
+        messages: record.messages.map((message) => message.id === payload.settledMessage?.id
+          ? { ...message, serverSequence: payload.settledMessage.sequence }
+          : message),
         ...turnPersistStopState(record, payload),
         ...(terminalPhase ? terminalRuntimePatch(record, terminalPhase) : {}),
         ...(payload.fileEffects && payload.turnId === record.fileEffectTurnId
@@ -2949,7 +2949,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const messages = persistedTurnMessages(record, payload, localMessageId);
     const stopState = turnPersistStopState(record, payload);
     return {
-      ...(messages ? { messages } : {}),
+      messages: (messages ?? record.messages).map((message) => message.id === localMessageId && payload.settledMessage?.id === payload.messageId
+        ? { ...message, serverSequence: payload.settledMessage.sequence }
+        : message),
       persistedToolCallCounts: { ...record.persistedToolCallCounts, [localMessageId]: payload.toolCallCount },
       persistedFilesChanged: { ...record.persistedFilesChanged, [localMessageId]: payload.filesChanged },
       latestTurnWithChanges: currentThreadId === payload.threadId
@@ -3325,12 +3327,14 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       const prefetchedPage = conversationResidency.takePrefetchedHistoryPage(request);
       const {
         identity: responseIdentity,
-        messages: olderMessages,
+        messages: fetchedMessages,
         hasMore,
         answeredPlanMessageIds,
         narrativeByMessage,
       } = prefetchedPage
         ?? await getTransport().loadOlderConversationPage(request);
+      const olderMessages = prefetchedPage ? fetchedMessages
+        : fetchedMessages.map((message) => ({ ...message, serverSequence: message.sequence }));
 
       const currentRecord = getRec(threadId);
       const currentIdentity = {
@@ -3476,7 +3480,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
       patchRec(threadId, (r) => ({
         ...(() => {
-          const merged = mergeConversationWindow(threadId, r.messages, newerMessages, "newer");
+          const merged = mergeConversationWindow(threadId, r.messages,
+            newerMessages.map((message) => ({ ...message, serverSequence: message.sequence })), "newer");
           const retainedMessageIds = new Set(merged.messages.map((message) => message.id));
           return {
             messages: merged.messages,

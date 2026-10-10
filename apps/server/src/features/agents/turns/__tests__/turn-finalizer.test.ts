@@ -142,6 +142,7 @@ describe("TurnFinalizer.finalize — turn outcome → tool-call status", () => {
       threadId: THREAD,
       turnId: null,
       messageId: "m1",
+      settledMessage: { id: "m1", sequence: 1 },
       toolCallCount: 1,
       filesChanged: [],
       outcome: "completed",
@@ -200,7 +201,7 @@ describe("TurnFinalizer.finalize — turn outcome → tool-call status", () => {
     expect(tools[0].status).toBe("failed");
   });
 
-  it("leaves no assistant row and broadcasts nothing for a fully empty turn", async () => {
+  it("leaves no assistant row and broadcasts the persisted prompt for a fully empty turn", async () => {
     // The genuine pre-turn / no-output case: no tool, body, narration, or hook.
     // hasRecordableActivity is false, so finalize writes nothing.
     await insertMessage(db, "u1", "user", "do the thing", 1);
@@ -211,7 +212,10 @@ describe("TurnFinalizer.finalize — turn outcome → tool-call status", () => {
 
     const { messages } = new MessageRepo(db, writerFor(db)).listByThread(THREAD, 10);
     expect(messages.some((m) => m.role === "assistant")).toBe(false);
-    expect(broadcast).not.toHaveBeenCalledWith("turn.persisted", expect.anything());
+    expect(broadcast).toHaveBeenCalledWith("turn.persisted", {
+      threadId: THREAD, turnId: null, messageId: null, settledMessage: { id: "u1", sequence: 1 },
+      toolCallCount: 0, filesChanged: [], outcome: "errored", executionId: null,
+    });
   });
 
   it("clears the last-persisted message id on an empty turn so a late hook can't attach to the prior turn", async () => {

@@ -1,8 +1,8 @@
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent, TurnOutcome } from "@mcode/contracts";
 
 /** Dependencies used to publish one normalized provider event to the parent UI. */
 export interface ParentProviderEventPublicationDeps {
-  updateThreadStatus: (threadId: string, status: "completed" | "errored" | "interrupted") => void;
+  recordTurnOutcome: (threadId: string, outcome: TurnOutcome) => void;
   publishThreadStatus: (payload: { threadId: string; status: "completed" | "errored" | "interrupted" }) => void;
 }
 
@@ -16,10 +16,10 @@ export function publishParentProviderEvent(
   // A late replay must not overwrite the status of a newer execution.
   if (event.publicationId !== undefined) return true;
   if (event.type === "turnComplete") {
-    deps.updateThreadStatus(event.threadId, "completed");
+    deps.recordTurnOutcome(event.threadId, "completed");
     deps.publishThreadStatus({ threadId: event.threadId, status: "completed" });
   } else if (event.type === "error") {
-    deps.updateThreadStatus(event.threadId, "errored");
+    deps.recordTurnOutcome(event.threadId, "errored");
     deps.publishThreadStatus({ threadId: event.threadId, status: "errored" });
   } else if (event.type === "ended" && event.outcome !== undefined) {
     const status = event.outcome === "completed"
@@ -27,7 +27,7 @@ export function publishParentProviderEvent(
       : event.outcome === "errored"
         ? "errored"
         : "interrupted";
-    deps.updateThreadStatus(event.threadId, status);
+    deps.recordTurnOutcome(event.threadId, event.outcome);
     deps.publishThreadStatus({ threadId: event.threadId, status });
   }
   return true;

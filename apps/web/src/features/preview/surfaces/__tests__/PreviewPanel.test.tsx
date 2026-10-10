@@ -1044,6 +1044,7 @@ describe("PreviewPanel: full panel state", () => {
       pushEmitter.emit("turn.persisted", {
         threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         messageId: "message-1",
+        settledMessage: { id: "message-1", sequence: 1 },
         toolCallCount: 1,
         filesChanged: ["src/main.ts"],
       });
@@ -1072,6 +1073,7 @@ describe("PreviewPanel: full panel state", () => {
       pushEmitter.emit("turn.persisted", {
         threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         messageId: "message-1",
+        settledMessage: { id: "message-1", sequence: 1 },
         toolCallCount: 3,
         filesChanged: [],
       });

@@ -69,7 +69,7 @@ describe("Chat Pagination", () => {
 
 await activateTestConversation(threadId);
 
-    expect(getTestActiveMessages()).toEqual(messages);
+    expect(getTestActiveMessages()).toEqual([{ ...messages[0], serverSequence: 51 }, { ...messages[1], serverSequence: 52 }]);
     expect(getTestThreadOldestLoadedSequence(threadId)).toBe(51);
     expect(getTestThreadHasMoreMessages(threadId)).toBe(true);
   });
@@ -282,7 +282,7 @@ await activateTestConversation(threadId);
     await currentLoad;
 
     expect(getTestThreadIsLoadingMore(threadId)).toBe(false);
-    expect(readThreadField(threadId, (record) => record.messages)).toEqual([fresh, resident]);
+    expect(readThreadField(threadId, (record) => record.messages)).toEqual([{ ...fresh, serverSequence: 9 }, resident]);
   });
 
   it("loadOlderMessages writes async snapshot file lists into the message cache", async () => {
@@ -543,7 +543,7 @@ await activateTestConversation(threadId);
 
     expect(mockTransport.loadConversationPage).toHaveBeenCalledWith(threadId, 25, 5);
     expect(getTestActiveMessages()).toEqual([
-      older,
+      { ...older, serverSequence: 2 },
       residentAtSharedSequence,
       live,
     ]);

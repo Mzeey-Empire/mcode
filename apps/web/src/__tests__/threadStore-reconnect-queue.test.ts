@@ -153,6 +153,7 @@ describe("threadStore reconnect and queued follow-ups", () => {
     });
 
     useThreadStore.getState().handleTurnPersisted({
+      settledMessage: null,
       threadId: THREAD_ID,
       messageId: "assistant-1",
       toolCallCount: 0,
@@ -199,6 +200,7 @@ describe("threadStore reconnect and queued follow-ups", () => {
     });
 
     useThreadStore.getState().handleTurnPersisted({
+      settledMessage: null,
       threadId: THREAD_ID,
       messageId: "assistant-1",
       toolCallCount: 0,
@@ -233,6 +235,7 @@ describe("threadStore reconnect and queued follow-ups", () => {
       });
 
       useThreadStore.getState().handleTurnPersisted({
+        settledMessage: null,
         threadId: THREAD_ID,
         messageId: "assistant-1",
         toolCallCount: 0,
@@ -269,6 +272,7 @@ describe("threadStore reconnect and queued follow-ups", () => {
     });
 
     useThreadStore.getState().handleTurnPersisted({
+      settledMessage: null,
       threadId: THREAD_ID,
       messageId: "assistant-1",
       toolCallCount: 0,
@@ -419,6 +423,7 @@ describe("threadStore reconnect and queued follow-ups", () => {
       });
 
       useThreadStore.getState().handleTurnPersisted({
+        settledMessage: null,
         threadId: THREAD_ID,
         messageId: "assistant-1",
         toolCallCount: 0,
@@ -463,6 +468,7 @@ describe("threadStore reconnect and queued follow-ups", () => {
 
     const stopping = useThreadStore.getState().stopAgent(THREAD_ID);
     useThreadStore.getState().handleTurnPersisted({
+      settledMessage: null,
       threadId: THREAD_ID,
       messageId: "assistant-1",
       toolCallCount: 0,

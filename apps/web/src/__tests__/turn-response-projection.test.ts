@@ -36,6 +36,7 @@ function startTurn(): void {
 
 function persist(messageId: string, toolCallCount = 0): void {
   useThreadStore.getState().handleTurnPersisted({
+    settledMessage: null,
     threadId: THREAD_ID,
     messageId,
     toolCallCount,

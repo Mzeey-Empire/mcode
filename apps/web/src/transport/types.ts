@@ -1,3 +1,6 @@
+/** A rendered message keeps server sequence provenance separate from live ordering guesses. */
+export type Message = import("@mcode/contracts").Message & { serverSequence?: number };
+
 // Import shared types for local use in the McodeTransport interface.
 import type {
   DiffStats,
@@ -135,7 +138,6 @@ export type {
   WorkspaceEnvironmentActionRun,
   Thread,
   RecentThread,
-  Message,
   AttachmentMeta,
   StoredAttachment,
   GitBranch,
@@ -505,8 +507,10 @@ export interface McodeTransport {
       defaultOpenInApp?: string | null;
     },
   ): Promise<boolean>;
-  /** Clear the "completed" badge for a thread. Transitions completed -> paused in the DB. */
-  markThreadViewed(threadId: string): Promise<void>;
+  /** Return live waits and unseen settled outcomes across all threads. */
+  listAttention(): Promise<import("@mcode/contracts").ThreadAttention[]>;
+  /** Acknowledge a rendered server sequence up to a settled turn boundary. */
+  acknowledgeSeen(threadId: string, throughSequence: number): Promise<import("@mcode/contracts").AcknowledgeSeenResult>;
   /** Scan threads for stale or missing PR data and refresh their state. Returns updated PR state
    * for all affected threads. A null prNumber/prStatus signals the PR was cleared (stale data removed). */
   syncThreadPrs(workspaceId: string): Promise<Array<{ threadId: string; prNumber: number | null; prStatus: string | null }>>;

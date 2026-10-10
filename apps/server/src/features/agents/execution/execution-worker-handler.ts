@@ -136,6 +136,7 @@ export type ProjectedCommittedProviderEvent = Omit<
 /** Writer-confirmed terminal projection surfaced after its durable finish. */
 export interface ExecutionTerminalPersistenceReceipt {
   readonly messageId: string | null;
+  readonly settledMessage: { readonly id: string; readonly sequence: number } | null;
   readonly outcome: TurnOutcome;
   readonly toolCallCount: number;
   readonly filesChanged: readonly string[];

@@ -7,7 +7,7 @@ import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { and, asc, desc, eq, getTableColumns, gt, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import { DevinModeSchema, ReasoningLevelSchema } from "@mcode/contracts";
+import { DevinModeSchema, ReasoningLevelSchema, type AcknowledgeSeenResult, type TurnOutcome } from "@mcode/contracts";
 import type { DevinMode, Thread, RecentThread, ThreadMode, ThreadStatus, ReasoningLevel, InteractionMode, OrchestrationMode, PermissionMode, ContextWindowMode } from "@mcode/contracts";
 import {
   canonicalAgentThreads,
@@ -17,6 +17,8 @@ import {
   workspaces,
 } from "../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
+import { transcriptMessageVisibility } from "../../agents/conversation/persistence/transcript-visibility.js";
+import { SequenceAheadError } from "../attention/sequence-ahead-error.js";
 
 type ThreadRow = typeof threads.$inferSelect;
 
@@ -529,6 +531,42 @@ export class ThreadStore {
       );
 
     return result.changes > 0;
+  }
+
+  /** Persist a terminal outcome at the newest visible message, including an unanswered prompt. */
+  recordTurnOutcome(id: string, outcome: TurnOutcome, endedAt: string): boolean {
+    return this.db.transaction(() => runChanges(this.orm, sql`
+      UPDATE threads SET status = ${outcome === "cancelled" ? "interrupted" : outcome}, updated_at = ${endedAt}, last_turn_outcome = ${outcome},
+        last_turn_ended_at = ${endedAt}, last_turn_sequence = (
+          SELECT MAX(sequence) FROM messages WHERE thread_id = ${id} AND ${transcriptMessageVisibility}
+        )
+      WHERE id = ${id} AND (last_turn_ended_at IS NULL OR julianday(last_turn_ended_at) <= julianday(${endedAt}))
+    `).changes > 0)();
+  }
+
+  /** Compare and advance inside the writer transaction so concurrent clients cannot regress it. */
+  acknowledgeSeen(id: string, throughSequence: number): AcknowledgeSeenResult {
+    return this.db.transaction(() => {
+      const row = this.orm.select({ sequence: threads.seenThroughSequence, at: threads.seenAt })
+        .from(threads).where(and(eq(threads.id, id), isNull(threads.deletedAt))).get();
+      if (!row) throw new Error("Thread not found");
+      const newest = this.orm.select({ sequence: sql<number | null>`MAX(sequence)` }).from(
+        sql`(
+          SELECT sequence FROM messages WHERE thread_id = ${id} AND outcome IS NOT NULL AND ${transcriptMessageVisibility}
+          UNION ALL SELECT last_turn_sequence FROM threads WHERE id = ${id}
+        )`,
+      ).get()?.sequence;
+      if (newest == null || throughSequence > newest) {
+        throw new SequenceAheadError();
+      }
+      const previous = row;
+      if (previous.sequence !== null && throughSequence <= previous.sequence) return { previous, current: previous };
+      const current = { sequence: throughSequence, at: new Date().toISOString() };
+      this.db.query(`UPDATE threads SET seen_through_sequence = ?, seen_at = ?,
+        status = CASE WHEN status = 'completed' THEN 'paused' ELSE status END
+        WHERE id = ?`).run(current.sequence, current.at, id);
+      return { previous, current };
+    })();
   }
 
   /** Persist the first user-completion timestamp and its deletion deadline. */

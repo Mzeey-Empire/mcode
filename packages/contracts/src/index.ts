@@ -1,4 +1,5 @@
 // Models
+export * from "./models/thread-attention.js";
 export * from "./models/next-message-draft.js";
 export {
   ThreadStatusSchema,

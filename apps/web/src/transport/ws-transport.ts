@@ -573,6 +573,12 @@ export function createWsTransport(
       // The client-side optimistic Set is lost on reload/reconnect; this
       // restores live-session indicators for threads the server is still running.
       const hydration = hydrateRunningThreadsFromServer((method, params) => rpc(method, params as Record<string, unknown>));
+      void import("@/features/thread-attention/thread-attention-store").then(({ threadAttentionStore }) => {
+        const observedAttention = threadAttentionStore.getState().byThreadId;
+        return rpc<import("@mcode/contracts").ThreadAttention[]>("thread.listAttention", {})
+          .then((attention) => threadAttentionStore.getState().hydrate(attention, observedAttention));
+      })
+        .catch((error: unknown) => console.warn("[thread-attention] hydration failed", error));
 
       // Expose a sentinel in dev/test builds so Playwright can synchronize on
       // hydration completion before injecting agent events. Without this, tests
@@ -1148,7 +1154,8 @@ export function createWsTransport(
         devinMode: settings.devinMode,
         defaultOpenInApp: settings.defaultOpenInApp,
       }),
-    markThreadViewed: (threadId) => rpc<void>("thread.markViewed", { threadId }),
+    listAttention: () => rpc<import("@mcode/contracts").ThreadAttention[]>("thread.listAttention", {}),
+    acknowledgeSeen: (threadId, throughSequence) => rpc<import("@mcode/contracts").AcknowledgeSeenResult>("thread.acknowledgeSeen", { threadId, throughSequence }),
     syncThreadPrs: (workspaceId) =>
       rpc<Array<{ threadId: string; prNumber: number; prStatus: string }>>("thread.syncPrs", { workspaceId }),
 

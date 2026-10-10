@@ -3,19 +3,24 @@ import type { Database } from "bun:sqlite";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { TurnSnapshotStore } from "./turn-snapshot-store.js";
 import { turnSnapshotWriteOperations } from "./turn-snapshot-write-operations.js";
+import type { ThreadAttentionService } from "../../../thread-control/attention/thread-attention-service.js";
 export type { CreateTurnSnapshotInput } from "./turn-snapshot-store.js";
 
 /** Read-only queries and committed mutations for TurnSnapshotRepo. */
 @injectable()
 export class TurnSnapshotRepo {
+  /** Read-model invalidation connected by the application composition root. */
+  attention?: Pick<ThreadAttentionService, "invalidate">;
   private readonly reader: TurnSnapshotStore;
 
   constructor(@inject("Database") db: Database, @inject(ApplicationDatabaseWriter) private readonly writer: ApplicationDatabaseWriter) {
     this.reader = new TurnSnapshotStore(db);
   }
 
-  create(input: Parameters<TurnSnapshotStore["create"]>[0]): Promise<ReturnType<TurnSnapshotStore["create"]>> {
-    return this.writer.execute(turnSnapshotWriteOperations.create, [input]);
+  async create(input: Parameters<TurnSnapshotStore["create"]>[0]): Promise<ReturnType<TurnSnapshotStore["create"]>> {
+    const snapshot = await this.writer.execute(turnSnapshotWriteOperations.create, [input]);
+    this.attention?.invalidate(input.threadId);
+    return snapshot;
   }
 
   getById(id: Parameters<TurnSnapshotStore["getById"]>[0]): ReturnType<TurnSnapshotStore["getById"]> {

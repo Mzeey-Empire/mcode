@@ -4,7 +4,7 @@ import { publishParentProviderEvent } from "../provider-event-publication.js";
 
 function buildPublicationDeps() {
   return {
-    updateThreadStatus: vi.fn(),
+    recordTurnOutcome: vi.fn(),
     publishThreadStatus: vi.fn(),
   };
 }
@@ -25,7 +25,7 @@ describe("provider event publication ownership", () => {
     };
 
     expect(publishParentProviderEvent(event, deps)).toBe(false);
-    expect(deps.updateThreadStatus).not.toHaveBeenCalled();
+    expect(deps.recordTurnOutcome).not.toHaveBeenCalled();
     expect(deps.publishThreadStatus).not.toHaveBeenCalled();
   });
 
@@ -41,7 +41,7 @@ describe("provider event publication ownership", () => {
     };
 
     expect(publishParentProviderEvent(parentEvent, deps)).toBe(true);
-    expect(deps.updateThreadStatus).toHaveBeenCalledWith("parent-thread", "completed");
+    expect(deps.recordTurnOutcome).toHaveBeenCalledWith("parent-thread", "completed");
     expect(deps.publishThreadStatus).toHaveBeenCalledWith({
       threadId: "parent-thread",
       status: "completed",
@@ -62,7 +62,7 @@ describe("provider event publication ownership", () => {
     };
 
     expect(publishParentProviderEvent(event, deps)).toBe(true);
-    expect(deps.updateThreadStatus).not.toHaveBeenCalled();
+    expect(deps.recordTurnOutcome).not.toHaveBeenCalled();
     expect(deps.publishThreadStatus).not.toHaveBeenCalled();
   });
 
@@ -75,7 +75,7 @@ describe("provider event publication ownership", () => {
     };
 
     expect(publishParentProviderEvent(parentEvent, deps)).toBe(true);
-    expect(deps.updateThreadStatus).toHaveBeenCalledWith("parent-thread", "errored");
+    expect(deps.recordTurnOutcome).toHaveBeenCalledWith("parent-thread", "errored");
     expect(deps.publishThreadStatus).toHaveBeenCalledWith({
       threadId: "parent-thread",
       status: "errored",
@@ -97,7 +97,7 @@ describe("provider event publication ownership", () => {
     };
 
     expect(publishParentProviderEvent(event, deps)).toBe(true);
-    expect(deps.updateThreadStatus).toHaveBeenCalledWith("parent-thread", status);
+    expect(deps.recordTurnOutcome).toHaveBeenCalledWith("parent-thread", outcome);
     expect(deps.publishThreadStatus).toHaveBeenCalledWith({
       threadId: "parent-thread",
       status,
@@ -113,7 +113,7 @@ describe("provider event publication ownership", () => {
     };
 
     expect(publishParentProviderEvent(event, deps)).toBe(false);
-    expect(deps.updateThreadStatus).not.toHaveBeenCalled();
+    expect(deps.recordTurnOutcome).not.toHaveBeenCalled();
     expect(deps.publishThreadStatus).not.toHaveBeenCalled();
   });
 
@@ -127,7 +127,7 @@ describe("provider event publication ownership", () => {
     };
 
     expect(publishParentProviderEvent(event, deps)).toBe(true);
-    expect(deps.updateThreadStatus).not.toHaveBeenCalled();
+    expect(deps.recordTurnOutcome).not.toHaveBeenCalled();
     expect(deps.publishThreadStatus).not.toHaveBeenCalled();
   });
 });

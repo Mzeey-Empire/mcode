@@ -523,7 +523,7 @@ await activateTestConversation(threadId);
 
     const state = useThreadStore.getState();
     expect(state.currentThreadId).toBe(threadId);
-    expect(getTestActiveMessages()).toEqual(msgs);
+    expect(getTestActiveMessages()).toEqual([{ ...msgs[0], serverSequence: 1 }, { ...msgs[1], serverSequence: 2 }]);
     expect(readActiveThreadField((r) => r.loading) ?? false).toBe(false);
   });
 

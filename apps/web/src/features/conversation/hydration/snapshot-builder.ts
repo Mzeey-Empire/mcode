@@ -67,7 +67,7 @@ export class SnapshotBuilder {
     const fileChanges = SnapshotBuilder.deriveFileChanges(snapshots);
 
     return {
-      messages,
+      messages: messages.map((message) => ({ ...message, serverSequence: message.sequence })),
       sessionNotices,
       noticeSessionId: providerNoticeSessionId(sessionNotices),
       oldestLoadedSequence,

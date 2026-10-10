@@ -475,9 +475,21 @@ explicitly stopped the turn), **interrupted** (infrastructure or a process
 disappeared before a terminal outcome), or **errored** (a known terminal
 provider or turn failure).
 
-> **Codebase mismatch.** Canonical persistence currently stores
-> `Completed|Interrupted|Errored`, so it lacks the distinct `Cancelled`
-> outcome.
+Canonical persistence preserves all four outcomes, including `Cancelled`.
+Legacy thread status still maps cancelled turns to `interrupted`.
+
+### Thread attention
+Server facts combining a live wait, the last settled turn outcome, and a
+seen marker. The marker is an acknowledged server message sequence and
+the server time it advanced. A turn ends at its newest persisted message,
+including its user prompt when no assistant output was saved. A focused,
+visible client acknowledges only server-confirmed messages it has rendered,
+up to the newest settled message or the last turn's ending sequence.
+
+### Needs you
+A live condition waiting for the user's input, such as an approval.
+Viewing the thread acknowledges settled outcomes but does not resolve
+the pending request.
 
 ### Recovery incident
 The exact set of active turns that one backend restart interrupted. The server
