@@ -23,6 +23,7 @@ import { projectActionRunWriteHandlers } from "../../../features/projects/enviro
 import { workspaceEnvironmentConfigurationWriteHandlers } from "../../../features/projects/environment/persistence/workspace-environment-configuration-write-operations.js";
 import { workspaceEnvironmentAutomaticWriteHandlers } from "../../../features/projects/environment/workspace-environment-automatic-write-operations.js";
 import { diffSummaryWriteHandlers } from "../../../features/projects/diffs/summaries/diff-summary-write-operations.js";
+import { gitCommitRequestWriteHandlers } from "../../../features/projects/git/commits/persistence/git-commit-request-write-operations.js";
 import { storeIdentityWriteHandlers } from "../../../features/projects/diffs/snapshots/snapshot-store-identity.js";
 import { buildThreadStoreWriteHandlers } from "../../../features/thread-control/persistence/thread-write-handlers.js";
 import { buildCleanupJobStoreWriteHandlers } from "../../../features/thread-control/cleanup/persistence/cleanup-job-write-handlers.js";
@@ -57,6 +58,7 @@ export function applicationDatabaseHandlers(db: Database): ReadonlyMap<string, (
     ...workspaceEnvironmentAutomaticWriteHandlers(db),
     ...diffSummaryWriteHandlers(db),
     ...storeIdentityWriteHandlers(db),
+    ...gitCommitRequestWriteHandlers(db),
     ...buildThreadStoreWriteHandlers(db),
     ...buildCleanupJobStoreWriteHandlers(db),
     ...buildThreadControlApprovalStoreWriteHandlers(db),

@@ -25,7 +25,6 @@ import {
   insertSlashCommandNode,
   removeSlashCommandTrigger,
 } from "@/components/chat/lexical";
-import { useTaskStore, type TaskItem } from "@/stores/taskStore";
 import { usePlanStore } from "@/stores/planStore";
 import type { OverviewPresentation } from "@/stores/overviewStore";
 import { useDiffStore } from "@/stores/diffStore";
@@ -60,8 +59,6 @@ export {
   isThreadRunningForSubmit,
   shouldQueueActiveThreadSubmit,
 } from "./submission/composer-submit-policy";
-
-const EMPTY_TASK_BUBBLE_TASKS: readonly TaskItem[] = [];
 
 /** `accept` list for the composer's hidden file input. */
 const ATTACHMENT_INPUT_ACCEPT = attachmentAcceptAttribute();
@@ -316,12 +313,6 @@ export function Composer({
     const panel = s.getRightPanel(workspaceId, threadId);
     return panel.visible && panel.activeTab === "tasks" && panel.openTabs.includes("tasks");
   });
-  const taskBubbleTasks = useTaskStore((s) =>
-    threadId ? s.taskBubbleByThread[threadId] ?? EMPTY_TASK_BUBBLE_TASKS : EMPTY_TASK_BUBBLE_TASKS,
-  );
-  const fileEffectSummary = useThreadStore((s) =>
-    threadId ? s.records.get(threadId)?.fileEffectSummary : undefined,
-  );
 
   const activeThread = useWorkspaceThread(threadId, (thread) => thread);
   const form = useComposerFormController({
@@ -656,8 +647,6 @@ export function Composer({
             activeThread,
             planPreview,
             planPanelOpen,
-            taskBubbleTasks,
-            fileEffectSummary,
             isAgentRunning,
             isStopPending,
             setupBlocked,

@@ -14,6 +14,7 @@ import type { GitExecutor } from "../../git/execution/index.js";
 import { RealGitExecutor } from "../../git/execution/real-git-executor.js";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { RepositoryGitMutationLock } from "../../git/repository-git-mutation-lock.js";
+import { isLiteralRepoPath } from "../../git/literal-paths.js";
 
 const MAX_ATTRIBUTED_PATHS = 16_384;
 const MAX_PATHS_PER_GIT_CALL = 128;
@@ -21,15 +22,7 @@ const MAX_PATHSPEC_CHARS_PER_GIT_CALL = 20_000;
 
 function literalPathspecs(paths: readonly string[]): string[] {
   return [...new Set(paths)]
-    .filter((path) => (
-      path.length > 0
-      && path.length <= 4096
-      && !path.includes("\0")
-      && !/^(?:[A-Za-z]:[\\/]|[\\/])/.test(path)
-      && path !== ".."
-      && !path.startsWith("../")
-      && !path.startsWith("..\\")
-    ))
+    .filter(isLiteralRepoPath)
     .map((path) => `:(literal)${path.replaceAll("\\", "/")}`);
 }
 

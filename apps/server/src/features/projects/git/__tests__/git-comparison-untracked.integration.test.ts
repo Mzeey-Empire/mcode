@@ -388,4 +388,23 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
     });
     expect(indexHash()).toBe(before);
   });
+
+  it("diffs only the selected paths from HEAD, untracked included, without touching the real index", async () => {
+    write("tracked.ts", "one\n");
+    write("other.ts", "one\n");
+    commit();
+    write("tracked.ts", "two\n");
+    write("other.ts", "two\n");
+    write("[new].md", "fresh\n");
+    const before = indexHash();
+
+    const diff = await service.readSelectedPathsDiff(cwd, ["tracked.ts", "[new].md"]);
+
+    expect(diff.stat).toContain("tracked.ts");
+    expect(diff.stat).toContain("[new].md");
+    expect(diff.patch).toContain("+fresh");
+    expect(diff.patch).not.toContain("other.ts");
+    expect(indexHash()).toBe(before);
+    expect(temporaryIndexes()).toEqual([]);
+  });
 });

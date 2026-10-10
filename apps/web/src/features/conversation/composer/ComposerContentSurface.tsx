@@ -14,7 +14,6 @@ import { Notice } from "@/components/ui/notice";
 import { RetryBanner } from "@/components/chat/RetryBanner";
 import { type useSlashCommand } from "@/components/chat/useSlashCommand";
 import { SpellcheckContextMenu } from "@/components/chat/SpellcheckContextMenu";
-import { TaskBubble } from "@/components/chat/TaskBubble";
 import { useFileAutocomplete } from "@/components/chat/useFileAutocomplete";
 import { ComposerEditor } from "@/components/chat/lexical";
 import { Button } from "@/components/ui/button";
@@ -35,6 +34,7 @@ import { cn } from "@/lib/utils";
 import { ComposerAgentControls } from "./controls/ComposerAgentControls";
 import type { ComposerMode } from "./execution/composer-mode";
 import { NewThreadTargetRail } from "./execution/NewThreadTargetRail";
+import { ComposerTray } from "./ComposerTray";
 import { useDraftWriteFailureStore } from "@/lib/composer-draft-storage";
 import { DiffCommentsComposerAttachment } from "./DiffCommentsComposerAttachment";
 import { SelectedTextCommentsComposerAttachment } from "./SelectedTextCommentsComposerAttachment";
@@ -55,8 +55,6 @@ interface ComposerContentSurfaceProps {
     readonly activeThread?: Thread;
     readonly planPreview?: ComponentProps<typeof PlanPreview>["preview"];
     readonly planPanelOpen: boolean;
-    readonly taskBubbleTasks: readonly ComponentProps<typeof TaskBubble>["tasks"][number][];
-    readonly fileEffectSummary: ComponentProps<typeof TaskBubble>["fileEffects"];
     readonly isAgentRunning: boolean;
     readonly isStopPending: boolean;
     readonly setupBlocked: boolean;
@@ -175,19 +173,9 @@ function ComposerPlanPreview({ model }: Pick<ComposerContentSurfaceProps, "model
   );
 }
 
-function ComposerTaskBubble({ model }: Pick<ComposerContentSurfaceProps, "model">) {
-  const showTaskBubble = Boolean(
-    model.threadId && model.taskBubbleTasks.length > 0 && !model.branchFromMessageId
-      && !model.isNewThread,
-  );
-
-  if (!showTaskBubble) return null;
-
-  return (
-    <div className="mb-2 flex justify-center">
-      <TaskBubble tasks={model.taskBubbleTasks} fileEffects={model.fileEffectSummary} />
-    </div>
-  );
+function ComposerTraySurface({ model }: Pick<ComposerContentSurfaceProps, "model">) {
+  if (!model.threadId || model.branchFromMessageId || model.isNewThread) return null;
+  return <ComposerTray threadId={model.threadId} />;
 }
 
 function ComposerQueueSurface({
@@ -728,9 +716,9 @@ export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
   return (
     <>
       <ComposerPlanPreview {...props} />
-      <ComposerTaskBubble {...props} />
       <ComposerQueueSurface {...props} />
       <ComposerNewThreadSurface {...props} />
+      <ComposerTraySurface {...props} />
       <ComposerInputSurface {...props} />
       {props.model.queuedSend && (
         <p className="px-1 pt-1 text-xs text-muted/60">

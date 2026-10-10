@@ -1,6 +1,34 @@
+import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
 import type { WebSocket } from "ws";
 import { routeMessage, type RouterDeps } from "../../../../application/transport/ws-router.js";
+import { GitPushService } from "../../../projects/git/git-push-service.js";
+
+type PushDeps = ConstructorParameters<typeof GitPushService>;
+
+/** Build git.push router deps around a real GitPushService so routing and target rules are both exercised. */
+function pushRouterDeps(deps: {
+  gitRepository: Partial<PushDeps[1]>;
+  pullRequestReviews?: Partial<PushDeps[2]>;
+  reviewWorktreeService: PushDeps[3];
+  ciWatcherService?: Partial<PushDeps[4]>;
+}): RouterDeps {
+  const unexpected = () => { throw new Error("Unexpected push operation"); };
+  const gitPush = new GitPushService(
+    { exec: vi.fn(unexpected) },
+    { push: unexpected, getCurrentBranchAt: unexpected, ...deps.gitRepository },
+    { pushPullRequestReviewBranch: unexpected, ...deps.pullRequestReviews },
+    deps.reviewWorktreeService,
+    { findByWorkspaceBranch: () => [], scheduleBumpAfterPush: unexpected, ...deps.ciWatcherService },
+    { findById: vi.fn() },
+  );
+  return {
+    workspaceService: {
+      findById: vi.fn().mockReturnValue({ id: "workspace-1", path: "C:/repo", is_git_repo: true }),
+    },
+    gitPush,
+  } as unknown as RouterDeps;
+}
 
 describe("pull request WebSocket routing", () => {
   it("routes legacy pull-request lookups and draft generation", async () => {
@@ -346,10 +374,7 @@ describe("pull request WebSocket routing", () => {
   it("routes linked Review pushes through the persisted explicit target", async () => {
     const pushPullRequestReviewBranch = vi.fn().mockResolvedValue(undefined);
     const push = vi.fn();
-    const deps = {
-      workspaceService: {
-        findById: vi.fn().mockReturnValue({ id: "workspace-1", path: "C:/repo", is_git_repo: true }),
-      },
+    const deps = pushRouterDeps({
       reviewWorktreeService: {
         resolvePushTarget: vi.fn().mockReturnValue({
           kind: "review",
@@ -368,12 +393,7 @@ describe("pull request WebSocket routing", () => {
         getCurrentBranchAt: vi.fn().mockResolvedValue("mcode/pr-42"),
       },
       pullRequestReviews: { pushPullRequestReviewBranch },
-      ciWatcherService: {
-        findByWorkspaceBranch: vi.fn().mockReturnValue([]),
-        scheduleBumpAfterPush: vi.fn(),
-      },
-      threadRepo: { findById: vi.fn() },
-    } as unknown as RouterDeps;
+    });
 
     const response = await routeMessage(JSON.stringify({
       id: "push-review",
@@ -397,15 +417,12 @@ describe("pull request WebSocket routing", () => {
 
   it("fails closed when a Review link is missing during push", async () => {
     const push = vi.fn();
-    const deps = {
-      workspaceService: {
-        findById: vi.fn().mockReturnValue({ id: "workspace-1", path: "C:/repo", is_git_repo: true }),
-      },
+    const deps = pushRouterDeps({
       reviewWorktreeService: {
         resolvePushTarget: vi.fn().mockReturnValue({ kind: "invalid_review" }),
       },
       gitRepository: { push },
-    } as unknown as RouterDeps;
+    });
 
     const response = await routeMessage(JSON.stringify({
       id: "push-review-race",
@@ -419,10 +436,7 @@ describe("pull request WebSocket routing", () => {
 
   it("blocks a Review push when the worktree is on another branch", async () => {
     const pushPullRequestReviewBranch = vi.fn();
-    const deps = {
-      workspaceService: {
-        findById: vi.fn().mockReturnValue({ id: "workspace-1", path: "C:/repo", is_git_repo: true }),
-      },
+    const deps = pushRouterDeps({
       reviewWorktreeService: {
         resolvePushTarget: vi.fn().mockReturnValue({
           kind: "review",
@@ -438,7 +452,7 @@ describe("pull request WebSocket routing", () => {
       },
       gitRepository: { getCurrentBranchAt: vi.fn().mockResolvedValue("other-branch") },
       pullRequestReviews: { pushPullRequestReviewBranch },
-    } as unknown as RouterDeps;
+    });
 
     const response = await routeMessage(JSON.stringify({
       id: "push-review-wrong-branch",
