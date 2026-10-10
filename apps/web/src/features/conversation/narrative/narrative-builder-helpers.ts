@@ -70,7 +70,8 @@ export function createNarrativeCounts(
   };
 }
 
-function isCancelledCall(call: ToolCall): boolean {
+/** Legacy persisted calls carry no terminal status, so being incomplete alone does not mean cancelled. */
+export function isCancelledCall(call: ToolCall): boolean {
   return call.isCancelled === true
     || (typeof call.output === "string" && call.output.toLowerCase().includes("cancelled"));
 }

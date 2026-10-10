@@ -49,8 +49,6 @@ describe("BrowserActivityRow", () => {
     const { container } = render(
       <ToolSummaryLine
         group={{ calls: Array.from({ length: 180 }, (_, index) => browserCall({ id: `browser-${index}` })) }}
-        hasError={false}
-        hasCancelled={false}
         virtualExpansion={{ open: true, onToggle: () => undefined }}
       />,
     );
@@ -63,8 +61,6 @@ describe("BrowserActivityRow", () => {
     const { container } = render(
       <ToolSummaryLine
         group={{ calls: [browserCall(), editCall()] }}
-        hasError={false}
-        hasCancelled={false}
       />,
     );
 
@@ -116,8 +112,6 @@ describe("BrowserActivityRow", () => {
             }),
           })],
         }}
-        hasError={false}
-        hasCancelled
       />,
     );
 
@@ -139,8 +133,6 @@ describe("BrowserActivityRow", () => {
             isError: true,
           })],
         }}
-        hasError
-        hasCancelled={false}
       />,
     );
 
@@ -167,8 +159,6 @@ describe("BrowserActivityRow", () => {
             isError: false,
           })],
         }}
-        hasError={false}
-        hasCancelled={false}
       />,
     );
 
@@ -184,8 +174,6 @@ describe("BrowserActivityRow", () => {
         group={{
           calls: [browserCall({ output: null, isCancelled: true })],
         }}
-        hasError={false}
-        hasCancelled
       />,
     );
 
@@ -220,7 +208,7 @@ describe("BrowserActivityRow", () => {
     expect(items[0]?.type).toBe("tool-group");
     if (items[0]?.type !== "tool-group") return;
 
-    render(<ToolSummaryLine group={items[0].group} hasError={false} hasCancelled={false} />);
+    render(<ToolSummaryLine group={items[0].group} />);
     fireEvent.click(screen.getByRole("button", { name: "Used the browser" }));
     expect(screen.getByText("Resized the Browser to 390 × 844")).toBeTruthy();
   });

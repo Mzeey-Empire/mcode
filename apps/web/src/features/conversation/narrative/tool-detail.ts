@@ -7,6 +7,7 @@ export function extractToolInputDetail(tc: ToolCall): string {
   const input = tc.toolInput;
   const detail = pathTail(input.file_path)
     ?? pathTail(input.path)
+    ?? pathTail(singleFile(input.files))
     ?? quotedDetail(input.pattern)
     ?? quotedDetail(input.query)
     ?? stringDetail(input.command)
@@ -16,7 +17,12 @@ export function extractToolInputDetail(tc: ToolCall): string {
 }
 
 function pathTail(value: unknown): string | undefined {
-  return typeof value === "string" ? value.split("/").pop() ?? value : undefined;
+  return typeof value === "string" ? value.split(/[/\\]/).pop() ?? value : undefined;
+}
+
+/** Codex file changes list their paths as one comma-joined string. */
+function singleFile(value: unknown): string | undefined {
+  return typeof value === "string" && !value.includes(", ") ? value : undefined;
 }
 
 function quotedDetail(value: unknown): string | undefined {

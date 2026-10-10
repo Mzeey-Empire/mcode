@@ -33,7 +33,7 @@ describe("tool activity label", () => {
     expect(toolActivityLabel(tool({ toolName: "custom_tool", toolInput: { description: "Running tests" } }))).toBe("Running tests");
     expect(toolActivityLabel(tool({ toolName: "Grep" }))).toBe("Searching the codebase");
     expect(toolActivityLabel(tool({ toolInput: { description: {} } }))).toBe("Reading files");
-    expect(toolActivityLabel(tool({ toolName: "file_change" }))).toBe("Editing files");
+    expect(toolActivityLabel(tool({ toolName: "file_change" }))).toBe("Making changes");
     expect(toolActivityLabel(tool({ toolName: "mystery" }))).toBe("Working");
   });
 

@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from "react";
-import { Webhook, X } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { Webhook } from "lucide-react";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import type { HookExecution } from "@/transport/types";
-import { NarrativeSummaryLine } from "./NarrativeSummaryLine";
+import { NarrativeToolRow, NarrativeToolRowDetail, NarrativeToolRowMeta } from "./NarrativeToolRow";
 import { getHookOutputLines } from "@/components/chat/hook-output";
 
 interface HookRowProps {
@@ -39,42 +39,8 @@ function useHookElapsedSeconds(isRunning: boolean, startedAt: number): number {
   return elapsedSeconds;
 }
 
-function HookStatusIcon({ isRunning, isBlocked }: { isRunning: boolean; isBlocked: boolean }) {
-  if (isRunning) {
-    return (
-      <span aria-label="running" className="flex w-3 h-3 items-center justify-center shrink-0">
-        <span className="size-1.5 animate-pulse rounded-full bg-primary" />
-      </span>
-    );
-  }
-  if (isBlocked) {
-    return (
-      <span aria-label="blocked" className="flex w-3 h-3 items-center justify-center shrink-0">
-        <X className="w-3 h-3 text-[var(--diff-remove)]" />
-      </span>
-    );
-  }
-  return (
-    <span aria-label="hook completed" className="flex w-3 h-3 items-center justify-center shrink-0">
-      <Webhook className="w-3 h-3 text-muted/55" />
-    </span>
-  );
-}
-
-function HookStatusBadge({ isRunning, isBlocked }: { isRunning: boolean; isBlocked: boolean }) {
-  if (isRunning) {
-    return (
-      <span className="shrink-0 rounded-sm bg-primary/15 px-1.5 py-px font-mono text-xs font-medium text-primary">
-        running
-      </span>
-    );
-  }
-  if (!isBlocked) return undefined;
-  return (
-    <span className="shrink-0 rounded-sm bg-[var(--diff-remove)]/15 px-1.5 py-px font-mono text-xs font-medium text-[var(--diff-remove)]">
-      blocked
-    </span>
-  );
+function hookMeta(isBlocked: boolean, duration: string | undefined): string | undefined {
+  return [isBlocked ? "blocked" : undefined, duration].filter(Boolean).join(" · ") || undefined;
 }
 
 function hookDurationLabel(
@@ -92,32 +58,21 @@ function HookOutput({
   hasOutput,
   isOpen,
   isRunning,
-  isBlocked,
-  hasPassed,
-  exitCode,
+  panelId,
 }: {
   fullLines: readonly string[];
   hasOutput: boolean;
   isOpen: boolean;
   isRunning: boolean;
-  isBlocked: boolean;
-  hasPassed: boolean;
-  exitCode: number | undefined;
+  panelId: string;
 }) {
   if (!hasOutput) return null;
 
   return (
     <AnimatedCollapsible open={isOpen}>
-      <pre className="mt-1 ml-6 max-h-64 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/60 bg-hover/25 px-3 py-2 font-mono text-sm leading-5 [overflow-wrap:anywhere]">
+      <pre id={panelId} className="mt-1 ml-6 max-h-64 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/60 bg-hover/25 px-3 py-2 font-mono text-sm leading-5 [overflow-wrap:anywhere]">
         {fullLines.map((line, index) => (
-          <span
-            key={`${index}-${line}`}
-            className={
-              isBlocked || (hasPassed && exitCode !== 0)
-                ? "block text-sm text-[var(--diff-remove)]"
-                : "block text-sm text-ink/75"
-            }
-          >
+          <span key={`${index}-${line}`} className="block text-sm text-ink/75">
             {line}
             {isRunning && index === fullLines.length - 1 && (
               <span aria-hidden="true" className="typing-cursor" />
@@ -130,67 +85,36 @@ function HookOutput({
 }
 
 /**
- * Compact inline row for displaying hook executions in the narrative timeline.
- *
- * Renders three visual states:
- * - **Passed** (status "completed", exitCode 0, !didBlock): hook icon, hook name, trigger, duration, expandable output.
- * - **Running** (status "running"): spinning clock, hook name, trigger, live elapsed timer, "running" badge.
- * - **Blocked** (didBlock true): red X, hook name, trigger, duration, "blocked" badge, error output in red.
- *
- * Output is expandable via a chevron. The chevron is only shown when the hook has output.
+ * Collapsed row for one hook execution: "Ran hook", the hook name, its
+ * trigger, and a meta such as `blocked · 1.2s`. Rows with
+ * output disclose it on click.
  */
 export function HookRow({ hook }: HookRowProps) {
   const [open, setOpen] = useState(false);
+  const panelId = useId();
   const isRunning = hook.status === "running";
   const isBlocked = hook.didBlock === true;
-  const hasPassed = !isBlocked && hook.status === "completed";
   const { fullLines, hasOutput } = getHookOutputLines(hook);
   const elapsedSeconds = useHookElapsedSeconds(isRunning, hook.startedAt);
-  const duration = hookDurationLabel(isRunning, hook.durationMs, elapsedSeconds);
-
-  const handleClick = () => {
-    if (hasOutput) setOpen((prev) => !prev);
-  };
+  const meta = hookMeta(isBlocked, hookDurationLabel(isRunning, hook.durationMs, elapsedSeconds));
 
   return (
-    <div className="min-w-0 max-w-full rounded-md">
-      {/* Main row */}
-      <NarrativeSummaryLine
-        open={open}
-        onToggle={handleClick}
-        disabled={!hasOutput}
-        expandable={hasOutput}
-        icon={<HookStatusIcon isRunning={isRunning} isBlocked={isBlocked} />}
-        badge={<HookStatusBadge isRunning={isRunning} isBlocked={isBlocked} />}
+    <div className="min-w-0 max-w-full">
+      <NarrativeToolRow
+        icon={Webhook}
+        label={isRunning ? "Running hook" : "Ran hook"}
+        disclosure={hasOutput ? { open, onToggle: () => setOpen((current) => !current), controlsId: panelId } : undefined}
       >
-
-        {/* Hook name */}
-        <span className="min-w-0 text-fade text-ink/80 flex-1">
-          {hook.hookName}
-        </span>
-
-        {/* Trigger label */}
-        {hook.toolName && (
-          <span className="min-w-0 text-fade font-mono text-xs text-muted/65">
-            on {hook.toolName}
-          </span>
-        )}
-
-        {/* Duration or elapsed timer - hide for sub-5ms instant hooks */}
-        {duration && (
-          <span className="shrink-0 font-mono text-xs tabular-nums text-muted/65">
-            {duration}
-          </span>
-        )}
-      </NarrativeSummaryLine>
+        <NarrativeToolRowDetail kind="file">{hook.hookName}</NarrativeToolRowDetail>
+        {hook.toolName ? <NarrativeToolRowDetail kind="file">{`on ${hook.toolName}`}</NarrativeToolRowDetail> : null}
+        {meta ? <NarrativeToolRowMeta>{meta}</NarrativeToolRowMeta> : null}
+      </NarrativeToolRow>
       <HookOutput
         fullLines={fullLines}
         hasOutput={hasOutput}
         isOpen={open}
         isRunning={isRunning}
-        isBlocked={isBlocked}
-        hasPassed={hasPassed}
-        exitCode={hook.exitCode}
+        panelId={panelId}
       />
     </div>
   );

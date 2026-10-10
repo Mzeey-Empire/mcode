@@ -8,55 +8,34 @@ import {
 } from "@/components/chat/tool-renderers/constants";
 import type { ToolCall } from "@/transport/types";
 import { extractToolInputDetail } from "./tool-detail";
-import { NARRATIVE_TOOL_ROW, narrativeToolDetailClass } from "./narrative-layout";
 import { ShellToolCallRow } from "./ShellToolCallRow";
 import { BrowserActivitySummary, isBrowserNarrativeCall } from "./BrowserActivityRow";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { NarrativeToolRow, NarrativeToolRowDetail } from "./NarrativeToolRow";
 
 interface ActiveToolRowProps {
   toolCall: ToolCall;
 }
 
 /**
- * Renders the currently executing tool call. Spinning icon + label + detail.
- * No background tint - the spinning icon alone signals activity.
+ * Renders the currently executing tool call as a collapsed row whose label
+ * reads in the present tense, such as "Reading file".
  */
 export function ActiveToolRow({ toolCall }: ActiveToolRowProps) {
   if (isBrowserNarrativeCall(toolCall)) {
     return <BrowserActivitySummary calls={[toolCall]} active />;
   }
 
-  if (isShellTool(toolCall.toolName)) {
-    return <div className="min-w-0 max-w-full pl-6"><ShellToolCallRow toolCall={toolCall} /></div>;
-  }
+  if (isShellTool(toolCall.toolName)) return <ShellToolCallRow toolCall={toolCall} />;
 
   if (toolCall.toolName === "Approval review") {
-    return (
-      <div className={`${NARRATIVE_TOOL_ROW} px-2 py-1 text-sm`}>
-        <DEFAULT_ICON className="w-3.5 h-3.5 shrink-0 text-muted/60" />
-        <span className="font-medium text-ink shrink-0">Reviewing</span>
-      </div>
-    );
+    return <NarrativeToolRow icon={DEFAULT_ICON} label="Reviewing" />;
   }
 
   const canonicalName = resolveToolName(toolCall.toolName);
-  const Icon = TOOL_ICONS[canonicalName] ?? DEFAULT_ICON;
-  const label =
-    TOOL_PHASE_LABELS[canonicalName] ??
-    TOOL_LABELS[canonicalName] ??
-    toolCall.toolName;
-  const detail = extractToolInputDetail(toolCall);
-
+  const label = TOOL_PHASE_LABELS[canonicalName] ?? TOOL_LABELS[canonicalName] ?? toolCall.toolName;
   return (
-    <div className={`${NARRATIVE_TOOL_ROW} px-2 py-1 text-sm`}>
-      <Icon className="w-3.5 h-3.5 shrink-0 text-muted/60" />
-      <span className="font-medium text-ink shrink-0">{label}</span>
-      <Tooltip>
-        <TooltipTrigger
-          render={<span className={narrativeToolDetailClass("sm")}>{detail}</span>}
-        />
-        <TooltipContent>{detail}</TooltipContent>
-      </Tooltip>
-    </div>
+    <NarrativeToolRow icon={TOOL_ICONS[canonicalName] ?? DEFAULT_ICON} label={label}>
+      <NarrativeToolRowDetail kind="file">{extractToolInputDetail(toolCall)}</NarrativeToolRowDetail>
+    </NarrativeToolRow>
   );
 }

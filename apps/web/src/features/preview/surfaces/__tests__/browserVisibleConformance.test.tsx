@@ -578,8 +578,6 @@ describe("visible Browser conformance observer", () => {
     render(
       <ToolSummaryLine
         group={{ calls: [browserCall(JSON.stringify(result))] }}
-        hasError={false}
-        hasCancelled
       />,
     );
     const user = userEvent.setup();
@@ -632,7 +630,7 @@ describe("visible Browser conformance observer", () => {
     });
     expect(items[0]?.type).toBe("tool-group");
     if (items[0]?.type !== "tool-group") return;
-    render(<ToolSummaryLine group={items[0].group} hasError hasCancelled={false} />);
+    render(<ToolSummaryLine group={items[0].group} />);
     await user.click(screen.getByRole("button", { name: "Used the browser" }));
     expect(screen.getByText("Browser action timed out")).toBeInTheDocument();
   });
