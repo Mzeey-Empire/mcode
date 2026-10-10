@@ -150,7 +150,7 @@ function parentTextOperation(text = "Durable parent text"): ExecutionSemanticOpe
   };
 }
 
-function finishLiveCommand(outcome: "completed" | "errored" | "cancelled" = "completed"):
+function finishLiveCommand(outcome: "completed" | "errored" | "cancelled" | "interrupted" = "completed"):
   Extract<ExecutionWorkCommand, { kind: "finish-live-event" }> {
   const identity = { threadId: THREAD_ID, turnExecutionId: EXECUTION_ID };
   const terminal: AgentEvent = outcome === "completed"
@@ -238,6 +238,19 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     reason: "The execution worker exited before its provider turn could be proved live.",
     recoveryIncidentId: "incident-1",
   };
+
+  it.each(["completed", "errored", "cancelled", "interrupted"] as const)(
+    "records %s attention facts through accepted compatibility", async (outcome) => {
+      expect(await writer.transact(operation(1, { kind: "begin", providerId: "codex", input: startInput() })))
+        .toMatchObject({ kind: "committed" });
+      const { livePublication, ...mutation } = finishLiveCommand(outcome);
+      db.transaction(() => writer.applyAcceptedCompatibility({ ...operation(2, mutation), livePublication }))();
+
+      expect(db.query("SELECT status, last_turn_outcome, last_turn_sequence, last_turn_ended_at FROM threads WHERE id = ?").get(THREAD_ID))
+        .toEqual({ status: outcome === "cancelled" ? "interrupted" : outcome,
+          last_turn_outcome: outcome, last_turn_sequence: 2, last_turn_ended_at: NOW });
+    },
+  );
 
   it("persists accepted native Copilot system evidence without inventing feature effects", async () => {
     db.prepare("UPDATE threads SET provider = 'copilot' WHERE id = ?").run(THREAD_ID);

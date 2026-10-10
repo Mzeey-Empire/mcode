@@ -420,6 +420,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const staged = this.turns.stageAcceptedTerminalProjection({ ...mutation.projection, narrative: [...items.values()] });
     this.turns.publishAcceptedTerminal({ ...mutation.input,
       projection: { kind: "writer-staged", ...(staged.messageId ? { messageId: staged.messageId } : {}) } });
+    const recorded = this.threads.recordTurnOutcome(head.execution.threadId, mutation.outcome, mutation.projection.endedAt);
+    if (!recorded && !this.threads.findById(head.execution.threadId)) throw new SemanticConflict();
     return { ...head, terminal: true, providerOutcome: mutation.outcome, assignedMessageId: staged.messageId };
   }
 
