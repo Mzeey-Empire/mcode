@@ -627,7 +627,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     if (routing && runtimeEvent.event.turnExecutionId === routing.executionId) {
       if (state.kind === "fenced") return;
       if (runtimeEvent.deliveryAttempt !== undefined && runtimeEvent.deliveryAttempt !== routing.deliveryAttempt) return;
-      this.drainApprovalsAtTurnEnd(routing, runtimeEvent.event);
+      this.drainApprovalsAtTurnEnd(routing, runtimeEvent);
       this.canonicalEventPublisher.publish(routing, {
         ...runtimeEvent,
         deliveryAttempt: routing.deliveryAttempt,
@@ -641,7 +641,10 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private readonly canonicalEventPublisher: CodexCanonicalEventPublisher;
 
-  private drainApprovalsAtTurnEnd(routing: CodexCanonicalEventRouting, event: AgentEvent): void {
+  private drainApprovalsAtTurnEnd(routing: CodexCanonicalEventRouting, runtimeEvent: ProviderRuntimeEvent): void {
+    // A sub-agent finishing shares the parent's routing but leaves the parent turn, and its approvals, live.
+    if (runtimeEvent.extension?.child !== undefined) return;
+    const { event } = runtimeEvent;
     if (event.type === "turnComplete" || event.type === "ended" || event.type === "error") {
       this.drainPending((entry) => entry.routing?.executionId === routing.executionId, "turn_ended");
     }
@@ -2824,7 +2827,11 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     this.runtime.recordUsage(entry.sessionId);
     const decision = this.nativeApprovalDecision(choice, response);
     entry.resolve(mapDecisionToCodexResponse(entry.method, decision, entry.params));
-    if (!await entry.acknowledged) return { status: "failed", message: "The answer did not reach Codex" };
+    if (!await entry.acknowledged) {
+      // Codex never got the answer, so the turn-end or stop drain must still settle this request.
+      entry.replying = false;
+      return { status: "failed", message: "The answer did not reach Codex" };
+    }
     if (!this.pendingPermissions.delete(requestId)) return { status: "not_pending" };
     this.publishApprovalDecision(requestId, entry, approvalOutcome(choice, response));
     return { status: "resolved" };
@@ -2859,7 +2866,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    */
   private drainPending(predicate: (entry: PendingPermissionEntry) => boolean, reason: "session_stopped" | "turn_ended" = "session_stopped"): void {
     for (const [requestId, entry] of Array.from(this.pendingPermissions)) {
-      if (!predicate(entry)) continue;
+      // An answer awaiting its write acknowledgement belongs to resolveApproval, which publishes the real outcome.
+      if (!predicate(entry) || entry.replying) continue;
       this.pendingPermissions.delete(requestId);
       const response = mapDecisionToCodexResponse(entry.method, "cancelled", entry.params);
       entry.resolve(response);
@@ -2869,6 +2877,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private publishApprovalDecision(requestId: string, entry: PendingPermissionEntry, outcome: ApprovalOutcome): void {
     if (entry.routing) this.canonicalEventPublisher.publish(entry.routing, providerRuntimeEvent({ ...approvalReceipt({ requestId, threadId: entry.threadId, body: entry.body }, outcome), turnExecutionId: entry.routing.executionId }));
+    else logger.warn("Codex approval decided outside a routed turn; no timeline receipt", { requestId, threadId: entry.threadId });
     this.emit("approval_resolved", { requestId, threadId: entry.threadId, outcome });
   }
 

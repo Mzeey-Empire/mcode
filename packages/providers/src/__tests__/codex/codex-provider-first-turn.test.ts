@@ -860,6 +860,47 @@ describe("CodexProvider first turn on new session", () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it("keeps a parent approval pending when a sub-agent turn completes", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
+      .mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    await provider.sendTurn({
+      turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
+      sessionId, workspaceId: "workspace-test", threadId, message: "delegate", cwd: process.cwd(),
+      model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "supervised",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const server = appServers[0];
+    const handler = server?.options.approvalHandler;
+    assert(server && handler);
+    void handler({ rpcId: 1, method: "item/commandExecution/requestApproval", params: { command: "bun run lint", itemId: "tool-1" } });
+    server.emit("notification", {
+      method: "item/started",
+      params: { threadId: "sdk-thread-1", turnId: "turn-test-id", item: {
+        type: "subAgentActivity", id: "spawn-child", kind: "started",
+        agentThreadId: "native-child", agentPath: "/root/worker",
+      } },
+    });
+    server.emit("notification", { method: "turn/started", params: { threadId: "native-child", turn: { id: "child-turn" } } });
+    server.emit("notification", {
+      method: "turn/completed", params: { threadId: "native-child", turn: { id: "child-turn", status: "completed" } },
+    });
+    const runtimeEvents = () => submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch));
+    const receipts = () => runtimeEvents().filter(({ event }) => event.type === AgentEventType.ApprovalDecided);
+    await vi.waitFor(() => expect(runtimeEvents().some((event) => event.extension?.child && event.event.type === AgentEventType.TurnComplete)).toBe(true));
+    expect(provider.listPendingApprovals(threadId)).toHaveLength(1);
+    expect(receipts()).toEqual([]);
+
+    server.emit("notification", {
+      method: "turn/completed", params: { threadId: "sdk-thread-1", turn: { id: "turn-test-id", status: "completed" } },
+    });
+    await vi.waitFor(() => expect(receipts().map(({ event }) => event.type === AgentEventType.ApprovalDecided && event.outcome))
+      .toEqual([{ status: "cancelled", reason: "turn_ended" }]));
+    expect(provider.listPendingApprovals(threadId)).toEqual([]);
+    await provider.shutdown();
+  });
+
   it("keeps native child progress in the parent's canonical stream through parent completion", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
       .mockResolvedValue(acceptedEventReceipt);

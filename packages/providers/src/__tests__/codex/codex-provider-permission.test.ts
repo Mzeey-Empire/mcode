@@ -144,6 +144,32 @@ describe("CodexProvider permission flow", () => {
     expect(resolved).toEqual([{ requestId: pending[0].requestId, threadId, outcome: { status: "denied", choiceLabel: "Deny" } }]);
   });
 
+  it.each([true, false])("lets an in-flight answer settle a stop that lands before its write acknowledgement (delivered: %s)", async (delivered) => {
+    const resolved: Array<{ requestId: string; outcome: ApprovalOutcome }> = [];
+    provider.on("approval_resolved", ({ requestId, outcome }) => resolved.push({ requestId, outcome }));
+    const nativeRequest: CodexApprovalRequest = { rpcId: 8, method: "item/commandExecution/requestApproval", params: { command: "ls", cwd: "/" } };
+    const native = (provider as unknown as {
+      handleApprovalRequest: (sessionId: string, threadId: string, req: unknown) => Promise<unknown>;
+    }).handleApprovalRequest(sessionId, threadId, nativeRequest);
+    const [pending] = provider.listPendingApprovals!(threadId);
+    const delivery = provider.resolveApproval!(pending.requestId, { choiceId: "allow" });
+    await native;
+
+    const stopped = provider.stopSession(sessionId);
+    expect(resolved).toEqual([]);
+    nativeRequest.responseWritten?.(delivered);
+    expect(await delivery).toEqual(delivered ? { status: "resolved" } : { status: "failed", message: "The answer did not reach Codex" });
+    if (!delivered) provider.stopSession(sessionId).catch(() => undefined);
+    await vi.runAllTimersAsync();
+    await stopped;
+
+    expect(resolved).toEqual([{
+      requestId: pending.requestId,
+      outcome: delivered ? { status: "allowed", intent: "allow_once", choiceLabel: "Allow once" } : { status: "cancelled", reason: "session_stopped" },
+    }]);
+    expect(provider.listPendingApprovals!(threadId)).toEqual([]);
+  });
+
   it("returns not_pending when requestId is unknown", async () => {
     expect(await provider.resolveApproval!("does-not-exist", { choiceId: "allow" })).toEqual({ status: "not_pending" });
   });

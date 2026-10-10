@@ -1195,6 +1195,7 @@ export class ClaudeProvider
 
   private publishApprovalDecision(requestId: string, entry: { threadId: string; body: ApprovalRequestBody; routing?: ClaudeCanonicalEventRouting }, outcome: ApprovalOutcome): void {
     if (entry.routing) this.publishTurnEvent(entry.routing, `mcode-${entry.threadId}`, approvalReceipt({ requestId, threadId: entry.threadId, body: entry.body }, outcome));
+    else logger.warn("Claude approval decided outside a routed turn; no timeline receipt", { requestId, threadId: entry.threadId });
     this.emit("approval_resolved", { requestId, threadId: entry.threadId, outcome });
   }
 

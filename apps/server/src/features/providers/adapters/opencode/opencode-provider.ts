@@ -116,6 +116,11 @@ type OpenCodeServeLease =
   | { kind: "attached"; endpoint: OpenCodeEndpoint };
 
 interface OpenCodeTurnState {
+  /**
+   * Session-wide, not per turn: OpenCode replays a still-pending ask in the next
+   * turn under the same id, and receipts are keyed by request id, so a second
+   * receipt would conflict with the first.
+   */
   receiptRequestIds: Set<string>;
   upstreamSessionId: string;
   /** Last lease this session ran on; stop aborts through it. */
