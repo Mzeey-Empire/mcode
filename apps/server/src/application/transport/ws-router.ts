@@ -100,7 +100,8 @@ import {
   isThreadStartupRpcMethod,
   routeThreadStartupRpc,
 } from "../../features/thread-startup/transport/thread-startup-rpc.js";
-import { WorkspaceFileNotFoundError, type FileService } from "../../features/projects/files/file-service.js";
+import type { FileService } from "../../features/projects/files/file-service.js";
+import { WorkspaceFileNotFoundError } from "../../features/projects/files/workspace-file-access.js";
 import { isFileRpcMethod, routeFileRpc } from "../../features/projects/files/transport/file-rpc.js";
 import { isAttachmentRpcMethod, routeAttachmentRpc } from "../../features/attachments/transport/attachment-rpc.js";
 import type { AttachmentService } from "../../features/attachments/storage/attachment-service.js";

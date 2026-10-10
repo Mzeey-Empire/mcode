@@ -4,7 +4,7 @@ import * as NodeHTTP from "node:http";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { validateWorkspaceFilePath } from "../../file-service.js";
+import { validateWorkspaceFilePath } from "../../workspace-file-access.js";
 import { handleWorkspaceImageRequest } from "../workspace-image-route.js";
 
 let temp: string;

@@ -1,7 +1,8 @@
 import * as NodeHTTP from "node:http";
 import { WORKSPACE_IMAGE_MAX_BYTES } from "@mcode/contracts";
 import { extractToken, matchesAuthToken } from "../../../../application/transport/auth.js";
-import { readWorkspaceFileBytes, workspaceImageMime, type FileService } from "../file-service.js";
+import type { FileService } from "../file-service.js";
+import { readWorkspaceFileBytes, workspaceImageMime } from "../workspace-file-access.js";
 
 type ImageRouteDeps = {
   authToken: string;
