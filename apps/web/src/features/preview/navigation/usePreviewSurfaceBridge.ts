@@ -33,9 +33,9 @@ export interface PreviewSurfaceBridge {
   readonly pushSync: (visible: boolean) => Promise<void>;
   /** Resolve user input to a safe Preview URL before loading the Browser page. */
   readonly resolveNavigation: (url: string) => Promise<PreviewResolveNavigationResult>;
-  /** Clear cookies in the shared Preview browser session. */
+  /** Clear cookies in the current workspace's Browser profile. */
   readonly clearCookies: () => Promise<void>;
-  /** Clear the HTTP cache in the shared Preview browser session. */
+  /** Clear the HTTP cache in the current workspace's Browser profile. */
   readonly clearCache: () => Promise<void>;
 }
 

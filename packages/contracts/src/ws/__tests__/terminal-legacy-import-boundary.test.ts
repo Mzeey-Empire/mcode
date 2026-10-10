@@ -11,6 +11,8 @@ const SOURCE_ROOTS = [
 ] as const;
 const ALLOWED_LEGACY_IMPORTERS = new Set([
   "apps/server/src/features/terminal/composition/register-terminal.ts",
+  // Test-only wiring that mirrors register-terminal so service tests reach the backend through its seam.
+  "apps/server/src/features/terminal/testing/action-terminal-test-fixture.ts",
   "apps/web/src/features/terminal/adapters/__tests__/legacy-terminal-client.test.ts",
   // Constructs the only Terminal client now that the backend selector is gone.
   "apps/web/src/transport/ws-transport.ts",

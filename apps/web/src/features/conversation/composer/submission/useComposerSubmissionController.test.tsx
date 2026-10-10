@@ -48,7 +48,6 @@ function execution(overrides: Partial<ComposerExecutionTargetController> = {}): 
   return {
     target,
     mode: "direct",
-    modeOptions: [],
     isGitRepo: false,
     needsWorkspace: false,
     isStaleWorktree: false,

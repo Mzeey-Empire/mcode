@@ -46,7 +46,7 @@ function isAccessModeDisabled(accessMode: ComposerAccessMode, permissionLocked: 
 const PERMISSION_LOCKED_REASON = "This provider runs without approval prompts";
 
 /** Compact access-mode menu; renders generic or provider-native options. */
-export function AccessModeSelector({
+export function AccessModeMenu({
   accessMode,
   permissionLocked,
   approvalReviewSupported,
@@ -134,7 +134,7 @@ export function ComposerOptionsMenu({
 
   return (
     <>
-      <AccessModeSelector
+      <AccessModeMenu
         accessMode={accessMode}
         permissionLocked={permissionLocked}
         approvalReviewSupported={approvalReviewSupported}

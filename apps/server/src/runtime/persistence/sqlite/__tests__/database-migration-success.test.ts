@@ -239,6 +239,7 @@ describe("successful database migration recovery", () => {
         "exit_code",
         "transcript",
         "transcript_truncated",
+        "trigger",
       ]);
       expect(database.prepare("PRAGMA index_list(project_action_runs)").all()).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: "idx_project_action_runs_slot", unique: 1 }),

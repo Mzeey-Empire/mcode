@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "bun:sqlite";
 import { ThreadControlApprovalStore as ThreadControlApprovalRepo } from "../thread-control-approval-store.js";
+import { pendingThreadControlApprovalSchema } from "../thread-control-approval-write-operations.js";
 import { ThreadStore as ThreadRepo } from "../../../persistence/thread-store.js";
 import { WorkspaceStore as WorkspaceRepo } from "../../../../projects/persistence/workspace-store.js";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
@@ -48,7 +49,10 @@ describe("ThreadControlApprovalRepo", () => {
       sourceThreadId: "thread-source",
     });
 
+    const createdAt = "2026-10-09T08:30:00Z";
+    db.prepare("UPDATE thread_control_approvals SET created_at = ? WHERE id = ?").run(createdAt, approvalId);
     expect(approvals.listPendingByThread(threadId)).toEqual([{
+      createdAt,
       operation: "thread_create_batch",
       approvalId,
       threadId,
@@ -66,7 +70,8 @@ describe("ThreadControlApprovalRepo", () => {
       callerId: "local-user",
       sourceThreadId: "thread-source",
     }]);
-    expect(approvals.claim(approvalId)?.approvalId).toBe(approvalId);
+    expect(approvals.listPending()[0]?.createdAt).toBe(createdAt);
+    expect(pendingThreadControlApprovalSchema.parse(approvals.claim(approvalId))).toMatchObject({ approvalId, createdAt });
     expect(approvals.claim(approvalId)).toBeNull();
     expect(approvals.settle(approvalId, "approved")).toBe(true);
     expect(approvals.listPendingByThread(threadId)).toEqual([]);

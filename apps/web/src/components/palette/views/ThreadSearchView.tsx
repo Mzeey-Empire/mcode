@@ -175,12 +175,10 @@ export function ThreadSearchView() {
   );
   const checksById = useWorkspaceStore((state) => state.checksById);
   const runningThreadIds = useThreadStore((state) => state.runningThreadIds);
-  const pendingPermissionIds = useThreadStore(
+  const pendingPermissionIds = useApprovalStore(
     useShallow((state) => {
       const ids: string[] = [];
-      for (const [threadId, record] of state.records) {
-        if (record.permissions.some((permission) => !permission.settled)) ids.push(threadId);
-      }
+      for (const request of state.approvals) if (!request.settled) ids.push(request.threadId);
       return ids;
     }),
   );
@@ -273,3 +271,4 @@ export function ThreadSearchView() {
     </>
   );
 }
+import { useApprovalStore } from "@/stores/approvalStore";

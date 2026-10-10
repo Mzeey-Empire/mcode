@@ -210,11 +210,11 @@ describe("OpenCodeProvider idle confirmation", () => {
     const { provider, submitted } = testProvider(http as never);
     // Full access auto-answers permission asks; a pending card requires supervised.
     const sending = provider.sendTurn({ ...turnRequest(), permissionMode: "supervised" });
-    await vi.waitFor(() => expect(provider.listPendingPermissions("thread-1")).toHaveLength(1));
+    await vi.waitFor(() => expect(provider.listPendingApprovals("thread-1")).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(endedOutcomes(submitted)).toEqual([]);
     expect(http.getSessionStatus).not.toHaveBeenCalled();
-    expect(provider.resolvePermission("per_1", "allow")).toBe(true);
+    expect(await provider.resolveApproval("per_1", { choiceId: "once" })).toEqual({ status: "resolved" });
     await sending;
     expect(endedOutcomes(submitted)).toEqual(["completed"]);
     await provider.shutdown();

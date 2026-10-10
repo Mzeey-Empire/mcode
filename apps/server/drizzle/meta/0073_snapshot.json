@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2a8cec5c-5937-4284-8fb1-43957ea1eafe",
+  "id": "4e1af0eb-a85e-4b4e-a69c-3d8807920e17",
   "prevId": "d41ff739-8732-4ca7-a975-bc830dc754dd",
   "tables": {
     "canonical_agent_events": {
@@ -535,13 +535,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "attempt_of": {
-          "name": "attempt_of",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "status": {
           "name": "status",
           "type": "text",
@@ -630,13 +623,6 @@
             "execution_id"
           ],
           "isUnique": true
-        },
-        "idx_canonical_agent_turns_attempt_of": {
-          "name": "idx_canonical_agent_turns_attempt_of",
-          "columns": [
-            "attempt_of"
-          ],
-          "isUnique": false
         },
         "idx_canonical_agent_turns_thread": {
           "name": "idx_canonical_agent_turns_thread",
@@ -1360,6 +1346,88 @@
       },
       "indexes": {},
       "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "diff_summaries": {
+      "name": "diff_summaries",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "content": {
+          "name": "content",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "turn_count": {
+          "name": "turn_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_turn_id": {
+          "name": "last_turn_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        }
+      },
+      "indexes": {
+        "idx_diff_summaries_thread": {
+          "name": "idx_diff_summaries_thread",
+          "columns": [
+            "thread_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "diff_summaries_thread_id_threads_id_fk": {
+          "name": "diff_summaries_thread_id_threads_id_fk",
+          "tableFrom": "diff_summaries",
+          "tableTo": "threads",
+          "columnsFrom": [
+            "thread_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -2586,6 +2654,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "trigger": {
+          "name": "trigger",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'manual'"
         },
         "action_name": {
           "name": "action_name",

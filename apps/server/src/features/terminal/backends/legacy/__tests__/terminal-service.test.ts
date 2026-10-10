@@ -123,7 +123,6 @@ function createService(options: {
       source: "certified",
       platform: "windows",
     },
-    headless: false,
   };
   return { host, service, launch };
 }
@@ -369,11 +368,11 @@ describe("TerminalService host ownership", () => {
     );
   });
 
-  it("applies the app-wide headless capacity across threads", async () => {
+  it("applies the app-wide action capacity across threads", async () => {
     const { service, launch } = createService({ sessionLimit: 1 });
-    await service.startPreparedCommand("thread", launch);
+    await openAction(service, launch, "thread");
 
-    await expect(service.startPreparedCommand("thread-two", launch)).rejects.toThrow(
+    await expect(openAction(service, launch, "thread-two")).rejects.toThrow(
       "app-wide Terminal session limit",
     );
   });
@@ -538,90 +537,165 @@ describe("TerminalService host ownership", () => {
     expect(service.listActiveSessions()).toEqual([{ ...created, threadId: "thread", state: "exited", exitCode: 1 }]);
   });
 
-  it("counts a running headless session toward the cap but skips it during thread teardown", async () => {
-    const host = new InMemoryPtyHostAdapter("1");
-    const { service, launch } = createService({ host });
-    const scope = "00000000-0000-4000-8000-000000000001";
-    try {
-      const prepared = await service.startPreparedCommand(scope, launch);
-      const exits: Array<number | null> = [];
-      const received: Uint8Array[] = [];
-      prepared.onExit((code) => exits.push(code));
-      prepared.onOutput((data) => received.push(data));
-      await Promise.all(Array.from({ length: 7 }, () => service.create(scope, launch)));
-      expect(service.listActiveSessions()).toHaveLength(7);
-      await expect(service.create(scope, launch)).rejects.toThrow(/Maximum PTY limit/);
-
-      await service.killByThread(scope);
-
-      expect(service.listActiveSessions()).toEqual([]);
-      expect(exits).toEqual([]);
-      await service.write(prepared.terminalSessionId, "still running");
-      host.emitOutput(prepared.terminalSessionId, Buffer.from("action output"));
-      expect(Buffer.concat(received).toString()).toBe("action output");
-      host.emitExit(prepared.terminalSessionId, 3);
-      expect(exits).toEqual([3]);
-    } finally {
-      await service.shutdown();
-    }
-  });
-
-  it("removes an exited headless session, frees its slot, and replays to late listeners", async () => {
-    const host = new InMemoryPtyHostAdapter("1");
-    const { service, launch } = createService({ host });
-    const scope = "00000000-0000-4000-8000-000000000001";
+  it("notifies connected clients when a terminal is killed", async () => {
+    const { service, launch } = createService();
     const json = vi.fn();
     service.setSender({ data: vi.fn(), json });
-    try {
-      const prepared = await service.startPreparedCommand(scope, launch);
-      expect(service.listActiveSessions()).toEqual([]);
-      host.emitOutput(prepared.terminalSessionId, Buffer.from("completed action\r\n"));
-      host.emitExit(prepared.terminalSessionId, 7);
-
-      expect(service.listActiveSessions()).toEqual([]);
-      expect(json.mock.calls).toEqual([]);
-      expect(() => service.reattach(prepared.terminalSessionId, -1)).toThrow(/PTY not found/);
-      await Promise.all(Array.from({ length: 8 }, () => service.create(scope, launch)));
-      expect(service.listActiveSessions()).toHaveLength(8);
-
-      const received: Uint8Array[] = [];
-      const exits: Array<number | null> = [];
-      prepared.onOutput((data) => received.push(data));
-      prepared.onExit((code) => exits.push(code));
-      expect(Buffer.concat(received).toString()).toBe("completed action\r\n");
-      expect(exits).toEqual([7]);
-    } finally {
-      await service.shutdown();
-    }
+    const created = await service.create("thread", launch);
+    await service.kill(created.ptyId);
+    expect(json.mock.calls).toEqual([["terminal.exit", { ptyId: created.ptyId, code: 0, exitCode: null }]]);
+    expect(service.listActiveSessions()).toEqual([]);
+    await service.shutdown();
   });
 
-  it("retains a synchronous headless exit until its owner attaches", async () => {
+  it.each(["start", "create"] as const)("publishes a failed rerun exit and flushes paused output when host %s fails", async (method) => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const create = vi.spyOn(host, "create");
+    const { service, launch } = createService({ host });
+    const json = vi.fn();
+    const data = vi.fn();
+    service.setSender({ data, json });
+    const action = await openAction(service, launch, "00000000-0000-4000-8000-000000000001");
+    host.emitExit(create.mock.calls[0][0].sessionId, 0);
+    await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    if (method === "start") vi.spyOn(host, "start").mockRejectedValueOnce(new Error("host unavailable"));
+    else create.mockRejectedValueOnce(new Error("host unavailable"));
+    await expect(action.run({ script: "echo rerun" })).rejects.toThrow("host unavailable");
+    expect(json.mock.calls).toEqual([["terminal.exit", { ptyId: action.terminalSessionId, code: 0, exitCode: null }]]);
+    expect(Buffer.concat(data.mock.calls.map(([, , bytes]) => bytes)).toString()).toContain("echo rerun");
+    expect(service.listActiveSessions()).toEqual([expect.objectContaining({
+      ptyId: action.terminalSessionId, state: "exited", exitCode: null,
+    })]);
+    await service.shutdown();
+  });
+
+  it("counts action records toward the cap and closes them during thread teardown", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const { service, launch } = createService({ host });
+    const scope = "00000000-0000-4000-8000-000000000001";
+    const action = await openAction(service, launch, scope);
+    const closed = vi.fn();
+    const exits: Array<number | null> = [];
+    action.onClosed(closed);
+    action.onCommandExit(({ exitCode }) => exits.push(exitCode));
+    await Promise.all(Array.from({ length: 7 }, () => service.create(scope, launch)));
+    expect(service.listActiveSessions()).toHaveLength(8);
+    await expect(service.create(scope, launch)).rejects.toThrow(/Maximum PTY limit/);
+    await service.killByThread(scope);
+    expect(service.listActiveSessions()).toEqual([expect.objectContaining({ ptyId: action.terminalSessionId, state: "running" })]);
+    expect(exits).toEqual([]);
+    expect(closed).not.toHaveBeenCalled();
+    await service.killByThread(scope, true);
+    expect(service.listActiveSessions()).toEqual([]);
+    expect(exits).toEqual([130]);
+    expect(closed).toHaveBeenCalledOnce();
+    await service.shutdown();
+  });
+
+  it("hands off to a new host session while retaining metadata, echo, output and monotonic replay", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const create = vi.spyOn(host, "create");
+    const { service, launch } = createService({ host });
+    const data = vi.fn();
+    const json = vi.fn();
+    service.setSender({ data, json });
+    const scope = "00000000-0000-4000-8000-000000000001";
+    const action = await openAction(service, launch, scope, "vite --open http://localhost:5173/\nnext");
+    const commandId = create.mock.calls[0][0].sessionId;
+    expect(commandId).not.toBe(action.terminalSessionId);
+    expect(service.listActiveSessions()).toEqual([{
+      ptyId: action.terminalSessionId, threadId: scope, shell: "pwsh", cwd: process.cwd(),
+      kind: "action", actionId: "build", state: "running", exitCode: null,
+      createdAt: expect.any(String),
+    }]);
+    host.emitOutput(commandId, Buffer.from("command output\r\n"));
+    host.emitExit(commandId, 2);
+    await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    const shellId = create.mock.calls[1][0].sessionId;
+    expect(shellId).not.toBe(commandId);
+    expect(create.mock.calls[1][0].launch.arguments).toEqual([]);
+    expect(create.mock.calls[1][0].cwd).toBe(process.cwd());
+    host.emitOutput(shellId, Buffer.from("PS> "));
+    const output: Uint8Array[] = [];
+    const exits: Array<number | null> = [];
+    action.onCommandOutput((bytes) => output.push(bytes));
+    action.onCommandExit(({ exitCode }) => exits.push(exitCode));
+    expect(Buffer.concat(output).toString()).toBe("command output\r\n");
+    expect(exits).toEqual([2]);
+    expect(data.mock.calls).toEqual([]);
+    expect(service.reattach(action.terminalSessionId, -1)).toEqual({ mode: "delta" });
+    expect(data.mock.calls.map((call) => call[1])).toEqual([1, 2, 3]);
+    expect(Buffer.concat(data.mock.calls.map((call) => call[2])).toString()).toBe(
+      `\u001b[90mPS ${process.cwd()}> \u001b[39mvite --open http://localhost:5173/\r\n  next\u001b[0m\r\ncommand output\r\nPS> `,
+    );
+    expect(json.mock.calls).toEqual([]);
+    host.emitExit(shellId, 0);
+    expect(service.listActiveSessions()[0]).toMatchObject({ state: "exited", exitCode: 0, kind: "action", actionId: "build" });
+    await service.shutdown();
+  });
+
+  it("retains a synchronous command exit until its owner attaches", async () => {
     const { service, host, launch } = createService();
     host.onCreate = (input) => {
+      if (!input.launch.arguments.includes("-Command")) return;
       host.emit(output(input.sessionId, "complete"));
       host.emit(exit(input.sessionId));
     };
-
-    const prepared = await service.startPreparedCommand("thread", launch);
+    const action = await openAction(service, launch, "thread");
     const received: Uint8Array[] = [];
     const exits: Array<number | null> = [];
-    prepared.onOutput((data) => received.push(data));
-    prepared.onExit((code) => exits.push(code));
-
+    action.onCommandOutput((data) => received.push(data));
+    action.onCommandExit(({ exitCode }) => exits.push(exitCode));
     expect(Buffer.concat(received).toString()).toBe("complete");
     expect(exits).toEqual([0]);
+    await vi.waitFor(() => expect(host.creates).toHaveLength(2));
+    expect(service.listActiveSessions()[0].state).toBe("running");
+    await service.shutdown();
   });
 
-  it("continues cleanup when an Action exit listener throws", async () => {
+  it("continues shell hand-off when an Action exit listener throws", async () => {
     const { service, host, launch } = createService();
-    const prepared = await service.startPreparedCommand("thread", launch);
-    prepared.onExit(() => {
-      throw new Error("persistence failed");
-    });
+    const action = await openAction(service, launch, "thread");
+    action.onCommandExit(() => { throw new Error("persistence failed"); });
+    expect(() => host.emit(exit(host.creates[0].sessionId))).not.toThrow();
+    await vi.waitFor(() => expect(host.creates).toHaveLength(2));
+    expect(service.listActiveSessions()[0].state).toBe("running");
+    await service.shutdown();
+  });
 
-    expect(() => host.emit(exit(prepared.terminalSessionId))).not.toThrow();
-    expect(service.listActiveSessions()).toEqual([]);
-    await expect(prepared.stop()).resolves.toBeUndefined();
+  it("still opens the shell on natural exit after a rerun fails to stop its command", async () => {
+    const { service, host, launch } = createService();
+    const action = await openAction(service, launch, "thread");
+    host.closeError = new Error("close failed");
+    vi.useFakeTimers();
+    try {
+      const rerun = expect(action.run({ script: "again" })).rejects.toThrow("close failed");
+      await vi.advanceTimersByTimeAsync(5000);
+      await rerun;
+      host.emit(exit(host.creates[0].sessionId, 0));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(host.creates).toHaveLength(2);
+      expect(host.creates[1].launch.arguments).toEqual([]);
+      expect(service.listActiveSessions()[0].state).toBe("running");
+    } finally {
+      vi.useRealTimers();
+      await service.shutdown();
+    }
+  });
+
+  it.each([
+    { shell: "cmd.exe", prompt: `${process.cwd()}> ` },
+    { shell: "/bin/bash", prompt: "$ " },
+  ])("echoes a multiline command with the $shell prompt", async ({ shell, prompt }) => {
+    const { service, launch } = createService();
+    const chunks: Uint8Array[] = [];
+    service.setSender({ data: (_id, _seq, bytes) => chunks.push(bytes), json: () => undefined });
+    const action = await openAction(service, {
+      ...launch, executable: shell, resolvedProfile: { ...launch.resolvedProfile, executable: shell },
+    }, "thread", "first\nsecond");
+    service.reattach(action.terminalSessionId, -1);
+    expect(Buffer.concat(chunks).toString()).toBe(`\u001b[90m${prompt}\u001b[39mfirst\r\n  second\u001b[0m\r\n`);
+    await service.shutdown();
   });
 
   it("uses graceful host close only after app shutdown enables it", async () => {
@@ -668,3 +742,20 @@ describe("TerminalService host ownership", () => {
     ]);
   });
 });
+
+function openAction(
+  service: TerminalService, launch: Parameters<TerminalService["create"]>[1], threadId: string,
+  script = "bun run build",
+) {
+  return service.openActionTerminal(
+    { threadId, actionId: "build", launch: { script } }, launch,
+    async (input, cwd) => ({
+      launch: { ...launch, arguments: ["-Command", input.script] },
+      snapshot: {
+        platform: "windows", script: input.script, checkoutPath: cwd,
+        terminal: { executable: launch.executable, arguments: ["-Command", input.script] },
+        environmentNames: [],
+      },
+    }),
+  );
+}

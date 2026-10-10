@@ -106,7 +106,8 @@ function finalRunFor(
   exitCode: number | null,
   finishedAt: string,
 ): WorkspaceEnvironmentActionRun {
-  const status = active.stopping ? "interrupted" : exitCode === 0 ? "completed" : "failed";
+  const interrupted = active.stopping || exitCode === 130 || exitCode === 0xC000013A || exitCode === -1073741510;
+  const status = interrupted ? "interrupted" : exitCode === 0 ? "completed" : "failed";
   return {
     ...active.run,
     revision: active.run.revision + 1,

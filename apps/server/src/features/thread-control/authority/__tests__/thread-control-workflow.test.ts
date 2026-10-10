@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { ApprovalService } from "../../../agents/approvals/approval-service.js";
 import { describe, expect, it, vi } from "vitest";
 import { ThreadCreateBatchResultSchema } from "@mcode/contracts";
 import { MessageRepo } from "../../../agents/conversation/persistence/message-repo.js";
@@ -95,7 +96,10 @@ describe("internal thread-control MCP workflow", () => {
     };
     const providers = { resolve: vi.fn(() => ({ id: "codex" })) };
     const models = { listModels: vi.fn().mockResolvedValue([{ id: "gpt-default" }]) };
+    const approvalService = new ApprovalService({ resolveAll: () => [] });
+    approvalService.start({ publishApprovalRequest: vi.fn(), publishApprovalResolved: vi.fn(), stopSession: agentService.stopSession });
     const service = new ThreadControlService(
+      approvalService,
       workspaces,
       worktrees as never,
       gitWorktrees,

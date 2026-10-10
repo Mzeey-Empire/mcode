@@ -267,9 +267,9 @@ function installMockWebviewMethods(options: {
 }
 
 function installDraftAnnotation(overrides: Record<string, unknown> = {}) {
-  usePreviewDesignModeStore.getState().setActive("thread-1", true);
-  usePreviewAnnotationStore.getState().setDraft("thread-1", {
-    threadId: "thread-1",
+  usePreviewDesignModeStore.getState().setActive("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", true);
+  usePreviewAnnotationStore.getState().setDraft("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
+    threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     pageIdentity: "",
     bounds: { x: 20, y: 24, width: 120, height: 32 },
     selectorHint: "button",
@@ -292,8 +292,8 @@ function installSavedAnnotation(
   overrides: Record<string, unknown> = {},
 ) {
   const pageUrl = "https://example.com/product-preview?productCode=QUAELE2010";
-  usePreviewAnnotationStore.getState().saveAnnotation("thread-1", {
-    threadId: "thread-1",
+  usePreviewAnnotationStore.getState().saveAnnotation("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
+    threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     pageIdentity: normalizePreviewPageIdentity(pageUrl),
     bounds: { x: 20, y: 24, width: 120, height: 32 },
     selectorHint: "button",
@@ -346,21 +346,21 @@ describe("PreviewPanel: unavailable state", () => {
   });
 
   it("renders the unavailable state when desktopBridge is absent", () => {
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(
       screen.getByTestId("preview-panel-unavailable"),
     ).toBeInTheDocument();
   });
 
   it("does not render the full panel when desktopBridge is absent", () => {
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(screen.queryByTestId("preview-panel")).not.toBeInTheDocument();
   });
 
   it("renders the enabled same-origin web preview without an Electron bridge", () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
-    useDiffStore.setState({ previewUrlByThread: { "thread-1": window.location.origin + "/fixture" } });
-    render(<PreviewPanel threadId="thread-1" />);
+    useDiffStore.setState({ previewUrlByThread: { "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": window.location.origin + "/fixture" } });
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(screen.getByTestId("web-runtime-preview-iframe")).toHaveAttribute(
       "src",
       window.location.origin + "/fixture",
@@ -373,28 +373,28 @@ describe("PreviewPanel: unavailable state", () => {
     const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
       new DOMRect(10, 20, 640, 480),
     );
-    useDiffStore.setState({ previewUrlByThread: { "thread-1": window.location.origin + "/fixture" } });
-    render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" />);
+    useDiffStore.setState({ previewUrlByThread: { "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": window.location.origin + "/fixture" } });
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" />);
     const iframe = screen.getByTestId("web-runtime-preview-iframe");
-    expect(iframe).toHaveAttribute("data-thread-id", "thread-1");
+    expect(iframe).toHaveAttribute("data-thread-id", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     expect(iframe).toHaveAttribute("data-tab-id", "web-preview");
     expect(useBrowserAutomationStore.getState().liveTargets.get(
-      JSON.stringify(["workspace-1", "thread-1", "web-preview"]),
-    )).toMatchObject({ workspaceId: "workspace-1", threadId: "thread-1", tabId: "web-preview" });
+      JSON.stringify(["11111111-1111-4111-8111-111111111111", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "web-preview"]),
+    )).toMatchObject({ workspaceId: "11111111-1111-4111-8111-111111111111", threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", tabId: "web-preview" });
     const initialRevision = useBrowserAutomationStore.getState().liveTargets.get(
-      JSON.stringify(["workspace-1", "thread-1", "web-preview"]),
+      JSON.stringify(["11111111-1111-4111-8111-111111111111", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "web-preview"]),
     )!.revision;
     fireEvent.load(iframe);
     expect(useBrowserAutomationStore.getState().liveTargets.get(
-      JSON.stringify(["workspace-1", "thread-1", "web-preview"]),
+      JSON.stringify(["11111111-1111-4111-8111-111111111111", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "web-preview"]),
     )!.revision).toBe(initialRevision + 1);
     const page = document.implementation.createHTMLDocument("Fixture");
     page.body.innerHTML = "<main>Visible fixture</main>";
     Object.defineProperty(iframe, "contentDocument", { configurable: true, value: page });
     const result = await executeWebBrowserDispatch({
       scope: {
-        workspaceId: "workspace-1",
-        threadId: "thread-1",
+        workspaceId: "11111111-1111-4111-8111-111111111111",
+        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         providerSessionId: "session-1",
         providerInstanceId: "instance-1",
       },
@@ -406,8 +406,8 @@ describe("PreviewPanel: unavailable state", () => {
       },
       request: {
         contractVersion: BROWSER_AUTOMATION_CONTRACT_VERSION,
-        workspaceId: "workspace-1",
-        threadId: "thread-1",
+        workspaceId: "11111111-1111-4111-8111-111111111111",
+        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         providerSessionId: "session-1",
         providerInstanceId: "instance-1",
         requestId: "request-preview",
@@ -421,7 +421,7 @@ describe("PreviewPanel: unavailable state", () => {
         desktopInstanceId: "web",
         windowId: 1,
         connectionGeneration: 1,
-        threadId: "thread-1",
+        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         tabId: "web-preview",
         targetGeneration: 1,
         active: true,
@@ -437,11 +437,11 @@ describe("PreviewPanel: unavailable state", () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
     useDiffStore.setState({
       previewUrlByThread: {
-        "thread-1": window.location.origin + "/first",
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": window.location.origin + "/first",
         "thread-2": window.location.origin + "/second",
       },
     });
-    const view = render(<PreviewPanel threadId="thread-1" />);
+    const view = render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     const firstIframe = screen.getByTestId("web-runtime-preview-iframe");
     view.rerender(<PreviewPanel threadId="thread-2" />);
     expect(screen.getByLabelText("Preview URL")).toHaveValue(window.location.origin + "/second");
@@ -458,8 +458,8 @@ describe("PreviewPanel: unavailable state", () => {
 
   it("keeps a cross-origin page visible while identifying DOM automation as unsupported", () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
-    useDiffStore.setState({ previewUrlByThread: { "thread-1": "https://example.com/fixture" } });
-    render(<PreviewPanel threadId="thread-1" />);
+    useDiffStore.setState({ previewUrlByThread: { "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": "https://example.com/fixture" } });
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(screen.getByTestId("web-runtime-preview-iframe")).toBeInTheDocument();
     expect(screen.getByTestId("web-runtime-cross-origin")).toHaveTextContent(
       "automation and DOM access are unsupported",
@@ -468,8 +468,8 @@ describe("PreviewPanel: unavailable state", () => {
 
   it("marks a same-origin requested page unsupported after cross-origin iframe navigation", async () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
-    useDiffStore.setState({ previewUrlByThread: { "thread-1": window.location.origin + "/fixture" } });
-    render(<PreviewPanel threadId="thread-1" />);
+    useDiffStore.setState({ previewUrlByThread: { "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": window.location.origin + "/fixture" } });
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     const iframe = screen.getByTestId("web-runtime-preview-iframe");
     Object.defineProperty(iframe, "contentWindow", {
       configurable: true,
@@ -485,7 +485,7 @@ describe("PreviewPanel: unavailable state", () => {
 
   it("explains that web preview automation is disabled by default", () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "0");
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(screen.getByTestId("preview-panel-unavailable")).toHaveTextContent(
       "Web preview automation is disabled",
     );
@@ -494,7 +494,7 @@ describe("PreviewPanel: unavailable state", () => {
 
   it("renders the deterministic same-origin fixture when web automation is enabled", () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(screen.queryByTestId("preview-panel-unavailable")).not.toBeInTheDocument();
     expect(screen.getByTestId("web-runtime-preview-iframe")).toHaveAttribute(
       "src",
@@ -504,7 +504,7 @@ describe("PreviewPanel: unavailable state", () => {
 
   it("hides the hosted iframe when navigation becomes unavailable", async () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     const iframe = screen.getByTestId("web-runtime-preview-iframe");
     const input = screen.getByLabelText("Preview URL");
 
@@ -525,14 +525,14 @@ describe("PreviewPanel: unavailable state", () => {
       new DOMRect(10, 20, 640, 480),
     );
     const view = render(
-      <PreviewPanel threadId="thread-1" workspaceId="workspace-1" presentationActive />,
+      <PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" presentationActive />,
     );
     const iframe = screen.getByTestId("web-runtime-preview-iframe");
     expect(iframe).toHaveStyle({ visibility: "visible", pointerEvents: "auto" });
     expect(iframe).toHaveAttribute("aria-hidden", "false");
 
     view.rerender(
-      <PreviewPanel threadId="thread-1" workspaceId="workspace-1" presentationActive={false} />,
+      <PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" presentationActive={false} />,
     );
     await waitFor(() => {
       expect(iframe).toHaveStyle({ visibility: "hidden", pointerEvents: "none" });
@@ -540,7 +540,7 @@ describe("PreviewPanel: unavailable state", () => {
     });
 
     view.rerender(
-      <PreviewPanel threadId="thread-1" workspaceId="workspace-1" presentationActive />,
+      <PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" presentationActive />,
     );
     await waitFor(() => {
       expect(iframe).toHaveStyle({ visibility: "visible", pointerEvents: "auto" });
@@ -553,7 +553,7 @@ describe("PreviewPanel: unavailable state", () => {
   it("keeps the responsive toolbar available through the web Browser overflow menu", { timeout: 15_000 }, async () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
     const user = userEvent.setup();
-    render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" />);
 
     await waitFor(() => {
       expect(useBrowserAutomationStore.getState().viewportCoordinators.size).toBeGreaterThan(0);
@@ -570,7 +570,7 @@ describe("PreviewPanel: unavailable state", () => {
     await waitFor(() => {
       expect(
         useBrowserAutomationStore.getState().viewportStateByTarget.get(
-          JSON.stringify(["workspace-1", "thread-1", "web-preview"]),
+          JSON.stringify(["11111111-1111-4111-8111-111111111111", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "web-preview"]),
         ),
       ).toMatchObject({ mode: "responsive" });
     });
@@ -580,7 +580,7 @@ describe("PreviewPanel: unavailable state", () => {
     await waitFor(() => {
       expect(
         useBrowserAutomationStore.getState().viewportStateByTarget.get(
-          JSON.stringify(["workspace-1", "thread-1", "web-preview"]),
+          JSON.stringify(["11111111-1111-4111-8111-111111111111", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "web-preview"]),
         ),
       ).toMatchObject({ mode: "regular" });
     });
@@ -592,7 +592,7 @@ describe("PreviewPanel: unavailable state", () => {
   it("opens the toolbar in Fit presentation after a previous fixed zoom", { timeout: 15_000 }, async () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
     const user = userEvent.setup();
-    render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" />);
 
     await waitFor(() => {
       expect(useBrowserAutomationStore.getState().viewportCoordinators.size).toBeGreaterThan(0);
@@ -608,7 +608,7 @@ describe("PreviewPanel: unavailable state", () => {
     await waitFor(() => {
       expect(
         useBrowserAutomationStore.getState().viewportStateByTarget.get(
-          JSON.stringify(["workspace-1", "thread-1", "web-preview"]),
+          JSON.stringify(["11111111-1111-4111-8111-111111111111", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "web-preview"]),
         ),
       ).toMatchObject({ presentation: "150%" });
     });
@@ -624,7 +624,7 @@ describe("PreviewPanel: unavailable state", () => {
     await waitFor(() => {
       expect(
         useBrowserAutomationStore.getState().viewportStateByTarget.get(
-          JSON.stringify(["workspace-1", "thread-1", "web-preview"]),
+          JSON.stringify(["11111111-1111-4111-8111-111111111111", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "web-preview"]),
         ),
       ).toMatchObject({ mode: "responsive", presentation: "fit" });
     });
@@ -633,13 +633,13 @@ describe("PreviewPanel: unavailable state", () => {
 
   it("shows the responsive toolbar when the agent resizes the viewport", async () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
-    render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" />);
 
     await waitFor(() => {
       expect(useBrowserAutomationStore.getState().viewportCoordinators.size).toBeGreaterThan(0);
     });
     const coordinator = useBrowserAutomationStore.getState().viewportCoordinators.get(
-      JSON.stringify(["workspace-1", "thread-1", "web-preview"]),
+      JSON.stringify(["11111111-1111-4111-8111-111111111111", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "web-preview"]),
     );
     expect(coordinator).toBeDefined();
     await coordinator!.requestAgentResize({ width: 393, height: 852 });
@@ -649,9 +649,9 @@ describe("PreviewPanel: unavailable state", () => {
 
   it("shows the toolbar from live agent state before the stored viewport projection catches up", async () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
-    render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" />);
 
-    const targetKey = JSON.stringify(["workspace-1", "thread-1", "web-preview"]);
+    const targetKey = JSON.stringify(["11111111-1111-4111-8111-111111111111", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "web-preview"]);
     await waitFor(() => {
       expect(useBrowserAutomationStore.getState().liveTargets.has(targetKey)).toBe(true);
     });
@@ -663,8 +663,8 @@ describe("PreviewPanel: unavailable state", () => {
     });
     act(() => {
       useBrowserAutomationStore.getState().setViewportCoordinator(
-        "workspace-1",
-        "thread-1",
+        "11111111-1111-4111-8111-111111111111",
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         "web-preview",
         coordinator,
       );
@@ -774,12 +774,12 @@ describe("PreviewPanel: full panel state", () => {
   });
 
   it("renders the full panel when desktopBridge is present", () => {
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(screen.getByTestId("preview-panel")).toBeInTheDocument();
   });
 
   it("shows the capture confirmation after a successful viewport capture", () => {
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     act(() => {
       mockCaptureSuccess.current?.("viewport");
@@ -795,8 +795,8 @@ describe("PreviewPanel: full panel state", () => {
       controllers: new Map([
         [
           browserAutomationTargetKey(
-            "thread-1",
-            "thread-1",
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             PREVIEW_WEBVIEW_FALLBACK_TAB_ID,
           ),
           {
@@ -808,7 +808,7 @@ describe("PreviewPanel: full panel state", () => {
       ]),
     });
 
-    render(<PreviewPanel threadId="thread-1" coveredLeft={112} />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" coveredLeft={112} />);
 
     const overlay = screen.getByTestId("browser-automation-overlay");
     expect(overlay.parentElement).toBe(screen.getByTestId("preview-surface"));
@@ -829,8 +829,8 @@ describe("PreviewPanel: full panel state", () => {
         [
           "pending-open",
           {
-            workspaceId: "workspace-1",
-            threadId: "thread-1",
+            workspaceId: "11111111-1111-4111-8111-111111111111",
+            threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             tabId: PREVIEW_WEBVIEW_FALLBACK_TAB_ID,
             url: "https://example.com",
             startedAt: 1,
@@ -839,51 +839,51 @@ describe("PreviewPanel: full panel state", () => {
       ]),
     });
 
-    render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" />);
 
     expect(screen.getByTestId("browser-automation-overlay")).toBeInTheDocument();
     expect(screen.getByTestId("browser-automation-pointer")).toBeInTheDocument();
   });
 
   it("does not render the unavailable state when desktopBridge is present", () => {
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(
       screen.queryByTestId("preview-panel-unavailable"),
     ).not.toBeInTheDocument();
   });
 
   it("renders the omnibox URL input inside the full panel", () => {
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(screen.getByLabelText("Preview URL")).toBeInTheDocument();
   });
 
   it("renders the navigation buttons inside the full panel", () => {
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(screen.getByLabelText("Back")).toBeInTheDocument();
     expect(screen.getByLabelText("Forward")).toBeInTheDocument();
   });
 
   it("shows the localhost-ports empty state when no page is loaded", () => {
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(screen.getByTestId("browser-local-ports")).toBeInTheDocument();
   });
 
   it("accepts an optional workspaceId prop without error", () => {
     expect(() =>
       render(
-        <PreviewPanel threadId="thread-1" workspaceId="ws-abc" />,
+        <PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="ws-abc" />,
       ),
     ).not.toThrow();
     expect(screen.getByTestId("preview-panel")).toBeInTheDocument();
   });
 
   it("no longer renders a horizontal tab strip (the rail is the page switcher)", () => {
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(screen.queryByTestId("preview-tab-bar")).not.toBeInTheDocument();
   });
 
   it("uses the webview preview path by default", () => {
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(screen.queryByTestId("preview-webview-surface")).not.toBeInTheDocument();
     expect(screen.getByTestId("browser-local-ports")).toBeInTheDocument();
     expect(screen.getByTestId("preview-surface")).toHaveClass(
@@ -891,12 +891,12 @@ describe("PreviewPanel: full panel state", () => {
       "rounded-tl-md",
     );
     expect(mockUsePreviewBridge).toHaveBeenLastCalledWith(
-      expect.objectContaining({ threadId: "thread-1" }),
+      expect.objectContaining({ threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }),
     );
   });
 
   it("keeps the webview path flush while preserving the empty state", () => {
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     expect(screen.queryByTestId("preview-webview-surface")).not.toBeInTheDocument();
     expect(screen.queryByTestId("preview-webview")).not.toBeInTheDocument();
@@ -918,12 +918,12 @@ describe("PreviewPanel: full panel state", () => {
       "z-(--layer-dropdown)",
     );
     expect(mockUsePreviewBridge).toHaveBeenLastCalledWith(
-      expect.objectContaining({ threadId: "thread-1" }),
+      expect.objectContaining({ threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }),
     );
   });
 
   it("clips the Browser chrome around the expanded activity rail", () => {
-    render(<PreviewPanel threadId="thread-1" coveredLeft={112} />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" coveredLeft={112} />);
 
     expect(screen.getByTestId("browser-header").parentElement).toHaveStyle({
       clipPath: "inset(0 0 0 112px)",
@@ -933,12 +933,12 @@ describe("PreviewPanel: full panel state", () => {
   it("mounts a blank Electron surface for a new page", async () => {
     mockUsePreviewTabs.mockReturnValue({
       tabSet: {
-        threadId: "thread-1",
+        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         activeTabId: "blank-tab",
         tabs: [
           {
             id: "blank-tab",
-            threadId: "thread-1",
+            threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             title: "New page",
             url: null,
             faviconUrl: null,
@@ -956,14 +956,14 @@ describe("PreviewPanel: full panel state", () => {
       new DOMRect(0, 0, 640, 480),
     );
     try {
-      render(<PreviewPanel threadId="thread-1" />);
+      render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
       expect(screen.getByTestId("preview-webview")).toHaveAttribute(
         "data-tab-id",
         "blank-tab",
       );
       expect(
-        screen.getByTestId("electron-browser-surface-webview").getAttribute("src"),
+        (await screen.findByTestId("electron-browser-surface-webview")).getAttribute("src"),
       ).toMatch(/^about:blank/);
       expect(screen.getByTestId("browser-local-ports")).toBeInTheDocument();
       await waitFor(() => expect(screen.getByTestId("electron-browser-surface-webview")).toHaveStyle({
@@ -975,7 +975,7 @@ describe("PreviewPanel: full panel state", () => {
     }
   });
 
-  it("renders the active URL in a live webview when the effective engine is webview", () => {
+  it("renders the active URL in a live webview when the effective engine is webview", async () => {
     mockUsePreviewBridge.mockReturnValue(
       mockBridgeState({ storedUrl: "https://example.com" }),
     );
@@ -984,7 +984,7 @@ describe("PreviewPanel: full panel state", () => {
       new DOMRect(0, 0, 640, 480),
     );
     try {
-      render(<PreviewPanel threadId="thread-1" />);
+      render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
       const webview = screen.getByTestId("preview-webview");
       expect(webview).toHaveAttribute("data-tab-id", PREVIEW_WEBVIEW_FALLBACK_TAB_ID);
@@ -993,12 +993,12 @@ describe("PreviewPanel: full panel state", () => {
       expect(screen.getByTestId("preview-panel")).toHaveClass("pointer-events-none");
       expect(screen.getByTestId("preview-surface")).toHaveClass("pointer-events-none");
       expect(screen.queryByTestId("browser-local-ports")).not.toBeInTheDocument();
-      expect(screen.getByTestId("electron-browser-surface-webview")).toHaveStyle({
+      expect(await screen.findByTestId("electron-browser-surface-webview")).toHaveStyle({
         visibility: "visible",
         pointerEvents: "auto",
       });
       expect(mockUsePreviewBridge).toHaveBeenLastCalledWith(
-        expect.objectContaining({ threadId: "thread-1" }),
+        expect.objectContaining({ threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }),
       );
     } finally {
       rect.mockRestore();
@@ -1011,14 +1011,14 @@ describe("PreviewPanel: full panel state", () => {
     );
     const navigateSurface = vi.mocked(window.desktopBridge!.preview!.surface.navigate);
 
-    render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" />);
     await screen.findByTestId("preview-webview");
     await waitFor(() => expect(pushEmitter.channels()).toContain("files.changed"));
 
     act(() => {
       pushEmitter.emit("files.changed", {
-        workspaceId: "workspace-1",
-        threadId: "thread-1",
+        workspaceId: "11111111-1111-4111-8111-111111111111",
+        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         changedPaths: ["src/main.ts"],
         wholeWorkspace: false,
       });
@@ -1035,13 +1035,13 @@ describe("PreviewPanel: full panel state", () => {
     );
     const navigateSurface = vi.mocked(window.desktopBridge!.preview!.surface.navigate);
 
-    render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" />);
     await screen.findByTestId("preview-webview");
     await waitFor(() => expect(pushEmitter.channels()).toContain("turn.persisted"));
 
     act(() => {
       pushEmitter.emit("turn.persisted", {
-        threadId: "thread-1",
+        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         messageId: "message-1",
         toolCallCount: 1,
         filesChanged: ["src/main.ts"],
@@ -1059,13 +1059,17 @@ describe("PreviewPanel: full panel state", () => {
     );
     const navigateSurface = vi.mocked(window.desktopBridge!.preview!.surface.navigate);
 
-    render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" />);
     await screen.findByTestId("preview-webview");
     await waitFor(() => expect(pushEmitter.channels()).toContain("turn.persisted"));
+    await waitFor(() => expect(navigateSurface).toHaveBeenCalledWith(expect.objectContaining({
+      navigation: { kind: "address", address: "http://127.0.0.1:4173/index.html" },
+    })));
+    navigateSurface.mockClear();
 
     act(() => {
       pushEmitter.emit("turn.persisted", {
-        threadId: "thread-1",
+        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         messageId: "message-1",
         toolCallCount: 3,
         filesChanged: [],
@@ -1081,14 +1085,18 @@ describe("PreviewPanel: full panel state", () => {
     );
     const navigateSurface = vi.mocked(window.desktopBridge!.preview!.surface.navigate);
 
-    render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" />);
     await screen.findByTestId("preview-webview");
     await waitFor(() => expect(pushEmitter.channels()).toContain("files.changed"));
+    await waitFor(() => expect(navigateSurface).toHaveBeenCalledWith(expect.objectContaining({
+      navigation: { kind: "address", address: "http://localhost:4173/index.html" },
+    })));
+    navigateSurface.mockClear();
 
     act(() => {
       pushEmitter.emit("files.changed", {
-        workspaceId: "workspace-2",
-        threadId: "thread-1",
+        workspaceId: "22222222-2222-4222-8222-222222222222",
+        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         changedPaths: ["src/main.ts"],
         wholeWorkspace: false,
       });
@@ -1103,14 +1111,18 @@ describe("PreviewPanel: full panel state", () => {
     );
     const navigateSurface = vi.mocked(window.desktopBridge!.preview!.surface.navigate);
 
-    render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" />);
     await screen.findByTestId("preview-webview");
     await waitFor(() => expect(pushEmitter.channels()).toContain("files.changed"));
+    await waitFor(() => expect(navigateSurface).toHaveBeenCalledWith(expect.objectContaining({
+      navigation: { kind: "address", address: "https://example.com/docs" },
+    })));
+    navigateSurface.mockClear();
 
     act(() => {
       pushEmitter.emit("files.changed", {
-        workspaceId: "workspace-1",
-        threadId: "thread-1",
+        workspaceId: "11111111-1111-4111-8111-111111111111",
+        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         changedPaths: ["src/main.ts"],
         wholeWorkspace: false,
       });
@@ -1123,11 +1135,11 @@ describe("PreviewPanel: full panel state", () => {
     mockUsePreviewBridge.mockReturnValue(mockBridgeState({ storedUrl: "" }));
     mockUsePreviewTabs.mockReturnValue({
       tabSet: {
-        threadId: "thread-1",
+        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         activeTabId: "blank-tab",
         tabs: [{
           id: "blank-tab",
-          threadId: "thread-1",
+          threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           title: null,
           url: "about:blank",
           faviconUrl: null,
@@ -1144,11 +1156,11 @@ describe("PreviewPanel: full panel state", () => {
     });
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
-      const view = render(<PreviewPanel threadId="thread-1" />);
+      const view = render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
       const firstWebview = await screen.findByTestId("preview-webview");
       expect(firstWebview).toHaveAttribute("data-tab-id", "blank-tab");
       fireEvent(firstWebview, new Event("did-stop-loading"));
-      view.rerender(<PreviewPanel threadId="thread-1" />);
+      view.rerender(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
       await waitFor(() => expect(screen.getByTestId("preview-webview")).toBe(firstWebview));
       expect(consoleError.mock.calls.flat().join(" ")).not.toContain(
         "Maximum update depth exceeded",
@@ -1165,25 +1177,25 @@ describe("PreviewPanel: full panel state", () => {
       mockBridgeState({ storedUrl: "https://example.com" }),
     );
     useDiffStore.setState({
-      previewUrlByThread: { "thread-1": "https://example.com" },
+      previewUrlByThread: { "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": "https://example.com" },
     });
     const restoreWebviewMethods = installMockWebviewMethods({
       getURL: () => "about:blank",
     });
 
     try {
-      render(<PreviewPanel threadId="thread-1" />);
+      render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
       await screen.findByTestId("preview-webview");
       const hostedWebview = screen.getByTestId("electron-browser-surface-webview");
       fireEvent(hostedWebview, new Event("did-start-loading"));
-      expect(useDiffStore.getState().previewUrlByThread["thread-1"]).toBe(
+      expect(useDiffStore.getState().previewUrlByThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]).toBe(
         "https://example.com/",
       );
 
       const titleEvent = new Event("page-title-updated") as Event & { title?: string };
       Object.defineProperty(titleEvent, "title", { value: "Example" });
       fireEvent(hostedWebview, titleEvent);
-      expect(useDiffStore.getState().previewUrlByThread["thread-1"]).toBe(
+      expect(useDiffStore.getState().previewUrlByThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]).toBe(
         "https://example.com/",
       );
 
@@ -1191,7 +1203,7 @@ describe("PreviewPanel: full panel state", () => {
       Object.defineProperty(blankEvent, "url", { value: "about:blank" });
       fireEvent(hostedWebview, blankEvent);
       await waitFor(() => {
-        expect(useDiffStore.getState().previewUrlByThread["thread-1"]).toBe("");
+        expect(useDiffStore.getState().previewUrlByThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]).toBe("");
       });
     } finally {
       restoreWebviewMethods();
@@ -1202,12 +1214,12 @@ describe("PreviewPanel: full panel state", () => {
     mockUsePreviewBridge.mockReturnValue(mockBridgeState({ storedUrl: "https://a.example" }));
     mockUsePreviewTabs.mockReturnValue({
       tabSet: {
-        threadId: "thread-1",
+        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         activeTabId: "tab-a",
         tabs: [
           {
             id: "tab-a",
-            threadId: "thread-1",
+            threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             title: "A",
             url: "https://a.example",
             faviconUrl: "https://a.example/favicon.ico",
@@ -1216,7 +1228,7 @@ describe("PreviewPanel: full panel state", () => {
           },
           {
             id: "tab-b",
-            threadId: "thread-1",
+            threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             title: "B",
             url: "https://b.example",
             faviconUrl: "https://b.example/favicon.ico",
@@ -1230,7 +1242,7 @@ describe("PreviewPanel: full panel state", () => {
       closeTab: vi.fn(),
     });
 
-    const { rerender } = render(<PreviewPanel threadId="thread-1" />);
+    const { rerender } = render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(screen.getAllByTestId("preview-webview")).toHaveLength(2);
     const webviewSurface = screen.getByTestId("preview-webview-surface");
     expect(webviewSurface).toHaveClass("pointer-events-none");
@@ -1240,12 +1252,12 @@ describe("PreviewPanel: full panel state", () => {
 
     mockUsePreviewTabs.mockReturnValue({
       tabSet: {
-        threadId: "thread-1",
+        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         activeTabId: "tab-b",
         tabs: [
           {
             id: "tab-a",
-            threadId: "thread-1",
+            threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             title: "A",
             url: "https://a.example",
             faviconUrl: "https://a.example/favicon.ico",
@@ -1254,7 +1266,7 @@ describe("PreviewPanel: full panel state", () => {
           },
           {
             id: "tab-b",
-            threadId: "thread-1",
+            threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             title: "B",
             url: "https://b.example",
             faviconUrl: "https://b.example/favicon.ico",
@@ -1268,7 +1280,7 @@ describe("PreviewPanel: full panel state", () => {
       closeTab: vi.fn(),
     });
 
-    rerender(<PreviewPanel threadId="thread-1" />);
+    rerender(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     const webviews = screen.getAllByTestId("preview-webview");
     expect(webviews).toHaveLength(2);
@@ -1303,11 +1315,11 @@ describe("PreviewPanel: full panel state", () => {
     mockUsePreviewBridge.mockReturnValue(mockBridgeState({ storedUrl: "https://a.example" }));
     mockUsePreviewTabs.mockReturnValue({
       tabSet: {
-        threadId: "thread-1",
+        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         activeTabId: "tab-a",
         tabs: [
-          { id: "tab-a", threadId: "thread-1", title: "A", url: "https://a.example", faviconUrl: null, warm: true, active: true },
-          { id: "tab-b", threadId: "thread-1", title: "B", url: "https://b.example", faviconUrl: null, warm: true, active: false },
+          { id: "tab-a", threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "A", url: "https://a.example", faviconUrl: null, warm: true, active: true },
+          { id: "tab-b", threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "B", url: "https://b.example", faviconUrl: null, warm: true, active: false },
         ],
       },
       newTab: vi.fn(),
@@ -1315,7 +1327,7 @@ describe("PreviewPanel: full panel state", () => {
       closeTab: vi.fn(),
     });
 
-    render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" automationOnly />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" automationOnly />);
 
     await waitFor(() => expect(screen.getAllByTestId("electron-browser-surface-webview")).toHaveLength(2));
     expect(screen.getAllByTestId("electron-browser-surface-webview")).toEqual([
@@ -1327,12 +1339,12 @@ describe("PreviewPanel: full panel state", () => {
 
   it("persists favicon updates from inactive warm webview pages", async () => {
     const tabSet = {
-      threadId: "thread-1",
+      threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       activeTabId: "tab-a",
       tabs: [
         {
           id: "tab-a",
-          threadId: "thread-1",
+          threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           title: "A",
           url: "https://a.example",
           faviconUrl: null,
@@ -1341,7 +1353,7 @@ describe("PreviewPanel: full panel state", () => {
         },
         {
           id: "tab-b",
-          threadId: "thread-1",
+          threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           title: "B",
           url: "https://b.example",
           faviconUrl: null,
@@ -1350,7 +1362,7 @@ describe("PreviewPanel: full panel state", () => {
         },
       ],
     };
-    usePreviewTabsStore.getState().setTabSet("thread-1", "thread-1", tabSet);
+    usePreviewTabsStore.getState().setTabSet("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", tabSet);
     mockUsePreviewTabs.mockReturnValue({
       tabSet,
       newTab: vi.fn(),
@@ -1358,10 +1370,9 @@ describe("PreviewPanel: full panel state", () => {
       closeTab: vi.fn(),
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
-    const inactiveWebview = screen
-      .getAllByTestId("electron-browser-surface-webview")
+    const inactiveWebview = (await screen.findAllByTestId("electron-browser-surface-webview"))
       .find((node) => node.getAttribute("data-tab-id") === "tab-b")!;
     fireEvent(
       inactiveWebview,
@@ -1371,7 +1382,7 @@ describe("PreviewPanel: full panel state", () => {
     );
 
     await waitFor(() => {
-      const updatedTabSet = usePreviewTabsStore.getState().tabSetByScope[previewTabsScopeKey("thread-1", "thread-1")]!;
+      const updatedTabSet = usePreviewTabsStore.getState().tabSetByScope[previewTabsScopeKey("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")]!;
       expect(updatedTabSet.tabs.find((tab) => tab.id === "tab-b")?.faviconUrl).toBe(
         "https://b.example/favicon.ico",
       );
@@ -1386,12 +1397,12 @@ describe("PreviewPanel: full panel state", () => {
     const setEquivalentTabs = () => {
       mockUsePreviewTabs.mockReturnValue({
         tabSet: {
-          threadId: "thread-1",
+          threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           activeTabId: "tab-a",
           tabs: [
             {
               id: "tab-a",
-              threadId: "thread-1",
+              threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
               title: "A",
               url: "https://a.example",
               faviconUrl: null,
@@ -1408,12 +1419,12 @@ describe("PreviewPanel: full panel state", () => {
 
     try {
       setEquivalentTabs();
-      const { rerender } = render(<PreviewPanel threadId="thread-1" />);
+      const { rerender } = render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
       setEquivalentTabs();
-      rerender(<PreviewPanel threadId="thread-1" />);
+      rerender(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
       setEquivalentTabs();
-      rerender(<PreviewPanel threadId="thread-1" />);
+      rerender(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
       expect(screen.getByTestId("preview-webview")).toHaveAttribute(
         "src",
@@ -1446,7 +1457,7 @@ describe("PreviewPanel: full panel state", () => {
     });
 
     try {
-      render(<PreviewPanel threadId="thread-1" />);
+      render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
       await waitFor(() => {
         expect(screen.getByTestId("preview-webview")).toHaveAttribute(
           "src",
@@ -1485,19 +1496,19 @@ describe("PreviewPanel: full panel state", () => {
       mockUsePreviewBridge.mockReturnValue(
         mockBridgeState({ storedUrl: "https://google.com/" }),
       );
-      const { rerender } = render(<PreviewPanel threadId="thread-1" />);
+      const { rerender } = render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
       const webview = screen.getByTestId("preview-webview");
       expect(webview).toHaveAttribute("src", "https://google.com/");
 
       liveUrl = "https://about.google/";
       fireEvent(
-        screen.getByTestId("electron-browser-surface-webview"),
+        await screen.findByTestId("electron-browser-surface-webview"),
         Object.assign(new Event("did-navigate"), { url: liveUrl }),
       );
       mockUsePreviewBridge.mockReturnValue(
         mockBridgeState({ storedUrl: "https://about.google/" }),
       );
-      rerender(<PreviewPanel threadId="thread-1" />);
+      rerender(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
       await waitFor(() => {
         expect(screen.getByTestId("preview-webview")).toHaveAttribute(
           "src",
@@ -1511,12 +1522,12 @@ describe("PreviewPanel: full panel state", () => {
 
   it("follows a host-assigned URL when a reused tab's earlier request already settled", async () => {
     const tabSetWith = (url: string | null) => ({
-      threadId: "thread-1",
+      threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       activeTabId: "tab-1",
       tabs: [
         {
           id: "tab-1",
-          threadId: "thread-1",
+          threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           title: null,
           url,
           faviconUrl: null,
@@ -1536,7 +1547,7 @@ describe("PreviewPanel: full panel state", () => {
     });
 
     try {
-      const { rerender } = render(<PreviewPanel threadId="thread-1" />);
+      const { rerender } = render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
       await waitFor(() =>
         expect(screen.getByTestId("preview-webview")).toHaveAttribute(
           "src",
@@ -1557,7 +1568,7 @@ describe("PreviewPanel: full panel state", () => {
         activateTab: vi.fn(),
         closeTab: vi.fn(),
       });
-      rerender(<PreviewPanel threadId="thread-1" />);
+      rerender(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
       await waitFor(() =>
         expect(screen.getByTestId("preview-webview")).toHaveAttribute(
@@ -1599,7 +1610,7 @@ describe("PreviewPanel: full panel state", () => {
     const prepare = vi.mocked(window.desktopBridge!.preview!.surface.prepare);
     const release = vi.mocked(window.desktopBridge!.preview!.surface.release);
 
-    render(<PreviewPanel threadId={threadId} workspaceId="workspace-1" />);
+    render(<PreviewPanel threadId={threadId} workspaceId="11111111-1111-4111-8111-111111111111" />);
     const initialPlacement = screen.getByTestId("preview-webview");
 
     await waitFor(() => expect(prepare).toHaveBeenCalled());
@@ -1622,11 +1633,11 @@ describe("PreviewPanel: full panel state", () => {
     });
     const tabs = (url: string) => ({
       tabSet: {
-        threadId: "thread-1",
+        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         activeTabId: "agent-tab",
         tabs: [{
           id: "agent-tab",
-          threadId: "thread-1",
+          threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           title: "DuckDuckGo",
           url,
           faviconUrl: null,
@@ -1644,20 +1655,20 @@ describe("PreviewPanel: full panel state", () => {
         mockBridgeState({ storedUrl: requestedUrl }),
       );
       mockUsePreviewTabs.mockReturnValue(tabs(requestedUrl));
-      const { rerender } = render(<PreviewPanel threadId="thread-1" />);
+      const { rerender } = render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
       const webview = screen.getByTestId("preview-webview");
       expect(webview).toHaveAttribute("src", requestedUrl);
 
       liveUrl = redirectedUrl;
       fireEvent(
-        screen.getByTestId("electron-browser-surface-webview"),
+        await screen.findByTestId("electron-browser-surface-webview"),
         Object.assign(new Event("did-navigate"), { url: liveUrl }),
       );
       mockUsePreviewBridge.mockReturnValue(
         mockBridgeState({ storedUrl: redirectedUrl }),
       );
       mockUsePreviewTabs.mockReturnValue(tabs(redirectedUrl));
-      rerender(<PreviewPanel threadId="thread-1" />);
+      rerender(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
       await waitFor(() => {
         expect(screen.getByTestId("preview-webview")).toHaveAttribute(
@@ -1689,7 +1700,7 @@ describe("PreviewPanel: full panel state", () => {
     });
 
     try {
-      render(<PreviewPanel threadId="thread-1" />);
+      render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
       const input = screen.getByLabelText("Preview URL");
       fireEvent.focus(input);
@@ -1715,7 +1726,7 @@ describe("PreviewPanel: full panel state", () => {
       mockBridgeState({ storedUrl: "https://example.com" }),
     );
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     expect(screen.getByTestId("preview-webview")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("More browser tools"));
@@ -1725,7 +1736,7 @@ describe("PreviewPanel: full panel state", () => {
   });
 
   it("keeps browser chrome visible while design mode has no saved annotations", () => {
-    usePreviewDesignModeStore.getState().setActive("thread-1", true);
+    usePreviewDesignModeStore.getState().setActive("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", true);
     mockUsePreviewBridge.mockReturnValue(
       mockBridgeState({
         inputUrl: "https://example.com/product-preview?productCode=QUAELE2010",
@@ -1739,7 +1750,7 @@ describe("PreviewPanel: full panel state", () => {
       }),
     );
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     expect(screen.getByTestId("browser-header")).toBeInTheDocument();
     expect(
@@ -1754,7 +1765,7 @@ describe("PreviewPanel: full panel state", () => {
   });
 
   it("shows the saved-annotation command bar after the first annotation", () => {
-    usePreviewDesignModeStore.getState().setActive("thread-1", true);
+    usePreviewDesignModeStore.getState().setActive("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", true);
     const pageUrl = "https://example.com/product-preview?productCode=QUAELE2010";
     installSavedAnnotation();
     mockUsePreviewBridge.mockReturnValue(
@@ -1770,7 +1781,7 @@ describe("PreviewPanel: full panel state", () => {
       }),
     );
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     expect(screen.queryByTestId("browser-header")).not.toBeInTheDocument();
     expect(screen.getByTestId("preview-annotation-header")).toBeInTheDocument();
@@ -1784,7 +1795,7 @@ describe("PreviewPanel: full panel state", () => {
 
   it("confirms before discarding saved page annotations", async () => {
     const user = userEvent.setup();
-    usePreviewDesignModeStore.getState().setActive("thread-1", true);
+    usePreviewDesignModeStore.getState().setActive("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", true);
     const pageUrl = "https://example.com/product-preview?productCode=QUAELE2010";
     installSavedAnnotation();
     mockUsePreviewBridge.mockReturnValue(
@@ -1800,9 +1811,9 @@ describe("PreviewPanel: full panel state", () => {
       }),
     );
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
-    expect(usePreviewAnnotationStore.getState().byThread["thread-1"]).toHaveLength(
+    expect(usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]).toHaveLength(
       1,
     );
     await user.click(screen.getByLabelText("Discard page annotations"));
@@ -1815,7 +1826,7 @@ describe("PreviewPanel: full panel state", () => {
         "This removes 1 saved annotation from this page.",
       ),
     ).toBeInTheDocument();
-    expect(usePreviewAnnotationStore.getState().byThread["thread-1"]).toHaveLength(
+    expect(usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]).toHaveLength(
       1,
     );
 
@@ -1826,7 +1837,7 @@ describe("PreviewPanel: full panel state", () => {
         screen.queryByRole("dialog", { name: "Delete page annotations?" }),
       ).not.toBeInTheDocument();
     });
-    expect(usePreviewAnnotationStore.getState().byThread["thread-1"]).toHaveLength(
+    expect(usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]).toHaveLength(
       1,
     );
 
@@ -1837,7 +1848,7 @@ describe("PreviewPanel: full panel state", () => {
     await user.click(within(deleteDialog).getByRole("button", { name: "Delete" }));
 
     await waitFor(() => {
-      expect(usePreviewAnnotationStore.getState().byThread["thread-1"]).toHaveLength(
+      expect(usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]).toHaveLength(
         0,
       );
     });
@@ -1862,9 +1873,9 @@ describe("PreviewPanel: full panel state", () => {
       }),
     );
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
-    expect(usePreviewAnnotationStore.getState().byThread["thread-1"]).toHaveLength(
+    expect(usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]).toHaveLength(
       1,
     );
     expect(
@@ -1873,7 +1884,7 @@ describe("PreviewPanel: full panel state", () => {
   });
 
   it("shows saved annotations as numbered markers until reopened", () => {
-    usePreviewDesignModeStore.getState().setActive("thread-1", true);
+    usePreviewDesignModeStore.getState().setActive("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", true);
     const pageUrl = "https://example.com/product-preview?productCode=QUAELE2010";
     installSavedAnnotation();
     mockUsePreviewBridge.mockReturnValue(
@@ -1889,7 +1900,7 @@ describe("PreviewPanel: full panel state", () => {
       }),
     );
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     const marker = screen.getByRole("button", { name: "Edit annotation 1" });
     expect(marker).toBeInTheDocument();
@@ -1915,7 +1926,7 @@ describe("PreviewPanel: full panel state", () => {
   });
 
   it("shows saved annotation content when the marker is hovered", async () => {
-    usePreviewDesignModeStore.getState().setActive("thread-1", true);
+    usePreviewDesignModeStore.getState().setActive("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", true);
     const pageUrl = "https://example.com/product-preview?productCode=QUAELE2010";
     installSavedAnnotation();
     mockUsePreviewBridge.mockReturnValue(
@@ -1931,7 +1942,7 @@ describe("PreviewPanel: full panel state", () => {
       }),
     );
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     await userEvent.hover(screen.getByRole("button", { name: "Edit annotation 1" }));
 
@@ -1942,7 +1953,7 @@ describe("PreviewPanel: full panel state", () => {
   it("keeps annotation advanced controls hidden in a new empty draft", () => {
     installDraftAnnotation();
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     expect(screen.getByTestId("preview-annotation-bubble")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Comment · / for skills · @ to mention")).toBeInTheDocument();
@@ -1953,7 +1964,7 @@ describe("PreviewPanel: full panel state", () => {
   it("outlines the target while the draft annotation bubble is open", () => {
     installDraftAnnotation();
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     expect(
       screen.getByTestId("preview-annotation-active-target-highlight"),
@@ -1968,7 +1979,7 @@ describe("PreviewPanel: full panel state", () => {
   it("layers the draft annotation bubble above the hosted page and below modals", () => {
     installDraftAnnotation();
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     const layers = declaredLayerValues();
     const bubbleLayer = outermostLayerToken(screen.getByTestId("preview-annotation-bubble"));
@@ -1981,7 +1992,7 @@ describe("PreviewPanel: full panel state", () => {
   it("shows annotation save only after note text or visual edits exist", () => {
     installDraftAnnotation();
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     expect(screen.queryByTestId("preview-annotation-save")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Annotation note"), {
@@ -1993,7 +2004,7 @@ describe("PreviewPanel: full panel state", () => {
   it("shakes before discarding a dirty draft from outside clicks", async () => {
     installDraftAnnotation();
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.change(screen.getByLabelText("Annotation note"), {
       target: { value: "Needs stronger contrast" },
@@ -2013,7 +2024,7 @@ describe("PreviewPanel: full panel state", () => {
 
     await waitFor(() => {
       expect(
-        usePreviewAnnotationStore.getState().drafts["thread-1"],
+        usePreviewAnnotationStore.getState().drafts["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
       ).toBeUndefined();
     });
     expect(
@@ -2024,41 +2035,61 @@ describe("PreviewPanel: full panel state", () => {
   it("focuses the annotation note when a draft bubble opens", async () => {
     installDraftAnnotation();
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     await waitFor(() => {
       expect(screen.getByLabelText("Annotation note")).toHaveFocus();
     });
   });
 
+  it("keeps the color picker open when annotation autofocus runs after the user opens it", async () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
+    try {
+      const user = userEvent.setup();
+      installDraftAnnotation({ elementStyle: { textColor: "rgb(255, 255, 255)" } });
+      render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
+
+      await user.click(screen.getByLabelText("Open annotation visual controls"));
+      await user.click(screen.getByLabelText("Open Text color picker"));
+      expect(screen.getByLabelText("Use HEX for Text color")).toBeInTheDocument();
+
+      await act(async () => { vi.advanceTimersToNextFrame(); });
+
+      expect(screen.getByLabelText("Use HEX for Text color")).toBeInTheDocument();
+      expect(screen.getByLabelText("Annotation note")).not.toHaveFocus();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("closes only the open annotation bubble on Escape", async () => {
     installDraftAnnotation();
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     expect(screen.getByTestId("preview-annotation-bubble")).toBeInTheDocument();
     fireEvent.keyDown(document, { key: "Escape", code: "Escape" });
 
     await waitFor(() => {
       expect(
-        usePreviewAnnotationStore.getState().drafts["thread-1"],
+        usePreviewAnnotationStore.getState().drafts["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
       ).toBeUndefined();
     });
-    expect(usePreviewDesignModeStore.getState().isActive("thread-1")).toBe(true);
+    expect(usePreviewDesignModeStore.getState().isActive("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).toBe(true);
     expect(
       screen.queryByTestId("preview-annotation-bubble"),
     ).not.toBeInTheDocument();
   });
 
   it("exits design mode on Escape when no annotation bubble is open", async () => {
-    usePreviewDesignModeStore.getState().setActive("thread-1", true);
+    usePreviewDesignModeStore.getState().setActive("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", true);
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.keyDown(document, { key: "Escape", code: "Escape" });
 
     await waitFor(() => {
-      expect(usePreviewDesignModeStore.getState().isActive("thread-1")).toBe(false);
+      expect(usePreviewDesignModeStore.getState().isActive("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).toBe(false);
     });
     expect(window.desktopBridge?.preview?.cancelCapture).toHaveBeenCalled();
   });
@@ -2066,21 +2097,21 @@ describe("PreviewPanel: full panel state", () => {
   it("handles app-level Escape without closing design mode when a bubble is open", async () => {
     installDraftAnnotation();
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     const event = new CustomEvent("mcode:preview-design-escape", {
       cancelable: true,
-      detail: { threadId: "thread-1" },
+      detail: { threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
     });
     const notCancelled = window.dispatchEvent(event);
 
     expect(notCancelled).toBe(false);
     await waitFor(() => {
       expect(
-        usePreviewAnnotationStore.getState().drafts["thread-1"],
+        usePreviewAnnotationStore.getState().drafts["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
       ).toBeUndefined();
     });
-    expect(usePreviewDesignModeStore.getState().isActive("thread-1")).toBe(true);
+    expect(usePreviewDesignModeStore.getState().isActive("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).toBe(true);
   });
 
   it("keeps the open annotation when the rail maximize control is clicked", () => {
@@ -2090,11 +2121,11 @@ describe("PreviewPanel: full panel state", () => {
     document.body.append(maximize);
 
     try {
-      render(<PreviewPanel threadId="thread-1" />);
+      render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
       fireEvent.pointerDown(maximize);
 
-      expect(usePreviewAnnotationStore.getState().drafts["thread-1"]).toBeDefined();
+      expect(usePreviewAnnotationStore.getState().drafts["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]).toBeDefined();
       expect(screen.getByTestId("preview-annotation-bubble")).toBeInTheDocument();
     } finally {
       maximize.remove();
@@ -2102,7 +2133,7 @@ describe("PreviewPanel: full panel state", () => {
   });
 
   it("discards an unsaved draft when design mode exits from browser chrome", async () => {
-    usePreviewDesignModeStore.getState().setActive("thread-1", true);
+    usePreviewDesignModeStore.getState().setActive("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", true);
     const pageUrl = "https://example.com/product-preview?productCode=QUAELE2010";
     mockUsePreviewBridge.mockReturnValue(
       mockBridgeState({
@@ -2118,14 +2149,14 @@ describe("PreviewPanel: full panel state", () => {
     );
     installDraftAnnotation();
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     expect(screen.getByTestId("preview-annotation-bubble")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Design" }));
 
     await waitFor(() => {
       expect(
-        usePreviewAnnotationStore.getState().drafts["thread-1"],
+        usePreviewAnnotationStore.getState().drafts["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
       ).toBeUndefined();
     });
     expect(
@@ -2140,7 +2171,7 @@ describe("PreviewPanel: full panel state", () => {
   it("saves the annotation when Enter is pressed in the note", async () => {
     installDraftAnnotation();
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     const note = screen.getByLabelText("Annotation note");
     fireEvent.change(note, { target: { value: "Use stronger contrast" } });
@@ -2148,7 +2179,7 @@ describe("PreviewPanel: full panel state", () => {
 
     await waitFor(() => {
       expect(
-        usePreviewAnnotationStore.getState().byThread["thread-1"],
+        usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
       ).toHaveLength(1);
     });
     expect(mockCaptureAnnotationSnapshot).toHaveBeenCalledWith({
@@ -2162,7 +2193,7 @@ describe("PreviewPanel: full panel state", () => {
       ],
     });
     expect(
-      usePreviewAnnotationStore.getState().byThread["thread-1"]?.[0]?.note,
+      usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]?.[0]?.note,
     ).toBe("Use stronger contrast");
   });
 
@@ -2195,7 +2226,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     const note = screen.getByLabelText("Annotation note");
     fireEvent.change(note, { target: { value: "Move this search input" } });
@@ -2225,7 +2256,7 @@ describe("PreviewPanel: full panel state", () => {
     installDraftAnnotation();
 
     try {
-      render(<PreviewPanel threadId="thread-1" />);
+      render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
       const note = screen.getByLabelText("Annotation note");
       fireEvent.change(note, { target: { value: "Move this button" } });
@@ -2241,17 +2272,17 @@ describe("PreviewPanel: full panel state", () => {
       const event = submitSpy.mock.calls[0]?.[0] as CustomEvent<{
         threadId?: string;
       }>;
-      expect(event.detail.threadId).toBe("thread-1");
+      expect(event.detail.threadId).toBe("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     } finally {
       window.removeEventListener("mcode:submit-composer", submitSpy);
     }
   });
 
   it("guards the page while a design-mode annotation bubble is open", async () => {
-    usePreviewDesignModeStore.getState().setActive("thread-1", true);
+    usePreviewDesignModeStore.getState().setActive("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", true);
     installDraftAnnotation();
 
-    const { unmount } = render(<PreviewPanel threadId="thread-1" />);
+    const { unmount } = render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     const setAnnotationGuard = vi.mocked(
       window.desktopBridge!.preview!.design.setAnnotationGuard,
@@ -2268,10 +2299,10 @@ describe("PreviewPanel: full panel state", () => {
   });
 
   it("re-arms the element picker after saving a design-mode annotation", async () => {
-    usePreviewDesignModeStore.getState().setActive("thread-1", true);
+    usePreviewDesignModeStore.getState().setActive("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", true);
     installDraftAnnotation();
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     expect(mockOnAddElementAnnotation).not.toHaveBeenCalled();
     const note = screen.getByLabelText("Annotation note");
@@ -2286,7 +2317,7 @@ describe("PreviewPanel: full panel state", () => {
   it("opens compact advanced annotation controls from the tuning action", () => {
     installDraftAnnotation();
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
 
@@ -2312,7 +2343,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
     const advanced = screen.getByTestId("preview-annotation-advanced");
@@ -2346,7 +2377,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
     const opacity = within(
@@ -2371,7 +2402,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
     const advanced = screen.getByTestId("preview-annotation-advanced");
@@ -2395,7 +2426,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
     const advanced = screen.getByTestId("preview-annotation-advanced");
@@ -2415,7 +2446,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
     const advanced = screen.getByTestId("preview-annotation-advanced");
@@ -2435,7 +2466,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
     const advanced = screen.getByTestId("preview-annotation-advanced");
@@ -2469,7 +2500,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
     const advanced = screen.getByTestId("preview-annotation-advanced");
@@ -2499,7 +2530,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
     const advanced = screen.getByTestId("preview-annotation-advanced");
@@ -2525,7 +2556,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
     const advanced = screen.getByTestId("preview-annotation-advanced");
@@ -2548,7 +2579,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
     const advanced = screen.getByTestId("preview-annotation-advanced");
@@ -2602,7 +2633,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
     const advanced = screen.getByTestId("preview-annotation-advanced");
@@ -2657,7 +2688,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
     const advanced = screen.getByTestId("preview-annotation-advanced");
@@ -2701,7 +2732,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
     const advanced = screen.getByTestId("preview-annotation-advanced");
@@ -2740,7 +2771,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
     const advanced = screen.getByTestId("preview-annotation-advanced");
@@ -2769,7 +2800,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
     fireEvent.change(
@@ -2797,7 +2828,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
     fireEvent.change(
@@ -2809,10 +2840,10 @@ describe("PreviewPanel: full panel state", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
-      expect(usePreviewAnnotationStore.getState().byThread["thread-1"]).toHaveLength(1);
+      expect(usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]).toHaveLength(1);
     });
     expect(
-      usePreviewAnnotationStore.getState().byThread["thread-1"]?.[0]?.proposedChanges,
+      usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]?.[0]?.proposedChanges,
     ).toEqual({ fontSize: "18px" });
   });
 
@@ -2826,7 +2857,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     fireEvent.click(screen.getByLabelText("Open annotation visual controls"));
     fireEvent.change(
@@ -2838,10 +2869,10 @@ describe("PreviewPanel: full panel state", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
-      expect(usePreviewAnnotationStore.getState().byThread["thread-1"]).toHaveLength(1);
+      expect(usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]).toHaveLength(1);
     });
     expect(
-      usePreviewAnnotationStore.getState().byThread["thread-1"]?.[0]?.proposedChanges,
+      usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]?.[0]?.proposedChanges,
     ).toEqual({ paddingLeft: "40px" });
     expect(mockCaptureAnnotationSnapshot).toHaveBeenCalledWith({
       activeDisplayNumber: 1,
@@ -2862,7 +2893,7 @@ describe("PreviewPanel: full panel state", () => {
   it("opens the slash-command popup when '/' is typed in the annotation note", async () => {
     installDraftAnnotation();
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     const note = screen.getByLabelText("Annotation note");
     // onChange reads selectionStart ?? value.length; jsdom returns null for
@@ -2879,7 +2910,7 @@ describe("PreviewPanel: full panel state", () => {
   it("closes the slash-command popup when Escape is pressed in the annotation note", async () => {
     installDraftAnnotation();
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     const note = screen.getByLabelText("Annotation note");
     fireEvent.change(note, { target: { value: "/" } });
@@ -2901,7 +2932,7 @@ describe("PreviewPanel: full panel state", () => {
   it("inserts the selected command text on Enter and does NOT save the annotation", async () => {
     installDraftAnnotation();
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     const note = screen.getByLabelText("Annotation note");
     fireEvent.change(note, { target: { value: "/" } });
@@ -2916,7 +2947,7 @@ describe("PreviewPanel: full panel state", () => {
 
     // The annotation store must still be empty (not saved).
     expect(
-      usePreviewAnnotationStore.getState().byThread["thread-1"],
+      usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
     ).toBeUndefined();
     // The popup must be dismissed after selection.
     await waitFor(() => {
@@ -2940,7 +2971,7 @@ describe("PreviewPanel: full panel state", () => {
 
     installDraftAnnotation();
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     const note = screen.getByLabelText("Annotation note");
     fireEvent.change(note, { target: { value: "/" } });
@@ -2961,7 +2992,7 @@ describe("PreviewPanel: full panel state", () => {
     installDraftAnnotation();
 
     try {
-      render(<PreviewPanel threadId="thread-1" />);
+      render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
       const note = screen.getByLabelText("Annotation note");
       fireEvent.change(note, { target: { value: "Use stronger contrast" } });
@@ -2970,7 +3001,7 @@ describe("PreviewPanel: full panel state", () => {
 
       await waitFor(() => {
         expect(
-          usePreviewAnnotationStore.getState().byThread["thread-1"],
+          usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
         ).toHaveLength(1);
       });
       expect(submitSpy).toHaveBeenCalledTimes(1);
@@ -2982,7 +3013,7 @@ describe("PreviewPanel: full panel state", () => {
     const resolveNavigation = vi.fn().mockResolvedValue({ ok: false, error: "file-not-found" });
     mockUsePreviewBridge.mockReturnValue(mockBridgeState({ resolveNavigation }));
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     const input = screen.getByLabelText("Preview URL");
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "C:\\missing\\page.html" } });
@@ -3001,7 +3032,7 @@ describe("PreviewPanel: full panel state", () => {
     const resolveNavigation = vi.fn().mockResolvedValue({ ok: false, error: "invalid-url" });
     mockUsePreviewBridge.mockReturnValue(mockBridgeState({ resolveNavigation }));
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     const input = screen.getByLabelText("Preview URL");
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "not a url" } });
@@ -3017,7 +3048,7 @@ describe("PreviewPanel: full panel state", () => {
     const resolveNavigation = vi.fn().mockResolvedValue({ ok: false, error: "is-directory" });
     mockUsePreviewBridge.mockReturnValue(mockBridgeState({ resolveNavigation }));
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     const input = screen.getByLabelText("Preview URL");
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "C:\\workspace\\docs" } });
@@ -3033,7 +3064,7 @@ describe("PreviewPanel: full panel state", () => {
     const resolveNavigation = vi.fn().mockResolvedValue({ ok: false, error: "sensitive-file" });
     mockUsePreviewBridge.mockReturnValue(mockBridgeState({ resolveNavigation }));
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     const input = screen.getByLabelText("Preview URL");
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "C:\\workspace\\.env" } });
@@ -3050,7 +3081,7 @@ describe("PreviewPanel: full panel state", () => {
     const resolveNavigation = vi.fn().mockResolvedValue({ ok: false, error: "file-not-found" });
     mockUsePreviewBridge.mockReturnValue(mockBridgeState({ resolveNavigation }));
 
-    render(<PreviewPanel threadId="thread-1" />);
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     const input = screen.getByLabelText("Preview URL");
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "C:\\missing\\page.html" } });
@@ -3068,12 +3099,12 @@ describe("PreviewPanel: full panel state", () => {
     mockUsePreviewBridge.mockReturnValue(mockBridgeState({ resolveNavigation }));
     mockUsePreviewTabs.mockReturnValue({
       tabSet: {
-        threadId: "thread-1",
+        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         activeTabId: "tab-1",
         tabs: [
           {
             id: "tab-1",
-            threadId: "thread-1",
+            threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             title: null,
             url: "https://old.example/",
             faviconUrl: null,
@@ -3091,7 +3122,7 @@ describe("PreviewPanel: full panel state", () => {
     });
 
     try {
-      render(<PreviewPanel threadId="thread-1" />);
+      render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
       const hostedWebview = await waitFor(() =>
         screen.getByTestId("electron-browser-surface-webview"),
       );
@@ -3136,12 +3167,12 @@ describe("PreviewPanel: full panel state", () => {
     mockUsePreviewBridge.mockReturnValue(mockBridgeState({ resolveNavigation }));
     mockUsePreviewTabs.mockReturnValue({
       tabSet: {
-        threadId: "thread-1",
+        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         activeTabId: "tab-1",
         tabs: [
           {
             id: "tab-1",
-            threadId: "thread-1",
+            threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             title: null,
             url: "https://old.example/",
             faviconUrl: null,
@@ -3159,7 +3190,7 @@ describe("PreviewPanel: full panel state", () => {
     });
 
     try {
-      render(<PreviewPanel threadId="thread-1" />);
+      render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
       const input = screen.getByLabelText("Preview URL");
 
       // Slow submission that will fail, then a fast one that succeeds.
@@ -3185,18 +3216,18 @@ describe("PreviewPanel: full panel state", () => {
     mockUsePreviewBridge.mockReturnValue(mockBridgeState());
     mockUsePreviewTabs.mockReturnValue({
       tabSet: {
-        threadId: "thread-1",
+        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         activeTabId: "tab-a",
         tabs: [
-          { id: "tab-a", threadId: "thread-1", title: null, url: "https://a.example/", faviconUrl: null, warm: true, active: true },
-          { id: "tab-b", threadId: "thread-1", title: null, url: null, faviconUrl: null, warm: true, active: false },
+          { id: "tab-a", threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: null, url: "https://a.example/", faviconUrl: null, warm: true, active: true },
+          { id: "tab-b", threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: null, url: null, faviconUrl: null, warm: true, active: false },
         ],
       },
       newTab: vi.fn(),
       activateTab: vi.fn(),
       closeTab: vi.fn(),
     });
-    usePreviewTabsStore.getState().setPendingNavError("thread-1", "thread-1", "tab-b", {
+    usePreviewTabsStore.getState().setPendingNavError("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "tab-b", {
       input: "C:\\missing\\page.html",
       error: { kind: "file-not-found", message: "File not found" },
       supersededUrl: null,
@@ -3204,7 +3235,7 @@ describe("PreviewPanel: full panel state", () => {
     const restoreWebviewMethods = installMockWebviewMethods({});
 
     try {
-      render(<PreviewPanel threadId="thread-1" />);
+      render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
       const webviews = await waitFor(() =>
         screen.getAllByTestId("electron-browser-surface-webview"),
       );
@@ -3215,7 +3246,7 @@ describe("PreviewPanel: full panel state", () => {
       await waitFor(() =>
         expect(
           usePreviewTabsStore.getState().pendingNavErrorsByScope[
-            previewTabsScopeKey("thread-1", "thread-1")
+            previewTabsScopeKey("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
           ],
         ).toBeUndefined(),
       );

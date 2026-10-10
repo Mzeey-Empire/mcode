@@ -1,224 +1,31 @@
-import { useState, useCallback, useEffect, useMemo, type ReactNode } from "react";
-import { Shield, ChevronDown, Check, X, Zap, Clock } from "lucide-react";
+import { useState, useEffect, useMemo, type ReactNode } from "react";
+import { Shield, Check, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { getTransport } from "@/transport";
-import { useThreadStore } from "../../stores/threadStore";
-import { TOOL_ICONS } from "./tool-renderers/constants";
-import type {
-  PermissionDecision,
-  PermissionQuestion,
-  PermissionRequestOption,
-  PermissionResponseAnswers,
-} from "@mcode/contracts";
+import { useThreadStore } from "@/stores/threadStore";
+import { useApprovalStore, type StoredApproval } from "@/stores/approvalStore";
+import type { ApprovalOutcome, ApprovalQuestion, ApprovalAnswers, ApprovalSubject } from "@mcode/contracts";
 
-/** Props for {@link PermissionRequestCard}. */
-interface PermissionRequestCardProps {
-  /** Unique identifier for the permission request. */
-  requestId: string;
-  /** The tool name that is requesting permission. */
-  toolName: string;
-  /** Raw tool input arguments; shape varies by tool. */
-  input: unknown;
-  /** Optional human-readable title for the permission request. */
-  title?: string;
-  /** Questions that must be answered before the provider can continue. */
-  questions?: PermissionQuestion[];
-  /** Provider-native selectable options rendered verbatim when present. */
-  options?: PermissionRequestOption[];
-  /** Whether this request has already been resolved. */
-  settled: boolean;
-  /** The user's decision, present when settled. */
-  decision?: PermissionDecision;
-  /** Owning thread; used to reflect provider-side mode changes (e.g. Devin's `switch_bypass`). */
-  threadId?: string | null;
-  /** Verbatim label of the provider-native option the user picked; overrides the generic decision label when settled. */
-  optionLabel?: string;
-}
-
-/** Maps a PermissionDecision to its Badge variant. */
-function badgeVariantFor(
-  decision: PermissionDecision,
-): "default" | "destructive" | "secondary" | "outline" {
-  if (decision === "allow" || decision === "allow-session") return "default";
-  if (decision === "deny") return "destructive";
-  return "outline";
-}
-
-/** Maps a PermissionDecision to its display label. */
-function decisionLabel(decision: PermissionDecision): string {
-  switch (decision) {
-    case "allow":
-      return "Allowed once";
-    case "allow-session":
-      return "Allowed in session";
-    case "deny":
-      return "Denied";
-    case "cancelled":
-      return "Cancelled";
+function decisionLabel(outcome: ApprovalOutcome): string {
+  switch (outcome.status) {
+    case "allowed": return outcome.choiceLabel;
+    case "denied": return outcome.choiceLabel;
+    case "answered": return "Answered";
+    case "cancelled": return outcome.reason === "unanswerable" ? "Stopped · Mcode couldn't answer this request" : "Cancelled";
+    case "auto_denied": return outcome.reason === "too_large" ? "Denied automatically · too large to show" : "Denied automatically · Mcode couldn't read this request";
   }
 }
 
-function SettledPermissionRequest({ icon, label, decision, optionLabel }: { icon: ReactNode; label: string; decision: PermissionDecision; optionLabel?: string }) {
-  return (
-    <div className="flex items-center gap-2 border-l-2 border-border/30 pl-3 py-1 text-xs text-muted/70">
-      {icon}
-      <span className="font-medium">{label}</span>
-      <Badge variant={badgeVariantFor(decision)} size="compact" className="ml-1">
-        {optionLabel ?? decisionLabel(decision)}
-      </Badge>
-    </div>
-  );
-}
-
-function PendingPermissionRequest({
-  icon,
-  label,
-  inputPreview,
-  responding,
-  ready,
-  allowMode,
-  error,
-  onRespond,
-  onAllowMode,
-}: {
-  icon: ReactNode;
-  label: string;
-  inputPreview: string | undefined;
-  responding: boolean;
-  ready: boolean;
-  allowMode: "allow" | "allow-session";
-  error: string | null;
-  onRespond: (decision: PermissionDecision) => void;
-  onAllowMode: (mode: "allow" | "allow-session") => void;
-}) {
-  const controlsDisabled = responding || !ready;
-  return (
-    <div className="border-l-2 border-primary/60 pl-3 py-2 flex flex-col gap-2">
-      <div className="flex items-center gap-2 text-xs font-medium text-primary">
-        {icon}
-        <span>Permission requested: {label}</span>
-      </div>
-      <pre className={cn("text-xs leading-relaxed text-muted/80", "bg-hover/30 rounded px-2 py-1.5", "max-h-[120px] overflow-y-auto scrollbar-on-hover", "whitespace-pre-wrap break-all font-mono")}>
-        {inputPreview}
-      </pre>
-      <div className="flex items-center gap-2">
-        <div className="flex items-stretch rounded-md overflow-hidden">
-          <button
-            disabled={controlsDisabled}
-            onClick={() => onRespond(allowMode)}
-            className={cn("inline-flex h-6 items-center gap-1 pl-2 pr-2 text-xs font-medium", "bg-primary text-primary-ink", "hover:bg-primary/90 transition-colors", "cursor-pointer disabled:pointer-events-none disabled:opacity-50")}
-          >
-            {allowMode === "allow" ? <Check size={11} /> : <Clock size={11} />}
-            {allowMode === "allow" ? "Allow" : "Allow in session"}
-          </button>
-          <div className="w-px bg-primary-ink/20 self-stretch" />
-          <DropdownMenu>
-            <DropdownMenuTrigger disabled={controlsDisabled} aria-label="Change allow mode" className={cn("inline-flex h-6 w-6 items-center justify-center", "bg-primary text-primary-ink", "hover:bg-primary/90 transition-colors", "outline-none focus-visible:ring-2 focus-visible:ring-focus/50", "cursor-pointer disabled:pointer-events-none disabled:opacity-50")}>
-              <ChevronDown size={11} className="opacity-80" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" sideOffset={4} className="min-w-[180px]">
-              <DropdownMenuItem
-                label="Allow once"
-                icon={<Zap />}
-                checked={allowMode === "allow"}
-                onClick={() => onAllowMode("allow")}
-              />
-              <DropdownMenuItem
-                label="Allow in session"
-                icon={<Clock />}
-                checked={allowMode === "allow-session"}
-                onClick={() => onAllowMode("allow-session")}
-              />
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        <button disabled={controlsDisabled} onClick={() => onRespond("deny")} className={cn("inline-flex h-6 items-center gap-1 px-2 text-xs font-medium rounded-md", "text-muted/70 hover:text-destructive", "hover:bg-destructive/10 transition-colors", "cursor-pointer disabled:pointer-events-none disabled:opacity-50")}>
-          <X size={11} />
-          Deny
-        </button>
-      </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
-    </div>
-  );
-}
-
-function OptionButton({
-  option,
-  disabled,
-  onRespond,
-}: {
-  option: PermissionRequestOption;
-  disabled: boolean;
-  onRespond: (decision: PermissionDecision, optionId: string) => void;
-}) {
-  const button = (
-    <button
-      disabled={disabled}
-      onClick={() => onRespond("allow", option.id)}
-      className={cn("inline-flex h-6 items-center gap-1 px-2 text-xs font-medium rounded-md", "bg-primary text-primary-ink", "hover:bg-primary/90 transition-colors", "cursor-pointer disabled:pointer-events-none disabled:opacity-50")}
-    >
-      {option.label}
-    </button>
-  );
-  if (!option.description) return button;
-  return (
-    <Tooltip>
-      <TooltipTrigger render={button} />
-      <TooltipContent>{option.description}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function PendingOptionsRequest({
-  icon,
-  label,
-  inputPreview,
-  options,
-  responding,
-  ready,
-  error,
-  onRespond,
-}: {
-  icon: ReactNode;
-  label: string;
-  inputPreview: string | undefined;
-  options: PermissionRequestOption[];
-  responding: boolean;
-  ready: boolean;
-  error: string | null;
-  onRespond: (decision: PermissionDecision, optionId: string) => void;
-}) {
-  const controlsDisabled = responding || !ready;
-  return (
-    <div className="border-l-2 border-primary/60 pl-3 py-2 flex flex-col gap-2">
-      <div className="flex items-center gap-2 text-xs font-medium text-primary">
-        {icon}
-        <span>Permission requested: {label}</span>
-      </div>
-      <pre className={cn("text-xs leading-relaxed text-muted/80", "bg-hover/30 rounded px-2 py-1.5", "max-h-[120px] overflow-y-auto scrollbar-on-hover", "whitespace-pre-wrap break-all font-mono")}>
-        {inputPreview}
-      </pre>
-      <div className="flex flex-wrap items-center gap-2">
-        {options.map((option) => (
-          <OptionButton
-            key={option.id}
-            option={option}
-            disabled={controlsDisabled}
-            onRespond={onRespond}
-          />
-        ))}
-      </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
-    </div>
-  );
+function subjectPreview(subject: ApprovalSubject): string {
+  switch (subject.kind) {
+    case "command": return subject.command;
+    case "file_edit": return subject.files.map((file) => file.path).join("\n");
+    case "fetch": return subject.url;
+    case "tool": return subject.preview ?? subject.toolName;
+    case "thread_operation": return [subject.operation, subject.targetTitle ?? subject.targetThreadId, subject.message].filter(Boolean).join("\n");
+    case "question": return "Question";
+  }
 }
 
 function PendingQuestionRequest({
@@ -234,16 +41,16 @@ function PendingQuestionRequest({
   requestId: string;
   icon: ReactNode;
   label: string;
-  questions: PermissionQuestion[];
+  questions: ApprovalQuestion[];
   responding: boolean;
   ready: boolean;
   error: string | null;
-  onRespond: (decision: PermissionDecision, answers?: PermissionResponseAnswers) => void;
+  onRespond: (decision: "allow" | "deny", answers?: ApprovalAnswers) => void;
 }) {
   const [selected, setSelected] = useState<string[][]>(() => questions.map(() => []));
   const [custom, setCustom] = useState<string[]>(() => questions.map(() => ""));
   const controlsDisabled = responding || !ready;
-  const answers = useMemo<PermissionResponseAnswers | undefined>(() => {
+  const answers = useMemo<ApprovalAnswers | undefined>(() => {
     const next = questions.map((question, index) => {
       const customAnswer = custom[index] ?? "";
       if (!customAnswer.trim()) return selected[index] ?? [];
@@ -324,78 +131,57 @@ function PendingQuestionRequest({
   );
 }
 
-/**
- * Renders an inline permission request card inside the chat message list.
- *
- * In the pending state it shows the tool name, an input preview, and an Allow
- * dropdown (Allow once / Allow in session) plus a Deny button. Once resolved
- * it collapses to a single line with an outcome badge.
- */
-export function PermissionRequestCard({
-  requestId,
-  toolName,
-  input,
-  title,
-  questions,
-  options,
-  settled,
-  decision,
-  threadId,
-  optionLabel,
-}: PermissionRequestCardProps) {
+
+/** Temporary inline approval card backed by adapter-owned v2 choices. */
+export function PermissionRequestCard({ request }: { request: StoredApproval }) {
   const [responding, setResponding] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Tracks which allow mode is active — dropdown picks the mode, primary button fires it.
-  const [allowMode, setAllowMode] = useState<"allow" | "allow-session">("allow");
-  // Guard against accidental clicks caused by the card appearing under the cursor.
-  // Buttons are disabled for 600ms after the card mounts so layout shifts don't
-  // register as intentional clicks.
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    const t = setTimeout(() => setReady(true), 600);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setReady(true), 600);
+    return () => clearTimeout(timer);
   }, []);
 
-  const respond = useCallback(
-    async (d: PermissionDecision, answers?: PermissionResponseAnswers, optionId?: string) => {
-      setResponding(true);
-      try {
-        setError(null);
-        await getTransport().respondToPermission(requestId, d, answers, optionId);
-        // Devin's `switch_bypass` flips the session to Bypass on the provider
-        // side; persist it so the composer shows the mode Devin is now in.
-        if (optionId === "switch_bypass" && threadId) {
-          void useThreadStore.getState().setThreadSettings(threadId, { devinMode: "bypass" });
-        }
-      } catch {
-        setError("Failed to send response. Please try again.");
-      } finally {
-        setResponding(false);
-      }
-    },
-    [requestId, threadId],
-  );
-
-  const respondWithOption = useCallback(
-    (d: PermissionDecision, optionId: string) => respond(d, undefined, optionId),
-    [respond],
-  );
-
-  const Icon = TOOL_ICONS[toolName] ?? Shield;
-  const label = title ?? toolName;
-  const inputPreview = useMemo(
-    () => (typeof input === "string" ? input : JSON.stringify(input, null, 2)),
-    [input],
-  );
-
-  if (settled && decision) {
-    return <SettledPermissionRequest icon={<Icon size={13} className="shrink-0 text-muted/50" />} label={label} decision={decision} optionLabel={optionLabel} />;
+  const respond = async (choiceId: string, answers?: ApprovalAnswers) => {
+    setResponding(true);
+    setError(null);
+    try {
+      const result = await getTransport().respondToApproval(request.requestId, { choiceId, ...(answers ? { answers } : {}) });
+      if (result.status === "failed") setError("Failed to send response. Please try again.");
+      else if (result.status === "not_pending") useApprovalStore.getState().remove(request.requestId);
+      else if (choiceId === "switch_bypass") void useThreadStore.getState().setThreadSettings(request.threadId, { devinMode: "bypass" });
+    } catch {
+      setError("Failed to send response. Please try again.");
+    } finally {
+      setResponding(false);
+    }
+  };
+  const label = request.reason ?? (request.subject.kind === "tool" ? request.subject.toolName : request.subject.kind.replace(/_/g, " "));
+  const icon = <Shield size={13} className="shrink-0" />;
+  if (request.settled && request.outcome) {
+    return <div className="flex items-center gap-2 border-l-2 border-border/30 pl-3 py-1 text-xs text-muted/70">
+      {icon}<span className="font-medium">{label}</span>
+      <Badge variant="outline" size="compact">{decisionLabel(request.outcome)}</Badge>
+    </div>;
   }
-  if (questions) {
-    return <PendingQuestionRequest requestId={requestId} icon={<Icon size={13} className="shrink-0" />} label={label} questions={questions} responding={responding} ready={ready} error={error} onRespond={respond} />;
+  if (request.subject.kind === "question") {
+    return <PendingQuestionRequest requestId={request.requestId} icon={icon} label={label}
+      questions={request.subject.questions} responding={responding} ready={ready} error={error}
+      onRespond={(decision, answers) => {
+        const choice = request.choices.find((item) => decision === "deny" ? item.intent === "deny" : item.intent === "allow_once");
+        if (choice) void respond(choice.id, answers);
+      }} />;
   }
-  if (options && options.length > 0) {
-    return <PendingOptionsRequest icon={<Icon size={13} className="shrink-0" />} label={label} inputPreview={inputPreview} options={options} responding={responding} ready={ready} error={error} onRespond={respondWithOption} />;
-  }
-  return <PendingPermissionRequest icon={<Icon size={13} className="shrink-0" />} label={label} inputPreview={inputPreview} responding={responding} ready={ready} allowMode={allowMode} error={error} onRespond={respond} onAllowMode={setAllowMode} />;
+  return <div className="border-l-2 border-primary/60 pl-3 py-2 flex flex-col gap-2">
+    <div className="flex items-center gap-2 text-xs font-medium text-primary">{icon}<span>Permission requested: {label}</span></div>
+    <pre className="text-xs leading-relaxed text-muted/80 bg-hover/30 rounded px-2 py-1.5 max-h-[120px] overflow-auto whitespace-pre-wrap break-all font-mono">{subjectPreview(request.subject)}</pre>
+    <div className="flex flex-wrap items-start gap-2">
+      {request.choices.map((choice) => <button key={choice.id} disabled={responding || !ready}
+        onClick={() => void respond(choice.id)}
+        className="inline-flex flex-col items-start gap-1 px-2 py-1 text-xs font-medium rounded-md bg-primary text-primary-ink hover:bg-primary/90 cursor-pointer disabled:pointer-events-none disabled:opacity-50">
+        <span>{choice.label}</span>{choice.description && <span className="font-normal">{choice.description}</span>}
+      </button>)}
+    </div>
+    {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+  </div>;
 }

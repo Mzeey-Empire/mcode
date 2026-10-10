@@ -897,6 +897,14 @@ tree rooted at that shell. If closing it leaves no right-panel tabs, the
 right panel closes. When a shell exits on its own, its Terminal tab keeps the
 exit status and retained output until the user closes it or deletes its scope.
 
+### Action terminal
+
+A terminal that runs a Project Action's resolved script, then opens a
+fresh interactive shell in the same folder. The terminal identity and replay
+survive the command's exit and subsequent runs. Unlike typing the command into
+the shell, the script is not in shell history, and its working-folder and
+environment changes do not carry into the shell that follows.
+
 ### Terminal scope
 The thread or workspace a shell session runs against. When a thread is
 active, shells open in that thread's working directory (worktree or

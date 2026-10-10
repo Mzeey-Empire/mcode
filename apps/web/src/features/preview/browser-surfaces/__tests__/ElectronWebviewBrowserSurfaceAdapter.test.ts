@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createElectronWebviewBrowserSurfaceAdapterFactory,
   ElectronWebviewBrowserSurfaceAdapter,
@@ -9,11 +9,11 @@ import {
   type BrowserSurfaceAdapterEvent,
   type BrowserSurfaceIdentity,
 } from "../BrowserSurfaceHost";
-import type { PreviewSurfaceBridge } from "@/transport/desktop-bridge";
+import type { PreviewSurfaceBridge, PreviewSurfaceBridgeResult, PreviewTabsBridge } from "@/transport/desktop-bridge";
 import { runBrowserSurfaceContract } from "./browserSurfaceContract";
 
 const IDENTITY: BrowserSurfaceIdentity = {
-  workspaceId: "workspace-electron",
+  workspaceId: "11111111-1111-4111-8111-111111111111",
   scope: { kind: "thread", id: "thread-electron" },
   tabId: "tab-electron",
 };
@@ -40,6 +40,179 @@ runBrowserSurfaceContract(
 );
 
 describe("ElectronWebviewBrowserSurfaceAdapter", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("adopts a cold guest after early discovery expires without reporting a load failure", async () => {
+    vi.useFakeTimers();
+    const surfaceBridge = bridge();
+    surfaceBridge.adopt.mockResolvedValue({ ok: false, error: "guest-not-found" });
+    const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 1, { bridge: surfaceBridge });
+    const events: BrowserSurfaceAdapterEvent[] = [];
+    adapter.subscribe((event) => events.push(event));
+    const navigation = adapter.navigate("https://example.test/cold");
+    await vi.advanceTimersByTimeAsync(3_000);
+    const discoveryCalls = surfaceBridge.adopt.mock.calls.length;
+    expect(discoveryCalls).toBeGreaterThan(1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(surfaceBridge.adopt).toHaveBeenCalledTimes(discoveryCalls);
+    expect(events.filter((event) => event.type === "load-failed")).toEqual([]);
+    surfaceBridge.adopt.mockResolvedValue({ ok: true });
+    adapter.element.dispatchEvent(new Event("did-attach"));
+    await navigation;
+    expect(surfaceBridge.adopt).toHaveBeenCalledTimes(discoveryCalls + 1);
+    expect(surfaceBridge.navigate.mock.calls).toEqual([[{
+      surface: { identity: IDENTITY, generation: 1 },
+      navigation: { kind: "address", address: "https://example.test/cold" },
+    }]]);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(events.filter((event) => event.type === "load-failed")).toEqual([]);
+    adapter.dispose();
+  });
+
+  it("settles current and future navigation when preparation rejects a stale generation", async () => {
+    const surfaceBridge = bridge();
+    let finish: (result: PreviewSurfaceBridgeResult) => void = () => { throw new Error("prepare not called"); };
+    surfaceBridge.prepare.mockImplementation(() => new Promise<PreviewSurfaceBridgeResult>((resolve) => { finish = resolve; }));
+    const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 1, { bridge: surfaceBridge });
+    const events: BrowserSurfaceAdapterEvent[] = [];
+    adapter.subscribe((event) => events.push(event));
+    adapter.create();
+    const navigation = adapter.navigate("https://example.test/stale");
+    finish({ ok: false, error: "stale-generation", nextGeneration: 12 });
+    await navigation;
+    await adapter.navigate("https://example.test/also-stale");
+    expect(events.filter((event) => event.type === "load-failed")).toHaveLength(2);
+    expect(events.filter((event) => event.type === "surface-lost")).toEqual([{
+      type: "surface-lost", identity: IDENTITY, generation: 1, nextGeneration: 12,
+    }]);
+    expect(surfaceBridge.adopt).not.toHaveBeenCalled();
+    expect(surfaceBridge.navigate).not.toHaveBeenCalled();
+    adapter.dispose();
+  });
+
+  it("adopts when did-attach extends a discovery loop that is still running", async () => {
+    vi.useFakeTimers();
+    const surfaceBridge = bridge();
+    surfaceBridge.adopt.mockResolvedValue({ ok: false, error: "guest-not-found" });
+    const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 1, { bridge: surfaceBridge });
+    const events: BrowserSurfaceAdapterEvent[] = [];
+    adapter.subscribe((event) => events.push(event));
+    const navigation = adapter.navigate("https://example.test/slow-discovery");
+    await vi.advanceTimersByTimeAsync(1_500);
+    const earlyCalls = surfaceBridge.adopt.mock.calls.length;
+    adapter.element.dispatchEvent(new Event("did-attach"));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(surfaceBridge.adopt.mock.calls.length).toBeGreaterThan(earlyCalls);
+    expect(events.filter((event) => event.type === "load-failed")).toEqual([]);
+    surfaceBridge.adopt.mockResolvedValue({ ok: true });
+    await vi.advanceTimersByTimeAsync(100);
+    await navigation;
+    expect(surfaceBridge.navigate.mock.calls).toEqual([[{
+      surface: { identity: IDENTITY, generation: 1 },
+      navigation: { kind: "address", address: "https://example.test/slow-discovery" },
+    }]]);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(events.filter((event) => event.type === "load-failed")).toEqual([]);
+    adapter.dispose();
+  });
+
+  it("waits for main to register the workspace tab set before preparing", async () => {
+    const surfaceBridge = bridge();
+    let finish: (result: Awaited<ReturnType<PreviewTabsBridge["list"]>>) => void = () => { throw new Error("list not called"); };
+    const list = vi.fn<PreviewTabsBridge["list"]>(() => new Promise((resolve) => { finish = resolve; }));
+    const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 1, { bridge: surfaceBridge, tabsBridge: { list } });
+    expect(list.mock.calls).toEqual([[IDENTITY.scope.id, IDENTITY.workspaceId]]);
+    expect(surfaceBridge.prepare).not.toHaveBeenCalled();
+    expect(adapter.element.isConnected).toBe(false);
+    finish({ ok: true, data: { threadId: IDENTITY.scope.id, activeTabId: IDENTITY.tabId, tabs: [] } });
+    await vi.waitFor(() => expect(adapter.element.isConnected).toBe(true));
+    expect(surfaceBridge.prepare.mock.calls).toEqual([[{
+      surface: { identity: IDENTITY, generation: 1 },
+      adoptionToken: adapter.element.getAttribute("src")!.slice("about:blank#".length),
+    }]]);
+    adapter.dispose();
+  });
+
+  it.each(["surface-owner-mismatch", "stale-generation"])("keeps the host failed when navigation follows %s preparation failure", async (error) => {
+    const surfaceBridge = bridge();
+    surfaceBridge.prepare.mockResolvedValue({ ok: false, error });
+    const host = new BrowserSurfaceHost({
+      adapterFactory: createElectronWebviewBrowserSurfaceAdapterFactory({ bridge: surfaceBridge }),
+      normalizeAddress: normalizeElectronWebviewSurfaceAddress,
+    });
+    host.ensure(IDENTITY);
+    await vi.waitFor(() => expect(host.getSnapshot(IDENTITY)?.phase).toBe("error"));
+    host.navigate(IDENTITY, "https://example.test/unavailable");
+    expect(host.getSnapshot(IDENTITY)?.phase).toBe("error");
+    expect(surfaceBridge.adopt).not.toHaveBeenCalled();
+    expect(surfaceBridge.navigate).not.toHaveBeenCalled();
+    host.disposeHost();
+  });
+
+  it("reports tab registration failure without preparing or attaching", async () => {
+    const surfaceBridge = bridge();
+    const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 1, {
+      bridge: surfaceBridge,
+      tabsBridge: { list: vi.fn().mockResolvedValue({ ok: false, error: "no-window" }) },
+    });
+    const events: BrowserSurfaceAdapterEvent[] = [];
+    adapter.subscribe((event) => events.push(event));
+    await adapter.navigate("https://example.test/unregistered");
+    expect(events.filter((event) => event.type === "load-failed")).toEqual([{
+      type: "load-failed", mainFrame: true, error: "Preview is unavailable", identity: IDENTITY, generation: 1,
+    }]);
+    expect(surfaceBridge.prepare).not.toHaveBeenCalled();
+    expect(adapter.element.isConnected).toBe(false);
+    adapter.dispose();
+  });
+
+  it("appends only after prepare succeeds and uses the workspace partition", async () => {
+    const surfaceBridge = bridge();
+    let finish: (result: { ok: true }) => void = () => { throw new Error("prepare not called"); };
+    surfaceBridge.prepare.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 1, { root: document.body, bridge: surfaceBridge });
+    expect(adapter.element.isConnected).toBe(false);
+    expect(adapter.element.getAttribute("partition")).toBe("persist:mcode-browser-11111111-1111-4111-8111-111111111111");
+    finish({ ok: true });
+    await vi.waitFor(() => expect(adapter.element.isConnected).toBe(true));
+    adapter.dispose();
+  });
+
+  it("reports a rejected preparation without appending the webview", async () => {
+    const surfaceBridge = bridge();
+    surfaceBridge.prepare.mockResolvedValue({ ok: false, error: "invalid-surface" });
+    const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 1, { root: document.body, bridge: surfaceBridge });
+    const events: BrowserSurfaceAdapterEvent[] = [];
+    adapter.subscribe((event) => events.push(event));
+    await vi.waitFor(() => expect(events).toContainEqual({
+      type: "load-failed", mainFrame: true, error: "Preview is unavailable", identity: IDENTITY, generation: 1,
+    }));
+    expect(adapter.element.isConnected).toBe(false);
+    expect(surfaceBridge.adopt).not.toHaveBeenCalled();
+    adapter.dispose();
+  });
+
+  it("reports an attachment that never emits did-attach", async () => {
+    vi.useFakeTimers();
+    const surfaceBridge = bridge();
+    surfaceBridge.adopt.mockResolvedValue({ ok: false, error: "guest-not-found" });
+    const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 1, { root: document.body, bridge: surfaceBridge });
+    const events: BrowserSurfaceAdapterEvent[] = [];
+    adapter.subscribe((event) => events.push(event));
+    const navigation = adapter.navigate("https://example.test/refused");
+    try {
+      await vi.advanceTimersByTimeAsync(30_000);
+      await navigation;
+      expect(events.filter((event) => event.type === "load-failed")).toEqual([{
+        type: "load-failed", mainFrame: true, error: "Preview is unavailable", identity: IDENTITY, generation: 1,
+      }]);
+      expect(surfaceBridge.navigate).not.toHaveBeenCalled();
+    } finally {
+      adapter.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("does not retain its private adoption URL when a cold tab is restored", () => {
     const adapters: ElectronWebviewBrowserSurfaceAdapter[] = [];
     const host = new BrowserSurfaceHost({

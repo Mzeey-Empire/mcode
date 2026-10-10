@@ -69,7 +69,7 @@ function createHooks() {
   return {
     disposePreviewForWindow: vi.fn(),
     disposeBrowserAutomationForWindow: vi.fn(),
-    hardenPreviewWebviewAttachment: vi.fn(),
+    hardenPreviewWebviewAttachment: vi.fn(() => true),
     resolvePreviewGuestPreloadPath: vi.fn(() => "C:/mcode/dist/preload/preview-guest-preload.cjs"),
     setupSpellcheck: vi.fn(),
     attachServerWindow: vi.fn(),
@@ -223,8 +223,18 @@ describe("Desktop Window creation", () => {
       preferences,
       params,
       "C:/mcode/dist/preload/preview-guest-preload.cjs",
+      17,
     );
     expect(hooks.disposePreviewForWindow).toHaveBeenCalledWith(createWindowTest.window);
     expect(hooks.disposeBrowserAutomationForWindow).toHaveBeenCalledWith(17);
+  });
+
+  it("prevents attachment when the prepared partition check refuses it", () => {
+    const hooks = createHooks();
+    hooks.hardenPreviewWebviewAttachment.mockReturnValue(false);
+    createWindow({ platform: "linux", isDesktopDev: () => false, hooks });
+    const event = { preventDefault: vi.fn() };
+    createWindowTest.emit("will-attach-webview", event, {}, { partition: "persist:foreign" });
+    expect(event.preventDefault).toHaveBeenCalledTimes(1);
   });
 });

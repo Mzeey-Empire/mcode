@@ -1,8 +1,7 @@
-import { AgentEventType, type AgentEvent, type IProviderRegistry, type PermissionRequest } from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts";
 import type { TurnPullRequestCompletionEffect } from "../../pull-requests/index.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { publishParentProviderEvent } from "../events/provider-event-publication.js";
-import { publishAgentPermissionEvents } from "../permissions/permission-publication.js";
 import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 import { logger } from "@mcode/shared";
 
@@ -19,10 +18,6 @@ export interface AgentEventPublicationDependencies {
   runtime: AgentEventPublicationRuntime;
   threads: Pick<ThreadRepo, "updateStatus">;
   pullRequests: Pick<TurnPullRequestCompletionEffect, "schedule">;
-  providers: IProviderRegistry;
-  stopSession: (threadId: string) => Promise<unknown>;
-  publishPermissionRequest(request: PermissionRequest): void;
-  publishPermissionResolved(payload: { requestId: string; decision: "allow" | "allow-session" | "deny" | "cancelled"; optionLabel?: string }): void;
   publishThreadStatus(payload: { threadId: string; status: "completed" | "errored" | "interrupted" }): void;
 }
 
@@ -30,16 +25,6 @@ export interface AgentEventPublicationDependencies {
 export class AgentEventPublicationService {
   private readonly pendingStatuses = new Set<Promise<unknown>>();
   constructor(private readonly dependencies: AgentEventPublicationDependencies) {}
-
-  /** Register the provider-neutral permission publication bridge. */
-  start(): void {
-    publishAgentPermissionEvents({
-      providerRegistry: this.dependencies.providers,
-      stopSession: this.dependencies.stopSession,
-      publishPermissionRequest: this.dependencies.publishPermissionRequest,
-      publishPermissionResolved: this.dependencies.publishPermissionResolved,
-    });
-  }
 
   /** Publish accepted progress while observing compatibility status saves independently. */
   publish(event: AgentEvent): void {

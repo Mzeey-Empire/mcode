@@ -157,14 +157,13 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
    * @param id - The request ID from the server's original message.
    * @param result - The result payload to return.
    */
-  sendResponse(id: number, result: unknown): void {
+  async sendResponse(id: number, result: unknown): Promise<void> {
     if (this.disposed) {
-      logger.warn("CodexRpcClient: sendResponse called on disposed client", { id });
-      return;
+      throw new Error("Codex connection is closed");
     }
     const message = JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n";
-    this.stdin.write(message, (err) => {
-      if (err) logger.warn("CodexRpcClient: response write failed", { id, error: err.message });
+    await new Promise<void>((resolve, reject) => {
+      this.stdin.write(message, (error) => error ? reject(error) : resolve());
     });
   }
 

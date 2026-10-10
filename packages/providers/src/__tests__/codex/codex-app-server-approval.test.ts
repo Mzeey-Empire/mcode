@@ -10,6 +10,7 @@ vi.mock("@mcode/shared", () => ({
  * helper exported from codex-app-server.ts. Spawning the real subprocess
  * is overkill for this unit; the integration is covered by manual UI testing.
  */
+import type { CodexApprovalRequest } from "../../private/codex/codex-app-server.js";
 import { routeCodexServerRequest } from "../../private/codex/codex-app-server.js";
 
 describe("routeCodexServerRequest", () => {
@@ -73,6 +74,25 @@ describe("routeCodexServerRequest", () => {
       sendResponse,
     });
     expect(sendResponse).toHaveBeenCalledWith(5, { decision: "denied" });
+  });
+
+  it("waits for the response write before acknowledging delivery", async () => {
+    const write = Promise.withResolvers<void>();
+    const acknowledge = vi.fn();
+    const task = routeCodexServerRequest({
+      msg: { id: 42, method: "item/commandExecution/requestApproval", params: { command: "bun run lint" } },
+      approvalPolicy: "on-request",
+      approvalHandler: async (request: CodexApprovalRequest) => {
+        request.responseWritten = acknowledge;
+        return { decision: "decline" };
+      },
+      sendResponse: () => write.promise,
+    });
+    await Promise.resolve();
+    expect(acknowledge.mock.calls).toEqual([]);
+    write.resolve();
+    await task;
+    expect(acknowledge.mock.calls).toEqual([[true]]);
   });
 
   it("invokes the handler in supervised mode and relays its result", async () => {

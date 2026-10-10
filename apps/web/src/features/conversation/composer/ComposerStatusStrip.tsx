@@ -1,73 +1,18 @@
-import { ModeSelector, type ComposerMode, type ModeOption } from "@/components/chat/ModeSelector";
 import { TerminalStatusIndicator } from "@/components/chat/TerminalStatusIndicator";
+import { basename } from "@/lib/path";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/transport";
 import { ComposerTargetSelection } from "./execution/ComposerTargetSelection";
+import type { ComposerMode } from "./execution/composer-mode";
+import { WorkspaceTargetMenu } from "./execution/WorkspaceTargetMenu";
 
 interface ComposerStatusStripProps {
   readonly visible: boolean;
   readonly isGitRepo: boolean;
-  readonly isNewThread: boolean;
-  readonly branchFromMessageId?: string;
-  readonly composerMode: ComposerMode;
   readonly branchExecMode: ComposerMode;
-  readonly modeOptions: readonly ModeOption[];
-  readonly workspaceId?: string;
+  readonly workspacePath: string | undefined;
   readonly activeThread?: Thread;
-  readonly onComposerModeChange: (mode: ComposerMode) => void;
   readonly onBranchModeChange: (mode: ComposerMode) => void;
-}
-
-function ComposerStatusMode({
-  isGitRepo,
-  isNewThread,
-  branchFromMessageId,
-  composerMode,
-  branchExecMode,
-  modeOptions,
-  onComposerModeChange,
-  onBranchModeChange,
-}: ComposerStatusStripProps) {
-  if (!isGitRepo && isNewThread) {
-    return (
-      <span className="flex h-6 items-center rounded-md px-1.5 py-0.5 text-xs text-muted/40">
-        Not a git repo
-      </span>
-    );
-  }
-
-  return (
-    <ModeSelector
-      mode={branchFromMessageId ? branchExecMode : composerMode}
-      onModeChange={branchFromMessageId ? onBranchModeChange : onComposerModeChange}
-      locked={!isNewThread && !branchFromMessageId}
-      options={[...modeOptions]}
-    />
-  );
-}
-
-function ComposerStatusTarget({
-  isGitRepo,
-  isNewThread,
-  branchFromMessageId,
-  composerMode,
-  branchExecMode,
-  workspaceId,
-  activeThread,
-}: ComposerStatusStripProps) {
-  if (!isGitRepo) return null;
-
-  if (isNewThread) {
-    return (
-      <ComposerTargetSelection scope="new-thread" mode={composerMode} workspaceId={workspaceId} />
-    );
-  }
-
-  if (!branchFromMessageId) return null;
-
-  return (
-    <ComposerTargetSelection scope="branch" mode={branchExecMode} sourceThread={activeThread} />
-  );
 }
 
 function ComposerStatusStripContent(props: ComposerStatusStripProps) {
@@ -76,19 +21,26 @@ function ComposerStatusStripContent(props: ComposerStatusStripProps) {
   return (
     <div className="min-h-0">
       <div className="flex items-center justify-between px-1 pt-1.5">
-        <ComposerStatusMode {...props} />
+        <WorkspaceTargetMenu
+          mode={props.branchExecMode}
+          isGitRepo={props.isGitRepo}
+          folder={props.workspacePath ? basename(props.workspacePath) : ""}
+          onModeChange={props.onBranchModeChange}
+        />
         <div className="flex items-center gap-3">
           <TerminalStatusIndicator />
         </div>
         <div className="ml-auto flex items-center gap-1">
-          <ComposerStatusTarget {...props} />
+          {props.isGitRepo ? (
+            <ComposerTargetSelection scope="branch" mode={props.branchExecMode} sourceThread={props.activeThread} />
+          ) : null}
         </div>
       </div>
     </div>
   );
 }
 
-/** Renders the composer status bar below the message input surface. */
+/** The fork strip below the input: where the forked thread runs and from which branch. */
 export function ComposerStatusStrip(props: ComposerStatusStripProps) {
   return (
     <div

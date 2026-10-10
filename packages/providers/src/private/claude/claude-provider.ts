@@ -5,6 +5,10 @@
  */
 
 import * as NodeEvents from "node:events";
+import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
+import { claudeApprovalBody } from "./claude-approval.js";
+
+type ClaudeApprovalDecision = "allow" | "allow-session" | "deny" | "cancelled" | "auto-deny";
 import * as NodeFSPromises from "node:fs/promises";
 import { z } from "zod";
 import * as NodePath from "node:path";
@@ -42,8 +46,10 @@ import type {
   ProviderBillingMode,
   ProviderUsageInfo,
   QuotaCategory,
-  PermissionDecision,
-  PermissionRequest,
+  ApprovalResponse,
+  ApprovalRespondResult,
+  ApprovalRequestEnvelope,
+  ApprovalRequestBody,
   CompletionOptions,
 } from "@mcode/contracts";
 import { buildReasoningOptions } from "./build-reasoning-options.js";
@@ -131,7 +137,7 @@ type ClaudeNativeGoalSupport = "unknown" | "supported" | "unsupported";
  * Per-session state owned by the {@link SessionRuntime}. Holds the live SDK
  * `query`, its prompt-queue handles, and the per-turn bookkeeping the stream
  * loop and eviction guard read. The runtime owns the pool and idle eviction; `lastUsedAt` is retained here because the stream loop and
- * `resolvePermission` stamp it so SDK activity and user attention count.
+ * `resolveApproval` stamp it so SDK activity and user attention count.
  */
 interface ClaudeSessionState {
   /** Session id this state belongs to; lets adapter methods reference provider maps. */
@@ -564,7 +570,8 @@ export class ClaudeProvider
       toolName: string;
       input: unknown;
       title?: string;
-      resolve: (decision: PermissionDecision) => void;
+      body: ApprovalRequestBody;
+      resolve: (decision: ClaudeApprovalDecision) => void;
     }
   >();
   private lastSessionCostUsd?: number;
@@ -1145,22 +1152,18 @@ export class ClaudeProvider
     toolName: string,
     input: Record<string, unknown>,
     options: Parameters<CanUseTool>[2],
-  ): Promise<PermissionDecision> {
+  ): Promise<ClaudeApprovalDecision> {
     return new Promise((resolve) => {
+      const body = claudeApprovalBody(toolName, input, options);
       this.pendingPermissions.set(requestId, {
         threadId,
         toolName,
         input,
         title: options?.title,
+        body,
         resolve,
       });
-      this.emit("permission_request", {
-        requestId,
-        threadId,
-        toolName,
-        input,
-        title: options?.title,
-      } satisfies PermissionRequest);
+      this.emit("approval_request", { requestId, threadId, body } satisfies ApprovalRequestEnvelope);
       options?.signal?.addEventListener(
         "abort",
         () => this.cancelClaudePermission(requestId, resolve),
@@ -1171,18 +1174,20 @@ export class ClaudeProvider
 
   private cancelClaudePermission(
     requestId: string,
-    resolve: (decision: PermissionDecision) => void,
+    resolve: (decision: ClaudeApprovalDecision) => void,
   ): void {
+    const pending = this.pendingPermissions.get(requestId);
     if (!this.pendingPermissions.delete(requestId)) return;
     resolve("cancelled");
-    this.emit("permission_resolved", {
+    this.emit("approval_resolved", {
       requestId,
-      decision: "cancelled" as const,
+      threadId: pending?.threadId,
+      outcome: { status: "cancelled", reason: "session_stopped" },
     });
   }
 
   private toClaudePermissionResult(
-    decision: PermissionDecision,
+    decision: ClaudeApprovalDecision,
     input: Record<string, unknown>,
     options: Parameters<CanUseTool>[2],
     toolName: string,
@@ -1199,6 +1204,8 @@ export class ClaudeProvider
         };
       case "deny":
         return { behavior: "deny" as const, message: "User denied" };
+      case "auto-deny":
+        return { behavior: "deny", message: "Mcode could not display this permission request" };
       case "cancelled":
         return {
           behavior: "deny" as const,
@@ -2800,7 +2807,7 @@ export class ClaudeProvider
       if (entry.threadId === tid) {
         this.pendingPermissions.delete(requestId);
         entry.resolve("cancelled");
-        this.emit("permission_resolved", { requestId, decision: "cancelled" });
+        this.emit("approval_resolved", { requestId, threadId: entry.threadId, outcome: { status: "cancelled", reason: "session_stopped" } });
       }
     }
     this.goalsBySession.delete(sessionId);
@@ -2919,49 +2926,29 @@ export class ClaudeProvider
     return listClaudeModels();
   }
 
-  /** Resolves a pending permission request by ID. Deletes the entry before calling resolve to prevent re-entrant calls. Returns false if the requestId is unknown. */
-  resolvePermission(requestId: string, decision: PermissionDecision): boolean {
+  /** Settle the live SDK callback before reporting a delivered answer. */
+  async resolveApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     const entry = this.pendingPermissions.get(requestId);
-    if (!entry) {
-      logger.warn(
-        "resolvePermission: requestId not found in pendingPermissions",
-        { requestId, decision, mapSize: this.pendingPermissions.size },
-      );
-      return false;
-    }
-    logger.debug("resolvePermission", {
-      requestId,
-      decision,
-      toolName: entry.toolName,
-    });
+    if (!entry) return { status: "not_pending" };
+    const choice = approvalChoice(entry.body, response);
+    if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
     this.pendingPermissions.delete(requestId);
-
-    // Reset the session's idle timer so the 10-minute eviction clock starts
-    // from the moment the user responds, not from when the request was sent.
-    const sessionId = `mcode-${entry.threadId}`;
-    const session = this.runtime.get(sessionId);
+    const session = this.runtime.get(`mcode-${entry.threadId}`);
     if (session) session.lastUsedAt = Date.now();
-
+    const decision = "autoDeny" in response ? "auto-deny" : choice?.intent === "allow_once" ? "allow"
+      : choice?.id === "allow-session" ? "allow-session" : "deny";
     entry.resolve(decision);
-    this.emit("permission_resolved", { requestId, decision });
-    return true;
+    await Promise.resolve();
+    this.emit("approval_resolved", { requestId, threadId: entry.threadId,
+      outcome: approvalOutcome(choice, response) });
+    return { status: "resolved" };
   }
 
-  /** Returns all pending permission requests for the given thread, including tool input and optional title for display. Used by the frontend to re-hydrate cards after a WebSocket reconnect. */
-  listPendingPermissions(threadId: string): PermissionRequest[] {
-    const results: PermissionRequest[] = [];
-    for (const [requestId, entry] of this.pendingPermissions) {
-      if (entry.threadId === threadId) {
-        results.push({
-          requestId,
-          threadId: entry.threadId,
-          toolName: entry.toolName,
-          input: entry.input,
-          title: entry.title,
-        });
-      }
-    }
-    return results;
+  /** Return stable adapter routing and the original approval body. */
+  listPendingApprovals(threadId?: string): ApprovalRequestEnvelope[] {
+    return [...this.pendingPermissions.entries()].flatMap(([requestId, entry]) =>
+      threadId === undefined || entry.threadId === threadId
+        ? [{ requestId, threadId: entry.threadId, body: entry.body }] : []);
   }
 
   /**
@@ -2996,9 +2983,10 @@ export class ClaudeProvider
     for (const [requestId, entry] of this.pendingPermissions) {
       this.pendingPermissions.delete(requestId);
       entry.resolve("cancelled");
-      this.emit("permission_resolved", {
+      this.emit("approval_resolved", {
         requestId,
-        decision: "cancelled" as const,
+        threadId: entry.threadId,
+        outcome: { status: "cancelled", reason: "session_stopped" },
       });
     }
     const results = await Promise.allSettled([this.runtime.shutdown()]);

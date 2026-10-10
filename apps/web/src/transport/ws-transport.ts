@@ -77,7 +77,7 @@ import {
 } from "@mcode/contracts";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
-import type { PermissionRequest } from "@mcode/contracts";
+import type { ApprovalRequest } from "@mcode/contracts";
 import { setAttachmentTransportWsUrl } from "@/lib/attachment-url";
 import { LegacyTerminalClient } from "@/features/terminal/adapters/legacy/legacy-terminal-client";
 import type {
@@ -394,6 +394,7 @@ export function createWsTransport(
   const freshTurnDiffThreads = new Set<string>();
   let closed = false;
   let reconnectDelay = MIN_RECONNECT_MS;
+  let hasConnected = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let heartbeatGeneration = 0;
@@ -557,6 +558,8 @@ export function createWsTransport(
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
+      const reconnecting = hasConnected;
+      hasConnected = true;
       reconnectDelay = MIN_RECONNECT_MS;
       consecutiveAuthFailures = 0;
       setAttachmentTransportWsUrl(url);
@@ -592,6 +595,7 @@ export function createWsTransport(
       // Deferred import avoids a circular dependency at module evaluation time.
       const nowForThreads = Date.now();
       import("@/features/projects/state/workspaceStore").then(({ useWorkspaceStore }) => {
+        if (reconnecting) void useWorkspaceStore.getState().loadWorkspaces();
         const { activeWorkspaceId, loadThreads, refreshActiveConversation, recoverPreparingThreads } = useWorkspaceStore.getState();
         void recoverPreparingThreads();
         if (!activeWorkspaceId) return;
@@ -1202,15 +1206,10 @@ export function createWsTransport(
     retrySave: async (threadId) => WS_METHODS()["agent.retrySave"].result.parse(await rpc<unknown>("agent.retrySave", { threadId })),
     continueWithoutSaving: (executionId) =>
       rpc<void>("agent.continueWithoutSaving", { executionId }),
-    respondToPermission: (requestId, decision, answers, optionId) =>
-      rpc<void>("permission.respond", {
-        requestId,
-        decision,
-        ...(answers === undefined ? {} : { answers }),
-        ...(optionId === undefined ? {} : { optionId }),
-      }),
-    listPendingPermissions: (threadId) =>
-      rpc<PermissionRequest[]>("permission.listPending", { threadId }),
+    respondToApproval: async (requestId, response) =>
+      WS_METHODS()["approval.respond"].result.parse(await rpc<unknown>("approval.respond", { requestId, ...response })),
+    listPendingApprovals: (threadId) =>
+      rpc<ApprovalRequest[]>("approval.listPending", { threadId }),
     answerPlanQuestions: (threadId, answers, permissionMode?, reasoningLevel?, contextWindow?, thinking?) =>
       rpc<void>("agent.answerQuestions", { threadId, answers, permissionMode, reasoningLevel, contextWindow, thinking }),
     dismissPlanQuestions: (threadId) =>

@@ -28,7 +28,7 @@ describe("ThreadTeardownService", () => {
     await service.teardownThread("thread-1");
 
     expect(agentService.teardownSession).toHaveBeenCalledWith("thread-1");
-    expect(terminalService.killByThread).toHaveBeenCalledWith("thread-1");
+    expect(terminalService.killByThread).toHaveBeenCalledWith("thread-1", true);
   });
 
   it("leaves resource owners untouched when the thread row is gone", async () => {

@@ -58,6 +58,44 @@ afterEach(async () => { await Promise.allSettled(providers.splice(0).map((provid
 async function completed(events: () => ProviderRuntimeEvent[], count: number) { await vi.waitFor(() => expect(events().filter(({ event }) => event.type === AgentEventType.TurnComplete)).toHaveLength(count)); }
 
 describe("Claude public factory core and capabilities", () => {
+  it("exposes native command scope and acknowledges the SDK deny callback", async () => {
+    const transport = installTransport(() => []);
+    const { provider } = fixture();
+    await provider.sendTurn(request());
+    await vi.waitFor(() => expect(transport.optionsSeen.length).toBe(1));
+    const canUseTool = transport.optionsSeen[0]?.canUseTool;
+    assert(canUseTool);
+    const native = canUseTool("Bash", { command: "bun run lint" }, { signal: new AbortController().signal, toolUseID: "tool-approval" });
+    const pending = provider.listPendingApprovals?.("thread-1") ?? [];
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.body).toMatchObject({
+      toolCallId: "tool-approval", subject: { kind: "command", command: "bun run lint" },
+      noteDelivery: "native", noteChoiceId: "deny", origin: { kind: "agent" },
+    });
+    expect(await provider.resolveApproval?.(pending[0]!.requestId, { choiceId: "deny" })).toEqual({ status: "resolved" });
+    expect(await native).toMatchObject({ behavior: "deny" });
+    expect(provider.listPendingApprovals?.()).toEqual([]);
+  });
+
+  it("emits whole oversized commands and reasons for server validation", async () => {
+    const transport = installTransport(() => []);
+    const { provider } = fixture();
+    await provider.sendTurn(request());
+    await vi.waitFor(() => expect(transport.optionsSeen.length).toBe(1));
+    const canUseTool = transport.optionsSeen[0]?.canUseTool;
+    assert(canUseTool);
+    const emitted = vi.fn();
+    provider.on("approval_request", emitted);
+    const tooLarge = canUseTool("Bash", { command: "x".repeat(70_000) }, { signal: new AbortController().signal, toolUseID: "oversized", decisionReason: "r".repeat(1_001) });
+    const [oversized] = provider.listPendingApprovals?.() ?? [];
+    assert(oversized);
+    expect(oversized.body).toMatchObject({ subject: { kind: "command", command: "x".repeat(70_000) }, reason: "r".repeat(1_001) });
+    expect(emitted.mock.calls).toEqual([[oversized]]);
+    expect(await provider.resolveApproval?.(oversized.requestId, { autoDeny: "too_large" })).toEqual({ status: "resolved" });
+    expect(await tooLarge).toMatchObject({ behavior: "deny" });
+    expect(provider.listPendingApprovals?.()).toEqual([]);
+  });
+
   it.each([
     ["captured", "## Native plan\nShip it.",
       "The client captured your proposed plan. Reply with a one or two sentence summary of it, then stop and wait for the user to review it."],
@@ -185,7 +223,7 @@ describe("Claude public factory core and capabilities", () => {
     const granted = await canUseTool?.("Read", { path: "fixture.md" }, { signal: new AbortController().signal, toolUseID: "READ_1" });
     expect(granted?.behavior).toBe("allow");
     input.host.grants.consume = () => false;
-    const permission = new Promise<string>((resolve) => { provider.on("permission_request", (req) => { expect(provider.resolvePermission?.(req.requestId, "allow")).toBe(true); resolve(req.requestId); }); });
+    const permission = new Promise<string>((resolve) => { provider.on("approval_request", (req) => { void provider.resolveApproval?.(req.requestId, { choiceId: "allow" }).then((result) => { expect(result).toEqual({ status: "resolved" }); resolve(req.requestId); }); }); });
     const pending = canUseTool?.("Read", { path: "other.md" }, { signal: new AbortController().signal, toolUseID: "READ_2" });
     await permission;
     expect((await pending)?.behavior).toBe("allow");

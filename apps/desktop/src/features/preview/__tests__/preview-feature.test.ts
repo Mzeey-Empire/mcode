@@ -1,4 +1,5 @@
 import * as NodeFSPromises from "node:fs/promises";
+import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
@@ -32,7 +33,7 @@ const previewTest = vi.hoisted(() => {
     session: { fromPartition: vi.fn(() => previewSession) },
     BrowserWindow: { fromWebContents: browserWindowFromWebContents },
     webContents: electronWebContents,
-    app: { getPath: vi.fn(() => "C:/mcode-test") },
+    app: { getPath: vi.fn(() => profileTestRoot) },
     shell: { openExternal: vi.fn() },
     nativeImage: { createFromBuffer: vi.fn() },
     browserWindowFromWebContents,
@@ -51,6 +52,7 @@ vi.mock("electron", () => ({
 }));
 
 import {
+  browserProfiles,
   disposePreviewForWindow,
   hardenPreviewWebviewAttachment,
   registerPreviewBrowserHandlers,
@@ -59,18 +61,24 @@ import {
 } from "../index.js";
 import { getSession, sessions } from "../state/window-session.js";
 
+const profileTestRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-feature-profiles-"));
+
 describe("Preview feature public interface", () => {
   beforeAll(() => {
     vi.useFakeTimers();
     registerPreviewBrowserHandlers("linux");
+    browserProfiles.sessionForWorkspace("11111111-1111-4111-8111-111111111111");
   });
 
   afterAll(() => {
     vi.useRealTimers();
+    NodeFS.rmSync(profileTestRoot, { recursive: true, force: true });
   });
 
   it("registers every Preview IPC capability, including performance counters", () => {
     const expectedChannels = [
+      "preview:profiles.remove",
+      "preview:profiles.reconcile",
       "preview:sync",
       "preview:resolve-navigation",
       "preview:navigate",
@@ -134,7 +142,7 @@ describe("Preview feature public interface", () => {
       { urls: ["http://*/*", "https://*/*"] },
       expect.any(Function),
     );
-    expect(previewTest.session.fromPartition).toHaveBeenCalledWith("persist:mcode-preview");
+    expect(previewTest.session.fromPartition).toHaveBeenCalledWith("persist:mcode-browser-11111111-1111-4111-8111-111111111111");
   });
 
   it("rejects malformed bounds and validates invalid URLs before requiring an active guest", async () => {
@@ -155,7 +163,7 @@ describe("Preview feature public interface", () => {
       { x: 0, y: 0, width: 100, height: Number.POSITIVE_INFINITY },
       { x: 0, y: 0, width: "100", height: 100 },
     ]) {
-      await sync({ sender }, { visible: false, bounds, workspaceId: "workspace-1" });
+      await sync({ sender }, { visible: false, bounds, workspaceId: "11111111-1111-4111-8111-111111111111" });
       expect(session.lastBounds).toBeNull();
     }
 
@@ -187,11 +195,11 @@ describe("Preview feature public interface", () => {
     const openTab = previewTest.handlers.get("preview:tabs.open")!;
     const opened = (await openTab(
       { sender },
-      { threadId: "thread-1", workspaceId: "workspace-1" },
+      { threadId: "thread-1", workspaceId: "11111111-1111-4111-8111-111111111111" },
     )) as { ok: true; data: { tabId: string } };
     const surface = {
       identity: {
-        workspaceId: "workspace-1",
+        workspaceId: "11111111-1111-4111-8111-111111111111",
         scope: { kind: "thread" as const, id: "thread-1" },
         tabId: opened.data.tabId,
       },
@@ -217,6 +225,22 @@ describe("Preview feature public interface", () => {
     const adopt = previewTest.handlers.get("preview.surface.adopt")!;
     expect(await adopt({ sender }, { surface, adoptionToken })).toEqual({ ok: true });
 
+    await previewTest.handlers.get("preview:sync")!({ sender }, {
+      visible: true, bounds: { x: 0, y: 0, width: 800, height: 600 },
+      workspaceId: "11111111-1111-4111-8111-111111111111", threadId: "thread-1",
+    });
+    const clearCookies = previewTest.handlers.get("preview:clear-cookies")!;
+    const clearCache = previewTest.handlers.get("preview:clear-cache")!;
+    await clearCookies({ sender });
+    await clearCache({ sender });
+    expect(previewTest.previewSession.clearStorageData.mock.calls).toEqual([[{ storages: ["cookies"] }]]);
+    expect(previewTest.previewSession.clearCache).toHaveBeenCalledTimes(1);
+    guest.session = { ...previewTest.previewSession };
+    await clearCookies({ sender });
+    await clearCache({ sender });
+    expect(previewTest.previewSession.clearStorageData).toHaveBeenCalledTimes(1);
+    expect(previewTest.previewSession.clearCache).toHaveBeenCalledTimes(1);
+
     const oldTabId = opened.data.tabId;
     disposePreviewForWindow(win as never);
 
@@ -225,39 +249,31 @@ describe("Preview feature public interface", () => {
 
     const reopened = (await openTab(
       { sender },
-      { threadId: "thread-1", workspaceId: "workspace-1" },
+      { threadId: "thread-1", workspaceId: "11111111-1111-4111-8111-111111111111" },
     )) as { ok: true; data: { tabId: string } };
     expect(reopened.data.tabId).not.toBe(oldTabId);
   });
 
-  it("enforces the fixed sandbox, partition, and guest preload policy", () => {
-    const preferences = {
-      nodeIntegration: true,
-      contextIsolation: false,
-      sandbox: false,
-      devTools: false,
-      preload: "C:/attacker/preload.js",
-      preloadURL: "file:///attacker/preload.js",
-    };
-    const params = { partition: "persist:attacker", preload: "C:/attacker/preload.js" };
-    const fixedPreload = resolvePreviewGuestPreloadPath("C:/mcode/dist/main");
+  it("refuses an attachment without a prepared token through the public interface", () => {
+    const params = { partition: "persist:attacker" };
+    expect(hardenPreviewWebviewAttachment({}, params, resolvePreviewGuestPreloadPath("C:/mcode/dist/main"), 7)).toBe(false);
+    expect(params.partition).toBe("persist:attacker");
+  });
 
-    hardenPreviewWebviewAttachment(preferences, params, fixedPreload);
-
-    expect(preferences).toEqual({
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      devTools: true,
-      preload: fixedPreload,
-    });
-    expect(params).toEqual({
-      partition: "persist:mcode-preview",
-      preload: fixedPreload,
-    });
-    expect(fixedPreload.replaceAll("\\", "/")).toBe(
-      "C:/mcode/dist/preload/preview-guest-preload.cjs",
-    );
+  it("validates profile IPC senders, UUIDs and bounded complete lists", async () => {
+    const remove = previewTest.handlers.get("preview:profiles.remove")!;
+    const reconcile = previewTest.handlers.get("preview:profiles.reconcile")!;
+    const sender = { send: vi.fn() };
+    previewTest.browserWindowFromWebContents.mockReturnValue({ webContents: sender, isDestroyed: () => false });
+    for (const invalid of ["../escape", "", 42, null]) {
+      expect(() => remove({ sender }, invalid)).toThrow();
+    }
+    for (const invalid of [null, ["../escape"], Array(10_001).fill("11111111-1111-4111-8111-111111111111")]) {
+      expect(() => reconcile({ sender }, invalid)).toThrow();
+    }
+    await expect(reconcile({ sender }, ["11111111-1111-4111-8111-111111111111"])).resolves.toBeUndefined();
+    await expect(remove({ sender }, "22222222-2222-4222-8222-222222222222")).resolves.toBeUndefined();
+    expect(() => remove({ sender: {} }, "11111111-1111-4111-8111-111111111111")).toThrow();
   });
 
   it("resolves a workspace Preview URL and rejects traversal", async () => {

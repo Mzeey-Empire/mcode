@@ -1,14 +1,16 @@
+import { createMockApproval } from "@/__tests__/mocks/transport";
+import type { McodeTransport } from "@/transport/types";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PermissionRequestCard } from "./PermissionRequestCard";
 
-const { respondToPermission } = vi.hoisted(() => ({
-  respondToPermission: vi.fn(async () => undefined),
+const { respondToApproval } = vi.hoisted(() => ({
+  respondToApproval: vi.fn<McodeTransport["respondToApproval"]>().mockResolvedValue({ status: "resolved" }),
 }));
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({ respondToPermission }),
+  getTransport: () => ({ respondToApproval }),
 }));
 
 const questions = [
@@ -38,19 +40,14 @@ const questions = [
 function renderQuestionCard() {
   render(
     <PermissionRequestCard
-      requestId="que_1"
-      toolName="Question"
-      input={{}}
-      title="Questions"
-      questions={questions}
-      settled={false}
+      request={{ ...createMockApproval({ requestId: "que_1", subject: { kind: "question", questions }, noteDelivery: "none" }), settled: false }}
     />,
   );
 }
 
 describe("PermissionRequestCard question flow", () => {
   beforeEach(() => {
-    respondToPermission.mockClear();
+    respondToApproval.mockClear();
   });
 
   it("collects single, multiple, and custom answers without offering session approval", async () => {
@@ -68,11 +65,9 @@ describe("PermissionRequestCard question flow", () => {
     await user.type(screen.getByRole("textbox", { name: "Custom answer for Notes" }), "ship after review");
     await user.click(screen.getByRole("button", { name: "Submit answers" }));
 
-    expect(respondToPermission).toHaveBeenCalledWith(
+    expect(respondToApproval).toHaveBeenCalledWith(
       "que_1",
-      "allow",
-      [["Yes"], ["East", "West"], ["ship after review"]],
-      undefined,
+      { choiceId: "allow", answers: [["Yes"], ["East", "West"], ["ship after review"]] },
     );
   });
 
@@ -83,15 +78,15 @@ describe("PermissionRequestCard question flow", () => {
 
     await user.click(screen.getByRole("button", { name: "Deny" }));
 
-    expect(respondToPermission).toHaveBeenCalledWith("que_1", "deny", undefined, undefined);
+    expect(respondToApproval).toHaveBeenCalledWith("que_1", { choiceId: "deny" });
   });
 
   it("keeps same-index radio answers independent across simultaneous cards", async () => {
     const user = userEvent.setup();
     render(
       <>
-        <PermissionRequestCard requestId="que_1" toolName="Question" input={{}} questions={questions} settled={false} />
-        <PermissionRequestCard requestId="que_2" toolName="Question" input={{}} questions={questions} settled={false} />
+        <PermissionRequestCard request={{ ...createMockApproval({ requestId: "que_1", subject: { kind: "question", questions } }), settled: false }} />
+        <PermissionRequestCard request={{ ...createMockApproval({ requestId: "que_2", subject: { kind: "question", questions } }), settled: false }} />
       </>,
     );
     const yesOptions = screen.getAllByRole("radio", { name: "Yes" });
@@ -107,44 +102,41 @@ describe("PermissionRequestCard question flow", () => {
 
 describe("PermissionRequestCard provider-native options", () => {
   beforeEach(() => {
-    respondToPermission.mockClear();
+    respondToApproval.mockClear();
   });
 
   it("renders provider options verbatim and responds with the selected optionId", async () => {
     const user = userEvent.setup();
     render(
       <PermissionRequestCard
-        requestId="req-1"
-        toolName="Bash"
-        input={{ command: "rm -rf build" }}
-        options={[
-          { id: "allow_once", label: "Allow once" },
-          { id: "reject_once", label: "Reject" },
-        ]}
-        settled={false}
+        request={{ ...createMockApproval({ requestId: "req-1", choices: [
+          { id: "allow_once", label: "Allow once", intent: "allow_once" },
+          { id: "reject_once", label: "Reject", intent: "deny" },
+        ] }), settled: false }}
       />,
     );
     await waitFor(() => expect(screen.getByRole("button", { name: "Allow once" })).toBeEnabled());
 
     await user.click(screen.getByRole("button", { name: "Reject" }));
 
-    expect(respondToPermission).toHaveBeenCalledWith("req-1", "allow", undefined, "reject_once");
+    expect(respondToApproval).toHaveBeenCalledWith("req-1", { choiceId: "reject_once" });
   });
 
-  it("falls back to generic allow/deny controls when no options are provided", async () => {
+  it("shows a failed acknowledgement and leaves the advertised choices retryable", async () => {
+    respondToApproval.mockResolvedValueOnce({ status: "failed", message: "offline" });
     const user = userEvent.setup();
     render(
       <PermissionRequestCard
-        requestId="req-2"
-        toolName="Bash"
-        input={{ command: "ls" }}
-        settled={false}
+        request={{ ...createMockApproval({ requestId: "req-2" }), settled: false }}
       />,
     );
-    await waitFor(() => expect(screen.getByRole("button", { name: "Allow" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Allow once" })).toBeEnabled());
 
     await user.click(screen.getByRole("button", { name: "Deny" }));
 
-    expect(respondToPermission).toHaveBeenCalledWith("req-2", "deny", undefined, undefined);
+    expect(respondToApproval).toHaveBeenCalledWith("req-2", { choiceId: "deny" });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Failed to send response");
+    await user.click(screen.getByRole("button", { name: "Deny" }));
+    expect(respondToApproval.mock.calls).toEqual([["req-2", { choiceId: "deny" }], ["req-2", { choiceId: "deny" }]]);
   });
 });

@@ -1,5 +1,7 @@
+import { useApprovalStore } from "@/stores/approvalStore";
+import { createMockApproval } from "@/__tests__/mocks/transport";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PermissionRequest, ThreadStartup } from "@mcode/contracts";
+import type { ThreadStartup } from "@mcode/contracts";
 import type { Thread } from "@/transport";
 
 vi.mock("@/transport", () => ({
@@ -16,7 +18,6 @@ import { startPushListeners, stopPushListeners } from "./ws-events";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useProviderCatalogStore } from "@/stores/providerCatalogStore";
 import { useDiffStore } from "@/stores/diffStore";
-import { useThreadStore } from "@/stores/threadStore";
 import { useThreadControlStore } from "@/stores/threadControlStore";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 import { onPtyExit } from "@/features/terminal/adapters/pty-data-registry";
@@ -24,6 +25,38 @@ import { useProjectActionStore } from "@/features/projects/environment/state/pro
 import { useThreadStartupStore } from "@/features/thread-startup";
 import { buildVolatileItems } from "@/features/conversation/messages/virtual-items";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
+import { createMockWorkspace } from "@/__tests__/mocks/transport";
+
+describe("workspace deletion Browser profiles", () => {
+  const workspaceId = "11111111-1111-4111-8111-111111111111";
+  const remove = vi.fn(async () => undefined);
+  const originalBridge = Object.getOwnPropertyDescriptor(window, "desktopBridge");
+
+  beforeEach(() => {
+    remove.mockClear();
+    Object.defineProperty(window, "desktopBridge", { configurable: true, value: { preview: { profiles: { remove } } } });
+    useWorkspaceStore.setState({ workspaces: [createMockWorkspace({ id: workspaceId })], activeWorkspaceId: null });
+    startPushListeners();
+  });
+  afterEach(() => {
+    stopPushListeners();
+    if (originalBridge) Object.defineProperty(window, "desktopBridge", originalBridge);
+    else delete window.desktopBridge;
+  });
+
+  it("removes the local profile when any client deletes the workspace", () => {
+    pushEmitter.emit("workspace.deleted", { workspaceId });
+    expect(remove.mock.calls).toEqual([[workspaceId]]);
+    expect(useWorkspaceStore.getState().workspaces).toEqual([]);
+  });
+
+  it("removes workspace state without a desktop bridge", () => {
+    delete window.desktopBridge;
+    pushEmitter.emit("workspace.deleted", { workspaceId });
+    expect(useWorkspaceStore.getState().workspaces).toEqual([]);
+    expect(remove).not.toHaveBeenCalled();
+  });
+});
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
@@ -160,6 +193,7 @@ describe("ws-events Project Actions", () => {
       runId: "run-1",
       revision: 1,
       terminalSessionId: "terminal-1",
+      trigger: "manual" as const,
       actionName: "Build",
       status: "completed" as const,
       snapshot: { platform: "windows" as const, script: "bun run build", checkoutPath: "C:\\repo", terminal: null, environmentNames: [] },
@@ -287,27 +321,48 @@ describe("ws-events provider.catalogChanged", () => {
   });
 });
 
-describe("ws-events permission.request", () => {
+describe("ws-events approval.requested", () => {
+  it.each(["approval.requested", "approval.resolved"] as const)("logs and drops malformed %s without changing state", (channel) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const refresh = vi.spyOn(useThreadControlStore.getState(), "refreshByThreadId").mockResolvedValue(undefined);
+    const rehydrate = vi.spyOn(useThreadControlStore.getState(), "rehydrate").mockResolvedValue(undefined);
+    const request = createMockApproval({ requestId: "pending", threadId: "thread-1" });
+    useApprovalStore.setState({ approvals: [{ ...request, settled: false }], revision: 0 });
+    const before = useApprovalStore.getState();
+    startPushListeners();
+    expect(() => pushEmitter.emit(channel, { requestId: "pending", secret: "private" })).not.toThrow();
+    expect(useApprovalStore.getState()).toBe(before);
+    expect(refresh.mock.calls).toEqual([]);
+    expect(rehydrate.mock.calls).toEqual([]);
+    expect(warn.mock.calls).toEqual([[`[ws-events] dropped invalid ${channel} message`]]);
+  });
+
+  it("refreshes the owner and target of a thread operation", () => {
+    const refresh = vi.spyOn(useThreadControlStore.getState(), "refreshByThreadId").mockResolvedValue(undefined);
+    const request = createMockApproval({ threadId: "owner", subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "target", message: "Hello" } });
+    useApprovalStore.setState({ approvals: [], revision: 0 });
+    startPushListeners();
+    pushEmitter.emit("approval.requested", request);
+    expect(refresh.mock.calls).toEqual([["owner"], ["target"]]);
+    expect(useApprovalStore.getState().approvals).toEqual([{ ...request, settled: false }]);
+  });
+
   afterEach(() => {
     stopPushListeners();
     vi.restoreAllMocks();
   });
 
   it("creates permission controls only from an actual provider permission request", () => {
-    const request = {
-      requestId: "permission-1",
-      threadId: "thread-1",
-      toolName: "Shell",
-      input: { command: "git status" },
-    } satisfies PermissionRequest;
+    const request = createMockApproval({ requestId: "permission-1", threadId: "thread-1" });
+    useApprovalStore.setState({ approvals: [], revision: 0 });
     startPushListeners();
 
-    expect(buildVolatileItems([], undefined, undefined, undefined, useThreadStore.getState().records.get(request.threadId)?.permissions))
+    expect(buildVolatileItems([], undefined, undefined, undefined, useApprovalStore.getState().approvals))
       .not.toContainEqual(expect.objectContaining({ type: "permission-request" }));
-    pushEmitter.emit("permission.request", request);
+    pushEmitter.emit("approval.requested", request);
 
-    expect(buildVolatileItems([], undefined, undefined, undefined, useThreadStore.getState().records.get(request.threadId)?.permissions))
-      .toMatchObject([{ type: "permission-request", requestId: request.requestId, toolName: "Shell" }]);
+    expect(buildVolatileItems([], undefined, undefined, undefined, useApprovalStore.getState().approvals))
+      .toMatchObject([{ type: "permission-request", request: { requestId: "permission-1", subject: { kind: "command", command: "git status" } } }]);
   });
 });
 

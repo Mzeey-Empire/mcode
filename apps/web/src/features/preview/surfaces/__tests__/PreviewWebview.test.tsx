@@ -27,7 +27,7 @@ describe("PreviewWebview", () => {
     delete window.desktopBridge;
   });
 
-  it("transfers exact tab control and invalidates observations only for trusted guest input", () => {
+  it("transfers exact tab control and invalidates observations only for trusted guest input", async () => {
     const invalidate = vi.fn();
     const interrupt = vi.fn().mockResolvedValue(true);
     window.desktopBridge = {
@@ -44,13 +44,13 @@ describe("PreviewWebview", () => {
     const unsubscribe = onBrowserAutomationObservationInvalidation(invalidate);
     render(
       <PreviewWebview
-        workspaceId="workspace-1"
-        threadId="thread-1"
+        workspaceId="11111111-1111-4111-8111-111111111111"
+        threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         tabId="tab-1"
         src="https://example.com"
       />,
     );
-    const webview = screen.getByTestId("electron-browser-surface-webview");
+    const webview = await screen.findByTestId("electron-browser-surface-webview");
     webview.dispatchEvent(Object.assign(new Event("ipc-message"), {
       channel: "mcode:browser-human-input",
       args: [{ kind: "pointer" }],
@@ -69,9 +69,9 @@ describe("PreviewWebview", () => {
     }));
     unsubscribe();
     expect(invalidate).toHaveBeenCalledOnce();
-    expect(invalidate).toHaveBeenCalledWith("workspace-1", "thread-1", "tab-1");
+    expect(invalidate).toHaveBeenCalledWith("11111111-1111-4111-8111-111111111111", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "tab-1");
     expect(interrupt).toHaveBeenCalledOnce();
-    expect(interrupt).toHaveBeenCalledWith({ threadId: "thread-1", tabId: "tab-1" });
+    expect(interrupt).toHaveBeenCalledWith({ threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", tabId: "tab-1" });
   });
 
   it("routes history through the exact generation-bound main bridge", async () => {
@@ -93,7 +93,7 @@ describe("PreviewWebview", () => {
       return (
         <PreviewWebview
           ref={ref}
-          threadId="thread-1"
+          threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
           tabId="tab-1"
           src="https://example.com"
         />
@@ -106,8 +106,8 @@ describe("PreviewWebview", () => {
     expect(navigate).toHaveBeenCalledWith({
       surface: {
         identity: {
-          workspaceId: "thread-1",
-          scope: { kind: "thread", id: "thread-1" },
+          workspaceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          scope: { kind: "thread", id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
           tabId: "tab-1",
         },
         generation: expect.any(Number),
@@ -127,13 +127,13 @@ describe("PreviewWebview", () => {
     try {
       render(
         <PreviewWebview
-          workspaceId="workspace-generation"
+          workspaceId="33333333-3333-4333-8333-333333333333"
           threadId="thread-generation"
           tabId="tab-generation"
           src="https://example.com"
         />,
       );
-      const key = browserAutomationTargetKey("workspace-generation", "thread-generation", "tab-generation");
+      const key = browserAutomationTargetKey("33333333-3333-4333-8333-333333333333", "thread-generation", "tab-generation");
       await waitFor(() => {
         expect(useBrowserAutomationStore.getState().viewportCoordinators.get(key)).toBeDefined();
       });
@@ -146,11 +146,11 @@ describe("PreviewWebview", () => {
         expect(store.liveTargets.get(key)?.revision).toBe(1);
       });
     } finally {
-      releaseBrowserAutomationThreadScope("workspace-generation", "thread-generation");
+      releaseBrowserAutomationThreadScope("33333333-3333-4333-8333-333333333333", "thread-generation");
     }
   });
 
-  it("preserves the Electron guest and generation when presentation remounts", () => {
+  it("preserves the Electron guest and generation when presentation remounts", async () => {
     const prepare = vi.fn().mockResolvedValue({ ok: true });
     const release = vi.fn().mockResolvedValue({ ok: true });
     window.desktopBridge = { preview: { surface: {
@@ -160,7 +160,7 @@ describe("PreviewWebview", () => {
       release,
     } } } as unknown as NonNullable<typeof window.desktopBridge>;
     const props = {
-      workspaceId: "workspace-remount",
+      workspaceId: "44444444-4444-4444-8444-444444444444",
       threadId: "thread-remount",
       tabId: "tab-remount",
       src: "about:blank",
@@ -168,7 +168,7 @@ describe("PreviewWebview", () => {
 
     const first = render(<PreviewWebview {...props} />);
     const firstGeneration = prepare.mock.calls[0]?.[0].surface.generation as number;
-    const firstGuest = screen.getByTestId("electron-browser-surface-webview");
+    const firstGuest = await screen.findByTestId("electron-browser-surface-webview");
     const targetKey = browserAutomationTargetKey(props.workspaceId, props.threadId, props.tabId);
     const firstTargetGeneration = useBrowserAutomationStore.getState().liveTargets.get(targetKey)?.revision;
     first.unmount();
@@ -229,7 +229,7 @@ describe("PreviewWebview", () => {
   it("applies an exact renderer-owned design viewport to the visible webview", () => {
     render(
       <PreviewWebview
-        threadId="thread-1"
+        threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         tabId="tab-1"
         src="https://example.com"
         viewport={{ width: 1024, height: 768 }}
@@ -366,7 +366,7 @@ describe("PreviewWebview", () => {
     const props = {
       active: true,
       presentationActive: true,
-      workspaceId: "workspace-warm",
+      workspaceId: "55555555-5555-4555-8555-555555555555",
       threadId: "thread-warm",
       tabId: "tab-warm",
       src: "https://example.com",
@@ -434,7 +434,7 @@ describe("PreviewWebview", () => {
     );
     render(
       <PreviewWebview
-        workspaceId="workspace-zero"
+        workspaceId="66666666-6666-4666-8666-666666666666"
         threadId="thread-zero"
         tabId="tab-zero"
         src="https://example.com"
@@ -442,7 +442,7 @@ describe("PreviewWebview", () => {
     );
     const surface = screen.getByTestId("web-runtime-preview-iframe");
     const snapshot = browserSurfaceHost.getSnapshot({
-      workspaceId: "workspace-zero",
+      workspaceId: "66666666-6666-4666-8666-666666666666",
       scope: { kind: "thread", id: "thread-zero" },
       tabId: "tab-zero",
     });
@@ -453,7 +453,7 @@ describe("PreviewWebview", () => {
     rect.mockRestore();
   });
 
-  it("uses the coordinator Activity Rail overlap when automation has no explicit override", () => {
+  it("uses the coordinator Activity Rail overlap when automation has no explicit override", async () => {
     const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
       new DOMRect(10, 20, 640, 480),
     );
@@ -471,7 +471,7 @@ describe("PreviewWebview", () => {
     render(
       <PreviewWebview
         presentationSource="automation"
-        workspaceId="workspace-rail"
+        workspaceId="77777777-7777-4777-8777-777777777777"
         threadId="thread-rail"
         tabId="tab-rail"
         src="https://example.com"
@@ -479,13 +479,13 @@ describe("PreviewWebview", () => {
     );
     const anchor = screen.getByTestId("preview-webview");
     const releaseAnchor = browserSurfacePresentationCoordinator.registerAutomationAnchor(
-      "workspace-rail",
+      "77777777-7777-4777-8777-777777777777",
       "thread-rail",
       anchor,
     );
     browserSurfacePresentationCoordinator.setActivityRailOverlap(112);
 
-    expect(screen.getByTestId("electron-browser-surface-webview")).toHaveStyle({
+    expect(await screen.findByTestId("electron-browser-surface-webview")).toHaveStyle({
       clipPath: "inset(0px 0px 0px 112px round 0px 0px 0px 0px)",
     });
     releaseAnchor();

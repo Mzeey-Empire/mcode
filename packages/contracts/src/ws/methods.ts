@@ -121,10 +121,10 @@ import {
   ProviderCatalogSnapshotSchema,
 } from "../providers/capability-catalog.js";
 import {
-  PermissionDecisionSchema,
-  PermissionRequestSchema,
-  PermissionResponseAnswersSchema,
-} from "../models/permission.js";
+  ApprovalRespondResultSchema,
+  ApprovalRequestSchema,
+  ApprovalAnswersSchema,
+} from "../models/approval.js";
 import { GoalLookupResultSchema, GoalObjectiveSchema } from "../models/goal.js";
 import {
   CanonicalAgentRevisionSchema,
@@ -1158,20 +1158,19 @@ export const WS_METHODS = lazySchema(() => ({
     }),
     result: z.object({ versions: z.array(PlanVersionSchema()) }),
   },
-  "permission.respond": {
+  "approval.respond": {
     params: z.object({
       requestId: z.string(),
-      decision: PermissionDecisionSchema,
-      answers: PermissionResponseAnswersSchema().optional(),
-      /** Provider-native option id selected from the request's verbatim options. */
-      optionId: z.string().min(1).max(200).optional(),
+      choiceId: z.string().min(1).max(200),
+      note: z.string().trim().min(1).max(4_000).optional(),
+      answers: ApprovalAnswersSchema().optional(),
     }),
-    result: z.void(),
+    result: ApprovalRespondResultSchema(),
   },
   /** Returns pending permission requests for a thread; used to re-hydrate the frontend after a WebSocket reconnect. */
-  "permission.listPending": {
-    params: z.object({ threadId: z.string() }),
-    result: z.array(PermissionRequestSchema()),
+  "approval.listPending": {
+    params: z.object({ threadId: z.string().optional() }),
+    result: z.array(ApprovalRequestSchema()).max(500),
   },
   "message.list": {
     params: z.object({

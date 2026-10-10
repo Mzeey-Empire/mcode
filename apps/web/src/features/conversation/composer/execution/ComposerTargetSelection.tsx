@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { ChevronDown, GitBranch, GitFork } from "lucide-react";
-import type { ComposerMode } from "@/components/chat/ModeSelector";
 import { Button } from "@/components/ui/button";
 import { PICKER_PANEL_CLASS } from "@/components/ui/picker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { BranchTargetPicker } from "./BranchTargetPicker";
+import type { ComposerMode } from "./composer-mode";
+import { TARGET_TRIGGER_CLASS } from "./target-trigger";
 import type { ForkSourceThread } from "./useTargetBranch";
 import {
   useForkTargetSelection,
@@ -70,9 +71,9 @@ function TargetTrigger({ pick, workspaceId, threadId, testId }: TargetTriggerPro
             variant="ghost"
             size="compact"
             data-testid={testId}
-            className="h-[28px] gap-[6px] rounded-md px-[10px] text-xs font-medium leading-none text-muted"
+            className={TARGET_TRIGGER_CLASS}
           >
-            <Icon className="size-3.5" aria-hidden />
+            <Icon className="size-4" aria-hidden />
             <span>{pick.label}</span>
             <ChevronDown className="size-3" aria-hidden />
           </Button>

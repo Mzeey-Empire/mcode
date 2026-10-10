@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { ComposerMode } from "@/components/chat/ModeSelector";
+import type { ComposerMode } from "./composer-mode";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { attachedWorktreeFromTarget, isDetachedWorktree, normalizeWorktreePath, type AttachedWorktree } from "@/lib/worktree";
 import type { BranchTargetList } from "./BranchTargetPicker";

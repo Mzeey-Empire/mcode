@@ -160,15 +160,6 @@ vi.mock("@/components/chat/useSlashCommand", () => ({
   },
 }));
 
-vi.mock("@/components/chat/ModeSelector", () => ({
-  ALL_MODE_OPTIONS: [
-    { value: "direct", label: "Direct" },
-    { value: "worktree", label: "New worktree" },
-    { value: "existing-worktree", label: "Existing worktree" },
-  ],
-  ModeSelector: ({ mode }: { mode: string }) => <div data-testid="mode-selector">{mode}</div>,
-}));
-
 vi.mock("../BranchTargetPicker", () => ({
   BranchTargetPicker: ({ onSelect }: { onSelect: (target: BranchTarget) => void }) => (
     <div>
@@ -450,14 +441,22 @@ describe("Composer checkout confirmation", () => {
     );
   });
 
-  it("shows project, checkout mode, and branch in the new-thread context strip", () => {
-    const workspace = seedComposerState("direct");
+  it("shows the workspace and branch in the new-thread target rail", () => {
+    seedComposerState("direct");
     render(<Composer isNewThread workspaceId="ws-1" />);
 
-    const strip = screen.getByTestId("new-thread-context-strip");
-    expect(within(strip).getByText(workspace.name)).toBeInTheDocument();
-    expect(within(strip).getByTestId("mode-selector")).toHaveTextContent("direct");
-    expect(within(strip).getByTestId("composer-branch-trigger")).toHaveTextContent("On feature/base");
+    const rail = screen.getByTestId("new-thread-target-rail");
+    expect(within(rail).getByTestId("workspace-target-trigger")).toHaveTextContent("Local");
+    expect(within(rail).getByTestId("composer-branch-trigger")).toHaveTextContent("On feature/base");
+  });
+
+  it("leaves the workspace and branch to a shown overview card", () => {
+    seedComposerState("direct");
+    const { rerender } = render(<Composer isNewThread workspaceId="ws-1" overviewPresentation="docked" />);
+    expect(screen.queryByTestId("new-thread-target-rail")).not.toBeInTheDocument();
+
+    rerender(<Composer isNewThread workspaceId="ws-1" overviewPresentation="overlay" />);
+    expect(screen.queryByTestId("new-thread-target-rail")).not.toBeInTheDocument();
   });
 
   it("applies a transcript deletion to the matching ComposerDraft and consumes the handoff", async () => {
@@ -506,14 +505,13 @@ describe("Composer checkout confirmation", () => {
   });
 
   it("shows a non-git project as local without checkout controls", () => {
-    const workspace = seedComposerState("worktree", false);
+    seedComposerState("worktree", false);
     render(<Composer isNewThread workspaceId="ws-1" />);
 
-    const strip = screen.getByTestId("new-thread-context-strip");
-    expect(within(strip).getByText(workspace.name)).toBeInTheDocument();
-    expect(within(strip).getByText("Local")).toBeInTheDocument();
-    expect(within(strip).queryByTestId("mode-selector")).not.toBeInTheDocument();
-    expect(within(strip).queryByTestId("composer-branch-trigger")).not.toBeInTheDocument();
+    const rail = screen.getByTestId("new-thread-target-rail");
+    expect(within(rail).getByTestId("workspace-target-trigger")).toHaveTextContent("Local");
+    expect(within(rail).queryByRole("button", { name: /Local/ })).not.toBeInTheDocument();
+    expect(within(rail).queryByTestId("composer-branch-trigger")).not.toBeInTheDocument();
     expect(useWorkspaceStore.getState().newThreadMode).toBe("worktree");
   });
 
@@ -594,18 +592,6 @@ describe("Composer checkout confirmation", () => {
     });
   });
 
-  it("clears the selected project without deleting it", async () => {
-    const workspace = seedComposerState("direct");
-    render(<Composer isNewThread workspaceId="ws-1" />);
-
-    await userEvent.click(
-      screen.getByRole("button", { name: `Clear ${workspace.name} project` }),
-    );
-
-    expect(useWorkspaceStore.getState().activeWorkspaceId).toBeNull();
-    expect(useWorkspaceStore.getState().workspaces).toContainEqual(workspace);
-  });
-
   it("confirms Direct branch checkout in an app dialog before sending", async () => {
     seedComposerState("direct");
     render(<Composer isNewThread workspaceId="ws-1" />);
@@ -645,7 +631,8 @@ describe("Composer checkout confirmation", () => {
       vi.clearAllMocks();
       seedComposerState(mode);
       const { unmount } = render(<Composer isNewThread workspaceId="ws-1" />);
-      await waitFor(() => expect(screen.getByTestId("mode-selector")).toHaveTextContent(mode));
+      const label = mode === "worktree" ? "New worktree" : "Existing worktree";
+      await waitFor(() => expect(screen.getByTestId("workspace-target-trigger")).toHaveTextContent(label));
 
       await typeAndSend();
 
@@ -719,6 +706,23 @@ describe("Composer checkout confirmation", () => {
     await waitFor(() => expect(screen.getByLabelText("Send message")).toBeEnabled());
     expect(screen.getByTestId("composer-branch-trigger")).toHaveTextContent("From main");
     expect(mockTransport.createAndSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("holds Send for Existing worktree until a worktree is chosen", async () => {
+    seedComposerState("existing-worktree");
+    useWorkspaceStore.setState({ selectedWorktree: null });
+    render(<Composer isNewThread workspaceId="ws-1" />);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Message Mcode"), "Build this");
+    expect(screen.getByLabelText("Send message")).toBeDisabled();
+
+    act(() => {
+      useWorkspaceStore.setState({
+        selectedWorktree: { name: "existing", path: "/repo/.worktrees/existing", branch: "feature/base" },
+      });
+    });
+    await waitFor(() => expect(screen.getByLabelText("Send message")).toBeEnabled());
   });
 
   it("keeps Send disabled when the project names no branch to start from", async () => {

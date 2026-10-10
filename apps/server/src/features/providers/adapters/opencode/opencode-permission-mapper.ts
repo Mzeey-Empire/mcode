@@ -1,4 +1,7 @@
-import type { PermissionDecision, PermissionQuestion, PermissionRequest } from "@mcode/contracts";
+import type { ApprovalChoice, ApprovalQuestion, ApprovalRequestBody, ApprovalRequestEnvelope } from "@mcode/contracts";
+import { z } from "zod";
+
+const ToolIdentitySchema = z.object({ callID: z.string().optional() });
 
 /**
  * Upstream reply for `POST /session/{id}/permissions/{permissionID}`.
@@ -9,12 +12,6 @@ export type OpenCodePermissionReply = "once" | "always" | "reject";
 
 /** Largest accepted upstream request id (`per_*` / `que_*`); longer is hostile. */
 const MAX_REQUEST_ID_CHARS = 128;
-/** Largest accepted permission action verb (`bash`, `edit`, ...). */
-const MAX_ACTION_CHARS = 128;
-/** Largest retained resource pattern per permission request. */
-const MAX_RESOURCE_CHARS = 512;
-/** Largest retained permission resource list; upstream asks are single-tool. */
-const MAX_RESOURCES = 32;
 /** Largest retained question title header. */
 const MAX_HEADER_CHARS = 200;
 /** Largest retained question body. */
@@ -27,8 +24,6 @@ const MAX_OPTION_CHARS = 100;
 const MAX_QUESTIONS = 10;
 /** Largest retained option list per question. */
 const MAX_OPTIONS = 10;
-/** Largest retained card title. */
-const MAX_TITLE_CHARS = 200;
 
 function boundString(value: unknown, max: number): string | undefined {
   if (typeof value !== "string" || value.length === 0) return undefined;
@@ -44,53 +39,35 @@ function acceptedId(value: unknown): string | undefined {
   return acceptedIdentity(value, MAX_REQUEST_ID_CHARS);
 }
 
-function boundStringList(value: unknown, itemMax: number, listMax: number): string[] {
-  if (!Array.isArray(value)) return [];
-  const out: string[] = [];
-  for (const item of value) {
-    if (typeof item !== "string" || item.length === 0) continue;
-    out.push(item.length > itemMax ? item.slice(0, itemMax) : item);
-    if (out.length >= listMax) break;
-  }
-  return out;
-}
-
-/**
- * Map an Mcode permission decision onto the upstream permission reply.
- * Mcode owns policy (which card, which decision); the provider only relays.
- * `cancelled` degrades to `reject` because upstream has no cancel variant;
- * the turn still settles through the provider abort path.
- */
-export function mapPermissionDecisionToReply(decision: PermissionDecision): OpenCodePermissionReply {
-  if (decision === "allow") return "once";
-  if (decision === "allow-session") return "always";
+/** Map the exact adapter-owned choice to OpenCode's native permission reply. */
+export function mapApprovalChoiceToReply(choiceId: string): OpenCodePermissionReply {
+  if (choiceId === "once") return "once";
+  if (choiceId === "always") return "always";
   return "reject";
 }
 
-/**
- * Build an inline approval card for `permission.v2.asked`
- * (`{ id: per_*, action, resources[] }`) or the legacy `permission.asked`
- * (`{ id, permission }`) shape. Returns null when the envelope carries no
- * usable request identity or action, so the caller can fall back to a bounded
- * diagnostic instead of showing a broken card.
- */
-export function synthesizeOpenCodePermissionRequest(input: {
-  threadId: string;
-  properties: Record<string, unknown>;
-}): PermissionRequest | null {
+/** Keep all resources intact; the shared scope validator decides whether they fit. */
+export function synthesizeOpenCodeApprovalRequest(input: {
+  threadId: string; properties: Record<string, unknown>;
+}): (ApprovalRequestEnvelope & { body: ApprovalRequestBody }) | null {
   const requestId = acceptedId(input.properties.id);
   if (requestId === undefined) return null;
-  const action = boundString(input.properties.action, MAX_ACTION_CHARS)
-    ?? boundString(input.properties.permission, MAX_ACTION_CHARS);
-  if (action === undefined) return null;
-  const resources = boundStringList(input.properties.resources, MAX_RESOURCE_CHARS, MAX_RESOURCES);
-  const title = boundString(input.properties.title, MAX_TITLE_CHARS);
+  const action = typeof input.properties.action === "string" ? input.properties.action
+    : typeof input.properties.permission === "string" ? input.properties.permission : "";
+  const resources = input.properties.resources ?? [];
+  const description = Array.isArray(resources) && resources.every((item): item is string => typeof item === "string")
+    ? resources.join(", ") : undefined;
+  const choices: ApprovalChoice[] = [{ id: "once", intent: "allow_once", label: "Allow once" }];
+  if (description && description.length <= 500) choices.push({ id: "always", intent: "allow_scoped", label: "Allow for this session", description });
+  choices.push({ id: "reject", intent: "deny", label: "Deny" });
+  const tool = ToolIdentitySchema.safeParse(input.properties.tool);
   return {
-    requestId,
-    threadId: input.threadId,
-    toolName: action,
-    input: resources.length > 0 ? { action, resources } : { action },
-    ...(title === undefined ? {} : { title }),
+    requestId, threadId: input.threadId,
+    body: {
+      requestedAt: new Date().toISOString(), toolCallId: tool.success ? tool.data.callID : undefined,
+      subject: { kind: "tool", toolName: action, preview: JSON.stringify({ action, resources }) },
+      choices, noteDelivery: "next_turn", noteChoiceId: "reject", origin: { kind: "agent" },
+    },
   };
 }
 
@@ -98,7 +75,7 @@ function objectRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function optionOf(value: unknown): PermissionQuestion["options"][number] | undefined {
+function optionOf(value: unknown): ApprovalQuestion["options"][number] | undefined {
   if (!objectRecord(value)) return undefined;
   // Labels are reply identities. Truncating one changes what the user chose,
   // so an oversized label invalidates the card instead of changing it.
@@ -108,9 +85,9 @@ function optionOf(value: unknown): PermissionQuestion["options"][number] | undef
   return { label, ...(description === undefined ? {} : { description }) };
 }
 
-function optionsOf(value: unknown): PermissionQuestion["options"] | undefined {
+function optionsOf(value: unknown): ApprovalQuestion["options"] | undefined {
   if (!Array.isArray(value) || value.length > MAX_OPTIONS) return undefined;
-  const options: PermissionQuestion["options"] = [];
+  const options: ApprovalQuestion["options"] = [];
   for (const option of value) {
     const mapped = optionOf(option);
     if (mapped === undefined) return undefined;
@@ -119,7 +96,7 @@ function optionsOf(value: unknown): PermissionQuestion["options"] | undefined {
   return options;
 }
 
-function cardOf(value: unknown): PermissionQuestion | null {
+function cardOf(value: unknown): ApprovalQuestion | null {
   if (!objectRecord(value)) return null;
   const header = boundString(value.header, MAX_HEADER_CHARS);
   const question = boundString(value.question, MAX_QUESTION_CHARS);
@@ -144,12 +121,12 @@ function cardOf(value: unknown): PermissionQuestion | null {
 export function synthesizeOpenCodeQuestionRequest(input: {
   threadId: string;
   properties: Record<string, unknown>;
-}): PermissionRequest | null {
+}): (ApprovalRequestEnvelope & { body: ApprovalRequestBody }) | null {
   const requestId = acceptedId(input.properties.id);
   if (requestId === undefined) return null;
   if (!Array.isArray(input.properties.questions)) return null;
   if (input.properties.questions.length === 0 || input.properties.questions.length > MAX_QUESTIONS) return null;
-  const questions: PermissionQuestion[] = [];
+  const questions: ApprovalQuestion[] = [];
   for (const item of input.properties.questions) {
     const card = cardOf(item);
     if (!card) return null;
@@ -158,9 +135,10 @@ export function synthesizeOpenCodeQuestionRequest(input: {
   return {
     requestId,
     threadId: input.threadId,
-    toolName: "Question",
-    input: {},
-    title: questions[0]!.header,
-    questions,
+    body: {
+      requestedAt: new Date().toISOString(), subject: { kind: "question", questions },
+      choices: [{ id: "answer", intent: "allow_once", label: "Submit answers" }, { id: "reject", intent: "deny", label: "Dismiss" }],
+      noteDelivery: "none", origin: { kind: "agent" },
+    },
   };
 }

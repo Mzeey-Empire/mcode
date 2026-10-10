@@ -30,8 +30,9 @@ import type {
   IAgentProvider,
   ISessionEvictable,
   TurnRequest,
-  PermissionDecision,
-  PermissionRequest,
+  ApprovalResponse,
+  ApprovalRespondResult,
+  ApprovalRequestEnvelope,
   ProviderModelInfo,
   Settings,
   ProviderTurnDiffUpdate,
@@ -253,16 +254,16 @@ export class CursorProvider
           this.acpSessionIdentities(entry),
         ),
         publishNativeTurnDiff: (entry, diffs) => this.publishNativeTurnDiff(entry, diffs),
-        emitPermissionRequest: (request) => {
+        emitApprovalRequest: (request) => {
           try {
-            this.emit("permission_request", request);
+            this.emit("approval_request", request);
           } catch {
             // Event subscribers must not prevent ACP from receiving its decision.
           }
         },
-        emitPermissionResolved: (requestId, decision) => {
+        emitApprovalResolved: (payload) => {
           try {
-            this.emit("permission_resolved", { requestId, decision });
+            this.emit("approval_resolved", payload);
           } catch {
             // Permission completion must not depend on a renderer subscriber.
           }
@@ -868,12 +869,14 @@ export class CursorProvider
     logger.info("CursorProvider shutdown complete");
   }
 
-  resolvePermission(requestId: string, decision: PermissionDecision): boolean {
-    return this.getAcpClientBridge().resolvePermission(requestId, decision);
+  /** Await the native ACP permission response. */
+  resolveApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
+    return this.getAcpClientBridge().resolveApproval(requestId, response);
   }
 
-  listPendingPermissions(threadId: string): PermissionRequest[] {
-    return this.getAcpClientBridge().listPendingPermissions(threadId);
+  /** Return adapter routing envelopes for the requested thread or every thread. */
+  listPendingApprovals(threadId?: string): ApprovalRequestEnvelope[] {
+    return this.getAcpClientBridge().listPendingApprovals(threadId);
   }
 
   /**

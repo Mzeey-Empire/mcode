@@ -1,3 +1,4 @@
+import { useApprovalStore } from "@/stores/approvalStore";
 import { cacheRecord, getCachedRecord } from "./record-cache";
 import {
   getThreadRecord,
@@ -109,67 +110,20 @@ export class AuxiliaryHydrator {
   }
 
   private hydratePermissions(threadId: string): void {
-    const { getState, setState, shallowEqualBy } = this.deps;
-    const startedState = getState();
-    const startedRecord = getThreadRecord(startedState.records, threadId);
-    const startedGeneration = this.permissionSnapshotGenerations.get(threadId) ?? 0;
-    const startedRunning = startedState.runningThreadIds.has(threadId);
-    const startedCurrentThreadId = startedState.currentThreadId;
-    this.pendingPermissionHydrations.set(
-      threadId,
-      (this.pendingPermissionHydrations.get(threadId) ?? 0) + 1,
-    );
-
-    void this.transport()
-      .listPendingPermissions(threadId)
-      .then((pending) => {
-        const state = getState();
-        const current = getThreadRecord(state.records, threadId);
-        const generation = this.permissionSnapshotGenerations.get(threadId) ?? 0;
-        const runningNow = state.runningThreadIds.has(threadId);
-        // Snapshot may commit only to same thread instance and lifecycle. A
-        // live request wins once present; empty live state still permits a
-        // running snapshot when no event arrived to populate it.
-        if (
-          generation !== startedGeneration
-          || state.currentThreadId !== startedCurrentThreadId
-          || !state.records.has(threadId)
-          || current.loadEpoch !== startedRecord.loadEpoch
-          || runningNow !== startedRunning
-          || (runningNow && current.permissions.length > 0)
-        ) return;
-        const mapped = pending.map((p) => ({ ...p, settled: false }));
-        if (!shallowEqualBy(mapped, current.permissions, ["requestId", "toolName", "settled"])) {
-          setState((s: ThreadHydratorWriteState) => {
-            const next = getThreadRecord(s.records, threadId);
-            if (
-              !s.records.has(threadId)
-              || s.currentThreadId !== startedCurrentThreadId
-              || next.loadEpoch !== startedRecord.loadEpoch
-              || (this.permissionSnapshotGenerations.get(threadId) ?? 0) !== startedGeneration
-              || s.runningThreadIds.has(threadId) !== startedRunning
-              || (s.runningThreadIds.has(threadId) && next.permissions.length > 0)
-            ) return {};
-            return {
-              records: patchThreadRecord(s.records, threadId, { permissions: mapped }),
-            };
-          });
-        }
-      })
-      .catch(() => {
-        /* non-critical */
-      })
-      .finally(() => {
-        const pending = (this.pendingPermissionHydrations.get(threadId) ?? 1) - 1;
-        if (pending > 0) {
-          this.pendingPermissionHydrations.set(threadId, pending);
-          return;
-        }
-        this.pendingPermissionHydrations.delete(threadId);
-        if (this.permissionGenerationDisposals.delete(threadId)) {
-          this.permissionSnapshotGenerations.delete(threadId);
-        }
-      });
+    const revision = useApprovalStore.getState().revision;
+    const generation = this.permissionSnapshotGenerations.get(threadId) ?? 0;
+    this.pendingPermissionHydrations.set(threadId, (this.pendingPermissionHydrations.get(threadId) ?? 0) + 1);
+    void this.transport().listPendingApprovals(threadId).then((pending) => {
+      if ((this.permissionSnapshotGenerations.get(threadId) ?? 0) !== generation) return;
+      useApprovalStore.getState().replaceThread(threadId, pending, revision);
+    }).catch((error: unknown) => {
+      console.debug("[approvalHydration] Failed to load pending approvals:", error);
+    }).finally(() => {
+      const remaining = (this.pendingPermissionHydrations.get(threadId) ?? 1) - 1;
+      if (remaining > 0) this.pendingPermissionHydrations.set(threadId, remaining);
+      else this.pendingPermissionHydrations.delete(threadId);
+      if (this.permissionGenerationDisposals.delete(threadId)) this.permissionSnapshotGenerations.delete(threadId);
+    });
   }
 
   private hydrateTasks(threadId: string): void {

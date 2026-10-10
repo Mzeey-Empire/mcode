@@ -64,7 +64,7 @@ import {
 } from "../../features/thread-control";
 import { StartupAgentPhaseObserver, ThreadStartupService } from "../../features/thread-startup";
 import {
-  AgentPermissionService,
+  ApprovalService,
   AgentService,
   CanonicalAgentBoundary,
   GoalLifecycleService,
@@ -332,7 +332,7 @@ const agentContinuation = container.resolve(AgentTurnContinuationPort);
 workspaceEnvironmentService.setAutomaticSetupDispatcher({
   dispatch: (submission) => agentService.dispatchQueuedAutomaticTurn(submission),
 });
-  const agentPermissionService = container.resolve(AgentPermissionService);
+  const approvalService = container.resolve(ApprovalService);
   const planTurnService = container.resolve(PlanTurnService);
   const goalLifecycleService = container.resolve(GoalLifecycleService);
   const subagentLifecycleService = container.resolve(SubagentLifecycleService);
@@ -733,7 +733,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   threadService,
   agentService,
   agentContinuation,
-  agentPermissionService,
+  approvalService,
   planTurnService,
   goalLifecycleService,
   subagentLifecycleService,
@@ -927,24 +927,25 @@ async function bootstrapServer(): Promise<void> {
 
     // Provider work must start only after every client-visible history route has
     // one durable display representation.
-    startAgentOrchestration({
+    approvalService.start({
       stopSession: (threadId) => agentService.stopSession(threadId),
+      publishApprovalRequest: (request) => {
+        broadcast("approval.requested", request);
+        portPush.send("approval.requested", request);
+      },
+      publishApprovalResolved: (payload) => {
+        broadcast("approval.resolved", payload);
+        portPush.send("approval.resolved", payload);
+      },
+    }, threadControlService);
+    startAgentOrchestration({
       runtime: container.resolve(AgentEventPublicationRuntimePort),
       publicationRegistry: container.resolve(AgentEventPublicationRegistry),
       threadRepo,
       pullRequestCompletionEffect,
-      providerRegistry,
       publishThreadStatus: (status) => {
         broadcast("thread.status", status);
         portPush.send("thread.status", status);
-      },
-      publishPermissionRequest: (request) => {
-        broadcast("permission.request", request);
-        portPush.send("permission.request", request);
-      },
-      publishPermissionResolved: (payload) => {
-        broadcast("permission.resolved", payload);
-        portPush.send("permission.resolved", payload);
       },
     });
     await recoverTurnsAtStartup();

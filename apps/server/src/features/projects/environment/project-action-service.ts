@@ -3,6 +3,7 @@ import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
 import type {
   WorkspaceEnvironmentActionRun,
+  WorkspaceEnvironmentActionLaunchSnapshot,
   WorkspaceEnvironmentActionSlotInput,
 } from "@mcode/contracts";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
@@ -10,7 +11,9 @@ import {
   TERMINAL_BACKEND_TOKEN,
   PreparedTerminalCommandApprovalMismatchError,
   PreparedTerminalCommandStartError,
-  type PreparedTerminalCommandSession,
+  ActionTerminalClosedError,
+  TerminalCapacityError,
+  type ActionTerminal,
   type TerminalBackend,
 } from "../../terminal/backends/terminal-backend.js";
 import { ProjectActionAdmissionGate, type ProjectActionStartThread } from "./project-action-admission.js";
@@ -57,6 +60,9 @@ interface ProjectActionStartContext {
 /** Owns Project Action slot exclusion, latest-run retention, and backend process lifecycle. */
 @injectable()
 export class ProjectActionService {
+  private readonly terminals = new Map<string, {
+    threadId: string; terminal: ActionTerminal; unsubscribe: (() => void)[]; closed: Promise<void>;
+  }>();
   private readonly active = new Map<string, ProjectActionSlotState>();
   private readonly admission = new ProjectActionAdmissionGate();
   private readonly publisher: ProjectActionRunPublisher;
@@ -99,8 +105,21 @@ export class ProjectActionService {
     return this.runs.get(input.threadId, input.actionId);
   }
 
-  /** Starts one configured Action in its private retained terminal session. */
+  /** Starts an Action or returns the run already owned by its open terminal. */
   async start(input: WorkspaceEnvironmentActionSlotInput): Promise<WorkspaceEnvironmentActionRun> {
+    const thread = this.threads.findById(input.threadId);
+    if (!thread) throw threadNotFoundError();
+    this.admission.assertThreadCanStart(thread, thread);
+    const slot = slotKey(input.threadId, input.actionId);
+    const retained = this.runs.get(input.threadId, input.actionId);
+    if (this.terminals.has(slot) && retained?.status !== "awaiting-approval") {
+      if (this.active.get(slot)?.state === "pending-finalization") throw actionAlreadyRunningError();
+      if (retained) return retained;
+    }
+    return this.startNewRun(input);
+  }
+
+  private async startNewRun(input: WorkspaceEnvironmentActionSlotInput): Promise<WorkspaceEnvironmentActionRun> {
     const context = this.createStartContext(input);
     let releaseAdmission: (() => void) | null = null;
     try {
@@ -115,23 +134,29 @@ export class ProjectActionService {
   /** Stops one running Action and waits for its backend close barrier. */
   async stop(input: WorkspaceEnvironmentActionSlotInput): Promise<WorkspaceEnvironmentActionRun | null> {
     const active = await this.activeForSlot(slotKey(input.threadId, input.actionId));
-    if (!active) return this.runs.get(input.threadId, input.actionId);
+    if (!active) {
+      await this.terminals.get(slotKey(input.threadId, input.actionId))?.terminal.stopCommand();
+      return this.runs.get(input.threadId, input.actionId);
+    }
     if (active.state === "pending-finalization") return this.retryFinalization(input, active);
     return await this.stopRunningAction(input, active);
   }
 
-  /** Restarts a slot only after its prior terminal fully closes. */
+  /** Creates a fresh run after the previous command settles, reusing its terminal. */
   async restart(input: WorkspaceEnvironmentActionSlotInput): Promise<WorkspaceEnvironmentActionRun> {
-    await this.stop(input);
-    return await this.start(input);
+    const active = await this.activeForSlot(slotKey(input.threadId, input.actionId));
+    if (active?.state === "pending-finalization") await this.retryFinalization(input, active);
+    else if (active) await this.stopRunningAction(input, active, "replace");
+    return await this.startNewRun(input);
   }
 
-  /** Stops all active Action sessions owned by one Thread. */
+  /** Closes every Action terminal owned by one Thread and persists its final state. */
   async stopForThread(threadId: string): Promise<void> {
-    const actions = [...this.active.values()]
-      .filter((active) => active.threadId === threadId)
-      .map((active) => this.stop({ threadId, actionId: active.actionId }));
-    await Promise.all(actions);
+    const terminals = [...this.terminals.values()].filter((tracked) => tracked.threadId === threadId);
+    await Promise.all(terminals.map(async (tracked) => {
+      await this.terminal.kill(tracked.terminal.terminalSessionId);
+      await tracked.closed;
+    }));
   }
 
   /** Blocks new starts for one Thread and waits for starts already admitted to settle. */
@@ -155,14 +180,14 @@ export class ProjectActionService {
     return this.disposePromise;
   }
 
-  /** Converts surviving persisted running rows to interrupted after startup recovery has reaped terminals. */
+  /** Interrupts stale runs and clears terminal identities after startup recovery has reaped terminals. */
   async recoverStaleRuns(): Promise<WorkspaceEnvironmentActionRun[]> {
-    const interrupted: WorkspaceEnvironmentActionRun[] = [];
+    const recovered: WorkspaceEnvironmentActionRun[] = [];
     while (true) {
       const runs = await this.runs.interruptRunning(this.runFactory.timestamp());
       for (const run of runs) this.publisher.publish(run);
-      interrupted.push(...runs);
-      if (runs.length < 256) return interrupted;
+      recovered.push(...runs);
+      if (runs.length < 256) return recovered;
     }
   }
 
@@ -190,30 +215,100 @@ export class ProjectActionService {
     if (resolved.kind === "launch") return await this.launchResolvedAction(context, resolved);
     if (resolved.kind === "unavailable") return this.publisher.persistAndPublish(this.runFactory.createUnavailable(this.runInput(context, resolved)));
     if (resolved.kind === "configuration") return this.publisher.persistAndPublish(this.runFactory.createFailed({ ...this.runInput(context, resolved), script: null }));
-    return this.publisher.persistAndPublish(this.runFactory.createAwaitingApproval(this.runInput(context, resolved)));
+    return this.retainPendingApproval(context, resolved);
   }
 
   private async launchResolvedAction(
     context: ProjectActionStartContext,
     resolved: Extract<ProjectActionResolution, { readonly kind: "launch" }>,
   ): Promise<WorkspaceEnvironmentActionRun> {
-    let session: PreparedTerminalCommandSession | null = null;
+    let session: ActionTerminal | null = this.terminals.get(context.slot)?.terminal ?? null;
+    let launched = false;
     try {
-      session = await this.terminal.startPreparedCommand({
-        threadId: context.thread.id,
-        script: resolved.script,
-        expectedLaunch: { terminal: resolved.snapshot.terminal },
-      });
-      return await this.retainLaunchedAction(context, resolved, session);
+      const launch = { script: resolved.script, expectedLaunch: { terminal: resolved.snapshot.terminal } };
+      let snapshot: WorkspaceEnvironmentActionLaunchSnapshot;
+      if (session) {
+        this.clearRunListeners(context.slot);
+        snapshot = await session.run(launch);
+      } else {
+        session = await this.terminal.openActionTerminal({
+          threadId: context.thread.id, actionId: context.actionId, launch,
+        });
+        this.trackTerminal(context, session);
+        snapshot = session.snapshot ?? resolved.snapshot;
+      }
+      launched = true;
+      return await this.retainLaunchedAction(context, resolved, session, snapshot);
     } catch (error) {
-      return await this.handleLaunchFailure(context, resolved, session, error);
+      if (error instanceof TerminalCapacityError) throw terminalCapError(resolved.action.name);
+      return await this.handleLaunchFailure(context, resolved, launched ? session : null, error);
     }
+  }
+
+  private async retainPendingApproval(
+    context: ProjectActionStartContext,
+    resolved: Extract<ProjectActionResolution, { kind: "awaiting-approval" }>,
+  ): Promise<WorkspaceEnvironmentActionRun> {
+    let terminal = this.terminals.get(context.slot)?.terminal;
+    if (!terminal) {
+      try {
+        terminal = await this.terminal.openActionTerminal({
+          threadId: context.thread.id, actionId: context.actionId,
+          launch: "pending-approval",
+        });
+        this.trackTerminal(context, terminal);
+      } catch (error) {
+        if (error instanceof TerminalCapacityError) throw terminalCapError(resolved.action.name);
+        throw error;
+      }
+    }
+    const run = this.runFactory.createAwaitingApproval(this.runInput(context, resolved));
+    return this.publisher.persistAndPublish({ ...run, terminalSessionId: terminal.terminalSessionId });
+  }
+
+  private trackTerminal(context: ProjectActionStartContext, terminal: ActionTerminal): void {
+    const unsubscribe: (() => void)[] = [];
+    const tracked = { threadId: context.thread.id, terminal, unsubscribe, closed: Promise.resolve() };
+    this.terminals.set(context.slot, tracked);
+    terminal.onClosed(() => {
+      this.clearRunListeners(context.slot);
+      this.terminals.delete(context.slot);
+      tracked.closed = this.clearClosedTerminal(context, terminal.terminalSessionId);
+      void tracked.closed.catch((error: unknown) => {
+        logger.error("Closed action terminal persistence failed", { error: String(error) });
+      });
+    });
+  }
+
+  private clearRunListeners(slot: string): void {
+    const tracked = this.terminals.get(slot);
+    for (const unsubscribe of tracked?.unsubscribe ?? []) unsubscribe();
+    if (tracked) tracked.unsubscribe = [];
+  }
+
+  private async clearClosedTerminal(context: ProjectActionStartContext, terminalSessionId: string): Promise<void> {
+    const starting = this.active.get(context.slot);
+    if (starting?.state === "starting") await starting.settled;
+    const active = this.active.get(context.slot);
+    if (active && active.state !== "starting") {
+      active.stopping = true;
+      await this.runLifecycle.finish(context.slot, active.run.runId, 130);
+      await this.runLifecycle.retryPendingFinalization(context.slot, active);
+    }
+    const run = this.runs.get(context.thread.id, context.actionId);
+    if (!run || run.terminalSessionId !== terminalSessionId) return;
+    const closed: WorkspaceEnvironmentActionRun = {
+      ...run, revision: run.revision + 1, terminalSessionId: null,
+      ...(run.status === "awaiting-approval" ? { status: "interrupted", finishedAt: this.runFactory.timestamp() } : {}),
+    };
+    if (await this.runs.updateIfCurrent(closed)) this.publisher.publish(closed);
   }
 
   private async retainLaunchedAction(
     context: ProjectActionStartContext,
     resolved: Extract<ProjectActionResolution, { readonly kind: "launch" }>,
-    session: PreparedTerminalCommandSession,
+    session: ActionTerminal,
+    snapshot: WorkspaceEnvironmentActionLaunchSnapshot,
   ): Promise<WorkspaceEnvironmentActionRun> {
     const active: ActiveProjectAction = {
       state: "running",
@@ -223,6 +318,7 @@ export class ProjectActionService {
       run: this.runFactory.createActive({
         ...this.runInput(context, resolved),
         session,
+        snapshot,
       }),
       pendingFinalization: null,
       outputRemainder: new Uint8Array(),
@@ -230,8 +326,13 @@ export class ProjectActionService {
     };
     this.active.set(context.slot, active);
     await this.publisher.persistAndPublish(active.run);
-    session.onOutput((data) => this.runLifecycle.recordOutput(context.slot, active.run.runId, data));
-    session.onExit((exit) => this.finishAction(context.slot, active.run.runId, exit.exitCode));
+    const runId = active.run.runId;
+    const unsubscribe = [
+      session.onCommandOutput((data) => this.runLifecycle.recordOutput(context.slot, runId, data)),
+      session.onCommandExit((exit) => this.finishAction(context.slot, runId, exit.exitCode)),
+    ];
+    const tracked = this.terminals.get(context.slot);
+    if (tracked) tracked.unsubscribe = unsubscribe;
     this.settleStartingReservation(context);
     return active.run;
   }
@@ -239,17 +340,23 @@ export class ProjectActionService {
   private async handleLaunchFailure(
     context: ProjectActionStartContext,
     resolved: Extract<ProjectActionResolution, { readonly kind: "launch" }>,
-    session: PreparedTerminalCommandSession | null,
+    session: ActionTerminal | null,
     error: unknown,
   ): Promise<WorkspaceEnvironmentActionRun> {
     const renewedApproval = await this.renewedApprovalAfterMismatch(context, error);
-    if (renewedApproval) return this.publisher.persistAndPublish(this.runFactory.createAwaitingApproval(this.runInput(context, renewedApproval)));
+    if (renewedApproval) return this.retainPendingApproval(context, renewedApproval);
     if (session) return await this.compensateLaunchFailure(context, session, error);
-    return this.publisher.persistAndPublish(this.runFactory.createFailed({
+    const failed = this.runFactory.createFailed({
       ...this.runInput(context, resolved),
       script: resolved.script,
       snapshot: error instanceof PreparedTerminalCommandStartError ? error.snapshot : resolved.snapshot,
-    }));
+    });
+    return this.publisher.persistAndPublish({
+      ...failed,
+      ...(error instanceof ActionTerminalClosedError
+        ? { status: "interrupted", terminalSessionId: null }
+        : { terminalSessionId: this.terminals.get(context.slot)?.terminal.terminalSessionId ?? null }),
+    });
   }
 
   private async renewedApprovalAfterMismatch(
@@ -262,7 +369,7 @@ export class ProjectActionService {
 
   private async compensateLaunchFailure(
     context: ProjectActionStartContext,
-    session: PreparedTerminalCommandSession,
+    session: ActionTerminal,
     error: unknown,
   ): Promise<never> {
     const active = this.active.get(context.slot);
@@ -328,10 +435,11 @@ export class ProjectActionService {
   private async stopRunningAction(
     input: WorkspaceEnvironmentActionSlotInput,
     active: ActiveProjectAction,
+    afterExit: "shell" | "replace" = "shell",
   ): Promise<WorkspaceEnvironmentActionRun | null> {
     active.stopping = true;
     try {
-      await active.session.stop();
+      await active.session.stopCommand(afterExit);
     } finally {
       const current = this.active.get(slotKey(input.threadId, input.actionId));
       if (current?.state === "pending-finalization") await this.runLifecycle.retryPendingFinalization(slotKey(input.threadId, input.actionId), current);
@@ -352,7 +460,10 @@ export class ProjectActionService {
   }
 
   private activeThreadIds(): string[] {
-    return [...new Set([...this.active.values()].map((active) => active.threadId))];
+    return [...new Set([
+      ...[...this.active.values()].map((active) => active.threadId),
+      ...[...this.terminals.values()].map((tracked) => tracked.threadId),
+    ])];
   }
 }
 
@@ -369,4 +480,11 @@ function threadNotFoundError(): WorkspaceEnvironmentServiceError {
 
 function slotKey(threadId: string, actionId: string): string {
   return `${threadId}\u0000${actionId}`;
+}
+
+function terminalCapError(actionName: string): WorkspaceEnvironmentServiceError {
+  return new WorkspaceEnvironmentServiceError(
+    "WORKSPACE_ENVIRONMENT_TERMINAL_CAP",
+    `8 terminals are open. Close one to run ${actionName}.`,
+  );
 }

@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 /**
  * Verifies the off-band handoff bypass in ClaudeProvider.canUseTool (PRD #538):
  * a Read pre-granted via ScopedPreGrantService is auto-allowed without emitting
- * a permission_request, and all other tool calls fall through to the normal
+ * a approval_request, and all other tool calls fall through to the normal
  * permission flow unchanged.
  *
  * The fake SDK captures the `canUseTool` callback passed to query() so the test
@@ -106,7 +106,7 @@ describe("ClaudeProvider scoped pre-grant (off-band handoff Read)", () => {
     });
   }
 
-  it("auto-allows a pre-granted Read without emitting a permission_request", async () => {
+  it("auto-allows a pre-granted Read without emitting a approval_request", async () => {
     const threadId = "thread-grant";
     const grantedPath = "/tmp/mcode-handoff-thread-grant-123.md";
     scopedPreGrant.issue({ threadId, toolName: "Read", path: grantedPath });
@@ -115,7 +115,7 @@ describe("ClaudeProvider scoped pre-grant (off-band handoff Read)", () => {
     expect(captured.canUseTool).toBeTypeOf("function");
 
     const permissionEvents: unknown[] = [];
-    provider.on("permission_request", (e) => permissionEvents.push(e));
+    provider.on("approval_request", (e) => permissionEvents.push(e));
 
     const result = await captured.canUseTool!("Read", { path: grantedPath }, {});
     expect(result).toEqual({ behavior: "allow", updatedInput: { path: grantedPath } });
@@ -124,13 +124,13 @@ describe("ClaudeProvider scoped pre-grant (off-band handoff Read)", () => {
     expect(scopedPreGrant.hasActiveGrant(threadId)).toBe(false);
   });
 
-  it("does not bypass a Read of a different path (emits a permission_request)", async () => {
+  it("does not bypass a Read of a different path (emits a approval_request)", async () => {
     const threadId = "thread-other";
     scopedPreGrant.issue({ threadId, toolName: "Read", path: "/tmp/granted.md" });
 
     await startTurn(threadId);
     const permissionEvents: unknown[] = [];
-    provider.on("permission_request", (e) => permissionEvents.push(e));
+    provider.on("approval_request", (e) => permissionEvents.push(e));
 
     // Invoke with a non-granted path; the callback awaits a user decision, so
     // race it against a tick to confirm it emitted a request rather than

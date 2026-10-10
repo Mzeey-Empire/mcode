@@ -29,19 +29,22 @@ cancels every operation that did not request the removal.
 
 ## Security boundaries
 
-Every desktop Browser guest uses the persistent `persist:mcode-preview`
-partition. Cookies and HTTP cache survive guest replacement and are shared
-across threads and workspaces under Chromium's origin rules. Clearing cookies
-or cache affects the shared partition, not one tab. The
-[session policy](../../../apps/desktop/src/features/preview/security/electron-session-policy.ts)
-owns that partition and its permission handlers.
+Each workspace has one persistent `persist:mcode-browser-<uuid>` partition.
+Cookies and HTTP cache survive guest replacement and are shared by that
+workspace's threads only. Clearing cookies or cache affects that workspace.
+[Browser profiles](../../../apps/desktop/src/features/preview/security/browser-profiles.ts)
+install permission, download and request-recording policy before the first
+guest attaches. Server deletion releases the workspace's guests and clears
+its data; reconciliation with a complete workspace list also removes profiles
+deleted while this desktop was disconnected. See [ADR 0024](../../adr/0024-one-browser-profile-per-project.md).
 
 Electron main [fixes each webview's attachment policy](../../../apps/desktop/src/features/preview/security/webview-attachment-policy.ts)
 before creation. It disables Node integration, enables context isolation and
-sandboxing, and replaces the preload and partition with Mcode's fixed values.
+sandboxing, replaces the preload, and requires the partition bound to this
+window's prepared adoption token.
 The [adoption registry](../../../apps/desktop/src/features/preview/surfaces/registry.ts)
 then checks the owning renderer, tab identity, prepared token, and exact
-generation. Stale or foreign guests cannot become the current tab's host.
+generation and workspace session. Stale or foreign guests cannot become the current tab's host.
 
 A trusted, unsuppressed pointer event reported by the fixed preload can arm a
 clipboard grant for five seconds. The [clipboard policy](../../../apps/desktop/src/features/preview/security/clipboard-trust.ts)

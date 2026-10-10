@@ -6,7 +6,7 @@ import { ProviderIdSchema, SettingsSchema } from "../models/settings.js";
 import { PlanQuestionSchema } from "../models/plan-questions.js";
 import { PlanVersionSchema } from "../models/plan.js";
 import { ChecksStatusSchema } from "../github.js";
-import { PermissionRequestSchema, PermissionDecisionSchema } from "../models/permission.js";
+import { ApprovalRequestSchema, ApprovalOutcomeSchema } from "../models/approval.js";
 import { ProviderAvailabilitySchema } from "../providers/availability.js";
 import { lazySchema } from "../utils/lazySchema.js";
 import {
@@ -203,12 +203,13 @@ export const WS_CHANNELS = {
     threadId: z.string(),
     version: PlanVersionSchema(),
   }),
-  /** A tool permission request awaiting user decision. */
-  "permission.request": PermissionRequestSchema(),
-  /** Notification that a permission request has been settled. */
-  "permission.resolved": z.object({
+  /** A validated approval request awaiting a user decision. */
+  "approval.requested": ApprovalRequestSchema(),
+  /** Notification that an approval request has been settled. */
+  "approval.resolved": z.object({
     requestId: z.string(),
-    decision: PermissionDecisionSchema,
+    threadId: z.string(),
+    outcome: ApprovalOutcomeSchema(),
   }),
   /** Emitted when a workspace is fully hard-deleted (all cleanup complete). */
   "workspace.deleted": z.object({ workspaceId: z.string() }),

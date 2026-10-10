@@ -49,7 +49,7 @@ function routerDeps(sendMessage: AgentRouterDeps["agentService"]["sendMessage"],
   const unused = (): never => { throw new Error("Unexpected dependency in confirmation route"); };
   return {
     agentService: { sendMessage, createAndSend: unused, stopSession: unused, runtimeAccess: unused },
-    agentPermissionService: { respondToPermission: unused, listPendingPermissions: unused },
+    approvalService: { respondToApproval: unused, listPendingApprovals: unused },
     hookExecutionRepo: { listByMessage: unused },
     messageRepo,
     narrativeStore: { load: unused },
