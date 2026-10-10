@@ -12,6 +12,7 @@ import {
   type ComponentPropsWithoutRef,
   type ReactNode,
 } from "react";
+import { usePreparingRowEntrance } from "@/features/thread-startup";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "./state/workspaceStore";
@@ -2911,8 +2912,19 @@ function WorkspaceThreadSection({
     ? threadList.treeItems.slice(0, threadList.maxVisible)
     : threadList.treeItems;
   const showDrafts = lifecycleView === "active" && drafts.length > 0;
+  const sectionRowsRef = useRef<HTMLDivElement>(null);
+  usePreparingRowEntrance(
+    sectionRowsRef,
+    [
+      ...(showDrafts ? drafts.map((draft) => `draft:${draft.id}`) : []),
+      ...capped.map((item) => item.thread.id),
+    ],
+    capped
+      .filter((item) => item.thread.clientPreparing === true)
+      .map((item) => item.thread.id),
+  );
   return (
-    <>
+    <div ref={sectionRowsRef}>
       {showDrafts &&
         drafts.map((draft) => (
           <div
@@ -2991,7 +3003,7 @@ function WorkspaceThreadSection({
           onToggleThreadList={ctx.onToggleThreadList}
         />
       )}
-    </>
+    </div>
   );
 }
 import { useApprovalStore } from "@/stores/approvalStore";
