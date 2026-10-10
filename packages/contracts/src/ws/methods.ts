@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AcknowledgeSeenResultSchema, ThreadAttentionSchema } from "../models/thread-attention.js";
 import { AgentProgressPositionSchema, AgentThreadIdSchema } from "../compat/agent-model.js";
 import { WorkspaceSchema, WorkspaceEnrichmentSchema } from "../models/workspace.js";
 import {
@@ -851,9 +852,13 @@ export const WS_METHODS = lazySchema(() => ({
     ),
     result: z.boolean(),
   },
-  "thread.markViewed": {
-    params: z.object({ threadId: z.string() }),
-    result: z.void(),
+  "thread.listAttention": {
+    params: z.object({}).strict(),
+    result: z.array(ThreadAttentionSchema()),
+  },
+  "thread.acknowledgeSeen": {
+    params: z.object({ threadId: z.string().min(1).max(256), throughSequence: z.number().int().nonnegative() }).strict(),
+    result: AcknowledgeSeenResultSchema(),
   },
   /** Return the active open goal for a thread without starting provider work. */
   "thread.goal.get": {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ThreadAttentionSchema } from "../models/thread-attention.js";
 import { CanonicalAgentProgressFrameSchema } from "../models/canonical-agent-progress.js";
 import { ThreadStatusSchema } from "../models/enums.js";
 import { ThreadSchema } from "../models/thread.js";
@@ -29,6 +30,7 @@ export const CANONICAL_AGENT_EVENT_BATCH_MAX = 256;
 
 /** All push channel definitions keyed by channel name. */
 export const WS_CHANNELS = {
+  "thread.attention": ThreadAttentionSchema(),
   /** Directs browser creation to a host when no visible target exists yet. */
   "browserAutomation.bootstrap": z
     .object({
