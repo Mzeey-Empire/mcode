@@ -226,8 +226,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
       await completed;
     } catch (error) {
       turn.settle("failed", toError(error));
-      this.publishAssistantTextBoundary(state, turn);
-      this.publish(state, { type: "error", threadId: request.threadId, error: toError(error).message });
+      this.publishTurnError(state, turn, toError(error).message);
     } finally {
       unsubscribe();
       this.cancelPermissions(state, "turn_ended");
@@ -254,13 +253,22 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
       rememberNativeEvent(state, event);
       this.runtime.recordUsage(state.sessionId);
       if (event.type === "session.idle") this.publishCompletedAssistantMessage(state, turn);
-      for (const mapped of events) this.publish(state, mapped, event);
+      for (const mapped of events) {
+        if (mapped.type === "error") this.cancelPermissions(state, "turn_ended");
+        this.publish(state, mapped, event);
+      }
     } catch (error) {
       turn.settle("failed", toError(error));
-      this.publishAssistantTextBoundary(state, turn);
-      this.publish(state, { type: "error", threadId: state.request.threadId, error: toError(error).message });
+      this.publishTurnError(state, turn, toError(error).message);
       turn.abortTask ??= state.session.abort();
     }
+  }
+
+  /** The error terminal closes the turn server-side, so pending approvals settle ahead of it. */
+  private publishTurnError(state: CopilotSessionState, turn: CopilotTurnState, message: string): void {
+    this.publishAssistantTextBoundary(state, turn);
+    this.cancelPermissions(state, "turn_ended");
+    this.publish(state, { type: "error", threadId: state.request.threadId, error: message });
   }
 
   private publishCompletedAssistantMessage(state: CopilotSessionState, turn: CopilotTurnState): void {

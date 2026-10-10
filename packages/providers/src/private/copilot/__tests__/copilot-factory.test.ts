@@ -291,6 +291,19 @@ describe("Copilot public factory", () => {
     await expect(provider.shutdown()).resolves.toBeUndefined();
   });
 
+  it("settles a pending permission before a native error ends the turn", async () => {
+    await provider.sendTurn(request({ permissionMode: "supervised" }));
+    const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
+    const native = options.onPermissionRequest({ kind: "shell", fullCommandText: "bun run lint", toolCallId: "call-1" }, { sessionId: session.sessionId });
+    session.emit({ type: "session.error", data: { errorType: "fatal", message: "native failed" } });
+    expect(await native).toEqual({ kind: "denied-interactively-by-user" });
+    await vi.waitFor(() => expect(projections(sink).at(-1)?.type).toBe("ended"));
+    const types = projections(sink).map((event) => event.type);
+    expect(projections(sink).filter((event) => event.type === "approvalDecided").map((event) => event.outcome))
+      .toEqual([{ status: "cancelled", reason: "turn_ended" }]);
+    expect(types.indexOf("approvalDecided")).toBeLessThan(types.indexOf("error"));
+  });
+
   it("keeps a native error terminal failed when idle follows", async () => {
     await provider.sendTurn(request());
     session.emit({ type: "session.error", data: { errorType: "fatal", message: "native failed" } });
