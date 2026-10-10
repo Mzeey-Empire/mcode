@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo } from "react";
-import { ALL_MODE_OPTIONS, type ComposerMode, type ModeOption } from "@/components/chat/ModeSelector";
 import type { Thread } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { isDetachedWorktree, normalizeWorktreePath } from "@/lib/worktree";
 import { rememberComposerMode } from "@/lib/composer-mode-preference";
+import type { ComposerMode } from "./composer-mode";
 import { useForkTargetBranch, useNewThreadTargetBranch, type TargetBranch } from "./useTargetBranch";
 
 /** The selected execution target for the current Composer session. */
@@ -40,7 +40,6 @@ export interface UseComposerExecutionTargetOptions {
 export interface ComposerExecutionTargetController {
   target: ComposerExecutionTarget;
   mode: ComposerMode;
-  modeOptions: ModeOption[];
   isGitRepo: boolean;
   needsWorkspace: boolean;
   isStaleWorktree: boolean;
@@ -53,8 +52,9 @@ export interface ComposerExecutionTargetController {
   branchWorktreePath: string | null;
   branchWorktreeIsDetached: boolean;
   /**
-   * True while a new thread or fork in a git project has no branch to send: nothing is picked and the default is
-   * still loading or could not be read. Send waits instead of guessing a branch name.
+   * True while a new thread or fork in a git project has nothing to send to: Existing worktree has no worktree
+   * chosen, or nothing is picked and the default branch is still loading or could not be read. Send waits
+   * instead of guessing.
    */
   targetPending: boolean;
   setMode(mode: ComposerMode): void;
@@ -105,10 +105,6 @@ export function useComposerExecutionTarget({
     const normalizePath = (path: string) => path.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
     return !worktrees.some((worktree) => normalizePath(worktree.path) === normalizePath(activeThread.worktree_path!));
   }, [activeThread, worktrees, worktreesLoadedForWorkspace]);
-  const modeOptions = useMemo<ModeOption[]>(
-    () => isGitRepo ? ALL_MODE_OPTIONS : ALL_MODE_OPTIONS.filter((option) => option.value === "direct"),
-    [isGitRepo],
-  );
 
   const setMode = useCallback(
     (mode: ComposerMode) => {
@@ -159,7 +155,6 @@ export function useComposerExecutionTarget({
   return {
     target,
     mode: composerMode,
-    modeOptions,
     isGitRepo,
     needsWorkspace,
     isStaleWorktree,
@@ -194,10 +189,19 @@ interface TargetBranchPendingInput {
   readonly forkWorktreeIsDetached: boolean;
 }
 
-/** A new thread or fork in a git project needs a branch unless it attaches to a worktree that has one checked out. */
+/**
+ * A new thread or fork in a git project needs a branch unless it attaches to a worktree that has one checked out.
+ * Existing worktree also needs the worktree itself, since the workspace menu only switches the mode.
+ */
 function isTargetBranchPending(input: TargetBranchPendingInput): boolean {
   const { isGitRepo, target } = input;
-  if (!isGitRepo || target.kind === "existing-thread" || target.branch !== "") return false;
+  if (!isGitRepo || target.kind === "existing-thread") return false;
+  if (target.mode === "existing-worktree" && !hasChosenWorktree(target)) return true;
+  if (target.branch !== "") return false;
   if (target.mode !== "existing-worktree") return true;
   return target.kind === "new-thread" ? input.newThreadWorktreeIsDetached : input.forkWorktreeIsDetached;
+}
+
+function hasChosenWorktree(target: Exclude<ComposerExecutionTarget, { kind: "existing-thread" }>): boolean {
+  return target.kind === "new-thread" ? target.hasWorktree : Boolean(target.worktreePath);
 }

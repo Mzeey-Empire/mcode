@@ -72,12 +72,23 @@ function DropdownMenuContent({
   )
 }
 
-/** Groups related rows. Groups are split by separators and carry no visible label. */
+/** Groups related rows. Groups are split by separators; a group may lead with a {@link DropdownMenuGroupLabel}. */
 function DropdownMenuGroup({ className, ...props }: MenuPrimitive.Group.Props) {
   return (
     <MenuPrimitive.Group
       data-slot="dropdown-menu-group"
       className={cn("flex flex-col gap-1", className)}
+      {...props}
+    />
+  )
+}
+
+/** A muted caption naming the group it leads, such as "Workspace" (`20LL-2`). Names the group for assistive tech. */
+function DropdownMenuGroupLabel({ className, ...props }: MenuPrimitive.GroupLabel.Props) {
+  return (
+    <MenuPrimitive.GroupLabel
+      data-slot="dropdown-menu-group-label"
+      className={cn("px-3 pt-1.5 pb-1 text-caption font-medium text-muted select-none", className)}
       {...props}
     />
   )
@@ -300,6 +311,7 @@ export {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
+  DropdownMenuGroupLabel,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuSub,

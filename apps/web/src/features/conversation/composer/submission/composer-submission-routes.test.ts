@@ -70,7 +70,6 @@ function execution(target: ComposerExecutionTargetController["target"]): Compose
   return {
     target,
     mode: target.mode,
-    modeOptions: [],
     isGitRepo: false,
     needsWorkspace: false,
     isStaleWorktree: false,
