@@ -286,6 +286,10 @@ describe("ElectronWebviewBrowserSurfaceAdapter", () => {
     });
 
     const first = host.create(IDENTITY, { address: "http://localhost:4321/start" });
+    Object.assign(adapters[0]!.element, {
+      canGoBack: vi.fn(() => true),
+      canGoForward: vi.fn(() => false),
+    });
     adapters[0]!.element.dispatchEvent(Object.assign(new Event("did-navigate"), {
       url: "http://user:pw@localhost:4321/three?q=1#top",
       isMainFrame: true,
