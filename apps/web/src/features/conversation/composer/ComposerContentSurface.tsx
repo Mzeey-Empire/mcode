@@ -188,6 +188,8 @@ function ComposerQueueSurface({
   );
 
   if (!canShowQueue) return null;
+  // Nothing may reach agent.send while the thread is starting, queued messages included.
+  const paused = model.planPending || model.startingThread;
 
   return (
     <ComposerQueueList
@@ -195,11 +197,11 @@ function ComposerQueueSurface({
       isAgentRunning={model.isAgentRunning}
       provider={model.provider}
       isEditing={Boolean(model.editingFromQueue)}
-      isPaused={model.planPending}
+      isPaused={paused}
       onLoadIntoComposer={actions.onLoadIntoComposer}
-      onResume={() => model.planPending ? Promise.resolve() : actions.onResumeQueuedMessage()}
+      onResume={() => paused ? Promise.resolve() : actions.onResumeQueuedMessage()}
       onSendNow={(message) =>
-        model.planPending ? Promise.resolve() : actions.onSendQueuedMessageNow(message)
+        paused ? Promise.resolve() : actions.onSendQueuedMessageNow(message)
       }
     />
   );
