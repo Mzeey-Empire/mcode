@@ -139,12 +139,33 @@ export function PanelTitlePill({
   );
 }
 
+/** The round Close panel button, shared by row 1 and the rail's caption strip. */
+export function PanelToggleButton({ onClick }: { readonly onClick: () => void }) {
+  const panelShortcut = keybindingKeycaps(
+    getKeybindingForCommand("rightPanel.toggle")?.key ?? "mod+alt+b",
+    isMac,
+  );
+  return (
+    <IconButton
+      shape="round"
+      aria-label="Close panel"
+      tooltipShortcut={panelShortcut}
+      data-testid="panel-header-toggle"
+      data-preview-design-keep-open="true"
+      onClick={onClick}
+    >
+      <PanelRight />
+    </IconButton>
+  );
+}
+
 interface PanelHeaderProps {
   readonly maximized: boolean;
   readonly leadingRef: Ref<HTMLDivElement>;
   readonly row2Ref: Ref<HTMLDivElement>;
   readonly onToggleMaximized: () => void;
-  readonly onTogglePanel: () => void;
+  /** Row 1's trailing Close panel button, or null when the rail's caption strip hosts it. */
+  readonly panelToggle: ReactNode;
 }
 
 /**
@@ -158,13 +179,9 @@ export function PanelHeader({
   leadingRef,
   row2Ref,
   onToggleMaximized,
-  onTogglePanel,
+  panelToggle,
 }: PanelHeaderProps) {
   const { sidebarDocked } = useShellChrome();
-  const panelShortcut = keybindingKeycaps(
-    getKeybindingForCommand("rightPanel.toggle")?.key ?? "mod+alt+b",
-    isMac,
-  );
   return (
     <>
       <div
@@ -183,16 +200,7 @@ export function PanelHeader({
         >
           {maximized ? <Minimize2 /> : <Maximize2 />}
         </IconButton>
-        <IconButton
-          shape="round"
-          aria-label="Close panel"
-          tooltipShortcut={panelShortcut}
-          data-testid="panel-header-toggle"
-          data-preview-design-keep-open="true"
-          onClick={onTogglePanel}
-        >
-          <PanelRight />
-        </IconButton>
+        {panelToggle}
       </div>
       <div
         ref={row2Ref}

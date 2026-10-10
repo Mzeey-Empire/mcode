@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ShellChromeProvider } from "@/components/shell/shell-chrome-context";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { OverlayGateContext } from "@/components/ui/overlay-gate";
-import { PanelHeader, PanelHeaderSlot, PanelHeaderSlotScope } from "../PanelHeader";
+import { PanelHeader, PanelHeaderSlot, PanelHeaderSlotScope, PanelToggleButton } from "../PanelHeader";
 
 function renderHeader(maximized: boolean, sidebarDocked: boolean) {
   return render(
@@ -14,7 +14,7 @@ function renderHeader(maximized: boolean, sidebarDocked: boolean) {
         leadingRef={null}
         row2Ref={null}
         onToggleMaximized={vi.fn()}
-        onTogglePanel={vi.fn()}
+        panelToggle={<PanelToggleButton onClick={vi.fn()} />}
       />
     </ShellChromeProvider>,
   );

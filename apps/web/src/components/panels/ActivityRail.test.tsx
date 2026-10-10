@@ -179,6 +179,27 @@ describe("ActivityRail expansion", () => {
     expect(screen.getByRole("button", { name: "New tab" })).toBeInTheDocument();
   });
 
+  it("hosts a caption action in the top strip when the window leaves it free", () => {
+    const onClosePanel = vi.fn();
+    render(
+      <ActivityRail
+        tabInstances={[{ id: rightPanelSingletonId("terminal"), type: "terminal" }]}
+        workspaceId={workspaceId}
+        activeTabId={rightPanelSingletonId("terminal")}
+        scope="thread"
+        changesCount={0}
+        changesFresh={false}
+        browserTabSet={null}
+        {...handlers}
+        captionAction={<button type="button" onClick={onClosePanel}>Close panel</button>}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+
+    expect(onClosePanel).toHaveBeenCalledTimes(1);
+  });
+
   it("opens the remaining tab choices and creates the selected tab", () => {
     renderRail();
 

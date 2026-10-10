@@ -17,7 +17,8 @@ import {
 import { PlanPanel } from "./plan";
 import { PanelEmptyState } from "./PanelEmptyState";
 import { ACTIVITY_RAIL_FLOATING_OVERLAP_PX, ActivityRail } from "./ActivityRail";
-import { PanelHeader, PanelHeaderSlotScope, type PanelHeaderElements } from "./shell/PanelHeader";
+import { PanelHeader, PanelHeaderSlotScope, PanelToggleButton, type PanelHeaderElements } from "./shell/PanelHeader";
+import { windowChromeKind } from "@/components/shell/window-chrome";
 import type { PanelScope } from "@/lib/panel-tabs";
 import { DiffPanel } from "@/components/diff";
 import {
@@ -836,7 +837,18 @@ function TerminalPanelContent({ active }: { readonly active: boolean }) {
   );
 }
 
+/**
+ * Windows and Linux caption buttons cover the rail's top strip, so the toggle
+ * stays in row 1 there. Elsewhere the strip is free, and the toggle lands where
+ * the canvas toggle sits while the panel is closed.
+ */
+function placePanelToggle(toggle: React.ReactNode): { row1: React.ReactNode; rail: React.ReactNode } {
+  const captionButtonsCoverRail = windowChromeKind(window.desktopBridge?.window?.platform) === "caption-overlay";
+  return captionButtonsCoverRail ? { row1: toggle, rail: null } : { row1: null, rail: toggle };
+}
+
 function RightPanelActivityRail({
+  captionAction,
   activeThreadId,
   activeWorkspaceId,
   browserTabSet,
@@ -855,6 +867,7 @@ function RightPanelActivityRail({
   setActivityRailExpanded,
   setRightPanelTabInstance,
 }: {
+  readonly captionAction: React.ReactNode;
   readonly activeThreadId: string | null;
   readonly activeWorkspaceId: string;
   readonly browserTabSet: BrowserTabSet | null;
@@ -882,6 +895,7 @@ function RightPanelActivityRail({
       changesCount={changesCount}
       changesFresh={changesFresh}
       browserTabSet={browserTabSet}
+      captionAction={captionAction}
       onSelect={(instanceId) => {
         setRightPanelTabInstance(activeWorkspaceId, activeThreadId, instanceId);
         setActiveTerminalForTab(renderedTabInstances, instanceId, panelScopeId);
@@ -1334,6 +1348,8 @@ export function RightPanel() {
   // no workspace to anchor it to.
   if (!activeWorkspaceId) return null;
 
+  const panelToggle = placePanelToggle(<PanelToggleButton onClick={handleTogglePanel} />);
+
   return (
     <RightPanelFrame
       getMaxPanelWidth={getMaxPanelWidth}
@@ -1349,7 +1365,7 @@ export function RightPanel() {
             leadingRef={setHeaderLeading}
             row2Ref={setHeaderRow2}
             onToggleMaximized={toggleMaximized}
-            onTogglePanel={handleTogglePanel}
+            panelToggle={panelToggle.row1}
           />
           <RightPanelContent
             actionTerminalActive={actionTerminalActive}
@@ -1371,6 +1387,7 @@ export function RightPanel() {
           />
         </div>
         <RightPanelActivityRail
+          captionAction={panelToggle.rail}
           activeThreadId={activeThreadId}
           activeWorkspaceId={activeWorkspaceId}
           browserTabSet={browserTabSet}

@@ -43,6 +43,7 @@ vi.mock("./ActivityRail", () => ({
     onSelect,
     onCloseBrowserPage,
     onExpandedChange,
+    captionAction,
   }: {
     tabInstances: Array<{ id: string; type: string }>;
     activeTabId: string | null;
@@ -51,6 +52,7 @@ vi.mock("./ActivityRail", () => ({
     onSelect?: (instanceId: string) => void;
     onCloseBrowserPage?: (pageId: string) => void;
     onExpandedChange?: (expanded: boolean) => void;
+    captionAction?: React.ReactNode;
   }) => (
     <div
       data-testid="activity-rail"
@@ -58,6 +60,7 @@ vi.mock("./ActivityRail", () => ({
       data-active-tab-id={activeTabId}
       data-terminal-labels={JSON.stringify(terminalLabels ?? {})}
     >
+      <div data-testid="activity-rail-caption-strip">{captionAction}</div>
       <button type="button" data-testid="expand-activity-rail" onClick={() => onExpandedChange?.(true)} />
       {tabInstances.some((instance) => instance.type === "preview") && onCloseBrowserPage && (
         <button type="button" data-testid="close-browser-page" onClick={() => onCloseBrowserPage("browser-tab-1")} />
@@ -418,12 +421,35 @@ describe("RightPanel", () => {
     expect(row1).toHaveClass("window-drag");
     expect(screen.getByTestId("panel-header-row-2")).toBeEmptyDOMElement();
 
-    fireEvent.click(within(row1).getByRole("button", { name: "Close panel" }));
-    expect(toggleRightPanelAdaptive).toHaveBeenCalledWith("workspace-1", null);
-
     fireEvent.click(within(row1).getByRole("button", { name: "Expand" }));
     expect(useUiStore.getState().rightPanelMaximized).toBe(true);
     expect(within(row1).getByRole("button", { name: "Restore" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["Windows caption buttons cover the rail's top strip", "win32", "panel-header-row-1"],
+    ["Linux caption buttons cover the rail's top strip", "linux", "panel-header-row-1"],
+    ["macOS leaves the rail's top strip free", "darwin", "activity-rail-caption-strip"],
+    ["the browser build has no caption buttons", undefined, "activity-rail-caption-strip"],
+  ])("places Close panel where %s", (_case, platform, hostTestId) => {
+    const bridge = window.desktopBridge;
+    Object.defineProperty(window, "desktopBridge", {
+      configurable: true,
+      value: { ...bridge, window: platform ? { platform } : undefined },
+    });
+    useDiffStore.setState({
+      rightPanelFallbackByWorkspace: {
+        "workspace-1": createRightPanelState({ visible: true, width: 400 }),
+      },
+    });
+    render(<RightPanel />);
+
+    const toggles = screen.getAllByRole("button", { name: "Close panel" });
+    expect(toggles).toHaveLength(1);
+    expect(screen.getByTestId(hostTestId)).toContainElement(toggles[0]!);
+
+    fireEvent.click(toggles[0]!);
+    expect(toggleRightPanelAdaptive).toHaveBeenCalledWith("workspace-1", null);
   });
 
   it("gives the header rows only to the active tool", () => {

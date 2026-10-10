@@ -658,6 +658,8 @@ interface ActivityRailProps {
   onCloseBrowserPage: (pageId: string) => void;
   /** Publishes the floating state so Browser surfaces exclude the covered edge. */
   readonly onExpandedChange?: (expanded: boolean) => void;
+  /** A control for the caption strip when no window caption buttons cover it. */
+  readonly captionAction?: ReactNode;
 }
 
 interface ActivityRailViewProps extends ActivityRailProps {
@@ -788,6 +790,7 @@ function ActivityRailView({
   terminalLabels,
   onSelectBrowserPage,
   onCloseBrowserPage,
+  captionAction,
   railRef,
   expanded,
   onPointerEnter,
@@ -813,7 +816,13 @@ function ActivityRailView({
     >
       {/* The top 48 sits under the caption buttons and drags the window. It never
           widens, so the expanded rail cannot cover row 1's panel controls. */}
-      <div aria-hidden data-testid="activity-rail-caption-strip" className="window-drag absolute top-0 right-0 h-row-comfortable w-(--container-right-rail) border-l border-border bg-background" />
+      <div
+        aria-hidden={captionAction ? undefined : true}
+        data-testid="activity-rail-caption-strip"
+        className="window-drag absolute top-0 right-0 flex h-row-comfortable w-(--container-right-rail) items-center justify-center border-l border-border bg-background"
+      >
+        {captionAction}
+      </div>
       {/* Anchored to the window edge, so hover expansion grows leftward over the body. */}
       <div
         data-testid="activity-rail-surface"
@@ -871,6 +880,7 @@ export function ActivityRail({
   onSelectBrowserPage,
   onCloseBrowserPage,
   onExpandedChange,
+  captionAction,
 }: ActivityRailProps) {
   const [expanded, setExpanded] = useState(false);
   const railRef = useRef<HTMLDivElement>(null);
@@ -979,6 +989,7 @@ export function ActivityRail({
       terminalLabels={terminalLabels}
       onSelectBrowserPage={onSelectBrowserPage}
       onCloseBrowserPage={onCloseBrowserPage}
+      captionAction={captionAction}
       railRef={railRef}
       expanded={expanded}
       onPointerEnter={onPointerEnter}
