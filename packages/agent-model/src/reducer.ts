@@ -5,6 +5,7 @@ import { CanonicalAgentSemanticEnvelopeSchema } from "./events.js";
 import {
   AgentItemSchema,
   AgentThreadSchema,
+  type AgentTurnEnding,
   AgentTurnSchema,
   type AgentTurnStatus,
   CollaborationActionSchema,
@@ -283,6 +284,7 @@ function reduceTurnStarted(
     status: "Running",
     startedAt: event.payload.startedAt,
     endedAt: null,
+    ending: null,
   });
 }
 
@@ -321,6 +323,7 @@ function reduceTurnCompleted(
   return updateTurnLifecycle(state, event.routing.threadId, event.routing.turnId, acceptedInputState, {
     status: "Completed",
     endedAt: event.payload.endedAt,
+    ending: null,
   });
 }
 
@@ -332,6 +335,8 @@ function reduceTurnCancelled(
   return updateTurnLifecycle(state, event.routing.threadId, event.routing.turnId, acceptedInputState, {
     status: "Cancelled",
     endedAt: event.payload.endedAt,
+    // Every stop before stop causes existed was a user stop.
+    ending: { outcome: "cancelled", stop: event.payload.stop ?? { by: "user" } },
   });
 }
 
@@ -343,6 +348,7 @@ function reduceTurnInterrupted(
   return updateTurnLifecycle(state, event.routing.threadId, event.routing.turnId, acceptedInputState, {
     status: "Interrupted",
     endedAt: event.payload.endedAt,
+    ending: { outcome: "interrupted", cause: event.payload.cause ?? "unknown" },
   });
 }
 
@@ -354,6 +360,14 @@ function reduceTurnErrored(
   return updateTurnLifecycle(state, event.routing.threadId, event.routing.turnId, acceptedInputState, {
     status: "Errored",
     endedAt: event.payload.endedAt,
+    ending: {
+      outcome: "errored",
+      failure: event.payload.failure ?? {
+        kind: "fatal",
+        provider: state.threads[event.routing.threadId]?.providerId ?? event.sourceProviderId,
+        message: event.payload.error,
+      },
+    },
   });
 }
 
@@ -367,7 +381,7 @@ function reduceIngestOverflow(
     event.routing.threadId,
     event.routing.turnId,
     acceptedInputState,
-    { status: "Interrupted", endedAt: event.payload.endedAt },
+    { status: "Interrupted", endedAt: event.payload.endedAt, ending: { outcome: "interrupted", cause: "saving_stopped" } },
   );
   if (lifecycle.outcome !== "applied") return lifecycle;
   const thread = lifecycle.state.threads[event.routing.threadId];
@@ -490,6 +504,7 @@ function updateTurnLifecycle(
     status: AgentTurnStatus;
     startedAt?: string;
     endedAt: string | null;
+    ending: AgentTurnEnding | null;
   },
 ): AgentReducerResult {
   const currentTurn = turnId ? state.turns[turnId] : undefined;
@@ -513,6 +528,7 @@ function updateTurnLifecycle(
           status: update.status,
           startedAt: update.startedAt ?? currentTurn.startedAt,
           endedAt: update.endedAt,
+          ending: update.ending,
           updatedAt: update.endedAt ?? update.startedAt ?? currentTurn.updatedAt,
         },
       },

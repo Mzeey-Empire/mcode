@@ -44,6 +44,7 @@ export {
   AgentItemSchema,
   AgentThreadActivityStateSchema,
   AgentThreadSchema,
+  AgentTurnEndingSchema,
   AgentTurnStatusSchema,
   AgentTurnSchema,
   AgentTurnTriggerSchema,
@@ -53,6 +54,10 @@ export {
   CollaborationActionStatusSchema,
   CollaborationSourceSchema,
   CollaborationTargetSchema,
+  InterruptionCauseSchema,
+  PersistedTurnFailureSchema,
+  SystemStopReasonSchema,
+  TurnStopCauseSchema,
 } from "./records.js";
 export type {
   AgentItem,
@@ -60,6 +65,7 @@ export type {
   AgentThread,
   AgentThreadActivityState,
   AgentTurn,
+  AgentTurnEnding,
   AgentTurnStatus,
   AgentTurnTrigger,
   CollaborationAction,
@@ -67,6 +73,10 @@ export type {
   CollaborationActionStatus,
   CollaborationSource,
   CollaborationTarget,
+  InterruptionCause,
+  PersistedTurnFailure,
+  SystemStopReason,
+  TurnStopCause,
 } from "./records.js";
 
 export {

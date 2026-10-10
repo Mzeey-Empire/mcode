@@ -13,6 +13,9 @@ import {
   AgentThreadSchema,
   AgentTurnSchema,
   CollaborationActionSchema,
+  InterruptionCauseSchema,
+  PersistedTurnFailureSchema,
+  TurnStopCauseSchema,
 } from "./records.js";
 
 const PendingAgentTurnSchema = AgentTurnSchema.refine(
@@ -55,6 +58,8 @@ export const CanonicalAgentEventSchema = z.discriminatedUnion("type", [
       type: z.literal("turn.cancelled"),
       endedAt: CanonicalTimestampSchema,
       reason: z.string().trim().min(1).max(2_000),
+      // Optional only so envelopes written before endings existed still parse.
+      stop: TurnStopCauseSchema.optional(),
     })
     .strict(),
   z
@@ -62,6 +67,8 @@ export const CanonicalAgentEventSchema = z.discriminatedUnion("type", [
       type: z.literal("turn.interrupted"),
       endedAt: CanonicalTimestampSchema,
       reason: z.string().trim().min(1).max(2_000),
+      // Optional only so envelopes written before endings existed still parse.
+      cause: InterruptionCauseSchema.optional(),
     })
     .strict(),
   z
@@ -69,6 +76,8 @@ export const CanonicalAgentEventSchema = z.discriminatedUnion("type", [
       type: z.literal("turn.errored"),
       endedAt: CanonicalTimestampSchema,
       error: z.string().trim().min(1).max(8_000),
+      // Optional only so envelopes written before endings existed still parse.
+      failure: PersistedTurnFailureSchema.optional(),
     })
     .strict(),
   z

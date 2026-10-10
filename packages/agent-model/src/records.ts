@@ -80,6 +80,59 @@ export const AgentTurnTriggerSchema = z.discriminatedUnion("kind", [
 /** Provenance for the action that caused a canonical turn. */
 export type AgentTurnTrigger = z.infer<typeof AgentTurnTriggerSchema>;
 
+/** Why an interrupted turn stopped. "unknown" covers rows written before causes existed. */
+export const InterruptionCauseSchema = z.enum(["app_closed", "provider_exited", "saving_stopped", "unknown"]);
+/** Why an interrupted turn stopped. "unknown" covers rows written before causes existed. */
+export type InterruptionCause = z.infer<typeof InterruptionCauseSchema>;
+
+/** Provider failure persisted with an errored turn, with any reset time made absolute. */
+export const PersistedTurnFailureSchema = z
+  .object({
+    kind: z.enum(["retryable", "usage_limit", "auth", "fatal"]),
+    provider: ProviderIdSchema,
+    /** Raw provider text for Details. */
+    message: z.string().trim().min(1).max(8_000),
+    status: z.number().int().min(100).max(599).optional(),
+    code: z.string().trim().min(1).max(128).optional(),
+    resetsAt: CanonicalTimestampSchema.optional(),
+    limitType: z.string().trim().min(1).max(64).optional(),
+    retries: z
+      .object({ made: z.number().int().nonnegative(), max: z.number().int().positive().optional() })
+      .strict()
+      .optional(),
+  })
+  .strict();
+/** Provider failure persisted with an errored turn, with any reset time made absolute. */
+export type PersistedTurnFailure = z.infer<typeof PersistedTurnFailureSchema>;
+
+/** Why Mcode itself, not the user, stopped a turn. */
+export const SystemStopReasonSchema = z.enum([
+  // A Deny could not be delivered upstream, so Mcode stopped the turn fail-closed.
+  "approval_unanswerable",
+  "thread_control",
+  // Teardown of a deleted thread; no notice is ever shown.
+  "thread_deleted",
+]);
+/** Why Mcode itself, not the user, stopped a turn. */
+export type SystemStopReason = z.infer<typeof SystemStopReasonSchema>;
+
+/** Who stopped a cancelled turn. Rows written before stop causes existed read as "user". */
+export const TurnStopCauseSchema = z.discriminatedUnion("by", [
+  z.object({ by: z.literal("user") }).strict(),
+  z.object({ by: z.literal("mcode"), reason: SystemStopReasonSchema }).strict(),
+]);
+/** Who stopped a cancelled turn. Rows written before stop causes existed read as "user". */
+export type TurnStopCause = z.infer<typeof TurnStopCauseSchema>;
+
+/** Cause of a non-completed ending; null for completed and running turns. */
+export const AgentTurnEndingSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("cancelled"), stop: TurnStopCauseSchema }).strict(),
+  z.object({ outcome: z.literal("interrupted"), cause: InterruptionCauseSchema }).strict(),
+  z.object({ outcome: z.literal("errored"), failure: PersistedTurnFailureSchema }).strict(),
+]);
+/** Cause of a non-completed ending; null for completed and running turns. */
+export type AgentTurnEnding = z.infer<typeof AgentTurnEndingSchema>;
+
 /** Runtime-neutral canonical turn record. */
 export const AgentTurnSchema = z
   .object({
@@ -100,6 +153,8 @@ export const AgentTurnSchema = z
     // field existed parse as null rather than failing validation.
     providerStartedAt: CanonicalTimestampSchema.nullable().default(null),
     endedAt: CanonicalTimestampSchema.nullable(),
+    // Turns persisted before endings existed parse as null.
+    ending: AgentTurnEndingSchema.nullable().default(null),
     ...RecordTimestampsSchema,
   })
   .strict();
