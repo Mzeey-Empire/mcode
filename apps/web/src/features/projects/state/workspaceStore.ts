@@ -28,6 +28,7 @@ import { useComposerDraftStore, type ComposerDraft } from "@/stores/composerDraf
 import { useThreadDraftStore } from "@/stores/threadDraftStore";
 import { toComposerAttachmentMetas } from "@/features/conversation/composer/draft/composer-attachment-operations";
 import { useDiffStore } from "@/stores/diffStore";
+import { newThreadOverviewKey, useOverviewStore } from "@/stores/overviewStore";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { usePreviewReferenceQueueStore } from "@/features/preview/state/previewReferenceQueueStore";
 import { usePreviewTabsStore } from "@/features/preview/state/previewTabsStore";
@@ -1750,6 +1751,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     get().setActiveThread(null);
     get().setPendingNewThread(true);
     set({ activeDraftId: null });
+    // Each new thread starts with its targets in view, even after the user closed the card on the last one.
+    const activeWorkspaceId = get().activeWorkspaceId;
+    if (activeWorkspaceId) useOverviewStore.getState().reopen(newThreadOverviewKey(activeWorkspaceId));
   },
 
   setActiveDraftId: (draftId) => {
@@ -1777,6 +1781,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       autoPreviewBranch: entity.target.autoPreviewBranch,
       selectedWorktree: entity.target.selectedWorktree,
     });
+    useOverviewStore.getState().reopen(newThreadOverviewKey(workspaceId));
   },
 
   discardThreadDraft: (draftId) => {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { overviewPresentation, threadOverviewKey, useOverviewStore } from "../overviewStore";
+import { newThreadOverviewKey, overviewPresentation, threadOverviewKey, useOverviewStore } from "../overviewStore";
 
 const key = threadOverviewKey("thread-1");
 const other = threadOverviewKey("thread-2");
@@ -46,6 +46,20 @@ describe("overviewStore", () => {
 
     expect(useOverviewStore.getState().closedSubjects.has(key)).toBe(false);
     expect(useOverviewStore.getState().overlaySubject).toBe(key);
+  });
+
+  it("reopens only the given subject, clearing its overlay", () => {
+    const newThread = newThreadOverviewKey("ws-1");
+    useOverviewStore.getState().toggle(newThread, true);
+    useOverviewStore.getState().toggle(key, true);
+    useOverviewStore.getState().reopen(newThread);
+
+    expect(useOverviewStore.getState().closedSubjects.has(newThread)).toBe(false);
+    expect(useOverviewStore.getState().closedSubjects.has(key)).toBe(true);
+
+    useOverviewStore.getState().toggle(newThread, false);
+    useOverviewStore.getState().reopen(newThread);
+    expect(useOverviewStore.getState().overlaySubject).toBeNull();
   });
 
   it("docks unless closed, and overlays only on request where it cannot dock", () => {

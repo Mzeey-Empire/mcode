@@ -14,6 +14,11 @@ export function threadOverviewKey(threadId: string): OverviewSubjectKey {
   return `thread:${threadId}`;
 }
 
+/** Store key for a workspace's new-thread Overview. */
+export function newThreadOverviewKey(workspaceId: string): OverviewSubjectKey {
+  return `new-thread:${workspaceId}`;
+}
+
 interface OverviewState {
   /** Subjects whose docked card the user closed. The choice lasts for the session. */
   closedSubjects: ReadonlySet<OverviewSubjectKey>;
@@ -25,6 +30,8 @@ interface OverviewState {
   toggle: (key: OverviewSubjectKey, dockable: boolean) => void;
   /** Closes the overlay after Esc, an outside press, or the canvas regaining room to dock. */
   dismissOverlay: (key: OverviewSubjectKey) => void;
+  /** Shows a subject's card again after the user closed it, as starting a new thread does. */
+  reopen: (key: OverviewSubjectKey) => void;
   /** Request that one thread's Overview show after navigation. */
   requestOpen: (threadId: string) => void;
   /** Shows a requested Overview the way the canvas allows, then clears the request. */
@@ -53,6 +60,14 @@ export const useOverviewStore = create<OverviewState>((set) => ({
     }),
   dismissOverlay: (key) =>
     set((state) => (state.overlaySubject === key ? { overlaySubject: null } : state)),
+  reopen: (key) =>
+    set((state) => {
+      const closedSubjects = withoutKey(state.closedSubjects, key);
+      const overlaySubject = state.overlaySubject === key ? null : state.overlaySubject;
+      return closedSubjects === state.closedSubjects && overlaySubject === state.overlaySubject
+        ? state
+        : { closedSubjects, overlaySubject };
+    }),
   requestOpen: (threadId) => set({ requestedSubject: threadOverviewKey(threadId) }),
   consumeOpenRequest: (key, dockable) =>
     set((state) =>
