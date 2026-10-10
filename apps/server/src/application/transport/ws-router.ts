@@ -47,6 +47,9 @@ import type {
   ProjectActionService,
 } from "../../features/projects/index.js";
 import { WorkspaceEnvironmentServiceError } from "../../features/projects/environment/workspace-environment-errors.js";
+import type { GitPushService } from "../../features/projects/git/git-push-service.js";
+import type { GitCommitService } from "../../features/projects/git/commits/git-commit-service.js";
+import type { CommitMessageGenerator } from "../../features/projects/git/commits/commit-message-generator.js";
 import {
   isWorkspaceEnvironmentMethod,
   routeWorkspaceEnvironment,
@@ -242,6 +245,12 @@ export interface RouterDeps {
   gitComparison: GitComparisonService;
   gitRepository: GitRepositoryService;
   gitWorktrees: GitWorktreeService;
+  /** Pushes branches and commit SHAs to standard or Review task targets. */
+  gitPush: GitPushService;
+  /** Durable Review commits and their pushes. */
+  gitCommit: GitCommitService;
+  /** Writes commit messages for selected Review files. */
+  commitMessages: CommitMessageGenerator;
   pullRequestReviews: PullRequestReviewGitService;
   githubService: GithubService;
   fileService: FileService;

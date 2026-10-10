@@ -15,6 +15,9 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import * as NodeChildProcess from "node:child_process";
+import { GitPushService } from "../../features/projects/git/git-push-service.js";
+import { GitCommitService } from "../../features/projects/git/commits/git-commit-service.js";
+import { CommitMessageGenerator } from "../../features/projects/git/commits/commit-message-generator.js";
 import { killOrphanedServer, reapOrphanedPtys } from "../../runtime/process/orphan-cleanup.js";
 import { PtyPidRegistry } from "../../features/terminal/host/pty-pid-registry.js";
 
@@ -496,6 +499,9 @@ const ciWatcherService = new CiWatcherService(githubService, (channel, data) => 
   portPush.send("thread.prLinked", payload);
 });
 container.registerInstance(CiWatcherService, ciWatcherService);
+const gitPush = container.resolve(GitPushService);
+const gitCommit = container.resolve(GitCommitService);
+const commitMessages = container.resolve(CommitMessageGenerator);
 const threadDeletionTeardownService = container.resolve(ThreadDeletionTeardownService);
 if (workerOwnedTurnRuntime.progress) {
   threadDeletionTeardownService.bindAcceptedProgress(workerOwnedTurnRuntime.progress);
@@ -638,6 +644,15 @@ async function removeExpiredSnapshots(): Promise<void> {
 }
 
 await removeExpiredSnapshots();
+
+/** Settles commit requests a previous process left prepared, then drops expired ones, before RPCs arrive. */
+async function settleCommitRequests(): Promise<void> {
+  await gitCommit.reconcileAllPrepared();
+  const removed = await gitCommit.deleteExpired();
+  if (removed > 0) logger.info(`Cleaned up ${removed} expired commit requests`);
+}
+
+await settleCommitRequests();
 container.resolve(AttachmentService).removeExpiredDraftImages();
 
 /** Starts workspace and worktree Git watchers, then repairs stale Git flags. */
@@ -730,6 +745,9 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   gitComparison,
   gitRepository,
   gitWorktrees,
+  gitPush,
+  gitCommit,
+  commitMessages,
   pullRequestReviews,
   githubService,
   pullRequestService,

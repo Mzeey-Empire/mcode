@@ -343,7 +343,6 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
   const turnExpandRef = useRef(new Map<string, boolean>());
   const [hosts, setHosts] = useState<readonly TranscriptHost[]>([]);
   const [atTail, setAtTail] = useState(true);
-  const [hasNewContent, setHasNewContent] = useState(false);
   const [stickyVisible, setStickyVisible] = useState(false);
   const [stickyKey, setStickyKey] = useState<string>();
   const [stickyHeight, setStickyHeight] = useState(0);
@@ -382,7 +381,6 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
   const syncPosition = useCallback((position: TranscriptPosition) => {
     positionRef.current = position;
     setAtTail(position.kind === "end");
-    if (position.kind === "end") setHasNewContent(false);
     const view = controllerRef.current;
     if (!view) return;
     const current = latest.current;
@@ -430,11 +428,6 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
       recordThreadPositioned(data.activeThreadId);
     }
   }, [items, data.loading, data.renderedThreadId, data.activeThreadId]);
-
-  const lastItemKey = items.at(-1)?.key;
-  useEffect(() => {
-    if (positionRef.current.kind !== "end") setHasNewContent(true);
-  }, [data.streamingText, lastItemKey]);
 
   const fillPages = useRef(0);
   useEffect(() => {
@@ -564,8 +557,8 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
         selectedTextCommentEditor={props.selectedTextCommentEditor} selectedTextCommentEditorScope={props.selectedTextCommentEditorScope}
         viewportRef={viewportRef} renderedThreadId={data.renderedThreadId} stickyPreview={stickyPreview}
         isStickyVisible={stickyVisible} onJumpToUserMessage={jumpToUser} onStickyHeightChange={setStickyHeight}
-        showScrollToBottom={!atTail} hasNewContent={hasNewContent}
-        onScrollToBottom={() => controllerRef.current?.moveTo({ kind: "end" }, true)}
+        showJumpToLatest={!atTail}
+        onJumpToLatest={() => controllerRef.current?.moveTo({ kind: "end" }, true)}
       />
     </div>
   );

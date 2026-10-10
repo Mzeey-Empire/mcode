@@ -2,8 +2,6 @@ import { ReviewWorktreeMissingError, assertReviewWorktree, reviewComparisonFailu
 import { WS_METHODS, type WsMethodName } from "@mcode/contracts";
 import type { z } from "zod";
 import type { HandoffCheckoutService } from "../../../handoff/checkout/handoff-checkout-service.js";
-import type { CiWatcherService } from "../../../pull-requests/status/ci-watcher.js";
-import type { ReviewWorktreeService } from "../../../pull-requests/reviews/review-worktree-service.js";
 import type { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import type { ThreadService } from "../../../thread-control/lifecycle/thread-service.js";
 import { broadcast } from "../../../../application/transport/push.js";
@@ -11,19 +9,16 @@ import type { WorkspaceService } from "../../lifecycle/workspace-service.js";
 import type { WorkspaceRepo } from "../../persistence/workspace-repo.js";
 import type { GitComparisonService } from "../git-comparison-service.js";
 import type { GitRepositoryService } from "../git-repository-service.js";
+import type { GitPushService } from "../git-push-service.js";
+import type { CommitMessageGenerator } from "../commits/commit-message-generator.js";
+import type { GitCommitService } from "../commits/git-commit-service.js";
 import type { GitWorktreeService } from "../git-worktree-service.js";
-import type { PullRequestReviewGitService } from "../pull-request-review-git-service.js";
 
 type GitRpcMethod = Extract<WsMethodName, `git.${string}`>;
 
 type GitRpcParamsByMethod = {
   [Method in GitRpcMethod]: z.input<ReturnType<typeof WS_METHODS>[Method]["params"]>;
 };
-
-type ReviewPushTarget = Extract<
-  ReturnType<ReviewWorktreeService["resolvePushTarget"]>,
-  { kind: "review" }
->["target"];
 
 /** Defines the services required to route validated Git RPC calls. */
 export interface GitRouterDeps {
@@ -46,17 +41,15 @@ export interface GitRouterDeps {
     | "getCurrentBranch"
     | "checkout"
     | "getRemoteUrl"
-    | "getCurrentBranchAt"
-    | "push"
   >;
   gitWorktrees: Pick<GitWorktreeService, "listWorktrees" | "resolveWorkingDir">;
   handoffCheckoutService: Pick<HandoffCheckoutService, "createBranchForThread">;
   threadService: Pick<ThreadService, "findById">;
   threadRepo: Pick<ThreadRepo, "findById">;
   workspaceRepo: Pick<WorkspaceRepo, "findById">;
-  pullRequestReviews: Pick<PullRequestReviewGitService, "pushPullRequestReviewBranch">;
-  reviewWorktreeService: Pick<ReviewWorktreeService, "resolvePushTarget">;
-  ciWatcherService: Pick<CiWatcherService, "findByWorkspaceBranch" | "scheduleBumpAfterPush">;
+  gitPush: Pick<GitPushService, "pushCheckedOutBranch">;
+  gitCommit: Pick<GitCommitService, "commit">;
+  commitMessages: Pick<CommitMessageGenerator, "generate">;
 }
 
 type GitHandlerMap = {
@@ -176,6 +169,20 @@ const gitHandlers: GitHandlerMap = {
       )
       : { status: "unavailable", reason: "no-base" },
   "git.push": routeGitPush,
+  "git.generateCommitMessage": (deps, params) => deps.commitMessages.generate(
+    resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
+    params.paths,
+  ),
+  "git.commit": (deps, params) => deps.gitCommit.commit({
+    requestId: params.requestId,
+    workspaceId: params.workspaceId,
+    threadId: params.threadId ?? null,
+    repoPath: resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
+    expectedHead: params.expectedHead,
+    files: params.files,
+    message: params.message,
+    push: params.push,
+  }),
 };
 
 /** Checks whether a method belongs to the Git RPC family. */
@@ -261,64 +268,11 @@ async function routeGitPush(
   if (!workspace) throw new Error(`Workspace ${params.workspaceId} not found`);
   if (!workspace.is_git_repo) return;
 
-  await pushToResolvedTarget(deps, params, workspace.path);
-  schedulePushBumps(deps, params.workspaceId, params.branch);
+  await deps.gitPush.pushCheckedOutBranch({
+    workspaceId: params.workspaceId,
+    workspacePath: workspace.path,
+    branch: params.branch,
+    threadId: params.threadId,
+  });
   return { success: true };
-}
-
-async function pushToResolvedTarget(
-  deps: GitRouterDeps,
-  params: GitRpcParamsByMethod["git.push"],
-  workspacePath: string,
-): Promise<void> {
-  const resolution = params.threadId
-    ? deps.reviewWorktreeService.resolvePushTarget(params.threadId)
-    : { kind: "standard" as const };
-  if (resolution.kind === "invalid_review") {
-    throw new Error("The Review task link changed. Reload the task before pushing.");
-  }
-  if (resolution.kind === "review") {
-    await pushReviewTarget(deps, params, resolution.target);
-    return;
-  }
-  await deps.gitRepository.push(workspacePath, params.branch);
-}
-
-async function pushReviewTarget(
-  deps: GitRouterDeps,
-  params: GitRpcParamsByMethod["git.push"],
-  target: ReviewPushTarget,
-): Promise<void> {
-  if (target.workspaceId !== params.workspaceId || target.localBranch !== params.branch) {
-    throw new Error("Review task push target does not match the requested Workspace branch.");
-  }
-  const currentBranch = await deps.gitRepository.getCurrentBranchAt(target.worktreePath);
-  if (currentBranch !== target.localBranch) {
-    throw new Error(
-      `Review task checkout is on ${currentBranch ?? "detached HEAD"}, expected ${target.localBranch}.`,
-    );
-  }
-  await deps.pullRequestReviews.pushPullRequestReviewBranch(
-    target.worktreePath,
-    target.pushRemote,
-    target.pushRef,
-    target.expectedHeadRepositoryUrl,
-  );
-}
-
-function schedulePushBumps(
-  deps: GitRouterDeps,
-  workspaceId: string,
-  branch: string,
-): void {
-  // Fresh CI runs appear 3-15s after push. Schedule bumps so the UI surfaces
-  // "pending" without waiting a full passive poll cycle.
-  const threadIds = deps.ciWatcherService.findByWorkspaceBranch(
-    (id) => deps.threadRepo.findById(id),
-    workspaceId,
-    branch,
-  );
-  for (const threadId of threadIds) {
-    deps.ciWatcherService.scheduleBumpAfterPush(threadId);
-  }
 }

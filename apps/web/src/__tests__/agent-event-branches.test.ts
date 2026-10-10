@@ -1060,6 +1060,31 @@ describe("handleAgentEvent branches", () => {
     ]);
   });
 
+  it("session.toolUse records the latest user message as the parent task list's source", () => {
+    resetThreadStoreForTests({
+      currentThreadId: "thread-1",
+      runningThreadIds: new Set(["thread-1"]),
+      records: new Map<string, ThreadRecord>([
+        ["thread-1", {
+          ...createEmptyThreadRecord(),
+          messages: [
+            createMockMessage({ id: "user-1", role: "user" }),
+            createMockMessage({ id: "assistant-1", role: "assistant" }),
+            createMockMessage({ id: "user-2", role: "user" }),
+            createMockMessage({ id: "assistant-2", role: "assistant" }),
+          ],
+          loading: false,
+        }],
+      ]),
+    });
+
+    useThreadStore.getState().handleAgentEvent({ type: "toolUse", threadId: "thread-1", toolCallId: "todo-1",
+        toolName: "TodoWrite",
+        toolInput: { todos: [{ id: "a", content: "Run mapper tests", status: "pending" }] }, } as AgentEvent);
+
+    expect(useTaskStore.getState().taskBubbleByThread["thread-1"]?.sourceMessageId).toBe("user-2");
+  });
+
   it("session.toolUse keeps sub-agent task grouping when duplicate TodoWrite omits parent", () => {
     useThreadStore.getState().handleAgentEvent({ type: "toolUse", threadId: "thread-1", toolCallId: "agent-1",
         toolName: "Agent",

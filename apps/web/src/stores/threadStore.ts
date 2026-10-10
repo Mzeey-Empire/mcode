@@ -1135,6 +1135,18 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
   const getRec = (threadId: string) => getThreadRecord(get().records, threadId);
 
+  const latestUserMessageId = (threadId: string): string | null => {
+    const messages = getRec(threadId).messages;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role === "user") return messages[index].id;
+    }
+    return null;
+  };
+
+  const writeGroupTasks = (threadId: string, group: string, tasks: readonly TaskItem[]): void => {
+    useTaskStore.getState().setGroupTasks(threadId, group, tasks, latestUserMessageId(threadId));
+  };
+
   const patchRec = (
     threadId: string,
     patch: Partial<ThreadRecord> | ((current: ThreadRecord) => Partial<ThreadRecord>),
@@ -1384,7 +1396,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     setPlanQuestions: (threadId, questions) => get().setPlanQuestions(threadId, questions),
     extractPendingPlanQuestions,
     getTasksForThread: (threadId) => useTaskStore.getState().tasksByThread[threadId] ?? [],
-    setTasksForThread: (threadId, tasks) => useTaskStore.getState().setTasks(threadId, tasks),
+    // Persisted tasks carry no turn link, so the latest user message is the best available source.
+    setTasksForThread: (threadId, tasks) =>
+      useTaskStore.getState().setTasks(threadId, tasks, latestUserMessageId(threadId)),
     addPlanForThread: (threadId, plan) => usePlanStore.getState().addPlan(threadId, plan),
     shallowEqualBy,
     coerceTaskStatus,
@@ -1850,7 +1864,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         group,
       };
     });
-    useTaskStore.getState().setGroupTasks(threadId, group, tasks);
+    writeGroupTasks(threadId, group, tasks);
   };
 
   const projectTaskCreate = (
@@ -1875,7 +1889,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     };
     const existing = useTaskStore.getState().tasksByThread[threadId] ?? [];
     const groupTasks = existing.filter((item) => item.group === group && item.id !== task.id);
-    useTaskStore.getState().setGroupTasks(threadId, group, [...groupTasks, task]);
+    writeGroupTasks(threadId, group, [...groupTasks, task]);
   };
 
   const taskUpdateTarget = (
@@ -1918,11 +1932,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (!target) return;
     const groupTasks = tasks.filter((task) => task.group === target.group);
     if (toolInput.status === "deleted") {
-      useTaskStore.getState().setGroupTasks(threadId, target.group, groupTasks.filter((task) => task !== target));
+      writeGroupTasks(threadId, target.group, groupTasks.filter((task) => task !== target));
       return;
     }
     const patched = patchedTaskItem(target, toolInput);
-    useTaskStore.getState().setGroupTasks(threadId, target.group, groupTasks.map((task) => task === target ? patched : task));
+    writeGroupTasks(threadId, target.group, groupTasks.map((task) => task === target ? patched : task));
   };
 
   const projectTaskToolUse = (
@@ -1939,7 +1953,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (toolName === "update_plan") {
       const group = taskGroupFor(toolCalls, parentToolCallId);
       const tasks = updatePlanTasksFromToolInput(toolInput).map((task) => ({ ...task, group }));
-      if (tasks.length > 0) useTaskStore.getState().setGroupTasks(threadId, group, tasks);
+      if (tasks.length > 0) writeGroupTasks(threadId, group, tasks);
     }
   };
 
@@ -2052,7 +2066,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const tasks = useTaskStore.getState().tasksByThread[threadId] ?? [];
     const target = tasks.find((task) => task.id === toolCallId);
     if (!target || target.harnessTaskId === harnessTaskId) return;
-    useTaskStore.getState().setGroupTasks(
+    writeGroupTasks(
       threadId,
       target.group,
       tasks.filter((task) => task.group === target.group)

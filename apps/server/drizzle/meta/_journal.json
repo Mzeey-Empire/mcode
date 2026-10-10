@@ -516,8 +516,15 @@
     {
       "idx": 72,
       "version": "6",
-      "when": 1791630550995,
-      "tag": "0072_yielding_night_nurse",
+      "when": 1791630647365,
+      "tag": "0072_legal_slayback",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "6",
+      "when": 1791651687882,
+      "tag": "0073_glossy_dagger",
       "breakpoints": true
     }
   ]

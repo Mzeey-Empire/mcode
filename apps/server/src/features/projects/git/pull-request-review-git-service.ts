@@ -347,15 +347,23 @@ export class PullRequestReviewGitService {
     }
   }
 
-  /** Push one linked Review branch to its persisted explicit target without force. */
+  /**
+   * Push one linked Review branch to its persisted explicit target without force.
+   * `source` is HEAD for a branch push, or the exact SHA a commit request made, so a
+   * checkout switched while the push waited cannot change what is pushed.
+   */
   async pushPullRequestReviewBranch(
     repoPath: string,
     pushRemote: string,
     pushRef: string,
     expectedHeadRepositoryUrl: string,
+    source = "HEAD",
   ): Promise<void> {
     if (!/^[A-Za-z0-9._-]{1,100}$/.test(pushRemote)) {
       throw new Error("Invalid Review push remote.");
+    }
+    if (source !== "HEAD" && !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(source)) {
+      throw new Error("Invalid Review push source.");
     }
     assertSafeReviewBranch(pushRef, "Review push ref");
     const expectedRepositoryKey = normalizedRepositoryKey(expectedHeadRepositoryUrl);
@@ -379,7 +387,7 @@ export class PullRequestReviewGitService {
     );
     try {
       await this.gitExecutor.exec(
-        ["-C", repoPath, "merge-base", "--is-ancestor", "FETCH_HEAD", "HEAD"],
+        ["-C", repoPath, "merge-base", "--is-ancestor", "FETCH_HEAD", source],
         { timeout: 10_000 },
       );
     } catch {
@@ -389,7 +397,7 @@ export class PullRequestReviewGitService {
       );
     }
     await this.gitExecutor.exec(
-      ["-C", repoPath, "push", pushRemote, `HEAD:refs/heads/${pushRef}`],
+      ["-C", repoPath, "push", pushRemote, `${source}:refs/heads/${pushRef}`],
       { timeout: 60_000 },
     );
   }
