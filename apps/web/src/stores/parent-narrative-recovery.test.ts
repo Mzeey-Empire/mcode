@@ -1,0 +1,84 @@
+import { createAgentModelState, type AgentModelState, type AgentTurn } from "@mcode/contracts";
+import { describe, expect, it } from "vitest";
+import { recoverParentNarrative } from "./parent-narrative-recovery";
+import { createEmptyThreadRecord, type ThreadRecord } from "./thread-record";
+
+const NOW = "2026-10-10T12:00:00.000Z";
+const THREAD = "parent-thread";
+const EXECUTION = "00000000-0000-4000-8000-000000000001";
+const MESSAGE = "turn-message";
+
+const receipt = {
+  id: "receipt-1", message_id: "", tool_call_id: "bash-1", kind: "command" as const, subject_label: "rm -rf build",
+  outcome: { status: "denied" as const, choiceLabel: "Deny" }, origin: null, decided_at: NOW, sort_order: 2,
+};
+const tool = {
+  id: "bash-1", message_id: "", parent_tool_call_id: null, tool_name: "Bash", input_summary: "{}", output_summary: "",
+  status: "failed", started_at: NOW, completed_at: NOW, sort_order: 1,
+};
+
+function turnState(status: AgentTurn["status"]): AgentModelState {
+  const state = createAgentModelState();
+  state.turns.parent = {
+    id: "parent", threadId: THREAD, executionId: EXECUTION, status, trigger: { kind: "user" },
+    permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested", attemptOf: null,
+    providerIdentities: [], startedAt: NOW, providerStartedAt: null, endedAt: status === "Running" ? null : NOW, createdAt: NOW, updatedAt: NOW,
+  };
+  state.items.tool = {
+    id: "tool", threadId: THREAD, turnId: "parent", kind: "tool-call", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+    payload: { projection: "toolCall", record: tool },
+  };
+  state.items.receipt = {
+    id: "receipt", threadId: THREAD, turnId: "parent", kind: "system", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+    payload: { projection: "approval", record: receipt },
+  };
+  return state;
+}
+
+function finishedRecord(patch: Partial<ThreadRecord> = {}): ThreadRecord {
+  return { ...createEmptyThreadRecord(), runtimePhase: "completed", turnExecutionId: EXECUTION, currentTurnMessageId: MESSAGE, ...patch };
+}
+
+describe("recoverParentNarrative", () => {
+  it("keeps a finished turn's fold and receipt in the message cache that outlives the next turn", () => {
+    const patch = recoverParentNarrative(THREAD, turnState("Completed"), finishedRecord());
+
+    expect(patch.narrativeByMessage).toEqual({
+      [MESSAGE]: {
+        tools: [{ ...tool, message_id: MESSAGE }],
+        thoughts: [],
+        hooks: [],
+        approvals: [{ ...receipt, message_id: MESSAGE }],
+      },
+    });
+  });
+
+  it("merges into an already loaded bucket, letting the live record win", () => {
+    const loadedThought = { id: "thought-1", message_id: MESSAGE, text: "Checking the build", started_at: NOW, ended_at: NOW, sort_order: 0 };
+    const staleReceipt = { ...receipt, message_id: MESSAGE, subject_label: "stale" };
+    const record = finishedRecord({
+      narrativeByMessage: {
+        [MESSAGE]: { tools: [], thoughts: [loadedThought], hooks: [], approvals: [staleReceipt] },
+        "older-message": { tools: [], thoughts: [], hooks: [], approvals: [] },
+      },
+    });
+
+    const patch = recoverParentNarrative(THREAD, turnState("Completed"), record);
+
+    expect(patch.narrativeByMessage?.[MESSAGE]).toEqual({
+      tools: [{ ...tool, message_id: MESSAGE }],
+      thoughts: [loadedThought],
+      hooks: [],
+      approvals: [{ ...receipt, message_id: MESSAGE }],
+    });
+    expect(patch.narrativeByMessage?.["older-message"]).toEqual({ tools: [], thoughts: [], hooks: [], approvals: [] });
+  });
+
+  it("leaves the cache alone while the turn is still running", () => {
+    const record = finishedRecord({ runtimePhase: "idle" });
+
+    const patch = recoverParentNarrative(THREAD, turnState("Running"), record);
+
+    expect(patch.narrativeByMessage).toBeUndefined();
+  });
+});

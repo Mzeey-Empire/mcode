@@ -13,11 +13,58 @@ export function recoverParentNarrative(threadId: string, state: AgentModelState,
     .sort((left, right) => left.record.sort_order - right.record.sort_order);
   if (items.length === 0 && !record) return {};
   const narrative = recoveredNarrative(turn, items);
+  const response = record ? recoveredResponse(threadId, turn, state, record, narrative.streaming, narrative.terminal) : {};
   return {
     ...(items.length > 0 ? { ...narrative.patch, ...recoveredStartTime(turn, record) } : emptyOwnedNarrativePatch(turn, state, record)),
     ...recoveredAssistantText(turn, state),
-    ...(record ? recoveredResponse(threadId, turn, state, record, narrative.streaming, narrative.terminal) : {}),
+    ...response,
+    ...(record && narrative.terminal ? finishedNarrativeCache(record, response.currentTurnMessageId ?? record.currentTurnMessageId, items) : {}),
   };
+}
+
+/**
+ * The next turn clears the ephemeral narrative, and only `narrativeByMessage` keeps a finished turn's fold.
+ * Without this copy the fold and its decision receipts vanish until a reload refetches them.
+ */
+function finishedNarrativeCache(record: ThreadRecord, messageId: string, items: readonly ParentNarrativeRecoveryItem[]): Partial<ThreadRecord> {
+  if (!messageId || items.length === 0) return {};
+  const previous = record.narrativeByMessage[messageId] ?? emptyBucket();
+  const recovered = anchoredNarrative(items, messageId);
+  return {
+    narrativeByMessage: {
+      ...record.narrativeByMessage,
+      [messageId]: {
+        tools: mergeById(previous.tools, recovered.tools),
+        thoughts: mergeById(previous.thoughts, recovered.thoughts),
+        hooks: mergeById(previous.hooks, recovered.hooks),
+        approvals: mergeById(previous.approvals, recovered.approvals),
+      },
+    },
+  };
+}
+
+type NarrativeBucket = NonNullable<ThreadRecord["narrativeByMessage"][string]>;
+
+function emptyBucket(): NarrativeBucket {
+  return { tools: [], thoughts: [], hooks: [], approvals: [] };
+}
+
+/** Live records can carry a provisional message id, so each is re-keyed to the message that owns the bucket. */
+function anchoredNarrative(items: readonly ParentNarrativeRecoveryItem[], messageId: string): NarrativeBucket {
+  const bucket = emptyBucket();
+  for (const item of items) {
+    if (item.kind === "toolCall") bucket.tools.push({ ...item.record, message_id: messageId });
+    if (item.kind === "narrationSegment") bucket.thoughts.push({ ...item.record, message_id: messageId });
+    if (item.kind === "hook") bucket.hooks.push({ ...item.record, message_id: messageId });
+    if (item.kind === "approval") bucket.approvals.push({ ...item.record, message_id: messageId });
+  }
+  return bucket;
+}
+
+function mergeById<T extends { id: string; sort_order: number }>(existing: readonly T[], incoming: readonly T[]): T[] {
+  const byId = new Map(existing.map((record) => [record.id, record]));
+  for (const record of incoming) byId.set(record.id, record);
+  return [...byId.values()].sort((left, right) => left.sort_order - right.sort_order || left.id.localeCompare(right.id));
 }
 
 function recoveredAssistantText(turn: AgentTurn, state: AgentModelState): Partial<ThreadRecord> {
