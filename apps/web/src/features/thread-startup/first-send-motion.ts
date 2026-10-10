@@ -51,6 +51,10 @@ export function recordFirstSend(threadId: string, startColumn: HTMLElement, now 
     element.removeAttribute("id");
     element.removeAttribute("data-testid");
   }
+  // Re-inserting the copy would restart the heading's entrance animation under the fade-out.
+  for (const element of [clone, ...clone.querySelectorAll<HTMLElement | SVGElement>("*")]) {
+    element.style.animation = "none";
+  }
   records.set(threadId, {
     recordedAt: now,
     composerTop: card.getBoundingClientRect().top,
@@ -93,13 +97,19 @@ export function firstSendAnimations(dy: number, reducedMotion: boolean): FirstSe
   };
 }
 
-/** Sidebar timing: the new row fades in while the rows below it slide down by its height. */
-export function sidebarRowAnimations(rowHeight: number, reducedMotion: boolean): { readonly entering: TrackAnimation; readonly shifted: TrackAnimation } | undefined {
+/** Sidebar motion: the new row fades in; a row that moved `offset` pixels slides from where it was. */
+export interface SidebarRowAnimations {
+  readonly entering: TrackAnimation;
+  readonly shifted: (offset: number) => TrackAnimation;
+}
+
+/** Sidebar timing for a first send. Reduced motion keeps the sidebar still. */
+export function sidebarRowAnimations(reducedMotion: boolean): SidebarRowAnimations | undefined {
   if (reducedMotion) return undefined;
   const options = { duration: 180, easing: EASING } as const;
   return {
     entering: { keyframes: FADE_IN, options },
-    shifted: { keyframes: [{ transform: `translateY(${-rowHeight}px)` }, { transform: "translateY(0)" }], options },
+    shifted: (offset) => ({ keyframes: [{ transform: `translateY(${-offset}px)` }, { transform: "translateY(0)" }], options }),
   };
 }
 
@@ -164,28 +174,46 @@ export function useFirstSendMotion(threadId: string): FirstSendMotionRefs {
 }
 
 /**
- * Fades in a sidebar row for a thread that is still being prepared and slides the rows below it into place.
+ * Fades in a sidebar row for a thread that was just sent and slides the rows that moved into place.
  *
- * `list` holds one child element per row carrying `data-thread-id`. Only a row that appears after the list
- * first rendered animates, so opening a project with a preparing thread does not replay it.
+ * `rowKeys` is the section's full row order, including rows rendered outside `list` such as drafts, so a
+ * draft that turns into the new thread nets out to no movement. `list` holds one child per thread row
+ * carrying `data-thread-id`. Only a preparing thread whose row did not exist before animates, so a retried
+ * placeholder or a project opened with a thread already preparing stays still.
  */
-export function usePreparingRowEntrance(list: RefObject<HTMLElement | null>, preparingThreadIds: readonly string[]): void {
-  const seen = useRef<ReadonlySet<string> | undefined>(undefined);
-  const key = preparingThreadIds.join("\n");
+export function usePreparingRowEntrance(
+  list: RefObject<HTMLElement | null>,
+  rowKeys: readonly string[],
+  preparingThreadIds: readonly string[],
+): void {
+  const previous = useRef<readonly string[] | undefined>(undefined);
+  const rowKey = rowKeys.join("\n");
+  const preparingKey = preparingThreadIds.join("\n");
   useLayoutEffect(() => {
-    const ids = key === "" ? [] : key.split("\n");
-    const previous = seen.current;
-    seen.current = new Set(ids);
+    const rows = splitKey(rowKey);
+    const before = previous.current;
+    previous.current = rows;
     const container = list.current;
-    if (!previous || !container) return;
-    const entering = ids.find((id) => !previous.has(id));
+    if (!before || !container) return;
+    const entering = splitKey(preparingKey).find((id) => !before.includes(id));
     if (!entering) return;
-    const rows = Array.from(container.children);
-    const index = rows.findIndex((row) => row instanceof HTMLElement && row.dataset.threadId === entering);
-    if (index < 0) return;
-    const animations = sidebarRowAnimations(rows[index]!.getBoundingClientRect().height, prefersReducedMotion());
-    if (!animations) return;
-    play(rows[index], animations.entering);
-    for (const row of rows.slice(index + 1)) play(row, animations.shifted);
-  }, [key, list]);
+    const elements = new Map<string, HTMLElement>();
+    for (const child of container.children) {
+      if (child instanceof HTMLElement && child.dataset.threadId) elements.set(child.dataset.threadId, child);
+    }
+    const enteringRow = elements.get(entering);
+    const animations = sidebarRowAnimations(prefersReducedMotion());
+    if (!enteringRow || !animations) return;
+    const rowHeight = enteringRow.getBoundingClientRect().height;
+    play(enteringRow, animations.entering);
+    const indexBefore = new Map(before.map((key, index) => [key, index]));
+    rows.forEach((key, index) => {
+      const was = indexBefore.get(key);
+      if (was !== undefined && was !== index) play(elements.get(key), animations.shifted((index - was) * rowHeight));
+    });
+  }, [rowKey, preparingKey, list]);
+}
+
+function splitKey(key: string): string[] {
+  return key === "" ? [] : key.split("\n");
 }

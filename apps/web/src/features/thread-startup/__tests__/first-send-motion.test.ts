@@ -21,7 +21,7 @@ function rect(top: number, height = 0): DOMRect {
 function startColumn(composerTop: number): HTMLElement {
   const column = document.createElement("div");
   column.dataset.testid = "new-thread-start-column";
-  column.innerHTML = '<h1 id="heading">Start</h1><div data-testid="composer-surface"></div>';
+  column.innerHTML = '<h1 id="heading" class="animate-fade-up-in">Start</h1><div data-testid="composer-surface"></div>';
   column.querySelector<HTMLElement>('[data-testid="composer-surface"]')!.getBoundingClientRect = () => rect(composerTop);
   return column;
 }
@@ -91,6 +91,13 @@ describe("first-send record", () => {
     expect(clone.querySelector("h1")?.textContent).toBe("Start");
     expect(clone.querySelector("div")?.style.visibility).toBe("hidden");
   });
+
+  it("stops the copied heading from replaying its entrance animation", () => {
+    recordFirstSend("thread-1", startColumn(412), 1000);
+
+    const clone = takeFirstSend("thread-1", 1000)!.startColumn!.clone;
+    expect(clone.querySelector("h1")?.style.animation).toBe("none");
+  });
 });
 
 describe("firstSendAnimations", () => {
@@ -123,18 +130,18 @@ describe("firstSendAnimations", () => {
 });
 
 describe("sidebarRowAnimations", () => {
-  it("fades the new row in and slides the rows below by its height", () => {
-    expect(sidebarRowAnimations(28, false)).toEqual({
-      entering: { keyframes: [{ opacity: 0 }, { opacity: 1 }], options: { duration: 180, easing: EASING } },
-      shifted: {
-        keyframes: [{ transform: "translateY(-28px)" }, { transform: "translateY(0)" }],
-        options: { duration: 180, easing: EASING },
-      },
+  it("fades the new row in and slides a moved row from where it was", () => {
+    const animations = sidebarRowAnimations(false)!;
+
+    expect(animations.entering).toEqual({ keyframes: [{ opacity: 0 }, { opacity: 1 }], options: { duration: 180, easing: EASING } });
+    expect(animations.shifted(28)).toEqual({
+      keyframes: [{ transform: "translateY(-28px)" }, { transform: "translateY(0)" }],
+      options: { duration: 180, easing: EASING },
     });
   });
 
   it("does not move the sidebar under reduced motion", () => {
-    expect(sidebarRowAnimations(28, true)).toBeUndefined();
+    expect(sidebarRowAnimations(true)).toBeUndefined();
   });
 });
 
@@ -196,9 +203,9 @@ describe("useFirstSendMotion", () => {
   });
 });
 
-function ThreadRows({ ids, preparing }: { ids: string[]; preparing: string[] }) {
+function ThreadRows({ drafts = [], ids, preparing }: { drafts?: string[]; ids: string[]; preparing: string[] }) {
   const list = useRef<HTMLDivElement>(null);
-  usePreparingRowEntrance(list, preparing);
+  usePreparingRowEntrance(list, [...drafts.map((id) => `draft:${id}`), ...ids], preparing);
   return createElement(
     "div",
     { ref: list },
@@ -225,6 +232,26 @@ describe("usePreparingRowEntrance", () => {
     expect(calls.map((call) => call.element.getAttribute("data-thread-id"))).toEqual(["new", "a", "b"]);
     expect(calls[0]!.keyframes).toEqual([{ opacity: 0 }, { opacity: 1 }]);
     expect(calls[1]!.keyframes).toEqual([{ transform: "translateY(-28px)" }, { transform: "translateY(0)" }]);
+  });
+
+  it("keeps the rows still when a draft above them becomes the new thread", () => {
+    stubReducedMotion(false);
+    const calls = stubAnimate();
+    const { rerender } = render(createElement(ThreadRows, { drafts: ["d1"], ids: ["a", "b"], preparing: [] }));
+
+    rerender(createElement(ThreadRows, { ids: ["new", "a", "b"], preparing: ["new"] }));
+
+    expect(calls.map((call) => call.element.getAttribute("data-thread-id"))).toEqual(["new"]);
+  });
+
+  it("stays still when a failed placeholder is retried in place", () => {
+    stubReducedMotion(false);
+    const calls = stubAnimate();
+    const { rerender } = render(createElement(ThreadRows, { ids: ["retry", "a"], preparing: [] }));
+
+    rerender(createElement(ThreadRows, { ids: ["retry", "a"], preparing: ["retry"] }));
+
+    expect(calls).toEqual([]);
   });
 
   it("does not replay for a row already preparing when the list first renders", () => {

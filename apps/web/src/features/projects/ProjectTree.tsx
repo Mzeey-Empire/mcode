@@ -2915,6 +2915,10 @@ function WorkspaceThreadSection({
   const threadRowsRef = useRef<HTMLDivElement>(null);
   usePreparingRowEntrance(
     threadRowsRef,
+    [
+      ...(showDrafts ? drafts.map((draft) => `draft:${draft.id}`) : []),
+      ...capped.map((item) => item.thread.id),
+    ],
     capped
       .filter((item) => item.thread.clientPreparing === true)
       .map((item) => item.thread.id),
