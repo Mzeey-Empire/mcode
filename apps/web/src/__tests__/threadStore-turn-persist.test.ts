@@ -66,6 +66,7 @@ describe("handleTurnPersisted", () => {
     });
 
     useThreadStore.getState().handleTurnPersisted({
+      settledMessage: null,
       threadId: THREAD_ID,
       messageId: "server-turn-1",
       toolCallCount: 2,
@@ -117,6 +118,7 @@ describe("handleTurnPersisted", () => {
       tokensOut: 0,
     } as AgentEvent);
     useThreadStore.getState().handleTurnPersisted({
+      settledMessage: null,
       threadId: THREAD_ID,
       messageId: "server-volatile",
       toolCallCount: 1,
@@ -153,6 +155,7 @@ describe("handleTurnPersisted", () => {
 
     useApprovalStore.getState().add(createMockApproval({ requestId: "permission-1", threadId: THREAD_ID }));
     useThreadStore.getState().handleTurnPersisted({
+      settledMessage: null,
       threadId: THREAD_ID,
       messageId: "assistant-1",
       toolCallCount: 0,
@@ -202,6 +205,7 @@ describe("handleTurnPersisted", () => {
     });
 
     useThreadStore.getState().handleTurnPersisted({
+      settledMessage: null,
       threadId: THREAD_ID,
       messageId: "assistant-1",
       toolCallCount: 0,
@@ -239,6 +243,7 @@ describe("handleTurnPersisted", () => {
     });
 
     useThreadStore.getState().handleTurnPersisted({
+      settledMessage: null,
       threadId: THREAD_ID,
       messageId: "server-tools-only",
       toolCallCount: 3,
@@ -326,6 +331,7 @@ describe("handleTurnPersisted", () => {
       effects: [],
     });
     useThreadStore.getState().handleTurnPersisted({
+      settledMessage: null,
       threadId: THREAD_ID,
       messageId: "server-turn",
       turnId: "turn-1",
@@ -363,6 +369,7 @@ describe("handleTurnPersisted", () => {
       effects: [],
     });
     useThreadStore.getState().handleTurnPersisted({
+      settledMessage: null,
       threadId: THREAD_ID,
       turnId: "turn-1",
       messageId: "server-turn-1",
@@ -426,6 +433,7 @@ describe("handleTurnPersisted", () => {
     });
 
     useThreadStore.getState().handleTurnPersisted({
+      settledMessage: null,
       threadId: THREAD_ID,
       messageId: "server-stop-1",
       toolCallCount: 0,
@@ -464,6 +472,7 @@ describe("handleTurnPersisted", () => {
     });
 
     useThreadStore.getState().handleTurnPersisted({
+      settledMessage: null,
       threadId: THREAD_ID,
       messageId: null,
       toolCallCount: 0,

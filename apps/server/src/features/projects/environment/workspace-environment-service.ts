@@ -392,6 +392,7 @@ export class WorkspaceEnvironmentService {
     if (admission.queued && admission.snapshot.attempt?.state === "queued") {
       if (this.isAutomaticSetupCancelled(thread.id)) {
         await repository.interruptCurrentAttempt(thread.id);
+        await repository.cancelStartupTurns(thread.id);
         return { ...admission, snapshot: repository.snapshot(thread.id) };
       }
       this.launchAutomaticSetup(thread);
@@ -426,21 +427,9 @@ export class WorkspaceEnvironmentService {
     return repository.snapshot(input.threadId);
   }
 
-  /** Cancel only the requested Turn that remains queued behind automatic Setup. */
-  async cancelQueuedAutomaticTurn(input: {
-    readonly threadId: string;
-    readonly queuedTurnId: string;
-  }): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot> {
-    const cancelled = await this.requireAutomaticRepository().cancelQueuedTurn(input);
-    if (cancelled.attachments.length > 0) {
-      await this.options.attachmentStorage?.removeStoredAttachments(input.threadId, cancelled.attachments);
-    }
-    return cancelled.snapshot;
-  }
-
-  /** Interrupt the active automatic Setup attempt without releasing the blocked gate. */
+  /** Contain automatic Setup, then discard pending Turns when startup cancellation was requested. */
   async stopAutomaticSetup(input: WorkspaceEnvironmentAutomaticSetupStopInput): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot> {
-    this.requireAutomaticSetupThread(input.threadId);
+    this.requireAutomaticSetupThread(input.threadId, true);
     this.invalidateAutomaticRetry(input.threadId);
     const stopping = this.automaticStopPromises.get(input.threadId);
     if (stopping) return this.snapshotAfterAutomaticStop(input.threadId, stopping);
@@ -479,6 +468,9 @@ export class WorkspaceEnvironmentService {
     const resourceAttemptId = attemptId ?? resource?.attemptId ?? null;
     if (resourceAttemptId && this.shouldCloseAutomaticSetup(resource, resourceAttemptId, starting)) {
       await this.closeAutomaticSetupResources(threadId, resourceAttemptId, resource, starting);
+    }
+    if (this.isAutomaticSetupCancelled(threadId)) {
+      await this.requireAutomaticRepository().cancelStartupTurns(threadId);
     }
   }
 
@@ -1154,14 +1146,14 @@ export class WorkspaceEnvironmentService {
     throw new Error("Automatic Project Setup requires SQLite lifecycle storage");
   }
 
-  private requireAutomaticSetupThread(threadId: string): WorkspaceEnvironmentSetupThread {
+  private requireAutomaticSetupThread(threadId: string, allowAttached = false): WorkspaceEnvironmentSetupThread {
     const thread = this.requireSetupThread(threadId);
     if (
       this.disposed ||
       thread.mode !== "worktree" ||
-      thread.worktree_managed !== true ||
-      thread.deleted_at !== null && thread.deleted_at !== undefined ||
-      thread.cleanup_state !== null && thread.cleanup_state !== undefined ||
+      (!allowAttached && thread.worktree_managed !== true) ||
+      thread.deleted_at != null ||
+      thread.cleanup_state != null ||
       this.deletingThreadCounts.has(thread.id) ||
       this.deletingWorkspaceCounts.has(thread.workspace_id)
     ) {
@@ -1178,6 +1170,7 @@ export class WorkspaceEnvironmentService {
     if (existing) return existing;
     if (this.isAutomaticSetupCancelled(thread.id)) {
       await this.requireAutomaticRepository().interruptCurrentAttempt(thread.id);
+      await this.requireAutomaticRepository().cancelStartupTurns(thread.id);
       return Promise.resolve();
     }
     const starting = this.startAutomaticSetupAttempt(thread);

@@ -101,8 +101,8 @@ import {
 } from "../PreviewPanel";
 import { executeWebBrowserDispatch } from "../../automation/browserAutomationWebExecutor";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { normalizePreviewPageIdentity } from "@mcode/shared/browser-page-identity";
 import {
-  normalizePreviewPageIdentity,
   usePreviewAnnotationStore,
 } from "../../state/previewAnnotationStore";
 import { usePreviewDesignModeStore } from "../../state/previewDesignModeStore";
@@ -715,6 +715,7 @@ describe("PreviewPanel: full panel state", () => {
           prepare: vi.fn().mockResolvedValue({ ok: true }),
           adopt: vi.fn().mockResolvedValue({ ok: true }),
           release: vi.fn().mockResolvedValue({ ok: true }),
+          hidden: vi.fn().mockResolvedValue({ ok: true }),
           navigate: vi.fn().mockResolvedValue({ ok: true }),
         },
         design: {
@@ -1043,6 +1044,7 @@ describe("PreviewPanel: full panel state", () => {
       pushEmitter.emit("turn.persisted", {
         threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         messageId: "message-1",
+        settledMessage: { id: "message-1", sequence: 1 },
         toolCallCount: 1,
         filesChanged: ["src/main.ts"],
       });
@@ -1071,6 +1073,7 @@ describe("PreviewPanel: full panel state", () => {
       pushEmitter.emit("turn.persisted", {
         threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         messageId: "message-1",
+        settledMessage: { id: "message-1", sequence: 1 },
         toolCallCount: 3,
         filesChanged: [],
       });

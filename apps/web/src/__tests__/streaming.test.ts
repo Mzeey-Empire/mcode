@@ -254,6 +254,7 @@ describe("Agent Message Flow", () => {
 
     useThreadStore.setState({ currentThreadId: "thread-a" });
     handleTurnPersisted({
+      settledMessage: null,
       threadId: "thread-a",
       messageId: "thread-a-completed",
       toolCallCount: 0,

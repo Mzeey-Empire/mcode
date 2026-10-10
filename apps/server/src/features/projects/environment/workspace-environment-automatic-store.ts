@@ -88,11 +88,6 @@ export interface WorkspaceEnvironmentClaimedQueuedTurn {
   readonly submission: WorkspaceEnvironmentQueuedTurnSubmission;
 }
 
-interface WorkspaceEnvironmentCancelledQueuedTurn {
-  readonly snapshot: WorkspaceEnvironmentAutomaticSetupSnapshot;
-  readonly attachments: readonly StoredAttachment[];
-}
-
 interface AutomaticSetupGate {
   state: WorkspaceEnvironmentAutomaticSetupSnapshot["gate"];
 }
@@ -500,37 +495,22 @@ export class WorkspaceEnvironmentAutomaticStore {
     })();
   }
 
-  /** Cancel one still-queued Turn and remove its visible user message in the same transaction. */
-  cancelQueuedTurn(input: { readonly threadId: string; readonly queuedTurnId: string }): WorkspaceEnvironmentCancelledQueuedTurn {
-    let attachments: readonly StoredAttachment[] = [];
+  /** Discard pending startup Turns and clear the gate without replaying their messages. */
+  cancelStartupTurns(threadId: string): void {
     this.db.transaction(() => {
-      const queued = this.orm
-        .select({
-          messageId: workspaceEnvironmentQueuedTurns.messageId,
-          submissionJson: workspaceEnvironmentQueuedTurns.submissionJson,
-        })
-        .from(workspaceEnvironmentQueuedTurns)
-        .where(and(
-          eq(workspaceEnvironmentQueuedTurns.id, input.queuedTurnId),
-          eq(workspaceEnvironmentQueuedTurns.threadId, input.threadId),
-          eq(workspaceEnvironmentQueuedTurns.state, "queued"),
-        ))
-        .get();
-      if (!queued) return;
-      attachments = this.parseSubmission(queued.submissionJson).attachments;
       this.orm.update(workspaceEnvironmentQueuedTurns)
         .set({ state: "cancelled" })
         .where(and(
-          eq(workspaceEnvironmentQueuedTurns.id, input.queuedTurnId),
-          eq(workspaceEnvironmentQueuedTurns.state, "queued"),
+          eq(workspaceEnvironmentQueuedTurns.threadId, threadId),
+          inArray(workspaceEnvironmentQueuedTurns.state, ["queued", "released", "dispatching"]),
         ))
         .run();
-      this.orm.delete(messages)
-        .where(and(eq(messages.id, queued.messageId), eq(messages.threadId, input.threadId)))
+      this.orm.update(workspaceEnvironmentSetupGates)
+        .set({ state: "not-required", attemptId: null, updatedAt: this.now() })
+        .where(eq(workspaceEnvironmentSetupGates.threadId, threadId))
         .run();
-      this.pruneTerminalTurns(input.threadId);
+      this.pruneTerminalTurns(threadId);
     })();
-    return { snapshot: this.snapshot(input.threadId), attachments };
   }
 
   /** Mark the current queued or running automatic Setup attempt interrupted. */

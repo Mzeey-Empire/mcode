@@ -3,12 +3,15 @@ import type { Database } from "bun:sqlite";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { ThreadStore, MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS } from "./thread-store.js";
 import { threadWriteOperations } from "./thread-write-operations.js";
+import type { ThreadAttentionService } from "../attention/thread-attention-service.js";
 export type { ThreadDelegationLineageRecord, ActiveWorktreePathSet, CompletedThreadRetentionRecord, CompletedThreadDeadlineUpdate } from "./thread-store.js";
 export { MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS } from "./thread-store.js";
 
 /** Read-only queries and committed mutations for ThreadRepo. */
 @injectable()
 export class ThreadRepo {
+  /** Read-model invalidation connected by the application composition root. */
+  attention?: Pick<ThreadAttentionService, "invalidate">;
   private readonly reader: ThreadStore;
 
   constructor(@inject("Database") db: Database, @inject(ApplicationDatabaseWriter) private readonly writer: ApplicationDatabaseWriter) {
@@ -37,6 +40,13 @@ export class ThreadRepo {
 
   updateStatus(id: Parameters<ThreadStore["updateStatus"]>[0], status: Parameters<ThreadStore["updateStatus"]>[1]): Promise<ReturnType<ThreadStore["updateStatus"]>> {
     return this.writer.execute(threadWriteOperations.updateStatus, [id, status]);
+  }
+
+  /** Commit the terminal facts before publishing changed attention. */
+  async recordTurnOutcome(...input: Parameters<ThreadStore["recordTurnOutcome"]>): Promise<boolean> {
+    const changed = await this.writer.execute(threadWriteOperations.recordTurnOutcome, input);
+    if (changed) this.attention?.invalidate(input[0]);
+    return changed;
   }
 
   complete(id: Parameters<ThreadStore["complete"]>[0], completedAt: Parameters<ThreadStore["complete"]>[1], scheduledDeletionAt: Parameters<ThreadStore["complete"]>[2]): Promise<ReturnType<ThreadStore["complete"]>> {

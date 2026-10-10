@@ -187,25 +187,6 @@ function createdDevinMode(
 }
 
 /**
- * Trailing-edge debounce window for `markThreadViewed` RPCs. Rapid sidebar
- * navigation (e.g. arrow-keys, fast clicks) collapses to one RPC per thread
- * instead of one per click. The "completed -> paused" optimistic local
- * transition is unaffected and still applies synchronously on every click.
- */
-const MARK_VIEWED_DEBOUNCE_MS = 150;
-const pendingMarkViewedTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-function scheduleMarkThreadViewed(threadId: string): void {
-  const existing = pendingMarkViewedTimers.get(threadId);
-  if (existing) clearTimeout(existing);
-  const timer = setTimeout(() => {
-    pendingMarkViewedTimers.delete(threadId);
-    getTransport().markThreadViewed(threadId).catch(() => { /* non-critical */ });
-  }, MARK_VIEWED_DEBOUNCE_MS);
-  pendingMarkViewedTimers.set(threadId, timer);
-}
-
-/**
  * Bumped immediately before applying local additions/removals that must win over
  * in-flight {@link WorkspaceState.loadThreads} responses. Without this, a slow
  * `thread.list` that started before branching (for example) can finish after the
@@ -1750,34 +1731,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     useThreadStore.getState().clearThreadState(threadId);
   },
 
-  /**
-   * Set the active thread and clear the "completed" badge if present.
-   *
-   * When a user opens a completed thread, the green badge is dismissed
-   * both locally (optimistic) and in the DB (via markThreadViewed IPC)
-   * so it stays cleared across workspace switches and app restarts.
-   */
+  /** Select a conversation; attention owns acknowledgement after the focused dwell. */
   setActiveThread: (id) => {
     if (id) recordThreadSelection(id);
-    const thread = id ? get().threads.find((t) => t.id === id) : null;
-    const isCompleted = thread?.status === "completed";
-
-    set((state) => ({
+    set({
       activeThreadId: id,
       activeDraftId: null,
       ...(id ? { pendingNewThread: false } : {}),
-      threads: isCompleted
-        ? state.threads.map((t) =>
-            t.id === id ? { ...t, status: "paused" as const } : t,
-          )
-        : state.threads,
-      }));
+    });
 
     activateSelectedConversation();
-
-    if (isCompleted && id) {
-      scheduleMarkThreadViewed(id);
-    }
   },
 
   beginNewThread: (workspaceId) => {

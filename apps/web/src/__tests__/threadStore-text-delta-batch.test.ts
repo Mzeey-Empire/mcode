@@ -269,6 +269,7 @@ describe("threadStore textDelta batching", () => {
     });
 
     useThreadStore.getState().handleTurnPersisted({
+      settledMessage: null,
       threadId: tid,
       messageId: serverMessageId,
       toolCallCount: 1,

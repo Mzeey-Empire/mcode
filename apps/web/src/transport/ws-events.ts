@@ -6,6 +6,8 @@ import {
   type TurnFileEffectSummary,
 } from "@mcode/contracts";
 import { useApprovalStore } from "@/stores/approvalStore";
+import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
+import { startThreadAttentionTracking } from "@/features/thread-attention/thread-attention-tracking";
 import { pushEmitter } from "./ws-transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useDiffStore } from "@/stores/diffStore";
@@ -169,6 +171,11 @@ function handleTerminalData(data: unknown): void {
 export function startPushListeners(): void {
   // Guard against double-init
   stopPushListeners();
+  unsubs.push(startThreadAttentionTracking());
+  unsubs.push(pushEmitter.on("thread.attention", (data) => {
+    const parsed = WS_CHANNELS["thread.attention"].safeParse(data);
+    if (parsed.success) threadAttentionStore.getState().apply(parsed.data);
+  }));
 
   unsubs.push(
     pushEmitter.on("agent.canonical", (data) => {

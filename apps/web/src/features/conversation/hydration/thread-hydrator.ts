@@ -1561,7 +1561,9 @@ export class ThreadHydrator {
         || page.identity.conversationRevision !== request.conversationRevision
       ) return;
 
-      cachePrefetchedHistoryPage(threadId, before, page);
+      cachePrefetchedHistoryPage(threadId, before, {
+        ...page, messages: page.messages.map((message) => ({ ...message, serverSequence: message.sequence })),
+      });
     } catch {
       // The visible tail is complete; older history remains available on scroll.
     }

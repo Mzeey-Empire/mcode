@@ -69,7 +69,7 @@ import {
   CanonicalAgentBoundary,
   GoalLifecycleService,
   PlanTurnService,
-  SubagentLifecycleService,
+  SubagentRosterService,
   TurnRecoveryService,
   startAgentOrchestration,
 } from "../../features/agents";
@@ -98,6 +98,9 @@ import { WorkspaceTerminalPreferencesService } from "../../features/terminal/pre
 import { TerminalDiagnosticsService } from "../../features/terminal/diagnostics/terminal-diagnostics-service.js";
 import { MessageRepo } from "../../features/agents/conversation/persistence/message-repo.js";
 import { ThreadRepo } from "../../features/thread-control/persistence/thread-repo.js";
+import { invalidateAttentionOnSettledTurns, ThreadAttentionService } from "../../features/thread-control/attention/thread-attention-service.js";
+import { subscribeCommittedCanonicalEvents } from "../../features/agents/canonical/committed-canonical-events.js";
+import { approvalWaitingSource } from "../../features/thread-control/attention/approval-waiting-source.js";
 import { ToolCallRecordRepo } from "../../features/agents/tools/persistence/tool-call-record-repo.js";
 import { ThoughtSegmentRepo } from "../../features/agents/conversation/narrative/persistence/thought-segment-repo.js";
 import { HookExecutionRepo } from "../../features/agents/events/persistence/hook-execution-repo.js";
@@ -335,7 +338,8 @@ workspaceEnvironmentService.setAutomaticSetupDispatcher({
   const approvalService = container.resolve(ApprovalService);
   const planTurnService = container.resolve(PlanTurnService);
   const goalLifecycleService = container.resolve(GoalLifecycleService);
-  const subagentLifecycleService = container.resolve(SubagentLifecycleService);
+  const subagentRosterService = container.resolve(SubagentRosterService);
+  const stopObservingSubagentRosters = subagentRosterService.observeCommittedEvents();
 const turnRecoveryService = container.resolve(TurnRecoveryService);
 const threadControlService = container.resolve(ThreadControlService);
 const threadStartupService = container.resolve(ThreadStartupService);
@@ -386,7 +390,7 @@ const canonicalSink = container.resolve(CanonicalAgentBoundary);
 if (workerOwnedTurnRuntime.progress) {
   const progress = workerOwnedTurnRuntime.progress;
   container.resolve(PlanQuestionService).bindAcceptedProgress(progress);
-  container.resolve(SubagentLifecycleService).bindAcceptedProgress(progress);
+  container.resolve(SubagentRosterService).bindAcceptedProgress(progress);
   container.resolve(ThreadService).bindAcceptedProgress(progress);
   container.resolve(PostTerminalHookCompletionEffect).bindAcceptedProgress(progress);
   canonicalSink.bindAcceptedSynthesizedPublications((threadId, events) =>
@@ -467,6 +471,12 @@ const handoffStorage = container.resolve(HandoffStorage);
 const handoffCheckoutService = container.resolve(HandoffCheckoutService);
 const db = container.resolve<Database>("Database");
 const databaseWriter = container.resolve(ApplicationDatabaseWriter);
+const threadAttentionService = new ThreadAttentionService(db, databaseWriter, [approvalWaitingSource(approvalService)],
+  (attention) => broadcast("thread.attention", attention));
+threadRepo.attention = threadAttentionService;
+turnSnapshotRepo.attention = threadAttentionService;
+snapshotRefPins.attention = threadAttentionService;
+invalidateAttentionOnSettledTurns(threadAttentionService, subscribeCommittedCanonicalEvents);
 const planService = createPlanService(databaseWriter, workerOwnedTurnRuntime, planRepo, planTurnService);
 const reliabilityHarness = createReliabilityHarnessAdapter(databaseWriter, undefined, {
   streamAssistant: (threadId) => agentReliability.streamAssistantText(threadId),
@@ -725,6 +735,7 @@ codexCatalogService.onSkillsChanged((cwd) => {
 
 // Create and start HTTP + WS server
 const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
+  threadAttentionService,
   workerQueueDepth: () => workerOwnedTurnRuntime.scheduler.depth(),
   runtime: hostRuntime,
   workspaceService,
@@ -736,7 +747,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   approvalService,
   planTurnService,
   goalLifecycleService,
-  subagentLifecycleService,
+  subagentRosterService,
   turnRecoveryService,
   threadControlService,
   threadStartupService,
@@ -931,10 +942,12 @@ async function bootstrapServer(): Promise<void> {
       stopSession: (threadId) => agentService.stopSession(threadId),
       publishApprovalRequest: (request) => {
         broadcast("approval.requested", request);
+        threadAttentionService.invalidate(request.threadId);
         portPush.send("approval.requested", request);
       },
       publishApprovalResolved: (payload) => {
         broadcast("approval.resolved", payload);
+        threadAttentionService.invalidate(payload.threadId);
         portPush.send("approval.resolved", payload);
       },
     }, threadControlService);
@@ -1069,6 +1082,7 @@ async function shutdown(): Promise<void> {
   await captureCleanupFailure(() => workerOwnedTurnRuntime.close());
   // Turns are drained, so no further turn facts arrive; finish startup writes before the writer closes.
   await captureCleanupFailure(() => startupAgentPhaseObserver.stop());
+  stopObservingSubagentRosters();
   shutdownCoordinator.setPhase("close application database writer");
   await captureCleanupFailure(() => databaseWriter.close());
 

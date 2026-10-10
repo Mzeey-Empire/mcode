@@ -1,5 +1,5 @@
 import { inject, injectable } from "tsyringe";
-import type { Thread } from "@mcode/contracts";
+import type { Thread, TurnOutcome } from "@mcode/contracts";
 
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 
@@ -20,6 +20,8 @@ export interface TurnRuntimePersistence {
   clearProviderCursor(threadId: string): Promise<void>;
   /** Store a terminal lifecycle state selected by the runtime owner. */
   setRuntimeStatus(threadId: string, status: "paused" | "interrupted"): Promise<void>;
+  /** Record the real terminal outcome before applying the legacy runtime status. */
+  recordTurnOutcome(threadId: string, outcome: TurnOutcome): Promise<void>;
 }
 
 /** Injection token for the runtime persistence port. */
@@ -52,5 +54,9 @@ export class ThreadRuntimePersistence implements TurnRuntimePersistence {
 
   async setRuntimeStatus(threadId: string, status: "paused" | "interrupted"): Promise<void> {
     await this.threads.updateStatus(threadId, status);
+  }
+
+  async recordTurnOutcome(threadId: string, outcome: TurnOutcome): Promise<void> {
+    await this.threads.recordTurnOutcome(threadId, outcome, new Date().toISOString());
   }
 }

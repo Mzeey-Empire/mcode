@@ -27,7 +27,7 @@ import type {
   CanonicalAgentBoundary,
   GoalLifecycleService,
   PlanTurnService,
-  SubagentLifecycleService,
+  SubagentRosterService,
   TurnRecoveryService,
 } from "../../features/agents/index.js";
 import {
@@ -101,10 +101,12 @@ import {
   routeThreadStartupRpc,
 } from "../../features/thread-startup/transport/thread-startup-rpc.js";
 import type { FileService } from "../../features/projects/files/file-service.js";
+import { WorkspaceFileNotFoundError } from "../../features/projects/files/workspace-file-access.js";
 import { isFileRpcMethod, routeFileRpc } from "../../features/projects/files/transport/file-rpc.js";
 import { isAttachmentRpcMethod, routeAttachmentRpc } from "../../features/attachments/transport/attachment-rpc.js";
 import type { AttachmentService } from "../../features/attachments/storage/attachment-service.js";
 import { DraftImageMissingError } from "../../features/attachments/storage/draft-image-missing-error.js";
+import { SequenceAheadError } from "../../features/thread-control/attention/sequence-ahead-error.js";
 import { isMemoryRpcMethod, routeMemoryRpc } from "../../runtime/memory/transport/memory-rpc.js";
 import { isGitRpcMethod, routeGitRpc } from "../../features/projects/git/transport/git-rpc.js";
 import { isSnapshotRpcMethod, routeSnapshotRpc } from "../../features/projects/diffs/transport/snapshot-rpc.js";
@@ -136,6 +138,7 @@ import { PlanServiceError, type PlanService } from "../../features/agents/planni
 import type { SnapshotService } from "../../features/projects/diffs/snapshots/snapshot-service.js";
 import type { MemoryPressureService } from "../../runtime/memory/memory-pressure-service.js";
 import type { ThreadRepo } from "../../features/thread-control/persistence/thread-repo.js";
+import type { ThreadAttentionService } from "../../features/thread-control/attention/thread-attention-service.js";
 import type { WorkspaceRepo } from "../../features/projects/persistence/workspace-repo.js";
 import {
   isPushSubscriptionRpcMethod,
@@ -235,7 +238,7 @@ export interface RouterDeps {
   /** Owns thread goal commands and goal lifecycle reads. */
   goalLifecycleService: GoalLifecycleService;
   /** Owns sub-agent roster and independent cancellation. */
-  subagentLifecycleService: SubagentLifecycleService;
+  subagentRosterService: SubagentRosterService;
   /** Owns restart reconciliation and explicit turn recovery actions. */
   turnRecoveryService: TurnRecoveryService;
   /** Owns durable approvals for protected delegated-thread mutations. */
@@ -309,6 +312,7 @@ export interface RouterDeps {
   ciWatcherService: CiWatcherService;
   /** Thread repository for resolving worktree paths in git operations. */
   threadRepo: ThreadRepo;
+  threadAttentionService: ThreadAttentionService;
   /** Stages draft images for the next message. */
   attachmentService: Pick<AttachmentService, "stageDraft">;
   /** Workspace repository for resolving repo paths in git operations. */
@@ -451,14 +455,22 @@ function validateRpcParameters(
   };
 }
 
-function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResponse {
-  const message = error instanceof Error ? error.message : String(error);
+function domainRouteError(id: string, error: unknown, message: string): WebSocketResponse | null {
+  if (error instanceof WorkspaceFileNotFoundError) return { id, error: { code: error.code, message } };
   if (error instanceof PlanServiceError) {
-    return { id: request.id, error: { code: error.code, message, data: { latestVersion: error.latestVersion } } };
+    return { id, error: { code: error.code, message, data: { latestVersion: error.latestVersion } } };
   }
   if (error instanceof DraftImageMissingError) {
-    return { id: request.id, error: { code: error.code, message, data: { stagingId: error.stagingId } } };
+    return { id, error: { code: error.code, message, data: { stagingId: error.stagingId } } };
   }
+  if (error instanceof SequenceAheadError) return { id, error: { code: error.code, message } };
+  return null;
+}
+
+function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResponse {
+  const message = error instanceof Error ? error.message : String(error);
+  const domain = domainRouteError(request.id, error, message);
+  if (domain) return domain;
   if (error instanceof TerminalBackendError) {
     return terminalRouteError(request.id, error, message);
   }

@@ -1,6 +1,7 @@
 import type { AttachmentMeta, OpenInApp } from "./types";
 import type {
   BrowserAutomationControllerState,
+  BrowserHistory,
   BrowserAutomationHostDispatch,
   BrowserAutomationHostDispatchTarget,
   BrowserAutomationResponse,
@@ -147,6 +148,8 @@ export type PreviewSurfaceBridgeResult =
 
 /** Opaque Electron surface operations exposed to the renderer. */
 export interface PreviewSurfaceBridge {
+  /** Captures the last view when this exact adopted surface is hidden. */
+  hidden(payload: { readonly surface: PreviewSurfaceRef }): Promise<PreviewSurfaceBridgeResult>;
   /** Registers an inert webview token before the guest can be adopted. */
   prepare(payload: {
     readonly surface: PreviewSurfaceRef;
@@ -214,6 +217,13 @@ interface PreviewBridge {
   reload(): Promise<void>;
   /** Hard reload that bypasses the guest's HTTP cache (Force reload). */
   forceReload(): Promise<void>;
+  /** Recent pages and server thumbnails stored in the workspace's local profile. */
+  history: {
+    /** Lists bounded recent pages and local server thumbnails. */
+    list(workspaceId: string): Promise<BrowserHistory>;
+    /** Removes a page by its normalized identity. */
+    remove(workspaceId: string, url: string): Promise<void>;
+  };
   /** Lifecycle of local per-workspace Browser profiles. */
   profiles: {
     /** Remove a server-deleted workspace's browser data. */

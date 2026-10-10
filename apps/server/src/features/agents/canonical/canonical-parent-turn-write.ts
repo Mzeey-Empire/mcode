@@ -211,7 +211,7 @@ export class CanonicalParentTurnWrite {
       input.endedAt,
     );
     if (result.outcome !== "committed") throw new Error(`Parent interruption did not commit: ${input.executionId}`);
-    this.threads.updateStatus(input.threadId, "interrupted");
+    this.threads.recordTurnOutcome(input.threadId, "interrupted", input.endedAt ?? new Date().toISOString());
     return result;
   }
 

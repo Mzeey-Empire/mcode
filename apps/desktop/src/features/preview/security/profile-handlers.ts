@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from "electron";
 import { browserPartitionFor } from "@mcode/shared/browser-partition";
 import { browserProfiles } from "./browser-profiles.js";
+import { sanitizeHistoryUrl } from "../profiles/history-store.js";
 
 function validateSender(event: IpcMainInvokeEvent): void {
   const win = BrowserWindow.fromWebContents(event.sender);
@@ -16,6 +17,16 @@ function workspaceId(value: unknown): string {
 /** Registers UUID-validated profile deletion and bounded complete-list reconciliation. */
 export function registerBrowserProfileHandlers(): void {
   browserProfiles.initialize();
+  ipcMain.handle("preview:history.list", (event, value: unknown) => {
+    validateSender(event);
+    return browserProfiles.history.list(workspaceId(value));
+  });
+  ipcMain.handle("preview:history.remove", (event, value: unknown, url: unknown) => {
+    validateSender(event);
+    const id = workspaceId(value);
+    if (typeof url !== "string" || !sanitizeHistoryUrl(url)) throw new TypeError("Expected a bounded HTTP(S) history URL");
+    return browserProfiles.history.remove(id, url);
+  });
   ipcMain.handle("preview:profiles.remove", (event, value: unknown) => {
     validateSender(event);
     return browserProfiles.remove(workspaceId(value));

@@ -1,3 +1,4 @@
+import { CanonicalChildRosterRequestSchema, CanonicalChildRosterSchema, type CanonicalChildRoster, type CanonicalChildRosterRequest, type CanonicalChildRow } from "./canonical-child-roster.js";
 import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
 import { PlanStore as PlanRepo } from "../planning/persistence/plan-store.js";
@@ -11,16 +12,12 @@ import {
   CanonicalAgentEventEnvelopeSchema,
   CollaborationActionSchema,
   canonicalSubagentTerminalOutcome,
-  CanonicalSubagentRosterRequestSchema,
-  CanonicalSubagentRosterSchema,
-  type CanonicalSubagentRoster,
-  type CanonicalSubagentRosterRequest,
   type CanonicalSubagentStopRequest,
-  type CanonicalSubagentRosterRow,
   CANONICAL_SUBAGENT_LINEAGE_MAX_DEPTH,
   CANONICAL_SUBAGENT_ROSTER_MAX_CHILDREN,
   MAX_TURN_RECOVERIES,
   ProviderIdentitySchema,
+  ProviderIdSchema,
   CANONICAL_AGENT_EVENT_BATCH_MAX,
   createAgentModelState,
   reduceAgentEvent,
@@ -288,7 +285,7 @@ interface SubagentRosterLookup extends SubagentRosterActivity {
 }
 
 type SubagentRosterMetadata = Pick<
-  CanonicalSubagentRosterRow,
+  CanonicalChildRow,
   "task" | "identity" | "model" | "reasoning"
 >;
 
@@ -1229,11 +1226,11 @@ export class CanonicalAgentStore {
   }
 
   /** Read one owning parent's unique canonical descendant roster. */
-  loadSubagentRoster(request: CanonicalSubagentRosterRequest): CanonicalSubagentRoster {
-    const parsedRequest = CanonicalSubagentRosterRequestSchema().parse(request);
+  loadSubagentRoster(request: CanonicalChildRosterRequest): CanonicalChildRoster {
+    const parsedRequest = CanonicalChildRosterRequestSchema().parse(request);
     const parent = this.loadThread(parsedRequest.owningParentThreadId);
     if (!parent) {
-      return CanonicalSubagentRosterSchema().parse({
+      return CanonicalChildRosterSchema().parse({
         owningParentThreadId: parsedRequest.owningParentThreadId,
         rosterRevision: 0,
         active: [],
@@ -1320,8 +1317,8 @@ export class CanonicalAgentStore {
     return this.projectSubagentRoster(parsedRequest, parent, rows);
   }
 
-  private emptySubagentRoster(owningParentThreadId: string, rosterRevision: number): CanonicalSubagentRoster {
-    return CanonicalSubagentRosterSchema().parse({
+  private emptySubagentRoster(owningParentThreadId: string, rosterRevision: number): CanonicalChildRoster {
+    return CanonicalChildRosterSchema().parse({
       owningParentThreadId,
       rosterRevision,
       active: [],
@@ -1330,8 +1327,8 @@ export class CanonicalAgentStore {
   }
 
   /** Project the saved roster's metadata rules from accepted family records without storage. */
-  projectAcceptedSubagentRoster(request: CanonicalSubagentRosterRequest, state: AgentModelState): CanonicalSubagentRoster {
-    const parsed = CanonicalSubagentRosterRequestSchema().parse(request);
+  projectAcceptedSubagentRoster(request: CanonicalChildRosterRequest, state: AgentModelState): CanonicalChildRoster {
+    const parsed = CanonicalChildRosterRequestSchema().parse(request);
     const parent = state.threads[parsed.owningParentThreadId];
     if (!parent) return this.emptySubagentRoster(parsed.owningParentThreadId, 0);
     const family = Object.values(state.threads).filter((thread) => thread.id !== parent.id
@@ -1401,15 +1398,15 @@ export class CanonicalAgentStore {
   }
 
   private projectSubagentRoster(
-    request: CanonicalSubagentRosterRequest,
+    request: CanonicalChildRosterRequest,
     parent: AgentThread,
     rows: Array<Record<string, unknown>>,
-  ): CanonicalSubagentRoster {
+  ): CanonicalChildRoster {
     return this.projectRosterLookup(request, parent, this.loadSubagentRosterLookup(rows));
   }
 
-  private projectRosterLookup(request: CanonicalSubagentRosterRequest, parent: AgentThread,
-    lookup: SubagentRosterLookup): CanonicalSubagentRoster {
+  private projectRosterLookup(request: CanonicalChildRosterRequest, parent: AgentThread,
+    lookup: SubagentRosterLookup): CanonicalChildRoster {
     const rosterRows = lookup.threads.map((thread) => this.projectSubagentRosterRow(
       request,
       thread,
@@ -1418,7 +1415,7 @@ export class CanonicalAgentStore {
     const { active, done } = this.partitionSubagentRosterRows(rosterRows, lookup.activeIds);
     const retainedActive = active.slice(0, request.limit);
     const retainedDone = done.slice(0, Math.max(0, request.limit - retainedActive.length));
-    return CanonicalSubagentRosterSchema().parse({
+    return CanonicalChildRosterSchema().parse({
       owningParentThreadId: request.owningParentThreadId,
       rosterRevision: parent.rosterRevision,
       active: retainedActive,
@@ -1523,10 +1520,10 @@ export class CanonicalAgentStore {
   }
 
   private projectSubagentRosterRow(
-    request: CanonicalSubagentRosterRequest,
+    request: CanonicalChildRosterRequest,
     thread: AgentThread,
     lookup: SubagentRosterLookup,
-  ): CanonicalSubagentRosterRow {
+  ): CanonicalChildRow {
     const turns = lookup.turnsByThread.get(thread.id) ?? [];
     const latestTurn = lookup.latestTurns.get(thread.id) ?? null;
     const source = this.subagentRosterSource(thread.id, lookup);
@@ -1542,6 +1539,12 @@ export class CanonicalAgentStore {
         lookup.threads,
       ),
       ...sourceFields,
+      stepCount: lookup.itemRows.filter((row) => {
+        if (row.threadId !== thread.id || row.kind !== "tool-call") return false;
+        const item = this.itemFromRow(row);
+        const record = this.subagentRosterToolRecord(item.payload);
+        return (record?.tool_name ?? item.payload.toolName) !== "Agent";
+      }).length,
       ...this.subagentRosterIdentities(thread, source),
       ...this.subagentRosterActivityFields(thread.id, lookup),
     };
@@ -1567,7 +1570,7 @@ export class CanonicalAgentStore {
   private subagentRosterIdentities(
     thread: AgentThread,
     source: { action: CollaborationAction | undefined; sourceItem: AgentItem | undefined },
-  ): Pick<CanonicalSubagentRosterRow, "providerIdentities" | "sourceProviderIdentities"> {
+  ): Pick<CanonicalChildRow, "providerIdentities" | "sourceProviderIdentities"> {
     return {
       providerIdentities: this.uniqueProviderIdentities([
         ...thread.providerIdentities,
@@ -1581,7 +1584,7 @@ export class CanonicalAgentStore {
   private subagentRosterActivityFields(
     threadId: string,
     lookup: SubagentRosterLookup,
-  ): Pick<CanonicalSubagentRosterRow, "hasActiveDescendant" | "canStop"> {
+  ): Pick<CanonicalChildRow, "hasActiveDescendant" | "canStop"> {
     const active = lookup.activeIds.has(threadId);
     return {
       hasActiveDescendant: !active && this.subagentHasActiveDescendant(threadId, lookup),
@@ -1625,17 +1628,18 @@ export class CanonicalAgentStore {
   }
 
   private subagentRosterRowBase(
-    request: CanonicalSubagentRosterRequest,
+    request: CanonicalChildRosterRequest,
     thread: AgentThread,
     latestTurn: AgentTurn | null,
     startedAt: string,
     updatedAt: string,
     threads: readonly AgentThread[],
-  ): Omit<CanonicalSubagentRosterRow, "sourceItemId" | "task" | "identity" | "model" | "reasoning" | "providerIdentities" | "sourceProviderIdentities" | "hasActiveDescendant" | "canStop"> {
+  ): Omit<CanonicalChildRow, "sourceItemId" | "task" | "identity" | "model" | "reasoning" | "providerIdentities" | "sourceProviderIdentities" | "hasActiveDescendant" | "canStop" | "stepCount"> {
     const latestTurnStatus = latestTurn?.status ?? null;
     return {
       id: thread.id,
       parentThreadId: thread.parentThreadId ?? request.owningParentThreadId,
+      provider: ProviderIdSchema.parse(thread.providerId),
       rootThreadId: thread.rootThreadId,
       owningParentThreadId: thread.owningParentThreadId ?? request.owningParentThreadId,
       lineage: this.subagentLineage(request.owningParentThreadId, thread, threads),
@@ -1651,7 +1655,7 @@ export class CanonicalAgentStore {
   private subagentRosterSourceFields(
     action: CollaborationAction | undefined,
     payload: Record<string, unknown>,
-  ): Pick<CanonicalSubagentRosterRow, "sourceItemId"> & SubagentRosterMetadata {
+  ): Pick<CanonicalChildRow, "sourceItemId"> & SubagentRosterMetadata {
     const sourceItemId = action?.source.itemId;
     return {
       ...(sourceItemId ? { sourceItemId } : {}),
@@ -1744,9 +1748,9 @@ export class CanonicalAgentStore {
   }
 
   private partitionSubagentRosterRows(
-    rosterRows: readonly CanonicalSubagentRosterRow[],
+    rosterRows: readonly CanonicalChildRow[],
     activeIds: ReadonlySet<string>,
-  ): { active: CanonicalSubagentRosterRow[]; done: CanonicalSubagentRosterRow[] } {
+  ): { active: CanonicalChildRow[]; done: CanonicalChildRow[] } {
     const active = rosterRows
       .filter((row) => activeIds.has(row.id))
       .sort((left, right) => left.startedAt.localeCompare(right.startedAt) || left.id.localeCompare(right.id));

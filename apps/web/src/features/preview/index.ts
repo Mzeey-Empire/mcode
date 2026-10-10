@@ -48,7 +48,6 @@ export {
 } from "./state/previewTabsStore";
 export type { ClosePageOptions, PreviewLiveChrome } from "./state/previewTabsStore";
 export {
-  normalizePreviewPageIdentity,
   usePreviewAnnotationStore,
 } from "./state/previewAnnotationStore";
 export type {

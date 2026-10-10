@@ -1,6 +1,12 @@
+/** A rendered message keeps server sequence provenance separate from live ordering guesses. */
+export type Message = import("@mcode/contracts").Message & { serverSequence?: number };
+
 // Import shared types for local use in the McodeTransport interface.
 import type {
   DiffStats,
+  WorkspaceFileList,
+  WorkspaceFileChanges,
+  FileReadResult,
   FilesystemBrowseResult,
   ReviewComparisonResult,
   ReviewFileDiffResult,
@@ -62,7 +68,8 @@ import type {
   ConversationOlderPage,
   ConversationOlderPageRequest,
   ConversationTail,
-  CanonicalSubagentRoster,
+  SubagentRoster,
+  SubagentDetail,
   CanonicalSubagentStopResult,
   SetThreadSubscriptionsInput,
   SetThreadSubscriptionsResult,
@@ -131,7 +138,6 @@ export type {
   WorkspaceEnvironmentActionRun,
   Thread,
   RecentThread,
-  Message,
   AttachmentMeta,
   StoredAttachment,
   GitBranch,
@@ -341,10 +347,6 @@ export interface McodeTransport {
   getAutomaticSetup(threadId: string): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot>;
   /** Release queued Turns without rerunning automatic Setup. */
   continueAutomaticSetup(threadId: string): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot>;
-  /** Cancel one Turn that is still queued behind automatic Setup. */
-  cancelQueuedAutomaticTurn(threadId: string, queuedTurnId: string): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot>;
-  /** Stop the active automatic Setup attempt without releasing its gate. */
-  stopAutomaticSetup(threadId: string): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot>;
   /** Start one new automatic Setup attempt from the current Project environment. */
   retryAutomaticSetup(threadId: string): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot>;
   /** Create one interactive recovery Terminal for the current Thread checkout. */
@@ -501,8 +503,10 @@ export interface McodeTransport {
       defaultOpenInApp?: string | null;
     },
   ): Promise<boolean>;
-  /** Clear the "completed" badge for a thread. Transitions completed -> paused in the DB. */
-  markThreadViewed(threadId: string): Promise<void>;
+  /** Return live waits and unseen settled outcomes across all threads. */
+  listAttention(): Promise<import("@mcode/contracts").ThreadAttention[]>;
+  /** Acknowledge a rendered server sequence up to a settled turn boundary. */
+  acknowledgeSeen(threadId: string, throughSequence: number): Promise<import("@mcode/contracts").AcknowledgeSeenResult>;
   /** Scan threads for stale or missing PR data and refresh their state. Returns updated PR state
    * for all affected threads. A null prNumber/prStatus signals the PR was cleared (stale data removed). */
   syncThreadPrs(workspaceId: string): Promise<Array<{ threadId: string; prNumber: number | null; prStatus: string | null }>>;
@@ -521,10 +525,11 @@ export interface McodeTransport {
   /** Fetch persisted messages and grouped narrative for one thread page. */
   loadConversationPage(threadId: string, limit: number, before?: number): Promise<ConversationPage>;
   /** Fetch the canonical descendant roster rooted at one owning parent thread. */
-  loadCanonicalSubagentRoster(
+  loadSubagentRoster(
     owningParentThreadId: string,
-    limit?: number,
-  ): Promise<CanonicalSubagentRoster>;
+  ): Promise<SubagentRoster>;
+  /** Read the last 32 persisted steps for one roster entry. */
+  loadSubagentDetail(owningParentThreadId: string, entryId: string): Promise<SubagentDetail>;
   /** Stop one exact active canonical child turn. */
   stopCanonicalSubagent(
     owningParentThreadId: string,
@@ -544,8 +549,9 @@ export interface McodeTransport {
   getVersion(): Promise<string>;
 
   // File operations (@ file tagging)
-  listWorkspaceFiles(workspaceId: string, threadId?: string): Promise<string[]>;
-  readFileContent(workspaceId: string, relativePath: string, threadId?: string): Promise<string>;
+  listWorkspaceFiles(workspaceId: string, threadId?: string): Promise<WorkspaceFileList>;
+  getWorkspaceFileChanges(workspaceId: string, threadId?: string): Promise<WorkspaceFileChanges>;
+  readFileContent(workspaceId: string, relativePath: string, threadId?: string, as?: "text"): Promise<FileReadResult>;
   refreshWorkspaceFiles(workspaceId: string, threadId?: string): Promise<void>;
 
   // Open-in app actions

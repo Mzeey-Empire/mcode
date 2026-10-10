@@ -1,4 +1,4 @@
-import type { DiffStats, FilesystemBrowseResult, ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn, WorkspaceCreateResult } from "@mcode/contracts";
+import type { DiffStats, FileReadResult, FilesystemBrowseResult, ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn, WorkspaceCreateResult, WorkspaceFileChanges, WorkspaceFileList } from "@mcode/contracts";
 import type {
   McodeTransport,
   Workspace,
@@ -70,7 +70,7 @@ import type {
   TerminalCustomProfile,
   TerminalProfileReference,
 } from "@mcode/contracts";
-import type { PaginatedMessages, ConversationPage, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationTail, CanonicalSubagentRoster, CanonicalSubagentStopResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability, GoalLookupResult } from "@mcode/contracts";
+import type { PaginatedMessages, ConversationPage, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationTail, SubagentRoster, SubagentDetail, CanonicalSubagentStopResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability, GoalLookupResult } from "@mcode/contracts";
 import {
   TERMINAL_DATA_TAG,
   decodeTerminalDataFrame,
@@ -573,6 +573,12 @@ export function createWsTransport(
       // The client-side optimistic Set is lost on reload/reconnect; this
       // restores live-session indicators for threads the server is still running.
       const hydration = hydrateRunningThreadsFromServer((method, params) => rpc(method, params as Record<string, unknown>));
+      void import("@/features/thread-attention/thread-attention-store").then(({ threadAttentionStore }) => {
+        const observedAttention = threadAttentionStore.getState().byThreadId;
+        return rpc<import("@mcode/contracts").ThreadAttention[]>("thread.listAttention", {})
+          .then((attention) => threadAttentionStore.getState().hydrate(attention, observedAttention));
+      })
+        .catch((error: unknown) => console.warn("[thread-attention] hydration failed", error));
 
       // Expose a sentinel in dev/test builds so Playwright can synchronize on
       // hydration completion before injecting agent events. Without this, tests
@@ -1059,16 +1065,6 @@ export function createWsTransport(
         "workspace.environment.automaticSetup.continue",
         { threadId },
       ),
-    cancelQueuedAutomaticTurn: (threadId, queuedTurnId) =>
-      rpc<import("@mcode/contracts").WorkspaceEnvironmentAutomaticSetupSnapshot>(
-        "workspace.environment.automaticSetup.cancelQueuedTurn",
-        { threadId, queuedTurnId },
-      ),
-    stopAutomaticSetup: (threadId) =>
-      rpc<import("@mcode/contracts").WorkspaceEnvironmentAutomaticSetupSnapshot>(
-        "workspace.environment.automaticSetup.stop",
-        { threadId },
-      ),
     retryAutomaticSetup: (threadId) =>
       rpc<import("@mcode/contracts").WorkspaceEnvironmentAutomaticSetupSnapshot>(
         "workspace.environment.automaticSetup.retry",
@@ -1148,7 +1144,8 @@ export function createWsTransport(
         devinMode: settings.devinMode,
         defaultOpenInApp: settings.defaultOpenInApp,
       }),
-    markThreadViewed: (threadId) => rpc<void>("thread.markViewed", { threadId }),
+    listAttention: () => rpc<import("@mcode/contracts").ThreadAttention[]>("thread.listAttention", {}),
+    acknowledgeSeen: (threadId, throughSequence) => rpc<import("@mcode/contracts").AcknowledgeSeenResult>("thread.acknowledgeSeen", { threadId, throughSequence }),
     syncThreadPrs: (workspaceId) =>
       rpc<Array<{ threadId: string; prNumber: number; prStatus: string }>>("thread.syncPrs", { workspaceId }),
 
@@ -1247,11 +1244,11 @@ export function createWsTransport(
       rpc<PaginatedMessages>("message.list", { threadId, limit, ...(before != null ? { before } : {}) }),
     loadConversationPage: (threadId, limit, before?) =>
       rpc<ConversationPage>("conversation.page", { threadId, limit, ...(before != null ? { before } : {}) }),
-    loadCanonicalSubagentRoster: (owningParentThreadId, limit?) =>
-      rpc<CanonicalSubagentRoster>("canonicalAgent.roster", {
+    loadSubagentRoster: (owningParentThreadId) =>
+      rpc<SubagentRoster>("subagent.roster", {
         owningParentThreadId,
-        ...(limit !== undefined ? { limit } : {}),
       }),
+    loadSubagentDetail: (owningParentThreadId, entryId) => rpc<SubagentDetail>("subagent.detail", { owningParentThreadId, entryId }),
     stopCanonicalSubagent: (owningParentThreadId, childThreadId) =>
       rpc<CanonicalSubagentStopResult>("agent.child.stop", {
         owningParentThreadId,
@@ -1273,9 +1270,11 @@ export function createWsTransport(
 
     // Files
     listWorkspaceFiles: (workspaceId, threadId?) =>
-      rpc<string[]>("file.list", { workspaceId, threadId }),
-    readFileContent: (workspaceId, relativePath, threadId?) =>
-      rpc<string>("file.read", { workspaceId, relativePath, threadId }),
+      rpc<WorkspaceFileList>("file.list", { workspaceId, threadId }),
+    getWorkspaceFileChanges: (workspaceId, threadId?) =>
+      rpc<WorkspaceFileChanges>("file.changes", { workspaceId, threadId }),
+    readFileContent: (workspaceId, relativePath, threadId?, as?) =>
+      rpc<FileReadResult>("file.read", { workspaceId, relativePath, threadId, as }),
     refreshWorkspaceFiles: (workspaceId, threadId?) =>
       rpc<void>("file.refresh", { workspaceId, threadId }),
 

@@ -12,6 +12,8 @@ export interface GitExecOptions {
   env?: NodeJS.ProcessEnv;
   /** Receive stdout chunks while Git runs. Enables the observed execution path. */
   onStdout?: (chunk: string) => void;
+  /** Skip retaining stdout when an onStdout consumer collects a bounded result. */
+  retainStdout?: boolean;
   /** Receive stderr chunks while Git runs. Enables the observed execution path. */
   onStderr?: (chunk: string) => void;
 }

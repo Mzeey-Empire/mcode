@@ -2,7 +2,8 @@
  * Derives the current page annotation and connects its draft editor to mention selection, separate from picker lifecycle effects.
  */
 import { useCallback, useMemo } from "react";
-import { normalizePreviewPageIdentity, usePreviewAnnotationStore } from "../state/previewAnnotationStore";
+import { usePreviewAnnotationStore } from "../state/previewAnnotationStore";
+import { normalizePreviewPageIdentity } from "@mcode/shared/browser-page-identity";
 import { useFileTagPopup } from "@/components/chat/FileTagPopup";
 import type { MentionSuggestion } from "@/components/chat/useFileAutocomplete";
 import { type usePreviewPage, previewPageIdentityUrl } from "../surfaces/usePreviewPage";

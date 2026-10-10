@@ -830,6 +830,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       threadId: active.execution.threadId,
       turnId: active.execution.turnId,
       messageId: persisted.messageId,
+      settledMessage: persisted.settledMessage,
       toolCallCount: persisted.toolCallCount,
       filesChanged: [...persisted.filesChanged],
       outcome: persisted.outcome,
@@ -1500,6 +1501,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       });
     this.disarmTurnRetryWindow(prepared.threadId);
     this.clearTurnEndedState(prepared.threadId);
+    await this.runtimePersistence.recordTurnOutcome(prepared.threadId, "cancelled");
     await this.runtimePersistence.setRuntimeStatus(prepared.threadId, "paused");
     broadcast("thread.status", { threadId: prepared.threadId, status: "paused" });
     this.trackSessionEnded(prepared.threadId, prepared.runtime.turnExecutionId);
@@ -2106,6 +2108,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       // A provider turn finishes the startup through StartupAgentPhaseObserver once the provider answers. A command
       // handled without a provider turn has nothing to wait for, so it finishes the startup here.
       if (!initialDispatch.failed && !initialDispatch.providerAdmitted
+        && !await this.threadCreation.settleVetoedAgent(created.startupId)
         && this.threadCreation.canAdmitQueuedAgent(created.thread.id, created.startupId)) {
         await this.threadCreation.completeHandledInitialCommand(created.startupId);
       }
@@ -2158,7 +2161,10 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       await this.threadCreation.failInitialAgent(startupId);
       throw error;
     }
-    if (cancellationWon) return { completion: Promise.resolve() };
+    if (cancellationWon) {
+      await this.threadCreation.settleVetoedAgent(startupId);
+      return { completion: Promise.resolve() };
+    }
     return { completion };
   }
 

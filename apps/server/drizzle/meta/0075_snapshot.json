@@ -1,107 +1,9 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "469be8a0-e253-452f-8847-abfeab0b718c",
+  "id": "fed1a3bd-a654-403d-ab29-0e36e33e8800",
   "prevId": "2c47b6ae-a770-49c4-b1d5-28e41b98cdc3",
   "tables": {
-    "approval_receipts": {
-      "name": "approval_receipts",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "message_id": {
-          "name": "message_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tool_call_id": {
-          "name": "tool_call_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "subject_label": {
-          "name": "subject_label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "outcome": {
-          "name": "outcome",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "origin": {
-          "name": "origin",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "decided_at": {
-          "name": "decided_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
-        },
-        "sort_order": {
-          "name": "sort_order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "idx_approval_receipts_message_sort_order_id": {
-          "name": "idx_approval_receipts_message_sort_order_id",
-          "columns": [
-            "message_id",
-            "sort_order",
-            "id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "approval_receipts_message_id_messages_id_fk": {
-          "name": "approval_receipts_message_id_messages_id_fk",
-          "tableFrom": "approval_receipts",
-          "tableTo": "messages",
-          "columnsFrom": [
-            "message_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "canonical_agent_events": {
       "name": "canonical_agent_events",
       "columns": {
@@ -3827,6 +3729,41 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'active'"
+        },
+        "seen_through_sequence": {
+          "name": "seen_through_sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "seen_at": {
+          "name": "seen_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_turn_outcome": {
+          "name": "last_turn_outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_turn_ended_at": {
+          "name": "last_turn_ended_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_turn_sequence": {
+          "name": "last_turn_sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "mode": {
           "name": "mode",

@@ -60,7 +60,7 @@ import type { ThreadService } from "../../../thread-control/index.js";
 import type { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
 import { ThreadControlMutationReservationService } from "../../../thread-control/index.js";
 import { publishParentProviderEvent } from "../../events/provider-event-publication.js";
-import { SubagentLifecycleService } from "../../collaboration/subagent-lifecycle-service.js";
+import { SubagentRosterService } from "../../collaboration/subagent-roster-service.js";
 
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn(), subscribedThreadIds: () => new Set<string>() }));
 
@@ -1410,6 +1410,7 @@ describe("AgentService Ended finalization", () => {
     const toolCallRecordRepo = new RealToolCallRecordRepo(db, agentStorageTestWriter(db));
     const thoughtSegmentRepo = new RealThoughtSegmentRepo(db, agentStorageTestWriter(db));
     const hookExecutionRepo = new RealHookExecutionRepo(db, agentStorageTestWriter(db));
+    const narrative = new NarrativeStore(messageRepo, toolCallRecordRepo, thoughtSegmentRepo, hookExecutionRepo, db);
     providerEmitter = wrapProviderEmitterForRuntimeEvents(Object.assign(new NodeEvents.EventEmitter(), {
       id: "codex" as ProviderId,
       descriptor: {
@@ -1489,7 +1490,7 @@ describe("AgentService Ended finalization", () => {
       { assertUsable: vi.fn() } as unknown as ProviderAvailabilityService,
       { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "" })) } as any,
       { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
-      new NarrativeStore(messageRepo, toolCallRecordRepo, thoughtSegmentRepo, hookExecutionRepo),
+      narrative,
       new ParentAssistantTextCheckpointService(db, agentStorageTestWriter(db)),
       undefined,
       undefined,
@@ -1499,7 +1500,7 @@ describe("AgentService Ended finalization", () => {
       undefined,
       planTurns,
       undefined,
-      new SubagentLifecycleService(canonicalSink, providerRegistry),
+      new SubagentRosterService(canonicalSink, providerRegistry, narrative, db),
     );
     const fixtureService = service;
     registerAgentStorageTestProducer(db, async () => {
@@ -1508,7 +1509,7 @@ describe("AgentService Ended finalization", () => {
     });
     startAgentServiceIngressForTest(service, (event) => {
       publishParentProviderEvent(event, {
-        updateThreadStatus: (threadId, status) => threadRepo.updateStatus(threadId, status),
+        recordTurnOutcome: (threadId, outcome) => threadRepo.recordTurnOutcome(threadId, outcome, new Date().toISOString()),
         publishThreadStatus: (payload) => broadcast("thread.status", payload),
       });
     });

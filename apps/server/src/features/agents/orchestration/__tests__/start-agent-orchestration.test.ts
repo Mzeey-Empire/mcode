@@ -15,7 +15,7 @@ async function buildOrchestration() {
   const workspace = await new WorkspaceRepo(reader, database.writer).create("Orchestration", "orchestration", false);
   const threadRepo = new ThreadRepo(reader, database.writer);
   const thread = await threadRepo.create(workspace.id, "Orchestration status", "direct", "main");
-  vi.spyOn(threadRepo, "updateStatus");
+  vi.spyOn(threadRepo, "recordTurnOutcome");
   const runtime = {
     getCurrentFileEffectTurnId: vi.fn(() => undefined),
     shouldSuppressTurnEnded: vi.fn(() => false),
@@ -67,7 +67,7 @@ describe("agent orchestration", () => {
 
       orchestration.publish(event);
 
-      expect(orchestration.threadRepo.updateStatus).toHaveBeenCalledWith(orchestration.thread.id, "completed");
+      expect(orchestration.threadRepo.recordTurnOutcome).toHaveBeenCalledWith(orchestration.thread.id, "completed", expect.any(String));
       expect(orchestration.publishThreadStatus).toHaveBeenCalledWith({
         threadId: orchestration.thread.id,
         status: "completed",
@@ -94,12 +94,12 @@ describe("agent orchestration", () => {
       const legacy: AgentEvent = { type: AgentEventType.TurnComplete, threadId: orchestration.thread.id,
         reason: "completed", costUsd: null, tokensIn: 1, tokensOut: 1 };
       orchestration.publish(legacy);
-      expect(orchestration.threadRepo.updateStatus).not.toHaveBeenCalled();
+      expect(orchestration.threadRepo.recordTurnOutcome).not.toHaveBeenCalled();
 
       const committed: AgentEvent = { ...legacy,
         turnExecutionId: "00000000-0000-4000-8000-000000000001", publicationId: "1" };
       orchestration.publish(committed);
-      expect(orchestration.threadRepo.updateStatus).not.toHaveBeenCalled();
+      expect(orchestration.threadRepo.recordTurnOutcome).not.toHaveBeenCalled();
       expect(orchestration.publishThreadStatus).not.toHaveBeenCalled();
       expect(orchestration.pullRequestCompletionEffect.schedule).toHaveBeenCalledWith(orchestration.thread.id);
       await orchestration.publicationRegistry.drain();

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ThreadAttentionSchema } from "../models/thread-attention.js";
 import { CanonicalAgentProgressFrameSchema } from "../models/canonical-agent-progress.js";
 import { ThreadStatusSchema } from "../models/enums.js";
 import { ThreadSchema } from "../models/thread.js";
@@ -29,6 +30,11 @@ export const CANONICAL_AGENT_EVENT_BATCH_MAX = 256;
 
 /** All push channel definitions keyed by channel name. */
 export const WS_CHANNELS = {
+  "thread.attention": ThreadAttentionSchema(),
+  /** Invalidates the owning parent's unified subagent roster. */
+  "subagents.changed": z.object({
+    threadId: z.string().min(1), epoch: z.string().min(1), revision: z.number().int().nonnegative(),
+  }).strict(),
   /** Directs browser creation to a host when no visible target exists yet. */
   "browserAutomation.bootstrap": z
     .object({
@@ -155,16 +161,17 @@ export const WS_CHANNELS = {
   /** Sidebar project order changed on the server; clients should refresh `workspace.list`. */
   "workspace.orderChanged": z.object({}),
   "turn.diffChanged": z.object({ threadId: z.string() }),
-  "turn.persisted": z.object({
+  "turn.persisted": lazySchema(() => z.object({
     threadId: z.string(),
     turnId: z.string().nullable().optional(),
     messageId: z.string().nullable(),
+    settledMessage: z.object({ id: z.string(), sequence: z.number().int().nonnegative() }).nullable(),
     toolCallCount: z.number(),
     filesChanged: z.array(z.string()),
     fileEffects: TurnFileEffectSummarySchema().optional(),
     outcome: TurnOutcomeSchema.optional(),
     executionId: z.string().nullable().optional(),
-  }),
+  }))(),
   /** Reports whether live assistant text remains recoverable or needs explicit risk acceptance. */
   "turn.savingStatus": TurnSavingStatusSchema(),
   /** Live net file effects attributed to explicit agent mutation tools. */

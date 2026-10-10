@@ -20,7 +20,7 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
     planService: { saveVersion: unused, snapshot: unused },
     planTurnService: { answerQuestions: unused, dismissQuestions: unused },
     recapService: { generate: unused },
-    subagentLifecycleService: { loadRoster: unused, stop: unused },
+    subagentRosterService: { loadRoster: unused, loadDetail: unused, stop: unused },
     taskRepo: { get: unused },
     thoughtSegmentRepo: { listByMessage: unused },
     threadControlService: { respondToApproval: unused, listPendingApprovals: unused },
