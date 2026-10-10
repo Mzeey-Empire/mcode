@@ -176,7 +176,7 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     this.frame.addEventListener("dom-ready", this.onDomReady);
     this.frame.addEventListener("ipc-message", this.onIpcMessage);
     this.frame.addEventListener("render-process-gone", this.onRenderProcessGone);
-    this.preparePromise = this.prepare(options.tabsBridge ?? window.desktopBridge?.preview?.tabs)
+    this.preparePromise = this.registerScopeAndPrepare(options.tabsBridge ?? window.desktopBridge?.preview?.tabs)
       .catch(() => ({ ok: false as const, error: "Surface preparation failed" }));
     const root = options.root ?? this.documentRef.body;
     this.controlIndicator = new BrowserSurfaceControlIndicator(this.documentRef, root);
@@ -193,10 +193,10 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     });
   }
 
-  private async prepare(tabs: Pick<PreviewTabsBridge, "list"> | undefined): Promise<PreviewSurfaceBridgeResult> {
+  private async registerScopeAndPrepare(tabs: Pick<PreviewTabsBridge, "list"> | undefined): Promise<PreviewSurfaceBridgeResult> {
     if (tabs) {
-      const listed = await tabs.list(this.identity.scope.id, this.identity.workspaceId);
-      if (!listed.ok) return listed;
+      const scopeRegistration = await tabs.list(this.identity.scope.id, this.identity.workspaceId);
+      if (!scopeRegistration.ok) return scopeRegistration;
     }
     if (this.disposed) return { ok: false, error: "Surface disposed" };
     return this.bridge.prepare({ surface: this.surface, adoptionToken: this.adoptionToken });

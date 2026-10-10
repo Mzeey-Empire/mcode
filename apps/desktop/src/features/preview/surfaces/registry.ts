@@ -5,7 +5,7 @@ import {
 } from "electron";
 import type { IpcMainInvokeEvent, WebContents } from "electron";
 import { logger } from "@mcode/shared";
-import { browserPartitionFor } from "@mcode/shared/browser-partition";
+import { browserPartitionFor, isBrowserWorkspaceId } from "@mcode/shared/browser-partition";
 import {
   applyPageStatus,
   emitTabsUpdated,
@@ -135,11 +135,7 @@ function validateSurfaceIdentity(value: unknown): PreviewSurfaceIdentity | null 
   const identity = value as Partial<PreviewSurfaceIdentity>;
   const scope = validateSurfaceScope(identity.scope);
   if (!validBoundedId(identity.workspaceId) || !validBoundedId(identity.tabId) || !scope) return null;
-  try {
-    browserPartitionFor(identity.workspaceId);
-  } catch {
-    return null;
-  }
+  if (!isBrowserWorkspaceId(identity.workspaceId)) return null;
   return { workspaceId: identity.workspaceId.trim(), scope, tabId: identity.tabId.trim() };
 }
 
@@ -215,6 +211,11 @@ function isInertGuestUrl(url: string, adoptionToken: string): boolean {
   return url === `about:blank#${adoptionToken}`;
 }
 
+function guestUsesWorkspaceProfile(guest: WebContents, workspaceId: string): boolean {
+  if (browserProfiles.isRemoved(workspaceId)) return false;
+  return guest.session === browserProfiles.sessionForWorkspace(workspaceId);
+}
+
 function guestMatchesPending(
   guest: WebContents,
   sender: WebContents,
@@ -222,8 +223,7 @@ function guestMatchesPending(
 ): boolean {
   if (guest.isDestroyed() || guest.getType() !== "webview") return false;
   if (guest.hostWebContents !== sender) return false;
-  if (browserProfiles.isRemoved(pending.surface.identity.workspaceId)) return false;
-  if (guest.session !== browserProfiles.sessionForWorkspace(pending.surface.identity.workspaceId)) return false;
+  if (!guestUsesWorkspaceProfile(guest, pending.surface.identity.workspaceId)) return false;
   return isInertGuestUrl(guest.getURL(), pending.adoptionToken);
 }
 

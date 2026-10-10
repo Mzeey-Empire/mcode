@@ -1,7 +1,7 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { app, session, type Session } from "electron";
-import { browserPartitionFor } from "@mcode/shared/browser-partition";
+import { browserPartitionFor, isBrowserWorkspaceId } from "@mcode/shared/browser-partition";
 import { installBrowserSessionPolicy } from "./electron-session-policy.js";
 import { disposePreviewSurfacesForWorkspace } from "../surfaces/registry.js";
 
@@ -26,10 +26,7 @@ function profileIds(directory: string, prefix = ""): string[] {
   for (const entry of NodeFS.readdirSync(directory, { withFileTypes: true })) {
     if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue;
     const id = entry.name.slice(prefix.length);
-    try {
-      ids.push(canonicalWorkspaceId(id));
-    } catch {
-    }
+    if (isBrowserWorkspaceId(id)) ids.push(id.toLowerCase());
   }
   return ids;
 }
