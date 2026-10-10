@@ -2485,10 +2485,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   const synchronizeTerminalStatus = (threadId: string, status: "completed" | "errored" | "interrupted"): void => {
-    if (useWorkspaceStore.getState().activeThreadId === threadId) {
-      void getTransport().markThreadViewed(threadId).catch(() => {});
-      return;
-    }
     useWorkspaceStore.setState((workspace) => ({
       threads: workspace.threads.map((thread) => thread.id === threadId ? { ...thread, status } : thread),
     }));
