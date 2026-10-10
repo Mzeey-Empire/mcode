@@ -2935,7 +2935,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (payload.messageId === null) {
       return {
         messages: record.messages.map((message) => message.id === payload.settledMessage?.id
-          ? { ...message, sequence: payload.settledMessage.sequence, serverSequence: payload.settledMessage.sequence }
+          ? { ...message, serverSequence: payload.settledMessage.sequence }
           : message),
         ...turnPersistStopState(record, payload),
         ...(terminalPhase ? terminalRuntimePatch(record, terminalPhase) : {}),
@@ -2950,7 +2950,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const stopState = turnPersistStopState(record, payload);
     return {
       messages: (messages ?? record.messages).map((message) => message.id === localMessageId && payload.settledMessage?.id === payload.messageId
-        ? { ...message, sequence: payload.settledMessage.sequence, serverSequence: payload.settledMessage.sequence }
+        ? { ...message, serverSequence: payload.settledMessage.sequence }
         : message),
       persistedToolCallCounts: { ...record.persistedToolCallCounts, [localMessageId]: payload.toolCallCount },
       persistedFilesChanged: { ...record.persistedFilesChanged, [localMessageId]: payload.filesChanged },

@@ -63,7 +63,7 @@ describe("on-screen thread acknowledgements", () => {
       settledMessage: { id: "prompt-1", sequence: 3 }, outcome: "errored", executionId: "execution-1", toolCallCount: 0, filesChanged: [] });
     await vi.advanceTimersByTimeAsync(150);
     expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([["a", 3]]);
-    expect(useThreadStore.getState().records.get("a")?.messages[0]?.sequence).toBe(3);
+    expect(useThreadStore.getState().records.get("a")?.messages[0]).toMatchObject({ sequence: 4, serverSequence: 3 });
 
     useThreadStore.getState().addMessage(createMockMessage({ id: "assistant-2", thread_id: "a", role: "assistant", sequence: 7, outcome: "completed" }));
     await vi.advanceTimersByTimeAsync(150);
@@ -72,6 +72,8 @@ describe("on-screen thread acknowledgements", () => {
       settledMessage: { id: "assistant-2", sequence: 5 }, outcome: "completed", toolCallCount: 0, filesChanged: [] });
     await vi.advanceTimersByTimeAsync(150);
     expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([["a", 3], ["a", 5]]);
+    expect(useThreadStore.getState().records.get("a")?.messages.map((message) => message.sequence)).toEqual([4, 5, 7]);
+    expect(useThreadStore.getState().records.get("a")?.messages[2]).toMatchObject({ id: "assistant-2", serverSequence: 5 });
   });
 
   it("acknowledges a reloaded empty ending only after its actual server prompt is rendered", async () => {
