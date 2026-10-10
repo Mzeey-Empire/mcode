@@ -451,6 +451,7 @@ export class CursorProvider
       logger.warn("Cursor event had no active turn routing", { type: event.type, threadId: event.threadId });
       return;
     }
+    if (event.type === "turnComplete" || event.type === "ended" || event.type === "error") this.acpClientBridge?.cancelPendingForSession(`mcode-${routing.threadId}`, "turn_ended");
     this.canonicalEventPublisher.publish(routing, providerRuntimeEvent(event), sourceIdentities);
   }
 

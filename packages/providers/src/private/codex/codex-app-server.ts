@@ -33,6 +33,8 @@ import type {
   TurnStartResult,
   TurnInterruptParams,
   TurnInterruptResult,
+  ThreadCompactStartParams,
+  ThreadCompactStartResult,
   ThreadGoal,
   ThreadGoalSetParams,
   ThreadGoalSetResult,
@@ -1203,6 +1205,58 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     const turnId = result?.turnId ?? result?.turn?.id ?? null;
     this.recordStartedTurn(threadId, turnId);
     return turnId;
+  }
+
+  /**
+   * Starts native context compaction with `thread/compact/start`.
+   * Codex runs compaction as its own turn but answers the RPC with `{}`, so this
+   * resolves with the turn id from that turn's `turn/started` notification.
+   *
+   * @returns Codex turn id of the compaction turn.
+   * @throws When the RPC fails or no compaction turn starts within the timeout.
+   */
+  async startCompaction(): Promise<string> {
+    const threadId = this.threadId;
+    if (!threadId) throw new Error("startCompaction called before thread was established");
+    const stopWaiting = new AbortController();
+    try {
+      // Subscribe before sending because the response and `turn/started` race on the wire.
+      const [turnId] = await Promise.all([
+        this.nextMainTurnStartedId(threadId, stopWaiting.signal),
+        this.rpc.sendRequest<ThreadCompactStartParams, ThreadCompactStartResult>("thread/compact/start", { threadId }, 60000),
+      ]);
+      logger.debug("Codex thread/compact/start acknowledged", { threadId, turnId: boundProtocolIdentifier(turnId) });
+      return turnId;
+    } finally {
+      stopWaiting.abort();
+    }
+  }
+
+  private nextMainTurnStartedId(threadId: string, signal: AbortSignal): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const finish = (): void => {
+        clearTimeout(timeout);
+        this.removeListener("notification", onNotification);
+        signal.removeEventListener("abort", onAbort);
+      };
+      const onNotification = (notification: { method?: string; params?: Record<string, unknown> }): void => {
+        if (notification.method !== "turn/started" || notification.params?.threadId !== threadId) return;
+        const turnId = (notification.params.turn as { id?: unknown } | undefined)?.id;
+        if (typeof turnId !== "string" || turnId.length === 0) return;
+        finish();
+        resolve(turnId);
+      };
+      const onAbort = (): void => {
+        finish();
+        reject(new Error("Codex compaction wait stopped"));
+      };
+      const timeout = setTimeout(() => {
+        finish();
+        reject(new Error("Codex compaction turn did not start"));
+      }, 60000);
+      this.on("notification", onNotification);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   private recordStartedTurn(threadId: string, turnId: string | null): void {

@@ -130,3 +130,34 @@ describe("ClaudeEventMapper tool results", () => {
     await expect(outputOf(blocks)).resolves.toBe(JSON.stringify(blocks));
   });
 });
+
+describe("ClaudeEventMapper rate limits", () => {
+  async function eventsFor(rateLimitInfo: unknown): Promise<AgentEvent[]> {
+    const { events, mapper } = createMapper();
+    await mapper.map({ type: "rate_limit_event", rate_limit_info: rateLimitInfo });
+    return events;
+  }
+
+  it("reports a usage warning as not blocked", async () => {
+    await expect(eventsFor({ status: "allowed_warning", resetsAt: 1_700_000_000, rateLimitType: "five_hour", utilization: 0.9 }))
+      .resolves.toEqual([{ type: AgentEventType.RateLimited, threadId: "test", active: false }]);
+  });
+
+  it("reports a rejection as blocked with its retry window", async () => {
+    vi.useFakeTimers({ now: 1_700_000_000_000 });
+    try {
+      await expect(eventsFor({ status: "rejected", resetsAt: 1_700_000_090, rateLimitType: "five_hour", utilization: 1 }))
+        .resolves.toEqual([{ type: AgentEventType.RateLimited, threadId: "test", active: true, retryAfterMs: 90_000, limitType: "five_hour", utilization: 1 }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears the block when requests are allowed", async () => {
+    await expect(eventsFor({ status: "allowed" })).resolves.toEqual([{ type: AgentEventType.RateLimited, threadId: "test", active: false }]);
+  });
+
+  it.each([undefined, {}, { status: "constructor" }])("ignores an unknown status %j", async (info) => {
+    await expect(eventsFor(info)).resolves.toEqual([]);
+  });
+});

@@ -1250,6 +1250,7 @@ export class ThreadHydrator {
             currentTurnMessageId: "",
             thoughtSegments: [],
             hooks: [],
+            approvals: [],
             isCompacting: false,
             agentStartTime: undefined,
             settings: this.deps.getWorkspaceThreadSettings(threadId),

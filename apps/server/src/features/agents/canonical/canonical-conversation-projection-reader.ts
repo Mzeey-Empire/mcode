@@ -3,6 +3,7 @@ import type { Database } from "bun:sqlite";
 import { and, asc, desc, eq, gt, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import {
+  ApprovalReceiptRecordSchema,
   CONVERSATION_HISTORY_PAGE_MAX_MESSAGES,
   ThoughtSegmentRecordSchema,
   ToolCallRecordSchema,
@@ -122,7 +123,7 @@ export class CanonicalConversationProjectionReader {
   private createNarrativeBuckets(messages: readonly Message[]): Record<string, ConversationNarrativeBatch> {
     const narrativeByMessage: Record<string, ConversationNarrativeBatch> = {};
     for (const message of messages) {
-      narrativeByMessage[message.id] = { tools: [], thoughts: [], hooks: [] };
+      narrativeByMessage[message.id] = { tools: [], thoughts: [], hooks: [], approvals: [] };
     }
     return narrativeByMessage;
   }
@@ -454,6 +455,9 @@ export class CanonicalConversationProjectionReader {
         break;
       case "hook":
         bucket.hooks.push(record as unknown as ConversationNarrativeBatch["hooks"][number]);
+        break;
+      case "approval":
+        bucket.approvals.push(ApprovalReceiptRecordSchema().parse(record));
         break;
     }
   }

@@ -29,3 +29,29 @@ export function formatUsageResetText(
 
   return `Resets in ${relative} · ${exact}`;
 }
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Formats a quota reset as a short meta label: a clock time within a day,
+ * a weekday within a week, else a date. Callers keep the full text from
+ * `formatUsageResetText` for assistive tech.
+ */
+export function formatUsageResetShort(
+  resetDate: string | null | undefined,
+  now = new Date(),
+  timeZone?: string,
+): string | null {
+  if (!resetDate) return null;
+  const reset = new Date(resetDate);
+  const remainingMs = reset.getTime() - now.getTime();
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) return null;
+
+  const options: Intl.DateTimeFormatOptions =
+    remainingMs < DAY_MS
+      ? { hour: "2-digit", minute: "2-digit", hour12: false }
+      : remainingMs < 7 * DAY_MS
+        ? { weekday: "short" }
+        : { month: "short", day: "numeric" };
+  return `resets ${new Intl.DateTimeFormat("en-US", { ...options, timeZone }).format(reset)}`;
+}

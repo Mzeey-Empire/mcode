@@ -286,7 +286,7 @@ beforeEach(() => {
   mockGetProviderUsage.mockReset();
   mockGetProviderUsage.mockImplementation(() => new Promise(() => {}));
   mockGetRightPanel.mockClear();
-  mockGetRightPanelVisible.mockClear();
+  mockGetRightPanelVisible.mockReset().mockReturnValue(false);
   mockShowRightPanel.mockClear();
   mockSetRightPanelTab.mockClear();
   mockSetRightPanelWidth.mockClear();
@@ -615,23 +615,22 @@ describe("HeaderActions - consolidated header", () => {
     expect(screen.getByTestId("thread-overview-recap")).not.toHaveTextContent(/stale|out of date|generate/i);
   });
 
-  it("renders usage limits as compact progress bars when quota data exists", () => {
+  it("renders usage limits as always-open neutral progress bars when quota data exists", () => {
     mockGetProviderUsage.mockResolvedValue(CLAUDE_USAGE);
     seedThreadUsage("thread-1", CLAUDE_USAGE);
     renderHeaderActions(makeThread({ worktree_path: "/repo/worktrees/feat-x" }));
 
-    const usageTrigger = screen.getByTestId("thread-overview-usage");
+    const usage = screen.getByTestId("thread-overview-usage");
     const prAction = screen.getByTestId("thread-overview-pr");
     const recap = screen.getByTestId("thread-overview-recap");
-    expect(usageTrigger).toHaveAttribute("aria-label", "Usage, 5-hour 12%, weekly 47%");
-    expect(usageTrigger).toHaveAttribute("aria-expanded", "true");
-    expect(Boolean(usageTrigger.compareDocumentPosition(prAction) & Node.DOCUMENT_POSITION_PRECEDING)).toBe(true);
-    expect(Boolean(usageTrigger.compareDocumentPosition(recap) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(usageTrigger).toHaveTextContent("Usage");
-    expect(usageTrigger).not.toHaveTextContent("5-hour 12%, weekly 47%");
-    expect(screen.getByTestId("thread-overview-usage-details")).toBeVisible();
+    expect(usage).toHaveAttribute("aria-label", "Usage, 5-hour 12%, weekly 47%");
+    expect(usage).not.toHaveAttribute("aria-expanded");
+    expect(Boolean(usage.compareDocumentPosition(prAction) & Node.DOCUMENT_POSITION_PRECEDING)).toBe(true);
+    expect(Boolean(usage.compareDocumentPosition(recap) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(screen.getByText("5-hour limit")).toBeInTheDocument();
     expect(screen.getByText("Weekly limit")).toBeInTheDocument();
+    const values = screen.getAllByTestId("thread-overview-usage-value");
+    expect(values.map((value) => value.textContent)).toEqual(["12% · resets Jul 3", "47% · resets Jul 7"]);
     expect(screen.getByRole("progressbar", { name: /5-hour usage 12 percent\. Resets in/ })).toHaveAttribute(
       "aria-valuenow",
       "12",
@@ -640,35 +639,31 @@ describe("HeaderActions - consolidated header", () => {
       "aria-valuenow",
       "47",
     );
-    expect(screen.getAllByText(/Resets in/)).toHaveLength(2);
 
-    fireEvent.click(usageTrigger);
+    fireEvent.click(usage);
 
-    expect(usageTrigger).toHaveAttribute("aria-expanded", "false");
-    expect(usageTrigger).toHaveTextContent("5-hour 12%, weekly 47%");
-    expect(screen.queryByRole("progressbar", { name: /5-hour usage/ })).not.toBeInTheDocument();
-    expect(screen.queryByText("usage unavailable")).not.toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: /5-hour usage/ })).toBeInTheDocument();
     expect(screen.queryByTestId("thread-overview-usage-popover")).not.toBeInTheDocument();
   });
 
-  it("emphasizes quota percentages when usage approaches or reaches the limit", () => {
+  it("keeps usage neutral below 90 percent and turns it amber, never red, from 90", () => {
     seedThreadUsage("thread-1", {
       providerId: "claude",
       usageStatus: "ready",
       quotaCategories: [
         {
           label: "5-hour limit",
-          used: 75,
+          used: 89,
           total: 100,
-          remainingPercent: 0.25,
+          remainingPercent: 0.11,
           resetDate: "2099-07-07T14:14:00.000Z",
           isUnlimited: false,
         },
         {
           label: "Weekly limit",
-          used: 95,
+          used: 100,
           total: 100,
-          remainingPercent: 0.05,
+          remainingPercent: 0,
           resetDate: "2099-07-07T14:14:00.000Z",
           isUnlimited: false,
         },
@@ -678,10 +673,14 @@ describe("HeaderActions - consolidated header", () => {
     renderHeaderActions(makeThread({ worktree_path: "/repo/worktrees/feat-x" }));
 
     const values = screen.getAllByTestId("thread-overview-usage-value");
-    expect(values[0]).toHaveTextContent("75%");
-    expect(values[0]).toHaveClass("text-primary");
-    expect(values[1]).toHaveTextContent("95%");
-    expect(values[1]).toHaveClass("text-destructive");
+    const fills = screen.getAllByRole("progressbar").map((bar) => bar.firstElementChild);
+    expect(values[0]).toHaveTextContent("89%");
+    expect(values[0]).not.toHaveClass("text-primary");
+    expect(fills[0]).toHaveClass("bg-muted");
+    expect(values[1]).toHaveTextContent("100%");
+    expect(values[1]).toHaveClass("text-primary");
+    expect(fills[1]).toHaveClass("bg-primary");
+    expect(screen.getByTestId("thread-overview-usage").innerHTML).not.toMatch(/destructive|diff-add|diff-remove/);
   });
 
   it("does not render Codex usage before provider quota data arrives", () => {
@@ -707,7 +706,6 @@ describe("HeaderActions - consolidated header", () => {
     const usageTrigger = screen.getByTestId("thread-overview-usage");
     expect(usageTrigger).toHaveAttribute("aria-label", `Usage, ${summary}`);
     expect(usageTrigger).toHaveTextContent(summary);
-    expect(screen.queryByTestId("thread-overview-usage-details")).not.toBeInTheDocument();
   });
 
   it("hides empty or unlimited-only usage without API-key billing mode", () => {
@@ -744,7 +742,6 @@ describe("HeaderActions - consolidated header", () => {
     const usageTrigger = screen.getByTestId("thread-overview-usage");
     expect(usageTrigger).toHaveAttribute("aria-label", "Usage, $12.34 session");
     expect(usageTrigger).toHaveTextContent("$12.34 session");
-    expect(screen.queryByTestId("thread-overview-usage-details")).not.toBeInTheDocument();
   });
 
   it("suppresses session cost for plan billing mode even when cost exists", () => {
@@ -788,11 +785,15 @@ describe("HeaderActions - consolidated header", () => {
     expect(mockSetPendingPrefill).toHaveBeenCalledWith(COMMIT_PREFILL);
   });
 
-  it("renders a single dedicated right-panel toggle", () => {
+  it("renders the right-panel toggle only while the panel is closed", () => {
+    mockGetRightPanelVisible.mockReturnValue(false);
+    const { unmount } = renderHeaderActions();
+    expect(screen.getByRole("button", { name: "Toggle panel" })).toBeInTheDocument();
+    unmount();
+
+    mockGetRightPanelVisible.mockReturnValue(true);
     renderHeaderActions();
-    const toggle = screen.getByTestId("header-panel-toggle");
-    expect(toggle).toBeInTheDocument();
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("button", { name: "Toggle panel" })).not.toBeInTheDocument();
   });
 
   it("collapses the old per-tab toggle icons (no terminal/preview/changes buttons)", () => {

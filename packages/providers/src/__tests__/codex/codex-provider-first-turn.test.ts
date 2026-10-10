@@ -22,8 +22,9 @@ vi.mock("../../private/codex/codex-version.js", () => ({
   meetsMinVersion: meetsMinVersionMock,
 }));
 
-const { sendTurnMock, readConfigMock, appServers, startError, startGate } = vi.hoisted(() => ({
+const { sendTurnMock, startCompactionMock, readConfigMock, appServers, startError, startGate } = vi.hoisted(() => ({
   sendTurnMock: vi.fn().mockResolvedValue("turn-test-id"),
+  startCompactionMock: vi.fn<() => Promise<string>>(),
   readConfigMock: vi.fn(),
   appServers: [] as Array<import("node:events").EventEmitter & {
     isAlive: boolean;
@@ -62,6 +63,9 @@ vi.mock("../../private/codex/codex-app-server.js", async () => {
     }
     async sendTurn(input: unknown, turnOptions: unknown): Promise<string> {
       return sendTurnMock(input, turnOptions);
+    }
+    async startCompaction(): Promise<string> {
+      return startCompactionMock();
     }
     async interruptTurn(): Promise<void> {}
     async interruptTurnAndDrain(turnId: string): Promise<void> {
@@ -143,11 +147,44 @@ function makeProvider(
  * first turn on queueMicrotask ran before that and skipped runTurn entirely.
  */
 describe("CodexProvider first turn on new session", () => {
+  it.each([false, true])("orders one cancellation receipt before stop (failed deny: %s)", async (failedDeny) => {
+    const batches: ProviderEventBatch[] = [];
+    const provider = makeProvider(undefined, undefined, undefined, { submit: async (batch) => { batches.push(batch); return acceptedEventReceipt; } });
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    await provider.sendTurn({
+      turnId: "approval-turn", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
+      threadId, message: "lint", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "supervised",
+    });
+    const handler = appServers[0]?.options.approvalHandler;
+    assert(handler);
+    const request: CodexApprovalRequest = { rpcId: 1, method: "item/commandExecution/requestApproval", params: { command: "bun run lint", itemId: "tool-1" } };
+    const native = handler(request);
+    const [pending] = provider.listPendingApprovals();
+    assert(pending);
+    if (failedDeny) {
+      const response = provider.resolveApproval(pending.requestId, { autoDeny: "unreadable" });
+      await native;
+      request.responseWritten?.(false);
+      expect(await response).toMatchObject({ status: "failed" });
+    }
+    await provider.stopSession(sessionId);
+    await native;
+    await vi.waitFor(() => expect(submittedRuntimeEvents(batches).filter(({ event }) => event.type === "approvalDecided").map(({ event }) => event)).toEqual([{
+      type: "approvalDecided", threadId, requestId: pending.requestId, turnExecutionId: schemaValidExecutionId,
+      kind: failedDeny ? "tool" : "command", subjectLabel: failedDeny ? "Mcode couldn't read this request" : "bun run lint",
+      outcome: { status: "cancelled", reason: failedDeny ? "unanswerable" : "session_stopped" },
+      ...(failedDeny ? {} : { toolCallId: "tool-1", origin: { kind: "agent" } }),
+    }]));
+    await provider.shutdown();
+  });
+
   const threadId = "first-turn-thread";
   const sessionId = `mcode-${threadId}`;
 
   beforeEach(() => {
     sendTurnMock.mockClear();
+    startCompactionMock.mockReset();
     checkCodexVersionMock.mockClear();
     meetsMinVersionMock.mockClear();
     appServers.length = 0;
@@ -761,6 +798,62 @@ describe("CodexProvider first turn on new session", () => {
     await ended;
   });
 
+  const compactChip = { id: "command:command:compact", kind: "command", label: "compact", namespace: "command", range: { start: 0, end: 8 } } as const;
+
+  it.each([
+    { form: "typed", message: " /compact\n", mentions: [] },
+    { form: "chip", message: "/compact", mentions: [compactChip] },
+  ])("runs a $form /compact as native compaction and ends on its compaction turn", async ({ message, mentions }) => {
+    const provider = makeProvider();
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    const notify = (method: string, params: Record<string, unknown>) =>
+      appServers[0]!.emit("notification", { method, params: { threadId: "sdk-thread-1", ...params } });
+    // Codex answers thread/compact/start with {} and announces the turn id only on turn/started.
+    startCompactionMock.mockImplementation(async () => {
+      notify("turn/started", { turn: { id: "compact-turn", status: "inProgress" } });
+      return "compact-turn";
+    });
+
+    await provider.sendTurn({
+      turnId: "compact-turn-request", turnExecutionId: "compact-execution", sessionId, workspaceId: "workspace-test",
+      threadId, message, mentions: [...mentions], cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "auto",
+    });
+    await vi.waitFor(() => expect(startCompactionMock).toHaveBeenCalledTimes(1));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    notify("item/started", { turnId: "compact-turn", item: { type: "contextCompaction", id: "compaction-1" } });
+    notify("item/completed", { turnId: "compact-turn", item: { type: "contextCompaction", id: "compaction-1" } });
+    notify("turn/completed", { turn: { id: "compact-turn", status: "completed" } });
+
+    await vi.waitFor(() => expect(events.at(-1)?.event.type).toBe(AgentEventType.Ended));
+    expect(sendTurnMock).not.toHaveBeenCalled();
+    expect(events.filter(({ event }) => event.type !== AgentEventType.System).map(({ event }) =>
+      event.type === AgentEventType.Compacting ? `${event.type}:${event.active}` : event.type)).toEqual([
+      "compacting:true", "compacting:false", AgentEventType.TurnComplete, AgentEventType.Ended,
+    ]);
+    await provider.stopSession(sessionId);
+  });
+
+  it.each([
+    { message: "/compact now", mentions: [] },
+    { message: "please /compact", mentions: [] },
+    { message: "/compact", mentions: [compactChip, { id: "file:a", kind: "file", label: "a.ts", path: "/repo/a.ts", range: { start: 0, end: 1 } }] },
+  ] as const)("sends $message with $mentions.length mentions as an ordinary turn", async ({ message, mentions }) => {
+    const provider = makeProvider();
+
+    await provider.sendTurn({
+      turnId: "text-turn", turnExecutionId: "text-execution", sessionId, workspaceId: "workspace-test",
+      threadId, message, mentions: [...mentions], cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "auto",
+    });
+
+    await vi.waitFor(() => expect(sendTurnMock).toHaveBeenCalledTimes(1));
+    expect(sendTurnMock.mock.calls[0]?.[0]).toContainEqual({ type: "text", text: message });
+    expect(startCompactionMock).not.toHaveBeenCalled();
+    await provider.stopSession(sessionId);
+  });
+
   it("submits an attempt-bound parent event through the canonical sink only when enabled", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedEventReceipt);
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
@@ -826,6 +919,47 @@ describe("CodexProvider first turn on new session", () => {
 
     expect(legacy.some((event) => event.event.type === AgentEventType.TextDelta)).toBe(true);
     expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("keeps a parent approval pending when a sub-agent turn completes", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
+      .mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    await provider.sendTurn({
+      turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
+      sessionId, workspaceId: "workspace-test", threadId, message: "delegate", cwd: process.cwd(),
+      model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "supervised",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const server = appServers[0];
+    const handler = server?.options.approvalHandler;
+    assert(server && handler);
+    void handler({ rpcId: 1, method: "item/commandExecution/requestApproval", params: { command: "bun run lint", itemId: "tool-1" } });
+    server.emit("notification", {
+      method: "item/started",
+      params: { threadId: "sdk-thread-1", turnId: "turn-test-id", item: {
+        type: "subAgentActivity", id: "spawn-child", kind: "started",
+        agentThreadId: "native-child", agentPath: "/root/worker",
+      } },
+    });
+    server.emit("notification", { method: "turn/started", params: { threadId: "native-child", turn: { id: "child-turn" } } });
+    server.emit("notification", {
+      method: "turn/completed", params: { threadId: "native-child", turn: { id: "child-turn", status: "completed" } },
+    });
+    const runtimeEvents = () => submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch));
+    const receipts = () => runtimeEvents().filter(({ event }) => event.type === AgentEventType.ApprovalDecided);
+    await vi.waitFor(() => expect(runtimeEvents().some((event) => event.extension?.child && event.event.type === AgentEventType.TurnComplete)).toBe(true));
+    expect(provider.listPendingApprovals(threadId)).toHaveLength(1);
+    expect(receipts()).toEqual([]);
+
+    server.emit("notification", {
+      method: "turn/completed", params: { threadId: "sdk-thread-1", turn: { id: "turn-test-id", status: "completed" } },
+    });
+    await vi.waitFor(() => expect(receipts().map(({ event }) => event.type === AgentEventType.ApprovalDecided && event.outcome))
+      .toEqual([{ status: "cancelled", reason: "turn_ended" }]));
+    expect(provider.listPendingApprovals(threadId)).toEqual([]);
+    await provider.shutdown();
   });
 
   it("keeps native child progress in the parent's canonical stream through parent completion", async () => {

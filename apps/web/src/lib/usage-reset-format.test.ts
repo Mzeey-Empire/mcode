@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatUsageResetText } from "./usage-reset-format";
+import { formatUsageResetShort, formatUsageResetText } from "./usage-reset-format";
 
 describe("formatUsageResetText", () => {
   const now = new Date("2026-07-03T12:00:00.000Z");
@@ -28,5 +28,26 @@ describe("formatUsageResetText", () => {
   it("rejects missing timestamps", () => {
     expect(formatUsageResetText(undefined, now)).toBeNull();
     expect(formatUsageResetText(null, now)).toBeNull();
+  });
+});
+
+describe("formatUsageResetShort", () => {
+  const now = new Date("2026-07-03T12:00:00.000Z");
+
+  it("shows the clock time for a reset within a day", () => {
+    expect(formatUsageResetShort("2026-07-03T16:00:00.000Z", now, "UTC")).toBe("resets 16:00");
+    expect(formatUsageResetShort("2026-07-04T11:59:00.000Z", now, "UTC")).toBe("resets 11:59");
+  });
+
+  it("shows the weekday for a reset within a week, then the date", () => {
+    expect(formatUsageResetShort("2026-07-04T12:00:00.000Z", now, "UTC")).toBe("resets Sat");
+    expect(formatUsageResetShort("2026-07-10T11:59:00.000Z", now, "UTC")).toBe("resets Fri");
+    expect(formatUsageResetShort("2026-07-10T12:00:00.000Z", now, "UTC")).toBe("resets Jul 10");
+  });
+
+  it("rejects expired, invalid, and missing timestamps", () => {
+    expect(formatUsageResetShort("2026-07-03T12:00:00.000Z", now)).toBeNull();
+    expect(formatUsageResetShort("not-a-date", now)).toBeNull();
+    expect(formatUsageResetShort(null, now)).toBeNull();
   });
 });

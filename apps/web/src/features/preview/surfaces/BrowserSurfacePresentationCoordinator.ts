@@ -24,7 +24,7 @@ export interface BrowserSurfacePresentationIntent {
   readonly pageState?: BrowserSurfacePageState | null;
   readonly viewport?: { readonly width: number; readonly height: number };
   /** Optional explicit overlap used by focused renderer tests and callers. */
-  readonly coveredLeft?: number;
+  readonly coveredRight?: number;
   /** Explicitly controls input for a visible detached surface. */
   readonly inputEnabled?: boolean;
   /** Explicitly controls accessibility exposure for a visible detached surface. */
@@ -100,7 +100,7 @@ function isPresentablePage(pageState: BrowserSurfacePageState | null | undefined
     !address!.startsWith("chrome-error:");
 }
 
-function boundedCoveredLeft(overlap: number, width: number, scale: number): number {
+function boundedCoveredRight(overlap: number, width: number, scale: number): number {
   if (!Number.isFinite(overlap) || !Number.isFinite(scale) || scale <= 0) return 0;
   return Math.min(width, Math.max(0, overlap / scale));
 }
@@ -348,11 +348,11 @@ export class BrowserSurfacePresentationCoordinator {
     rect: BrowserSurfacePresentationRect,
     scale: number,
     offscreen: boolean,
-  ): Pick<BrowserSurfacePresentation, "zIndex" | "coveredLeft" | "inputEnabled" | "accessible"> {
+  ): Pick<BrowserSurfacePresentation, "zIndex" | "coveredRight" | "inputEnabled" | "accessible"> {
     const panelInput = intent.source === "panel";
     return {
       zIndex: offscreen ? 29 : 31,
-      coveredLeft: offscreen ? 0 : boundedCoveredLeft(intent.coveredLeft ?? this.activityRailOverlap, rect.width, scale),
+      coveredRight: offscreen ? 0 : boundedCoveredRight(intent.coveredRight ?? this.activityRailOverlap, rect.width, scale),
       inputEnabled: offscreen ? false : intent.inputEnabled ?? panelInput,
       accessible: offscreen ? false : intent.accessible ?? panelInput,
     };

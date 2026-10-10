@@ -25,7 +25,7 @@ const hook: HookExecution = {
 };
 
 function props(item: NarrativeItem): NarrativeRowProps {
-  return { rowId: "row-1", item, allToolCalls: [toolCall] };
+  return { rowId: "row-1", item };
 }
 
 describe("areNarrativeRowPropsEqual", () => {
@@ -79,9 +79,5 @@ describe("areNarrativeRowPropsEqual", () => {
     const delta: NarrativeItem = { type: "delta", text: "thinking" };
 
     expect(areNarrativeRowPropsEqual(props(thought), props(delta))).toBe(false);
-    expect(areNarrativeRowPropsEqual(
-      props(thought),
-      { ...props(thought), allToolCalls: [] },
-    )).toBe(true);
   });
 });

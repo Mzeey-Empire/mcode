@@ -16,7 +16,7 @@ describe("transcript narrative rows", () => {
       thoughtSegments: [{ text: "Checking", startedAt: 1000, endedAt: 1100, isExplicitNonFinal: true }],
       toolCalls: [0, 1].map((index) => ({ id: `tool-${index}`, toolName: "Bash", toolInput: { command: "pwd" }, output: "done", isError: false, isComplete: true, startedAt: 1200 + index, completedAt: 1300 + index })),
       persistedNarrativeByMessage: { answer: {
-        hooks: [], thoughts: [{ id: "thought", message_id: "answer", text: "Checking", started_at: new Date(1000).toISOString(), ended_at: new Date(1100).toISOString(), sort_order: 0 }],
+        approvals: [], hooks: [], thoughts: [{ id: "thought", message_id: "answer", text: "Checking", started_at: new Date(1000).toISOString(), ended_at: new Date(1100).toISOString(), sort_order: 0 }],
         tools: [0, 1].map((index) => ({ id: `tool-${index}`, message_id: "answer", parent_tool_call_id: null, tool_name: "Bash", input_summary: "pwd", output_summary: "done", status: "completed", started_at: new Date(1200 + index).toISOString(), completed_at: new Date(1300 + index).toISOString(), sort_order: index + 1 })),
       } },
     };
@@ -35,7 +35,7 @@ describe("transcript narrative rows", () => {
 
   it("keeps an open lone call in its own row instead of listing it as a child", () => {
     const narrative = expandTranscriptNarrative([{
-      type: "narrative-flow", key: "live", startTime: 1000, hooks: [], thoughtSegments: [],
+      type: "narrative-flow", key: "live", startTime: 1000, approvals: [], hooks: [], thoughtSegments: [],
       toolCalls: [{ id: "tool-0", toolName: "Bash", toolInput: { command: "pwd" }, output: "done", isError: false, isComplete: true, startedAt: 1200 }],
       streamingText: "", isAgentRunning: false,
     }], {}, new Set());
@@ -46,14 +46,14 @@ describe("transcript narrative rows", () => {
   it("omits hooks from live and saved narrative rows while retaining reasoning", () => {
     const live = expandTranscriptNarrative([{
       type: "narrative-flow", key: "live", toolCalls: [], startTime: 1000,
-      hooks: [{ hookName: "Setup", hookType: "permission", status: "completed", startedAt: 1000, outputLines: [], fullOutput: [] }],
+      approvals: [], hooks: [{ hookName: "Setup", hookType: "permission", status: "completed", startedAt: 1000, outputLines: [], fullOutput: [] }],
       thoughtSegments: [{ text: "Working", startedAt: 2000, endedAt: 2100, isExplicitNonFinal: true }],
       streamingText: "", isAgentRunning: true,
     }], {}, new Set());
     const saved = expandTranscriptNarrative([fold("saved", "answer", "Done")], { answer: { tools: [], thoughts: [{
       id: "thought", message_id: "answer", text: "Working", started_at: new Date(2000).toISOString(),
       ended_at: new Date(2100).toISOString(), sort_order: 2,
-    }], hooks: [{
+    }], approvals: [], hooks: [{
       id: "hook", message_id: "answer", hook_name: "Setup", tool_name: null, phase: "permission",
       payload: "{}", duration_ms: 1, did_block: false, started_at: new Date(1000).toISOString(),
       ended_at: new Date(1001).toISOString(), sort_order: 1,
@@ -65,7 +65,7 @@ describe("transcript narrative rows", () => {
   it("keeps reasoning keys and order across live completion and cold cache hydration", () => {
     const answer = message("answer", "Final response", "execution");
     const flow: ChatVirtualItem = {
-      type: "narrative-flow", key: "live", toolCalls: [], hooks: [], startTime: 1000,
+      type: "narrative-flow", key: "live", toolCalls: [], approvals: [], hooks: [], startTime: 1000,
       thoughtSegments: [1000, 2000].map((startedAt) => ({
         text: `Reasoning ${startedAt}`, startedAt, endedAt: startedAt + 10, isExplicitNonFinal: true,
       })),
@@ -75,7 +75,7 @@ describe("transcript narrative rows", () => {
     const saved = expandTranscriptNarrative([
       fold("saved", answer.id, answer.content),
       { type: "message", key: answer.id, message: answer },
-    ], { answer: { tools: [], hooks: [], thoughts: [1000, 2000].map((time, index) => ({
+    ], { answer: { tools: [], approvals: [], hooks: [], thoughts: [1000, 2000].map((time, index) => ({
       id: `thought-${index}`, message_id: answer.id, text: `Reasoning ${time}`,
       started_at: new Date(time).toISOString(), ended_at: new Date(time + 10).toISOString(), sort_order: index,
     })) } }, new Set(["saved"]), { threadId: "thread" });
@@ -86,7 +86,7 @@ describe("transcript narrative rows", () => {
   });
 
   it("shows only the fold while it is closed and its rows once it opens", () => {
-    const records = { answer: { tools: [], hooks: [], thoughts: [{
+    const records = { answer: { tools: [], approvals: [], hooks: [], thoughts: [{
       id: "thought", message_id: "answer", text: "Working", started_at: new Date(1000).toISOString(),
       ended_at: new Date(1100).toISOString(), sort_order: 0,
     }] } };
@@ -101,7 +101,7 @@ describe("transcript narrative rows", () => {
 
   it("puts a settled live turn's rows under its fold instead of above the answer", () => {
     const live: ChatVirtualItem = {
-      type: "narrative-flow", key: "live", toolCalls: [], hooks: [], startTime: 1000,
+      type: "narrative-flow", key: "live", toolCalls: [], approvals: [], hooks: [], startTime: 1000,
       thoughtSegments: [{ text: "Working", startedAt: 1000, endedAt: 1100, isExplicitNonFinal: true }],
       streamingText: "", isAgentRunning: false,
     };
@@ -120,7 +120,7 @@ describe("transcript narrative rows", () => {
 
   it.each([
     ["before records load", undefined, undefined],
-    ["after records load", { answer: { tools: [], hooks: [], thoughts: [{
+    ["after records load", { answer: { tools: [], approvals: [], hooks: [], thoughts: [{
       id: "thought", message_id: "answer", text: "Done", started_at: new Date(1000).toISOString(),
       ended_at: new Date(1100).toISOString(), sort_order: 0, is_final_response: 1,
     }] } }, undefined],
@@ -137,7 +137,7 @@ describe("transcript narrative rows", () => {
   });
 
   it("folds saved tools that a stopped turn's live state dropped", () => {
-    const records = { answer: { hooks: [], thoughts: [], tools: [{
+    const records = { answer: { approvals: [], hooks: [], thoughts: [], tools: [{
       id: "tool", message_id: "answer", parent_tool_call_id: null, tool_name: "Bash", input_summary: "pwd",
       output_summary: "done", status: "completed" as const, started_at: new Date(1200).toISOString(),
       completed_at: new Date(1300).toISOString(), sort_order: 0,
@@ -154,7 +154,7 @@ describe("transcript narrative rows", () => {
   });
 
   it("keeps a settled turn's live tools when only part of its records has loaded", () => {
-    const records = { answer: { hooks: [], thoughts: [], tools: [{
+    const records = { answer: { approvals: [], hooks: [], thoughts: [], tools: [{
       id: "tool-0", message_id: "answer", parent_tool_call_id: null, tool_name: "Bash", input_summary: "pwd",
       output_summary: "done", status: "completed" as const, started_at: new Date(1200).toISOString(),
       completed_at: new Date(1300).toISOString(), sort_order: 0,
@@ -172,7 +172,7 @@ describe("transcript narrative rows", () => {
   });
 
   it("keeps a settled turn's live thoughts when its records hold only the answer", () => {
-    const records = { answer: { tools: [], hooks: [], thoughts: [{
+    const records = { answer: { tools: [], approvals: [], hooks: [], thoughts: [{
       id: "thought", message_id: "answer", text: "Done", started_at: new Date(1000).toISOString(),
       ended_at: new Date(1100).toISOString(), sort_order: 0, is_final_response: 1,
     }] } };
@@ -187,9 +187,21 @@ describe("transcript narrative rows", () => {
     expect(open.map(rowLabel)).toEqual(["work-fold", "thought", "message"]);
   });
 
+  it("keeps a stopped turn's only receipt when nothing else ran", () => {
+    const turn = { threadId: "thread", executionId: "execution", messageId: "answer" };
+    const projected = createTranscriptItemProjector()({
+      messages: [message("answer", "Stopped", "execution")], currentTurn: turn,
+      agentDisplayState: { phase: "completed" }, agentStartTime: 1000, streamingText: undefined, toolCalls: [],
+      approvals: [{ requestId: "req-1", subjectLabel: "rm -rf build", outcome: { status: "cancelled", reason: "session_stopped" }, decidedAt: 1200 }],
+      committedAssistantBody: "Stopped",
+    });
+    const open = expandTranscriptNarrative(projected, {}, new Set(["work-fold:answer"]), turn);
+    expect(open.map(rowLabel)).toEqual(["work-fold", "approval", "message"]);
+  });
+
   it("bounds persisted narrative expansion for very large saved tool histories", () => {
     const records: NonNullable<PersistedNarrativeRecords> = {
-      hooks: [],
+      approvals: [], hooks: [],
       thoughts: [],
       tools: Array.from({ length: 170 }, (_, index) => ({
         id: `tool-${String(index).padStart(3, "0")}`,

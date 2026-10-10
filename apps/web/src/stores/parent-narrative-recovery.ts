@@ -1,6 +1,7 @@
 import { MessageSchema, ParentNarrativeRecoveryItemSchema, type AgentItem, type AgentModelState, type AgentTurn, type Message, type ParentNarrativeRecoveryItem } from "@mcode/contracts";
-import { recordToHookExecution, recordToToolCall } from "@/features/conversation/narrative/build-persisted-narrative";
+import { recordToApprovalReceipt, recordToHookExecution, recordToToolCall } from "@/features/conversation/narrative/build-persisted-narrative";
 import type { ThreadRecord } from "./thread-record";
+import { appendThoughtSegment } from "./thread-store/narrative-projection";
 import { getCanonicalRuntimeTurn } from "./thread-lifecycle";
 
 /** Restores a parent's active narrative or terminal response at the subscription boundary. */
@@ -13,11 +14,85 @@ export function recoverParentNarrative(threadId: string, state: AgentModelState,
     .sort((left, right) => left.record.sort_order - right.record.sort_order);
   if (items.length === 0 && !record) return {};
   const narrative = recoveredNarrative(turn, items);
+  const owned = ownedNarrativePatch(turn, state, record, items, narrative.patch);
+  const text = recoveredAssistantText(turn, state);
+  const response = record ? recoveredResponse(threadId, turn, state, record, narrative.streaming, narrative.terminal) : {};
   return {
-    ...(items.length > 0 ? { ...narrative.patch, ...recoveredStartTime(turn, record) } : emptyOwnedNarrativePatch(turn, state, record)),
-    ...recoveredAssistantText(turn, state),
-    ...(record ? recoveredResponse(threadId, turn, state, record, narrative.streaming, narrative.terminal) : {}),
+    ...owned,
+    ...text,
+    ...(record && !serverOwnsThoughtTape(items, owned) ? syncedThoughtTape(record, text.streaming) : {}),
+    ...response,
+    ...(record && narrative.terminal ? finishedNarrativeCache(record, response.currentTurnMessageId ?? record.currentTurnMessageId, items) : {}),
   };
+}
+
+/**
+ * The next turn clears the ephemeral narrative, and only `narrativeByMessage` keeps a finished turn's fold.
+ * Without this copy the fold and its decision receipts vanish until a reload refetches them.
+ */
+function finishedNarrativeCache(record: ThreadRecord, messageId: string, items: readonly ParentNarrativeRecoveryItem[]): Partial<ThreadRecord> {
+  if (!messageId || items.length === 0) return {};
+  const previous = record.narrativeByMessage[messageId] ?? emptyBucket();
+  const recovered = anchoredNarrative(items, messageId);
+  return {
+    narrativeByMessage: {
+      ...record.narrativeByMessage,
+      [messageId]: {
+        tools: mergeById(previous.tools, recovered.tools),
+        thoughts: mergeById(previous.thoughts, recovered.thoughts),
+        hooks: mergeById(previous.hooks, recovered.hooks),
+        approvals: mergeById(previous.approvals, recovered.approvals),
+      },
+    },
+  };
+}
+
+type NarrativeBucket = NonNullable<ThreadRecord["narrativeByMessage"][string]>;
+
+function emptyBucket(): NarrativeBucket {
+  return { tools: [], thoughts: [], hooks: [], approvals: [] };
+}
+
+/** Live records can carry a provisional message id, so each is re-keyed to the message that owns the bucket. */
+function anchoredNarrative(items: readonly ParentNarrativeRecoveryItem[], messageId: string): NarrativeBucket {
+  const bucket = emptyBucket();
+  for (const item of items) {
+    if (item.kind === "toolCall") bucket.tools.push({ ...item.record, message_id: messageId });
+    if (item.kind === "narrationSegment") bucket.thoughts.push({ ...item.record, message_id: messageId });
+    if (item.kind === "hook") bucket.hooks.push({ ...item.record, message_id: messageId });
+    if (item.kind === "approval") bucket.approvals.push({ ...item.record, message_id: messageId });
+  }
+  return bucket;
+}
+
+function mergeById<T extends { id: string; sort_order: number }>(existing: readonly T[], incoming: readonly T[]): T[] {
+  const byId = new Map(existing.map((record) => [record.id, record]));
+  for (const record of incoming) byId.set(record.id, record);
+  return [...byId.values()].sort((left, right) => left.sort_order - right.sort_order || left.id.localeCompare(right.id));
+}
+
+/** Narration segments, or a discarded-narration marker, mean the server's thought list replaces the local tape. */
+function serverOwnsThoughtTape(items: readonly ParentNarrativeRecoveryItem[], owned: Partial<ThreadRecord>): boolean {
+  return items.length > 0 ? items.some((item) => item.kind === "narrationSegment") : owned.thoughtSegments !== undefined;
+}
+
+/**
+ * Undecided text chunks land in both `streaming` and the local thought tape, and the timeline treats
+ * `streaming` past the tape as the answer. Without narration segments the server can restore `streaming`
+ * but has no record of that tape, so the local tape is kept and extended with the text missed while
+ * disconnected. Otherwise the earlier text renders as a thought and the answer restarts at the next chunk.
+ */
+function syncedThoughtTape(record: ThreadRecord, streaming: string | undefined): Partial<ThreadRecord> {
+  const segments = record.thoughtSegments;
+  const last = segments.at(-1);
+  if (streaming === undefined || !last || last.id?.startsWith("assistant-text:")) return {};
+  const tape = segments.filter((segment) => !segment.id?.startsWith("assistant-text:")).map((segment) => segment.text).join("");
+  if (record.streaming !== tape || !streaming.startsWith(tape)) return {};
+  return { thoughtSegments: appendThoughtSegment(segments, streaming.slice(tape.length), false) };
+}
+
+function ownedNarrativePatch(turn: AgentTurn, state: AgentModelState, record: ThreadRecord | undefined, items: readonly ParentNarrativeRecoveryItem[], patch: Partial<ThreadRecord>): Partial<ThreadRecord> {
+  return items.length > 0 ? { ...patch, ...recoveredStartTime(turn, record) } : emptyOwnedNarrativePatch(turn, state, record);
 }
 
 function recoveredAssistantText(turn: AgentTurn, state: AgentModelState): Partial<ThreadRecord> {
@@ -40,13 +115,14 @@ function emptyOwnedNarrativePatch(turn: AgentTurn, state: AgentModelState, recor
     ...(discarded.some((item) => item.kind === "narrationSegment") ? { thoughtSegments: [] } : {}),
     ...(discarded.some((item) => item.kind === "toolCall") ? { toolCalls: [] } : {}),
     ...(discarded.some((item) => item.kind === "hook") ? { hooks: [] } : {}),
+    ...(discarded.some((item) => item.kind === "approval") ? { approvals: [] } : {}),
   };
 }
 
 function parentNarrativeRecord(item: AgentItem): ParentNarrativeRecoveryItem[] {
   const projection = item.payload.projection;
   if (projection === "narrativeRecovery") return [ParentNarrativeRecoveryItemSchema().parse(item.payload.narrative)];
-  if (projection === "toolCall" || projection === "narrationSegment" || projection === "hook") {
+  if (projection === "toolCall" || projection === "narrationSegment" || projection === "hook" || projection === "approval") {
     return [ParentNarrativeRecoveryItemSchema().parse({ kind: projection, record: item.payload.record })];
   }
   return [];
@@ -71,6 +147,7 @@ function recoveredNarrative(turn: AgentTurn, items: readonly ParentNarrativeReco
   const tools = items.filter((item) => item.kind === "toolCall");
   const thoughts = items.filter((item) => item.kind === "narrationSegment");
   const hooks = items.filter((item) => item.kind === "hook");
+  const approvals = items.filter((item) => item.kind === "approval");
   const streaming = thoughts.filter((item) => item.record.is_final_response === 1)
     .map((item) => item.record.text).join("");
   const terminal = turn.status !== "Pending" && turn.status !== "Running";
@@ -85,6 +162,7 @@ function recoveredNarrative(turn: AgentTurn, items: readonly ParentNarrativeReco
       isExplicitNonFinal: record.is_final_response === 0 || record.ended_at !== null,
     })),
     hooks: hooks.map((item) => recordToHookExecution(item.record)),
+    approvals: approvals.map((item) => recordToApprovalReceipt(item.record)),
     streaming: terminal ? "" : streaming, streamingPreview: terminal ? "" : streaming.slice(-200),
     responseTextIsStreaming: !terminal && thoughts.some((item) => item.record.is_final_response === 1
       && item.record.ended_at === null && item.record.text.length > 0),

@@ -22,6 +22,7 @@ import { CanonicalAgentStore as CanonicalAgentBoundary } from "../canonical-agen
 import type { CodexSystemWriterIntent } from "../canonical-codex-system-error-projection.js";
 import { CanonicalExecutionSemanticWriter } from "../canonical-execution-semantic-writer.js";
 import { CanonicalAcceptedEventWrite } from "../canonical-accepted-write.js";
+import { CanonicalConversationProjectionReader } from "../canonical-conversation-projection-reader.js";
 import { ExecutionLivePublicationRelease } from "../execution-live-publication-release.js";
 import type { DataOnlyParentTurnStartInput } from "../canonical-parent-turn-write.js";
 
@@ -238,6 +239,47 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     reason: "The execution worker exited before its provider turn could be proved live.",
     recoveryIncidentId: "incident-1",
   };
+
+  it("persists and publishes a duplicate decision once between tools, then reanchors it at turn end", async () => {
+    await send(1, { kind: "start", providerId: "codex", input: startInput(), parentLive: { planFeature: "none", precedingMessageId: "user-1" } });
+    const raw = (ordinal: number, event: AgentEvent) => send(ordinal, { kind: "event", phase: "running", nativeCursor: null, events: [runtimeEvent(ordinal, event)] });
+    const bound = { threadId: THREAD_ID, turnExecutionId: EXECUTION_ID };
+    expect((await raw(2, { ...bound, type: "turnStarted" })).kind).toBe("committed");
+    expect((await raw(3, { ...bound, type: "toolUse", toolCallId: "before", toolName: "Bash", toolInput: {} })).kind).toBe("committed");
+    const decision = { ...bound, type: "approvalDecided", requestId: "request-1", toolCallId: "before", kind: "command", subjectLabel: "bun run lint",
+      outcome: { status: "auto_denied", reason: "unreadable" } } satisfies AgentEvent;
+    expect((await raw(4, decision)).kind).toBe("committed");
+    expect((await raw(5, decision)).kind).toBe("committed");
+    expect((await raw(6, { ...bound, type: "toolUse", toolCallId: "after", toolName: "Read", toolInput: {} })).kind).toBe("committed");
+    expect(db.prepare("SELECT id, sort_order, outcome FROM approval_receipts").all()).toEqual([
+      { id: "request-1", sort_order: 1, outcome: '{"status":"auto_denied","reason":"unreadable"}' },
+    ]);
+    const finish = finishLiveCommand();
+    expect((await send(7, { kind: "event", phase: "running", nativeCursor: null,
+      events: [runtimeEvent(7, { ...bound, type: "turnComplete", reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 })],
+      terminalInput: finish.input })).kind).toBe("committed");
+    const messageId = new CanonicalAgentBoundary(db).loadTerminalProjection(TURN_ID).message?.id;
+    expect(db.prepare("SELECT message_id, sort_order FROM approval_receipts").all()).toEqual([{ message_id: messageId, sort_order: 1 }]);
+    expect(db.prepare("SELECT id, sort_order FROM tool_call_records ORDER BY sort_order").all()).toEqual([
+      { id: "before", sort_order: 0 }, { id: "after", sort_order: 2 },
+    ]);
+    const page = new CanonicalConversationProjectionReader(db).load(THREAD_ID, 20);
+    expect(page.narrativeByMessage[messageId ?? ""]?.approvals).toEqual([expect.objectContaining({
+      id: "request-1", subject_label: "bun run lint", sort_order: 1, outcome: { status: "auto_denied", reason: "unreadable" },
+    })]);
+  });
+
+  it("throws when the same request id arrives with a conflicting decision", async () => {
+    await send(1, { kind: "start", providerId: "codex", input: startInput(), parentLive: { planFeature: "none", precedingMessageId: "user-1" } });
+    const raw = (ordinal: number, event: AgentEvent) => send(ordinal, { kind: "event", phase: "running", nativeCursor: null, events: [runtimeEvent(ordinal, event)] });
+    const bound = { threadId: THREAD_ID, turnExecutionId: EXECUTION_ID };
+    await raw(2, { ...bound, type: "turnStarted" });
+    const decision = { ...bound, type: "approvalDecided", requestId: "request-1", kind: "tool", subjectLabel: "Read",
+      outcome: { status: "denied", choiceLabel: "Deny" } } satisfies AgentEvent;
+    expect((await raw(3, decision)).kind).toBe("committed");
+    await expect(raw(4, { ...decision, outcome: { status: "allowed", intent: "allow_once", choiceLabel: "Allow" } })).rejects.toThrow();
+    expect(db.prepare("SELECT outcome FROM approval_receipts").all()).toEqual([{ outcome: '{"status":"denied","choiceLabel":"Deny"}' }]);
+  });
 
   it.each(["completed", "errored", "cancelled", "interrupted"] as const)(
     "records %s attention facts through accepted compatibility", async (outcome) => {

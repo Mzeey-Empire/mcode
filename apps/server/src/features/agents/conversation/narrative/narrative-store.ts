@@ -1,4 +1,5 @@
 import { NarrativeReadStore } from "./narrative-read-store.js";
+import { ApprovalReceiptStore, approvalReceiptRecord } from "../../approvals/approval-receipt-store.js";
 /**
  * NarrativeStore — single home for the narrative pipeline's read side (and,
  * after the candidate-A write-seam extraction, its enrichment + classification
@@ -41,6 +42,7 @@ import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { and, asc, desc, eq, gt, gte, inArray, lt, ne, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import {
   hookExecutions,
+  approvalReceipts,
   messages,
   thoughtSegments,
   toolCallRecords,
@@ -91,6 +93,7 @@ function narrativeKindOrder(kind: NarrativeDetailCursor["kind"]): number {
     case "toolCall": return 1;
     case "narrationSegment": return 2;
     case "hook": return 3;
+    case "approval": return 4;
   }
 }
 
@@ -100,6 +103,7 @@ function narrativeEntryId(entry: NarrativeEntry): string {
     case "toolCall": return entry.record.id;
     case "narrationSegment": return entry.record.id;
     case "hook": return entry.record.id;
+    case "approval": return entry.record.id;
   }
 }
 
@@ -226,6 +230,17 @@ export class NarrativeStore {
 
   nextSortOrder(...args: Parameters<NarrativeTurnState["nextSortOrder"]>): ReturnType<NarrativeTurnState["nextSortOrder"]> {
     return this.stateFor(args[0]).nextSortOrder(...args);
+  }
+
+  /** Retain a decision in the owning turn's ordered recovery snapshot. */
+  recordApproval(event: Parameters<NarrativeTurnState["recordApproval"]>[0]): void {
+    this.stateFor(event.threadId).recordApproval(event);
+  }
+
+  /** Read the durable decisions for the narrative.list endpoint. */
+  listApprovals(messageId: string) {
+    if (!this.db) throw new Error("NarrativeStore requires a database for approval reads");
+    return new ApprovalReceiptStore(this.db).listByMessage(messageId);
   }
 
   openOrExtendThought(...args: Parameters<NarrativeTurnState["openOrExtendThought"]>): ReturnType<NarrativeTurnState["openOrExtendThought"]> {
@@ -447,7 +462,14 @@ export class NarrativeStore {
       .limit(limit)
       .all();
 
+    const approvalRows = orm.select().from(approvalReceipts).where(and(
+      eq(approvalReceipts.messageId, message.id),
+      this.detailCursorCondition(after, "approval", approvalReceipts.sortOrder, approvalReceipts.id),
+    )).orderBy(asc(approvalReceipts.sortOrder), asc(approvalReceipts.id)).limit(limit).all();
     const entries = [
+      ...approvalRows.map((row) => NarrativeEntrySchema().parse({
+        kind: "approval", sequence: message.sequence, sortOrder: row.sortOrder, record: approvalReceiptRecord(row),
+      })),
       ...(this.isAfterDetailCursor(body, after) ? [body] : []),
       ...toolRows.map((tool) => NarrativeEntrySchema().parse({
         kind: "toolCall",
@@ -566,7 +588,8 @@ export class NarrativeStore {
   }
   /** Build persisted narrative entries for an already-loaded message page. */
   loadForMessages(messages: readonly Message[]): NarrativeEntry[] {
-    return new NarrativeReadStore(this.toolCallRecordRepo, this.thoughtSegmentRepo, this.hookExecutionRepo).loadForMessages(messages);
+    return new NarrativeReadStore(this.toolCallRecordRepo, this.thoughtSegmentRepo, this.hookExecutionRepo,
+      this.db ? new ApprovalReceiptStore(this.db) : undefined).loadForMessages(messages);
   }
   /** Persist recovered rows through acknowledged owner commands. */
   async persistRecoveredNarrative(messageId: string, items: readonly ParentNarrativeRecoveryItem[], replaceExisting = false): Promise<void> {

@@ -81,8 +81,12 @@ vi.mock("@/features/projects/state/workspaceStore", () => {
 });
 
 vi.mock("@/stores/threadStore", () => ({
-  useThreadStore: vi.fn((selector: (state: { records: Map<string, unknown>; fetchProviderUsage: () => void }) => unknown) =>
-    selector({ records: mockThreadRecords, fetchProviderUsage: vi.fn() })),
+  useThreadStore: vi.fn((selector: (state: {
+    records: Map<string, unknown>;
+    runningThreadIds: Set<string>;
+    fetchProviderUsage: () => void;
+  }) => unknown) =>
+    selector({ records: mockThreadRecords, runningThreadIds: new Set(), fetchProviderUsage: vi.fn() })),
 }));
 
 vi.mock("@/features/pull-requests", () => ({ usePullRequestReviewLink: vi.fn().mockReturnValue(null) }));

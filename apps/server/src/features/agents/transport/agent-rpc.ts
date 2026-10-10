@@ -88,7 +88,7 @@ export interface AgentRouterDeps {
   gitWatcherService?: Pick<GitWatcherService, "watchThreadWorktree">;
   hookExecutionRepo: Pick<HookExecutionRepo, "listByMessage">;
   messageRepo: ConversationPageDeps["messageRepo"] & Pick<MessageRepo, "confirmUserMessage">;
-  narrativeStore: Pick<NarrativeStore, "load">;
+  narrativeStore: Pick<NarrativeStore, "load" | "listApprovals">;
   planQuestionAnswersRepo: ConversationPageDeps["planQuestionAnswersRepo"];
   planService: Pick<PlanService, "saveVersion" | "snapshot">;
   planTurnService: Pick<PlanTurnService, "answerQuestions" | "dismissQuestions">;
@@ -218,6 +218,7 @@ const agentHandlers: AgentRpcHandlerMap = {
     tools: deps.toolCallRecordRepo.listByMessage(params.messageId),
     thoughts: deps.thoughtSegmentRepo.listByMessage(params.messageId),
     hooks: deps.hookExecutionRepo.listByMessage(params.messageId),
+    approvals: deps.narrativeStore.listApprovals(params.messageId),
   }),
   "thread.getTasks": (deps, params) => deps.canonicalProgress?.getTasks(params.threadId) ?? deps.taskRepo.get(params.threadId),
   "approval.respond": async (deps, params) => {

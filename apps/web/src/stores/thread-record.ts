@@ -1,6 +1,7 @@
 import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode } from "@/transport";
 import type { ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport";
 import type {
+  ApprovalReceiptRecord,
   ContextWindowMode,
   ReasoningLevel,
   OrchestrationMode,
@@ -14,7 +15,7 @@ import type {
 } from "@mcode/contracts";
 import type { DevinMode } from "@mcode/contracts";
 import { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
-import type { ThoughtSegment } from "@/features/conversation/narrative/types";
+import type { ApprovalReceipt, ThoughtSegment } from "@/features/conversation/narrative/types";
 import {
   createCanonicalAgentReplica,
   type CanonicalAgentReplica,
@@ -55,6 +56,7 @@ export type ThreadNarrativeByMessage = Record<
     tools: ToolCallRecord[];
     thoughts: ThoughtSegmentRecord[];
     hooks: HookExecutionRecord[];
+    approvals: ApprovalReceiptRecord[];
   } | undefined
 >;
 
@@ -150,6 +152,8 @@ export interface ThreadRecord {
   assistantResponseKeys: Record<string, string>;
   thoughtSegments: ThoughtSegment[];
   hooks: HookExecution[];
+  /** Approvals decided during the live turn; persisted receipts replace them on reload. */
+  approvals: ApprovalReceipt[];
   isCompacting: boolean;
 
   settings: ThreadSettings;
@@ -195,6 +199,7 @@ export const CONVERSATION_REVISION_FIELD_KEYS = [
   "toolCalls",
   "thoughtSegments",
   "hooks",
+  "approvals",
   "currentTurnMessageId",
   "pendingTurnPersistMessageIds",
   "currentTurnResponseKey",
@@ -247,6 +252,7 @@ export function createEmptyThreadRecord(): ThreadRecord {
     assistantResponseKeys: {},
     thoughtSegments: [],
     hooks: [],
+    approvals: [],
     isCompacting: false,
 
     settings: { ...DEFAULT_THREAD_SETTINGS },

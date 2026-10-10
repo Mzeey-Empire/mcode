@@ -13,6 +13,7 @@ import { z } from "zod";
 import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";
 import { NarrativeReadStore } from "../conversation/narrative/narrative-read-store.js";
 import { recoveredNarrativeRows } from "../conversation/narrative/recovered-narrative-rows.js";
+import { ApprovalReceiptStore } from "../approvals/approval-receipt-store.js";
 import { ThoughtSegmentStore as ThoughtSegmentRepo } from "../conversation/narrative/persistence/thought-segment-store.js";
 import { HookExecutionStore as HookExecutionRepo } from "../events/persistence/hook-execution-store.js";
 import { PlanQuestionAnswersStore as PlanQuestionAnswersRepo } from "../planning/persistence/plan-question-answers-store.js";
@@ -170,7 +171,7 @@ export class CanonicalParentTurnWrite {
     this.toolRecords = new ToolCallRecordRepo(db);
     this.thoughtRecords = new ThoughtSegmentRepo(db);
     this.hookRecords = new HookExecutionRepo(db);
-    this.narrative = new NarrativeReadStore(this.toolRecords, this.thoughtRecords, this.hookRecords);
+    this.narrative = new NarrativeReadStore(this.toolRecords, this.thoughtRecords, this.hookRecords, new ApprovalReceiptStore(db));
     this.threads = new ThreadRepo(db);
     this.planAnswers = new PlanQuestionAnswersRepo(db);
     this.stagedAssistant = db.prepare("SELECT role, content FROM messages WHERE id = ? AND thread_id = ?");
@@ -321,6 +322,7 @@ export class CanonicalParentTurnWrite {
     this.toolRecords.bulkCreate(rows.tools, replaceExisting);
     this.thoughtRecords.bulkCreate(rows.thoughts, replaceExisting);
     this.hookRecords.bulkCreate(rows.hooks, replaceExisting);
+    for (const record of rows.approvals) new ApprovalReceiptStore(this.db).materialize(record);
   }
 
   /** Replace an internal accepted prefix with the exact terminal body on the writer connection. */
@@ -632,6 +634,7 @@ function settleTerminalNarrative(
     if (item.kind === "narrationSegment") lastThoughtOrder = Math.max(lastThoughtOrder, item.record.sort_order);
   }
   return items.map((item) => {
+    if (item.kind === "approval") return { kind: "approval", record: { ...item.record, message_id: messageId } };
     if (item.kind === "toolCall") return settleToolCall(item, messageId, outcome, endedAt);
     if (item.kind === "hook") return settleHook(item, messageId, endedAt);
     return settleThought(item, messageId, finalText, lastThoughtOrder);

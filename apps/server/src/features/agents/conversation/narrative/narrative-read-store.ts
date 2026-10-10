@@ -2,13 +2,14 @@ import type { Message, NarrativeEntry } from "@mcode/contracts";
 import type { ToolCallRecordStore } from "../../tools/persistence/tool-call-record-store.js";
 import type { ThoughtSegmentStore } from "./persistence/thought-segment-store.js";
 import type { HookExecutionStore } from "../../events/persistence/hook-execution-store.js";
+import type { ApprovalReceiptStore } from "../../approvals/approval-receipt-store.js";
 type ToolCallRecordRepo = ToolCallRecordStore;
 type ThoughtSegmentRepo = ThoughtSegmentStore;
 type HookExecutionRepo = HookExecutionStore;
 
 /** Persisted narrative projection accepts only synchronous read capabilities. */
 export class NarrativeReadStore {
- constructor(private readonly toolCallRecordRepo: Pick<ToolCallRecordRepo, "listByMessages">, private readonly thoughtSegmentRepo: Pick<ThoughtSegmentRepo, "listByMessages">, private readonly hookExecutionRepo: Pick<HookExecutionRepo, "listByMessages">) {}
+ constructor(private readonly toolCallRecordRepo: Pick<ToolCallRecordRepo, "listByMessages">, private readonly thoughtSegmentRepo: Pick<ThoughtSegmentRepo, "listByMessages">, private readonly hookExecutionRepo: Pick<HookExecutionRepo, "listByMessages">, private readonly approvals?: Pick<ApprovalReceiptStore, "listByMessages">) {}
 loadForMessages(messages: readonly Message[]): NarrativeEntry[] {
     const entries: NarrativeEntry[] = [];
     const assistantMessages = messages.filter((m) => m.role === "assistant");
@@ -16,8 +17,12 @@ loadForMessages(messages: readonly Message[]): NarrativeEntry[] {
     const toolsByMessage = this.toolCallRecordRepo.listByMessages(assistantMessageIds);
     const thoughtsByMessage = this.thoughtSegmentRepo.listByMessages(assistantMessageIds);
     const hooksByMessage = this.hookExecutionRepo.listByMessages(assistantMessageIds);
+    const approvalsByMessage = this.approvals?.listByMessages(assistantMessageIds);
 
     for (const message of assistantMessages) {
+      for (const record of approvalsByMessage?.get(message.id) ?? []) {
+        entries.push({ kind: "approval", sequence: message.sequence, sortOrder: record.sort_order, record });
+      }
       this.appendAssistantNarrativeEntries(entries, message, {
         tools: toolsByMessage.get(message.id) ?? [],
         thoughts: thoughtsByMessage.get(message.id) ?? [],

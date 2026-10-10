@@ -80,7 +80,7 @@ export class CursorAcpProcessSpawner {
       },
       callbacks: {
         onPermissionRequest: async (request) => entry
-          ? this.deps.bridge.requestPermission(entry, request)
+          ? this.deps.bridge.createClient(entry).requestPermission(request)
           : { outcome: { outcome: "cancelled" } },
         onSessionUpdate: async (update) => {
           if (entry) await this.deps.bridge.deliverSessionUpdate(entry, update);
@@ -97,7 +97,7 @@ export class CursorAcpProcessSpawner {
       },
       clientFactory: (callbacks) => ({
         requestPermission: async (request) => entry
-          ? this.deps.bridge.requestPermission(entry, request)
+          ? this.deps.bridge.createClient(entry).requestPermission(request)
           : { outcome: { outcome: "cancelled" } },
         sessionUpdate: callbacks.onSessionUpdate,
         readTextFile: async ({ path: filePath }) => ({

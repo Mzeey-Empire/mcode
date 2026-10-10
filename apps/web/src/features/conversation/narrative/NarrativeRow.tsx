@@ -1,9 +1,9 @@
 import { memo } from "react";
-import type { ToolCall } from "@/transport/types";
 import type { NarrativeItem, SubagentRosterTarget } from "./types";
 import { ThoughtBlock } from "./ThoughtBlock";
 import { ToolSummaryLine } from "./ToolSummaryLine";
 import { HookRow } from "./HookRow";
+import { ApprovalReceiptRow } from "./ApprovalReceiptRow";
 import { SubagentRow } from "./SubagentRow";
 import { ActiveToolRow } from "./ActiveToolRow";
 import { DeltaBlock } from "./DeltaBlock";
@@ -15,8 +15,6 @@ export interface NarrativeRowProps {
   rowId: string;
   /** Narrative item rendered in this row. */
   item: NarrativeItem;
-  /** Full turn graph retained for the sub-agent detail contract. */
-  allToolCalls: readonly ToolCall[];
   /** Opens a selected canonical child through the composition root. */
   onSubagentSelect?: (id: string, target: SubagentRosterTarget) => void;
   /** Opens the owning thread's Subagents roster for aggregate activity. */
@@ -66,6 +64,10 @@ function sameNarrativeItems(left: NarrativeItem, right: NarrativeItem): boolean 
       const leftHook = left as Extract<NarrativeItem, { type: "hook" }>;
       return sameValues([leftHook.hook === right.hook]);
     }
+    case "approval": {
+      const leftApproval = left as Extract<NarrativeItem, { type: "approval" }>;
+      return sameValues([leftApproval.receipt === right.receipt]);
+    }
     case "subagent": {
       const leftSubagent = left as Extract<NarrativeItem, { type: "subagent" }>;
       return sameValues([
@@ -99,7 +101,6 @@ export function areNarrativeRowPropsEqual(
 
 function renderItem(
   item: NarrativeItem,
-  allToolCalls: readonly ToolCall[],
   onSubagentSelect?: (id: string, target: SubagentRosterTarget) => void,
   onOpenSubagents?: (target: SubagentRosterTarget) => void,
 ): React.ReactNode {
@@ -110,15 +111,12 @@ function renderItem(
       return <ToolSummaryLine group={item.group} />;
     case "hook":
       return <HookRow hook={item.hook} />;
+    case "approval":
+      return <ApprovalReceiptRow receipt={item.receipt} />;
     case "subagent":
       return (
         <SubagentRow
-          toolCall={item.toolCall}
           participants={item.participants}
-          lifecycle={item.lifecycle}
-          children={item.children}
-          hooks={item.hooks}
-          allToolCalls={allToolCalls}
           activities={item.activities}
           onOpenSubagents={onOpenSubagents}
           onSubagentSelect={onSubagentSelect}
@@ -139,13 +137,12 @@ function renderItem(
 export const NarrativeRow = memo(function NarrativeRow({
   rowId,
   item,
-  allToolCalls,
   onSubagentSelect,
   onOpenSubagents,
 }: NarrativeRowProps) {
   return (
     <NarrativePerformanceRow rowId={rowId}>
-      {renderItem(item, allToolCalls, onSubagentSelect, onOpenSubagents)}
+      {renderItem(item, onSubagentSelect, onOpenSubagents)}
     </NarrativePerformanceRow>
   );
 }, areNarrativeRowPropsEqual);

@@ -645,10 +645,21 @@ describe("diffStore", () => {
       expect(getRightPanel("ws-1").activeTab).toBe("terminal");
     });
 
-    it("empties the open set when the last tab closes (returns to card grid)", () => {
-      const { setRightPanelTab, closeRightPanelTab, getRightPanel } = useDiffStore.getState();
+    it("closes the panel with its last tab and reopens on the empty state", () => {
+      const { setRightPanelTab, closeRightPanelTab, getRightPanel, getRightPanelVisible, showRightPanel } =
+        useDiffStore.getState();
       setRightPanelTab("ws-1", null, "preview");
+      setRightPanelTab("ws-1", null, "terminal");
+      showRightPanel("ws-1", null);
       closeRightPanelTab("ws-1", null, "preview");
+      expect(getRightPanelVisible("ws-1", null)).toBe(true);
+
+      closeRightPanelTab("ws-1", null, "terminal");
+      expect(getRightPanel("ws-1").openTabs).toEqual([]);
+      expect(getRightPanelVisible("ws-1", null)).toBe(false);
+
+      showRightPanel("ws-1", null);
+      expect(getRightPanelVisible("ws-1", null)).toBe(true);
       expect(getRightPanel("ws-1").openTabs).toEqual([]);
     });
 

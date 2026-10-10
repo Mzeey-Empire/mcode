@@ -25,7 +25,7 @@ function shellCall(id: string, overrides: Partial<ToolCall> = {}): ToolCall {
 }
 
 function narrativeRow(item: NarrativeItem, firstCallId: string): TranscriptNarrativeItem {
-  return { type: "narrative-row", key: `narrative:live:tool:${firstCallId}:0`, item, index: 0, allToolCalls: [] };
+  return { type: "narrative-row", key: `narrative:live:tool:${firstCallId}:0`, item, index: 0 };
 }
 
 function toolGroupRow(calls: readonly ToolCall[]): TranscriptNarrativeItem {

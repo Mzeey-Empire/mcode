@@ -61,6 +61,7 @@ import {
   acceptExpectedWebNavigationRevision as acceptExpectedWebNavigationRevisionImplementation,
 } from "./browserAutomationHostNavigation";
 import { createBrowserAutomationBootstrapLifecycle } from "./browserAutomationHostLifecycle";
+import { OverlayGateContext } from "@/components/ui/overlay-gate";
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const HOST_REGISTRATION_RETRY_MS = 1_000;
@@ -795,7 +796,7 @@ interface PersistentSurfaceLayout {
   readonly top: number;
   readonly width: number;
   readonly height: number;
-  readonly coveredLeft: number;
+  readonly coveredRight: number;
 }
 
 interface AutomationTargetRef {
@@ -826,7 +827,7 @@ function PersistentAutomationPreviewSurface({
     top: 0,
     width: 1_280,
     height: 720,
-    coveredLeft: 0,
+    coveredRight: 0,
   });
 
   useEffect(() => {
@@ -842,7 +843,7 @@ function PersistentAutomationPreviewSurface({
             top: rect.top,
             width: rect.width,
             height: rect.height,
-            coveredLeft: browserSurfacePresentationCoordinator.getActivityRailOverlap(),
+            coveredRight: browserSurfacePresentationCoordinator.getActivityRailOverlap(),
           }
         : {
             visible: false,
@@ -850,12 +851,12 @@ function PersistentAutomationPreviewSurface({
             top: 0,
             width: 1_280,
             height: 720,
-            coveredLeft: 0,
+            coveredRight: 0,
           };
       setLayout((current) => (
         current.visible === next.visible && current.left === next.left && current.top === next.top &&
         current.width === next.width && current.height === next.height &&
-        current.coveredLeft === next.coveredLeft ? current : next
+        current.coveredRight === next.coveredRight ? current : next
       ));
     };
     const unsubscribe = browserSurfacePresentationCoordinator.subscribe(update);
@@ -888,12 +889,15 @@ function PersistentAutomationPreviewSurface({
         pointerEvents: layout.visible ? "auto" : "none",
       }}
     >
-      <PreviewPanel
-        threadId={scope.threadId}
-        workspaceId={scope.workspaceId}
-        automationOnly={!layout.visible}
-        coveredLeft={layout.visible ? layout.coveredLeft : 0}
-      />
+      {/* This surface lives outside the right panel's tree, so it gates its own body-portaled popups. */}
+      <OverlayGateContext.Provider value={layout.visible}>
+        <PreviewPanel
+          threadId={scope.threadId}
+          workspaceId={scope.workspaceId}
+          automationOnly={!layout.visible}
+          coveredRight={layout.visible ? layout.coveredRight : 0}
+        />
+      </OverlayGateContext.Provider>
     </div>
   );
 }

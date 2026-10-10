@@ -3,6 +3,7 @@ import { lazySchema } from "../utils/lazySchema.js";
 import { ToolCallRecordSchema } from "./tool-call-record.js";
 import { ThoughtSegmentRecordSchema } from "./thought-segment.js";
 import { HookExecutionRecordSchema } from "./hook-execution.js";
+import { ApprovalReceiptRecordSchema } from "./approval-receipt.js";
 
 /**
  * One entry in a Turn's chronological narrative, as returned by the
@@ -17,6 +18,7 @@ import { HookExecutionRecordSchema } from "./hook-execution.js";
  */
 export const NarrativeEntrySchema = lazySchema(() =>
   z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("approval"), sequence: z.number(), sortOrder: z.number(), record: ApprovalReceiptRecordSchema() }),
     z.object({
       kind: z.literal("assistantMessage"),
       messageId: z.string(),
@@ -54,6 +56,7 @@ export const NarrativeDetailKindSchema = z.enum([
   "toolCall",
   "narrationSegment",
   "hook",
+  "approval",
 ]);
 
 /** Exclusive continuation position within a selected turn range. */

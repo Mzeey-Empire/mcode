@@ -11,6 +11,8 @@ import { SUBAGENT_REPORTING } from "@mcode/contracts";
  */
 
 import * as NodeEvents from "node:events";
+import { approvalReceipt } from "../../approvals/approval-receipt.js";
+import type { ApprovalOutcome, ApprovalChoice } from "@mcode/contracts";
 import * as NodeCrypto from "node:crypto";
 import { logger } from "@mcode/shared";
 import { buildMcodeInstructionPlan, renderMcodeInstructions } from "@mcode/thread-orchestration";
@@ -66,6 +68,7 @@ import {
 import {
   buildCodexInput,
   hasCodexInternalThreadControlMcp,
+  isCodexCompactCommand,
   mapCodexRateLimitsToUsage,
   mergeCodexUsageInfo,
   nativeCollabSpawnThreadIds,
@@ -73,8 +76,8 @@ import {
 } from "./codex-input-mapper.js";
 import { traceCodexIngest } from "./codex-trace.js";
 import type {
-  TurnInputPart,
   CodexNotification,
+  CodexTurnInput,
   CodexTurnOptions,
   CompletedItem,
   SandboxMode,
@@ -351,6 +354,11 @@ interface CodexSessionState {
 
 /** One pending codex approval bridged into the Phase 1 permission flow. */
 interface PendingPermissionEntry {
+  routing?: CodexCanonicalEventRouting;
+  unanswerable?: boolean;
+  replying?: boolean;
+  /** A drain that skipped this entry mid-write; a failed write settles it with this reason. */
+  deferredDrain?: "session_stopped" | "turn_ended";
   sessionId: string;
   threadId: string;
   body: ApprovalRequestBody;
@@ -367,7 +375,7 @@ interface PreparedCodexTurn {
   threadId: string;
   sandbox: SandboxMode;
   browserPermissionCapability: "observe" | "interact" | "privileged";
-  input: TurnInputPart[];
+  input: CodexTurnInput;
   turnOptions: CodexTurnOptions;
   threadControlEligible: boolean;
 }
@@ -389,7 +397,7 @@ interface CodexSpawnContext {
   resumeFrom: string | undefined;
   sandbox: SandboxMode;
   approvalPolicy: "never" | "on-request";
-  pendingSpawn: { input: string | TurnInputPart[]; turnOptions: CodexTurnOptions; turnExecutionId: string; threadControlEligible: boolean } | undefined;
+  pendingSpawn: { input: CodexTurnInput; turnOptions: CodexTurnOptions; turnExecutionId: string; threadControlEligible: boolean } | undefined;
   stagedExecutionId: string | undefined;
   threadControlEligible: boolean;
   browserAccess: { stage: BrowserAutomationSessionLeaseStage; workspaceId: string; permissionCapability: "observe" | "interact" | "privileged" } | undefined;
@@ -624,6 +632,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     if (routing && runtimeEvent.event.turnExecutionId === routing.executionId) {
       if (state.kind === "fenced") return;
       if (runtimeEvent.deliveryAttempt !== undefined && runtimeEvent.deliveryAttempt !== routing.deliveryAttempt) return;
+      this.drainApprovalsAtTurnEnd(routing, runtimeEvent);
       this.canonicalEventPublisher.publish(routing, {
         ...runtimeEvent,
         deliveryAttempt: routing.deliveryAttempt,
@@ -636,6 +645,15 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   private readonly canonicalEventPublisher: CodexCanonicalEventPublisher;
+
+  private drainApprovalsAtTurnEnd(routing: CodexCanonicalEventRouting, runtimeEvent: ProviderRuntimeEvent): void {
+    // A sub-agent finishing shares the parent's routing but leaves the parent turn, and its approvals, live.
+    if (runtimeEvent.extension?.child !== undefined) return;
+    const { event } = runtimeEvent;
+    if (event.type === "turnComplete" || event.type === "ended" || event.type === "error") {
+      this.drainPending((entry) => entry.routing?.executionId === routing.executionId, "turn_ended");
+    }
+  }
   private readonly canonicalTurnRoutingsByThread = new Map<string, {
     kind: "active" | "fenced";
     routing: CodexCanonicalEventRouting;
@@ -705,7 +723,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private pendingSpawnTurns = new Map<
     string,
     {
-      input: string | TurnInputPart[];
+      input: CodexTurnInput;
       turnOptions: CodexTurnOptions;
       turnExecutionId: string;
       turnId: string;
@@ -1155,7 +1173,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     return sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
   }
 
-  private async resolveCodexTurnInput(request: TurnRequest<"codex">, threadId: string): Promise<TurnInputPart[] | undefined> {
+  private async resolveCodexTurnInput(request: TurnRequest<"codex">, threadId: string): Promise<CodexTurnInput | undefined> {
+    if (isCodexCompactCommand(request.message, request.attachments, request.mentions ?? [])) return { kind: "compact" };
     const skillCatalog = await this.codexSkillCatalog(request.message, request.cwd);
     try {
       return await buildCodexInput(request.message, request.attachments, skillCatalog, request.mentions ?? []);
@@ -1779,7 +1798,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private startStagedCodexTurn(
     context: CodexSpawnContext,
     server: CodexAppServer,
-    staged: { input: string | TurnInputPart[]; turnOptions: CodexTurnOptions; turnExecutionId: string; turnId: string; deliveryAttempt: number; signal: AbortSignal },
+    staged: { input: CodexTurnInput; turnOptions: CodexTurnOptions; turnExecutionId: string; turnId: string; deliveryAttempt: number; signal: AbortSignal },
   ): void {
     const state = this.runtime.get(context.sessionId);
     if (!state || state.server !== server) { this.releasePendingCodexRequest(context.sessionId, staged.signal); return; }
@@ -2479,7 +2498,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     sessionId: string,
     threadId: string,
     server: CodexAppServer,
-    input: string | TurnInputPart[],
+    input: CodexTurnInput,
     turnOptions: CodexTurnOptions | undefined,
     turnExecutionId: string,
     signal: AbortSignal,
@@ -2511,7 +2530,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     sessionId: string,
     threadId: string,
     server: CodexAppServer,
-    input: string | TurnInputPart[],
+    input: CodexTurnInput,
     turnOptions: CodexTurnOptions | undefined,
     turnExecutionId: string,
   ): Promise<void> {
@@ -2572,7 +2591,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private async waitForCodexTurn(
     run: CodexTurnRun,
     server: CodexAppServer,
-    input: string | TurnInputPart[],
+    input: CodexTurnInput,
     turnOptions: CodexTurnOptions | undefined,
     turnExecutionId: string,
     completion: CodexTurnCompletionState,
@@ -2672,7 +2691,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private async sendCodexTurnStart(
     run: CodexTurnRun,
     server: CodexAppServer,
-    input: string | TurnInputPart[],
+    input: CodexTurnInput,
     turnOptions: CodexTurnOptions | undefined,
     turnExecutionId: string,
     completion: CodexTurnCompletionState,
@@ -2681,7 +2700,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     reject: (error: unknown) => void,
   ): Promise<void> {
     try {
-      const turnId = await server.sendTurn(input, turnOptions);
+      const turnId = Array.isArray(input) ? await server.sendTurn(input, turnOptions) : await server.startCompaction();
       if (run.seq !== run.entry.runTurnSeq) return;
       run.entry.turnStartResponsePending = false;
       run.entry.pendingTurnStartNotification = undefined;
@@ -2795,6 +2814,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const acknowledged = new Promise<boolean>((resolve) => { request.responseWritten = resolve; });
     return new Promise<unknown>((resolve) => {
       this.pendingPermissions.set(requestId, {
+        routing: this.canonicalTurnRoutingsByThread.get(threadId)?.routing,
         sessionId, threadId, body, acknowledged, method: request.method, params: request.params, resolve,
       });
       this.emit("approval_request", { requestId, threadId, body } satisfies ApprovalRequestEnvelope);
@@ -2805,17 +2825,28 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   async resolveApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     const entry = this.pendingPermissions.get(requestId);
     if (!entry) return { status: "not_pending" };
+    if ("autoDeny" in response) entry.unanswerable = true;
+    if (entry.replying) return { status: "failed", message: "An answer is already being sent" };
     const choice = approvalChoice(entry.body, response);
     if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
-    this.pendingPermissions.delete(requestId);
+    entry.replying = true;
     this.runtime.recordUsage(entry.sessionId);
-    const decision = "autoDeny" in response || choice?.intent === "deny" ? "deny"
-      : choice?.intent === "allow_scoped" ? "allow-session" : "allow";
+    const decision = this.nativeApprovalDecision(choice, response);
     entry.resolve(mapDecisionToCodexResponse(entry.method, decision, entry.params));
-    if (!await entry.acknowledged) return { status: "failed", message: "The answer did not reach Codex" };
-    this.emit("approval_resolved", { requestId, threadId: entry.threadId,
-      outcome: approvalOutcome(choice, response) });
+    if (!await entry.acknowledged) {
+      // Codex never got the answer, so a stop or turn end that skipped this write settles it now.
+      entry.replying = false;
+      if (entry.deferredDrain) this.drainPending((pending) => pending === entry, entry.deferredDrain);
+      return { status: "failed", message: "The answer did not reach Codex" };
+    }
+    if (!this.pendingPermissions.delete(requestId)) return { status: "not_pending" };
+    this.publishApprovalDecision(requestId, entry, approvalOutcome(choice, response));
     return { status: "resolved" };
+  }
+
+  private nativeApprovalDecision(choice: ApprovalChoice | undefined, response: ApprovalResponse): Parameters<typeof mapDecisionToCodexResponse>[1] {
+    if ("autoDeny" in response || choice?.intent === "deny") return "deny";
+    return choice?.intent === "allow_scoped" ? "allow-session" : "allow";
   }
 
   /** List stable routing envelopes, optionally filtered by owning thread. */
@@ -2840,14 +2871,25 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * Used by stopSession and shutdown to unblock any in-flight approvals so the
    * codex turn can tear down cleanly.
    */
-  private drainPending(predicate: (entry: PendingPermissionEntry) => boolean): void {
+  private drainPending(predicate: (entry: PendingPermissionEntry) => boolean, reason: "session_stopped" | "turn_ended" = "session_stopped"): void {
     for (const [requestId, entry] of Array.from(this.pendingPermissions)) {
       if (!predicate(entry)) continue;
+      // An answer awaiting its write acknowledgement belongs to resolveApproval, which publishes the real outcome.
+      if (entry.replying) {
+        entry.deferredDrain = reason;
+        continue;
+      }
       this.pendingPermissions.delete(requestId);
       const response = mapDecisionToCodexResponse(entry.method, "cancelled", entry.params);
       entry.resolve(response);
-      this.emit("approval_resolved", { requestId, threadId: entry.threadId, outcome: { status: "cancelled", reason: "session_stopped" } });
+      this.publishApprovalDecision(requestId, entry, { status: "cancelled", reason: entry.unanswerable ? "unanswerable" : reason });
     }
+  }
+
+  private publishApprovalDecision(requestId: string, entry: PendingPermissionEntry, outcome: ApprovalOutcome): void {
+    if (entry.routing) this.canonicalEventPublisher.publish(entry.routing, providerRuntimeEvent({ ...approvalReceipt({ requestId, threadId: entry.threadId, body: entry.body }, outcome), turnExecutionId: entry.routing.executionId }));
+    else logger.warn("Codex approval decided outside a routed turn; no timeline receipt", { requestId, threadId: entry.threadId });
+    this.emit("approval_resolved", { requestId, threadId: entry.threadId, outcome });
   }
 
   /**

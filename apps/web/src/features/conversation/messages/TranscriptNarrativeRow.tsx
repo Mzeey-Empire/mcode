@@ -84,5 +84,5 @@ export function TranscriptNarrativeRow({ row, threadId, expanded, callExpanded =
       </>
     );
   }
-  return <>{loader}<NarrativeRow rowId={row.key} item={row.item} allToolCalls={row.allToolCalls} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} /></>;
+  return <>{loader}<NarrativeRow rowId={row.key} item={row.item} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} /></>;
 }

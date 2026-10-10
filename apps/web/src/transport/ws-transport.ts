@@ -1392,6 +1392,7 @@ export function createWsTransport(
         tools: ToolCallRecord[];
         thoughts: ThoughtSegmentRecord[];
         hooks: HookExecutionRecord[];
+        approvals: import("@mcode/contracts").ApprovalReceiptRecord[];
       }>("narrative.list", { messageId }),
     loadTurn: (threadId, range) =>
       rpc<import("@mcode/contracts").NarrativeEntry[]>("turn.load", {

@@ -1,5 +1,7 @@
 import { SUBAGENT_REPORTING } from "@mcode/contracts";
 import * as NodeEvents from "node:events";
+import { approvalReceipt } from "../../approvals/approval-receipt.js";
+import type { ApprovalOutcome } from "@mcode/contracts";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -66,6 +68,8 @@ export interface DevinProviderPorts {
 }
 
 interface DevinPendingPermission {
+  routing?: DevinCanonicalEventRouting;
+  unanswerable?: boolean;
   entry: DevinAcpSessionEntry;
   request: ApprovalRequestEnvelope & { body: ApprovalRequestBody };
   /** Raw ACP options, retained so `optionId` and `kind` survive to the reply. */
@@ -700,6 +704,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
   async resolveApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     const pending = this.pendingPermissions.get(requestId);
     if (!pending) return { status: "not_pending" };
+    if ("autoDeny" in response) pending.unanswerable = true;
     if (pending.entry.connection.signal.aborted || pending.entry.child.exitCode !== null) {
       return { status: "failed", message: "The ACP connection is closed" };
     }
@@ -708,15 +713,16 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     const selected = "autoDeny" in response
       ? pending.acpOptions.find((option) => option.kind === "reject_once")
       : pending.acpOptions.find((option) => option.optionId === response.choiceId);
-    this.pendingPermissions.delete(requestId);
     pending.resolve({ outcome: selected ? { outcome: "selected", optionId: selected.optionId } : { outcome: "cancelled" } });
+    this.pendingPermissions.delete(requestId);
     await Promise.resolve();
-    if (selected?.optionId === "switch_bypass") this.applyObservedDevinMode(pending.entry, "bypass");
-    this.emit("approval_resolved", {
-      requestId, threadId: pending.entry.threadId,
-      outcome: approvalOutcome(choice, response),
-    });
+    this.applyApprovalMode(pending.entry, selected);
+    this.publishApprovalDecision(pending, approvalOutcome(choice, response));
     return { status: "resolved" };
+  }
+
+  private applyApprovalMode(entry: DevinAcpSessionEntry, selected: { optionId: string } | undefined): void {
+    if (selected?.optionId === "switch_bypass") this.applyObservedDevinMode(entry, "bypass");
   }
 
   /** Return routing envelopes without trusting their display bodies. */
@@ -734,7 +740,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     }
     const request = this.buildApprovalRequest(entry, params, options);
     const outcome = new Promise<AcpPermissionOutcome>((resolve) => {
-      this.pendingPermissions.set(request.requestId, { entry, request, acpOptions: options, resolve });
+      this.pendingPermissions.set(request.requestId, { entry, request, acpOptions: options, resolve, routing: this.pendingTurns.get(entry.mcodeSessionId)?.routing });
     });
     this.emit("approval_request", request);
     return outcome;
@@ -758,13 +764,18 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     };
   }
 
-  private cancelPendingPermissionsForSession(mcodeSessionId: string): void {
+  private cancelPendingPermissionsForSession(mcodeSessionId: string, reason: "session_stopped" | "turn_ended" = "session_stopped"): void {
     for (const [requestId, pending] of this.pendingPermissions) {
       if (pending.entry.mcodeSessionId !== mcodeSessionId) continue;
       this.pendingPermissions.delete(requestId);
       pending.resolve({ outcome: { outcome: "cancelled" } });
-      this.emit("approval_resolved", { requestId, threadId: pending.entry.threadId, outcome: { status: "cancelled", reason: "session_stopped" } });
+      this.publishApprovalDecision(pending, { status: "cancelled", reason: pending.unanswerable ? "unanswerable" : reason });
     }
+  }
+
+  private publishApprovalDecision(pending: DevinPendingPermission, outcome: ApprovalOutcome): void {
+    this.publishEntryEvent(pending.entry, pending.routing, approvalReceipt(pending.request, outcome));
+    this.emit("approval_resolved", { requestId: pending.request.requestId, threadId: pending.request.threadId, outcome });
   }
 
   // ---------------------------------------------------------------------
@@ -1044,6 +1055,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       logger.warn("Devin event had no active turn routing", { type: event.type, threadId: event.threadId });
       return;
     }
+    if (event.type === "turnComplete" || event.type === "ended" || event.type === "error") this.cancelPendingPermissionsForSession(entry.mcodeSessionId, "turn_ended");
     this.canonicalEvents.publish(routing, providerRuntimeEvent(event), this.acpSessionIdentities(entry));
   }
 

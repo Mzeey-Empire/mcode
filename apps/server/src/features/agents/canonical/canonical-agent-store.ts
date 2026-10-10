@@ -2131,7 +2131,7 @@ export class CanonicalAgentStore {
         ? "toolCall"
         : item.kind === "narrationSegment"
           ? "narrationSegment"
-          : "hook";
+          : item.kind;
       return this.itemDraft(input.executionId, input.thread, turn, {
         id: itemId,
         threadId: input.thread.id,
@@ -2144,7 +2144,7 @@ export class CanonicalAgentStore {
             : "system",
         providerIdentities: turn.providerIdentities,
         payload: { projection, record: item.record },
-        createdAt: item.record.started_at,
+        createdAt: item.kind === "approval" ? item.record.decided_at : item.record.started_at,
         updatedAt: input.endedAt,
       }, `${input.executionId}:recovery-narrative:${itemId}`);
     });
@@ -2739,7 +2739,7 @@ export class CanonicalAgentStore {
       id: `${entry.kind}:${entry.record.id}`,
       kind: narrativeItemKind(entry.kind),
       payload: { projection: entry.kind, record: entry.record },
-      createdAt: entry.record.started_at,
+      createdAt: entry.kind === "approval" ? entry.record.decided_at : entry.record.started_at,
       ...narrativeParentItem(entry),
     };
   }
@@ -3335,7 +3335,7 @@ export class CanonicalAgentStore {
     if (event.payload.type !== "turn.response-bound") return [];
     return this.orm.select({ id: canonicalAgentItems.id }).from(canonicalAgentItems)
       .where(and(eq(canonicalAgentItems.threadId, event.routing.threadId), eq(canonicalAgentItems.turnId, event.routing.turnId ?? ""),
-        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') IN ('toolCall', 'hook', 'narrationSegment')`))
+        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') IN ('toolCall', 'hook', 'narrationSegment', 'approval')`))
       .all().map((row) => row.id);
   }
 

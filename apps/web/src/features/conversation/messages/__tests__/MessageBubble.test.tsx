@@ -15,8 +15,8 @@ beforeEach(() => {
   resetThreadStoreForTests({ records: new Map([["thread-1", {
     ...createEmptyThreadRecord(),
     narrativeByMessage: {
-      "msg-1": { tools: [], thoughts: [], hooks: [] },
-      "msg-asst": { tools: [], thoughts: [], hooks: [] },
+      "msg-1": { tools: [], thoughts: [], approvals: [], hooks: [] },
+      "msg-asst": { tools: [], thoughts: [], approvals: [], hooks: [] },
     },
   }]]) });
 });
@@ -556,7 +556,7 @@ describe("MessageBubble agent response state", () => {
     resetThreadStoreForTests({
       records: new Map([["thread-1", {
         ...createEmptyThreadRecord(),
-        narrativeByMessage: { "msg-1": { tools: [], thoughts: [], hooks: [{
+        narrativeByMessage: { "msg-1": { tools: [], thoughts: [], approvals: [], hooks: [{
           id: "hook-1", message_id: "msg-1", hook_name: "SessionStart:startup",
           tool_name: null, phase: "stop", payload: "Hidden hook output",
           duration_ms: 1, did_block: false, started_at: "2026-08-27T11:12:00.000Z",

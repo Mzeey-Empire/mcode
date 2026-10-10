@@ -25,7 +25,7 @@ describe("live tool presentation transitions", () => {
     rerender({ calls: [call("one", true)] });
     const rows = () => expandTranscriptNarrative([{
       type: "narrative-flow", key: "live", toolCalls: result.current.calls,
-      hooks: [], thoughtSegments: [], streamingText: "", isAgentRunning: true, startTime: 1,
+      approvals: [], hooks: [], thoughtSegments: [], streamingText: "", isAgentRunning: true, startTime: 1,
     }], {}, new Set(), undefined, result.current.transitions);
     const closing = rows()[0];
     expect(closing).toMatchObject({ transition: "exiting", item: { type: "active-tool", toolCall: { isComplete: true } } });

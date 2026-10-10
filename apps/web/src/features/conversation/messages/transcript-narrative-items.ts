@@ -1,6 +1,6 @@
 import type { Message, ToolCall } from "@/transport/types";
 import { buildNarrativeItems } from "../narrative/build-narrative";
-import { buildPersistedNarrativeItems, recordToToolCall } from "../narrative/build-persisted-narrative";
+import { buildPersistedNarrativeItems } from "../narrative/build-persisted-narrative";
 import type { NarrativeItem } from "../narrative/types";
 import { rendersAsSingleCallRow } from "../narrative/ToolSummaryLine";
 import type { ToolCallTransition } from "./useToolCallTransitions";
@@ -19,7 +19,6 @@ export interface TranscriptNarrativeItem {
   readonly messageId?: string;
   readonly item: NarrativeItem;
   readonly index: number;
-  readonly allToolCalls: readonly ToolCall[];
   readonly transition?: "entering" | "exiting";
 }
 
@@ -100,6 +99,7 @@ function rowIdentity(item: NarrativeItem): string {
     case "tool-group": return `tool:${item.group.calls[0]?.id}`;
     case "active-tool": return `tool:${item.toolCall.id}`;
     case "hook": return `hook:${item.hook.hookName}:${item.hook.startedAt}`;
+    case "approval": return `approval:${item.receipt.requestId}`;
     case "subagent": return `subagent:${item.toolCall.id}`;
     case "delta": return "delta";
   }
@@ -140,7 +140,6 @@ function visiblePersistedRecords(
 function narrativeRows(
   prefix: string,
   items: readonly NarrativeItem[],
-  allToolCalls: readonly ToolCall[],
   messageId?: string,
 ): TranscriptNarrativeItem[] {
   const occurrences = new Map<string, number>();
@@ -154,7 +153,6 @@ function narrativeRows(
       messageId,
       item,
       index,
-      allToolCalls,
     };
   });
 }
@@ -242,7 +240,6 @@ function persistedFoldRows(
   return narrativeRows(
     outcomeExecutionId ?? fold.messageId,
     buildPersistedNarrativeItems({ ...visibleRecords, messageContent: fold.messageContent }),
-    visibleRecords.tools.map(recordToToolCall),
     fold.messageId,
   );
 }
@@ -257,7 +254,7 @@ function liveNarrativeRows(
     return transition?.phase === "exiting" ? transition.call : call;
   });
   const current = new Map(item.toolCalls.map((call) => [call.id, call]));
-  const rows = narrativeRows(prefix, buildNarrativeItems({ ...item, toolCalls }).items, item.toolCalls);
+  const rows = narrativeRows(prefix, buildNarrativeItems({ ...item, toolCalls }).items);
   return rows.map((row) => {
     if (row.item.type !== "active-tool") return row;
     return {

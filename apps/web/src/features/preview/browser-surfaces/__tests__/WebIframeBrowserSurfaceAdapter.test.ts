@@ -30,16 +30,16 @@ describe("WebIframeBrowserSurfaceAdapter", () => {
     });
     expect(adapter.element.title).toBe("Preview");
     const zIndex = 42;
-    adapter.present({ left: 10, top: 20, width: 640, height: 480, scale: 1.25, zIndex, coveredLeft: 112 });
+    adapter.present({ left: 10, top: 20, width: 640, height: 480, scale: 1.25, zIndex, coveredRight: 112 });
     expect(adapter.element.style.left).toBe("10px");
     expect(adapter.element.style.width).toBe("640px");
     expect(adapter.element.style.zIndex).toBe("42");
     expect(adapter.element.style.clipPath).toBe(
-      "inset(0px 0px 0px 112px round 0px 0px 0px 0px)",
+      "inset(0px 112px 0px 0px round 0px 0px 0px 0px)",
     );
-    adapter.present({ left: 10, top: 20, width: 640, height: 480, coveredLeft: 0 });
+    adapter.present({ left: 10, top: 20, width: 640, height: 480, coveredRight: 0 });
     expect(adapter.element.style.clipPath).toBe(
-      "inset(0px 0px 0px 0px round var(--radius-md) 0px 0px 0px)",
+      "inset(0px 0px 0px 0px round 0px var(--radius-md) 0px 0px)",
     );
     adapter.dispose();
     expect(document.body.contains(adapter.element)).toBe(false);

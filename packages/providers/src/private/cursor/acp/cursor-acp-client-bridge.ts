@@ -1,4 +1,5 @@
 import * as NodeFS from "node:fs";
+import { approvalReceipt } from "../../../approvals/approval-receipt.js";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import type {
@@ -36,6 +37,8 @@ type AcpExtMethodResponse = Awaited<ReturnType<NonNullable<Client["extMethod"]>>
 
 interface PendingAcpPermission {
   entry: { connection: Pick<CursorAcpSessionEntry["connection"], "signal">; child: Pick<CursorAcpSessionEntry["child"], "exitCode"> };
+  publish: (event: AgentEvent) => void;
+  unanswerable?: boolean;
   mcodeSessionId: string;
   threadId: string;
   options: PermissionOption[];
@@ -70,16 +73,17 @@ export class CursorAcpClientBridge {
   async resolveApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     const pending = this.pendingPermissions.get(requestId);
     if (!pending) return { status: "not_pending" };
+    if ("autoDeny" in response) pending.unanswerable = true;
     if (pending.entry.connection.signal.aborted || pending.entry.child.exitCode !== null) {
       return { status: "failed", message: "The ACP connection is closed" };
     }
     const choice = approvalChoice(pending.request.body, response);
     if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
-    this.pendingPermissions.delete(requestId);
     const outcome = mapResponseToAcpOutcome(response, pending.options);
     pending.resolve({ outcome });
+    this.pendingPermissions.delete(requestId);
     await Promise.resolve();
-    this.deps.emitApprovalResolved({ requestId, threadId: pending.threadId, outcome: approvalOutcome(choice, response) });
+    this.publishApprovalDecision(pending, approvalOutcome(choice, response));
     return { status: "resolved" };
   }
 
@@ -91,23 +95,29 @@ export class CursorAcpClientBridge {
   }
 
   /** Cancels permissions owned by a session that is stopping. */
-  cancelPendingForSession(mcodeSessionId: string): void {
+  cancelPendingForSession(mcodeSessionId: string, reason: "session_stopped" | "turn_ended" = "session_stopped"): void {
     for (const [requestId, pending] of this.pendingPermissions) {
       if (pending.mcodeSessionId !== mcodeSessionId) continue;
       this.pendingPermissions.delete(requestId);
       pending.resolve({ outcome: { outcome: "cancelled" } });
-      this.deps.emitApprovalResolved({ requestId, threadId: pending.threadId, outcome: { status: "cancelled", reason: "session_stopped" } });
+      this.publishApprovalDecision(pending, { status: "cancelled", reason: pending.unanswerable ? "unanswerable" : reason });
     }
   }
 
   /** Cancels every permission request during provider shutdown. */
   cancelAllPending(): void {
     for (const [requestId, pending] of this.pendingPermissions) {
+      this.pendingPermissions.delete(requestId);
       pending.resolve({ outcome: { outcome: "cancelled" } });
-      this.deps.emitApprovalResolved({ requestId, threadId: pending.threadId, outcome: { status: "cancelled", reason: "session_stopped" } });
+      this.publishApprovalDecision(pending, { status: "cancelled", reason: pending.unanswerable ? "unanswerable" : "session_stopped" });
     }
     this.pendingPermissions.clear();
     this.planQuestionModeThreads.clear();
+  }
+
+  private publishApprovalDecision(pending: PendingAcpPermission, outcome: ApprovalOutcome): void {
+    pending.publish(approvalReceipt(pending.request, outcome));
+    this.deps.emitApprovalResolved({ requestId: pending.request.requestId, threadId: pending.threadId, outcome });
   }
 
   /** Creates the ACP client callbacks for one Cursor subprocess. */
@@ -116,7 +126,7 @@ export class CursorAcpClientBridge {
       this.deps.publishEvent(entry, event);
     };
     return {
-      requestPermission: async (request) => this.requestPermission(entry, request),
+      requestPermission: async (request) => this.requestPermission(entry, request, emitAcpEvent),
       sessionUpdate: async (params) => this.deliverSessionUpdate(entry, params),
       readTextFile: async (request) => ({ content: this.readWorkspaceFile(entry.cwd, request.path) }),
       writeTextFile: async (request) => {
@@ -237,6 +247,7 @@ export class CursorAcpClientBridge {
   async requestPermission(
     entry: Pick<CursorAcpSessionEntry, "permissionMode" | "threadId" | "mcodeSessionId"> & PendingAcpPermission["entry"],
     params: RequestPermissionRequest,
+    publish: (event: AgentEvent) => void,
   ): Promise<RequestPermissionResponse> {
     if (entry.permissionMode === "full") {
       const optionId = pickFullAccessAllowOption(params.options);
@@ -256,6 +267,7 @@ export class CursorAcpClientBridge {
     return await new Promise((resolve) => {
       this.pendingPermissions.set(requestId, {
         entry,
+        publish,
         mcodeSessionId: entry.mcodeSessionId,
         threadId: entry.threadId,
         options: params.options,

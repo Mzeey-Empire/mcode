@@ -111,7 +111,7 @@ export interface PreviewPanelProps {
   /** Whether this warm panel currently owns the visible Browser presentation. */
   readonly presentationActive?: boolean;
   /** Explicit overlap supplied by the active Activity Rail. */
-  readonly coveredLeft?: number;
+  readonly coveredRight?: number;
 }
 
 /** Composes the existing preview layers and preserves the order of their state and effects. */
@@ -120,7 +120,7 @@ export function PreviewPanel({
   workspaceId,
   automationOnly = false,
   presentationActive = true,
-  coveredLeft,
+  coveredRight,
 }: PreviewPanelProps) {
   useWorkspaceFileRefresh(workspaceId, threadId);
   const surfaceRef = useRef<HTMLDivElement>(null);
@@ -419,7 +419,7 @@ export function PreviewPanel({
         responsiveViewportScale={responsiveViewportScale}
         closeViewportToolbar={closeViewportToolbar}
         invalidateActiveViewportObservation={invalidateActiveViewportObservation}
-        coveredLeft={coveredLeft}
+        coveredRight={coveredRight}
         showAnnotationCommandBar={showAnnotationCommandBar}
         pageAnnotations={pageAnnotations}
         bundleCount={bundleCount}
@@ -464,7 +464,7 @@ export function PreviewPanel({
         webviewRefs={webviewRefs}
         workspaceId={workspaceId}
         presentationActive={presentationActive}
-        coveredLeft={coveredLeft}
+        coveredRight={coveredRight}
         responsiveViewportSize={responsiveViewportSize}
         clearPendingNavOnCommit={clearPendingNavOnCommit}
         onWebviewPageStatus={onWebviewPageStatus}

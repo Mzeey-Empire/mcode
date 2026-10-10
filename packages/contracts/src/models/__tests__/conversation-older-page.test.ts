@@ -64,7 +64,7 @@ describe("ConversationOlderPageSchema", () => {
       messages: [message],
       hasMore: true,
       nextCursor: { version: 1, beforeSequence: 21 },
-      narrativeByMessage: { "message-21": { tools: [], thoughts: [], hooks: [] } },
+      narrativeByMessage: { "message-21": { tools: [], thoughts: [], hooks: [], approvals: [] } },
     });
 
     expect(result.success).toBe(true);

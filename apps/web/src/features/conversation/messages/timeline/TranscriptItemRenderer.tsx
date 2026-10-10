@@ -97,6 +97,7 @@ function NarrativeFlowTranscriptItemRenderer({ item, onSubagentSelect, onOpenSub
     <NarrativeFlow
       toolCalls={flow.toolCalls}
       hooks={flow.hooks}
+      approvals={flow.approvals}
       thoughtSegments={flow.thoughtSegments}
       streamingText={flow.streamingText}
       isAgentRunning={flow.isAgentRunning}

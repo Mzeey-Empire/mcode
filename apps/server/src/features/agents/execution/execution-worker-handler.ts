@@ -533,7 +533,7 @@ function isOptionalObservation(command: Extract<WorkerCommand, { kind: "event" }
     const parsed = ProviderRuntimeEventSchema().safeParse(draft.payload.item.payload.runtimeEvent);
     if (!parsed.success) return false;
     const event = parsed.data.event;
-    return event.type === "turnComplete" || event.type === "error"
+    return event.type === "turnComplete" || event.type === "error" || event.type === "approvalDecided"
       || event.type === "ended" && event.outcome !== undefined;
   });
 }

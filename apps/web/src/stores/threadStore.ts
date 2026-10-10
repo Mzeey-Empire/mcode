@@ -688,10 +688,12 @@ function mergeNarrativeEntries(
   const tools = new Map(existing?.tools.map((record) => [record.id, record]));
   const thoughts = new Map(existing?.thoughts.map((record) => [record.id, record]));
   const hooks = new Map(existing?.hooks.map((record) => [record.id, record]));
+  const approvals = new Map(existing?.approvals.map((record) => [record.id, record]));
   for (const entry of entries) {
     if (entry.kind === "toolCall") tools.set(entry.record.id, entry.record);
     if (entry.kind === "narrationSegment") thoughts.set(entry.record.id, entry.record);
     if (entry.kind === "hook") hooks.set(entry.record.id, entry.record);
+    if (entry.kind === "approval") approvals.set(entry.record.id, entry.record);
   }
   const ordered = <T extends { id: string; sort_order: number }>(records: Iterable<T>): T[] =>
     [...records].sort((left, right) => left.sort_order - right.sort_order || left.id.localeCompare(right.id));
@@ -699,6 +701,7 @@ function mergeNarrativeEntries(
     tools: ordered(tools.values()),
     thoughts: ordered(thoughts.values()),
     hooks: ordered(hooks.values()),
+    approvals: ordered(approvals.values()),
   };
 }
 const providerUsageSnapshots = new Map<string, ProviderUsageInfo>();
@@ -812,6 +815,7 @@ function resetTurnEphemeral(_rec: ThreadRecord): Partial<ThreadRecord> {
     toolCalls: [],
     thoughtSegments: [],
     hooks: [],
+    approvals: [],
     currentTurnMessageId: "",
     currentTurnResponseKey: "",
     fileEffectTurnId: "",
@@ -2303,6 +2307,15 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       : completeVolatileHook(record, event));
   };
 
+  const handleApprovalDecided = (event: Extract<AgentEvent, { type: "approvalDecided" }>): void => {
+    patchRec(event.threadId, (record) => {
+      // Providers may republish a decision on recovery; one request is one receipt.
+      if (record.approvals.some((receipt) => receipt.requestId === event.requestId)) return {};
+      const receipt = { requestId: event.requestId, subjectLabel: event.subjectLabel, outcome: event.outcome, decidedAt: Date.now() };
+      return { approvals: [...record.approvals, receipt] };
+    });
+  };
+
   const terminalPhaseFor = (
     event: Extract<AgentEvent, { type: "turnComplete" | "ended" }>,
   ): ThreadRecord["runtimePhase"] | undefined => {
@@ -2771,6 +2784,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     hookStarted: handleHookStarted,
     hookProgress: handleHookProgress,
     hookCompleted: handleHookCompleted,
+    approvalDecided: handleApprovalDecided,
     assistantMessageBoundary: handleAssistantMessageBoundary,
     goalUpdated: handleGoalUpdated,
     goalCleared: handleGoalCleared,

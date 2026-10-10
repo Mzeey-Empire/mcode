@@ -110,6 +110,8 @@ export type ApprovalChoice = z.infer<ReturnType<typeof ApprovalChoiceSchema>>;
 export type ApprovalSubject = z.infer<ReturnType<typeof ApprovalSubjectSchema>>;
 /** Acknowledged decision. */
 export type ApprovalOutcome = z.infer<ReturnType<typeof ApprovalOutcomeSchema>>;
+/** Actor whose request produced the decision. */
+export type ApprovalOrigin = z.infer<ReturnType<typeof ApprovalOriginSchema>>;
 /** User decision or fail-closed instruction. */
 export type ApprovalResponse = z.infer<ReturnType<typeof ApprovalResponseSchema>> | { autoDeny: "unreadable" | "too_large" };
 /** Native answer delivery status. */

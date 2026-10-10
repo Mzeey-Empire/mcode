@@ -16,6 +16,7 @@ type MessageListItemsInput = Pick<
   MessageListData,
   | "agentDisplayState"
   | "agentStartTime"
+  | "approvals"
   | "assistantResponseKeys"
   | "currentTurnMessageId"
   | "currentTurnResponseKey"
@@ -99,6 +100,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
   const {
     agentDisplayState,
     agentStartTime,
+    approvals,
     assistantResponseKeys,
     currentTurnMessageId,
     currentTurnResponseKey,
@@ -153,6 +155,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
     responseTextIsStreaming,
       permissions,
       hooks,
+      approvals,
       thoughtSegments,
       holdingSignals,
       committedAssistantBody: findLastAgentMessageBody({
@@ -167,6 +170,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
       agentStartTime,
       holdingSignals,
       hooks,
+      approvals,
       isAgentRunning,
       latestTurnWithChanges,
       messages,

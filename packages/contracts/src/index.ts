@@ -500,6 +500,7 @@ export type {
   TurnRange,
 } from "./models/narrative-entry.js";
 export { ParentNarrativeRecoveryItemSchema } from "./models/narrative-recovery.js";
+export { ApprovalDecidedPayloadSchema, ApprovalReceiptRecordSchema, type ApprovalReceiptRecord } from "./models/approval-receipt.js";
 export type { ParentNarrativeRecoveryItem } from "./models/narrative-recovery.js";
 
 export { TurnSnapshotSchema } from "./models/turn-snapshot.js";
@@ -922,6 +923,7 @@ export type {
   ApprovalRequestBody,
   ApprovalRequestEnvelope,
   ApprovalOutcome,
+  ApprovalOrigin,
   ApprovalSubject,
   ApprovalResponse,
   ApprovalRespondResult,

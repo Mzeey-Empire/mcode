@@ -4,6 +4,7 @@ import * as React from "react"
 import { Select as SelectPrimitive } from "@base-ui/react/select"
 
 import { cn } from "@/lib/utils"
+import { useGatedOpen } from "./overlay-gate"
 import { FIELD_SURFACE_CLASS } from "./field-surface"
 import { MENU_LIST_CLASS, MENU_ROW_CLASS, MenuRowCheck } from "./menu-row"
 import { POPOVER_FADE_CLASS, POPOVER_SURFACE_CLASS } from "./overlay-surface"
@@ -14,9 +15,13 @@ import { ChevronDownIcon, ChevronUpIcon } from "lucide-react"
  */
 function Select<Value, Multiple extends boolean | undefined = false>({
   modal = false,
+  open,
+  defaultOpen,
+  onOpenChange,
   ...props
 }: SelectPrimitive.Root.Props<Value, Multiple>) {
-  return <SelectPrimitive.Root modal={modal} {...props} />
+  const gated = useGatedOpen({ open, defaultOpen, onOpenChange })
+  return <SelectPrimitive.Root modal={modal} {...props} {...gated} />
 }
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {

@@ -1,4 +1,3 @@
-import type { ToolCall } from "@/transport/types";
 import { NarrativeRow } from "./NarrativeRow";
 import { narrativePerformanceRowId } from "./NarrativePerformanceBoundary";
 import type { NarrativeItem, SubagentRosterTarget } from "./types";
@@ -7,8 +6,6 @@ import type { NarrativeItem, SubagentRosterTarget } from "./types";
 export interface NarrativeRowsProps {
   /** Ordered narrative items for one turn. */
   items: readonly NarrativeItem[];
-  /** Full turn graph retained for the sub-agent detail contract. */
-  allToolCalls: readonly ToolCall[];
   /** Adds the live row entry animation. */
   animateEntry?: boolean;
   /** Opens a selected canonical child through the composition root. */
@@ -31,6 +28,8 @@ export function narrativeRowKey(item: NarrativeItem, index: number): string {
       return `tool-group-${item.group.calls[0]?.id ?? index}`;
     case "hook":
       return `hook-${item.hook.hookName}-${item.hook.startedAt}-${index}`;
+    case "approval":
+      return `approval-${item.receipt.requestId}`;
     case "subagent":
       return `subagent-${item.toolCall.id}-${item.lifecycle}-${index}`;
     case "active-tool":
@@ -43,7 +42,6 @@ export function narrativeRowKey(item: NarrativeItem, index: number): string {
 /** Renders every narrative row inline in chronological order. */
 export function NarrativeRows({
   items,
-  allToolCalls,
   animateEntry = false,
   onSubagentSelect,
   onOpenSubagents,
@@ -68,7 +66,6 @@ export function NarrativeRows({
             <NarrativeRow
               rowId={key}
               item={item}
-              allToolCalls={allToolCalls}
               onSubagentSelect={onSubagentSelect}
               onOpenSubagents={onOpenSubagents}
             />

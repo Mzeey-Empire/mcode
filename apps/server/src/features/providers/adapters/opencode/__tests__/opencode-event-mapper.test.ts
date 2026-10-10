@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mapOpenCodeEnvelope } from "../opencode-event-mapper.js";
 
 const CTX = { threadId: "thread-1", turnExecutionId: "11111111-1111-4111-8111-111111111111" };
@@ -318,5 +318,55 @@ describe("mapOpenCodeEnvelope", () => {
     ]) {
       expect(mapOpenCodeEnvelope({ type, properties: {} }, CTX).disposition).toBe("state-only");
     }
+  });
+});
+
+describe("mapOpenCodeEnvelope retries", () => {
+  const NOW = 1_800_000_000_000;
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("maps a retry session status to ApiRetry with the delay until the next attempt", () => {
+    vi.useFakeTimers({ now: NOW });
+    expect(mapOpenCodeEnvelope({ type: "session.status", properties: { sessionID: "ses_1", status: {
+      type: "retry", attempt: 2, message: "Provider is overloaded", next: NOW + 4_000,
+    } } }, CTX)).toEqual({ disposition: "mapped", events: [{
+      type: "apiRetry", threadId: "thread-1", turnExecutionId: CTX.turnExecutionId,
+      reason: "Provider is overloaded", attempt: 2, delayMs: 4_000,
+    }] });
+  });
+
+  it("clamps a next attempt already in the past to no delay", () => {
+    vi.useFakeTimers({ now: NOW });
+    expect(mapOpenCodeEnvelope({ type: "session.status", properties: { status: { type: "retry", attempt: 1, message: "busy", next: NOW - 50 } } }, CTX).events)
+      .toEqual([{ type: "apiRetry", threadId: "thread-1", turnExecutionId: CTX.turnExecutionId, reason: "busy", attempt: 1, delayMs: 0 }]);
+  });
+
+  it.each(["idle", "busy"])("keeps a %s session status state-only", (type) => {
+    expect(mapOpenCodeEnvelope({ type: "session.status", properties: { sessionID: "ses_1", status: { type } } }, CTX))
+      .toEqual({ disposition: "state-only", events: [] });
+  });
+
+  it("maps a retry part to ApiRetry with its HTTP status", () => {
+    expect(mapOpenCodeEnvelope({ type: "message.part.updated", properties: { part: {
+      id: "prt_1", sessionID: "ses_1", messageID: "msg_1", type: "retry", attempt: 3, time: { created: NOW },
+      error: { name: "APIError", data: { message: "Too many requests", statusCode: 429, isRetryable: true, responseBody: "secret body" } },
+    } } }, CTX)).toEqual({ disposition: "mapped", events: [{
+      type: "apiRetry", threadId: "thread-1", turnExecutionId: CTX.turnExecutionId,
+      reason: "Too many requests", attempt: 3, errorStatus: 429,
+    }] });
+  });
+
+  it("maps session.next.retried to ApiRetry", () => {
+    expect(mapOpenCodeEnvelope({ type: "session.next.retried", properties: {
+      sessionID: "ses_1", attempt: 1, error: { message: "Server error", statusCode: 503, isRetryable: true },
+    } }, CTX)).toEqual({ disposition: "mapped", events: [{
+      type: "apiRetry", threadId: "thread-1", turnExecutionId: CTX.turnExecutionId,
+      reason: "Server error", attempt: 1, errorStatus: 503,
+    }] });
+  });
+
+  it("maps a malformed retry with a generic reason and no optional fields", () => {
+    expect(mapOpenCodeEnvelope({ type: "session.next.retried", properties: { attempt: "two", error: "boom" } }, CTX).events)
+      .toEqual([{ type: "apiRetry", threadId: "thread-1", turnExecutionId: CTX.turnExecutionId, reason: "retry" }]);
   });
 });

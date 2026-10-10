@@ -1,5 +1,5 @@
 import type { ToolCall, HookExecution } from "@/transport/types";
-import type { ApprovalReviewMode, TurnOutcome } from "@mcode/contracts";
+import type { ApprovalOutcome, ApprovalReviewMode, TurnOutcome } from "@mcode/contracts";
 import type { SubagentLifecycle } from "./subagent-lifecycle";
 
 /** Roster view associated with a sub-agent activity control. */
@@ -35,6 +35,17 @@ export interface ThoughtSegment {
   isExplicitNonFinal?: boolean;
 }
 
+/** One decided approval, rendered where the decision happened in the turn. */
+export interface ApprovalReceipt {
+  /** Provider request id; one receipt per request. */
+  requestId: string;
+  /** Short adapter-built subject, such as the command or host. */
+  subjectLabel: string;
+  outcome: ApprovalOutcome;
+  /** Epoch ms of the decision; orders live receipts against tool rows. */
+  decidedAt: number;
+}
+
 /**
  * Coalesced consecutive tool calls rendered as one expandable summary row.
  */
@@ -44,12 +55,13 @@ export interface ToolGroup {
 }
 
 /**
- * One row in the live narrative timeline: thought, tool group, hook, subagent, active tool, or final delta.
+ * One row in the live narrative timeline: thought, tool group, hook, approval receipt, subagent, active tool, or final delta.
  */
 export type NarrativeItem =
   | { type: "thought"; segment: ThoughtSegment; isActive: boolean }
   | { type: "tool-group"; group: ToolGroup; hasError: boolean; hasCancelled: boolean }
   | { type: "hook"; hook: HookExecution }
+  | { type: "approval"; receipt: ApprovalReceipt }
   | {
       type: "subagent";
       lifecycle: SubagentLifecycle;

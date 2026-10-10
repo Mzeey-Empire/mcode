@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -43,7 +43,7 @@ vi.mock("./ActivityRail", () => ({
     onSelect,
     onCloseBrowserPage,
     onExpandedChange,
-    onTogglePanel,
+    captionAction,
   }: {
     tabInstances: Array<{ id: string; type: string }>;
     activeTabId: string | null;
@@ -52,7 +52,7 @@ vi.mock("./ActivityRail", () => ({
     onSelect?: (instanceId: string) => void;
     onCloseBrowserPage?: (pageId: string) => void;
     onExpandedChange?: (expanded: boolean) => void;
-    onTogglePanel?: () => void;
+    captionAction?: React.ReactNode;
   }) => (
     <div
       data-testid="activity-rail"
@@ -60,15 +60,15 @@ vi.mock("./ActivityRail", () => ({
       data-active-tab-id={activeTabId}
       data-terminal-labels={JSON.stringify(terminalLabels ?? {})}
     >
+      <div data-testid="activity-rail-caption-strip">{captionAction}</div>
       <button type="button" data-testid="expand-activity-rail" onClick={() => onExpandedChange?.(true)} />
-      <button type="button" data-testid="toggle-right-panel" onClick={onTogglePanel} />
       {tabInstances.some((instance) => instance.type === "preview") && onCloseBrowserPage && (
         <button type="button" data-testid="close-browser-page" onClick={() => onCloseBrowserPage("browser-tab-1")} />
       )}
       {tabInstances.filter((instance) => instance.type === "action-terminal").map((instance) => (
         <button key={instance.id} type="button" data-testid={`select-${instance.id}`} onClick={() => onSelect?.(instance.id)} />
       ))}
-      {tabInstances.filter((instance) => instance.type === "action-terminal").map((instance) => (
+      {tabInstances.filter((instance) => instance.type.endsWith("terminal")).map((instance) => (
         <button key={`close-${instance.id}`} type="button" data-testid={`close-${instance.id}`} onClick={() => onClose?.(instance.id)} />
       ))}
     </div>
@@ -111,13 +111,31 @@ vi.mock("./CoordinationPanel", () => ({
     <div data-testid="coordination-panel-integration">{workspaceId}:{threadId}</div>
   ),
 }));
-vi.mock("./plan", () => ({ PlanPanel: () => <div /> }));
-vi.mock("@/components/diff", () => ({ DiffPanel: () => <div /> }));
+vi.mock("./plan", async () => {
+  const { PanelHeaderSlot } = await import("./shell/PanelHeader");
+  return {
+    PlanPanel: () => (
+      <PanelHeaderSlot slot="leading">
+        <span data-testid="plan-header" />
+      </PanelHeaderSlot>
+    ),
+  };
+});
+vi.mock("@/components/diff", async () => {
+  const { PanelHeaderSlot } = await import("./shell/PanelHeader");
+  return {
+    DiffPanel: () => (
+      <PanelHeaderSlot slot="row2">
+        <span data-testid="review-controls" />
+      </PanelHeaderSlot>
+    ),
+  };
+});
 vi.mock("@/features/preview", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/preview")>()),
   PreviewPanel: (props: Record<string, unknown>) => {
     previewPanelRender(props);
-    return <div data-testid="preview-panel" data-covered-left={props.coveredLeft ?? 0} />;
+    return <div data-testid="preview-panel" data-covered-right={props.coveredRight ?? 0} />;
   },
 }));
 vi.mock("@/features/terminal/surfaces/TerminalPoolSlotContext", () => ({
@@ -147,6 +165,8 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { setLayoutMeasurements } from "@/lib/composer-layout";
+import { toggleRightPanelAdaptive } from "@/lib/right-panel-layout";
+import { useToastStore } from "@/stores/toastStore";
 import {
   browserAutomationScopeKey,
   browserSurfacePresentationCoordinator,
@@ -389,6 +409,109 @@ describe("RightPanel", () => {
     expect(reconcileWarmPreviewScopes([first], second, new Set())).toEqual([second, first]);
   });
 
+  it("puts the panel controls in row 1", () => {
+    useDiffStore.setState({
+      rightPanelFallbackByWorkspace: {
+        "workspace-1": createRightPanelState({ visible: true, width: 400 }),
+      },
+    });
+    render(<RightPanel />);
+    const row1 = screen.getByTestId("panel-header-row-1");
+
+    expect(row1).toHaveClass("window-drag");
+    expect(screen.getByTestId("panel-header-row-2")).toBeEmptyDOMElement();
+
+    fireEvent.click(within(row1).getByRole("button", { name: "Expand" }));
+    expect(useUiStore.getState().rightPanelMaximized).toBe(true);
+    expect(within(row1).getByRole("button", { name: "Restore" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["Windows caption buttons cover the rail's top strip", "win32", "panel-header-row-1"],
+    ["Linux caption buttons cover the rail's top strip", "linux", "panel-header-row-1"],
+    ["macOS leaves the rail's top strip free", "darwin", "activity-rail-caption-strip"],
+    ["the browser build has no caption buttons", undefined, "activity-rail-caption-strip"],
+  ])("places Close panel where %s", (_case, platform, hostTestId) => {
+    const bridge = window.desktopBridge;
+    Object.defineProperty(window, "desktopBridge", {
+      configurable: true,
+      value: { ...bridge, window: platform ? { platform } : undefined },
+    });
+    useDiffStore.setState({
+      rightPanelFallbackByWorkspace: {
+        "workspace-1": createRightPanelState({ visible: true, width: 400 }),
+      },
+    });
+    render(<RightPanel />);
+
+    const toggles = screen.getAllByRole("button", { name: "Close panel" });
+    expect(toggles).toHaveLength(1);
+    expect(screen.getByTestId(hostTestId)).toContainElement(toggles[0]!);
+
+    fireEvent.click(toggles[0]!);
+    expect(toggleRightPanelAdaptive).toHaveBeenCalledWith("workspace-1", null);
+  });
+
+  it("gives the header rows only to the active tool", () => {
+    useWorkspaceStore.setState({ activeThreadId: "thread-1" });
+    const panel = (activeTabId: string) => ({
+      rightPanelByThread: {
+        "thread-1": createRightPanelState({
+          visible: true,
+          width: 400,
+          tabInstances: [
+            { id: "singleton:changes", type: "changes" as const },
+            { id: "singleton:tasks", type: "tasks" as const },
+          ],
+          activeTabId,
+        }),
+      },
+    });
+    useDiffStore.setState(panel("singleton:changes"));
+    render(<RightPanel />);
+    const leading = screen.getByTestId("panel-header-leading");
+    const row2 = screen.getByTestId("panel-header-row-2");
+
+    expect(within(row2).getByTestId("review-controls")).toBeInTheDocument();
+    expect(within(leading).queryByTestId("plan-header")).not.toBeInTheDocument();
+
+    act(() => useDiffStore.setState(panel("singleton:tasks")));
+
+    expect(within(leading).getByTestId("plan-header")).toBeInTheDocument();
+    expect(row2).toBeEmptyDOMElement();
+  });
+
+  it("keeps a terminal tab open and shows a toast when stopping it fails", async () => {
+    terminalKill.mockRejectedValue(new Error("pty is gone"));
+    useDiffStore.setState({
+      rightPanelFallbackByWorkspace: {
+        "workspace-1": createRightPanelState({
+          visible: true,
+          width: 400,
+          tabInstances: [{ id: "terminal:pty-1", type: "terminal" }],
+          activeTabId: "terminal:pty-1",
+        }),
+      },
+    });
+    useTerminalStore.setState({
+      terminals: { "workspace-1": [{ id: "pty-1", threadId: "workspace-1", label: "Shell" }] },
+    });
+    useToastStore.setState({ toasts: [] });
+    render(<RightPanel />);
+
+    fireEvent.click(screen.getByTestId("close-terminal:pty-1"));
+
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts[0]).toMatchObject({
+        kind: "failed",
+        title: "Couldn't close terminal",
+        meta: "pty is gone",
+      }),
+    );
+    expect(terminalKill).toHaveBeenCalledWith("pty-1");
+    expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-open-tabs", "terminal");
+  });
+
   it("releases focus before making the right panel inert", () => {
     useDiffStore.setState({
       rightPanelFallbackByWorkspace: {
@@ -396,7 +519,7 @@ describe("RightPanel", () => {
       },
     });
     render(<RightPanel />);
-    const toggle = screen.getByTestId("toggle-right-panel");
+    const toggle = screen.getByRole("button", { name: "Close panel" });
     toggle.focus();
     expect(toggle).toHaveFocus();
 
@@ -707,7 +830,7 @@ describe("RightPanel", () => {
 
     render(<RightPanel />);
     expect(screen.getByTestId("preview-panel")).toHaveAttribute(
-      "data-covered-left",
+      "data-covered-right",
       "0",
     );
 
