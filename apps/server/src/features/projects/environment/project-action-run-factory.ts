@@ -3,7 +3,7 @@ import type {
   WorkspaceEnvironmentActionRun,
   WorkspaceEnvironmentPlatform,
 } from "@mcode/contracts";
-import type { PreparedTerminalCommandSession } from "../../terminal/backends/terminal-backend.js";
+import type { ActionTerminal } from "../../terminal/backends/terminal-backend.js";
 
 /** Builds immutable retained Project Action runs with monotonic timestamps. */
 export class ProjectActionRunFactory {
@@ -69,10 +69,11 @@ export class ProjectActionRunFactory {
       actionId: input.actionId,
       runId: this.createRunId(),
       revision: 0,
+      trigger: "manual",
       terminalSessionId: input.session.terminalSessionId,
       actionName: input.actionName,
       status: "running",
-      snapshot: input.session.snapshot,
+      snapshot: input.snapshot,
       createdAt: timestamp,
       startedAt: timestamp,
       finishedAt: null,
@@ -91,7 +92,7 @@ export class ProjectActionRunFactory {
 
   private base(
     input: ProjectActionRunInput,
-    values: Omit<WorkspaceEnvironmentActionRun, "threadId" | "workspaceId" | "actionId" | "runId" | "revision" | "actionName" | "snapshot">,
+    values: Omit<WorkspaceEnvironmentActionRun, "threadId" | "workspaceId" | "actionId" | "runId" | "revision" | "trigger" | "actionName" | "snapshot">,
   ): WorkspaceEnvironmentActionRun {
     return {
       threadId: input.threadId,
@@ -99,6 +100,7 @@ export class ProjectActionRunFactory {
       actionId: input.actionId,
       runId: this.createRunId(),
       revision: 0,
+      trigger: "manual",
       actionName: input.actionName,
       snapshot: input.snapshot,
       ...values,
@@ -127,7 +129,8 @@ export interface ProjectActionActiveRunInput {
   readonly workspaceId: string;
   readonly actionId: string;
   readonly actionName: string;
-  readonly session: PreparedTerminalCommandSession;
+  readonly session: ActionTerminal;
+  readonly snapshot: WorkspaceEnvironmentActionLaunchSnapshot;
 }
 
 function unavailableSnapshot(

@@ -25,7 +25,7 @@ export class ThreadTeardownService {
 
     const results = await Promise.allSettled([
       this.agentService.teardownSession(threadId),
-      this.terminalService.killByThread(threadId),
+      this.terminalService.killByThread(threadId, true),
     ]);
     const failures = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
     if (failures.length > 0) {

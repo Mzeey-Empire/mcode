@@ -1,0 +1,1 @@
+ALTER TABLE `project_action_runs` ADD `trigger` text DEFAULT 'manual' NOT NULL;

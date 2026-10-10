@@ -1,12 +1,12 @@
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
-import type { PreparedTerminalCommandSession } from "../../terminal/backends/terminal-backend.js";
+import type { ActionTerminal } from "../../terminal/backends/terminal-backend.js";
 
 /** Active terminal state owned by one Project Action slot. */
 export interface ActiveProjectAction {
   state: "running" | "pending-finalization";
   readonly threadId: string;
   readonly actionId: string;
-  readonly session: PreparedTerminalCommandSession;
+  readonly session: ActionTerminal;
   run: WorkspaceEnvironmentActionRun;
   pendingFinalization: WorkspaceEnvironmentActionRun | null;
   outputRemainder: Uint8Array;

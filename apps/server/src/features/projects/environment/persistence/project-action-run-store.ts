@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { and, desc, eq, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, lt, ne, or, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import {
   WorkspaceEnvironmentActionRunSchema,
@@ -64,6 +64,7 @@ export class ProjectActionRunStore {
           runId: parsed.runId,
           revision: parsed.revision,
           terminalSessionId: parsed.terminalSessionId,
+          trigger: parsed.trigger,
           actionName: parsed.actionName,
           status: parsed.status,
           snapshotJson: JSON.stringify(parsed.snapshot),
@@ -81,6 +82,7 @@ export class ProjectActionRunStore {
             runId: parsed.runId,
             revision: parsed.revision,
             terminalSessionId: parsed.terminalSessionId,
+            trigger: parsed.trigger,
             actionName: parsed.actionName,
             status: parsed.status,
             snapshotJson: JSON.stringify(parsed.snapshot),
@@ -107,6 +109,7 @@ export class ProjectActionRunStore {
         .set({
           revision: parsed.revision,
           terminalSessionId: parsed.terminalSessionId,
+          trigger: parsed.trigger,
           actionName: parsed.actionName,
           status: parsed.status,
           snapshotJson: JSON.stringify(parsed.snapshot),
@@ -133,12 +136,12 @@ export class ProjectActionRunStore {
     });
   }
 
-  /** Marks durable in-progress runs interrupted after startup has reaped stale terminals. */
+  /** Interrupts stale runs and clears every retained terminal identity after startup. */
   interruptRunning(finishedAt: string): WorkspaceEnvironmentActionRun[] {
     const rows = this.orm
       .select()
       .from(projectActionRuns)
-      .where(eq(projectActionRuns.status, "running"))
+      .where(or(eq(projectActionRuns.status, "running"), isNotNull(projectActionRuns.terminalSessionId)))
       .limit(PROJECT_ACTION_RUNS_PER_THREAD_MAX)
       .all();
     const interrupted = rows.flatMap((row) => {
@@ -147,9 +150,8 @@ export class ProjectActionRunStore {
       return [{
         ...run,
         revision: run.revision + 1,
-        status: "interrupted" as const,
-        finishedAt,
-        exitCode: null,
+        terminalSessionId: null,
+        ...(run.status === "running" ? { status: "interrupted" as const, finishedAt, exitCode: null } : {}),
       }];
     });
     this.orm.transaction(() => {
@@ -185,6 +187,7 @@ function parseRow(row: ProjectActionRunRow): WorkspaceEnvironmentActionRun | nul
       runId: row.runId,
       revision: row.revision,
       terminalSessionId: row.terminalSessionId,
+      trigger: row.trigger,
       actionName: row.actionName,
       status: row.status,
       snapshot,

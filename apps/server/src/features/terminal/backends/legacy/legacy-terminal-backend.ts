@@ -5,8 +5,9 @@ import {
   TerminalBackend,
   PreparedTerminalCommandApprovalMismatchError,
   type TerminalBackendSender,
-  type PreparedTerminalCommandRequest,
-  type PreparedTerminalCommandSession,
+  type ActionTerminalRequest,
+  type ActionTerminal,
+  type PreparedActionLaunch,
   type TerminalReattachResult,
 } from "../terminal-backend.js";
 import { TerminalService } from "./terminal-service.js";
@@ -55,7 +56,6 @@ export class LegacyTerminalBackend extends TerminalBackend {
       arguments: [...profile.resolvedProfile.arguments],
       requestedProfileId: profile.requestedProfileId,
       resolvedProfile: profile.resolvedProfile,
-      headless: false,
     }, replacesPtyId);
   }
 
@@ -93,8 +93,8 @@ export class LegacyTerminalBackend extends TerminalBackend {
   }
 
   /** Closes all legacy PTYs for one scope. */
-  killByThread(threadId: string): Promise<void> {
-    return this.terminalService.killByThread(threadId);
+  killByThread(threadId: string, includeActions = false): Promise<void> {
+    return this.terminalService.killByThread(threadId, includeActions);
   }
 
   /** Closes every legacy PTY and releases service resources. */
@@ -127,48 +127,45 @@ export class LegacyTerminalBackend extends TerminalBackend {
     return this.terminalService.hasChildren(ptyId);
   }
 
-  /** Starts one exact hidden command using the legacy PTY's existing capacity and ownership tracking. */
-  async startPreparedCommand(input: PreparedTerminalCommandRequest): Promise<PreparedTerminalCommandSession> {
+  /** Opens an attachable action terminal with the same approval-bound command arguments. */
+  async openActionTerminal(input: ActionTerminalRequest): Promise<ActionTerminal> {
     const thread = this.threads.findById(input.threadId);
-    if (!thread || thread.deleted_at !== null) throw new Error("Prepared command Thread is unavailable");
+    if (!thread || thread.deleted_at !== null) throw new Error("Action Thread is unavailable");
     const profile = await this.profiles.resolveLaunchProfile({ workspaceId: thread.workspace_id });
-    const launch = noninteractiveLaunch(profile.resolvedProfile, input.script);
-    if (!launch) throw new Error("The current Terminal profile does not support noninteractive Project Actions");
-    const checkoutPath = this.terminalService.resolveWorkingDirectory(input.threadId);
-    if (!matchesExpectedPreparedLaunch(launch, input.expectedLaunch)) {
-      throw new PreparedTerminalCommandApprovalMismatchError({
-        platform: terminalPlatform(this.hostRuntime.platform),
-        script: input.script,
-        checkoutPath,
-        terminal: { executable: launch.executable, arguments: [...launch.arguments] },
-        environmentNames: [],
-      });
-    }
-    const session = await this.terminalService.startPreparedCommand(input.threadId, {
-      executable: launch.executable,
-      arguments: [...launch.arguments],
+    const shellLaunch = {
+      executable: profile.resolvedProfile.executable,
+      arguments: [...profile.resolvedProfile.arguments],
       requestedProfileId: profile.requestedProfileId,
       resolvedProfile: profile.resolvedProfile,
-    });
-    return {
-      terminalSessionId: session.terminalSessionId,
-      snapshot: {
-        platform: terminalPlatform(this.hostRuntime.platform),
-        script: input.script,
-        checkoutPath: session.checkoutPath,
-        terminal: { executable: session.executable, arguments: session.arguments },
-        environmentNames: session.environmentNames,
-      },
-      onOutput: session.onOutput,
-      onExit: (listener) => session.onExit((exitCode) => listener({ exitCode })),
-      stop: session.stop,
     };
+    return this.terminalService.openActionTerminal(input, shellLaunch, async (prepared, checkoutPath) => {
+      // Re-resolve at every launch so a profile edit cannot reuse stale approval.
+      const current = await this.profiles.resolveLaunchProfile({ workspaceId: thread.workspace_id });
+      const launch = noninteractiveLaunch(current.resolvedProfile, prepared.script);
+      if (!launch) throw new Error("The current Terminal profile does not support noninteractive Project Actions");
+      const snapshot = {
+        platform: terminalPlatform(this.hostRuntime.platform),
+        script: prepared.script, checkoutPath,
+        terminal: { executable: launch.executable, arguments: [...launch.arguments] },
+        environmentNames: [],
+      };
+      if (!matchesExpectedPreparedLaunch(launch, prepared.expectedLaunch)) {
+        throw new PreparedTerminalCommandApprovalMismatchError(snapshot);
+      }
+      return {
+        snapshot,
+        launch: {
+          executable: launch.executable, arguments: [...launch.arguments],
+          requestedProfileId: current.requestedProfileId, resolvedProfile: current.resolvedProfile,
+        },
+      };
+    });
   }
 }
 
 function matchesExpectedPreparedLaunch(
   launch: { readonly executable: string; readonly arguments: readonly string[] },
-  expected: PreparedTerminalCommandRequest["expectedLaunch"],
+  expected: PreparedActionLaunch["expectedLaunch"],
 ): boolean {
   if (!expected) return true;
   return expected.terminal?.executable === launch.executable

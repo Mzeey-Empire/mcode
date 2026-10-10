@@ -26,6 +26,7 @@ const completedRun: WorkspaceEnvironmentActionRun = {
   runId: "run-1",
   revision: 1,
   terminalSessionId: "terminal-1",
+  trigger: "manual",
   actionName: "Build",
   status: "completed",
   snapshot: {

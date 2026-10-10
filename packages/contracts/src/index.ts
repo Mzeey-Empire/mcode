@@ -64,6 +64,7 @@ export {
   WorkspaceEnvironmentSetupGetInputSchema,
   WorkspaceEnvironmentSetupGetResultSchema,
   WorkspaceEnvironmentActionRunStatusSchema,
+  WorkspaceEnvironmentActionRunTriggerSchema,
   WorkspaceEnvironmentActionLaunchSnapshotSchema,
   WorkspaceEnvironmentActionRunSchema,
   WorkspaceEnvironmentActionListInputSchema,

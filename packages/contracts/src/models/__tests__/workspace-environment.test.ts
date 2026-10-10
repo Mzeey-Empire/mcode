@@ -164,6 +164,7 @@ describe("workspace environment contracts", () => {
       runId: "run-1",
       revision: 1,
       terminalSessionId: "terminal-1",
+      trigger: "manual",
       actionName: "Build",
       status: "completed",
       snapshot: {
@@ -185,6 +186,9 @@ describe("workspace environment contracts", () => {
     });
 
     expect(run.status).toBe("completed");
+    expect(run.trigger).toBe("manual");
+    expect(WorkspaceEnvironmentActionRunSchema().parse({ ...run, trigger: "startup", terminalSessionId: null }).trigger).toBe("startup");
+    expect(WorkspaceEnvironmentActionRunSchema().safeParse({ ...run, trigger: "scheduled" }).success).toBe(false);
     expect(WorkspaceEnvironmentActionRunSchema().safeParse({
       ...run,
       transcript: "x".repeat(WORKSPACE_ENVIRONMENT_COMMAND_MAX_BYTES * 9),
