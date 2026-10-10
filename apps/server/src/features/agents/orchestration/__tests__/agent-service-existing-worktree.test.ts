@@ -878,6 +878,25 @@ describe("AgentService.createAndSend defaults", () => {
     expect(messageRepo.listByThread(first.id, 10).messages).toHaveLength(1);
   });
 
+  it("cancels a Direct startup whose cancellation lands while its thread is being created", async () => {
+    const { workspaceRepo, service, provider, threadStartups } = createAgentServiceHarness();
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
+    const startupId = "00000000-0000-4000-8000-000000000026";
+    const createAndBindThread = threadStartups.createAndBindThread.bind(threadStartups);
+    vi.spyOn(threadStartups, "createAndBindThread").mockImplementation(async (...args) => {
+      const thread = await createAndBindThread(...args);
+      // The thread phase checkpoint has already passed, so only admission can see this intent.
+      (await threadStartups.cancel(startupId));
+      return thread;
+    });
+
+    const result = await service.createAndSend({ workspaceId: workspace.id, content: "Cancel while creating", startupId });
+
+    expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", phase: "agent", cancellation: "requested" });
+    expect(result.runtimeSnapshot).toEqual({ threadId: result.id, turnExecutionId: null, phase: "idle" });
+    expect(provider.sendTurn).not.toHaveBeenCalled();
+  });
+
   it("completes startup when the initial native command is handled without a provider turn", async () => {
     const { workspaceRepo, service, provider, threadStartups } = createAgentServiceHarness(undefined, true);
     const workspace = (await workspaceRepo.create("Repo", "/repo"));

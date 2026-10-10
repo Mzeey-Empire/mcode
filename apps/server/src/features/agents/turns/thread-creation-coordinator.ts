@@ -153,6 +153,17 @@ export class ThreadCreationCoordinator {
     if (startupId) await this.startups()?.advance(startupId, "agent");
   }
 
+  /**
+   * Settle a startup whose cancellation vetoed its first turn at admission. Intent can land after the last
+   * coordinator checkpoint, and a vetoed turn produces no provider frame for the agent-phase observer.
+   * Returns whether cancellation was requested.
+   */
+  async settleVetoedAgent(startupId: string | undefined): Promise<boolean> {
+    if (!startupId || !this.startups()?.isCancellationRequested(startupId)) return false;
+    await this.startups()?.markCancelled(startupId);
+    return true;
+  }
+
   /** Complete a startup whose initial command was handled without a provider turn, so no provider frame will come. */
   async completeHandledInitialCommand(startupId: string | undefined): Promise<void> {
     if (startupId) await this.startups()?.complete(startupId);
