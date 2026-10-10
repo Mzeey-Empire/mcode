@@ -47,15 +47,12 @@ const threadStartupHandlers: ThreadStartupHandlerMap = {
       case "setup":
         await deps.workspaceEnvironmentService.stopAutomaticSetup({ threadId: startup.threadId });
         return deps.threadStartupService.markCancelled(startup.startupId);
-      case "agent": {
-        const stopped = await deps.agentService.stopSession(startup.threadId);
-        // Admission checks the committed cancellation intent. Without an active turn,
-        // no turn.cancelled event will reach the startup observer to settle this record.
-        if (stopped.status === "already-terminal") {
-          return deps.threadStartupService.markCancelled(startup.startupId);
-        }
-        return deps.threadStartupService.get(startup.startupId);
-      }
+      case "agent":
+        // Intent is committed before the stop, so a first provider frame racing it settles as cancelled,
+        // and a turn stopped before dispatch commits no turn fact for the observer. Once the stop
+        // resolves, the record is either already terminal (markCancelled keeps it) or cancelled.
+        await deps.agentService.stopSession(startup.threadId);
+        return deps.threadStartupService.markCancelled(startup.startupId);
       case "thread":
       case "fetch":
       case "worktree":

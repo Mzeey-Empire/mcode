@@ -136,7 +136,7 @@ describe("thread startup RPC", () => {
     expect(stopSession).not.toHaveBeenCalled();
   });
 
-  it.each(agentKinds)("stops the %s agent and leaves the active turn outcome to the observer", async (kind) => {
+  it.each(agentKinds)("settles %s agent cancellation when the stop returns, before any turn fact arrives", async (kind) => {
     const { service, thread, cancel, stopSession, stopAutomaticSetup } = await harness(kind, "agent");
     let publish: ((events: readonly CanonicalAgentEventEnvelope[]) => void) | undefined;
     const observer = new StartupAgentPhaseObserver(service, (listener) => {
@@ -147,11 +147,13 @@ describe("thread startup RPC", () => {
     stopSession.mockImplementation(async () => {
       expect(service.get(startup.startupId)?.cancellation).toBe("requested");
       return {
-        threadId: thread.id, turnExecutionId: "execution-1", status: "cancelled", dispatchState: "dispatched",
+        threadId: thread.id, turnExecutionId: "execution-1", status: "cancelled", dispatchState: "not-dispatched",
         snapshot: { threadId: thread.id, turnExecutionId: "execution-1", phase: "cancelled" },
       };
     });
-    expect(await cancel()).toMatchObject({ state: "running", phase: "agent", cancellation: "requested" });
+    // A turn stopped before dispatch commits no turn.cancelled fact, so the RPC itself must settle the record.
+    const settled = await cancel();
+    expect(settled).toMatchObject({ state: "cancelled", phase: "agent", cancellation: "requested" });
     publish?.([{
       eventId: "cancelled-event",
       routing: { threadId: thread.id, turnId: "turn-1", executionId: "execution-1" },
@@ -160,9 +162,8 @@ describe("thread startup RPC", () => {
       payload: { type: "turn.cancelled", endedAt: startup.createdAt, reason: "User stopped" },
     }]);
     await observer.stop();
-    const cancelled = service.get(startup.startupId);
-    expect(cancelled).toMatchObject({ state: "cancelled", cancellation: "requested" });
-    expect(await cancel()).toEqual(cancelled);
+    expect(service.get(startup.startupId)).toEqual(settled);
+    expect(await cancel()).toEqual(settled);
     expect(stopSession).toHaveBeenCalledExactlyOnceWith(thread.id);
     expect(stopAutomaticSetup).not.toHaveBeenCalled();
   });
