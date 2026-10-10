@@ -274,6 +274,8 @@ function useChangesState(thread: Thread) {
     fallback: fallbackChangeSummary,
   });
   const showChangeSummary = hasVisibleThreadOverviewChangeSummary(changeSummary);
+  // Renames, binary edits and empty files change files without changing line totals.
+  const hasChanges = showChangeSummary || changeSummary.files > 0;
   const isSettledResolvePending = !isRunning && !hasCurrentChangeSummary;
   const isChangeSummaryLoading = open && isSettledResolvePending && !showChangeSummary
     && changeSummaryStatus !== "error";
@@ -319,18 +321,19 @@ function useChangesState(thread: Thread) {
       clearTimeout(timer);
     };
   }, [cachedSnapshotKey, cachedSnapshots, diffRevision, isRunning, open, setSnapshots, thread.id, thread.workspace_id]);
-  return { changeSummary, isChangeSummaryFailed, isChangeSummaryLoading, showChangeSummary };
+  return { changeSummary, hasChanges, isChangeSummaryFailed, isChangeSummaryLoading, showChangeSummary };
 }
 
 /** Preserves the loaded summary and its status while the overview is closed. */
 export const { Provider: ChangesEntryState, useEntryState: useChangesEntryState } = createOverviewEntryState(useChangesState);
 
 function ChangesEntry() {
-  const { changeSummary, isChangeSummaryFailed, isChangeSummaryLoading, showChangeSummary } = useChangesEntryState();
+  const { changeSummary, hasChanges, isChangeSummaryFailed, isChangeSummaryLoading, showChangeSummary } =
+    useChangesEntryState();
   const openChanges = useCallback(() => {
     executeCommand("changes.toggle");
   }, []);
-  return (<ThreadOverviewWhen when={isChangeSummaryLoading || isChangeSummaryFailed || showChangeSummary}>
+  return (<ThreadOverviewWhen when={isChangeSummaryLoading || isChangeSummaryFailed || hasChanges}>
     <Button
       variant="ghost"
       size="compact"

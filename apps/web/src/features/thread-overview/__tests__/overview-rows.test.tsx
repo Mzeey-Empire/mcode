@@ -129,7 +129,10 @@ describe("overview Changes, Tasks and Usage rows", () => {
   });
 
   it("hides the Changes row when there are no changes", async () => {
-    vi.mocked(mockTransport.getReviewComparison).mockResolvedValue(readyComparison(0, 0));
+    vi.mocked(mockTransport.getReviewComparison).mockResolvedValue({
+      status: "ready",
+      comparison: { files: [], additions: 0, deletions: 0 },
+    });
     vi.mocked(mockTransport.getReviewState).mockResolvedValue({
       isGitRepo: true, head: "abc", branch: "main",
       uncommitted: { staged: 0, unstaged: 0, untracked: 0 },
@@ -140,6 +143,22 @@ describe("overview Changes, Tasks and Usage rows", () => {
 
     expect(mockTransport.getReviewComparison).toHaveBeenCalled();
     expect(screen.queryByTestId("workspace-menu-changes")).not.toBeInTheDocument();
+  });
+
+  it("keeps the Changes row for a change without line totals", async () => {
+    vi.mocked(mockTransport.getReviewComparison).mockResolvedValue({
+      status: "ready",
+      comparison: {
+        files: [{ path: "logo.png", previousPath: null, changeType: "modified", binary: true, additions: 0, deletions: 0, untracked: false }],
+        additions: 0,
+        deletions: 0,
+      },
+    });
+    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await flushTimers(1_000);
+
+    expect(screen.getByTestId("workspace-menu-changes")).toHaveAttribute("aria-label", "Changes, 1 file");
+    expect(screen.queryByTestId("thread-overview-change-summary")).not.toBeInTheDocument();
   });
 
   it("does not re-render the overview for streaming text deltas", async () => {
