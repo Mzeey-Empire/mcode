@@ -29,7 +29,6 @@ function profileIds(directory: string, prefix = ""): string[] {
     try {
       ids.push(canonicalWorkspaceId(id));
     } catch {
-      // Unrelated directories are not owned by Browser profiles.
     }
   }
   return ids;

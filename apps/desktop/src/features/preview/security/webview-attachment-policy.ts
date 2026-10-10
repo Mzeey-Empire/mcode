@@ -36,7 +36,6 @@ export function hardenPreviewWebviewAttachment(
   try {
     browserProfiles.sessionForWorkspace(pending.surface.identity.workspaceId);
   } catch {
-    // A removed profile or failed policy installation must refuse attachment.
     return false;
   }
   webPreferences.nodeIntegration = false;

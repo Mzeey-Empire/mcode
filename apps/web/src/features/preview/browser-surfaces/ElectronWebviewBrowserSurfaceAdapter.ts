@@ -194,7 +194,6 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
   }
 
   private async prepare(tabs: Pick<PreviewTabsBridge, "list"> | undefined): Promise<PreviewSurfaceBridgeResult> {
-    // Layout effects materialize surfaces before the passive tab-list effect registers their scope.
     if (tabs) {
       const listed = await tabs.list(this.identity.scope.id, this.identity.workspaceId);
       if (!listed.ok) return listed;

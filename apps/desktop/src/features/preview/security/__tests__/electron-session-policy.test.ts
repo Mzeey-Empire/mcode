@@ -98,7 +98,6 @@ describe("workspace session policy", () => {
     const ipc = new NodeEvents.EventEmitter();
     const first = session.fromPartition("second");
     const second = session.fromPartition("first");
-    // Use fresh policy sessions so this assertion is independent of earlier installations.
     const firstCheck = vi.fn<Session["setPermissionCheckHandler"]>();
     const secondCheck = vi.fn<Session["setPermissionCheckHandler"]>();
     installBrowserSessionPolicy({ ...first, setPermissionCheckHandler: firstCheck }, ipc);
