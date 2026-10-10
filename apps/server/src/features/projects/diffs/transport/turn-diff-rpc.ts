@@ -5,7 +5,7 @@ import { parseTurnDiff } from "../../../agents/turns/turn-diff-patch.js";
 import type { StoredTurnDiff } from "../../../agents/turns/persistence/turn-diff-repo.js";
 import { readSnapshotRangeComparison, readSnapshotRangeDiff, type SnapshotRouterDeps } from "./snapshot-rpc.js";
 import { reviewComparisonFailure } from "../../git/review-comparison-errors.js";
-import { snapshotRange, type SnapshotTurn, type TurnSnapshotRange } from "../snapshots/turn-snapshot-range.js";
+import { snapshotRange, type SnapshotTurn, type TurnSnapshotRange } from "../snapshots/turn-snapshot-range-model.js";
 
 type TurnDiffMethod = Extract<WsMethodName, `turnDiff.${string}`>;
 type TurnDiffParams = { [M in TurnDiffMethod]: z.input<ReturnType<typeof WS_METHODS>[M]["params"]> };

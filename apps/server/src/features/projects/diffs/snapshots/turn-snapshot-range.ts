@@ -6,28 +6,8 @@ import type { TurnSnapshot } from "@mcode/contracts";
 import { canonicalAgentItems, canonicalAgentTurns, messages } from "../../../../runtime/persistence/sqlite/schema.js";
 import { TurnSnapshotRepo } from "../../../agents/turns/persistence/turn-snapshot-repo.js";
 import { deriveTurnAssistantMessageId } from "../../../agents/turns/turn-assistant-message-id.js";
-import { attributedWorkspacePaths, collectAttributedWorkspacePathGroups } from "./snapshot-attribution.js";
-
-/** A whole logical turn, including attempts whose snapshot was never written. */
-export interface SnapshotTurn {
-  messageId: string;
-  messageIds: string[];
-  ordinal: number;
-  createdAt: string;
-  phase: "live" | "settled";
-  complete: boolean;
-  rows: TurnSnapshot[];
-}
-
-/** Complete attributed evidence, or an expired logical turn. */
-export type TurnSnapshotRange = {
-  status: "ready";
-  rows: [TurnSnapshot, ...TurnSnapshot[]];
-  refBefore: string;
-  refAfter: string;
-  paths: string[];
-  pathGroups: string[][];
-} | { status: "unavailable"; reason: "snapshot-expired" };
+import { attributedWorkspacePaths } from "./snapshot-attribution.js";
+import { snapshotRange, type SnapshotTurn, type TurnSnapshotRange } from "./turn-snapshot-range-model.js";
 
 type Attempt = typeof canonicalAgentTurns.$inferSelect;
 type OrderedMessage = { id: string; role: string; timestamp: string; executionId: string | null; turnId: string | null };
@@ -137,14 +117,4 @@ function snapshotTurn(threadId: string, group: MessageGroup, members: Attempt[],
 
 function isLive(attempt: Attempt | undefined): boolean {
   return attempt?.status === "Pending" || attempt?.status === "Running";
-}
-
-/** Build range refs and attribution without collapsing rename groups from different rows. */
-export function snapshotRange(rows: readonly TurnSnapshot[]): TurnSnapshotRange {
-  const first = rows[0];
-  const last = rows.at(-1);
-  if (!first || !last) return { status: "unavailable", reason: "snapshot-expired" };
-  const pathGroups = collectAttributedWorkspacePathGroups(rows);
-  return { status: "ready", rows: [first, ...rows.slice(1)], refBefore: first.ref_before, refAfter: last.ref_after,
-    pathGroups, paths: [...new Set(pathGroups.flat())] };
 }

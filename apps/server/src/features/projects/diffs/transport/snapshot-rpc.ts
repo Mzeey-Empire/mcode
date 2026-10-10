@@ -6,7 +6,8 @@ import type { GitWorktreeService } from "../../git/git-worktree-service.js";
 import type { WorkspaceService } from "../../lifecycle/workspace-service.js";
 import { assertReviewWorktree, reviewComparisonFailure, ReviewComparisonLimitError, ReviewWorktreeMissingError } from "../../git/review-comparison-errors.js";
 import type { SnapshotService } from "../snapshots/snapshot-service.js";
-import { snapshotRange, type TurnSnapshotRange, type TurnSnapshotRangeReader } from "../snapshots/turn-snapshot-range.js";
+import { snapshotRange, type TurnSnapshotRange } from "../snapshots/turn-snapshot-range-model.js";
+import type { TurnSnapshotRangeReader } from "../snapshots/turn-snapshot-range.js";
 
 type SnapshotRpcMethod = Extract<WsMethodName, `snapshot.${string}`>;
 type SnapshotRpcParamsByMethod = {
