@@ -108,10 +108,10 @@ export function rendersAsSingleCallRow(calls: readonly ToolCall[]): boolean {
 }
 
 /** Renders one completed tool call inside a semantic list. */
-export function ToolCallDetailRow({ toolCall }: { toolCall: ToolCall }) {
+export function ToolCallDetailRow({ toolCall, expansion }: { toolCall: ToolCall; expansion?: RowExpansion }) {
   return (
     <li className="min-w-0 max-w-full">
-      <ToolCallRow toolCall={toolCall} />
+      <ToolCallRow toolCall={toolCall} expansion={expansion} />
     </li>
   );
 }

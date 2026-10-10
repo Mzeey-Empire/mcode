@@ -18,16 +18,16 @@ separate tool groups in the chronological data; only their inline display is rem
 Tool calls render as collapsed rows built on `NarrativeToolRow`: icon, label,
 detail, meta, and a chevron only when the row has more to show. Rows never open
 themselves. A running command stays collapsed until clicked, and a manual open
-survives output arrival. A lone running call is an `active-tool` row and
-remounts as a `tool-group` row when it completes, so its open state does not
-carry across completion. A tool result completes its matched call; a new tool
+survives output arrival. A running call is an `active-tool` row that remounts
+as a `tool-group` row or a group child when it completes, so its open state
+lives in the transcript under a per-call key that every row of that call reads.
+A tool result completes its matched call; a new tool
 call or assistant message does not complete other calls. Turn termination
 settles any outstanding calls.
 
 A group of one call renders that call's own row, so a failed edit reads
-"Edit failed" with its file. That row's disclosure uses the group's
-transcript-owned expansion state, so it survives row unmounts and never lists
-the call again as a child row. Larger groups show a summary with failure and
+"Edit failed" with its file. Opening that row also opens its group, so when
+the group grows its children list the call with its output still open. Larger groups show a summary with failure and
 cancellation counts and expand into one row per call. Failure shows as text in
 the row meta, never as red rows or badges.
 

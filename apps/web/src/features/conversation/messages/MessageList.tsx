@@ -23,6 +23,7 @@ import { findViewportMessageAnchor } from "./message-list-scroll";
 import { useMessageListData, type MessageListData } from "./useMessageListData";
 import { useMessageListItems } from "./useMessageListItems";
 import { useTranscriptGroupExpansion } from "./useTranscriptGroupExpansion";
+import { toolCallDisclosureKey, type TranscriptNarrativeItem, type TranscriptToolItem } from "./transcript-narrative-items";
 import { resolveUserMessagePreview } from "@/components/chat/user-message-preview";
 import { estimateMessageListItemHeight, type MessageListItem } from "./message-list-virtualization";
 import { TranscriptViewport, type TranscriptHost, type TranscriptPosition } from "./transcript-viewport";
@@ -300,6 +301,11 @@ function transcriptGroupKey(item: MessageListItem): string {
   return item.type === "tool-row" ? item.groupKey : item.key;
 }
 
+function isCallExpanded(item: TranscriptNarrativeItem | TranscriptToolItem, expanded: ReadonlySet<string>): boolean {
+  const key = toolCallDisclosureKey(item);
+  return key !== undefined && expanded.has(key);
+}
+
 const ROW_PADDING_BY_TYPE: Partial<Record<MessageListItem["type"], string>> = {
   "work-fold": "pt-2 pb-1",
   "fold-note": "pb-3",
@@ -541,7 +547,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
               ) : item.type === "fold-note" ? (
                 <WorkFoldNote text={item.text} />
               ) : item.type === "narrative-row" || item.type === "tool-row" ? (
-                <TranscriptNarrativeRow row={item} threadId={data.renderedThreadId} expanded={expandedGroups.has(transcriptGroupKey(item))} entering={enteringGroups.has(transcriptGroupKey(item))} onToggle={toggleGroup} onSubagentSelect={props.onSubagentSelect} onOpenSubagents={props.onOpenSubagents} />
+                <TranscriptNarrativeRow row={item} threadId={data.renderedThreadId} expanded={expandedGroups.has(transcriptGroupKey(item))} callExpanded={isCallExpanded(item, expandedGroups)} entering={enteringGroups.has(transcriptGroupKey(item))} onToggle={toggleGroup} onSubagentSelect={props.onSubagentSelect} onOpenSubagents={props.onOpenSubagents} />
               ) : (
                 <TranscriptItemRenderer item={item} expanded={expandedGroups.has(item.key)} onToggleGroup={toggleGroup} turnExpandRef={turnExpandRef} onBranch={props.onBranch} onSubagentSelect={props.onSubagentSelect} onOpenSubagents={props.onOpenSubagents} onScrollToMessage={scrollToMessage} currentTurnMessageIdByThread={data.currentTurnMessageIdByThread} threadId={data.renderedThreadId} showParentAgentProvenance={props.showParentAgentProvenance ?? true} />
               )}

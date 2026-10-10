@@ -43,6 +43,19 @@ export interface TranscriptFoldNoteItem {
   readonly text: string;
 }
 
+/**
+ * Open-state key for the output of the one call a row discloses. Running,
+ * lone, and grouped rows of a call share it, so a manual open survives the
+ * call completing or its group growing.
+ */
+export function toolCallDisclosureKey(row: TranscriptNarrativeItem | TranscriptToolItem): string | undefined {
+  const call = row.type === "tool-row" ? row.toolCall
+    : row.item.type === "active-tool" ? row.item.toolCall
+    : row.item.type === "tool-group" && rendersAsSingleCallRow(row.item.group.calls) ? row.item.group.calls[0]
+    : undefined;
+  return call ? `tool-call:${call.id}` : undefined;
+}
+
 /** Inserts open group children into the existing viewport, without another scroll owner. */
 export function expandTranscriptToolGroups(
   items: readonly (ChatVirtualItem | TranscriptNarrativeItem | TranscriptFoldNoteItem)[],
