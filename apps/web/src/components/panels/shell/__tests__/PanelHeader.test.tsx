@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ShellChromeProvider } from "@/components/shell/shell-chrome-context";
 import { PanelHeader, PanelHeaderSlot, PanelHeaderSlotScope } from "../PanelHeader";
@@ -66,6 +66,42 @@ describe("PanelHeaderSlot", () => {
     expect(leading).toBeEmptyDOMElement();
     expect(row2).toBeEmptyDOMElement();
     expect(screen.queryByText("title")).not.toBeInTheDocument();
+  });
+
+  it("keeps a tool's header state while another tool owns the shell", () => {
+    const leading = document.createElement("div");
+    const row2 = document.createElement("div");
+    const header = (active: boolean) => (
+      <PanelHeaderSlotScope active={active} elements={{ leading, row2 }}>
+        <PanelHeaderSlot slot="row2">
+          <input aria-label="Address" />
+        </PanelHeaderSlot>
+      </PanelHeaderSlotScope>
+    );
+    const { rerender } = render(header(true));
+    document.body.append(leading, row2);
+    fireEvent.change(screen.getByRole("textbox", { name: "Address" }), { target: { value: "localhost:5173" } });
+
+    rerender(header(false));
+    expect(row2).toBeEmptyDOMElement();
+    rerender(header(true));
+
+    expect(screen.getByRole("textbox", { name: "Address" })).toHaveValue("localhost:5173");
+    leading.remove();
+    row2.remove();
+  });
+
+  it("leaves a row empty when the active tool puts nothing in it", () => {
+    const leading = document.createElement("div");
+    const row2 = document.createElement("div");
+    render(
+      <PanelHeaderSlotScope active elements={{ leading, row2 }}>
+        <PanelHeaderSlot slot="leading">title</PanelHeaderSlot>
+      </PanelHeaderSlotScope>,
+    );
+
+    expect(leading).toHaveTextContent("title");
+    expect(row2).toBeEmptyDOMElement();
   });
 
   it("stays inline outside the panel shell", () => {

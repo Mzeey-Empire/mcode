@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, type ReactNode, type Ref } from "react";
+import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useState, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { Maximize2, Minimize2, PanelRight } from "lucide-react";
 import { IconButton } from "@/components/ui/button";
@@ -13,22 +13,41 @@ export interface PanelHeaderElements {
   readonly row2: HTMLElement | null;
 }
 
+type PanelHeaderSlotName = "leading" | "row2";
+
 /**
- * Where a tool's header content goes. Tools keep their header state and portal
- * the markup into the shell, so moving a header never moves its state. Outside
- * the shell (standalone renders, the automation dock) the header stays inline.
+ * Where a tool's header content goes. Each tool portals into its own detached
+ * hosts, and only the active tool's hosts sit in the shell rows. Swapping tools
+ * moves DOM nodes, never React trees, so header state (an omnibox draft, an
+ * open picker) survives a switch. Outside the shell (standalone renders, the
+ * automation dock) the context is null and the header stays inline.
  */
-type PanelHeaderSlotTarget =
-  | { readonly kind: "inline" }
-  | { readonly kind: "hidden" }
-  | ({ readonly kind: "portal" } & PanelHeaderElements);
+interface PanelHeaderSlotTarget {
+  readonly hosts: Readonly<Record<PanelHeaderSlotName, HTMLElement>>;
+  /** Marks a slot as used until the returned release runs, so empty rows stay out of the shell. */
+  readonly claim: (slot: PanelHeaderSlotName) => () => void;
+}
 
-const PanelHeaderSlotContext = createContext<PanelHeaderSlotTarget>({ kind: "inline" });
+const PanelHeaderSlotContext = createContext<PanelHeaderSlotTarget | null>(null);
+
+function createSlotHost(slot: PanelHeaderSlotName): HTMLElement {
+  const host = document.createElement("div");
+  // The row's flex layout must reach the tool's own elements.
+  host.style.display = "contents";
+  host.dataset.panelHeaderSlotHost = slot;
+  return host;
+}
+
+function attachSlotHost(row: HTMLElement | null, host: HTMLElement): (() => void) | undefined {
+  if (!row) return undefined;
+  row.append(host);
+  return () => host.remove();
+}
 
 /**
- * Gives one tool access to the shell header. Only the active tool portals into
- * it; a mounted but inactive tool (Review and warm Browser surfaces stay
- * mounted) renders no header content at all.
+ * Gives one tool access to the shell header. Only the active tool's content is
+ * attached; a mounted but inactive tool (Review and warm Browser surfaces stay
+ * mounted) keeps its header alive off-document.
  */
 export function PanelHeaderSlotScope({
   active,
@@ -39,11 +58,17 @@ export function PanelHeaderSlotScope({
   readonly elements: PanelHeaderElements;
   readonly children: ReactNode;
 }) {
-  const { leading, row2 } = elements;
-  const target = useMemo<PanelHeaderSlotTarget>(
-    () => (active ? { kind: "portal", leading, row2 } : { kind: "hidden" }),
-    [active, leading, row2],
-  );
+  const [hosts] = useState(() => ({ leading: createSlotHost("leading"), row2: createSlotHost("row2") }));
+  const [claims, setClaims] = useState<Readonly<Record<PanelHeaderSlotName, number>>>({ leading: 0, row2: 0 });
+  const claim = useCallback((slot: PanelHeaderSlotName) => {
+    setClaims((current) => ({ ...current, [slot]: current[slot] + 1 }));
+    return () => setClaims((current) => ({ ...current, [slot]: current[slot] - 1 }));
+  }, []);
+  const leadingRow = active && claims.leading > 0 ? elements.leading : null;
+  const row2Row = active && claims.row2 > 0 ? elements.row2 : null;
+  useLayoutEffect(() => attachSlotHost(leadingRow, hosts.leading), [leadingRow, hosts]);
+  useLayoutEffect(() => attachSlotHost(row2Row, hosts.row2), [row2Row, hosts]);
+  const target = useMemo<PanelHeaderSlotTarget>(() => ({ hosts, claim }), [hosts, claim]);
   return <PanelHeaderSlotContext.Provider value={target}>{children}</PanelHeaderSlotContext.Provider>;
 }
 
@@ -52,14 +77,14 @@ export function PanelHeaderSlot({
   slot,
   children,
 }: {
-  readonly slot: "leading" | "row2";
+  readonly slot: PanelHeaderSlotName;
   readonly children: ReactNode;
 }) {
   const target = useContext(PanelHeaderSlotContext);
-  if (target.kind === "inline") return children;
-  if (target.kind === "hidden") return null;
-  const host = slot === "leading" ? target.leading : target.row2;
-  return host ? createPortal(children, host) : null;
+  const claim = target?.claim;
+  useLayoutEffect(() => claim?.(slot), [claim, slot]);
+  if (!target) return children;
+  return createPortal(children, target.hosts[slot]);
 }
 
 /**
