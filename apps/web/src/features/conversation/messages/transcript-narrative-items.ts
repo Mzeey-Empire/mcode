@@ -30,6 +30,8 @@ export interface TranscriptToolItem {
   /** Assistant message whose persisted tool group produced this virtual row. */
   readonly messageId?: string;
   readonly groupKey: string;
+  /** Output keys of every call in the group, any of which holds the group open. */
+  readonly groupCallKeys: readonly string[];
   readonly toolCall: ToolCall;
   readonly index: number;
   readonly count: number;
@@ -43,6 +45,10 @@ export interface TranscriptFoldNoteItem {
   readonly text: string;
 }
 
+function callDisclosureKey(call: ToolCall): string {
+  return `tool-call:${call.id}`;
+}
+
 /**
  * Open-state key for the output of the one call a row discloses. Running,
  * lone, and grouped rows of a call share it, so a manual open survives the
@@ -53,7 +59,22 @@ export function toolCallDisclosureKey(row: TranscriptNarrativeItem | TranscriptT
     : row.item.type === "active-tool" ? row.item.toolCall
     : row.item.type === "tool-group" && rendersAsSingleCallRow(row.item.group.calls) ? row.item.group.calls[0]
     : undefined;
-  return call ? `tool-call:${call.id}` : undefined;
+  return call ? callDisclosureKey(call) : undefined;
+}
+
+/** Output keys of the calls in the tool group a row belongs to. */
+export function transcriptGroupCallKeys(row: TranscriptNarrativeItem | TranscriptToolItem): readonly string[] {
+  if (row.type === "tool-row") return row.groupCallKeys;
+  return row.item.type === "tool-group" ? row.item.group.calls.map(callDisclosureKey) : [];
+}
+
+/**
+ * A group is open while its own key or any of its calls' output is open, so a
+ * call the user opened never lands hidden in a collapsed group when it completes.
+ */
+export function isTranscriptGroupOpen(row: TranscriptNarrativeItem | TranscriptToolItem, open: ReadonlySet<string>): boolean {
+  return open.has(row.type === "tool-row" ? row.groupKey : row.key)
+    || transcriptGroupCallKeys(row).some((key) => open.has(key));
 }
 
 /** Inserts open group children into the existing viewport, without another scroll owner. */
@@ -62,11 +83,12 @@ export function expandTranscriptToolGroups(
   expandedGroups: ReadonlySet<string>,
 ): (ChatVirtualItem | TranscriptNarrativeItem | TranscriptFoldNoteItem | TranscriptToolItem)[] {
   return items.flatMap((row): (ChatVirtualItem | TranscriptNarrativeItem | TranscriptFoldNoteItem | TranscriptToolItem)[] => {
-    if (row.type !== "narrative-row" || row.item.type !== "tool-group" || !expandedGroups.has(row.key)) return [row];
+    if (row.type !== "narrative-row" || row.item.type !== "tool-group" || !isTranscriptGroupOpen(row, expandedGroups)) return [row];
     const calls = row.item.group.calls;
     if (rendersAsSingleCallRow(calls)) return [row];
+    const groupCallKeys = transcriptGroupCallKeys(row);
     return [row, ...calls.map((toolCall, index): TranscriptToolItem => ({
-      type: "tool-row", key: `${row.key}:call:${toolCall.id}`, groupKey: row.key, toolCall, index, count: calls.length,
+      type: "tool-row", key: `${row.key}:call:${toolCall.id}`, groupKey: row.key, groupCallKeys, toolCall, index, count: calls.length,
       messageId: row.messageId,
     }))];
   });

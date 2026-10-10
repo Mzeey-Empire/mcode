@@ -5,13 +5,12 @@ import type { NarrativeItem } from "../../narrative/types";
 import { TranscriptNarrativeRow } from "../TranscriptNarrativeRow";
 import {
   expandTranscriptToolGroups,
+  isTranscriptGroupOpen,
   toolCallDisclosureKey,
   type TranscriptNarrativeItem,
   type TranscriptToolItem,
 } from "../transcript-narrative-items";
 import { useTranscriptGroupExpansion } from "../useTranscriptGroupExpansion";
-
-const ROW_KEY = "narrative:live:tool:tc-1:0";
 
 function shellCall(id: string, overrides: Partial<ToolCall> = {}): ToolCall {
   return {
@@ -25,12 +24,16 @@ function shellCall(id: string, overrides: Partial<ToolCall> = {}): ToolCall {
   };
 }
 
-function narrativeRow(item: NarrativeItem): TranscriptNarrativeItem {
-  return { type: "narrative-row", key: ROW_KEY, item, index: 0, allToolCalls: [] };
+function narrativeRow(item: NarrativeItem, firstCallId: string): TranscriptNarrativeItem {
+  return { type: "narrative-row", key: `narrative:live:tool:${firstCallId}:0`, item, index: 0, allToolCalls: [] };
 }
 
 function toolGroupRow(calls: readonly ToolCall[]): TranscriptNarrativeItem {
-  return narrativeRow({ type: "tool-group", group: { calls: [...calls] }, hasError: false, hasCancelled: false });
+  return narrativeRow({ type: "tool-group", group: { calls: [...calls] }, hasError: false, hasCancelled: false }, calls[0]!.id);
+}
+
+function activeRow(toolCall: ToolCall): TranscriptNarrativeItem {
+  return narrativeRow({ type: "active-tool", toolCall }, toolCall.id);
 }
 
 function isTranscriptRow(row: { type: string }): row is TranscriptNarrativeItem | TranscriptToolItem {
@@ -50,7 +53,7 @@ function Transcript({ items }: { items: readonly TranscriptNarrativeItem[] }) {
             key={`${row.type}:${row.key}`}
             row={row}
             threadId={null}
-            expanded={expanded.has(row.type === "tool-row" ? row.groupKey : row.key)}
+            expanded={isTranscriptGroupOpen(row, expanded)}
             callExpanded={callKey !== undefined && expanded.has(callKey)}
             onToggle={toggle}
           />
@@ -62,8 +65,7 @@ function Transcript({ items }: { items: readonly TranscriptNarrativeItem[] }) {
 
 describe("TranscriptNarrativeRow call disclosure", () => {
   it("keeps a running shell's manual open after its output arrives and it completes", () => {
-    const running = narrativeRow({ type: "active-tool", toolCall: shellCall("tc-1") });
-    const view = render(<Transcript items={[running]} />);
+    const view = render(<Transcript items={[activeRow(shellCall("tc-1"))]} />);
     fireEvent.click(screen.getByRole("button", { name: /Running command/ }));
 
     view.rerender(<Transcript items={[toolGroupRow([shellCall("tc-1", { isComplete: true, output: "first output" })])]} />);
@@ -83,5 +85,22 @@ describe("TranscriptNarrativeRow call disclosure", () => {
     expect(within(firstChild).getByRole("button", { name: /Ran command/ })).toHaveAttribute("aria-expanded", "true");
     expect(within(firstChild).getByText("first output")).toBeVisible();
     expect(screen.queryByText("second output")).toBeNull();
+  });
+
+  it("opens the earlier group an open running shell completes into, and collapsing it closes the shell", () => {
+    const read: ToolCall = { id: "read-1", toolName: "Read", toolInput: { file_path: "a.ts" }, output: "contents", isError: false, isComplete: true };
+    const view = render(<Transcript items={[toolGroupRow([read]), activeRow(shellCall("tc-1"))]} />);
+    fireEvent.click(screen.getByRole("button", { name: /Running command/ }));
+
+    view.rerender(<Transcript items={[toolGroupRow([read, shellCall("tc-1", { isComplete: true, output: "first output" })])]} />);
+
+    const shellChild = screen.getByRole("list", { name: "Tool call 2 of 2" });
+    expect(within(shellChild).getByRole("button", { name: /Ran command/ })).toHaveAttribute("aria-expanded", "true");
+    expect(within(shellChild).getByText("first output")).toBeVisible();
+
+    const summary = screen.getByRole("button", { name: /Read 1 file/ });
+    expect(summary).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(summary);
+    expect(screen.getByRole("button", { name: /Read 1 file/ })).toHaveAttribute("aria-expanded", "false");
   });
 });

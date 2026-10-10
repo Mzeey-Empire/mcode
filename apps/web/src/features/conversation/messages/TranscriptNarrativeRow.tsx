@@ -8,7 +8,7 @@ import { NarrativeRow } from "../narrative/NarrativeRow";
 import type { RowExpansion } from "../narrative/NarrativeToolRow";
 import { ToolCallDetailRow, ToolSummaryLine } from "../narrative/ToolSummaryLine";
 import type { SubagentRosterTarget } from "../narrative/types";
-import { toolCallDisclosureKey, type TranscriptNarrativeItem, type TranscriptToolItem } from "./transcript-narrative-items";
+import { toolCallDisclosureKey, transcriptGroupCallKeys, type TranscriptNarrativeItem, type TranscriptToolItem } from "./transcript-narrative-items";
 
 interface TranscriptNarrativeRowProps {
   readonly row: TranscriptNarrativeItem | TranscriptToolItem;
@@ -17,7 +17,8 @@ interface TranscriptNarrativeRowProps {
   /** Whether the output of the call this row discloses is open. */
   readonly callExpanded?: boolean;
   readonly entering?: boolean;
-  readonly onToggle: (key: string) => void;
+  /** Toggles a disclosure key, clearing linked keys on close, while keeping the anchor row still. */
+  readonly onToggle: (key: string, linkedKeys?: readonly string[], anchorKey?: string) => void;
   readonly onSubagentSelect?: (id: string, target: SubagentRosterTarget) => void;
   readonly onOpenSubagents?: (target: SubagentRosterTarget) => void;
 }
@@ -34,24 +35,13 @@ export function VisibleNarrativeLoader({ threadId, messageId }: { threadId: stri
   return null;
 }
 
-/**
- * A row that is its call's own row also flips its own key, so the call stays
- * listed and open when a lone group grows into a multi-call group.
- */
 function callExpansionFor(
   row: TranscriptNarrativeItem | TranscriptToolItem,
   open: boolean,
-  onToggle: (key: string) => void,
+  onToggle: TranscriptNarrativeRowProps["onToggle"],
 ): RowExpansion | undefined {
   const key = toolCallDisclosureKey(row);
-  if (!key) return undefined;
-  return {
-    open,
-    onToggle: () => {
-      if (row.type === "narrative-row") onToggle(row.key);
-      onToggle(key);
-    },
-  };
+  return key ? { open, onToggle: () => onToggle(key, [], row.key) } : undefined;
 }
 
 function ToolChildRow({ row, open, entering, expansion }: {
@@ -81,7 +71,7 @@ export function TranscriptNarrativeRow({ row, threadId, expanded, callExpanded =
     return <>{loader}<ToolChildRow row={row} open={expanded} entering={entering} expansion={callExpansion} /></>;
   }
   if (row.item.type === "tool-group") {
-    return <>{loader}<ToolSummaryLine {...row.item} virtualExpansion={callExpansion ?? { open: expanded, onToggle: () => onToggle(row.key) }} /></>;
+    return <>{loader}<ToolSummaryLine {...row.item} virtualExpansion={callExpansion ?? { open: expanded, onToggle: () => onToggle(row.key, transcriptGroupCallKeys(row)) }} /></>;
   }
   if (row.item.type === "active-tool") {
     return (

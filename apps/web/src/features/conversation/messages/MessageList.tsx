@@ -23,7 +23,7 @@ import { findViewportMessageAnchor } from "./message-list-scroll";
 import { useMessageListData, type MessageListData } from "./useMessageListData";
 import { useMessageListItems } from "./useMessageListItems";
 import { useTranscriptGroupExpansion } from "./useTranscriptGroupExpansion";
-import { toolCallDisclosureKey, type TranscriptNarrativeItem, type TranscriptToolItem } from "./transcript-narrative-items";
+import { isTranscriptGroupOpen, toolCallDisclosureKey, type TranscriptNarrativeItem, type TranscriptToolItem } from "./transcript-narrative-items";
 import { resolveUserMessagePreview } from "@/components/chat/user-message-preview";
 import { estimateMessageListItemHeight, type MessageListItem } from "./message-list-virtualization";
 import { TranscriptViewport, type TranscriptHost, type TranscriptPosition } from "./transcript-viewport";
@@ -357,12 +357,12 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
     data.renderedThreadId ? recallScrollPosition(data.renderedThreadId)?.expandedGroups ?? new Set() : new Set());
   // A fold the settle reveal opened collapses on the next visit unless the user touches it.
   const autoOpenedFolds = useRef(new Set<string>());
-  const toggleGroup = useCallback((key: string) => {
+  const toggleGroup = useCallback((key: string, linkedKeys?: readonly string[], anchorKey = key) => {
     autoOpenedFolds.current.delete(key);
     const view = controllerRef.current;
-    const top = view?.rowTop(key);
-    if (top !== undefined) view?.moveTo({ kind: "reading", key, offset: -top });
-    toggleExpandedGroup(key);
+    const top = view?.rowTop(anchorKey);
+    if (top !== undefined) view?.moveTo({ kind: "reading", key: anchorKey, offset: -top });
+    toggleExpandedGroup(key, linkedKeys);
   }, [toggleExpandedGroup]);
   const { items } =
     useMessageListItems({ ...data, expandedFolds: expandedGroups, expandedGroups: presentGroups, leadingContent: props.leadingContent, afterFirstUserContent: props.afterFirstUserContent });
@@ -547,7 +547,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
               ) : item.type === "fold-note" ? (
                 <WorkFoldNote text={item.text} />
               ) : item.type === "narrative-row" || item.type === "tool-row" ? (
-                <TranscriptNarrativeRow row={item} threadId={data.renderedThreadId} expanded={expandedGroups.has(transcriptGroupKey(item))} callExpanded={isCallExpanded(item, expandedGroups)} entering={enteringGroups.has(transcriptGroupKey(item))} onToggle={toggleGroup} onSubagentSelect={props.onSubagentSelect} onOpenSubagents={props.onOpenSubagents} />
+                <TranscriptNarrativeRow row={item} threadId={data.renderedThreadId} expanded={isTranscriptGroupOpen(item, expandedGroups)} callExpanded={isCallExpanded(item, expandedGroups)} entering={enteringGroups.has(transcriptGroupKey(item))} onToggle={toggleGroup} onSubagentSelect={props.onSubagentSelect} onOpenSubagents={props.onOpenSubagents} />
               ) : (
                 <TranscriptItemRenderer item={item} expanded={expandedGroups.has(item.key)} onToggleGroup={toggleGroup} turnExpandRef={turnExpandRef} onBranch={props.onBranch} onSubagentSelect={props.onSubagentSelect} onOpenSubagents={props.onOpenSubagents} onScrollToMessage={scrollToMessage} currentTurnMessageIdByThread={data.currentTurnMessageIdByThread} threadId={data.renderedThreadId} showParentAgentProvenance={props.showParentAgentProvenance ?? true} />
               )}
