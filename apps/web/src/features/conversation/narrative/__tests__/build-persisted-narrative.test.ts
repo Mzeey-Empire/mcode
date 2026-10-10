@@ -298,6 +298,20 @@ describe("buildPersistedNarrativeItems", () => {
     expect(items[0].type).toBe("thought");
   });
 
+  it("drops persisted task-list calls from the tool rows", () => {
+    const items = buildPersistedNarrativeItems({
+      tools: [
+        makeTool({ id: "t-todo", tool_name: "TodoWrite", sort_order: 1 }),
+        makeTool({ id: "t-read", tool_name: "Read", sort_order: 2 }),
+        makeTool({ id: "t-task", tool_name: "TaskUpdate", sort_order: 3 }),
+      ],
+      thoughts: [],
+      hooks: [],
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ type: "tool-group", group: { calls: [{ id: "t-read" }] } });
+  });
+
   it("tools-only flat: groups consecutive completed non-Agent calls into a tool-group", () => {
     const items = buildPersistedNarrativeItems({
       tools: [

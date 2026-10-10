@@ -1,6 +1,7 @@
 // Models
 export * from "./models/thread-attention.js";
 export * from "./models/next-message-draft.js";
+export * from "./models/task-list-tools.js";
 export {
   ThreadStatusSchema,
   ThreadModeSchema,

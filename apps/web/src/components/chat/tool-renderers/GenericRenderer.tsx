@@ -17,8 +17,6 @@ function summarizeInput(input: Record<string, unknown>): string {
     if (input[key] != null) return formatValue(input[key]);
   }
   if (input.command != null) return formatValue(input.command).slice(0, 80);
-  // TodoWrite-style: array of todo items — summarize as "N todos"
-  if (Array.isArray(input.todos)) return `${input.todos.length} todo${input.todos.length === 1 ? "" : "s"}`;
   const keys = Object.keys(input);
   return keys.length > 0 ? `${keys[0]}: ${formatValue(input[keys[0]]).slice(0, 60)}` : "";
 }
