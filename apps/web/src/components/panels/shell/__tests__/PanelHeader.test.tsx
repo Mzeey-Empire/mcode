@@ -1,6 +1,9 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ShellChromeProvider } from "@/components/shell/shell-chrome-context";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { OverlayGateContext } from "@/components/ui/overlay-gate";
 import { PanelHeader, PanelHeaderSlot, PanelHeaderSlotScope } from "../PanelHeader";
 
 function renderHeader(maximized: boolean, sidebarDocked: boolean) {
@@ -108,5 +111,37 @@ describe("PanelHeaderSlot", () => {
     render(<PanelHeaderSlot slot="row2">controls</PanelHeaderSlot>);
 
     expect(screen.getByText("controls")).toBeInTheDocument();
+  });
+});
+
+describe("PanelHeaderSlotScope inside a closed panel", () => {
+  function ScopedMenu({ panelVisible, row2 }: { readonly panelVisible: boolean; readonly row2: HTMLElement }) {
+    return (
+      <OverlayGateContext.Provider value={panelVisible}>
+        <PanelHeaderSlotScope active elements={{ leading: null, row2 }}>
+          <PanelHeaderSlot slot="row2">
+            <DropdownMenu>
+              <DropdownMenuTrigger>Review options</DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem label="Refresh" />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </PanelHeaderSlot>
+        </PanelHeaderSlotScope>
+      </OverlayGateContext.Provider>
+    );
+  }
+
+  it("detaches the active tool's row and closes its menus when the panel closes", async () => {
+    const row2 = document.body.appendChild(document.createElement("div"));
+    const { rerender } = render(<ScopedMenu panelVisible row2={row2} />);
+    await userEvent.click(screen.getByRole("button", { name: "Review options" }));
+    expect(await screen.findByRole("menuitem", { name: "Refresh" })).toBeInTheDocument();
+
+    rerender(<ScopedMenu panelVisible={false} row2={row2} />);
+
+    await waitFor(() => expect(screen.queryByRole("menuitem", { name: "Refresh" })).not.toBeInTheDocument());
+    expect(row2).toBeEmptyDOMElement();
+    row2.remove();
   });
 });

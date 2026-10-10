@@ -6,6 +6,7 @@ import { CollapsedSidebarControls } from "@/components/shell/CanvasHeader";
 import { useShellChrome } from "@/components/shell/shell-chrome-context";
 import { getKeybindingForCommand, keybindingKeycaps } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
+import { OverlayGateContext } from "@/components/ui/overlay-gate";
 
 /** The DOM hosts that row 1's leading slot and row 2 expose to the active tool. */
 export interface PanelHeaderElements {
@@ -23,7 +24,6 @@ type PanelHeaderSlotName = "leading" | "row2";
  * automation dock) the context is null and the header stays inline.
  */
 interface PanelHeaderSlotTarget {
-  readonly active: boolean;
   readonly hosts: Readonly<Record<PanelHeaderSlotName, HTMLElement>>;
   /** Marks a slot as used until the returned release runs, so empty rows stay out of the shell. */
   readonly claim: (slot: PanelHeaderSlotName) => () => void;
@@ -48,7 +48,8 @@ function attachSlotHost(row: HTMLElement | null, host: HTMLElement): (() => void
 /**
  * Gives one tool access to the shell header. Only the active tool's content is
  * attached; a mounted but inactive tool (Review and warm Browser surfaces stay
- * mounted) keeps its header alive off-document.
+ * mounted) keeps its header alive off-document. A scope is active only while
+ * its enclosing scope is, and its popups close while it is inactive.
  */
 export function PanelHeaderSlotScope({
   active,
@@ -59,28 +60,33 @@ export function PanelHeaderSlotScope({
   readonly elements: PanelHeaderElements;
   readonly children: ReactNode;
 }) {
+  const scopeActive = useContext(OverlayGateContext) && active;
   const [hosts] = useState(() => ({ leading: createSlotHost("leading"), row2: createSlotHost("row2") }));
   const [claims, setClaims] = useState<Readonly<Record<PanelHeaderSlotName, number>>>({ leading: 0, row2: 0 });
   const claim = useCallback((slot: PanelHeaderSlotName) => {
     setClaims((current) => ({ ...current, [slot]: current[slot] + 1 }));
     return () => setClaims((current) => ({ ...current, [slot]: current[slot] - 1 }));
   }, []);
-  const leadingRow = active && claims.leading > 0 ? elements.leading : null;
-  const row2Row = active && claims.row2 > 0 ? elements.row2 : null;
+  const leadingRow = scopeActive && claims.leading > 0 ? elements.leading : null;
+  const row2Row = scopeActive && claims.row2 > 0 ? elements.row2 : null;
   useLayoutEffect(() => attachSlotHost(leadingRow, hosts.leading), [leadingRow, hosts]);
   useLayoutEffect(() => attachSlotHost(row2Row, hosts.row2), [row2Row, hosts]);
-  const target = useMemo<PanelHeaderSlotTarget>(() => ({ active, hosts, claim }), [active, hosts, claim]);
-  return <PanelHeaderSlotContext.Provider value={target}>{children}</PanelHeaderSlotContext.Provider>;
+  const target = useMemo<PanelHeaderSlotTarget>(() => ({ hosts, claim }), [hosts, claim]);
+  return (
+    <OverlayGateContext.Provider value={scopeActive}>
+      <PanelHeaderSlotContext.Provider value={target}>{children}</PanelHeaderSlotContext.Provider>
+    </OverlayGateContext.Provider>
+  );
 }
 
 /**
- * Open state for a menu or popover in a tool's header. An inactive tool stays
- * mounted, and its body-portaled popup would float over the active tool, so the
- * menu closes when its tool leaves the shell and stays closed on return.
+ * Open state for a controlled menu or popover in a tool's header. The scope's
+ * overlay gate hides it while the tool is inactive; this also clears the state,
+ * so the menu does not pop back open when the tool returns.
  */
 export function usePanelHeaderMenuOpen(): readonly [boolean, (open: boolean) => void] {
   const [open, setOpen] = useState(false);
-  const active = useContext(PanelHeaderSlotContext)?.active ?? true;
+  const active = useContext(OverlayGateContext);
   if (open && !active) setOpen(false);
   return [open, setOpen];
 }

@@ -43,6 +43,7 @@ import { createTerminalForScope } from "@/lib/ensure-terminal";
 import { toggleRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { getTransport } from "@/transport";
 import { cn } from "@/lib/utils";
+import { OverlayGateContext } from "@/components/ui/overlay-gate";
 import { ResizableRightPanel } from "./ResizableRightPanel";
 import { useToastStore } from "@/stores/toastStore";
 
@@ -589,7 +590,8 @@ function RightPanelFrame({
       data-visible={panelVisible}
       inert={!panelVisible ? true : undefined}
     >
-      {children}
+      {/* A hidden panel stays mounted, but its body-portaled popups must close with it. */}
+      <OverlayGateContext.Provider value={panelVisible}>{children}</OverlayGateContext.Provider>
     </ResizableRightPanel>
   );
 }
