@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
@@ -58,7 +58,62 @@ describe("FileService unicode paths (real git)", () => {
   }, GIT_REPO_SETUP_TIMEOUT_MS);
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     NodeFS.rmSync(root, { recursive: true, force: true });
+  });
+
+  it.each([false, true])("reads a non-git folder with a HEAD file present: %s", async (hasHeadFile) => {
+    const folder = NodePath.join(root, "non-git");
+    NodeFS.mkdirSync(folder);
+    vi.stubEnv("GIT_CEILING_DIRECTORIES", root);
+    NodeFS.writeFileSync(NodePath.join(folder, "plain.txt"), "plain\n");
+    if (hasHeadFile) NodeFS.writeFileSync(NodePath.join(folder, "HEAD"), "unrelated\n");
+    const files = makeService(folder);
+
+    await expect(files.read("workspace-1", "plain.txt")).resolves.toEqual({
+      kind: "text", path: "plain.txt", size: 6, encoding: "utf-8", content: "plain\n", changedLines: null,
+    });
+    await expect(files.changes("workspace-1")).resolves.toEqual({ git: false, entries: [], truncated: false });
+  });
+
+  it("keeps list, marks and refresh relative to a workspace below the repo root", async () => {
+    const folder = NodePath.join(root, "sub");
+    NodeFS.mkdirSync(folder);
+    NodeFS.writeFileSync(NodePath.join(root, "outside.txt"), "outside\n");
+    NodeFS.writeFileSync(NodePath.join(folder, "tracked.txt"), "before\n");
+    gitIn(root, "add", ".");
+    gitIn(root, "commit", "-m", "baseline");
+    const files = makeService(folder);
+    await expect(files.refresh("workspace-1")).resolves.toBeNull();
+    NodeFS.writeFileSync(NodePath.join(root, "outside.txt"), "outside edit\n");
+    NodeFS.writeFileSync(NodePath.join(root, "outside-new.txt"), "new\n");
+    await expect(files.refresh("workspace-1")).resolves.toBeNull();
+    NodeFS.writeFileSync(NodePath.join(folder, "tracked.txt"), "after\n");
+    NodeFS.writeFileSync(NodePath.join(folder, "new.txt"), "new\n");
+
+    expect((await files.list("workspace-1")).paths.sort()).toEqual(["new.txt", "tracked.txt"]);
+    await expect(files.changes("workspace-1")).resolves.toEqual({
+      git: true, entries: [{ path: "tracked.txt", mark: "M" }, { path: "new.txt", mark: "A" }], truncated: false,
+    });
+    await expect(files.refresh("workspace-1")).resolves.toEqual({
+      changedPaths: ["tracked.txt", "new.txt"], wholeWorkspace: false,
+    });
+    await expect(files.refresh("workspace-1")).resolves.toBeNull();
+  });
+
+  it("reports source line numbers even when a textconv driver prepends a line", async () => {
+    const driver = NodePath.join(root, ".git", "textconv.cjs");
+    NodeFS.writeFileSync(driver, "process.stdout.write('header\\n' + require('node:fs').readFileSync(process.argv[2], 'utf8'));\n");
+    gitIn(root, "config", "diff.fixture.textconv", `"${process.execPath.replaceAll("\\", "/")}" "${driver.replaceAll("\\", "/")}"`);
+    NodeFS.writeFileSync(NodePath.join(root, ".gitattributes"), "*.txt diff=fixture\n");
+    NodeFS.writeFileSync(NodePath.join(root, "tracked.txt"), "one\ntwo\nthree\n");
+    gitIn(root, "add", ".");
+    gitIn(root, "commit", "-m", "baseline");
+    NodeFS.writeFileSync(NodePath.join(root, "tracked.txt"), "one\nchanged\nthree\n");
+
+    await expect(service.read("workspace-1", "tracked.txt")).resolves.toEqual({
+      kind: "text", path: "tracked.txt", size: 18, encoding: "utf-8", content: "one\nchanged\nthree\n", changedLines: [[2, 2]],
+    });
   });
 
   it("lists a tracked non-ASCII path verbatim and round-trips read + mention validation", async () => {

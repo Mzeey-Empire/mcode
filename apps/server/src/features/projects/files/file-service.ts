@@ -89,15 +89,17 @@ export class FileService {
 
   private async readStatus(cwd: string): Promise<Array<{ path: string; status: string }> | null> {
     try {
+      const { stdout } = await this.gitExecutor.exec(["rev-parse", "--show-prefix"], { cwd });
+      const prefix = stdout.replace(/\r?\n$/, "");
       const entries: Array<{ path: string; status: string }> = [];
       let skipSource = false;
       await this.readGitRecords(
-        ["status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd,
+        ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", "."], cwd,
         (record) => {
           if (skipSource) { skipSource = false; return; }
           if (record.length < 4) return;
           const status = record.slice(0, 2);
-          entries.push({ path: record.slice(3), status });
+          entries.push({ path: record.slice(3 + prefix.length), status });
           skipSource = /[RC]/.test(status);
         },
       );
@@ -190,13 +192,14 @@ export class FileService {
   }
 
   private async readChangedLines(cwd: string, path: string): Promise<Array<[number, number]> | null> {
+    if (!await this.isGitWorkTree(cwd)) return null;
     let pending = "";
     let added = false;
     let hasDiff = false;
     const ranges: Array<[number, number]> = [];
     try {
       await this.gitExecutor.exec(
-        ["diff", "--no-color", "--no-ext-diff", "-U0", "HEAD", "--", path],
+        ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "-U0", "HEAD", "--", path],
         {
           cwd, env: { GIT_LITERAL_PATHSPECS: "1" }, retainStdout: false,
           onStdout(chunk) {
@@ -214,8 +217,28 @@ export class FileService {
       // Empty diffs include untracked files; new-file diffs are staged additions.
       return !hasDiff || added ? null : ranges;
     } catch (error) {
-      const details = error instanceof Error && "stderr" in error ? String(error.stderr) : String(error);
-      if (/not a git repository|bad revision 'HEAD'|ambiguous argument 'HEAD'/.test(details)) return null;
+      if (!await this.hasGitHead(cwd)) return null;
+      throw error;
+    }
+  }
+
+  private async isGitWorkTree(cwd: string): Promise<boolean> {
+    try {
+      // The executor caches this probe by -C, keeping subsequent opens to one Git process.
+      await this.gitExecutor.exec(["-C", cwd, "rev-parse", "--show-toplevel"]);
+      return true;
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === 128) return false;
+      throw error;
+    }
+  }
+
+  private async hasGitHead(cwd: string): Promise<boolean> {
+    try {
+      await this.gitExecutor.exec(["rev-parse", "--verify", "--quiet", "HEAD"], { cwd });
+      return true;
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === 1) return false;
       throw error;
     }
   }

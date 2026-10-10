@@ -7,6 +7,7 @@
 import "reflect-metadata";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import * as NodeHTTP from "node:http";
+import * as NodeNet from "node:net";
 import { WebSocket } from "ws";
 import { createWsServer, type WsServerDeps } from "../ws-server.js";
 import type { RouterDeps } from "../ws-router.js";
@@ -296,6 +297,27 @@ describe("single-instance WebSocket attachment", () => {
 
   afterEach(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it.each([false, true])("rejects multibyte credentials without throwing, single instance: %s", async (singleInstance) => {
+    const deps = makeMinimalDeps({
+      authToken: "a".repeat(36), singleInstance,
+      instanceToken: "a".repeat(36), worktreeIdentity: "fixture",
+    });
+    const created = createWsServer(deps);
+    server = created.httpServer;
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const wrong = `${"a".repeat(35)}%C3%A9`;
+    const req = new NodeHTTP.IncomingMessage(new NodeNet.Socket());
+    req.url = singleInstance
+      ? `/?token=${"a".repeat(36)}&instanceToken=${wrong}&worktree=fixture`
+      : `/?token=${wrong}`;
+    const close = vi.fn();
+    const send = vi.fn();
+
+    expect(() => created.wss.emit("connection", { close, send }, req)).not.toThrow();
+    expect(close.mock.calls).toEqual([[4001, singleInstance ? "WRONG_INSTANCE" : "Unauthorized"]]);
+    expect((await getHealth(server)).status).toBe(200);
   });
 
   it("returns structured WRONG_INSTANCE refusal without token values", async () => {

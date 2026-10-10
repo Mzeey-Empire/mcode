@@ -103,6 +103,13 @@ describe("workspace image HTTP route", () => {
     expect(await response.text()).toBe("Not found");
   });
 
+  it("does not cache an icon without a version", async () => {
+    const response = await authenticated(imageUrl("a..b.png", "icon"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(png);
+  });
+
   it("uses the thread checkout for Files and rejects all thread parameters for icons", async () => {
     const response = await authenticated(imageUrl("a..b.png", "file", { threadId: "thread-1" }));
     expect(response.status).toBe(200);

@@ -30,7 +30,7 @@ async function serveImage(url: URL, res: NodeHTTP.ServerResponse, deps: ImageRou
     res.writeHead(200, {
       "Content-Type": image.mime,
       "Content-Length": image.bytes.length,
-      "Cache-Control": image.use === "icon" ? "private, max-age=31536000, immutable" : "no-store",
+      "Cache-Control": image.use === "icon" && url.searchParams.has("v") ? "private, max-age=31536000, immutable" : "no-store",
       "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
     });

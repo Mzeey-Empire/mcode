@@ -1001,7 +1001,7 @@ export class TurnAdmissionDispatchCoordinator {
       paths.add(mention.path);
       this.files.validateMentionPath(prepared.workspace.id, mention.path, prepared.command.threadId);
       const result = await this.files.read(prepared.workspace.id, mention.path, prepared.command.threadId, "text");
-      if (result.kind !== "text") throw new Error(`Cannot include a ${result.kind} file mention`);
+      if (result.kind !== "text") continue;
       files.push({ path: mention.path, content: result.content });
     }
     return buildInjectedFileMessage(text, files);

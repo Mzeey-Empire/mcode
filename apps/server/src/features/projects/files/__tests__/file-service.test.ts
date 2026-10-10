@@ -22,6 +22,8 @@ function makeService(overrides?: {
     threadRepo as never,
     gitWorktrees as never,
     { exec: async (args: string[], opts?: GitExecOptions) => {
+      if (args.includes("--show-prefix")) return { stdout: "", stderr: "" };
+      if (args.includes("--show-toplevel")) return { stdout: root, stderr: "" };
       const result = await exec(args, opts);
       opts?.onStdout?.(result.stdout);
       return result;
@@ -48,7 +50,7 @@ describe("FileService.refresh", () => {
     });
     expect(exec).toHaveBeenCalledTimes(3);
     expect(exec).toHaveBeenLastCalledWith(
-      ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+      ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", "."],
       { cwd: "C:/workspace", retainStdout: false, onStdout: expect.any(Function) },
     );
   });
@@ -292,5 +294,19 @@ describe("FileService viewer", () => {
     NodeFS.writeFileSync(NodePath.join(root, "file.txt"), "content");
     const { service } = makeService({ root, exec: vi.fn().mockRejectedValue(new Error("Git permission denied")) });
     await expect(service.read("workspace-1", "file.txt")).rejects.toThrow("Git permission denied");
+  });
+
+  it("returns null for unborn HEAD without interpreting localized diff errors", async () => {
+    const { root } = fixture();
+    NodeFS.writeFileSync(NodePath.join(root, "file.txt"), "content");
+    const exec = vi.fn(async (args: string[]) => {
+      if (args[0] === "diff") throw Object.assign(new Error("Git failed"), { code: 128, stderr: "révision HEAD inconnue" });
+      if (args.includes("--verify")) throw Object.assign(new Error("Git failed"), { code: 1 });
+      return { stdout: root, stderr: "" };
+    });
+    const { service } = makeService({ root, exec });
+    await expect(service.read("workspace-1", "file.txt")).resolves.toEqual({
+      kind: "text", path: "file.txt", size: 7, encoding: "utf-8", content: "content", changedLines: null,
+    });
   });
 });
