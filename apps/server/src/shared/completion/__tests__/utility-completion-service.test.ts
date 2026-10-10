@@ -64,7 +64,7 @@ describe("UtilityCompletionService", () => {
       "/tmp",
       {},
     );
-    expect(result).toEqual({ text: "summary result", model: "gpt-4.1-mini" });
+    expect(result).toEqual({ text: "summary result", provider: "copilot", model: "gpt-4.1-mini" });
   });
 
   it("falls back to model.defaults.provider when utility.provider is empty", async () => {
@@ -91,11 +91,12 @@ describe("UtilityCompletionService", () => {
 
     const settings = mockSettingsService({ defaultsProvider: "gemini" });
     const svc = new UtilityCompletionService(settings, registry, availability);
-    await svc.complete("prompt", "/tmp");
+    const result = await svc.complete("prompt", "/tmp");
 
     expect(registry.resolve).toHaveBeenCalledWith("gemini");
     expect(registry.resolve).toHaveBeenCalledWith("claude");
     expect(claudeProvider.complete).toHaveBeenCalled();
+    expect(result.provider).toBe("claude");
   });
 
   it("uses provider-specific default model when utility.id is empty", async () => {
