@@ -1,53 +1,44 @@
-import { WS_METHODS, type WsMethodName } from "@mcode/contracts";
+import { WS_METHODS, type DiffStats, type ReviewComparisonResult, type ReviewFileDiffResult, type ReviewFileChange, type WsMethodName } from "@mcode/contracts";
 import type { z } from "zod";
 import type { TurnSnapshotRepo } from "../../../agents/turns/persistence/turn-snapshot-repo.js";
 import type { ThreadService } from "../../../thread-control/lifecycle/thread-service.js";
 import type { GitWorktreeService } from "../../git/git-worktree-service.js";
 import type { WorkspaceService } from "../../lifecycle/workspace-service.js";
-import {
-  attributedWorkspacePathGroups,
-  attributedWorkspacePaths,
-  collectAttributedWorkspacePathGroups,
-  collectAttributedWorkspacePaths,
-} from "../snapshots/snapshot-attribution.js";
+import { assertReviewWorktree, reviewComparisonFailure, ReviewComparisonLimitError, ReviewWorktreeMissingError } from "../../git/review-comparison-errors.js";
 import type { SnapshotService } from "../snapshots/snapshot-service.js";
+import { snapshotRange, type TurnSnapshotRange, type TurnSnapshotRangeReader } from "../snapshots/turn-snapshot-range.js";
 
 type SnapshotRpcMethod = Extract<WsMethodName, `snapshot.${string}`>;
-
 type SnapshotRpcParamsByMethod = {
   [Method in SnapshotRpcMethod]: z.input<ReturnType<typeof WS_METHODS>[Method]["params"]>;
 };
+type ReadyRange = Extract<TurnSnapshotRange, { status: "ready" }>;
 
-type StoredSnapshot = NonNullable<ReturnType<TurnSnapshotRepo["getById"]>>;
-
-/** Defines the services required to route validated snapshot RPC calls. */
+/** Services required by historical and cumulative snapshot reads. */
 export interface SnapshotRouterDeps {
-  turnSnapshotRepo: Pick<
-    TurnSnapshotRepo,
-    "getById" | "deleteExpired" | "listByThread"
-  >;
-  snapshotService: Pick<SnapshotService, "getDiff" | "getDiffStats">;
+  turnSnapshotRepo: Pick<TurnSnapshotRepo, "getById" | "deleteExpired" | "listByThread">;
+  turnSnapshotRanges: Pick<TurnSnapshotRangeReader, "turnSnapshotRange" | "listTurns" | "listSnapshots">;
+  snapshotService: Pick<SnapshotService, "getDiff" | "getDiffStats" | "validateRef">;
   threadService: Pick<ThreadService, "findById">;
   workspaceService: Pick<WorkspaceService, "findById">;
   gitWorktrees: Pick<GitWorktreeService, "resolveWorkingDir">;
-  /** Reconciles this store's snapshot pins with its rows, skipping threads the runtime holds. */
   sweepSnapshotPins: () => Promise<void>;
 }
 
 type SnapshotHandlerMap = {
-  [Method in SnapshotRpcMethod]: (
-    deps: SnapshotRouterDeps,
-    params: SnapshotRpcParamsByMethod[Method],
-  ) => Promise<unknown> | unknown;
+  [Method in SnapshotRpcMethod]: (deps: SnapshotRouterDeps, params: SnapshotRpcParamsByMethod[Method]) => Promise<unknown> | unknown;
 };
 
 const snapshotHandlers: SnapshotHandlerMap = {
-  "snapshot.getDiff": routeSnapshotDiff,
-  "snapshot.getDiffStats": routeSnapshotDiffStats,
+  "snapshot.getDiff": (deps, params) => readSnapshotRangeDiff(deps, rangeForSnapshot(deps, params.snapshotId), params.filePath, params.maxLines),
+  "snapshot.getDiffStats": (deps, params) => readSnapshotRangeStats(deps, rangeForSnapshot(deps, params.snapshotId)),
   "snapshot.cleanup": routeSnapshotCleanup,
-  "snapshot.listByThread": (deps, params) => deps.turnSnapshotRepo.listByThread(params.threadId),
-  "snapshot.getCumulativeDiff": routeCumulativeSnapshotDiff,
-  "snapshot.getCumulativeDiffStats": routeCumulativeSnapshotDiffStats,
+  "snapshot.listByThread": (deps, params) => deps.turnSnapshotRanges.listSnapshots(params.threadId),
+  "snapshot.getCumulativeDiff": (deps, params) => {
+    const range = cumulativeRange(deps, params.threadId);
+    return range.status === "ready" ? readSnapshotRangeDiff(deps, range, params.filePath, params.maxLines) : "";
+  },
+  "snapshot.getCumulativeDiffStats": (deps, params) => readSnapshotRangeComparison(deps, cumulativeRange(deps, params.threadId), true),
 };
 
 /** Checks whether a method belongs to the snapshot RPC family. */
@@ -57,143 +48,87 @@ export function isSnapshotRpcMethod(method: WsMethodName): method is SnapshotRpc
 
 /** Routes validated snapshot RPC parameters to feature services. */
 export async function routeSnapshotRpc<Method extends SnapshotRpcMethod>(
-  method: Method,
-  params: SnapshotRpcParamsByMethod[Method],
-  deps: SnapshotRouterDeps,
+  method: Method, params: SnapshotRpcParamsByMethod[Method], deps: SnapshotRouterDeps,
 ): Promise<unknown> {
   return await snapshotHandlers[method](deps, params);
 }
 
-/** Delete expired rows, then drop the pins they held so git gc can reclaim their trees. */
 async function routeSnapshotCleanup(deps: SnapshotRouterDeps): Promise<{ removed: number }> {
-  const removed = await deps.turnSnapshotRepo.deleteExpired(
-    parseInt(process.env.SNAPSHOT_MAX_AGE_DAYS ?? "30", 10),
-  );
+  const removed = await deps.turnSnapshotRepo.deleteExpired(parseInt(process.env.SNAPSHOT_MAX_AGE_DAYS ?? "30", 10));
   await deps.sweepSnapshotPins();
   return { removed };
 }
 
-async function routeSnapshotDiff(
-  deps: SnapshotRouterDeps,
-  params: SnapshotRpcParamsByMethod["snapshot.getDiff"],
-): Promise<string> {
-  const snapshot = requireSnapshot(deps, params.snapshotId);
-  const snapshotCwd = resolveSnapshotCwd(deps, snapshot);
-  const attributedPaths = attributedWorkspacePaths(snapshot);
-  const attributedPathGroups = attributedWorkspacePathGroups(snapshot);
-  if (!isAttributedFile(attributedPaths, params.filePath)) return "";
-  return await deps.snapshotService.getDiff(
-    snapshotCwd,
-    snapshot.ref_before,
-    snapshot.ref_after,
-    params.filePath,
-    params.maxLines,
-    attributedPaths,
-    attributedPathGroups,
-  );
-}
-
-async function routeSnapshotDiffStats(
-  deps: SnapshotRouterDeps,
-  params: SnapshotRpcParamsByMethod["snapshot.getDiffStats"],
-): Promise<unknown> {
-  const snapshot = requireSnapshot(deps, params.snapshotId);
-  return await deps.snapshotService.getDiffStats(
-    resolveSnapshotCwd(deps, snapshot),
-    snapshot.ref_before,
-    snapshot.ref_after,
-    attributedWorkspacePaths(snapshot),
-    attributedWorkspacePathGroups(snapshot),
-  );
-}
-
-async function routeCumulativeSnapshotDiff(
-  deps: SnapshotRouterDeps,
-  params: SnapshotRpcParamsByMethod["snapshot.getCumulativeDiff"],
-): Promise<string> {
-  const snapshots = getSnapshotsWithGitRefs(deps, params.threadId);
-  if (snapshots.length === 0) return "";
-  const first = snapshots[0]!;
-  const last = snapshots[snapshots.length - 1]!;
-  const attributedPaths = collectAttributedWorkspacePaths(snapshots);
-  const attributedPathGroups = collectAttributedWorkspacePathGroups(snapshots);
-  if (!isAttributedFile(attributedPaths, params.filePath)) return "";
-  return await deps.snapshotService.getDiff(
-    resolveCumulativeSnapshotCwd(deps, first, params.threadId),
-    first.ref_before,
-    last.ref_after,
-    params.filePath,
-    params.maxLines,
-    attributedPaths,
-    attributedPathGroups,
-  );
-}
-
-async function routeCumulativeSnapshotDiffStats(
-  deps: SnapshotRouterDeps,
-  params: SnapshotRpcParamsByMethod["snapshot.getCumulativeDiffStats"],
-): Promise<unknown> {
-  const snapshots = getSnapshotsWithGitRefs(deps, params.threadId);
-  if (snapshots.length === 0) return [];
-  const first = snapshots[0]!;
-  const last = snapshots[snapshots.length - 1]!;
-  const stats = await deps.snapshotService.getDiffStats(
-    resolveCumulativeSnapshotCwd(deps, first, params.threadId),
-    first.ref_before,
-    last.ref_after,
-    collectAttributedWorkspacePaths(snapshots),
-    collectAttributedWorkspacePathGroups(snapshots),
-  );
-  if (stats.length > 10_000) {
-    throw new Error("Cumulative Review comparison is limited to 10000 files");
-  }
-  return stats;
-}
-
-function requireSnapshot(deps: SnapshotRouterDeps, snapshotId: string): StoredSnapshot {
+function rangeForSnapshot(deps: SnapshotRouterDeps, snapshotId: string): TurnSnapshotRange {
   const snapshot = deps.turnSnapshotRepo.getById(snapshotId);
-  if (!snapshot) throw new Error(`Snapshot not found: ${snapshotId}`);
-  return snapshot;
+  return snapshot ? deps.turnSnapshotRanges.turnSnapshotRange(snapshot.thread_id, snapshot.message_id)
+    : { status: "unavailable", reason: "snapshot-expired" };
 }
 
-function getSnapshotsWithGitRefs(deps: SnapshotRouterDeps, threadId: string): StoredSnapshot[] {
-  return deps.turnSnapshotRepo.listByThread(threadId).filter(
-    (snapshot) => snapshot.ref_before && snapshot.ref_after,
-  );
+function cumulativeRange(deps: SnapshotRouterDeps, threadId: string): TurnSnapshotRange {
+  return snapshotRange(deps.turnSnapshotRanges.listSnapshots(threadId));
 }
 
-function isAttributedFile(attributedPaths: readonly string[], filePath?: string): boolean {
-  return !filePath || attributedPaths.some(
-    (path) => path.replaceAll("\\", "/") === filePath.replaceAll("\\", "/"),
-  );
+/** Resolve the original checkout and validate refs before choosing native or Git evidence. */
+export async function validateSnapshotRange(deps: SnapshotRouterDeps, range: ReadyRange): Promise<string | Exclude<ReviewComparisonResult, { status: "ready" }>> {
+  try {
+    const cwd = resolveSnapshotCwd(deps, range.rows[0]);
+    assertReviewWorktree(cwd);
+    const valid = await Promise.all([deps.snapshotService.validateRef(cwd, range.refBefore), deps.snapshotService.validateRef(cwd, range.refAfter)]);
+    return valid.every(Boolean) ? cwd : { status: "unavailable", reason: "snapshot-pruned" };
+  } catch (error) {
+    return reviewComparisonFailure(error);
+  }
 }
 
-function resolveSnapshotCwd(deps: SnapshotRouterDeps, snapshot: StoredSnapshot): string {
-  if (snapshot.worktree_path) return snapshot.worktree_path;
-  const thread = deps.threadService.findById(snapshot.thread_id);
-  if (!thread) throw new Error(`Thread not found for snapshot: ${snapshot.thread_id}`);
+function resolveSnapshotCwd(deps: SnapshotRouterDeps, first: ReadyRange["rows"][0]): string {
+  const thread = deps.threadService.findById(first.thread_id);
+  if (!thread) throw new Error(`Thread not found for snapshot: ${first.thread_id}`);
   const workspace = deps.workspaceService.findById(thread.workspace_id);
   if (!workspace) throw new Error(`Workspace not found: ${thread.workspace_id}`);
-  return deps.gitWorktrees.resolveWorkingDir(
-    workspace.path,
-    thread.mode,
-    thread.worktree_path,
-  );
+  if (!first.worktree_path && thread.mode === "worktree" && !thread.worktree_path) throw new ReviewWorktreeMissingError("Thread worktree path is missing");
+  return first.worktree_path ?? deps.gitWorktrees.resolveWorkingDir(workspace.path, thread.mode, thread.worktree_path);
 }
 
-function resolveCumulativeSnapshotCwd(
-  deps: SnapshotRouterDeps,
-  first: StoredSnapshot,
-  threadId: string,
-): string {
-  if (first.worktree_path) return first.worktree_path;
-  const thread = deps.threadService.findById(threadId);
-  if (!thread) throw new Error(`Thread not found: ${threadId}`);
-  const workspace = deps.workspaceService.findById(thread.workspace_id);
-  if (!workspace) throw new Error(`Workspace not found: ${thread.workspace_id}`);
-  return deps.gitWorktrees.resolveWorkingDir(
-    workspace.path,
-    thread.mode,
-    thread.worktree_path,
-  );
+/** Read Git metadata across all joined attempts, retaining truthful failure outcomes. */
+export async function readSnapshotRangeComparison(deps: SnapshotRouterDeps, range: TurnSnapshotRange, emptyIsReady = false): Promise<ReviewComparisonResult> {
+  if (range.status !== "ready") return emptyIsReady ? { status: "ready", comparison: { files: [], additions: 0, deletions: 0 } } : range;
+  const stats = await readSnapshotRangeStats(deps, range);
+  if (!Array.isArray(stats)) return stats;
+  return { status: "ready", comparison: {
+    files: stats.map(diffStatsFile),
+    additions: stats.reduce((sum, file) => sum + file.additions, 0),
+    deletions: stats.reduce((sum, file) => sum + file.deletions, 0),
+  } };
+}
+
+function diffStatsFile(file: DiffStats): ReviewFileChange {
+  return { path: file.filePath, previousPath: null, changeType: file.changeType, binary: false,
+    additions: file.additions, deletions: file.deletions, untracked: false };
+}
+
+async function readSnapshotRangeStats(deps: SnapshotRouterDeps, range: TurnSnapshotRange): Promise<DiffStats[] | Exclude<ReviewComparisonResult, { status: "ready" }>> {
+  if (range.status !== "ready") return range;
+  const cwd = await validateSnapshotRange(deps, range);
+  if (typeof cwd !== "string") return cwd;
+  try {
+    const stats = await deps.snapshotService.getDiffStats(cwd, range.refBefore, range.refAfter, range.paths, range.pathGroups);
+    if (stats.length > 10_000) throw new ReviewComparisonLimitError(stats.length);
+    return stats;
+  } catch (error) {
+    return reviewComparisonFailure(error);
+  }
+}
+
+/** Read a file patch from the same complete attempt range as its comparison. */
+export async function readSnapshotRangeDiff(deps: SnapshotRouterDeps, range: TurnSnapshotRange, filePath?: string, maxLines?: number): Promise<ReviewFileDiffResult> {
+  if (range.status !== "ready") return range;
+  const cwd = await validateSnapshotRange(deps, range);
+  if (typeof cwd !== "string") return cwd;
+  if (filePath && !range.paths.some((path) => path.replaceAll("\\", "/") === filePath.replaceAll("\\", "/"))) return "";
+  try {
+    return await deps.snapshotService.getDiff(cwd, range.refBefore, range.refAfter, filePath, maxLines, range.paths, range.pathGroups);
+  } catch (error) {
+    return reviewComparisonFailure(error);
+  }
 }

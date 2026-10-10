@@ -8,7 +8,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../testing/owned-test-database.js";
 import { WorkspaceRepo } from "../../persistence/workspace-repo.js";
-import { GitComparisonService, ReviewComparisonError } from "../git-comparison-service.js";
+import { GitComparisonService } from "../git-comparison-service.js";
 import { RealGitExecutor } from "../execution/real-git-executor.js";
 import type { GitExecutor } from "../execution/index.js";
 
@@ -29,6 +29,11 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
     ? NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(NodePath.join(cwd, ".git/index"))).digest("hex") : null;
   const temporaryIndexes = () => NodeFS.readdirSync(NodePath.join(cwd, ".git")).filter((name) => name.startsWith("mcode-review-index-"));
   async function read(view: "unstaged" | "uncommitted" | "staged") {
+    const result = await readResult(view);
+    if (result.status !== "ready") throw new Error(JSON.stringify(result));
+    return result.comparison;
+  }
+  async function readResult(view: "unstaged" | "uncommitted" | "staged") {
     const before = indexHash();
     try { return await service.readReviewComparison("fixture", view, {}, cwd); }
     finally {
@@ -268,7 +273,7 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
 
   it("reports a corrupt index as a typed Git error and preserves its bytes", async () => {
     NodeFS.writeFileSync(NodePath.join(cwd, ".git/index"), "unreadable index data");
-    await expect(read("unstaged")).rejects.toBeInstanceOf(ReviewComparisonError);
+    await expect(readResult("unstaged")).resolves.toMatchObject({ status: "failed", failure: { kind: "git-error" } });
   });
 
   it("never substitutes an empty index when copying the real index fails", async () => {
@@ -278,7 +283,7 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
     const failure = Object.assign(new Error("permission denied"), { code: "EACCES" });
     const copy = vi.mocked(NodeFSPromises.copyFile).mockClear().mockRejectedValueOnce(failure);
     try {
-      await expect(read("unstaged")).rejects.toMatchObject({ kind: "git-error" });
+      await expect(readResult("unstaged")).resolves.toMatchObject({ status: "failed", failure: { kind: "git-error" } });
       expect(copy).toHaveBeenCalledTimes(1);
     } finally { copy.mockReset(); }
   });
@@ -294,7 +299,7 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
       },
     };
     service = new GitComparisonService(repo, boundary);
-    await expect(read("unstaged")).rejects.toMatchObject({ kind: "git-error" });
+    await expect(readResult("unstaged")).resolves.toMatchObject({ status: "failed", failure: { kind: mode === "timeout" ? "timeout" : "git-error" } });
   });
 
   it("cleans the temporary index and lock after add times out", async () => {
@@ -310,7 +315,7 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
         return executor.exec(args, options);
       },
     });
-    await expect(read("unstaged")).rejects.toMatchObject({ kind: "git-error" });
+    await expect(readResult("unstaged")).resolves.toMatchObject({ status: "failed", failure: { kind: "timeout" } });
   });
 
   it("keeps dirty counts when origin/HEAD points to a missing ref", async () => {
@@ -347,7 +352,7 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
 
   it.each(["success", "failure"])("preserves a comparison %s when temporary index cleanup fails", async (outcome) => {
     write("notes.md", "notes\n");
-    const failure = new ReviewComparisonError("Could not read Review comparison", "Git timed out");
+    const failure = Object.assign(new Error("Git timed out"), { killed: true, stderr: "Git timed out" });
     service = new GitComparisonService(repo, {
       exec: (args, options) => {
         if (outcome === "failure" && args.includes("--name-status")) return Promise.reject(failure);
@@ -361,9 +366,11 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
     try {
       const result = service.readReviewComparison("fixture", "unstaged", {}, cwd);
       if (outcome === "failure") {
-        await expect(result).rejects.toBe(failure);
+        await expect(result).resolves.toEqual({ status: "failed", failure: { kind: "timeout", summary: "Git comparison timed out", detail: "Git timed out" } });
       } else {
-        await expect(result).resolves.toEqual({
+        const ready = await result;
+        if (ready.status !== "ready") throw new Error(JSON.stringify(ready));
+        expect(ready.comparison).toEqual({
           files: [{ path: "notes.md", previousPath: null, changeType: "added", binary: false, additions: 1, deletions: 0, untracked: true }],
           additions: 1, deletions: 0,
         });

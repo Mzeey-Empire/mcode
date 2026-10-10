@@ -637,6 +637,7 @@ export const canonicalAgentTurns = sqliteTable(
     id: text("id").primaryKey().notNull(),
     threadId: text("thread_id").notNull().references(() => canonicalAgentThreads.id, { onDelete: "cascade" }),
     executionId: text("execution_id").notNull(),
+    attemptOf: text("attempt_of"),
     status: text("status").notNull(),
     triggerJson: text("trigger_json").notNull(),
     permissionMode: text("permission_mode").notNull(),
@@ -651,6 +652,7 @@ export const canonicalAgentTurns = sqliteTable(
   },
   (table) => [
     uniqueIndex("idx_canonical_agent_turns_execution").on(table.executionId),
+    index("idx_canonical_agent_turns_attempt_of").on(table.attemptOf),
     index("idx_canonical_agent_turns_thread").on(table.threadId, table.createdAt),
   ],
 );
@@ -888,23 +890,6 @@ export const canonicalLegacyMessageProvenance = sqliteTable(
       table.messageId,
     ),
   ],
-);
-
-/** Persisted AI-generated diff summaries, one per thread. */
-export const diffSummaries = sqliteTable(
-  "diff_summaries",
-  {
-    id: text("id").primaryKey().notNull(),
-    threadId: text("thread_id")
-      .notNull()
-      .references(() => threads.id, { onDelete: "cascade" }),
-    content: text("content").notNull(),
-    turnCount: integer("turn_count").notNull(),
-    lastTurnId: text("last_turn_id"),
-    model: text("model").notNull(),
-    createdAt: text("created_at").notNull().default(timestampDefault),
-  },
-  (table) => [uniqueIndex("idx_diff_summaries_thread").on(table.threadId)],
 );
 
 export const threadTasks = sqliteTable("thread_tasks", {

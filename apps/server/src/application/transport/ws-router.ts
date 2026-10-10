@@ -107,10 +107,7 @@ import { isGitRpcMethod, routeGitRpc } from "../../features/projects/git/transpo
 import { isSnapshotRpcMethod, routeSnapshotRpc } from "../../features/projects/diffs/transport/snapshot-rpc.js";
 import { isTurnDiffRpcMethod, routeTurnDiffRpc } from "../../features/projects/diffs/transport/turn-diff-rpc.js";
 import type { TurnDiffService } from "../../features/agents/turns/turn-diff-service.js";
-import {
-  isDiffSummaryRpcMethod,
-  routeDiffSummaryRpc,
-} from "../../features/projects/diffs/transport/diff-summary-rpc.js";
+import type { TurnSnapshotRangeReader } from "../../features/projects/diffs/snapshots/turn-snapshot-range.js";
 import type { ConfigService } from "../../features/providers/configuration/config-service.js";
 import type { SkillService } from "../../features/agents/skills/catalog/skill-service.js";
 import type { CodexCatalogService } from "../../features/providers/catalog/codex-catalog-service.js";
@@ -153,7 +150,6 @@ import {
 import type { ProviderAvailabilityService } from "../../features/providers/availability/provider-availability-service.js";
 
 import type { ModelCacheService } from "../../features/providers/models/model-cache-service.js";
-import type { DiffSummaryService } from "../../features/projects/diffs/summaries/diff-summary-service.js";
 import type { RecapService } from "../../features/agents/recap/recap-service.js";
 
 type TerminalDiagnosticsMethod =
@@ -277,6 +273,7 @@ export interface RouterDeps {
   /** Reconciles this store's snapshot pins with its rows after expired rows are deleted. */
   sweepSnapshotPins: () => Promise<void>;
   turnDiffs: TurnDiffService;
+  turnSnapshotRanges: TurnSnapshotRangeReader;
   snapshotService: SnapshotService;
   settingsService: SettingsService;
   /** Watcher service for tracking per-workspace HEAD file changes. */
@@ -312,7 +309,6 @@ export interface RouterDeps {
   /** Browses the host filesystem for the project-selector folder picker. */
   filesystemBrowser: FilesystemBrowser;
   /** Generates and persists AI-powered diff summaries for threads. */
-  diffSummaryService: DiffSummaryService;
   /** Generates stateless AI-powered thread recaps from caller-supplied messages. */
   recapService: RecapService;
   /** Stops all thread-owned work before persistent data is deleted. */
@@ -596,8 +592,6 @@ const ROUTE_FAMILIES = [
   createRouteFamily(isGitRpcMethod, (method, params, deps) => routeGitRpc(method, params, deps)),
   createRouteFamily(isSnapshotRpcMethod, (method, params, deps) => routeSnapshotRpc(method, params, deps)),
   createRouteFamily(isTurnDiffRpcMethod, (method, params, deps) => routeTurnDiffRpc(method, params, deps)),
-  createRouteFamily(isDiffSummaryRpcMethod, (method, params, deps) =>
-    routeDiffSummaryRpc(method, params, deps)),
   createRouteFamily(isFileRpcMethod, (method, params, deps) => routeFileRpc(method, params, deps)),
   createRouteFamily(isAttachmentRpcMethod, (method, params, deps) => routeAttachmentRpc(method, params, deps)),
   createRouteFamily(isMemoryRpcMethod, (method, params, deps) => routeMemoryRpc(method, params, deps)),

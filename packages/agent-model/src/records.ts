@@ -90,6 +90,7 @@ export const AgentTurnSchema = z
     // Stamped by the reducer from routing so clients can correlate the turn to
     // the local runtime without threading the event envelope through state.
     executionId: AgentTurnExecutionIdSchema.optional(),
+    attemptOf: AgentTurnIdSchema.nullable().default(null),
     permissionMode: z.enum(["supervised", "full"]),
     approvalReviewMode: z.enum(["manual", "automatic"]),
     approvalReviewReason: z.string().min(1).max(128),

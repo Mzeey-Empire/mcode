@@ -435,14 +435,6 @@ export const SettingsSchema = lazySchema(() =>
       .object({})
       .default({}),
 
-    /** Diff summary generation settings. */
-    diffSummary: z
-      .object({
-        /** Enable the AI-generated Summary tab in the diff panel. */
-        enabled: z.boolean().default(false),
-      })
-      .default({}),
-
     /** In-app browser preview settings. */
     preview: z
       .object({
@@ -676,11 +668,6 @@ export const PartialSettingsSchema = lazySchema(() =>
       })
       .optional(),
     prDraft: z.object({}).optional(),
-    diffSummary: z
-      .object({
-        enabled: z.boolean().optional(),
-      })
-      .optional(),
     preview: z
       .object({
         memorySaver: z

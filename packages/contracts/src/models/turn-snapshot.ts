@@ -13,6 +13,7 @@ export const TurnSnapshotSchema = lazySchema(() => z.object({
   file_effects: TurnFileEffectSummarySchema().optional(),
   worktree_path: z.string().nullable(),
   created_at: z.string(),
+  attempt_count: z.number().int().positive(),
 }));
 
 /** Git snapshot refs for reconstructing diffs on demand. */

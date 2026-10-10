@@ -1,4 +1,4 @@
-import type { DiffStats, FilesystemBrowseResult, ReviewComparison, WorkspaceCreateResult } from "@mcode/contracts";
+import type { DiffStats, FilesystemBrowseResult, ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn, WorkspaceCreateResult } from "@mcode/contracts";
 import type {
   McodeTransport,
   Workspace,
@@ -1412,22 +1412,23 @@ export function createWsTransport(
 
     // Snapshots
     getSnapshotDiff: (snapshotId, filePath?, maxLines?) =>
-      rpc<string>("snapshot.getDiff", { snapshotId, filePath, maxLines }),
+      rpc<ReviewFileDiffResult>("snapshot.getDiff", { snapshotId, filePath, maxLines }),
     getTurnDiffComparison: (threadId, messageId?) =>
-      rpc<ReviewComparison | null>("turnDiff.getComparison", {
+      rpc<ReviewComparisonResult>("turnDiff.getComparison", {
         threadId,
         includeLive: messageId ? undefined : freshTurnDiffThreads.has(threadId),
         messageId,
       }),
-    getTurnDiffFile: (threadId, comparisonId, filePath) => rpc<string>("turnDiff.getFileDiff", { threadId, comparisonId, filePath }),
+    getTurnDiffFile: (threadId, comparisonId, filePath) => rpc<ReviewFileDiffResult>("turnDiff.getFileDiff", { threadId, comparisonId, filePath }),
     getSnapshotDiffStats: (snapshotId) =>
-      rpc<DiffStats[]>("snapshot.getDiffStats", { snapshotId }),
+      rpc<DiffStats[] | Exclude<ReviewComparisonResult, { status: "ready" }>>("snapshot.getDiffStats", { snapshotId }),
     cleanupSnapshots: () =>
       rpc<{ removed: number }>("snapshot.cleanup", {}),
     listSnapshots: (threadId) =>
       rpc<TurnSnapshot[]>("snapshot.listByThread", { threadId }),
+    listReviewTurns: (threadId) => rpc<ReviewTurn[]>("turnDiff.listTurns", { threadId }),
     getCumulativeDiff: (threadId, filePath?, maxLines?) =>
-      rpc<string>("snapshot.getCumulativeDiff", { threadId, filePath, maxLines }),
+      rpc<ReviewFileDiffResult>("snapshot.getCumulativeDiff", { threadId, filePath, maxLines }),
     getCumulativeDiffStats: (threadId) =>
       rpc("snapshot.getCumulativeDiffStats", { threadId }),
     getGitLog: (workspaceId, branch?, limit?, baseBranch?, threadId?, options?) =>
@@ -1457,7 +1458,7 @@ export function createWsTransport(
     getReviewState: (workspaceId, threadId?) =>
       rpc<import("@mcode/contracts").ReviewState>("git.reviewState", { workspaceId, threadId }),
     getReviewComparison: (params) =>
-      rpc<import("@mcode/contracts").ReviewComparison>("git.reviewComparison", params),
+      rpc<import("@mcode/contracts").ReviewComparisonResult>("git.reviewComparison", params),
 
     // GitHub PR (advanced)
     push: (workspaceId, branch, threadId?) =>
@@ -1496,27 +1497,6 @@ export function createWsTransport(
     listProviderAvailability: () =>
       rpc<ProviderAvailability[]>("providers.listAvailability", {}),
 
-    // Diff summaries
-    getDiffSummary: (threadId: string) =>
-      rpc<{
-        id: string;
-        threadId: string;
-        content: string;
-        turnCount: number;
-        lastTurnId: string | null;
-        model: string;
-        createdAt: string;
-      } | null>("diffSummary.get", { threadId }),
-    generateDiffSummary: (threadId: string) =>
-      rpc<{
-        id: string;
-        threadId: string;
-        content: string;
-        turnCount: number;
-        lastTurnId: string | null;
-        model: string;
-        createdAt: string;
-      }>("diffSummary.generate", { threadId }),
     generateRecap: (threadId, messages, previousRecap) =>
       rpc<{ text: string }>("recap.generate", { threadId, messages, previousRecap }),
 

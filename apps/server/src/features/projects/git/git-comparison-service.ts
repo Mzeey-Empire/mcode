@@ -7,24 +7,17 @@ import type {
   BranchComparison,
   GitCommit,
   ReviewComparison,
+  ReviewComparisonResult,
   ReviewFileChange,
   ReviewState,
 } from "@mcode/contracts";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import type { GitExecutor } from "./execution/index.js";
 import { GitRepositoryService } from "./git-repository-service.js";
+import { assertReviewWorktree, reviewComparisonFailure, ReviewComparisonLimitError, UnsafeReviewRefError } from "./review-comparison-errors.js";
 
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const MAX_REVIEW_COMPARISON_FILES = 10_000;
-
-/** A Git failure that S10-03 can translate into a comparison outcome. */
-export class ReviewComparisonError extends Error {
-  readonly kind = "git-error";
-  constructor(readonly summary: string, readonly detail: string) {
-    super(`${summary}: ${detail}`);
-    this.name = "ReviewComparisonError";
-  }
-}
 
 /** Computes Git history, diffs, file lists, and branch comparisons. */
 @injectable()
@@ -208,18 +201,19 @@ export class GitComparisonService {
     view: ReviewView,
     opts: { base?: string; target?: string; sha?: string },
     repoPath?: string,
-  ): Promise<ReviewComparison> {
+  ): Promise<ReviewComparisonResult> {
     const cwd = repoPath ?? this.requireWorkspace(workspaceId).path;
-    const suffix = await this.resolveReviewComparisonSuffix(cwd, view, opts);
-    if (!suffix) return emptyReviewComparison();
-    if (view === "unstaged" || view === "uncommitted") {
-      return this.withIntentToAddIndex(cwd, (env, untracked) =>
-        this.runReviewComparison(cwd, suffix, env, untracked)).catch((error: unknown) => {
-          if (error instanceof ReviewComparisonError || isReviewComparisonLimitError(error)) throw error;
-          throw new ReviewComparisonError("Could not read Review comparison", gitErrorDetail(error));
-        });
+    try {
+      assertReviewWorktree(cwd);
+      const suffix = await this.resolveReviewComparisonSuffix(cwd, view, opts);
+      if (!suffix) return { status: "unavailable", reason: await this.hasCommits(cwd) ? "no-base" : "unborn" };
+      const comparison = view === "unstaged" || view === "uncommitted"
+        ? await this.withIntentToAddIndex(cwd, (env, untracked) => this.runReviewComparison(cwd, suffix, env, untracked))
+        : await this.readReviewComparisonWithCommitFallback(cwd, view, opts.sha, suffix);
+      return { status: "ready", comparison };
+    } catch (error) {
+      return reviewComparisonFailure(error);
     }
-    return this.readReviewComparisonWithCommitFallback(cwd, view, opts.sha, suffix);
   }
 
   private async withIntentToAddIndex<T>(
@@ -231,7 +225,6 @@ export class GitComparisonService {
     if (filePath) args.push("--", `:(literal)${filePath}`);
     const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000 });
     const entries = stdout.split("\0").filter(Boolean);
-    assertReviewComparisonFileCount(entries.length);
     const paths = entries.filter((path) => !path.endsWith("/"));
     const index = await this.gitExecutor.exec(["-C", cwd, "rev-parse", "--git-path", "index"]);
     const source = NodePath.resolve(cwd, index.stdout.trim());
@@ -241,9 +234,6 @@ export class GitComparisonService {
       await this.copyReviewIndex(cwd, source, temporary, env);
       if (paths.length) await this.addReviewUntracked(cwd, env, paths, filePath);
       return await run(env, new Set(paths));
-    } catch (error) {
-      if (error instanceof ReviewComparisonError || isReviewComparisonLimitError(error)) throw error;
-      throw new ReviewComparisonError("Could not read Review comparison", gitErrorDetail(error));
     } finally {
       for (const path of [temporary, `${temporary}.lock`]) await NodeFSPromises.unlink(path).catch((error: unknown) => {
         // Cleanup must preserve both successful comparisons and the original Git failure.
@@ -347,8 +337,19 @@ export class GitComparisonService {
     if (names.status === "rejected") throw names.reason;
     if (numstat.status === "rejected") throw numstat.reason;
     const stats = parsePerFileNumstat(numstat.value.stdout);
-    const files = parseReviewFileChanges(names.value.stdout, parseBinaryPaths(numstat.value.stdout))
-      .map((file) => ({ ...file, ...stats.get(file.path), untracked: untracked.has(file.path) }));
+    let files: ReviewFileChange[];
+    try {
+      files = parseReviewFileChanges(names.value.stdout, parseBinaryPaths(numstat.value.stdout))
+        .map((file) => ({ ...file, ...stats.get(file.path), untracked: untracked.has(file.path) }));
+    } catch (error) {
+      if (!(error instanceof ReviewComparisonLimitError)) throw error;
+      const { stdout } = await this.gitExecutor.exec(
+        ["-C", cwd, "diff", "--shortstat", "--find-renames", "--find-copies", ...range], { timeout: 10_000, env },
+      );
+      const count = stdout.match(/(\d+) files? changed/);
+      if (!count) throw new Error("Git shortstat did not report the comparison file count");
+      throw new ReviewComparisonLimitError(Number(count[1]));
+    }
     return { files, additions: files.reduce((sum, file) => sum + (file.additions ?? 0), 0), deletions: files.reduce((sum, file) => sum + (file.deletions ?? 0), 0) };
   }
 
@@ -397,8 +398,12 @@ export class GitComparisonService {
     try {
       return await this.runReviewComparison(cwd, suffix);
     } catch (error) {
-      if (isReviewComparisonLimitError(error) || view !== "commit") throw error;
+      if (view !== "commit") throw error;
+      const failure = reviewComparisonFailure(error);
+      if (failure.status !== "failed" || failure.failure.kind !== "git-error") throw error;
       assertSafeSha(sha);
+      const parents = await this.gitExecutor.exec(["-C", cwd, "rev-list", "--parents", "-n", "1", sha], { timeout: 10_000 });
+      if (!/^[a-f0-9]{40}$/.test(parents.stdout.trim())) throw error;
       return this.runReviewComparison(cwd, [EMPTY_TREE, sha]);
     }
   }
@@ -612,17 +617,8 @@ function resolveCommitReviewSuffix(sha: string | undefined): string[] {
   return [`${sha}~1`, sha];
 }
 
-function isReviewComparisonLimitError(error: unknown): boolean {
-  return error instanceof Error && error.message.startsWith("Review comparison is limited");
-}
-
 function hasErrorCode(error: unknown, code: string): boolean {
   return error instanceof Error && "code" in error && error.code === code;
-}
-
-function gitErrorDetail(error: unknown): string {
-  if (error instanceof Error && "stderr" in error && typeof error.stderr === "string") return error.stderr;
-  return String(error);
 }
 
 function batchReviewPaths(paths: readonly string[]): string[][] {
@@ -834,7 +830,7 @@ function standardFileChangeType(code: string): ReviewFileChange["changeType"] {
 
 function assertReviewComparisonFileCount(fileCount: number): void {
   if (fileCount > MAX_REVIEW_COMPARISON_FILES) {
-    throw new Error(`Review comparison is limited to ${MAX_REVIEW_COMPARISON_FILES} files`);
+      throw new ReviewComparisonLimitError(fileCount);
   }
 }
 
@@ -881,7 +877,7 @@ function addBinaryRenamePaths(
 }
 
 function assertSafeRef(ref: string): void {
-  if (!/^(?!-)[A-Za-z0-9._/-]+$/.test(ref)) throw new Error(`Unsafe git ref: ${ref}`);
+  if (!/^(?!-)[A-Za-z0-9._/-]+$/.test(ref)) throw new UnsafeReviewRefError(`Unsafe git ref: ${ref}`);
 }
 
 /** Refs passed to `git show` may carry revision suffixes like `sha~1`. */
@@ -890,13 +886,9 @@ function assertShowRef(ref: string): void {
 }
 
 function assertSafeSha(sha: string | undefined): asserts sha is string {
-  if (!sha || !/^[0-9a-fA-F]{4,40}$/.test(sha)) throw new Error(`Invalid or missing git SHA for commit view: ${sha}`);
+  if (!sha || !/^[0-9a-fA-F]{4,40}$/.test(sha)) throw new UnsafeReviewRefError(`Invalid or missing git SHA for commit view: ${sha}`);
 }
 
 function assertCommitSha(sha: string): void {
   if (!/^[0-9a-fA-F]{4,40}$/.test(sha)) throw new Error(`Invalid git SHA: ${sha}`);
-}
-
-function emptyReviewComparison(): ReviewComparison {
-  return { files: [], additions: 0, deletions: 0 };
 }

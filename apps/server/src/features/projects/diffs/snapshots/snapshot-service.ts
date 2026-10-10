@@ -342,19 +342,15 @@ export class SnapshotService {
     const pathspecBatches = getDiffPathspecBatches(filePath, allowedPaths, allowedPathGroups);
     if (pathspecBatches.length === 0) return "";
 
-    try {
-      const outputs = await executeDiffBatches(
-        this.gitExecutor,
-        cwd,
-        "unified",
-        refBefore,
-        refAfter,
-        pathspecBatches,
-      );
-      return truncateUnifiedDiff(outputs.join("\n"), maxLines);
-    } catch {
-      return "";
-    }
+    const outputs = await executeDiffBatches(
+      this.gitExecutor,
+      cwd,
+      "unified",
+      refBefore,
+      refAfter,
+      pathspecBatches,
+    );
+    return truncateUnifiedDiff(outputs.join("\n"), maxLines);
   }
 
   /** Validate that a git ref still exists (not garbage collected). */
@@ -384,15 +380,11 @@ export class SnapshotService {
     const pathspecBatches = getDiffPathspecBatches(undefined, allowedPaths, allowedPathGroups);
     if (pathspecBatches.length === 0) return [];
 
-    try {
-      const [outputs, statusOutputs] = await Promise.all([
-        executeDiffBatches(this.gitExecutor, cwd, "numstat", refBefore, refAfter, pathspecBatches),
-        executeDiffBatches(this.gitExecutor, cwd, "name-status", refBefore, refAfter, pathspecBatches),
-      ]);
-      return collectDiffStats(outputs, statusOutputs);
-    } catch {
-      return [];
-    }
+    const [outputs, statusOutputs] = await Promise.all([
+      executeDiffBatches(this.gitExecutor, cwd, "numstat", refBefore, refAfter, pathspecBatches),
+      executeDiffBatches(this.gitExecutor, cwd, "name-status", refBefore, refAfter, pathspecBatches),
+    ]);
+    return collectDiffStats(outputs, statusOutputs);
   }
 
   /**
