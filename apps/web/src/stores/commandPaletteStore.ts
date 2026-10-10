@@ -22,6 +22,25 @@ const INTENT_VIEW_KIND = {
   addProject: "sources",
 } as const satisfies Record<OpenIntent, View["kind"]>;
 
+/** Options for {@link State.open}. A starting folder only makes sense when adding a project. */
+export type OpenOptions =
+  | { intent?: Exclude<OpenIntent, "addProject"> }
+  | { intent: "addProject"; path?: string };
+
+/**
+ * Browse query that lists the folder at `path` itself: a trailing separator
+ * makes `splitBrowseQuery` treat the whole path as the directory, not a leaf filter.
+ */
+function directoryBrowseQuery(path: string): string {
+  if (/[\\/]$/.test(path)) return path;
+  const separator = path.includes("\\") && !path.includes("/") ? "\\" : "/";
+  return path + separator;
+}
+
+function initialQuery(opts: OpenOptions | undefined): string {
+  return opts && "path" in opts && opts.path ? directoryBrowseQuery(opts.path) : "";
+}
+
 interface State {
   /** Whether the palette overlay is visible. */
   isOpen: boolean;
@@ -40,9 +59,9 @@ interface State {
    * Open the palette, optionally at a specific intent.
    * - `projects`: open at the projects view.
    * - `threadSearch`: open the cross-project thread finder.
-   * - `addProject`: open at the sources view with an empty query.
+   * - `addProject`: open at the sources view; with a `path`, the query browses that folder.
    */
-  open: (opts?: { intent?: OpenIntent }) => void;
+  open: (opts?: OpenOptions) => void;
   /** Push a new view onto the navigation stack and clear the query. */
   push: (view: View) => void;
   /** Pop the active view. Closes the palette if the stack would become empty. */
@@ -71,7 +90,7 @@ export const useCommandPaletteStore = create<State>((set, get) => ({
   open: (opts) => {
     const intent = opts?.intent;
     const view: View = intent ? { kind: INTENT_VIEW_KIND[intent] } : { kind: "root" };
-    set({ isOpen: true, viewStack: [view], query: "", pendingConfirm: null, pendingBack: null });
+    set({ isOpen: true, viewStack: [view], query: initialQuery(opts), pendingConfirm: null, pendingBack: null });
   },
   push: (view) => set({
     viewStack: [...get().viewStack, view],

@@ -37,6 +37,27 @@ describe("commandPaletteStore", () => {
     expect(state.query).toBe("");
   });
 
+  it("open({ intent: 'addProject', path }) browses that folder from the sources view", () => {
+    useCommandPaletteStore.getState().open({ intent: "addProject", path: "C:\\Users\\me\\proj" });
+    const state = useCommandPaletteStore.getState();
+    expect(state.viewStack).toEqual([{ kind: "sources" }]);
+    expect(state.query).toBe("C:\\Users\\me\\proj\\");
+  });
+
+  it("open({ intent: 'addProject', path }) keeps POSIX and already-terminated paths as directories", () => {
+    useCommandPaletteStore.getState().open({ intent: "addProject", path: "/home/me/proj" });
+    expect(useCommandPaletteStore.getState().query).toBe("/home/me/proj/");
+
+    useCommandPaletteStore.getState().open({ intent: "addProject", path: "C:\\" });
+    expect(useCommandPaletteStore.getState().query).toBe("C:\\");
+  });
+
+  it("open() after a path-seeded open starts with an empty query", () => {
+    useCommandPaletteStore.getState().open({ intent: "addProject", path: "/home/me/proj" });
+    useCommandPaletteStore.getState().open({ intent: "threadSearch" });
+    expect(useCommandPaletteStore.getState().query).toBe("");
+  });
+
   it("pop on single-item stack closes the palette", () => {
     useCommandPaletteStore.getState().open();
     useCommandPaletteStore.getState().pop();

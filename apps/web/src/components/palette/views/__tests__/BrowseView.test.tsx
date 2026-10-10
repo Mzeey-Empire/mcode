@@ -202,6 +202,25 @@ describe("BrowseView", () => {
     expect(mocks.getPendingConfirm()).toBeNull();
   });
 
+  it("refuses a dropped file: the query the drop well builds browses it, warns, and offers no Add", async () => {
+    // A file dropped on the empty Projects well opens the palette with the path plus a separator as the query.
+    mocks.palette.query = "C:\\Users\\me\\notes.txt\\";
+    mocks.filesystemBrowse.mockResolvedValue({
+      path: "C:\\Users\\me",
+      parent: "C:\\Users",
+      entries: [{ name: "src", isDir: true }],
+      requestedPath: "file",
+      isTooBroad: false,
+    });
+
+    render(<BrowseView />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("That's a file, not a folder.");
+    expect(mocks.filesystemBrowse).toHaveBeenCalledWith(expect.stringMatching(/^C:\\Users\\me\\notes\.txt\\?$/));
+    expect(mocks.getPendingConfirm()).toBeNull();
+    expect(mocks.workspace.createWorkspace).not.toHaveBeenCalled();
+  });
+
   it("says why a folder could not be added and keeps the palette open", async () => {
     mocks.palette.query = "~/gone/";
     mocks.workspace.createWorkspace.mockResolvedValue({
