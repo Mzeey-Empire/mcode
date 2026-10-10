@@ -28,22 +28,6 @@ function usageCategoryPriority(category: QuotaCategory): number {
   return 2;
 }
 
-/** Shared usageCategoryFillClass used by the overview entries. */
-export function usageCategoryFillClass(category: QuotaCategory): string {
-  const percent = usageCategoryPercent(category);
-  if (percent >= 90) return "bg-destructive";
-  if (percent >= 70) return "bg-primary";
-  return "bg-[var(--diff-add-strong)]";
-}
-
-/** Shared usageCategoryMetricClass used by the overview entries. */
-export function usageCategoryMetricClass(category: QuotaCategory): string {
-  const percent = usageCategoryPercent(category);
-  if (percent >= 90) return "text-destructive";
-  if (percent >= 70) return "text-primary";
-  return "text-ink/80";
-}
-
 /**
  * Returns the Overview session-cost label only for provider-proven API-key billing.
  */

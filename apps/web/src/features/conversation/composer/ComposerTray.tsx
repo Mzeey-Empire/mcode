@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
+import { useId, useRef, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { Check, ChevronUp, ListChecks, X } from "lucide-react";
 import { IconButton } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -142,7 +142,8 @@ function TaskRow({ progress, expanded, listId, chevronRef, onToggle }: TaskRowPr
  */
 export function ComposerTray({ threadId }: { threadId: string }) {
   const progress = useTaskProgress(threadId);
-  const [expanded, setExpanded] = useState(false);
+  const expanded = useTaskStore((s) => s.trayExpandedByThread[threadId] ?? false);
+  const setExpanded = (next: boolean) => useTaskStore.getState().setTrayExpanded(threadId, next);
   const listId = useId();
   const chevronRef = useRef<HTMLButtonElement>(null);
   const listContainerRef = useRef<HTMLDivElement>(null);
@@ -173,7 +174,7 @@ export function ComposerTray({ threadId }: { threadId: string }) {
         expanded={expanded}
         listId={listId}
         chevronRef={chevronRef}
-        onToggle={() => setExpanded((open) => !open)}
+        onToggle={() => setExpanded(!expanded)}
       />
     </div>
   );

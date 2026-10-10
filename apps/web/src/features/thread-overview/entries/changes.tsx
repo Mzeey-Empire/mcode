@@ -5,10 +5,12 @@ import { createOverviewEntryState } from "@/features/thread-overview/overview-en
 import { executeCommand } from "@/lib/command-registry";
 import { cn } from "@/lib/utils";
 import { useDiffStore } from "@/stores/diffStore";
+import { useThreadRecord } from "@/stores/thread-selectors";
+import { useThreadStore } from "@/stores/threadStore";
 import { getTransport, type McodeTransport, type Thread } from "@/transport";
 import type { ReviewComparisonResult, TurnSnapshot } from "@mcode/contracts";
 import { Diff } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LoadStatus, OVERVIEW_ROW_CLASS, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 
 type SnapshotDiffStat = { filePath: string; additions: number; deletions: number };
@@ -209,10 +211,38 @@ function hasCurrentThreadOverviewChangeSummary(
     && loaded.revision === revision;
 }
 
+const SETTLED_RESOLVE_DEBOUNCE_MS = 300;
+
+function selectDisplayedChangeSummary({
+  isRunning,
+  live,
+  loaded,
+  hasCurrentLoaded,
+  fallback,
+}: {
+  isRunning: boolean;
+  live: ThreadOverviewChangeSummary;
+  loaded: ThreadOverviewChangeSummary;
+  hasCurrentLoaded: boolean;
+  fallback: ThreadOverviewChangeSummary;
+}): ThreadOverviewChangeSummary {
+  if (isRunning) return live;
+  if (hasCurrentLoaded) return loaded;
+  if (hasVisibleThreadOverviewChangeSummary(live)) return live;
+  return fallback;
+}
+
 function useChangesState(thread: Thread) {
   const { open } = useOverviewContext();
+  const isRunning = useThreadStore((s) => s.runningThreadIds.has(thread.id));
+  const liveChangeSummary = useThreadRecord(thread.id, (record) => ({
+    files: record.fileEffectSummary.fileCount,
+    additions: record.fileEffectSummary.additions,
+    deletions: record.fileEffectSummary.deletions,
+  }));
   const [loadedChangeSummary, setLoadedChangeSummary] = useState<LoadedChangeSummary | null>(null);
   const [changeSummaryStatus, setChangeSummaryStatus] = useState<LoadStatus>("idle");
+  const stayedOpenRef = useRef(false);
   const cachedSnapshots = useDiffStore((s) => s.snapshotsByThread[thread.id]);
   const setSnapshots = useDiffStore((s) => s.setSnapshots);
   const diffRevision = useDiffStore((s) => s.diffRevisionByScope[thread.id] ?? 0);
@@ -224,25 +254,40 @@ function useChangesState(thread: Thread) {
     },
     [cachedSnapshots],
   );
-  const changeSummary = getLoadedThreadOverviewChangeSummary({
-    loaded: loadedChangeSummary,
-    threadId: thread.id,
-    snapshotKey: cachedSnapshotKey,
-    revision: diffRevision,
-    fallback: fallbackChangeSummary,
-  });
-  const showChangeSummary = hasVisibleThreadOverviewChangeSummary(changeSummary);
   const hasCurrentChangeSummary = hasCurrentThreadOverviewChangeSummary(
     loadedChangeSummary,
     thread.id,
     cachedSnapshotKey,
     diffRevision,
   );
-  const isChangeSummaryLoading = open && !hasCurrentChangeSummary && changeSummaryStatus !== "error";
+  const changeSummary = selectDisplayedChangeSummary({
+    isRunning,
+    live: liveChangeSummary,
+    loaded: getLoadedThreadOverviewChangeSummary({
+      loaded: loadedChangeSummary,
+      threadId: thread.id,
+      snapshotKey: cachedSnapshotKey,
+      revision: diffRevision,
+      fallback: fallbackChangeSummary,
+    }),
+    hasCurrentLoaded: hasCurrentChangeSummary,
+    fallback: fallbackChangeSummary,
+  });
+  const showChangeSummary = hasVisibleThreadOverviewChangeSummary(changeSummary);
+  const isSettledResolvePending = !isRunning && !hasCurrentChangeSummary;
+  const isChangeSummaryLoading = open && isSettledResolvePending && !showChangeSummary
+    && changeSummaryStatus !== "error";
   // The fallback summary has no line totals, so a failed load must say so rather than show nothing.
-  const isChangeSummaryFailed = !hasCurrentChangeSummary && changeSummaryStatus === "error";
+  const isChangeSummaryFailed = isSettledResolvePending && changeSummaryStatus === "error";
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      stayedOpenRef.current = false;
+      return;
+    }
+    const delay = stayedOpenRef.current ? SETTLED_RESOLVE_DEBOUNCE_MS : 0;
+    stayedOpenRef.current = true;
+    // A running turn bumps the diff revision on every file write; its live file effects cover the row.
+    if (isRunning) return;
 
     let cancelled = false;
     const loadChangeSummary = async () => {
@@ -267,12 +312,13 @@ function useChangesState(thread: Thread) {
       }
     };
 
-    void loadChangeSummary();
+    const timer = setTimeout(() => void loadChangeSummary(), delay);
 
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
-  }, [cachedSnapshotKey, cachedSnapshots, diffRevision, open, setSnapshots, thread.id, thread.workspace_id]);
+  }, [cachedSnapshotKey, cachedSnapshots, diffRevision, isRunning, open, setSnapshots, thread.id, thread.workspace_id]);
   return { changeSummary, isChangeSummaryFailed, isChangeSummaryLoading, showChangeSummary };
 }
 
@@ -284,48 +330,46 @@ function ChangesEntry() {
   const openChanges = useCallback(() => {
     executeCommand("changes.toggle");
   }, []);
-  return (<Button
-    variant="ghost"
-    size="compact"
-    onClick={openChanges}
-    data-testid="workspace-menu-changes"
-    aria-label={`Changes, ${changedFilesLabel(changeSummary.files)}`}
-    className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-between")}
-  >
-    <span className="flex min-w-0 items-center gap-2">
-      <Diff
-        size={14}
-        className="shrink-0 text-muted transition-colors duration-150 group-hover:text-ink/80"
-      />
-      <span className="text-fade text-xs font-medium">Changes</span>
-    </span>
-    <ThreadOverviewWhen when={isChangeSummaryLoading}>
-      <span
-        data-testid="thread-overview-change-loading"
-        aria-label="Loading changes"
-        className="animate-thread-overview-loading h-3 w-14 shrink-0 overflow-hidden rounded-sm bg-hover/45"
-      />
-    </ThreadOverviewWhen>
-    <ThreadOverviewWhen when={isChangeSummaryFailed}>
-      <span data-testid="thread-overview-change-failed" className="shrink-0 text-xs text-muted">
-        Unavailable
+  return (<ThreadOverviewWhen when={isChangeSummaryLoading || isChangeSummaryFailed || showChangeSummary}>
+    <Button
+      variant="ghost"
+      size="compact"
+      onClick={openChanges}
+      data-testid="workspace-menu-changes"
+      aria-label={`Changes, ${changedFilesLabel(changeSummary.files)}`}
+      className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-between gap-2")}
+    >
+      <span className="flex size-4 shrink-0 items-center justify-center">
+        <Diff
+          size={16}
+          strokeWidth={1.5}
+          className="text-muted transition-colors duration-150 group-hover:text-ink/80"
+        />
       </span>
-    </ThreadOverviewWhen>
-    <ThreadOverviewWhen when={!isChangeSummaryLoading && !isChangeSummaryFailed && showChangeSummary}>
-      <span
-        data-testid="thread-overview-change-summary"
-        aria-label={`${changeSummary.additions} additions, ${changeSummary.deletions} deletions`}
-        className="flex shrink-0 items-center gap-1.5 font-mono text-xs tabular-nums"
-      >
-        <span className="text-[var(--diff-add-strong)]">
-          +{changeSummary.additions}
+      <span className="text-fade min-w-0 grow text-sm text-ink">Changes</span>
+      <ThreadOverviewWhen when={isChangeSummaryLoading}>
+        <span
+          data-testid="thread-overview-change-loading"
+          aria-label="Loading changes"
+          className="animate-thread-overview-loading h-3 w-14 shrink-0 overflow-hidden rounded-sm bg-hover/45"
+        />
+      </ThreadOverviewWhen>
+      <ThreadOverviewWhen when={isChangeSummaryFailed}>
+        <span data-testid="thread-overview-change-failed" className="shrink-0 text-xs text-muted">
+          Unavailable
         </span>
-        <span className="text-[var(--diff-remove-strong)]">
-          -{changeSummary.deletions}
+      </ThreadOverviewWhen>
+      <ThreadOverviewWhen when={!isChangeSummaryLoading && !isChangeSummaryFailed && showChangeSummary}>
+        <span
+          data-testid="thread-overview-change-summary"
+          aria-label={`${changeSummary.additions} additions, ${changeSummary.deletions} deletions`}
+          className="shrink-0 text-xs tabular-nums text-muted"
+        >
+          {`+${changeSummary.additions} −${changeSummary.deletions}`}
         </span>
-      </span>
-    </ThreadOverviewWhen>
-  </Button>);
+      </ThreadOverviewWhen>
+    </Button>
+  </ThreadOverviewWhen>);
 }
 
 /** Changes block in the thread overview, preserving its existing row position. */
