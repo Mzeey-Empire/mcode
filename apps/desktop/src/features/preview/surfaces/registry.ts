@@ -11,6 +11,7 @@ import {
   emitTabsUpdated,
   getSession,
   getThreadTabSet,
+  previewTabScopeKey,
   type TabState,
 } from "../state/window-session.js";
 import { resolvePreviewNavigationTarget } from "../navigation/resolve-target.js";
@@ -174,16 +175,16 @@ function findOwnedTab(
   identity: PreviewSurfaceIdentity,
 ): { threadId: string; tabId: string; tab: TabState } | null {
   const session = getSession(win);
-  if (session.workspaceId !== identity.workspaceId) return null;
   if (identity.scope.kind === "thread") {
-    const tab = getThreadTabSet(session, identity.scope.id, identity.workspaceId)?.tabs.find((candidate) => candidate.id === identity.tabId);
+    const tab = session.tabsByThread.get(previewTabScopeKey(identity.workspaceId, identity.scope.id))?.tabs.find((candidate) => candidate.id === identity.tabId);
     return tab?.threadId === identity.scope.id
       ? { threadId: identity.scope.id, tabId: tab.id, tab }
       : null;
   }
   if (identity.scope.id !== identity.workspaceId) return null;
   let found: { threadId: string; tabId: string; tab: TabState } | null = null;
-  for (const tabSet of session.tabsByThread.values()) {
+  for (const [key, tabSet] of session.tabsByThread) {
+    if (key !== previewTabScopeKey(identity.workspaceId, tabSet.threadId)) continue;
     const tab = tabSet.tabs.find((candidate) => candidate.id === identity.tabId);
     if (!tab) continue;
     if (found) return null;

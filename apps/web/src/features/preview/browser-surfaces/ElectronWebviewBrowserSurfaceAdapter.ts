@@ -5,6 +5,7 @@ import type {
   PreviewSurfaceBridgeResult,
   PreviewSurfaceNavigation,
   PreviewSurfaceRef,
+  PreviewTabsBridge,
 } from "@/transport/desktop-bridge";
 import type {
   BrowserSurfaceAdapter,
@@ -27,6 +28,7 @@ export interface ElectronWebviewBrowserSurfaceAdapterOptions {
   readonly root?: HTMLElement | null;
   readonly document?: Document;
   readonly bridge?: PreviewSurfaceBridge;
+  readonly tabsBridge?: Pick<PreviewTabsBridge, "list">;
   readonly title?: string;
   readonly onHumanInput?: (identity: BrowserSurfaceIdentity, generation: number) => void;
 }
@@ -174,19 +176,14 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     this.frame.addEventListener("dom-ready", this.onDomReady);
     this.frame.addEventListener("ipc-message", this.onIpcMessage);
     this.frame.addEventListener("render-process-gone", this.onRenderProcessGone);
-    this.preparePromise = Promise.resolve(this.bridge.prepare({
-      surface: this.surface,
-      adoptionToken: this.adoptionToken,
-    })).catch(() => ({ ok: false as const, error: "Surface preparation failed" }));
+    this.preparePromise = this.prepare(options.tabsBridge ?? window.desktopBridge?.preview?.tabs)
+      .catch(() => ({ ok: false as const, error: "Surface preparation failed" }));
     const root = options.root ?? this.documentRef.body;
     this.controlIndicator = new BrowserSurfaceControlIndicator(this.documentRef, root);
     void this.preparePromise.then((result) => {
       if (this.disposed) return;
       if (!result.ok) {
-        if (result.error === "stale-generation") {
-          this.unavailable = true;
-          this.resolveAdoptionWaiters(false);
-        } else this.attachmentFailed();
+        this.attachmentFailed();
         return;
       }
       this.attachmentTimer = window.setTimeout(() => this.attachmentFailed(), ATTACHMENT_TIMEOUT_MS);
@@ -194,6 +191,16 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
       // Refused attachments emit no did-attach; cold session setup gets its own deadline.
       this.startAdoption();
     });
+  }
+
+  private async prepare(tabs: Pick<PreviewTabsBridge, "list"> | undefined): Promise<PreviewSurfaceBridgeResult> {
+    // Layout effects materialize surfaces before the passive tab-list effect registers their scope.
+    if (tabs) {
+      const listed = await tabs.list(this.identity.scope.id, this.identity.workspaceId);
+      if (!listed.ok) return listed;
+    }
+    if (this.disposed) return { ok: false, error: "Surface disposed" };
+    return this.bridge.prepare({ surface: this.surface, adoptionToken: this.adoptionToken });
   }
 
   /** Returns the owned webview for host placement and lifecycle integration. */
@@ -255,6 +262,10 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
   public async navigate(address: string): Promise<void> {
     if (this.disposed) return;
     const normalized = normalizeElectronWebviewSurfaceAddress(address);
+    if (this.unavailable) {
+      this.emit({ type: "load-failed", mainFrame: true, address: normalized, error: "Preview is unavailable" });
+      return;
+    }
     this.emit({ type: "navigation-started", mainFrame: true, address: normalized });
     if (!this.adopted) {
       this.pendingAddress = normalized;

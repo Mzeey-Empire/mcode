@@ -355,7 +355,7 @@ export interface PreviewTabOpenData {
 }
 
 /** Tab control surface mounted under `desktopBridge.preview.tabs`. */
-interface PreviewTabsBridge {
+export interface PreviewTabsBridge {
   list(
     threadId: string,
     workspaceId?: string,

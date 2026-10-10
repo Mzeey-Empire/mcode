@@ -1,6 +1,9 @@
 import * as NodeEvents from "node:events";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import { JSDOM } from "jsdom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getSession,
   previewTabScopeKey,
@@ -16,7 +19,14 @@ import { registerDesignModeHandlers } from "../handlers.js";
 const ipcHandlers: Record<string, (...args: unknown[]) => unknown> = {};
 const fakeGuests: FakeGuest[] = [];
 const allWindows: FakeWindow[] = [];
-const previewPartition = {};
+const profileRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-design-profiles-"));
+afterAll(() => NodeFS.rmSync(profileRoot, { recursive: true, force: true }));
+const previewPartition = {
+  setPermissionCheckHandler: vi.fn(),
+  setPermissionRequestHandler: vi.fn(),
+  on: vi.fn(),
+  webRequest: { onCompleted: vi.fn() },
+};
 
 interface FakeWindow {
   id: number;
@@ -75,9 +85,9 @@ function makeWindow(id: number): FakeWindow {
 
 function makeSession(window: FakeWindow, activeTabId: string, tabIds: string[]): PreviewSession {
   const session = getSession(window as never);
-  session.workspaceId = "workspace-A";
+  session.workspaceId = "11111111-1111-4111-8111-111111111111";
   session.lastPreviewThreadId = "thread-A";
-  session.tabsByThread.set(previewTabScopeKey("workspace-A", "thread-A"), {
+  session.tabsByThread.set(previewTabScopeKey("11111111-1111-4111-8111-111111111111", "thread-A"), {
     threadId: "thread-A",
     activeTabId,
     tabs: tabIds.map((id, index) => ({
@@ -95,7 +105,7 @@ function makeSession(window: FakeWindow, activeTabId: string, tabIds: string[]):
 function surface(tabId: string, generation = 1) {
   return {
     identity: {
-      workspaceId: "workspace-A",
+      workspaceId: "11111111-1111-4111-8111-111111111111",
       scope: { kind: "thread" as const, id: "thread-A" },
       tabId,
     },
@@ -132,12 +142,14 @@ function dispatchClick(guest: FakeGuest): { event: MouseEvent; listener: ReturnT
 }
 
 vi.mock("electron", () => ({
+  app: { getPath: () => profileRoot },
   BrowserWindow: {
     fromWebContents: vi.fn((sender: unknown) =>
       allWindows.find((window) => window.webContents === sender) ?? null,
     ),
   },
   ipcMain: {
+    on: vi.fn(),
     handle: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => {
       ipcHandlers[channel] = handler;
     }),

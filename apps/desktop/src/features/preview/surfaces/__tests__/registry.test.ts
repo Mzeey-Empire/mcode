@@ -170,6 +170,30 @@ afterEach(() => {
 });
 
 describe("preview typed surface bridge", () => {
+  it.each(["thread", "workspace"] as const)("prepares an owned inactive workspace's %s surface without accepting another window's tab", (kind) => {
+    const win = BrowserWindow.fromId(1)!;
+    const state = getSession(win);
+    const workspaceId = "22222222-2222-4222-8222-222222222222";
+    const otherSurface = {
+      ...surface(),
+      identity: { ...surface().identity, workspaceId, scope: { kind, id: kind === "thread" ? "thread-A" : workspaceId } },
+    };
+    const payload = { surface: otherSurface, adoptionToken: "token-inactive" };
+    expect(invoke("preview.surface.prepare", payload)).toEqual({ ok: false, error: "surface-owner-mismatch" });
+    state.tabsByThread.set(previewTabScopeKey(workspaceId, "thread-A"), {
+      threadId: "thread-A", activeTabId: "tab-1",
+      tabs: [{ id: "tab-1", threadId: "thread-A", resumeUrl: null, title: null, faviconUrl: null, lastActiveAt: 0 }],
+    });
+    const otherWindow = makeWindow(2);
+    allWindows.push(otherWindow);
+    expect(invoke("preview.surface.prepare", payload, otherWindow.webContents))
+      .toEqual({ ok: false, error: "surface-owner-mismatch" });
+    expect(invoke("preview.surface.prepare", payload)).toEqual({ ok: true });
+    expect(state.workspaceId).toBe(surface().identity.workspaceId);
+    expect(findPendingPreviewAttachment(win.id, "about:blank#token-inactive")?.partition)
+      .toBe("persist:mcode-browser-22222222-2222-4222-8222-222222222222");
+  });
+
   it("returns typed failures when a pending workspace is removed during guest discovery", async () => {
     const workspaceId = "ABCDEFAB-1234-4234-8234-ABCDEFABCDEF";
     const win = BrowserWindow.fromId(1);
