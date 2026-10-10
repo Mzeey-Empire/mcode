@@ -91,9 +91,28 @@ function bounded(value: unknown, max: number): string | null {
   return typeof value === "string" && value.length > 0 ? value.slice(0, max) : null;
 }
 
+/**
+ * A guest can commit a URL with userinfo that every Mcode navigation path refuses.
+ * Dropping it here keeps that address out of state that is later navigated to, matching
+ * the page's own `location.href`.
+ */
+function withoutCredentials(address: string): string {
+  if (!address.includes("@")) return address;
+  let parsed: URL;
+  try {
+    parsed = new URL(address);
+  } catch {
+    return address;
+  }
+  if (!parsed.username && !parsed.password) return address;
+  parsed.username = "";
+  parsed.password = "";
+  return parsed.href;
+}
+
 function eventAddress(event: WebviewEvent): string | null {
   const address = bounded(event.url, MAX_ADDRESS) ?? bounded(event.validatedURL, MAX_ADDRESS);
-  return address?.startsWith(INERT_URL_PREFIX) ? null : address;
+  return !address || address.startsWith(INERT_URL_PREFIX) ? null : withoutCredentials(address);
 }
 
 function mainFrame(event: WebviewEvent): boolean {
