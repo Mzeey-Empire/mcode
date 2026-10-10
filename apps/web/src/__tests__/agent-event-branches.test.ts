@@ -58,6 +58,20 @@ describe("handleAgentEvent branches", () => {
     expect(getTestThreadError("thread-1")).toBe("Out of tokens");
   });
 
+  it("keeps retry state through retry events and clears it on the next provider event", () => {
+    const handle = useThreadStore.getState().handleAgentEvent;
+    const retryState = () => readThreadField("thread-1", (record) => ({ rateLimit: record.rateLimit, apiRetry: record.apiRetry }));
+    handle({ type: "rateLimited", threadId: "thread-1", active: true, retryAfterMs: 30000 } as AgentEvent);
+    handle({ type: "apiRetry", threadId: "thread-1", reason: "rate_limit", attempt: 1 } as AgentEvent);
+    expect(retryState()).toEqual({ rateLimit: { retryAfterMs: 30000 }, apiRetry: { reason: "rate_limit", attempt: 1 } });
+
+    handle({ type: "rateLimited", threadId: "thread-1", active: true, retryAfterMs: 20000 } as AgentEvent);
+    expect(retryState()).toEqual({ rateLimit: { retryAfterMs: 20000 }, apiRetry: undefined });
+
+    handle({ type: "textDelta", threadId: "thread-1", delta: "back online" } as AgentEvent);
+    expect(retryState()).toEqual({ rateLimit: undefined, apiRetry: undefined });
+  });
+
   it("session.system sdk_session_invalidated appends a reset hairline message", () => {
     useThreadStore.getState().handleAgentEvent({ type: "system", threadId: "thread-1", subtype: "sdk_session_invalidated" } as AgentEvent);
 

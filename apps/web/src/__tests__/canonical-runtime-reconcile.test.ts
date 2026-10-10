@@ -234,6 +234,43 @@ describe("canonical runtime reconciliation", () => {
     expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(true);
   });
 
+  it("keeps the local turn clock when recovered narrative arrives for the same running turn", () => {
+    const sentAt = Date.parse(NOW) - 9_000;
+    const runningTool = envelope("live-tool", 4, EXECUTION_ID, { type: "item.recorded", item: { id: "toolCall:live-tool",
+      threadId: THREAD_ID, turnId: TURN_ID, kind: "tool-call", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+      payload: { projection: "narrativeRecovery", narrative: { kind: "toolCall", record: { id: "live-tool", message_id: "",
+        parent_tool_call_id: null, tool_name: "Bash", input_summary: "bun run lint", output_summary: "", status: "running",
+        started_at: NOW, completed_at: null, sort_order: 0 } } } } });
+    useThreadStore.setState({
+      records: seedThreadRecord(THREAD_ID, { runtimePhase: "running", turnExecutionId: EXECUTION_ID, agentStartTime: sentAt }),
+      runningThreadIds: new Set([THREAD_ID]),
+    });
+
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, [...turnEvents(EXECUTION_ID), runningTool]);
+
+    expect(readThreadField(THREAD_ID, (r) => r.toolCalls.map((tool) => tool.id))).toEqual(["live-tool"]);
+    expect(readThreadField(THREAD_ID, (r) => r.agentStartTime)).toBe(sentAt);
+  });
+
+  it.each([
+    ["has no clock yet", undefined],
+    ["was clocked after the server turn started", Date.parse(NOW) + 66_000],
+  ])("moves the clock forward to the server turn start when the running record %s", (_case, localStart) => {
+    const runningTool = envelope("live-tool", 4, EXECUTION_ID, { type: "item.recorded", item: { id: "toolCall:live-tool",
+      threadId: THREAD_ID, turnId: TURN_ID, kind: "tool-call", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+      payload: { projection: "narrativeRecovery", narrative: { kind: "toolCall", record: { id: "live-tool", message_id: "",
+        parent_tool_call_id: null, tool_name: "Bash", input_summary: "bun run lint", output_summary: "", status: "running",
+        started_at: NOW, completed_at: null, sort_order: 0 } } } } });
+    useThreadStore.setState({
+      records: seedThreadRecord(THREAD_ID, { runtimePhase: "running", turnExecutionId: EXECUTION_ID, agentStartTime: localStart }),
+      runningThreadIds: new Set([THREAD_ID]),
+    });
+
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, [...turnEvents(EXECUTION_ID), runningTool]);
+
+    expect(readThreadField(THREAD_ID, (r) => r.agentStartTime)).toBe(Date.parse(NOW));
+  });
+
   it("keeps the optimistic running window while no canonical turn correlates", () => {
     seedRuntime("running", null, true);
 

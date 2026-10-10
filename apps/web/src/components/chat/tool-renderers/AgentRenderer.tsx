@@ -12,7 +12,7 @@ export function AgentRenderer({ toolCall, isActive }: ToolRendererProps) {
   return (
     <ToolCallWrapper
       icon={StackedLayersIcon}
-      label="Thinking deeper..."
+      label="Subagent"
       badge={summary}
       isActive={isActive}
     >

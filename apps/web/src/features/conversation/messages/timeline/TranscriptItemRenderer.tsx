@@ -145,9 +145,7 @@ function NarrativeIndicatorTranscriptItemRenderer({ item }: TranscriptItemRender
   return (
     <NarrativeIndicator
       stepCount={indicator.stepCount}
-      subagentCount={indicator.subagentCount}
-      activeToolCalls={indicator.activeToolCalls}
-      summaryHeading={indicator.summaryHeading}
+      status={indicator.status}
       startTime={indicator.startTime}
       isAgentRunning={indicator.isAgentRunning}
     />

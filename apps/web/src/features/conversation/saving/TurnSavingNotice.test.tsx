@@ -7,6 +7,7 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { resetThreadStoreForTests, seedThreadRecord } from "@/stores/thread-store-test-utils";
 import { useThreadStore } from "@/stores/threadStore";
 import { NarrativeIndicator } from "../narrative/NarrativeIndicator";
+import { deriveRunStatus } from "../narrative/run-status";
 import { getComposerSendButtonVisualState } from "../composer/ComposerContentSurface";
 
 vi.mock("@/transport", async () => ({ ...(await vi.importActual("@/transport")), getTransport: () => mockTransport }));
@@ -25,7 +26,9 @@ function ConnectedSavingNotice() {
 function ConnectedRuntimeNotice() {
   const record = useThreadStore((state) => state.records.get(pending.threadId));
   const running = useThreadStore((state) => state.runningThreadIds.has(pending.threadId));
-  return <><NarrativeIndicator stepCount={1} subagentCount={0} activeToolCalls={record?.toolCalls ?? []} isAgentRunning={running} />
+  const status = deriveRunStatus({ stopPending: false, compacting: false, subagentsRunning: false, answering: false,
+    activeTool: record?.toolCalls.find((tool) => !tool.isComplete) });
+  return <><NarrativeIndicator stepCount={1} status={status} isAgentRunning={running} />
     <TurnSavingNotice lostProgress={false} /></>;
 }
 
@@ -88,7 +91,7 @@ describe("turn saving notice", () => {
     useThreadStore.setState({ records: seedThreadRecord(pending.threadId, { toolCalls: [openTool],
       thoughtSegments: [{ text: "Working", startedAt: Date.parse(pending.oldestPendingAt) }] }) });
     render(<ConnectedRuntimeNotice />);
-    expect(screen.getByText(/Running a command/)).toBeInTheDocument();
+    expect(screen.getByText("Running measure")).toBeInTheDocument();
     expect(getComposerSendButtonVisualState({ isThreadScaffold: false, isAgentRunning: true, isStopPending: false, hasContent: false })).toBe("stop");
     const payloads = [{ type: "execution.checkpoint" as const, operationKind: "worker-lost" as const },
       { type: "turn.response-bound" as const, messageId: "interrupted-response", outcome: "interrupted" as const, endedAt: pending.oldestPendingAt },
@@ -116,7 +119,7 @@ describe("turn saving notice", () => {
     });
     expect(useThreadStore.getState().records.get(pending.threadId)?.toolCalls).toEqual(record?.toolCalls);
     expect(useThreadStore.getState().records.get(pending.threadId)?.runtimePhase).toBe("interrupted");
-    await waitFor(() => expect(screen.queryByText(/Running a command/)).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Running measure")).toBeNull());
     expect(screen.queryByRole("button", { name: "Retry save" })).toBeNull();
     expect(useThreadStore.getState().records.get(pending.threadId)?.savingStatuses).not.toHaveLength(0);
     expect(screen.queryByRole("dialog")).toBeNull();

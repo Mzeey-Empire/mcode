@@ -101,6 +101,7 @@ const NARRATIVE_INPUT_SUMMARIZERS: Record<string, (input: Record<string, unknown
   move: renameInputSummary,
   rename: renameInputSummary,
   bash: commandInputSummary,
+  powershell: commandInputSummary,
   shell: commandInputSummary,
   terminal: commandInputSummary,
   command_execution: commandInputSummary,

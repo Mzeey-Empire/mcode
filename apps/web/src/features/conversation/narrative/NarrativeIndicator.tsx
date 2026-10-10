@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
-import { formatDuration } from "@/lib/time";
-import type { ToolCall } from "@/transport/types";
-import { narrativeActivityLabel } from "./activity-label";
+import { formatClock } from "@/lib/time";
+import { Spinner } from "@/components/ui/spinner";
 import { StackedLayersIcon, stackedLayersIconClassName } from "@/components/ui/StackedLayersIcon";
+import type { RunStatus } from "./run-status";
 
 /**
  * How long the exit animation plays before the component stops rendering.
@@ -79,86 +79,85 @@ function useNarrativeIndicatorLifecycle(
   return { elapsed: elapsedRef.current, phase };
 }
 
-/** Props for {@link NarrativeIndicator}: step counts, active tools, and turn start time. */
+/** Props for {@link NarrativeIndicator}: step count, run status, and turn start time. */
 interface NarrativeIndicatorProps {
   /** Total number of steps executed so far in this agent turn. */
   stepCount: number;
-  /** Number of subagent calls dispatched at the top level. Only rendered when > 0. */
-  subagentCount: number;
-  /** Currently active (possibly incomplete) tool calls. */
-  activeToolCalls: readonly ToolCall[];
-  /** Complete heading supplied by the current open narration segment. */
-  summaryHeading?: string;
+  /** Label and icon chosen by `deriveRunStatus`. */
+  status: RunStatus;
   /** Epoch ms when the agent turn started, used to compute elapsed time. */
   startTime?: number;
   /** Whether the agent is still running; flipping to false plays the exit transition. */
   isAgentRunning: boolean;
 }
 
+/** Keeps the last running status so the exit fade shows what the turn was doing, not a new word. */
+function useFrozenStatus(status: RunStatus, isAgentRunning: boolean): RunStatus {
+  const lastRunningRef = useRef(status);
+  if (isAgentRunning) lastRunningRef.current = status;
+  return lastRunningRef.current;
+}
+
+function RunStatusIcon({ icon, running }: { icon: RunStatus["icon"]; running: boolean }) {
+  if (icon === "spinner") {
+    // D5 keeps spinners on the 12/16 scale, so the 12px spinner sits centred in the 14px icon slot.
+    return (
+      <span className="flex size-3.5 shrink-0 items-center justify-center text-muted" data-run-status-icon="spinner">
+        <Spinner size={12} />
+      </span>
+    );
+  }
+  return (
+    <StackedLayersIcon
+      animated={running}
+      className={stackedLayersIconClassName(running)}
+      data-run-status-icon="layers"
+    />
+  );
+}
+
 /**
- * Bottom bar of the narrative flow. Combines step count, optional subagent
- * count, phase label, and elapsed time into a single compact status line.
+ * Bottom bar of the narrative flow: step count, run status label, and a clock.
  *
  * Example outputs:
- *   6 steps · Thinking... (0:22)
- *   4 steps · 2 subagents · Thinking deeper... (0:15)
- *   5 steps · Running a command... (0:38)
+ *   6 steps · Thinking 0:22
+ *   5 steps · Running bun run lint 0:38
+ *   Stopping 1:04
  *
  * When the turn ends the bar collapses and fades out over
- * {@link EXIT_DURATION_MS} instead of vanishing in a single frame, then
- * renders nothing. Mounting with the agent already stopped (e.g. revisiting
- * a thread whose turn finished) skips straight to rendering nothing.
+ * {@link EXIT_DURATION_MS} with its last running label instead of vanishing in
+ * a single frame, then renders nothing. Mounting with the agent already
+ * stopped (e.g. revisiting a thread whose turn finished) skips straight to
+ * rendering nothing.
  */
 export function NarrativeIndicator({
   stepCount,
-  subagentCount,
-  activeToolCalls,
-  summaryHeading,
+  status,
   startTime,
   isAgentRunning,
 }: NarrativeIndicatorProps) {
   const { elapsed, phase } = useNarrativeIndicatorLifecycle(startTime, isAgentRunning);
-
-  const phaseLabel = useMemo(() => narrativeActivityLabel(activeToolCalls, summaryHeading), [activeToolCalls, summaryHeading]);
+  const shown = useFrozenStatus(status, isAgentRunning);
 
   if (phase === "done") return null;
-
-  const subagentLabel =
-    subagentCount === 1 ? "1 subagent" : `${subagentCount} subagents`;
-  const statusLabel = [
-    ...(stepCount > 0 ? [`${stepCount} ${stepCount === 1 ? "step" : "steps"}`] : []),
-    ...(subagentCount > 0 ? [subagentLabel] : []),
-    phase === "exiting" ? "Done" : phaseLabel,
-  ].join(" · ");
 
   return (
     <div
       className={cn(
-        "mt-2 flex items-center gap-2 px-4 py-2",
+        "mt-2 flex h-6 items-center gap-1.5 pl-2 text-xs",
         phase === "exiting" && "narrative-indicator-exit",
       )}
       data-state={phase}
     >
-      <span className="flex min-w-0 items-center gap-2 text-sm text-muted">
-        <StackedLayersIcon
-          animated={phase === "running"}
-          className={stackedLayersIconClassName(phase === "running")}
-        />
-        <span className="relative min-w-0 text-fade">
-          {statusLabel}
-          {phase === "running" && (
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-0 text-ink startup-activity-shimmer startup-activity-shimmer-text"
-              data-startup-activity-shimmer-text={statusLabel}
-            />
-          )}
+      <RunStatusIcon icon={shown.icon} running={phase === "running"} />
+      {stepCount > 0 && (
+        <span className="shrink-0 text-muted">
+          {stepCount} {stepCount === 1 ? "step" : "steps"} ·
         </span>
-      </span>
+      )}
+      <span className="min-w-0 font-medium text-ink text-fade">{shown.label}</span>
       {startTime !== undefined && (
-        <span className="shrink-0 text-xs text-muted/50">
-          ({formatDuration(elapsed)})
-        </span>
+        <span className="shrink-0 font-mono text-muted">{formatClock(elapsed)}</span>
       )}
     </div>
   );

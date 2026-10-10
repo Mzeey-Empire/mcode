@@ -14,7 +14,7 @@ export function recoverParentNarrative(threadId: string, state: AgentModelState,
   if (items.length === 0 && !record) return {};
   const narrative = recoveredNarrative(turn, items);
   return {
-    ...(items.length > 0 ? narrative.patch : emptyOwnedNarrativePatch(turn, state, record)),
+    ...(items.length > 0 ? { ...narrative.patch, ...recoveredStartTime(turn, record) } : emptyOwnedNarrativePatch(turn, state, record)),
     ...recoveredAssistantText(turn, state),
     ...(record ? recoveredResponse(threadId, turn, state, record, narrative.streaming, narrative.terminal) : {}),
   };
@@ -88,9 +88,18 @@ function recoveredNarrative(turn: AgentTurn, items: readonly ParentNarrativeReco
     streaming: terminal ? "" : streaming, streamingPreview: terminal ? "" : streaming.slice(-200),
     responseTextIsStreaming: !terminal && thoughts.some((item) => item.record.is_final_response === 1
       && item.record.ended_at === null && item.record.text.length > 0),
-    agentStartTime: Date.parse(turn.startedAt ?? turn.createdAt),
   };
   return { patch, terminal, streaming };
+}
+
+/**
+ * A running record is already this turn (see `matchesRecoveryRuntime`), usually clocked from the local send.
+ * The server turn is created seconds later, so only an earlier start may win; a later one would run the clock backwards.
+ */
+function recoveredStartTime(turn: AgentTurn, record: ThreadRecord | undefined): Partial<ThreadRecord> {
+  const serverStart = Date.parse(turn.startedAt ?? turn.createdAt);
+  const localStart = record?.runtimePhase === "running" ? record.agentStartTime : undefined;
+  return { agentStartTime: localStart === undefined ? serverStart : Math.min(localStart, serverStart) };
 }
 
 function recoveredResponse(threadId: string, turn: AgentTurn, state: AgentModelState, record: ThreadRecord, text: string, terminal: boolean): Partial<ThreadRecord> {

@@ -16,6 +16,16 @@ export function formatDuration(totalSeconds: number): string {
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
+/** Formats elapsed seconds as a clock: `m:ss`, or `h:mm:ss` from one hour. */
+export function formatClock(totalSeconds: number): string {
+  const whole = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const seconds = String(whole % 60).padStart(2, "0");
+  if (hours === 0) return `${minutes}:${seconds}`;
+  return `${hours}:${String(minutes).padStart(2, "0")}:${seconds}`;
+}
+
 /** Formats elapsed milliseconds with the turn footer's compact convention. */
 export function formatDurationMs(ms: number | null): string {
   if (ms == null || ms < 0) return "—";

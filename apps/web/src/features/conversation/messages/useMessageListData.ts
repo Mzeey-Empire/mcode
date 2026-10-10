@@ -17,6 +17,7 @@ import {
 } from "./virtual-items";
 import type { Message } from "@/transport/types";
 import type { ThoughtSegment } from "../narrative/types";
+import type { RunHoldingSignals } from "../narrative/run-status";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
 const EMPTY_TURN_MAP: Record<string, string> = {};
@@ -167,6 +168,14 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const loadNewerMessages = useThreadStore((state) => state.loadNewerMessages);
   const permissions = useThreadRecord(renderedThreadId, (record) => record.permissions);
   const hooks = useThreadRecord(renderedThreadId, (record) => record.hooks);
+  const stopPending = useThreadStore((state) => renderedThreadId ? (state.pendingStopCounts[renderedThreadId] ?? 0) > 0 : false);
+  const compacting = useThreadRecord(renderedThreadId, (record) => record.isCompacting);
+  const retry = useThreadRecord(renderedThreadId, (record): RunHoldingSignals["retry"] =>
+    record.rateLimit ? "rate-limited" : record.apiRetry ? "retrying" : undefined);
+  const holdingSignals = useMemo<RunHoldingSignals>(
+    () => ({ stopPending, compacting, retry }),
+    [stopPending, compacting, retry],
+  );
   const persistedNarrativeByMessage = useThreadRecord(renderedThreadId, (record) => record.narrativeByMessage);
   const legacyCurrentTurnMessageId = useThreadRecord(renderedThreadId, (record) => record.currentTurnMessageId);
   const legacyCurrentTurnResponseKey = useThreadRecord(renderedThreadId, (record) => record.currentTurnResponseKey);
@@ -207,6 +216,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
     transcriptThreadId: canonicalContent.messages[0]?.thread_id ?? null,
     permissions,
     hooks,
+    holdingSignals,
     persistedNarrativeByMessage,
     currentTurnMessageId: canonicalTurnIdentity.currentTurnMessageId,
     turnExecutionId,

@@ -31,15 +31,15 @@ describe("activity heading row identity", () => {
     const build = createVolatileItemsBuilder();
     const indicator = (text: string, endedAt?: number) => build(
       [], STREAMING_AGENT, 1000, undefined, undefined, undefined,
-      [{ text, startedAt: 1000, ...(endedAt === undefined ? {} : { endedAt }) }],
+      [{ text, startedAt: 1000, isExplicitNonFinal: true, ...(endedAt === undefined ? {} : { endedAt }) }],
     ).find((item) => item.type === "narrative-indicator");
     const first = indicator("**Inspecting layout**");
-    expect(first).toMatchObject({ summaryHeading: "Inspecting layout" });
+    expect(first).toMatchObject({ status: { label: "Inspecting layout", icon: "layers" } });
     expect(indicator("**Inspecting layout**\nMore body text")).toBe(first);
     const next = indicator("**Checking tests**");
     expect(next).not.toBe(first);
-    expect(next).toMatchObject({ summaryHeading: "Checking tests" });
-    expect(indicator("**Checking tests**", 2000)).toMatchObject({ summaryHeading: undefined });
+    expect(next).toMatchObject({ status: { label: "Checking tests", icon: "layers" } });
+    expect(indicator("**Checking tests**", 2000)).toMatchObject({ status: { label: "Thinking", icon: "layers" } });
   });
 });
 
@@ -783,17 +783,47 @@ describe("buildVirtualItems (combined)", () => {
     expect(indicator?.stepCount).toBe(2);
   });
 
-  it("indicator subagentCount counts all dispatched Agent calls, not only in-flight", () => {
-    const toolCalls: ToolCall[] = [
-      makeToolCall({ id: "a1", toolName: "Agent", isComplete: true }),
-      makeToolCall({ id: "a2", toolName: "Agent", isComplete: false }),
-      makeToolCall({ id: "read-1", toolName: "Read", parentToolCallId: "a1" }),
-    ];
-    const items = buildVolatileItems(toolCalls, STREAMING_AGENT, 1000, undefined);
-    const indicator = items.find((i) => i.type === "narrative-indicator") as
-      | (ChatVirtualItem & { type: "narrative-indicator" })
-      | undefined;
-    expect(indicator?.subagentCount).toBe(2);
+  it("indicator waits on subagents only while an Agent call is in flight and nothing else runs", () => {
+    const status = (toolCalls: ToolCall[]) => findIndicator(buildVolatileItems(toolCalls, STREAMING_AGENT, 1000, undefined))?.status;
+    const done = makeToolCall({ id: "a1", toolName: "Agent", isComplete: true });
+    const child = makeToolCall({ id: "read-1", toolName: "Read", parentToolCallId: "a2", isComplete: false });
+    const running = makeToolCall({ id: "a2", toolName: "Agent", isComplete: false });
+    expect(status([done, running, child])).toEqual({ label: "Waiting on subagents", icon: "layers" });
+    expect(status([done])).toEqual({ label: "Thinking", icon: "layers" });
+    expect(status([running, makeToolCall({ id: "grep", toolName: "Grep", isComplete: false })])).toEqual({ label: "Searching the codebase", icon: "layers" });
+  });
+
+  it("indicator reads Answering exactly when the live response row exists", () => {
+    const narration: ThoughtSegment = { text: "**Inspecting layout**", startedAt: 1, isExplicitNonFinal: true };
+    const silent = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, undefined, undefined, [narration]);
+    expect(silent.some(isLiveResponse)).toBe(false);
+    expect(findIndicator(silent)?.status.label).toBe("Inspecting layout");
+
+    const answering = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, undefined, undefined, [{ ...narration, isExplicitNonFinal: false }]);
+    expect(answering.some(isLiveResponse)).toBe(true);
+    expect(findIndicator(answering)?.status).toEqual({ label: "Answering", icon: "layers" });
+  });
+
+  it("indicator lets a retry signal outrank a running tool", () => {
+    const items = buildVolatileItems(
+      [makeToolCall({ id: "grep", toolName: "Grep", isComplete: false })],
+      STREAMING_AGENT, 1000, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      { stopPending: false, compacting: false, retry: "rate-limited" },
+    );
+    expect(findIndicator(items)?.status).toEqual({ label: "Rate limited", icon: "spinner" });
+  });
+
+  it("reuses the indicator row while the label holds and replaces it when the label changes", () => {
+    const build = createVolatileItemsBuilder();
+    const grep = makeToolCall({ id: "grep", toolName: "Grep", isComplete: false });
+    const first = findIndicator(build([grep], STREAMING_AGENT, 1000, undefined));
+    expect(findIndicator(build([{ ...grep }], STREAMING_AGENT, 1000, undefined))).toBe(first);
+    const retrying = findIndicator(build(
+      [grep], STREAMING_AGENT, 1000, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      { stopPending: false, compacting: false, retry: "retrying" },
+    ));
+    expect(retrying).not.toBe(first);
+    expect(retrying?.status).toEqual({ label: "Retrying", icon: "spinner" });
   });
 
   it("does not emit a narrative-indicator when not running and no tool calls remain", () => {
@@ -1037,3 +1067,11 @@ describe("buildVolatileItems with hooks", () => {
     expect(narrativeItem.hooks[0].hookName).toBe("lint");
   });
 });
+
+function findIndicator(items: readonly ChatVirtualItem[]) {
+  return items.find((item): item is ChatVirtualItem & { type: "narrative-indicator" } => item.type === "narrative-indicator");
+}
+
+function isLiveResponse(item: ChatVirtualItem): boolean {
+  return item.type === "message" && item.agentDisplayState?.phase === "streaming";
+}

@@ -107,10 +107,11 @@ turn progress.
 ### Activity labels
 
 Providers use the existing canonical events for the live activity label. No provider-specific UI branch is required.
-Set `toolInput.description` on `ToolUse` to supply a short action label. Keep credentials and raw command arguments out of this description.
-Without a description, the UI uses a file action or the tool category. `ToolResult` ends that action.
+Shell tools always read `Running <command>` from `toolInput.command`, so every provider words the same action alike.
+For other tools, Read, Edit and Write name the file; otherwise set `toolInput.description` on `ToolUse` to supply a short action label. Keep credentials out of this description.
+Without either, the UI uses the tool category. `ToolResult` ends that action.
 Non-final `TextDelta` events can supply a Markdown summary heading, such as `**Inspecting layout**`.
-The label uses the latest active root tool first, then a complete heading from the current open thought segment, then `Thinking...`.
+The tool label sits inside the status precedence in `deriveRunStatus`; a complete heading from the current open thought segment, then `Thinking`, is the fallback.
 Completed tools, child tools, and closed thought segments do not supply the label. Plain narration does not become an inferred activity.
 Codex already forwards non-final summary deltas. Claude and Cursor use the same tool and narration events; adapters can add descriptions without a wire-schema change.
 

@@ -47,6 +47,7 @@ export const DEFAULT_ICON: IconComponent = Wrench;
 
 /** Provider-specific shell tool names normalized to `Bash`. */
 const SHELL_TOOL_ALIASES: Record<string, "Bash"> = {
+  PowerShell: "Bash",
   Shell: "Bash",
   Terminal: "Bash",
   command_execution: "Bash",
@@ -67,20 +68,19 @@ export function isShellTool(toolName: string): boolean {
 
 /** Present-tense phase labels shown in the streaming indicator. */
 export const TOOL_PHASE_LABELS: Record<string, string> = {
-  Glob: "Searching the codebase...",
-  Grep: "Searching the codebase...",
-  Read: "Reading files...",
-  Edit: "Making changes...",
-  Write: "Making changes...",
-  Bash: "Running a command...",
-  Agent: "Thinking deeper...",
-  WebSearch: "Searching the web...",
-  WebFetch: "Fetching a page...",
-  browser_open: "Opening a page...",
-  browser_inspect: "Inspecting the page...",
-  browser_act: "Acting on the page...",
-  browser_tabs: "Updating Browser tabs...",
-  browser_evaluate: "Evaluating the page...",
+  Glob: "Searching the codebase",
+  Grep: "Searching the codebase",
+  Read: "Reading files",
+  Edit: "Making changes",
+  Write: "Making changes",
+  Bash: "Running a command",
+  WebSearch: "Searching the web",
+  WebFetch: "Fetching a page",
+  browser_open: "Opening a page",
+  browser_inspect: "Inspecting the page",
+  browser_act: "Acting on the page",
+  browser_tabs: "Updating Browser tabs",
+  browser_evaluate: "Evaluating the page",
 };
 
 /** Singular/plural labels for tool summary text generation. */

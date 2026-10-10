@@ -20,6 +20,7 @@ type MessageListItemsInput = Pick<
   | "currentTurnMessageId"
   | "currentTurnResponseKey"
   | "turnExecutionId"
+  | "holdingSignals"
   | "hooks"
   | "isAgentRunning"
   | "latestTurnWithChanges"
@@ -102,6 +103,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
     currentTurnMessageId,
     currentTurnResponseKey,
     turnExecutionId,
+    holdingSignals,
     hooks,
     isAgentRunning,
     latestTurnWithChanges,
@@ -152,6 +154,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
       permissions,
       hooks,
       thoughtSegments,
+      holdingSignals,
       committedAssistantBody: findLastAgentMessageBody({
         renderedThreadId,
         isAgentRunning,
@@ -162,6 +165,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
       currentTurn,
       agentDisplayState,
       agentStartTime,
+      holdingSignals,
       hooks,
       isAgentRunning,
       latestTurnWithChanges,
