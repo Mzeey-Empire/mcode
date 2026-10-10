@@ -1,4 +1,5 @@
 import * as NodeFS from "node:fs";
+import * as NodeEvents from "node:events";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -64,7 +65,18 @@ beforeEach(() => {
   electron.sessions.clear();
   vi.clearAllMocks();
 });
-afterEach(() => NodeFS.rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+  vi.useRealTimers();
+  NodeFS.rmSync(root, { recursive: true, force: true });
+});
+
+function historyGuest(id: number, url: string) {
+  const image = { resize: () => ({ toJPEG: () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]) }) };
+  return Object.assign(new NodeEvents.EventEmitter(), {
+    id, getURL: () => url, getTitle: () => "Fixture", isDestroyed: () => false,
+    capturePage: vi.fn(async () => image),
+  });
+}
 
 describe("BrowserProfiles", () => {
   it("continues startup when the legacy partition is locked and retries next launch", () => {
@@ -126,9 +138,23 @@ describe("BrowserProfiles", () => {
   });
 
   it("releases guests before clearing, deletes history and thumbnails, and removes idempotently", async () => {
-    seedProfile(A);
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    NodeFS.mkdirSync(NodePath.join(root, "session-data", "Partitions", `mcode-browser-${A}`), { recursive: true });
     const profiles = owner();
     profiles.sessionForWorkspace(A);
+    const captured = historyGuest(1, "http://localhost:5173/fixture");
+    const delayed = historyGuest(2, "http://127.0.0.1:5173/pending");
+    for (const guest of [captured, delayed]) {
+      profiles.history.observe(A, guest);
+      guest.emit("did-navigate", {}, guest.getURL());
+    }
+    await profiles.history.captureGuest(captured.id);
+    expect(profiles.history.list(A).entries.map((entry) => entry.url)).toEqual([delayed.getURL(), captured.getURL()]);
+    expect(profiles.history.list(A).thumbnails.map((thumbnail) => thumbnail.origin)).toEqual(["http://localhost:5173"]);
+    expect(NodeFS.readdirSync(NodePath.join(root, "browser-profiles", A, "thumbnails"))).toHaveLength(1);
+    delayed.emit("did-finish-load");
+    expect(vi.getTimerCount()).toBe(1);
     const first = profiles.remove(A);
     expect(profiles.remove(A)).toBe(first);
     await first;
@@ -139,11 +165,38 @@ describe("BrowserProfiles", () => {
     expect(a.clearStorageData.mock.calls).toEqual([[]]);
     expect(a.clearCache).toHaveBeenCalledTimes(1);
     expect(NodeFS.existsSync(NodePath.join(root, "browser-profiles", A))).toBe(false);
+    expect(profiles.history.list(A)).toEqual({ entries: [], thumbnails: [] });
+    expect(captured.eventNames()).toEqual([]);
+    expect(delayed.eventNames()).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(120_000);
+    profiles.history.record(A, "http://localhost/late");
+    delayed.emit("did-finish-load");
+    await profiles.history.captureGuest(delayed.id);
+    expect(delayed.capturePage).not.toHaveBeenCalled();
+    expect(NodeFS.existsSync(NodePath.join(root, "browser-profiles", A))).toBe(false);
     expect(NodeFS.existsSync(NodePath.join(root, "session-data", "Partitions", `mcode-browser-${A}`))).toBe(true);
     expect(() => profiles.sessionForWorkspace(A)).toThrow();
     await owner().reconcile(new Set());
     expect(NodeFS.existsSync(NodePath.join(root, "session-data", "Partitions", `mcode-browser-${A}`))).toBe(false);
     expect(electron.session.fromPartition).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not recreate a removed profile when an in-flight capture finishes", async () => {
+    const profiles = owner();
+    const guest = historyGuest(3, "http://localhost/fixture");
+    const image = await guest.capturePage();
+    let finish: (value: typeof image) => void = () => { throw new Error("capture not started"); };
+    guest.capturePage.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    profiles.history.observe(A, guest);
+    guest.emit("did-navigate", {}, guest.getURL());
+    const capture = profiles.history.captureGuest(guest.id);
+    await profiles.remove(A);
+    finish(image);
+    await capture;
+    expect(profiles.history.list(A)).toEqual({ entries: [], thumbnails: [] });
+    expect(NodeFS.existsSync(NodePath.join(root, "browser-profiles", A))).toBe(false);
+    expect(guest.eventNames()).toEqual([]);
   });
 
   it("reconciles only absent profiles without opening their partitions", async () => {

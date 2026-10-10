@@ -101,8 +101,8 @@ import {
 } from "../PreviewPanel";
 import { executeWebBrowserDispatch } from "../../automation/browserAutomationWebExecutor";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { normalizePreviewPageIdentity } from "@mcode/shared/browser-page-identity";
 import {
-  normalizePreviewPageIdentity,
   usePreviewAnnotationStore,
 } from "../../state/previewAnnotationStore";
 import { usePreviewDesignModeStore } from "../../state/previewDesignModeStore";

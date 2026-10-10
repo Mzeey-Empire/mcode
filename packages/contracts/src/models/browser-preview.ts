@@ -4,6 +4,36 @@ import type { AttachmentMeta, StoredAttachment } from "./attachment.js";
 import { MessageMentionsSchema } from "./mention.js";
 import { MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS } from "./selected-text-comment.js";
 
+/** Bounded local Browser history persisted by desktop main. */
+export const BrowserHistoryEntrySchema = lazySchema(() => z.object({
+  url: z.string().min(1).max(4096),
+  title: z.string().max(240).nullable(),
+  faviconUrl: z.string().max(4096).nullable(),
+  lastVisitedAt: z.number().finite().nonnegative(),
+}));
+
+/** One recent page in a workspace's Browser profile. */
+export type BrowserHistoryEntry = z.infer<ReturnType<typeof BrowserHistoryEntrySchema>>;
+
+/** A local server's most recent JPEG view, served without uploading. */
+export const BrowserServerThumbnailSchema = lazySchema(() => z.object({
+  origin: z.string().max(4096),
+  capturedAt: z.number().finite().nonnegative(),
+  dataUrl: z.string().startsWith("data:image/jpeg;base64,"),
+}));
+
+/** Thumbnail returned to the renderer for a project server origin. */
+export type BrowserServerThumbnail = z.infer<ReturnType<typeof BrowserServerThumbnailSchema>>;
+
+/** Desktop history response, also bounding the persisted entry list at load. */
+export const BrowserHistorySchema = lazySchema(() => z.object({
+  entries: z.array(BrowserHistoryEntrySchema()).max(50),
+  thumbnails: z.array(BrowserServerThumbnailSchema()).max(50),
+}));
+
+/** Recent pages and local server thumbnails for one workspace. */
+export type BrowserHistory = z.infer<ReturnType<typeof BrowserHistorySchema>>;
+
 /** Max lengths for {@link McodeBrowserCaptureV1} excerpt fields (matches Zod). */
 export const MCODE_BROWSER_CAPTURE_V1_STRING_MAX = {
   htmlExcerpt: 16_000,

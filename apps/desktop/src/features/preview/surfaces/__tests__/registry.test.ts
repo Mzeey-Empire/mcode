@@ -32,6 +32,10 @@ interface FakeWindow {
 }
 
 interface FakeWebContents {
+  id: number;
+  getTitle: () => string;
+  capturePage: ReturnType<typeof vi.fn>;
+  on: (event: string, listener: (...args: unknown[]) => void) => void;
   close: ReturnType<typeof vi.fn>;
   destroyed: boolean;
   url: string;
@@ -70,6 +74,14 @@ function makeGuest(
 ): FakeWebContents {
   const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
   const guest: FakeWebContents = {
+    id: fakeGuests.length + 1,
+    getTitle() { return this.title; },
+    capturePage: vi.fn(async () => ({ resize: () => ({ toJPEG: () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]) }) })),
+    on(event, listener) {
+      const bag = listeners.get(event) ?? new Set();
+      listeners.set(event, bag);
+      bag.add(listener);
+    },
     close: vi.fn(() => { guest.destroyed = true; }),
     destroyed: false,
     url: "about:blank#token-1234",
@@ -367,20 +379,41 @@ describe("preview typed surface bridge", () => {
     expect(invoke("preview.surface.prepare", { surface: otherSurface, adoptionToken: "token-5678" })).toMatchObject({ ok: false, error: "duplicate-adoption-token" });
   });
 
-  it("releases the exact adopted generation after its tab ownership record is removed", () => {
-    makeGuest(allWindows[0]!);
+  it("validates hidden surfaces and records adopted automation guests with the real history store", async () => {
+    const guest = makeGuest(allWindows[0]!);
     expect(invoke("preview.surface.prepare", { surface: surface(), adoptionToken: "token-1234" })).toEqual({ ok: true });
     expect(invoke("preview.surface.adopt", { surface: surface(), adoptionToken: "token-1234" })).toEqual({ ok: true });
+    guest.url = "http://localhost:5174/agent";
+    guest.emit("did-navigate", {}, guest.url);
+    guest.emit("page-title-updated", {}, "Agent page");
+    expect(await invoke("preview.surface.hidden", { surface: surface(2) })).toEqual({ ok: false, error: "stale-generation" });
+    expect(await invoke("preview.surface.hidden", { surface: surface() }, {})).toEqual({ ok: false, error: "no-window" });
+    expect(guest.capturePage).not.toHaveBeenCalled();
+    expect(await invoke("preview.surface.hidden", { surface: surface() })).toEqual({ ok: true });
+    expect(guest.capturePage).toHaveBeenCalledTimes(1);
+    const history = browserProfiles.history.list(surface().identity.workspaceId);
+    expect(history.entries[0]).toMatchObject({ url: guest.url, title: "Agent page" });
+    expect(history.thumbnails.map((thumbnail) => thumbnail.origin)).toContain("http://localhost:5174");
+  });
+
+  it("captures and releases the exact adopted generation after its tab ownership record is removed", async () => {
+    const guest = makeGuest(allWindows[0]!);
+    expect(invoke("preview.surface.prepare", { surface: surface(), adoptionToken: "token-1234" })).toEqual({ ok: true });
+    expect(invoke("preview.surface.adopt", { surface: surface(), adoptionToken: "token-1234" })).toEqual({ ok: true });
+    guest.url = "http://localhost:5173/closed";
+    guest.emit("did-navigate", {}, guest.url);
     getSession(allWindows[0] as never).tabsByThread.clear();
 
-    expect(invoke("preview.surface.release", {
+    expect(await invoke("preview.surface.release", {
       surface: surface(),
       reason: "dispose",
     })).toEqual({ ok: true });
+    expect(guest.capturePage).toHaveBeenCalledTimes(1);
+    expect(browserProfiles.history.list(surface().identity.workspaceId).thumbnails.map((thumbnail) => thumbnail.origin)).toContain("http://localhost:5173");
     expect(findAdoptedWebContentsForWindow(1, "thread-A", "tab-1", 1)).toBeNull();
   });
 
-  it("marks renderer residency cold on release and requests policy-selected discard by exact generation", () => {
+  it("marks renderer residency cold on release and requests policy-selected discard by exact generation", async () => {
     makeGuest(allWindows[0]!);
     expect(invoke("preview.surface.prepare", { surface: surface(), adoptionToken: "token-1234" })).toEqual({ ok: true });
     expect(invoke("preview.surface.adopt", { surface: surface(), adoptionToken: "token-1234" })).toEqual({ ok: true });
@@ -391,12 +424,12 @@ describe("preview typed surface bridge", () => {
       "preview.surface.discard-requested",
       surface(),
     );
-    expect(invoke("preview.surface.release", {
+    expect(await invoke("preview.surface.release", {
       surface: surface(),
       reason: "attacker-controlled",
     })).toMatchObject({ ok: false, error: "invalid-release-reason" });
 
-    expect(invoke("preview.surface.release", {
+    expect(await invoke("preview.surface.release", {
       surface: surface(),
       reason: "discard",
     })).toEqual({ ok: true });

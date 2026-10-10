@@ -1536,4 +1536,6 @@ export type {
 } from "./providers/usage.js";
 
 export { LegacyTerminalRecordSchema } from "./ws/terminal-legacy.js";
+export { BrowserHistoryEntrySchema, BrowserServerThumbnailSchema, BrowserHistorySchema } from "./models/browser-preview.js";
+export type { BrowserHistoryEntry, BrowserServerThumbnail, BrowserHistory } from "./models/browser-preview.js";
 export type { LegacyTerminalRecord, LegacyTerminalCreateResult } from "./ws/terminal-legacy.js";

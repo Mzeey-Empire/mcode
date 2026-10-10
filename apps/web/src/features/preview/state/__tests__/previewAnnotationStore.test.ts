@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { isPreviewAnnotationPayload } from "@mcode/contracts";
+import { normalizePreviewPageIdentity } from "@mcode/shared/browser-page-identity";
 import {
-  normalizePreviewPageIdentity,
   usePreviewAnnotationStore,
   type PreviewDraftAnnotation,
 } from "../previewAnnotationStore";
