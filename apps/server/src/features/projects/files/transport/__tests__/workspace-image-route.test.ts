@@ -4,6 +4,7 @@ import * as NodeHTTP from "node:http";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { validateWorkspaceFilePath } from "../../file-service.js";
 import { handleWorkspaceImageRequest } from "../workspace-image-route.js";
 
 let temp: string;
@@ -25,10 +26,10 @@ beforeEach(async () => {
     const handled = handleWorkspaceImageRequest(req, res, {
       authToken: "image-test-token",
       fileService: {
-        resolveWorkingDir(workspaceId, threadId) {
+        resolveWorkspaceFile(workspaceId, relativePath, threadId) {
           if (workspaceId !== "workspace-1") throw new Error("Unknown workspace");
           if (threadId && threadId !== "thread-1") throw new Error("Thread does not belong to workspace");
-          return threadId ? threadRoot : root;
+          return validateWorkspaceFilePath(threadId ? threadRoot : root, relativePath, process.platform);
         },
       },
     });

@@ -283,6 +283,20 @@ describe("FileService viewer", () => {
     expect(result.git).toBe(true);
   });
 
+  it("keeps delete-side conflicts and maps copies to added", async () => {
+    const stdout = ["UD theirs-deleted.ts", "DU ours-deleted.ts", "DD both-deleted.ts", "D  staged-gone.ts", "C  copy.ts", "src.ts"].join(" ");
+    const { service } = makeService({ exec: vi.fn().mockResolvedValue({ stdout }) });
+    await expect(service.changes("workspace-1")).resolves.toEqual({
+      git: true,
+      truncated: false,
+      entries: [
+        { path: "theirs-deleted.ts", mark: "M" },
+        { path: "ours-deleted.ts", mark: "M" },
+        { path: "copy.ts", mark: "A" },
+      ],
+    });
+  });
+
   it("returns no marks for a non-git folder", async () => {
     const { root } = fixture();
     const { service } = makeService({ root, exec: vi.fn().mockRejectedValue(new Error("not a repo")) });

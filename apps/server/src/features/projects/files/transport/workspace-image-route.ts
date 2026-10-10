@@ -1,11 +1,11 @@
 import * as NodeHTTP from "node:http";
 import { WORKSPACE_IMAGE_MAX_BYTES } from "@mcode/contracts";
 import { extractToken, matchesAuthToken } from "../../../../application/transport/auth.js";
-import { readWorkspaceFileBytes, validateWorkspaceFilePath, workspaceImageMime, type FileService } from "../file-service.js";
+import { readWorkspaceFileBytes, workspaceImageMime, type FileService } from "../file-service.js";
 
 type ImageRouteDeps = {
   authToken: string;
-  fileService: Pick<FileService, "resolveWorkingDir">;
+  fileService: Pick<FileService, "resolveWorkspaceFile">;
 };
 
 /** Serves authenticated, size-bounded workspace images for Files and project icons. */
@@ -46,8 +46,9 @@ async function resolveImage(url: URL, deps: ImageRouteDeps) {
   const use = url.searchParams.get("use");
   if (!/^[^/]+$/.test(workspaceId) || (use !== "file" && use !== "icon")) throw new Error("Invalid image request");
   if (use === "icon" && url.searchParams.has("threadId")) throw new Error("Icons require workspace scope");
-  const root = deps.fileService.resolveWorkingDir(workspaceId, url.searchParams.get("threadId") ?? undefined);
-  const { path, fullPath } = validateWorkspaceFilePath(root, url.searchParams.get("path") ?? "");
+  const { path, fullPath } = deps.fileService.resolveWorkspaceFile(
+    workspaceId, url.searchParams.get("path") ?? "", url.searchParams.get("threadId") ?? undefined,
+  );
   const mime = workspaceImageMime(path);
   if (!mime) throw new Error("Unsupported image type");
   const bytes = await readWorkspaceFileBytes(fullPath, WORKSPACE_IMAGE_MAX_BYTES[use]);

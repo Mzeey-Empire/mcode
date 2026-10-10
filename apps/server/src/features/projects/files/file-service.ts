@@ -80,8 +80,9 @@ export class FileService {
     if (status === null) return { git: false, entries: [], truncated: false };
     const entries: WorkspaceFileChanges["entries"] = [];
     for (const { path, status: mark } of status) {
-      if (mark.includes("D")) continue;
-      entries.push({ path, mark: /[?AR]/.test(mark) ? "A" : "M" });
+      // Unmerged UD/DU conflicts keep the file on disk with conflict markers, so only plain deletions drop out.
+      if (mark.includes("D") && !mark.includes("U")) continue;
+      entries.push({ path, mark: /[?ARC]/.test(mark) ? "A" : "M" });
       if (entries.length > FILE_CHANGES_MAX_ENTRIES) break;
     }
     return { git: true, entries: entries.slice(0, FILE_CHANGES_MAX_ENTRIES), truncated: entries.length > FILE_CHANGES_MAX_ENTRIES };
@@ -257,6 +258,11 @@ export class FileService {
     assertFileSize(fullPath, relativePath);
   }
 
+  /** Resolves a workspace-relative path to a contained real file using the host's path rules. */
+  resolveWorkspaceFile(workspaceId: string, relativePath: string, threadId?: string): { path: string; fullPath: string } {
+    return validateWorkspaceFilePath(this.resolveWorkingDir(workspaceId, threadId), relativePath, this.hostRuntime.platform);
+  }
+
   /**
    * Resolve the working directory for a workspace, optionally scoped to a thread.
    * Validates that the thread exists and belongs to the given workspace to prevent
@@ -341,7 +347,9 @@ export async function readWorkspaceFileBytes(path: string, limit: number): Promi
   try {
     const file = await NodeFS.promises.open(path, "r");
     try {
-      const buffer = Buffer.alloc(limit + 1);
+      // Size from fstat so small files avoid a cap-sized allocation; the extra byte still catches growth mid-read.
+      const { size } = await file.stat();
+      const buffer = Buffer.alloc(Math.min(size, limit) + 1);
       let length = 0;
       while (length < buffer.length) {
         const { bytesRead } = await file.read(buffer, length, buffer.length - length, length);
