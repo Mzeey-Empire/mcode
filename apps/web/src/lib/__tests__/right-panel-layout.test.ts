@@ -14,7 +14,7 @@ function resetDiffStore() {
     rightPanelFallbackByWorkspace: {},
     snapshotsByThread: {},
     snapshotsLoadingByThread: {},
-    snapshotsPendingByThread: {},
+    reviewTurnsByThread: {},
     viewMode: "last-turn",
     reviewViewByThread: {},
     reviewViewManuallySelectedByThread: {},

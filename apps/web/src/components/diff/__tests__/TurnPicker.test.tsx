@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { TurnSnapshot } from "@mcode/contracts";
+import type { ReviewTurn } from "@mcode/contracts";
 import { useDiffStore } from "@/stores/diffStore";
 import { TurnPicker } from "../TurnPicker";
 
@@ -11,34 +11,33 @@ class ObserverMock {
   disconnect = () => {};
 }
 
-function snapshot(
+function turn(
   messageId: string,
-  createdAt: string,
+  ordinal: number,
   fileCount: number,
-): TurnSnapshot {
+  availability: ReviewTurn["availability"] = "available",
+): ReviewTurn {
   return {
-    id: `snap-${messageId}`,
-    message_id: messageId,
-    thread_id: "thread-1",
-    ref_before: "a".repeat(40),
-    ref_after: "b".repeat(40),
-    files_changed: Array.from({ length: fileCount }, (_, i) => `f${i}.ts`),
-    file_effects: {
-      revision: 0,
-      fileCount,
-      additions: fileCount,
-      deletions: 0,
-      effects: [],
-    },
-    worktree_path: null,
-    created_at: createdAt,
+    messageId,
+    ordinal,
+    createdAt: `2026-09-20T1${ordinal}:00:00Z`,
+    phase: "settled",
+    fileCount,
+    additions: fileCount > 0 ? fileCount : null,
+    deletions: fileCount > 0 ? 0 : null,
+    evidence: fileCount > 0 ? "native" : null,
+    availability,
   };
+}
+
+function seedTurns(turns: readonly ReviewTurn[]) {
+  useDiffStore.setState({ reviewTurnsByThread: { "thread-1": [...turns] } });
 }
 
 describe("TurnPicker", () => {
   beforeEach(() => {
     useDiffStore.setState({
-      snapshotsByThread: {},
+      reviewTurnsByThread: {},
       selectedTurnMessageIdByThread: {},
     });
     Element.prototype.scrollIntoView = vi.fn();
@@ -47,81 +46,48 @@ describe("TurnPicker", () => {
   });
 
   it("seeds the operand with the latest turn that changed files", async () => {
-    useDiffStore.setState({
-      snapshotsByThread: {
-        "thread-1": [
-          snapshot("msg-old", "2026-09-20T10:00:00Z", 2),
-          snapshot("msg-empty", "2026-09-20T11:00:00Z", 0),
-          snapshot("msg-new", "2026-09-20T12:00:00Z", 3),
-        ],
-      },
-    });
+    seedTurns([turn("msg-old", 1, 2), turn("msg-new", 2, 3), turn("msg-empty", 3, 0)]);
     render(<TurnPicker threadId="thread-1" />);
 
-    // A zero-change snapshot must not win the seed even though it is newer
-    // than a real diff-turn would be.
+    // A newer turn without file changes must not win the seed.
     await waitFor(() =>
-      expect(useDiffStore.getState().selectedTurnMessageIdByThread["thread-1"]).toBe(
-        "msg-new",
-      ),
+      expect(useDiffStore.getState().selectedTurnMessageIdByThread["thread-1"]).toBe("msg-new"),
     );
   });
 
-  it("lists only turns with changes and picks one", async () => {
-    useDiffStore.setState({
-      snapshotsByThread: {
-        "thread-1": [
-          snapshot("msg-old", "2026-09-20T10:00:00Z", 2),
-          snapshot("msg-empty", "2026-09-20T11:00:00Z", 0),
-          snapshot("msg-new", "2026-09-20T12:00:00Z", 3),
-        ],
-      },
-    });
+  it("seeds the latest turn when no turn changed files", async () => {
+    seedTurns([turn("msg-a", 1, 0), turn("msg-b", 2, 0)]);
     render(<TurnPicker threadId="thread-1" />);
 
-    await userEvent.click(screen.getByTestId("turn-picker"));
-
-    expect(screen.getByTestId("turn-picker-item-msg-new")).toBeInTheDocument();
-    expect(screen.getByTestId("turn-picker-item-msg-old")).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("turn-picker-item-msg-empty"),
-    ).not.toBeInTheDocument();
-
-    await userEvent.click(screen.getByTestId("turn-picker-item-msg-old"));
-    expect(useDiffStore.getState().selectedTurnMessageIdByThread["thread-1"]).toBe(
-      "msg-old",
-    );
-  }, 15_000);
-
-  it("numbers turns by order among turns with changes, not all snapshots", async () => {
-    useDiffStore.setState({
-      snapshotsByThread: {
-        "thread-1": [
-          snapshot("msg-old", "2026-09-20T10:00:00Z", 2),
-          snapshot("msg-empty", "2026-09-20T11:00:00Z", 0),
-          snapshot("msg-new", "2026-09-20T12:00:00Z", 3),
-        ],
-      },
-    });
-    render(<TurnPicker threadId="thread-1" />);
-
-    // The zero-change middle snapshot must not consume a number: the two
-    // diff turns are "Turn 1" and "Turn 2", with the newest seeded.
     await waitFor(() =>
-      expect(screen.getByTestId("turn-picker")).toHaveTextContent("Turn 2"),
+      expect(useDiffStore.getState().selectedTurnMessageIdByThread["thread-1"]).toBe("msg-b"),
     );
+  });
 
+  it("lists every turn with its server ordinal and labels empty and gone turns", async () => {
+    seedTurns([
+      turn("msg-gone", 1, 0, "snapshot-expired"),
+      turn("msg-empty", 2, 0),
+      turn("msg-new", 3, 3),
+    ]);
+    render(<TurnPicker threadId="thread-1" />);
+
+    await waitFor(() => expect(screen.getByTestId("turn-picker")).toHaveTextContent("Turn 3"));
     await userEvent.click(screen.getByTestId("turn-picker"));
-    expect(screen.getByTestId("turn-picker-item-msg-new")).toHaveTextContent("Turn 2");
-    expect(screen.getByTestId("turn-picker-item-msg-old")).toHaveTextContent("Turn 1");
+
+    expect(screen.getByTestId("turn-picker-item-msg-new")).toHaveTextContent("Turn 3");
+    expect(screen.getByTestId("turn-picker-item-msg-new")).toHaveTextContent("3 files · +3 −0");
+    expect(screen.getByTestId("turn-picker-item-msg-empty")).toHaveTextContent("Turn 2");
+    expect(screen.getByTestId("turn-picker-item-msg-empty")).toHaveTextContent("no file changes");
+    expect(screen.getByTestId("turn-picker-item-msg-gone")).toHaveTextContent("Turn 1");
+    expect(screen.getByTestId("turn-picker-item-msg-gone")).toHaveTextContent("changes gone");
+
+    await userEvent.click(screen.getByTestId("turn-picker-item-msg-empty"));
+    expect(useDiffStore.getState().selectedTurnMessageIdByThread["thread-1"]).toBe("msg-empty");
   }, 15_000);
 
-  it("reports an empty state when no turn changed files", () => {
-    useDiffStore.setState({
-      snapshotsByThread: {
-        "thread-1": [snapshot("msg-empty", "2026-09-20T11:00:00Z", 0)],
-      },
-    });
+  it("reports an empty state when the thread has no turns", () => {
+    seedTurns([]);
     render(<TurnPicker threadId="thread-1" />);
 
     expect(screen.getByText("No turns yet")).toBeInTheDocument();

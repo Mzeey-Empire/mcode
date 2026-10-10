@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
-import type { TurnSnapshot } from "@mcode/contracts";
+import type { ReviewTurn } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -15,45 +15,30 @@ import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/time";
 import { useDiffStore } from "@/stores/diffStore";
 
-// Mirrors the server's render rule in turn-diff-rpc: workspace-scoped effects
-// win; when none exist the comparison falls back to files_changed. Only a
-// snapshot that would render files is a pickable turn.
-function renderedFileCount(s: TurnSnapshot): number {
-  const workspace = s.file_effects?.effects.filter((e) => e.scope === "workspace").length ?? 0;
-  return workspace > 0 ? workspace : s.files_changed.length;
+function statLabel(turn: ReviewTurn): string {
+  if (turn.availability === "snapshot-expired") return "changes gone";
+  if (turn.fileCount === 0) return "no file changes";
+  const files = `${turn.fileCount} ${turn.fileCount === 1 ? "file" : "files"}`;
+  return turn.additions === null || turn.deletions === null
+    ? files
+    : `${files} · +${turn.additions} −${turn.deletions}`;
 }
 
-function diffTurns(snapshots: readonly TurnSnapshot[]): TurnSnapshot[] {
-  return snapshots.filter((s) => renderedFileCount(s) > 0);
-}
-
-function byCreatedAt(a: TurnSnapshot, b: TurnSnapshot): number {
-  return a.created_at.localeCompare(b.created_at);
-}
-
-/** Ordinal across turns with changes only, so "Turn 2" is the 2nd pickable turn. */
-function turnOrdinals(snapshots: readonly TurnSnapshot[]): Map<string, number> {
-  const ordinals = new Map<string, number>();
-  [...snapshots].sort(byCreatedAt).forEach((s, i) => {
-    ordinals.set(s.message_id, i + 1);
-  });
-  return ordinals;
-}
-
-function statLabel(s: TurnSnapshot): string {
-  const effects = s.file_effects;
-  if (!effects) return `${s.files_changed.length} files`;
-  return `${renderedFileCount(s)} files · +${effects.additions} −${effects.deletions}`;
+/** The newest turn that changed files, else the newest turn, from a newest-first list. */
+function seedTurn(newestFirst: readonly ReviewTurn[]): ReviewTurn | undefined {
+  return newestFirst.find((turn) => turn.fileCount > 0) ?? newestFirst[0];
 }
 
 /**
- * The Turn view's operand picker: a searchable dropdown over the thread's turns
- * that changed files, resolving to exactly one turn's diff. Entering the view
- * unpicked seeds the operand to the latest diff-turn, since an operand-less
- * request would resolve live state. See CONTEXT.md → "Turn view".
+ * The Turn view's operand picker: a searchable dropdown over every turn in the
+ * thread, resolving to exactly one turn's diff. Turns without file changes or
+ * whose snapshots are gone stay listed so ordinals match the conversation.
+ * Entering the view unpicked seeds the operand to the latest turn that changed
+ * files, since an operand-less request would resolve live state. See
+ * CONTEXT.md → "Turn view".
  */
 export function TurnPicker({ threadId }: { threadId: string }) {
-  const snapshots = useDiffStore((s) => s.snapshotsByThread[threadId]);
+  const reviewTurns = useDiffStore((s) => s.reviewTurnsByThread[threadId]);
   const selectedMessageId = useDiffStore(
     (s) => s.selectedTurnMessageIdByThread[threadId],
   );
@@ -61,22 +46,21 @@ export function TurnPicker({ threadId }: { threadId: string }) {
   const [open, setOpen] = useState(false);
 
   const turns = useMemo(
-    () => diffTurns(snapshots ?? []).sort(byCreatedAt).reverse(),
-    [snapshots],
+    () => [...(reviewTurns ?? [])].sort((a, b) => b.ordinal - a.ordinal),
+    [reviewTurns],
   );
-  const ordinals = useMemo(() => turnOrdinals(turns), [turns]);
-  const effectiveMessageId = selectedMessageId ?? turns[0]?.message_id ?? null;
+  const seed = seedTurn(turns);
+  const effectiveMessageId = selectedMessageId ?? seed?.messageId ?? null;
 
-  // Seed the operand with the latest diff-turn when the view is entered
-  // unpicked: an operand-less request would resolve live state, which a picked
-  // turn view must never show.
+  // Seed the operand when the view is entered unpicked: an operand-less
+  // request would resolve live state, which a picked turn view must never show.
   useEffect(() => {
-    if (selectedMessageId === undefined && turns.length > 0) {
-      setReviewTurnForThread(threadId, turns[0]!.message_id);
+    if (selectedMessageId === undefined && seed) {
+      setReviewTurnForThread(threadId, seed.messageId);
     }
-  }, [threadId, selectedMessageId, turns, setReviewTurnForThread]);
+  }, [threadId, selectedMessageId, seed, setReviewTurnForThread]);
 
-  if (snapshots === undefined) {
+  if (reviewTurns === undefined) {
     return (
       <span className="font-mono text-caption uppercase tracking-[0.18em] text-muted/40">
         Resolving
@@ -91,9 +75,7 @@ export function TurnPicker({ threadId }: { threadId: string }) {
     );
   }
 
-  const effectiveOrdinal = effectiveMessageId
-    ? ordinals.get(effectiveMessageId)
-    : undefined;
+  const effectiveOrdinal = turns.find((turn) => turn.messageId === effectiveMessageId)?.ordinal;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -128,19 +110,19 @@ export function TurnPicker({ threadId }: { threadId: string }) {
           />
           <CommandList>
             <CommandEmpty className="py-4 text-caption">No turns found</CommandEmpty>
-            <CommandGroup heading="Turns with changes">
+            <CommandGroup heading="Turns">
               {turns.map((turn) => {
-                const ordinal = ordinals.get(turn.message_id) ?? 0;
-                const active = turn.message_id === effectiveMessageId;
+                const ordinal = turn.ordinal;
+                const active = turn.messageId === effectiveMessageId;
                 return (
                   <CommandItem
-                    key={turn.id}
+                    key={turn.messageId}
                     value={`turn ${ordinal} ${statLabel(turn)}`}
                     onSelect={() => {
-                      setReviewTurnForThread(threadId, turn.message_id);
+                      setReviewTurnForThread(threadId, turn.messageId);
                       setOpen(false);
                     }}
-                    data-testid={`turn-picker-item-${turn.message_id}`}
+                    data-testid={`turn-picker-item-${turn.messageId}`}
                     aria-current={active ? "true" : undefined}
                     className="gap-2 px-2 py-1.5"
                   >
@@ -152,7 +134,7 @@ export function TurnPicker({ threadId }: { threadId: string }) {
                       <Check size={11} className="shrink-0 text-muted" />
                     ) : (
                       <span className="shrink-0 font-mono text-caption tabular-nums text-muted/45">
-                        {relativeTime(turn.created_at)}
+                        {relativeTime(turn.createdAt)}
                       </span>
                     )}
                   </CommandItem>

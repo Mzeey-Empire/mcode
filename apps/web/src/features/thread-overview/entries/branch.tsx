@@ -85,7 +85,7 @@ function useUncommittedFiles(thread: Thread, open: boolean): UncommittedFilesSta
     // A failed comparison only hides the count; the branch list stays usable.
     void getTransport()
       .getReviewComparison({ workspaceId: thread.workspace_id, view: "uncommitted", threadId: thread.id })
-      .then((comparison): number | null => comparison.files.length, () => null)
+      .then((result): number | null => result.status === "ready" ? result.comparison.files.length : null, () => null)
       .then((count) => {
         if (!cancelled) setUncommitted({ settled: true, count });
       });

@@ -5,60 +5,30 @@ import { FileList } from "./FileList";
 /** The threadless git working-tree views the Review tab renders against the workspace root. */
 export type GitView = "unstaged" | "staged" | "commit" | "branch";
 
-/** One settled git comparison consumed by both the diff and Files projections. */
-export interface ResolvedGitComparison {
+/** Props for GitDiffView. */
+interface GitDiffViewProps {
   comparison: ReviewComparison;
   source: DiffSource;
   id: string;
   cacheVersion: string | number;
-}
-
-/** Props for GitDiffView. */
-interface GitDiffViewProps {
-  resolved: ResolvedGitComparison | null;
   threadId: string;
-  loading: boolean;
   immutable: boolean;
+  refreshing: boolean;
   onRefresh: () => void;
-  emptyLabel: string;
 }
 
-/** The empty-state glyph and label shown for a comparison with no changes. */
-function EmptyState({ label }: { label: string }) {
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-3 py-14">
-      <span aria-hidden="true" className="font-mono text-2xl leading-none text-muted/15">⊘</span>
-      <p className="font-mono text-caption uppercase tracking-[0.18em] text-muted/40">{label}</p>
-    </div>
-  );
-}
-
-/** The three-dot loading pulse shared across the diff views. */
-function LoadingPulse() {
-  return (
-    <div className="flex items-center justify-center gap-1.5 py-10">
-      {[0, 150, 300].map((delay) => (
-        <div key={delay} className="h-1 w-1 rounded-full bg-muted/25 animate-pulse" style={{ animationDelay: `${delay}ms` }} />
-      ))}
-    </div>
-  );
-}
-
-/** Render the diff projection of a comparison resolved by the parent Review lifecycle. */
-export function GitDiffView({ resolved, threadId, loading, immutable, onRefresh, emptyLabel }: GitDiffViewProps) {
-  if (loading && !resolved) return <LoadingPulse />;
-  if (!resolved || resolved.comparison.files.length === 0) return <EmptyState label={emptyLabel} />;
-
+/** Render the diff projection of a git comparison with files, resolved by the parent Review lifecycle. */
+export function GitDiffView({ comparison, source, id, cacheVersion, threadId, immutable, refreshing, onRefresh }: GitDiffViewProps) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <FileList
-        files={resolved.comparison.files}
-        source={resolved.source}
-        id={resolved.id}
+        files={comparison.files}
+        source={source}
+        id={id}
         threadId={threadId}
-        cacheVersion={resolved.cacheVersion}
+        cacheVersion={cacheVersion}
         refreshable={!immutable}
-        refreshing={loading}
+        refreshing={refreshing}
         onRefresh={onRefresh}
         defaultFilesExpanded
       />

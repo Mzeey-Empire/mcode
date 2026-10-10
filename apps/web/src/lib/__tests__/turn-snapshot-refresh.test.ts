@@ -16,7 +16,6 @@ describe("refreshTurnSnapshotsAfterPersist", () => {
     vi.clearAllMocks();
     useDiffStore.setState({
       snapshotsByThread: {},
-      snapshotsPendingByThread: {},
       diffRevisionByScope: {},
       rightPanelByThread: {},
       rightPanelFallbackByWorkspace: {},
@@ -41,6 +40,7 @@ describe("refreshTurnSnapshotsAfterPersist", () => {
         ref_before: "aaa",
         ref_after: "bbb",
         worktree_path: null,
+        attempt_count: 1,
         created_at: new Date().toISOString(),
       },
     ]);
@@ -54,7 +54,7 @@ describe("refreshTurnSnapshotsAfterPersist", () => {
     expect(useDiffStore.getState().snapshotsByThread[THREAD_ID]).toHaveLength(1);
   });
 
-  it("skipped refetch while the cumulative view is open on the active thread", () => {
+  it("refetched in place while the cumulative view is open on the active thread", async () => {
     useDiffStore.setState({
       snapshotsByThread: { [THREAD_ID]: [] },
       rightPanelByThread: {
@@ -70,7 +70,8 @@ describe("refreshTurnSnapshotsAfterPersist", () => {
 
     refreshTurnSnapshotsAfterPersist(THREAD_ID, ["src/a.ts"]);
 
-    expect(mockTransport.listSnapshots).not.toHaveBeenCalled();
-    expect(useDiffStore.getState().snapshotsPendingByThread[THREAD_ID]).toBe(true);
+    await vi.waitFor(() => {
+      expect(useDiffStore.getState().snapshotsByThread[THREAD_ID]).toHaveLength(1);
+    });
   });
 });

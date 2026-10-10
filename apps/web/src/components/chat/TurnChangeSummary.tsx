@@ -151,6 +151,7 @@ export function TurnChangeSummary({ messageId, filesChanged, isLatestTurn, manua
         if (!snapshot) return;
 
         const stats = await getTransport().getSnapshotDiffStats(snapshot.id);
+        if (!Array.isArray(stats)) return;
         setDiffStats(new Map(stats.map((s) => [normalizeSlashes(s.filePath), s])));
       } catch {
         // Best-effort: stats are decorative, don't block the file list

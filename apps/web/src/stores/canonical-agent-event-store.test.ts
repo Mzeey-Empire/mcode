@@ -105,7 +105,7 @@ describe("canonical agent event residency guards", () => {
     const state = createAgentModelState();
     state.turns.parent = {
       id: "parent", threadId, status: "Running", trigger: { kind: "user" },
-      permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested",
+      permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested", attemptOf: null,
       providerIdentities: [], startedAt: NOW, providerStartedAt: null, endedAt: null, createdAt: NOW, updatedAt: NOW,
     };
     state.items.tool = {
@@ -137,7 +137,7 @@ describe("canonical agent event residency guards", () => {
     resetThreadStoreForTests({ currentThreadId: threadId });
     const state = createAgentModelState();
     state.turns.parent = { id: "parent", threadId, executionId, status: "Running", trigger: { kind: "user" },
-      permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested", providerIdentities: [],
+      permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested", attemptOf: null, providerIdentities: [],
       startedAt: NOW, providerStartedAt: null, endedAt: null, createdAt: NOW, updatedAt: NOW };
     const tail = [
       { eventId: "retained-answer", routing: { threadId, turnId: "parent", executionId, itemId: "answer" }, sourceProviderId: "codex", sourceIdentities: [],
@@ -226,7 +226,7 @@ describe("canonical agent event residency guards", () => {
           trigger: { kind: "child", sourceThreadId: "parent-thread", sourceTurnId: "parent-turn" },
           permissionMode: "full",
           approvalReviewMode: "manual",
-          approvalReviewReason: "manual-requested",
+          approvalReviewReason: "manual-requested", attemptOf: null,
           providerIdentities: [],
           startedAt: null, providerStartedAt: null,
           endedAt: null,

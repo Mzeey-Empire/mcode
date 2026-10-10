@@ -65,7 +65,7 @@ function initialEvents(): CanonicalAgentEventEnvelope[] {
         trigger: { kind: "user" },
         permissionMode: "full",
         approvalReviewMode: "manual",
-        approvalReviewReason: "manual-requested",
+        approvalReviewReason: "manual-requested", attemptOf: null,
         providerIdentities: [],
         startedAt: null, providerStartedAt: null,
         endedAt: null,

@@ -1,20 +1,5 @@
 import { getTransport } from "@/transport";
 import { useDiffStore } from "@/stores/diffStore";
-import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-
-function isViewingCumulativeChanges(threadId: string): boolean {
-  const diffState = useDiffStore.getState();
-  const workspaceState = useWorkspaceStore.getState();
-  const workspaceId = workspaceState.threads.find((thread) => thread.id === threadId)?.workspace_id;
-  const panel = workspaceId ? diffState.getRightPanel(workspaceId, threadId) : undefined;
-  return (
-    workspaceState.activeThreadId === threadId &&
-    workspaceId !== undefined &&
-    diffState.getRightPanelVisible(workspaceId, threadId) &&
-    panel?.activeTab === "changes" &&
-    diffState.viewMode === "cumulative"
-  );
-}
 
 /**
  * Refresh turn snapshots after `turn.persisted` when a turn touched files.
@@ -28,11 +13,6 @@ export function refreshTurnSnapshotsAfterPersist(
   if (filesChanged.length === 0) return;
 
   useDiffStore.getState().bumpDiffRevision(threadId);
-
-  if (isViewingCumulativeChanges(threadId)) {
-    useDiffStore.getState().markSnapshotsPending(threadId, true);
-    return;
-  }
 
   const transport = getTransport();
 

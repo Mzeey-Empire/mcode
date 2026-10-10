@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReviewComparison, TurnSnapshot } from "@mcode/contracts";
+import type { ReviewComparison, ReviewComparisonResult, TurnSnapshot } from "@mcode/contracts";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { DiffPanel } from "../DiffPanel";
@@ -12,10 +12,13 @@ const transport = vi.hoisted(() => ({
   refreshWorkspaceFiles: vi.fn().mockResolvedValue(undefined),
   listSnapshots: vi.fn().mockResolvedValue([]),
   getSnapshotDiffStats: vi.fn().mockResolvedValue([]),
-  getTurnDiffComparison: vi.fn().mockResolvedValue(null),
-  getCumulativeDiffStats: vi.fn().mockResolvedValue([]),
-  getReviewComparison: vi.fn().mockResolvedValue({ files: [], additions: 0, deletions: 0 }),
+  getTurnDiffComparison: vi.fn(),
+  getCumulativeDiffStats: vi.fn(),
+  getReviewComparison: vi.fn(),
+  listReviewTurns: vi.fn().mockResolvedValue([]),
 }));
+
+const EMPTY_READY: ReviewComparisonResult = { status: "ready", comparison: { files: [], additions: 0, deletions: 0 } };
 
 vi.mock("@/hooks/useElementWidth", () => ({
   useElementWidth: () => measuredWidth,
@@ -96,21 +99,28 @@ describe("DiffPanel worktree files", () => {
     } as TurnSnapshot;
   }
 
-  function stats(path: string) {
-    return [{ filePath: path, additions: 1, deletions: 0 }];
+  function ready(value: ReviewComparison): ReviewComparisonResult {
+    return { status: "ready", comparison: value };
   }
-  function comparison(id: string, path: string): ReviewComparison {
-    return { files: [{ path, previousPath: null, changeType: "modified", binary: false, additions: null, deletions: null, untracked: false }], additions: 1, deletions: 0,
-      turnDiff: { id, phase: "settled", source: "native", fidelity: "agent", revision: 1 } };
+  function file(path: string): ReviewComparison["files"][number] {
+    return { path, previousPath: null, changeType: "modified", binary: false, additions: null, deletions: null, untracked: false };
+  }
+  function stats(path: string): ReviewComparisonResult {
+    return ready({ files: [{ ...file(path), additions: 1, deletions: 0 }], additions: 1, deletions: 0 });
+  }
+  function comparison(id: string, path: string): ReviewComparisonResult {
+    return ready({ files: [file(path)], additions: 1, deletions: 0,
+      turnDiff: { id, phase: "settled", source: "native", fidelity: "agent", revision: 1 } });
   }
   beforeEach(() => {
     measuredWidth = 900;
     vi.clearAllMocks();
     transport.listSnapshots.mockReset().mockResolvedValue([]);
     transport.getSnapshotDiffStats.mockReset().mockResolvedValue([]);
-    transport.getTurnDiffComparison.mockReset().mockResolvedValue(null);
-    transport.getCumulativeDiffStats.mockReset().mockResolvedValue([]);
-    transport.getReviewComparison.mockReset().mockResolvedValue({ files: [], additions: 0, deletions: 0 });
+    transport.getTurnDiffComparison.mockReset().mockResolvedValue(EMPTY_READY);
+    transport.getCumulativeDiffStats.mockReset().mockResolvedValue(EMPTY_READY);
+    transport.getReviewComparison.mockReset().mockResolvedValue(EMPTY_READY);
+    transport.listReviewTurns.mockReset().mockResolvedValue([]);
     useWorkspaceStore.setState({
       activeThreadId: "thread-1",
       activeWorkspaceId: "workspace-1",
@@ -119,7 +129,7 @@ describe("DiffPanel worktree files", () => {
       viewMode: "last-turn",
       snapshotsByThread: { "thread-1": [] },
       snapshotsLoadingByThread: {},
-      snapshotsPendingByThread: {},
+      reviewTurnsByThread: {},
       diffRevisionByScope: {},
       reviewFilesVisibleByScope: {},
     });
@@ -128,7 +138,7 @@ describe("DiffPanel worktree files", () => {
   it("starts closed at wide widths and never requests the full worktree", async () => {
     render(<DiffPanel />);
 
-    await screen.findByTestId("snapshot-diff");
+    await screen.findByTestId("review-state");
 
     expect(screen.queryByTestId("worktree-files")).not.toBeInTheDocument();
     expect(transport.listWorkspaceFiles).not.toHaveBeenCalled();
@@ -152,9 +162,9 @@ describe("DiffPanel worktree files", () => {
   });
 
   it("hides invalidated Live files until the fresh comparison request settles", async () => {
-    const live: ReviewComparison = { ...comparison("live-1", "live.ts"),
-      turnDiff: { id: "live-1", phase: "live", source: "native", fidelity: "agent", revision: 1 } };
-    const reconnect = deferred<ReviewComparison>();
+    const live = ready({ files: [file("live.ts")], additions: 1, deletions: 0,
+      turnDiff: { id: "live-1", phase: "live", source: "native", fidelity: "agent", revision: 1 } });
+    const reconnect = deferred<ReviewComparisonResult>();
     transport.getTurnDiffComparison.mockResolvedValueOnce(live).mockReturnValueOnce(reconnect.promise);
     render(<DiffPanel />);
     await waitFor(() => expect(screen.getByTestId("snapshot-diff")).toHaveTextContent("live.ts"));
@@ -188,7 +198,7 @@ describe("DiffPanel worktree files", () => {
 
     // Operand-less requests resolve live/latest state, which a picked-turn
     // view must not show. The panel settles empty without asking the server.
-    await waitFor(() => expect(screen.getByTestId("snapshot-diff")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("review-state")).toHaveTextContent("No turns yet"));
     expect(transport.getTurnDiffComparison).not.toHaveBeenCalled();
   });
 
@@ -209,15 +219,15 @@ describe("DiffPanel worktree files", () => {
   });
 
   it("publishes one matching diff and Files result after a controlled refresh", async () => {
-    const first = deferred<{ files: { path: string; previousPath: null; changeType: "modified"; binary: false, additions: null, deletions: null, untracked: false }[]; additions: number; deletions: number }>();
-    const second = deferred<{ files: { path: string; previousPath: null; changeType: "modified"; binary: false, additions: null, deletions: null, untracked: false }[]; additions: number; deletions: number }>();
+    const first = deferred<ReviewComparisonResult>();
+    const second = deferred<ReviewComparisonResult>();
     transport.getReviewComparison.mockReset().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
     useWorkspaceStore.setState({ activeThreadId: null, activeWorkspaceId: "workspace-1" });
     useDiffStore.setState({ viewMode: "unstaged" });
     const user = userEvent.setup();
 
     render(<DiffPanel />);
-    first.resolve({ files: [{ path: "old.ts", previousPath: null, changeType: "modified", binary: false, additions: null, deletions: null, untracked: false }], additions: 1, deletions: 0 });
+    first.resolve(ready({ files: [file("old.ts")], additions: 1, deletions: 0 }));
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("old.ts"));
     act(() => { useDiffStore.getState().setReviewFilesVisible("workspace-1", true); });
     expect(screen.getByTestId("worktree-files")).toHaveTextContent("old.ts");
@@ -228,21 +238,21 @@ describe("DiffPanel worktree files", () => {
     expect(screen.getByTestId("worktree-files")).toHaveTextContent("old.ts");
     expect(screen.getByText("Refreshing comparison")).toBeInTheDocument();
 
-    second.resolve({ files: [{ path: "new.ts", previousPath: null, changeType: "modified", binary: false, additions: null, deletions: null, untracked: false }], additions: 2, deletions: 1 });
+    second.resolve(ready({ files: [file("new.ts")], additions: 2, deletions: 1 }));
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("new.ts"));
     expect(screen.getByTestId("worktree-files")).toHaveTextContent("new.ts");
     expect(transport.listWorkspaceFiles).not.toHaveBeenCalled();
   });
 
-  it("keeps Last turn identity, diff, and Files atomic through refresh success and comparison failure", async () => {
+  it("keeps Last turn identity, diff, and Files atomic through refresh success and shows a comparison failure", async () => {
     const oldSnapshot = snapshot("snapshot-old", "old.ts");
     const nextSnapshot = snapshot("snapshot-next", "next.ts");
     const failedSnapshot = snapshot("snapshot-failed", "failed.ts");
-    const initialStats = deferred<ReviewComparison>();
+    const initialStats = deferred<ReviewComparisonResult>();
     const nextList = deferred<TurnSnapshot[]>();
-    const nextStats = deferred<ReviewComparison>();
+    const nextStats = deferred<ReviewComparisonResult>();
     const failedList = deferred<TurnSnapshot[]>();
-    const failedStats = deferred<ReviewComparison>();
+    const failedStats = deferred<ReviewComparisonResult>();
     transport.getTurnDiffComparison.mockReset()
       .mockReturnValueOnce(initialStats.promise)
       .mockReturnValueOnce(nextStats.promise)
@@ -279,21 +289,21 @@ describe("DiffPanel worktree files", () => {
     failedList.resolve([failedSnapshot]);
     await waitFor(() => expect(transport.getTurnDiffComparison).toHaveBeenCalledTimes(3));
     failedStats.reject(new Error("stats failed"));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh snapshot" })).toBeEnabled());
-    expect(screen.getByTestId("snapshot-diff")).toHaveAttribute("data-snapshot-id", "snapshot-next");
-    expect(screen.getByTestId("snapshot-diff")).toHaveTextContent("next.ts");
-    expect(screen.getByTestId("worktree-files")).toHaveTextContent("next.ts");
+    // A failed refresh reads as a failure, never as the previous comparison.
+    await waitFor(() => expect(screen.getByTestId("review-state")).toHaveAttribute("data-review-state", "failed"));
+    expect(screen.queryByTestId("snapshot-diff")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("worktree-files")).not.toHaveTextContent("next.ts");
   });
 
-  it("keeps All turns cache identity, diff, and Files atomic through refresh success and stats failure", async () => {
+  it("keeps All turns cache identity, diff, and Files atomic through refresh success and shows a stats failure", async () => {
     const oldSnapshot = snapshot("snapshot-old", "old.ts");
     const nextSnapshot = snapshot("snapshot-next", "next.ts");
     const failedSnapshot = snapshot("snapshot-failed", "failed.ts");
-    const initialStats = deferred<ReturnType<typeof stats>>();
+    const initialStats = deferred<ReviewComparisonResult>();
     const nextList = deferred<TurnSnapshot[]>();
-    const nextStats = deferred<ReturnType<typeof stats>>();
+    const nextStats = deferred<ReviewComparisonResult>();
     const failedList = deferred<TurnSnapshot[]>();
-    const failedStats = deferred<ReturnType<typeof stats>>();
+    const failedStats = deferred<ReviewComparisonResult>();
     transport.getCumulativeDiffStats.mockReset()
       .mockReturnValueOnce(initialStats.promise)
       .mockReturnValueOnce(nextStats.promise)
@@ -329,9 +339,10 @@ describe("DiffPanel worktree files", () => {
     failedList.resolve([failedSnapshot]);
     await waitFor(() => expect(transport.getCumulativeDiffStats).toHaveBeenCalledTimes(3));
     failedStats.reject(new Error("stats failed"));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh cumulative" })).toBeEnabled());
-    expect(screen.getByTestId("cumulative-diff")).toHaveTextContent("next.ts");
-    expect(screen.getByTestId("worktree-files")).toHaveTextContent("next.ts");
+    // A failed refresh reads as a failure, never as the previous comparison.
+    await waitFor(() => expect(screen.getByTestId("review-state")).toHaveAttribute("data-review-state", "failed"));
+    expect(screen.queryByTestId("cumulative-diff")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("worktree-files")).not.toHaveTextContent("next.ts");
   });
 
   it("ignores an unresolved snapshot refresh after the active scope changes", async () => {
@@ -356,6 +367,66 @@ describe("DiffPanel worktree files", () => {
 
     await waitFor(() => expect(useDiffStore.getState().snapshotsByThread["thread-1"]).toEqual([oldSnapshot]));
     expect(screen.queryByText("stale.ts")).not.toBeInTheDocument();
+  });
+
+  function renderUnstaged(result: ReviewComparisonResult) {
+    transport.getReviewComparison.mockReset().mockResolvedValue(result);
+    useWorkspaceStore.setState({ activeThreadId: null, activeWorkspaceId: "workspace-1" });
+    useDiffStore.setState({ viewMode: "unstaged", reviewViewMenuOpen: false });
+    render(<DiffPanel />);
+  }
+
+  it.each<[string, ReviewComparisonResult, string, string]>([
+    ["empty", EMPTY_READY, "empty", "No unstaged changes"],
+    ["too-many-files", { status: "too-many-files", fileCount: 12_345, limit: 10_000 }, "too-many-files", "12,345 changed files. Review shows up to 10,000."],
+    ["failed", { status: "failed", failure: { kind: "timeout", summary: "git diff timed out", detail: "stderr" } }, "failed", "git diff timed out"],
+    ["unborn", { status: "unavailable", reason: "unborn" }, "empty", "No commits yet"],
+    ["snapshot-expired", { status: "unavailable", reason: "snapshot-expired" }, "gone", "Snapshots older than 30 days are cleared"],
+  ])("renders the %s outcome as its own body, never as files", async (_label, result, kind, text) => {
+    renderUnstaged(result);
+
+    const body = await screen.findByTestId("review-state");
+    expect(body).toHaveAttribute("data-review-state", kind);
+    expect(body).toHaveTextContent(text);
+    expect(screen.queryByTestId("diff-files")).not.toBeInTheDocument();
+  });
+
+  it("shows failure details, copies them, and retries the comparison", async () => {
+    const detail = "fatal: bad object HEAD\nexit code 128";
+    renderUnstaged({ status: "failed", failure: { kind: "git-error", summary: "Git couldn't read the repository", detail } });
+    // userEvent installs its own clipboard, so read back what was copied.
+    const user = userEvent.setup();
+
+    await screen.findByText("Couldn't load this comparison");
+    expect(screen.queryByTestId("review-failure-detail")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Details" }));
+    expect(screen.getByTestId("review-failure-detail").textContent).toBe(detail);
+    await user.click(screen.getByRole("button", { name: "Copy error details" }));
+    await expect(navigator.clipboard.readText()).resolves.toBe(detail);
+
+    transport.getReviewComparison.mockResolvedValue(stats("fixed.ts"));
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("fixed.ts"));
+    expect(transport.getReviewComparison).toHaveBeenCalledTimes(2);
+  });
+
+  it("names a request that never answered as a failure with its message", async () => {
+    transport.getReviewComparison.mockReset().mockRejectedValue(new Error("socket closed"));
+    useWorkspaceStore.setState({ activeThreadId: null, activeWorkspaceId: "workspace-1" });
+    useDiffStore.setState({ viewMode: "unstaged" });
+    render(<DiffPanel />);
+
+    const body = await screen.findByTestId("review-state");
+    expect(body).toHaveTextContent("The request didn't complete");
+    await userEvent.setup().click(screen.getByRole("button", { name: "Details" }));
+    expect(screen.getByTestId("review-failure-detail")).toHaveTextContent("socket closed");
+  });
+
+  it("opens the view menu from the too-many-files body", async () => {
+    renderUnstaged({ status: "too-many-files", fileCount: 20_000, limit: 10_000 });
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Choose another view" }));
+    expect(useDiffStore.getState().reviewViewMenuOpen).toBe(true);
   });
 
 });

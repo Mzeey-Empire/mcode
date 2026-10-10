@@ -37,7 +37,7 @@ function turn(
     trigger: { kind: "child", sourceThreadId: "parent", sourceTurnId: "parent-turn" },
     permissionMode: "full",
     approvalReviewMode: "manual",
-    approvalReviewReason: "manual-requested",
+    approvalReviewReason: "manual-requested", attemptOf: null,
     providerIdentities: [],
     startedAt: STARTED_AT, providerStartedAt: null,
     endedAt,

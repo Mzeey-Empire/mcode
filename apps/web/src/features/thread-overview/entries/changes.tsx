@@ -6,7 +6,7 @@ import { executeCommand } from "@/lib/command-registry";
 import { cn } from "@/lib/utils";
 import { useDiffStore } from "@/stores/diffStore";
 import { getTransport, type McodeTransport, type Thread } from "@/transport";
-import type { TurnSnapshot } from "@mcode/contracts";
+import type { ReviewComparisonResult, TurnSnapshot } from "@mcode/contracts";
 import { Diff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoadStatus, OVERVIEW_ROW_CLASS, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
@@ -96,6 +96,24 @@ function summarizeGitChangeStats(
 }
 
 /**
+ * A git comparison's summary. Nothing to compare reads as no changes; an
+ * oversized comparison reports its file count without line totals; a failed
+ * one throws so the row shows an error rather than an empty summary.
+ */
+function summarizeGitComparison(result: ReviewComparisonResult): ThreadOverviewChangeSummary {
+  switch (result.status) {
+    case "ready":
+      return summarizeGitChangeStats(result.comparison.files.map((file) => file.path), result.comparison);
+    case "too-many-files":
+      return { files: result.fileCount, additions: 0, deletions: 0 };
+    case "unavailable":
+      return EMPTY_CHANGE_SUMMARY;
+    case "failed":
+      throw new Error(result.failure.summary);
+  }
+}
+
+/**
  * Sums turn snapshot diff stats for the compact thread-level change summary.
  */
 export function summarizeThreadChangeStats(
@@ -148,7 +166,9 @@ export async function resolveThreadOverviewChangeSummary({
   const latest = latestSnapshotWithChanges(resolvedSnapshots);
 
   if (latest) {
-    const stats = await transport.getSnapshotDiffStats(latest.id).catch(() => []);
+    const result = await transport.getSnapshotDiffStats(latest.id).catch(() => []);
+    // Line totals are decorative here; a missing snapshot still counts its recorded files.
+    const stats = Array.isArray(result) ? result : [];
     return {
       snapshots: resolvedSnapshots,
       summary: summarizeThreadChangeStats([latest], [stats]),
@@ -158,9 +178,8 @@ export async function resolveThreadOverviewChangeSummary({
   const working = await transport.getReviewComparison({
     workspaceId: thread.workspace_id, view: "uncommitted", threadId: thread.id,
   });
-  if (working.files.length > 0) {
-    return { snapshots: resolvedSnapshots, summary: summarizeGitChangeStats(working.files.map((file) => file.path), working) };
-  }
+  const workingSummary = summarizeGitComparison(working);
+  if (workingSummary.files > 0) return { snapshots: resolvedSnapshots, summary: workingSummary };
   const state = await transport.getReviewState(thread.workspace_id, thread.id);
   if (!state.isGitRepo || !("compare" in state.branchDefault)) {
     return { snapshots: resolvedSnapshots, summary: EMPTY_CHANGE_SUMMARY };
@@ -174,7 +193,7 @@ export async function resolveThreadOverviewChangeSummary({
   });
   return {
     snapshots: resolvedSnapshots,
-    summary: summarizeGitChangeStats(comparison.files.map((file) => file.path), comparison),
+    summary: summarizeGitComparison(comparison),
   };
 }
 

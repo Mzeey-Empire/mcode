@@ -58,7 +58,7 @@ vi.mock("@/transport", async (importOriginal) => {
       getProviderUsage: mockGetProviderUsage,
       listSnapshots: vi.fn().mockResolvedValue([]),
       getSnapshotDiffStats: vi.fn().mockResolvedValue([]),
-      getReviewComparison: vi.fn().mockResolvedValue({ files: [], additions: 0, deletions: 0 }),
+      getReviewComparison: vi.fn().mockResolvedValue({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } }),
       getReviewState: vi.fn().mockResolvedValue({ isGitRepo: false }),
       getBranchComparison: vi.fn().mockResolvedValue(null),
       readWorkspaceEnvironment: vi.fn().mockResolvedValue({
@@ -1020,7 +1020,7 @@ function makeSummaryTransport(
   return {
     listSnapshots: vi.fn().mockResolvedValue([]),
     getSnapshotDiffStats: vi.fn().mockResolvedValue([]),
-    getReviewComparison: vi.fn().mockResolvedValue({ files: [], additions: 0, deletions: 0 }),
+    getReviewComparison: vi.fn().mockResolvedValue({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } }),
     getReviewState: vi.fn().mockResolvedValue({ isGitRepo: false }),
     ...overrides,
   };
@@ -1032,7 +1032,7 @@ function makeSnapshot(overrides: Partial<TurnSnapshot>): TurnSnapshot {
     message_id: "message-1",
     thread_id: "thread-1",
     ref_before: "before",
-    ref_after: "after",
+    ref_after: "after", attempt_count: 1,
     files_changed: [],
     worktree_path: "/repo",
     created_at: new Date().toISOString(),
@@ -1046,7 +1046,7 @@ describe("resolveThreadOverviewChangeSummary", () => {
       getSnapshotDiffStats: vi.fn().mockResolvedValue([
         { filePath: "src/latest.ts", additions: 8, deletions: 2, changeType: "modified" },
       ]),
-      getReviewComparison: vi.fn().mockResolvedValue({ files: [{ path: "src/manual.ts", previousPath: null, changeType: "modified", binary: false, additions: 0, deletions: 0, untracked: false } satisfies ReviewFileChange], additions: 0, deletions: 0 }),
+      getReviewComparison: vi.fn().mockResolvedValue({ status: "ready", comparison: { files: [{ path: "src/manual.ts", previousPath: null, changeType: "modified", binary: false, additions: 0, deletions: 0, untracked: false } satisfies ReviewFileChange], additions: 0, deletions: 0 } }),
     });
 
     const result = await resolveThreadOverviewChangeSummary({
@@ -1066,10 +1066,10 @@ describe("resolveThreadOverviewChangeSummary", () => {
 
   it("counts untracked files before branch comparison", async () => {
     const transport = makeSummaryTransport({
-      getReviewComparison: vi.fn().mockResolvedValue({
+      getReviewComparison: vi.fn().mockResolvedValue({ status: "ready", comparison: {
         files: [{ path: "notes.md", previousPath: null, changeType: "added", binary: false, additions: 5, deletions: 0, untracked: true } satisfies ReviewFileChange],
         additions: 5, deletions: 0,
-      }),
+      } }),
     });
     const result = await resolveThreadOverviewChangeSummary({
       thread: { id: "thread-1", workspace_id: "ws-1" }, snapshots: [], transport,
@@ -1089,8 +1089,8 @@ describe("resolveThreadOverviewChangeSummary", () => {
         branchDefault: { base: "origin/main", compare: "feat/x" },
       }),
       getReviewComparison: vi.fn()
-        .mockResolvedValueOnce({ files: [], additions: 0, deletions: 0 })
-        .mockResolvedValueOnce({ files: [{ path: "src/branch.ts", previousPath: null, changeType: "modified", binary: false, additions: 13, deletions: 3, untracked: false } satisfies ReviewFileChange], additions: 13, deletions: 3 }),
+        .mockResolvedValueOnce({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } })
+        .mockResolvedValueOnce({ status: "ready", comparison: { files: [{ path: "src/branch.ts", previousPath: null, changeType: "modified", binary: false, additions: 13, deletions: 3, untracked: false } satisfies ReviewFileChange], additions: 13, deletions: 3 } }),
     });
     const result = await resolveThreadOverviewChangeSummary({
       thread: { id: "thread-1", workspace_id: "ws-1" }, snapshots: [], transport,

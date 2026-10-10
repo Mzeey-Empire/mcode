@@ -31,7 +31,7 @@ function snapshot(id: string, messageId: string): TurnSnapshot {
     worktree_path: null,
     message_id: messageId,
     ref_before: `${id}-before`,
-    ref_after: `${id}-after`,
+    ref_after: `${id}-after`, attempt_count: 1,
     files_changed: [],
     created_at: "2026-07-20T12:00:00.000Z",
   };

@@ -21,14 +21,14 @@ const resolved = {
 
 describe("GitDiffView", () => {
   it("renders one settled comparison and hides refresh for immutable commits", () => {
-    render(<GitDiffView resolved={resolved} threadId="thread-1" loading={false} immutable onRefresh={vi.fn()} emptyLabel="No commit yet" />);
+    render(<GitDiffView {...resolved} threadId="thread-1" refreshing={false} immutable onRefresh={vi.fn()} />);
 
     expect(screen.getByTestId("file-list")).toHaveTextContent("selected.ts");
     expect(screen.getByTestId("file-list")).toHaveAttribute("data-refreshable", "false");
   });
 
   it("keeps the settled comparison visible while its replacement loads", () => {
-    render(<GitDiffView resolved={resolved} threadId="thread-1" loading immutable={false} onRefresh={vi.fn()} emptyLabel="No changes" />);
+    render(<GitDiffView {...resolved} threadId="thread-1" refreshing immutable={false} onRefresh={vi.fn()} />);
 
     expect(screen.getByTestId("file-list")).toHaveTextContent("selected.ts");
     expect(screen.getByTestId("file-list")).toHaveAttribute("data-refreshing", "true");
