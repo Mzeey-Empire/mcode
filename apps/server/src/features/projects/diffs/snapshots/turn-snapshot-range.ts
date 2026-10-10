@@ -1,10 +1,11 @@
 import type { Database } from "bun:sqlite";
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { inject, injectable } from "tsyringe";
 import type { TurnSnapshot } from "@mcode/contracts";
 import { canonicalAgentItems, canonicalAgentTurns, messages } from "../../../../runtime/persistence/sqlite/schema.js";
 import { TurnSnapshotRepo } from "../../../agents/turns/persistence/turn-snapshot-repo.js";
+import { deriveTurnAssistantMessageId } from "../../../agents/turns/turn-assistant-message-id.js";
 import { attributedWorkspacePaths, collectAttributedWorkspacePathGroups } from "./snapshot-attribution.js";
 
 /** A whole logical turn, including attempts whose snapshot was never written. */
@@ -54,10 +55,10 @@ export class TurnSnapshotRangeReader {
     const attempts = orm.select().from(canonicalAgentTurns).where(eq(canonicalAgentTurns.threadId, threadId))
       .orderBy(asc(canonicalAgentTurns.createdAt), asc(sql`${canonicalAgentTurns}.rowid`)).all();
     const ordered = orm.select({ id: messages.id, role: messages.role, timestamp: messages.timestamp,
-      executionId: messages.outcomeExecutionId, turnId: sql<string | null>`coalesce(${messages.sourceTurnId}, ${canonicalAgentItems.turnId})`,
+      executionId: messages.outcomeExecutionId, turnId: sql<string | null>`coalesce(${canonicalAgentItems.turnId}, ${messages.sourceTurnId})`,
     }).from(messages).leftJoin(canonicalAgentItems, eq(canonicalAgentItems.id, sql`'message:' || ${messages.id}`))
-      .where(eq(messages.threadId, threadId)).orderBy(asc(messages.sequence), asc(messages.id)).all();
-    return collectTurns(ordered, attempts, this.snapshots.listByThread(threadId));
+      .where(and(eq(messages.threadId, threadId), eq(messages.isInternal, 0))).orderBy(asc(messages.sequence), asc(messages.id)).all();
+    return collectTurns(threadId, ordered, attempts, this.snapshots.listByThread(threadId));
   }
 
   /** Hide every remaining row of an incomplete turn from cumulative readers. */
@@ -67,7 +68,7 @@ export class TurnSnapshotRangeReader {
   }
 }
 
-function collectTurns(ordered: OrderedMessage[], attempts: Attempt[], snapshots: TurnSnapshot[]): SnapshotTurn[] {
+function collectTurns(threadId: string, ordered: OrderedMessage[], attempts: Attempt[], snapshots: TurnSnapshot[]): SnapshotTurn[] {
   const byExecution = new Map(attempts.map((attempt) => [attempt.executionId, attempt]));
   const byId = new Map(attempts.map((attempt) => [attempt.id, attempt]));
   const groups = groupMessages(ordered, byExecution, byId);
@@ -79,7 +80,7 @@ function collectTurns(ordered: OrderedMessage[], attempts: Attempt[], snapshots:
     members.push(attempt);
     attemptsByTurn.set(key, members);
   }
-  return [...groups.entries()].flatMap(([key, group]) => snapshotTurn(group, attemptsByTurn.get(key) ?? [], byExecution, byMessage));
+  return [...groups.entries()].flatMap(([key, group]) => snapshotTurn(threadId, group, attemptsByTurn.get(key) ?? [], byExecution, byMessage));
 }
 
 function groupMessages(ordered: OrderedMessage[], byExecution: Map<string, Attempt>, byId: Map<string, Attempt>): Map<string, MessageGroup> {
@@ -111,8 +112,15 @@ function turnKey(attempt: Attempt): string {
   return attempt.attemptOf ?? attempt.id;
 }
 
-function snapshotTurn(group: MessageGroup, members: Attempt[], byExecution: Map<string, Attempt>, byMessage: Map<string, TurnSnapshot>): SnapshotTurn[] {
+function snapshotTurn(threadId: string, group: MessageGroup, members: Attempt[], byExecution: Map<string, Attempt>, byMessage: Map<string, TurnSnapshot>): SnapshotTurn[] {
   const assistant = group.messages.filter((message) => message.role === "assistant");
+  const latestAttempt = members.at(-1);
+  const live = isLive(latestAttempt);
+  const user = group.messages.filter((message) => message.role === "user").at(-1);
+  if (latestAttempt && live && user) {
+    // Live assistant rows are internal and have no execution identity until settlement.
+    assistant.push({ ...user, id: deriveTurnAssistantMessageId(threadId, user.id), role: "assistant", executionId: latestAttempt.executionId });
+  }
   const latest = assistant.at(-1);
   if (!latest) return [];
   const complete = assistant.every((message) => {
@@ -124,7 +132,7 @@ function snapshotTurn(group: MessageGroup, members: Attempt[], byExecution: Map<
     return row && (message === latest || attributedWorkspacePaths(row).length > 0) ? [row] : [];
   });
   return [{ messageId: latest.id, messageIds: assistant.map((message) => message.id), ordinal: group.ordinal,
-    createdAt: group.createdAt, phase: isLive(members.at(-1)) ? "live" as const : "settled" as const, complete, rows }];
+    createdAt: group.createdAt, phase: live ? "live" as const : "settled" as const, complete, rows }];
 }
 
 function isLive(attempt: Attempt | undefined): boolean {

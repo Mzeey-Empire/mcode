@@ -3,7 +3,7 @@ import type { z } from "zod";
 import type { TurnDiffService } from "../../../agents/turns/turn-diff-service.js";
 import { parseTurnDiff } from "../../../agents/turns/turn-diff-patch.js";
 import type { StoredTurnDiff } from "../../../agents/turns/persistence/turn-diff-repo.js";
-import { readSnapshotRangeComparison, readSnapshotRangeDiff, validateSnapshotRange, type SnapshotRouterDeps } from "./snapshot-rpc.js";
+import { readSnapshotRangeComparison, readSnapshotRangeDiff, type SnapshotRouterDeps } from "./snapshot-rpc.js";
 import { reviewComparisonFailure } from "../../git/review-comparison-errors.js";
 import { snapshotRange, type SnapshotTurn, type TurnSnapshotRange } from "../snapshots/turn-snapshot-range.js";
 
@@ -35,7 +35,9 @@ async function comparison(deps: TurnDiffRouterDeps, threadId: string, includeLiv
     if (live) return { status: "ready", comparison: live };
   }
   const selected = messageId ?? latestSettledMessage(deps, threadId);
-  if (!selected) return { status: "unavailable", reason: "snapshot-expired" };
+  if (!selected) return deps.turnSnapshotRanges.listTurns(threadId).length === 0
+    ? { status: "ready", comparison: { files: [], additions: 0, deletions: 0 } }
+    : { status: "unavailable", reason: "snapshot-expired" };
   const range = deps.turnSnapshotRanges.turnSnapshotRange(threadId, selected);
   if (range.status !== "ready") return range;
   return settledComparison(deps, threadId, range);
@@ -52,8 +54,6 @@ async function settledComparison(deps: TurnDiffRouterDeps, threadId: string, ran
   const last = range.rows.at(-1)!;
   const record = deps.turnDiffs.forMessage(threadId, last.message_id);
   if (range.rows.length === 1 && record && record.source !== "git") {
-    const cwd = await validateSnapshotRange(deps, range);
-    if (typeof cwd !== "string") return cwd;
     try {
       return { status: "ready", comparison: nativeComparison(record) };
     } catch (error) {
@@ -108,8 +108,6 @@ async function fileDiff(deps: TurnDiffRouterDeps, params: TurnDiffParams["turnDi
 async function settledFileDiff(deps: TurnDiffRouterDeps, params: TurnDiffParams["turnDiff.getFileDiff"], range: Extract<TurnSnapshotRange, { status: "ready" }>): Promise<ReviewFileDiffResult> {
   const latest = deps.turnDiffs.forMessage(params.threadId, range.rows.at(-1)!.message_id);
   if (range.rows.length !== 1 || !latest || latest.source === "git") return readSnapshotRangeDiff(deps, range, params.filePath);
-  const cwd = await validateSnapshotRange(deps, range);
-  if (typeof cwd !== "string") return cwd;
   if (!latest.patch) return "";
   const parsed = parseTurnDiff(latest.patch);
   return parsed ? parsed.filePatches.get(params.filePath) ?? "" : reviewComparisonFailure(new Error("Invalid stored turn diff"));

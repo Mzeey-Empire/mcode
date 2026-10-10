@@ -66,11 +66,12 @@ function rangeForSnapshot(deps: SnapshotRouterDeps, snapshotId: string): TurnSna
 }
 
 function cumulativeRange(deps: SnapshotRouterDeps, threadId: string): TurnSnapshotRange {
-  return snapshotRange(deps.turnSnapshotRanges.listSnapshots(threadId));
+  return snapshotRange(deps.turnSnapshotRanges.listSnapshots(threadId).filter((row) => row.ref_before && row.ref_after));
 }
 
-/** Resolve the original checkout and validate refs before choosing native or Git evidence. */
+/** Git evidence requires the original checkout and retained refs. */
 export async function validateSnapshotRange(deps: SnapshotRouterDeps, range: ReadyRange): Promise<string | Exclude<ReviewComparisonResult, { status: "ready" }>> {
+  if (!range.refBefore || !range.refAfter) return { status: "unavailable", reason: "snapshot-expired" };
   try {
     const cwd = resolveSnapshotCwd(deps, range.rows[0]);
     assertReviewWorktree(cwd);

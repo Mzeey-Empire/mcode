@@ -3,7 +3,8 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { canonicalAgentIngestCheckpoints, canonicalAgentThreads, canonicalAgentTurns, messages, threads, workspaces } from "../../../../../runtime/persistence/sqlite/schema.js";
+import { canonicalAgentIngestCheckpoints, canonicalAgentItems, canonicalAgentThreads, canonicalAgentTurns, messages, threads, workspaces } from "../../../../../runtime/persistence/sqlite/schema.js";
+import { deriveTurnAssistantMessageId } from "../../../../agents/turns/turn-assistant-message-id.js";
 import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../../../agents/__tests__/agent-storage-fixture.js";
 import { TurnSnapshotRepo } from "../../../../agents/turns/persistence/turn-snapshot-repo.js";
 import { TurnDiffRepo } from "../../../../agents/turns/persistence/turn-diff-repo.js";
@@ -42,17 +43,20 @@ export async function createSnapshotRangeFixture() {
   async function attempt(input: { id: string; attemptOf?: string; edits?: Record<string, string>; missing?: boolean; noAssistant?: boolean; status?: string; ageDays?: number }) {
     const date = new Date(Date.now() - (input.ageDays ?? 0) * 86_400_000).toISOString();
     const executionId = `execution-${input.id}`;
-    const messageId = `message-${input.id}`;
     const status = input.status ?? "Completed";
-    orm.insert(canonicalAgentTurns).values({ id: input.id, threadId: "thread", executionId, attemptOf: input.attemptOf ?? null,
+    const live = ["Running", "Pending"].includes(status);
+    const messageId = live ? deriveTurnAssistantMessageId("thread", `user-${input.id}`) : `message-${input.id}`;
+    orm.insert(canonicalAgentTurns).values({ id: input.id, threadId: "thread", executionId, attemptOf: input.attemptOf,
       status, triggerJson: '{"kind":"user"}', permissionMode: "supervised", createdAt: date, updatedAt: date }).run();
     orm.insert(canonicalAgentIngestCheckpoints).values({ executionId, threadId: "thread", turnId: input.id,
       phase: status.toLowerCase(), terminalOutcome: null,
       lastAcceptedSequence: 1, lastDurableSequence: 1, updatedAt: date }).run();
     orm.insert(messages).values({ id: `user-${input.id}`, threadId: "thread", sourceTurnId: input.id,
       role: "user", content: "Edit files", sequence: ++sequence, timestamp: date }).run();
+    orm.insert(canonicalAgentItems).values({ id: `message:user-${input.id}`, threadId: "thread", turnId: input.id,
+      kind: "user-message", payloadJson: "{}", createdAt: date, updatedAt: date }).run();
     if (input.noAssistant) return null;
-    orm.insert(messages).values({ id: messageId, threadId: "thread", outcomeExecutionId: executionId,
+    orm.insert(messages).values({ id: messageId, threadId: "thread", outcomeExecutionId: live ? null : executionId, isInternal: Number(live),
       role: "assistant", content: "Result", sequence: ++sequence, timestamp: date }).run();
     const before = await snapshotService.captureRef(directory);
     for (const [path, text] of Object.entries(input.edits ?? {})) NodeFS.writeFileSync(NodePath.join(directory, path), text);
@@ -63,8 +67,8 @@ export async function createSnapshotRangeFixture() {
     db.prepare("UPDATE turn_snapshots SET created_at = ? WHERE id = ?").run(date, snapshot.id);
     return snapshot;
   }
-  function native(id: string, patch: string) {
-    new TurnDiffStore(db).create({ id: `native-${id}`, thread_id: "thread", message_id: `message-${id}`, source: "native", patch, revision: 1 });
+  function native(id: string, patch: string, source: "native" | "tracked" = "native") {
+    new TurnDiffStore(db).create({ id: `native-${id}`, thread_id: "thread", message_id: `message-${id}`, source, patch, revision: 1 });
   }
   return { directory, db, deps, ranges, snapshots, snapshotService, attempt, native,
     async close() { await closeAgentStorageTestDatabases(); NodeFS.rmSync(directory, { recursive: true, force: true }); } };

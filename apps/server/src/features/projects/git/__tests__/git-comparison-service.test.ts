@@ -46,6 +46,8 @@ describe("GitComparisonService unified output", () => {
   });
 
   it.each([
+    { error: Object.assign(new Error("Git command timed out after 5000 ms"), { killed: true, stderr: "" }), kind: "timeout", detail: "Git command timed out after 5000 ms" },
+    { error: Object.assign(new Error("Git command timed out after 5000 ms"), { killed: true, stderr: " \n" }), kind: "timeout", detail: "Git command timed out after 5000 ms" },
     { error: Object.assign(new Error("timeout"), { killed: true, stderr: "git timed out\n" }), kind: "timeout", detail: "git timed out\n" },
     { error: Object.assign(new Error("exit 128"), { stderr: "fatal: bad object\n" }), kind: "git-error", detail: "fatal: bad object\n" },
   ])("returns $kind and preserves raw stderr", async ({ error, kind, detail }) => {
@@ -58,6 +60,28 @@ describe("GitComparisonService unified output", () => {
       { stdout: Array.from({ length: 10_001 }, (_, index) => `M\0file-${index}.ts\0`).join(""), stderr: "" });
     fake.setResponse(["diff", "--shortstat", "--find-renames", "--find-copies", "--cached"], { stdout: " 12480 files changed, 12480 insertions(+)\n", stderr: "" });
     expect(await service.readReviewComparison(workspaceId, "staged", {})).toEqual({ status: "too-many-files", fileCount: 12_480, limit: 10_000 });
+  });
+
+  it("rejects too many untracked files before preparing a temporary index", async () => {
+    fake.setResponse(["ls-files", "--others", "--exclude-standard", "-z"],
+      { stdout: Array.from({ length: 10_001 }, (_, index) => `file-${index}.ts\0`).join(""), stderr: "" });
+    expect(await service.readReviewComparison(workspaceId, "unstaged", {}))
+      .toEqual({ status: "too-many-files", fileCount: 10_001, limit: 10_000 });
+    expect(fake.calls.map((call) => call.args)).toEqual([["-C", process.cwd(), "ls-files", "--others", "--exclude-standard", "-z"]]);
+  });
+
+  it.each([
+    { error: Object.assign(new Error("Git command timed out after 5000 ms"), { killed: true, code: null, stderr: "" }), kind: "timeout" },
+    { error: Object.assign(new Error("not a repository"), { code: 128, stderr: "fatal: not a git repository" }), kind: "git-error" },
+  ])("preserves $kind from the HEAD probe", async ({ error, kind }) => {
+    fake.setResponse(["rev-parse", "--verify", "--quiet", "HEAD"], error);
+    expect(await service.readReviewComparison(workspaceId, "uncommitted", {}))
+      .toMatchObject({ status: "failed", failure: { kind } });
+  });
+
+  it("recognizes only the quiet missing-HEAD exit as an unborn branch", async () => {
+    fake.setResponse(["rev-parse", "--verify", "--quiet", "HEAD"], Object.assign(new Error("exit 1"), { code: 1, stderr: "" }));
+    expect(await service.readReviewComparison(workspaceId, "branch", {})).toEqual({ status: "unavailable", reason: "unborn" });
   });
 
   it("returns unsafe-ref before executing the comparison", async () => {

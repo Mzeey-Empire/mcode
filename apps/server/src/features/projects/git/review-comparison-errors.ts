@@ -31,7 +31,7 @@ export function reviewComparisonFailure(error: unknown): Exclude<ReviewCompariso
 }
 
 function errorDetail(error: unknown): string {
-  if (typeof error === "object" && error !== null && "stderr" in error && typeof error.stderr === "string") return error.stderr;
+  if (typeof error === "object" && error !== null && "stderr" in error && typeof error.stderr === "string" && error.stderr.trim()) return error.stderr;
   return error instanceof Error ? error.message : String(error);
 }
 

@@ -225,6 +225,7 @@ export class GitComparisonService {
     if (filePath) args.push("--", `:(literal)${filePath}`);
     const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000 });
     const entries = stdout.split("\0").filter(Boolean);
+    assertReviewComparisonFileCount(entries.length);
     const paths = entries.filter((path) => !path.endsWith("/"));
     const index = await this.gitExecutor.exec(["-C", cwd, "rev-parse", "--git-path", "index"]);
     const source = NodePath.resolve(cwd, index.stdout.trim());
@@ -469,8 +470,10 @@ export class GitComparisonService {
     try {
       await this.gitExecutor.exec(["-C", repoPath, "rev-parse", "--verify", "--quiet", "HEAD"], { timeout: 5_000 });
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === 1
+        && "stderr" in error && error.stderr === "" && !("killed" in error && error.killed === true)) return false;
+      throw error;
     }
   }
 

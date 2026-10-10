@@ -1489,7 +1489,6 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({}),
     result: z.array(ProviderAvailabilitySchema()),
   },
-  /** Retrieve the stored diff summary for a thread (null if none exists). */
   /**
    * v1 stub for regenerating a handoff document via the live AI path.
    * Live regeneration is deferred to a follow-on plan.
@@ -1537,7 +1536,6 @@ export const WS_METHODS = lazySchema(() => ({
       }),
     }).nullable(),
   },
-  /** Generate (or regenerate) an AI-powered diff summary for a thread. */
   /** Generate a stateless one-line conversational recap from caller-supplied messages. */
   "recap.generate": {
     params: z.object({

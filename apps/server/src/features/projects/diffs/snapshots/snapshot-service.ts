@@ -363,8 +363,11 @@ export class SnapshotService {
         timeout: RealGitExecutor.DEFAULT_TIMEOUT,
       });
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      if (error instanceof Error && "stderr" in error && typeof error.stderr === "string"
+        && /^fatal: (Not a valid object name|git cat-file: could not get object info)\b/m.test(error.stderr)
+        && !("killed" in error && error.killed === true)) return false;
+      throw error;
     }
   }
 

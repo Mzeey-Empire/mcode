@@ -119,7 +119,7 @@ const gitHandlers: GitHandlerMap = {
         params.staged,
         params.filePath,
         params.maxLines,
-        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
+        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
         params.untracked,
         params.previousPath,
       )
@@ -161,7 +161,7 @@ const gitHandlers: GitHandlerMap = {
   },
   "git.reviewState": (deps, params) => {
     if (!isGitWorkspace(deps, params.workspaceId)) return { isGitRepo: false };
-    const cwd = resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId);
+    const cwd = resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true);
     const thread = params.threadId ? deps.threadRepo.findById(params.threadId) : null;
     return deps.gitComparison.readReviewState(params.workspaceId, cwd,
       thread?.checkout_state === "branchless" ? thread.base_branch ?? thread.branch : null);
@@ -172,7 +172,7 @@ const gitHandlers: GitHandlerMap = {
         params.workspaceId,
         params.view,
         { base: params.base, target: params.target, sha: params.sha },
-        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
+        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
       )
       : { status: "unavailable", reason: "no-base" },
   "git.push": routeGitPush,
@@ -190,7 +190,8 @@ export async function routeGitRpc<Method extends GitRpcMethod>(
   deps: GitRouterDeps,
 ): Promise<unknown> {
   try {
-    if ("threadId" in params && params.threadId) resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId);
+    const allowDraftThread = method === "git.reviewComparison" || method === "git.reviewState" || method === "git.workingTreeDiff";
+    if ("threadId" in params && params.threadId) resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, allowDraftThread);
     return await gitHandlers[method](deps, params);
   } catch (error) {
     if (method === "git.reviewComparison" && error instanceof ReviewWorktreeMissingError) return reviewComparisonFailure(error);
@@ -235,12 +236,15 @@ function resolveWorkspaceRepoPath(
   deps: GitRouterDeps,
   workspaceId: string,
   threadId?: string,
+  allowDraftThread = false,
 ): string {
   const workspace = deps.workspaceService.findById(workspaceId);
   if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
   if (!threadId) return workspace.path;
 
   const thread = deps.threadRepo.findById(threadId);
+  // Review can open before the composer persists its draft thread.
+  if (!thread && allowDraftThread) return workspace.path;
   if (!thread) throw new Error(`Thread not found: ${threadId}`);
   if (thread.workspace_id !== workspaceId) {
     throw new Error(`Thread ${threadId} does not belong to workspace ${workspaceId}`);

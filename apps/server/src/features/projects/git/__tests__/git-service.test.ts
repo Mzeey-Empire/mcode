@@ -33,6 +33,10 @@ import type { WorktreeDirectoryRemover } from "../../worktrees/worktree-director
 import { createMockGitExecutor } from "../execution/__tests__/mock-git-executor.js";
 
 describe("GitComparisonService.readReviewComparison", () => {
+  beforeEach(() => {
+    mockExistsSync.mockReturnValue(true);
+  });
+
   it("returns one batched status result for changed, renamed, copied, and binary files", async () => {
     const mock = createMockGitExecutor();
     mock.execFn.mockImplementation(async (args) => {
@@ -51,7 +55,7 @@ describe("GitComparisonService.readReviewComparison", () => {
 
     const result = await service.readReviewComparison("ws-1", "staged", {}, "/repo");
 
-    expect(result).toEqual({
+    expect(result).toEqual({ status: "ready", comparison: {
       files: [
         { path: "assets/logo.png", previousPath: null, changeType: "modified", binary: true, additions: null, deletions: null, untracked: false },
         { path: "src/added.ts", previousPath: null, changeType: "added", binary: false, additions: 2, deletions: 0, untracked: false },
@@ -61,7 +65,7 @@ describe("GitComparisonService.readReviewComparison", () => {
       ],
       additions: 2,
       deletions: 3,
-    });
+    } });
     expect(mock.execFn).toHaveBeenCalledTimes(2);
   });
 
@@ -73,36 +77,40 @@ describe("GitComparisonService.readReviewComparison", () => {
     const service = new GitComparisonService({} as WorkspaceRepo, mock.executor);
 
     await expect(service.readReviewComparison("ws-1", "staged", {}, "/repo")).resolves.toMatchObject({
-      files: [{ path: "src/name\twith-tab.bin", binary: true }],
+      status: "ready",
+      comparison: { files: [{ path: "src/name\twith-tab.bin", binary: true }] },
     });
   });
 
-  it("rejects comparison results above the production file bound", async () => {
+  it("reports comparison results above the production file bound as too many files", async () => {
     const mock = createMockGitExecutor();
     const names = Array.from({ length: 10_001 }, (_, index) => `M\0file-${index}.ts\0`).join("");
-    mock.execFn.mockImplementation(async (args) => args.includes("--name-status")
-      ? { stdout: names, stderr: "" }
-      : { stdout: "", stderr: "" });
+    mock.execFn.mockImplementation(async (args) => {
+      if (args.includes("--name-status")) return { stdout: names, stderr: "" };
+      if (args.includes("--shortstat")) return { stdout: " 12000 files changed, 40 insertions(+)\n", stderr: "" };
+      return { stdout: "", stderr: "" };
+    });
     const service = new GitComparisonService({} as WorkspaceRepo, mock.executor);
 
-    await expect(service.readReviewComparison("ws-1", "staged", {}, "/repo")).rejects.toThrow(
-      "Review comparison is limited to 10000 files",
-    );
+    await expect(service.readReviewComparison("ws-1", "staged", {}, "/repo")).resolves.toEqual({
+      status: "too-many-files", fileCount: 12_000, limit: 10_000,
+    });
   });
 
-  it("propagates mutable comparison failures", async () => {
+  it("reports mutable comparison failures with their detail", async () => {
     const mock = createMockGitExecutor();
     mock.execFn.mockRejectedValue(new Error("git unavailable"));
     const service = new GitComparisonService({} as WorkspaceRepo, mock.executor);
 
-    await expect(service.readReviewComparison("ws-1", "staged", {}, "/repo")).rejects.toThrow(
-      "git unavailable",
-    );
+    await expect(service.readReviewComparison("ws-1", "staged", {}, "/repo")).resolves.toMatchObject({
+      status: "failed", failure: { kind: "git-error", detail: expect.stringContaining("git unavailable") },
+    });
   });
 
   it("retries a root commit against the empty tree", async () => {
     const mock = createMockGitExecutor();
     mock.execFn.mockImplementation(async (args) => {
+      if (args.includes("rev-list")) return { stdout: `${"a".repeat(40)}\n`, stderr: "" };
       if (!args.includes("4b825dc642cb6eb9a060e54bf8d69288fbee4904")) {
         throw new Error("unknown revision sha~1");
       }
@@ -113,21 +121,20 @@ describe("GitComparisonService.readReviewComparison", () => {
     const service = new GitComparisonService({} as WorkspaceRepo, mock.executor);
 
     await expect(service.readReviewComparison("ws-1", "commit", { sha: "abc1234" }, "/repo")).resolves.toMatchObject({
-      files: [{ path: "root.ts", changeType: "added" }],
-      additions: 3,
-      deletions: 0,
+      status: "ready",
+      comparison: { files: [{ path: "root.ts", changeType: "added" }], additions: 3, deletions: 0 },
     });
   });
 
-  it("propagates a root commit fallback failure", async () => {
+  it("reports a root commit fallback failure", async () => {
     const mock = createMockGitExecutor();
     mock.execFn.mockRejectedValue(new Error("git unavailable"));
     const service = new GitComparisonService({} as WorkspaceRepo, mock.executor);
 
-    await expect(service.readReviewComparison("ws-1", "commit", { sha: "abc1234" }, "/repo")).rejects.toThrow(
-      "git unavailable",
-    );
-    expect(mock.execFn).toHaveBeenCalledTimes(4);
+    await expect(service.readReviewComparison("ws-1", "commit", { sha: "abc1234" }, "/repo")).resolves.toMatchObject({
+      status: "failed", failure: { kind: "git-error", detail: expect.stringContaining("git unavailable") },
+    });
+    expect(mock.execFn).toHaveBeenCalledWith(expect.arrayContaining(["rev-list"]), expect.anything());
   });
 });
 

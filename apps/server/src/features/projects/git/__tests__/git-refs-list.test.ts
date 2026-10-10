@@ -86,7 +86,7 @@ beforeAll(() => {
 afterAll(() => NodeFS.rmSync(directory, { recursive: true, force: true }));
 
 describe("GitRepositoryService.listRefsAt", () => {
-  it("reads unscoped Review from the workspace root and rejects missing or foreign threads", { timeout: 30_000 }, async () => {
+  it("reads Review drafts from the workspace root and rejects foreign persisted threads", { timeout: 30_000 }, async () => {
     const database = createOwnedTestDatabase();
     const file = NodePath.join(root, "review-draft.txt");
     NodeFS.writeFileSync(file, "workspace root\n");
@@ -100,7 +100,7 @@ describe("GitRepositoryService.listRefsAt", () => {
         ...routerDeps(workspaceRepo, threadRepo),
         gitComparison: new GitComparisonService(workspaceRepo, new RealGitExecutor()),
       };
-      const params = { workspaceId: workspace.id };
+      const params = { workspaceId: workspace.id, threadId: "draft-thread" };
       expect(await routeGitRpc("git.workingTreeDiff", {
         ...params, staged: false, untracked: true, filePath: "review-draft.txt",
       }, deps)).toContain("+workspace root");
@@ -110,7 +110,6 @@ describe("GitRepositoryService.listRefsAt", () => {
       expect(await routeGitRpc("git.reviewComparison", { ...params, view: "unstaged" }, deps)).toMatchObject({
         status: "ready", comparison: { files: [{ path: "review-draft.txt", untracked: true, additions: 1 }] },
       });
-      await expect(routeGitRpc("git.reviewComparison", { ...params, threadId: "draft-thread", view: "unstaged" }, deps)).rejects.toThrow();
       const mismatch = { workspaceId: workspace.id, threadId: foreign.id };
       await expect(routeGitRpc("git.workingTreeDiff", { ...mismatch, staged: false }, deps)).rejects.toThrow(/does not belong/);
       await expect(routeGitRpc("git.reviewState", mismatch, deps)).rejects.toThrow(/does not belong/);
@@ -143,9 +142,9 @@ describe("GitRepositoryService.listRefsAt", () => {
       }, deps)).rejects.toThrow();
       const nonRepo = await routeGitRpc("git.refs.list", { workspaceId: other.id, purpose: "new-thread" }, deps);
       expect(nonRepo).toMatchObject({ ok: false, error: { code: "not_a_repository" } });
-      await expect(routeGitRpc("git.reviewState", {
+      expect(await routeGitRpc("git.reviewState", {
         workspaceId: other.id, threadId: "missing-thread",
-      }, deps)).rejects.toThrow();
+      }, deps)).toEqual({ isGitRepo: false });
       expect(await routeGitRpc("git.reviewState", { workspaceId: other.id }, deps)).toEqual({ isGitRepo: false });
     } finally { await database.close(); }
   });

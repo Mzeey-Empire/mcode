@@ -4,6 +4,7 @@ import { ReviewComparisonResultSchema, TurnSnapshotSchema } from "@mcode/contrac
 import { routeTurnDiffRpc } from "../../transport/turn-diff-rpc.js";
 import { routeSnapshotRpc } from "../../transport/snapshot-rpc.js";
 import { createSnapshotRangeFixture } from "./turn-snapshot-range-fixture.js";
+import { deriveTurnAssistantMessageId } from "../../../../agents/turns/turn-assistant-message-id.js";
 
 const PATCH = "diff --git a/c.ts b/c.ts\nnew file mode 100644\n--- /dev/null\n+++ b/c.ts\n@@ -0,0 +1 @@\n+c\n";
 
@@ -121,7 +122,23 @@ describe("whole-turn snapshot ranges with real Git", { timeout: 30_000 }, () => 
       status: "ready", comparison: { files: [{ path: "c.ts" }], turnDiff: { phase: "live", source: "native" } },
     });
     expect(await routeTurnDiffRpc("turnDiff.listTurns", { threadId: "thread" }, fixture.deps)).toMatchObject([
-      { messageId: "message-two", ordinal: 1, phase: "live", fileCount: 1, availability: "available", evidence: "native" },
+      { messageId: deriveTurnAssistantMessageId("thread", "user-two"), ordinal: 1, phase: "live", fileCount: 1, availability: "available", evidence: "native" },
+    ]);
+  });
+
+  it("lists the first running turn once before its internal assistant settles", async () => {
+    await fixture.attempt({ id: "one", status: "Running", missing: true });
+    expect(await routeTurnDiffRpc("turnDiff.listTurns", { threadId: "thread" }, fixture.deps)).toMatchObject([
+      { messageId: deriveTurnAssistantMessageId("thread", "user-one"), ordinal: 1, phase: "live" },
+    ]);
+  });
+
+  it("numbers copied messages using the destination thread's canonical turns", async () => {
+    await fixture.attempt({ id: "one" });
+    await fixture.attempt({ id: "two" });
+    fixture.db.prepare("UPDATE messages SET source_turn_id = 'origin-turn' WHERE role = 'user'").run();
+    expect(await routeTurnDiffRpc("turnDiff.listTurns", { threadId: "thread" }, fixture.deps)).toMatchObject([
+      { messageId: "message-one", ordinal: 1 }, { messageId: "message-two", ordinal: 2 },
     ]);
   });
 });

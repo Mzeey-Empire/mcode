@@ -40,8 +40,12 @@ describe("strict thread checkout resolution", () => {
     expect(executor.calls).toEqual([]);
   });
 
-  it("rejects unknown thread ids instead of treating them as workspace reads", async () => {
-    await expect(routeGitRpc("git.reviewComparison", { workspaceId: "ws", threadId: "unknown", view: "staged" }, deps)).rejects.toThrow();
+  it("allows draft Review reads but keeps other unknown-thread requests strict", async () => {
+    expect(await routeGitRpc("git.reviewComparison", { workspaceId: "ws", threadId: "draft", view: "staged" }, deps))
+      .toEqual({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } });
+    expect(executor.calls.every((call) => call.args[1] === fixture.directory)).toBe(true);
+    executor.reset();
+    await expect(routeGitRpc("git.log", { workspaceId: "ws", threadId: "unknown" }, deps)).rejects.toThrow();
     expect(executor.calls).toEqual([]);
   });
 
