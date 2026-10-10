@@ -124,7 +124,7 @@ function TaskRow({ progress, expanded, listId, chevronRef, onToggle }: TaskRowPr
         ref={chevronRef}
         aria-label={expanded ? "Hide tasks" : "Show tasks"}
         aria-expanded={expanded}
-        aria-controls={listId}
+        aria-controls={expanded ? listId : undefined}
         className="shrink-0 text-muted"
       >
         <ChevronUp
