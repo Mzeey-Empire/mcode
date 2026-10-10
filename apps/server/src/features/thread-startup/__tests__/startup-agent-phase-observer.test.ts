@@ -83,6 +83,25 @@ describe("StartupAgentPhaseObserver", () => {
     expect(startups.startup.state).toBe("running");
   });
 
+  it("keeps cancellation when a provider frame commits before the stopped turn", async () => {
+    const { startups, commit } = harness();
+    startups.startup = { ...startups.startup, cancellation: "requested" };
+    await commit({ type: "turn.provider-started", at: AT },
+      { type: "turn.cancelled", endedAt: AT, reason: "User stopped" });
+
+    expect(startups.calls).toEqual([{ kind: "markCancelled" }]);
+    expect(startups.startup.state).toBe("cancelled");
+  });
+
+  it("completes a completed turn even when cancellation was requested", async () => {
+    const { startups, commit } = harness();
+    startups.startup = { ...startups.startup, cancellation: "requested" };
+    await commit({ type: "turn.completed", endedAt: AT });
+
+    expect(startups.calls).toEqual([{ kind: "complete" }]);
+    expect(startups.startup.state).toBe("completed");
+  });
+
   it("fails the startup with the provider error when the turn errors before any frame", async () => {
     const { startups, commit } = harness();
     await commit({ type: "turn.errored", endedAt: AT, error: `  ${"x".repeat(2_100)}  ` });

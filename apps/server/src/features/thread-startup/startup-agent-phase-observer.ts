@@ -30,14 +30,16 @@ function inAgentPhase(startup: ThreadStartup | null): startup is ThreadStartup {
 const complete: StartupTransition = (startups, startupId) => startups.complete(startupId);
 
 /**
- * Turn facts that settle the agent phase. The first provider frame completes it; a turn that ends before any frame
+ * Turn facts that settle the agent phase. The first provider frame honours cancellation intent; a turn that ends before any frame
  * reports how it ended. A completed turn also completes the startup: the provider-started event leads every batch
  * that carries a frame, so this only matters for a turn finished from saved state, which must not leave the
  * spinner running.
  */
 function transitionFor(event: CanonicalAgentEvent): StartupTransition | undefined {
   switch (event.type) {
-    case "turn.provider-started": return complete;
+    case "turn.provider-started": return (startups, startupId) => startups.get(startupId)?.cancellation === "requested"
+      ? startups.markCancelled(startupId)
+      : startups.complete(startupId);
     case "turn.completed": return complete;
     case "turn.cancelled": return (startups, startupId) => startups.markCancelled(startupId);
     case "turn.errored": return failure("Agent failed to start", event.error);
