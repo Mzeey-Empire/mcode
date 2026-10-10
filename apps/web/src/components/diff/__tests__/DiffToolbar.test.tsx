@@ -57,7 +57,7 @@ describe("DiffToolbar review availability", () => {
     );
     const { rerender } = render(toolbar(true));
     await userEvent.setup().click(screen.getByRole("button", { name: "Select review view" }));
-    expect(await screen.findByTestId("review-view-commit")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("review-view-commit")).toHaveAttribute("aria-disabled", "true"));
 
     rerender(toolbar(false));
     await waitFor(() => expect(useDiffStore.getState().reviewViewMenuOpen).toBe(false));

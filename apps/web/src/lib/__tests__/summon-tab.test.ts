@@ -91,7 +91,7 @@ describe("summonTab", () => {
       useDiffStore.getState().closeRightPanelTabInstance(WID, TID, "terminal:pty-1");
       useTerminalStore.getState().removeTerminal("pty-1");
       expect(panel()).toMatchObject({
-        visible: true,
+        visible: false,
         activeTab: "tasks",
         openTabs: [],
       });
