@@ -2828,31 +2828,15 @@ export class CanonicalAgentStore {
     draft: CanonicalAgentEventDraft,
     stored: CanonicalAgentEventEnvelope,
   ): void {
-    const storedPayload = stored.payload.type === "thread.recorded"
-      && draft.payload.type === "thread.recorded"
-      ? {
-          ...stored.payload,
-          thread: {
-            ...stored.payload.thread,
-            conversationRevision: draft.payload.thread.conversationRevision,
-          },
-        }
-      : stored.payload;
-    const comparable = {
-      eventId: stored.eventId,
-      routing: stored.routing,
-      sourceProviderId: stored.sourceProviderId,
-      sourceIdentities: stored.sourceIdentities,
-      sourceSequence: stored.sourceSequence,
-      providerTimestamp: stored.providerTimestamp,
-      payload: storedPayload,
-    };
-    const { ingestClass: _ingestClass, ...comparableDraft } = draft;
-    const normalizedDraft = JSON.parse(JSON.stringify({
-      ...comparableDraft,
-      sourceIdentities: [...draft.sourceIdentities],
-    }));
-    if (JSON.stringify(normalizedDraft) !== JSON.stringify(JSON.parse(JSON.stringify(comparable)))) {
+    // Build the draft exactly as it was stored so schema defaults and key order
+    // match; a raw draft omits defaulted fields such as a turn's attemptOf.
+    const replayed = this.createEnvelope(
+      draft,
+      stored.acceptedSequence,
+      stored.durableRevision,
+      stored.serverTimestamps.acceptedAt,
+    );
+    if (JSON.stringify(duplicateIdentity(replayed)) !== JSON.stringify(duplicateIdentity(stored))) {
       throw new Error(`Canonical event identity conflict: ${draft.eventId}`);
     }
   }
@@ -3933,6 +3917,19 @@ export class CanonicalAgentStore {
     }
     return rows.map((row) => this.checkpointFromRow(row));
   }
+}
+
+/** Envelope fields a duplicate submission must reproduce; server-assigned fields are excluded. */
+function duplicateIdentity(envelope: CanonicalAgentEventEnvelope) {
+  return {
+    eventId: envelope.eventId,
+    routing: envelope.routing,
+    sourceProviderId: envelope.sourceProviderId,
+    sourceIdentities: envelope.sourceIdentities,
+    sourceSequence: envelope.sourceSequence,
+    providerTimestamp: envelope.providerTimestamp,
+    payload: envelope.payload,
+  };
 }
 
 function requiredObservedRecord<RecordValue>(record: RecordValue | undefined): RecordValue {
