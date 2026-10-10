@@ -78,7 +78,6 @@ vi.mock("@/transport", async (importOriginal) => {
         label: "Mzeey-Empire/mcode",
         webUrl: "https://github.com/Mzeey-Empire/mcode",
       }),
-      listBranches: vi.fn().mockResolvedValue([]),
       createBranch: vi.fn().mockResolvedValue({ branch: "feat/my-feature" }),
     }),
   };

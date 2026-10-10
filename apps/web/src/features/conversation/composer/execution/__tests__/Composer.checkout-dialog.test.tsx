@@ -21,7 +21,7 @@ import { useToastStore } from "@/stores/toastStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useThreadDraftStore } from "@/stores/threadDraftStore";
 import { mockTransport, createMockThread, createMockWorkspace } from "@/__tests__/mocks/transport";
-import { INTERACTION_MODES, PERMISSION_MODES, type GitBranch } from "@/transport";
+import { INTERACTION_MODES, PERMISSION_MODES } from "@/transport";
 import type { GitRef } from "@mcode/contracts";
 import type { BranchTarget } from "../targets/branch-target";
 import { invalidateBranchTargets } from "../targets/useBranchTargets";
@@ -82,13 +82,6 @@ function gitRef(shortName: string, overrides: Partial<GitRef> = {}): GitRef {
 function refsPage(items: GitRef[]) {
   return { ok: true, items, total: items.length, nextCursor: null };
 }
-
-const branch = (name: string, isCurrent = false): GitBranch => ({
-  name,
-  shortSha: "abc1234",
-  type: "local",
-  isCurrent,
-});
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -303,7 +296,6 @@ function seedComposerState(
     activeWorkspaceId: workspace.id,
     threads: [],
     activeThreadId: null,
-    branches: [branch("main", true), branch("feature/base")],
     newThreadMode: mode,
     newThreadBranch: "feature/base",
     selectedWorktree: mode === "existing-worktree"
@@ -328,7 +320,6 @@ function seedPreparingComposerState() {
     activeWorkspaceId: workspace.id,
     threads: [{ ...placeholder, clientPreparing: true }],
     activeThreadId: placeholder.id,
-    branches: [branch("main", true)],
     newThreadMode: "existing-worktree",
     newThreadBranch: "main",
     selectedWorktree: { name: "selected", path: "/repo/.worktrees/selected", branch: "main" },
@@ -436,7 +427,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: null,
       threads: [],
       activeThreadId: null,
-      branches: [],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -982,7 +972,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -1040,7 +1029,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -1106,7 +1094,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -1145,7 +1132,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -1174,7 +1160,6 @@ describe("Composer checkout confirmation", () => {
     seedComposerState("direct");
     useWorkspaceStore.setState({
       newThreadBranch: "main",
-      branches: [branch("main", true)],
     });
     usePreviewDesignModeStore.getState().setActive("ws-1", true);
     usePreviewAnnotationStore.setState({
@@ -1223,7 +1208,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -1311,7 +1295,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -1358,7 +1341,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -1402,7 +1384,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -1439,7 +1420,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -1487,7 +1467,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -1524,7 +1503,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -1564,7 +1542,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -1603,7 +1580,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -1673,7 +1649,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -1747,7 +1722,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -1795,7 +1769,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -1871,7 +1844,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -1982,7 +1954,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -2057,7 +2028,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [thread],
       activeThreadId: thread.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,
@@ -2121,7 +2091,6 @@ describe("Composer checkout confirmation", () => {
       activeWorkspaceId: workspace.id,
       threads: [threadA, threadB],
       activeThreadId: threadA.id,
-      branches: [branch("main", true)],
       newThreadMode: "direct",
       newThreadBranch: "main",
       selectedWorktree: null,

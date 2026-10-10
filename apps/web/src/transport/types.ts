@@ -16,7 +16,6 @@ import type {
   RecentThread,
   PaginatedMessages,
   AttachmentMeta,
-  GitBranch,
   GitRefsListParams,
   GitRefsListResult,
   PullRequestTargetsListParams,
@@ -24,7 +23,6 @@ import type {
   BranchComparison,
   WorktreeInfo,
   PrInfo,
-  PrDetail,
   ProviderCatalogRequest,
   ProviderCatalogSnapshot,
   PermissionMode,
@@ -137,7 +135,6 @@ export type {
   GitRemoteUrl,
   WorktreeInfo,
   PrInfo,
-  PrDetail,
   ProviderCatalogRequest,
   ProviderCatalogSnapshot,
   PermissionMode,
@@ -406,7 +403,6 @@ export interface McodeTransport {
   retryThreadCleanup(threadId: string): Promise<Thread>;
 
   // Git branch commands
-  listBranches(workspaceId: string): Promise<GitBranch[]>;
   /** List qualified branch and worktree targets for one picker page. */
   listRefs(params: GitRefsListParams): Promise<GitRefsListResult>;
   /** List repository pull request targets with a GitHub total. */
@@ -626,8 +622,6 @@ export interface McodeTransport {
   ): Promise<PullRequestCancelResult>;
 
   // PR review
-  listOpenPrs(workspaceId: string): Promise<PrDetail[]>;
-  fetchBranch(workspaceId: string, branch: string, prNumber?: number): Promise<void>;
   /** Fetch fresh CI check status for a thread (manual refresh). */
   checkStatus(threadId: string, force?: boolean): Promise<ChecksStatus>;
 

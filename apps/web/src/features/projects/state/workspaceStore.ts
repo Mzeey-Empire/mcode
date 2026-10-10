@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Workspace, Thread, GitBranch, PermissionMode, WorktreeInfo, AttachmentMeta, PrDetail } from "@/transport";
+import type { Workspace, Thread, PermissionMode, WorktreeInfo, AttachmentMeta } from "@/transport";
 import {
   type WorkspaceThread,
   buildPlaceholderWorkspaceThread,
@@ -591,8 +591,6 @@ interface WorkspaceState {
   pendingNewThread: boolean;
   loading: boolean;
   error: string | null;
-  branches: GitBranch[];
-  branchesLoading: boolean;
   newThreadMode: "direct" | "worktree" | "existing-worktree";
   newThreadBranch: string;
   newThreadBranchSource: "branch" | "pr";
@@ -604,9 +602,6 @@ interface WorkspaceState {
   customBranchName: string;
   autoPreviewBranch: string;
   selectedWorktree: AttachedWorktree | null;
-  openPrs: PrDetail[];
-  openPrsLoading: boolean;
-  fetchingBranch: string | null;
   /** In-memory map of thread ID → PR URL, populated immediately on PR creation so the header can link without waiting for the next poll. */
   prUrlsByThreadId: Record<string, string>;
   /** In-memory map of thread ID → latest CI check status, updated by the thread.checksUpdated push channel. */
@@ -709,7 +704,6 @@ interface WorkspaceState {
   dismissWarnings: (threadId: string) => void;
 
   // Branch actions
-  loadBranches: (workspaceId: string) => Promise<void>;
   getCurrentBranch: (workspaceId: string) => Promise<string | null>;
   checkoutBranch: (workspaceId: string, branch: string) => Promise<void>;
   setNewThreadMode: (mode: "direct" | "worktree" | "existing-worktree") => void;
@@ -746,8 +740,6 @@ interface WorkspaceState {
   /** Set and sanitize the custom branch name for the branch-from-chat flow. */
   setBranchCustomName: (name: string) => void;
 
-  loadOpenPrs: (workspaceId: string) => Promise<void>;
-  fetchBranch: (workspaceId: string, branch: string, prNumber?: number) => Promise<void>;
   /**
    * Record a PR that was just created from the dialog. Updates `pr_number` and
    * `pr_status` on the thread immediately and caches the URL so the header can
@@ -1103,8 +1095,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   pendingNewThread: false,
   loading: false,
   error: null,
-  branches: [],
-  branchesLoading: false,
   newThreadMode: readRememberedComposerMode(),
   newThreadBranch: "",
   newThreadBranchSource: "branch" as const,
@@ -1115,9 +1105,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   customBranchName: "",
   autoPreviewBranch: generateBranchId(),
   selectedWorktree: null,
-  openPrs: [],
-  openPrsLoading: false,
-  fetchingBranch: null,
   // Branch-from-chat fields — safe defaults; always reset by initBranchMode before use.
   branchExecMode: "direct" as const,
   branchTargetBranch: "",
@@ -1258,15 +1245,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       activeWorkspaceId: id,
       activeDraftId: null,
       ...(shouldClearThread ? { activeThreadId: null } : {}),
-      branches: [],
       newThreadBranch: "",
       worktrees: [],
       worktreesLoading: false,
       worktreesLoadedForWorkspace: null,
       selectedWorktree: null,
-      openPrs: [],
-      openPrsLoading: false,
-      fetchingBranch: null,
     });
     reconcileSelectedConversation();
     if (id) {
@@ -1875,18 +1858,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     }));
   },
 
-  loadBranches: async (workspaceId) => {
-    set({ branchesLoading: true });
-    try {
-      const branches = await getTransport().listBranches(workspaceId);
-      if (get().activeWorkspaceId !== workspaceId) return;
-      set({ branches, branchesLoading: false });
-    } catch (e) {
-      if (get().activeWorkspaceId !== workspaceId) return;
-      set({ branchesLoading: false, error: String(e) });
-    }
-  },
-
   getCurrentBranch: async (workspaceId) => {
     return getTransport().getCurrentBranch(workspaceId);
   },
@@ -1937,29 +1908,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   setBranchTargetBranch: (branch) => set({ branchTargetBranch: branch }),
   setBranchWorktreePath: (path) => set({ branchWorktreePath: path }),
   setBranchCustomName: (name) => set({ branchCustomName: sanitizeCustomBranchInput(name) }),
-
-  loadOpenPrs: async (workspaceId) => {
-    set({ openPrsLoading: true });
-    try {
-      const openPrs = await getTransport().listOpenPrs(workspaceId);
-      if (get().activeWorkspaceId !== workspaceId) return;
-      set({ openPrs, openPrsLoading: false });
-    } catch (e) {
-      if (get().activeWorkspaceId !== workspaceId) return;
-      set({ openPrsLoading: false, error: String(e) });
-    }
-  },
-
-  fetchBranch: async (workspaceId, branch, prNumber?) => {
-    set({ fetchingBranch: branch });
-    try {
-      await getTransport().fetchBranch(workspaceId, branch, prNumber);
-      // Refresh branches so the newly fetched branch appears as local
-      await get().loadBranches(workspaceId);
-    } finally {
-      set({ fetchingBranch: null });
-    }
-  },
 
   recordPullRequestLink: (threadId, prNumber, prUrl, prStatus) => {
     set((state) => {
