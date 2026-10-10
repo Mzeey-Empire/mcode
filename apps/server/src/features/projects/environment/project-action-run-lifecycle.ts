@@ -72,7 +72,7 @@ export class ProjectActionRunLifecycle {
   private async persistOutput(active: ActiveProjectAction, runId: string): Promise<void> {
     const run = active.run;
     try {
-      await this.runs.updateIfCurrent(run);
+      if (await this.runs.updateIfCurrent(run)) this.publisher.publish(run);
     } catch (error) {
       logger.warn("Project Action output persistence failed; retaining output for the next durable update", {
         threadId: active.threadId,

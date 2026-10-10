@@ -537,6 +537,38 @@ describe("TerminalService host ownership", () => {
     expect(service.listActiveSessions()).toEqual([{ ...created, threadId: "thread", state: "exited", exitCode: 1 }]);
   });
 
+  it("notifies connected clients when a terminal is killed", async () => {
+    const { service, launch } = createService();
+    const json = vi.fn();
+    service.setSender({ data: vi.fn(), json });
+    const created = await service.create("thread", launch);
+    await service.kill(created.ptyId);
+    expect(json.mock.calls).toEqual([["terminal.exit", { ptyId: created.ptyId, code: 0, exitCode: null }]]);
+    expect(service.listActiveSessions()).toEqual([]);
+    await service.shutdown();
+  });
+
+  it.each(["start", "create"] as const)("publishes a failed rerun exit and flushes paused output when host %s fails", async (method) => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const create = vi.spyOn(host, "create");
+    const { service, launch } = createService({ host });
+    const json = vi.fn();
+    const data = vi.fn();
+    service.setSender({ data, json });
+    const action = await openAction(service, launch, "00000000-0000-4000-8000-000000000001");
+    host.emitExit(create.mock.calls[0][0].sessionId, 0);
+    await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    if (method === "start") vi.spyOn(host, "start").mockRejectedValueOnce(new Error("host unavailable"));
+    else create.mockRejectedValueOnce(new Error("host unavailable"));
+    await expect(action.run({ script: "echo rerun" })).rejects.toThrow("host unavailable");
+    expect(json.mock.calls).toEqual([["terminal.exit", { ptyId: action.terminalSessionId, code: 0, exitCode: null }]]);
+    expect(Buffer.concat(data.mock.calls.map(([, , bytes]) => bytes)).toString()).toContain("echo rerun");
+    expect(service.listActiveSessions()).toEqual([expect.objectContaining({
+      ptyId: action.terminalSessionId, state: "exited", exitCode: null,
+    })]);
+    await service.shutdown();
+  });
+
   it("counts action records toward the cap and closes them during thread teardown", async () => {
     const host = new InMemoryPtyHostAdapter("1");
     const { service, launch } = createService({ host });
@@ -550,6 +582,10 @@ describe("TerminalService host ownership", () => {
     expect(service.listActiveSessions()).toHaveLength(8);
     await expect(service.create(scope, launch)).rejects.toThrow(/Maximum PTY limit/);
     await service.killByThread(scope);
+    expect(service.listActiveSessions()).toEqual([expect.objectContaining({ ptyId: action.terminalSessionId, state: "running" })]);
+    expect(exits).toEqual([]);
+    expect(closed).not.toHaveBeenCalled();
+    await service.killByThread(scope, true);
     expect(service.listActiveSessions()).toEqual([]);
     expect(exits).toEqual([130]);
     expect(closed).toHaveBeenCalledOnce();
@@ -712,7 +748,7 @@ function openAction(
   script = "bun run build",
 ) {
   return service.openActionTerminal(
-    { threadId, actionId: "build", echo: script, launch: { script } }, launch,
+    { threadId, actionId: "build", launch: { script } }, launch,
     async (input, cwd) => ({
       launch: { ...launch, arguments: ["-Command", input.script] },
       snapshot: {

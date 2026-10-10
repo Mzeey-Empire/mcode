@@ -93,8 +93,8 @@ export class LegacyTerminalBackend extends TerminalBackend {
   }
 
   /** Closes all legacy PTYs for one scope. */
-  killByThread(threadId: string): Promise<void> {
-    return this.terminalService.killByThread(threadId);
+  killByThread(threadId: string, includeActions = false): Promise<void> {
+    return this.terminalService.killByThread(threadId, includeActions);
   }
 
   /** Closes every legacy PTY and releases service resources. */

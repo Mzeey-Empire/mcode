@@ -47,10 +47,12 @@ function session(
   emit(data: string): void;
   emitBytes(data: Uint8Array): void;
   exit(code: number | null): void;
+  close(): void;
   captureOutput(): (data: string) => void;
 } {
   const outputs = new Set<(data: Uint8Array) => void>();
   const exits = new Set<(exit: { exitCode: number | null }) => void>();
+  const closed = new Set<() => void>();
   return {
     terminalSessionId: id,
     snapshot: {
@@ -64,7 +66,8 @@ function session(
       if (!this.snapshot) throw new Error("Missing test launch");
       return this.snapshot;
     },
-    onClosed() { return () => undefined; },
+    onClosed(listener) { closed.add(listener); return () => closed.delete(listener); },
+    close() { for (const listener of closed) listener(); },
     onCommandOutput(listener) {
       outputs.add(listener);
       if (replay?.output !== undefined) listener(new TextEncoder().encode(replay.output));
@@ -101,9 +104,14 @@ afterEach(async () => {
 
 class ActionTestHost extends InMemoryPtyHostAdapter {
   interruptOnInput = false;
+  private readonly commands = new Set<string>();
+  override async create(input: Parameters<InMemoryPtyHostAdapter["create"]>[0]) {
+    if (input.launch.arguments.length > 0) this.commands.add(input.sessionId);
+    return super.create(input);
+  }
   override async send(command: PtyHostCommand): Promise<void> {
     await super.send(command);
-    if (this.interruptOnInput && command.kind === "input" && Buffer.from(command.data).toString() === "\u0003") {
+    if (this.interruptOnInput && this.commands.has(command.sessionId) && command.kind === "input" && Buffer.from(command.data).toString() === "\u0003") {
       this.emitExit(command.sessionId, 130);
     }
   }
@@ -149,7 +157,7 @@ async function actionFixture(shared = false, script = "vite --open http://localh
 const actionSlot = { threadId: ACTION_TEST_THREAD, actionId: "build" };
 
 describe("ProjectActionService with the in-memory PTY host", () => {
-  it("attaches to the action terminal, retains echo and output, and publishes only lifecycle changes", async () => {
+  it("attaches to the action terminal and publishes coalesced command output with lifecycle changes", async () => {
     const f = await actionFixture();
     const updates: WorkspaceEnvironmentActionRun[] = [];
     f.actions.onUpdate((update) => updates.push(update.run));
@@ -166,7 +174,7 @@ describe("ProjectActionService with the in-memory PTY host", () => {
     f.host.emitOutput(commandId, Buffer.from("ready\r\n"));
     f.host.emitOutput(commandId, Buffer.from("listening\r\n"));
     await vi.waitFor(() => expect(f.runs.get(ACTION_TEST_THREAD, "build")?.transcript).toBe("ready\r\nlistening\r\n"));
-    expect(updates.map((update) => update.status)).toEqual(["running"]);
+    await vi.waitFor(() => expect(updates.map((update) => update.transcript)).toEqual(["", "ready\r\n", "ready\r\nlistening\r\n"]));
     f.host.emitExit(commandId, 2);
     await vi.waitFor(() => expect(f.actions.get(actionSlot)).toMatchObject({ status: "failed", exitCode: 2 }));
     await vi.waitFor(() => expect(f.creates).toHaveBeenCalledTimes(2));
@@ -177,7 +185,7 @@ describe("ProjectActionService with the in-memory PTY host", () => {
       `\u001b[90mPS ${f.creates.mock.calls[0][0].cwd}> \u001b[39mvite --open http://localhost:5173/\u001b[0m\r\nready\r\nlistening\r\nPS> `,
     );
     expect(f.actions.get(actionSlot)?.transcript).toBe("ready\r\nlistening\r\n");
-    expect(updates.map((update) => update.status)).toEqual(["running", "failed"]);
+    expect(updates.map((update) => update.status)).toEqual(["running", "running", "running", "failed"]);
     expect(await f.actions.start(actionSlot)).toEqual(f.actions.get(actionSlot));
     expect(f.creates).toHaveBeenCalledTimes(2);
   });
@@ -225,19 +233,103 @@ describe("ProjectActionService with the in-memory PTY host", () => {
     expect(f.creates).toHaveBeenCalledOnce();
   });
 
-  it("restarts and runs again with new run ids in the same terminal", async () => {
+  it("restarts commands and runs again from shells without waiting five seconds", async () => {
     const f = await actionFixture();
     f.host.interruptOnInput = true;
+    const send = vi.spyOn(f.host, "send");
+    const close = vi.spyOn(f.host, "close");
     const run = await f.actions.start(actionSlot);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const restart = f.actions.restart(actionSlot);
     expect(await restart).toMatchObject({ runId: "run-2", terminalSessionId: run.terminalSessionId, status: "running" });
+    expect(f.creates).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls.map(([command]) => ({ sessionId: command.sessionId, data: command.kind === "input" ? Buffer.from(command.data).toString() : null }))).toEqual([
+      { sessionId: f.creates.mock.calls[0][0].sessionId, data: "\u0003" },
+    ]);
     const command = f.creates.mock.calls.at(-1)?.[0];
     if (!command) throw new Error("Missing rerun process");
     f.host.emitExit(command.sessionId, 0);
     await vi.waitFor(() => expect(f.actions.get(actionSlot)?.status).toBe("completed"));
     const again = f.actions.restart(actionSlot);
     expect(await again).toMatchObject({ runId: "run-3", terminalSessionId: run.terminalSessionId, status: "running" });
+    expect(f.creates).toHaveBeenCalledTimes(4);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(close.mock.calls.map(([process]) => process.sessionId)).toEqual([f.creates.mock.calls[2][0].sessionId]);
     expect(f.backend.listActiveSessions()).toHaveLength(1);
+  });
+
+  it("leaves a live shell untouched when Stop has no command to interrupt", async () => {
+    const f = await actionFixture();
+    const send = vi.spyOn(f.host, "send");
+    const close = vi.spyOn(f.host, "close");
+    await f.actions.start(actionSlot);
+    f.host.emitExit(f.creates.mock.calls[0][0].sessionId, 0);
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)?.status).toBe("completed"));
+    const retained = f.actions.get(actionSlot);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    expect(await f.actions.stop(actionSlot)).toEqual(retained);
+    expect(send.mock.calls).toEqual([]);
+    expect(close.mock.calls).toEqual([]);
+    expect(f.creates).toHaveBeenCalledTimes(2);
+    expect(f.backend.listActiveSessions()[0].state).toBe("running");
+  });
+
+  it.each(["thread", "dispose"])("closes commands and retained shells during %s teardown", async (kind) => {
+    const f = await actionFixture();
+    await f.actions.start(actionSlot);
+    if (kind === "dispose") {
+      f.host.emitExit(f.creates.mock.calls[0][0].sessionId, 0);
+      await vi.waitFor(() => expect(f.actions.get(actionSlot)?.status).toBe("completed"));
+      const first = f.actions.dispose();
+      expect(f.actions.dispose()).toBe(first);
+      await first;
+    } else {
+      await f.actions.stopForThread(ACTION_TEST_THREAD);
+    }
+    expect(f.actions.get(actionSlot)).toMatchObject({
+      status: kind === "dispose" ? "completed" : "interrupted", terminalSessionId: null,
+    });
+    expect(f.backend.listActiveSessions()).toEqual([]);
+    expect(f.creates).toHaveBeenCalledTimes(kind === "dispose" ? 2 : 1);
+  });
+
+  it.each([
+    { phase: "first launch", boundary: "start" },
+    { phase: "first launch", boundary: "create" },
+    { phase: "replacement", boundary: "start" },
+    { phase: "replacement", boundary: "create" },
+  ])("records a close during $phase at host $boundary as interrupted", async ({ phase, boundary }) => {
+    const f = await actionFixture();
+    if (phase === "replacement") {
+      await f.actions.start(actionSlot);
+      f.host.emitExit(f.creates.mock.calls[0][0].sessionId, 0);
+      await vi.waitFor(() => expect(f.actions.get(actionSlot)?.status).toBe("completed"));
+    }
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    const startHost = f.host.start.bind(f.host);
+    if (boundary === "start") {
+      vi.spyOn(f.host, "start").mockImplementationOnce(async () => {
+        entered.resolve();
+        await release.promise;
+        return startHost();
+      });
+    } else {
+      const createHost = f.host.create.bind(f.host);
+      f.creates.mockImplementationOnce(async (input) => {
+        entered.resolve();
+        await release.promise;
+        return createHost(input);
+      });
+    }
+    const starting = phase === "first launch" ? f.actions.start(actionSlot) : f.actions.restart(actionSlot);
+    await entered.promise;
+    const closing = f.backend.kill(f.backend.listActiveSessions()[0].ptyId);
+    release.resolve();
+    await closing;
+    expect(await starting).toMatchObject({ status: "interrupted", terminalSessionId: null });
+    expect(f.actions.get(actionSlot)).toMatchObject({ status: "interrupted", terminalSessionId: null });
+    expect(f.backend.listActiveSessions()).toEqual([]);
   });
 
   it("reports the named cap error for eight retained shells without consuming an action slot", async () => {
@@ -293,7 +385,7 @@ describe("ProjectActionService with the in-memory PTY host", () => {
     release.resolve();
     await starting;
     await vi.waitFor(() => expect(f.actions.get(actionSlot)).toMatchObject({
-      status: "awaiting-approval", terminalSessionId: null,
+      status: "interrupted", terminalSessionId: null,
     }));
     expect(f.backend.listActiveSessions()).toEqual([]);
     expect(f.creates.mock.calls).toEqual([]);
@@ -602,7 +694,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => thread } as never,
-      { openActionTerminal: async () => prepared } as never,
+      { openActionTerminal: async () => prepared, kill: async () => prepared.close() } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -622,14 +714,14 @@ describe("ProjectActionService", () => {
   it("shares one idempotent shutdown barrier and stops its owned session once", async () => {
     const runs = new Runs();
     const prepared = session("terminal-1");
-    const stop = vi.spyOn(prepared, "stopCommand");
+    const close = vi.spyOn(prepared, "close");
     const service = new ProjectActionService(
       runs as never,
       projectActionEnvironment(async () => ({ document: { version: "0.0.1", actions: [
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { openActionTerminal: async () => prepared } as never,
+      { openActionTerminal: async () => prepared, kill: async () => prepared.close() } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -640,7 +732,7 @@ describe("ProjectActionService", () => {
     expect(second).toBe(first);
     await Promise.all([first, second]);
 
-    expect(stop).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
     expect(runs.get("thread-1", "build")?.status).toBe("interrupted");
   });
 
@@ -656,7 +748,7 @@ describe("ProjectActionService", () => {
         { id: "test", name: "Test", command: { default: "bun test" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { openActionTerminal: () => { enteredBackend.resolve(); return startup.promise; } } as never,
+      { openActionTerminal: () => { enteredBackend.resolve(); return startup.promise; }, kill: async () => prepared.close() } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -926,7 +1018,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { openActionTerminal: async () => prepared } as never,
+      { openActionTerminal: async () => prepared, kill: async () => prepared.close() } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -940,8 +1032,9 @@ describe("ProjectActionService", () => {
     expect(runs.get("thread-1", "build")).toMatchObject({
       runId: "run-1",
       status: "failed",
-      revision: 1,
+      revision: 2,
       exitCode: 3,
+      terminalSessionId: null,
     });
     expect(updateIfCurrent.mock.calls.map(([run]) => ({
       status: run.status,
@@ -950,6 +1043,7 @@ describe("ProjectActionService", () => {
     }))).toEqual([
       { status: "failed", revision: 1, exitCode: 3 },
       { status: "failed", revision: 1, exitCode: 3 },
+      { status: "failed", revision: 2, exitCode: 3 },
     ]);
   });
 

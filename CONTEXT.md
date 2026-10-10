@@ -902,7 +902,7 @@ exit status and retained output until the user closes it or deletes its scope.
 
 ### Action terminal
 
-A terminal that runs a Project Action's exact approved script, then opens a
+A terminal that runs a Project Action's resolved script, then opens a
 fresh interactive shell in the same folder. The terminal identity and replay
 survive the command's exit and subsequent runs. Unlike typing the command into
 the shell, the script is not in shell history, and its working-folder and

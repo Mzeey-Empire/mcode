@@ -34,6 +34,12 @@ export class TerminalBackendError extends Error {
   }
 }
 
+/** A capacity rejection distinguished from host or profile failures. */
+export class TerminalCapacityError extends Error {}
+
+/** A launch cancelled by closing its owning terminal. */
+export class ActionTerminalClosedError extends Error {}
+
 /** Result of a legacy Terminal reattachment. */
 export type TerminalReattachResult =
   | { mode: "delta" }
@@ -55,7 +61,8 @@ export interface ActionTerminal {
   /** Actual latest launch facts, or null before the first command starts. */
   readonly snapshot: WorkspaceEnvironmentActionLaunchSnapshot | null;
   run(launch: PreparedActionLaunch): Promise<WorkspaceEnvironmentActionLaunchSnapshot>;
-  stopCommand(): Promise<void>;
+  /** Interrupts only a command, omitting the following shell when a rerun will replace it. */
+  stopCommand(afterExit?: "shell" | "replace"): Promise<void>;
   /** Command process bytes only, excluding the synthesized echo and interactive shell. */
   onCommandOutput(listener: (bytes: Uint8Array) => void): () => void;
   onCommandExit(listener: (exit: { readonly exitCode: number | null }) => void): () => void;
@@ -93,7 +100,6 @@ export class PreparedTerminalCommandApprovalMismatchError extends Error {
 export interface ActionTerminalRequest {
   readonly threadId: string;
   readonly actionId: string;
-  readonly echo: string;
   readonly launch: PreparedActionLaunch | "pending-approval";
 }
 
@@ -111,7 +117,7 @@ export abstract class TerminalBackend {
     ptyId: string,
     reason?: "user-requested-process-tree-close" | "app-shutdown",
   ): Promise<void>;
-  abstract killByThread(threadId: string): Promise<void>;
+  abstract killByThread(threadId: string, includeActions?: boolean): Promise<void>;
   abstract shutdown(): Promise<void>;
   abstract setGracefulKill(enabled: boolean): void;
   abstract reattach(ptyId: string, lastSeq: number, cold?: boolean): TerminalReattachResult;

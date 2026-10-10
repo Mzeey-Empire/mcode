@@ -19,9 +19,7 @@ import type { WorkspaceRepo } from "../../../projects/persistence/workspace-repo
 import { GitWorktreeService } from "../../../projects/git/git-worktree-service.js";
 import type { SettingsService } from "../../../settings/settings-service.js";
 import { EnvService } from "../../../../runtime/environment/env-service.js";
-
-
-import type { ActionTerminal, ActionTerminalRequest, PreparedActionLaunch } from "../terminal-backend.js";
+import { ActionTerminalClosedError, TerminalCapacityError, type ActionTerminal, type ActionTerminalRequest, type PreparedActionLaunch } from "../terminal-backend.js";
 import { ActionTerminalEvents, actionCommandEcho } from "./action-terminal-events.js";
 
 /** Resolved host launch shared by command and interactive shell phases. */
@@ -32,9 +30,6 @@ export interface LegacyTerminalLaunch {
   readonly resolvedProfile: TerminalResolvedProfile;
   readonly environment?: Record<string, string>;
 }
-
-/** A capacity rejection distinguished from host or profile failures. */
-export class TerminalCapacityError extends Error {}
 
 interface PtyProcess {
   readonly id: string;
@@ -145,7 +140,6 @@ export class TerminalService {
     this.sender = sender;
   }
 
-
   /** Creates an ordinary shell terminal, retaining its record after exit. */
   async create(scopeId: string, launch: LegacyTerminalLaunch, replacesPtyId?: string): Promise<LegacyTerminalCreateResult> {
     const session = this.reserveTerminal(scopeId, launch, null, replacesPtyId);
@@ -232,8 +226,11 @@ export class TerminalService {
       process.status = "running";
     } catch (error) {
       this.hostSessions.delete(hostId);
-      if (currentProcess(session) === process) session.phase = { kind: "exited", exitCode: null };
+      if (currentProcess(session) === process) {
+        session.phase = { kind: "exited", exitCode: null };
+      }
       resolveExit();
+      this.assertOpen(session);
       throw error;
     }
   }
@@ -252,7 +249,7 @@ export class TerminalService {
   }
 
   private assertOpen(session: PtySession): void {
-    if (!this.sessions.has(session.id) || session.closePromise) throw new Error("Terminal scope was closed");
+    if (!this.sessions.has(session.id) || session.closePromise) throw new ActionTerminalClosedError("Terminal scope was closed");
   }
 
   /** Resolves the checkout path used by a thread or workspace terminal session. */
@@ -293,7 +290,6 @@ export class TerminalService {
     return snapshot;
   }
 
-
   /** Opens one attachable action record and starts its command when approval is present. */
   async openActionTerminal(
     input: ActionTerminalRequest,
@@ -314,7 +310,7 @@ export class TerminalService {
     const terminal: ActionTerminal = {
       terminalSessionId: session.id, run,
       get snapshot() { return snapshot; },
-      stopCommand: () => this.serializeAction(session, () => this.stopActionProcess(session)),
+      stopCommand: (afterExit) => this.serializeAction(session, () => this.stopActionProcess(session, afterExit === "replace")),
       onCommandOutput: events.onCommandOutput, onCommandExit: events.onCommandExit, onClosed: events.onClosed,
     };
     try {
@@ -346,12 +342,21 @@ export class TerminalService {
     session.action?.events.reset();
     this.recordOutput(session, ++session.sequence, actionCommandEcho(session.shell, session.cwd, input.script));
     const environment = this.envService.getEnv();
-    await this.launchProcess(session, "command", { ...prepared.launch, environment });
+    try {
+      await this.launchProcess(session, "command", { ...prepared.launch, environment });
+      this.assertOpen(session);
+    } catch (error) {
+      this.assertOpen(session);
+      session.phase = { kind: "exited", exitCode: null };
+      this.notifyTerminalExit(session, null);
+      throw error;
+    }
     return { ...prepared.snapshot, environmentNames: Object.keys(environment).sort() };
   }
 
   private async stopActionProcess(session: PtySession, replacing = false): Promise<void> {
     await session.transition;
+    if (!replacing && session.phase.kind !== "command") return;
     const process = currentProcess(session);
     if (!process) return;
     await process.creation;
@@ -360,6 +365,10 @@ export class TerminalService {
     process.afterExit = replacing ? "replace" : "shell";
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
+      if (session.phase.kind !== "command") {
+        await this.closeProcess(session, process, "user");
+        return;
+      }
       await this.interruptProcess(session, process);
       const exited = await Promise.race([
         process.exited.then(() => true),
@@ -428,7 +437,6 @@ export class TerminalService {
     }
   }
 
-
   /** Writes to the currently attached process, never an earlier phase. */
   write(ptyId: string, data: string): Promise<void> {
     const process = this.requireRunningProcess(ptyId);
@@ -467,7 +475,6 @@ export class TerminalService {
     return session.commandTail;
   }
 
-
   /** Closes a retained record, interrupting an active command without starting a shell. */
   async kill(
     ptyId: string,
@@ -484,6 +491,7 @@ export class TerminalService {
         process.afterExit = "replace";
         await this.closeProcess(session, process, reason === "app-shutdown" && this.useGracefulKill ? "app-shutdown" : "user");
       }
+      this.notifyTerminalExit(session, null);
       this.removePty(ptyId);
     });
     session.closePromise = closing.catch((error: unknown) => {
@@ -495,9 +503,11 @@ export class TerminalService {
     return session.closePromise;
   }
 
-  /** Closes shells and action terminals belonging to one scope. */
-  async killByThread(threadId: string): Promise<void> {
-    await Promise.all([...(this.threadIndex.get(threadId) ?? [])].map((id) => this.kill(id)));
+  /** Closes visible shells, including hidden action terminals only for scope teardown. */
+  async killByThread(threadId: string, includeActions = false): Promise<void> {
+    const ids = [...(this.threadIndex.get(threadId) ?? [])]
+      .filter((id) => includeActions || !this.sessions.get(id)?.action);
+    await Promise.all(ids.map((id) => this.kill(id)));
   }
 
   /** Stops the host after in-flight creations and commands settle. */
@@ -600,7 +610,6 @@ export class TerminalService {
     if (!replayBuffer) throw new Error(`PTY not found: ${ptyId}`);
     return { accepted: replayBuffer.checkpointAt(seq, data) };
   }
-
 
   /** Lists all retained records, including pending approval and exited terminals. */
   listActiveSessions(): LegacyTerminalRecord[] {

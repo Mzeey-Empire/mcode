@@ -56,7 +56,7 @@ describe.runIf(process.platform === "win32")("action terminal with a real Window
     try {
       const script = "echo __ACTION_COMMAND__ & exit /b 2";
       const terminal = await fixture.backend.openActionTerminal({
-        threadId: ACTION_TEST_THREAD, actionId: "build", echo: script, launch: { script },
+        threadId: ACTION_TEST_THREAD, actionId: "build", launch: { script },
       });
       fixture.backend.resume(terminal.terminalSessionId);
       const commandOutput: Uint8Array[] = [];

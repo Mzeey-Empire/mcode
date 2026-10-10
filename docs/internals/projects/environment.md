@@ -120,8 +120,8 @@ running and exited terminals all count toward the eight-record scope limit.
 
 The terminal replay includes a synthesized command echo and both processes'
 output. The retained transcript temporarily feeds the existing Action view and
-contains only command-process output. Output persistence does not publish run
-updates; publication follows lifecycle changes.
+contains only command-process output. Coalesced output writes publish run
+updates alongside lifecycle changes until the Action view uses terminal tabs.
 
 The initial running result must be saved before the service subscribes to
 output and exit events. If retention fails after launch, the

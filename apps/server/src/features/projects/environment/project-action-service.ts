@@ -11,10 +11,11 @@ import {
   TERMINAL_BACKEND_TOKEN,
   PreparedTerminalCommandApprovalMismatchError,
   PreparedTerminalCommandStartError,
+  ActionTerminalClosedError,
+  TerminalCapacityError,
   type ActionTerminal,
   type TerminalBackend,
 } from "../../terminal/backends/terminal-backend.js";
-import { TerminalCapacityError } from "../../terminal/backends/legacy/terminal-service.js";
 import { ProjectActionAdmissionGate, type ProjectActionStartThread } from "./project-action-admission.js";
 import { compensateFailedProjectActionLaunch } from "./project-action-launch-compensation.js";
 import {
@@ -59,7 +60,9 @@ interface ProjectActionStartContext {
 /** Owns Project Action slot exclusion, latest-run retention, and backend process lifecycle. */
 @injectable()
 export class ProjectActionService {
-  private readonly terminals = new Map<string, { terminal: ActionTerminal; unsubscribe: (() => void)[] }>();
+  private readonly terminals = new Map<string, {
+    threadId: string; terminal: ActionTerminal; unsubscribe: (() => void)[]; closed: Promise<void>;
+  }>();
   private readonly active = new Map<string, ProjectActionSlotState>();
   private readonly admission = new ProjectActionAdmissionGate();
   private readonly publisher: ProjectActionRunPublisher;
@@ -141,16 +144,19 @@ export class ProjectActionService {
 
   /** Creates a fresh run after the previous command settles, reusing its terminal. */
   async restart(input: WorkspaceEnvironmentActionSlotInput): Promise<WorkspaceEnvironmentActionRun> {
-    if (this.active.has(slotKey(input.threadId, input.actionId))) await this.stop(input);
+    const active = await this.activeForSlot(slotKey(input.threadId, input.actionId));
+    if (active?.state === "pending-finalization") await this.retryFinalization(input, active);
+    else if (active) await this.stopRunningAction(input, active, "replace");
     return await this.startNewRun(input);
   }
 
-  /** Stops all active Action sessions owned by one Thread. */
+  /** Closes every Action terminal owned by one Thread and persists its final state. */
   async stopForThread(threadId: string): Promise<void> {
-    const actions = [...this.active.values()]
-      .filter((active) => active.threadId === threadId)
-      .map((active) => this.stop({ threadId, actionId: active.actionId }));
-    await Promise.all(actions);
+    const terminals = [...this.terminals.values()].filter((tracked) => tracked.threadId === threadId);
+    await Promise.all(terminals.map(async (tracked) => {
+      await this.terminal.kill(tracked.terminal.terminalSessionId);
+      await tracked.closed;
+    }));
   }
 
   /** Blocks new starts for one Thread and waits for starts already admitted to settle. */
@@ -174,14 +180,14 @@ export class ProjectActionService {
     return this.disposePromise;
   }
 
-  /** Converts surviving persisted running rows to interrupted after startup recovery has reaped terminals. */
+  /** Interrupts stale runs and clears terminal identities after startup recovery has reaped terminals. */
   async recoverStaleRuns(): Promise<WorkspaceEnvironmentActionRun[]> {
-    const interrupted: WorkspaceEnvironmentActionRun[] = [];
+    const recovered: WorkspaceEnvironmentActionRun[] = [];
     while (true) {
       const runs = await this.runs.interruptRunning(this.runFactory.timestamp());
       for (const run of runs) this.publisher.publish(run);
-      interrupted.push(...runs);
-      if (runs.length < 256) return interrupted;
+      recovered.push(...runs);
+      if (runs.length < 256) return recovered;
     }
   }
 
@@ -226,7 +232,7 @@ export class ProjectActionService {
         snapshot = await session.run(launch);
       } else {
         session = await this.terminal.openActionTerminal({
-          threadId: context.thread.id, actionId: context.actionId, echo: resolved.script, launch,
+          threadId: context.thread.id, actionId: context.actionId, launch,
         });
         this.trackTerminal(context, session);
         snapshot = session.snapshot ?? resolved.snapshot;
@@ -248,7 +254,7 @@ export class ProjectActionService {
       try {
         terminal = await this.terminal.openActionTerminal({
           threadId: context.thread.id, actionId: context.actionId,
-          echo: resolved.snapshot.script ?? "", launch: "pending-approval",
+          launch: "pending-approval",
         });
         this.trackTerminal(context, terminal);
       } catch (error) {
@@ -261,11 +267,14 @@ export class ProjectActionService {
   }
 
   private trackTerminal(context: ProjectActionStartContext, terminal: ActionTerminal): void {
-    this.terminals.set(context.slot, { terminal, unsubscribe: [] });
+    const unsubscribe: (() => void)[] = [];
+    const tracked = { threadId: context.thread.id, terminal, unsubscribe, closed: Promise.resolve() };
+    this.terminals.set(context.slot, tracked);
     terminal.onClosed(() => {
       this.clearRunListeners(context.slot);
       this.terminals.delete(context.slot);
-      void this.clearClosedTerminal(context, terminal.terminalSessionId).catch((error: unknown) => {
+      tracked.closed = this.clearClosedTerminal(context, terminal.terminalSessionId);
+      void tracked.closed.catch((error: unknown) => {
         logger.error("Closed action terminal persistence failed", { error: String(error) });
       });
     });
@@ -288,7 +297,10 @@ export class ProjectActionService {
     }
     const run = this.runs.get(context.thread.id, context.actionId);
     if (!run || run.terminalSessionId !== terminalSessionId) return;
-    const closed = { ...run, revision: run.revision + 1, terminalSessionId: null };
+    const closed: WorkspaceEnvironmentActionRun = {
+      ...run, revision: run.revision + 1, terminalSessionId: null,
+      ...(run.status === "awaiting-approval" ? { status: "interrupted", finishedAt: this.runFactory.timestamp() } : {}),
+    };
     if (await this.runs.updateIfCurrent(closed)) this.publisher.publish(closed);
   }
 
@@ -340,7 +352,10 @@ export class ProjectActionService {
       snapshot: error instanceof PreparedTerminalCommandStartError ? error.snapshot : resolved.snapshot,
     });
     return this.publisher.persistAndPublish({
-      ...failed, terminalSessionId: this.terminals.get(context.slot)?.terminal.terminalSessionId ?? null,
+      ...failed,
+      ...(error instanceof ActionTerminalClosedError
+        ? { status: "interrupted", terminalSessionId: null }
+        : { terminalSessionId: this.terminals.get(context.slot)?.terminal.terminalSessionId ?? null }),
     });
   }
 
@@ -420,10 +435,11 @@ export class ProjectActionService {
   private async stopRunningAction(
     input: WorkspaceEnvironmentActionSlotInput,
     active: ActiveProjectAction,
+    afterExit: "shell" | "replace" = "shell",
   ): Promise<WorkspaceEnvironmentActionRun | null> {
     active.stopping = true;
     try {
-      await active.session.stopCommand();
+      await active.session.stopCommand(afterExit);
     } finally {
       const current = this.active.get(slotKey(input.threadId, input.actionId));
       if (current?.state === "pending-finalization") await this.runLifecycle.retryPendingFinalization(slotKey(input.threadId, input.actionId), current);
@@ -444,7 +460,10 @@ export class ProjectActionService {
   }
 
   private activeThreadIds(): string[] {
-    return [...new Set([...this.active.values()].map((active) => active.threadId))];
+    return [...new Set([
+      ...[...this.active.values()].map((active) => active.threadId),
+      ...[...this.terminals.values()].map((tracked) => tracked.threadId),
+    ])];
   }
 }
 

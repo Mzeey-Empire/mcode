@@ -88,6 +88,24 @@ describe("ProjectActionRunStore retention", () => {
     expect(repo.get(threadId, "old")).toEqual(original);
   });
 
+  it("clears terminal identities from every retained status without changing completed results", () => {
+    const retained: WorkspaceEnvironmentActionRun[] = [
+      { ...run(threadId, workspaceId, "completed", 0), terminalSessionId: "completed-terminal" },
+      { ...run(threadId, workspaceId, "failed", 1), status: "failed", exitCode: 2, terminalSessionId: "failed-terminal" },
+      { ...run(threadId, workspaceId, "interrupted", 2), status: "interrupted", exitCode: null, terminalSessionId: "interrupted-terminal" },
+      { ...run(threadId, workspaceId, "unavailable", 3), status: "unavailable", startedAt: null, exitCode: null, terminalSessionId: "unavailable-terminal" },
+      { ...run(threadId, workspaceId, "approval", 4), status: "awaiting-approval", startedAt: null, finishedAt: null, exitCode: null,
+        terminalSessionId: "approval-terminal", snapshot: { ...run(threadId, workspaceId, "approval", 4).snapshot,
+          approval: { target: { kind: "action", actionId: "approval" }, fingerprint: "a".repeat(64) } } },
+    ];
+    for (const candidate of retained) repo.replace(candidate);
+    expect(repo.interruptRunning("2026-01-02T00:00:00.000Z")).toHaveLength(5);
+    for (const candidate of retained) {
+      expect(repo.get(threadId, candidate.actionId)).toEqual({ ...candidate, revision: 2, terminalSessionId: null });
+    }
+    expect(repo.interruptRunning("2026-01-03T00:00:00.000Z")).toEqual([]);
+  });
+
   it("keeps the newest bounded deleted Action slots using an independent retention oracle", () => {
     const submitted = Array.from({ length: RETAINED_ACTION_RUNS_PER_THREAD + 1 }, (_, index) =>
       run(threadId, workspaceId, `deleted-${index.toString().padStart(3, "0")}`, index),
