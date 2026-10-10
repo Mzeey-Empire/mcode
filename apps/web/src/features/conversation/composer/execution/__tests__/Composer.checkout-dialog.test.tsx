@@ -22,6 +22,9 @@ import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useThreadDraftStore } from "@/stores/threadDraftStore";
 import { mockTransport, createMockThread, createMockWorkspace } from "@/__tests__/mocks/transport";
 import { INTERACTION_MODES, PERMISSION_MODES, type GitBranch } from "@/transport";
+import type { GitRef } from "@mcode/contracts";
+import type { BranchTarget } from "../targets/branch-target";
+import { invalidateBranchTargets } from "../targets/useBranchTargets";
 
 let lastComposerText = "";
 let lastFileAutocompleteOptions: Record<string, unknown> | undefined;
@@ -58,6 +61,27 @@ const transcriptComments: readonly SelectedTextComment[] = [
     mentions: [],
   },
 ];
+
+function gitRef(shortName: string, overrides: Partial<GitRef> = {}): GitRef {
+  return {
+    kind: "ref",
+    fullName: `refs/heads/${shortName}`,
+    shortName,
+    branchName: shortName,
+    remote: null,
+    twin: null,
+    isCurrent: false,
+    isDefault: false,
+    worktree: null,
+    headSha: "a".repeat(40),
+    committedAt: "2026-10-01T12:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function refsPage(items: GitRef[]) {
+  return { ok: true, items, total: items.length, nextCursor: null };
+}
 
 const branch = (name: string, isCurrent = false): GitBranch => ({
   name,
@@ -152,30 +176,32 @@ vi.mock("@/components/chat/ModeSelector", () => ({
   ModeSelector: ({ mode }: { mode: string }) => <div data-testid="mode-selector">{mode}</div>,
 }));
 
-vi.mock("@/components/chat/BranchPicker", () => ({
-  BranchPicker: ({
-    selectedBranch,
-    onSelectPullRequest,
-  }: {
-    selectedBranch: string;
-    onSelectPullRequest?: (branch: string, prNumber: number) => void;
-  }) => (
-    <div data-testid="branch-picker">
-      {selectedBranch}
-      {onSelectPullRequest ? (
-        <button
-          type="button"
-          onClick={() => onSelectPullRequest("contributor/pr-branch", 42)}
-        >
-          Select PR branch
-        </button>
-      ) : null}
+vi.mock("../BranchTargetPicker", () => ({
+  BranchTargetPicker: ({ onSelect }: { onSelect: (target: BranchTarget) => void }) => (
+    <div>
+      <button
+        type="button"
+        onClick={() => onSelect({ kind: "pull-request", number: 42, title: "Contributor fix", headRefName: "contributor/pr-branch" })}
+      >
+        Select PR branch
+      </button>
+      <button
+        type="button"
+        onClick={() => onSelect({
+          kind: "branch",
+          name: "release/2",
+          branchName: "release/2",
+          remote: null,
+          twin: null,
+          isCurrent: false,
+          isDefault: false,
+          worktree: null,
+        })}
+      >
+        Select release/2
+      </button>
     </div>
   ),
-}));
-
-vi.mock("@/components/chat/WorktreePicker", () => ({
-  default: () => <div data-testid="worktree-picker" />,
 }));
 
 vi.mock("@/components/chat/ModelSelector", () => ({
@@ -281,7 +307,7 @@ function seedComposerState(
     newThreadMode: mode,
     newThreadBranch: "feature/base",
     selectedWorktree: mode === "existing-worktree"
-      ? { name: "existing", path: "/repo/.worktrees/existing", branch: "feature/base", managed: true }
+      ? { name: "existing", path: "/repo/.worktrees/existing", branch: "feature/base" }
       : null,
     worktrees: [],
   });
@@ -305,7 +331,7 @@ function seedPreparingComposerState() {
     branches: [branch("main", true)],
     newThreadMode: "existing-worktree",
     newThreadBranch: "main",
-    selectedWorktree: { name: "selected", path: "/repo/.worktrees/selected", branch: "main", managed: true },
+    selectedWorktree: { name: "selected", path: "/repo/.worktrees/selected", branch: "main" },
   });
 }
 
@@ -422,6 +448,8 @@ describe("Composer checkout confirmation", () => {
       throw new Error("native alert should not be used");
     });
     delete (window as unknown as Record<string, unknown>).desktopBridge;
+    invalidateBranchTargets("ws-1");
+    (mockTransport.listRefs as ReturnType<typeof vi.fn>).mockResolvedValue(refsPage([]));
     (mockTransport.getCurrentBranch as ReturnType<typeof vi.fn>).mockResolvedValue("main");
     (mockTransport.checkoutBranch as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
     (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(
@@ -443,7 +471,7 @@ describe("Composer checkout confirmation", () => {
     const strip = screen.getByTestId("new-thread-context-strip");
     expect(within(strip).getByText(workspace.name)).toBeInTheDocument();
     expect(within(strip).getByTestId("mode-selector")).toHaveTextContent("direct");
-    expect(within(strip).getByTestId("branch-picker")).toHaveTextContent("feature/base");
+    expect(within(strip).getByTestId("composer-branch-trigger")).toHaveTextContent("On feature/base");
   });
 
   it("applies a transcript deletion to the matching ComposerDraft and consumes the handoff", async () => {
@@ -499,7 +527,7 @@ describe("Composer checkout confirmation", () => {
     expect(within(strip).getByText(workspace.name)).toBeInTheDocument();
     expect(within(strip).getByText("Local")).toBeInTheDocument();
     expect(within(strip).queryByTestId("mode-selector")).not.toBeInTheDocument();
-    expect(within(strip).queryByTestId("branch-picker")).not.toBeInTheDocument();
+    expect(within(strip).queryByTestId("composer-branch-trigger")).not.toBeInTheDocument();
     expect(useWorkspaceStore.getState().newThreadMode).toBe("worktree");
   });
 
@@ -649,8 +677,9 @@ describe("Composer checkout confirmation", () => {
     render(<Composer isNewThread workspaceId="ws-1" />);
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole("button", { name: "Select PR branch" }));
-    expect(mockTransport.fetchBranch).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("composer-branch-trigger"));
+    await user.click(await screen.findByRole("button", { name: "Select PR branch" }));
+    expect(screen.getByTestId("composer-branch-trigger")).toHaveTextContent("From #42");
 
     await user.type(screen.getByLabelText("Message Mcode"), "Review this PR");
     await user.click(screen.getByLabelText("Send message"));
@@ -665,6 +694,127 @@ describe("Composer checkout confirmation", () => {
       pullRequestNumber: 42,
       worktreeBranchMode: "named",
     });
+  });
+
+  it("sends the checked-out branch when no branch was picked", async () => {
+    seedComposerState("worktree");
+    useWorkspaceStore.setState({ newThreadBranch: "" });
+    (mockTransport.listRefs as ReturnType<typeof vi.fn>).mockResolvedValue(
+      refsPage([gitRef("main", { isDefault: true }), gitRef("develop", { isCurrent: true })]),
+    );
+    render(<Composer isNewThread workspaceId="ws-1" />);
+
+    expect(await screen.findByText("From develop")).toBeInTheDocument();
+    await typeAndSend();
+
+    await waitFor(() => expect(mockTransport.createAndSendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "worktree", branch: "develop" }),
+    ));
+  });
+
+  it("holds Send until the default branch is known", async () => {
+    seedComposerState("worktree");
+    useWorkspaceStore.setState({ newThreadBranch: "" });
+    let resolveRefs!: (value: unknown) => void;
+    (mockTransport.listRefs as ReturnType<typeof vi.fn>).mockReturnValue(
+      new Promise((resolve) => { resolveRefs = resolve; }),
+    );
+    render(<Composer isNewThread workspaceId="ws-1" />);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Message Mcode"), "Build this");
+    expect(screen.getByTestId("composer-branch-trigger")).toHaveTextContent("Loading branches");
+    expect(screen.getByLabelText("Send message")).toBeDisabled();
+
+    await act(async () => {
+      resolveRefs(refsPage([gitRef("main", { isDefault: true })]));
+    });
+
+    await waitFor(() => expect(screen.getByLabelText("Send message")).toBeEnabled());
+    expect(screen.getByTestId("composer-branch-trigger")).toHaveTextContent("From main");
+    expect(mockTransport.createAndSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps Send disabled when the project names no branch to start from", async () => {
+    seedComposerState("worktree");
+    useWorkspaceStore.setState({ newThreadBranch: "" });
+    render(<Composer isNewThread workspaceId="ws-1" />);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Message Mcode"), "Build this");
+
+    await waitFor(() => expect(screen.getByTestId("composer-branch-trigger")).toHaveTextContent("Choose branch"));
+    expect(screen.getByLabelText("Send message")).toBeDisabled();
+  });
+
+  it("keeps a picked branch when the checked-out branch changes", async () => {
+    seedComposerState("worktree");
+    useWorkspaceStore.setState({ newThreadBranch: "" });
+    (mockTransport.listRefs as ReturnType<typeof vi.fn>).mockResolvedValue(
+      refsPage([gitRef("main", { isCurrent: true, isDefault: true })]),
+    );
+    render(<Composer isNewThread workspaceId="ws-1" />);
+    const user = userEvent.setup();
+    expect(await screen.findByText("From main")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("composer-branch-trigger"));
+    await user.click(await screen.findByRole("button", { name: "Select release/2" }));
+    (mockTransport.listRefs as ReturnType<typeof vi.fn>).mockResolvedValue(
+      refsPage([gitRef("main", { isDefault: true }), gitRef("hotfix", { isCurrent: true })]),
+    );
+    await act(async () => {
+      invalidateBranchTargets("ws-1");
+    });
+
+    expect(screen.getByTestId("composer-branch-trigger")).toHaveTextContent("From release/2");
+    await typeAndSend();
+    await waitFor(() => expect(mockTransport.createAndSendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "worktree", branch: "release/2" }),
+    ));
+  });
+
+  it("moves an unpicked branch when the checked-out branch changes", async () => {
+    seedComposerState("direct");
+    useWorkspaceStore.setState({ newThreadBranch: "" });
+    (mockTransport.listRefs as ReturnType<typeof vi.fn>).mockResolvedValue(
+      refsPage([gitRef("main", { isCurrent: true, isDefault: true })]),
+    );
+    render(<Composer isNewThread workspaceId="ws-1" />);
+    expect(await screen.findByText("On main")).toBeInTheDocument();
+
+    (mockTransport.listRefs as ReturnType<typeof vi.fn>).mockResolvedValue(
+      refsPage([gitRef("main", { isDefault: true }), gitRef("hotfix", { isCurrent: true })]),
+    );
+    await act(async () => {
+      invalidateBranchTargets("ws-1");
+    });
+
+    expect(await screen.findByText("On hotfix")).toBeInTheDocument();
+    expect(useWorkspaceStore.getState().newThreadBranch).toBe("");
+  });
+
+  it("forks onto the parent thread's branch", async () => {
+    const workspace = seedComposerState("direct");
+    const parent = createMockThread({ id: "thread-parent", workspace_id: workspace.id, mode: "direct", branch: "feature/parent" });
+    useWorkspaceStore.setState({ threads: [parent], activeThreadId: parent.id });
+    render(<Composer threadId={parent.id} workspaceId="ws-1" branchFromMessageId="message-1" />);
+
+    expect(await screen.findByTestId("composer-branch-trigger")).toHaveTextContent("On feature/parent");
+  });
+
+  it("forks a branchless parent onto the branch its checkout has out", async () => {
+    const workspace = seedComposerState("direct");
+    const parent = createMockThread({ id: "thread-parent", workspace_id: workspace.id, mode: "direct", branch: "", base_branch: null });
+    useWorkspaceStore.setState({ threads: [parent], activeThreadId: parent.id });
+    (mockTransport.listRefs as ReturnType<typeof vi.fn>).mockResolvedValue(
+      refsPage([gitRef("main", { isDefault: true }), gitRef("trunk", { isCurrent: true })]),
+    );
+    render(<Composer threadId={parent.id} workspaceId="ws-1" branchFromMessageId="message-1" />);
+
+    expect(await screen.findByText("On trunk")).toBeInTheDocument();
+    expect(mockTransport.listRefs).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "ws-1", threadId: "thread-parent", purpose: "new-thread" }),
+    );
   });
 
   it("reports the created thread to an embedding new-thread workflow", async () => {

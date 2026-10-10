@@ -85,12 +85,7 @@ export function ComposerNewThreadContext({
             </span>
           )}
           {isGitRepo && (
-            <ComposerTargetSelection
-              scope="new-thread"
-              mode={mode}
-              workspaceId={workspaceId}
-              variant="context-strip"
-            />
+            <ComposerTargetSelection scope="new-thread" mode={mode} workspaceId={workspaceId} />
           )}
         </>
       ) : (

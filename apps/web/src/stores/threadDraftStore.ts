@@ -3,8 +3,8 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import type {
   ApprovalReviewMode,
   OrchestrationMode,
-  WorktreeInfo,
 } from "@mcode/contracts";
+import type { AttachedWorktree } from "@/lib/worktree";
 import type {
   InteractionMode,
   PermissionMode,
@@ -29,7 +29,7 @@ export interface ThreadDraftTarget {
   pullRequestNumber?: number;
   customBranchName: string;
   autoPreviewBranch: string;
-  selectedWorktree: WorktreeInfo | null;
+  selectedWorktree: AttachedWorktree | null;
   branchManuallySelected: boolean;
 }
 

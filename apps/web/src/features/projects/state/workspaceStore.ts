@@ -36,7 +36,7 @@ import {
 } from "@/features/preview/automation/browserAutomationStore";
 import type { ApprovalReviewMode, ContextWindowMode, DevinMode, ReasoningLevel, InteractionMode, OrchestrationMode, TurnRuntimeSnapshot, Message } from "@mcode/contracts";
 import { sanitizeCustomBranchInput } from "@/lib/branch-name";
-import { isDetachedWorktree, normalizeWorktreePath } from "@/lib/worktree";
+import { isDetachedWorktree, normalizeWorktreePath, type AttachedWorktree } from "@/lib/worktree";
 import { readRememberedComposerMode } from "@/lib/composer-mode-preference";
 import { recordThreadSelection } from "@/lib/thread-switch-telemetry";
 
@@ -357,7 +357,7 @@ function threadCreationContext(
 }
 
 function targetForAttachedWorktree(
-  worktree: WorktreeInfo,
+  worktree: AttachedWorktree,
   selectedBranch: string,
   existingWorktreePath = worktree.path,
 ): ThreadCreationTarget {
@@ -384,16 +384,16 @@ function newThreadCreationTarget(
   branch: string,
   branchSource: WorkspaceState["newThreadBranchSource"],
   pullRequestNumber: number | undefined,
-  selectedWorktree: WorktreeInfo | null,
+  selectedWorktree: AttachedWorktree | null,
 ): ThreadCreationTarget {
   const selectedPullRequestNumber = branchSource === "pr" ? pullRequestNumber : undefined;
   if (mode === "direct") {
-    return { transportMode: "direct", branch: branch || "main", pullRequestNumber: selectedPullRequestNumber };
+    return { transportMode: "direct", branch, pullRequestNumber: selectedPullRequestNumber };
   }
   if (mode === "worktree") {
     return {
       transportMode: "worktree",
-      branch: branch || "main",
+      branch: requireBranch(branch),
       pullRequestNumber: selectedPullRequestNumber,
       worktreeBranchMode: branchSource === "pr" ? "named" : "branchless",
     };
@@ -406,9 +406,9 @@ function branchThreadCreationTarget(
   params: BranchThreadParams,
   worktrees: WorktreeInfo[],
 ): ThreadCreationTarget {
-  const branch = params.branch ?? "main";
+  const branch = params.branch ?? "";
   if (params.mode === "direct") return { transportMode: "direct", branch };
-  if (params.mode === "worktree") return { transportMode: "worktree", branch };
+  if (params.mode === "worktree") return { transportMode: "worktree", branch: requireBranch(branch) };
   const existingWorktreePath = params.existingWorktreePath;
   if (!existingWorktreePath) {
     throw new Error("existingWorktreePath is required for existing-worktree mode");
@@ -429,6 +429,12 @@ function branchThreadCreationTarget(
     params.existingWorktreeBaseBranch ?? params.branch ?? "",
     existingWorktreePath,
   );
+}
+
+/** A new worktree starts from a named branch; the Composer gates Send until one is known. */
+function requireBranch(branch: string): string {
+  if (!branch) throw new Error("Choose a branch before sending");
+  return branch;
 }
 
 function placeholderWorktreeSettings(pending: PendingThreadCreation) {
@@ -488,7 +494,8 @@ async function runCreateAndSend(pending: PendingThreadCreation): Promise<CreateA
     permissionMode: pending.permissionMode,
     approvalReviewMode: pending.approvalReviewMode,
     mode: pending.transportMode,
-    branch: pending.branch,
+    // A project without git has no branch; the server records its own placeholder.
+    branch: pending.branch || undefined,
     pullRequestNumber: pending.pullRequestNumber,
     worktreeBranchMode: pending.worktreeBranchMode,
     existingWorktreePath: pending.existingWorktreePath,
@@ -596,7 +603,7 @@ interface WorkspaceState {
   worktreesLoadedForWorkspace: string | null;
   customBranchName: string;
   autoPreviewBranch: string;
-  selectedWorktree: WorktreeInfo | null;
+  selectedWorktree: AttachedWorktree | null;
   openPrs: PrDetail[];
   openPrsLoading: boolean;
   fetchingBranch: string | null;
@@ -716,7 +723,7 @@ interface WorkspaceState {
   // Worktree actions
   loadWorktrees: (workspaceId: string) => Promise<void>;
   setCustomBranchName: (name: string) => void;
-  setSelectedWorktree: (worktree: WorktreeInfo | null) => void;
+  setSelectedWorktree: (worktree: AttachedWorktree | null) => void;
   regenerateAutoPreview: () => void;
 
   // Branch-from-chat state (mirrors new-thread naming fields)

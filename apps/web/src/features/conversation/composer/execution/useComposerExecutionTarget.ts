@@ -4,6 +4,7 @@ import type { Thread } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { isDetachedWorktree, normalizeWorktreePath } from "@/lib/worktree";
 import { rememberComposerMode } from "@/lib/composer-mode-preference";
+import { useForkTargetBranch, useNewThreadTargetBranch, type TargetBranch } from "./useTargetBranch";
 
 /** The selected execution target for the current Composer session. */
 export type ComposerExecutionTarget =
@@ -51,7 +52,11 @@ export interface ComposerExecutionTargetController {
   branchTargetBranch: string;
   branchWorktreePath: string | null;
   branchWorktreeIsDetached: boolean;
-  fetchingBranch: boolean;
+  /**
+   * True while a new thread or fork in a git project has no branch to send: nothing is picked and the default is
+   * still loading or could not be read. Send waits instead of guessing a branch name.
+   */
+  targetPending: boolean;
   setMode(mode: ComposerMode): void;
   setBranchMode(mode: ComposerMode): void;
   setNewThreadMode(mode: ComposerMode): void;
@@ -69,20 +74,14 @@ export function useComposerExecutionTarget({
   const activeWorkspace = useWorkspaceStore((state) =>
     state.workspaces.find((workspace) => workspace.id === state.activeWorkspaceId),
   );
-  const branches = useWorkspaceStore((state) => state.branches);
   const newThreadMode = useWorkspaceStore((state) => state.newThreadMode);
-  const newThreadBranch = useWorkspaceStore((state) => state.newThreadBranch);
   const newThreadBranchSource = useWorkspaceStore((state) => state.newThreadBranchSource);
   const newThreadPullRequestNumber = useWorkspaceStore((state) => state.newThreadPullRequestNumber);
   const selectedWorktree = useWorkspaceStore((state) => state.selectedWorktree);
   const branchExecMode = useWorkspaceStore((state) => state.branchExecMode);
-  const branchTargetBranch = useWorkspaceStore((state) => state.branchTargetBranch);
   const branchWorktreePath = useWorkspaceStore((state) => state.branchWorktreePath);
   const worktrees = useWorkspaceStore((state) => state.worktrees);
   const worktreesLoadedForWorkspace = useWorkspaceStore((state) => state.worktreesLoadedForWorkspace);
-  const fetchingBranch = useWorkspaceStore((state) => state.fetchingBranch);
-  const loadBranches = useWorkspaceStore((state) => state.loadBranches);
-  const loadOpenPrs = useWorkspaceStore((state) => state.loadOpenPrs);
   const loadWorktrees = useWorkspaceStore((state) => state.loadWorktrees);
   const initBranchMode = useWorkspaceStore((state) => state.initBranchMode);
   const setBranchExecMode = useWorkspaceStore((state) => state.setBranchExecMode);
@@ -99,6 +98,7 @@ export function useComposerExecutionTarget({
     return worktrees.find((worktree) => normalizeWorktreePath(worktree.path) === normalizedPath) ?? null;
   }, [branchWorktreePath, worktrees]);
   const branchWorktreeIsDetached = isDetachedWorktree(branchSelectedWorktree);
+  const { newThreadBranch, forkBranch } = useFlowBranches({ activeThread, branchFromMessageId, isNewThread, workspaceId });
   const isStaleWorktree = useMemo(() => {
     if (!activeThread?.worktree_path || activeThread.mode !== "worktree") return false;
     if (worktreesLoadedForWorkspace !== activeThread.workspace_id) return false;
@@ -124,30 +124,15 @@ export function useComposerExecutionTarget({
   useEffect(() => {
     if (!branchFromMessageId || !workspaceId) return;
     initBranchMode(activeThread);
-    loadBranches(workspaceId);
     loadWorktrees(workspaceId);
-  }, [activeThread, branchFromMessageId, initBranchMode, loadBranches, loadWorktrees, workspaceId]);
-
-  useEffect(() => {
-    if (isNewThread && workspaceId && isGitRepo) loadBranches(workspaceId);
-  }, [isGitRepo, isNewThread, loadBranches, workspaceId]);
-
-  useEffect(() => {
-    if (!isNewThread || newThreadBranch || branches.length === 0) return;
-    const currentBranch = branches.find((branch) => branch.isCurrent);
-    if (currentBranch) setNewThreadBranch(currentBranch.name);
-  }, [branches, isNewThread, newThreadBranch, setNewThreadBranch]);
-
-  useEffect(() => {
-    if (isNewThread && workspaceId && composerMode === "worktree") loadOpenPrs(workspaceId);
-  }, [composerMode, isNewThread, loadOpenPrs, workspaceId]);
+  }, [activeThread, branchFromMessageId, initBranchMode, loadWorktrees, workspaceId]);
 
   const target = useMemo<ComposerExecutionTarget>(() => {
     if (isNewThread) {
       return {
         kind: "new-thread",
         mode: composerMode,
-        branch: newThreadBranch,
+        branch: newThreadBranch.name,
         branchSource: newThreadBranchSource,
         pullRequestNumber: newThreadPullRequestNumber,
         hasWorktree: selectedWorktree !== null,
@@ -157,13 +142,19 @@ export function useComposerExecutionTarget({
       return {
         kind: "branch",
         mode: branchExecMode,
-        branch: branchTargetBranch,
+        branch: forkBranch.name,
         worktreePath: branchWorktreePath,
         worktreeIsDetached: branchWorktreeIsDetached,
       };
     }
     return { kind: "existing-thread", mode: composerMode };
-  }, [branchExecMode, branchFromMessageId, branchTargetBranch, branchWorktreeIsDetached, branchWorktreePath, composerMode, isNewThread, newThreadBranch, newThreadBranchSource, newThreadPullRequestNumber, selectedWorktree]);
+  }, [branchExecMode, branchFromMessageId, forkBranch.name, branchWorktreeIsDetached, branchWorktreePath, composerMode, isNewThread, newThreadBranch.name, newThreadBranchSource, newThreadPullRequestNumber, selectedWorktree]);
+  const targetPending = isTargetBranchPending({
+    isGitRepo,
+    target,
+    newThreadWorktreeIsDetached: isDetachedWorktree(selectedWorktree),
+    forkWorktreeIsDetached: branchWorktreeIsDetached,
+  });
 
   return {
     target,
@@ -174,17 +165,39 @@ export function useComposerExecutionTarget({
     isStaleWorktree,
     workspacePath: activeWorkspace?.path,
     selectedWorktree,
-    newThreadBranch,
+    newThreadBranch: newThreadBranch.name,
     newThreadBranchSource,
     branchExecMode,
-    branchTargetBranch,
+    branchTargetBranch: forkBranch.name,
     branchWorktreePath,
     branchWorktreeIsDetached,
-    fetchingBranch: Boolean(fetchingBranch),
+    targetPending,
     setMode,
     setBranchMode: setBranchExecMode,
     setNewThreadMode,
     setNewThreadBranch,
     setNewThreadBranchFromPullRequest: setNewThreadBranchFromPr,
   };
+}
+
+/** Reads the branch of the flow on screen only, so the other flow fetches no default. */
+function useFlowBranches(options: UseComposerExecutionTargetOptions): { newThreadBranch: TargetBranch; forkBranch: TargetBranch } {
+  const newThreadBranch = useNewThreadTargetBranch(options.isNewThread ? options.workspaceId : undefined);
+  const forkBranch = useForkTargetBranch(options.branchFromMessageId ? options.activeThread : undefined);
+  return { newThreadBranch, forkBranch };
+}
+
+interface TargetBranchPendingInput {
+  readonly isGitRepo: boolean;
+  readonly target: ComposerExecutionTarget;
+  readonly newThreadWorktreeIsDetached: boolean;
+  readonly forkWorktreeIsDetached: boolean;
+}
+
+/** A new thread or fork in a git project needs a branch unless it attaches to a worktree that has one checked out. */
+function isTargetBranchPending(input: TargetBranchPendingInput): boolean {
+  const { isGitRepo, target } = input;
+  if (!isGitRepo || target.kind === "existing-thread" || target.branch !== "") return false;
+  if (target.mode !== "existing-worktree") return true;
+  return target.kind === "new-thread" ? input.newThreadWorktreeIsDetached : input.forkWorktreeIsDetached;
 }

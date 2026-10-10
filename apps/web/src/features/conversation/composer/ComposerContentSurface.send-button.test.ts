@@ -14,6 +14,7 @@ const disabledArgs = {
   isStopPending: false,
   hasContent: false,
   setupBlocked: false,
+  targetPending: false,
 } as const;
 
 describe("composer send button stopping state", () => {
@@ -47,5 +48,29 @@ describe("composer send button stopping state", () => {
       hasContent: false,
     })).toBe("stop");
     expect(isComposerSendButtonDisabled({ ...disabledArgs, isStopPending: false })).toBe(false);
+  });
+});
+
+describe("composer send button with a pending target branch", () => {
+  it("disables Send while a new thread has content but no branch yet", () => {
+    expect(isComposerSendButtonDisabled({
+      ...disabledArgs,
+      isAgentRunning: false,
+      hasContent: true,
+      targetPending: true,
+    })).toBe(true);
+  });
+
+  it("enables Send once the branch is known", () => {
+    expect(isComposerSendButtonDisabled({
+      ...disabledArgs,
+      isAgentRunning: false,
+      hasContent: true,
+      targetPending: false,
+    })).toBe(false);
+  });
+
+  it("keeps Stop enabled for a running parent thread while a fork waits for its branch", () => {
+    expect(isComposerSendButtonDisabled({ ...disabledArgs, targetPending: true })).toBe(false);
   });
 });

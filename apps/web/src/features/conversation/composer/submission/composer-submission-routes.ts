@@ -18,7 +18,6 @@ export interface DispatchComposerTargetOptions {
   threadId?: string;
   workspaceId?: string;
   branchFromMessageId?: string;
-  activeThread?: Thread;
   target: ComposerExecutionTarget;
   execution: ComposerExecutionTargetController;
   submission: PreparedComposerSubmission;
@@ -174,10 +173,10 @@ async function dispatchBranch(
   options: DispatchComposerTargetOptions,
   threadId: string,
 ): Promise<void> {
-  const { target, activeThread, branchFromMessageId, submission, onBranchModeExit } = options;
+  const { target, branchFromMessageId, submission, onBranchModeExit } = options;
   if (target.kind !== "branch") return;
   await useWorkspaceStore.getState().branchThread(
-    createBranchThreadRequest(threadId, target, activeThread, branchFromMessageId!, submission),
+    createBranchThreadRequest(threadId, target, branchFromMessageId!, submission),
   );
   onBranchModeExit?.();
 }
@@ -186,7 +185,6 @@ async function dispatchBranch(
 function createBranchThreadRequest(
   sourceThreadId: string,
   target: Extract<ComposerExecutionTarget, { kind: "branch" }>,
-  activeThread: Thread | undefined,
   forkedFromMessageId: string,
   submission: PreparedComposerSubmission,
 ) {
@@ -197,9 +195,10 @@ function createBranchThreadRequest(
     displayContent: prepared.displayContent,
     attachments: submission.attachmentMetas.length > 0 ? submission.attachmentMetas : undefined,
     mode: target.mode,
-    branch: target.branch || activeThread?.branch || "",
+    branch: target.branch,
     existingWorktreePath: target.worktreePath ?? undefined,
-    existingWorktreeBaseBranch: resolveDetachedBaseBranch(target, activeThread),
+    // A detached worktree has no branch of its own, so the picked branch is the base it starts from.
+    existingWorktreeBaseBranch: target.worktreeIsDetached ? target.branch : undefined,
     forkedFromMessageId,
     mentions: snapshot.mentions,
     selectedTextComments: savedCommentsForTransport(snapshot.selectedTextComments),
@@ -224,15 +223,6 @@ function branchThreadAgentOptions(selection: ComposerAgentSelection) {
     devinMode: selection.provider === "devin" ? selection.devinMode ?? undefined : undefined,
     orchestrationMode: selection.orchestrationMode,
   };
-}
-
-/** Resolves the branch to use when branching into a detached existing worktree. */
-function resolveDetachedBaseBranch(
-  target: Extract<ComposerExecutionTarget, { kind: "branch" }>,
-  activeThread: Thread | undefined,
-): string | undefined {
-  if (!target.worktreeIsDetached) return undefined;
-  return target.branch || activeThread?.base_branch || activeThread?.branch || "main";
 }
 
 /** Sends a prepared message to the existing thread. */
