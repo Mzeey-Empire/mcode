@@ -9,8 +9,9 @@ import { LastTurnView } from "./LastTurnView";
 import { CumulativeView } from "./CumulativeView";
 import { GitDiffView, type GitView } from "./GitDiffView";
 import type { DiffSource } from "@/stores/diffStore";
-import { reviewBody, type ReviewBody, type ReviewOutcome } from "./review-body";
+import { filesPaneNotice, reviewBody, type ReviewBody, type ReviewOutcome } from "./review-body";
 import { ReviewLoadingPulse, ReviewStateBody } from "./ReviewStateBody";
+import { ReviewStateControls } from "./FileList";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { WorktreeFilesPane } from "./WorktreeFilesPane";
@@ -52,6 +53,7 @@ interface ComparisonLoadInput {
   readonly selectedCommitSha: string | null;
   readonly selectedTurnMessageId: string | null;
   readonly reviewTurns: readonly ReviewTurn[] | undefined;
+  readonly reviewTurnsError: string | null;
   readonly snapshotVersion: string;
   readonly snapshots: readonly Snapshot[] | undefined;
   readonly viewMode: DiffViewMode;
@@ -75,12 +77,12 @@ function canLoadComparison(input: ComparisonLoadInput, snapshotsLoading: boolean
 
 /**
  * An unpicked Turn view waits for the turn list: the picker seeds the latest
- * turn as soon as it arrives, and only an empty list means "No turns yet".
+ * turn as soon as it arrives, and only an empty list means "No turns yet". A
+ * failed list stops the wait so the body can report it.
  */
 function isAwaitingTurnSelection(input: ComparisonLoadInput): boolean {
-  return input.viewMode === "turn" &&
-    !input.selectedTurnMessageId &&
-    (input.reviewTurns === undefined || input.reviewTurns.length > 0);
+  if (input.viewMode !== "turn" || input.selectedTurnMessageId) return false;
+  return input.reviewTurns === undefined ? input.reviewTurnsError === null : input.reviewTurns.length > 0;
 }
 
 function isUnavailableBranchComparison(input: ComparisonLoadInput): boolean {
@@ -178,7 +180,9 @@ async function loadTurnDiffComparison(input: ComparisonLoadInput): Promise<Loade
   // all: operand-less requests resolve live/latest state the user never chose.
   if (input.viewMode === "turn" && !input.selectedTurnMessageId) {
     return {
-      outcome: { status: "unselected" },
+      outcome: input.reviewTurns === undefined && input.reviewTurnsError !== null
+        ? { status: "request-failed", detail: input.reviewTurnsError }
+        : { status: "unselected" },
       git: null,
       cacheVersion: input.mutableComparisonRevision,
       liveRevision: input.mutableComparisonRevision,
@@ -224,8 +228,10 @@ interface DiffPanelStore {
   readonly selectedCommitSha: DiffStoreState["selectedCommitSha"];
   readonly selectedTurnMessageId: string | null;
   readonly reviewTurns: readonly ReviewTurn[] | undefined;
+  readonly reviewTurnsError: string | null;
   readonly setReviewDiffStat: DiffStoreState["setReviewDiffStat"];
   readonly setReviewTurns: DiffStoreState["setReviewTurns"];
+  readonly setReviewTurnsError: DiffStoreState["setReviewTurnsError"];
   readonly setReviewFilesVisible: DiffStoreState["setReviewFilesVisible"];
   readonly setSnapshots: DiffStoreState["setSnapshots"];
   readonly setSnapshotsLoading: DiffStoreState["setSnapshotsLoading"];
@@ -277,8 +283,12 @@ function useDiffPanelStore(): DiffPanelStore {
     reviewTurns: useDiffStore((state) =>
       activeThreadId ? state.reviewTurnsByThread[activeThreadId] : undefined,
     ),
+    reviewTurnsError: useDiffStore((state) =>
+      activeThreadId ? (state.reviewTurnsErrorByThread[activeThreadId] ?? null) : null,
+    ),
     setReviewDiffStat: useDiffStore((state) => state.setReviewDiffStat),
     setReviewTurns: useDiffStore((state) => state.setReviewTurns),
+    setReviewTurnsError: useDiffStore((state) => state.setReviewTurnsError),
     setReviewFilesVisible: useDiffStore((state) => state.setReviewFilesVisible),
     setSnapshots: useDiffStore((state) => state.setSnapshots),
     setSnapshotsLoading: useDiffStore((state) => state.setSnapshotsLoading),
@@ -360,6 +370,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
   const [settled, setSettled] = useState<SettledComparison | null>(null);
   const [comparisonLoading, setComparisonLoading] = useState(false);
   const [snapshotRefreshRevision, setSnapshotRefreshRevision] = useState(0);
+  const [turnListRevision, setTurnListRevision] = useState(0);
   const {
     activeThreadId,
     bumpDiffRevision,
@@ -393,6 +404,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     selectedCommitSha: store.selectedCommitSha,
     selectedTurnMessageId: store.selectedTurnMessageId,
     reviewTurns: store.reviewTurns,
+    reviewTurnsError: store.reviewTurnsError,
     snapshotVersion,
     snapshots: store.snapshots,
     viewMode: store.viewMode,
@@ -401,6 +413,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     mutableComparisonRevision,
     snapshotVersion,
     store.reviewTurns,
+    store.reviewTurnsError,
     store.activeThreadClientOnly,
     store.activeThreadId,
     store.activeWorkspaceId,
@@ -461,6 +474,9 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
       setComparisonLoading,
       setSnapshotRefreshRevision,
       setSnapshots,
+      onFailed: (error) => {
+        setSettled({ identity: comparisonIdentity, outcome: requestFailedOutcome(error), git: null, cacheVersion: "" });
+      },
     });
   }, [
     activeThreadId,
@@ -474,13 +490,20 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
 
   // Retry reruns the same comparison even where Refresh is hidden: a failed
   // commit comparison is immutable but still worth asking again.
+  // Only a list that never arrived blocks the body; a failed background
+  // refetch keeps the loaded list, so Retry then reruns the comparison.
+  const turnListFailed = store.reviewTurns === undefined && store.reviewTurnsError !== null;
   const onRetryComparison = useCallback(() => {
+    if (viewMode === "turn" && turnListFailed) {
+      setTurnListRevision((revision) => revision + 1);
+      return;
+    }
     if (viewMode === "commit") {
       setSnapshotRefreshRevision((revision) => revision + 1);
       return;
     }
     onRefreshComparison();
-  }, [onRefreshComparison, viewMode]);
+  }, [onRefreshComparison, turnListFailed, viewMode]);
 
   useEffect(() => () => {
     refreshRequestRef.current += 1;
@@ -490,8 +513,9 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
   useReviewTurns(
     store.activeThreadClientOnly ? null : store.activeThreadId,
     store.viewMode,
-    snapshotVersion,
+    `${snapshotVersion}#${turnListRevision}`,
     store.setReviewTurns,
+    store.setReviewTurnsError,
   );
 
   return {
@@ -570,6 +594,7 @@ function refreshSnapshots({
   setComparisonLoading,
   setSnapshotRefreshRevision,
   setSnapshots,
+  onFailed,
 }: {
   readonly activeThreadId: string;
   readonly comparisonIdentity: string;
@@ -578,6 +603,8 @@ function refreshSnapshots({
   readonly setComparisonLoading: (loading: boolean) => void;
   readonly setSnapshotRefreshRevision: (update: (current: number) => number) => void;
   readonly setSnapshots: DiffStoreState["setSnapshots"];
+  /** A refresh that never answered replaces the shown comparison, so a stale diff can't pass for current. */
+  readonly onFailed: (error: unknown) => void;
 }): void {
   const requestId = ++refreshRequestRef.current;
   setComparisonLoading(true);
@@ -585,8 +612,9 @@ function refreshSnapshots({
     if (!isCurrentRefreshRequest(refreshRequestRef, comparisonIdentityRef, requestId, comparisonIdentity)) return;
     setSnapshots(activeThreadId, snapshots);
     setSnapshotRefreshRevision((revision) => revision + 1);
-  }).catch(() => {
+  }).catch((error: unknown) => {
     if (isCurrentRefreshRequest(refreshRequestRef, comparisonIdentityRef, requestId, comparisonIdentity)) {
+      onFailed(error);
       setComparisonLoading(false);
     }
   });
@@ -623,24 +651,26 @@ function useInitialSnapshots(
 
 /**
  * Loads the thread's turn list for the Turn view's picker and ordinals. It
- * refetches whenever the snapshots change, so a finished turn appears.
+ * refetches whenever `fetchKey` changes: new snapshots, so a finished turn
+ * appears, or a retry after a failed list.
  */
 function useReviewTurns(
   threadId: string | null,
   viewMode: DiffViewMode,
-  snapshotVersion: string,
+  fetchKey: string,
   setReviewTurns: DiffStoreState["setReviewTurns"],
+  setReviewTurnsError: DiffStoreState["setReviewTurnsError"],
 ): void {
   useEffect(() => {
     if (!threadId || viewMode !== "turn") return;
     let cancelled = false;
     void getTransport().listReviewTurns(threadId).then((turns) => {
       if (!cancelled) setReviewTurns(threadId, turns);
-    }).catch(() => {
-      // The picker keeps its last list; the comparison body reports its own failures.
+    }).catch((error: unknown) => {
+      if (!cancelled) setReviewTurnsError(threadId, error instanceof Error ? error.message : String(error));
     });
     return () => { cancelled = true; };
-  }, [setReviewTurns, snapshotVersion, threadId, viewMode]);
+  }, [fetchKey, setReviewTurns, setReviewTurnsError, threadId, viewMode]);
 }
 
 /**
@@ -703,6 +733,7 @@ export function DiffPanel() {
         comparisonFiles={comparison.comparisonFiles}
         comparisonLoading={comparison.comparisonLoading}
         filesLoading={!comparison.visibleSettled}
+        filesNotice={filesPaneNotice(body)}
         filesPaneFits={filesPaneFits}
         filesPanelWidth={filesPanelWidth}
         filesVisible={filesVisible}
@@ -775,8 +806,20 @@ function DiffPanelView({
   readonly viewMode: DiffViewMode;
 }) {
   if (!scopeId) return null;
-  if (!body || !comparison.visibleSettled) return comparison.comparisonPending ? <ReviewLoadingPulse /> : null;
-  if (body.kind !== "ready") return <ReviewStateBody body={body} onRetry={comparison.onRetryComparison} />;
+  const controls = (
+    <ReviewStateControls
+      scopeId={scopeId}
+      refreshable={viewMode !== "commit"}
+      refreshing={comparison.comparisonLoading}
+      onRefresh={comparison.onRefreshComparison}
+    />
+  );
+  if (!body || !comparison.visibleSettled) {
+    return comparison.comparisonPending ? <>{controls}<ReviewLoadingPulse /></> : null;
+  }
+  if (body.kind !== "ready") {
+    return <>{controls}<ReviewStateBody body={body} onRetry={comparison.onRetryComparison} /></>;
+  }
   return (
     <ReadyComparisonView
       comparison={body.comparison}
@@ -850,6 +893,7 @@ function ReviewFilesPane({
   comparisonFiles,
   comparisonLoading,
   filesLoading,
+  filesNotice,
   filesPaneFits,
   filesPanelWidth,
   filesVisible,
@@ -864,6 +908,7 @@ function ReviewFilesPane({
   readonly comparisonFiles: readonly ReviewFileChange[];
   readonly comparisonLoading: boolean;
   readonly filesLoading: boolean;
+  readonly filesNotice: string | null;
   readonly filesPaneFits: boolean;
   readonly filesPanelWidth: number;
   readonly filesVisible: boolean;
@@ -882,7 +927,7 @@ function ReviewFilesPane({
       files={comparisonFiles}
       activePath={activePath}
       loading={filesLoading}
-      error={null}
+      error={filesNotice}
       width={filesPanelWidth}
       minWidth={FILES_PANEL_MIN_WIDTH}
       maxWidth={`calc(100% - ${DIFF_VIEWPORT_MIN_WIDTH}px)`}

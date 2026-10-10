@@ -39,6 +39,7 @@ function seedTurn(newestFirst: readonly ReviewTurn[]): ReviewTurn | undefined {
  */
 export function TurnPicker({ threadId }: { threadId: string }) {
   const reviewTurns = useDiffStore((s) => s.reviewTurnsByThread[threadId]);
+  const reviewTurnsError = useDiffStore((s) => s.reviewTurnsErrorByThread[threadId]);
   const selectedMessageId = useDiffStore(
     (s) => s.selectedTurnMessageIdByThread[threadId],
   );
@@ -63,7 +64,7 @@ export function TurnPicker({ threadId }: { threadId: string }) {
   if (reviewTurns === undefined) {
     return (
       <span className="font-mono text-caption uppercase tracking-[0.18em] text-muted/40">
-        Resolving
+        {reviewTurnsError === undefined ? "Resolving" : "Turns unavailable"}
       </span>
     );
   }

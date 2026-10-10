@@ -48,6 +48,24 @@ export function reviewBody(outcome: ReviewOutcome, context: ReviewBodyContext): 
   }
 }
 
+/**
+ * What the Files pane says when a body has no file list to show, so the pane
+ * never reads "No changed files" beside a failure. Null means the pane lists
+ * the comparison's files as usual.
+ */
+export function filesPaneNotice(body: ReviewBody | null): string | null {
+  switch (body?.kind) {
+    case "failed":
+      return "Couldn't load this comparison";
+    case "too-many-files":
+      return "Too many files to show";
+    case "gone":
+      return body.title;
+    default:
+      return null;
+  }
+}
+
 function emptyBody(context: ReviewBodyContext): ReviewBody {
   switch (context.view) {
     case "turn":

@@ -37,8 +37,8 @@ vi.mock("../DiffToolbar", () => ({
 }));
 
 vi.mock("../WorktreeFilesPane", () => ({
-  WorktreeFilesPane: ({ files }: { files: readonly { path: string }[] }) => (
-    <aside data-testid="worktree-files">{files.map((file) => file.path).join(",")}</aside>
+  WorktreeFilesPane: ({ files, error }: { files: readonly { path: string }[]; error: string | null }) => (
+    <aside data-testid="worktree-files">{error ?? files.map((file) => file.path).join(",")}</aside>
   ),
 }));
 
@@ -77,6 +77,9 @@ vi.mock("../FileList", () => ({
       <button type="button" onClick={onRefresh}>Refresh</button>
       {refreshing ? <span>Refreshing comparison</span> : null}
     </section>
+  ),
+  ReviewStateControls: ({ onRefresh }: { onRefresh: () => void }) => (
+    <button type="button" data-testid="review-state-controls" onClick={onRefresh}>Refresh controls</button>
   ),
 }));
 
@@ -389,6 +392,74 @@ describe("DiffPanel worktree files", () => {
     expect(body).toHaveAttribute("data-review-state", kind);
     expect(body).toHaveTextContent(text);
     expect(screen.queryByTestId("diff-files")).not.toBeInTheDocument();
+    // Refresh and Files stay reachable when there is no file list to own them.
+    expect(screen.getByTestId("review-state-controls")).toBeInTheDocument();
+  });
+
+  it.each<[string, ReviewComparisonResult, string]>([
+    ["failed", { status: "failed", failure: { kind: "timeout", summary: "git diff timed out", detail: "stderr" } }, "Couldn't load this comparison"],
+    ["too-many-files", { status: "too-many-files", fileCount: 12_345, limit: 10_000 }, "Too many files to show"],
+  ])("tells the Files pane the %s outcome instead of listing no files", async (_label, result, notice) => {
+    renderUnstaged(result);
+    await screen.findByTestId("review-state");
+    act(() => { useDiffStore.getState().setReviewFilesVisible("workspace-1", true); });
+
+    expect(screen.getByTestId("worktree-files")).toHaveTextContent(notice);
+  });
+
+  it("reports a turn list that never loaded and retries the list", async () => {
+    transport.listReviewTurns.mockReset().mockRejectedValueOnce(new Error("turns offline")).mockResolvedValueOnce([]);
+    useDiffStore.setState({ viewMode: "turn", selectedTurnMessageIdByThread: {}, reviewTurnsErrorByThread: {} });
+    const user = userEvent.setup();
+    render(<DiffPanel />);
+
+    const body = await screen.findByTestId("review-state");
+    await waitFor(() => expect(body).toHaveAttribute("data-review-state", "failed"));
+    await user.click(screen.getByRole("button", { name: "Details" }));
+    expect(screen.getByTestId("review-failure-detail")).toHaveTextContent("turns offline");
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByTestId("review-state")).toHaveTextContent("No turns yet"));
+    expect(transport.listReviewTurns).toHaveBeenCalledTimes(2);
+    expect(transport.getTurnDiffComparison).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed turn comparison, not the list, when a loaded list's refetch failed", async () => {
+    transport.listReviewTurns.mockReset().mockRejectedValue(new Error("turns offline"));
+    transport.getTurnDiffComparison.mockReset()
+      .mockResolvedValue({ status: "failed", failure: { kind: "git-error", summary: "Git reported an error", detail: "fatal" } });
+    useDiffStore.setState({
+      viewMode: "turn",
+      selectedTurnMessageIdByThread: { "thread-1": "msg-picked" },
+      reviewTurnsByThread: { "thread-1": [] },
+      reviewTurnsErrorByThread: {},
+    });
+    const user = userEvent.setup();
+    render(<DiffPanel />);
+    await waitFor(() => expect(screen.getByTestId("review-state")).toHaveAttribute("data-review-state", "failed"));
+    await waitFor(() => expect(useDiffStore.getState().reviewTurnsErrorByThread["thread-1"]).toBe("turns offline"));
+    await waitFor(() => expect(screen.getByTestId("review-state")).toHaveAttribute("data-review-state", "failed"));
+    transport.getTurnDiffComparison.mockResolvedValue(comparison("picked-1", "picked.ts"));
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByTestId("snapshot-diff")).toHaveTextContent("picked.ts"));
+  });
+
+  it("replaces the shown comparison when a refresh cannot list snapshots", async () => {
+    transport.getCumulativeDiffStats.mockReset().mockResolvedValue(stats("old.ts"));
+    transport.listSnapshots.mockReset().mockRejectedValueOnce(new Error("snapshots offline"));
+    useDiffStore.setState({ viewMode: "cumulative", snapshotsByThread: { "thread-1": [snapshot("snapshot-old", "old.ts")] } });
+    const user = userEvent.setup();
+    render(<DiffPanel />);
+    await waitFor(() => expect(screen.getByTestId("cumulative-diff")).toHaveTextContent("old.ts"));
+
+    await user.click(screen.getByRole("button", { name: "Refresh cumulative" }));
+
+    await waitFor(() => expect(screen.getByTestId("review-state")).toHaveAttribute("data-review-state", "failed"));
+    expect(screen.queryByTestId("cumulative-diff")).not.toBeInTheDocument();
+    transport.listSnapshots.mockResolvedValue([snapshot("snapshot-old", "old.ts")]);
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByTestId("cumulative-diff")).toHaveTextContent("old.ts"));
   });
 
   it("shows failure details, copies them, and retries the comparison", async () => {

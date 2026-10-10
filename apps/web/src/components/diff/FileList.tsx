@@ -256,6 +256,53 @@ export function FileList({
   );
 }
 
+/** Props for {@link ReviewStateControls}. */
+interface ReviewStateControlsProps {
+  /** Diff scope (thread or workspace id) that owns the Files navigator visibility. */
+  scopeId: string;
+  refreshable: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
+}
+
+/**
+ * The toolbar controls for a comparison with no file list to show. Loading,
+ * empty and failed bodies have no FileList to portal them, yet the toolbar
+ * must keep Refresh and the Files toggle in every state.
+ */
+export function ReviewStateControls({ scopeId, refreshable, refreshing, onRefresh }: ReviewStateControlsProps) {
+  const [jumpOpen, setJumpOpen] = useState(false);
+  const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
+  const filesVisible = useDiffStore((s) => s.reviewFilesVisibleByScope[scopeId] ?? false);
+  const setReviewFilesVisible = useDiffStore((s) => s.setReviewFilesVisible);
+  const renderMode = useDiffStore((s) => s.renderMode);
+  const setRenderMode = useDiffStore((s) => s.setRenderMode);
+  const toggleLineWrap = useDiffStore((s) => s.toggleLineWrap);
+  const lineWrap = useDiffStore((s) => (activeThreadId ? s.getLineWrap(activeThreadId) : true));
+  const setBulkDiffExpand = useDiffStore((s) => s.setBulkDiffExpand);
+  const allExpanded = useDiffStore((s) => s.bulkDiffExpand?.expand ?? false);
+  return (
+    <FileListToolbar
+      activeThreadId={activeThreadId}
+      filesVisible={filesVisible}
+      onToggleFiles={() => setReviewFilesVisible(scopeId, !filesVisible)}
+      refreshable={refreshable}
+      refreshInProgress={refreshing}
+      onRefresh={onRefresh}
+      lineWrap={lineWrap}
+      toggleLineWrap={toggleLineWrap}
+      allExpanded={allExpanded}
+      onToggleAll={() => setBulkDiffExpand(!allExpanded)}
+      jumpOpen={jumpOpen}
+      onJumpOpenChange={setJumpOpen}
+      sortedFiles={[]}
+      onJumpToFile={() => setJumpOpen(false)}
+      renderMode={renderMode}
+      onToggleRenderMode={() => setRenderMode(renderMode === "unified" ? "side-by-side" : "unified")}
+    />
+  );
+}
+
 /** Props for the persistent controls above a changed-file list. */
 interface FileListToolbarProps {
   activeThreadId: string | null;

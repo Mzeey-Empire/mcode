@@ -12,7 +12,7 @@ export type ReviewStateBodyKind = Exclude<ReviewBody, { kind: "ready" }>;
 /** The three-dot pulse a Review body shows while nothing has settled yet. */
 export function ReviewLoadingPulse() {
   return (
-    <div data-testid="review-loading" className="flex items-center justify-center gap-1.5 py-10">
+    <div data-testid="review-loading" className="flex min-h-full items-center justify-center gap-1.5 py-10">
       {[0, 150, 300].map((delay) => (
         <div key={delay} className="h-1 w-1 rounded-full bg-muted/25 animate-pulse" style={{ animationDelay: `${delay}ms` }} />
       ))}
@@ -26,7 +26,7 @@ export function ReviewLoadingPulse() {
  */
 export function ReviewStateBody({ body, onRetry }: { readonly body: ReviewStateBodyKind; readonly onRetry: () => void }) {
   return (
-    <div data-testid="review-state" data-review-state={body.kind} className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-14 text-center">
+    <div data-testid="review-state" data-review-state={body.kind} className="flex min-h-full flex-col items-center justify-center gap-3 px-6 py-14 text-center">
       <ReviewStateContent body={body} onRetry={onRetry} />
     </div>
   );

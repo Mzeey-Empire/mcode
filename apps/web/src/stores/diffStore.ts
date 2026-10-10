@@ -499,6 +499,8 @@ interface DiffState {
   snapshotsLoadingByThread: Record<string, boolean>;
   /** Server-ordered Review turns keyed by thread ID; ordinals survive snapshot expiry. */
   reviewTurnsByThread: Record<string, ReviewTurn[]>;
+  /** Why the last turn-list request failed, keyed by thread ID; cleared when a list arrives. */
+  reviewTurnsErrorByThread: Record<string, string>;
   /** Whether the Review view menu is open; state bodies open it to offer another view. */
   reviewViewMenuOpen: boolean;
   /**
@@ -643,6 +645,8 @@ interface DiffState {
   setSnapshotsLoading: (threadId: string, loading: boolean) => void;
   /** Store the server's turn list for a thread. */
   setReviewTurns: (threadId: string, turns: ReviewTurn[]) => void;
+  /** Record that the thread's turn list could not be loaded. */
+  setReviewTurnsError: (threadId: string, detail: string) => void;
   /** Open or close the Review view menu. */
   setReviewViewMenuOpen: (open: boolean) => void;
   /** Cache a fetched inline diff so it survives component unmounts. */
@@ -684,6 +688,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   snapshotsByThread: {},
   snapshotsLoadingByThread: {},
   reviewTurnsByThread: {},
+  reviewTurnsErrorByThread: {},
   reviewViewMenuOpen: false,
   inlineDiffCache: {},
   diffRevisionByScope: {},
@@ -1004,7 +1009,13 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   setSnapshotsLoading: (threadId, loading) =>
     set((s) => ({ snapshotsLoadingByThread: { ...s.snapshotsLoadingByThread, [threadId]: loading } })),
   setReviewTurns: (threadId, turns) =>
-    set((s) => ({ reviewTurnsByThread: { ...s.reviewTurnsByThread, [threadId]: turns } })),
+    set((s) => {
+      const reviewTurnsErrorByThread = { ...s.reviewTurnsErrorByThread };
+      delete reviewTurnsErrorByThread[threadId];
+      return { reviewTurnsByThread: { ...s.reviewTurnsByThread, [threadId]: turns }, reviewTurnsErrorByThread };
+    }),
+  setReviewTurnsError: (threadId, detail) =>
+    set((s) => ({ reviewTurnsErrorByThread: { ...s.reviewTurnsErrorByThread, [threadId]: detail } })),
   setReviewViewMenuOpen: (open) => set({ reviewViewMenuOpen: open }),
   cacheInlineDiff: (threadId, source, id, filePath, data, cacheVersion) =>
     set((s) => ({
@@ -1034,6 +1045,8 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete snapshotsLoading[threadId];
       const reviewTurns = { ...state.reviewTurnsByThread };
       delete reviewTurns[threadId];
+      const reviewTurnsErrors = { ...state.reviewTurnsErrorByThread };
+      delete reviewTurnsErrors[threadId];
       const previewUrls = { ...state.previewUrlByThread };
       delete previewUrls[threadId];
       const lineWrapByThread = { ...state.lineWrapByThread };
@@ -1070,6 +1083,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         snapshotsByThread: snapshots,
         snapshotsLoadingByThread: snapshotsLoading,
         reviewTurnsByThread: reviewTurns,
+        reviewTurnsErrorByThread: reviewTurnsErrors,
         previewUrlByThread: previewUrls,
         lineWrapByThread,
         rightPanelByThread,
