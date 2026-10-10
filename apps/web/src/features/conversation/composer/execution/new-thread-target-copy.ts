@@ -41,3 +41,17 @@ export function placeholderTargetLabel(name: string): TargetLabel {
 export function targetLabelText(label: TargetLabel): string {
   return label.prefix ? `${label.prefix} ${label.name}` : label.name;
 }
+
+/**
+ * Meta beside a new thread's workspace name: "Create" for a new worktree, the project folder for Local,
+ * and the attached worktree's folder for an existing worktree. Null until an existing worktree is chosen.
+ */
+export function newThreadWorkspaceMeta(
+  mode: NewThreadTargetCopyInput["mode"],
+  folder: string,
+  worktree: AttachedWorktree | null,
+): string | null {
+  if (mode === "worktree") return "Create";
+  if (mode === "direct") return folder;
+  return worktree?.name ?? null;
+}

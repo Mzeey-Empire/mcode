@@ -6,6 +6,7 @@ import { createOverviewEntryState } from "@/features/thread-overview/overview-en
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { rightPanelActionTerminalId, useDiffStore } from "@/stores/diffStore";
+import { newThreadOverviewKey, useOverviewStore } from "@/stores/overviewStore";
 import { type Thread } from "@/transport";
 import { Settings } from "lucide-react";
 import { useCallback } from "react";
@@ -81,8 +82,7 @@ function ProjectActions({ thread }: { thread: Thread }) {
     )}
   />);
 }
-function ProjectSettings() {
-  const { openProjectSettings } = useOverviewContext();
+function ProjectSettingsButton({ onOpen }: { onOpen: () => void }) {
   return (<Tooltip>
     <TooltipTrigger
       render={
@@ -91,7 +91,7 @@ function ProjectSettings() {
           size="icon-compact"
           type="button"
           aria-label="Open Project settings"
-          onClick={openProjectSettings}
+          onClick={onOpen}
           className="cursor-pointer text-muted hover:bg-hover/40 hover:text-ink"
         >
           <Settings size={14} aria-hidden />
@@ -103,11 +103,22 @@ function ProjectSettings() {
     </TooltipContent>
   </Tooltip>);
 }
+function ThreadProjectSettings() {
+  return <ProjectSettingsButton onOpen={useOverviewContext().openProjectSettings} />;
+}
+/** A new thread has no thread-scoped panel yet, so settings open in the workspace's new-thread panel. */
+function openNewThreadProjectSettings(workspaceId: string) {
+  useOverviewStore.getState().dismissOverlay(newThreadOverviewKey(workspaceId));
+  showRightPanelAdaptive(workspaceId, null);
+  useDiffStore.getState().setRightPanelTab(workspaceId, null, "environment");
+}
 /** Project action menu beside the overview title. */
 export function OverviewProjectActions({ subject }: { subject: OverviewSubject }) {
   return subject.kind === "thread" ? <ProjectActions thread={subject.thread} /> : null;
 }
 /** Project settings shortcut beside the overview title. */
 export function OverviewProjectSettings({ subject }: { subject: OverviewSubject }) {
-  return subject.kind === "thread" ? <ProjectSettings /> : null;
+  return subject.kind === "thread"
+    ? <ThreadProjectSettings />
+    : <ProjectSettingsButton onOpen={() => openNewThreadProjectSettings(subject.workspaceId)} />;
 }

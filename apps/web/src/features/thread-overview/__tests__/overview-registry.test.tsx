@@ -75,13 +75,18 @@ describe("overview registry", () => {
     expect(getOverviewHeaderActions(subject).map(({ id }) => id)).toEqual(["project-actions", "settings"]);
   });
 
-  it("excludes every existing entry and header action from a new-thread subject", () => {
+  it("gives a new-thread subject only its target rows and the settings action", () => {
     const newThread: OverviewSubject = { kind: "new-thread", workspaceId: thread.workspace_id };
-    expect(getOverviewEntries(newThread).map(({ id }) => id)).toEqual([]);
-    expect(getOverviewHeaderActions(newThread).map(({ id }) => id)).toEqual([]);
+    expect(getOverviewEntries(newThread).map(({ id, section, order }) => [id, section, order])).toEqual([
+      ["target.workspace", "lane", 50],
+      ["target.branch", "lane", 70],
+    ]);
+    expect(getOverviewHeaderActions(newThread).map(({ id }) => id)).toEqual(["settings"]);
+    const threadOnlyEntries = OVERVIEW_ENTRIES.filter(({ subjects }) => !subjects.includes("new-thread"));
+    const threadOnlyActions = OVERVIEW_HEADER_ACTIONS.filter(({ subjects }) => !subjects.includes("new-thread"));
     const { container } = render(<>
-      {OVERVIEW_ENTRIES.map(({ id, Entry }) => <Entry key={id} subject={newThread} />)}
-      {OVERVIEW_HEADER_ACTIONS.map(({ id, Action }) => <Action key={id} subject={newThread} />)}
+      {threadOnlyEntries.map(({ id, Entry }) => <Entry key={id} subject={newThread} />)}
+      {threadOnlyActions.map(({ id, Action }) => <Action key={id} subject={newThread} />)}
     </>);
     expect(container).toBeEmptyDOMElement();
   });

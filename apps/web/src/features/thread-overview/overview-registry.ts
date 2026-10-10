@@ -6,6 +6,7 @@ import { CommitOrPushEntryBlock } from "./entries/commit";
 import { CreateBranchEntryBlock } from "./entries/create-branch";
 import { LocalEntryBlock, LocalEntryState } from "./entries/local";
 import { TasksEntryBlock } from "./entries/tasks";
+import { TargetBranchEntryBlock, TargetWorkspaceEntryBlock } from "./entries/new-thread-target";
 import { PullRequestEntryBlock } from "./entries/pull-request";
 import { RecapEntryBlock, RecapEntryState } from "./entries/recap";
 import { RepositoryEntryBlock, RepositoryEntryState } from "./entries/repository";
@@ -53,6 +54,9 @@ export const OVERVIEW_ENTRIES: readonly OverviewEntry[] = [
   { id: "repository", section: "activity", order: 30, subjects: ["thread"], Entry: RepositoryEntryBlock, State: RepositoryEntryState },
   { id: "tasks", section: "activity", order: 40, subjects: ["thread"], Entry: TasksEntryBlock },
   { id: "local", section: "lane", order: 50, subjects: ["thread"], Entry: LocalEntryBlock, State: LocalEntryState },
+  // A new thread's rows take the slots of the thread rows they become: where it runs, then the branch.
+  { id: "target.workspace", section: "lane", order: 50, subjects: ["new-thread"], Entry: TargetWorkspaceEntryBlock },
+  { id: "target.branch", section: "lane", order: 70, subjects: ["new-thread"], Entry: TargetBranchEntryBlock },
   { id: "create-branch", section: "lane", order: 60, subjects: ["thread"], Entry: CreateBranchEntryBlock },
   { id: "branch", section: "lane", order: 70, subjects: ["thread"], Entry: BranchEntryBlock, State: BranchEntryState },
   { id: "commit", section: "lane", order: 80, subjects: ["thread"], Entry: CommitOrPushEntryBlock },
@@ -67,7 +71,7 @@ export const OVERVIEW_ENTRIES: readonly OverviewEntry[] = [
 /** Header actions in their existing visual order. */
 export const OVERVIEW_HEADER_ACTIONS: readonly OverviewHeaderAction[] = [
   { id: "project-actions", order: 0, subjects: ["thread"], Action: OverviewProjectActions, State: OverviewProjectActionsState },
-  { id: "settings", order: 10, subjects: ["thread"], Action: OverviewProjectSettings },
+  { id: "settings", order: 10, subjects: ["thread", "new-thread"], Action: OverviewProjectSettings },
 ];
 
 /** Filters entries for the subject, sorted by `order`. */
