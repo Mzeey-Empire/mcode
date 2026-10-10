@@ -206,19 +206,19 @@ describe("useFirstSendMotion", () => {
 function ThreadRows({ drafts = [], ids, preparing }: { drafts?: string[]; ids: string[]; preparing: string[] }) {
   const list = useRef<HTMLDivElement>(null);
   usePreparingRowEntrance(list, [...drafts.map((id) => `draft:${id}`), ...ids], preparing);
+  const sized = (row: HTMLDivElement | null) => {
+    if (row) row.getBoundingClientRect = () => rect(0, 28);
+  };
   return createElement(
     "div",
     { ref: list },
-    ids.map((id) =>
-      createElement("div", {
-        key: id,
-        "data-thread-id": id,
-        ref: (row: HTMLDivElement | null) => {
-          if (row) row.getBoundingClientRect = () => rect(0, 28);
-        },
-      }),
-    ),
+    drafts.map((id) => createElement("div", { key: `draft:${id}`, "data-draft-id": id, ref: sized })),
+    ids.map((id) => createElement("div", { key: id, "data-thread-id": id, ref: sized })),
   );
+}
+
+function animatedRows(calls: AnimateCall[]): (string | null)[] {
+  return calls.map((call) => call.element.getAttribute("data-thread-id") ?? call.element.getAttribute("data-draft-id"));
 }
 
 describe("usePreparingRowEntrance", () => {
@@ -241,7 +241,18 @@ describe("usePreparingRowEntrance", () => {
 
     rerender(createElement(ThreadRows, { ids: ["new", "a", "b"], preparing: ["new"] }));
 
-    expect(calls.map((call) => call.element.getAttribute("data-thread-id"))).toEqual(["new"]);
+    expect(animatedRows(calls)).toEqual(["new"]);
+  });
+
+  it("slides a draft that moved up when the draft above it became the new thread", () => {
+    stubReducedMotion(false);
+    const calls = stubAnimate();
+    const { rerender } = render(createElement(ThreadRows, { drafts: ["A", "B"], ids: ["C"], preparing: [] }));
+
+    rerender(createElement(ThreadRows, { drafts: ["B"], ids: ["A", "C"], preparing: ["A"] }));
+
+    expect(animatedRows(calls)).toEqual(["A", "B"]);
+    expect(calls[1]!.keyframes).toEqual([{ transform: "translateY(28px)" }, { transform: "translateY(0)" }]);
   });
 
   it("stays still when a failed placeholder is retried in place", () => {

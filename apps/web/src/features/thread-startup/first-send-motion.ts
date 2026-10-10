@@ -176,9 +176,9 @@ export function useFirstSendMotion(threadId: string): FirstSendMotionRefs {
 /**
  * Fades in a sidebar row for a thread that was just sent and slides the rows that moved into place.
  *
- * `rowKeys` is the section's full row order, including rows rendered outside `list` such as drafts, so a
- * draft that turns into the new thread nets out to no movement. `list` holds one child per thread row
- * carrying `data-thread-id`. Only a preparing thread whose row did not exist before animates, so a retried
+ * `rowKeys` is the section's row order: thread ids, and `draft:<id>` for drafts, so a draft that turns into
+ * the new thread nets out to no movement. `list` holds one child per row, carrying `data-thread-id` or
+ * `data-draft-id`. Only a preparing thread whose row did not exist before animates, so a retried
  * placeholder or a project opened with a thread already preparing stays still.
  */
 export function usePreparingRowEntrance(
@@ -199,7 +199,10 @@ export function usePreparingRowEntrance(
     if (!entering) return;
     const elements = new Map<string, HTMLElement>();
     for (const child of container.children) {
-      if (child instanceof HTMLElement && child.dataset.threadId) elements.set(child.dataset.threadId, child);
+      if (!(child instanceof HTMLElement)) continue;
+      const { threadId, draftId } = child.dataset;
+      if (threadId) elements.set(threadId, child);
+      else if (draftId) elements.set(`draft:${draftId}`, child);
     }
     const enteringRow = elements.get(entering);
     const animations = sidebarRowAnimations(prefersReducedMotion());
