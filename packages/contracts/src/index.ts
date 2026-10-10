@@ -40,6 +40,8 @@ export type { TurnOutcome } from "./models/turn-outcome.js";
 
 export { WorkspaceSchema, WorkspaceEnrichmentSchema } from "./models/workspace.js";
 export type { Workspace, WorkspaceEnrichment } from "./models/workspace.js";
+export { FILE_LIST_MAX_PATHS, FILE_VIEW_TEXT_MAX_BYTES, FILE_CHANGES_MAX_ENTRIES, WORKSPACE_IMAGE_MAX_BYTES, WorkspaceFileListSchema, WorkspaceFileChangesSchema, FileReadResultSchema } from "./models/workspace-file.js";
+export type { WorkspaceFileList, WorkspaceFileChanges, FileReadResult } from "./models/workspace-file.js";
 
 export {
   WORKSPACE_ENVIRONMENT_VERSION,

@@ -1,4 +1,4 @@
-import type { DiffStats, FilesystemBrowseResult, ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn, WorkspaceCreateResult } from "@mcode/contracts";
+import type { DiffStats, FileReadResult, FilesystemBrowseResult, ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn, WorkspaceCreateResult, WorkspaceFileChanges, WorkspaceFileList } from "@mcode/contracts";
 import type {
   McodeTransport,
   Workspace,
@@ -1273,9 +1273,11 @@ export function createWsTransport(
 
     // Files
     listWorkspaceFiles: (workspaceId, threadId?) =>
-      rpc<string[]>("file.list", { workspaceId, threadId }),
-    readFileContent: (workspaceId, relativePath, threadId?) =>
-      rpc<string>("file.read", { workspaceId, relativePath, threadId }),
+      rpc<WorkspaceFileList>("file.list", { workspaceId, threadId }),
+    getWorkspaceFileChanges: (workspaceId, threadId?) =>
+      rpc<WorkspaceFileChanges>("file.changes", { workspaceId, threadId }),
+    readFileContent: (workspaceId, relativePath, threadId?, as?) =>
+      rpc<FileReadResult>("file.read", { workspaceId, relativePath, threadId, as }),
     refreshWorkspaceFiles: (workspaceId, threadId?) =>
       rpc<void>("file.refresh", { workspaceId, threadId }),
 

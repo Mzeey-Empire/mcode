@@ -1,6 +1,9 @@
 // Import shared types for local use in the McodeTransport interface.
 import type {
   DiffStats,
+  WorkspaceFileList,
+  WorkspaceFileChanges,
+  FileReadResult,
   FilesystemBrowseResult,
   ReviewComparisonResult,
   ReviewFileDiffResult,
@@ -544,8 +547,9 @@ export interface McodeTransport {
   getVersion(): Promise<string>;
 
   // File operations (@ file tagging)
-  listWorkspaceFiles(workspaceId: string, threadId?: string): Promise<string[]>;
-  readFileContent(workspaceId: string, relativePath: string, threadId?: string): Promise<string>;
+  listWorkspaceFiles(workspaceId: string, threadId?: string): Promise<WorkspaceFileList>;
+  getWorkspaceFileChanges(workspaceId: string, threadId?: string): Promise<WorkspaceFileChanges>;
+  readFileContent(workspaceId: string, relativePath: string, threadId?: string, as?: "text"): Promise<FileReadResult>;
   refreshWorkspaceFiles(workspaceId: string, threadId?: string): Promise<void>;
 
   // Open-in app actions

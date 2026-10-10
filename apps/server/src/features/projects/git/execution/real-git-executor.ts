@@ -201,6 +201,7 @@ export class RealGitExecutor implements GitExecutor {
       });
       let stdout = "";
       let stderr = "";
+      const stdoutDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
       let settled = false;
       let timedOut = false;
       const timer = setTimeout(() => {
@@ -215,8 +216,8 @@ export class RealGitExecutor implements GitExecutor {
       };
 
       child.stdout.on("data", (chunk: Buffer) => {
-        const text = chunk.toString("utf8");
-        stdout += text;
+        const text = stdoutDecoder.decode(chunk, { stream: true });
+        if (opts.retainStdout !== false) stdout += text;
         opts.onStdout?.(text);
       });
       child.stderr.on("data", (chunk: Buffer) => {
@@ -226,6 +227,9 @@ export class RealGitExecutor implements GitExecutor {
       });
       child.once("error", (error) => finish(() => reject(error)));
       child.once("close", (code, signal) => finish(() => {
+        const tail = stdoutDecoder.decode();
+        if (opts.retainStdout !== false) stdout += tail;
+        if (tail) opts.onStdout?.(tail);
         if (timedOut) {
           reject(Object.assign(new Error(`Git command timed out after ${timeout} ms`), {
             code: null,

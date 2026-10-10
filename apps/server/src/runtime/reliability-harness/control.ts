@@ -267,8 +267,9 @@ function parseAssistantThreadId(
 }
 
 function safeTokenEqual(left: string, right: string): boolean {
-  if (left.length !== right.length) return false;
-  return NodeCrypto.timingSafeEqual(Buffer.from(left), Buffer.from(right));
+  const leftBytes = Buffer.from(left);
+  const rightBytes = Buffer.from(right);
+  return leftBytes.length === rightBytes.length && NodeCrypto.timingSafeEqual(leftBytes, rightBytes);
 }
 
 function isLoopbackAddress(address: string | undefined): boolean {

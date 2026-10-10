@@ -6,6 +6,15 @@
  */
 
 import * as NodeHTTP from "node:http";
+import * as NodeCrypto from "node:crypto";
+
+/** Compares HTTP and WebSocket credentials without content-dependent timing. */
+export function matchesAuthToken(presented: string | null | undefined, expected: string): boolean {
+  if (typeof presented !== "string") return false;
+  const actualBytes = Buffer.from(presented);
+  const expectedBytes = Buffer.from(expected);
+  return actualBytes.length === expectedBytes.length && NodeCrypto.timingSafeEqual(actualBytes, expectedBytes);
+}
 
 /** Minimal request shape required for token extraction. */
 type RequestLike = Pick<NodeHTTP.IncomingMessage, "url" | "headers">;
@@ -27,12 +36,8 @@ export function extractToken(req: RequestLike): string | null {
 
   // 2. Query param (only parse URL when header was absent)
   if (req.url) {
-    const qIdx = req.url.indexOf("?token=");
-    if (qIdx !== -1) {
-      const start = qIdx + 7;
-      const end = req.url.indexOf("&", start);
-      return end === -1 ? req.url.slice(start) : req.url.slice(start, end);
-    }
+    const token = new URL(req.url, "http://localhost").searchParams.get("token");
+    if (token !== null) return token;
   }
 
   // 3. Cookie

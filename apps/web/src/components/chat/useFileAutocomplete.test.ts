@@ -1,8 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProviderCatalogSnapshot } from "@mcode/contracts";
+import type { ProviderCatalogSnapshot, WorkspaceFileList } from "@mcode/contracts";
 
-const listWorkspaceFiles = vi.fn<() => Promise<string[]>>();
+const listWorkspaceFiles = vi.fn<() => Promise<WorkspaceFileList>>();
 const getProviderCatalog = vi.fn<() => Promise<ProviderCatalogSnapshot>>();
 const refreshWorkspaceFiles = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
@@ -59,12 +59,12 @@ describe("useFileAutocomplete async lifecycle", () => {
     vi.clearAllMocks();
     clearFileListCache();
     useProviderCatalogStore.getState().reset();
-    listWorkspaceFiles.mockResolvedValue([]);
+    listWorkspaceFiles.mockResolvedValue({ paths: [], truncated: false });
     getProviderCatalog.mockResolvedValue(CACHED_SNAPSHOT);
   });
 
   it("loads workspace catalog and files without a placeholder thread for @", async () => {
-    listWorkspaceFiles.mockResolvedValueOnce(["src/app.ts"]);
+    listWorkspaceFiles.mockResolvedValueOnce({ paths: ["src/app.ts"], truncated: true });
 
     const { result } = renderHook(() => useFileAutocomplete({
       workspaceId: "workspace-1",
@@ -77,6 +77,7 @@ describe("useFileAutocomplete async lifecycle", () => {
 
     expect(getProviderCatalog).toHaveBeenCalledWith(REQUEST);
     expect(listWorkspaceFiles).toHaveBeenCalledWith("workspace-1", undefined);
+    expect(result.current.suggestions.filter((item) => item.kind === "file").map((item) => item.path)).toEqual(["src/app.ts"]);
     expect(result.current.suggestions).toContainEqual(expect.objectContaining({
       kind: "agent",
       name: "reviewer",
@@ -84,7 +85,7 @@ describe("useFileAutocomplete async lifecycle", () => {
   });
 
   it("does not reopen after the user dismisses while files are loading", async () => {
-    let resolveFiles!: (files: string[]) => void;
+    let resolveFiles!: (files: WorkspaceFileList) => void;
     listWorkspaceFiles.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveFiles = resolve;
@@ -104,7 +105,7 @@ describe("useFileAutocomplete async lifecycle", () => {
     });
 
     await act(async () => {
-      resolveFiles(["src/app.ts"]);
+      resolveFiles({ paths: ["src/app.ts"], truncated: false });
       await pending;
     });
 
@@ -114,8 +115,8 @@ describe("useFileAutocomplete async lifecycle", () => {
 
   it("refreshes an open picker after the scope cache is invalidated", async () => {
     listWorkspaceFiles
-      .mockResolvedValueOnce(["src/old.ts"])
-      .mockResolvedValueOnce(["src/new.ts"]);
+      .mockResolvedValueOnce({ paths: ["src/old.ts"], truncated: false })
+      .mockResolvedValueOnce({ paths: ["src/new.ts"], truncated: false });
     const { result } = renderHook(() =>
       useFileAutocomplete({ workspaceId: "workspace-1" }),
     );

@@ -230,9 +230,9 @@ export function useFileAutocomplete({
     // Start a new fetch and store its promise so concurrent callers share it.
     const fetchPromise = getTransport()
       .listWorkspaceFiles(workspaceId, threadId)
-      .then((files) => {
-        fileListCache.set(key, files);
-        return files;
+      .then(({ paths }) => {
+        fileListCache.set(key, paths);
+        return paths;
       })
       .catch((err) => {
         console.error("[useFileAutocomplete] Failed to load files:", err);

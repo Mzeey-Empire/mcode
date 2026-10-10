@@ -495,10 +495,11 @@ export function ReviewDiffView({
         name: path,
         contents: await transport.readFileAtRef(workspaceId, ref, path, realThreadId),
       });
-      const worktree = async (path: string): Promise<FileContents> => ({
-        name: path,
-        contents: await transport.readFileContent(workspaceId, path, realThreadId),
-      });
+      const worktree = async (path: string): Promise<FileContents> => {
+        const result = await transport.readFileContent(workspaceId, path, realThreadId, "text");
+        if (result.kind !== "text") throw new Error(`Cannot expand context for a ${result.kind} file`);
+        return { name: path, contents: result.content };
+      };
       return resolveHydrationFiles(source, id, fileDiff, at, worktree);
     },
     [id, source, threadId],
