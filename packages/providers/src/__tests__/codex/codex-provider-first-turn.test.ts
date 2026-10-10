@@ -22,8 +22,9 @@ vi.mock("../../private/codex/codex-version.js", () => ({
   meetsMinVersion: meetsMinVersionMock,
 }));
 
-const { sendTurnMock, readConfigMock, appServers, startError, startGate } = vi.hoisted(() => ({
+const { sendTurnMock, startCompactionMock, readConfigMock, appServers, startError, startGate } = vi.hoisted(() => ({
   sendTurnMock: vi.fn().mockResolvedValue("turn-test-id"),
+  startCompactionMock: vi.fn<() => Promise<string>>(),
   readConfigMock: vi.fn(),
   appServers: [] as Array<import("node:events").EventEmitter & {
     isAlive: boolean;
@@ -62,6 +63,9 @@ vi.mock("../../private/codex/codex-app-server.js", async () => {
     }
     async sendTurn(input: unknown, turnOptions: unknown): Promise<string> {
       return sendTurnMock(input, turnOptions);
+    }
+    async startCompaction(): Promise<string> {
+      return startCompactionMock();
     }
     async interruptTurn(): Promise<void> {}
     async interruptTurnAndDrain(turnId: string): Promise<void> {
@@ -180,6 +184,7 @@ describe("CodexProvider first turn on new session", () => {
 
   beforeEach(() => {
     sendTurnMock.mockClear();
+    startCompactionMock.mockReset();
     checkCodexVersionMock.mockClear();
     meetsMinVersionMock.mockClear();
     appServers.length = 0;
@@ -791,6 +796,62 @@ describe("CodexProvider first turn on new session", () => {
     });
 
     await ended;
+  });
+
+  const compactChip = { id: "command:command:compact", kind: "command", label: "compact", namespace: "command", range: { start: 0, end: 8 } } as const;
+
+  it.each([
+    { form: "typed", message: " /compact\n", mentions: [] },
+    { form: "chip", message: "/compact", mentions: [compactChip] },
+  ])("runs a $form /compact as native compaction and ends on its compaction turn", async ({ message, mentions }) => {
+    const provider = makeProvider();
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    const notify = (method: string, params: Record<string, unknown>) =>
+      appServers[0]!.emit("notification", { method, params: { threadId: "sdk-thread-1", ...params } });
+    // Codex answers thread/compact/start with {} and announces the turn id only on turn/started.
+    startCompactionMock.mockImplementation(async () => {
+      notify("turn/started", { turn: { id: "compact-turn", status: "inProgress" } });
+      return "compact-turn";
+    });
+
+    await provider.sendTurn({
+      turnId: "compact-turn-request", turnExecutionId: "compact-execution", sessionId, workspaceId: "workspace-test",
+      threadId, message, mentions: [...mentions], cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "auto",
+    });
+    await vi.waitFor(() => expect(startCompactionMock).toHaveBeenCalledTimes(1));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    notify("item/started", { turnId: "compact-turn", item: { type: "contextCompaction", id: "compaction-1" } });
+    notify("item/completed", { turnId: "compact-turn", item: { type: "contextCompaction", id: "compaction-1" } });
+    notify("turn/completed", { turn: { id: "compact-turn", status: "completed" } });
+
+    await vi.waitFor(() => expect(events.at(-1)?.event.type).toBe(AgentEventType.Ended));
+    expect(sendTurnMock).not.toHaveBeenCalled();
+    expect(events.filter(({ event }) => event.type !== AgentEventType.System).map(({ event }) =>
+      event.type === AgentEventType.Compacting ? `${event.type}:${event.active}` : event.type)).toEqual([
+      "compacting:true", "compacting:false", AgentEventType.TurnComplete, AgentEventType.Ended,
+    ]);
+    await provider.stopSession(sessionId);
+  });
+
+  it.each([
+    { message: "/compact now", mentions: [] },
+    { message: "please /compact", mentions: [] },
+    { message: "/compact", mentions: [compactChip, { id: "file:a", kind: "file", label: "a.ts", path: "/repo/a.ts", range: { start: 0, end: 1 } }] },
+  ] as const)("sends $message with $mentions.length mentions as an ordinary turn", async ({ message, mentions }) => {
+    const provider = makeProvider();
+
+    await provider.sendTurn({
+      turnId: "text-turn", turnExecutionId: "text-execution", sessionId, workspaceId: "workspace-test",
+      threadId, message, mentions: [...mentions], cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "auto",
+    });
+
+    await vi.waitFor(() => expect(sendTurnMock).toHaveBeenCalledTimes(1));
+    expect(sendTurnMock.mock.calls[0]?.[0]).toContainEqual({ type: "text", text: message });
+    expect(startCompactionMock).not.toHaveBeenCalled();
+    await provider.stopSession(sessionId);
   });
 
   it("submits an attempt-bound parent event through the canonical sink only when enabled", async () => {
