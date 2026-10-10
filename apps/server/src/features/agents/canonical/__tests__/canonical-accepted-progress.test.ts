@@ -78,10 +78,11 @@ function acceptedMessage(event: Pick<AcceptedCanonicalAgentEventEnvelope, "paylo
   return MessageSchema().parse(payload.item.payload.message);
 }
 
-const pushes = vi.hoisted(() => ({ frames: [] as unknown[] }));
+const pushes = vi.hoisted(() => ({ frames: [] as unknown[], turns: [] as { channel: string; data: unknown }[] }));
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: (channel: string, frame: unknown) => {
   if (channel === "agent.canonical") pushes.frames.push(frame);
-}, subscribedThreadIds: () => new Set<string>() }));
+  if (channel === "thread.status" || channel === "turn.persisted") pushes.turns.push({ channel, data: frame });
+},subscribedThreadIds: () => new Set<string>() }));
 const NOW = "2026-09-30T10:00:00.000Z";
 const execution = { threadId: "live-thread", turnId: "live-turn", executionId: "00000000-0000-4000-8000-000000000123" };
 const lease = { ownerEpoch: 1, workerIndex: 0, workerGeneration: 1, leaseId: "live-lease" };
@@ -139,6 +140,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
 
   beforeEach(() => {
     pushes.frames.length = 0;
+    pushes.turns.length = 0;
     directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-live-progress-"));
     const dbPath = NodePath.join(directory, "app.sqlite");
     db = openDatabase({ dbPath });
@@ -1083,6 +1085,33 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     release?.();
     await expect.poll(() => progress.depth().pending).toBe(0);
     expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Interrupted" });
+    expect(pushes.turns.filter((push) => push.channel === "thread.status")).toEqual([
+      { channel: "thread.status", data: { threadId: execution.threadId, status: "interrupted" } }]);
+  });
+
+  it("publishes the finished turn's status and persistence once, only after its terminal batch is saved", async () => {
+    await send(1, start("devin"));
+    holdWrites();
+    const events = [draft("devin", 1, "toolUse", { toolCallId: "tool", toolName: "Read", toolInput: { file_path: "file.txt" } }),
+      draft("devin", 2, "toolResult", { toolCallId: "tool", output: "Read", isError: false }),
+      draft("devin", 3, "textDelta", { delta: "DONE", isFinalResponse: true })];
+    for (const [index, event] of events.entries()) {
+      expect((await send(index + 2, { kind: "event", phase: "running", nativeCursor: null, events: [event] })).result.kind).toBe("accepted");
+    }
+    expect((await send(5, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("devin", 4, "turnComplete")], terminalInput: { ...execution, providerId: "devin", providerIdentities: [],
+        outcome: "completed", projection: { kind: "writer-staged" } } })).result.kind).toBe("accepted");
+    expect(pushes.turns).toEqual([]);
+    release?.();
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    const saved = new CanonicalAgentBoundary(db, () => {}).loadTerminalProjection(execution.turnId).message;
+    if (!saved) throw new Error("Expected saved assistant response");
+    expect(pushes.turns).toEqual([
+      { channel: "thread.status", data: { threadId: execution.threadId, status: "completed" } },
+      { channel: "turn.persisted", data: { threadId: execution.threadId, turnId: execution.turnId, executionId: execution.executionId,
+        messageId: saved.id, settledMessage: { id: saved.id, sequence: saved.sequence }, toolCallCount: 1, filesChanged: [],
+        outcome: "completed" } },
+    ]);
   });
 
   it("waits for accepted save capacity instead of rejecting a long provider stream", async () => {
