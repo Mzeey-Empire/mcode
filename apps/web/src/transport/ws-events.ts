@@ -610,10 +610,10 @@ export function startPushListeners(): void {
         console.warn("[ws-events] dropped invalid approval.resolved message");
         return;
       }
-      const { requestId, outcome } = parsed.data;
+      const { requestId } = parsed.data;
       void useThreadControlStore.getState().rehydrate();
       if (!requestId) return;
-      useApprovalStore.getState().resolve(requestId, outcome);
+      useApprovalStore.getState().resolve(requestId);
     }),
   );
 

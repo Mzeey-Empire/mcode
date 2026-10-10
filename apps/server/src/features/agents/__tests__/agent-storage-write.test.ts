@@ -18,6 +18,10 @@ import { TurnSnapshotRepo } from "../turns/persistence/turn-snapshot-repo.js";
 import { TurnDiffRepo } from "../turns/persistence/turn-diff-repo.js";
 import { NarrativeStore } from "../conversation/narrative/narrative-store.js";
 import { PlanQuestionService } from "../planning/plan-question-service.js";
+import { NarrativeTurnState } from "../conversation/narrative/narrative-turn-state.js";
+import { ApprovalReceiptStore } from "../approvals/approval-receipt-store.js";
+import { recoveredNarrativeWriteOperation } from "../conversation/narrative/persistence/recovered-narrative-write-operation.js";
+import type { AgentEvent } from "@mcode/contracts";
 
 describe("agent storage through the application writer", () => {
   let directory: string;
@@ -40,6 +44,29 @@ describe("agent storage through the application writer", () => {
     await writer.close();
     reader.close(true);
     NodeFS.rmSync(directory, { recursive: true, force: true });
+  });
+
+  it("writes one receipt for duplicate approvalDecided events and rejects conflicting saved content", async () => {
+    const message = await new MessageRepo(reader, writer).create("thread", "assistant", "", 1);
+    const state = new NarrativeTurnState("thread");
+    const event = { type: "approvalDecided", threadId: "thread", requestId: "request-1", toolCallId: "tool-1",
+      kind: "command", subjectLabel: "bun run lint", outcome: { status: "allowed", intent: "allow_once", choiceLabel: "Allow once" },
+      origin: { kind: "agent" } } satisfies AgentEvent;
+    state.recordApproval(event);
+    state.recordApproval(event);
+    const items = state.terminalSnapshot("thread");
+    await writer.execute(recoveredNarrativeWriteOperation, [message.id, items, false]);
+    await writer.execute(recoveredNarrativeWriteOperation, [message.id, items, false]);
+    const records = new ApprovalReceiptStore(reader).listByMessage(message.id);
+    expect(records.map(({ decided_at, ...record }) => ({ ...record, hasTimestamp: Number.isFinite(Date.parse(decided_at)) }))).toEqual([{
+      id: "request-1", message_id: message.id, tool_call_id: "tool-1", kind: "command", subject_label: "bun run lint",
+      outcome: { status: "allowed", intent: "allow_once", choiceLabel: "Allow once" }, origin: { kind: "agent" }, sort_order: 0, hasTimestamp: true,
+    }]);
+    const first = records[0];
+    if (!first) throw new Error("Missing receipt");
+    await expect(writer.execute(recoveredNarrativeWriteOperation, [message.id,
+      [{ kind: "approval", record: { ...first, outcome: { status: "denied", choiceLabel: "Deny" } } }], false])).rejects.toThrow();
+    expect(new ApprovalReceiptStore(reader).listByMessage(message.id)).toEqual(records);
   });
 
   it("commits messages, narrative, answers and settled evidence before synchronous reads observe them", async () => {

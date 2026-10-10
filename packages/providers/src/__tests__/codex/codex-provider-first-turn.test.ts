@@ -143,6 +143,38 @@ function makeProvider(
  * first turn on queueMicrotask ran before that and skipped runTurn entirely.
  */
 describe("CodexProvider first turn on new session", () => {
+  it.each([false, true])("orders one cancellation receipt before stop (failed deny: %s)", async (failedDeny) => {
+    const batches: ProviderEventBatch[] = [];
+    const provider = makeProvider(undefined, undefined, undefined, { submit: async (batch) => { batches.push(batch); return acceptedEventReceipt; } });
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    await provider.sendTurn({
+      turnId: "approval-turn", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
+      threadId, message: "lint", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "supervised",
+    });
+    const handler = appServers[0]?.options.approvalHandler;
+    assert(handler);
+    const request: CodexApprovalRequest = { rpcId: 1, method: "item/commandExecution/requestApproval", params: { command: "bun run lint", itemId: "tool-1" } };
+    const native = handler(request);
+    const [pending] = provider.listPendingApprovals();
+    assert(pending);
+    if (failedDeny) {
+      const response = provider.resolveApproval(pending.requestId, { autoDeny: "unreadable" });
+      await native;
+      request.responseWritten?.(false);
+      expect(await response).toMatchObject({ status: "failed" });
+    }
+    await provider.stopSession(sessionId);
+    await native;
+    await vi.waitFor(() => expect(submittedRuntimeEvents(batches).filter(({ event }) => event.type === "approvalDecided").map(({ event }) => event)).toEqual([{
+      type: "approvalDecided", threadId, requestId: pending.requestId, turnExecutionId: schemaValidExecutionId,
+      kind: failedDeny ? "tool" : "command", subjectLabel: failedDeny ? "Mcode couldn't read this request" : "bun run lint",
+      outcome: { status: "cancelled", reason: failedDeny ? "unanswerable" : "session_stopped" },
+      ...(failedDeny ? {} : { toolCallId: "tool-1", origin: { kind: "agent" } }),
+    }]));
+    await provider.shutdown();
+  });
+
   const threadId = "first-turn-thread";
   const sessionId = `mcode-${threadId}`;
 
@@ -826,6 +858,47 @@ describe("CodexProvider first turn on new session", () => {
 
     expect(legacy.some((event) => event.event.type === AgentEventType.TextDelta)).toBe(true);
     expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("keeps a parent approval pending when a sub-agent turn completes", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
+      .mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    await provider.sendTurn({
+      turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
+      sessionId, workspaceId: "workspace-test", threadId, message: "delegate", cwd: process.cwd(),
+      model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "supervised",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const server = appServers[0];
+    const handler = server?.options.approvalHandler;
+    assert(server && handler);
+    void handler({ rpcId: 1, method: "item/commandExecution/requestApproval", params: { command: "bun run lint", itemId: "tool-1" } });
+    server.emit("notification", {
+      method: "item/started",
+      params: { threadId: "sdk-thread-1", turnId: "turn-test-id", item: {
+        type: "subAgentActivity", id: "spawn-child", kind: "started",
+        agentThreadId: "native-child", agentPath: "/root/worker",
+      } },
+    });
+    server.emit("notification", { method: "turn/started", params: { threadId: "native-child", turn: { id: "child-turn" } } });
+    server.emit("notification", {
+      method: "turn/completed", params: { threadId: "native-child", turn: { id: "child-turn", status: "completed" } },
+    });
+    const runtimeEvents = () => submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch));
+    const receipts = () => runtimeEvents().filter(({ event }) => event.type === AgentEventType.ApprovalDecided);
+    await vi.waitFor(() => expect(runtimeEvents().some((event) => event.extension?.child && event.event.type === AgentEventType.TurnComplete)).toBe(true));
+    expect(provider.listPendingApprovals(threadId)).toHaveLength(1);
+    expect(receipts()).toEqual([]);
+
+    server.emit("notification", {
+      method: "turn/completed", params: { threadId: "sdk-thread-1", turn: { id: "turn-test-id", status: "completed" } },
+    });
+    await vi.waitFor(() => expect(receipts().map(({ event }) => event.type === AgentEventType.ApprovalDecided && event.outcome))
+      .toEqual([{ status: "cancelled", reason: "turn_ended" }]));
+    expect(provider.listPendingApprovals(threadId)).toEqual([]);
+    await provider.shutdown();
   });
 
   it("keeps native child progress in the parent's canonical stream through parent completion", async () => {

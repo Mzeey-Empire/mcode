@@ -3,7 +3,7 @@ import * as NodeEvents from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApprovalRequestEnvelope, ApprovalResponse, ApprovalRespondResult, ApprovalRequestBody } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
-import { ApprovalService, UNREADABLE_APPROVAL_TITLE } from "../approval-service.js";
+import { ApprovalService } from "../approval-service.js";
 
 vi.mock("@mcode/shared", () => ({ logger: { warn: vi.fn(), error: vi.fn() } }));
 
@@ -43,7 +43,7 @@ describe("ApprovalService", () => {
     test.provider.emit("approval_request", { requestId: "bad", threadId: "owner", body: { subject: "secret-payload" } });
     await vi.waitFor(() => expect(test.provider.resolveApproval.mock.calls).toEqual([["bad", { autoDeny: "unreadable" }]]));
     expect(test.publishApprovalResolved.mock.calls).toEqual([]);
-    expect(test.publishApprovalRequest.mock.calls[0]?.[0].subject).toEqual({ kind: "tool", toolName: UNREADABLE_APPROVAL_TITLE });
+    expect(test.publishApprovalRequest.mock.calls).toEqual([]);
     expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain("secret-payload");
     expect(vi.mocked(logger.warn).mock.calls[0]?.[1]).toMatchObject({ providerId: "cursor", requestId: "bad" });
     delivery.resolve({ status: "resolved" });
@@ -80,7 +80,7 @@ describe("ApprovalService", () => {
     test.provider.emit("approval_request", envelope);
     expect(test.service.listPendingApprovals()).toEqual([]);
     await vi.waitFor(() => expect(test.provider.resolveApproval.mock.calls).toEqual([["bad", { autoDeny: "unreadable" }]]));
-    expect(test.publishApprovalRequest.mock.calls.map(([request]) => request.subject)).toEqual([{ kind: "tool", toolName: UNREADABLE_APPROVAL_TITLE }]);
+    expect(test.publishApprovalRequest.mock.calls).toEqual([]);
     delivery.resolve({ status: "resolved" });
     await vi.waitFor(() => expect(test.publishApprovalResolved.mock.calls).toEqual([[{
       requestId: "bad", threadId: "owner", outcome: { status: "auto_denied", reason: "unreadable" },
@@ -105,7 +105,7 @@ describe("ApprovalService", () => {
     test.provider.resolveApproval.mockResolvedValue({ status: "resolved" });
     test.provider.emit("approval_request", { requestId: "large", threadId: "owner", body: { ...body, subject: { kind: "command", command: "x".repeat(70_000) } } });
     await vi.waitFor(() => expect(test.provider.resolveApproval.mock.calls).toEqual([["large", { autoDeny: "too_large" }]]));
-    expect(test.publishApprovalRequest.mock.calls.map(([request]) => request.subject)).toEqual([{ kind: "tool", toolName: UNREADABLE_APPROVAL_TITLE }]);
+    expect(test.publishApprovalRequest.mock.calls).toEqual([]);
   });
 
   it("returns not_pending for an unknown id and coalesces competing answers", async () => {

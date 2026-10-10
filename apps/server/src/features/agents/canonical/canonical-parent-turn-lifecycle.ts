@@ -364,6 +364,7 @@ export class CanonicalParentTurnLifecycle {
   ): ParentNarrativeRecoveryItem {
     if (item.kind === "toolCall") return this.reconciledToolCall(item, messageId, endedAt);
     if (item.kind === "hook") return this.reconciledHook(item, messageId, endedAt);
+    if (item.kind === "approval") return { kind: "approval", record: { ...item.record, message_id: messageId } };
     return { kind: "narrationSegment", record: { ...item.record, message_id: messageId } };
   }
 

@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { ApprovalReceiptStore } from "./approvals/approval-receipt-store.js";
 import { databaseWriteHandler } from "../../runtime/persistence/sqlite/database-write-operation.js";
 import { MessageStore } from "./conversation/persistence/message-store.js";
 import { messageWriteOperations } from "./conversation/persistence/message-write-operations.js";
@@ -48,6 +49,7 @@ function narrativeHandlers(db: Database): ReadonlyMap<string, (input: unknown) =
       tools.bulkCreate(rows.tools, replaceExisting);
       thoughts.bulkCreate(rows.thoughts, replaceExisting);
       hooks.bulkCreate(rows.hooks, replaceExisting);
+      for (const record of rows.approvals) new ApprovalReceiptStore(db).create(record);
     })],
     [tool.create.name, databaseWriteHandler(tool.create, input => tools.create(...input))],
     [tool.bulkCreate.name, databaseWriteHandler(tool.bulkCreate, input => tools.bulkCreate(...input))],

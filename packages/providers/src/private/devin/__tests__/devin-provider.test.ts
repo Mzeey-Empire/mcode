@@ -689,6 +689,8 @@ describe("DevinProvider", () => {
     await vi.waitFor(() => expect(permissionEvents).toHaveLength(1));
     expect(await p.resolveApproval(permissionEvents[0].requestId, { choiceId: "switch_bypass" })).toEqual({ status: "resolved" });
     await first;
+    expect(submittedRuntimeEvents(host).filter((event) => event.type === "approvalDecided").map((event) => event.outcome))
+      .toEqual([{ status: "allowed", intent: "provider", choiceLabel: "Switch to Bypass" }]);
     await p.sendTurn(turn({ providerOptions: { mode: "bypass" } }));
 
     expect(permissionEvents).toHaveLength(1);
@@ -698,7 +700,7 @@ describe("DevinProvider", () => {
     expect(modeCalls).toEqual(["normal"]);
   });
 
-  it("rejects permission resolution for unknown request ids and cancels pending requests on stop", async () => {
+  it.each([false, true])("cancels pending requests on stop with their original cause (failed deny: %s)", async (failedDeny) => {
     const host = createHost();
     const fake = createFakeRuntime("devin-acp-1", 101);
     starts.push(mockAcpStart([fake]));
@@ -719,9 +721,17 @@ describe("DevinProvider", () => {
     const sending = p.sendTurn(turn());
     await vi.waitFor(() => expect(permissionEvents).toHaveLength(1));
     expect(await p.resolveApproval("unknown-id", { choiceId: "allow_once" })).toEqual({ status: "not_pending" });
+    if (failedDeny) {
+      fake.child.exitCode = 0;
+      const pending = permissionEvents[0];
+      if (!pending) throw new Error("Missing approval");
+      expect(await p.resolveApproval(pending.requestId, { autoDeny: "unreadable" })).toMatchObject({ status: "failed" });
+    }
     await p.stopSession("mcode-thread-1");
     await sending;
     expect(fake.runtime.cancel).toHaveBeenCalledOnce();
+    expect(submittedRuntimeEvents(host).filter((event) => event.type === "approvalDecided").map((event) => event.outcome))
+      .toEqual([{ status: "cancelled", reason: failedDeny ? "unanswerable" : "session_stopped" }]);
   });
 
   it("auto-continues with a follow-up prompt when the turn hits Devin's request limit", async () => {

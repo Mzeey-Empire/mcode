@@ -4,6 +4,7 @@ import type { NarrativeItem, SubagentRosterTarget } from "./types";
 import { ThoughtBlock } from "./ThoughtBlock";
 import { ToolSummaryLine } from "./ToolSummaryLine";
 import { HookRow } from "./HookRow";
+import { ApprovalReceiptRow } from "./ApprovalReceiptRow";
 import { SubagentRow } from "./SubagentRow";
 import { ActiveToolRow } from "./ActiveToolRow";
 import { DeltaBlock } from "./DeltaBlock";
@@ -66,6 +67,10 @@ function sameNarrativeItems(left: NarrativeItem, right: NarrativeItem): boolean 
       const leftHook = left as Extract<NarrativeItem, { type: "hook" }>;
       return sameValues([leftHook.hook === right.hook]);
     }
+    case "approval": {
+      const leftApproval = left as Extract<NarrativeItem, { type: "approval" }>;
+      return sameValues([leftApproval.receipt === right.receipt]);
+    }
     case "subagent": {
       const leftSubagent = left as Extract<NarrativeItem, { type: "subagent" }>;
       return sameValues([
@@ -116,6 +121,8 @@ function renderItem(
       );
     case "hook":
       return <HookRow hook={item.hook} />;
+    case "approval":
+      return <ApprovalReceiptRow receipt={item.receipt} />;
     case "subagent":
       return (
         <SubagentRow

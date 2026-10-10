@@ -58,6 +58,29 @@ afterEach(async () => { await Promise.allSettled(providers.splice(0).map((provid
 async function completed(events: () => ProviderRuntimeEvent[], count: number) { await vi.waitFor(() => expect(events().filter(({ event }) => event.type === AgentEventType.TurnComplete)).toHaveLength(count)); }
 
 describe("Claude public factory core and capabilities", () => {
+  it.each([false, true])("publishes one cancellation receipt when stopped (failed auto-deny: %s)", async (failedDeny) => {
+    const transport = installTransport(() => []);
+    const { provider, events } = fixture();
+    await provider.sendTurn(request());
+    await vi.waitFor(() => expect(transport.optionsSeen.length).toBe(1));
+    const canUseTool = transport.optionsSeen[0]?.canUseTool;
+    assert(canUseTool);
+    const controller = new AbortController();
+    if (failedDeny) controller.abort();
+    const native = canUseTool("Bash", { command: "bun run lint" }, { signal: controller.signal, toolUseID: "tool-1" });
+    const [pending] = provider.listPendingApprovals?.() ?? [];
+    assert(pending);
+    if (failedDeny) expect(await provider.resolveApproval?.(pending.requestId, { autoDeny: "unreadable" })).toMatchObject({ status: "failed" });
+    await provider.stopSession("mcode-thread-1");
+    await native;
+    await vi.waitFor(() => expect(events().filter(({ event }) => event.type === "approvalDecided").map(({ event }) => event)).toEqual([{
+      type: "approvalDecided", threadId: "thread-1", requestId: pending.requestId, turnExecutionId: execution1,
+      kind: failedDeny ? "tool" : "command", subjectLabel: failedDeny ? "Mcode couldn't read this request" : "bun run lint",
+      outcome: { status: "cancelled", reason: failedDeny ? "unanswerable" : "session_stopped" },
+      ...(failedDeny ? {} : { toolCallId: "tool-1", origin: { kind: "agent" } }),
+    }]));
+  });
+
   it("exposes native command scope and acknowledges the SDK deny callback", async () => {
     const transport = installTransport(() => []);
     const { provider } = fixture();

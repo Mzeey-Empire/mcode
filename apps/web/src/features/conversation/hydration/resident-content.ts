@@ -3,7 +3,7 @@ import type { ThreadRecord } from "@/stores/thread-record";
 /** Fields that keep a thread paintable while persisted history is hydrating. */
 export type ResidentContentRecord = Pick<
   ThreadRecord,
-  "messages" | "sessionNotices" | "streaming" | "streamingPreview" | "toolCalls" | "thoughtSegments" | "hooks"
+  "messages" | "sessionNotices" | "streaming" | "streamingPreview" | "toolCalls" | "thoughtSegments" | "hooks" | "approvals"
 >;
 
 /** Returns whether a thread has any transcript or live-turn content to keep visible. */
@@ -14,5 +14,6 @@ export function hasResidentContent(record: ResidentContentRecord): boolean {
     || record.streamingPreview.length > 0
     || record.toolCalls.length > 0
     || record.thoughtSegments.length > 0
-    || record.hooks.length > 0;
+    || record.hooks.length > 0
+    || record.approvals.length > 0;
 }

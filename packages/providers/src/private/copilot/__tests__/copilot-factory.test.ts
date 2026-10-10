@@ -91,6 +91,24 @@ describe("Copilot public factory", () => {
     await finish();
   });
 
+  it("publishes one session-stopped receipt before ending a pending permission", async () => {
+    await provider.sendTurn(request({ permissionMode: "supervised" }));
+    const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
+    const native = options.onPermissionRequest({ kind: "shell", fullCommandText: "bun run lint", toolCallId: "call-1" }, { sessionId: session.sessionId });
+    const [pending] = provider.listPendingApprovals?.() ?? [];
+    if (!pending) throw new Error("Missing approval");
+    await provider.stopSession("mcode-thread-1");
+    await native;
+    await vi.waitFor(() => expect(projections(sink).at(-1)?.type).toBe("ended"));
+    const events = projections(sink);
+    expect(events.filter((event) => event.type === "approvalDecided")).toEqual([{
+      type: "approvalDecided", threadId: "thread-1", requestId: pending.requestId, turnExecutionId: "00000000-0000-4000-8000-000000000001",
+      toolCallId: "call-1", kind: "command", subjectLabel: "bun run lint", origin: { kind: "agent" },
+      outcome: { status: "cancelled", reason: "session_stopped" },
+    }]);
+    expect(events.findIndex((event) => event.type === "approvalDecided")).toBeLessThan(events.findIndex((event) => event.type === "ended"));
+  });
+
   it("emits whole oversized commands and acknowledges the server's deny", async () => {
     await provider.sendTurn(request({ permissionMode: "supervised" }));
     const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
@@ -106,6 +124,8 @@ describe("Copilot public factory", () => {
       .toEqual({ kind: "denied-no-approval-rule-and-could-not-request-from-user" });
     expect(provider.listPendingApprovals?.()).toEqual([]);
     await finish();
+    expect(projections(sink).filter((event) => event.type === "approvalDecided").map((event) => event.outcome))
+      .toEqual([{ status: "auto_denied", reason: "too_large" }]);
   });
 
   it("validates its own port and stays inert until the first public send", async () => {
@@ -269,6 +289,19 @@ describe("Copilot public factory", () => {
     await finish();
     expect(sdk.create).toHaveBeenCalledOnce();
     await expect(provider.shutdown()).resolves.toBeUndefined();
+  });
+
+  it("settles a pending permission before a native error ends the turn", async () => {
+    await provider.sendTurn(request({ permissionMode: "supervised" }));
+    const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
+    const native = options.onPermissionRequest({ kind: "shell", fullCommandText: "bun run lint", toolCallId: "call-1" }, { sessionId: session.sessionId });
+    session.emit({ type: "session.error", data: { errorType: "fatal", message: "native failed" } });
+    expect(await native).toEqual({ kind: "denied-interactively-by-user" });
+    await vi.waitFor(() => expect(projections(sink).at(-1)?.type).toBe("ended"));
+    const types = projections(sink).map((event) => event.type);
+    expect(projections(sink).filter((event) => event.type === "approvalDecided").map((event) => event.outcome))
+      .toEqual([{ status: "cancelled", reason: "turn_ended" }]);
+    expect(types.indexOf("approvalDecided")).toBeLessThan(types.indexOf("error"));
   });
 
   it("keeps a native error terminal failed when idle follows", async () => {

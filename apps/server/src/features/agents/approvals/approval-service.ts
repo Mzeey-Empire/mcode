@@ -14,9 +14,6 @@ type ThreadApprovalSource = {
   respondToApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult>;
 };
 
-/** Safe temporary card retained until durable approval receipts ship. */
-export const UNREADABLE_APPROVAL_TITLE = "Mcode couldn't read this request";
-
 /** Runtime effects shared by provider and thread-operation approvals. */
 export interface ApprovalPublication {
   publishApprovalRequest(request: ApprovalRequest): void;
@@ -142,18 +139,8 @@ export class ApprovalService {
     return task;
   }
 
-  private publishUnreadableStandIn(envelope: ApprovalRequestEnvelope, owner: ApprovalOwner): void {
-    this.effects().publishApprovalRequest({
-      requestId: envelope.requestId, threadId: envelope.threadId, providerId: owner.id,
-      requestedAt: new Date().toISOString(), subject: { kind: "tool", toolName: UNREADABLE_APPROVAL_TITLE },
-      choices: [{ id: "deny", intent: "deny", label: "Deny" }], noteDelivery: "none",
-      origin: owner.id === null ? { kind: "integration", label: "Integration" } : { kind: "agent" },
-    });
-  }
-
   private async failClosed(envelope: ApprovalRequestEnvelope, owner: ApprovalOwner, reason: "unreadable" | "too_large"): Promise<ApprovalRespondResult> {
     this.automatic.add(envelope.requestId);
-    this.publishUnreadableStandIn(envelope, owner);
     try {
       const result = await owner.resolveApproval?.(envelope.requestId, { autoDeny: reason });
       if (result?.status === "resolved") {

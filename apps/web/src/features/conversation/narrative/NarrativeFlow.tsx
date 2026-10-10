@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { ToolCall, HookExecution } from "@/transport/types";
-import type { SubagentRosterTarget, ThoughtSegment } from "./types";
+import type { ApprovalReceipt, SubagentRosterTarget, ThoughtSegment } from "./types";
 import { buildNarrativeItems } from "./build-narrative";
 import { NarrativeRows } from "./NarrativeRows";
 import { NarrativePerformanceBoundary } from "./NarrativePerformanceBoundary";
@@ -11,6 +11,8 @@ export interface NarrativeFlowProps {
   toolCalls: readonly ToolCall[];
   /** All hook executions for the current agent turn. */
   hooks: readonly HookExecution[];
+  /** Approvals decided during the current agent turn. */
+  approvals: readonly ApprovalReceipt[];
   /** Ordered thought segments accumulated during the agent turn. */
   thoughtSegments: readonly ThoughtSegment[];
   /** Partial streaming text not yet committed to a thought segment. */
@@ -40,6 +42,7 @@ export interface NarrativeFlowProps {
 export function NarrativeFlow({
   toolCalls,
   hooks,
+  approvals,
   thoughtSegments,
   streamingText,
   isAgentRunning,
@@ -52,6 +55,7 @@ export function NarrativeFlow({
       buildNarrativeItems({
         toolCalls,
         hooks,
+        approvals,
         thoughtSegments,
         streamingText,
         isAgentRunning,
@@ -60,6 +64,7 @@ export function NarrativeFlow({
     [
       toolCalls,
       hooks,
+      approvals,
       thoughtSegments,
       streamingText,
       isAgentRunning,

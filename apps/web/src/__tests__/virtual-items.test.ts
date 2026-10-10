@@ -187,7 +187,7 @@ describe("buildStableItems", () => {
       a1: {
         tools: [makeToolRecord({ message_id: "a1" })],
         thoughts: [],
-        hooks: [makeHookRecord({ message_id: "a1", phase: "stop", sort_order: 2 })],
+        approvals: [], hooks: [makeHookRecord({ message_id: "a1", phase: "stop", sort_order: 2 })],
       },
     });
     expect(items.map((i) => i.type)).toEqual(["message", "work-fold", "message", "turn-meta-line"]);
@@ -211,7 +211,7 @@ describe("buildStableItems", () => {
       a1: {
         tools: [],
         thoughts: [],
-        hooks: [makeHookRecord({ message_id: "a1", phase: "stop" })],
+        approvals: [], hooks: [makeHookRecord({ message_id: "a1", phase: "stop" })],
       },
     });
 
@@ -1003,7 +1003,7 @@ describe("buildVirtualItems (combined)", () => {
       makeMessage({ id: "u1", sequence: 1, role: "user", content: "build X" }),
       makeMessage({ id: "a1", sequence: 2, role: "assistant", content: "```plan-questions\n[]\n```" }),
     ];
-    const stable = buildStableItems(messages, undefined, undefined, { threadId: "thread-1", messageId: "a1" }, undefined, undefined, COMPLETED_AGENT, false, "tools");
+    const stable = buildStableItems(messages, undefined, undefined, { threadId: "thread-1", messageId: "a1" }, undefined, undefined, COMPLETED_AGENT, false, "rows");
     const volatile = buildVolatileItems([makeToolCall({ id: "tc-1", isComplete: true })], COMPLETED_AGENT, undefined, undefined);
     const result = buildVirtualItems(stable, volatile, true, "a1");
 
@@ -1057,6 +1057,15 @@ describe("buildVolatileItems with hooks", () => {
     const narrativeIdx = types.indexOf("narrative-flow");
     const permIdx = types.indexOf("permission-request");
     expect(narrativeIdx).toBeLessThan(permIdx);
+  });
+
+  it("drops a decided permission card and keeps the pending one", () => {
+    const permissions = [
+      { ...createMockApproval({ requestId: "decided" }), settled: true },
+      { ...createMockApproval({ requestId: "pending" }), settled: false },
+    ];
+    const items = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, permissions);
+    expect(items.filter((i) => i.type === "permission-request").map((i) => i.key)).toEqual(["permission-pending"]);
   });
 
   it("narrative-flow item carries the hooks array", () => {

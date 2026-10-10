@@ -86,7 +86,7 @@ describe("Turn response projection", () => {
         })],
         narrativeByMessage: {
           ...record.narrativeByMessage,
-          [fallbackId]: { tools: [], thoughts: [], hooks: [] },
+          [fallbackId]: { tools: [], thoughts: [], approvals: [], hooks: [] },
         },
       })),
     }));
@@ -105,7 +105,7 @@ describe("Turn response projection", () => {
       fallbackResponseKey,
     );
     expect(readThreadField(THREAD_ID, (record) => record.narrativeByMessage["server-final"])).toEqual({
-      tools: [], thoughts: [], hooks: [],
+      tools: [], thoughts: [], approvals: [], hooks: [],
     });
   });
 

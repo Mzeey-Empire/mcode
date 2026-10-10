@@ -37,7 +37,7 @@ describe("MessageBubble lazy MarkdownContent", () => {
   beforeEach(() => {
     resetThreadStoreForTests({ records: new Map([["t-1", {
       ...createEmptyThreadRecord(),
-      narrativeByMessage: { "msg-1": { tools: [], thoughts: [], hooks: [] } },
+      narrativeByMessage: { "msg-1": { tools: [], thoughts: [], approvals: [], hooks: [] } },
     }]]) });
   });
 

@@ -79,7 +79,7 @@ function cacheBoundedConversation(): void {
     serverMessageIds: responses,
     assistantResponseKeys: responses,
     narrativeByMessage: Object.fromEntries(messages.map((message) => [message.id, {
-      tools: [], thoughts: [], hooks: [],
+      tools: [], thoughts: [], approvals: [], hooks: [],
     }])),
     answeredPlanMessageIds: new Set(messages.map((message) => message.id)),
     latestTurnWithChanges: "message-1",
@@ -233,7 +233,7 @@ describe("recordCache", () => {
       hasMore: false,
       answeredPlanMessageIds: historyMessages.map((message) => message.id),
       narrativeByMessage: Object.fromEntries(historyMessages.map((message) => [message.id, {
-        tools: [], thoughts: [], hooks: [],
+        tools: [], thoughts: [], approvals: [], hooks: [],
       }])),
     });
 

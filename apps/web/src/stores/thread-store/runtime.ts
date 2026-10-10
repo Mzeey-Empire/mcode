@@ -78,6 +78,7 @@ function runtimeNarrativePatch(
     toolCalls: mergeRuntimeList(persisted.toolCalls, placeholder.toolCalls),
     thoughtSegments: mergeRuntimeList(persisted.thoughtSegments, placeholder.thoughtSegments),
     hooks: mergeRuntimeList(persisted.hooks, placeholder.hooks),
+    approvals: mergeRuntimeList(persisted.approvals, placeholder.approvals),
     currentTurnResponseKey: fallbackWhenEmpty(
       persisted.currentTurnResponseKey,
       placeholder.currentTurnResponseKey,
