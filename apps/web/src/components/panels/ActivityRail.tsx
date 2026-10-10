@@ -815,11 +815,13 @@ function ActivityRailView({
       onBlurCapture={onBlurCapture}
     >
       {/* The top 48 sits under the caption buttons and drags the window. It never
-          widens, so the expanded rail cannot cover row 1's panel controls. */}
+          widens, so the expanded rail cannot cover row 1's panel controls. The
+          right padding matches the canvas header's, so a caption action lands
+          exactly where the canvas toggle sits while the panel is closed. */}
       <div
         aria-hidden={captionAction ? undefined : true}
         data-testid="activity-rail-caption-strip"
-        className="window-drag absolute top-0 right-0 flex h-row-comfortable w-(--container-right-rail) items-center justify-center border-l border-border bg-background"
+        className="window-drag absolute top-0 right-0 flex h-row-comfortable w-(--container-right-rail) items-center justify-end border-l border-border bg-background pr-[0.8rem]"
       >
         {captionAction}
       </div>
