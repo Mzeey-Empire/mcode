@@ -11,6 +11,7 @@ import { CanonicalParentTurnWrite } from "../../../agents/canonical/canonical-pa
 import { CanonicalExecutionSemanticWriter } from "../../../agents/canonical/canonical-execution-semantic-writer.js";
 import { ExecutionWorkerHandler } from "../../../agents/execution/execution-worker-handler.js";
 import { deriveTurnAssistantMessageId } from "../../../agents/turns/turn-assistant-message-id.js";
+import { MessageStore } from "../../../agents/conversation/persistence/message-store.js";
 import { ThreadAttentionService } from "../thread-attention-service.js";
 import { approvalWaitingSource } from "../approval-waiting-source.js";
 
@@ -44,6 +45,33 @@ async function fixture() {
 }
 
 describe("thread attention through real SQLite and the serialized writer", () => {
+  it.each([true, false])("uses only transcript-visible sequence anchors, with answer: %s", async (withAnswer) => {
+    const t = await fixture();
+    t.database.query("INSERT INTO messages (id, thread_id, role, content, sequence) VALUES ('prompt', ?, 'user', 'Question', 1)").run(t.a.id);
+    if (withAnswer) t.settle(2);
+    t.database.query("INSERT INTO messages (id, thread_id, role, content, sequence, is_internal, outcome) VALUES ('internal', ?, 'assistant', 'Internal', 3, 1, 'completed')").run(t.a.id);
+    for (const [index, notice] of [
+      { scope: "session", kind: "mode" },
+      { scope: "turn", kind: "warning" },
+      { scope: "turn", kind: "configuration" },
+      { scope: "turn", kind: "deprecation" },
+      { scope: "turn", kind: "authentication-recovered" },
+    ].entries()) {
+      t.database.query("INSERT INTO messages (id, thread_id, role, content, sequence, system_notice) VALUES (?, ?, 'system', 'Notice', ?, ?)")
+        .run(`notice-${index}`, t.a.id, index + 4, JSON.stringify(notice));
+    }
+
+    await t.threads.recordTurnOutcome(t.a.id, "completed", ENDED);
+    const messages = new MessageStore(t.database);
+    const sequence = withAnswer ? 2 : 1;
+    expect(messages.latestSequenceMessage(t.a.id)).toEqual({ id: withAnswer ? "message-2" : "prompt", sequence });
+    expect(messages.listByThread(t.a.id, 20).messages.map((message) => message.sequence)).toEqual(withAnswer ? [1, 2] : [1]);
+    expect(t.service.get(t.a.id)?.lastTurn?.sequence).toBe(sequence);
+    await expect(t.service.acknowledgeSeen(t.a.id, sequence + 1)).rejects.toMatchObject({ code: "sequence_ahead" });
+    expect((await t.service.acknowledgeSeen(t.a.id, sequence)).current.sequence).toBe(sequence);
+    expect(t.service.listInteresting()).toEqual([]);
+  });
+
   async function beginEmptyTurn(t: Awaited<ReturnType<typeof fixture>>) {
     const execution = { threadId: t.a.id, turnId: "empty-turn", executionId: "00000000-0000-4000-8000-000000000002" };
     const lease = { ownerEpoch: 1, workerIndex: 0, workerGeneration: 1, leaseId: "empty-lease" };

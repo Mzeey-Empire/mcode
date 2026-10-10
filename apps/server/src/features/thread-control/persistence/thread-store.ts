@@ -17,6 +17,7 @@ import {
   workspaces,
 } from "../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
+import { transcriptMessageVisibility } from "../../agents/conversation/persistence/transcript-visibility.js";
 
 type ThreadRow = typeof threads.$inferSelect;
 
@@ -531,15 +532,15 @@ export class ThreadStore {
     return result.changes > 0;
   }
 
-  /** Persist a terminal outcome at the newest message, including an unanswered prompt. */
+  /** Persist a terminal outcome at the newest visible message, including an unanswered prompt. */
   recordTurnOutcome(id: string, outcome: TurnOutcome, endedAt: string): boolean {
-    return this.db.transaction(() => this.db.query(`
-      UPDATE threads SET status = ?, updated_at = ?, last_turn_outcome = ?,
-        last_turn_ended_at = ?, last_turn_sequence = (
-          SELECT MAX(sequence) FROM messages WHERE thread_id = ?
+    return this.db.transaction(() => runChanges(this.orm, sql`
+      UPDATE threads SET status = ${outcome === "cancelled" ? "interrupted" : outcome}, updated_at = ${endedAt}, last_turn_outcome = ${outcome},
+        last_turn_ended_at = ${endedAt}, last_turn_sequence = (
+          SELECT MAX(sequence) FROM messages WHERE thread_id = ${id} AND ${transcriptMessageVisibility}
         )
-      WHERE id = ? AND (last_turn_ended_at IS NULL OR julianday(last_turn_ended_at) <= julianday(?))
-    `).run(outcome === "cancelled" ? "interrupted" : outcome, endedAt, outcome, endedAt, id, id, endedAt).changes > 0)();
+      WHERE id = ${id} AND (last_turn_ended_at IS NULL OR julianday(last_turn_ended_at) <= julianday(${endedAt}))
+    `).changes > 0)();
   }
 
   /** Compare and advance inside the writer transaction so concurrent clients cannot regress it. */
@@ -548,12 +549,12 @@ export class ThreadStore {
       const row = this.orm.select({ sequence: threads.seenThroughSequence, at: threads.seenAt })
         .from(threads).where(and(eq(threads.id, id), isNull(threads.deletedAt))).get();
       if (!row) throw new Error("Thread not found");
-      const newest = this.db.query<{ sequence: number | null }, [string, string]>(
-        `SELECT MAX(sequence) AS sequence FROM (
-          SELECT sequence FROM messages WHERE thread_id = ? AND outcome IS NOT NULL
-          UNION ALL SELECT last_turn_sequence FROM threads WHERE id = ?
+      const newest = this.orm.select({ sequence: sql<number | null>`MAX(sequence)` }).from(
+        sql`(
+          SELECT sequence FROM messages WHERE thread_id = ${id} AND outcome IS NOT NULL AND ${transcriptMessageVisibility}
+          UNION ALL SELECT last_turn_sequence FROM threads WHERE id = ${id}
         )`,
-      ).get(id, id)?.sequence;
+      ).get()?.sequence;
       if (newest == null || throughSequence > newest) {
         throw Object.assign(new Error("Acknowledged sequence is ahead of settled history"), { code: "sequence_ahead" });
       }

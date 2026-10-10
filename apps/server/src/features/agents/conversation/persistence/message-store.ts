@@ -4,6 +4,7 @@
  */
 
 import * as NodeCrypto from "node:crypto";
+import { notSessionNotice, transcriptMessageVisibility } from "./transcript-visibility.js";
 import type { Changes, Database } from "bun:sqlite";
 import { and, asc, count, desc, eq, getTableColumns, gt, inArray, isNotNull, lt, lte, placeholder, sql, type SQL } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
@@ -177,11 +178,6 @@ function rowToMessage(row: MessageRow): Message {
 
   return msg;
 }
-
-/** Session-scoped system notices are hidden from transcript reads. */
-const notSessionNotice = sql`json_extract(${messages.systemNotice}, '$.scope') IS NOT 'session'`;
-// The transcript hides these notices, so they cannot consume a bounded display page.
-const notRoutineTranscriptNotice = sql`COALESCE(json_extract(${messages.systemNotice}, '$.kind'), '') NOT IN ('warning', 'configuration', 'deprecation', 'authentication-recovered')`;
 
 const DEFAULT_HISTORY_PAGE_SIZE = 100;
 const MAX_HISTORY_PAGE_SIZE = 500;
@@ -593,11 +589,11 @@ export class MessageStore {
     return row?.sequence ?? 0;
   }
 
-  /** Return the durable sequence anchor, including a prompt for a turn without output. */
+  /** Return the newest visible sequence anchor, including a prompt for a turn without output. */
   latestSequenceMessage(threadId: string): { id: string; sequence: number } | null {
-    return this.db.query<{ id: string; sequence: number }, [string]>(
-      "SELECT id, sequence FROM messages WHERE thread_id = ? ORDER BY sequence DESC LIMIT 1",
-    ).get(threadId);
+    return this.orm.select({ id: messages.id, sequence: messages.sequence }).from(messages)
+      .where(and(eq(messages.threadId, threadId), transcriptMessageVisibility))
+      .orderBy(desc(messages.sequence)).limit(1).get() ?? null;
   }
 
   /** Provider system notices may follow a user prompt without starting another conversation turn. */
@@ -656,9 +652,7 @@ export class MessageStore {
       and(
         eq(messages.threadId, threadId),
         ...(before != null ? [lt(messages.sequence, before)] : []),
-        eq(messages.isInternal, 0),
-        notSessionNotice,
-        notRoutineTranscriptNotice,
+        transcriptMessageVisibility,
       ),
       "DESC",
       fetchLimit,
@@ -714,9 +708,7 @@ export class MessageStore {
       and(
         eq(messages.threadId, threadId),
         gt(messages.sequence, after),
-        eq(messages.isInternal, 0),
-        notSessionNotice,
-        notRoutineTranscriptNotice,
+        transcriptMessageVisibility,
       ),
       "ASC",
       fetchLimit,
