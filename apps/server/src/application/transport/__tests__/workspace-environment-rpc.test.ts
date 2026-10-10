@@ -330,20 +330,6 @@ describe("workspace environment RPC", () => {
       queuedTurns: [],
     });
 
-    const cancelled = await routeMessage(JSON.stringify({
-      id: "automatic-cancel",
-      method: "workspace.environment.automaticSetup.cancelQueuedTurn",
-      params: { threadId: "thread-1", queuedTurnId: "queued-1" },
-    }), deps);
-    expect(cancelled.result).toEqual({ gate: "not-required", attempt: null, queuedTurns: [] });
-
-    const stopped = await routeMessage(JSON.stringify({
-      id: "automatic-stop",
-      method: "workspace.environment.automaticSetup.stop",
-      params: { threadId: "thread-1" },
-    }), deps);
-    expect(stopped.result).toEqual({ gate: "not-required", attempt: null, queuedTurns: [] });
-
     const terminal = await routeMessage(JSON.stringify({
       id: "automatic-terminal",
       method: "workspace.environment.automaticSetup.openTerminal",
@@ -357,13 +343,6 @@ describe("workspace environment RPC", () => {
       params: { threadId: "thread-1", extra: true },
     }), deps);
     expect(malformed.error?.code).toBe("WORKSPACE_ENVIRONMENT_VALIDATION");
-
-    const malformedCancel = await routeMessage(JSON.stringify({
-      id: "automatic-cancel-bad",
-      method: "workspace.environment.automaticSetup.cancelQueuedTurn",
-      params: { threadId: "thread-1" },
-    }), deps);
-    expect(malformedCancel.error?.code).toBe("WORKSPACE_ENVIRONMENT_VALIDATION");
 
     database.prepare("INSERT INTO workspaces (id, name, path, provider_config) VALUES ('workspace-1', 'Project', '/project', '{}')").run();
     database.prepare("INSERT INTO threads (id, workspace_id, title, mode, branch, worktree_managed, provider) VALUES ('thread-1', 'workspace-1', 'Blocked Turn', 'worktree', 'main', 1, 'claude')").run();

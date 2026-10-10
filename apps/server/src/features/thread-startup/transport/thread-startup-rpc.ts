@@ -4,6 +4,7 @@ import type {
   ThreadStartupListInput,
   WsMethodName,
 } from "@mcode/contracts";
+import type { AgentService } from "../../agents/orchestration/agent-service.js";
 import type { WorkspaceEnvironmentService } from "../../projects/environment/workspace-environment-service.js";
 import type { ThreadStartupService } from "../thread-startup-service.js";
 
@@ -22,6 +23,7 @@ type ThreadStartupParamsByMethod = {
 export interface ThreadStartupRouterDeps {
   threadStartupService: Pick<ThreadStartupService, "get" | "list" | "cancel" | "markCancelled">;
   workspaceEnvironmentService: Pick<WorkspaceEnvironmentService, "stopAutomaticSetup">;
+  agentService: Pick<AgentService, "stopSession">;
 }
 
 type ThreadStartupHandlerMap = {
@@ -37,14 +39,28 @@ const threadStartupHandlers: ThreadStartupHandlerMap = {
   "thread.startup.cancel": async (deps, params) => {
     const startup = await deps.threadStartupService.cancel(params.startupId);
     if (
-      startup.kind !== "managed-worktree"
-      || !startup.threadId
-      || startup.phase === "agent"
+      !startup.threadId
       || ["completed", "failed", "cancelled", "interrupted"].includes(startup.state)
     ) return startup;
 
-    await deps.workspaceEnvironmentService.stopAutomaticSetup({ threadId: startup.threadId });
-    return deps.threadStartupService.markCancelled(startup.startupId);
+    switch (startup.phase) {
+      case "setup":
+        await deps.workspaceEnvironmentService.stopAutomaticSetup({ threadId: startup.threadId });
+        return deps.threadStartupService.markCancelled(startup.startupId);
+      case "agent": {
+        const stopped = await deps.agentService.stopSession(startup.threadId);
+        // Admission checks the committed cancellation intent. Without an active turn,
+        // no turn.cancelled event will reach the startup observer to settle this record.
+        if (stopped.status === "already-terminal") {
+          return deps.threadStartupService.markCancelled(startup.startupId);
+        }
+        return deps.threadStartupService.get(startup.startupId);
+      }
+      case "thread":
+      case "fetch":
+      case "worktree":
+        return startup;
+    }
   },
 };
 

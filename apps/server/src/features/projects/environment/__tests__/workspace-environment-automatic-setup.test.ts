@@ -56,8 +56,9 @@ async function eventually(assertion: () => void): Promise<void> {
   throw failure;
 }
 
-async function automaticHarness({ setup = true, prepareFailure = false, attachmentStorage, threadStartups, threadIds = ["thread-1"] }: {
+async function automaticHarness({ setup = true, prepareFailure = false, attachmentStorage, threadStartups, threadIds = ["thread-1"], managed = true }: {
   readonly setup?: boolean;
+  readonly managed?: boolean;
   readonly prepareFailure?: boolean;
   readonly attachmentStorage?: WorkspaceEnvironmentServiceOptions["attachmentStorage"];
   readonly threadStartups?: WorkspaceEnvironmentServiceOptions["threadStartups"]
@@ -95,7 +96,7 @@ async function automaticHarness({ setup = true, prepareFailure = false, attachme
     mcodeDir: root,
     database: databaseReader(db),
     databaseWriter: databaseWriter(db),
-    threads: { findById: (id) => threadIds.includes(id) ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true } : null },
+    threads: { findById: (id) => threadIds.includes(id) ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: managed } : null },
     terminalCommands,
     terminalRecovery,
     attachmentStorage,
@@ -110,7 +111,8 @@ async function automaticHarness({ setup = true, prepareFailure = false, attachme
       document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
     });
   }
-  return { root, db, service, completion, start, close, prepare, terminalCommands, terminalRecovery };
+  const repository = new WorkspaceEnvironmentAutomaticRepository(databaseReader(db), () => new Date(milliseconds++).toISOString(), databaseWriter(db));
+  return { root, db, service, repository, completion, start, close, prepare, terminalCommands, terminalRecovery };
 }
 
 function queuedInput(index = 1, threadId = "thread-1") {
@@ -138,6 +140,18 @@ function queuedInput(index = 1, threadId = "thread-1") {
 }
 
 describe("automatic Project Setup", () => {
+  it("allows stopping attached worktree setup without enabling automatic admission", async () => {
+    const { service, start, close } = await automaticHarness({ managed: false });
+    expect(await service.stopAutomaticSetup({ threadId: "thread-1" })).toEqual({
+      gate: "not-required", attempt: null, queuedTurns: [],
+    });
+    await expect(service.queueAutomaticFirstTurn(queuedInput())).rejects.toMatchObject({
+      code: "WORKSPACE_ENVIRONMENT_SETUP_UNAVAILABLE",
+    });
+    expect(start).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+  });
+
   it("does not launch or dispatch when a terminal startup cancellation precedes automatic Setup admission", async () => {
     const cancelledStartup: ThreadStartup = {
       startupId: "00000000-0000-4000-8000-000000000001",
@@ -426,14 +440,14 @@ describe("automatic Project Setup", () => {
   });
 
   it("cancels only the targeted queued Turn and leaves the Setup command running", async () => {
-    const { db, service, close, start } = await automaticHarness();
+    const { db, service, repository, close, start } = await automaticHarness();
     await service.queueAutomaticFirstTurn(queuedInput());
     await service.queueAutomaticFirstTurn(queuedInput(2));
     await eventually(() => expect(start).toHaveBeenCalledOnce());
     const firstQueuedTurn = service.getAutomaticSetup({ threadId: "thread-1" }).queuedTurns[0]!;
-    const cancelled = await service.cancelQueuedAutomaticTurn({ threadId: "thread-1", queuedTurnId: firstQueuedTurn.id });
+    const cancelled = await repository.cancelQueuedTurn({ threadId: "thread-1", queuedTurnId: firstQueuedTurn.id });
 
-    expect(cancelled.queuedTurns).toMatchObject([
+    expect(cancelled.snapshot.queuedTurns).toMatchObject([
       { id: firstQueuedTurn.id, state: "cancelled" },
       { messageId: "message-2", state: "queued" },
     ]);
@@ -442,9 +456,8 @@ describe("automatic Project Setup", () => {
     expect(close).not.toHaveBeenCalled();
   });
 
-  it("removes only the cancelled queued Turn's stored attachments", async () => {
-    const attachmentStorage = { removeStoredAttachments: vi.fn(async () => undefined) };
-    const { service } = await automaticHarness({ attachmentStorage });
+  it("returns only the cancelled queued Turn's stored attachments for cleanup", async () => {
+    const { service, repository } = await automaticHarness();
     const firstAttachment = { id: "queued-file-1", name: "first.png", mimeType: "image/png", sizeBytes: 4 };
     const secondAttachment = { id: "queued-file-2", name: "second.png", mimeType: "image/png", sizeBytes: 4 };
     for (const [messageId, attachment] of [["message-1", firstAttachment], ["message-2", secondAttachment]] as const) {
@@ -470,10 +483,9 @@ describe("automatic Project Setup", () => {
     }
     const firstQueuedTurn = service.getAutomaticSetup({ threadId: "thread-1" }).queuedTurns[0]!;
 
-    await service.cancelQueuedAutomaticTurn({ threadId: "thread-1", queuedTurnId: firstQueuedTurn.id });
+    const cancelled = await repository.cancelQueuedTurn({ threadId: "thread-1", queuedTurnId: firstQueuedTurn.id });
 
-    expect(attachmentStorage.removeStoredAttachments).toHaveBeenCalledWith("thread-1", [firstAttachment]);
-    expect(attachmentStorage.removeStoredAttachments).not.toHaveBeenCalledWith("thread-1", [secondAttachment]);
+    expect(cancelled.attachments).toEqual([firstAttachment]);
   });
 
   it("rejects the next active queued Turn at the per-Thread capacity boundary", async () => {
@@ -492,11 +504,11 @@ describe("automatic Project Setup", () => {
   });
 
   it("retains only the latest terminal queued Turns without pruning active rows", async () => {
-    const { service } = await automaticHarness();
+    const { service, repository } = await automaticHarness();
     for (let index = 1; index <= 33; index += 1) await service.queueAutomaticFirstTurn(queuedInput(index));
 
     for (const queuedTurn of service.getAutomaticSetup({ threadId: "thread-1" }).queuedTurns) {
-      await service.cancelQueuedAutomaticTurn({ threadId: "thread-1", queuedTurnId: queuedTurn.id });
+      await repository.cancelQueuedTurn({ threadId: "thread-1", queuedTurnId: queuedTurn.id });
     }
 
     const snapshot = service.getAutomaticSetup({ threadId: "thread-1" });
@@ -1203,7 +1215,7 @@ describe("automatic Project Setup", () => {
     let startups!: ThreadStartupService;
     const startupId = "00000000-0000-4000-8000-0000000000bb";
     const threadId = "00000000-0000-4000-8000-0000000000b1";
-    const { service, start, completion } = await automaticHarness({
+    const { service, repository, start, completion } = await automaticHarness({
       threadIds: [threadId],
       threadStartups: (database, writer) => {
         startups = new ThreadStartupService(new ThreadStartupRepo(database, writer), writer, () => new Date());
@@ -1228,7 +1240,7 @@ describe("automatic Project Setup", () => {
     expect(startups.findByThreadId(threadId)?.steps[2].detail).toEqual({ phase: "setup", exitCode: 1 });
 
     const queued = service.getAutomaticSetup({ threadId }).queuedTurns[0]!;
-    await service.cancelQueuedAutomaticTurn({ threadId, queuedTurnId: queued.id });
+    await repository.cancelQueuedTurn({ threadId, queuedTurnId: queued.id });
     await service.continueAutomaticSetup({ threadId });
 
     expect(startups.findByThreadId(threadId)?.state).toBe("completed");

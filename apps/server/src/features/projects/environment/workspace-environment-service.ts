@@ -425,21 +425,9 @@ export class WorkspaceEnvironmentService {
     return repository.snapshot(input.threadId);
   }
 
-  /** Cancel only the requested Turn that remains queued behind automatic Setup. */
-  async cancelQueuedAutomaticTurn(input: {
-    readonly threadId: string;
-    readonly queuedTurnId: string;
-  }): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot> {
-    const cancelled = await this.requireAutomaticRepository().cancelQueuedTurn(input);
-    if (cancelled.attachments.length > 0) {
-      await this.options.attachmentStorage?.removeStoredAttachments(input.threadId, cancelled.attachments);
-    }
-    return cancelled.snapshot;
-  }
-
   /** Interrupt the active automatic Setup attempt without releasing the blocked gate. */
   async stopAutomaticSetup(input: WorkspaceEnvironmentAutomaticSetupStopInput): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot> {
-    this.requireAutomaticSetupThread(input.threadId);
+    this.requireAutomaticSetupThread(input.threadId, true);
     this.invalidateAutomaticRetry(input.threadId);
     const stopping = this.automaticStopPromises.get(input.threadId);
     if (stopping) return this.snapshotAfterAutomaticStop(input.threadId, stopping);
@@ -1144,14 +1132,14 @@ export class WorkspaceEnvironmentService {
     throw new Error("Automatic Project Setup requires SQLite lifecycle storage");
   }
 
-  private requireAutomaticSetupThread(threadId: string): WorkspaceEnvironmentSetupThread {
+  private requireAutomaticSetupThread(threadId: string, allowAttached = false): WorkspaceEnvironmentSetupThread {
     const thread = this.requireSetupThread(threadId);
     if (
       this.disposed ||
       thread.mode !== "worktree" ||
-      thread.worktree_managed !== true ||
-      thread.deleted_at !== null && thread.deleted_at !== undefined ||
-      thread.cleanup_state !== null && thread.cleanup_state !== undefined ||
+      (!allowAttached && thread.worktree_managed !== true) ||
+      thread.deleted_at != null ||
+      thread.cleanup_state != null ||
       this.deletingThreadCounts.has(thread.id) ||
       this.deletingWorkspaceCounts.has(thread.workspace_id)
     ) {

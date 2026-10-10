@@ -4,11 +4,9 @@ import type {
   WorkspaceEnvironmentAutomaticSetupContinueInput,
   WorkspaceEnvironmentAutomaticSetupGetInput,
   WorkspaceEnvironmentAutomaticSetupRetryInput,
-  WorkspaceEnvironmentAutomaticSetupStopInput,
   WorkspaceEnvironmentAutomaticSetupTerminalInput,
   WorkspaceEnvironmentCommandApprovalClearInput,
   WorkspaceEnvironmentCommandApproveInput,
-  WorkspaceEnvironmentQueuedTurnCancelInput,
   WorkspaceEnvironmentReadInput,
   WorkspaceEnvironmentSaveInput,
   WorkspaceEnvironmentSetupGetInput,
@@ -36,8 +34,6 @@ type WorkspaceEnvironmentParamsByMethod = {
   "workspace.environment.setup.get": WorkspaceEnvironmentSetupGetInput;
   "workspace.environment.automaticSetup.get": WorkspaceEnvironmentAutomaticSetupGetInput;
   "workspace.environment.automaticSetup.continue": WorkspaceEnvironmentAutomaticSetupContinueInput;
-  "workspace.environment.automaticSetup.cancelQueuedTurn": WorkspaceEnvironmentQueuedTurnCancelInput;
-  "workspace.environment.automaticSetup.stop": WorkspaceEnvironmentAutomaticSetupStopInput;
   "workspace.environment.automaticSetup.retry": WorkspaceEnvironmentAutomaticSetupRetryInput;
   "workspace.environment.automaticSetup.openTerminal": WorkspaceEnvironmentAutomaticSetupTerminalInput;
   "workspace.environment.action.list": WorkspaceEnvironmentActionListInput;
@@ -88,10 +84,6 @@ const workspaceEnvironmentHandlers: WorkspaceEnvironmentHandlerMap = {
     deps.workspaceEnvironmentService.getAutomaticSetup(params),
   "workspace.environment.automaticSetup.continue": (deps, params) =>
     deps.workspaceEnvironmentService.continueAutomaticSetup(params),
-  "workspace.environment.automaticSetup.cancelQueuedTurn": (deps, params) =>
-    deps.workspaceEnvironmentService.cancelQueuedAutomaticTurn(params),
-  "workspace.environment.automaticSetup.stop": (deps, params) =>
-    deps.workspaceEnvironmentService.stopAutomaticSetup(params),
   "workspace.environment.automaticSetup.retry": (deps, params) =>
     deps.workspaceEnvironmentService.retryAutomaticSetup(params),
   "workspace.environment.automaticSetup.openTerminal": (deps, params) =>

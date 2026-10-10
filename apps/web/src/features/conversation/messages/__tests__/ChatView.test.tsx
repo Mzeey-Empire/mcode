@@ -42,7 +42,6 @@ const {
       stopAgent: vi.fn(),
       getAutomaticSetup: vi.fn(),
       continueAutomaticSetup: vi.fn(),
-      cancelQueuedAutomaticTurn: vi.fn(),
       retryAutomaticSetup: vi.fn(),
       getThreadStartup: vi.fn(),
       listThreadStartups: vi.fn(),

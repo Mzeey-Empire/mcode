@@ -341,10 +341,6 @@ export interface McodeTransport {
   getAutomaticSetup(threadId: string): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot>;
   /** Release queued Turns without rerunning automatic Setup. */
   continueAutomaticSetup(threadId: string): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot>;
-  /** Cancel one Turn that is still queued behind automatic Setup. */
-  cancelQueuedAutomaticTurn(threadId: string, queuedTurnId: string): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot>;
-  /** Stop the active automatic Setup attempt without releasing its gate. */
-  stopAutomaticSetup(threadId: string): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot>;
   /** Start one new automatic Setup attempt from the current Project environment. */
   retryAutomaticSetup(threadId: string): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot>;
   /** Create one interactive recovery Terminal for the current Thread checkout. */

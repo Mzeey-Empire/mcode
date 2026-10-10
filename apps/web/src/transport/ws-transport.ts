@@ -1059,16 +1059,6 @@ export function createWsTransport(
         "workspace.environment.automaticSetup.continue",
         { threadId },
       ),
-    cancelQueuedAutomaticTurn: (threadId, queuedTurnId) =>
-      rpc<import("@mcode/contracts").WorkspaceEnvironmentAutomaticSetupSnapshot>(
-        "workspace.environment.automaticSetup.cancelQueuedTurn",
-        { threadId, queuedTurnId },
-      ),
-    stopAutomaticSetup: (threadId) =>
-      rpc<import("@mcode/contracts").WorkspaceEnvironmentAutomaticSetupSnapshot>(
-        "workspace.environment.automaticSetup.stop",
-        { threadId },
-      ),
     retryAutomaticSetup: (threadId) =>
       rpc<import("@mcode/contracts").WorkspaceEnvironmentAutomaticSetupSnapshot>(
         "workspace.environment.automaticSetup.retry",
