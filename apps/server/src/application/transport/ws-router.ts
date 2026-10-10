@@ -105,6 +105,7 @@ import { isFileRpcMethod, routeFileRpc } from "../../features/projects/files/tra
 import { isAttachmentRpcMethod, routeAttachmentRpc } from "../../features/attachments/transport/attachment-rpc.js";
 import type { AttachmentService } from "../../features/attachments/storage/attachment-service.js";
 import { DraftImageMissingError } from "../../features/attachments/storage/draft-image-missing-error.js";
+import { SequenceAheadError } from "../../features/thread-control/attention/sequence-ahead-error.js";
 import { isMemoryRpcMethod, routeMemoryRpc } from "../../runtime/memory/transport/memory-rpc.js";
 import { isGitRpcMethod, routeGitRpc } from "../../features/projects/git/transport/git-rpc.js";
 import { isSnapshotRpcMethod, routeSnapshotRpc } from "../../features/projects/diffs/transport/snapshot-rpc.js";
@@ -453,22 +454,26 @@ function validateRpcParameters(
   };
 }
 
-function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResponse {
-  const message = error instanceof Error ? error.message : String(error);
+function domainRouteError(id: string, error: unknown, message: string): WebSocketResponse | null {
   if (error instanceof PlanServiceError) {
-    return { id: request.id, error: { code: error.code, message, data: { latestVersion: error.latestVersion } } };
+    return { id, error: { code: error.code, message, data: { latestVersion: error.latestVersion } } };
   }
   if (error instanceof DraftImageMissingError) {
-    return { id: request.id, error: { code: error.code, message, data: { stagingId: error.stagingId } } };
+    return { id, error: { code: error.code, message, data: { stagingId: error.stagingId } } };
   }
+  if (error instanceof SequenceAheadError) return { id, error: { code: error.code, message } };
+  return null;
+}
+
+function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResponse {
+  const message = error instanceof Error ? error.message : String(error);
+  const domain = domainRouteError(request.id, error, message);
+  if (domain) return domain;
   if (error instanceof TerminalBackendError) {
     return terminalRouteError(request.id, error, message);
   }
   if (isProviderAvailabilityError(error)) return providerAvailabilityRouteError(request, error, message);
   if (error instanceof WorkspaceEnvironmentServiceError) return workspaceEnvironmentRouteError(request.id, error, message);
-  if (error instanceof Error && "code" in error && error.code === "sequence_ahead") {
-    return { id: request.id, error: { code: "sequence_ahead", message } };
-  }
   logger.error("RPC handler error", { method: request.method, error: message });
   return { id: request.id, error: { code: "INTERNAL_ERROR", message } };
 }

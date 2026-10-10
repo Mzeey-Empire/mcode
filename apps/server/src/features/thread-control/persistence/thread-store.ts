@@ -18,6 +18,7 @@ import {
 } from "../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
 import { transcriptMessageVisibility } from "../../agents/conversation/persistence/transcript-visibility.js";
+import { SequenceAheadError } from "../attention/sequence-ahead-error.js";
 
 type ThreadRow = typeof threads.$inferSelect;
 
@@ -556,7 +557,7 @@ export class ThreadStore {
         )`,
       ).get()?.sequence;
       if (newest == null || throughSequence > newest) {
-        throw Object.assign(new Error("Acknowledged sequence is ahead of settled history"), { code: "sequence_ahead" });
+        throw new SequenceAheadError();
       }
       const previous = row;
       if (previous.sequence !== null && throughSequence <= previous.sequence) return { previous, current: previous };
