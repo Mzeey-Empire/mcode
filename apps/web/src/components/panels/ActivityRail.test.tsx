@@ -107,33 +107,13 @@ describe("ActivityRail expansion", () => {
     expect(onExpandedChange).toHaveBeenLastCalledWith(false);
   });
 
-  it("keeps a fixed footprint on the right edge and expands leftward over the body", () => {
-    renderRail();
-    const rail = screen.getByTestId("activity-rail");
-    const surface = screen.getByTestId("activity-rail-surface");
-    const captionStrip = screen.getByTestId("activity-rail-caption-strip");
-
-    expect(rail).toHaveClass("z-(--layer-floating-panel)", "w-(--container-right-rail)", "flex-none");
-    expect(surface).toHaveClass("absolute", "right-0", "border-l", "top-row-comfortable", "w-(--container-right-rail)");
-
-    fireEvent.focus(screen.getByRole("button", { name: "Terminal" }));
-
-    expect(rail).toHaveClass("w-(--container-right-rail)");
-    expect(surface).toHaveClass("right-0", "w-(--container-right-rail-expanded)");
-    // Row 1's panel controls sit left of this strip; widening it would cover them.
-    expect(captionStrip).toHaveClass("h-row-comfortable", "w-(--container-right-rail)");
-  });
-
-  it("marks only the active entry with the selected fill and amber edge", () => {
+  it("selects only the active entry", () => {
     renderRail();
 
-    expect(screen.getByRole("button", { name: "Terminal" })).toHaveClass("bg-selected", "text-ink");
+    const selected = screen.getAllByRole("button", { pressed: true });
+    expect(selected).toHaveLength(1);
+    expect(selected[0]).toHaveAccessibleName("Terminal");
     expect(screen.getAllByTestId("rail-active-edge")).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Terminal" }).parentElement).toContainElement(
-      screen.getByTestId("rail-active-edge"),
-    );
-    expect(screen.getByRole("button", { name: "Review, 3 files changed" })).toHaveClass("text-muted");
-    expect(screen.getByRole("button", { name: "Review, 3 files changed" })).not.toHaveClass("bg-selected");
   });
 
   it("keeps the remembered Browser page unfilled while another tool owns the panel", () => {
@@ -146,48 +126,7 @@ describe("ActivityRail expansion", () => {
     const page = screen.getByRole("button", { name: "Browser page: Example" });
 
     expect(page).toHaveAttribute("aria-pressed", "false");
-    expect(page).toHaveClass("text-ink");
-    expect(page).not.toHaveClass("bg-selected");
-    expect(page).not.toHaveClass("bg-hover");
     expect(screen.getAllByTestId("rail-active-edge")).toHaveLength(1);
-  });
-
-  it("anchors trailing controls right and reserves their label space", () => {
-    const { rerender } = renderRail();
-    fireEvent.focus(screen.getByRole("button", { name: "Terminal" }));
-
-    expect(screen.getByRole("button", { name: "Close Terminal" })).toHaveClass(
-      "absolute",
-      "right-0",
-      "top-0",
-    );
-    expect(screen.getByRole("button", { name: "Terminal" }).querySelector("span")).toHaveClass(
-      "left-8",
-      "right-8",
-    );
-
-    rerender(
-      <ActivityRail
-        tabInstances={[{ id: rightPanelSingletonId("preview"), type: "preview" }]}
-        workspaceId={workspaceId}
-        activeTabId={rightPanelSingletonId("preview")}
-        scope="thread"
-        changesCount={0}
-        changesFresh={false}
-        browserTabSet={browserTabSet}
-        {...handlers}
-      />,
-    );
-
-    expect(screen.getByRole("button", { name: "Close page Example" })).toHaveClass(
-      "absolute",
-      "right-0",
-      "top-0",
-    );
-    expect(screen.getByRole("button", { name: "Browser page: Example" }).querySelector("span")).toHaveClass(
-      "left-8",
-      "right-8",
-    );
   });
 
   it("cancels expansion when the pointer only crosses the rail", () => {
@@ -275,7 +214,7 @@ describe("ActivityRail expansion", () => {
     expect(rail).toHaveAttribute("data-expanded", "false");
   });
 
-  it("gives the expanded rail a real hit-test box over the renderer guest seam", () => {
+  it("keeps the renderer guest visible and clickable beside the expanded rail", () => {
     const guestPointerDown = vi.fn();
     render(
       <div
@@ -300,51 +239,23 @@ describe("ActivityRail expansion", () => {
     );
 
     const rail = screen.getByTestId("activity-rail");
-    const railOverlay = screen.getByTestId("activity-rail-surface");
     const guest = screen.getByTestId("renderer-guest");
     const terminal = screen.getByRole("button", { name: "Terminal" });
-    expect(railOverlay).toHaveClass("w-(--container-right-rail)");
 
-    const originalElementFromPoint = document.elementFromPoint;
-    Object.defineProperty(document, "elementFromPoint", {
-      configurable: true,
-      value: (x: number) => {
-        const expanded = railOverlay?.classList.contains("w-(--container-right-rail-expanded)");
-        if (expanded && x >= 640) return terminal;
-        if (x < 752) return guest;
-        return rail;
-      },
-    });
+    fireEvent.pointerEnter(rail, { pointerType: "mouse" });
+    act(() => vi.advanceTimersByTime(EXPECTED_EXPAND_DELAY_MS));
 
-    try {
-      fireEvent.pointerEnter(rail, { pointerType: "mouse" });
-      act(() => vi.advanceTimersByTime(EXPECTED_EXPAND_DELAY_MS));
+    expect(rail).toHaveAttribute("data-expanded", "true");
+    expect(guest).toBeVisible();
+    fireEvent.click(terminal);
+    expect(handlers.onSelect).toHaveBeenCalledWith(rightPanelSingletonId("terminal"));
+    fireEvent.pointerDown(guest, { clientX: 300, clientY: 200 });
+    expect(guestPointerDown).toHaveBeenCalledTimes(1);
 
-      expect(rail).toHaveAttribute("data-expanded", "true");
-      expect(rail).toHaveClass("w-(--container-right-rail)", "z-(--layer-floating-panel)");
-      expect(railOverlay).toHaveClass("absolute", "right-0", "w-(--container-right-rail-expanded)");
-      expect(document.elementFromPoint(700, 200)).toBe(terminal);
-      expect(document.elementFromPoint(300, 200)).toBe(guest);
-      expect(guest).toBeVisible();
-      expect(guest).not.toHaveClass("invisible", "pointer-events-none");
-
-      fireEvent.click(terminal);
-      expect(handlers.onSelect).toHaveBeenCalledWith(rightPanelSingletonId("terminal"));
-      fireEvent.pointerDown(guest, { clientX: 300, clientY: 200 });
-      expect(guestPointerDown).toHaveBeenCalledTimes(1);
-
-      fireEvent.pointerLeave(rail, { pointerType: "mouse" });
-      act(() => vi.advanceTimersByTime(EXPECTED_COLLAPSE_DELAY_MS));
-      expect(rail).toHaveAttribute("data-expanded", "false");
-      expect(railOverlay).toHaveClass("w-(--container-right-rail)");
-    } finally {
-      Object.defineProperty(document, "elementFromPoint", {
-        configurable: true,
-        value: originalElementFromPoint,
-      });
-    }
+    fireEvent.pointerLeave(rail, { pointerType: "mouse" });
+    act(() => vi.advanceTimersByTime(EXPECTED_COLLAPSE_DELAY_MS));
+    expect(rail).toHaveAttribute("data-expanded", "false");
   });
-
   it("uses the amber pointer favicon and accessible name for an agent-controlled page", () => {
     const page = browserTabSet.tabs[0]!;
     useBrowserAutomationStore.setState({

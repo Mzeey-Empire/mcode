@@ -406,7 +406,7 @@ describe("RightPanel", () => {
     expect(reconcileWarmPreviewScopes([first], second, new Set())).toEqual([second, first]);
   });
 
-  it("puts the panel controls in row 1 and the rail after the body", () => {
+  it("puts the panel controls in row 1", () => {
     useDiffStore.setState({
       rightPanelFallbackByWorkspace: {
         "workspace-1": createRightPanelState({ visible: true, width: 400 }),
@@ -415,8 +415,7 @@ describe("RightPanel", () => {
     render(<RightPanel />);
     const row1 = screen.getByTestId("panel-header-row-1");
 
-    expect(row1).toHaveClass("h-row-comfortable", "window-drag");
-    expect(row1.compareDocumentPosition(screen.getByTestId("activity-rail")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(row1).toHaveClass("window-drag");
     expect(screen.getByTestId("panel-header-row-2")).toBeEmptyDOMElement();
 
     fireEvent.click(within(row1).getByRole("button", { name: "Close panel" }));

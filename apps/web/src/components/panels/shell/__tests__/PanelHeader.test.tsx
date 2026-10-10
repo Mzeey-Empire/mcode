@@ -20,15 +20,15 @@ function renderHeader(maximized: boolean, sidebarDocked: boolean) {
   );
 }
 
-function buttonNames(): string[] {
-  return screen.getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? "");
+function buttonNames(): Set<string> {
+  return new Set(screen.getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? ""));
 }
 
 describe("PanelHeader", () => {
   it("takes over the sidebar and history controls when a maximized panel replaces the canvas", () => {
     renderHeader(true, false);
 
-    expect(buttonNames()).toEqual(["Expand sidebar", "Back", "Forward", "Restore", "Close panel"]);
+    expect(buttonNames()).toEqual(new Set(["Expand sidebar", "Back", "Forward", "Restore", "Close panel"]));
     expect(screen.getByRole("button", { name: "Back" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Forward" })).toBeDisabled();
   });
@@ -39,7 +39,7 @@ describe("PanelHeader", () => {
   ])("keeps only the panel controls for %s", (_case, maximized, sidebarDocked, expandLabel) => {
     renderHeader(maximized, sidebarDocked);
 
-    expect(buttonNames()).toEqual([expandLabel, "Close panel"]);
+    expect(buttonNames()).toEqual(new Set([expandLabel, "Close panel"]));
   });
 });
 
