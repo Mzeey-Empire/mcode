@@ -608,7 +608,9 @@ function getRightPanelClassName(panelVisible: boolean, maximized: boolean): stri
     "relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background focus:outline-none",
     "transition-[width,min-width,max-width,opacity,transform] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
     !panelVisible && "pointer-events-none translate-x-2 opacity-0",
-    panelVisible && "translate-x-0 opacity-100",
+    // No translate when visible: even translate-x-0 creates a stacking context
+    // that traps Design overlays below the hosted Browser page.
+    panelVisible && "opacity-100",
     panelVisible && maximized && "flex-1",
   );
 }
