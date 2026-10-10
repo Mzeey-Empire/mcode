@@ -336,6 +336,7 @@ workspaceEnvironmentService.setAutomaticSetupDispatcher({
   const planTurnService = container.resolve(PlanTurnService);
   const goalLifecycleService = container.resolve(GoalLifecycleService);
   const subagentRosterService = container.resolve(SubagentRosterService);
+  const stopObservingSubagentRosters = subagentRosterService.observeCommittedEvents();
 const turnRecoveryService = container.resolve(TurnRecoveryService);
 const threadControlService = container.resolve(ThreadControlService);
 const threadStartupService = container.resolve(ThreadStartupService);
@@ -1069,6 +1070,7 @@ async function shutdown(): Promise<void> {
   await captureCleanupFailure(() => workerOwnedTurnRuntime.close());
   // Turns are drained, so no further turn facts arrive; finish startup writes before the writer closes.
   await captureCleanupFailure(() => startupAgentPhaseObserver.stop());
+  stopObservingSubagentRosters();
   shutdownCoordinator.setPhase("close application database writer");
   await captureCleanupFailure(() => databaseWriter.close());
 

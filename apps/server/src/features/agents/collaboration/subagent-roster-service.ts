@@ -9,6 +9,7 @@ import {
   type IAgentProvider,
   type IProviderRegistry,
   type ProviderId,
+  type CanonicalAgentEventEnvelope,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import {
@@ -26,6 +27,7 @@ import { NarrativeStore } from "../conversation/narrative/narrative-store.js";
 import { broadcast } from "../../../application/transport/push.js";
 import { narrativeRosterEntry, narrativeSubagentDetail, rootAgent, subagentStatusFrom, subagentModelLabel, type RosterToolCall } from "./subagent-roster-projection.js";
 import type { CanonicalChildRow } from "../canonical/canonical-child-roster.js";
+import { subscribeCommittedCanonicalEvents } from "../canonical/committed-canonical-events.js";
 
 type AcceptedSubagentProgress = Pick<import("../canonical/canonical-accepted-progress.js").CanonicalAcceptedProgress,
   "loadSubagentRoster" | "loadSubagentStopTarget" | "loadActiveSubagentStopTargets" | "finishSubagentTurn" | "interruptSubagentTurns" | "onSubagentRosterChange">;
@@ -109,6 +111,18 @@ export class SubagentRosterService {
     const byId = new Map(calls.map((call) => [call.toolCallId, call]));
     const call = byId.get(toolCallId);
     if (call && rootAgent(call, byId)) this.changed(threadId);
+  }
+
+  /**
+   * Invalidate from saved narrative tool calls. Worker-owned turns persist Agent calls and their steps without
+   * passing through {@link toolChanged}, so the saved batch is the only live signal for those rosters.
+   */
+  observeCommittedEvents(subscribe = subscribeCommittedCanonicalEvents): () => void {
+    return subscribe((events) => {
+      for (const threadId of new Set(events.filter(touchesNarrativeRoster).map((event) => event.routing.threadId))) {
+        this.changed(threadId);
+      }
+    });
   }
 
   /** Refresh terminal outcomes after narrative persistence completes. */
@@ -350,4 +364,17 @@ function rootEvidence(root: RosterToolCall, calls: readonly RosterToolCall[], by
     outputSummary: latest.outputSummary || root.outputSummary,
     completedAt: running ? undefined : latest.completedAt ?? root.completedAt,
   };
+}
+
+function touchesNarrativeRoster(event: CanonicalAgentEventEnvelope): boolean {
+  if (event.payload.type !== "item.recorded" || event.payload.item.kind !== "tool-call") return false;
+  const { parentItemId, payload } = event.payload.item;
+  if (payload.projection !== "narrativeRecovery" && payload.projection !== "narrativeRecoveryDiscarded") return false;
+  return parentItemId !== undefined || narrativeToolName(payload.narrative) === "Agent";
+}
+
+function narrativeToolName(narrative: unknown): unknown {
+  if (typeof narrative !== "object" || narrative === null || !("record" in narrative)) return undefined;
+  const { record } = narrative;
+  return typeof record === "object" && record !== null && "tool_name" in record ? record.tool_name : undefined;
 }

@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "bun:sqlite";
-import type { ProviderId } from "@mcode/contracts";
+import type { AgentItem, CanonicalAgentEventEnvelope, ProviderId } from "@mcode/contracts";
 import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
@@ -233,6 +233,38 @@ describe("SubagentRosterService", () => {
     service.toolChanged("parent", "root");
     expect(service.loadRoster(request).revision).toBe(2);
     expect(service.loadRoster(request).revision).toBe(2);
+  });
+
+  it("bumps from saved narrative Agent calls and their steps, ignoring other committed items", () => {
+    const { service } = harness();
+    let deliver: ((events: readonly CanonicalAgentEventEnvelope[]) => void) | undefined;
+    const stop = service.observeCommittedEvents((listener) => {
+      deliver = listener;
+      return () => { deliver = undefined; };
+    });
+    const saved = (threadId: string, item: Partial<AgentItem>): CanonicalAgentEventEnvelope => ({
+      eventId: `event-${item.id}`, routing: { threadId, turnId: "turn", executionId: "execution" },
+      sourceProviderId: "claude", sourceIdentities: [], acceptedSequence: 1, durableRevision: 1,
+      serverTimestamps: { acceptedAt: NOW, persistedAt: NOW },
+      payload: { type: "item.recorded", item: { id: "item", threadId, turnId: "turn", kind: "tool-call",
+        providerIdentities: [], payload: {}, createdAt: NOW, updatedAt: NOW, ...item } },
+    });
+    const narrative = (toolName: string) => ({ projection: "narrativeRecovery", narrative: { kind: "toolCall", record: { tool_name: toolName } } });
+    deliver?.([
+      saved("parent", { id: "toolCall:read", payload: narrative("Read") }),
+      saved("parent", { id: "toolCall:canonical", parentItemId: "toolCall:x", payload: { projection: "toolCall" } }),
+      saved("parent", { id: "reasoning:thought", kind: "reasoning", parentItemId: "toolCall:x", payload: narrative("Agent") }),
+    ]);
+    expect(service.loadRoster(request).revision).toBe(0);
+    deliver?.([
+      saved("parent", { id: "toolCall:root", payload: narrative("Agent") }),
+      saved("parent", { id: "toolCall:step", parentItemId: "toolCall:root", payload: narrative("Read") }),
+    ]);
+    expect(service.loadRoster(request).revision).toBe(1);
+    deliver?.([saved("parent", { id: "toolCall:step", parentItemId: "toolCall:root", payload: narrative("Read") })]);
+    expect(service.loadRoster(request).revision).toBe(2);
+    stop();
+    expect(deliver).toBeUndefined();
   });
 
   it("coalesces narrative and canonical invalidations into one push after 250 ms", () => {
