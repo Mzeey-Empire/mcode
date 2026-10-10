@@ -49,12 +49,26 @@ export function looksLikeBareDomain(input: string): boolean {
   if (/\s/.test(input)) return false;
   const hostPart = input.split("/", 1)[0]!;
   if (hostPart.length === 0) return false;
+  if (/^\[[0-9a-f:.]+\](:\d+)?$/i.test(hostPart)) return true;
   if (!/^[a-z0-9.\-:]+$/i.test(hostPart)) return false;
   if (hostPart === "localhost" || /^localhost:\d+$/.test(hostPart)) return true;
   if (/^\d{1,3}(\.\d{1,3}){3}(:\d+)?$/.test(hostPart)) return true;
   if (!hostPart.includes(".")) return false;
   const tld = hostPart.split(":")[0]!.split(".").pop() ?? "";
   return /^[a-z][a-z0-9-]{1,}$/i.test(tld);
+}
+
+/**
+ * Picks the scheme for a bare omnibox address: http for loopback and IP literals,
+ * which local dev servers serve without TLS, https otherwise.
+ */
+function bareAddressScheme(input: string): "http" | "https" {
+  const hostPart = input.split("/", 1)[0]!;
+  if (hostPart.startsWith("[")) return "http";
+  const hostname = hostPart.split(":", 1)[0]!.toLowerCase();
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) return "http";
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) return "http";
+  return "https";
 }
 
 /** Resolve user omnibox input to a safe Preview URL without loading it. */
@@ -78,6 +92,6 @@ async function resolvePreviewTarget(
   if (/^file:\/\//i.test(trimmed) || looksLikeFilePath(trimmed)) {
     return resolveLocalFileUrl(trimmed, workspacePath);
   }
-  if (looksLikeBareDomain(trimmed)) return validatePreviewNavigationUrl(`https://${trimmed}`);
+  if (looksLikeBareDomain(trimmed)) return validatePreviewNavigationUrl(`${bareAddressScheme(trimmed)}://${trimmed}`);
   return validatePreviewNavigationUrl(`https://www.google.com/search?q=${encodeURIComponent(trimmed)}`);
 }
