@@ -1,8 +1,9 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import type {
+  GitRef,
   WorkspaceEnvironmentActionRun,
   WorkspaceEnvironmentAutomaticSetupSnapshot,
 } from "@mcode/contracts";
@@ -20,6 +21,7 @@ import { createRightPanelState, useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { setLayoutMeasurements } from "@/lib/composer-layout";
+import { invalidateBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";
 
 const {
   mockCreateBranch,
@@ -28,6 +30,7 @@ const {
   mockGetReviewComparison,
   mockGetReviewState,
   mockGetWorkspaceSetupAttempt,
+  mockListRefs,
   mockListWorkspaceActionRuns,
   mockOpenSubagentsPanel,
   mockReadWorkspaceEnvironment,
@@ -43,6 +46,7 @@ const {
   mockGetReviewComparison: vi.fn(),
   mockGetReviewState: vi.fn(),
   mockGetWorkspaceSetupAttempt: vi.fn(),
+  mockListRefs: vi.fn(),
   mockListWorkspaceActionRuns: vi.fn(),
   mockOpenSubagentsPanel: vi.fn(),
   mockReadWorkspaceEnvironment: vi.fn(),
@@ -69,10 +73,7 @@ vi.mock("@/transport", async (importOriginal) => {
       listSnapshots: vi.fn().mockResolvedValue([]),
       getReviewComparison: mockGetReviewComparison,
       getReviewState: mockGetReviewState,
-      listBranches: vi.fn().mockResolvedValue([
-        { name: "main", shortSha: "abc123", type: "local", isCurrent: true },
-        { name: "feature/other", shortSha: "def456", type: "local", isCurrent: false },
-      ]),
+      listRefs: mockListRefs,
       getBranchComparison: vi.fn().mockResolvedValue(null),
       getRemoteUrl: vi.fn().mockResolvedValue({ label: "repo", webUrl: null }),
       getAutomaticSetup: mockGetAutomaticSetup,
@@ -224,6 +225,27 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
   };
 }
 
+function gitRef(shortName: string, overrides: Partial<GitRef> = {}): GitRef {
+  return {
+    kind: "ref",
+    fullName: `refs/heads/${shortName}`,
+    shortName,
+    branchName: shortName,
+    remote: null,
+    twin: null,
+    isCurrent: false,
+    isDefault: false,
+    worktree: null,
+    headSha: "a".repeat(40),
+    committedAt: "2026-10-01T12:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function refsPage(items: GitRef[]) {
+  return { ok: true, items, total: items.length, nextCursor: null };
+}
+
 function runningActionRun(): WorkspaceEnvironmentActionRun {
   return {
     threadId: "thread-1",
@@ -263,6 +285,12 @@ describe("ThreadOverview branchless Create PR", () => {
     mockGetReviewComparison.mockReset().mockResolvedValue({ files: [], additions: 0, deletions: 0 });
     mockGetReviewState.mockReset().mockResolvedValue({ isGitRepo: false });
     mockGetWorkspaceSetupAttempt.mockReset().mockResolvedValue(null);
+    invalidateBranchTargets("ws-1");
+    mockListRefs.mockReset().mockResolvedValue(refsPage([
+      gitRef("main", { isCurrent: true, isDefault: true }),
+      gitRef("feature/other"),
+      gitRef("origin/other", { fullName: "refs/remotes/origin/other", branchName: "other", remote: "origin" }),
+    ]));
     mockListWorkspaceActionRuns.mockReset().mockResolvedValue([]);
     mockReadWorkspaceEnvironment.mockReset().mockResolvedValue({
       document: {
@@ -322,6 +350,36 @@ describe("ThreadOverview branchless Create PR", () => {
     expect(screen.getByTestId("thread-overview-current-branch")).toHaveTextContent("main");
     expect(screen.queryByText("Branches unavailable")).not.toBeInTheDocument();
     expect(screen.queryByText(/Uncommitted:/)).not.toBeInTheDocument();
+  });
+
+  it("lists the checkout's local branches and searches them on the server", async () => {
+    const user = userEvent.setup();
+    render(<ThreadOverview thread={makeThread({ checkout_state: "named" })} threadPaneWidth={1400} />);
+    await user.click(screen.getByTestId("workspace-menu-branch"));
+
+    expect(await screen.findByRole("button", { name: "feature/other" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "origin/other" })).not.toBeInTheDocument();
+    expect(mockListRefs).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "ws-1", threadId: "thread-1", purpose: "new-thread" }),
+    );
+
+    mockListRefs.mockResolvedValue(refsPage([gitRef("feature/other")]));
+    await user.type(screen.getByLabelText("Search branches"), "feat");
+
+    await waitFor(() => expect(mockListRefs).toHaveBeenCalledWith(expect.objectContaining({ query: "feat" })));
+    const list = screen.getByTestId("thread-overview-branch-list");
+    await waitFor(() => expect(within(list).queryByRole("button", { name: "main" })).not.toBeInTheDocument());
+    expect(within(list).getByRole("button", { name: "feature/other" })).toBeInTheDocument();
+  });
+
+  it("keeps the checkout's branch and says the list is unavailable when listing fails", async () => {
+    mockListRefs.mockResolvedValue({ ok: false, error: { code: "git_failed", message: "Could not list targets" } });
+    const user = userEvent.setup();
+    render(<ThreadOverview thread={makeThread({ checkout_state: "named" })} threadPaneWidth={1400} />);
+    await user.click(screen.getByTestId("workspace-menu-branch"));
+
+    expect(await screen.findByText("Branches unavailable")).toBeInTheDocument();
+    expect(screen.getByTestId("thread-overview-current-branch")).toHaveTextContent("main");
   });
 
   it("uses the state probe's detached comparison when the worktree is clean", async () => {

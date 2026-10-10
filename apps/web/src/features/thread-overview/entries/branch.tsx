@@ -9,7 +9,10 @@ import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
 import { cn } from "@/lib/utils";
-import { getTransport, type GitBranch as GitBranchRecord, type Thread } from "@/transport";
+import { getTransport, type Thread } from "@/transport";
+import type { BranchTarget } from "@/features/conversation/composer/execution/targets/branch-target";
+import type { TargetPageStatus } from "@/features/conversation/composer/execution/targets/target-page-cache";
+import { useBranchTargets, useDebouncedQuery } from "@/features/conversation/composer/execution/targets/useBranchTargets";
 import { Check, ChevronDown, GitBranch, Plus, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -18,30 +21,42 @@ import {
   ThreadOverviewWhen,
 } from "@/features/thread-overview/overview-row";
 
-type LoadedBranchState =
-  | { status: "idle"; branches: GitBranchRecord[]; uncommittedFiles: number | null }
-  | { status: "loading"; branches: GitBranchRecord[]; uncommittedFiles: number | null }
-  | { status: "ready"; branches: GitBranchRecord[]; uncommittedFiles: number | null }
-  | { status: "error"; branches: GitBranchRecord[]; uncommittedFiles: number | null };
+interface OverviewBranchRow {
+  readonly name: string;
+  readonly isCurrent: boolean;
+}
+
+interface UncommittedFilesState {
+  /** False until the comparison answers or fails; branch creation waits for it. */
+  readonly settled: boolean;
+  readonly count: number | null;
+}
+
+interface BranchMenuData {
+  readonly status: TargetPageStatus<unknown>["kind"];
+  readonly hasListedBranches: boolean;
+  readonly rows: readonly OverviewBranchRow[];
+  readonly uncommitted: UncommittedFilesState;
+}
 
 function uncommittedFilesLabel(count: number): string {
   return `Uncommitted: ${count} ${count === 1 ? "file" : "files"}`;
 }
 
-function branchRows(branches: readonly GitBranchRecord[], currentBranch: string): GitBranchRecord[] {
-  const localBranches = new Map<string, GitBranchRecord>();
-  for (const branch of branches) {
-    if (branch.type === "remote") continue;
-    if (!localBranches.has(branch.name)) localBranches.set(branch.name, branch);
+function matchesQuery(name: string, query: string): boolean {
+  return name.toLowerCase().includes(query.toLowerCase());
+}
+
+function branchRows(targets: readonly BranchTarget[], currentBranch: string, query: string): OverviewBranchRow[] {
+  const localBranches = new Map<string, OverviewBranchRow>();
+  for (const target of targets) {
+    if (target.kind !== "branch" || target.remote !== null) continue;
+    localBranches.set(target.name, { name: target.name, isCurrent: target.isCurrent });
   }
 
-  if (!localBranches.has(currentBranch)) {
-    localBranches.set(currentBranch, {
-      name: currentBranch,
-      shortSha: "",
-      type: "local",
-      isCurrent: true,
-    });
+  // The server lists real branches only; a branchless checkout's HEAD still gets a row, as long as the search matches it.
+  if (!localBranches.has(currentBranch) && matchesQuery(currentBranch, query)) {
+    localBranches.set(currentBranch, { name: currentBranch, isCurrent: true });
   }
 
   return [...localBranches.values()].sort((a, b) => {
@@ -59,51 +74,40 @@ interface ThreadOverviewBranchMenuProps {
   hasCommitsAhead: boolean | null;
 }
 
-/** Loads branch and working-tree data while the branch picker is open. */
-function useThreadOverviewBranchState(thread: Thread, open: boolean): LoadedBranchState {
-  const [loaded, setLoaded] = useState<LoadedBranchState>({
-    status: "loading",
-    branches: [],
-    uncommittedFiles: null,
-  });
+/** Counts the checkout's uncommitted files while the branch picker is open. */
+function useUncommittedFiles(thread: Thread, open: boolean): UncommittedFilesState {
+  const [uncommitted, setUncommitted] = useState<UncommittedFilesState>({ settled: false, count: null });
 
   useEffect(() => {
     if (!open) return;
 
     let cancelled = false;
-    const loadBranches = async () => {
-      try {
-        const [branches, comparison] = await Promise.all([
-          getTransport().listBranches(thread.workspace_id),
-          getTransport().getReviewComparison({ workspaceId: thread.workspace_id, view: "uncommitted", threadId: thread.id }).catch(() => null),
-        ]);
-
-        if (cancelled) return;
-        setLoaded({
-          status: "ready",
-          branches,
-          uncommittedFiles: comparison?.files.length ?? null,
-        });
-      } catch {
-        if (!cancelled) setLoaded((previous) => ({ ...previous, status: "error" }));
-      }
-    };
-
-    void loadBranches();
+    // A failed comparison only hides the count; the branch list stays usable.
+    void getTransport()
+      .getReviewComparison({ workspaceId: thread.workspace_id, view: "uncommitted", threadId: thread.id })
+      .then((comparison): number | null => comparison.files.length, () => null)
+      .then((count) => {
+        if (!cancelled) setUncommitted({ settled: true, count });
+      });
 
     return () => {
       cancelled = true;
     };
   }, [open, thread.id, thread.workspace_id]);
 
-  return loaded;
+  return uncommitted;
 }
 
-/** Filters branch rows by the picker search text. */
-function getVisibleBranchRows(branches: readonly GitBranchRecord[], search: string): readonly GitBranchRecord[] {
-  const query = search.trim().toLowerCase();
-  if (!query) return branches;
-  return branches.filter((branch) => branch.name.toLowerCase().includes(query));
+/** Lists the checkout's local branches, searched on the server, while the branch picker is open. */
+function useThreadOverviewBranchData(thread: Thread, open: boolean, search: string): BranchMenuData {
+  const query = useDebouncedQuery(search);
+  const refs = useBranchTargets(open
+    ? { workspaceId: thread.workspace_id, threadId: thread.id, purpose: "new-thread", query }
+    : null);
+  const uncommitted = useUncommittedFiles(thread, open);
+  const displayBranch = thread.checkout_state === "branchless" ? "HEAD" : thread.branch;
+  const rows = useMemo(() => branchRows(refs.items, displayBranch, query), [refs.items, displayBranch, query]);
+  return { status: refs.status.kind, hasListedBranches: refs.items.length > 0, rows, uncommitted };
 }
 
 /** Returns the current branch's uncommitted-file label. */
@@ -115,12 +119,12 @@ function getCurrentBranchUncommittedLabel(uncommittedFiles: number | null): stri
 /** Returns whether this checkout can create and switch to a new branch. */
 function canCreateCheckoutBranch(
   thread: Thread,
-  loaded: LoadedBranchState,
+  uncommitted: UncommittedFilesState,
   hasCommitsAhead: boolean | null,
 ): boolean {
-  if (thread.checkout_state !== "named" || loaded.status !== "ready") return false;
+  if (thread.checkout_state !== "named" || !uncommitted.settled) return false;
   if (hasCommitsAhead === true) return true;
-  return loaded.uncommittedFiles !== null && loaded.uncommittedFiles > 0;
+  return uncommitted.count !== null && uncommitted.count > 0;
 }
 
 function ThreadOverviewBranchMenu({
@@ -131,18 +135,11 @@ function ThreadOverviewBranchMenu({
   hasCommitsAhead,
 }: ThreadOverviewBranchMenuProps) {
   const [search, setSearch] = useState("");
-  const loaded = useThreadOverviewBranchState(thread, open);
+  const data = useThreadOverviewBranchData(thread, open, search);
 
-  const displayBranch = thread.checkout_state === "branchless" ? "HEAD" : thread.branch;
-  const branches = useMemo(
-    () => branchRows(loaded.branches, displayBranch),
-    [loaded.branches, displayBranch],
-  );
-  const visibleBranches = useMemo(() => getVisibleBranchRows(branches, search), [branches, search]);
-
-  const currentBranchUncommittedLabel = getCurrentBranchUncommittedLabel(loaded.uncommittedFiles);
-  const shouldConstrainBranchList = visibleBranches.length > 6;
-  const canCreateNewBranch = canCreateCheckoutBranch(thread, loaded, hasCommitsAhead);
+  const currentBranchUncommittedLabel = getCurrentBranchUncommittedLabel(data.uncommitted.count);
+  const shouldConstrainBranchList = data.rows.length > 6;
+  const canCreateNewBranch = canCreateCheckoutBranch(thread, data.uncommitted, hasCommitsAhead);
 
   return (
     <div
@@ -172,8 +169,7 @@ function ThreadOverviewBranchMenu({
       >
         <ThreadOverviewBranchRows
           thread={thread}
-          loaded={loaded}
-          branches={visibleBranches}
+          data={data}
           currentBranchUncommittedLabel={currentBranchUncommittedLabel}
           onOpenChange={onOpenChange}
         />
@@ -192,24 +188,22 @@ function ThreadOverviewBranchMenu({
 /** Renders loaded branches and their branch-picker states. */
 function ThreadOverviewBranchRows({
   thread,
-  loaded,
-  branches,
+  data,
   currentBranchUncommittedLabel,
   onOpenChange,
 }: {
   thread: Thread;
-  loaded: LoadedBranchState;
-  branches: readonly GitBranchRecord[];
+  data: BranchMenuData;
   currentBranchUncommittedLabel: string | null;
   onOpenChange: (open: boolean) => void;
 }) {
-  const showBranches = loaded.status !== "loading" || loaded.branches.length > 0;
-  const isEmpty = loaded.status !== "loading" && branches.length === 0;
+  const showBranches = data.status !== "loading" || data.hasListedBranches;
+  const isEmpty = data.status !== "loading" && data.rows.length === 0;
 
   return (
     <div className="space-y-0.5 pr-2">
-      {loaded.status === "loading" && loaded.branches.length === 0 ? <ThreadOverviewBranchLoadingRow /> : null}
-      {showBranches ? branches.map((branch) => (
+      {showBranches ? null : <ThreadOverviewBranchLoadingRow />}
+      {showBranches ? data.rows.map((branch) => (
         <ThreadOverviewBranchRow
           key={branch.name}
           branch={branch}
@@ -219,7 +213,7 @@ function ThreadOverviewBranchRows({
         />
       )) : null}
       {isEmpty ? <div className="rounded-md px-2 py-2 text-xs text-muted">No branches match</div> : null}
-      {loaded.status === "error" ? <div className="rounded-md px-2 py-2 text-xs text-muted">Branches unavailable</div> : null}
+      {data.status === "failed" ? <div className="rounded-md px-2 py-2 text-xs text-muted">Branches unavailable</div> : null}
     </div>
   );
 }
@@ -236,7 +230,7 @@ function ThreadOverviewBranchRow({
   currentBranchUncommittedLabel,
   onOpenChange,
 }: {
-  branch: GitBranchRecord;
+  branch: OverviewBranchRow;
   isCurrent: boolean;
   currentBranchUncommittedLabel: string | null;
   onOpenChange: (open: boolean) => void;
