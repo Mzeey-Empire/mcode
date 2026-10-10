@@ -22,6 +22,7 @@ import { CanonicalAgentStore as CanonicalAgentBoundary } from "../canonical-agen
 import type { CodexSystemWriterIntent } from "../canonical-codex-system-error-projection.js";
 import { CanonicalExecutionSemanticWriter } from "../canonical-execution-semantic-writer.js";
 import { CanonicalAcceptedEventWrite } from "../canonical-accepted-write.js";
+import { CanonicalConversationProjectionReader } from "../canonical-conversation-projection-reader.js";
 import { ExecutionLivePublicationRelease } from "../execution-live-publication-release.js";
 import type { DataOnlyParentTurnStartInput } from "../canonical-parent-turn-write.js";
 
@@ -262,6 +263,10 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect(db.prepare("SELECT id, sort_order FROM tool_call_records ORDER BY sort_order").all()).toEqual([
       { id: "before", sort_order: 0 }, { id: "after", sort_order: 2 },
     ]);
+    const page = new CanonicalConversationProjectionReader(db).load(THREAD_ID, 20);
+    expect(page.narrativeByMessage[messageId ?? ""]?.approvals).toEqual([expect.objectContaining({
+      id: "request-1", subject_label: "bun run lint", sort_order: 1, outcome: { status: "auto_denied", reason: "unreadable" },
+    })]);
   });
 
   it("throws when the same request id arrives with a conflicting decision", async () => {

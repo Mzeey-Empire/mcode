@@ -4,6 +4,7 @@ import { MessageSchema, SessionNoticesSchema, type Message } from "./message.js"
 import { ToolCallRecordSchema } from "./tool-call-record.js";
 import { ThoughtSegmentRecordSchema } from "./thought-segment.js";
 import { HookExecutionRecordSchema } from "./hook-execution.js";
+import { ApprovalReceiptRecordSchema } from "./approval-receipt.js";
 
 /** Persisted narrative records grouped under one assistant message. */
 export const ConversationNarrativeBatchSchema = lazySchema(() =>
@@ -11,6 +12,7 @@ export const ConversationNarrativeBatchSchema = lazySchema(() =>
     tools: z.array(ToolCallRecordSchema()),
     thoughts: z.array(ThoughtSegmentRecordSchema()),
     hooks: z.array(HookExecutionRecordSchema()),
+    approvals: z.array(ApprovalReceiptRecordSchema()),
   }),
 );
 
