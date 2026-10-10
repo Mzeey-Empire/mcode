@@ -724,7 +724,7 @@ export function encodeEnvironmentDocument(document: WorkspaceEnvironmentDocument
     || document.actions.some((action) => action.icon !== undefined
       || action.runOnStartup !== undefined
       || action.runOnCleanup !== undefined
-      || Object.keys(action).some((key) => !Object.hasOwn(WorkspaceEnvironmentActionSchema().shape, key)));
+      || Object.keys(action).some((key) => !["id", "name", "command", "icon", "runOnStartup", "runOnCleanup"].includes(key)));
   const encodedDocument = WorkspaceEnvironmentDocumentSchema().parse({
     ...document,
     version: hasNewFields ? WORKSPACE_ENVIRONMENT_VERSION : WORKSPACE_ENVIRONMENT_LEGACY_VERSION,

@@ -65,6 +65,14 @@ describe("encodeEnvironmentDocument", () => {
     expect(input.version).toBe("0.0.1");
   });
 
+  it("writes 0.1.0 and preserves an unknown action key named constructor", () => {
+    const action = { id: "run", name: "Run", command: validCommand, constructor: "future-constructor" };
+    const encoded = encodeEnvironmentDocument({ version: "0.0.1", actions: [action] });
+    const expected = { version: "0.1.0", actions: [action] };
+    expect(encoded.document).toEqual(expected);
+    expect(JSON.parse(new TextDecoder().decode(encoded.bytes))).toEqual(expected);
+  });
+
   it("writes 0.1.0 for unknown top-level keys", () => {
     const encoded = encodeEnvironmentDocument({ version: "0.0.1", actions: [], future: { order: ["run"] } });
     const expected = { version: "0.1.0", actions: [], future: { order: ["run"] } };
