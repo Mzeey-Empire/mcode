@@ -7,15 +7,37 @@ export type NewThreadTargetCopyInput =
   | { readonly mode: "existing-worktree"; readonly worktree: AttachedWorktree | null };
 
 /**
+ * Target copy split into a relation verb and the thing it names, so the rail can print it as one phrase and
+ * the Overview can emphasize the name. A null prefix means the name stands alone, as a detached worktree's
+ * folder or a placeholder does.
+ */
+export interface TargetLabel {
+  readonly prefix: "From" | "On" | null;
+  readonly name: string;
+}
+
+/**
  * Trigger copy for a new thread's target: "From main", "From #1804", "On main", or "On {branch}" and the folder
  * of a detached worktree. Null when nothing is chosen yet, so the caller says why instead of guessing a name.
  */
-export function newThreadTargetLabel(input: NewThreadTargetCopyInput): string | null {
+export function newThreadTargetLabel(input: NewThreadTargetCopyInput): TargetLabel | null {
   if (input.mode === "existing-worktree") {
     if (!input.worktree) return null;
-    return isDetachedWorktree(input.worktree) ? input.worktree.name : `On ${input.worktree.branch}`;
+    return isDetachedWorktree(input.worktree)
+      ? { prefix: null, name: input.worktree.name }
+      : { prefix: "On", name: input.worktree.branch };
   }
-  if (input.mode === "direct") return input.branch ? `On ${input.branch}` : null;
-  if (input.pullRequestNumber !== undefined) return `From #${input.pullRequestNumber}`;
-  return input.branch ? `From ${input.branch}` : null;
+  if (input.mode === "direct") return input.branch ? { prefix: "On", name: input.branch } : null;
+  if (input.pullRequestNumber !== undefined) return { prefix: "From", name: `#${input.pullRequestNumber}` };
+  return input.branch ? { prefix: "From", name: input.branch } : null;
+}
+
+/** A label with no relation verb, for placeholders such as "Choose branch". */
+export function placeholderTargetLabel(name: string): TargetLabel {
+  return { prefix: null, name };
+}
+
+/** The label as one phrase, the way the rail trigger prints it. */
+export function targetLabelText(label: TargetLabel): string {
+  return label.prefix ? `${label.prefix} ${label.name}` : label.name;
 }

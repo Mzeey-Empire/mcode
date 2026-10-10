@@ -3,7 +3,7 @@ import type { ComposerMode } from "./composer-mode";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { attachedWorktreeFromTarget, isDetachedWorktree, normalizeWorktreePath, type AttachedWorktree } from "@/lib/worktree";
 import type { BranchTargetList } from "./BranchTargetPicker";
-import { newThreadTargetLabel } from "./new-thread-target-copy";
+import { newThreadTargetLabel, placeholderTargetLabel, type TargetLabel } from "./new-thread-target-copy";
 import type { BranchTarget, BranchTargetValue } from "./targets/branch-target";
 import { useForkTargetBranch, useNewThreadTargetBranch, type ForkSourceThread, type TargetBranch } from "./useTargetBranch";
 
@@ -25,7 +25,7 @@ export type ComposerTargetSelectionProps =
 
 /** One trigger and the picker list it opens. */
 export interface TargetPick {
-  readonly label: string;
+  readonly label: TargetLabel;
   readonly list: BranchTargetList;
   readonly value: BranchTargetValue | null;
   readonly select: (target: BranchTarget) => void;
@@ -44,8 +44,8 @@ export interface ComposerTargetSelectionState {
 
 type BranchPickMode = "direct" | "worktree";
 
-function unknownBranchLabel(branch: TargetBranch): string {
-  return branch.unknown === "loading" ? "Loading branches" : "Choose branch";
+function unknownBranchLabel(branch: TargetBranch): TargetLabel {
+  return placeholderTargetLabel(branch.unknown === "loading" ? "Loading branches" : "Choose branch");
 }
 
 function branchPick(mode: BranchPickMode, branch: TargetBranch, select: (name: string) => void): TargetPick {
@@ -61,7 +61,7 @@ function branchPick(mode: BranchPickMode, branch: TargetBranch, select: (name: s
 
 function worktreePick(worktree: AttachedWorktree | null, path: string, select: (worktree: AttachedWorktree) => void): TargetPick {
   return {
-    label: newThreadTargetLabel({ mode: "existing-worktree", worktree }) ?? "Choose worktree",
+    label: newThreadTargetLabel({ mode: "existing-worktree", worktree }) ?? placeholderTargetLabel("Choose worktree"),
     list: "worktrees",
     value: path ? { kind: "worktree", path } : null,
     select: (target) => {

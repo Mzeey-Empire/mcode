@@ -5,6 +5,7 @@ import { PICKER_PANEL_CLASS } from "@/components/ui/picker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { BranchTargetPicker } from "./BranchTargetPicker";
 import type { ComposerMode } from "./composer-mode";
+import { targetLabelText } from "./new-thread-target-copy";
 import { TARGET_TRIGGER_CLASS } from "./target-trigger";
 import type { ForkSourceThread } from "./useTargetBranch";
 import {
@@ -74,7 +75,7 @@ function TargetTrigger({ pick, workspaceId, threadId, testId }: TargetTriggerPro
             className={TARGET_TRIGGER_CLASS}
           >
             <Icon className="size-4" aria-hidden />
-            <span>{pick.label}</span>
+            <span>{targetLabelText(pick.label)}</span>
             <ChevronDown className="size-3" aria-hidden />
           </Button>
         }
