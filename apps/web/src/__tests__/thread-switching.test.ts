@@ -80,7 +80,7 @@ const loadPromise = activateTestConversation("thread-b");
     await loadPromise;
 
     // Final state has Thread B's messages
-    expect(getTestActiveMessages()).toEqual([threadBMsg]);
+    expect(getTestActiveMessages()).toEqual([{ ...threadBMsg, serverSequence: 1 }]);
     expect(getTestActiveLoading()).toBe(false);
   });
 
@@ -194,7 +194,7 @@ const loadPromise = activateTestConversation("thread-b");
     ];
     (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ messages: threadAMsgs, hasMore: false });
     await activateTestConversation("thread-a");
-    expect(getTestActiveMessages()).toEqual(threadAMsgs);
+    expect(getTestActiveMessages()).toEqual([{ ...threadAMsgs[0], serverSequence: 1 }]);
 
     // Act: switch to Thread B
     (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ messages: [], hasMore: false });
@@ -214,7 +214,7 @@ const loadPromise = activateTestConversation("thread-b");
 
     // Assert: all messages shown, including those that arrived while viewing Thread B
     const state = useThreadStore.getState();
-    expect(getTestActiveMessages()).toEqual(updatedThreadAMsgs);
+    expect(getTestActiveMessages()).toEqual(updatedThreadAMsgs.map((message) => ({ ...message, serverSequence: 1 })));
     expect(state.currentThreadId).toBe("thread-a");
   });
 });
