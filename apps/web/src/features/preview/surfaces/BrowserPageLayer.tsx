@@ -35,7 +35,7 @@ function previewSurfaceClassName(
   // layer below the Browser surface host root, which paints the hosted page.
   return cn(
     "relative min-h-[min(40vh,20rem)] min-w-0 flex-1 basis-0",
-    "rounded-tl-md",
+    "rounded-tr-md",
     responsiveViewportSize ? "overflow-auto bg-hover/20" : "overflow-hidden",
     webviewLayerInteractive && "pointer-events-none",
     showLocalPorts && "overflow-y-auto",
@@ -54,7 +54,7 @@ interface BrowserPageLayerProps {
   readonly webviewRefs: RefObject<Record<string, PreviewWebviewHandle | null>>;
   readonly workspaceId: string | null | undefined;
   readonly presentationActive: boolean;
-  readonly coveredLeft: number | undefined;
+  readonly coveredRight: number | undefined;
   readonly responsiveViewportSize: { readonly width: number; readonly height: number; } | null;
   readonly clearPendingNavOnCommit: ReturnType<typeof usePreviewPage>["clearPendingNavOnCommit"];
   readonly onWebviewPageStatus: ReturnType<typeof usePreviewPage>["onWebviewPageStatus"];
@@ -95,7 +95,7 @@ export function BrowserPageLayer({
   webviewRefs,
   workspaceId,
   presentationActive,
-  coveredLeft,
+  coveredRight,
   responsiveViewportSize,
   clearPendingNavOnCommit,
   onWebviewPageStatus,
@@ -140,7 +140,7 @@ export function BrowserPageLayer({
         allowHiddenPresentation={automationOnly}
         presentationActive={automationOnly || presentationActive}
         presentationSource={automationOnly ? "automation" : "panel"}
-        coveredLeft={coveredLeft}
+        coveredRight={coveredRight}
         viewport={tabViewportState?.mode === "responsive" ? tabViewport : undefined}
         className={cn(
           responsiveViewportSize
@@ -231,7 +231,7 @@ export function BrowserPageLayer({
         <RenderWhen condition={hasWebviewLayer}>
           <div
             data-testid="preview-webview-surface"
-            className="pointer-events-none absolute inset-0 z-(--layer-base) overflow-hidden rounded-tl-md"
+            className="pointer-events-none absolute inset-0 z-(--layer-base) overflow-hidden rounded-tr-md"
           >
           <BrowserViewportCanvas
             coordinator={activeViewportCoordinator}
@@ -248,9 +248,9 @@ export function BrowserPageLayer({
         <RenderWhen condition={agentControlsBrowser}>
           <div
             data-testid="browser-automation-overlay"
-            className="pointer-events-none absolute inset-0 z-(--layer-dropdown) rounded-tl-md"
+            className="pointer-events-none absolute inset-0 z-(--layer-dropdown) rounded-tr-md"
             style={{
-              clipPath: coveredLeft ? `inset(0 0 0 ${coveredLeft}px)` : undefined,
+              clipPath: coveredRight ? `inset(0 ${coveredRight}px 0 0)` : undefined,
               backgroundImage: BROWSER_CONTROL_EDGE_BACKGROUND_IMAGE,
               boxShadow: BROWSER_CONTROL_EDGE_BOX_SHADOW,
             }}
@@ -275,7 +275,7 @@ export function BrowserPageLayer({
         <div
           data-testid="preview-design-layer"
           className="pointer-events-none absolute inset-0 z-(--layer-browser-overlay)"
-          style={{ clipPath: coveredLeft ? `inset(0 0 0 ${coveredLeft}px)` : undefined }}
+          style={{ clipPath: coveredRight ? `inset(0 ${coveredRight}px 0 0)` : undefined }}
         >
           {designLayer}
         </div>

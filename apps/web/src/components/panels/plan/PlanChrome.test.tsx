@@ -59,3 +59,21 @@ describe("PlanChrome Implement button", () => {
     await waitFor(() => expect(usePlanStore.getState().activeVersionByThread.t1).toBe(1));
   });
 });
+
+describe("PlanChrome in the panel shell", () => {
+  it("keeps the revision picker in row 1 and puts the actions in row 2", async () => {
+    const { PanelHeaderSlotScope } = await import("@/components/panels/shell/PanelHeader");
+    const leading = document.createElement("div");
+    const row2 = document.createElement("div");
+    render(
+      <PanelHeaderSlotScope active elements={{ leading, row2 }}>
+        <PlanChrome plan={plan} allVersions={[plan]} threadId="t1" onRevise={() => {}} onImplement={() => {}} commentCount={0} />
+      </PanelHeaderSlotScope>,
+    );
+
+    expect(leading.querySelector('[aria-label="Revision history: v1 of 1"]')).not.toBeNull();
+    expect(leading).not.toHaveTextContent(/Revise|Implement/);
+    expect(row2).toHaveTextContent("Revise");
+    expect(row2).toHaveTextContent("Implement");
+  });
+});

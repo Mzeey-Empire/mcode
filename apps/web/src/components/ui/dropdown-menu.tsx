@@ -5,6 +5,7 @@ import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 import { ChevronRightIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { useGatedOpen } from "./overlay-gate"
 import {
   MENU_LIST_CLASS,
   MENU_ROW_CLASS,
@@ -21,8 +22,9 @@ const MENU_ITEM_ROW_CLASS = cn(MENU_ROW_CLASS, MENU_ROW_DISABLED_CLASS, "data-hi
 /**
  * Dropdown menu root that allows pointer interaction outside the popup by default.
  */
-function DropdownMenu({ modal = false, ...props }: MenuPrimitive.Root.Props) {
-  return <MenuPrimitive.Root data-slot="dropdown-menu" modal={modal} {...props} />
+function DropdownMenu({ modal = false, open, defaultOpen, onOpenChange, ...props }: MenuPrimitive.Root.Props) {
+  const gated = useGatedOpen({ open, defaultOpen, onOpenChange })
+  return <MenuPrimitive.Root data-slot="dropdown-menu" modal={modal} {...props} {...gated} />
 }
 
 /** The control that opens the menu and takes focus back when it closes. */

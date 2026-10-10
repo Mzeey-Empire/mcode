@@ -50,10 +50,10 @@ export class BrowserSurfaceControlIndicator {
     this.element.style.zIndex = presentation.zIndex === undefined
       ? ""
       : String(presentation.zIndex + 1);
-    const coveredLeft = presentation.coveredLeft ?? 0;
-    this.element.style.borderRadius = coveredLeft > 0 ? "" : "var(--radius-md) 0 0 0";
-    this.element.style.clipPath = coveredLeft > 0
-      ? `inset(0px 0px 0px ${coveredLeft}px round 0px 0px 0px 0px)`
+    const coveredRight = presentation.coveredRight ?? 0;
+    this.element.style.borderRadius = coveredRight > 0 ? "" : "0 var(--radius-md) 0 0";
+    this.element.style.clipPath = coveredRight > 0
+      ? `inset(0px ${coveredRight}px 0px 0px round 0px 0px 0px 0px)`
       : "";
     this.syncVisibility();
   }

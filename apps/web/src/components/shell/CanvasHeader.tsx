@@ -14,8 +14,8 @@ function ConnectionNotice() {
   return <div className="px-4 pt-2"><Notice tone="warning" busy title={title} /></div>;
 }
 
-/** Sidebar controls the canvas takes over while the sidebar is not docked. */
-function CollapsedSidebarControls() {
+/** Sidebar controls the canvas (or a maximized panel) takes over while the sidebar is not docked. */
+export function CollapsedSidebarControls() {
   const expandSidebar = useUiStore((s) => s.expandSidebar);
   return (
     <div className="flex shrink-0 items-center gap-1 self-stretch">
@@ -43,20 +43,5 @@ export function CanvasHeader({ children, className }: { readonly children?: Reac
       </header>
       <ConnectionNotice />
     </>
-  );
-}
-
-/**
- * Top strip of the right panel. It keeps panel content clear of the
- * Windows/Linux caption buttons, and takes over the sidebar controls when a
- * maximized panel has replaced the canvas and the sidebar is not docked.
- */
-export function PanelCaptionStrip({ maximized }: { readonly maximized: boolean }) {
-  const { sidebarDocked } = useShellChrome();
-  if (!maximized || sidebarDocked) return <div aria-hidden className="caption-strip window-drag" />;
-  return (
-    <header className="window-drag flex h-row-comfortable shrink-0 items-center pl-4 select-none">
-      <CollapsedSidebarControls />
-    </header>
   );
 }

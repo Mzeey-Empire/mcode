@@ -6,15 +6,7 @@ import type {
   ReactNode,
 } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Globe,
-  Maximize2,
-  Minimize2,
-  MousePointer2,
-  PanelRight,
-  Plus,
-  X,
-} from "lucide-react";
+import { Globe, MousePointer2, Plus, X } from "lucide-react";
 import type { BrowserTabInfo, BrowserTabSet } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -40,12 +32,6 @@ import {
 } from "@/features/preview";
 import { cn } from "@/lib/utils";
 
-/** Legacy task completion payload kept for tab API compatibility. */
-export interface ScopeProgress {
-  readonly done: number;
-  readonly total: number;
-}
-
 /** Past this many changed files the Review badge renders "{cap}+" instead of the exact count. */
 const CHANGES_COUNT_CAP = 99;
 
@@ -55,11 +41,36 @@ const RAIL_EXPAND_DELAY_MS = 140;
 /** Grace period that keeps the rail open while the pointer moves between rows. */
 const RAIL_COLLAPSE_DELAY_MS = 250;
 
-/** Width that the expanded rail floats over Browser content beyond its collapsed footprint. */
+/** Width the expanded rail floats leftward over the body beyond its collapsed footprint. */
 export const ACTIVITY_RAIL_FLOATING_OVERLAP_PX = 112;
 
 /** Shared trailing anchor for expanded-rail actions. */
 const RAIL_TRAILING_CONTROL_CLASS = "absolute right-0 top-0";
+
+/** Rail glyph size; the icon inherits the row's muted or ink color. */
+const RAIL_ICON_SIZE = 16;
+
+const RAIL_ENTRY_CLASS = "relative h-8 w-full overflow-hidden rounded-lg px-2 text-xs transition-colors";
+
+/** The selected entry: selected fill and ink glyph; `RailActiveEdge` adds the amber bar. */
+const RAIL_ACTIVE_CLASS = "bg-selected text-ink";
+
+const RAIL_IDLE_CLASS = "text-muted hover:bg-hover hover:text-ink";
+
+/**
+ * The active entry's 2x20 amber bar, 2px outside its body-facing edge. A
+ * sibling of the entry rather than a shadow, because the entry clips its
+ * label during expansion and outer shadows are not part of the elevation set.
+ */
+function RailActiveEdge() {
+  return (
+    <span
+      data-testid="rail-active-edge"
+      aria-hidden
+      className="pointer-events-none absolute top-1/2 -left-[2px] h-[20px] w-[2px] -translate-y-1/2 rounded-[1px] bg-primary"
+    />
+  );
+}
 
 function RailTooltip({
   content,
@@ -73,7 +84,7 @@ function RailTooltip({
   return (
     <Tooltip disabled={disabled}>
       <TooltipTrigger render={children} />
-      <TooltipContent side="right">{content}</TooltipContent>
+      <TooltipContent side="left">{content}</TooltipContent>
     </Tooltip>
   );
 }
@@ -202,13 +213,9 @@ function tabKeycap(type: PanelTabType): string | null {
 function railAccessibleLabel(
   id: RightPanelTab,
   label: string,
-  _scope: ScopeProgress,
   changesCount: number,
   changesFresh: boolean,
 ): string {
-  if (id === "tasks") {
-    return label;
-  }
   if (id === "changes") {
     if (changesCount === 0) return label;
     const files = `${changesCount} ${changesCount === 1 ? "file" : "files"} changed`;
@@ -263,13 +270,12 @@ function RailStatus({
   return null;
 }
 
-/** One rail entry: a select glyph with an active lamp, plus a hover-revealed × to close. */
+/** One rail entry: a select glyph, plus a hover-revealed × to close. */
 function RailTab({
   id,
   label: labelOverride,
   active,
   expanded,
-  scope,
   changesCount,
   changesFresh,
   onSelect,
@@ -279,7 +285,6 @@ function RailTab({
   label?: string;
   active: boolean;
   expanded: boolean;
-  scope: ScopeProgress;
   changesCount: number;
   changesFresh: boolean;
   onSelect: (id: RightPanelTab) => void;
@@ -290,6 +295,7 @@ function RailTab({
   const { Icon, label } = presentation;
   return (
     <div className="group relative w-full">
+      {active && <RailActiveEdge />}
       <RailTooltip content={label} disabled={expanded}>
         <Button
           type="button"
@@ -298,17 +304,15 @@ function RailTab({
           data-rail-tab={railDomId(id)}
           data-active={active ? "true" : undefined}
           aria-pressed={active}
-          aria-label={railAccessibleLabel(id, label, scope, changesCount, changesFresh)}
+          aria-label={railAccessibleLabel(id, label, changesCount, changesFresh)}
           onClick={() => onSelect(id)}
           className={cn(
-            "relative h-8 w-full overflow-hidden px-2 text-xs transition-colors",
+            RAIL_ENTRY_CLASS,
             expanded ? "flex-row justify-start gap-2" : "flex-col gap-0",
-            active
-              ? "bg-panel text-primary"
-              : "text-ink/70 hover:bg-panel/60 hover:text-ink",
+            active ? RAIL_ACTIVE_CLASS : RAIL_IDLE_CLASS,
           )}
         >
-          <Icon size={17} />
+          <Icon size={RAIL_ICON_SIZE} />
           <span
             aria-hidden
             className={cn(
@@ -327,14 +331,6 @@ function RailTab({
           />
         </Button>
       </RailTooltip>
-      {/* Active lamp: a short amber bar on the rail's inner edge. */}
-      {active && (
-        <span
-          data-testid="rail-active-indicator"
-          aria-hidden
-          className="pointer-events-none absolute -left-1.5 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-primary"
-        />
-      )}
       {/* Hover/focus-revealed close. A sibling button (not nested) so the markup
           stays valid and the × is its own focusable, announced control. */}
       <RailTooltip content={`Close ${label}`} disabled={expanded}>
@@ -410,6 +406,7 @@ function BrowserPageRailTab({
   const activePage = active && browserActive;
   return (
     <div className="group relative w-full">
+      {activePage && <RailActiveEdge />}
       <RailTooltip content={label} disabled={expanded}>
         <Button
           type="button"
@@ -417,16 +414,15 @@ function BrowserPageRailTab({
           size="compact"
           data-rail-browser-page={page.id}
           data-active={active ? "true" : undefined}
-          aria-pressed={active}
+          // Pressed drives the ghost variant's selected fill, so only the live
+          // page claims it; `data-active` still marks the remembered page.
+          aria-pressed={activePage}
           // The live page (active, and Browser owns the panel) is the current
           // page in the switcher; expose that beyond the visual lamp.
           aria-current={activePage ? "page" : undefined}
           aria-label={`Browser page: ${label}${agentControlled ? ", agent controls Browser" : ""}`}
           onClick={() => onSelect(page.id)}
-          className={cn(
-            "relative h-8 w-full justify-start overflow-hidden px-2 text-xs transition-colors",
-            browserPageRailClass(active, browserActive),
-          )}
+          className={cn(RAIL_ENTRY_CLASS, "justify-start", browserPageRailClass(active, browserActive))}
         >
           <BrowserPageRailGlyph agentControlled={agentControlled} faviconUrl={page.faviconUrl} />
           <span
@@ -440,15 +436,6 @@ function BrowserPageRailTab({
           </span>
         </Button>
       </RailTooltip>
-      {/* Active lamp mirrors the singleton tabs: a short amber bar on the inner
-          edge, shown only when this page is active and Browser owns the panel. */}
-      {activePage && (
-        <span
-          data-testid="rail-active-indicator"
-          aria-hidden
-          className="pointer-events-none absolute -left-1.5 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-primary"
-        />
-      )}
       <RailTooltip content={`Close ${label}`} disabled={expanded}>
         <Button
           type="button"
@@ -476,9 +463,10 @@ function BrowserPageRailTab({
 }
 
 function browserPageRailClass(active: boolean, browserActive: boolean): string {
-  if (active && browserActive) return "bg-panel text-primary";
-  if (active) return "bg-panel/60 text-ink";
-  return "text-ink/70 hover:bg-panel/60 hover:text-ink";
+  if (active && browserActive) return RAIL_ACTIVE_CLASS;
+  // Ink alone marks the page Browser will show; a fill would read as a second selection.
+  if (active) return "text-ink hover:bg-hover";
+  return RAIL_IDLE_CLASS;
 }
 
 function BrowserPageRailGlyph({
@@ -492,16 +480,16 @@ function BrowserPageRailGlyph({
     return (
       <MousePointer2
         data-testid="browser-agent-control-indicator"
-        size={17}
+        size={RAIL_ICON_SIZE}
         className="text-primary"
         aria-hidden
       />
     );
   }
   if (faviconUrl) {
-    return <img src={faviconUrl} alt="" width={17} height={17} className="rounded-[3px]" />;
+    return <img src={faviconUrl} alt="" width={RAIL_ICON_SIZE} height={RAIL_ICON_SIZE} className="rounded-[3px]" />;
   }
-  return <Globe size={17} />;
+  return <Globe size={RAIL_ICON_SIZE} />;
 }
 
 /**
@@ -530,7 +518,7 @@ function BrowserPageGroup({
       data-testid="rail-browser-pages"
       role="group"
       aria-label="Browser pages"
-      className="flex w-full flex-col items-stretch gap-0.5 rounded-lg bg-ink/[0.03] py-0.5"
+      className="flex w-full flex-col items-stretch gap-1 rounded-lg bg-ink/[0.03]"
     >
       {tabSet.tabs.map((page) => (
         <BrowserPageRailTab
@@ -584,7 +572,7 @@ function RailAddControl({
           <Button
             variant="ghost"
             size="compact"
-            className="relative h-8 w-full justify-start overflow-hidden px-2 text-muted hover:text-ink"
+            className="relative h-8 w-full justify-start overflow-hidden rounded-lg px-2 text-muted hover:text-ink"
             aria-label={`New ${only.label}`}
             disabled={terminalCapReached && only.id === "terminal"}
             onClick={() => onCreate(only.id as RightPanelTab)}
@@ -613,7 +601,7 @@ function RailAddControl({
             <Button
               variant="ghost"
               size="compact"
-              className="relative h-8 w-full justify-start overflow-hidden px-2 text-muted hover:text-ink"
+              className="relative h-8 w-full justify-start overflow-hidden rounded-lg px-2 text-muted hover:text-ink"
               aria-label="New tab"
             >
               <Plus />
@@ -630,7 +618,7 @@ function RailAddControl({
           }
         />
       </RailTooltip>
-      <DropdownMenuContent align="start" sideOffset={6} className="min-w-[184px]">
+      <DropdownMenuContent side="left" align="start" sideOffset={6} className="min-w-[184px]">
         {shown.map((type) => {
           const unavailableReason = newTabUnavailableReason(type, terminalCapReached ?? false);
           return (
@@ -654,15 +642,10 @@ interface ActivityRailProps {
   readonly tabInstances: readonly RightPanelTabInstance[];
   readonly activeTabId: string | null;
   readonly scope: PanelScope;
-  readonly scopeProgress: ScopeProgress;
   readonly changesCount: number;
   readonly changesFresh: boolean;
   /** The Browser tab's open pages, or null when none are known (web build / not yet loaded). */
   readonly browserTabSet: BrowserTabSet | null;
-  /** Whether the panel fills the content area beside the project tree. */
-  readonly maximized: boolean;
-  onTogglePanel: () => void;
-  onToggleMaximized: () => void;
   onSelect: (instanceId: string) => void;
   onClose: (instanceId: string) => void;
   onReorder: (instanceId: string, direction: -1 | 1) => void;
@@ -682,66 +665,16 @@ interface ActivityRailViewProps extends ActivityRailProps {
   readonly expanded: boolean;
   onPointerEnter: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerLeave: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerDownCapture: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerUpCapture: () => void;
   onFocusCapture: () => void;
   onBlurCapture: (event: ReactFocusEvent<HTMLDivElement>) => void;
-}
-
-function RailHeader({
-  expanded,
-  maximized,
-  onTogglePanel,
-  onToggleMaximized,
-}: Pick<ActivityRailViewProps, "expanded" | "maximized" | "onTogglePanel" | "onToggleMaximized">) {
-  return (
-    <div className="relative h-8 w-full shrink-0">
-      <RailTooltip content="Close panel" disabled={expanded}>
-        <Button
-          variant="ghost"
-          size="compact"
-          onClick={onTogglePanel}
-          className="relative h-8 w-full justify-start overflow-hidden px-2 text-muted/70 transition-colors hover:bg-transparent hover:text-ink"
-          aria-label="Close panel"
-          data-testid="rail-panel-toggle"
-          data-preview-design-keep-open="true"
-        >
-          <PanelRight />
-          <span
-            aria-hidden
-            className={cn(
-              "absolute left-8 right-8 text-fade text-left text-xs font-medium transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
-              expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
-            )}
-          >
-            Close panel
-          </span>
-        </Button>
-      </RailTooltip>
-      <RailTooltip content={maximized ? "Restore panel" : "Maximize panel"}>
-        <Button
-          variant="ghost"
-          size="icon-compact"
-          onClick={onToggleMaximized}
-          className={cn(
-            RAIL_TRAILING_CONTROL_CLASS,
-            "text-muted/70 transition-[color,opacity] motion-reduce:duration-0 motion-reduce:transition-none hover:bg-panel hover:text-ink",
-            expanded ? "opacity-100" : "pointer-events-none opacity-0",
-          )}
-          aria-label={maximized ? "Restore panel" : "Maximize panel"}
-          data-testid="rail-maximize-toggle"
-          data-preview-design-keep-open="true"
-        >
-          {maximized ? <Minimize2 /> : <Maximize2 />}
-        </Button>
-      </RailTooltip>
-    </div>
-  );
 }
 
 function RailTabInstances({
   workspaceId,
   tabInstances,
   activeTabId,
-  scopeProgress,
   changesCount,
   changesFresh,
   browserTabSet,
@@ -757,7 +690,6 @@ function RailTabInstances({
   | "workspaceId"
   | "tabInstances"
   | "activeTabId"
-  | "scopeProgress"
   | "changesCount"
   | "changesFresh"
   | "browserTabSet"
@@ -800,7 +732,6 @@ function RailTabInstances({
           }
           active={instanceId === activeTabId}
           expanded={expanded}
-          scope={scopeProgress}
           changesCount={changesCount}
           changesFresh={changesFresh}
           onSelect={() => onSelect(instanceId)}
@@ -846,13 +777,9 @@ function ActivityRailView({
   tabInstances,
   activeTabId,
   scope,
-  scopeProgress,
   changesCount,
   changesFresh,
   browserTabSet,
-  maximized,
-  onTogglePanel,
-  onToggleMaximized,
   onSelect,
   onClose,
   onReorder,
@@ -865,6 +792,8 @@ function ActivityRailView({
   expanded,
   onPointerEnter,
   onPointerLeave,
+  onPointerDownCapture,
+  onPointerUpCapture,
   onFocusCapture,
   onBlurCapture,
 }: ActivityRailViewProps) {
@@ -873,34 +802,30 @@ function ActivityRailView({
       ref={railRef}
       data-testid="activity-rail"
       data-expanded={expanded ? "true" : "false"}
-      className={cn(
-        "relative z-(--layer-floating-panel) flex-none bg-background transition-[width,margin-right] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
-        expanded ? "w-40 -mr-28" : "w-12",
-      )}
+      className="relative z-(--layer-floating-panel) w-(--container-right-rail) flex-none"
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
+      onPointerDownCapture={onPointerDownCapture}
+      onPointerUpCapture={onPointerUpCapture}
+      onPointerCancelCapture={onPointerUpCapture}
       onFocusCapture={onFocusCapture}
       onBlurCapture={onBlurCapture}
     >
+      {/* The top 48 sits under the caption buttons and drags the window. It never
+          widens, so the expanded rail cannot cover row 1's panel controls. */}
+      <div aria-hidden data-testid="activity-rail-caption-strip" className="window-drag absolute top-0 right-0 h-row-comfortable w-(--container-right-rail) border-l border-border bg-background" />
+      {/* Anchored to the window edge, so hover expansion grows leftward over the body. */}
       <div
+        data-testid="activity-rail-surface"
         className={cn(
-          "absolute inset-y-0 left-0 flex w-full flex-col items-stretch gap-0.5 overflow-hidden bg-background px-1.5 py-2",
-          expanded && "border-r border-border/50",
+          "absolute top-row-comfortable right-0 bottom-0 flex flex-col items-stretch gap-1 overflow-hidden border-l border-border bg-background p-2 transition-[width] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+          expanded ? "w-(--container-right-rail-expanded)" : "w-(--container-right-rail)",
         )}
       >
-      {/* Panel-level actions stay at the rail head so they remain the first tab
-          stops and never scroll off-screen on short viewports. */}
-      <RailHeader
-        expanded={expanded}
-        maximized={maximized}
-        onTogglePanel={onTogglePanel}
-        onToggleMaximized={onToggleMaximized}
-      />
       <RailTabInstances
         workspaceId={workspaceId}
         tabInstances={tabInstances}
         activeTabId={activeTabId}
-        scopeProgress={scopeProgress}
         changesCount={changesCount}
         changesFresh={changesFresh}
         browserTabSet={browserTabSet}
@@ -925,23 +850,18 @@ function ActivityRailView({
 }
 
 /**
- * Vertical activity rail for the right panel: close and maximize controls at the head, then
- * open singleton tabs (active lamp, hover-× close, add control when tabs exist).
- * With no tabs open the rail keeps only the panel actions beside the empty-state
- * list. The close action mirrors the chat-header toggle and right-panel shortcut.
+ * Vertical activity rail on the panel's right edge: open tabs (hover-× close)
+ * and an add control once a tab exists. Panel-level controls live in the
+ * panel header, not here.
  */
 export function ActivityRail({
   workspaceId,
   tabInstances,
   activeTabId,
   scope,
-  scopeProgress,
   changesCount,
   changesFresh,
   browserTabSet,
-  maximized,
-  onTogglePanel,
-  onToggleMaximized,
   onSelect,
   onClose,
   onReorder,
@@ -958,6 +878,9 @@ export function ActivityRail({
   const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pointerWithinRef = useRef(false);
   const focusWithinRef = useRef(false);
+  // The rail grows leftward from the window edge, so expanding mid-press slides
+  // the entry out from under the pointer and the click lands elsewhere.
+  const pointerPressedRef = useRef(false);
 
   const clearExpandTimer = useCallback(() => {
     if (expandTimerRef.current === null) return;
@@ -976,7 +899,7 @@ export function ActivityRail({
     if (expanded || expandTimerRef.current !== null) return;
     expandTimerRef.current = setTimeout(() => {
       expandTimerRef.current = null;
-      if (pointerWithinRef.current) setExpanded(true);
+      if (pointerWithinRef.current && !pointerPressedRef.current) setExpanded(true);
     }, RAIL_EXPAND_DELAY_MS);
   }, [clearCollapseTimer, expanded]);
 
@@ -1012,14 +935,25 @@ export function ActivityRail({
   const onPointerLeave = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.pointerType === "touch") return;
     pointerWithinRef.current = false;
+    pointerPressedRef.current = false;
     scheduleCollapse();
+  };
+
+  const onPointerDownCapture = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "touch") return;
+    pointerPressedRef.current = true;
+  };
+
+  const onPointerUpCapture = () => {
+    pointerPressedRef.current = false;
+    if (pointerWithinRef.current) scheduleExpand();
   };
 
   const onFocusCapture = () => {
     focusWithinRef.current = true;
     clearExpandTimer();
     clearCollapseTimer();
-    setExpanded(true);
+    if (!pointerPressedRef.current) setExpanded(true);
   };
 
   const onBlurCapture = (event: ReactFocusEvent<HTMLDivElement>) => {
@@ -1034,13 +968,9 @@ export function ActivityRail({
       tabInstances={tabInstances}
       activeTabId={activeTabId}
       scope={scope}
-      scopeProgress={scopeProgress}
       changesCount={changesCount}
       changesFresh={changesFresh}
       browserTabSet={browserTabSet}
-      maximized={maximized}
-      onTogglePanel={onTogglePanel}
-      onToggleMaximized={onToggleMaximized}
       onSelect={onSelect}
       onClose={onClose}
       onReorder={onReorder}
@@ -1053,6 +983,8 @@ export function ActivityRail({
       expanded={expanded}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
+      onPointerDownCapture={onPointerDownCapture}
+      onPointerUpCapture={onPointerUpCapture}
       onFocusCapture={onFocusCapture}
       onBlurCapture={onBlurCapture}
     />

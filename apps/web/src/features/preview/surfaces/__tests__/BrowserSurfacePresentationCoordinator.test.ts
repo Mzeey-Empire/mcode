@@ -82,7 +82,7 @@ describe("BrowserSurfacePresentationCoordinator", () => {
 
     expect(host.present).toHaveBeenLastCalledWith(identity, expect.objectContaining({
       scale: 0.5,
-      coveredLeft: 224,
+      coveredRight: 224,
     }));
   });
 

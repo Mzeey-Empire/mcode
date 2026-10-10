@@ -55,21 +55,26 @@ vi.mock("@/transport", () => ({
   },
 }));
 
-vi.mock("../../surfaces/PreviewPanel", () => ({
-  WEB_RUNTIME_PREVIEW_TAB_ID: "web-preview",
-  PreviewPanel: ({ threadId, automationOnly, coveredLeft }: {
-    readonly threadId: string;
-    readonly automationOnly?: boolean;
-    readonly coveredLeft?: number;
-  }) => (
-    <div
-      data-testid="automation-preview-panel"
-      data-thread-id={threadId}
-      data-automation-only={String(automationOnly ?? false)}
-      data-covered-left={coveredLeft ?? 0}
-    />
-  ),
-}));
+vi.mock("../../surfaces/PreviewPanel", async () => {
+  const { useContext } = await import("react");
+  const { OverlayGateContext } = await import("@/components/ui/overlay-gate");
+  return {
+    WEB_RUNTIME_PREVIEW_TAB_ID: "web-preview",
+    PreviewPanel: ({ threadId, automationOnly, coveredRight }: {
+      readonly threadId: string;
+      readonly automationOnly?: boolean;
+      readonly coveredRight?: number;
+    }) => (
+      <div
+        data-testid="automation-preview-panel"
+        data-thread-id={threadId}
+        data-automation-only={String(automationOnly ?? false)}
+        data-overlays-open={String(useContext(OverlayGateContext))}
+        data-covered-left={coveredRight ?? 0}
+      />
+    ),
+  };
+});
 
 vi.mock("../browserAutomationWebExecutor", () => webExecutor);
 vi.mock("../webBrowserInteractionExecutor", async (importOriginal) => {
@@ -2336,6 +2341,7 @@ describe("BrowserAutomationHost", () => {
         oldestVisiblePanel = document.querySelector(
           '[data-automation-persistent-scope="sequential-0"] [data-testid="automation-preview-panel"]',
         );
+        expect(oldestVisiblePanel).toHaveAttribute("data-overlays-open", "false");
         oldestDock = document.createElement("div");
         vi.spyOn(oldestDock, "getBoundingClientRect").mockReturnValue({
           left: 5, top: 10, width: 700, height: 500, right: 705, bottom: 510, x: 5, y: 10, toJSON: () => undefined,
@@ -2350,6 +2356,7 @@ describe("BrowserAutomationHost", () => {
           "data-automation-only",
           "false",
         ));
+        expect(oldestVisiblePanel).toHaveAttribute("data-overlays-open", "true");
       }
       const threadId = `sequential-${index}`;
       const base = dispatch(1, 30 + index, { threadId }).request;

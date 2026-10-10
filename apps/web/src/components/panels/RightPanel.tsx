@@ -16,11 +16,8 @@ import {
 } from "@/stores/diffStore";
 import { PlanPanel } from "./plan";
 import { PanelEmptyState } from "./PanelEmptyState";
-import {
-  ACTIVITY_RAIL_FLOATING_OVERLAP_PX,
-  ActivityRail,
-  type ScopeProgress,
-} from "./ActivityRail";
+import { ACTIVITY_RAIL_FLOATING_OVERLAP_PX, ActivityRail } from "./ActivityRail";
+import { PanelHeader, PanelHeaderSlotScope, type PanelHeaderElements } from "./shell/PanelHeader";
 import type { PanelScope } from "@/lib/panel-tabs";
 import { DiffPanel } from "@/components/diff";
 import {
@@ -46,8 +43,9 @@ import { createTerminalForScope } from "@/lib/ensure-terminal";
 import { toggleRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { getTransport } from "@/transport";
 import { cn } from "@/lib/utils";
+import { OverlayGateContext } from "@/components/ui/overlay-gate";
 import { ResizableRightPanel } from "./ResizableRightPanel";
-import { PanelCaptionStrip } from "@/components/shell/CanvasHeader";
+import { useToastStore } from "@/stores/toastStore";
 
 /** One thread/workspace Browser panel retained by the warm LRU pool. */
 export interface WarmPreviewScope {
@@ -469,13 +467,13 @@ function addProjectedPreviewTab(
 interface WarmPreviewSurfaceProps {
   readonly scope: WarmPreviewScope;
   readonly visible: boolean;
-  readonly coveredLeft: number;
+  readonly coveredRight: number;
 }
 
 const WarmPreviewSurface = memo(function WarmPreviewSurface({
   scope,
   visible,
-  coveredLeft,
+  coveredRight,
 }: WarmPreviewSurfaceProps) {
   const automationHosted = useBrowserAutomationStore((state) =>
     state.hostedScopeIds.has(warmPreviewScopeKey(scope)),
@@ -520,7 +518,7 @@ const WarmPreviewSurface = memo(function WarmPreviewSurface({
           threadId={scope.scopeId}
           workspaceId={scope.workspaceId}
           presentationActive={visible}
-          coveredLeft={coveredLeft}
+          coveredRight={coveredRight}
         />
       )}
     </div>
@@ -592,8 +590,8 @@ function RightPanelFrame({
       data-visible={panelVisible}
       inert={!panelVisible ? true : undefined}
     >
-      <PanelCaptionStrip maximized={maximized} />
-      {children}
+      {/* A hidden panel stays mounted, but its body-portaled popups must close with it. */}
+      <OverlayGateContext.Provider value={panelVisible}>{children}</OverlayGateContext.Provider>
     </ResizableRightPanel>
   );
 }
@@ -622,6 +620,7 @@ function RightPanelContent({
   activeWorkspaceId,
   activityRailExpanded,
   changesActive,
+  headerElements,
   panelScope,
   panelScopeId,
   previewActive,
@@ -638,6 +637,7 @@ function RightPanelContent({
   readonly activeWorkspaceId: string;
   readonly activityRailExpanded: boolean;
   readonly changesActive: boolean;
+  readonly headerElements: PanelHeaderElements;
   readonly panelScope: PanelScope;
   readonly panelScopeId: string | null;
   readonly previewActive: boolean;
@@ -648,42 +648,49 @@ function RightPanelContent({
   readonly warmPreviewScopes: readonly WarmPreviewScope[];
   readonly onCreateTab: (id: Parameters<ReturnType<typeof useDiffStore.getState>["setRightPanelTab"]>[2]) => void;
 }) {
+  // Tools that mount only while active can always own the header; Review and
+  // warm Browser surfaces stay mounted, so they narrow it to their own activity.
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <PanelEmptyContent
-        panelScope={panelScope}
-        renderedOpenTabs={renderedOpenTabs}
-        onCreateTab={onCreateTab}
-      />
-      <PlanPanelContent activeTab={renderedActiveTab} openTabs={renderedOpenTabs} threadId={activeThreadId} />
-      <SubagentsPanelContent activeTab={renderedActiveTab} openTabs={renderedTabInstances} threadId={activeThreadId} />
-      <CoordinationPanelContent
-        activeTab={renderedActiveTab}
-        openTabs={renderedOpenTabs}
-        threadId={activeThreadId}
-        workspaceId={activeWorkspaceId}
-      />
-      <EnvironmentPanelContent
-        activeTab={renderedActiveTab}
-        openTabs={renderedOpenTabs}
-        threadId={activeThreadId}
-        workspaceId={activeWorkspaceId}
-      />
-      <ActionTerminalContent
-        active={actionTerminalActive}
-        actionId={activeActionId}
-        threadId={activeThreadId}
-      />
-      <ChangesPanelContent active={changesActive} />
-      <WarmPreviewSurfaces
-        activeWorkspaceId={activeWorkspaceId}
-        activityRailExpanded={activityRailExpanded}
-        panelScopeId={panelScopeId}
-        previewActive={previewActive}
-        scopes={warmPreviewScopes}
-      />
-      <TerminalPanelContent active={terminalActive} />
-    </div>
+    <PanelHeaderSlotScope active elements={headerElements}>
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <PanelEmptyContent
+          panelScope={panelScope}
+          renderedOpenTabs={renderedOpenTabs}
+          onCreateTab={onCreateTab}
+        />
+        <PlanPanelContent activeTab={renderedActiveTab} openTabs={renderedOpenTabs} threadId={activeThreadId} />
+        <SubagentsPanelContent activeTab={renderedActiveTab} openTabs={renderedTabInstances} threadId={activeThreadId} />
+        <CoordinationPanelContent
+          activeTab={renderedActiveTab}
+          openTabs={renderedOpenTabs}
+          threadId={activeThreadId}
+          workspaceId={activeWorkspaceId}
+        />
+        <EnvironmentPanelContent
+          activeTab={renderedActiveTab}
+          openTabs={renderedOpenTabs}
+          threadId={activeThreadId}
+          workspaceId={activeWorkspaceId}
+        />
+        <ActionTerminalContent
+          active={actionTerminalActive}
+          actionId={activeActionId}
+          threadId={activeThreadId}
+        />
+        <PanelHeaderSlotScope active={changesActive} elements={headerElements}>
+          <ChangesPanelContent active={changesActive} />
+        </PanelHeaderSlotScope>
+        <WarmPreviewSurfaces
+          activeWorkspaceId={activeWorkspaceId}
+          activityRailExpanded={activityRailExpanded}
+          headerElements={headerElements}
+          panelScopeId={panelScopeId}
+          previewActive={previewActive}
+          scopes={warmPreviewScopes}
+        />
+        <TerminalPanelContent active={terminalActive} />
+      </div>
+    </PanelHeaderSlotScope>
   );
 }
 
@@ -789,12 +796,14 @@ function ChangesPanelContent({ active }: { readonly active: boolean }) {
 function WarmPreviewSurfaces({
   activeWorkspaceId,
   activityRailExpanded,
+  headerElements,
   panelScopeId,
   previewActive,
   scopes,
 }: {
   readonly activeWorkspaceId: string;
   readonly activityRailExpanded: boolean;
+  readonly headerElements: PanelHeaderElements;
   readonly panelScopeId: string | null;
   readonly previewActive: boolean;
   readonly scopes: readonly WarmPreviewScope[];
@@ -802,12 +811,13 @@ function WarmPreviewSurfaces({
   return scopes.map((scope) => {
     const visible = previewActive && scope.scopeId === panelScopeId && scope.workspaceId === activeWorkspaceId;
     return (
-      <WarmPreviewSurface
-        key={warmPreviewScopeKey(scope)}
-        scope={scope}
-        visible={visible}
-        coveredLeft={visible && activityRailExpanded ? ACTIVITY_RAIL_FLOATING_OVERLAP_PX : 0}
-      />
+      <PanelHeaderSlotScope key={warmPreviewScopeKey(scope)} active={visible} elements={headerElements}>
+        <WarmPreviewSurface
+          scope={scope}
+          visible={visible}
+          coveredRight={visible && activityRailExpanded ? ACTIVITY_RAIL_FLOATING_OVERLAP_PX : 0}
+        />
+      </PanelHeaderSlotScope>
     );
   });
 }
@@ -834,20 +844,16 @@ function RightPanelActivityRail({
   changesFresh,
   closeRightPanelTab,
   closeRightPanelTabInstance,
-  maximized,
   onCreateTab,
-  onTogglePanel,
   panelScope,
   panelScopeId,
   railTerminalLabels,
   renderedActiveTabId,
   renderedTabInstances,
   reorderRightPanelTab,
-  scope,
   scopeTerminals,
   setActivityRailExpanded,
   setRightPanelTabInstance,
-  toggleMaximized,
 }: {
   readonly activeThreadId: string | null;
   readonly activeWorkspaceId: string;
@@ -856,20 +862,16 @@ function RightPanelActivityRail({
   readonly changesFresh: boolean;
   readonly closeRightPanelTab: ReturnType<typeof useDiffStore.getState>["closeRightPanelTab"];
   readonly closeRightPanelTabInstance: ReturnType<typeof useDiffStore.getState>["closeRightPanelTabInstance"];
-  readonly maximized: boolean;
   readonly onCreateTab: (id: Parameters<ReturnType<typeof useDiffStore.getState>["setRightPanelTab"]>[2]) => void;
-  readonly onTogglePanel: () => void;
   readonly panelScope: PanelScope;
   readonly panelScopeId: string | null;
   readonly railTerminalLabels: Record<string, string>;
   readonly renderedActiveTabId: string | null;
   readonly renderedTabInstances: ReturnType<typeof projectRightPanelForScope>["tabInstances"];
   readonly reorderRightPanelTab: ReturnType<typeof useDiffStore.getState>["reorderRightPanelTab"];
-  readonly scope: ScopeProgress;
   readonly scopeTerminals: readonly TerminalInstance[];
   readonly setActivityRailExpanded: (expanded: boolean) => void;
   readonly setRightPanelTabInstance: ReturnType<typeof useDiffStore.getState>["setRightPanelTabInstance"];
-  readonly toggleMaximized: () => void;
 }) {
   return (
     <ActivityRail
@@ -877,13 +879,9 @@ function RightPanelActivityRail({
       tabInstances={renderedTabInstances}
       activeTabId={renderedActiveTabId}
       scope={panelScope}
-      scopeProgress={scope}
       changesCount={changesCount}
       changesFresh={changesFresh}
       browserTabSet={browserTabSet}
-      maximized={maximized}
-      onTogglePanel={onTogglePanel}
-      onToggleMaximized={toggleMaximized}
       onSelect={(instanceId) => {
         setRightPanelTabInstance(activeWorkspaceId, activeThreadId, instanceId);
         setActiveTerminalForTab(renderedTabInstances, instanceId, panelScopeId);
@@ -950,10 +948,21 @@ function closePanelTab({
     return;
   }
   const ptyId = instanceId.slice("terminal:".length);
-  void getTransport().terminalKill(ptyId).then(() => {
-    useTerminalStore.getState().removeTerminal(ptyId);
-    closeRightPanelTabInstance(activeWorkspaceId, activeThreadId, instanceId);
-  });
+  // The tab stays open on failure: the shell may still be running, and the
+  // user needs to know closing it did not stop it.
+  getTransport().terminalKill(ptyId).then(
+    () => {
+      useTerminalStore.getState().removeTerminal(ptyId);
+      closeRightPanelTabInstance(activeWorkspaceId, activeThreadId, instanceId);
+    },
+    (error: unknown) => {
+      useToastStore.getState().show({
+        kind: "failed",
+        title: "Couldn't close terminal",
+        meta: error instanceof Error ? error.message : String(error),
+      });
+    },
+  );
 }
 
 function activateBrowserPage(workspaceId: string, panelScopeId: string | null, pageId: string): void {
@@ -1089,6 +1098,12 @@ export function RightPanel() {
     [],
   );
   const [activityRailExpanded, setActivityRailExpanded] = useState(false);
+  const [headerLeading, setHeaderLeading] = useState<HTMLDivElement | null>(null);
+  const [headerRow2, setHeaderRow2] = useState<HTMLDivElement | null>(null);
+  const headerElements = useMemo<PanelHeaderElements>(
+    () => ({ leading: headerLeading, row2: headerRow2 }),
+    [headerLeading, headerRow2],
+  );
 
   useEffect(() => () => {
     browserSurfacePresentationCoordinator.setActivityRailOverlap(0);
@@ -1213,11 +1228,8 @@ export function RightPanel() {
     }
   }, [panelVisible]);
 
-  // Tab-strip glance status. Changes counts
-  // distinct files across every turn snapshot (the cumulative working-tree diff
-  // the user reviews and ships).
-  const scope = useMemo<ScopeProgress>(() => ({ done: 0, total: 0 }), []);
-
+  // Review's rail badge counts distinct files across every turn snapshot (the
+  // cumulative working-tree diff the user reviews and ships).
   const snapshots = useDiffStore((s) =>
     activeThreadId ? s.snapshotsByThread[activeThreadId] : undefined,
   );
@@ -1331,6 +1343,33 @@ export function RightPanel() {
       panelWidth={panelWidth}
     >
       <div className="flex min-h-0 flex-1 flex-row overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <PanelHeader
+            maximized={maximized}
+            leadingRef={setHeaderLeading}
+            row2Ref={setHeaderRow2}
+            onToggleMaximized={toggleMaximized}
+            onTogglePanel={handleTogglePanel}
+          />
+          <RightPanelContent
+            actionTerminalActive={actionTerminalActive}
+            activeActionId={activeActionId}
+            activeThreadId={activeThreadId}
+            activeWorkspaceId={activeWorkspaceId}
+            activityRailExpanded={activityRailExpanded}
+            changesActive={changesActive}
+            headerElements={headerElements}
+            panelScope={panelScope}
+            panelScopeId={panelScopeId}
+            previewActive={previewActive}
+            renderedActiveTab={renderedActiveTab}
+            renderedOpenTabs={renderedOpenTabs}
+            renderedTabInstances={renderedTabInstances}
+            terminalActive={terminalActive}
+            warmPreviewScopes={warmPreviewScopes}
+            onCreateTab={handleCreateTab}
+          />
+        </div>
         <RightPanelActivityRail
           activeThreadId={activeThreadId}
           activeWorkspaceId={activeWorkspaceId}
@@ -1339,37 +1378,16 @@ export function RightPanel() {
           changesFresh={changesFresh}
           closeRightPanelTab={closeRightPanelTab}
           closeRightPanelTabInstance={closeRightPanelTabInstance}
-          maximized={maximized}
           onCreateTab={handleCreateTab}
-          onTogglePanel={handleTogglePanel}
           panelScope={panelScope}
           panelScopeId={panelScopeId}
           railTerminalLabels={railTerminalLabels}
           renderedActiveTabId={renderedActiveTabId}
           renderedTabInstances={renderedTabInstances}
           reorderRightPanelTab={reorderRightPanelTab}
-          scope={scope}
           scopeTerminals={scopeTerminals}
           setActivityRailExpanded={setActivityRailExpanded}
           setRightPanelTabInstance={setRightPanelTabInstance}
-          toggleMaximized={toggleMaximized}
-        />
-        <RightPanelContent
-          actionTerminalActive={actionTerminalActive}
-          activeActionId={activeActionId}
-          activeThreadId={activeThreadId}
-          activeWorkspaceId={activeWorkspaceId}
-          activityRailExpanded={activityRailExpanded}
-          changesActive={changesActive}
-          panelScope={panelScope}
-          panelScopeId={panelScopeId}
-          previewActive={previewActive}
-          renderedActiveTab={renderedActiveTab}
-          renderedOpenTabs={renderedOpenTabs}
-          renderedTabInstances={renderedTabInstances}
-          terminalActive={terminalActive}
-          warmPreviewScopes={warmPreviewScopes}
-          onCreateTab={handleCreateTab}
         />
       </div>
     </RightPanelFrame>

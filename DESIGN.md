@@ -770,12 +770,14 @@ The desktop hierarchy has three sibling panes:
 1. **Sidebar:** projects, threads, status, and primary navigation.
 2. **Conversation:** thread header, narrative, and composer, with the thread
    overview card floating at its top right.
-3. **Right panel:** the workspace-global host for Browser, Terminal, Review,
-   Plan, Files, Subagents, and Project settings, with a vertical tab rail at
-   the window's right edge. Its visibility, width, active tab, and top-level
-   tab set persist even when no thread is open. Each tab declares whether its
-   content uses workspace or thread scope. Browser and Terminal can use the
-   workspace root; Plan requires a thread.
+3. **Right panel:** the host for Browser, Terminal, Review, Plan, Files,
+   Subagents, and Project settings, with a vertical tab rail at the window's
+   right edge. Its visibility, width, active tab, and tab set belong to the
+   open thread; with no thread open, the workspace keeps its own copy. Each
+   tab declares whether its content uses workspace or thread scope. Browser
+   and Terminal can use the workspace root; Plan requires a thread. The Paper
+   boards 10a (Review), 11a (Browser), 12a (Terminal), and 07e (Plan) are the
+   visual reference.
 
 These panes share the app frame. Never wrap them in an outer dashboard card.
 The conversation is the visual anchor. The sidebar provides orientation; the
@@ -806,7 +808,8 @@ lights sit in the sidebar header.
 
 - Sidebar width ranges from `22rem` to `34rem` and defaults to `30.4rem`.
   The right panel ranges from `48rem` to `84rem` and defaults to `60rem`; its
-  tab rail is `4.8rem` wide, `16rem` when expanded. The thread overview card
+  tab rail is `4.8rem` wide and expands leftward over the panel body to `16rem`
+  on hover. The thread overview card
   is `28rem` wide. A compact floating inspector defaults to `31rem` and never
   shrinks below `28rem`.
 - The composer is `76rem` wide wherever it appears and never resizes between
@@ -814,7 +817,9 @@ lights sit in the sidebar header.
   `52rem` of usable width. Its prose measure caps at `76rem`; code, diffs,
   tables, and terminal output may exceed that measure inside their own
   scrolling region.
-- Sidebar and right panel widths persist per workspace.
+- Sidebar width persists per workspace. Right panel state persists per thread.
+- Closing the panel's last tab closes the panel and leaves maximize. Reopening
+  it shows the empty state.
 - Resize seams are visible on hover and focus, remain at least 1px at rest, and
   implement the keyboard and accessibility contract below.
 - Toolbars remain attached to the content they control. Do not add a detached
@@ -833,9 +838,11 @@ it (the Review panel's Commit button).
   identity on the left (a view picker, a title pill, or horizontal tabs), a
   drag spacer, and the round expand and panel-toggle buttons on the right,
   clear of the caption buttons.
-- **Row 2** (`4rem`) is always present. The tab's operand sits on the left
-  (a URL, a branch pair, a working folder, a version picker) and its view
-  controls sit on the right as 32px round buttons.
+- **Row 2** (`4rem`) appears only when the tab has controls. The tab's operand
+  sits on the left (a URL, a branch pair, a working folder, a version picker)
+  and its view controls sit on the right as 32px round buttons.
+- The conversation header's panel toggle shows only while the panel is closed.
+  Once open, row 1's toggle takes its place.
 
 ### Responsive posture
 
