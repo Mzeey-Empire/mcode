@@ -79,6 +79,8 @@ describe("Preview feature public interface", () => {
     const expectedChannels = [
       "preview:profiles.remove",
       "preview:profiles.reconcile",
+      "preview:history.list",
+      "preview:history.remove",
       "preview:sync",
       "preview:resolve-navigation",
       "preview:navigate",
@@ -108,6 +110,7 @@ describe("Preview feature public interface", () => {
       "preview.surface.prepare",
       "preview.surface.adopt",
       "preview.surface.release",
+      "preview.surface.hidden",
       "preview.surface.navigate",
       "preview:design.set-inspect",
       "preview:design.set-annotation-guard",
