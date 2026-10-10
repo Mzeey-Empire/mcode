@@ -80,20 +80,23 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
   };
 }
 
-describe("useThreadGitActions branchless PR gates", () => {
-  beforeEach(() => {
-    mockUseBranchPr.mockClear();
-    mockUseHasCommitsAhead.mockClear();
-    mockWorkspaceSelector.mockImplementation((selector: (state: unknown) => unknown) =>
-      selector({
-        workspaces: [{ id: "ws-1", path: "/repo" }],
-        prUrlsByThreadId: {},
-        checksById: {},
-        openPrs: [],
-      }),
-    );
-  });
+function seedWorkspace(prUrlsByThreadId: Record<string, string> = {}) {
+  mockWorkspaceSelector.mockImplementation((selector: (state: unknown) => unknown) =>
+    selector({
+      workspaces: [{ id: "ws-1", path: "/repo" }],
+      prUrlsByThreadId,
+      checksById: {},
+    }),
+  );
+}
 
+beforeEach(() => {
+  mockUseBranchPr.mockReset().mockReturnValue(null);
+  mockUseHasCommitsAhead.mockClear();
+  seedWorkspace();
+});
+
+describe("useThreadGitActions branchless PR gates", () => {
   it("does not poll PR or commits-ahead state while the worktree is branchless", () => {
     renderHook(() =>
       useThreadGitActions(
@@ -126,5 +129,29 @@ describe("useThreadGitActions branchless PR gates", () => {
       "feat/issue-801",
       "thread-1",
     );
+  });
+});
+
+describe("useThreadGitActions PR title", () => {
+  it("titles the PR row from the polled branch PR", () => {
+    mockUseBranchPr.mockReturnValue({
+      number: 12,
+      title: "Resize the sidebar",
+      url: "https://github.com/acme/app/pull/12",
+      state: "OPEN",
+    });
+    const { result } = renderHook(() => useThreadGitActions(makeThread({ branch: "feat/sidebar" })));
+
+    expect(result.current.openPrDetail).toEqual({ title: "Resize the sidebar" });
+  });
+
+  it("has no title for a PR this client created before the next poll", () => {
+    seedWorkspace({ "thread-1": "https://github.com/acme/app/pull/13" });
+    const { result } = renderHook(() =>
+      useThreadGitActions(makeThread({ branch: "feat/sidebar", pr_number: 13, pr_status: "OPEN" })),
+    );
+
+    expect(result.current.pr).toEqual({ number: 13, url: "https://github.com/acme/app/pull/13", state: "OPEN" });
+    expect(result.current.openPrDetail).toBeNull();
   });
 });
