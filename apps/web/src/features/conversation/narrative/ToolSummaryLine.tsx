@@ -116,14 +116,20 @@ export function ToolCallDetailRow({ toolCall }: { toolCall: ToolCall }) {
   );
 }
 
-function groupSummaryLabel(calls: readonly ToolCall[]): string {
+/** The summary fades in a narrow column, but the failure counts always stay readable. */
+function GroupSummaryLabel({ calls }: { calls: readonly ToolCall[] }) {
   const failed = calls.filter((call) => toolCallOutcome(call) === "failed").length;
   const cancelled = calls.filter((call) => toolCallOutcome(call) === "cancelled").length;
-  return [
-    buildToolSummaryText(calls),
+  const outcomes = [
     failed > 0 ? `${failed} failed` : null,
     cancelled > 0 ? `${cancelled} cancelled` : null,
-  ].filter(Boolean).join(" · ");
+  ].filter(Boolean);
+  return (
+    <>
+      <span className="text-fade">{buildToolSummaryText(calls)}</span>
+      {outcomes.length > 0 ? <span className="shrink-0 whitespace-pre">{` · ${outcomes.join(" · ")}`}</span> : null}
+    </>
+  );
 }
 
 function ToolGroupRow({ calls, open, onToggle, listsChildren }: {
@@ -137,7 +143,7 @@ function ToolGroupRow({ calls, open, onToggle, listsChildren }: {
   const LeadingIcon = firstCall ? (TOOL_ICONS[resolveToolName(firstCall.toolName)] ?? DEFAULT_ICON) : DEFAULT_ICON;
   return (
     <>
-      <NarrativeToolRow icon={LeadingIcon} label={groupSummaryLabel(calls)} disclosure={{ open, onToggle }} />
+      <NarrativeToolRow icon={LeadingIcon} label={<GroupSummaryLabel calls={calls} />} disclosure={{ open, onToggle }} />
       {open && listsChildren ? (
         <AnimatedCollapsible open>
           <ul className="mt-1 min-w-0 max-w-full space-y-1 pb-2 pl-6">

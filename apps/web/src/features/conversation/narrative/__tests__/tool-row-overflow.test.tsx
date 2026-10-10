@@ -428,8 +428,11 @@ describe("narrative tool row layout classes", () => {
       />,
     );
 
-    const summary = screen.getByRole("button", { name: "Read 2 files · 1 failed" });
+    // jsdom drops the count's leading space from the name; Chromium keeps it.
+    const summary = screen.getByRole("button", { name: /^Read 2 files ?· 1 failed$/ });
     expect(summary).toHaveAttribute("aria-expanded", "false");
+    expect(within(summary).getByText("Read 2 files")).toHaveClass("text-fade");
+    expect(within(summary).getByText("· 1 failed")).toHaveClass("shrink-0");
     fireEvent.click(summary);
     expect(screen.getByText("Read file")).toBeVisible();
     expect(screen.getByText("Read failed")).toBeVisible();

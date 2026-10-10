@@ -42,7 +42,8 @@ export function NarrativeToolRow({ icon: Icon, label, children, disclosure }: Na
   const content = (
     <>
       <Icon className="size-3.5 shrink-0 text-muted" strokeWidth={1.5} aria-hidden="true" />
-      <span className="shrink-0 text-sm font-medium text-muted">{label}</span>
+      {/* A detail after the label gives way first; a label alone may shrink so its parts can fade. */}
+      <span className={`${children ? "shrink-0" : "flex min-w-0"} text-sm font-medium text-muted`}>{label}</span>
       {children}
     </>
   );
