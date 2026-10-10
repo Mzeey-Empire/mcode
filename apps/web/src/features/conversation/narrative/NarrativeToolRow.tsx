@@ -3,6 +3,18 @@ import { ChevronRight } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { IconComponent } from "@/components/chat/tool-renderers/constants";
 
+/** Open state for a row whose owner keeps it across unmounts. */
+export interface RowExpansion {
+  readonly open: boolean;
+  readonly onToggle: () => void;
+}
+
+/** Uses the owner's expansion when given, otherwise row-local state. */
+export function useRowExpansion(owned?: RowExpansion): RowExpansion {
+  const [localOpen, setLocalOpen] = useState(false);
+  return owned ?? { open: localOpen, onToggle: () => setLocalOpen((current) => !current) };
+}
+
 /** Click target for a row that discloses more below it. */
 export interface NarrativeToolRowDisclosure {
   readonly open: boolean;

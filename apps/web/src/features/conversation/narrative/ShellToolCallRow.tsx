@@ -11,6 +11,8 @@ import {
   NarrativeToolRowDetail,
   NarrativeToolRowMeta,
   type NarrativeToolRowDisclosure,
+  type RowExpansion,
+  useRowExpansion,
 } from "./NarrativeToolRow";
 import { ToolOutputTruncationNotice } from "./ToolOutputTruncationNotice";
 import { extractNarrativeCommand } from "./extract-narrative-command";
@@ -18,6 +20,8 @@ import { extractNarrativeCommand } from "./extract-narrative-command";
 interface ShellToolCallRowProps {
   /** Shell invocation rendered as a nested narrative row. */
   toolCall: ToolCall;
+  /** Transcript-owned open state, so the transcript survives row unmounts. */
+  expansion?: RowExpansion;
 }
 
 /** Formats a completed tool duration as a clock; sub-second runs show none. */
@@ -176,8 +180,8 @@ function useCollapsibleTranscriptPresence(open: boolean) {
 }
 
 /** Renders a shell call that reveals a terminal-style command transcript on click. */
-export function ShellToolCallRow({ toolCall }: ShellToolCallRowProps) {
-  const [open, setOpen] = useState(false);
+export function ShellToolCallRow({ toolCall, expansion }: ShellToolCallRowProps) {
+  const { open, onToggle } = useRowExpansion(expansion);
   const panelId = useId();
   const command = extractNarrativeCommand(toolCall);
   const detail = command.replace(/\s+/g, " ").trim() || "Output";
@@ -192,7 +196,7 @@ export function ShellToolCallRow({ toolCall }: ShellToolCallRowProps) {
         status={status}
         disclosure={{
           open,
-          onToggle: () => setOpen((current) => !current),
+          onToggle,
           controlsId: transcript.present ? panelId : undefined,
         }}
       />

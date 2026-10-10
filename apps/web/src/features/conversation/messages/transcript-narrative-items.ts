@@ -2,6 +2,7 @@ import type { Message, ToolCall } from "@/transport/types";
 import { buildNarrativeItems } from "../narrative/build-narrative";
 import { buildPersistedNarrativeItems, recordToToolCall } from "../narrative/build-persisted-narrative";
 import type { NarrativeItem } from "../narrative/types";
+import { rendersAsSingleCallRow } from "../narrative/ToolSummaryLine";
 import type { ToolCallTransition } from "./useToolCallTransitions";
 import { type ChatVirtualItem, type CurrentTurnResponseIdentity, type PersistedNarrativeRecords, type PersistedNarrativeRecordsByMessage } from "./virtual-items";
 
@@ -50,6 +51,7 @@ export function expandTranscriptToolGroups(
   return items.flatMap((row): (ChatVirtualItem | TranscriptNarrativeItem | TranscriptFoldNoteItem | TranscriptToolItem)[] => {
     if (row.type !== "narrative-row" || row.item.type !== "tool-group" || !expandedGroups.has(row.key)) return [row];
     const calls = row.item.group.calls;
+    if (rendersAsSingleCallRow(calls)) return [row];
     return [row, ...calls.map((toolCall, index): TranscriptToolItem => ({
       type: "tool-row", key: `${row.key}:call:${toolCall.id}`, groupKey: row.key, toolCall, index, count: calls.length,
       messageId: row.messageId,

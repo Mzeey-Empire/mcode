@@ -25,7 +25,9 @@ call or assistant message does not complete other calls. Turn termination
 settles any outstanding calls.
 
 A group of one call renders that call's own row, so a failed edit reads
-"Edit failed" with its file. Larger groups show a summary with failure and
+"Edit failed" with its file. That row's disclosure uses the group's
+transcript-owned expansion state, so it survives row unmounts and never lists
+the call again as a child row. Larger groups show a summary with failure and
 cancellation counts and expand into one row per call. Failure shows as text in
 the row meta, never as red rows or badges.
 

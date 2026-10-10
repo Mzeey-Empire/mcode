@@ -15,7 +15,7 @@ import { extractToolInputDetail } from "./tool-detail";
 import { isCancelledCall } from "./narrative-builder-helpers";
 import { ToolOutputTruncationNotice } from "./ToolOutputTruncationNotice";
 import { ShellToolCallRow } from "./ShellToolCallRow";
-import { NarrativeToolRow, NarrativeToolRowDetail } from "./NarrativeToolRow";
+import { NarrativeToolRow, NarrativeToolRowDetail, useRowExpansion, type RowExpansion } from "./NarrativeToolRow";
 import {
   BrowserActivitySummary,
   isBrowserNarrativeCall,
@@ -23,7 +23,7 @@ import {
 
 interface ToolSummaryLineProps {
   /** Keeps expansion in the owning viewport when children are separate virtual rows. */
-  virtualExpansion?: { readonly open: boolean; readonly onToggle: () => void };
+  virtualExpansion?: RowExpansion;
   /** The group of consecutive tool calls to summarize. */
   group: ToolGroup;
 }
@@ -68,8 +68,8 @@ function FailedToolCallOutput({ toolCall, panelId }: { toolCall: ToolCall; panel
   );
 }
 
-function GenericToolCallRow({ toolCall }: { toolCall: ToolCall }) {
-  const [open, setOpen] = useState(false);
+function GenericToolCallRow({ toolCall, expansion }: { toolCall: ToolCall; expansion?: RowExpansion }) {
+  const { open, onToggle } = useRowExpansion(expansion);
   const panelId = useId();
   const outcome = toolCallOutcome(toolCall);
   const Icon = TOOL_ICONS[resolveToolName(toolCall.toolName)] ?? DEFAULT_ICON;
@@ -82,7 +82,7 @@ function GenericToolCallRow({ toolCall }: { toolCall: ToolCall }) {
         icon={Icon}
         label={toolCallLabel(toolCall, outcome)}
         disclosure={hasFailureOutput
-          ? { open, onToggle: () => setOpen((current) => !current), controlsId: open ? panelId : undefined }
+          ? { open, onToggle, controlsId: open ? panelId : undefined }
           : undefined}
       >
         <NarrativeToolRowDetail kind="file">{detail}</NarrativeToolRowDetail>
@@ -93,10 +93,18 @@ function GenericToolCallRow({ toolCall }: { toolCall: ToolCall }) {
 }
 
 /** Renders one tool call as its own collapsed row. */
-export function ToolCallRow({ toolCall }: { toolCall: ToolCall }) {
+export function ToolCallRow({ toolCall, expansion }: { toolCall: ToolCall; expansion?: RowExpansion }) {
   if (toolCall.toolName === "Approval review") return <ApprovalReviewRow toolCall={toolCall} />;
-  if (isShellTool(toolCall.toolName)) return <ShellToolCallRow toolCall={toolCall} />;
-  return <GenericToolCallRow toolCall={toolCall} />;
+  if (isShellTool(toolCall.toolName)) return <ShellToolCallRow toolCall={toolCall} expansion={expansion} />;
+  return <GenericToolCallRow toolCall={toolCall} expansion={expansion} />;
+}
+
+/**
+ * Whether a group renders as its lone call's own row. Such a group discloses
+ * that call's output in place, so it never lists children as separate rows.
+ */
+export function rendersAsSingleCallRow(calls: readonly ToolCall[]): boolean {
+  return calls.length === 1 && !calls.some(isBrowserNarrativeCall);
 }
 
 /** Renders one completed tool call inside a semantic list. */
@@ -169,8 +177,8 @@ export function ToolSummaryLine({ group, virtualExpansion }: ToolSummaryLineProp
       data-first-tool-call-id={firstCall?.id}
       data-last-tool-call-id={calls.at(-1)?.id}
     >
-      {calls.length === 1 && firstCall ? (
-        <ToolCallRow toolCall={firstCall} />
+      {rendersAsSingleCallRow(calls) && firstCall ? (
+        <ToolCallRow toolCall={firstCall} expansion={virtualExpansion} />
       ) : (
         <ToolGroupRow
           calls={calls}

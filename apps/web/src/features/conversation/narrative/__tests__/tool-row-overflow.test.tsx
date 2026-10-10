@@ -139,6 +139,22 @@ describe("narrative tool row layout classes", () => {
     expect(screen.getByText("command output")).toBeTruthy();
   });
 
+  it("keeps a lone shell transcript open across a virtual row remount", () => {
+    const group: ToolGroup = {
+      calls: [makeBashCall({ id: "tc-1", isComplete: true, output: "command output" })],
+    };
+    let open = false;
+    const virtualExpansion = { get open() { return open; }, onToggle: () => { open = !open; } };
+    const first = render(<ToolSummaryLine group={group} virtualExpansion={virtualExpansion} />);
+    fireEvent.click(screen.getByRole("button", { name: /Ran command/ }));
+    first.unmount();
+
+    render(<ToolSummaryLine group={group} virtualExpansion={virtualExpansion} />);
+
+    expect(screen.getByRole("button", { name: /Ran command/ })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("command output")).toBeVisible();
+  });
+
   it("ToolSummaryLine shows the persisted approval review outcome", () => {
     const group: ToolGroup = {
       calls: [makeBashCall({
