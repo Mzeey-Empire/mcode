@@ -34,6 +34,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
+import { usePanelHeaderMenuOpen } from "@/components/panels/shell/PanelHeader";
 import { ReviewDiffView } from "./ReviewDiffView";
 import { ReviewToolbarSlotContext } from "./review-toolbar-slot";
 import { Spinner } from "@/components/ui/spinner";
@@ -94,7 +95,7 @@ export function FileList({
   onRefresh,
   jumpViewKey,
 }: FileListProps) {
-  const [jumpOpen, setJumpOpen] = useState(false);
+  const [jumpOpen, setJumpOpen] = usePanelHeaderMenuOpen();
   const [jumpTarget, setJumpTarget] = useState<{ path: string; token: number } | null>(null);
   const [highlightPath, setHighlightPath] = useState<string | null>(null);
   const jumpTokenRef = useRef(0);
@@ -147,7 +148,7 @@ export function FileList({
       setHighlightPath((current) => (current === path ? null : current));
       highlightClearRef.current = null;
     }, 1500);
-  }, []);
+  }, [setJumpOpen]);
 
   const clearJumpTarget = useCallback((token: number) => {
     setJumpTarget((current) => (current?.token === token ? null : current));
