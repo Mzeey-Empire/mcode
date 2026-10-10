@@ -166,8 +166,9 @@ export async function resolveThreadOverviewChangeSummary({
   const latest = latestSnapshotWithChanges(resolvedSnapshots);
 
   if (latest) {
-    const result = await transport.getSnapshotDiffStats(latest.id).catch(() => []);
-    // Line totals are decorative here; a missing snapshot still counts its recorded files.
+    const result = await transport.getSnapshotDiffStats(latest.id);
+    if (!Array.isArray(result) && result.status === "failed") throw new Error(result.failure.summary);
+    // An expired or pruned snapshot still counts its recorded files, without line totals.
     const stats = Array.isArray(result) ? result : [];
     return {
       snapshots: resolvedSnapshots,

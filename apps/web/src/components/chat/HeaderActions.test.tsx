@@ -1064,6 +1064,25 @@ describe("resolveThreadOverviewChangeSummary", () => {
     expect(transport.getReviewComparison).not.toHaveBeenCalled();
   });
 
+  it("keeps an expired turn's file count but rejects a failed stats load", async () => {
+    const snapshots = [makeSnapshot({ id: "latest", files_changed: ["a.ts", "b.ts"] })];
+    const expired = makeSummaryTransport({
+      getSnapshotDiffStats: vi.fn().mockResolvedValue({ status: "unavailable", reason: "snapshot-pruned" }),
+    });
+    const result = await resolveThreadOverviewChangeSummary({ thread: { id: "thread-1", workspace_id: "ws-1" }, snapshots, transport: expired });
+    expect(result.summary).toEqual({ files: 2, additions: 0, deletions: 0 });
+
+    const failed = makeSummaryTransport({
+      getSnapshotDiffStats: vi.fn().mockResolvedValue({ status: "failed", failure: { kind: "git-error", summary: "Git reported an error", detail: "fatal" } }),
+    });
+    await expect(resolveThreadOverviewChangeSummary({ thread: { id: "thread-1", workspace_id: "ws-1" }, snapshots, transport: failed }))
+      .rejects.toThrow("Git reported an error");
+    const offline = makeSummaryTransport({ getSnapshotDiffStats: vi.fn().mockRejectedValue(new Error("socket closed")) });
+    await expect(resolveThreadOverviewChangeSummary({ thread: { id: "thread-1", workspace_id: "ws-1" }, snapshots, transport: offline }))
+      .rejects.toThrow("socket closed");
+    expect(failed.getReviewComparison).not.toHaveBeenCalled();
+  });
+
   it("counts untracked files before branch comparison", async () => {
     const transport = makeSummaryTransport({
       getReviewComparison: vi.fn().mockResolvedValue({ status: "ready", comparison: {
