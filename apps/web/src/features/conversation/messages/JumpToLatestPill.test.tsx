@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MessageListOverlays } from "./MessageListOverlays";
 
-function renderOverlays(showJumpToLatest: boolean, onJumpToLatest = vi.fn()) {
+function renderOverlays(showJumpToLatest: boolean, onJumpToLatest = vi.fn(), contentPaddingRight?: string) {
   render(
     <MessageListOverlays
       handoffStatus={undefined}
@@ -18,6 +18,7 @@ function renderOverlays(showJumpToLatest: boolean, onJumpToLatest = vi.fn()) {
       viewportRef={{ current: null }}
       renderedThreadId="thread-1"
       stickyPreview={null}
+      contentPaddingRight={contentPaddingRight}
       isStickyVisible={false}
       onJumpToUserMessage={vi.fn()}
       onStickyHeightChange={vi.fn()}
@@ -44,5 +45,11 @@ describe("Jump to latest pill", () => {
     renderOverlays(true);
     const pill = screen.getByRole("button", { name: "Jump to latest" });
     expect(pill.className).not.toMatch(/primary|destructive/);
+  });
+
+  it("keeps the docked overview's reserve out of the pill's centring box", () => {
+    renderOverlays(true, vi.fn(), "328px");
+    const fade = screen.getByRole("button", { name: "Jump to latest" }).parentElement?.parentElement;
+    expect(fade?.style.right).toBe("328px");
   });
 });

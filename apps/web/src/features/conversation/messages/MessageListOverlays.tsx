@@ -113,12 +113,15 @@ export function MessageListOverlays({
       )}
       {showJumpToLatest && (
         // The list ends 16px above the composer tray, so these offsets set the fade's base and the
-        // pill's 34px lift from the tray top, as the board does.
+        // pill's 34px lift from the tray top, as the board does. The right inset keeps both off the
+        // docked overview's reserve so the pill centres on the conversation column.
         <div
-          className="pointer-events-none absolute inset-x-0 -bottom-4 h-14 bg-linear-to-t from-background [scrollbar-gutter:stable]"
-          style={{ paddingRight: contentPaddingRight }}
+          className="pointer-events-none absolute left-0 -bottom-4 h-14 bg-linear-to-t from-background"
+          style={{ right: contentPaddingRight ?? 0 }}
         >
-          <div className="absolute inset-x-0 bottom-[34px] flex justify-center">
+          {/* A hidden-overflow box with a stable gutter reserves the transcript scrollbar's width, and
+              its vertical padding leaves room for the pill's shadow. */}
+          <div className="absolute inset-x-0 bottom-2.5 flex justify-center overflow-y-hidden py-6 [scrollbar-gutter:stable]">
             <JumpToLatestPill onJumpToLatest={onJumpToLatest} />
           </div>
         </div>
