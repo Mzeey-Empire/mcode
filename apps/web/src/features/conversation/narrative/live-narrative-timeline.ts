@@ -129,11 +129,12 @@ function createLiveTimeline(
   hooks: readonly HookExecution[],
   approvals: readonly ApprovalReceipt[],
 ): LiveTimelineEvent[] {
-  const timeline = createThoughtEvents(thoughtSegments)
+  // Receipts lead the stable sort: an equal client stamp means one arrival batch, where a decision precedes the tool it unblocked.
+  const timeline = approvals.map((receipt): LiveTimelineEvent => ({ kind: "approval", receipt, startedAt: receipt.decidedAt }))
+    .concat(createThoughtEvents(thoughtSegments))
     .concat(createTopLevelToolEvents(topLevelCalls))
     .concat(createSubagentEvents(toolCalls, childrenByParent))
-    .concat(createHookEvents(hooks))
-    .concat(approvals.map((receipt) => ({ kind: "approval" as const, receipt, startedAt: receipt.decidedAt })));
+    .concat(createHookEvents(hooks));
   return timeline.sort((left, right) => left.startedAt - right.startedAt);
 }
 

@@ -95,4 +95,24 @@ describe("approval receipt position", () => {
     expect(shape(live)).toEqual(["tool-group", "approval:req-1", "tool-group"]);
     expect(shape(persisted)).toEqual(shape(live));
   });
+
+  it("keeps a decision ahead of the tool it unblocked when both share a timestamp", () => {
+    const live = buildNarrativeItems({
+      toolCalls: [liveTool("unblocked", BASE)],
+      hooks: [],
+      approvals: [{ requestId: "req-1", subjectLabel: "bun run test", outcome: { status: "allowed", intent: "allow_once", choiceLabel: "Allow once" }, decidedAt: BASE }],
+      thoughtSegments: [],
+      streamingText: "",
+      isAgentRunning: false,
+    }).items;
+    const persisted = buildPersistedNarrativeItems({
+      tools: [toolRecord("unblocked", 1, BASE)],
+      thoughts: [],
+      hooks: [],
+      approvals: [receiptRecord(0, BASE)],
+    });
+
+    expect(shape(live)).toEqual(["approval:req-1", "tool-group"]);
+    expect(shape(persisted)).toEqual(shape(live));
+  });
 });

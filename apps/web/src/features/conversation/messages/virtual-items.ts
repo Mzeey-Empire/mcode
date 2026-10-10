@@ -270,11 +270,11 @@ function sameStableTranscriptInput(previous: StableTranscriptInput | undefined, 
 }
 
 function hasLiveNarrative(input: TranscriptProjectionInput): boolean {
-  return input.toolCalls.length > 0 || (input.thoughtSegments?.length ?? 0) > 0;
+  return [input.toolCalls, input.thoughtSegments ?? [], input.approvals ?? []].some((rows) => rows.length > 0);
 }
 
 /** What a settled current turn's live state can put under its fold. */
-export type SettledLiveNarrative = "tools" | "thoughts" | "empty";
+export type SettledLiveNarrative = "rows" | "thoughts" | "empty";
 
 /**
  * Undefined when the turn still runs (it has no fold yet) or holds no live narrative, so records and the summary decide.
@@ -282,7 +282,7 @@ export type SettledLiveNarrative = "tools" | "thoughts" | "empty";
  */
 function settledLiveNarrative(input: TranscriptProjectionInput): SettledLiveNarrative | undefined {
   if (isAgentDisplayActive(input.agentDisplayState) || !hasLiveNarrative(input)) return undefined;
-  if (input.toolCalls.length > 0) return "tools";
+  if (input.toolCalls.length > 0 || (input.approvals?.length ?? 0) > 0) return "rows";
   const hasThoughtRows = buildNarrativeItems({
     toolCalls: [],
     hooks: [],
@@ -456,7 +456,7 @@ function terminalDisplayOutcome(state: AgentDisplayState): TurnOutcome | undefin
  */
 function hasFoldableNarrative(message: Message, input: StableItemInput, summary: TurnSummary): boolean {
   const live = isCurrentResponse(message, input) ? input.currentTurnLiveNarrative : undefined;
-  if (live === "tools" || live === "thoughts") return true;
+  if (live === "rows" || live === "thoughts") return true;
   const records = input.persistedNarrativeByMessage?.[message.id];
   if (records) return hasFoldRows(records, message.content);
   if (live === "empty") return false;
@@ -548,7 +548,7 @@ export function buildVolatileItems(
 }
 
 function narrativeFlowItem(toolCalls: readonly ToolCall[], hooks: readonly HookExecution[], approvals: readonly ApprovalReceipt[], thoughts: readonly ThoughtSegment[], streamingText: string, liveText: string, isAgentRunning: boolean, startTime: number | undefined, committedAssistantBody: string | undefined): ChatVirtualItem | undefined {
-  return isAgentRunning || toolCalls.length > 0 || thoughts.length > 0 ? { key: "narrative-flow", type: "narrative-flow", toolCalls, hooks, approvals, thoughtSegments: thoughts, streamingText: liveText.length > 0 ? "" : streamingText, isAgentRunning, startTime, committedAssistantBody } : undefined;
+  return isAgentRunning || [toolCalls, thoughts, approvals].some((rows) => rows.length > 0) ? { key: "narrative-flow", type: "narrative-flow", toolCalls, hooks, approvals, thoughtSegments: thoughts, streamingText: liveText.length > 0 ? "" : streamingText, isAgentRunning, startTime, committedAssistantBody } : undefined;
 }
 
 function liveResponseItem(liveText: string, currentTurn: CurrentTurnResponseIdentity | undefined, agentDisplayState: AgentDisplayState | undefined, textIsStreaming?: boolean): ChatVirtualItem | undefined {

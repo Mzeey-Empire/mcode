@@ -177,6 +177,18 @@ describe("transcript narrative rows", () => {
     expect(open.map(rowLabel)).toEqual(["work-fold", "thought", "message"]);
   });
 
+  it("keeps a stopped turn's only receipt when nothing else ran", () => {
+    const turn = { threadId: "thread", executionId: "execution", messageId: "answer" };
+    const projected = createTranscriptItemProjector()({
+      messages: [message("answer", "Stopped", "execution")], currentTurn: turn,
+      agentDisplayState: { phase: "completed" }, agentStartTime: 1000, streamingText: undefined, toolCalls: [],
+      approvals: [{ requestId: "req-1", subjectLabel: "rm -rf build", outcome: { status: "cancelled", reason: "session_stopped" }, decidedAt: 1200 }],
+      committedAssistantBody: "Stopped",
+    });
+    const open = expandTranscriptNarrative(projected, {}, new Set(["work-fold:answer"]), turn);
+    expect(open.map(rowLabel)).toEqual(["work-fold", "approval", "message"]);
+  });
+
   it("bounds persisted narrative expansion for very large saved tool histories", () => {
     const records: NonNullable<PersistedNarrativeRecords> = {
       approvals: [], hooks: [],

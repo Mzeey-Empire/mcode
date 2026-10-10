@@ -1003,7 +1003,7 @@ describe("buildVirtualItems (combined)", () => {
       makeMessage({ id: "u1", sequence: 1, role: "user", content: "build X" }),
       makeMessage({ id: "a1", sequence: 2, role: "assistant", content: "```plan-questions\n[]\n```" }),
     ];
-    const stable = buildStableItems(messages, undefined, undefined, { threadId: "thread-1", messageId: "a1" }, undefined, undefined, COMPLETED_AGENT, false, "tools");
+    const stable = buildStableItems(messages, undefined, undefined, { threadId: "thread-1", messageId: "a1" }, undefined, undefined, COMPLETED_AGENT, false, "rows");
     const volatile = buildVolatileItems([makeToolCall({ id: "tc-1", isComplete: true })], COMPLETED_AGENT, undefined, undefined);
     const result = buildVirtualItems(stable, volatile, true, "a1");
 
@@ -1059,7 +1059,7 @@ describe("buildVolatileItems with hooks", () => {
     expect(narrativeIdx).toBeLessThan(permIdx);
   });
 
-  it("drops a decided permission card so only its narrative receipt remains", () => {
+  it("drops a decided permission card and keeps the pending one", () => {
     const permissions = [
       { ...createMockApproval({ requestId: "decided" }), settled: true },
       { ...createMockApproval({ requestId: "pending" }), settled: false },
