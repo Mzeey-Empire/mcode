@@ -126,7 +126,8 @@ export class ThreadControlService {
   private readonly mutationReservations: ThreadControlMutationReservationService;
 
   constructor(
-    @inject(ApprovalService) private readonly approvalService: ApprovalService,
+    // Delayed because ApprovalService needs the provider registry, whose host ports resolve thread control.
+    @inject(delay(() => ApprovalService)) private readonly approvalService: ApprovalService,
     @inject(WorkspaceRepo) private readonly workspaces: WorkspaceRepo,
     @inject(WorktreeRepo) private readonly worktrees: WorktreeRepo,
     @inject(delay(() => GitWorktreeService)) private readonly gitWorktrees: GitWorktreeService,
