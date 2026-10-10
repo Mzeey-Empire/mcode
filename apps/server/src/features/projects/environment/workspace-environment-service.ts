@@ -4,6 +4,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import {
   DEFAULT_WORKSPACE_ENVIRONMENT_DOCUMENT,
+  encodeEnvironmentDocument,
   WORKSPACE_ENVIRONMENT_APPROVAL_CONTRACT_VERSION,
   WORKSPACE_ENVIRONMENT_DOCUMENT_MAX_BYTES,
   WORKSPACE_ENVIRONMENT_SETUP_OUTPUT_MAX_BYTES,
@@ -929,10 +930,15 @@ export class WorkspaceEnvironmentService {
   async save(input: WorkspaceEnvironmentSaveInput): Promise<WorkspaceEnvironmentReadResult> {
     const parsed = WorkspaceEnvironmentDocumentSchema().safeParse(input.document);
     if (!parsed.success) throw validationError(parsed.error);
-    return this.enqueueSave(
-      input.workspaceId,
-      () => this.saveValidatedEnvironment(input, parsed.data),
-    );
+    try {
+      return await this.enqueueSave(
+        input.workspaceId,
+        () => this.saveValidatedEnvironment(input, parsed.data),
+      );
+    } catch (error) {
+      if (error instanceof ZodError) throw validationError(error);
+      throw error;
+    }
   }
 
   private async saveValidatedEnvironment(
@@ -947,9 +953,8 @@ export class WorkspaceEnvironmentService {
     const filePath = thread
       ? this.filePathForThread(thread, storageMode)
       : this.filePathForWorkspace(input.workspaceId, storageMode);
-    const encoded = new TextEncoder().encode(JSON.stringify(document));
-    await this.writeEnvironmentDocument(filePath, encoded);
-    return { document, revision: revisionFor(encoded, storageMode, filePath), status: "present", storageMode: current.storageMode };
+    const encoded = await this.writeEnvironmentDocument(filePath, document);
+    return { document: encoded.document, revision: revisionFor(encoded.bytes, storageMode, filePath), status: "present", storageMode: current.storageMode };
   }
 
   private assertCurrentEnvironmentRevision(
@@ -976,17 +981,22 @@ export class WorkspaceEnvironmentService {
     }
   }
 
-  private async writeEnvironmentDocument(filePath: string, encoded: Uint8Array): Promise<void> {
+  private async writeEnvironmentDocument(
+    filePath: string,
+    document: WorkspaceEnvironmentSaveInput["document"],
+  ): Promise<ReturnType<typeof encodeEnvironmentDocument>> {
+    const encoded = encodeEnvironmentDocument(document);
     const directory = NodePath.dirname(filePath);
     await NodeFSPromises.mkdir(directory, { recursive: true });
     const temporaryPath = NodePath.join(directory, `.environment.${NodeCrypto.randomUUID()}.tmp`);
     try {
-      await NodeFSPromises.writeFile(temporaryPath, encoded);
+      await NodeFSPromises.writeFile(temporaryPath, encoded.bytes);
       await NodeFSPromises.rename(temporaryPath, filePath);
     } catch (error) {
       await this.removeTemporaryEnvironmentFile(temporaryPath);
       throw error;
     }
+    return encoded;
   }
 
   private async removeTemporaryEnvironmentFile(filePath: string): Promise<void> {

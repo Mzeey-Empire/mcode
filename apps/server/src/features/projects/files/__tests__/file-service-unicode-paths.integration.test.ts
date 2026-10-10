@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
@@ -58,7 +58,62 @@ describe("FileService unicode paths (real git)", () => {
   }, GIT_REPO_SETUP_TIMEOUT_MS);
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     NodeFS.rmSync(root, { recursive: true, force: true });
+  });
+
+  it.each([false, true])("reads a non-git folder with a HEAD file present: %s", async (hasHeadFile) => {
+    const folder = NodePath.join(root, "non-git");
+    NodeFS.mkdirSync(folder);
+    vi.stubEnv("GIT_CEILING_DIRECTORIES", root);
+    NodeFS.writeFileSync(NodePath.join(folder, "plain.txt"), "plain\n");
+    if (hasHeadFile) NodeFS.writeFileSync(NodePath.join(folder, "HEAD"), "unrelated\n");
+    const files = makeService(folder);
+
+    await expect(files.read("workspace-1", "plain.txt")).resolves.toEqual({
+      kind: "text", path: "plain.txt", size: 6, encoding: "utf-8", content: "plain\n", changedLines: null,
+    });
+    await expect(files.changes("workspace-1")).resolves.toEqual({ git: false, entries: [], truncated: false });
+  });
+
+  it("keeps list, marks and refresh relative to a workspace below the repo root", async () => {
+    const folder = NodePath.join(root, "sub");
+    NodeFS.mkdirSync(folder);
+    NodeFS.writeFileSync(NodePath.join(root, "outside.txt"), "outside\n");
+    NodeFS.writeFileSync(NodePath.join(folder, "tracked.txt"), "before\n");
+    gitIn(root, "add", ".");
+    gitIn(root, "commit", "-m", "baseline");
+    const files = makeService(folder);
+    await expect(files.refresh("workspace-1")).resolves.toBeNull();
+    NodeFS.writeFileSync(NodePath.join(root, "outside.txt"), "outside edit\n");
+    NodeFS.writeFileSync(NodePath.join(root, "outside-new.txt"), "new\n");
+    await expect(files.refresh("workspace-1")).resolves.toBeNull();
+    NodeFS.writeFileSync(NodePath.join(folder, "tracked.txt"), "after\n");
+    NodeFS.writeFileSync(NodePath.join(folder, "new.txt"), "new\n");
+
+    expect((await files.list("workspace-1")).paths.sort()).toEqual(["new.txt", "tracked.txt"]);
+    await expect(files.changes("workspace-1")).resolves.toEqual({
+      git: true, entries: [{ path: "tracked.txt", mark: "M" }, { path: "new.txt", mark: "A" }], truncated: false,
+    });
+    await expect(files.refresh("workspace-1")).resolves.toEqual({
+      changedPaths: ["tracked.txt", "new.txt"], wholeWorkspace: false,
+    });
+    await expect(files.refresh("workspace-1")).resolves.toBeNull();
+  });
+
+  it("reports source line numbers even when a textconv driver prepends a line", async () => {
+    const driver = NodePath.join(root, ".git", "textconv.cjs");
+    NodeFS.writeFileSync(driver, "process.stdout.write('header\\n' + require('node:fs').readFileSync(process.argv[2], 'utf8'));\n");
+    gitIn(root, "config", "diff.fixture.textconv", `"${process.execPath.replaceAll("\\", "/")}" "${driver.replaceAll("\\", "/")}"`);
+    NodeFS.writeFileSync(NodePath.join(root, ".gitattributes"), "*.txt diff=fixture\n");
+    NodeFS.writeFileSync(NodePath.join(root, "tracked.txt"), "one\ntwo\nthree\n");
+    gitIn(root, "add", ".");
+    gitIn(root, "commit", "-m", "baseline");
+    NodeFS.writeFileSync(NodePath.join(root, "tracked.txt"), "one\nchanged\nthree\n");
+
+    await expect(service.read("workspace-1", "tracked.txt")).resolves.toEqual({
+      kind: "text", path: "tracked.txt", size: 18, encoding: "utf-8", content: "one\nchanged\nthree\n", changedLines: [[2, 2]],
+    });
   });
 
   it("lists a tracked non-ASCII path verbatim and round-trips read + mention validation", async () => {
@@ -68,9 +123,9 @@ describe("FileService unicode paths (real git)", () => {
 
     const listed = await service.list("workspace-1");
 
-    expect(listed).toContain("café.ts");
-    expect(service.read("workspace-1", "café.ts")).toBe("fixture content");
-    for (const path of listed) {
+    expect(listed).toEqual({ paths: ["café.ts"], truncated: false });
+    await expect(service.read("workspace-1", "café.ts")).resolves.toEqual({ kind: "text", path: "café.ts", size: 15, encoding: "utf-8", content: "fixture content", changedLines: null });
+    for (const path of listed.paths) {
       expect(() => service.validateMentionPath("workspace-1", path)).not.toThrow();
     }
   });
@@ -80,8 +135,8 @@ describe("FileService unicode paths (real git)", () => {
 
     const listed = await service.list("workspace-1");
 
-    expect(listed).toContain("new üntracked.ts");
-    expect(service.read("workspace-1", "new üntracked.ts")).toBe("untracked");
+    expect(listed).toEqual({ paths: ["new üntracked.ts"], truncated: false });
+    await expect(service.read("workspace-1", "new üntracked.ts")).resolves.toEqual({ kind: "text", path: "new üntracked.ts", size: 9, encoding: "utf-8", content: "untracked", changedLines: null });
   });
 
   it("lists names with spaces and non-ASCII names inside subdirectories", async () => {
@@ -91,8 +146,7 @@ describe("FileService unicode paths (real git)", () => {
 
     const listed = await service.list("workspace-1");
 
-    expect(listed).toContain("dir q/ünïcode.md");
-    expect(listed).toContain("spaced name.ts");
+    expect(listed.paths).toEqual(["dir q/ünïcode.md", "spaced name.ts"]);
   });
 
   it("keeps gitignore exclusions for non-ASCII names", async () => {
@@ -101,8 +155,7 @@ describe("FileService unicode paths (real git)", () => {
 
     const listed = await service.list("workspace-1");
 
-    expect(listed).toContain(".gitignore");
-    expect(listed).not.toContain("ignoré.log");
+    expect(listed).toEqual({ paths: [".gitignore"], truncated: false });
   });
 
   it("reports unescaped paths in refresh changedPaths", async () => {
@@ -142,8 +195,51 @@ describe("FileService unicode paths (real git)", () => {
 
       const listed = await service.list("workspace-1");
 
-      expect(listed).toContain(newlineName);
-      expect(service.read("workspace-1", newlineName)).toBe("newline content");
+      expect(listed.paths).toEqual([newlineName]);
+      await expect(service.read("workspace-1", newlineName)).resolves.toMatchObject({ kind: "text", content: "newline content", changedLines: null });
     },
   );
+
+  it("reports exact changed ranges against HEAD, including staged edits", async () => {
+    const original = Array.from({ length: 20 }, (_, i) => `line ${i + 1}\n`);
+    NodeFS.writeFileSync(NodePath.join(root, "tracked.txt"), original.join(""));
+    gitIn(root, "add", "tracked.txt");
+    gitIn(root, "commit", "-m", "baseline");
+    const edited = [...original];
+    edited.splice(11, 4, "changed 12\n", "changed 13\n", "changed 14\n", "changed 15\n");
+    NodeFS.writeFileSync(NodePath.join(root, "tracked.txt"), edited.join(""));
+    gitIn(root, "add", "tracked.txt");
+    await expect(service.read("workspace-1", "tracked.txt")).resolves.toMatchObject({ kind: "text", content: edited.join(""), changedLines: [[12, 15]] });
+    await expect(service.changes("workspace-1")).resolves.toEqual({ git: true, entries: [{ path: "tracked.txt", mark: "M" }], truncated: false });
+  });
+
+  it("marks untracked, staged additions, and renamed destinations A and drops deletions", async () => {
+    NodeFS.writeFileSync(NodePath.join(root, "old.txt"), "renamed\n");
+    NodeFS.writeFileSync(NodePath.join(root, "gone.txt"), "removed\n");
+    gitIn(root, "add", ".");
+    gitIn(root, "commit", "-m", "baseline");
+    gitIn(root, "mv", "old.txt", "new näme.txt");
+    gitIn(root, "rm", "gone.txt");
+    NodeFS.writeFileSync(NodePath.join(root, "untracked.txt"), "untracked\n");
+    NodeFS.writeFileSync(NodePath.join(root, "added.txt"), "added\n");
+    gitIn(root, "add", "added.txt");
+    const changes = await service.changes("workspace-1");
+    expect(changes).toEqual({ git: true, entries: [
+      { path: "added.txt", mark: "A" }, { path: "new näme.txt", mark: "A" }, { path: "untracked.txt", mark: "A" },
+    ], truncated: false });
+    for (const path of ["untracked.txt", "added.txt"]) {
+      await expect(service.read("workspace-1", path)).resolves.toMatchObject({ kind: "text", changedLines: null });
+    }
+  });
+
+  it("returns null without HEAD and handles single-line hunks and pure deletions", async () => {
+    NodeFS.writeFileSync(NodePath.join(root, "lines.txt"), "one\ntwo\nthree\n");
+    gitIn(root, "add", "lines.txt");
+    await expect(service.read("workspace-1", "lines.txt")).resolves.toMatchObject({ kind: "text", changedLines: null });
+    gitIn(root, "commit", "-m", "baseline");
+    NodeFS.writeFileSync(NodePath.join(root, "lines.txt"), "one\nchanged\nthree\n");
+    await expect(service.read("workspace-1", "lines.txt")).resolves.toMatchObject({ kind: "text", changedLines: [[2, 2]] });
+    NodeFS.writeFileSync(NodePath.join(root, "lines.txt"), "one\nthree\n");
+    await expect(service.read("workspace-1", "lines.txt")).resolves.toMatchObject({ kind: "text", changedLines: [] });
+  });
 });

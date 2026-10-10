@@ -1447,6 +1447,7 @@ function newChildTurn(
     id: turnId,
     threadId,
     status: "Pending",
+    attemptOf: null,
     trigger: {
       kind: "child",
       sourceThreadId: action.source.threadId,

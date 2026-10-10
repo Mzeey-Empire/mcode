@@ -36,6 +36,7 @@ type DiffRowMeta =
   | { readonly kind: "saved"; readonly annotationId: string }
   | { readonly kind: "draft" }
   | { readonly kind: "status"; readonly status: "loading" | "empty" | "binary" }
+  | { readonly kind: "load-failed"; readonly path: string }
   | { readonly kind: "preview"; readonly patch: string };
 
 type DiffItem = CodeViewItem<DiffRowMeta>;
@@ -45,6 +46,7 @@ const DIFF_COMMENT_FRAME_CLASS =
   "mx-3 my-1.5 w-[calc(100%-1.5rem)] overflow-hidden rounded-composer border border-border bg-panel text-ink";
 
 const EMPTY_PATCHES: Record<string, string> = {};
+const EMPTY_FAILED: ReadonlySet<string> = new Set();
 
 /** Comparison sources whose old/new contents can be read from git refs. */
 const HYDRATABLE_SOURCES: ReadonlySet<DiffSource> = new Set([
@@ -141,9 +143,11 @@ function buildItem({
   fileDiff,
   annotations,
   previewMode,
+  loadFailed,
 }: {
   readonly file: ReviewFileChange;
   readonly isExpanded: boolean;
+  readonly loadFailed: boolean;
   readonly patch: string | undefined;
   readonly fileDiff: FileDiffMetadata | undefined;
   readonly annotations: DiffLineAnnotation<DiffRowMeta>[];
@@ -166,7 +170,9 @@ function buildItem({
   }
 
   const status = statusOf(file, isExpanded, loaded, fileDiff);
-  if (status) {
+  if (isExpanded && loadFailed) {
+    rows.push({ side: "additions", lineNumber: 0, metadata: { kind: "load-failed", path: file.path } });
+  } else if (status) {
     rows.push({ side: "additions", lineNumber: 0, metadata: { kind: "status", status } });
   }
 
@@ -272,14 +278,18 @@ export function ReviewDiffView({
     }
     return seeded;
   };
+  // A failed load is kept apart from an empty patch so the file reads as
+  // failed and can be retried, never as "No diff content".
   const [patchState, setPatchState] = useState(() => ({
     scope: patchScope,
     byPath: seedPatches(),
+    failed: EMPTY_FAILED,
   }));
   if (patchState.scope !== patchScope) {
-    setPatchState({ scope: patchScope, byPath: seedPatches() });
+    setPatchState({ scope: patchScope, byPath: seedPatches(), failed: EMPTY_FAILED });
   }
   const patches = patchState.scope === patchScope ? patchState.byPath : EMPTY_PATCHES;
+  const failedPatches = patchState.scope === patchScope ? patchState.failed : EMPTY_FAILED;
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
     () => new Set((bulkDiffExpand?.expand ?? defaultFilesExpanded) ? files.map((f) => f.path) : []),
   );
@@ -337,7 +347,7 @@ export function ReviewDiffView({
     const transport = getTransport();
     const scope = patchScope;
     for (const file of files) {
-      if (!effectiveExpanded.has(file.path) || patches[file.path] !== undefined) continue;
+      if (!effectiveExpanded.has(file.path) || patches[file.path] !== undefined || failedPatches.has(file.path)) continue;
       const path = file.path;
       const pendingKey = `${scope} ${path}`;
       if (pendingPatches.current.has(pendingKey)) continue;
@@ -349,7 +359,7 @@ export function ReviewDiffView({
           // versioned cache key keeps them out of any later seed.
           setPatchState((prev) =>
             prev.scope === scope && prev.byPath[path] === undefined
-              ? { scope, byPath: { ...prev.byPath, [path]: result } }
+              ? { ...prev, byPath: { ...prev.byPath, [path]: result } }
               : prev,
           );
           useDiffStore.getState().cacheInlineDiff(threadId, source, id, path, result, cacheVersion);
@@ -358,13 +368,22 @@ export function ReviewDiffView({
           console.warn("[ReviewDiffView] load failed", path, error);
           setPatchState((prev) =>
             prev.scope === scope && prev.byPath[path] === undefined
-              ? { scope, byPath: { ...prev.byPath, [path]: "" } }
+              ? { ...prev, failed: new Set(prev.failed).add(path) }
               : prev,
           );
         })
         .finally(() => pendingPatches.current.delete(pendingKey));
     }
-  }, [effectiveExpanded, files, patchScope, patches, source, id, threadId, cacheVersion]);
+  }, [effectiveExpanded, failedPatches, files, patchScope, patches, source, id, threadId, cacheVersion]);
+
+  const retryPatch = useCallback((path: string) => {
+    setPatchState((prev) => {
+      if (!prev.failed.has(path)) return prev;
+      const failed = new Set(prev.failed);
+      failed.delete(path);
+      return { ...prev, failed };
+    });
+  }, []);
 
   // Bulk expand/collapse arrives as a store command; subscriptions run outside
   // the render pass, unlike an effect watching the nonce.
@@ -448,6 +467,7 @@ export function ReviewDiffView({
         file,
         isExpanded: effectiveExpanded.has(file.path),
         patch: patches[file.path],
+        loadFailed: failedPatches.has(file.path),
         fileDiff: fileDiffs[file.path],
         annotations: annotationsByFile.get(file.path) ?? [],
         previewMode: previewPaths.has(file.path),
@@ -458,7 +478,7 @@ export function ReviewDiffView({
       itemVersions.current.set(file.path, { sig, version });
       return { ...item, version };
     });
-  }, [files, effectiveExpanded, patches, fileDiffs, previewPaths, savedAnnotations, editTarget, editingAnnotation]);
+  }, [files, effectiveExpanded, patches, failedPatches, fileDiffs, previewPaths, savedAnnotations, editTarget, editingAnnotation]);
 
   // Pierre merges loaded files into the diff metadata, so both sides must be
   // the exact contents the patch was generated against — mismatched contents
@@ -475,10 +495,11 @@ export function ReviewDiffView({
         name: path,
         contents: await transport.readFileAtRef(workspaceId, ref, path, realThreadId),
       });
-      const worktree = async (path: string): Promise<FileContents> => ({
-        name: path,
-        contents: await transport.readFileContent(workspaceId, path, realThreadId),
-      });
+      const worktree = async (path: string): Promise<FileContents> => {
+        const result = await transport.readFileContent(workspaceId, path, realThreadId, "text");
+        if (result.kind !== "text") throw new Error(`Cannot expand context for a ${result.kind} file`);
+        return { name: path, contents: result.content };
+      };
       return resolveHydrationFiles(source, id, fileDiff, at, worktree);
     },
     [id, source, threadId],
@@ -620,6 +641,9 @@ export function ReviewDiffView({
         if (meta.kind === "status") {
           return <DiffStatusRow status={meta.status} />;
         }
+        if (meta.kind === "load-failed") {
+          return <DiffLoadFailedRow onRetry={() => retryPatch(meta.path)} />;
+        }
         return renderCommentRow(meta);
       }}
       renderGutterUtility={(getHoveredLine, item) => (
@@ -698,6 +722,18 @@ function DiffStatusRow({ status }: { readonly status: "loading" | "empty" | "bin
     <p className="px-3 py-2 font-mono text-caption text-muted/70">
       {status === "binary" ? "Binary file changed" : "No diff content"}
     </p>
+  );
+}
+
+/** A file whose patch request failed; Retry asks again. */
+function DiffLoadFailedRow({ onRetry }: { readonly onRetry: () => void }) {
+  return (
+    <div role="alert" className="flex items-center gap-2 px-3 py-2 font-mono text-caption text-muted/70">
+      <span>Couldn't load this file</span>
+      <button type="button" onClick={onRetry} className="rounded px-1 text-ink underline-offset-2 hover:underline">
+        Retry
+      </button>
+    </div>
   );
 }
 

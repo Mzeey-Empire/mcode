@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   FileSearch,
@@ -257,6 +257,35 @@ export function FileList({
   );
 }
 
+/** Props for {@link ReviewStateControls}. */
+interface ReviewStateControlsProps {
+  /** Diff scope (thread or workspace id) that owns the Files navigator visibility. */
+  scopeId: string;
+  refreshable: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
+}
+
+/**
+ * The toolbar controls for a comparison with no file list to show. Loading,
+ * empty and failed bodies have no FileList to portal them, yet the toolbar
+ * must keep Refresh and the Files toggle in every state. Controls that act on
+ * shown diffs (jump, expand, wrap, render mode) have nothing to act on here.
+ */
+export function ReviewStateControls({ scopeId, refreshable, refreshing, onRefresh }: ReviewStateControlsProps) {
+  const filesVisible = useDiffStore((s) => s.reviewFilesVisibleByScope[scopeId] ?? false);
+  const setReviewFilesVisible = useDiffStore((s) => s.setReviewFilesVisible);
+  return (
+    <ReviewToolbarControls>
+      {refreshable ? (
+        <ReviewOptionsMenu refreshInProgress={refreshing} onRefresh={onRefresh} />
+      ) : null}
+      <RefreshProgress refreshInProgress={refreshing} />
+      <FilesToggle filesVisible={filesVisible} onToggle={() => setReviewFilesVisible(scopeId, !filesVisible)} />
+    </ReviewToolbarControls>
+  );
+}
+
 /** Props for the persistent controls above a changed-file list. */
 interface FileListToolbarProps {
   activeThreadId: string | null;
@@ -296,29 +325,18 @@ function FileListToolbar({
   renderMode,
   onToggleRenderMode,
 }: FileListToolbarProps) {
-  const toolbarSlot = useContext(ReviewToolbarSlotContext);
-  const controls = (
-    <>
-      <ReviewOptionsMenu
-        activeThreadId={activeThreadId}
-        refreshable={refreshable}
-        refreshInProgress={refreshInProgress}
-        onRefresh={onRefresh}
-        lineWrap={lineWrap}
-        toggleLineWrap={toggleLineWrap}
-        allExpanded={allExpanded}
-        onToggleAll={onToggleAll}
-      />
-      {refreshInProgress ? (
-        <span
-          role="status"
-          aria-label="Refreshing comparison"
-          data-testid="review-refresh-progress"
-          className="inline-flex h-6 w-6 items-center justify-center text-muted/55"
-        >
-          <Spinner size={12} />
-        </span>
-      ) : null}
+  return (
+    <ReviewToolbarControls>
+      <ReviewOptionsMenu refreshInProgress={refreshInProgress} onRefresh={refreshable ? onRefresh : undefined}>
+        <ReviewDisplayItems
+          activeThreadId={activeThreadId}
+          lineWrap={lineWrap}
+          toggleLineWrap={toggleLineWrap}
+          allExpanded={allExpanded}
+          onToggleAll={onToggleAll}
+        />
+      </ReviewOptionsMenu>
+      <RefreshProgress refreshInProgress={refreshInProgress} />
       <FilesToggle filesVisible={filesVisible} onToggle={onToggleFiles} />
       <FileJumpPopover
         open={jumpOpen}
@@ -327,15 +345,35 @@ function FileListToolbar({
         onJumpToFile={onJumpToFile}
       />
       <RenderModeToggle renderMode={renderMode} onToggle={onToggleRenderMode} />
-    </>
+    </ReviewToolbarControls>
   );
+}
+
+/** Places toolbar controls in the Review panel's toolbar row. */
+function ReviewToolbarControls({ children }: { children: ReactNode }) {
+  const toolbarSlot = useContext(ReviewToolbarSlotContext);
   // The Review panel supplies a slot inside the top toolbar row so the two
   // rows collapse into one. Standalone renders fall back to a sticky bar.
-  if (toolbarSlot) return createPortal(controls, toolbarSlot);
+  if (toolbarSlot) return createPortal(children, toolbarSlot);
   return (
     <div className="sticky top-0 z-(--layer-dropdown) flex items-center gap-0.5 bg-background/95 px-2 py-1.5 border-b border-border backdrop-blur-sm">
-      {controls}
+      {children}
     </div>
+  );
+}
+
+/** Shows that a comparison refresh is running. */
+function RefreshProgress({ refreshInProgress }: { refreshInProgress: boolean }) {
+  if (!refreshInProgress) return null;
+  return (
+    <span
+      role="status"
+      aria-label="Refreshing comparison"
+      data-testid="review-refresh-progress"
+      className="inline-flex h-6 w-6 items-center justify-center text-muted/55"
+    >
+      <Spinner size={12} />
+    </span>
   );
 }
 
@@ -380,27 +418,15 @@ function FilesToggle({ filesVisible, onToggle }: FilesToggleProps) {
 
 /** Props for the review-options menu. */
 interface ReviewOptionsMenuProps {
-  activeThreadId: string | null;
-  refreshable: boolean;
   refreshInProgress: boolean;
+  /** Omitted where the comparison cannot change, which hides Refresh. */
   onRefresh?: () => void;
-  lineWrap: boolean;
-  toggleLineWrap: (threadId: string) => void;
-  allExpanded: boolean;
-  onToggleAll: () => void;
+  /** Options that act on shown diffs, absent when no diff is shown. */
+  children?: ReactNode;
 }
 
-/** Renders the options that change how the current review appears. */
-function ReviewOptionsMenu({
-  activeThreadId,
-  refreshable,
-  refreshInProgress,
-  onRefresh,
-  lineWrap,
-  toggleLineWrap,
-  allExpanded,
-  onToggleAll,
-}: ReviewOptionsMenuProps) {
+/** Renders Refresh and the options that change how the current review appears. */
+function ReviewOptionsMenu({ refreshInProgress, onRefresh, children }: ReviewOptionsMenuProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -411,7 +437,7 @@ function ReviewOptionsMenu({
         <MoreIcon size={13} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={6} className="min-w-[190px]">
-        {refreshable ? (
+        {onRefresh ? (
           <DropdownMenuItem
             label={refreshInProgress ? "Refreshing" : "Refresh"}
             icon={refreshInProgress ? <Spinner size={16} /> : <RefreshCw />}
@@ -420,24 +446,42 @@ function ReviewOptionsMenu({
             data-testid="review-option-refresh"
           />
         ) : null}
-        <DropdownMenuItem
-          label={lineWrap ? "Disable word wrap" : "Enable word wrap"}
-          icon={<TextWrap />}
-          disabledReason={activeThreadId ? null : "Open a thread to change word wrap"}
-          onClick={() => {
-            if (activeThreadId) toggleLineWrap(activeThreadId);
-          }}
-          data-testid="review-option-word-wrap"
-        />
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          label={allExpanded ? "Collapse all" : "Expand all"}
-          icon={allExpanded ? <ChevronsDownUp /> : <ChevronsUpDown />}
-          onClick={onToggleAll}
-          data-testid="review-option-toggle-all"
-        />
+        {children}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** Props for the diff display options. */
+interface ReviewDisplayItemsProps {
+  activeThreadId: string | null;
+  lineWrap: boolean;
+  toggleLineWrap: (threadId: string) => void;
+  allExpanded: boolean;
+  onToggleAll: () => void;
+}
+
+/** Menu items that change how shown diffs wrap and expand. */
+function ReviewDisplayItems({ activeThreadId, lineWrap, toggleLineWrap, allExpanded, onToggleAll }: ReviewDisplayItemsProps) {
+  return (
+    <>
+      <DropdownMenuItem
+        label={lineWrap ? "Disable word wrap" : "Enable word wrap"}
+        icon={<TextWrap />}
+        disabledReason={activeThreadId ? null : "Open a thread to change word wrap"}
+        onClick={() => {
+          if (activeThreadId) toggleLineWrap(activeThreadId);
+        }}
+        data-testid="review-option-word-wrap"
+      />
+      <DropdownMenuSeparator />
+      <DropdownMenuItem
+        label={allExpanded ? "Collapse all" : "Expand all"}
+        icon={allExpanded ? <ChevronsDownUp /> : <ChevronsUpDown />}
+        onClick={onToggleAll}
+        data-testid="review-option-toggle-all"
+      />
+    </>
   );
 }
 

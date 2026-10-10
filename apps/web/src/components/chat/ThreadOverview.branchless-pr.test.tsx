@@ -282,7 +282,7 @@ describe("ThreadOverview branchless Create PR", () => {
     mockCreateBranch.mockReset().mockResolvedValue({ branch: "feat/issue-801" });
     mockGetAutomaticSetup.mockReset();
     mockGetRightPanelVisible.mockReset().mockReturnValue(false);
-    mockGetReviewComparison.mockReset().mockResolvedValue({ files: [], additions: 0, deletions: 0 });
+    mockGetReviewComparison.mockReset().mockResolvedValue({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } });
     mockGetReviewState.mockReset().mockResolvedValue({ isGitRepo: false });
     mockGetWorkspaceSetupAttempt.mockReset().mockResolvedValue(null);
     invalidateBranchTargets("ws-1");
@@ -329,16 +329,26 @@ describe("ThreadOverview branchless Create PR", () => {
   });
 
   it("loads untracked changes from the branchless checkout comparison", async () => {
-    mockGetReviewComparison.mockResolvedValue({
+    mockGetReviewComparison.mockResolvedValue({ status: "ready", comparison: {
       files: [{ path: "notes.md", previousPath: null, changeType: "added", binary: false, additions: 4, deletions: 0, untracked: true }],
       additions: 4, deletions: 0,
-    });
+    } });
     render(<ThreadOverview thread={makeThread()} threadPaneWidth={1400} />);
     expect(await screen.findByTestId("thread-overview-change-summary")).toHaveAttribute("aria-label", "4 additions, 0 deletions");
     expect(mockGetReviewComparison).toHaveBeenCalledWith({
       workspaceId: "ws-1", threadId: "thread-1", view: "uncommitted",
     });
     expect(mockGetReviewState).not.toHaveBeenCalled();
+  });
+
+  it("says the Changes row is unavailable when its comparison fails", async () => {
+    mockGetReviewComparison.mockResolvedValue({
+      status: "failed", failure: { kind: "git-error", summary: "Git reported an error", detail: "fatal" },
+    });
+    render(<ThreadOverview thread={makeThread()} threadPaneWidth={1400} />);
+    expect(await screen.findByTestId("thread-overview-change-failed")).toHaveTextContent("Unavailable");
+    expect(screen.queryByTestId("thread-overview-change-loading")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("thread-overview-change-summary")).not.toBeInTheDocument();
   });
 
   it("keeps branch choices when the uncommitted comparison fails", async () => {
@@ -389,8 +399,8 @@ describe("ThreadOverview branchless Create PR", () => {
       commitsAhead: { count: 1, base: "main" }, branchDefault: { base: "main", compare: "HEAD" },
     });
     mockGetReviewComparison
-      .mockResolvedValueOnce({ files: [], additions: 0, deletions: 0 })
-      .mockResolvedValue({ files: [{ path: "existing.md", previousPath: null, changeType: "modified", binary: false, additions: 3, deletions: 1, untracked: false }], additions: 3, deletions: 1 });
+      .mockResolvedValueOnce({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } })
+      .mockResolvedValue({ status: "ready", comparison: { files: [{ path: "existing.md", previousPath: null, changeType: "modified", binary: false, additions: 3, deletions: 1, untracked: false }], additions: 3, deletions: 1 } });
     render(<ThreadOverview thread={makeThread()} threadPaneWidth={1400} />);
     expect(await screen.findByTestId("thread-overview-change-summary")).toHaveAttribute("aria-label", "3 additions, 1 deletions");
     expect(mockGetReviewState).toHaveBeenCalledWith("ws-1", "thread-1");

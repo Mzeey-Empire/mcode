@@ -75,7 +75,10 @@ export class FakeGitExecutor implements GitExecutor {
       const response = this.responses.get(key);
 
       if (response instanceof Error) throw response;
-      return response ?? { stdout: "", stderr: "" };
+      const result = response ?? { stdout: "", stderr: "" };
+      opts?.onStdout?.(result.stdout);
+      opts?.onStderr?.(result.stderr);
+      return opts?.retainStdout === false ? { ...result, stdout: "" } : result;
     });
   }
 

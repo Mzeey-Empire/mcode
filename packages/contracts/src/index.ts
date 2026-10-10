@@ -40,9 +40,12 @@ export type { TurnOutcome } from "./models/turn-outcome.js";
 
 export { WorkspaceSchema, WorkspaceEnrichmentSchema } from "./models/workspace.js";
 export type { Workspace, WorkspaceEnrichment } from "./models/workspace.js";
+export { FILE_LIST_MAX_PATHS, FILE_VIEW_TEXT_MAX_BYTES, FILE_CHANGES_MAX_ENTRIES, WORKSPACE_IMAGE_MAX_BYTES, WorkspaceFileListSchema, WorkspaceFileChangesSchema, FileReadResultSchema } from "./models/workspace-file.js";
+export type { WorkspaceFileList, WorkspaceFileChanges, FileReadResult } from "./models/workspace-file.js";
 
 export {
   WORKSPACE_ENVIRONMENT_VERSION,
+  WORKSPACE_ENVIRONMENT_LEGACY_VERSION,
   WORKSPACE_ENVIRONMENT_APPROVAL_CONTRACT_VERSION,
   WORKSPACE_ENVIRONMENT_SCRIPT_MAX_BYTES,
   WORKSPACE_ENVIRONMENT_COMMAND_MAX_BYTES,
@@ -86,7 +89,10 @@ export {
   WorkspaceEnvironmentAutomaticSetupTerminalInputSchema,
   WorkspaceEnvironmentAutomaticSetupTerminalSchema,
   WorkspaceEnvironmentActionSchema,
+  WorkspaceEnvironmentActionIdSchema,
+  WorkspaceEnvironmentActionIconIdSchema,
   WorkspaceEnvironmentDocumentSchema,
+  encodeEnvironmentDocument,
   DEFAULT_WORKSPACE_ENVIRONMENT_DOCUMENT,
   WorkspaceEnvironmentReadResultSchema,
   WorkspaceEnvironmentReadInputSchema,
@@ -520,11 +526,18 @@ export {
   ReviewFileChangeSchema,
   ReviewStateSchema,
   ReviewComparisonSchema,
+  ReviewComparisonResultSchema,
+  ReviewComparisonUnavailableSchema,
+  ReviewFileDiffResultSchema,
+  ReviewTurnSchema,
 } from "./models/review-comparison.js";
 export type {
   ReviewFileChange,
   ReviewState,
   ReviewComparison,
+  ReviewComparisonResult,
+  ReviewFileDiffResult,
+  ReviewTurn,
 } from "./models/review-comparison.js";
 
 export {
@@ -1536,4 +1549,6 @@ export type {
 } from "./providers/usage.js";
 
 export { LegacyTerminalRecordSchema } from "./ws/terminal-legacy.js";
+export { BrowserHistoryEntrySchema, BrowserServerThumbnailSchema, BrowserHistorySchema } from "./models/browser-preview.js";
+export type { BrowserHistoryEntry, BrowserServerThumbnail, BrowserHistory } from "./models/browser-preview.js";
 export type { LegacyTerminalRecord, LegacyTerminalCreateResult } from "./ws/terminal-legacy.js";

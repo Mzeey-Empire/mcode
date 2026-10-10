@@ -126,7 +126,7 @@ function shouldShowThinking(provider: string, modelId: string): boolean {
 /**
  * Model settings section: provider, default model, fallback model, reasoning effort
  * (only when the provider exposes an effort tier), utility model provider/model,
- * diff summary toggle, and CLI paths.
+ * and CLI paths.
  *
  * Default and fallback pickers merge live `listProviderModels` results with static
  * catalog fallbacks (needed for Cursor, Copilot, and Claude API discovery). Stale
@@ -150,7 +150,6 @@ export function ModelSection() {
   );
   const utilityProvider = useSettingsStore((s) => s.settings.model.utility.provider);
   const utilityModelId = useSettingsStore((s) => s.settings.model.utility.id);
-  const diffSummaryEnabled = useSettingsStore((s) => s.settings.diffSummary.enabled);
   const update = useSettingsStore((s) => s.update);
   const availabilityProviders = useProviderAvailabilityStore((s) => s.providers);
   const availabilityById = useMemo(
@@ -441,7 +440,6 @@ export function ModelSection() {
       utilityProviderOptions={utilityProviderOptions}
       utilityModelOptions={utilityModelOptions}
       utilityModelsLoading={utilityModelsLoading}
-      diffSummaryEnabled={diffSummaryEnabled}
       onProviderChange={handleProviderChange}
       onModelChange={handleModelChange}
       onFallbackChange={(value) => void update({ model: { defaults: { fallbackId: value } } })}
@@ -451,7 +449,6 @@ export function ModelSection() {
       onThinkingChange={(value) => update({ model: { defaults: { thinking: value === "on" } } })}
       onUtilityProviderChange={(value) => void update({ model: { utility: { provider: value as SettingsProviderId | "", id: "" } } })}
       onUtilityModelChange={(value) => void update({ model: { utility: { id: value } } })}
-      onDiffSummaryChange={(value) => update({ diffSummary: { enabled: value } })}
     />
   );
 }
@@ -481,7 +478,6 @@ interface ModelSettingsContentProps {
   utilityProviderOptions: ProviderOptions;
   utilityModelOptions: ModelPickerOptions;
   utilityModelsLoading: boolean;
-  diffSummaryEnabled: boolean;
   onProviderChange: (value: string) => void;
   onModelChange: (value: string) => void;
   onFallbackChange: (value: string) => void;
@@ -491,7 +487,6 @@ interface ModelSettingsContentProps {
   onThinkingChange: (value: string) => void;
   onUtilityProviderChange: (value: string) => void;
   onUtilityModelChange: (value: string) => void;
-  onDiffSummaryChange: (value: boolean) => void;
 }
 
 function ModelSettingsContent({
@@ -519,7 +514,6 @@ function ModelSettingsContent({
   utilityProviderOptions,
   utilityModelOptions,
   utilityModelsLoading,
-  diffSummaryEnabled,
   onProviderChange,
   onModelChange,
   onFallbackChange,
@@ -529,7 +523,6 @@ function ModelSettingsContent({
   onThinkingChange,
   onUtilityProviderChange,
   onUtilityModelChange,
-  onDiffSummaryChange,
 }: ModelSettingsContentProps) {
   return (
     <div data-testid="model-settings-section" className="mx-auto w-full max-w-[88rem] pb-10">
@@ -581,15 +574,6 @@ function ModelSettingsContent({
           onUtilityProviderChange={onUtilityProviderChange}
           onUtilityModelChange={onUtilityModelChange}
         />
-        <SettingsGroup title="AI features" description="Optional model-powered features.">
-          <SettingRow
-            label="Diff summary"
-            configKey="diffSummary.enabled"
-            hint="Show the Summarize toggle in the All turns diff."
-          >
-            <Switch checked={diffSummaryEnabled} onCheckedChange={onDiffSummaryChange} />
-          </SettingRow>
-        </SettingsGroup>
       </div>
     </div>
   );
@@ -776,12 +760,12 @@ function UtilityModelSettings({
   return (
     <SettingsGroup
       title="Utility model"
-      description="Provider and model for lightweight tasks such as PR drafts and diff summaries."
+      description="Provider and model for lightweight tasks such as PR drafts."
     >
       <SettingRow
         label="Provider"
         configKey="model.utility.provider"
-        hint="AI provider for lightweight tasks (PR drafts, diff summaries). Auto inherits from the default provider above."
+        hint="AI provider for lightweight tasks (PR drafts). Auto inherits from the default provider above."
       >
         <SettingsSelectPicker
           value={utilityProvider}

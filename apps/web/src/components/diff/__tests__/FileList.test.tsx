@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useDiffStore } from "@/stores/diffStore";
 import { pathsToReviewFiles } from "@/lib/review-comparison";
-import { FileList } from "../FileList";
+import { FileList, ReviewStateControls } from "../FileList";
 
 vi.mock("@/hooks/useOpenInApps", () => ({
   useOpenInApps: () => [],
@@ -172,4 +172,29 @@ describe("FileList jump to file", () => {
     );
     expect(useDiffStore.getState().reviewFileJumpRequest).toBeNull();
   }, 15_000);
+});
+
+describe("ReviewStateControls", () => {
+  it("offers Refresh and Files but no controls that act on shown diffs", async () => {
+    const onRefresh = vi.fn();
+    useDiffStore.setState({ reviewFilesVisibleByScope: {} });
+    render(<ReviewStateControls scopeId="thread-1" refreshable refreshing={false} onRefresh={onRefresh} />);
+
+    expect(screen.queryByTestId("review-file-jump-trigger")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("review-files-toggle"));
+    expect(useDiffStore.getState().reviewFilesVisibleByScope["thread-1"]).toBe(true);
+
+    await userEvent.click(screen.getByTestId("review-options-menu"));
+    const refresh = await screen.findByRole("menuitem", { name: /Refresh/ });
+    expect(screen.queryByTestId("review-option-toggle-all")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("review-option-word-wrap")).not.toBeInTheDocument();
+    await userEvent.click(refresh);
+    expect(onRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("drops the options menu where the comparison cannot change", () => {
+    render(<ReviewStateControls scopeId="thread-1" refreshable={false} refreshing={false} onRefresh={vi.fn()} />);
+    expect(screen.queryByTestId("review-options-menu")).not.toBeInTheDocument();
+    expect(screen.getByTestId("review-files-toggle")).toBeInTheDocument();
+  });
 });

@@ -38,6 +38,7 @@ export interface CanonicalParentTurnLifecycleOperations {
     input: CanonicalParentTurnStartInput,
     userMessage: Message,
     startedAt: string,
+    attemptOf: string | null,
   ): CanonicalAgentEventDraft[];
   parentTurnTerminalEvents(
     input: CanonicalParentTurnFinishInput,
@@ -77,6 +78,7 @@ export class CanonicalParentTurnLifecycle {
   /** Starts one parent execution and atomically projects its user message. */
   start(input: CanonicalParentTurnStartInput): CanonicalAgentCommitResult {
     let userMessage: Message | null = null;
+    let attemptOf: string | null = null;
     const startedAt = new Date().toISOString();
     const result = this.operations.commit({
       threadId: input.thread.id,
@@ -86,12 +88,17 @@ export class CanonicalParentTurnLifecycle {
       nativeCursor: input.providerIdentities.find((identity) => identity.provenance === "native"),
       replayGuard: "execution-started",
       projectCompatibility: () => {
+        if (input.retryOfExecutionId) {
+          const replaced = this.operations.loadTurnByExecution(input.retryOfExecutionId);
+          if (!replaced || replaced.threadId !== input.thread.id) throw new Error("Retry turn not found in this thread");
+          attemptOf = replaced.attemptOf ?? replaced.id;
+        }
         this.consumeRetry(input.retryOfExecutionId, startedAt);
         userMessage = input.projectUserMessage();
       },
       events: () => {
         if (!userMessage) throw new Error("Canonical user-message projection did not produce a row");
-        return this.operations.parentTurnStartEvents(input, userMessage, startedAt);
+        return this.operations.parentTurnStartEvents(input, userMessage, startedAt, attemptOf);
       },
     });
     this.operations.cacheExecution(input.executionId, input.turnId);

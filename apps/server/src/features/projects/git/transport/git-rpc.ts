@@ -1,3 +1,4 @@
+import { ReviewWorktreeMissingError, assertReviewWorktree, reviewComparisonFailure } from "../review-comparison-errors.js";
 import { WS_METHODS, type WsMethodName } from "@mcode/contracts";
 import type { z } from "zod";
 import type { HandoffCheckoutService } from "../../../handoff/checkout/handoff-checkout-service.js";
@@ -86,7 +87,7 @@ const gitHandlers: GitHandlerMap = {
         params.branch,
         params.limit,
         params.baseBranch,
-        resolveThreadRepoPath(deps, params.threadId),
+        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
         params.skip,
         params.includeStats,
       )
@@ -126,7 +127,7 @@ const gitHandlers: GitHandlerMap = {
       params.workspaceId,
       params.ref,
       params.filePath,
-      resolveThreadRepoPath(deps, params.threadId),
+      resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
     );
   },
   "git.branchDiff": (deps, params) =>
@@ -137,7 +138,7 @@ const gitHandlers: GitHandlerMap = {
         params.target,
         params.filePath,
         params.maxLines,
-        resolveThreadRepoPath(deps, params.threadId),
+        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
       )
       : "",
   "git.branchComparison": (deps, params) => {
@@ -147,7 +148,7 @@ const gitHandlers: GitHandlerMap = {
     const thread = params.threadId ? deps.threadRepo.findById(params.threadId) : null;
     return deps.gitComparison.resolveBranchComparison(
       params.workspaceId,
-      resolveThreadRepoPath(deps, params.threadId),
+      resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
       thread?.checkout_state === "branchless" ? thread.base_branch ?? thread.branch : null,
     );
   },
@@ -166,7 +167,7 @@ const gitHandlers: GitHandlerMap = {
         { base: params.base, target: params.target, sha: params.sha },
         resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
       )
-      : { files: [], additions: 0, deletions: 0 },
+      : { status: "unavailable", reason: "no-base" },
   "git.push": routeGitPush,
   "git.generateCommitMessage": (deps, params) => deps.commitMessages.generate(
     resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
@@ -195,7 +196,12 @@ export async function routeGitRpc<Method extends GitRpcMethod>(
   params: GitRpcParamsByMethod[Method],
   deps: GitRouterDeps,
 ): Promise<unknown> {
-  return await gitHandlers[method](deps, params);
+  try {
+    return await gitHandlers[method](deps, params);
+  } catch (error) {
+    if (method === "git.reviewComparison" && error instanceof ReviewWorktreeMissingError) return reviewComparisonFailure(error);
+    throw error;
+  }
 }
 
 function isGitWorkspace(deps: GitRouterDeps, workspaceId: string): boolean {
@@ -231,18 +237,6 @@ function broadcastThreadCheckoutChange(deps: GitRouterDeps, threadId: string): v
   });
 }
 
-function resolveThreadRepoPath(deps: GitRouterDeps, threadId?: string): string | undefined {
-  if (!threadId) return undefined;
-  const thread = deps.threadRepo.findById(threadId);
-  const workspace = thread ? deps.workspaceRepo.findById(thread.workspace_id) : null;
-  if (!thread || !workspace) return undefined;
-  return deps.gitWorktrees.resolveWorkingDir(
-    workspace.path,
-    thread.mode,
-    thread.worktree_path,
-  );
-}
-
 function resolveWorkspaceRepoPath(
   deps: GitRouterDeps,
   workspaceId: string,
@@ -260,11 +254,10 @@ function resolveWorkspaceRepoPath(
   if (thread.workspace_id !== workspaceId) {
     throw new Error(`Thread ${threadId} does not belong to workspace ${workspaceId}`);
   }
-  return deps.gitWorktrees.resolveWorkingDir(
-    workspace.path,
-    thread.mode,
-    thread.worktree_path,
-  );
+  if (thread.mode === "worktree" && !thread.worktree_path) throw new ReviewWorktreeMissingError("Thread worktree path is missing");
+  const cwd = deps.gitWorktrees.resolveWorkingDir(workspace.path, thread.mode, thread.worktree_path);
+  assertReviewWorktree(cwd);
+  return cwd;
 }
 
 async function routeGitPush(

@@ -36,7 +36,7 @@ function fixture() {
     conversationRevision: 1, rosterRevision: 0, createdAt: NOW, updatedAt: NOW } });
   const admission = event(2, 2, { type: "turn.created", turn: { id: TURN, threadId: THREAD,
     executionId: EXECUTION, status: "Pending", trigger: { kind: "user" }, permissionMode: "full",
-    approvalReviewMode: "manual", approvalReviewReason: "manual-requested", providerIdentities: [],
+    approvalReviewMode: "manual", approvalReviewReason: "manual-requested", attemptOf: null, providerIdentities: [],
     startedAt: null, providerStartedAt: null, endedAt: null, createdAt: NOW, updatedAt: NOW } });
   const started = event(3, 3, { type: "turn.started", startedAt: NOW });
   const prefix = event(4, 4, { type: "item.recorded", item: { id: "closed-prefix", threadId: THREAD,

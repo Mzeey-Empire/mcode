@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { TurnSnapshot, BranchComparison } from "@mcode/contracts";
+import type { TurnSnapshot, BranchComparison, ReviewTurn } from "@mcode/contracts";
 import { defaultReviewView, type ReviewChangeState } from "@/lib/review-views";
 
 export type { BranchComparison };
@@ -497,13 +497,12 @@ interface DiffState {
   snapshotsByThread: Record<string, TurnSnapshot[]>;
   /** Whether snapshots are currently loading, keyed by thread ID. */
   snapshotsLoadingByThread: Record<string, boolean>;
-  /**
-   * Whether a deferred snapshot refresh is pending for a thread, keyed by thread ID.
-   * Set when a new turn persists while the user is actively viewing the "All" changes
-   * view; the CumulativeView surfaces a refresh affordance instead of auto-refetching
-   * so the user's scroll position and reading flow aren't disrupted.
-   */
-  snapshotsPendingByThread: Record<string, boolean>;
+  /** Server-ordered Review turns keyed by thread ID; ordinals survive snapshot expiry. */
+  reviewTurnsByThread: Record<string, ReviewTurn[]>;
+  /** Why the last turn-list request failed, keyed by thread ID; cleared when a list arrives. */
+  reviewTurnsErrorByThread: Record<string, string>;
+  /** Whether the Review view menu is open; state bodies open it to offer another view. */
+  reviewViewMenuOpen: boolean;
   /**
    * Inline diff cache keyed by `"threadId:source:id:version:filePath"`. Survives
    * component unmounts (panel close/reopen, tab switches) so diffs aren't
@@ -516,18 +515,6 @@ interface DiffState {
    * checkout without changing the visible ref names.
    */
   diffRevisionByScope: Record<string, number>;
-  /** Persisted diff summary for the current thread. */
-  summaryRecord: {
-    id: string;
-    threadId: string;
-    content: string;
-    turnCount: number;
-    lastTurnId: string | null;
-    model: string;
-    createdAt: string;
-  } | null;
-  /** Whether a summary is currently being generated. */
-  summaryLoading: boolean;
   /**
    * Effective panel record for a scope: the thread's own record when it has
    * diverged, otherwise the workspace fallback (ADR-0012 copy-on-write read).
@@ -656,12 +643,12 @@ interface DiffState {
   toggleLineWrap: (threadId: string) => void;
   setSnapshots: (threadId: string, snapshots: TurnSnapshot[]) => void;
   setSnapshotsLoading: (threadId: string, loading: boolean) => void;
-  /** Flag a thread's all-changes view as having upstream changes not yet reflected. */
-  markSnapshotsPending: (threadId: string, pending: boolean) => void;
-  /** Set the loaded summary record. */
-  setSummaryRecord: (record: DiffState["summaryRecord"]) => void;
-  /** Set summary loading state. */
-  setSummaryLoading: (loading: boolean) => void;
+  /** Store the server's turn list for a thread. */
+  setReviewTurns: (threadId: string, turns: ReviewTurn[]) => void;
+  /** Record that the thread's turn list could not be loaded, or clear it with null when a new request starts. */
+  setReviewTurnsError: (threadId: string, detail: string | null) => void;
+  /** Open or close the Review view menu. */
+  setReviewViewMenuOpen: (open: boolean) => void;
   /** Cache a fetched inline diff so it survives component unmounts. */
   cacheInlineDiff: (threadId: string, source: string, id: string, filePath: string, data: string, cacheVersion: string | number) => void;
   /** Retrieve a cached inline diff, or undefined if not cached. */
@@ -700,11 +687,11 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   lineWrapByThread: {},
   snapshotsByThread: {},
   snapshotsLoadingByThread: {},
-  snapshotsPendingByThread: {},
+  reviewTurnsByThread: {},
+  reviewTurnsErrorByThread: {},
+  reviewViewMenuOpen: false,
   inlineDiffCache: {},
   diffRevisionByScope: {},
-  summaryRecord: null,
-  summaryLoading: false,
 
   getRightPanel: (workspaceId, threadId) =>
     effectiveRightPanel(get(), workspaceId, threadId),
@@ -1013,30 +1000,31 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       };
     }),
   setSnapshots: (threadId, snapshots) =>
-    set((s) => {
-      const nextPending = { ...s.snapshotsPendingByThread };
-      delete nextPending[threadId];
-      return {
-        snapshotsByThread: { ...s.snapshotsByThread, [threadId]: snapshots },
-        snapshotsLoadingByThread: { ...s.snapshotsLoadingByThread, [threadId]: false },
-        snapshotsPendingByThread: nextPending,
-        inlineDiffCache: omitInlineDiffCacheByPrefix(
-          s.inlineDiffCache,
-          `${threadId}:cumulative:${threadId}:`,
-        ),
-      };
-    }),
+    set((s) => ({
+      snapshotsByThread: { ...s.snapshotsByThread, [threadId]: snapshots },
+      snapshotsLoadingByThread: { ...s.snapshotsLoadingByThread, [threadId]: false },
+      inlineDiffCache: omitInlineDiffCacheByPrefix(
+        s.inlineDiffCache,
+        `${threadId}:cumulative:${threadId}:`,
+      ),
+    })),
   setSnapshotsLoading: (threadId, loading) =>
     set((s) => ({ snapshotsLoadingByThread: { ...s.snapshotsLoadingByThread, [threadId]: loading } })),
-  markSnapshotsPending: (threadId, pending) =>
+  setReviewTurns: (threadId, turns) =>
     set((s) => {
-      const next = { ...s.snapshotsPendingByThread };
-      if (pending) next[threadId] = true;
-      else delete next[threadId];
-      return { snapshotsPendingByThread: next };
+      const reviewTurnsErrorByThread = { ...s.reviewTurnsErrorByThread };
+      delete reviewTurnsErrorByThread[threadId];
+      return { reviewTurnsByThread: { ...s.reviewTurnsByThread, [threadId]: turns }, reviewTurnsErrorByThread };
     }),
-  setSummaryRecord: (record) => set({ summaryRecord: record }),
-  setSummaryLoading: (loading) => set({ summaryLoading: loading }),
+  setReviewTurnsError: (threadId, detail) =>
+    set((s) => {
+      if (detail !== null) return { reviewTurnsErrorByThread: { ...s.reviewTurnsErrorByThread, [threadId]: detail } };
+      if (!(threadId in s.reviewTurnsErrorByThread)) return s;
+      const reviewTurnsErrorByThread = { ...s.reviewTurnsErrorByThread };
+      delete reviewTurnsErrorByThread[threadId];
+      return { reviewTurnsErrorByThread };
+    }),
+  setReviewViewMenuOpen: (open) => set({ reviewViewMenuOpen: open }),
   cacheInlineDiff: (threadId, source, id, filePath, data, cacheVersion) =>
     set((s) => ({
       inlineDiffCache: { ...s.inlineDiffCache, [inlineDiffCacheKey(threadId, source, id, filePath, cacheVersion)]: data },
@@ -1063,8 +1051,10 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete snapshots[threadId];
       const snapshotsLoading = { ...state.snapshotsLoadingByThread };
       delete snapshotsLoading[threadId];
-      const snapshotsPending = { ...state.snapshotsPendingByThread };
-      delete snapshotsPending[threadId];
+      const reviewTurns = { ...state.reviewTurnsByThread };
+      delete reviewTurns[threadId];
+      const reviewTurnsErrors = { ...state.reviewTurnsErrorByThread };
+      delete reviewTurnsErrors[threadId];
       const previewUrls = { ...state.previewUrlByThread };
       delete previewUrls[threadId];
       const lineWrapByThread = { ...state.lineWrapByThread };
@@ -1097,12 +1087,11 @@ export const useDiffStore = create<DiffState>((set, get) => ({
 
       const inlineDiffCache = omitInlineDiffCacheByPrefix(state.inlineDiffCache, `${threadId}:`);
 
-      const summaryBelongsToThread = state.summaryRecord?.threadId === threadId;
-
       return {
         snapshotsByThread: snapshots,
         snapshotsLoadingByThread: snapshotsLoading,
-        snapshotsPendingByThread: snapshotsPending,
+        reviewTurnsByThread: reviewTurns,
+        reviewTurnsErrorByThread: reviewTurnsErrors,
         previewUrlByThread: previewUrls,
         lineWrapByThread,
         rightPanelByThread,
@@ -1116,9 +1105,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         branchManuallySelectedByScope,
         branchResolvedRevisionByScope,
         inlineDiffCache,
-        ...(summaryBelongsToThread
-          ? { summaryRecord: null, summaryLoading: false }
-          : {}),
       };
     }),
   clearWorkspace: (workspaceId) =>

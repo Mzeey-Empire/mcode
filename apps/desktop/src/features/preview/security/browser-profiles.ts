@@ -4,6 +4,7 @@ import { app, session, type Session } from "electron";
 import { browserPartitionFor, isBrowserWorkspaceId } from "@mcode/shared/browser-partition";
 import { installBrowserSessionPolicy } from "./electron-session-policy.js";
 import { disposePreviewSurfacesForWorkspace } from "../surfaces/registry.js";
+import { BrowserHistoryStore } from "../profiles/history-store.js";
 
 /** Injectable Electron boundaries; file operations stay inside the supplied data directories. */
 export interface BrowserProfilesOptions {
@@ -33,6 +34,8 @@ function profileIds(directory: string, prefix = ""): string[] {
 
 /** Owns one persistent Electron session and its local Browser data per workspace. */
 export class BrowserProfiles {
+  /** History shares this owner's removal tombstones and user-data directory. */
+  public readonly history: BrowserHistoryStore;
   private readonly sessions = new Map<string, Session>();
   private readonly removals = new Map<string, Promise<void>>();
   private readonly removed = new Set<string>();
@@ -45,7 +48,12 @@ export class BrowserProfiles {
     sessionFromPartition: (partition) => session.fromPartition(partition),
     installPolicy: installBrowserSessionPolicy,
     releaseWorkspace: disposePreviewSurfacesForWorkspace,
-  }) {}
+  }) {
+    this.history = new BrowserHistoryStore({
+      userDataPath: options.userDataPath,
+      isRemoved: (id) => this.isRemoved(id),
+    });
+  }
 
   /** Removes the retired jar once, before opening any Browser session. */
   public initialize(): void {
@@ -100,6 +108,7 @@ export class BrowserProfiles {
     const pending = this.removals.get(id);
     if (pending) return pending;
     this.removed.add(id);
+    this.history.forget(id);
     const removal = this.removeProfile(id);
     this.removals.set(id, removal);
     void removal.catch(() => this.removals.delete(id));

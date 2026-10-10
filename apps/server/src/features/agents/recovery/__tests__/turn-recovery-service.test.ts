@@ -687,7 +687,29 @@ describe("TurnRecoveryService", () => {
 
     expect(sink.listInterruptedCheckpoints()).toEqual([]);
     expect(sink.loadCheckpoint(EXECUTION_ID)?.phase).toBe("retried");
+    expect(sink.loadTurn(TURN_ID)?.attemptOf).toBeNull();
+    expect(sink.loadTurn("turn-retry")?.attemptOf).toBe(TURN_ID);
     expect(service.currentRecoveryIncident()).toBeNull();
+
+    sink.finishParentTurn({ threadId: THREAD_ID, turnId: "turn-retry", executionId: "00000000-0000-4000-8000-000000000016",
+      providerId: "codex", providerIdentities: [], outcome: "errored", error: "failed again", projectTurn: () => ({ message: null, narrative: [] }) });
+    sink.startParentTurn({ thread: { id: THREAD_ID, workspaceId: "workspace-recovery", providerId: "codex", createdAt: NOW },
+      turnId: "turn-retry-again", executionId: "00000000-0000-4000-8000-000000000017", permissionMode: "supervised", providerIdentities: [],
+      retryOfExecutionId: "00000000-0000-4000-8000-000000000016", projectUserMessage: () => messageRepo.create(THREAD_ID, "user", "Retry again", 3) });
+    expect(sink.loadTurn("turn-retry-again")?.attemptOf).toBe(TURN_ID);
+    expect(sink.loadCheckpoint("00000000-0000-4000-8000-000000000016")?.phase).toBe("retried");
+  });
+
+  it("rolls back the attempt link and retry consumption when starting fails", () => {
+    sink.finishParentTurn({ threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, providerId: "codex", providerIdentities: [],
+      outcome: "errored", error: "failed", projectTurn: () => ({ message: null, narrative: [] }) });
+    expect(() => sink.startParentTurn({ thread: { id: THREAD_ID, workspaceId: "workspace-recovery", providerId: "codex", createdAt: NOW },
+      turnId: "failed-start", executionId: "00000000-0000-4000-8000-000000000018", permissionMode: "supervised", providerIdentities: [],
+      retryOfExecutionId: EXECUTION_ID, projectUserMessage: () => { throw new Error("Projection failed"); },
+    })).toThrow();
+    expect(sink.loadCheckpoint(EXECUTION_ID)?.phase).toBe("errored");
+    expect(sink.loadTurn("failed-start")).toBeNull();
+    expect(sink.loadCheckpoint("00000000-0000-4000-8000-000000000018")).toBeNull();
   });
 
   it("rejects a provider failure outside the current restart incident", async () => {

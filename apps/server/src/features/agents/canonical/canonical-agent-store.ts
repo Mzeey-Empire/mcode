@@ -468,8 +468,8 @@ export class CanonicalAgentStore {
     });
     this.parentLifecycle = new CanonicalParentTurnLifecycle(db, {
       commit: (input) => this.commit(input),
-      parentTurnStartEvents: (input, userMessage, startedAt) =>
-        this.parentTurnStartEvents(input, userMessage, startedAt),
+      parentTurnStartEvents: (input, userMessage, startedAt, attemptOf) =>
+        this.parentTurnStartEvents(input, userMessage, startedAt, attemptOf),
       parentTurnTerminalEvents: (input, projection, endedAt) =>
         this.parentTurnTerminalEvents(input, projection, endedAt),
       cacheExecution: (executionId, turnId) => this.cacheTurnExecution(executionId, turnId),
@@ -2578,6 +2578,7 @@ export class CanonicalAgentStore {
     },
     message: Message,
     startedAt: string,
+    attemptOf: string | null,
   ): CanonicalAgentEventDraft[] {
     const sourceIdentities = [...input.providerIdentities];
     const routing = { threadId: input.thread.id, turnId: input.turnId, executionId: input.executionId };
@@ -2614,6 +2615,7 @@ export class CanonicalAgentStore {
           type: "turn.created",
           turn: {
             id: input.turnId,
+            attemptOf,
             threadId: input.thread.id,
             status: "Pending",
             trigger: { kind: "user" },
@@ -2826,31 +2828,15 @@ export class CanonicalAgentStore {
     draft: CanonicalAgentEventDraft,
     stored: CanonicalAgentEventEnvelope,
   ): void {
-    const storedPayload = stored.payload.type === "thread.recorded"
-      && draft.payload.type === "thread.recorded"
-      ? {
-          ...stored.payload,
-          thread: {
-            ...stored.payload.thread,
-            conversationRevision: draft.payload.thread.conversationRevision,
-          },
-        }
-      : stored.payload;
-    const comparable = {
-      eventId: stored.eventId,
-      routing: stored.routing,
-      sourceProviderId: stored.sourceProviderId,
-      sourceIdentities: stored.sourceIdentities,
-      sourceSequence: stored.sourceSequence,
-      providerTimestamp: stored.providerTimestamp,
-      payload: storedPayload,
-    };
-    const { ingestClass: _ingestClass, ...comparableDraft } = draft;
-    const normalizedDraft = JSON.parse(JSON.stringify({
-      ...comparableDraft,
-      sourceIdentities: [...draft.sourceIdentities],
-    }));
-    if (JSON.stringify(normalizedDraft) !== JSON.stringify(JSON.parse(JSON.stringify(comparable)))) {
+    // Build the draft exactly as it was stored so schema defaults and key order
+    // match; a raw draft omits defaulted fields such as a turn's attemptOf.
+    const replayed = this.createEnvelope(
+      draft,
+      stored.acceptedSequence,
+      stored.durableRevision,
+      stored.serverTimestamps.acceptedAt,
+    );
+    if (JSON.stringify(duplicateIdentity(replayed)) !== JSON.stringify(duplicateIdentity(stored))) {
       throw new Error(`Canonical event identity conflict: ${draft.eventId}`);
     }
   }
@@ -3566,6 +3552,7 @@ export class CanonicalAgentStore {
       id: placeholder("id"),
       threadId: placeholder("threadId"),
       executionId: placeholder("executionId"),
+      attemptOf: placeholder("attemptOf"),
       status: placeholder("status"),
       triggerJson: placeholder("triggerJson"),
       permissionMode: placeholder("permissionMode"),
@@ -3580,6 +3567,7 @@ export class CanonicalAgentStore {
     }).onConflictDoUpdate({
       target: canonicalAgentTurns.id,
       set: {
+        attemptOf: sql`excluded.attempt_of`,
         status: sql`excluded.status`,
         approvalReviewMode: sql`excluded.approval_review_mode`,
         approvalReviewReason: sql`excluded.approval_review_reason`,
@@ -3599,6 +3587,7 @@ export class CanonicalAgentStore {
       threadId: parsed.threadId,
       executionId,
       status: parsed.status,
+      attemptOf: parsed.attemptOf,
       triggerJson: JSON.stringify(parsed.trigger),
       permissionMode: parsed.permissionMode,
       approvalReviewMode: parsed.approvalReviewMode,
@@ -3859,6 +3848,7 @@ export class CanonicalAgentStore {
       providerIdentities: JSON.parse(String(row.providerIdentitiesJson)),
       startedAt: row.startedAt,
       providerStartedAt: row.providerStartedAt,
+      attemptOf: row.attemptOf,
       endedAt: row.endedAt,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
@@ -3927,6 +3917,19 @@ export class CanonicalAgentStore {
     }
     return rows.map((row) => this.checkpointFromRow(row));
   }
+}
+
+/** Envelope fields a duplicate submission must reproduce; server-assigned fields are excluded. */
+function duplicateIdentity(envelope: CanonicalAgentEventEnvelope) {
+  return {
+    eventId: envelope.eventId,
+    routing: envelope.routing,
+    sourceProviderId: envelope.sourceProviderId,
+    sourceIdentities: envelope.sourceIdentities,
+    sourceSequence: envelope.sourceSequence,
+    providerTimestamp: envelope.providerTimestamp,
+    payload: envelope.payload,
+  };
 }
 
 function requiredObservedRecord<RecordValue>(record: RecordValue | undefined): RecordValue {

@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import * as NodeFS from "fs";
 import type { WorkspaceRepo } from "../../persistence/workspace-repo.js";
 import { GitComparisonService } from "../git-comparison-service.js";
 import { GitRepositoryService } from "../git-repository-service.js";
@@ -109,7 +110,8 @@ function verifiedHeadScenarioResponse(
   scenario: ReturnType<typeof resolveBranchComparisonScenario>,
 ): GitScenarioResponse | null {
   if (!args.includes("rev-parse") || !args.includes("--verify")) return null;
-  if (!scenario.hasCommits) throw new Error("unborn");
+  // `rev-parse --verify --quiet HEAD` exits 1 with no stderr on an unborn branch.
+  if (!scenario.hasCommits) throw Object.assign(new Error("unborn"), { code: 1, stderr: "" });
   return { stdout: "deadbeef\n", stderr: "" };
 }
 
@@ -400,6 +402,7 @@ describe("GitComparisonService branch comparison ranges", () => {
       new GitRepositoryService(workspaceRepo, mock.executor),
     );
     execFn.mockResolvedValue({ stdout: "a.ts\nb.ts", stderr: "" });
+    vi.mocked(NodeFS.existsSync).mockReturnValue(true);
   });
 
 
@@ -415,7 +418,7 @@ describe("GitComparisonService branch comparison ranges", () => {
   it("rejects a ref that could smuggle a git flag (argument injection)", async () => {
     await expect(
       gitService.readReviewComparison("ws", "branch", { base: "--output=/tmp/pwned", target: "HEAD" }, REPO),
-    ).rejects.toThrow(/unsafe git ref/i);
+    ).resolves.toMatchObject({ status: "failed", failure: { kind: "unsafe-ref" } });
     await expect(
       gitService.readBranchComparisonDiff("ws", "main", "-rf", undefined, undefined, REPO),
     ).rejects.toThrow(/unsafe git ref/i);
@@ -437,7 +440,7 @@ describe("GitComparisonService branch comparison ranges", () => {
     );
   });
 
-  it("returns an explicit empty list when no default base is detected", async () => {
+  it("reports no base when no default base is detected", async () => {
     execFn.mockImplementation(async (args: string[]) => {
       if (args.includes("symbolic-ref")) throw new Error("no origin head");
       if (args.includes("remote")) throw new Error("no origin");
@@ -445,9 +448,9 @@ describe("GitComparisonService branch comparison ranges", () => {
       return { stdout: "a.ts", stderr: "" };
     });
 
-    const files = await gitService.readReviewComparison("ws", "branch", {}, REPO);
+    const result = await gitService.readReviewComparison("ws", "branch", {}, REPO);
 
-    expect(files).toEqual({ files: [], additions: 0, deletions: 0 });
+    expect(result).toEqual({ status: "unavailable", reason: "no-base" });
     expect(execFn).not.toHaveBeenCalledWith(
       expect.arrayContaining(["diff"]),
       expect.anything(),

@@ -1,5 +1,5 @@
 import type { ReviewState } from "@mcode/contracts";
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
@@ -18,7 +18,8 @@ import { CommitPicker } from "./CommitPicker";
 import { TurnPicker } from "./TurnPicker";
 import { ReviewActions } from "./ReviewActions";
 import { DiffStat } from "./DiffStat";
-import { PanelHeaderSlot, usePanelHeaderMenuOpen } from "@/components/panels/shell/PanelHeader";
+import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
+import { OverlayGateContext } from "@/components/ui/overlay-gate";
 
 type CommitAvailability = "loading" | "available" | "empty";
 type BranchAvailability = "loading" | "available" | "empty";
@@ -54,8 +55,21 @@ export function DiffToolbar({
   const setViewMode = useDiffStore((s) => s.setViewMode);
   const setReviewViewForThread = useDiffStore((s) => s.setReviewViewForThread);
   const getReviewView = useDiffStore((s) => s.getReviewView);
-  const [viewMenuOpen, setViewMenuOpen] = usePanelHeaderMenuOpen();
+  const viewMenuOpen = useDiffStore((s) => s.reviewViewMenuOpen);
+  const setViewMenuOpen = useDiffStore((s) => s.setReviewViewMenuOpen);
+  // The gate hides the menu while Review or the panel is hidden; clearing the
+  // shared flag keeps it from popping back open when Review returns.
+  const overlaysOpen = useContext(OverlayGateContext);
+  useEffect(() => {
+    if (!overlaysOpen && viewMenuOpen) setViewMenuOpen(false);
+  }, [overlaysOpen, viewMenuOpen, setViewMenuOpen]);
   const [reviewProbeNonce, setReviewProbeNonce] = useState(0);
+  // The menu can also be opened from a review state body ("Choose another
+  // view"), so the availability probe follows the shared open flag.
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- Opening the view menu must re-probe repository state, whichever surface opened it.
+    if (viewMenuOpen) setReviewProbeNonce((nonce) => nonce + 1);
+  }, [viewMenuOpen]);
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const activeThread = useWorkspaceStore(
@@ -124,12 +138,7 @@ export function DiffToolbar({
       branchAvailability={branchAvailability}
       commitAvailability={commitAvailability}
       diffScopeRevision={diffScopeRevision}
-      onViewMenuOpenChange={(open) => {
-        setViewMenuOpen(open);
-        if (open) {
-          setReviewProbeNonce((nonce) => nonce + 1);
-        }
-      }}
+      onViewMenuOpenChange={setViewMenuOpen}
       reviewDiffStat={reviewDiffStat}
       reviewFileCount={reviewFileCount}
       setReviewViewForThread={setReviewViewForThread}

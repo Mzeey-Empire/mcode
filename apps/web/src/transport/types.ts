@@ -1,8 +1,13 @@
 // Import shared types for local use in the McodeTransport interface.
 import type {
   DiffStats,
+  WorkspaceFileList,
+  WorkspaceFileChanges,
+  FileReadResult,
   FilesystemBrowseResult,
-  ReviewComparison,
+  ReviewComparisonResult,
+  ReviewFileDiffResult,
+  ReviewTurn,
   Workspace,
   WorkspaceCreateResult,
   WorkspaceEnrichment,
@@ -542,8 +547,9 @@ export interface McodeTransport {
   getVersion(): Promise<string>;
 
   // File operations (@ file tagging)
-  listWorkspaceFiles(workspaceId: string, threadId?: string): Promise<string[]>;
-  readFileContent(workspaceId: string, relativePath: string, threadId?: string): Promise<string>;
+  listWorkspaceFiles(workspaceId: string, threadId?: string): Promise<WorkspaceFileList>;
+  getWorkspaceFileChanges(workspaceId: string, threadId?: string): Promise<WorkspaceFileChanges>;
+  readFileContent(workspaceId: string, relativePath: string, threadId?: string, as?: "text"): Promise<FileReadResult>;
   refreshWorkspaceFiles(workspaceId: string, threadId?: string): Promise<void>;
 
   // Open-in app actions
@@ -736,21 +742,22 @@ export interface McodeTransport {
 
   // Snapshots
   /** Get a unified diff for a specific file from a turn snapshot. */
-  getSnapshotDiff(snapshotId: string, filePath?: string, maxLines?: number): Promise<string>;
+  getSnapshotDiff(snapshotId: string, filePath?: string, maxLines?: number): Promise<ReviewFileDiffResult>;
   /** Read the active or settled Last turn comparison, or one picked turn when `messageId` is given. */
-  getTurnDiffComparison(threadId: string, messageId?: string): Promise<ReviewComparison | null>;
+  getTurnDiffComparison(threadId: string, messageId?: string): Promise<ReviewComparisonResult>;
   /** Read a file from one exact native or fallback comparison. */
-  getTurnDiffFile(threadId: string, comparisonId: string, filePath: string): Promise<string>;
+  getTurnDiffFile(threadId: string, comparisonId: string, filePath: string): Promise<ReviewFileDiffResult>;
   /** Get per-file change classification and line counts for a turn snapshot. */
-  getSnapshotDiffStats(snapshotId: string): Promise<DiffStats[]>;
+  getSnapshotDiffStats(snapshotId: string): Promise<DiffStats[] | Exclude<ReviewComparisonResult, { status: "ready" }>>;
   /** Run garbage collection on expired snapshot refs. */
   cleanupSnapshots(): Promise<{ removed: number }>;
   /** List all turn snapshots for a thread, ordered by creation time. */
   listSnapshots(threadId: string): Promise<TurnSnapshot[]>;
   /** Get cumulative diff across all turns for a thread. Implemented in Phase 3. */
-  getCumulativeDiff(threadId: string, filePath?: string, maxLines?: number): Promise<string>;
+  listReviewTurns(threadId: string): Promise<ReviewTurn[]>;
+  getCumulativeDiff(threadId: string, filePath?: string, maxLines?: number): Promise<ReviewFileDiffResult>;
   /** Return authoritative net file stats from the first turn ref to the final turn ref. */
-  getCumulativeDiffStats(threadId: string): Promise<DiffStats[]>;
+  getCumulativeDiffStats(threadId: string): Promise<ReviewComparisonResult>;
   /** Get commit log for a workspace branch. Pass threadId so the server runs git from the thread's worktree path. */
   getGitLog(
     workspaceId: string,
@@ -784,7 +791,7 @@ export interface McodeTransport {
     target?: string;
     sha?: string;
     threadId?: string;
-  }): Promise<import("@mcode/contracts").ReviewComparison>;
+  }): Promise<import("@mcode/contracts").ReviewComparisonResult>;
 
   // GitHub PR (advanced)
   /** Push a branch to the remote. */
@@ -823,27 +830,6 @@ export interface McodeTransport {
   /** Fetch the current availability snapshot for all registered providers. */
   listProviderAvailability(): Promise<ProviderAvailability[]>;
 
-  // Diff summaries
-  /** Fetch the stored diff summary for a thread, or null if none exists. */
-  getDiffSummary(threadId: string): Promise<{
-    id: string;
-    threadId: string;
-    content: string;
-    turnCount: number;
-    lastTurnId: string | null;
-    model: string;
-    createdAt: string;
-  } | null>;
-  /** Generate (or regenerate) an AI-powered diff summary for a thread. */
-  generateDiffSummary(threadId: string): Promise<{
-    id: string;
-    threadId: string;
-    content: string;
-    turnCount: number;
-    lastTurnId: string | null;
-    model: string;
-    createdAt: string;
-  }>;
   /** Generate a stateless one-line conversational recap from bounded messages. */
   generateRecap(
     threadId: string,

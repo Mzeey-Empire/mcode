@@ -48,7 +48,6 @@ import { ProtectedEnvStore } from "../../runtime/environment/protected-env-store
 import { ShellEnvResolver } from "../../runtime/environment/shell-env-resolver.js";
 import { EnvService } from "../../runtime/environment/env-service.js";
 import { UtilityCompletionService } from "../../shared/completion/utility-completion-service.js";
-import { DiffSummaryService } from "../../features/projects/diffs/summaries/diff-summary-service.js";
 import { RecapService } from "../../features/agents/recap/recap-service.js";
 import { RealGitExecutor } from "../../features/projects/git/execution/index.js";
 import { registerBrowserAutomation } from "../../features/browser-automation/composition/register-browser-automation.js";
@@ -246,11 +245,6 @@ export async function setupContainer(mcodeDir: string): Promise<typeof container
   container.register(
     UtilityCompletionService,
     { useClass: UtilityCompletionService },
-    { lifecycle: Lifecycle.Singleton },
-  );
-  container.register(
-    DiffSummaryService,
-    { useClass: DiffSummaryService },
     { lifecycle: Lifecycle.Singleton },
   );
   container.register(

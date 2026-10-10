@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 import * as NodeChildProcess from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "bun:sqlite";
-import { ReviewComparisonSchema } from "@mcode/contracts";
+import { ReviewComparisonResultSchema } from "@mcode/contracts";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { ThoughtSegmentRepo } from "../../conversation/narrative/persistence/thought-segment-repo.js";
@@ -23,11 +23,17 @@ import { routeSnapshotRpc } from "../../../projects/diffs/transport/snapshot-rpc
 import { TurnDiffRepo } from "../persistence/turn-diff-repo.js";
 import { TurnSnapshotRepo } from "../persistence/turn-snapshot-repo.js";
 import { TurnDiffService } from "../turn-diff-service.js";
+import { TurnSnapshotRangeReader } from "../../../projects/diffs/snapshots/turn-snapshot-range.js";
 
+function readyComparison(value: unknown) {
+  const result = ReviewComparisonResultSchema().parse(value);
+  if (result.status !== "ready") throw new Error(JSON.stringify(result));
+  return result.comparison;
+}
 const identity = { threadId: "thread-1", turnId: "turn-1", turnExecutionId: "execution-1", deliveryAttempt: 1 };
 const nativePatch = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,2 @@\n-AGENT=before\n+AGENT=after\n USER=before\n";
 
-describe("Last turn Review public comparison boundary", () => {
+describe("Last turn Review public comparison boundary", { timeout: 30_000 }, () => {
   let db: Database;
   let setup: Database;
   let directory: string;
@@ -53,6 +59,7 @@ describe("Last turn Review public comparison boundary", () => {
     snapshots = new TurnSnapshotRepo(db, writer());
     snapshotService = new SnapshotService(new RealGitExecutor());
     deps = { turnDiffs: new TurnDiffService(new TurnDiffRepo(db, writer())), turnSnapshotRepo: snapshots,
+      turnSnapshotRanges: new TurnSnapshotRangeReader(db, snapshots), sweepSnapshotPins: async () => {},
       snapshotService, threadService: new ThreadRepo(db, writer()), workspaceService: new WorkspaceRepo(db, writer()),
       gitWorktrees: { resolveWorkingDir: GitWorktreeService.prototype.resolveWorkingDir } };
   });
@@ -79,13 +86,13 @@ describe("Last turn Review public comparison boundary", () => {
     NodeFS.writeFileSync(NodePath.join(directory, "a.txt"), "AGENT=after\nUSER=before\n");
     deps.turnDiffs.begin(identity);
     deps.turnDiffs.push({ ...identity, state: "snapshot", nativeFidelity: "agent", revision: 1, patch: nativePatch });
-    const live = ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
+    const live = readyComparison(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
     expect(live.turnDiff?.phase).toBe("live");
     expect(await routeTurnDiffRpc("turnDiff.getFileDiff", { threadId: identity.threadId, comparisonId: live.turnDiff!.id, filePath: "a.txt" }, deps)).toBe(nativePatch);
     await snapshotBothEdits(before);
     await deps.turnDiffs.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed")("message-1", undefined);
     deps.turnDiffs = new TurnDiffService(new TurnDiffRepo(db, writer()));
-    const settled = ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
+    const settled = readyComparison(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
     expect(settled.turnDiff).toMatchObject({ phase: "settled", source: "native", fidelity: "agent" });
     expect(await routeTurnDiffRpc("turnDiff.getFileDiff", { threadId: identity.threadId, comparisonId: settled.turnDiff!.id, filePath: "a.txt" }, deps)).toBe(nativePatch);
     expect(NodeFS.readFileSync(NodePath.join(directory, "a.txt"), "utf8")).toBe("AGENT=after\nUSER=after\n");
@@ -96,7 +103,7 @@ describe("Last turn Review public comparison boundary", () => {
 
   it("keeps legacy histories readable through the attributed Git fallback", async () => {
     const snapshot = await snapshotBothEdits();
-    const result = ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
+    const result = readyComparison(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
     expect(result.turnDiff).toEqual({ id: `git:${snapshot.id}`, phase: "settled", source: "git", fidelity: "same-file-changes-possible", revision: 0 });
     expect(result.files.map((file) => file.path)).toEqual(["a.txt"]);
     const patch = await routeTurnDiffRpc("turnDiff.getFileDiff", { threadId: identity.threadId, comparisonId: result.turnDiff!.id, filePath: "a.txt" }, deps);
@@ -115,10 +122,10 @@ describe("Last turn Review public comparison boundary", () => {
     const second = await snapshots.create({ messageId: "message-2", threadId: identity.threadId,
       refBefore: beforeSecond, refAfter: afterSecond, filesChanged: ["a.txt"], worktreePath: null });
 
-    const picked = ReviewComparisonSchema().parse(
+    const picked = readyComparison(
       await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId, messageId: "message-1" }, deps));
     expect(picked.turnDiff?.id).toBe(`git:${first.id}`);
-    const latest = ReviewComparisonSchema().parse(
+    const latest = readyComparison(
       await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
     expect(latest.turnDiff?.id).toBe(`git:${second.id}`);
 
@@ -128,7 +135,7 @@ describe("Last turn Review public comparison boundary", () => {
     expect(pickedPatch).not.toContain("+AGENT=again");
 
     expect(await routeTurnDiffRpc("turnDiff.getComparison",
-      { threadId: identity.threadId, messageId: "message-missing" }, deps)).toBeNull();
+      { threadId: identity.threadId, messageId: "message-missing" }, deps)).toEqual({ status: "unavailable", reason: "snapshot-expired" });
   });
 
   it("clears Live evidence after an empty update and selects the Git fallback when file effects remain", async () => {
@@ -143,32 +150,33 @@ describe("Last turn Review public comparison boundary", () => {
     const next = { ...identity, turnId: "turn-2", turnExecutionId: "execution-2" };
     deps.turnDiffs.begin(next);
     deps.turnDiffs.push({ ...next, state: "snapshot", nativeFidelity: "agent", revision: 1, patch: nativePatch });
-    expect(ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps)).turnDiff?.phase).toBe("live");
+    expect(readyComparison(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps)).turnDiff?.phase).toBe("live");
     deps.turnDiffs.push({ ...next, revision: 2, state: "indeterminate-empty" });
     expect(deps.turnDiffs.liveComparison(identity.threadId)).toBeNull();
-    const afterEmpty = ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
+    const afterEmpty = readyComparison(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
     expect(afterEmpty.turnDiff).toMatchObject({ phase: "settled", source: "git", fidelity: "same-file-changes-possible" });
     await deps.turnDiffs.prepareFinalization(identity.threadId, next.turnExecutionId, "completed")("message-2", {
       revision: 2, fileCount: 1, additions: 1, deletions: 1,
       effects: [{ path: "a.txt", scope: "workspace", kind: "edited", additions: 1, deletions: 1, binary: false, toolCallIds: [] }],
     });
-    const fallback = ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
+    const fallback = readyComparison(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
     expect(fallback.turnDiff).toMatchObject({ phase: "settled", source: "git", fidelity: "same-file-changes-possible" });
     expect(await routeTurnDiffRpc("turnDiff.getFileDiff", { threadId: identity.threadId, comparisonId: fallback.turnDiff!.id, filePath: "a.txt" }, deps)).toContain("+USER=after");
   });
 
   it("keeps the previous settled Review after explicit invalidation clears the next Live diff", async () => {
+    await snapshotBothEdits();
     deps.turnDiffs.begin(identity);
     deps.turnDiffs.push({ ...identity, state: "snapshot", nativeFidelity: "agent", revision: 1, patch: nativePatch });
     await deps.turnDiffs.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed")("message-1", undefined);
-    const previous = ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
+    const previous = readyComparison(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
     const next = { ...identity, turnId: "turn-2", turnExecutionId: "execution-2" };
     deps.turnDiffs.begin(next);
     deps.turnDiffs.push({ ...next, state: "snapshot", nativeFidelity: "agent", revision: 1, patch: nativePatch });
-    expect(ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps)).turnDiff?.phase).toBe("live");
+    expect(readyComparison(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps)).turnDiff?.phase).toBe("live");
     deps.turnDiffs.push({ ...next, revision: 2, state: "invalidated" });
     expect(deps.turnDiffs.liveComparison(identity.threadId)).toBeNull();
-    const retained = ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
+    const retained = readyComparison(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
     expect(retained.turnDiff?.id).toBe(previous.turnDiff?.id);
     expect(retained.turnDiff).toMatchObject({ phase: "settled", source: "native", fidelity: "agent" });
   });
@@ -177,12 +185,12 @@ describe("Last turn Review public comparison boundary", () => {
     const snapshot = await snapshotBothEdits();
     deps.turnDiffs.begin(identity);
     deps.turnDiffs.push({ ...identity, state: "snapshot", nativeFidelity: "agent", revision: 1, patch: nativePatch });
-    const reconnected = ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId, includeLive: false }, deps));
+    const reconnected = readyComparison(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId, includeLive: false }, deps));
     expect(reconnected.turnDiff?.id).toBe(`git:${snapshot.id}`);
-    const otherClient = ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
+    const otherClient = readyComparison(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
     expect(otherClient.turnDiff?.phase).toBe("live");
     deps.turnDiffs.push({ ...identity, state: "snapshot", nativeFidelity: "agent", revision: 2, patch: nativePatch.replace("+AGENT=after", "+AGENT=fresh") });
-    const fresh = ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId, includeLive: true }, deps));
+    const fresh = readyComparison(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId, includeLive: true }, deps));
     expect(fresh.turnDiff?.revision).toBe(2);
     expect(await routeTurnDiffRpc("turnDiff.getFileDiff", { threadId: identity.threadId, comparisonId: fresh.turnDiff!.id, filePath: "a.txt" }, deps)).toContain("+AGENT=fresh");
   });
@@ -206,8 +214,8 @@ describe("Last turn Review public comparison boundary", () => {
     await finalizer.finalize(identity.threadId, outcome, Promise.resolve(), executionId);
     expect(deps.turnDiffs.latest(identity.threadId)).toBeUndefined();
     const result = await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps);
-    if (previous) expect(ReviewComparisonSchema().parse(result).turnDiff?.id).toBe(`git:${previous.id}`);
-    else expect(result).toBeNull();
+    if (previous) expect(readyComparison(result).turnDiff?.id).toBe(`git:${previous.id}`);
+    else expect(result).toEqual({ status: "unavailable", reason: "snapshot-expired" });
     expect(deps.turnSnapshotRepo.listByThread(identity.threadId)).toHaveLength(hasPrevious ? 2 : 1);
   });
 });

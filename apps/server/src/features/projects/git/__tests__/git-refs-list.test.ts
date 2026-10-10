@@ -108,7 +108,7 @@ describe("GitRepositoryService.listRefsAt", () => {
         isGitRepo: true, branch: "context", uncommitted: { staged: 0, unstaged: 0, untracked: 1 },
       });
       expect(await routeGitRpc("git.reviewComparison", { ...params, view: "unstaged" }, deps)).toMatchObject({
-        files: [{ path: "review-draft.txt", untracked: true, additions: 1 }],
+        status: "ready", comparison: { files: [{ path: "review-draft.txt", untracked: true, additions: 1 }] },
       });
       const mismatch = { workspaceId: workspace.id, threadId: foreign.id };
       await expect(routeGitRpc("git.workingTreeDiff", { ...mismatch, staged: false }, deps)).rejects.toThrow(/does not belong/);
@@ -145,6 +145,7 @@ describe("GitRepositoryService.listRefsAt", () => {
       expect(await routeGitRpc("git.reviewState", {
         workspaceId: other.id, threadId: "missing-thread",
       }, deps)).toEqual({ isGitRepo: false });
+      expect(await routeGitRpc("git.reviewState", { workspaceId: other.id }, deps)).toEqual({ isGitRepo: false });
     } finally { await database.close(); }
   });
 

@@ -466,6 +466,7 @@ function registerAdoptedGuest(
   key: string,
   guest: WebContents,
 ): AdoptionRecord {
+  const disposeHistory = browserProfiles.history.observe(surface.identity.workspaceId, guest);
   const onDestroyed = () => {
     dropAdoption(win.id, key);
     setRendererResidency(win, owner, null);
@@ -482,6 +483,7 @@ function registerAdoptedGuest(
     adoptionToken: "",
     webContents: guest,
     dispose: () => {
+      disposeHistory();
       guest.removeListener("destroyed", onDestroyed);
       disposePopup();
     },
@@ -554,13 +556,27 @@ function clearReleasedResidency(
   if (reason === "discard") applyDiscardRelease(win, owner, surface);
 }
 
-function releaseSurface(event: IpcMainInvokeEvent, inputValue: unknown): PreviewSurfaceResult {
+async function captureSurface(event: IpcMainInvokeEvent, inputValue: unknown): Promise<PreviewSurfaceResult> {
   const input = asReleaseInput(inputValue);
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed() || win.webContents !== event.sender) return errorResult("no-window");
+  const surface = validateSurface(input.surface);
+  if (!surface) return errorResult("invalid-surface");
+  // Closing a tab can remove its tab-state row before the renderer releases its guest.
+  const record = resolveAdoptedPreviewSurfaceForWindow(win.id, surface, event.sender);
+  if (!record) return errorResult("stale-generation");
+  await browserProfiles.history.captureGuest(record.webContents.id);
+  return { ok: true };
+}
+
+async function releaseSurface(event: IpcMainInvokeEvent, inputValue: unknown): Promise<PreviewSurfaceResult> {
+  const input = asReleaseInput(inputValue);
+  if (!validReleaseReason(input.reason)) return errorResult("invalid-release-reason");
+  await captureSurface(event, inputValue);
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win || win.isDestroyed()) return errorResult("no-window");
   const surface = validateSurface(input.surface);
   if (!surface) return errorResult("invalid-surface");
-  if (!validReleaseReason(input.reason)) return errorResult("invalid-release-reason");
   const key = surfaceKey(surface.identity);
   const owner = findOwnedTab(win, surface.identity);
   const currentGeneration = generationByWindow.get(win.id)?.get(key);
@@ -658,6 +674,7 @@ export function registerPreviewSurfaceHandlers(): void {
   ipcMain.handle("preview.surface.prepare", (event, input: unknown) => prepareSurface(event, input));
   ipcMain.handle("preview.surface.adopt", (event, input: unknown) => adoptSurface(event, input));
   ipcMain.handle("preview.surface.release", (event, input: unknown) => releaseSurface(event, input));
+  ipcMain.handle("preview.surface.hidden", (event, input: unknown) => captureSurface(event, input));
   ipcMain.handle("preview.surface.navigate", (event, input: unknown) => navigateSurface(event, input));
 }
 

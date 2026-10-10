@@ -24,7 +24,7 @@ describe("diffStore", () => {
       reviewFilesVisibleByScope: {},
       snapshotsByThread: {},
       snapshotsLoadingByThread: {},
-      snapshotsPendingByThread: {},
+      reviewTurnsByThread: {},
       viewMode: "last-turn",
       reviewViewByThread: {},
       reviewViewManuallySelectedByThread: {},
@@ -1141,33 +1141,15 @@ describe("diffStore", () => {
     });
   });
 
-  describe("markSnapshotsPending", () => {
-    it("sets the pending flag for the given thread", () => {
-      useDiffStore.getState().markSnapshotsPending("thread-1", true);
-      expect(useDiffStore.getState().snapshotsPendingByThread["thread-1"]).toBe(true);
-    });
-
-    it("clears the pending flag when called with false", () => {
-      useDiffStore.getState().markSnapshotsPending("thread-1", true);
-      useDiffStore.getState().markSnapshotsPending("thread-1", false);
-      expect(useDiffStore.getState().snapshotsPendingByThread["thread-1"]).toBeUndefined();
-    });
-
-    it("does not affect other threads", () => {
-      useDiffStore.getState().markSnapshotsPending("thread-1", true);
-      expect(useDiffStore.getState().snapshotsPendingByThread["thread-2"]).toBeUndefined();
-    });
-
-    it("is cleared when setSnapshots runs for the same thread", () => {
-      useDiffStore.getState().markSnapshotsPending("thread-1", true);
-      useDiffStore.getState().setSnapshots("thread-1", []);
-      expect(useDiffStore.getState().snapshotsPendingByThread["thread-1"]).toBeUndefined();
-    });
-
-    it("is cleared by clearThread", () => {
-      useDiffStore.getState().markSnapshotsPending("thread-1", true);
+  describe("reviewTurnsByThread", () => {
+    it("is cleared by clearThread without touching other threads", () => {
+      const turn = { messageId: "m1", ordinal: 1, createdAt: "2026-01-01T00:00:00Z", phase: "settled" as const,
+        fileCount: 1, additions: 1, deletions: 0, evidence: "git" as const, availability: "available" as const };
+      useDiffStore.getState().setReviewTurns("thread-1", [turn]);
+      useDiffStore.getState().setReviewTurns("thread-2", [turn]);
       useDiffStore.getState().clearThread("thread-1");
-      expect(useDiffStore.getState().snapshotsPendingByThread["thread-1"]).toBeUndefined();
+      expect(useDiffStore.getState().reviewTurnsByThread["thread-1"]).toBeUndefined();
+      expect(useDiffStore.getState().reviewTurnsByThread["thread-2"]).toHaveLength(1);
     });
   });
 
