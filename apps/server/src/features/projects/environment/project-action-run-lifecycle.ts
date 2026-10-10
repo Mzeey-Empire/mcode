@@ -72,7 +72,7 @@ export class ProjectActionRunLifecycle {
   private async persistOutput(active: ActiveProjectAction, runId: string): Promise<void> {
     const run = active.run;
     try {
-      if (await this.runs.updateIfCurrent(run)) this.publisher.publish(run);
+      await this.runs.updateIfCurrent(run);
     } catch (error) {
       logger.warn("Project Action output persistence failed; retaining output for the next durable update", {
         threadId: active.threadId,
@@ -106,7 +106,8 @@ function finalRunFor(
   exitCode: number | null,
   finishedAt: string,
 ): WorkspaceEnvironmentActionRun {
-  const status = active.stopping ? "interrupted" : exitCode === 0 ? "completed" : "failed";
+  const interrupted = active.stopping || exitCode === 130 || exitCode === 0xC000013A || exitCode === -1073741510;
+  const status = interrupted ? "interrupted" : exitCode === 0 ? "completed" : "failed";
   return {
     ...active.run,
     revision: active.run.revision + 1,

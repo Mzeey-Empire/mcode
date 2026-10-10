@@ -328,6 +328,9 @@ export type WorkspaceEnvironmentActionLaunchSnapshot = z.infer<
   ReturnType<typeof WorkspaceEnvironmentActionLaunchSnapshotSchema>
 >;
 
+/** Whether a user or thread startup initiated an action run. */
+export const WorkspaceEnvironmentActionRunTriggerSchema = z.enum(["manual", "startup"]);
+
 /** Latest retained result for the stable {threadId, actionId} Project Action slot. */
 export const WorkspaceEnvironmentActionRunSchema = lazySchema(() =>
   z.object({
@@ -337,6 +340,7 @@ export const WorkspaceEnvironmentActionRunSchema = lazySchema(() =>
     runId: z.string().min(1).max(256),
     revision: z.number().int().nonnegative().max(2_147_483_647),
     terminalSessionId: z.string().min(1).max(256).nullable(),
+    trigger: WorkspaceEnvironmentActionRunTriggerSchema,
     actionName: z.string().min(1).max(256),
     status: WorkspaceEnvironmentActionRunStatusSchema,
     snapshot: WorkspaceEnvironmentActionLaunchSnapshotSchema(),
@@ -778,6 +782,7 @@ export const WorkspaceEnvironmentErrorSchema = lazySchema(() => z.object({
     "WORKSPACE_ENVIRONMENT_SETUP_CAPACITY",
     "WORKSPACE_ENVIRONMENT_SETUP_UNAVAILABLE",
     "WORKSPACE_ENVIRONMENT_ACTION_RUNNING",
+    "WORKSPACE_ENVIRONMENT_TERMINAL_CAP",
     "WORKSPACE_ENVIRONMENT_ACTION_NOT_FOUND",
     "WORKSPACE_ENVIRONMENT_APPROVAL_STALE",
     "WORKSPACE_ENVIRONMENT_APPROVAL_NOT_REQUIRED",

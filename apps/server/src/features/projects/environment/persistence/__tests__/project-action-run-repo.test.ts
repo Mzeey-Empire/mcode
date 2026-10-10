@@ -24,6 +24,7 @@ function run(
     runId: `run-${index}`,
     revision: 1,
     terminalSessionId: status === "running" ? `terminal-${index}` : null,
+    trigger: "manual",
     actionName: `Deleted action ${index}`,
     status,
     snapshot: {
@@ -59,6 +60,32 @@ describe("ProjectActionRunStore retention", () => {
 
   afterEach(() => {
     db.close();
+  });
+
+  it("persists run triggers and clears terminal identity during startup recovery", () => {
+    repo.replace(run(threadId, workspaceId, "manual", 0, "running"));
+    repo.replace({ ...run(threadId, workspaceId, "startup", 1, "running"), trigger: "startup" });
+    const recovered = repo.interruptRunning("2026-01-02T00:00:00.000Z");
+    expect(recovered.map(({ actionId, trigger, status, terminalSessionId }) => ({
+      actionId, trigger, status, terminalSessionId,
+    }))).toEqual([
+      { actionId: "manual", trigger: "manual", status: "interrupted", terminalSessionId: null },
+      { actionId: "startup", trigger: "startup", status: "interrupted", terminalSessionId: null },
+    ]);
+    expect(repo.get(threadId, "startup")).toMatchObject({ trigger: "startup", terminalSessionId: null });
+  });
+
+  it("defaults a pre-trigger insert to manual through the migrated database", () => {
+    const original = run(threadId, workspaceId, "old", 0);
+    db.prepare(`INSERT INTO project_action_runs
+      (thread_id, workspace_id, action_id, run_id, revision, action_name, status,
+       snapshot_json, created_at, started_at, finished_at, exit_code)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      threadId, workspaceId, original.actionId, original.runId, original.revision,
+      original.actionName, original.status, JSON.stringify(original.snapshot),
+      original.createdAt, original.startedAt, original.finishedAt, original.exitCode,
+    );
+    expect(repo.get(threadId, "old")).toEqual(original);
   });
 
   it("keeps the newest bounded deleted Action slots using an independent retention oracle", () => {

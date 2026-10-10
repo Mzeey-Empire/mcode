@@ -106,17 +106,27 @@ prevent a delayed configuration read from launching work after teardown starts.
 
 ## Actions retain results beyond process exit
 
-An Action runs in a private noninteractive terminal session from the Thread's
-checkout, using the Project's terminal profile and its normal environment.
+An Action owns an attachable terminal record in the Thread's checkout. Its
+command runs through the Project profile's noninteractive launch, then a fresh
+interactive shell opens in the same record and folder. Stop interrupts the
+command and leaves that shell open. Restart creates a new run in the same
+terminal. Closing the terminal interrupts a command still running and clears
+the run's terminal identity.
+
 The [Action service](../../../apps/server/src/features/projects/environment/project-action-service.ts)
-reserves one slot per Thread and Action before resolution. Another Action may
-run concurrently, but the same slot cannot start twice. **Restart** waits for
-the prior session's stop barrier before starting a replacement.
+reserves one slot per Thread and Action before resolution. Starting an Action
+whose terminal is already open returns its retained run. Pending approval,
+running and exited terminals all count toward the eight-record scope limit.
+
+The terminal replay includes a synthesized command echo and both processes'
+output. The retained transcript temporarily feeds the existing Action view and
+contains only command-process output. Output persistence does not publish run
+updates; publication follows lifecycle changes.
 
 The initial running result must be saved before the service subscribes to
 output and exit events. If retention fails after launch, the
 [launch compensation](../../../apps/server/src/features/projects/environment/project-action-launch-compensation.ts)
-stops the launched session and preserves the original failure. A cleanup
+stops the launched command and preserves the original failure. A cleanup
 failure preserves both errors rather than reporting a successful start.
 
 Process exit also has a persistence barrier. The

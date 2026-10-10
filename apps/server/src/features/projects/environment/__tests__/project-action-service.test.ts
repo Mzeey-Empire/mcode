@@ -1,6 +1,8 @@
 import "reflect-metadata";
 import { logger } from "@mcode/shared";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as NodeFSPromises from "node:fs/promises";
+import * as NodePath from "node:path";
 import {
   WORKSPACE_ENVIRONMENT_ACTION_TRANSCRIPT_MAX_BYTES,
   WorkspaceEnvironmentActionRunSchema,
@@ -9,9 +11,15 @@ import {
 import {
   PreparedTerminalCommandApprovalMismatchError,
   PreparedTerminalCommandStartError,
-  type PreparedTerminalCommandSession,
+  type ActionTerminal,
 } from "../../../terminal/backends/terminal-backend.js";
-import { ProjectActionService } from "../project-action-service.js";
+import { ProjectActionService, PROJECT_ACTION_CLOCK_TOKEN, PROJECT_ACTION_RUN_ID_FACTORY_TOKEN } from "../project-action-service.js";
+import { ProjectActionRunRepo } from "../persistence/project-action-run-repo.js";
+import { WorkspaceEnvironmentService } from "../workspace-environment-service.js";
+import { InMemoryPtyHostAdapter } from "../../../terminal/testing/in-memory-pty-host-adapter.js";
+import { actionTerminalTestFixture, ACTION_TEST_THREAD, ACTION_TEST_WORKSPACE } from "../../../terminal/testing/action-terminal-test-fixture.js";
+import { TERMINAL_BACKEND_TOKEN } from "../../../terminal/backends/terminal-backend.js";
+import type { PtyHostCommand } from "../../../terminal/host/pty-host-adapter.js";
 
 class Runs {
   private readonly values = new Map<string, WorkspaceEnvironmentActionRun>();
@@ -35,10 +43,11 @@ function session(
     readonly exitCode?: number | null;
   },
   stopAction?: () => Promise<void>,
-): PreparedTerminalCommandSession & {
+): ActionTerminal & {
   emit(data: string): void;
   emitBytes(data: Uint8Array): void;
   exit(code: number | null): void;
+  captureOutput(): (data: string) => void;
 } {
   const outputs = new Set<(data: Uint8Array) => void>();
   const exits = new Set<(exit: { exitCode: number | null }) => void>();
@@ -51,21 +60,27 @@ function session(
       terminal: { executable: "powershell.exe", arguments: ["-Command", "bun run build"] },
       environmentNames: ["PATH"],
     },
-    onOutput(listener) {
+    async run() {
+      if (!this.snapshot) throw new Error("Missing test launch");
+      return this.snapshot;
+    },
+    onClosed() { return () => undefined; },
+    onCommandOutput(listener) {
       outputs.add(listener);
       if (replay?.output !== undefined) listener(new TextEncoder().encode(replay.output));
       for (const output of replay?.outputChunks ?? []) listener(output);
       return () => outputs.delete(listener);
     },
-    onExit(listener) {
+    onCommandExit(listener) {
       exits.add(listener);
       if (replay?.exitCode !== undefined) listener({ exitCode: replay.exitCode });
       return () => exits.delete(listener);
     },
-    async stop() {
+    async stopCommand() {
       if (stopAction) return stopAction();
       for (const listener of exits) listener({ exitCode: null });
     },
+    captureOutput() { const listeners = [...outputs]; return (data) => { for (const listener of listeners) listener(Buffer.from(data)); }; },
     emit(data) { for (const listener of outputs) listener(new TextEncoder().encode(data)); },
     emitBytes(data) { for (const listener of outputs) listener(data); },
     exit(exitCode) { for (const listener of exits) listener({ exitCode }); },
@@ -77,6 +92,213 @@ function deferred<T>(): { readonly promise: Promise<T>; resolve(value: T): void 
   const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
   return { promise, resolve };
 }
+
+const integrationCleanups: Array<() => Promise<void>> = [];
+afterEach(async () => {
+  vi.useRealTimers();
+  for (const cleanup of integrationCleanups.splice(0)) await cleanup();
+});
+
+class ActionTestHost extends InMemoryPtyHostAdapter {
+  interruptOnInput = false;
+  override async send(command: PtyHostCommand): Promise<void> {
+    await super.send(command);
+    if (this.interruptOnInput && command.kind === "input" && Buffer.from(command.data).toString() === "\u0003") {
+      this.emitExit(command.sessionId, 130);
+    }
+  }
+}
+
+async function actionFixture(shared = false, script = "vite --open http://localhost:5173/") {
+  const fixtureRoot = NodePath.resolve("../..", ".dev/fixture-repo");
+  await NodeFSPromises.mkdir(fixtureRoot, { recursive: true });
+  const root = await NodeFSPromises.mkdtemp(NodePath.join(fixtureRoot, "action-terminal-"));
+  const host = new ActionTestHost("1");
+  const creates = vi.spyOn(host, "create");
+  const fixture = actionTerminalTestFixture(host, root, {
+    id: "certified:windows-powershell-7", name: "PowerShell 7", executable: "pwsh.exe",
+    arguments: [], source: "certified", platform: "windows",
+  });
+  const environment = new WorkspaceEnvironmentService({
+    mcodeDir: NodePath.join(root, "data"), platform: "windows",
+    threads: fixture.threads, workspaces: fixture.workspaces, terminalCommands: fixture.commands,
+  });
+  const document = { version: "0.0.1", actions: [{ id: "build", name: "Build", command: { default: script } }] };
+  const sharedPath = NodePath.join(root, ".mcode/environment.json");
+  if (shared) {
+    await NodeFSPromises.mkdir(NodePath.dirname(sharedPath), { recursive: true });
+    await NodeFSPromises.writeFile(sharedPath, JSON.stringify(document));
+  } else {
+    await environment.save({ workspaceId: ACTION_TEST_WORKSPACE, sourceRevision: null, document });
+  }
+  const runs = new Runs();
+  fixture.scope.registerInstance<unknown>(ProjectActionRunRepo, runs);
+  fixture.scope.registerInstance(WorkspaceEnvironmentService, environment);
+  fixture.scope.registerInstance(TERMINAL_BACKEND_TOKEN, fixture.backend);
+  fixture.scope.registerInstance(PROJECT_ACTION_CLOCK_TOKEN, () => new Date("2026-10-10T12:00:00.000Z"));
+  let id = 0;
+  fixture.scope.registerInstance(PROJECT_ACTION_RUN_ID_FACTORY_TOKEN, () => `run-${++id}`);
+  const actions = fixture.scope.resolve(ProjectActionService);
+  integrationCleanups.push(async () => {
+    await fixture.terminals.shutdown();
+    await NodeFSPromises.rm(root, { recursive: true, force: true });
+  });
+  return { ...fixture, actions, runs, environment, host, creates, sharedPath, document };
+}
+
+const actionSlot = { threadId: ACTION_TEST_THREAD, actionId: "build" };
+
+describe("ProjectActionService with the in-memory PTY host", () => {
+  it("attaches to the action terminal, retains echo and output, and publishes only lifecycle changes", async () => {
+    const f = await actionFixture();
+    const updates: WorkspaceEnvironmentActionRun[] = [];
+    f.actions.onUpdate((update) => updates.push(update.run));
+    const bytes: Uint8Array[] = [];
+    f.backend.setSender({ data: (_id, _seq, data) => bytes.push(data), json: () => undefined });
+    const run = await f.actions.start(actionSlot);
+    expect(run).toMatchObject({ trigger: "manual", status: "running", runId: "run-1" });
+    expect(f.backend.listActiveSessions()).toEqual([expect.objectContaining({
+      ptyId: run.terminalSessionId, kind: "action", actionId: "build", state: "running",
+    })]);
+    if (!run.terminalSessionId) throw new Error("Action did not create a terminal");
+    expect(f.backend.reattach(run.terminalSessionId, -1)).toEqual({ mode: "delta" });
+    const commandId = f.creates.mock.calls[0][0].sessionId;
+    f.host.emitOutput(commandId, Buffer.from("ready\r\n"));
+    f.host.emitOutput(commandId, Buffer.from("listening\r\n"));
+    await vi.waitFor(() => expect(f.runs.get(ACTION_TEST_THREAD, "build")?.transcript).toBe("ready\r\nlistening\r\n"));
+    expect(updates.map((update) => update.status)).toEqual(["running"]);
+    f.host.emitExit(commandId, 2);
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)).toMatchObject({ status: "failed", exitCode: 2 }));
+    await vi.waitFor(() => expect(f.creates).toHaveBeenCalledTimes(2));
+    f.host.emitOutput(f.creates.mock.calls[1][0].sessionId, Buffer.from("PS> "));
+    bytes.length = 0;
+    f.backend.reattach(run.terminalSessionId, -1);
+    expect(Buffer.concat(bytes).toString()).toBe(
+      `\u001b[90mPS ${f.creates.mock.calls[0][0].cwd}> \u001b[39mvite --open http://localhost:5173/\u001b[0m\r\nready\r\nlistening\r\nPS> `,
+    );
+    expect(f.actions.get(actionSlot)?.transcript).toBe("ready\r\nlistening\r\n");
+    expect(updates.map((update) => update.status)).toEqual(["running", "failed"]);
+    expect(await f.actions.start(actionSlot)).toEqual(f.actions.get(actionSlot));
+    expect(f.creates).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([130, 0xC000013A, -1073741510])("maps interrupt exit %s and leaves a live shell", async (code) => {
+    const f = await actionFixture();
+    const run = await f.actions.start(actionSlot);
+    f.host.emitExit(f.creates.mock.calls[0][0].sessionId, code);
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)).toMatchObject({
+      status: "interrupted", exitCode: null, terminalSessionId: run.terminalSessionId,
+    }));
+    await vi.waitFor(() => expect(f.creates).toHaveBeenCalledTimes(2));
+    if (!run.terminalSessionId) throw new Error("Missing action terminal");
+    await f.backend.write(run.terminalSessionId, "echo alive\r");
+  });
+
+  it("stops with Ctrl C then kills at five seconds and keeps the shell", async () => {
+    const f = await actionFixture();
+    const send = vi.spyOn(f.host, "send");
+    const close = vi.spyOn(f.host, "close");
+    const run = await f.actions.start(actionSlot);
+    vi.useFakeTimers();
+    const stopping = f.actions.stop(actionSlot);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(send.mock.calls.map(([command]) => command.kind === "input" ? Buffer.from(command.data).toString() : "")).toEqual(["\u0003"]);
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(close.mock.calls).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    await stopping;
+    expect(close).toHaveBeenCalledOnce();
+    expect(f.actions.get(actionSlot)).toMatchObject({ status: "interrupted", terminalSessionId: run.terminalSessionId });
+    expect(f.creates).toHaveBeenCalledTimes(2);
+    expect(f.creates.mock.calls[1][0].launch.arguments).toEqual([]);
+  });
+
+  it("closes an active command without leaving a shell and clears the run terminal id", async () => {
+    const f = await actionFixture();
+    const run = await f.actions.start(actionSlot);
+    if (!run.terminalSessionId) throw new Error("Missing action terminal");
+    await f.backend.kill(run.terminalSessionId);
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)).toMatchObject({
+      status: "interrupted", terminalSessionId: null,
+    }));
+    expect(f.backend.listActiveSessions()).toEqual([]);
+    expect(f.creates).toHaveBeenCalledOnce();
+  });
+
+  it("restarts and runs again with new run ids in the same terminal", async () => {
+    const f = await actionFixture();
+    f.host.interruptOnInput = true;
+    const run = await f.actions.start(actionSlot);
+    const restart = f.actions.restart(actionSlot);
+    expect(await restart).toMatchObject({ runId: "run-2", terminalSessionId: run.terminalSessionId, status: "running" });
+    const command = f.creates.mock.calls.at(-1)?.[0];
+    if (!command) throw new Error("Missing rerun process");
+    f.host.emitExit(command.sessionId, 0);
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)?.status).toBe("completed"));
+    const again = f.actions.restart(actionSlot);
+    expect(await again).toMatchObject({ runId: "run-3", terminalSessionId: run.terminalSessionId, status: "running" });
+    expect(f.backend.listActiveSessions()).toHaveLength(1);
+  });
+
+  it("reports the named cap error for eight retained shells without consuming an action slot", async () => {
+    const f = await actionFixture();
+    for (let i = 0; i < 8; i++) {
+      const terminal = await f.backend.create(ACTION_TEST_THREAD);
+      f.host.emitExit(terminal.ptyId, 0);
+    }
+    await expect(f.actions.start(actionSlot)).rejects.toMatchObject({
+      code: "WORKSPACE_ENVIRONMENT_TERMINAL_CAP", message: "8 terminals are open. Close one to run Build.",
+    });
+    expect(f.actions.get(actionSlot)).toBeNull();
+    await f.backend.kill(f.backend.listActiveSessions()[0].ptyId);
+    expect(await f.actions.start(actionSlot)).toMatchObject({ status: "running" });
+  });
+
+  it("opens pending approval without a process, reuses approval, and asks again after the script changes", async () => {
+    const f = await actionFixture(true);
+    f.host.interruptOnInput = true;
+    const pending = await f.actions.start(actionSlot);
+    expect(pending.status).toBe("awaiting-approval");
+    expect(f.backend.listActiveSessions()[0]).toMatchObject({ state: "pending", ptyId: pending.terminalSessionId });
+    expect(f.creates.mock.calls).toEqual([]);
+    if (!pending.snapshot.approval) throw new Error("Missing shared approval");
+    await f.environment.approveCommand({ threadId: ACTION_TEST_THREAD, ...pending.snapshot.approval });
+    const approved = await f.actions.start(actionSlot);
+    expect(approved).toMatchObject({ status: "running", terminalSessionId: pending.terminalSessionId });
+    f.host.emitExit(f.creates.mock.calls[0][0].sessionId, 0);
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)?.status).toBe("completed"));
+    const restarting = f.actions.restart(actionSlot);
+    expect(await restarting).toMatchObject({ status: "running", terminalSessionId: pending.terminalSessionId });
+    await NodeFSPromises.writeFile(f.sharedPath, JSON.stringify({
+      ...f.document, actions: [{ id: "build", name: "Build", command: { default: "vite --host" } }],
+    }));
+    const changed = f.actions.restart(actionSlot);
+    expect(await changed).toMatchObject({ status: "awaiting-approval", snapshot: { script: "vite --host" } });
+  });
+
+  it("clears a pending terminal closed while its initial run is still being saved", async () => {
+    const f = await actionFixture(true);
+    const saving = deferred<void>();
+    const release = deferred<void>();
+    const replace = f.runs.replace.bind(f.runs);
+    vi.spyOn(f.runs, "replace").mockImplementationOnce(async (run) => {
+      saving.resolve();
+      await release.promise;
+      return replace(run);
+    });
+    const starting = f.actions.start(actionSlot);
+    await saving.promise;
+    const terminal = f.backend.listActiveSessions()[0];
+    await f.backend.kill(terminal.ptyId);
+    release.resolve();
+    await starting;
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)).toMatchObject({
+      status: "awaiting-approval", terminalSessionId: null,
+    }));
+    expect(f.backend.listActiveSessions()).toEqual([]);
+    expect(f.creates.mock.calls).toEqual([]);
+  });
+});
 
 function projectActionEnvironment(read: () => Promise<{
   readonly document: {
@@ -135,7 +357,8 @@ describe("ProjectActionService", () => {
         };
       },
     };
-    const startPreparedCommand = vi.fn(async () => {
+    const openActionTerminal = vi.fn(async (input: { launch: unknown }) => {
+      if (input.launch === "pending-approval") return session("pending-terminal");
       throw new PreparedTerminalCommandApprovalMismatchError({
         platform: "windows",
         script: "bun run build --fresh",
@@ -148,16 +371,17 @@ describe("ProjectActionService", () => {
       runs as never,
       environment as never,
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand } as never,
+      { openActionTerminal } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
 
     const run = await service.start({ threadId: "thread-1", actionId: "build" });
 
-    expect(startPreparedCommand).toHaveBeenCalledWith(expect.objectContaining({
-      expectedLaunch: {
-        terminal: { executable: "powershell.exe", arguments: ["-Command", "bun run build"] },
+    expect(openActionTerminal).toHaveBeenCalledWith(expect.objectContaining({
+      launch: {
+        script: "bun run build",
+        expectedLaunch: { terminal: { executable: "powershell.exe", arguments: ["-Command", "bun run build"] } },
       },
     }));
     expect(run).toMatchObject({
@@ -178,15 +402,13 @@ describe("ProjectActionService", () => {
         { id: "test", name: "Test", command: { default: "bun test" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: async () => sessions.shift()! } as never,
+      { openActionTerminal: async () => sessions.shift()! } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       (() => { let value = 0; return () => `run-${++value}`; })(),
     );
 
     const build = await service.start({ threadId: "thread-1", actionId: "build" });
-    await expect(service.start({ threadId: "thread-1", actionId: "build" })).rejects.toMatchObject({
-      code: "WORKSPACE_ENVIRONMENT_ACTION_RUNNING",
-    });
+    await expect(service.start({ threadId: "thread-1", actionId: "build" })).resolves.toEqual(build);
     const test = await service.start({ threadId: "thread-1", actionId: "test" });
     expect(test.runId).not.toBe(build.runId);
     expect(build.snapshot.terminal?.arguments).toEqual(["-Command", "bun run build"]);
@@ -201,12 +423,12 @@ describe("ProjectActionService", () => {
   it("reserves a slot while its environment document is still loading", async () => {
     const runs = new Runs();
     const environmentRead = deferred<{ readonly document: { readonly version: "0.0.1"; readonly actions: readonly [{ readonly id: "build"; readonly name: "Build"; readonly command: { readonly default: "bun run build" } }] } }>();
-    const startPreparedCommand = vi.fn(async () => session("terminal-1"));
+    const openActionTerminal = vi.fn(async () => session("terminal-1"));
     const service = new ProjectActionService(
       runs as never,
       projectActionEnvironment(() => environmentRead.promise),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand } as never,
+      { openActionTerminal } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -214,19 +436,19 @@ describe("ProjectActionService", () => {
     const firstStart = service.start({ threadId: "thread-1", actionId: "build" });
     const secondStart = service.start({ threadId: "thread-1", actionId: "build" });
 
-    expect(startPreparedCommand).not.toHaveBeenCalled();
+    expect(openActionTerminal).not.toHaveBeenCalled();
     environmentRead.resolve({ document: { version: "0.0.1", actions: [
       { id: "build", name: "Build", command: { default: "bun run build" } },
     ] } });
     await expect(secondStart).rejects.toMatchObject({ code: "WORKSPACE_ENVIRONMENT_ACTION_RUNNING" });
     await firstStart;
 
-    expect(startPreparedCommand).toHaveBeenCalledOnce();
+    expect(openActionTerminal).toHaveBeenCalledOnce();
   });
 
   it("waits for an in-flight Action start before stopping the prepared session", async () => {
     const runs = new Runs();
-    const startup = deferred<PreparedTerminalCommandSession>();
+    const startup = deferred<ActionTerminal>();
     const backendStarted = deferred<void>();
     const prepared = session("terminal-1");
     const service = new ProjectActionService(
@@ -237,7 +459,7 @@ describe("ProjectActionService", () => {
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
       {
-        startPreparedCommand: () => {
+        openActionTerminal: () => {
           backendStarted.resolve();
           return startup.promise;
         },
@@ -266,7 +488,7 @@ describe("ProjectActionService", () => {
     });
     first = session("terminal-1", undefined, stop);
     const second = session("terminal-2");
-    const startPreparedCommand = vi.fn()
+    const openActionTerminal = vi.fn()
       .mockResolvedValueOnce(first)
       .mockResolvedValueOnce(second);
     const service = new ProjectActionService(
@@ -275,7 +497,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand } as never,
+      { openActionTerminal } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       (() => { let value = 0; return () => `run-${++value}`; })(),
     );
@@ -284,11 +506,11 @@ describe("ProjectActionService", () => {
     const restarting = service.restart({ threadId: "thread-1", actionId: "build" });
     await Promise.resolve();
     expect(stop).toHaveBeenCalledOnce();
-    expect(startPreparedCommand).toHaveBeenCalledOnce();
+    expect(openActionTerminal).toHaveBeenCalledOnce();
 
     stopBarrier.resolve(undefined);
-    await expect(restarting).resolves.toMatchObject({ runId: "run-2", terminalSessionId: "terminal-2" });
-    expect(startPreparedCommand).toHaveBeenCalledTimes(2);
+    await expect(restarting).resolves.toMatchObject({ runId: "run-2", terminalSessionId: "terminal-1" });
+    expect(openActionTerminal).toHaveBeenCalledOnce();
   });
 
   it("persists a fast replayed exit as completed after the initial Action row exists", async () => {
@@ -300,7 +522,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: async () => fast } as never,
+      { openActionTerminal: async () => fast } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -316,7 +538,7 @@ describe("ProjectActionService", () => {
 
   it("closes Action admission before thread teardown waits for an in-flight start", async () => {
     const runs = new Runs();
-    const startup = deferred<PreparedTerminalCommandSession>();
+    const startup = deferred<ActionTerminal>();
     const enteredBackend = deferred<void>();
     const prepared = session("terminal-1");
     const service = new ProjectActionService(
@@ -325,7 +547,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: () => { enteredBackend.resolve(); return startup.promise; } } as never,
+      { openActionTerminal: () => { enteredBackend.resolve(); return startup.promise; } } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -354,7 +576,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: async () => prepared } as never,
+      { openActionTerminal: async () => prepared } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -380,7 +602,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => thread } as never,
-      { startPreparedCommand: async () => prepared } as never,
+      { openActionTerminal: async () => prepared } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -400,14 +622,14 @@ describe("ProjectActionService", () => {
   it("shares one idempotent shutdown barrier and stops its owned session once", async () => {
     const runs = new Runs();
     const prepared = session("terminal-1");
-    const stop = vi.spyOn(prepared, "stop");
+    const stop = vi.spyOn(prepared, "stopCommand");
     const service = new ProjectActionService(
       runs as never,
       projectActionEnvironment(async () => ({ document: { version: "0.0.1", actions: [
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: async () => prepared } as never,
+      { openActionTerminal: async () => prepared } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -424,7 +646,7 @@ describe("ProjectActionService", () => {
 
   it("waits for an admitted start, stops it during shutdown, and rejects later starts", async () => {
     const runs = new Runs();
-    const startup = deferred<PreparedTerminalCommandSession>();
+    const startup = deferred<ActionTerminal>();
     const enteredBackend = deferred<void>();
     const prepared = session("terminal-1");
     const service = new ProjectActionService(
@@ -434,7 +656,7 @@ describe("ProjectActionService", () => {
         { id: "test", name: "Test", command: { default: "bun test" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: () => { enteredBackend.resolve(); return startup.promise; } } as never,
+      { openActionTerminal: () => { enteredBackend.resolve(); return startup.promise; } } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -462,7 +684,7 @@ describe("ProjectActionService", () => {
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
       {
-        startPreparedCommand: vi.fn()
+        openActionTerminal: vi.fn()
           .mockResolvedValueOnce(successful)
           .mockRejectedValueOnce(new Error("capacity reached")),
       } as never,
@@ -501,7 +723,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: async () => { throw new PreparedTerminalCommandStartError(plannedSnapshot, new Error("host unavailable")); } } as never,
+      { openActionTerminal: async () => { throw new PreparedTerminalCommandStartError(plannedSnapshot, new Error("host unavailable")); } } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -517,7 +739,7 @@ describe("ProjectActionService", () => {
 
   it("closes a prepared session when retained-run persistence fails and preserves that failure", async () => {
     const prepared = session("terminal-1");
-    const stop = vi.spyOn(prepared, "stop");
+    const stop = vi.spyOn(prepared, "stopCommand");
     const persistenceFailure = new Error("database unavailable");
     const service = new ProjectActionService(
       { get: () => null, list: () => [], replace: () => { throw persistenceFailure; }, updateIfCurrent: () => false, interruptRunning: () => [] } as never,
@@ -525,7 +747,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: async () => prepared } as never,
+      { openActionTerminal: async () => prepared } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -551,7 +773,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: async () => prepared } as never,
+      { openActionTerminal: async () => prepared } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -584,7 +806,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: vi.fn().mockResolvedValueOnce(prepared).mockResolvedValueOnce(replacement) } as never,
+      { openActionTerminal: vi.fn().mockResolvedValueOnce(prepared).mockResolvedValueOnce(replacement) } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       (() => { let value = 0; return () => `run-${++value}`; })(),
     );
@@ -598,8 +820,8 @@ describe("ProjectActionService", () => {
 
     replace.mockRestore();
     await service.stop({ threadId: "thread-1", actionId: "build" });
-    await expect(service.start({ threadId: "thread-1", actionId: "build" })).resolves.toMatchObject({
-      terminalSessionId: "terminal-2",
+    await expect(service.restart({ threadId: "thread-1", actionId: "build" })).resolves.toMatchObject({
+      terminalSessionId: "terminal-1",
     });
     expect(stop).toHaveBeenCalledTimes(2);
   });
@@ -620,7 +842,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second) } as never,
+      { openActionTerminal: vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second) } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       (() => { let value = 0; return () => `run-${++value}`; })(),
     );
@@ -649,8 +871,8 @@ describe("ProjectActionService", () => {
       { runId: "run-1", status: "completed", revision: 1, exitCode: 0 },
       { runId: "run-1", status: "completed", revision: 1, exitCode: 0 },
     ]);
-    await expect(service.start({ threadId: "thread-1", actionId: "build" })).resolves.toMatchObject({
-      terminalSessionId: "terminal-2",
+    await expect(service.restart({ threadId: "thread-1", actionId: "build" })).resolves.toMatchObject({
+      terminalSessionId: "terminal-1",
     });
   });
 
@@ -669,7 +891,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second) } as never,
+      { openActionTerminal: vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second) } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       (() => { let value = 0; return () => `run-${++value}`; })(),
     );
@@ -679,7 +901,7 @@ describe("ProjectActionService", () => {
 
     const restarted = await service.restart({ threadId: "thread-1", actionId: "build" });
 
-    expect(restarted).toMatchObject({ runId: "run-2", terminalSessionId: "terminal-2", status: "running" });
+    expect(restarted).toMatchObject({ runId: "run-2", terminalSessionId: "terminal-1", status: "running" });
     expect(updateIfCurrent.mock.calls.map(([run]) => ({
       runId: run.runId,
       status: run.status,
@@ -704,7 +926,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: async () => prepared } as never,
+      { openActionTerminal: async () => prepared } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -741,7 +963,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second) } as never,
+      { openActionTerminal: vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second) } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       (() => { let value = 0; return () => `run-${++value}`; })(),
     );
@@ -757,8 +979,8 @@ describe("ProjectActionService", () => {
     await vi.waitFor(() => expect(publicationFailure).toHaveBeenCalledWith("Project Action completion publication failed", expect.objectContaining({ error: listenerFailure.message })));
     publicationFailure.mockRestore();
     expect(runs.get("thread-1", "build")?.status).toBe("completed");
-    await expect(service.start({ threadId: "thread-1", actionId: "build" })).resolves.toMatchObject({
-      terminalSessionId: "terminal-2",
+    await expect(service.restart({ threadId: "thread-1", actionId: "build" })).resolves.toMatchObject({
+      terminalSessionId: "terminal-1",
     });
   });
 
@@ -776,7 +998,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: async () => prepared } as never,
+      { openActionTerminal: async () => prepared } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -803,7 +1025,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: async () => prepared } as never,
+      { openActionTerminal: async () => prepared } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -836,7 +1058,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: async () => prepared } as never,
+      { openActionTerminal: async () => prepared } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -871,7 +1093,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: async () => replayed } as never,
+      { openActionTerminal: async () => replayed } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -893,7 +1115,7 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: async () => prepared } as never,
+      { openActionTerminal: async () => prepared } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -928,22 +1150,22 @@ describe("ProjectActionService", () => {
         },
         approval: null,
       });
-    const startPreparedCommand = vi.fn(async () => prepared);
+    const openActionTerminal = vi.fn(async () => prepared);
     const service = new ProjectActionService(
       runs as never,
       { resolveActionCommand } as never,
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand } as never,
+      { openActionTerminal } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
 
     await expect(service.start({ threadId: "thread-1", actionId: "build" })).rejects.toBe(resolutionFailure);
-    await expect(service.start({ threadId: "thread-1", actionId: "build" })).resolves.toMatchObject({
+    await expect(service.restart({ threadId: "thread-1", actionId: "build" })).resolves.toMatchObject({
       terminalSessionId: "terminal-1",
     });
 
-    expect(startPreparedCommand).toHaveBeenCalledOnce();
+    expect(openActionTerminal).toHaveBeenCalledOnce();
   });
 
   it("ignores output delivered after finalization and after a replacement owns the slot", async () => {
@@ -956,11 +1178,12 @@ describe("ProjectActionService", () => {
         { id: "build", name: "Build", command: { default: "bun run build" } },
       ] } })),
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand: vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second) } as never,
+      { openActionTerminal: vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second) } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       (() => { let value = 0; return () => `run-${++value}`; })(),
     );
     await service.start({ threadId: "thread-1", actionId: "build" });
+    const staleOutput = first.captureOutput();
     first.exit(0);
     await new Promise<void>((resolve) => setImmediate(resolve));
     first.emit("after finalization");
@@ -972,8 +1195,8 @@ describe("ProjectActionService", () => {
       transcript: "",
     });
 
-    await service.start({ threadId: "thread-1", actionId: "build" });
-    first.emit("after replacement");
+    await service.restart({ threadId: "thread-1", actionId: "build" });
+    staleOutput("after replacement");
 
     expect(runs.get("thread-1", "build")).toMatchObject({
       runId: "run-2",
@@ -1000,7 +1223,7 @@ describe("ProjectActionService", () => {
       readonly approval: null;
     }>();
     const resolving = deferred<void>();
-    const startPreparedCommand = vi.fn(async () => session("terminal-1"));
+    const openActionTerminal = vi.fn(async () => session("terminal-1"));
     const service = new ProjectActionService(
       runs as never,
       {
@@ -1010,7 +1233,7 @@ describe("ProjectActionService", () => {
         },
       } as never,
       { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { startPreparedCommand } as never,
+      { openActionTerminal } as never,
       () => new Date("2026-08-22T12:00:00.000Z"),
       () => "run-1",
     );
@@ -1040,7 +1263,7 @@ describe("ProjectActionService", () => {
     const release = await tearingDown;
     release();
 
-    expect(startPreparedCommand).not.toHaveBeenCalled();
+    expect(openActionTerminal).not.toHaveBeenCalled();
   });
 
   it("reaps every stale Action batch instead of stopping after the first 256 rows", async () => {

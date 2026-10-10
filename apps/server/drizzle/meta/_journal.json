@@ -512,6 +512,13 @@
       "when": 1791583844778,
       "tag": "0071_last_anita_blake",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "6",
+      "when": 1791630462396,
+      "tag": "0072_complex_red_wolf",
+      "breakpoints": true
     }
   ]
 }

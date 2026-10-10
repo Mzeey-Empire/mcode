@@ -160,6 +160,7 @@ describe("ws-events Project Actions", () => {
       runId: "run-1",
       revision: 1,
       terminalSessionId: "terminal-1",
+      trigger: "manual" as const,
       actionName: "Build",
       status: "completed" as const,
       snapshot: { platform: "windows" as const, script: "bun run build", checkoutPath: "C:\\repo", terminal: null, environmentNames: [] },

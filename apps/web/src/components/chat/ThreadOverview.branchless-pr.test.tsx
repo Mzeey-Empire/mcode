@@ -253,6 +253,7 @@ function runningActionRun(): WorkspaceEnvironmentActionRun {
     runId: "run-1",
     revision: 0,
     terminalSessionId: "terminal-1",
+    trigger: "manual",
     actionName: "Success",
     status: "running",
     snapshot: {

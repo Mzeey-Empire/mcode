@@ -10,6 +10,20 @@ import {
 const UUID = "abcdef12-abcd-4abc-8abc-abcdefabcdef";
 
 describe("PTY host v1 protocol", () => {
+  it.each([-1073741510, 3221225786, 4294967295])("preserves Windows exit code %s", (code) => {
+    const exit = {
+      contractVersion: 1, kind: "exit", sessionId: UUID, hostGeneration: "7",
+      finalOutputSeq: "0", code, signal: null, reason: "natural",
+    };
+    expect(PtyHostEventSchema().parse(exit)).toEqual(exit);
+  });
+
+  it.each([-2147483649, 4294967296])("rejects out-of-range exit code %s", (code) => {
+    expect(PtyHostEventSchema().safeParse({
+      contractVersion: 1, kind: "exit", sessionId: UUID, hostGeneration: "7",
+      finalOutputSeq: "0", code, signal: null, reason: "natural",
+    }).success).toBe(false);
+  });
   it("accepts a generation-bound child-inspection result", () => {
     expect(
       PtyHostEventSchema().parse({

@@ -43,18 +43,23 @@ export type TerminalReattachResult =
 /** A Terminal create that completed after its owning WebSocket disconnected. */
 export type DisconnectedTerminalCreate = { readonly method: "terminal.create"; readonly ptyId: string };
 
-/** Exit observation for a private prepared terminal command session. */
-export interface PreparedTerminalCommandExit {
-  readonly exitCode: number | null;
+/** Exact script and approval binding for a command phase. */
+export interface PreparedActionLaunch {
+  readonly script: string;
+  readonly expectedLaunch?: PreparedTerminalCommandExpectation;
 }
 
-/** Headless private command session retained by a Project Action lifecycle owner. */
-export interface PreparedTerminalCommandSession {
+/** One attachable terminal whose command process is followed by an interactive shell. */
+export interface ActionTerminal {
   readonly terminalSessionId: string;
-  readonly snapshot: WorkspaceEnvironmentActionLaunchSnapshot;
-  onOutput(listener: (data: Uint8Array) => void): () => void;
-  onExit(listener: (exit: PreparedTerminalCommandExit) => void): () => void;
-  stop(): Promise<void>;
+  /** Actual latest launch facts, or null before the first command starts. */
+  readonly snapshot: WorkspaceEnvironmentActionLaunchSnapshot | null;
+  run(launch: PreparedActionLaunch): Promise<WorkspaceEnvironmentActionLaunchSnapshot>;
+  stopCommand(): Promise<void>;
+  /** Command process bytes only, excluding the synthesized echo and interactive shell. */
+  onCommandOutput(listener: (bytes: Uint8Array) => void): () => void;
+  onCommandExit(listener: (exit: { readonly exitCode: number | null }) => void): () => void;
+  onClosed(listener: () => void): () => void;
 }
 
 /** Typed pre-spawn failure that preserves resolved Action launch facts without environment values. */
@@ -84,11 +89,12 @@ export class PreparedTerminalCommandApprovalMismatchError extends Error {
   }
 }
 
-/** Exact noninteractive command request owned by a Project Action slot. */
-export interface PreparedTerminalCommandRequest {
+/** Reserves an action terminal, optionally starting its first approved command. */
+export interface ActionTerminalRequest {
   readonly threadId: string;
-  readonly script: string;
-  readonly expectedLaunch?: PreparedTerminalCommandExpectation;
+  readonly actionId: string;
+  readonly echo: string;
+  readonly launch: PreparedActionLaunch | "pending-approval";
 }
 
 /** Server Terminal backend used by server orchestration and transport. */
@@ -113,10 +119,8 @@ export abstract class TerminalBackend {
   abstract listActiveSessions(): LegacyTerminalRecord[];
   abstract hasChildren(ptyId: string): Promise<{ hasChildren: boolean }>;
 
-  /** Starts one headless exact command session using this selected backend's capacity and tracking. */
-  startPreparedCommand(_input: PreparedTerminalCommandRequest): Promise<PreparedTerminalCommandSession> {
-    return Promise.reject(new Error("Prepared command sessions are unavailable"));
-  }
+  /** Opens a retained action terminal using the backend's normal capacity and flow control. */
+  abstract openActionTerminal(input: ActionTerminalRequest): Promise<ActionTerminal>;
 
   /** Releases controller leases and uploads owned by a disconnected client. */
   disconnectClient(_client: WebSocket): void {}

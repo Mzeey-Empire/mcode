@@ -9,7 +9,7 @@ import * as NodePath from "node:path";
 import * as NodeFS from "node:fs";
 import { v4 as uuid } from "uuid";
 import { logger } from "@mcode/shared";
-import { TERMINAL_MAX_PER_SCOPE, type LegacyTerminalRecord, type LegacyTerminalCreateResult, type Settings, type TerminalProfileReference, type TerminalResolvedProfile, type TerminalScope } from "@mcode/contracts";
+import { TERMINAL_MAX_PER_SCOPE, type LegacyTerminalRecord, type LegacyTerminalCreateResult, type Settings, type TerminalProfileReference, type TerminalResolvedProfile, type TerminalScope, type WorkspaceEnvironmentActionLaunchSnapshot } from "@mcode/contracts";
 import { TerminalFlowControl } from "./terminal-flow-control.js";
 import { TerminalReplayBuffer, replayCapBytesForScrollback } from "./terminal-replay-buffer.js";
 import type { PtyHostAdapter, PtyHostCommand } from "../../host/pty-host-adapter.js";
@@ -20,13 +20,66 @@ import { GitWorktreeService } from "../../../projects/git/git-worktree-service.j
 import type { SettingsService } from "../../../settings/settings-service.js";
 import { EnvService } from "../../../../runtime/environment/env-service.js";
 
-/**
- * Returns the shell executable basename without a `.exe` suffix for display
- * and job-object descriptions.
- */
-function shellBasename(shellPath: string): string {
-  const base = shellPath.split(/[\\/]/).pop() ?? shellPath;
-  return base.replace(/\.exe$/i, "").slice(0, 64);
+
+import type { ActionTerminal, ActionTerminalRequest, PreparedActionLaunch } from "../terminal-backend.js";
+import { ActionTerminalEvents, actionCommandEcho } from "./action-terminal-events.js";
+
+/** Resolved host launch shared by command and interactive shell phases. */
+export interface LegacyTerminalLaunch {
+  readonly executable: string;
+  readonly arguments: string[];
+  readonly requestedProfileId: TerminalProfileReference;
+  readonly resolvedProfile: TerminalResolvedProfile;
+  readonly environment?: Record<string, string>;
+}
+
+/** A capacity rejection distinguished from host or profile failures. */
+export class TerminalCapacityError extends Error {}
+
+interface PtyProcess {
+  readonly id: string;
+  readonly hostGeneration: string;
+  readonly outputOffset: number;
+  status: "creating" | "running";
+  creation: Promise<boolean>;
+  commandSequence: bigint;
+  commandTail: Promise<void>;
+  readonly exited: Promise<void>;
+  resolveExit(): void;
+  afterExit: "shell" | "retain" | "replace";
+}
+
+type TerminalPhase =
+  | { readonly kind: "pending" }
+  | { readonly kind: "command" | "shell"; readonly process: PtyProcess }
+  | { readonly kind: "exited"; readonly exitCode: number | null };
+
+interface ActionState {
+  readonly actionId: string;
+  readonly shellLaunch: LegacyTerminalLaunch;
+  readonly events: ActionTerminalEvents;
+}
+
+interface PtySession {
+  readonly id: string;
+  readonly threadId: string;
+  readonly shell: string;
+  readonly cwd: string;
+  readonly createdAt: string;
+  readonly action: ActionState | null;
+  phase: TerminalPhase;
+  sequence: number;
+  cols: number;
+  rows: number;
+  transition: Promise<void>;
+  operation: Promise<void>;
+  closePromise: Promise<void> | null;
+}
+
+/** Callbacks for streaming PTY output and exit events to connected clients. */
+export interface PtySender {
+  json: (channel: string, data: Record<string, unknown>) => void;
+  data: (ptyId: string, seq: number, bytes: Uint8Array) => void;
 }
 
 const DEFAULT_COLS = 80;
@@ -34,67 +87,24 @@ const DEFAULT_ROWS = 24;
 const MAX_HOST_ENVIRONMENT_NAMES = 256;
 const MAX_HOST_ENVIRONMENT_BYTES = 65_536;
 
-function describeError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+function shellBasename(shellPath: string): string {
+  return (shellPath.split(/[\\/]/).pop() ?? shellPath).replace(/\.exe$/i, "").slice(0, 64);
 }
 
-/** Immutable record describing a single PTY session. */
-interface PtySession {
-  readonly id: string;
-  readonly threadId: string;
-  readonly shell: string;
-  readonly cwd: string;
-  readonly hostGeneration: string;
-  status: "creating" | "running" | "closing" | "exited";
-  readonly createdAt: string;
-  exitCode: number | null;
-  creationPromise: Promise<boolean>;
-  closePromise: Promise<void> | null;
-  commandSequence: bigint;
-  commandTail: Promise<void>;
-  readonly headless: boolean;
-  readonly outputListeners: Set<(data: Uint8Array) => void>;
-  readonly exitListeners: Set<(exitCode: number | null) => void>;
-  headlessOutput: Uint8Array[];
-  headlessExit: number | null | undefined;
-  readonly closeBarrier: Promise<void>;
-  readonly resolveCloseBarrier: () => void;
+function currentProcess(session: PtySession): PtyProcess | null {
+  return session.phase.kind === "command" || session.phase.kind === "shell" ? session.phase.process : null;
 }
 
-interface LegacyTerminalLaunch {
-  readonly executable: string;
-  readonly arguments: string[];
-  readonly requestedProfileId: TerminalProfileReference;
-  readonly resolvedProfile: TerminalResolvedProfile;
-  readonly headless: boolean;
-  readonly environment?: Record<string, string>;
-}
-
-/** Callbacks for streaming PTY output and exit events to connected clients. */
-export interface PtySender {
-  /** Send a JSON push event (used for terminal.exit and any future JSON events). */
-  json: (channel: string, data: Record<string, unknown>) => void;
-  /** Send a PTY data chunk as a binary frame (tag 0x01 envelope). */
-  data: (ptyId: string, seq: number, bytes: Uint8Array) => void;
-}
-
-/**
- * Shell process basenames that are excluded when checking whether a terminal
- * has non-shell child processes. The comparison is case-insensitive.
- */
-/** Manages PTY sessions for the integrated terminal. */
+/** Owns retained terminal records and routes each phase's host session to its stable web id. */
 @injectable()
 export class TerminalService {
-  private sessions = new Map<string, PtySession>();
-  private readonly completedHeadlessSessions = new Map<string, PtySession>();
-  private threadIndex = new Map<string, Set<string>>();
-  private pendingCreations = new Map<string, Set<string>>();
+  private readonly sessions = new Map<string, PtySession>();
+  private readonly hostSessions = new Map<string, PtySession>();
+  private readonly threadIndex = new Map<string, Set<string>>();
   private sender: PtySender | null = null;
-  private flowControls = new Map<string, TerminalFlowControl>();
-  private replayBuffers = new Map<string, TerminalReplayBuffer>();
-  /** Last applied terminal.scrollback, used to skip redundant buffer resizes. */
+  private readonly flowControls = new Map<string, TerminalFlowControl>();
+  private readonly replayBuffers = new Map<string, TerminalReplayBuffer>();
   private lastScrollback: number;
-  /** Unsubscribe handle for the settings-change listener. */
   private readonly unsubscribeSettings: () => void;
   private readonly unsubscribeHost: () => void;
   private useGracefulKill = false;
@@ -135,155 +145,115 @@ export class TerminalService {
     this.sender = sender;
   }
 
-  /**
-   * Spawn a new PTY session tied to the given scope.
-   *
-   * The scope id is normally a thread id, in which case the working directory
-   * follows the thread's worktree (worktree mode) or the workspace root. When no
-   * thread is active yet — the new-thread composer view — the scope id is a
-   * workspace id and the shell opens at the workspace root (the local checkout),
-   * never a worktree, because no worktree exists until the thread is created.
-   *
-   * @param scopeId - A thread id, or a workspace id for the threadless shell.
-   * @returns The unique PTY session ID.
-   */
+
+  /** Creates an ordinary shell terminal, retaining its record after exit. */
   async create(scopeId: string, launch: LegacyTerminalLaunch, replacesPtyId?: string): Promise<LegacyTerminalCreateResult> {
-    const { cwd, createdAt } = this.preparePtyCreation(scopeId, launch, replacesPtyId);
-    const id = uuid();
-    this.reserveCreation(scopeId, id);
-    const shell = launch.executable;
-    logger.info("Spawning PTY", { id, scopeId, shell, cwd });
-    let hostGeneration: string;
+    const session = this.reserveTerminal(scopeId, launch, null, replacesPtyId);
     try {
-      hostGeneration = (await this.host.start()).hostGeneration;
-      if (!this.pendingCreations.get(scopeId)?.has(id)) throw new Error("Terminal scope was closed");
+      await this.launchProcess(session, "shell", launch, session.id);
+      return { ...this.sessionRecord(session), shell: shellBasename(session.shell) };
     } catch (error) {
-      this.releaseCreation(scopeId, id);
-      throw error;
-    }
-    const terminalSettings = this.settingsService.get().terminal;
-    const fc = this.createFlowControl(id, terminalSettings, launch);
-    this.flowControls.set(id, fc);
-    this.replayBuffers.set(id, new TerminalReplayBuffer(
-      replayCapBytesForScrollback(terminalSettings.behavior.scrollback),
-    ));
-    const session = this.createPtySession(id, scopeId, shell, cwd, hostGeneration, launch, createdAt);
-    this.sessions = new Map([...this.sessions, [id, session]]);
-    const updatedSet = new Set(this.threadIndex.get(scopeId) ?? []);
-    updatedSet.add(id);
-    this.threadIndex = new Map([
-      ...this.threadIndex,
-      [scopeId, updatedSet],
-    ]);
-    this.releaseCreation(scopeId, id);
-    try {
-      const creation = this.host.create({
-        sessionId: id,
-        hostGeneration,
-        launch: {
-          requestedProfileId: launch.requestedProfileId,
-          resolvedProfile: launch.resolvedProfile,
-          scope: this.scopeFor(scopeId),
-          arguments: launch.arguments,
-        },
-        cwd,
-        protectedEnv: this.environmentSnapshot(launch.environment ?? this.envService.getEnv()),
-        cols: DEFAULT_COLS,
-        rows: DEFAULT_ROWS,
-      });
-      session.creationPromise = creation.then(() => true, () => false);
-      await creation;
-      if (this.sessions.has(id) && session.status === "creating") session.status = "running";
-      return { ...this.sessionRecord(session), shell: shellBasename(shell) };
-    } catch (error) {
-      this.finalizePty(session);
+      this.removePty(session.id);
       throw error;
     }
   }
 
-  private preparePtyCreation(
+  private reserveTerminal(
     scopeId: string,
     launch: LegacyTerminalLaunch,
+    action: ActionState | null,
     replacesPtyId?: string,
-  ): { readonly cwd: string; readonly createdAt: string | undefined } {
+  ): PtySession {
     const cwd = this.resolveWorkingDirectory(scopeId);
     if (!NodePath.isAbsolute(cwd) || !NodeFS.existsSync(cwd) || !NodeFS.statSync(cwd).isDirectory()) {
       throw new Error(`Invalid working directory: ${cwd}`);
     }
     const createdAt = this.removeExitedReplacement(scopeId, replacesPtyId);
-    const threadPtys = this.threadIndex.get(scopeId);
-    if ((threadPtys?.size ?? 0) + (this.pendingCreations.get(scopeId)?.size ?? 0) >= TERMINAL_MAX_PER_SCOPE) {
-      throw new Error(`Maximum PTY limit (${TERMINAL_MAX_PER_SCOPE}) reached for scope ${scopeId}`);
+    this.assertCapacity(scopeId, action !== null);
+    const session: PtySession = {
+      id: uuid(), threadId: scopeId, shell: launch.executable, cwd,
+      createdAt: createdAt ?? new Date().toISOString(), action, phase: { kind: "pending" },
+      sequence: 0, cols: DEFAULT_COLS, rows: DEFAULT_ROWS,
+      transition: Promise.resolve(), operation: Promise.resolve(), closePromise: null,
+    };
+    this.sessions.set(session.id, session);
+    const index = this.threadIndex.get(scopeId) ?? new Set<string>();
+    index.add(session.id);
+    this.threadIndex.set(scopeId, index);
+    this.flowControls.set(session.id, this.createFlowControl(session.id, this.settingsService.get().terminal));
+    this.replayBuffers.set(session.id, new TerminalReplayBuffer(replayCapBytesForScrollback(this.lastScrollback)));
+    return session;
+  }
+
+  private assertCapacity(scopeId: string, action: boolean): void {
+    if ((this.threadIndex.get(scopeId)?.size ?? 0) >= TERMINAL_MAX_PER_SCOPE) {
+      throw new TerminalCapacityError(`Maximum PTY limit (${TERMINAL_MAX_PER_SCOPE}) reached for scope ${scopeId}`);
     }
-    this.assertHeadlessCapacity(launch);
-    return { cwd, createdAt };
-  }
-
-  private removeExitedReplacement(scopeId: string, replacesPtyId?: string): string | undefined {
-    const session = replacesPtyId === undefined ? undefined : this.sessions.get(replacesPtyId);
-    if (!session || session.threadId !== scopeId || session.headless || session.status !== "exited") return undefined;
-    // Free the cap slot and preserve its reload order without closing a live process.
-    this.removePty(session.id);
-    return session.createdAt;
-  }
-
-  private assertHeadlessCapacity(launch: LegacyTerminalLaunch): void {
-    const globalLimit = this.settingsService.get().terminal.behavior.sessionLimit;
-    if (launch.headless && this.sessions.size + this.pendingCreationCount() >= globalLimit) {
+    if (action && this.sessions.size >= this.settingsService.get().terminal.behavior.sessionLimit) {
       throw new Error("The app-wide Terminal session limit is reached");
     }
   }
 
-  private pendingCreationCount(): number {
-    let count = 0;
-    for (const pending of this.pendingCreations.values()) count += pending.size;
-    return count;
+  private removeExitedReplacement(scopeId: string, replacesPtyId?: string): string | undefined {
+    const session = replacesPtyId === undefined ? undefined : this.sessions.get(replacesPtyId);
+    if (!session || session.threadId !== scopeId || session.action || session.phase.kind !== "exited") return undefined;
+    this.removePty(session.id);
+    return session.createdAt;
   }
 
-  private createFlowControl(
-    id: string,
-    settings: Settings["terminal"],
-    launch: LegacyTerminalLaunch | undefined,
-  ): TerminalFlowControl {
+  private createFlowControl(id: string, settings: Settings["terminal"]): TerminalFlowControl {
     const flowControl = new TerminalFlowControl({
       sink: (sequence, bytes) => this.sender?.data(id, sequence, bytes),
       highBytes: settings.flowControl.serverHighBytes,
       lowBytes: settings.flowControl.serverLowBytes,
     });
-    if (!launch?.headless) flowControl.pause("client-request");
+    flowControl.pause("client-request");
     return flowControl;
   }
 
-  private createPtySession(
-    id: string,
-    scopeId: string,
-    shell: string,
-    cwd: string,
-    hostGeneration: string,
-    launch: LegacyTerminalLaunch | undefined,
-    createdAt = new Date().toISOString(),
-  ): PtySession {
-    let resolveCloseBarrier!: () => void;
-    const closeBarrier = new Promise<void>((resolve) => { resolveCloseBarrier = resolve; });
-    return {
-      id, threadId: scopeId, shell, cwd, hostGeneration,
-      status: "creating",
-      createdAt,
-      exitCode: null,
-      creationPromise: Promise.resolve(true),
-      closePromise: null,
-      commandSequence: 0n,
-      commandTail: Promise.resolve(),
-      headless: launch?.headless ?? false,
-      outputListeners: new Set(),
-      exitListeners: new Set(),
-      headlessOutput: [],
-      headlessExit: undefined,
-      closeBarrier,
-      resolveCloseBarrier,
+  private async launchProcess(
+    session: PtySession, kind: "command" | "shell", launch: LegacyTerminalLaunch, hostId = uuid(),
+  ): Promise<void> {
+    const { hostGeneration } = await this.host.start();
+    this.assertOpen(session);
+    let resolveExit = (): void => {};
+    const exited = new Promise<void>((resolve) => { resolveExit = resolve; });
+    const process: PtyProcess = {
+      id: hostId, hostGeneration, outputOffset: session.sequence, status: "creating",
+      creation: Promise.resolve(false), commandSequence: 0n, commandTail: Promise.resolve(),
+      exited, resolveExit, afterExit: kind === "command" ? "shell" : "retain",
     };
+    session.phase = { kind, process };
+    this.hostSessions.set(hostId, session);
+    const creation = this.createHostProcess(session, process, launch);
+    process.creation = creation.then(() => true, () => false);
+    try {
+      await creation;
+      process.status = "running";
+    } catch (error) {
+      this.hostSessions.delete(hostId);
+      if (currentProcess(session) === process) session.phase = { kind: "exited", exitCode: null };
+      resolveExit();
+      throw error;
+    }
   }
 
+  private async createHostProcess(session: PtySession, process: PtyProcess, launch: LegacyTerminalLaunch): Promise<void> {
+    await this.host.create({
+      sessionId: process.id, hostGeneration: process.hostGeneration,
+      launch: {
+        requestedProfileId: launch.requestedProfileId, resolvedProfile: launch.resolvedProfile,
+        scope: this.scopeFor(session.threadId), arguments: launch.arguments,
+      },
+      cwd: session.cwd,
+      protectedEnv: this.environmentSnapshot(launch.environment ?? this.envService.getEnv()),
+      cols: session.cols, rows: session.rows,
+    });
+  }
+
+  private assertOpen(session: PtySession): void {
+    if (!this.sessions.has(session.id) || session.closePromise) throw new Error("Terminal scope was closed");
+  }
 
   /** Resolves the checkout path used by a thread or workspace terminal session. */
   resolveWorkingDirectory(scopeId: string): string {
@@ -296,18 +266,6 @@ export class TerminalService {
     const workspace = this.workspaceRepo.findById(scopeId);
     if (!workspace) throw new Error(`Thread or workspace not found: ${scopeId}`);
     return workspace.path;
-  }
-
-  private reserveCreation(scopeId: string, id: string): void {
-    const pending = this.pendingCreations.get(scopeId) ?? new Set<string>();
-    pending.add(id);
-    this.pendingCreations.set(scopeId, pending);
-  }
-
-  private releaseCreation(scopeId: string, id: string): void {
-    const pending = this.pendingCreations.get(scopeId);
-    pending?.delete(id);
-    if (pending?.size === 0) this.pendingCreations.delete(scopeId);
   }
 
   private scopeFor(scopeId: string): TerminalScope {
@@ -335,74 +293,104 @@ export class TerminalService {
     return snapshot;
   }
 
-  /** Starts a private noninteractive PTY command that shares legacy capacity and process tracking. */
-  async startPreparedCommand(threadId: string, launch: Omit<LegacyTerminalLaunch, "headless" | "environment">): Promise<{
-    readonly terminalSessionId: string;
-    readonly checkoutPath: string;
-    readonly executable: string;
-    readonly arguments: string[];
-    readonly environmentNames: string[];
-    onOutput(listener: (data: Uint8Array) => void): () => void;
-    onExit(listener: (exitCode: number | null) => void): () => void;
-    stop(): Promise<void>;
-  }> {
-    const environment = this.envService.getEnv();
-    const environmentNames = Object.keys(environment).sort();
-    if (environmentNames.length > MAX_HOST_ENVIRONMENT_NAMES) {
-      throw new Error("Prepared terminal environment exceeds the host boundary limit");
-    }
-    const created = await this.create(threadId, {
-      executable: launch.executable,
-      arguments: [...launch.arguments],
-      requestedProfileId: launch.requestedProfileId,
-      resolvedProfile: launch.resolvedProfile,
-      headless: true,
-      environment,
-    });
-    const session = this.sessions.get(created.ptyId) ?? this.completedHeadlessSessions.get(created.ptyId);
-    if (!session) throw new Error("Prepared terminal session was not retained");
-    return {
-      terminalSessionId: session.id,
-      checkoutPath: session.cwd,
-      executable: launch.executable,
-      arguments: [...launch.arguments],
-      environmentNames,
-      onOutput: (listener) => {
-        session.outputListeners.add(listener);
-        for (const data of session.headlessOutput) listener(data);
-        return () => session.outputListeners.delete(listener);
-      },
-      onExit: (listener) => {
-        session.exitListeners.add(listener);
-        if (session.headlessExit !== undefined) {
-          listener(session.headlessExit);
-          if (!this.sessions.has(session.id)) this.completedHeadlessSessions.delete(session.id);
-        }
-        return () => session.exitListeners.delete(listener);
-      },
-      stop: async () => {
-        if (this.completedHeadlessSessions.delete(session.id)) return;
-        await this.stopPreparedCommand(session.id);
-      },
+
+  /** Opens one attachable action record and starts its command when approval is present. */
+  async openActionTerminal(
+    input: ActionTerminalRequest,
+    shellLaunch: LegacyTerminalLaunch,
+    prepare: (launch: PreparedActionLaunch, cwd: string) => Promise<{
+      readonly launch: LegacyTerminalLaunch;
+      readonly snapshot: WorkspaceEnvironmentActionLaunchSnapshot;
+    }>,
+  ): Promise<ActionTerminal> {
+    const events = new ActionTerminalEvents(replayCapBytesForScrollback(this.lastScrollback));
+    const session = this.reserveTerminal(input.threadId, shellLaunch, { actionId: input.actionId, shellLaunch, events });
+    let snapshot: WorkspaceEnvironmentActionLaunchSnapshot | null = null;
+    const run = (launch: PreparedActionLaunch): Promise<WorkspaceEnvironmentActionLaunchSnapshot> =>
+      this.serializeAction(session, async () => {
+        snapshot = await this.runAction(session, launch, prepare);
+        return snapshot;
+      });
+    const terminal: ActionTerminal = {
+      terminalSessionId: session.id, run,
+      get snapshot() { return snapshot; },
+      stopCommand: () => this.serializeAction(session, () => this.stopActionProcess(session)),
+      onCommandOutput: events.onCommandOutput, onCommandExit: events.onCommandExit, onClosed: events.onClosed,
     };
+    try {
+      if (input.launch !== "pending-approval") await run(input.launch);
+      return terminal;
+    } catch (error) {
+      await this.kill(session.id);
+      throw error;
+    }
   }
 
-  /** Requests a graceful Ctrl-C close, then force-closes after the Action five-second barrier. */
-  private async stopPreparedCommand(ptyId: string): Promise<void> {
-    const session = this.sessions.get(ptyId);
-    if (!session) return;
+  private serializeAction<T>(session: PtySession, operation: () => Promise<T>): Promise<T> {
+    const next = session.operation.then(operation);
+    session.operation = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
+  private async runAction(
+    session: PtySession, input: PreparedActionLaunch,
+    prepare: (launch: PreparedActionLaunch, cwd: string) => Promise<{
+      readonly launch: LegacyTerminalLaunch; readonly snapshot: WorkspaceEnvironmentActionLaunchSnapshot;
+    }>,
+  ): Promise<WorkspaceEnvironmentActionLaunchSnapshot> {
+    this.assertOpen(session);
+    const prepared = await prepare(input, session.cwd);
+    await this.stopActionProcess(session, true);
+    await session.transition;
+    this.assertOpen(session);
+    session.action?.events.reset();
+    this.recordOutput(session, ++session.sequence, actionCommandEcho(session.shell, session.cwd, input.script));
+    const environment = this.envService.getEnv();
+    await this.launchProcess(session, "command", { ...prepared.launch, environment });
+    return { ...prepared.snapshot, environmentNames: Object.keys(environment).sort() };
+  }
+
+  private async stopActionProcess(session: PtySession, replacing = false): Promise<void> {
+    await session.transition;
+    const process = currentProcess(session);
+    if (!process) return;
+    await process.creation;
+    if (currentProcess(session) !== process) return;
+    const afterExit = process.afterExit;
+    process.afterExit = replacing ? "replace" : "shell";
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await this.write(ptyId, "\u0003");
-    } catch {
-      await this.kill(ptyId);
-      return;
+      await this.interruptProcess(session, process);
+      const exited = await Promise.race([
+        process.exited.then(() => true),
+        new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), 5_000); }),
+      ]);
+      if (!exited) await this.closeProcess(session, process, "user");
+      await process.exited;
+      await session.transition;
+    } finally {
+      clearTimeout(timer);
+      if (currentProcess(session) === process) process.afterExit = afterExit;
     }
-    const closed = await Promise.race([
-      session.closeBarrier.then(() => true),
-      new Promise<false>((resolve) => setTimeout(() => resolve(false), 5_000)),
-    ]);
-    if (!closed) await this.kill(ptyId);
-    await session.closeBarrier;
+  }
+
+  private async interruptProcess(session: PtySession, process: PtyProcess): Promise<void> {
+    try {
+      await this.write(session.id, "\u0003");
+    } catch {
+      await this.closeProcess(session, process, "user");
+    }
+  }
+
+  private async closeProcess(session: PtySession, process: PtyProcess, reason: "user" | "app-shutdown"): Promise<void> {
+    await process.commandTail.catch(() => undefined);
+    if (currentProcess(session) !== process) return;
+    await this.host.close({
+      sessionId: process.id, hostGeneration: process.hostGeneration,
+      closeSeq: (process.commandSequence + 1n).toString(), reason,
+    });
+    // Some adapters acknowledge close without an exit event.
+    if (currentProcess(session) === process) this.processExited(session, process, null);
   }
 
   /**
@@ -411,7 +399,7 @@ export class TerminalService {
    */
   pause(ptyId: string): void {
     const fc = this.flowControls.get(ptyId);
-    if (this.sessions.get(ptyId)?.status === "exited") return;
+    if (this.sessions.get(ptyId)?.phase.kind === "exited") return;
     if (!fc) throw new Error(`PTY not found: ${ptyId}`);
     fc.pause("client-request");
   }
@@ -440,39 +428,36 @@ export class TerminalService {
     }
   }
 
-  /** Forward keystrokes to a PTY session. */
+
+  /** Writes to the currently attached process, never an earlier phase. */
   write(ptyId: string, data: string): Promise<void> {
-    const session = this.sessions.get(ptyId);
-    if (!session || session.status === "exited") throw new Error(`PTY not found: ${ptyId}`);
-    if (session.status !== "running")
-      throw new Error(`PTY is ${session.status}`);
-    return this.sendCommand(session, (commandSeq) => ({
-      sessionId: session.id,
-      hostGeneration: session.hostGeneration,
-      attachmentEpoch: "0",
-      commandSeq,
-      kind: "input",
-      data: Buffer.from(data, "utf8"),
+    const process = this.requireRunningProcess(ptyId);
+    return this.sendCommand(process, (commandSeq) => ({
+      sessionId: process.id, hostGeneration: process.hostGeneration, attachmentEpoch: "0",
+      commandSeq, kind: "input", data: Buffer.from(data, "utf8"),
     }));
   }
 
-  /** Resize a PTY session. */
+  /** Resizes the current process and retains dimensions for the following phase. */
   resize(ptyId: string, cols: number, rows: number): Promise<void> {
+    const process = this.requireRunningProcess(ptyId);
     const session = this.sessions.get(ptyId);
-    if (!session || session.status === "exited") throw new Error(`PTY not found: ${ptyId}`);
-    if (session.status !== "running")
-      throw new Error(`PTY is ${session.status}`);
-    return this.sendCommand(session, (commandSeq) => ({
-      sessionId: session.id,
-      hostGeneration: session.hostGeneration,
-      attachmentEpoch: "0",
-      commandSeq,
-      kind: "resize",
-      data: { cols, rows },
+    if (session) { session.cols = cols; session.rows = rows; }
+    return this.sendCommand(process, (commandSeq) => ({
+      sessionId: process.id, hostGeneration: process.hostGeneration, attachmentEpoch: "0",
+      commandSeq, kind: "resize", data: { cols, rows },
     }));
   }
 
-  private sendCommand(session: PtySession, makeCommand: (commandSeq: string) => PtyHostCommand): Promise<void> {
+  private requireRunningProcess(ptyId: string): PtyProcess {
+    const session = this.sessions.get(ptyId);
+    const process = session && currentProcess(session);
+    if (!process) throw new Error(`PTY not found: ${ptyId}`);
+    if (session.closePromise || process.status !== "running") throw new Error("PTY is not running");
+    return process;
+  }
+
+  private sendCommand(session: PtyProcess, makeCommand: (commandSeq: string) => PtyHostCommand): Promise<void> {
     const send = async (): Promise<void> => {
       const commandSeq = session.commandSequence + 1n;
       await this.host.send(makeCommand(commandSeq.toString()));
@@ -482,69 +467,52 @@ export class TerminalService {
     return session.commandTail;
   }
 
-  /** Kill a single PTY session. No-op if the ID is unknown. */
+
+  /** Closes a retained record, interrupting an active command without starting a shell. */
   async kill(
     ptyId: string,
-    reason: "user-requested-process-tree-close" | "app-shutdown" =
-      "user-requested-process-tree-close",
+    reason: "user-requested-process-tree-close" | "app-shutdown" = "user-requested-process-tree-close",
   ): Promise<void> {
     const session = this.sessions.get(ptyId);
     if (!session) return;
-    if (session.status === "exited") {
-      this.removePty(ptyId);
-      return;
-    }
-    if (session.status === "closing" && session.closePromise) {
-      return session.closePromise;
-    }
-    session.status = "closing";
-    const close = async (): Promise<void> => {
-      await session.commandTail.catch(() => undefined);
-      await this.host.close({
-        sessionId: session.id,
-        hostGeneration: session.hostGeneration,
-        closeSeq: (session.commandSequence + 1n).toString(),
-        reason: reason === "app-shutdown" && this.useGracefulKill ? "app-shutdown" : "user",
-      });
-      this.finalizePty(session);
-    };
-    const closePromise = session.creationPromise.then((created) => created ? close() : this.finalizePty(session)).catch((error: unknown) => {
-      if (this.sessions.has(session.id) && session.status !== "exited") {
-        session.status = "running";
-        session.closePromise = null;
+    if (session.closePromise) return session.closePromise;
+    const closing = Promise.resolve().then(async () => {
+      await session.transition;
+      const process = currentProcess(session);
+      if (process) {
+        await process.creation;
+        process.afterExit = "replace";
+        await this.closeProcess(session, process, reason === "app-shutdown" && this.useGracefulKill ? "app-shutdown" : "user");
       }
+      this.removePty(ptyId);
+    });
+    session.closePromise = closing.catch((error: unknown) => {
+      session.closePromise = null;
+      const process = currentProcess(session);
+      if (process) process.afterExit = session.phase.kind === "command" ? "shell" : "retain";
       throw error;
     });
-    session.closePromise = closePromise;
-    return closePromise;
+    return session.closePromise;
   }
 
-  /** Kill all PTY sessions for a given thread, concurrently. */
+  /** Closes shells and action terminals belonging to one scope. */
   async killByThread(threadId: string): Promise<void> {
-    this.pendingCreations.delete(threadId);
-    const ptys = this.threadIndex.get(threadId);
-    if (!ptys || ptys.size === 0) return;
-    // Kill all PTYs concurrently: each killProcessTree is independent.
-    await Promise.all([...ptys]
-      .filter((ptyId) => !this.sessions.get(ptyId)?.headless)
-      .map((ptyId) => this.kill(ptyId)));
-    logger.info("All PTYs killed for thread", { threadId });
+    await Promise.all([...(this.threadIndex.get(threadId) ?? [])].map((id) => this.kill(id)));
   }
 
-  /** Kill all PTY sessions across all threads. */
+  /** Stops the host after in-flight creations and commands settle. */
   async shutdown(): Promise<void> {
-    this.pendingCreations.clear();
     this.unsubscribeSettings();
     this.unsubscribeHost();
     const sessions = [...this.sessions.values()];
     await Promise.allSettled(sessions.map(async (session) => {
-      await session.creationPromise;
-      await session.commandTail;
+      await session.transition;
+      const process = currentProcess(session);
+      await process?.creation;
+      await process?.commandTail;
     }));
-    // The host closes all process scopes concurrently in one shutdown request.
     await this.host.shutdown();
-    for (const session of sessions) this.finalizePty(session);
-    this.completedHeadlessSessions.clear();
+    for (const session of sessions) this.removePty(session.id);
   }
 
   /**
@@ -633,158 +601,119 @@ export class TerminalService {
     return { accepted: replayBuffer.checkpointAt(seq, data) };
   }
 
-  /**
-   * Returns retained shell records, including pending and exited processes.
-   * Used by reconnecting clients to discover which PTYs to reattach.
-   */
+
+  /** Lists all retained records, including pending approval and exited terminals. */
   listActiveSessions(): LegacyTerminalRecord[] {
     return [...this.sessions.values()]
-      .filter((session) => !session.headless)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       .map((session) => this.sessionRecord(session));
   }
 
   private sessionRecord(session: PtySession): LegacyTerminalRecord {
+    const phase = session.phase;
     return {
-      ptyId: session.id,
-      threadId: session.threadId,
-      shell: shellBasename(session.shell),
-      cwd: session.cwd,
-      kind: session.headless ? "action" : "shell",
-      state: session.status === "creating" ? "pending" : session.status === "exited" ? "exited" : "running",
-      exitCode: session.exitCode,
-      createdAt: session.createdAt,
+      ptyId: session.id, threadId: session.threadId, shell: shellBasename(session.shell), cwd: session.cwd,
+      kind: session.action ? "action" : "shell",
+      ...(session.action ? { actionId: session.action.actionId } : {}),
+      state: this.recordState(phase),
+      exitCode: phase.kind === "exited" ? phase.exitCode : null, createdAt: session.createdAt,
     };
   }
 
-  /**
-   * Returns whether a PTY has non-shell child processes running.
-   * Used by the optional kill confirmation feature (#315).
-   *
-   * @param ptyId - The PTY session to inspect.
-   */
+  private recordState(phase: TerminalPhase): "pending" | "running" | "exited" {
+    if (phase.kind === "exited") return "exited";
+    if (phase.kind === "pending" || phase.process.status === "creating") return "pending";
+    return "running";
+  }
+
+  /** Reports children of the current phase's process. */
   async hasChildren(ptyId: string): Promise<{ hasChildren: boolean }> {
     const session = this.sessions.get(ptyId);
     if (!session) throw new Error(`PTY not found: ${ptyId}`);
-    if (session.status === "exited") return { hasChildren: false };
-    return this.host.inspectChildren(session.id, session.hostGeneration);
+    const process = currentProcess(session);
+    return process ? this.host.inspectChildren(process.id, process.hostGeneration) : { hasChildren: false };
   }
 
   private handleHostEvent(event: PtyHostEvent): void {
-    if (event.kind === "output") {
-      this.handleHostOutput(event);
-      return;
-    }
-    if (event.kind === "exit") {
-      this.handleHostExit(event);
-    }
+    if (event.kind === "output") this.handleHostOutput(event);
+    if (event.kind === "exit") this.handleHostExit(event);
     if (event.kind === "failure") this.handleHostFailure(event);
   }
 
   private handleHostOutput(event: Extract<PtyHostEvent, { kind: "output" }>): void {
-    const session = this.sessions.get(event.sessionId);
-    if (!session || session.status === "exited" || session.hostGeneration !== event.hostGeneration) return;
+    const session = this.hostSessions.get(event.sessionId);
+    const process = session && currentProcess(session);
+    if (!session || !process || process.hostGeneration !== event.hostGeneration) return;
     const bytes = Buffer.from(event.dataBase64, "base64");
-    const sequence = Number(event.outputSeq);
+    const sequence = process.outputOffset + Number(event.outputSeq);
+    if (sequence <= session.sequence) return;
+    session.sequence = sequence;
+    this.recordOutput(session, sequence, bytes);
+    if (session.phase.kind === "command") session.action?.events.emitOutput(bytes);
+  }
+
+  private recordOutput(session: PtySession, sequence: number, bytes: Uint8Array): void {
     this.replayBuffers.get(session.id)?.record(sequence, bytes);
-    if (session.headless) {
-      appendHeadlessOutput(session, bytes, replayCapBytesForScrollback(this.lastScrollback));
-      for (const listener of session.outputListeners) listener(bytes);
-      return;
-    }
     this.flowControls.get(session.id)?.push(sequence, bytes);
   }
 
   private handleHostExit(event: Extract<PtyHostEvent, { kind: "exit" }>): void {
-    const session = this.sessions.get(event.sessionId);
-    if (session && session.hostGeneration === event.hostGeneration) this.retainExitedPty(session, event.code);
+    const session = this.hostSessions.get(event.sessionId);
+    const process = session && currentProcess(session);
+    if (session && process?.hostGeneration === event.hostGeneration) this.processExited(session, process, event.code);
   }
 
   private handleHostFailure(event: Extract<PtyHostEvent, { kind: "failure" }>): void {
     for (const session of this.sessions.values()) {
-      if (session.hostGeneration === event.hostGeneration) this.retainExitedPty(session, 1);
+      const process = currentProcess(session);
+      if (!process || process.hostGeneration !== event.hostGeneration) continue;
+      process.afterExit = "retain";
+      this.processExited(session, process, 1);
     }
   }
 
-  private retainExitedPty(session: PtySession, exitCode: number | null): void {
-    if (session.headless) {
-      this.finalizePty(session, exitCode ?? undefined);
-      return;
+  private processExited(session: PtySession, process: PtyProcess, exitCode: number | null): void {
+    const wasCommand = session.phase.kind === "command";
+    this.hostSessions.delete(process.id);
+    session.phase = { kind: "exited", exitCode };
+    if (wasCommand) session.action?.events.emitExit(session.closePromise ? 130 : exitCode);
+    if (process.afterExit === "shell" && !session.closePromise && session.action) {
+      session.transition = this.launchFollowingShell(session, session.action.shellLaunch);
+    } else if (process.afterExit === "retain") {
+      this.notifyTerminalExit(session, exitCode);
     }
-    if (session.status === "exited") return;
-    session.status = "exited";
-    session.exitCode = exitCode;
+    process.resolveExit();
+  }
+
+  private async launchFollowingShell(session: PtySession, launch: LegacyTerminalLaunch): Promise<void> {
+    try {
+      await this.launchProcess(session, "shell", launch);
+    } catch (error) {
+      if (session.closePromise || !this.sessions.has(session.id)) return;
+      logger.warn("Action terminal shell launch failed", { id: session.id, error: String(error) });
+      session.phase = { kind: "exited", exitCode: null };
+      this.notifyTerminalExit(session, null);
+    }
+  }
+
+  private notifyTerminalExit(session: PtySession, exitCode: number | null): void {
     this.flowControls.get(session.id)?.resume();
-    this.notifyPtyExit(session, exitCode ?? undefined);
-    this.flowControls.delete(session.id);
-    session.outputListeners.clear();
-    session.exitListeners.clear();
-    session.resolveCloseBarrier();
-  }
-
-  private finalizePty(session: PtySession, exitCode?: number): void {
-    if (!this.sessions.has(session.id)) return;
-    const awaitOwnerAttachment = session.headless && session.exitListeners.size === 0;
-    if (session.headless) this.notifyPtyExit(session, exitCode);
-    else this.retainExitedPty(session, exitCode ?? null);
-    this.removePty(session.id);
-    if (awaitOwnerAttachment) {
-      this.completedHeadlessSessions.set(session.id, session);
-    }
-    session.resolveCloseBarrier();
-  }
-
-  private notifyPtyExit(session: PtySession, exitCode?: number): void {
-    if (!session.headless) {
-      this.sender?.json("terminal.exit", {
-        ptyId: session.id, code: exitCode ?? 0,
-        ...(exitCode === undefined ? { exitCode: null } : {}),
-      });
-    }
-    if (session.headless) session.headlessExit = exitCode ?? null;
-    for (const listener of session.exitListeners) {
-      try {
-        listener(exitCode ?? null);
-      } catch (err) {
-        logger.warn("Headless terminal exit listener failed during PTY finalization", {
-          id: session.id,
-          threadId: session.threadId,
-          error: describeError(err),
-        });
-      }
-    }
+    this.sender?.json("terminal.exit", {
+      ptyId: session.id, code: exitCode ?? 0, ...(exitCode === null ? { exitCode: null } : {}),
+    });
   }
 
   private removePty(ptyId: string): void {
     const session = this.sessions.get(ptyId);
     if (!session) return;
-
-    const newSessions = new Map(this.sessions);
-    newSessions.delete(ptyId);
-    this.sessions = newSessions;
-
-    const threadPtys = this.threadIndex.get(session.threadId);
-    if (threadPtys) {
-      const updated = new Set(threadPtys);
-      updated.delete(ptyId);
-      const newIndex = new Map(this.threadIndex);
-      if (updated.size === 0) {
-        newIndex.delete(session.threadId);
-      } else {
-        newIndex.set(session.threadId, updated);
-      }
-      this.threadIndex = newIndex;
-    }
-
+    this.sessions.delete(ptyId);
+    const process = currentProcess(session);
+    if (process) this.hostSessions.delete(process.id);
+    const index = this.threadIndex.get(session.threadId);
+    index?.delete(ptyId);
+    if (index?.size === 0) this.threadIndex.delete(session.threadId);
     this.flowControls.delete(ptyId);
     this.replayBuffers.delete(ptyId);
+    session.action?.events.close();
   }
-}
-
-function appendHeadlessOutput(session: PtySession, data: Uint8Array, maxBytes: number): void {
-  const retained = Buffer.concat([...session.headlessOutput, Buffer.from(data)]);
-  const bounded = retained.byteLength > maxBytes
-    ? retained.subarray(retained.byteLength - maxBytes)
-    : retained;
-  session.headlessOutput = [bounded];
 }
