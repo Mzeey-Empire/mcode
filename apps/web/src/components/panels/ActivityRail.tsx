@@ -414,7 +414,9 @@ function BrowserPageRailTab({
           size="compact"
           data-rail-browser-page={page.id}
           data-active={active ? "true" : undefined}
-          aria-pressed={active}
+          // Pressed drives the ghost variant's selected fill, so only the live
+          // page claims it; `data-active` still marks the remembered page.
+          aria-pressed={activePage}
           // The live page (active, and Browser owns the panel) is the current
           // page in the switcher; expose that beyond the visual lamp.
           aria-current={activePage ? "page" : undefined}
@@ -462,7 +464,8 @@ function BrowserPageRailTab({
 
 function browserPageRailClass(active: boolean, browserActive: boolean): string {
   if (active && browserActive) return RAIL_ACTIVE_CLASS;
-  if (active) return "bg-hover text-ink";
+  // Ink alone marks the page Browser will show; a fill would read as a second selection.
+  if (active) return "text-ink hover:bg-hover";
   return RAIL_IDLE_CLASS;
 }
 
@@ -662,6 +665,8 @@ interface ActivityRailViewProps extends ActivityRailProps {
   readonly expanded: boolean;
   onPointerEnter: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerLeave: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerDownCapture: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerUpCapture: () => void;
   onFocusCapture: () => void;
   onBlurCapture: (event: ReactFocusEvent<HTMLDivElement>) => void;
 }
@@ -787,6 +792,8 @@ function ActivityRailView({
   expanded,
   onPointerEnter,
   onPointerLeave,
+  onPointerDownCapture,
+  onPointerUpCapture,
   onFocusCapture,
   onBlurCapture,
 }: ActivityRailViewProps) {
@@ -798,6 +805,9 @@ function ActivityRailView({
       className="relative z-(--layer-floating-panel) w-(--container-right-rail) flex-none"
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
+      onPointerDownCapture={onPointerDownCapture}
+      onPointerUpCapture={onPointerUpCapture}
+      onPointerCancelCapture={onPointerUpCapture}
       onFocusCapture={onFocusCapture}
       onBlurCapture={onBlurCapture}
     >
@@ -866,6 +876,9 @@ export function ActivityRail({
   const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pointerWithinRef = useRef(false);
   const focusWithinRef = useRef(false);
+  // The rail grows leftward from the window edge, so expanding mid-press slides
+  // the entry out from under the pointer and the click lands elsewhere.
+  const pointerPressedRef = useRef(false);
 
   const clearExpandTimer = useCallback(() => {
     if (expandTimerRef.current === null) return;
@@ -884,7 +897,7 @@ export function ActivityRail({
     if (expanded || expandTimerRef.current !== null) return;
     expandTimerRef.current = setTimeout(() => {
       expandTimerRef.current = null;
-      if (pointerWithinRef.current) setExpanded(true);
+      if (pointerWithinRef.current && !pointerPressedRef.current) setExpanded(true);
     }, RAIL_EXPAND_DELAY_MS);
   }, [clearCollapseTimer, expanded]);
 
@@ -920,14 +933,25 @@ export function ActivityRail({
   const onPointerLeave = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.pointerType === "touch") return;
     pointerWithinRef.current = false;
+    pointerPressedRef.current = false;
     scheduleCollapse();
+  };
+
+  const onPointerDownCapture = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "touch") return;
+    pointerPressedRef.current = true;
+  };
+
+  const onPointerUpCapture = () => {
+    pointerPressedRef.current = false;
+    if (pointerWithinRef.current) scheduleExpand();
   };
 
   const onFocusCapture = () => {
     focusWithinRef.current = true;
     clearExpandTimer();
     clearCollapseTimer();
-    setExpanded(true);
+    if (!pointerPressedRef.current) setExpanded(true);
   };
 
   const onBlurCapture = (event: ReactFocusEvent<HTMLDivElement>) => {
@@ -957,6 +981,8 @@ export function ActivityRail({
       expanded={expanded}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
+      onPointerDownCapture={onPointerDownCapture}
+      onPointerUpCapture={onPointerUpCapture}
       onFocusCapture={onFocusCapture}
       onBlurCapture={onBlurCapture}
     />

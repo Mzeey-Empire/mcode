@@ -133,6 +133,22 @@ describe("ActivityRail expansion", () => {
     expect(screen.getByRole("button", { name: "Review, 3 files changed" })).not.toHaveClass("bg-selected");
   });
 
+  it("keeps the remembered Browser page unfilled while another tool owns the panel", () => {
+    render(
+      <ActivityRail
+        {...railElement(["preview", "terminal"]).props}
+        browserTabSet={browserTabSet}
+      />,
+    );
+    const page = screen.getByRole("button", { name: "Browser page: Example" });
+
+    expect(page).toHaveAttribute("aria-pressed", "false");
+    expect(page).toHaveClass("text-ink");
+    expect(page).not.toHaveClass("bg-selected");
+    expect(page).not.toHaveClass("bg-hover");
+    expect(screen.getAllByTestId("rail-active-edge")).toHaveLength(1);
+  });
+
   it("anchors trailing controls right and reserves their label space", () => {
     const { rerender } = renderRail();
     fireEvent.focus(screen.getByRole("button", { name: "Terminal" }));
@@ -189,6 +205,25 @@ describe("ActivityRail expansion", () => {
 
     fireEvent.focus(screen.getByRole("button", { name: "Terminal" }));
 
+    expect(rail).toHaveAttribute("data-expanded", "true");
+  });
+
+  it("keeps a collapsed entry under the pointer until its click selects it", () => {
+    renderRail();
+    const rail = screen.getByTestId("activity-rail");
+    const terminal = screen.getByRole("button", { name: "Terminal" });
+
+    fireEvent.pointerEnter(rail, { pointerType: "mouse" });
+    fireEvent.pointerDown(terminal, { pointerType: "mouse" });
+    fireEvent.focus(terminal);
+    act(() => vi.advanceTimersByTime(EXPECTED_EXPAND_DELAY_MS * 2));
+    expect(rail).toHaveAttribute("data-expanded", "false");
+
+    fireEvent.pointerUp(terminal, { pointerType: "mouse" });
+    fireEvent.click(terminal);
+    expect(handlers.onSelect).toHaveBeenCalledWith(rightPanelSingletonId("terminal"));
+
+    act(() => vi.advanceTimersByTime(EXPECTED_EXPAND_DELAY_MS));
     expect(rail).toHaveAttribute("data-expanded", "true");
   });
 
