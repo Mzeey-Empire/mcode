@@ -12,6 +12,7 @@ import {
   type ComponentPropsWithoutRef,
   type ReactNode,
 } from "react";
+import { usePreparingRowEntrance } from "@/features/thread-startup";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "./state/workspaceStore";
@@ -2911,6 +2912,13 @@ function WorkspaceThreadSection({
     ? threadList.treeItems.slice(0, threadList.maxVisible)
     : threadList.treeItems;
   const showDrafts = lifecycleView === "active" && drafts.length > 0;
+  const threadRowsRef = useRef<HTMLDivElement>(null);
+  usePreparingRowEntrance(
+    threadRowsRef,
+    capped
+      .filter((item) => item.thread.clientPreparing === true)
+      .map((item) => item.thread.id),
+  );
   return (
     <>
       {showDrafts &&
@@ -2940,48 +2948,50 @@ function WorkspaceThreadSection({
             : "No active threads"}
         </p>
       ) : (
-        capped.map((item) => (
-          <div
-            key={item.thread.id}
-            data-testid="thread-item"
-            data-thread-id={item.thread.id}
-          >
-            <ThreadRow
-              workspaceName={workspace.name}
-              thread={item.thread}
-              depth={item.depth}
-              hasPendingPermission={ctx.pendingPermissionThreadIds.has(
-                item.thread.id,
-              )}
-              checks={ctx.checksById[item.thread.id]}
-              isEditing={ctx.inlineEdit?.threadId === item.thread.id}
-              inlineEdit={
-                ctx.inlineEdit?.threadId === item.thread.id
-                  ? ctx.inlineEdit
-                  : null
-              }
-              worktreesLoadedFor={ctx.worktreesLoadedFor}
-              validWorktreePaths={ctx.validWorktreePaths}
-              availableProviders={ctx.availableProviders}
-              onInlineEditChange={ctx.onInlineEditChange}
-              onInlineEditCommit={ctx.onInlineEditCommit}
-              onInlineEditCancel={ctx.onInlineEditCancel}
-              onThreadClick={(threadId) =>
-                ctx.onThreadClick(workspace.id, threadId)
-              }
-              onThreadDoubleClick={ctx.onThreadDoubleClick}
-              onSelectThread={(threadId) =>
-                ctx.onSelectThread(workspace.id, threadId)
-              }
-              onThreadContextMenu={(event, clicked) =>
-                ctx.onThreadContextMenu(event, clicked, workspace.path)
-              }
-              onCompleteThread={ctx.onCompleteThread}
-              onReopenThread={ctx.onReopenThread}
-              onRetryThreadCleanup={ctx.onRetryThreadCleanup}
-            />
-          </div>
-        ))
+        <div ref={threadRowsRef}>
+          {capped.map((item) => (
+            <div
+              key={item.thread.id}
+              data-testid="thread-item"
+              data-thread-id={item.thread.id}
+            >
+              <ThreadRow
+                workspaceName={workspace.name}
+                thread={item.thread}
+                depth={item.depth}
+                hasPendingPermission={ctx.pendingPermissionThreadIds.has(
+                  item.thread.id,
+                )}
+                checks={ctx.checksById[item.thread.id]}
+                isEditing={ctx.inlineEdit?.threadId === item.thread.id}
+                inlineEdit={
+                  ctx.inlineEdit?.threadId === item.thread.id
+                    ? ctx.inlineEdit
+                    : null
+                }
+                worktreesLoadedFor={ctx.worktreesLoadedFor}
+                validWorktreePaths={ctx.validWorktreePaths}
+                availableProviders={ctx.availableProviders}
+                onInlineEditChange={ctx.onInlineEditChange}
+                onInlineEditCommit={ctx.onInlineEditCommit}
+                onInlineEditCancel={ctx.onInlineEditCancel}
+                onThreadClick={(threadId) =>
+                  ctx.onThreadClick(workspace.id, threadId)
+                }
+                onThreadDoubleClick={ctx.onThreadDoubleClick}
+                onSelectThread={(threadId) =>
+                  ctx.onSelectThread(workspace.id, threadId)
+                }
+                onThreadContextMenu={(event, clicked) =>
+                  ctx.onThreadContextMenu(event, clicked, workspace.path)
+                }
+                onCompleteThread={ctx.onCompleteThread}
+                onReopenThread={ctx.onReopenThread}
+                onRetryThreadCleanup={ctx.onRetryThreadCleanup}
+              />
+            </div>
+          ))}
+        </div>
       )}
       {threadList.needsCap && !threadList.forceExpand && (
         <ProjectThreadListToggle
