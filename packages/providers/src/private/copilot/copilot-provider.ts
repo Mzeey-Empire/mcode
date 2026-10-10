@@ -3,7 +3,9 @@ import * as NodeCrypto from "node:crypto";
 import { CopilotClient, approveAll } from "@github/copilot-sdk";
 import type { CopilotSession, SessionEvent, ModelInfo, PermissionRequest as NativePermissionRequest, PermissionRequestResult } from "@github/copilot-sdk";
 import { z } from "zod";
-import type { AgentEvent, IAgentProvider, ISessionEvictable, PermissionDecision, PermissionRequest, ProviderIdentity, ProviderModelInfo, TurnRequest, CompletionOptions } from "@mcode/contracts";
+import type { AgentEvent, IAgentProvider, ISessionEvictable, ApprovalChoice, ApprovalResponse, ApprovalRespondResult, ApprovalRequestEnvelope, ProviderIdentity, ProviderModelInfo, TurnRequest, CompletionOptions } from "@mcode/contracts";
+import { approvalChoice, approvalOutcome, approvalScope } from "../../approval-scope.js";
+import { copilotApprovalBody } from "./copilot-approval.js";
 import { BROWSER_AUTOMATION_OPERATION_METADATA, providerRuntimeEvent } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import { buildMcodeInstructionPlan, renderMcodeInstructions } from "@mcode/thread-orchestration";
@@ -291,10 +293,13 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     if (state.sessionApproval) return { kind: "approved" };
     if (turn.pendingPermissions.size >= 64) return { kind: "denied-by-rules", rules: [] };
     const requestId = NodeCrypto.randomUUID();
-    const request: PermissionRequest = { requestId, threadId: state.request.threadId, toolName: native.kind, input: native };
+    const body = copilotApprovalBody(native);
+    const request = { requestId, threadId: state.request.threadId, body };
     return new Promise((resolve) => {
       turn.pendingPermissions.set(requestId, { request, resolve });
-      this.emit("permission_request", request);
+      const autoDeny = approvalScope(body);
+      if (autoDeny) void this.resolveApproval(requestId, { autoDeny });
+      else this.emit("approval_request", request);
     });
   }
   private consumePermissionGrant(state: CopilotSessionState, native: NativePermissionRequest): boolean {
@@ -302,29 +307,41 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     return Boolean(path && this.host.grants.consume({ threadId: state.request.threadId, toolName: native.kind === "read" ? "Read" : native.kind, path }));
   }
 
-  /** Resolves one native permission callback through the existing Mcode approval path. */
-  resolvePermission(requestId: string, decision: PermissionDecision): boolean {
+  /** Resolve the live native handler before publishing the outcome. */
+  async resolveApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     for (const state of this.runtime.states()) {
-      const pending = state.turn?.pendingPermissions.get(requestId);
+      const turn = state.turn;
+      if (!turn) continue;
+      const pending = turn.pendingPermissions.get(requestId);
       if (!pending) continue;
-      state.turn?.pendingPermissions.delete(requestId);
-      if (decision === "allow-session") state.sessionApproval = true;
-      pending.resolve(decision === "allow" || decision === "allow-session" ? { kind: "approved" } : { kind: "denied-interactively-by-user" });
-      this.emit("permission_resolved", { requestId, decision });
-      return true;
+      const choice = approvalChoice(pending.request.body, response);
+      if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
+      turn.pendingPermissions.delete(requestId);
+      if (!("autoDeny" in response) && choice?.id === "allow-session") state.sessionApproval = true;
+      pending.resolve(this.nativeApprovalResult(choice, response));
+      await Promise.resolve();
+      this.emit("approval_resolved", { requestId, threadId: pending.request.threadId,
+        outcome: approvalOutcome(choice, response) });
+      return { status: "resolved" };
     }
-    return false;
+    return { status: "not_pending" };
   }
 
-  /** Lists pending approvals belonging to one thread. */
-  listPendingPermissions(threadId: string): PermissionRequest[] {
-    return this.runtime.states().filter((state) => state.request.threadId === threadId).flatMap((state) => [...state.turn?.pendingPermissions.values() ?? []].map((pending) => pending.request));
+  private nativeApprovalResult(choice: ApprovalChoice | undefined, response: ApprovalResponse): PermissionRequestResult {
+    if ("autoDeny" in response) return { kind: "denied-no-approval-rule-and-could-not-request-from-user" };
+    return choice?.intent === "deny" ? { kind: "denied-interactively-by-user" } : { kind: "approved" };
+  }
+
+  /** List stable routing and display bodies from pending native callbacks. */
+  listPendingApprovals(threadId?: string): ApprovalRequestEnvelope[] {
+    return this.runtime.states().filter((state) => threadId === undefined || state.request.threadId === threadId)
+      .flatMap((state) => [...state.turn?.pendingPermissions.values() ?? []].map((pending) => pending.request));
   }
 
   private cancelPermissions(turn: CopilotTurnState): void {
     for (const [requestId, pending] of turn.pendingPermissions) {
       pending.resolve({ kind: "denied-interactively-by-user" });
-      this.emit("permission_resolved", { requestId, decision: "cancelled" });
+      this.emit("approval_resolved", { requestId, threadId: pending.request.threadId, outcome: { status: "cancelled", reason: "session_stopped" } });
     }
     turn.pendingPermissions.clear();
   }

@@ -236,8 +236,8 @@ function createCursorAcpTraceReplay(trace: CursorAcpTraceFixture): CursorAcpTrac
     settings: { get: () => ({ provider: { cursor: {} } }) as never },
     publishEvent: (_entry, event) => emittedEvents.push(event),
     publishNativeTurnDiff: () => undefined,
-    emitPermissionRequest: () => undefined,
-    emitPermissionResolved: () => undefined,
+    emitApprovalRequest: () => undefined,
+    emitApprovalResolved: () => undefined,
     emitPlanCaptured: (args) => planCaptures.push(args),
   });
   const entry = createCursorTraceSessionEntry(trace);

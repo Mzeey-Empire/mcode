@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
 import { OpenCodeProvider } from "../opencode-provider.js";
 import { OpenCodeServerPool } from "../opencode-server-pool.js";
-import type { PermissionRequest, TurnRequest } from "@mcode/contracts";
+import type { ApprovalRequestEnvelope, TurnRequest } from "@mcode/contracts";
 
 function testPool(): OpenCodeServerPool {
   return new OpenCodeServerPool({
@@ -161,10 +161,10 @@ describe("OpenCodeProvider full-access permission bypass", () => {
   it("auto-replies always to a permission ask in full mode without carding", async () => {
     const http = fakeHttp([shellAsk()]);
     const provider = testProvider(http);
-    const cards: PermissionRequest[] = [];
+    const cards: ApprovalRequestEnvelope[] = [];
     const resolved: unknown[] = [];
-    provider.on("permission_request", (request) => cards.push(request as PermissionRequest));
-    provider.on("permission_resolved", (payload) => resolved.push(payload));
+    provider.on("approval_request", (request) => cards.push(request));
+    provider.on("approval_resolved", (payload) => resolved.push(payload));
 
     await provider.sendTurn(turnRequest("full"));
 
@@ -173,24 +173,24 @@ describe("OpenCodeProvider full-access permission bypass", () => {
     expect(http.replyPermission).toHaveBeenCalledWith(
       { baseUrl: "http://127.0.0.1:4096", directory: "/w/a" }, "ses_1", "per_1", "always", "v2", expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
-    expect(resolved).toEqual([{ requestId: "per_1", decision: "allow-session" }]);
-    expect(provider.listPendingPermissions("thread-1")).toHaveLength(0);
+    expect(resolved).toEqual([{ requestId: "per_1", threadId: "thread-1", outcome: { status: "allowed", intent: "allow_scoped", choiceLabel: "Full access" } }]);
+    expect(provider.listPendingApprovals("thread-1")).toHaveLength(0);
     await provider.shutdown();
   });
 
   it("still cards a question ask in full mode", async () => {
     const http = fakeHttp([questionAsk()]);
     const provider = testProvider(http);
-    const cards: PermissionRequest[] = [];
-    provider.on("permission_request", (request) => cards.push(request as PermissionRequest));
+    const cards: ApprovalRequestEnvelope[] = [];
+    provider.on("approval_request", (request) => cards.push(request));
 
     const sending = provider.sendTurn(turnRequest("full"));
     await vi.waitFor(() => expect(cards).toHaveLength(1));
-    expect(cards[0]?.toolName).toBe("Question");
+    expect(cards[0]?.body).toMatchObject({ subject: { kind: "question" } });
     expect(http.replyPermission).not.toHaveBeenCalled();
     expect(http.rejectQuestion).not.toHaveBeenCalled();
 
-    expect(provider.resolvePermission("que_1", "deny")).toBe(true);
+    expect(await provider.resolveApproval("que_1", { choiceId: "reject" })).toEqual({ status: "resolved" });
     await sending;
     expect(http.rejectQuestion).toHaveBeenCalledTimes(1);
     await provider.shutdown();
@@ -199,14 +199,14 @@ describe("OpenCodeProvider full-access permission bypass", () => {
   it("cards a permission ask without auto-replying in supervised mode", async () => {
     const http = fakeHttp([shellAsk()]);
     const provider = testProvider(http);
-    const cards: PermissionRequest[] = [];
-    provider.on("permission_request", (request) => cards.push(request as PermissionRequest));
+    const cards: ApprovalRequestEnvelope[] = [];
+    provider.on("approval_request", (request) => cards.push(request));
 
     const sending = provider.sendTurn(turnRequest("supervised"));
     await vi.waitFor(() => expect(cards).toHaveLength(1));
     expect(http.replyPermission).not.toHaveBeenCalled();
 
-    expect(provider.resolvePermission("per_1", "allow")).toBe(true);
+    expect(await provider.resolveApproval("per_1", { choiceId: "once" })).toEqual({ status: "resolved" });
     await sending;
     expect(http.replyPermission).toHaveBeenCalledTimes(1);
     expect(http.replyPermission).toHaveBeenCalledWith(
@@ -219,12 +219,12 @@ describe("OpenCodeProvider full-access permission bypass", () => {
     const http = fakeHttp([shellAsk(), shellAsk()]);
     const provider = testProvider(http);
     const resolved: unknown[] = [];
-    provider.on("permission_resolved", (payload) => resolved.push(payload));
+    provider.on("approval_resolved", (payload) => resolved.push(payload));
 
     await provider.sendTurn(turnRequest("full"));
 
     expect(http.replyPermission).toHaveBeenCalledTimes(1);
-    expect(resolved).toEqual([{ requestId: "per_1", decision: "allow-session" }]);
+    expect(resolved).toEqual([{ requestId: "per_1", threadId: "thread-1", outcome: { status: "allowed", intent: "allow_scoped", choiceLabel: "Full access" } }]);
     await provider.shutdown();
   });
 });

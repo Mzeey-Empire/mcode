@@ -16,7 +16,7 @@ export interface CopilotTurnState {
   cost?: number;
   contextWindow?: number;
   tools: Map<string, { name: string; startedAt: number }>;
-  pendingPermissions: Map<string, { request: import("@mcode/contracts").PermissionRequest; resolve: (result: import("@github/copilot-sdk").PermissionRequestResult) => void }>;
+  pendingPermissions: Map<string, { request: import("@mcode/contracts").ApprovalRequestEnvelope & { body: import("@mcode/contracts").ApprovalRequestBody }; resolve: (result: import("@github/copilot-sdk").PermissionRequestResult) => void }>;
   settle: (outcome: "completed" | "cancelled" | "failed", error?: Error) => void;
   completed: Promise<void>;
   abortTask?: Promise<void>;

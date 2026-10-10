@@ -79,6 +79,21 @@ describe("Copilot public factory", () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
 
+  it("keeps full native command scope and rejects oversized requests", async () => {
+    await provider.sendTurn(request({ permissionMode: "supervised" }));
+    const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
+    const native = options.onPermissionRequest({ kind: "shell", fullCommandText: "bun run lint", toolCallId: "call-1" }, { sessionId: session.sessionId });
+    const pending = provider.listPendingApprovals?.("thread-1") ?? [];
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.body).toMatchObject({ subject: { kind: "command", command: "bun run lint" }, toolCallId: "call-1", noteDelivery: "native" });
+    expect(await provider.resolveApproval?.(pending[0]!.requestId, { choiceId: "deny" })).toEqual({ status: "resolved" });
+    expect(await native).toEqual({ kind: "denied-interactively-by-user" });
+    expect(await options.onPermissionRequest({ kind: "shell", fullCommandText: "x".repeat(70_000) }, { sessionId: session.sessionId }))
+      .toEqual({ kind: "denied-no-approval-rule-and-could-not-request-from-user" });
+    expect(provider.listPendingApprovals?.()).toEqual([]);
+    await finish();
+  });
+
   it("validates its own port and stays inert until the first public send", async () => {
     expect(() => createCopilotProvider({ configuration: { cliPath: "copilot", idleSessionTtlMs: 1 }, host: ports })).toThrow("launch.resolve");
     expect(launch).not.toHaveBeenCalled(); expect(sdk.start).not.toHaveBeenCalled();
@@ -96,9 +111,9 @@ describe("Copilot public factory", () => {
     await finish();
     await provider.sendTurn(request({ turnId: "turn-2", turnExecutionId: "00000000-0000-4000-8000-000000000002", permissionMode: "supervised" }));
     const permission = options.onPermissionRequest({ kind: "shell", command: "touch a" }, { sessionId: session.sessionId });
-    const pending = provider.listPendingPermissions?.("thread-1") ?? [];
+    const pending = provider.listPendingApprovals?.("thread-1") ?? [];
     expect(pending).toHaveLength(1);
-    expect(provider.resolvePermission?.(pending[0]!.requestId, "deny")).toBe(true);
+    expect(await provider.resolveApproval?.(pending[0]!.requestId, { choiceId: "deny" })).toEqual({ status: "resolved" });
     expect(await permission).toEqual({ kind: "denied-interactively-by-user" });
     await finish();
     expect(sdk.create).toHaveBeenCalledOnce();
@@ -109,11 +124,11 @@ describe("Copilot public factory", () => {
     await provider.sendTurn(request({ permissionMode: "supervised" }));
     const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
     const permission = options.onPermissionRequest({ kind: "write", path: "/fixture/a" }, { sessionId: session.sessionId });
-    const pending = provider.listPendingPermissions?.("thread-1") ?? [];
-    provider.resolvePermission?.(pending[0]!.requestId, "allow-session");
+    const pending = provider.listPendingApprovals?.("thread-1") ?? [];
+    expect(await provider.resolveApproval?.(pending[0]!.requestId, { choiceId: "allow-session" })).toEqual({ status: "resolved" });
     expect(await permission).toEqual({ kind: "approved" });
     expect(await options.onPermissionRequest({ kind: "write", path: "/fixture/different" }, { sessionId: session.sessionId })).toEqual({ kind: "approved" });
-    expect(provider.listPendingPermissions?.("thread-1")).toEqual([]);
+    expect(provider.listPendingApprovals?.("thread-1")).toEqual([]);
     vi.mocked(ports.grants.consume).mockReturnValueOnce(true);
     expect(await options.onPermissionRequest({ kind: "write", path: "/fixture/a" }, { sessionId: session.sessionId })).toEqual({ kind: "approved" });
     await finish();

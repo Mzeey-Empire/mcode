@@ -37,8 +37,10 @@ import type {
   AgentEvent,
   GoalState,
   GoalLookupResult,
-  PermissionDecision,
-  PermissionRequest,
+  ApprovalResponse,
+  ApprovalRespondResult,
+  ApprovalRequestBody,
+  ApprovalRequestEnvelope,
   ProviderModelInfo,
   ProviderUsageInfo,
   ProviderRuntimeEvent,
@@ -54,6 +56,7 @@ import {
 import { checkCodexVersion, meetsMinVersion } from "./codex-version.js";
 import { CodexAppServer, warmCodexAppServer } from "./codex-app-server.js";
 import type { CodexApprovalRequest } from "./codex-app-server.js";
+import { approvalChoice, approvalOutcome, approvalScope } from "../../approval-scope.js";
 import { CodexEventMapper } from "./codex-event-mapper.js";
 import {
   CodexCanonicalEventPublisher,
@@ -78,7 +81,7 @@ import type {
 } from "./codex-types.js";
 import {
   mapDecisionToCodexResponse,
-  synthesizeCodexPermissionRequest,
+  synthesizeCodexApprovalRequest,
 } from "./codex-permission-mapper.js";
 import { CodexPromptResolutionError, parseCodexSlashInvocation } from "./codex-prompt.js";
 
@@ -273,7 +276,7 @@ function failedCodexInternalMcpStartup(params: Record<string, unknown>): CodexIn
  * Per-session state owned by the {@link SessionRuntime}. Holds the live
  * app-server, its event mapper, and the turn-sequencing bookkeeping that the
  * provider's `runTurn` reads. The runtime owns eviction timing, but
- * `lastUsedAt` is retained here because `resolvePermission` stamps it so user
+ * `lastUsedAt` is retained here because `resolveApproval` stamps it so user
  * attention on a permission card counts as activity.
  */
 interface CodexSessionState {
@@ -349,9 +352,8 @@ interface CodexSessionState {
 interface PendingPermissionEntry {
   sessionId: string;
   threadId: string;
-  toolName: string;
-  input: unknown;
-  title?: string;
+  body: ApprovalRequestBody;
+  acknowledged: Promise<boolean>;
   method: string;
   params: Record<string, unknown>;
   resolve: (response: unknown) => void;
@@ -2784,75 +2786,44 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     }
   }
 
-  /**
-   * Bridges a codex app-server serverRequest into the Phase 1 permission flow.
-   * Allocates a requestId, synthesises a PermissionRequest for the card UI,
-   * emits permission_request, and returns a promise that the app-server
-   * response listener awaits. Resolved by resolvePermission or by session
-   * shutdown/stop (which supply "cancelled").
-   */
-  private handleApprovalRequest(
-    sessionId: string,
-    threadId: string,
-    request: CodexApprovalRequest,
-  ): Promise<unknown> {
+  /** Keep routing separate and wait for the actual JSON-RPC write acknowledgement. */
+  private handleApprovalRequest(sessionId: string, threadId: string, request: CodexApprovalRequest): Promise<unknown> {
     const requestId = NodeCrypto.randomUUID();
-    const synthesized = synthesizeCodexPermissionRequest({
-      threadId,
-      requestId,
-      method: request.method,
-      params: request.params,
-    });
-
+    const body = synthesizeCodexApprovalRequest({ method: request.method, params: request.params });
+    const acknowledged = new Promise<boolean>((resolve) => { request.responseWritten = resolve; });
     return new Promise<unknown>((resolve) => {
       this.pendingPermissions.set(requestId, {
-        sessionId,
-        threadId,
-        toolName: synthesized.toolName,
-        input: synthesized.input,
-        title: synthesized.title,
-        method: request.method,
-        params: request.params,
-        resolve,
+        sessionId, threadId, body, acknowledged, method: request.method, params: request.params, resolve,
       });
-      this.emit("permission_request", synthesized satisfies PermissionRequest);
+      const autoDeny = approvalScope(body);
+      if (autoDeny) void this.resolveApproval(requestId, { autoDeny }).then((result) => {
+        if (result.status === "failed") void this.stopSession(sessionId);
+      });
+      else this.emit("approval_request", { requestId, threadId, body } satisfies ApprovalRequestEnvelope);
     });
   }
 
-  /**
-   * Resolve a pending permission request. Mirrors ClaudeProvider.resolvePermission.
-   * Returns true if requestId was found. On resolve, the codex app-server unblocks.
-   */
-  resolvePermission(requestId: string, decision: PermissionDecision): boolean {
+  /** Publish resolution only after the native response write completes. */
+  async resolveApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     const entry = this.pendingPermissions.get(requestId);
-    if (!entry) return false;
+    if (!entry) return { status: "not_pending" };
+    const choice = approvalChoice(entry.body, response);
+    if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
     this.pendingPermissions.delete(requestId);
-
-    // Reset idle timer on the owning session so user attention counts as activity.
     this.runtime.recordUsage(entry.sessionId);
-    const session = this.runtime.get(entry.sessionId);
-    if (session) session.lastUsedAt = Date.now();
-
-    const response = mapDecisionToCodexResponse(entry.method, decision, entry.params);
-    entry.resolve(response);
-    this.emit("permission_resolved", { requestId, decision });
-    return true;
+    const decision = "autoDeny" in response || choice?.intent === "deny" ? "deny"
+      : choice?.intent === "allow_scoped" ? "allow-session" : "allow";
+    entry.resolve(mapDecisionToCodexResponse(entry.method, decision, entry.params));
+    if (!await entry.acknowledged) return { status: "failed", message: "The answer did not reach Codex" };
+    this.emit("approval_resolved", { requestId, threadId: entry.threadId,
+      outcome: approvalOutcome(choice, response) });
+    return { status: "resolved" };
   }
 
-  /** List pending permissions for a given thread. */
-  listPendingPermissions(threadId: string): PermissionRequest[] {
-    const out: PermissionRequest[] = [];
-    for (const [requestId, entry] of this.pendingPermissions) {
-      if (entry.threadId !== threadId) continue;
-      out.push({
-        requestId,
-        threadId: entry.threadId,
-        toolName: entry.toolName,
-        input: entry.input,
-        title: entry.title,
-      });
-    }
-    return out;
+  /** List stable routing envelopes, optionally filtered by owning thread. */
+  listPendingApprovals(threadId?: string): ApprovalRequestEnvelope[] {
+    return [...this.pendingPermissions.entries()].flatMap(([requestId, entry]) =>
+      threadId === undefined || entry.threadId === threadId ? [{ requestId, threadId: entry.threadId, body: entry.body }] : []);
   }
 
   /**
@@ -2877,7 +2848,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       this.pendingPermissions.delete(requestId);
       const response = mapDecisionToCodexResponse(entry.method, "cancelled", entry.params);
       entry.resolve(response);
-      this.emit("permission_resolved", { requestId, decision: "cancelled" as const });
+      this.emit("approval_resolved", { requestId, threadId: entry.threadId, outcome: { status: "cancelled", reason: "session_stopped" } });
     }
   }
 

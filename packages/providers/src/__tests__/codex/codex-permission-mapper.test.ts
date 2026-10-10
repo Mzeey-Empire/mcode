@@ -6,7 +6,7 @@ vi.mock("@mcode/shared", () => ({
 
 import {
   mapDecisionToCodexResponse,
-  synthesizeCodexPermissionRequest,
+  synthesizeCodexApprovalRequest,
   CODEX_APPROVAL_METHODS,
 } from "../../private/codex/codex-permission-mapper.js";
 
@@ -106,93 +106,37 @@ describe("mapDecisionToCodexResponse", () => {
   });
 });
 
-describe("synthesizeCodexPermissionRequest", () => {
-  it("returns Shell toolName for commandExecution", () => {
-    const req = synthesizeCodexPermissionRequest({
-      threadId: "t1",
-      requestId: "r1",
-      method: "item/commandExecution/requestApproval",
-      params: { command: "ls -la", cwd: "/tmp", reason: "list files" },
-    });
-    expect(req.toolName).toBe("Shell");
-    expect(req.threadId).toBe("t1");
-    expect(req.requestId).toBe("r1");
-    expect(req.title).toBe("list files");
-    expect(req.input).toEqual({ command: "ls -la", cwd: "/tmp" });
+describe("synthesizeCodexApprovalRequest", () => {
+  it("keeps command scope, free tool identity and native network facts", () => {
+    const request = synthesizeCodexApprovalRequest({ method: "item/commandExecution/requestApproval",
+      params: { itemId: "tool-1", command: "curl example.com", cwd: "/tmp", reason: "fetch page", networkApprovalContext: { host: "example.com" } } });
+    expect(request.subject).toEqual({ kind: "command", command: "curl example.com", cwd: "/tmp", facts: ['Network: {"host":"example.com"}'] });
+    expect(request.toolCallId).toBe("tool-1");
+    expect(request.reason).toBe("fetch page");
+    expect(request.choices).toEqual([
+      { id: "allow", intent: "allow_once", label: "Allow once" },
+      { id: "allow-session", intent: "allow_scoped", label: "Allow for this session" },
+      { id: "deny", intent: "deny", label: "Deny" },
+    ]);
+    expect(request.noteDelivery).toBe("steer");
   });
 
-  it("forwards commandActions and networkApprovalContext when present", () => {
-    const req = synthesizeCodexPermissionRequest({
-      threadId: "t1",
-      requestId: "r1",
-      method: "item/commandExecution/requestApproval",
-      params: {
-        command: "curl example.com",
-        cwd: "/tmp",
-        commandActions: ["network"],
-        networkApprovalContext: { host: "example.com" },
-      },
-    });
-    expect(req.input).toEqual({
-      command: "curl example.com",
-      cwd: "/tmp",
-      commandActions: ["network"],
-      networkApprovalContext: { host: "example.com" },
-    });
+  it.each([
+    ["item/fileChange/requestApproval", { itemId: "abc123", grantRoot: "/repo" }, { kind: "tool", toolName: "FileWrite", preview: '{"itemId":"abc123","grantRoot":"/repo"}' }],
+    ["item/permissions/requestApproval", { permissions: { network: true } }, { kind: "tool", toolName: "WorkspacePermissions", preview: '{"permissions":{"network":true}}' }],
+    ["applyPatchApproval", { patch: "diff --git..." }, { kind: "tool", toolName: "ApplyPatch", preview: '{"patch":"diff --git..."}' }],
+    ["execCommandApproval", { command: "echo hi" }, { kind: "command", command: "echo hi" }],
+  ])("preserves the available scope for %s", (method, params, expected) => {
+    expect(synthesizeCodexApprovalRequest({ method, params }).subject).toEqual(expected);
   });
 
-  it("returns FileWrite toolName for fileChange", () => {
-    const req = synthesizeCodexPermissionRequest({
-      threadId: "t1",
-      requestId: "r1",
-      method: "item/fileChange/requestApproval",
-      params: { itemId: "abc123", grantRoot: "/repo" },
-    });
-    expect(req.toolName).toBe("FileWrite");
-    expect(req.input).toEqual({ itemId: "abc123", grantRoot: "/repo" });
+  it("keeps an oversized command intact for fail-closed scope validation", () => {
+    const request = synthesizeCodexApprovalRequest({ method: "item/commandExecution/requestApproval", params: { command: "x".repeat(70_000) } });
+    expect(request.subject).toEqual({ kind: "command", command: "x".repeat(70_000) });
   });
 
-  it("returns WorkspacePermissions toolName for permissions request", () => {
-    const req = synthesizeCodexPermissionRequest({
-      threadId: "t1",
-      requestId: "r1",
-      method: "item/permissions/requestApproval",
-      params: { permissions: { fileSystem: { read: ["/foo"], write: [] } } },
-    });
-    expect(req.toolName).toBe("WorkspacePermissions");
-    expect(req.input).toEqual({ permissions: { fileSystem: { read: ["/foo"], write: [] } } });
-  });
-
-  it("returns ApplyPatch for legacy applyPatchApproval and passes params through", () => {
-    const req = synthesizeCodexPermissionRequest({
-      threadId: "t1",
-      requestId: "r1",
-      method: "applyPatchApproval",
-      params: { patch: "diff --git..." },
-    });
-    expect(req.toolName).toBe("ApplyPatch");
-    expect(req.input).toEqual({ patch: "diff --git..." });
-  });
-
-  it("returns Shell for legacy execCommandApproval", () => {
-    const req = synthesizeCodexPermissionRequest({
-      threadId: "t1",
-      requestId: "r1",
-      method: "execCommandApproval",
-      params: { command: "rm -rf /tmp/x" },
-    });
-    expect(req.toolName).toBe("Shell");
-    expect(req.input).toEqual({ command: "rm -rf /tmp/x" });
-  });
-
-  it("omits title when params.reason is missing", () => {
-    const req = synthesizeCodexPermissionRequest({
-      threadId: "t1",
-      requestId: "r1",
-      method: "item/commandExecution/requestApproval",
-      params: { command: "ls", cwd: "/tmp" },
-    });
-    expect(req.title).toBeUndefined();
+  it("omits an absent native reason", () => {
+    expect(synthesizeCodexApprovalRequest({ method: "execCommandApproval", params: { command: "echo hi" } }).reason).toBeUndefined();
   });
 });
 

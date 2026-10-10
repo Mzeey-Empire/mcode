@@ -22,7 +22,7 @@ import {
 import { logger } from "@mcode/shared";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import type {
-  AgentPermissionService,
+  ApprovalService,
   AgentService,
   CanonicalAgentBoundary,
   GoalLifecycleService,
@@ -230,7 +230,7 @@ export interface RouterDeps {
   /** Continues an active turn without exposing AgentService lifecycle internals. */
   agentContinuation?: AgentTurnContinuationPort;
   /** Routes provider permission decisions through the Agents feature boundary. */
-  agentPermissionService: AgentPermissionService;
+  approvalService: ApprovalService;
   /** Owns plan question submission and plan output lifecycle. */
   planTurnService: PlanTurnService;
   /** Owns thread goal commands and goal lifecycle reads. */

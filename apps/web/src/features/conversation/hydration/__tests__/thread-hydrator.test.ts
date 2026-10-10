@@ -1,3 +1,5 @@
+import { useApprovalStore } from "@/stores/approvalStore";
+import { createMockApproval } from "@/__tests__/mocks/transport";
 import type { AgentEvent } from "@mcode/contracts";
 import {
   resetThreadStoreForTests,
@@ -166,7 +168,7 @@ function resetStores() {
     }),
   );
   (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-  (mockTransport.listPendingPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+  (mockTransport.listPendingApprovals as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   (mockTransport.getThreadTasks as ReturnType<typeof vi.fn>).mockResolvedValue(null);
   (mockTransport.getThreadPlans as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   (mockTransport.loadTurn as ReturnType<typeof vi.fn>).mockResolvedValue([]);
@@ -1019,7 +1021,7 @@ describe("ThreadHydrator", () => {
   it("skips auxiliary fanout on cache hit within the TTL window", async () => {
     await hydrator.hydrate(THREAD_A, "active");
     await vi.waitFor(() => {
-      expect(mockTransport.listPendingPermissions).toHaveBeenCalled();
+      expect(mockTransport.listPendingApprovals).toHaveBeenCalled();
     });
     vi.clearAllMocks();
 
@@ -1030,14 +1032,14 @@ describe("ThreadHydrator", () => {
     await hydrator.hydrate(THREAD_A, "active");
     await new Promise((r) => setTimeout(r, 20));
 
-    expect(mockTransport.listPendingPermissions).not.toHaveBeenCalled();
+    expect(mockTransport.listPendingApprovals).not.toHaveBeenCalled();
     expect(mockTransport.getThreadTasks).not.toHaveBeenCalled();
   });
 
   it("retains auxiliary freshness when an inactive thread is restored from cache", async () => {
     await hydrator.hydrate(THREAD_A, "active");
     await vi.waitFor(() => {
-      expect(mockTransport.listPendingPermissions).toHaveBeenCalledWith(THREAD_A);
+      expect(mockTransport.listPendingApprovals).toHaveBeenCalledWith(THREAD_A);
     });
     expect(getCachedRecord(THREAD_A)?.lastHydratedAt).toBeGreaterThan(0);
 
@@ -1048,7 +1050,7 @@ describe("ThreadHydrator", () => {
     await hydrator.hydrate(THREAD_A, "active");
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    expect(mockTransport.listPendingPermissions).not.toHaveBeenCalled();
+    expect(mockTransport.listPendingApprovals).not.toHaveBeenCalled();
     expect(mockTransport.getThreadTasks).not.toHaveBeenCalled();
   });
 
@@ -1064,7 +1066,7 @@ describe("ThreadHydrator", () => {
 
     await hydrator.hydrate(THREAD_A, "active");
     await vi.waitFor(() => {
-      expect(mockTransport.listPendingPermissions).toHaveBeenCalledWith(THREAD_A);
+      expect(mockTransport.listPendingApprovals).toHaveBeenCalledWith(THREAD_A);
     });
   });
 
@@ -1282,17 +1284,17 @@ describe("ThreadHydrator", () => {
 
     await hydrator.hydrate(THREAD_A, "active");
     await new Promise((resolve) => setTimeout(resolve, 120));
-    expect(mockTransport.listPendingPermissions).not.toHaveBeenCalled();
+    expect(mockTransport.listPendingApprovals).not.toHaveBeenCalled();
 
     vi.clearAllMocks();
     await hydrator.hydrate(THREAD_A, "active", { force: false });
     await new Promise((resolve) => setTimeout(resolve, 120));
-    expect(mockTransport.listPendingPermissions).not.toHaveBeenCalled();
+    expect(mockTransport.listPendingApprovals).not.toHaveBeenCalled();
 
     vi.clearAllMocks();
     await hydrator.hydrate(THREAD_A, "active", { force: true });
     await vi.waitFor(() => {
-      expect(mockTransport.listPendingPermissions).toHaveBeenCalledWith(THREAD_A);
+      expect(mockTransport.listPendingApprovals).toHaveBeenCalledWith(THREAD_A);
     });
   });
 
@@ -1443,7 +1445,7 @@ describe("ThreadHydrator", () => {
       toolName: string;
       input: Record<string, never>;
     }>) => void;
-    (mockTransport.listPendingPermissions as ReturnType<typeof vi.fn>).mockImplementation(
+    (mockTransport.listPendingApprovals as ReturnType<typeof vi.fn>).mockImplementation(
       () => new Promise((resolve) => {
         resolvePending = resolve;
       }),
@@ -1459,15 +1461,10 @@ describe("ThreadHydrator", () => {
 
     await hydrator.hydrate(THREAD_A, "active");
     await vi.waitFor(() => {
-      expect(mockTransport.listPendingPermissions).toHaveBeenCalledWith(THREAD_A);
+      expect(mockTransport.listPendingApprovals).toHaveBeenCalledWith(THREAD_A);
     });
 
-    useThreadStore.getState().addPermissionRequest({
-      requestId: "live-request",
-      threadId: THREAD_A,
-      toolName: "Bash",
-      input: {},
-    });
+    useApprovalStore.getState().add(createMockApproval({ requestId: "live-request", threadId: THREAD_A }));
     resolvePending([{
       requestId: "stale-request",
       threadId: THREAD_A,
@@ -1476,7 +1473,7 @@ describe("ThreadHydrator", () => {
     }]);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(useThreadStore.getState().records.get(THREAD_A)?.permissions)
+    expect(useApprovalStore.getState().approvals)
       .toEqual([expect.objectContaining({ requestId: "live-request", settled: false })]);
   });
 

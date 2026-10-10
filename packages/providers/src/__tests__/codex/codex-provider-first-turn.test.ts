@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { CodexAppServerOptions, CodexApprovalRequest } from "../../private/codex/codex-app-server.js";
+import { describe, it, expect, vi, beforeEach, afterEach, assert } from "vitest";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -26,7 +27,7 @@ const { sendTurnMock, readConfigMock, appServers, startError, startGate } = vi.h
   readConfigMock: vi.fn(),
   appServers: [] as Array<import("node:events").EventEmitter & {
     isAlive: boolean;
-    options: Record<string, unknown>;
+    options: CodexAppServerOptions;
     spawnedEnv?: Record<string, string>;
   }>,
   startError: { current: null as Error | null },
@@ -39,10 +40,10 @@ vi.mock("../../private/codex/codex-app-server.js", async () => {
     isAlive = true;
     threadId = "sdk-thread-1";
     resumeFailed = false;
-    options: Record<string, unknown>;
-    constructor(options: unknown) {
+    options: CodexAppServerOptions;
+    constructor(options: CodexAppServerOptions) {
       super();
-      this.options = options as Record<string, unknown>;
+      this.options = options;
       appServers.push(this);
     }
     spawnedEnv?: Record<string, string>;
@@ -160,6 +161,36 @@ describe("CodexProvider first turn on new session", () => {
 
   afterEach(() => {
     for (const server of appServers) server.emit("fatal", "test cleanup");
+  });
+
+  it.each([true, false])("reports delivery only after the native approval write: %s", async (delivered) => {
+    const provider = makeProvider();
+    const resolved = vi.fn();
+    provider.on("approval_resolved", resolved);
+    await provider.sendTurn({
+      turnId: "approval-turn", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
+      threadId, message: "lint", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "supervised",
+    });
+    await vi.waitFor(() => expect(appServers.length).toBe(1));
+    const handler = appServers[0]?.options.approvalHandler;
+    assert(handler);
+    const native: CodexApprovalRequest = {
+      rpcId: 42, method: "item/commandExecution/requestApproval",
+      params: { itemId: "tool-1", command: "bun run lint", cwd: "/fixture" },
+    };
+    const nativeResponse = handler(native);
+    const pending = provider.listPendingApprovals(threadId);
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.body).toMatchObject({ toolCallId: "tool-1", subject: { kind: "command", command: "bun run lint", cwd: "/fixture" }, noteDelivery: "steer" });
+    const result = provider.resolveApproval(pending[0]!.requestId, { choiceId: "deny" });
+    expect(await nativeResponse).toEqual({ decision: "decline" });
+    expect(resolved.mock.calls).toEqual([]);
+    assert(native.responseWritten);
+    native.responseWritten(delivered);
+    expect(await result).toEqual(delivered ? { status: "resolved" } : { status: "failed", message: "The answer did not reach Codex" });
+    expect(resolved.mock.calls).toEqual(delivered ? [[{ requestId: pending[0]!.requestId, threadId, outcome: { status: "denied", choiceLabel: "Deny" } }]] : []);
+    await provider.shutdown();
   });
 
   it("pushes complete native aggregates with dispatch identity and rejects foreign native turns", async () => {

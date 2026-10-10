@@ -27,7 +27,7 @@ import type { SendMessageCommand } from "../turns/turn-admission-dispatch-coordi
 import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 import type { AgentTurnContinuationPort } from "../orchestration/agent-runtime-internal-ports.js";
 import type { TaskRepo } from "../orchestration/persistence/task-repo.js";
-import type { AgentPermissionService } from "../permissions/agent-permission-service.js";
+import type { ApprovalService } from "../approvals/approval-service.js";
 import type { PlanTurnService } from "../planning/plan-turn-service.js";
 import type { PlanService } from "../planning/plan-service.js";
 import type { RecapService } from "../recap/recap-service.js";
@@ -61,8 +61,8 @@ type AgentRpcMethod =
   | "turn.load"
   | "narrative.list"
   | "thread.getTasks"
-  | "permission.respond"
-  | "permission.listPending"
+  | "approval.respond"
+  | "approval.listPending"
   | "recap.generate";
 
 type AgentRpcParams<Method extends AgentRpcMethod> = Method extends "canonicalAgent.roster"
@@ -80,9 +80,9 @@ export interface AgentRouterDeps {
     "sendMessage" | "createAndSend" | "stopSession" | "runtimeAccess"
   >;
   agentContinuation?: Pick<AgentTurnContinuationPort, "continueWithoutSaving">;
-  agentPermissionService: Pick<
-    AgentPermissionService,
-    "respondToPermission" | "listPendingPermissions"
+  approvalService: Pick<
+    ApprovalService,
+    "respondToApproval" | "listPendingApprovals"
   >;
   gitWatcherService?: Pick<GitWatcherService, "watchThreadWorktree">;
   hookExecutionRepo: Pick<HookExecutionRepo, "listByMessage">;
@@ -218,14 +218,11 @@ const agentHandlers: AgentRpcHandlerMap = {
     hooks: deps.hookExecutionRepo.listByMessage(params.messageId),
   }),
   "thread.getTasks": (deps, params) => deps.canonicalProgress?.getTasks(params.threadId) ?? deps.taskRepo.get(params.threadId),
-  "permission.respond": async (deps, params) => {
-    if (await deps.threadControlService.respondToApproval(params.requestId, params.decision)) return;
-    deps.agentPermissionService.respondToPermission(params.requestId, params.decision, params.answers, params.optionId);
+  "approval.respond": async (deps, params) => {
+    const { requestId, ...response } = params;
+      return deps.approvalService.respondToApproval(requestId, response);
   },
-  "permission.listPending": (deps, params) => [
-    ...deps.threadControlService.listPendingApprovals(params.threadId),
-    ...deps.agentPermissionService.listPendingPermissions(params.threadId),
-  ],
+  "approval.listPending": (deps, params) => deps.approvalService.listPendingApprovals(params.threadId),
   "recap.generate": (deps, params) => deps.recapService.generate(params),
 };
 

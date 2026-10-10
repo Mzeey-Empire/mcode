@@ -505,12 +505,10 @@ export function ProjectTree() {
   // Derive pending permission thread IDs directly in the selector with useShallow
   // so the component only re-renders when the actual set of IDs changes, not on
   // every unrelated threadStore update that creates a new permissionsByThread ref.
-  const pendingPermissionIds = useThreadStore(
+  const pendingPermissionIds = useApprovalStore(
     useShallow((s) => {
       const ids: string[] = [];
-      for (const [id, rec] of s.records) {
-        if (rec.permissions.some((p) => !p.settled)) ids.push(id);
-      }
+      for (const request of s.approvals) if (!request.settled) ids.push(request.threadId);
       return ids;
     }),
   );
@@ -2996,3 +2994,4 @@ function WorkspaceThreadSection({
     </>
   );
 }
+import { useApprovalStore } from "@/stores/approvalStore";

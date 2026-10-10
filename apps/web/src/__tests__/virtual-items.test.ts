@@ -1051,7 +1051,7 @@ describe("buildVolatileItems with hooks", () => {
 
   it("narrative-flow appears before permission-request items", () => {
     const hooks = [makeHook()];
-    const permissions = [{ requestId: "p1", toolName: "Edit", settled: false }];
+    const permissions = [{ ...createMockApproval({ requestId: "p1" }), settled: false }];
     const items = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, permissions, hooks);
     const types = items.map((i) => i.type);
     const narrativeIdx = types.indexOf("narrative-flow");
@@ -1075,3 +1075,4 @@ function findIndicator(items: readonly ChatVirtualItem[]) {
 function isLiveResponse(item: ChatVirtualItem): boolean {
   return item.type === "message" && item.agentDisplayState?.phase === "streaming";
 }
+import { createMockApproval } from "./mocks/transport";

@@ -48,9 +48,9 @@ import type {
   ChecksStatus,
   DevinMode,
   GitRemoteUrl,
-  PermissionDecision,
-  PermissionRequest,
-  PermissionResponseAnswers,
+  ApprovalResponse,
+  ApprovalRespondResult,
+  ApprovalRequest,
   CreateAndSendResult,
   ThreadStartup,
   ThreadStartupListResult,
@@ -427,14 +427,12 @@ export interface McodeTransport {
   /** Continue an active turn after the user accepts that its remaining text will not be saved. */
   continueWithoutSaving(executionId: string): Promise<void>;
   /** Respond to a tool permission request from the agent. */
-  respondToPermission(
+  respondToApproval(
     requestId: string,
-    decision: PermissionDecision,
-    answers?: PermissionResponseAnswers,
-    optionId?: string,
-  ): Promise<void>;
+    response: Exclude<ApprovalResponse, { autoDeny: string }>,
+  ): Promise<ApprovalRespondResult>;
   /** List pending permission requests for a thread (used to re-hydrate after reconnect). */
-  listPendingPermissions(threadId: string): Promise<PermissionRequest[]>;
+  listPendingApprovals(threadId?: string): Promise<ApprovalRequest[]>;
   /** Submit answers to a plan-mode question batch and resume the agent session. */
   answerPlanQuestions(
     threadId: string,

@@ -16,9 +16,10 @@ import {
   type DevinMode,
   type IAgentProvider,
   type ISessionEvictable,
-  type PermissionDecision,
-  type PermissionRequest,
-  type PermissionResponseAnswers,
+  type ApprovalResponse,
+  type ApprovalRespondResult,
+  type ApprovalRequestEnvelope,
+  type ApprovalRequestBody,
   type DevinModelFamily,
   type ProviderModelInfo,
   type SessionForker,
@@ -26,6 +27,7 @@ import {
   type TurnRequest,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
+import { acpApprovalChoices, acpNoteChoiceId, approvalChoice, approvalOutcome, approvalScope } from "../../approval-scope.js";
 import type { ProviderHostPorts } from "../../host-ports.js";
 import { SessionRuntime, type SpawnArgs, type SpawnResult } from "../session-runtime.js";
 import { AcpSessionRuntime } from "../protocols/acp/acp-session-runtime.js";
@@ -64,7 +66,7 @@ export interface DevinProviderPorts {
 
 interface DevinPendingPermission {
   entry: DevinAcpSessionEntry;
-  request: PermissionRequest;
+  request: ApprovalRequestEnvelope & { body: ApprovalRequestBody };
   /** Raw ACP options, retained so `optionId` and `kind` survive to the reply. */
   acpOptions: readonly { optionId: string; name: string; kind?: string | null }[];
   resolve: (outcome: AcpPermissionOutcome) => void;
@@ -81,7 +83,7 @@ function resolveDevinMode(req: TurnRequest<"devin">): DevinMode {
  * Candidate option ids/kinds per generic decision, in preference order.
  * A candidate matches either `optionId` or `kind` on an ACP option.
  */
-const DECISION_OPTION_CANDIDATES: Partial<Record<PermissionDecision, readonly string[]>> = {
+const DECISION_OPTION_CANDIDATES = {
   deny: ["reject_once", "reject_always"],
   "allow-session": ["allow_session", "allow_always", "allow_once"],
   allow: ["allow_once"],
@@ -90,7 +92,7 @@ const DECISION_OPTION_CANDIDATES: Partial<Record<PermissionDecision, readonly st
 /** Resolves which permission option id a generic decision maps to. */
 function resolveOptionIdForDecision(
   options: readonly { optionId: string; kind?: string | null }[],
-  decision: PermissionDecision,
+  decision: keyof typeof DECISION_OPTION_CANDIDATES,
 ): string | undefined {
   for (const candidate of DECISION_OPTION_CANDIDATES[decision] ?? []) {
     const hit = options.find(
@@ -98,7 +100,7 @@ function resolveOptionIdForDecision(
     );
     if (hit) return hit.optionId;
   }
-  return decision === "allow" ? options[0]?.optionId : undefined;
+  return undefined;
 }
 
 /** Stop reasons a bare "continue" prompt can push through, per Devin's own continue flow. */
@@ -692,96 +694,64 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
   // Permissions
   // ---------------------------------------------------------------------
 
-  /** Resolves a pending permission request for the given request id. */
-  resolvePermission(
-    requestId: string,
-    decision: PermissionDecision,
-    _answers?: PermissionResponseAnswers,
-    optionId?: string,
-  ): boolean {
+  /** Acknowledge the exact native option before publishing its outcome. */
+  async resolveApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     const pending = this.pendingPermissions.get(requestId);
-    if (!pending) return false;
+    if (!pending) return { status: "not_pending" };
+    const choice = approvalChoice(pending.request.body, response);
+    if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
+    const selected = "autoDeny" in response
+      ? pending.acpOptions.find((option) => option.kind === "reject_once")
+      : pending.acpOptions.find((option) => option.optionId === response.choiceId);
     this.pendingPermissions.delete(requestId);
-    pending.resolve(this.outcomeForDecision(pending.acpOptions, decision, optionId));
-    // `switch_bypass` flips Devin's own session mode; track it locally so the
-    // next turn does not re-apply the stale thread mode. The same sync happens
-    // via `current_mode_update` when Devin emits one.
-    if (optionId === "switch_bypass") this.applyObservedDevinMode(pending.entry, "bypass");
-    const selected = optionId
-      ? pending.acpOptions.find((option) => option.optionId === optionId)
-      : undefined;
-    const resolvedDecision = selected?.kind?.startsWith("reject") ? "deny" : decision;
-    this.emit("permission_resolved", {
-      requestId,
-      decision: resolvedDecision,
-      ...(selected?.name ? { optionLabel: selected.name } : {}),
+    pending.resolve({ outcome: selected ? { outcome: "selected", optionId: selected.optionId } : { outcome: "cancelled" } });
+    await Promise.resolve();
+    if (selected?.optionId === "switch_bypass") this.applyObservedDevinMode(pending.entry, "bypass");
+    this.emit("approval_resolved", {
+      requestId, threadId: pending.entry.threadId,
+      outcome: approvalOutcome(selected ? choice : undefined, response),
     });
-    return true;
+    return { status: "resolved" };
   }
 
-  /** Returns all pending permission requests for a given thread. */
-  listPendingPermissions(threadId: string): PermissionRequest[] {
+  /** Return routing envelopes without trusting their display bodies. */
+  listPendingApprovals(threadId?: string): ApprovalRequestEnvelope[] {
     return [...this.pendingPermissions.values()]
-      .filter((pending) => pending.request.threadId === threadId)
+      .filter((pending) => threadId === undefined || pending.request.threadId === threadId)
       .map((pending) => pending.request);
   }
 
-  private outcomeForDecision(
-    options: readonly { optionId: string; kind?: string | null }[],
-    decision: PermissionDecision,
-    optionId?: string,
-  ): AcpPermissionOutcome {
-    if (decision === "cancelled") return { outcome: { outcome: "cancelled" } };
-    const selectedId = optionId && options.some((option) => option.optionId === optionId)
-      ? optionId
-      : resolveOptionIdForDecision(options, decision);
-    if (!selectedId) return { outcome: { outcome: "cancelled" } };
-    return { outcome: { outcome: "selected", optionId: selectedId } };
-  }
-
-  private async requestPermission(
-    entry: DevinAcpSessionEntry,
-    params: AcpPermissionRequest,
-  ): Promise<AcpPermissionOutcome> {
+  private async requestPermission(entry: DevinAcpSessionEntry, params: AcpPermissionRequest): Promise<AcpPermissionOutcome> {
     const options = params.options ?? [];
     if (entry.devinMode === "bypass") {
       const allow = resolveOptionIdForDecision(options, "allow");
-      return allow
-        ? { outcome: { outcome: "selected", optionId: allow } }
-        : { outcome: { outcome: "cancelled" } };
+      return { outcome: allow ? { outcome: "selected", optionId: allow } : { outcome: "cancelled" } };
     }
-
-    const request = this.buildPermissionRequest(entry, params, options);
-    const outcomePromise = new Promise<AcpPermissionOutcome>((resolve) => {
+    const request = this.buildApprovalRequest(entry, params, options);
+    const outcome = new Promise<AcpPermissionOutcome>((resolve) => {
       this.pendingPermissions.set(request.requestId, { entry, request, acpOptions: options, resolve });
     });
-    this.emit("permission_request", request);
-    return outcomePromise;
+    const autoDeny = approvalScope(request.body);
+    if (autoDeny) await this.resolveApproval(request.requestId, { autoDeny });
+    else this.emit("approval_request", request);
+    return outcome;
   }
 
-  private buildPermissionRequest(
+  private buildApprovalRequest(
     entry: DevinAcpSessionEntry,
     params: AcpPermissionRequest,
     options: readonly { optionId: string; kind?: string | null; name: string }[],
-  ): PermissionRequest {
+  ): ApprovalRequestEnvelope & { body: ApprovalRequestBody } {
     const snapshot = entry.activeTurnState?.toolCallById.get(params.toolCall.toolCallId);
     const command = devinPermissionPreview(params.toolCall);
+    const choices = acpApprovalChoices(options);
     return {
-      requestId: crypto.randomUUID(),
-      threadId: entry.threadId,
-      toolName: snapshot?.toolName ?? "Tool",
-      input: {
-        ...snapshot?.input,
-        ...(command ? { command } : {}),
+      requestId: crypto.randomUUID(), threadId: entry.threadId,
+      body: {
+        toolCallId: params.toolCall.toolCallId, requestedAt: new Date().toISOString(),
+        subject: command ? { kind: "command", command } : { kind: "tool", toolName: snapshot?.toolName ?? params.toolCall.title ?? "Tool", preview: JSON.stringify(snapshot?.input ?? params.toolCall.rawInput ?? {}) },
+        choices, noteDelivery: "next_turn", noteChoiceId: acpNoteChoiceId(options, choices), origin: { kind: "agent" },
       },
-      ...(snapshot?.title ? { title: snapshot.title } : {}),
-      // `allow_always_global` grants outside the worktree, so it is hidden
-      // from the card even though Devin advertises it verbatim.
-      options: options.filter((option) => option.optionId !== "allow_always_global").map((option) => ({
-        id: option.optionId,
-        label: option.name,
-        ...(option.kind ? { kind: option.kind } : {}),
-      })),
     };
   }
 
@@ -790,7 +760,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       if (pending.entry.mcodeSessionId !== mcodeSessionId) continue;
       this.pendingPermissions.delete(requestId);
       pending.resolve({ outcome: { outcome: "cancelled" } });
-      this.emit("permission_resolved", { requestId, decision: "cancelled" });
+      this.emit("approval_resolved", { requestId, threadId: pending.entry.threadId, outcome: { status: "cancelled", reason: "session_stopped" } });
     }
   }
 

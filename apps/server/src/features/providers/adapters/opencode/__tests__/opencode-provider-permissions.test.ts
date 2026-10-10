@@ -1,9 +1,10 @@
 import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
+import { ApprovalRequestBodySchema } from "@mcode/contracts";
 import { OpenCodeProvider } from "../opencode-provider.js";
 import { OpenCodeServerPool } from "../opencode-server-pool.js";
 import { OpenCodeReplySessionNotFoundError } from "../opencode-http-client.js";
-import type { PermissionRequest, TurnRequest } from "@mcode/contracts";
+import type { ApprovalRequestEnvelope, TurnRequest } from "@mcode/contracts";
 
 function testPool(): OpenCodeServerPool {
   return new OpenCodeServerPool({
@@ -55,6 +56,7 @@ function fakeHttp(envelopes: unknown[], hooks?: { onPrompt?: () => void }): Fake
     subscribeEvents: vi.fn(async (_url: string, signal: AbortSignal, onEnvelope: (e: unknown) => void) => {
       emit = onEnvelope;
       for (const envelope of envelopes) onEnvelope(envelope);
+      if (signal.aborted) return;
       // Production streams stay open until abort; returning early would trip
       // the stream-end fallback and mis-settle the turn in tests.
       await new Promise<void>((resolve) => {
@@ -145,29 +147,26 @@ describe("OpenCodeProvider permission flow", () => {
   it("cards a shell ask once and relays approve-once exactly once", async () => {
     const http = fakeHttp([shellAsk(), shellAsk()]);
     const { provider, submitted } = testProvider(http);
-    const cards: PermissionRequest[] = [];
-    provider.on("permission_request", (request) => cards.push(request as PermissionRequest));
+    const cards: ApprovalRequestEnvelope[] = [];
+    provider.on("approval_request", (request) => cards.push(request));
 
     const sending = provider.sendTurn(turnRequest());
     await vi.waitFor(() => expect(cards).toHaveLength(1));
 
-    expect(cards[0]).toEqual({
-      requestId: "per_1",
-      threadId: "thread-1",
-      toolName: "bash",
-      input: { action: "bash", resources: ["echo hi"] },
-    });
-    expect(provider.listPendingPermissions("thread-1")).toHaveLength(1);
+    expect(cards[0]?.requestId).toBe("per_1");
+    expect(cards[0]?.threadId).toBe("thread-1");
+    expect(ApprovalRequestBodySchema().parse(cards[0]?.body).subject).toEqual({ kind: "tool", toolName: "bash", preview: '{"action":"bash","resources":["echo hi"]}' });
+    expect(provider.listPendingApprovals("thread-1")).toHaveLength(1);
 
-    expect(provider.resolvePermission("per_1", "allow")).toBe(true);
+    expect(await provider.resolveApproval("per_1", { choiceId: "once" })).toEqual({ status: "resolved" });
     await sending;
     expect(http.replyPermission).toHaveBeenCalledTimes(1);
     expect(http.replyPermission).toHaveBeenCalledWith(
       { baseUrl: "http://127.0.0.1:4096", directory: "/w/a" }, "ses_1", "per_1", "once", "v2", expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
-    expect(provider.listPendingPermissions("thread-1")).toHaveLength(0);
+    expect(provider.listPendingApprovals("thread-1")).toHaveLength(0);
 
-    expect(provider.resolvePermission("per_1", "allow")).toBe(false);
+    expect(await provider.resolveApproval("per_1", { choiceId: "once" })).toEqual({ status: "not_pending" });
     expect(http.replyPermission).toHaveBeenCalledTimes(1);
     const outcomes = submittedEvents(submitted)
       .filter((event) => event.type === "ended")
@@ -180,30 +179,33 @@ describe("OpenCodeProvider permission flow", () => {
     const http = fakeHttp([shellAsk()]);
     const { provider } = testProvider(http);
     const resolved: unknown[] = [];
-    provider.on("permission_resolved", (payload) => resolved.push(payload));
+    provider.on("approval_resolved", (payload) => resolved.push(payload));
 
     const sending = provider.sendTurn(turnRequest());
-    await vi.waitFor(() => expect(provider.listPendingPermissions("thread-1")).toHaveLength(1));
-    expect(provider.resolvePermission("per_1", "deny")).toBe(true);
+    await vi.waitFor(() => expect(provider.listPendingApprovals("thread-1")).toHaveLength(1));
+    expect(await provider.resolveApproval("per_1", { choiceId: "reject" })).toEqual({ status: "resolved" });
     await sending;
     expect(http.replyPermission).toHaveBeenCalledWith(
       { baseUrl: "http://127.0.0.1:4096", directory: "/w/a" }, "ses_1", "per_1", "reject", "v2", expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
-    expect(resolved).toEqual([{ requestId: "per_1", decision: "deny" }]);
-    expect(provider.resolvePermission("nope", "allow")).toBe(false);
+    expect(resolved).toEqual([{ requestId: "per_1", threadId: "thread-1", outcome: { status: "denied", choiceLabel: "Deny" } }]);
+    expect(await provider.resolveApproval("nope", { choiceId: "once" })).toEqual({ status: "not_pending" });
     await provider.shutdown();
   });
 
   it("relays exact question selections, rejects invalid answers locally, and rejects on deny", async () => {
     const http = fakeHttp([questionAsk("que_1"), questionAsk("que_2")]);
     const { provider } = testProvider(http);
-    const cards: PermissionRequest[] = [];
-    provider.on("permission_request", (request) => cards.push(request as PermissionRequest));
+    const cards: ApprovalRequestEnvelope[] = [];
+    provider.on("approval_request", (request) => cards.push(request));
 
     const sending = provider.sendTurn(turnRequest());
     await vi.waitFor(() => expect(cards).toHaveLength(2));
-    expect(cards.map((card) => card.toolName)).toEqual(["Question", "Question"]);
-    expect(cards[0]?.questions).toEqual([
+    const bodies = cards.map((card) => ApprovalRequestBodySchema().parse(card.body));
+    expect(bodies.map((body) => body.subject.kind)).toEqual(["question", "question"]);
+    const subject = bodies[0]?.subject;
+    if (subject?.kind !== "question") throw new Error("Expected question scope");
+    expect(subject.questions).toEqual([
       {
         header: "Deploy",
         question: "Deploy now?",
@@ -220,13 +222,13 @@ describe("OpenCodeProvider permission flow", () => {
       },
     ]);
 
-    expect(provider.resolvePermission("que_1", "allow")).toBe(false);
-    expect(provider.resolvePermission("que_1", "allow", [["Yes", "No"], ["East"]])).toBe(false);
-    expect(provider.resolvePermission("que_1", "allow-session", [["Yes"], ["East"]])).toBe(false);
+    expect(await provider.resolveApproval("que_1", { choiceId: "answer" })).toMatchObject({ status: "failed" });
+    expect(await provider.resolveApproval("que_1", { choiceId: "answer", answers: [["Yes", "No"], ["East"]] })).toMatchObject({ status: "failed" });
+    expect(await provider.resolveApproval("que_1", { choiceId: "always", answers: [["Yes"], ["East"]] })).toMatchObject({ status: "failed" });
     expect(http.replyQuestion).not.toHaveBeenCalled();
-    expect(provider.listPendingPermissions("thread-1")).toHaveLength(2);
+    expect(provider.listPendingApprovals("thread-1")).toHaveLength(2);
 
-    expect(provider.resolvePermission("que_1", "allow", [["Yes"], ["East"]])).toBe(true);
+    expect(await provider.resolveApproval("que_1", { choiceId: "answer", answers: [["Yes"], ["East"]] })).toEqual({ status: "resolved" });
     await vi.waitFor(() => expect(http.replyQuestion).toHaveBeenCalledTimes(1));
     expect(http.replyQuestion).toHaveBeenCalledWith(
       { baseUrl: "http://127.0.0.1:4096", directory: "/w/a" },
@@ -236,10 +238,10 @@ describe("OpenCodeProvider permission flow", () => {
       "v2",
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
-    expect(provider.resolvePermission("que_1", "allow", [["Yes"], ["East"]])).toBe(false);
+    expect(await provider.resolveApproval("que_1", { choiceId: "answer", answers: [["Yes"], ["East"]] })).toEqual({ status: "not_pending" });
 
-    expect(provider.resolvePermission("que_2", "deny")).toBe(true);
-    expect(provider.resolvePermission("que_2", "deny")).toBe(false);
+    expect(await provider.resolveApproval("que_2", { choiceId: "reject" })).toEqual({ status: "resolved" });
+    expect(await provider.resolveApproval("que_2", { choiceId: "reject" })).toEqual({ status: "not_pending" });
     await sending;
     expect(http.rejectQuestion).toHaveBeenCalledWith(
       { baseUrl: "http://127.0.0.1:4096", directory: "/w/a" }, "ses_1", "que_2", "v2", expect.objectContaining({ signal: expect.any(AbortSignal) }),
@@ -254,15 +256,15 @@ describe("OpenCodeProvider permission flow", () => {
     const { provider } = testProvider(http);
 
     const sending = provider.sendTurn(turnRequest());
-    await vi.waitFor(() => expect(provider.listPendingPermissions("thread-1")).toHaveLength(1));
-    expect(provider.resolvePermission("per_1", "allow")).toBe(true);
+    await vi.waitFor(() => expect(provider.listPendingApprovals("thread-1")).toHaveLength(1));
+    expect(await provider.resolveApproval("per_1", { choiceId: "once" })).toMatchObject({ status: "failed" });
     await vi.waitFor(() => expect(http.replyPermission).toHaveBeenCalledTimes(1));
-    expect(provider.listPendingPermissions("thread-1")).toHaveLength(1);
+    expect(provider.listPendingApprovals("thread-1")).toHaveLength(1);
 
-    expect(provider.resolvePermission("per_1", "allow")).toBe(true);
+    expect(await provider.resolveApproval("per_1", { choiceId: "once" })).toEqual({ status: "resolved" });
     await sending;
     expect(http.replyPermission).toHaveBeenCalledTimes(2);
-    expect(provider.listPendingPermissions("thread-1")).toHaveLength(0);
+    expect(provider.listPendingApprovals("thread-1")).toHaveLength(0);
     await provider.shutdown();
   });
 
@@ -278,15 +280,15 @@ describe("OpenCodeProvider permission flow", () => {
     );
     const { provider } = testProvider(http);
     const resolved: unknown[] = [];
-    provider.on("permission_resolved", (payload) => resolved.push(payload));
+    provider.on("approval_resolved", (payload) => resolved.push(payload));
 
     const sending = provider.sendTurn(turnRequest());
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(provider.listPendingPermissions("thread-1")).toHaveLength(1);
+    expect(provider.listPendingApprovals("thread-1")).toHaveLength(1);
     await provider.stopSession("mcode-thread-1");
     await sending;
-    expect(resolved).toEqual([{ requestId: "per_1", decision: "cancelled" }]);
-    expect(provider.listPendingPermissions("thread-1")).toHaveLength(0);
+    expect(resolved).toEqual([{ requestId: "per_1", threadId: "thread-1", outcome: { status: "cancelled", reason: "session_stopped" } }]);
+    expect(provider.listPendingApprovals("thread-1")).toHaveLength(0);
     await provider.shutdown();
   });
 
@@ -306,19 +308,20 @@ describe("OpenCodeProvider permission flow", () => {
     }));
     const { provider } = testProvider(http);
     const resolved: unknown[] = [];
-    provider.on("permission_resolved", (payload) => resolved.push(payload));
+    provider.on("approval_resolved", (payload) => resolved.push(payload));
 
     const sending = provider.sendTurn(turnRequest());
-    await vi.waitFor(() => expect(provider.listPendingPermissions("thread-1")).toHaveLength(1));
-    expect(provider.resolvePermission("per_1", "allow")).toBe(true);
+    await vi.waitFor(() => expect(provider.listPendingApprovals("thread-1")).toHaveLength(1));
+    const replying = provider.resolveApproval("per_1", { choiceId: "once" });
     await vi.waitFor(() => expect(http.replyPermission).toHaveBeenCalledTimes(1));
 
     await provider.stopSession("mcode-thread-1");
     await sending;
 
     expect(replySignal?.aborted).toBe(true);
-    expect(resolved).toEqual([{ requestId: "per_1", decision: "cancelled" }]);
-    expect(provider.resolvePermission("per_1", "allow")).toBe(false);
+    expect(await replying).toMatchObject({ status: "failed" });
+    expect(resolved).toEqual([{ requestId: "per_1", threadId: "thread-1", outcome: { status: "cancelled", reason: "session_stopped" } }]);
+    expect(await provider.resolveApproval("per_1", { choiceId: "once" })).toEqual({ status: "not_pending" });
     expect(http.replyPermission).toHaveBeenCalledTimes(1);
     await provider.shutdown();
   });
@@ -330,21 +333,21 @@ describe("OpenCodeProvider permission flow", () => {
     });
     const { provider } = testProvider(http);
     const resolved: unknown[] = [];
-    const cards: PermissionRequest[] = [];
-    provider.on("permission_resolved", (payload) => resolved.push(payload));
-    provider.on("permission_request", (request) => cards.push(request as PermissionRequest));
+    const cards: ApprovalRequestEnvelope[] = [];
+    provider.on("approval_resolved", (payload) => resolved.push(payload));
+    provider.on("approval_request", (request) => cards.push(request));
 
     await provider.sendTurn(turnRequest());
 
-    expect(resolved).toEqual([{ requestId: "per_1", decision: "cancelled" }]);
-    expect(provider.listPendingPermissions("thread-1")).toHaveLength(0);
+    expect(resolved).toEqual([{ requestId: "per_1", threadId: "thread-1", outcome: { status: "cancelled", reason: "session_stopped" } }]);
+    expect(provider.listPendingApprovals("thread-1")).toHaveLength(0);
     const retry = provider.sendTurn({ ...turnRequest(), turnId: "turn-2", turnExecutionId: "66666666-6666-4666-8666-666666666666" });
     await vi.waitFor(() => expect(cards).toHaveLength(2));
     await provider.stopSession("mcode-thread-1");
     await retry;
     expect(resolved).toEqual([
-      { requestId: "per_1", decision: "cancelled" },
-      { requestId: "per_1", decision: "cancelled" },
+      { requestId: "per_1", threadId: "thread-1", outcome: { status: "cancelled", reason: "session_stopped" } },
+      { requestId: "per_1", threadId: "thread-1", outcome: { status: "cancelled", reason: "session_stopped" } },
     ]);
     await provider.shutdown();
   });
@@ -354,18 +357,18 @@ describe("OpenCodeProvider permission flow", () => {
     http.promptAsync.mockRejectedValueOnce(new Error("provider failed"));
     const { provider } = testProvider(http);
     const resolved: unknown[] = [];
-    provider.on("permission_resolved", (payload) => resolved.push(payload));
+    provider.on("approval_resolved", (payload) => resolved.push(payload));
 
     await provider.sendTurn(turnRequest());
-    expect(resolved).toEqual([{ requestId: "per_1", decision: "cancelled" }]);
+    expect(resolved).toEqual([{ requestId: "per_1", threadId: "thread-1", outcome: { status: "cancelled", reason: "session_stopped" } }]);
 
     const retry = provider.sendTurn({ ...turnRequest(), turnId: "turn-2", turnExecutionId: "66666666-6666-4666-8666-666666666666" });
-    await vi.waitFor(() => expect(provider.listPendingPermissions("thread-1")).toHaveLength(1));
+    await vi.waitFor(() => expect(provider.listPendingApprovals("thread-1")).toHaveLength(1));
     await provider.shutdown();
     await retry;
     expect(resolved).toEqual([
-      { requestId: "per_1", decision: "cancelled" },
-      { requestId: "per_1", decision: "cancelled" },
+      { requestId: "per_1", threadId: "thread-1", outcome: { status: "cancelled", reason: "session_stopped" } },
+      { requestId: "per_1", threadId: "thread-1", outcome: { status: "cancelled", reason: "session_stopped" } },
     ]);
   });
 
@@ -374,14 +377,14 @@ describe("OpenCodeProvider permission flow", () => {
     http.replyPermission.mockRejectedValueOnce(new OpenCodeReplySessionNotFoundError());
     const { provider, submitted } = testProvider(http);
     const resolved: unknown[] = [];
-    provider.on("permission_resolved", (payload) => resolved.push(payload));
+    provider.on("approval_resolved", (payload) => resolved.push(payload));
 
     const sending = provider.sendTurn(turnRequest());
-    await vi.waitFor(() => expect(provider.listPendingPermissions("thread-1")).toHaveLength(1));
-    expect(provider.resolvePermission("per_1", "allow")).toBe(true);
+    await vi.waitFor(() => expect(provider.listPendingApprovals("thread-1")).toHaveLength(1));
+    expect(await provider.resolveApproval("per_1", { choiceId: "once" })).toMatchObject({ status: "failed" });
     await sending;
 
-    expect(resolved).toEqual([{ requestId: "per_1", decision: "cancelled" }]);
+    expect(resolved).toEqual([{ requestId: "per_1", threadId: "thread-1", outcome: { status: "cancelled", reason: "session_stopped" } }]);
     const events = submittedEvents(submitted);
     expect(events.filter((event) => event.type === "system" && event.subtype === "sdk_session_invalidated")).toHaveLength(1);
     expect(events.filter((event) => event.type === "ended").map((event) => event.outcome)).toEqual(["cancelled"]);
@@ -413,22 +416,47 @@ describe("OpenCodeProvider notice dedup", () => {
     await provider.shutdown();
   });
 
-  it("surfaces one diagnostic row for a malformed ask without carding", async () => {
-    const http = fakeHttp([
-      { type: "permission.v2.asked", properties: { sessionID: "ses_1" } },
-      { type: "permission.v2.asked", properties: { sessionID: "ses_1" } },
-      { type: "session.idle", properties: { sessionID: "ses_1" } },
-    ]);
-    const { provider, submitted } = testProvider(http);
-    const cards: PermissionRequest[] = [];
-    provider.on("permission_request", (request) => cards.push(request as PermissionRequest));
-
+  it("aborts a native ask with no routing id and publishes no pending request", async () => {
+    const http = fakeHttp([{ type: "permission.v2.asked", properties: { sessionID: "ses_1" } }]);
+    const { provider } = testProvider(http);
+    const requested = vi.fn();
+    const resolved = vi.fn();
+    provider.on("approval_request", requested);
+    provider.on("approval_resolved", resolved);
     await provider.sendTurn(turnRequest());
-    expect(cards).toHaveLength(0);
-    const subtypes = submittedEvents(submitted)
-      .filter((event) => event.type === "system")
-      .map((event) => event.subtype);
-    expect(subtypes.filter((subtype) => subtype === "provider.notice.malformed-request")).toHaveLength(1);
+    expect(requested.mock.calls).toEqual([]);
+    expect(http.abortSession.mock.calls).toEqual([[{ baseUrl: "http://127.0.0.1:4096", directory: "/w/a" }, "ses_1"]]);
+    expect(resolved.mock.calls.map(([event]) => ({ threadId: event.threadId, outcome: event.outcome }))).toEqual([
+      { threadId: "thread-1", outcome: { status: "cancelled", reason: "unanswerable" } },
+    ]);
+    expect(provider.listPendingApprovals()).toEqual([]);
+    await provider.shutdown();
+  });
+
+  it("rejects oversized resources without publishing a shortened request", async () => {
+    const http = fakeHttp([{ type: "permission.v2.asked", properties: { id: "per_large", sessionID: "ses_1", action: "bash", resources: ["x".repeat(70_000)] } }]);
+    const { provider } = testProvider(http);
+    const requested = vi.fn();
+    const resolved = vi.fn();
+    provider.on("approval_request", requested);
+    provider.on("approval_resolved", resolved);
+    await provider.sendTurn(turnRequest());
+    expect(requested.mock.calls).toEqual([]);
+    expect(http.replyPermission.mock.calls.map((args) => args.slice(1, 5))).toEqual([["ses_1", "per_large", "reject", "v2"]]);
+    expect(resolved.mock.calls).toEqual([[{ requestId: "per_large", threadId: "thread-1", outcome: { status: "auto_denied", reason: "too_large" } }]]);
+    await provider.shutdown();
+  });
+
+  it("stops an oversized request when its native reject cannot be delivered", async () => {
+    const http = fakeHttp([{ type: "permission.v2.asked", properties: { id: "per_large", sessionID: "ses_1", action: "bash", resources: ["x".repeat(70_000)] } }]);
+    http.replyPermission.mockRejectedValueOnce(new Error("offline"));
+    const { provider } = testProvider(http);
+    const resolved = vi.fn();
+    provider.on("approval_resolved", resolved);
+    await provider.sendTurn(turnRequest());
+    expect(resolved.mock.calls).toEqual([[{ requestId: "per_large", threadId: "thread-1", outcome: { status: "cancelled", reason: "unanswerable" } }]]);
+    expect(provider.listPendingApprovals()).toEqual([]);
+    expect(http.abortSession.mock.calls.map((args) => args[1])).toEqual(["ses_1"]);
     await provider.shutdown();
   });
 });

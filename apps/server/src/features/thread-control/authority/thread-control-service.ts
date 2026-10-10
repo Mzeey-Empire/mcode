@@ -2,8 +2,10 @@ import * as NodeCrypto from "node:crypto";
 import { logger } from "@mcode/shared";
 import {
   type IProviderRegistry,
-  type PermissionDecision,
-  type PermissionRequest,
+  type ApprovalResponse,
+  type ApprovalRespondResult,
+  ProviderIdSchema,
+  type ApprovalRequest,
   type ProviderId,
   type ResolvedExecution,
   type ResolvedPlacement,
@@ -76,6 +78,9 @@ import {
 import { ThreadControlAuditRepo } from "./persistence/thread-control-audit-repo.js";
 import { ProviderRegistry } from "../../providers/composition/provider-registry.js";
 import { AgentService, DelegationTargetResolver } from "../../agents/index.js";
+import { ApprovalService } from "../../agents/approvals/approval-service.js";
+
+type ThreadApprovalDecision = "allow" | "deny" | "cancelled";
 import {
   ThreadControlMutationReservationService,
   type ThreadMutationReservationState,
@@ -120,6 +125,7 @@ export class ThreadControlService {
   private readonly mutationReservations: ThreadControlMutationReservationService;
 
   constructor(
+    @inject(ApprovalService) private readonly approvalService: ApprovalService,
     @inject(WorkspaceRepo) private readonly workspaces: WorkspaceRepo,
     @inject(WorktreeRepo) private readonly worktrees: WorktreeRepo,
     @inject(delay(() => GitWorktreeService)) private readonly gitWorktrees: GitWorktreeService,
@@ -548,16 +554,11 @@ export class ThreadControlService {
   private async publishSendApproval(
     authority: ThreadControlAuthority,
     target: NonNullable<ReturnType<ThreadRepo["findById"]>>,
-    input: ThreadSendInput,
-    execution: ResolvedExecution,
+    _input: ThreadSendInput,
+    _execution: ResolvedExecution,
     approvalId: string,
   ): Promise<void> {
-    broadcast("permission.request", {
-      requestId: approvalId, threadId: target.id, toolName: "thread_send", title: "Send a message to another thread",
-      input: { threadId: target.id, message: input.message, execution }, ownerWorkspaceId: target.workspace_id,
-      ownerThreadId: authority.type === "internal" ? authority.sourceThreadId : target.id,
-      ...(authority.type === "internal" ? { sourceThreadId: authority.sourceThreadId } : {}), operation: "thread_send" as const,
-    });
+    this.publishThreadApproval(approvalId);
     (await this.auditMutation(authority, "thread_send", "pending_approval", target.id, target.workspace_id, approvalId));
   }
 
@@ -666,11 +667,7 @@ export class ThreadControlService {
   }
 
   private async publishStopApproval(authority: ThreadControlAuthority, target: MutableThread, approvalId: string): Promise<void> {
-    broadcast("permission.request", {
-      requestId: approvalId, threadId: target.id, toolName: "thread_stop", title: "Stop another thread", input: { threadId: target.id },
-      ownerWorkspaceId: target.workspace_id, ownerThreadId: authority.type === "internal" ? authority.sourceThreadId : target.id,
-      ...(authority.type === "internal" ? { sourceThreadId: authority.sourceThreadId } : {}), operation: "thread_stop" as const,
-    });
+    this.publishThreadApproval(approvalId);
     (await this.auditMutation(authority, "thread_stop", "pending_approval", target.id, target.workspace_id, approvalId));
   }
 
@@ -713,9 +710,20 @@ export class ThreadControlService {
   }
 
   /** Resolve a durable delegated-thread approval before provider permission handlers. */
-  async respondToApproval(requestId: string, decision: PermissionDecision): Promise<boolean> {
+  async respondToApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
+    if (!("autoDeny" in response) && response.choiceId !== "allow" && response.choiceId !== "deny") {
+      return this.approvals.listPending().some((approval) => approval.approvalId === requestId)
+        ? { status: "failed", message: "The approval choice is unavailable" } : { status: "not_pending" };
+    }
     const pending = (await this.approvals.claim(requestId));
-    if (!pending) return false;
+    if (!pending) return { status: "not_pending" };
+    const decision = "autoDeny" in response || response.choiceId === "deny" ? "deny" : "allow";
+    await this.respondToClaimedApproval(pending, decision);
+    return { status: "resolved" };
+  }
+
+  private async respondToClaimedApproval(pending: PendingThreadCreateApproval | PendingThreadSendApproval | PendingThreadStopApproval, decision: ThreadApprovalDecision): Promise<boolean> {
+    const requestId = pending.approvalId;
 
     if ("operation" in pending && (pending.operation === "thread_send" || pending.operation === "thread_stop")) {
       return (await this.respondToMutationApproval(pending, decision));
@@ -728,7 +736,7 @@ export class ThreadControlService {
         { callerId: pending.callerId, sourceThreadId: pending.sourceThreadId, workspaceId: pending.workspaceId, threadId: pending.threadId, operation: "thread_create_batch", outcome: "denied" },
         { approvalId: requestId, threadId: pending.threadId },
       ));
-      broadcast("permission.resolved", { requestId, decision });
+      this.publishApprovalResolution(pending, decision);
       broadcast("thread.status", { threadId: pending.threadId, status: "errored" });
       return true;
     }
@@ -755,7 +763,7 @@ export class ThreadControlService {
         { callerId: pending.callerId, sourceThreadId: pending.sourceThreadId, workspaceId: pending.workspaceId, threadId: pending.threadId, operation: "thread_create_batch", outcome: "resumed-approved" },
         { approvalId: requestId, threadId: pending.threadId },
       ));
-      broadcast("permission.resolved", { requestId, decision });
+      this.publishApprovalResolution(pending, decision);
       broadcast("thread.status", { threadId: pending.threadId, status: "active" });
       return true;
     } catch (error) {
@@ -771,7 +779,7 @@ export class ThreadControlService {
         { approvalId: requestId, threadId: pending.threadId },
       ));
       (await this.threads.updateStatus(pending.threadId, "errored"));
-      broadcast("permission.resolved", { requestId, decision });
+      this.publishApprovalResolution(pending, decision);
       broadcast("thread.status", { threadId: pending.threadId, status: "errored" });
       return true;
     }
@@ -1152,76 +1160,55 @@ export class ThreadControlService {
     else (await this.failRecovery(approval));
   }
 
-  /** Return durable thread-control approvals for frontend rehydration. */
-  listPendingApprovals(threadId: string): PermissionRequest[] {
-    const byTarget = this.approvals.listPendingByThread(threadId);
-    const bySource = this.approvals.listPendingBySourceThread?.(threadId) ?? [];
-    return this.uniquePendingApprovals(byTarget, bySource).map((approval) => this.permissionRequestForApproval(approval));
+  /** Approvals belong only to their source thread, or the external target thread. */
+  listPendingApprovals(threadId?: string): ApprovalRequest[] {
+    return this.approvals.listPending()
+      .filter((approval) => threadId === undefined || (approval.sourceThreadId ?? approval.threadId) === threadId)
+      .flatMap((approval) => {
+        const request = this.approvalRequestFor(approval);
+        return request ? [request] : [];
+      });
   }
 
-  private uniquePendingApprovals(
-    byTarget: ReturnType<ThreadControlApprovalRepo["listPendingByThread"]>,
-    bySource: ReturnType<NonNullable<ThreadControlApprovalRepo["listPendingBySourceThread"]>>,
-  ) {
-    const seen = new Set<string>();
-    return [...byTarget, ...bySource].filter((approval) => {
-      if (seen.has(approval.approvalId)) return false;
-      seen.add(approval.approvalId);
-      return true;
+  private approvalRequestFor(approval: RecoverableThreadCreateApproval): ApprovalRequest | undefined {
+    if ("invalid" in approval) {
+      this.approvalService.publish({ requestId: approval.approvalId, threadId: approval.sourceThreadId ?? approval.threadId, body: null }, {
+        id: null, resolveApproval: (id, response) => this.respondToApproval(id, response),
+      });
+      return undefined;
+    }
+    const ownerThreadId = approval.sourceThreadId ?? approval.threadId;
+    const owner = approval.sourceThreadId ? this.threads.findById(approval.sourceThreadId) : undefined;
+    const sourceProviderId = approval.operation === "thread_send" ? approval.sourceProviderId : undefined;
+    const providerId = sourceProviderId ? ProviderIdSchema.parse(sourceProviderId) : owner ? ProviderIdSchema.parse(owner.provider) : null;
+    return {
+      requestId: approval.approvalId, threadId: ownerThreadId, providerId,
+      requestedAt: new Date().toISOString(),
+      subject: { kind: "thread_operation", operation: approval.operation, targetThreadId: approval.threadId,
+        ...(approval.operation === "thread_send" ? { message: approval.message } : {}) },
+      choices: [{ id: "allow", intent: "allow_once", label: "Allow" }, { id: "deny", intent: "deny", label: "Deny" }],
+      noteDelivery: "none", origin: providerId ? { kind: "agent" } : { kind: "integration", label: "Integration" },
+    };
+  }
+
+  private publishThreadApproval(approvalId: string): void {
+    const approval = this.approvals.listPending().find((item) => item.approvalId === approvalId);
+    if (!approval) throw new Error("Pending thread approval was not found");
+    const request = this.approvalRequestFor(approval);
+    if (!request) return;
+    const { requestId, threadId, providerId, ...body } = request;
+    this.approvalService.publish({ requestId, threadId, body }, {
+      id: providerId, resolveApproval: (id, response) => this.respondToApproval(id, response),
     });
   }
 
-  private permissionRequestForApproval(
-    approval: ReturnType<ThreadControlApprovalRepo["listPendingByThread"]>[number],
-  ): PermissionRequest {
-    const owner = this.permissionOwner(approval);
-    if ("operation" in approval && approval.operation === "thread_send") {
-      return this.sendPermissionRequest(approval, owner);
-    }
-    if ("operation" in approval && approval.operation === "thread_stop") {
-      return this.stopPermissionRequest(approval, owner);
-    }
-    return this.createPermissionRequest(approval, owner);
-  }
-
-  private permissionOwner(approval: ReturnType<ThreadControlApprovalRepo["listPendingByThread"]>[number]) {
-    const ownerThread = approval.sourceThreadId ? this.threads.findById(approval.sourceThreadId) : null;
-    return { workspaceId: ownerThread?.workspace_id ?? approval.workspaceId, threadId: ownerThread?.id ?? approval.threadId };
-  }
-
-  private sendPermissionRequest(
-    approval: PendingThreadSendApproval,
-    owner: { workspaceId: string; threadId: string },
-  ): PermissionRequest {
-    return {
-      requestId: approval.approvalId, threadId: approval.threadId, toolName: "thread_send", title: "Send a message to another thread",
-      input: { threadId: approval.threadId, message: approval.message, execution: approval.execution },
-      ownerWorkspaceId: owner.workspaceId, ownerThreadId: owner.threadId,
-      ...(approval.sourceThreadId ? { sourceThreadId: approval.sourceThreadId } : {}), operation: approval.operation,
-    };
-  }
-
-  private stopPermissionRequest(
-    approval: PendingThreadStopApproval,
-    owner: { workspaceId: string; threadId: string },
-  ): PermissionRequest {
-    return {
-      requestId: approval.approvalId, threadId: approval.threadId, toolName: "thread_stop", title: "Stop another thread",
-      input: { threadId: approval.threadId }, ownerWorkspaceId: owner.workspaceId, ownerThreadId: owner.threadId,
-      ...(approval.sourceThreadId ? { sourceThreadId: approval.sourceThreadId } : {}), operation: approval.operation,
-    };
-  }
-
-  private createPermissionRequest(
-    approval: Exclude<ReturnType<ThreadControlApprovalRepo["listPendingByThread"]>[number], PendingThreadSendApproval | PendingThreadStopApproval>,
-    owner: { workspaceId: string; threadId: string },
-  ): PermissionRequest {
-    return {
-      requestId: approval.approvalId, threadId: approval.threadId, toolName: "thread_create_batch", title: "Create a new worktree",
-      input: { workspaceId: approval.workspaceId, placement: approval.placement, execution: approval.execution },
-      ownerWorkspaceId: owner.workspaceId, ownerThreadId: owner.threadId,
-      ...(approval.sourceThreadId ? { sourceThreadId: approval.sourceThreadId } : {}), operation: approval.operation,
-    };
+  private publishApprovalResolution(pending: PendingThreadCreateApproval | PendingThreadSendApproval | PendingThreadStopApproval, decision: ThreadApprovalDecision): void {
+    this.approvalService.resolved({
+      requestId: pending.approvalId, threadId: pending.sourceThreadId ?? pending.threadId,
+      outcome: decision === "cancelled" ? { status: "cancelled", reason: "session_stopped" }
+        : decision === "deny" ? { status: "denied", choiceLabel: "Deny" }
+        : { status: "allowed", intent: "allow_once", choiceLabel: "Allow" },
+    });
   }
 
   private async createOne(
@@ -1341,12 +1328,7 @@ export class ThreadControlService {
       callerId: authority.type === "internal" ? authority.userId : authority.integrationId,
       ...(authority.type === "internal" ? { sourceThreadId: authority.sourceThreadId } : {}),
     }));
-    broadcast("permission.request", {
-      requestId: approvalId, threadId, toolName: "thread_create_batch", title: "Create a new worktree",
-      input: { workspaceId: input.workspaceId, placement: input.placement, execution }, ownerWorkspaceId: input.workspaceId,
-      ownerThreadId: authority.type === "internal" ? authority.sourceThreadId : threadId,
-      ...(authority.type === "internal" ? { sourceThreadId: authority.sourceThreadId } : {}), operation: "thread_create_batch" as const,
-    });
+    this.publishThreadApproval(approvalId);
     return {
       index, status: "pending_approval", workspaceId: input.workspaceId, threadId, approvalId, execution,
       requestedPlacement: input.placement, state: { status: "waiting_for_approval", approvalId },
@@ -1576,7 +1558,7 @@ export class ThreadControlService {
 
   private async respondToMutationApproval(
     pending: PendingThreadSendApproval | PendingThreadStopApproval,
-    decision: PermissionDecision,
+    decision: ThreadApprovalDecision,
   ): Promise<boolean> {
     if (this.hasIncompleteSendProvenance(pending)) return (await this.failMutationApproval(pending, decision));
     if (decision === "deny" || decision === "cancelled") return (await this.rejectMutationApproval(pending, decision));
@@ -1634,28 +1616,28 @@ export class ThreadControlService {
 
   private async approveMutationApproval(
     pending: PendingThreadSendApproval | PendingThreadStopApproval,
-    decision: PermissionDecision,
+    decision: ThreadApprovalDecision,
   ): Promise<boolean> {
     return (await this.settleMutationApproval(pending, decision, "approved", "resumed-approved", false));
   }
 
   private async rejectMutationApproval(
     pending: PendingThreadSendApproval | PendingThreadStopApproval,
-    decision: PermissionDecision,
+    decision: ThreadApprovalDecision,
   ): Promise<boolean> {
     return (await this.settleMutationApproval(pending, decision, "rejected", "denied", true));
   }
 
   private async failMutationApproval(
     pending: PendingThreadSendApproval | PendingThreadStopApproval,
-    decision: PermissionDecision,
+    decision: ThreadApprovalDecision,
   ): Promise<boolean> {
     return (await this.settleMutationApproval(pending, decision, "failed", "resumed-failed", true));
   }
 
   private async settleMutationApproval(
     pending: PendingThreadSendApproval | PendingThreadStopApproval,
-    decision: PermissionDecision,
+    decision: ThreadApprovalDecision,
     status: "approved" | "rejected" | "failed",
     outcome: "resumed-approved" | "denied" | "resumed-failed",
     releaseReservation: boolean,
@@ -1669,7 +1651,7 @@ export class ThreadControlService {
       },
       { approvalId: pending.approvalId, threadId: pending.threadId },
     ));
-    broadcast("permission.resolved", { requestId: pending.approvalId, decision });
+    this.publishApprovalResolution(pending, decision);
     return true;
   }
 

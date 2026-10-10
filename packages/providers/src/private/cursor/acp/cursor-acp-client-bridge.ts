@@ -10,13 +10,14 @@ import type {
 } from "@agentclientprotocol/sdk";
 import { logger } from "@mcode/shared";
 import { AgentEventType, PLAN_MAX_CONTENT_CHARS } from "@mcode/contracts";
-import type { AgentEvent, PermissionDecision, PermissionRequest } from "@mcode/contracts";
+import type { AgentEvent, ApprovalOutcome, ApprovalRequestBody, ApprovalRequestEnvelope, ApprovalResponse, ApprovalRespondResult } from "@mcode/contracts";
+import { approvalChoice, approvalOutcome, approvalScope } from "../../../approval-scope.js";
 import type { CursorProviderPorts } from "../../../factory-types.js";
 import { buildCursorAskQuestionExtResponse } from "./cursor-acp-ask-question.js";
 import {
-  mapDecisionToAcpOutcome,
+  mapResponseToAcpOutcome,
   pickFullAccessAllowOption,
-  synthesizeCursorAcpPermissionRequest,
+  synthesizeCursorAcpApprovalRequest,
 } from "./cursor-acp-permission-mapper.js";
 import {
   shouldEmitCursorSessionTrace,
@@ -37,7 +38,7 @@ interface PendingAcpPermission {
   mcodeSessionId: string;
   threadId: string;
   options: PermissionOption[];
-  request: PermissionRequest;
+  request: ApprovalRequestEnvelope & { body: ApprovalRequestBody };
   resolve: (value: RequestPermissionResponse) => void;
 }
 
@@ -46,8 +47,8 @@ export interface CursorAcpClientBridgeDeps {
   settings: CursorProviderPorts["settings"];
   publishEvent: (entry: CursorAcpSessionEntry, event: AgentEvent) => void;
   publishNativeTurnDiff: (entry: CursorAcpSessionEntry, update: SessionNotification["update"]) => void;
-  emitPermissionRequest: (request: PermissionRequest) => void;
-  emitPermissionResolved: (requestId: string, decision: PermissionDecision) => void;
+  emitApprovalRequest: (request: ApprovalRequestEnvelope) => void;
+  emitApprovalResolved: (payload: { requestId: string; threadId: string; outcome: ApprovalOutcome }) => void;
   emitPlanCaptured: (args: { threadId: string; markdown: string; source: "native" | "fence" }, entry: CursorAcpSessionEntry) => void;
 }
 
@@ -65,20 +66,26 @@ export class CursorAcpClientBridge {
   }
 
   /** Resolves an outstanding Cursor permission request. */
-  resolvePermission(requestId: string, decision: PermissionDecision): boolean {
+  async resolveApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     const pending = this.pendingPermissions.get(requestId);
-    if (!pending) return false;
+    if (!pending) return { status: "not_pending" };
+    const choice = approvalChoice(pending.request.body, response);
+    if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
     this.pendingPermissions.delete(requestId);
-    const outcome = mapDecisionToAcpOutcome(decision, pending.options);
-    this.deps.emitPermissionResolved(requestId, outcome.outcome === "cancelled" ? "cancelled" : decision);
+    const outcome = mapResponseToAcpOutcome(response, pending.options);
     pending.resolve({ outcome });
-    return true;
+    await Promise.resolve();
+    this.deps.emitApprovalResolved({ requestId, threadId: pending.threadId, outcome: "autoDeny" in response
+      ? { status: "auto_denied", reason: response.autoDeny }
+      : outcome.outcome === "cancelled" ? { status: "cancelled", reason: "unanswerable" }
+        : choice ? approvalOutcome(choice, response) : { status: "cancelled", reason: "unanswerable" } });
+    return { status: "resolved" };
   }
 
   /** Lists outstanding permission requests for one thread. */
-  listPendingPermissions(threadId: string): PermissionRequest[] {
+  listPendingApprovals(threadId?: string): ApprovalRequestEnvelope[] {
     return [...this.pendingPermissions.values()]
-      .filter((pending) => pending.threadId === threadId)
+      .filter((pending) => threadId === undefined || pending.threadId === threadId)
       .map((pending) => pending.request);
   }
 
@@ -88,7 +95,7 @@ export class CursorAcpClientBridge {
       if (pending.mcodeSessionId !== mcodeSessionId) continue;
       this.pendingPermissions.delete(requestId);
       pending.resolve({ outcome: { outcome: "cancelled" } });
-      this.deps.emitPermissionResolved(requestId, "cancelled");
+      this.deps.emitApprovalResolved({ requestId, threadId: pending.threadId, outcome: { status: "cancelled", reason: "session_stopped" } });
     }
   }
 
@@ -96,7 +103,7 @@ export class CursorAcpClientBridge {
   cancelAllPending(): void {
     for (const [requestId, pending] of this.pendingPermissions) {
       pending.resolve({ outcome: { outcome: "cancelled" } });
-      this.deps.emitPermissionResolved(requestId, "cancelled");
+      this.deps.emitApprovalResolved({ requestId, threadId: pending.threadId, outcome: { status: "cancelled", reason: "session_stopped" } });
     }
     this.pendingPermissions.clear();
     this.planQuestionModeThreads.clear();
@@ -237,12 +244,14 @@ export class CursorAcpClientBridge {
 
     const requestId = NodeCrypto.randomUUID();
     const toolTitle = typeof params.toolCall.title === "string" ? params.toolCall.title : "Tool";
-    const request = synthesizeCursorAcpPermissionRequest({
-      requestId,
-      threadId: entry.threadId,
+    const body = synthesizeCursorAcpApprovalRequest({
       toolTitle,
       rawToolInput: params.toolCall.rawInput,
+      toolCallId: params.toolCall.toolCallId,
+      kind: params.toolCall.kind,
+      options: params.options,
     });
+    const request = { requestId, threadId: entry.threadId, body };
     return await new Promise((resolve) => {
       this.pendingPermissions.set(requestId, {
         mcodeSessionId: entry.mcodeSessionId,
@@ -251,7 +260,11 @@ export class CursorAcpClientBridge {
         request,
         resolve,
       });
-      queueMicrotask(() => this.deps.emitPermissionRequest(request));
+      const autoDeny = approvalScope(body);
+      queueMicrotask(() => {
+        if (autoDeny) void this.resolveApproval(requestId, { autoDeny });
+        else this.deps.emitApprovalRequest(request);
+      });
     });
   }
 

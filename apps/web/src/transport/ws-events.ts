@@ -5,7 +5,7 @@ import {
   type Settings,
   type TurnFileEffectSummary,
 } from "@mcode/contracts";
-import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
+import { useApprovalStore } from "@/stores/approvalStore";
 import { pushEmitter } from "./ws-transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useDiffStore } from "@/stores/diffStore";
@@ -157,8 +157,8 @@ function handleTerminalData(data: unknown): void {
  * - `plan.questions` -- model-proposed plan questions forwarded to threadStore wizard
  * - `plan.answered` -- server committed an answered marker; dismisses the wizard on this client
  * - `plan.versionUpserted` -- updates planStore and previews new agent versions in the active thread
- * - `permission.request` -- tool permission awaiting user decision
- * - `permission.resolved` -- a permission was settled (by user or session stop)
+ * - `approval.requested` -- tool permission awaiting user decision
+ * - `approval.resolved` -- a permission was settled (by user or session stop)
  * - `providers.availability` -- server-pushed provider availability snapshot forwarded to providerAvailabilityStore
  * - `workspace.gitStatusChanged` -- workspace git status changed (e.g. non-git folder became a repo), updates is_git_repo flag
  * - `workspace.orderChanged` -- sidebar project order changed on the server; refreshes workspace list
@@ -575,30 +575,22 @@ export function startPushListeners(): void {
     }),
   );
 
-  // permission.request: tool permission awaiting user decision
+  // approval.requested: tool permission awaiting user decision
   unsubs.push(
-    pushEmitter.on("permission.request", (data) => {
-      const request = data as PermissionRequest;
-      if (!request.requestId || !request.threadId) return;
-      useThreadStore.getState().addPermissionRequest(request);
+    pushEmitter.on("approval.requested", (data) => {
+      const request = WS_CHANNELS["approval.requested"].parse(data);
+      useApprovalStore.getState().add(request);
       void useThreadControlStore.getState().refreshByThreadId(request.threadId);
-      if (request.sourceThreadId) {
-        void useThreadControlStore.getState().refreshByThreadId(request.sourceThreadId);
-      }
     }),
   );
 
-  // permission.resolved: a permission was settled (by user or session stop)
+  // approval.resolved: a permission was settled (by user or session stop)
   unsubs.push(
-    pushEmitter.on("permission.resolved", (data) => {
-      const { requestId, decision, optionLabel } = data as {
-        requestId: string;
-        decision: PermissionDecision;
-        optionLabel?: string;
-      };
+    pushEmitter.on("approval.resolved", (data) => {
+      const { requestId, outcome } = WS_CHANNELS["approval.resolved"].parse(data);
       void useThreadControlStore.getState().rehydrate();
       if (!requestId) return;
-      useThreadStore.getState().resolvePermissionRequest(requestId, decision, optionLabel);
+      useApprovalStore.getState().resolve(requestId, outcome);
     }),
   );
 

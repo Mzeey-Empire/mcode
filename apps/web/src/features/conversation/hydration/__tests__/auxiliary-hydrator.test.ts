@@ -1,3 +1,5 @@
+import { useApprovalStore } from "@/stores/approvalStore";
+import { createMockApproval } from "@/__tests__/mocks/transport";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { HYDRATION_TTL_MS } from "..";
 import { AuxiliaryHydrator } from "../auxiliary-hydrator";
@@ -44,7 +46,7 @@ describe("AuxiliaryHydrator", () => {
     records = new Map<string, ThreadRecord>();
     currentThreadId = THREAD_ID;
 
-    (mockTransport.listPendingPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([
+    (mockTransport.listPendingApprovals as ReturnType<typeof vi.fn>).mockResolvedValue([
       { requestId: "r1", toolName: "bash", input: {}, threadId: THREAD_ID },
     ]);
     (mockTransport.getThreadTasks as ReturnType<typeof vi.fn>).mockResolvedValue(null);
@@ -104,42 +106,42 @@ describe("AuxiliaryHydrator", () => {
     const aux = createAux();
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: false });
     await vi.waitFor(() => {
-      expect(mockTransport.listPendingPermissions).toHaveBeenCalledTimes(1);
+      expect(mockTransport.listPendingApprovals).toHaveBeenCalledTimes(1);
     });
 
     vi.clearAllMocks();
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: false });
     await new Promise((r) => setTimeout(r, 20));
 
-    expect(mockTransport.listPendingPermissions).not.toHaveBeenCalled();
+    expect(mockTransport.listPendingApprovals).not.toHaveBeenCalled();
   });
 
   it("ran fanout again when force bypassed the TTL gate", async () => {
     const aux = createAux();
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS });
     await vi.waitFor(() => {
-      expect(mockTransport.listPendingPermissions).toHaveBeenCalledTimes(1);
+      expect(mockTransport.listPendingApprovals).toHaveBeenCalledTimes(1);
     });
 
     vi.clearAllMocks();
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
     await vi.waitFor(() => {
-      expect(mockTransport.listPendingPermissions).toHaveBeenCalledTimes(1);
+      expect(mockTransport.listPendingApprovals).toHaveBeenCalledTimes(1);
     });
   });
 
   it("pruned permission generation after deleted thread snapshot settled", async () => {
-    let resolvePermissions!: (value: readonly unknown[]) => void;
-    (mockTransport.listPendingPermissions as ReturnType<typeof vi.fn>).mockImplementationOnce(
+    let resolveApprovals!: (value: readonly unknown[]) => void;
+    (mockTransport.listPendingApprovals as ReturnType<typeof vi.fn>).mockImplementationOnce(
       () => new Promise<readonly unknown[]>((resolve) => {
-        resolvePermissions = resolve;
+        resolveApprovals = resolve;
       }),
     );
     const aux = createAux();
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
     aux.forgetThread(THREAD_ID);
 
-    resolvePermissions([]);
+    resolveApprovals([]);
     await vi.waitFor(() => {
       const generations = (aux as unknown as {
         permissionSnapshotGenerations: Map<string, number>;
@@ -148,30 +150,20 @@ describe("AuxiliaryHydrator", () => {
     });
   });
 
-  it("did not call setState for permissions when payload was unchanged", async () => {
-    records = patchThreadRecord(records, THREAD_ID, {
-      permissions: [{ requestId: "r1", toolName: "bash", settled: false, threadId: THREAD_ID, input: {} }],
-    });
+  it("keeps the approval state reference when the snapshot is unchanged", async () => {
+    const request = createMockApproval({ requestId: "r1", threadId: THREAD_ID });
+    useApprovalStore.getState().add(request);
+    const before = useApprovalStore.getState().approvals;
+    vi.mocked(mockTransport.listPendingApprovals).mockResolvedValueOnce([request]);
     const aux = createAux();
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
-    await vi.waitFor(() => {
-      expect(mockTransport.listPendingPermissions).toHaveBeenCalled();
-    });
-
-    const permissionPatches = setStateSpy.mock.calls.filter((call) => {
-      const arg = call[0];
-      if (typeof arg !== "function") return false;
-      const patch = arg({ records, currentThreadId, runningThreadIds: new Set() });
-      if (!patch.records) return false;
-      const next = getThreadRecord(patch.records, THREAD_ID).permissions;
-      const prev = getThreadRecord(records, THREAD_ID).permissions;
-      return next !== prev;
-    });
-    expect(permissionPatches).toHaveLength(0);
+    await vi.waitFor(() => expect(mockTransport.listPendingApprovals).toHaveBeenCalledWith(THREAD_ID));
+    await Promise.resolve();
+    expect(useApprovalStore.getState().approvals).toBe(before);
   });
 
   it("continued other fanouts when one RPC failed", async () => {
-    (mockTransport.listPendingPermissions as ReturnType<typeof vi.fn>).mockRejectedValue(
+    (mockTransport.listPendingApprovals as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("permissions down"),
     );
     const aux = createAux();

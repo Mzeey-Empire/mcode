@@ -4,7 +4,7 @@ import { broadcast } from "../../../application/transport/push.js";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 
 import {
-  AgentPermissionService,
+  ApprovalService,
   AgentService,
   CanonicalAgentBoundary,
   ParentAssistantTextCheckpointService,
@@ -310,8 +310,8 @@ export function registerAgentServices(container: DependencyContainer): void {
     { lifecycle: Lifecycle.Singleton },
   );
   container.register(
-    AgentPermissionService,
-    { useClass: AgentPermissionService },
+    ApprovalService,
+    { useClass: ApprovalService },
     { lifecycle: Lifecycle.Singleton },
   );
 }

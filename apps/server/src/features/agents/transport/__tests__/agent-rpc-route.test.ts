@@ -12,7 +12,7 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
   const unused = (): never => { throw new Error("Unexpected dependency in admission-only route"); };
   const deps: AgentRouterDeps = {
     agentService: { sendMessage, createAndSend: unused, stopSession: unused, runtimeAccess: unused },
-    agentPermissionService: { respondToPermission: unused, listPendingPermissions: unused },
+    approvalService: { respondToApproval: unused, listPendingApprovals: unused },
     hookExecutionRepo: { listByMessage: unused },
     messageRepo: { listByThread: unused, listByThreadAfter: unused, listSessionNotices: unused, confirmUserMessage: unused },
     narrativeStore: { load: unused },
@@ -146,52 +146,30 @@ describe("routeMessage Agent RPCs", () => {
     );
   });
 
-  it("falls through from thread-control permission requests to agent requests", async () => {
-    const calls: string[] = [];
-    const respondToApproval = vi.fn(async () => {
-      calls.push("thread-control");
-      return false;
-    });
-    const respondToPermission = vi.fn(() => {
-      calls.push("agent");
-    });
-
+  it("returns the approval service delivery result", async () => {
+    const respondToApproval = vi.fn(async () => ({ status: "not_pending" }));
     const response = await routeMessage(JSON.stringify({
-      id: "permission-1",
-      method: "permission.respond",
-      params: { requestId: "request-1", decision: "allow" },
-    }), {
-      threadControlService: { respondToApproval },
-      agentPermissionService: { respondToPermission },
-    } as unknown as RouterDeps);
-
-    expect(response).toEqual({ id: "permission-1", result: undefined });
-    expect(calls).toEqual(["thread-control", "agent"]);
+      id: "approval-1", method: "approval.respond", params: { requestId: "request-1", choiceId: "allow" },
+    }), { approvalService: { respondToApproval } } as unknown as RouterDeps);
+    expect(response).toEqual({ id: "approval-1", result: { status: "not_pending" } });
+    expect(respondToApproval.mock.calls).toEqual([["request-1", { choiceId: "allow" }]]);
   });
 
-  it("forwards exact question answers and rejects malformed answer payloads", async () => {
-    const respondToApproval = vi.fn(async () => false);
-    const respondToPermission = vi.fn();
-    const deps = {
-      threadControlService: { respondToApproval },
-      agentPermissionService: { respondToPermission },
-    } as unknown as RouterDeps;
-
+  it("forwards exact question answers and rejects malformed answers", async () => {
+    const respondToApproval = vi.fn(async () => ({ status: "resolved" }));
+    const deps = { approvalService: { respondToApproval } } as unknown as RouterDeps;
     const accepted = await routeMessage(JSON.stringify({
-      id: "question-1",
-      method: "permission.respond",
-      params: { requestId: "que_1", decision: "allow", answers: [[" staging "]] },
+      id: "question-1", method: "approval.respond",
+      params: { requestId: "que_1", choiceId: "answer", answers: [[" staging "]] },
     }), deps);
-    expect(accepted).toEqual({ id: "question-1", result: undefined });
-    expect(respondToPermission).toHaveBeenCalledWith("que_1", "allow", [[" staging "]], undefined);
-
+    expect(accepted).toEqual({ id: "question-1", result: { status: "resolved" } });
+    expect(respondToApproval.mock.calls).toEqual([["que_1", { choiceId: "answer", answers: [[" staging "]] }]]);
     const rejected = await routeMessage(JSON.stringify({
-      id: "question-2",
-      method: "permission.respond",
-      params: { requestId: "que_1", decision: "allow", answers: [[" "]] },
+      id: "question-2", method: "approval.respond",
+      params: { requestId: "que_1", choiceId: "answer", answers: [[" "]] },
     }), deps);
-    expect(rejected.error).toBeDefined();
-    expect(respondToPermission).toHaveBeenCalledTimes(1);
+    expect(rejected.error?.code).toBe("INVALID_PARAMS");
+    expect(respondToApproval).toHaveBeenCalledTimes(1);
   });
 });
 

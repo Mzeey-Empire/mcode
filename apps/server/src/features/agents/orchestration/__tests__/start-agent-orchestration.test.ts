@@ -27,15 +27,10 @@ async function buildOrchestration() {
   const pullRequestCompletionEffect = { schedule: vi.fn() };
 
   startAgentOrchestration({
-    stopSession: vi.fn(async () => undefined),
     runtime,
     publicationRegistry,
     threadRepo,
     pullRequestCompletionEffect,
-    providerRegistry: { resolve: () => { throw new Error("No provider needed for orchestration publication"); },
-      resolveAll: () => [], async shutdown() {} },
-    publishPermissionRequest: vi.fn(),
-    publishPermissionResolved: vi.fn(),
     publishThreadStatus,
   });
 

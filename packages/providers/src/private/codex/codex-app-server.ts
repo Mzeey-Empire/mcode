@@ -206,6 +206,8 @@ export interface CodexApprovalRequest {
   method: string;
   /** Opaque params payload forwarded from the server. */
   params: Record<string, unknown>;
+  /** Reports whether the native answer was written to the live connection. */
+  responseWritten?: (delivered: boolean) => void;
 }
 
 /**
@@ -322,7 +324,7 @@ export async function routeCodexServerRequest(args: {
   msg: { id?: number; method?: string; params?: Record<string, unknown> };
   approvalPolicy: AskForApproval | undefined;
   approvalHandler: CodexApprovalHandler | undefined;
-  sendResponse: (id: number, result: unknown) => void;
+  sendResponse: (id: number, result: unknown) => void | Promise<void>;
 }): Promise<void> {
   const { msg, approvalPolicy, approvalHandler, sendResponse } = args;
   if (typeof msg.id !== "number") return;
@@ -335,7 +337,7 @@ export async function routeCodexServerRequest(args: {
   if (autoApprove) {
     logger.info("Codex serverRequest auto-approved", { id: msg.id, method: diagnosticMethod });
     if (method === "item/permissions/requestApproval") {
-      sendResponse(msg.id, {
+      await sendResponse(msg.id, {
         permissions: {
           fileSystem: { read: [], write: [] },
           network: { enabled: true },
@@ -343,24 +345,27 @@ export async function routeCodexServerRequest(args: {
         scope: "session",
       });
     } else if (method === "applyPatchApproval" || method === "execCommandApproval") {
-      sendResponse(msg.id, { decision: "approved_for_session" });
+      await sendResponse(msg.id, { decision: "approved_for_session" });
     } else {
-      sendResponse(msg.id, { decision: "acceptForSession" });
+      await sendResponse(msg.id, { decision: "acceptForSession" });
     }
     return;
   }
 
   if (approvalHandler) {
+    const request: CodexApprovalRequest = { rpcId: msg.id, method, params };
     try {
-      const result = await approvalHandler({ rpcId: msg.id, method, params });
-      sendResponse(msg.id, result);
+      const result = await approvalHandler(request);
+      await sendResponse(msg.id, result);
+      acknowledgeApprovalResponse(request, true);
     } catch (err) {
+      acknowledgeApprovalResponse(request, false);
       logger.error("Codex approvalHandler rejected; sending safe-deny", {
         id: msg.id,
         method: diagnosticMethod,
         error: String(err),
       });
-      sendResponse(msg.id, mapDecisionToCodexResponse(method, "deny", params));
+      await sendResponse(msg.id, mapDecisionToCodexResponse(method, "deny", params));
     }
     return;
   }
@@ -372,10 +377,14 @@ export async function routeCodexServerRequest(args: {
     id: msg.id,
     method: diagnosticMethod,
   });
-  sendResponse(msg.id, mapDecisionToCodexResponse(method, "deny", params));
+  await sendResponse(msg.id, mapDecisionToCodexResponse(method, "deny", params));
 }
 
 
+
+function acknowledgeApprovalResponse(request: CodexApprovalRequest, delivered: boolean): void {
+  request.responseWritten?.(delivered);
+}
 
 /** Maximum time to drain an exact turn's terminal notification after interrupt acknowledgement. */
 const INTERRUPT_DRAIN_TIMEOUT_MS = 5_000;
@@ -1098,6 +1107,8 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
       approvalPolicy: this.options.approvalPolicy,
       approvalHandler: this.options.approvalHandler,
       sendResponse: (id, result) => this.rpc.sendResponse(id, result),
+    }).catch(() => {
+      this.emit("fatal", "Could not deliver the approval response");
     }).finally(() => {
       if (this.activeRequestId === request.id) this.activeRequestId = null;
     });

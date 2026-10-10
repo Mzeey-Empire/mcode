@@ -1,4 +1,5 @@
 import * as NodeEvents from "node:events";
+import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
 import type {
@@ -7,10 +8,13 @@ import type {
   IAgentProvider,
   IApprovalReviewCapable,
   ISessionEvictable,
-  PermissionDecision,
-  PermissionQuestion,
-  PermissionRequest,
-  PermissionResponseAnswers,
+  ApprovalResponse,
+  ApprovalRespondResult,
+  ApprovalOutcome,
+  ApprovalRequestBody,
+  ApprovalQuestion,
+  ApprovalRequestEnvelope,
+  ApprovalAnswers,
   ProviderId,
   ProviderModelInfo,
   ProviderIdentity,
@@ -20,7 +24,7 @@ import type {
 } from "@mcode/contracts";
 import { AgentEventType, providerRuntimeEvent } from "@mcode/contracts";
 import type { ProviderHostPorts } from "@mcode/providers";
-import { OpenCodeNativeTurnDiff } from "@mcode/providers";
+import { OpenCodeNativeTurnDiff, approvalChoice, approvalOutcome, approvalScope } from "@mcode/providers";
 import { SettingsService } from "../../../settings/settings-service.js";
 import { EnvService } from "../../../../runtime/environment/env-service.js";
 import { CleanForker } from "../../../handoff/index.js";
@@ -38,8 +42,8 @@ import {
 } from "./opencode-http-client.js";
 import { mapOpenCodeEnvelope, normalizeOpenCodeEnvelope, type OpenCodeMappedOutput } from "./opencode-event-mapper.js";
 import {
-  mapPermissionDecisionToReply,
-  synthesizeOpenCodePermissionRequest,
+  mapApprovalChoiceToReply,
+  synthesizeOpenCodeApprovalRequest,
   synthesizeOpenCodeQuestionRequest,
 } from "./opencode-permission-mapper.js";
 import { formatOpenCodeResumeCursor, parseOpenCodeResumeCursor } from "./opencode-resume-cursor.js";
@@ -90,7 +94,7 @@ const DEFAULT_IDLE_CONFIRM: OpenCodeIdleConfirm = {
 
 /** One upstream permission or question ask awaiting the user's decision. */
 interface OpenCodePendingAsk {
-  request: PermissionRequest;
+  request: ApprovalRequestEnvelope & { body: ApprovalRequestBody };
   sessionId: string;
   upstreamSessionId: string;
   endpoint: OpenCodeEndpoint;
@@ -192,11 +196,11 @@ function askVersion(type: string): OpenCodeRequestVersion {
 }
 
 function isValidQuestionResponse(
-  questions: PermissionQuestion[] | undefined,
-  decision: PermissionDecision,
-  answers: PermissionResponseAnswers | undefined,
+  questions: ApprovalQuestion[] | undefined,
+  decision: "allow" | "deny",
+  answers: ApprovalAnswers | undefined,
 ): boolean {
-  if (decision === "deny" || decision === "cancelled") return true;
+  if (decision === "deny") return true;
   if (decision !== "allow" || !questions || !answers || answers.length !== questions.length) return false;
   return questions.every((question, index) => {
     const answer = answers[index];
@@ -406,89 +410,52 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     if (failures.length > 0) throw new AggregateError(failures, "OpenCode provider shutdown failed");
   }
 
-  /**
-   * Relay one user decision to its pending upstream ask. The entry is marked
-   * replying synchronously so a duplicate decision returns false without a
-   * second upstream call; the entry leaves the map only after the reply
-   * succeeds, so a failed POST stays answerable instead of stalling the turn.
-   */
-  resolvePermission(
-    requestId: string,
-    decision: PermissionDecision,
-    answers?: PermissionResponseAnswers,
-  ): boolean {
+  /** A failed native relay stays answerable and is reported to the caller. */
+  async resolveApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     const entry = this.pendingPermissions.get(requestId);
-    if (!entry || entry.replying) return false;
-    if (entry.kind === "question" && !isValidQuestionResponse(entry.request.questions, decision, answers)) return false;
-    entry.replying = true;
-    void this.relayDecision(entry, decision, answers);
-    return true;
-  }
-
-  /** Return all pending permission and question cards for one thread. */
-  listPendingPermissions(threadId: string): PermissionRequest[] {
-    const out: PermissionRequest[] = [];
-    for (const entry of this.pendingPermissions.values()) {
-      if (entry.request.threadId === threadId) out.push(entry.request);
+    if (!entry) return { status: "not_pending" };
+    if (entry.replying) return { status: "failed", message: "An answer is already being sent" };
+    const choice = approvalChoice(entry.request.body, response);
+    if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
+    if (!this.validQuestionResponse(entry, response)) {
+      return { status: "failed", message: "The question answers are invalid" };
     }
-    return out;
+    entry.replying = true;
+    try {
+      await this.relayDecision(entry, response);
+      if (!this.ownsPendingAsk(entry)) return { status: "not_pending" };
+      const outcome: ApprovalOutcome = approvalOutcome(choice, response);
+      this.resolvePendingAsk(entry, outcome);
+      return { status: "resolved" };
+    } catch (error) {
+      entry.replying = false;
+      if (error instanceof OpenCodeReplySessionNotFoundError) this.invalidateReplySession(entry);
+      logger.error("OpenCode approval reply failed", { requestId });
+      return { status: "failed", message: "The answer did not reach OpenCode" };
+    }
   }
 
-  /**
-   * Relay one user decision upstream, exactly once. Permission approvals use
-   * `once`/`always` and denials use `reject`; question approvals relay the
-   * exact selected labels and denials reject the request.
-   */
-  private async relayDecision(
-    entry: OpenCodePendingAsk,
-    decision: PermissionDecision,
-    answers?: PermissionResponseAnswers,
-  ): Promise<void> {
-    try {
-      if (!this.ownsPendingAsk(entry)) return;
-      if (entry.kind === "permission") {
-        await this.http.replyPermission(
-          entry.endpoint,
-          entry.upstreamSessionId,
-          entry.request.requestId,
-          mapPermissionDecisionToReply(decision),
-          entry.version,
-          { signal: entry.signal },
-        );
-      } else if (decision === "allow") {
-        if (!answers) {
-          entry.replying = false;
-          return;
-        }
-        await this.http.replyQuestion(
-          entry.endpoint,
-          entry.upstreamSessionId,
-          entry.request.requestId,
-          answers,
-          entry.version,
-          { signal: entry.signal },
-        );
-      } else {
-        await this.http.rejectQuestion(
-          entry.endpoint,
-          entry.upstreamSessionId,
-          entry.request.requestId,
-          entry.version,
-          { signal: entry.signal },
-        );
-      }
-      this.resolvePendingAsk(entry, decision);
-    } catch (error) {
-      if (!this.ownsPendingAsk(entry)) return;
-      if (error instanceof OpenCodeReplySessionNotFoundError) {
-        this.invalidateReplySession(entry);
-        return;
-      }
-      entry.replying = false;
-      logger.error("OpenCode permission reply failed; the card stays answerable", {
-        requestId: entry.request.requestId,
-        error: error instanceof Error ? error.message : String(error),
-      });
+  /** List original adapter envelopes, optionally filtered by owning thread. */
+  listPendingApprovals(threadId?: string): ApprovalRequestEnvelope[] {
+    return [...this.pendingPermissions.values()].filter((entry) => threadId === undefined || entry.request.threadId === threadId)
+      .map((entry) => entry.request);
+  }
+
+  private validQuestionResponse(entry: OpenCodePendingAsk, response: ApprovalResponse): boolean {
+    if ("autoDeny" in response || entry.request.body.subject.kind !== "question") return true;
+    const choice = approvalChoice(entry.request.body, response);
+    return isValidQuestionResponse(entry.request.body.subject.questions, choice?.intent === "deny" ? "deny" : "allow", response.answers);
+  }
+
+  private async relayDecision(entry: OpenCodePendingAsk, response: ApprovalResponse): Promise<void> {
+    if (entry.kind === "permission") {
+      await this.http.replyPermission(entry.endpoint, entry.upstreamSessionId, entry.request.requestId,
+        "autoDeny" in response ? "reject" : mapApprovalChoiceToReply(response.choiceId), entry.version, { signal: entry.signal });
+    } else if (!("autoDeny" in response) && response.choiceId === "answer" && response.answers) {
+      await this.http.replyQuestion(entry.endpoint, entry.upstreamSessionId, entry.request.requestId,
+        response.answers, entry.version, { signal: entry.signal });
+    } else {
+      await this.http.rejectQuestion(entry.endpoint, entry.upstreamSessionId, entry.request.requestId, entry.version, { signal: entry.signal });
     }
   }
 
@@ -496,13 +463,13 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   private drainPendingForSession(sessionId: string): void {
     for (const entry of this.pendingPermissions.values()) {
       if (entry.sessionId !== sessionId) continue;
-      this.resolvePendingAsk(entry, "cancelled");
+      this.resolvePendingAsk(entry, { status: "cancelled", reason: "session_stopped" });
     }
   }
 
   /** Clear every unresolved ask while the owning provider is shutting down. */
   private drainAllPending(): void {
-    for (const entry of this.pendingPermissions.values()) this.resolvePendingAsk(entry, "cancelled");
+    for (const entry of this.pendingPermissions.values()) this.resolvePendingAsk(entry, { status: "cancelled", reason: "session_stopped" });
   }
 
   /** True only while this turn still exclusively owns the upstream ask. */
@@ -511,10 +478,10 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   }
 
   /** Remove one owned ask and publish its local outcome exactly once. */
-  private resolvePendingAsk(entry: OpenCodePendingAsk, decision: PermissionDecision): boolean {
+  private resolvePendingAsk(entry: OpenCodePendingAsk, outcome: ApprovalOutcome): boolean {
     if (this.pendingPermissions.get(entry.request.requestId) !== entry) return false;
     this.pendingPermissions.delete(entry.request.requestId);
-    this.emit("permission_resolved", { requestId: entry.request.requestId, decision });
+    this.emit("approval_resolved", { requestId: entry.request.requestId, threadId: entry.request.threadId, outcome });
     return true;
   }
 
@@ -1070,7 +1037,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       kind: "question", version: askVersion(normalized.type),
       signal: state.abortController.signal, routing, replying: false,
     });
-    this.emit("permission_request", synthesized);
+    this.emit("approval_request", synthesized);
   }
 
   /**
@@ -1089,8 +1056,13 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     routing: CanonicalLiveEventRouting,
   ): void {
     const threadId = this.threadIdFor(req.sessionId);
-    const request = synthesizeOpenCodePermissionRequest({ threadId, properties: normalized.properties });
-    if (!request) return this.emitAskDiagnostic(req, threadId);
+    const request = synthesizeOpenCodeApprovalRequest({ threadId, properties: normalized.properties });
+    if (!request) {
+      void this.stopSession(req.sessionId).finally(() => this.emit("approval_resolved", {
+        requestId: NodeCrypto.randomUUID(), threadId, outcome: { status: "cancelled", reason: "unanswerable" },
+      }));
+      return;
+    }
     if (this.pendingPermissions.has(request.requestId)) return;
     const entry: OpenCodePendingAsk = {
       request, sessionId: req.sessionId, upstreamSessionId: upstreamId, endpoint,
@@ -1098,12 +1070,23 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       signal: state.abortController.signal, routing, replying: false,
     };
     this.pendingPermissions.set(request.requestId, entry);
-    if (req.permissionMode === "full") {
-      entry.replying = true;
-      void this.relayDecision(entry, "allow-session");
+    const autoDeny = approvalScope(request.body);
+    if (autoDeny) {
+      void this.resolveApproval(request.requestId, { autoDeny }).then(async (result) => {
+        if (result.status === "resolved") return;
+        this.resolvePendingAsk(entry, { status: "cancelled", reason: "unanswerable" });
+        await this.stopSession(req.sessionId);
+      });
       return;
     }
-    this.emit("permission_request", request);
+    if (req.permissionMode === "full") {
+      entry.replying = true;
+      void this.relayDecision(entry, { choiceId: "always" }).then(() => {
+        this.resolvePendingAsk(entry, { status: "allowed", intent: "allow_scoped", choiceLabel: "Full access" });
+      }, () => { entry.replying = false; this.emit("approval_request", request); });
+      return;
+    }
+    this.emit("approval_request", request);
   }
 
   private emitAskDiagnostic(

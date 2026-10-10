@@ -386,10 +386,10 @@ describe("DevinProvider", () => {
     const fake = createFakeRuntime("devin-acp-1", 101);
     starts.push(mockAcpStart([fake]));
     const p = createProvider(host);
-    const permissionEvents: unknown[] = [];
+    const permissionEvents: ApprovalRequestEnvelope[] = [];
     const resolvedEvents: unknown[] = [];
-    p.on("permission_request", (request) => permissionEvents.push(request));
-    p.on("permission_resolved", (event) => resolvedEvents.push(event));
+    p.on("approval_request", (request) => permissionEvents.push(request));
+    p.on("approval_resolved", (event) => resolvedEvents.push(event));
 
     vi.mocked(fake.runtime.prompt).mockImplementation(async () => {
       const outcome = await fake.callbacks.onPermissionRequest?.({
@@ -407,20 +407,19 @@ describe("DevinProvider", () => {
 
     const sending = p.sendTurn(turn());
     await vi.waitFor(() => expect(permissionEvents).toHaveLength(1));
-    const request = permissionEvents[0] as {
-      requestId: string;
-      options: { id: string; label: string; kind?: string }[];
-      input: Record<string, unknown>;
-    };
-    expect(request.options).toEqual([
-      { id: "allow_once", label: "Allow once", kind: "allow_once" },
-      { id: "reject_once", label: "Reject", kind: "reject_once" },
+    const request = permissionEvents[0];
+    if (!request) throw new Error("Expected a pending approval");
+    const body = ApprovalRequestBodySchema().parse(request.body);
+    expect(body.choices).toEqual([
+      { id: "allow_once", label: "Allow once", intent: "allow_once" },
+      { id: "reject_once", label: "Reject", intent: "deny" },
     ]);
-    expect(request.input).toMatchObject({ command: "rm -rf build" });
+    expect(body.subject).toEqual({ kind: "command", command: "rm -rf build" });
+    expect(body.toolCallId).toBe("tc-perm");
 
-    expect(p.resolvePermission(request.requestId, "allow", undefined, "reject_once")).toBe(true);
+    expect(await p.resolveApproval(request.requestId, { choiceId: "reject_once" })).toEqual({ status: "resolved" });
     await sending;
-    expect(resolvedEvents).toEqual([{ requestId: request.requestId, decision: "deny", optionLabel: "Reject" }]);
+    expect(resolvedEvents).toEqual([{ requestId: request.requestId, threadId: request.threadId, outcome: { status: "denied", choiceLabel: "Reject" } }]);
   });
 
   it("auto-allows permission requests while bypass mode is active", async () => {
@@ -428,8 +427,8 @@ describe("DevinProvider", () => {
     const fake = createFakeRuntime("devin-acp-1", 101);
     starts.push(mockAcpStart([fake]));
     const p = createProvider(host);
-    const permissionEvents: unknown[] = [];
-    p.on("permission_request", (request) => permissionEvents.push(request));
+    const permissionEvents: ApprovalRequestEnvelope[] = [];
+    p.on("approval_request", (request) => permissionEvents.push(request));
 
     vi.mocked(fake.runtime.prompt).mockImplementation(async () => {
       const outcome = await fake.callbacks.onPermissionRequest?.({
@@ -601,7 +600,7 @@ describe("DevinProvider", () => {
     starts.push(mockAcpStart([fake]));
     const p = createProvider(host);
     const permissionEvents: { requestId: string }[] = [];
-    p.on("permission_request", (request) => permissionEvents.push(request));
+    p.on("approval_request", (request) => permissionEvents.push(request));
 
     let call = 0;
     vi.mocked(fake.runtime.prompt).mockImplementation(async () => {
@@ -626,7 +625,7 @@ describe("DevinProvider", () => {
 
     const first = p.sendTurn(turn());
     await vi.waitFor(() => expect(permissionEvents).toHaveLength(1));
-    expect(p.resolvePermission(permissionEvents[0].requestId, "allow", undefined, "switch_bypass")).toBe(true);
+    expect(await p.resolveApproval(permissionEvents[0].requestId, { choiceId: "switch_bypass" })).toEqual({ status: "resolved" });
     await first;
     await p.sendTurn(turn({ providerOptions: { mode: "bypass" } }));
 
@@ -643,7 +642,7 @@ describe("DevinProvider", () => {
     starts.push(mockAcpStart([fake]));
     const p = createProvider(host);
     const permissionEvents: { requestId: string }[] = [];
-    p.on("permission_request", (request) => permissionEvents.push(request));
+    p.on("approval_request", (request) => permissionEvents.push(request));
 
     vi.mocked(fake.runtime.prompt).mockImplementation(async () => {
       const outcome = await fake.callbacks.onPermissionRequest?.({
@@ -657,7 +656,7 @@ describe("DevinProvider", () => {
 
     const sending = p.sendTurn(turn());
     await vi.waitFor(() => expect(permissionEvents).toHaveLength(1));
-    expect(p.resolvePermission("unknown-id", "allow")).toBe(false);
+    expect(await p.resolveApproval("unknown-id", { choiceId: "allow_once" })).toEqual({ status: "not_pending" });
     await p.stopSession("mcode-thread-1");
     await sending;
     expect(fake.runtime.cancel).toHaveBeenCalledOnce();
@@ -962,3 +961,4 @@ describe("DevinProvider", () => {
     expect(events.some((event) => event.type === "message" && event.content === "historical reply")).toBe(false);
   });
 });
+import { ApprovalRequestBodySchema, type ApprovalRequestEnvelope } from "@mcode/contracts";

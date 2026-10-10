@@ -29,6 +29,14 @@ describe("CodexRpcClient", () => {
     vi.useRealTimers();
   });
 
+  it("acknowledges responses after the actual stream write and rejects closed transports", async () => {
+    const { stdin, client } = makeClient();
+    await client.sendResponse(42, { decision: "decline" });
+    expect(stdin.read()?.toString()).toBe('{"jsonrpc":"2.0","id":42,"result":{"decision":"decline"}}\n');
+    client.dispose();
+    await expect(client.sendResponse(43, { decision: "accept" })).rejects.toBeInstanceOf(Error);
+  });
+
   it("resolves with correct result on successful response", async () => {
     const { stdout, client } = makeClient();
 

@@ -2,7 +2,7 @@
 export { AgentService } from "./orchestration/agent-service.js";
 
 /** Agent permission capability used by the server composition roots. */
-export { AgentPermissionService } from "./permissions/agent-permission-service.js";
+export { ApprovalService } from "./approvals/approval-service.js";
 
 /** Owns plan questions and captured plan versions. */
 export { PlanTurnService } from "./planning/plan-turn-service.js";

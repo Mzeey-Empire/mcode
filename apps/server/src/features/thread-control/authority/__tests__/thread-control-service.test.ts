@@ -1,5 +1,7 @@
 import "reflect-metadata";
+import { ApprovalService } from "../../../agents/approvals/approval-service.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { PendingThreadCreateApproval, PendingThreadSendApproval, PendingThreadStopApproval } from "../persistence/thread-control-approval-repo.js";
 import { THREAD_GET_TRANSCRIPT_MAX_BYTES } from "@mcode/contracts";
 
 const { mockBroadcast } = vi.hoisted(() => ({ mockBroadcast: vi.fn() }));
@@ -19,6 +21,9 @@ const authority: InternalThreadControlAuthority = {
   sourceProviderId: "claude",
   permissionMode: "supervised",
 };
+
+const approvalService = new ApprovalService({ resolveAll: () => [] });
+approvalService.start({ publishApprovalRequest: (request) => mockBroadcast("approval.requested", request), publishApprovalResolved: (result) => mockBroadcast("approval.resolved", result), stopSession: async () => {} });
 
 describe("ThreadControlService", () => {
   const workspace = {
@@ -150,12 +155,27 @@ describe("ThreadControlService", () => {
       requeueRecoveredProvisioning: vi.fn().mockReturnValue(true),
       listPendingByThread: vi.fn().mockReturnValue([]),
     };
+    const pending = new Map<string, PendingThreadCreateApproval | PendingThreadSendApproval | PendingThreadStopApproval>();
+    approvals.listPending.mockImplementation(() => [...pending.values()]);
+    approvals.create.mockImplementation((input: Omit<PendingThreadCreateApproval, "approvalId" | "operation">) => {
+      pending.set("approval-1", { ...input, approvalId: "approval-1", operation: "thread_create_batch" });
+      return "approval-1";
+    });
+    approvals.createSend.mockImplementation((input: Omit<PendingThreadSendApproval, "approvalId" | "operation">) => {
+      pending.set("approval-send", { ...input, approvalId: "approval-send", operation: "thread_send" });
+      return "approval-send";
+    });
+    approvals.createStop.mockImplementation((input: Omit<PendingThreadStopApproval, "approvalId" | "operation">) => {
+      pending.set("approval-stop", { ...input, approvalId: "approval-stop", operation: "thread_stop" });
+      return "approval-stop";
+    });
     mutationReservations = new ThreadControlMutationReservationService();
     audit = { write: vi.fn() };
   });
 
   function createService(defaultPermission: "full" | "supervised" = "full") {
     return new ThreadControlService(
+      approvalService,
       workspaces as never,
       worktrees as never,
       git as never,
@@ -192,6 +212,7 @@ describe("ThreadControlService", () => {
   it("never returns a registered workspace filesystem path from workspace_search", () => {
     const workspacePath = "C:/private/workspace";
     const service = new ThreadControlService(
+      approvalService,
       { search: () => [{ id: "workspace-1", name: "Workspace", path: workspacePath, last_opened_at: null }] } as never,
       {} as never,
       {} as never,
@@ -756,7 +777,7 @@ describe("ThreadControlService", () => {
       sourceThreadId: "thread-1",
     });
 
-    await expect(service.respondToApproval("approval-1", "allow")).resolves.toBe(true);
+    await expect(service.respondToApproval("approval-1", { choiceId: "allow" })).resolves.toEqual({ status: "resolved" });
 
     expect(projectWorktreeService.provisionWorktree).toHaveBeenCalledTimes(1);
     expect(agentService.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
@@ -770,7 +791,7 @@ describe("ThreadControlService", () => {
     });
 
     approvals.claim.mockReturnValue(null);
-    await expect(service.respondToApproval("approval-1", "allow")).resolves.toBe(false);
+    await expect(service.respondToApproval("approval-1", { choiceId: "allow" })).resolves.toEqual({ status: "not_pending" });
     expect(projectWorktreeService.provisionWorktree).toHaveBeenCalledTimes(1);
   });
 
@@ -790,7 +811,7 @@ describe("ThreadControlService", () => {
     });
     audit.write.mockImplementationOnce(() => { throw new Error("audit unavailable"); });
 
-    await expect(service.respondToApproval("approval-audit-failure", "allow")).resolves.toBe(true);
+    await expect(service.respondToApproval("approval-audit-failure", { choiceId: "allow" })).resolves.toEqual({ status: "resolved" });
 
     expect(approvals.settle).toHaveBeenCalledWith("approval-audit-failure", "approved");
     expect(threads.updateStatus).not.toHaveBeenCalledWith(createdThread.id, "errored");
@@ -817,7 +838,7 @@ describe("ThreadControlService", () => {
     audit.write.mockImplementationOnce(() => { throw new Error("audit unavailable"); });
     if (outcome === "failure") agentService.sendMessage.mockRejectedValueOnce(new Error("dispatch failed"));
 
-    await expect(service.respondToApproval(`approval-${outcome}`, outcome === "deny" ? "deny" : "allow")).resolves.toBe(true);
+    await expect(service.respondToApproval(`approval-${outcome}`, { choiceId: outcome === "deny" ? "deny" : "allow" })).resolves.toEqual({ status: "resolved" });
   });
 
   it("requeues a recovered provisioning approval only after cleanup clears its persisted checkout", async () => {
@@ -1264,6 +1285,16 @@ describe("ThreadControlService", () => {
 
     await expect(service.threadSend(authority, { threadId: target.id, message: "Needs approval." })).resolves.toMatchObject({ status: "pending_approval", approvalId: "approval-send" });
     expect(approvals.createSend).toHaveBeenCalledWith(expect.objectContaining({ message: "Needs approval.", sourceThreadId: authority.sourceThreadId }));
+    expect(mockBroadcast).toHaveBeenCalledWith("approval.requested", {
+      requestId: "approval-send", threadId: "thread-1", providerId: "claude", requestedAt: expect.any(String),
+      subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "target-thread", message: "Needs approval." },
+      choices: [{ id: "allow", intent: "allow_once", label: "Allow" }, { id: "deny", intent: "deny", label: "Deny" }],
+      noteDelivery: "none", origin: { kind: "agent" },
+    });
+    expect(service.listPendingApprovals("target-thread")).toEqual([]);
+    expect(service.listPendingApprovals("thread-1").map(({ threadId, subject }) => ({ threadId, subject }))).toEqual([
+      { threadId: "thread-1", subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "target-thread", message: "Needs approval." } },
+    ]);
     await expect(service.threadSend(authority, { threadId: authority.sourceThreadId, message: "Self-target" })).resolves.toMatchObject({ status: "rejected", error: { code: "not_found" } });
   });
 
@@ -1357,7 +1388,7 @@ describe("ThreadControlService", () => {
       sourceProviderId: authority.sourceProviderId,
     });
 
-    await expect(service.respondToApproval("approval-send", "allow")).resolves.toBe(true);
+    await expect(service.respondToApproval("approval-send", { choiceId: "allow" })).resolves.toEqual({ status: "resolved" });
     expect(agentService.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       mutationReservationToken: "approval-send",
     }));
@@ -1382,7 +1413,7 @@ describe("ThreadControlService", () => {
       sourceTurnId: authority.sourceTurnId,
     });
 
-    await expect(service.respondToApproval("approval-send", "allow")).resolves.toBe(true);
+    await expect(service.respondToApproval("approval-send", { choiceId: "allow" })).resolves.toEqual({ status: "resolved" });
     expect(agentService.sendMessage).not.toHaveBeenCalled();
     expect(approvals.settle).toHaveBeenCalledWith("approval-send", "failed");
     expect(mutationReservations.get(target.id)).toBeUndefined();

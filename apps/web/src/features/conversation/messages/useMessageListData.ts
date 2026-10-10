@@ -166,7 +166,8 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const isLoadingNewer = useThreadRecord(renderedThreadId, (record) => record.isLoadingNewer);
   const loadOlderMessages = useThreadStore((state) => state.loadOlderMessages);
   const loadNewerMessages = useThreadStore((state) => state.loadNewerMessages);
-  const permissions = useThreadRecord(renderedThreadId, (record) => record.permissions);
+  const approvals = useApprovalStore((state) => state.approvals);
+  const permissions = useMemo(() => approvals.filter((request) => request.threadId === renderedThreadId), [approvals, renderedThreadId]);
   const hooks = useThreadRecord(renderedThreadId, (record) => record.hooks);
   const stopPending = useThreadStore((state) => renderedThreadId ? (state.pendingStopCounts[renderedThreadId] ?? 0) > 0 : false);
   const compacting = useThreadRecord(renderedThreadId, (record) => record.isCompacting);
@@ -229,3 +230,4 @@ export function useMessageListData(displayThreadId: string | undefined) {
 
 /** Normalized thread data consumed by transcript submodules. */
 export type MessageListData = ReturnType<typeof useMessageListData>;
+import { useApprovalStore } from "@/stores/approvalStore";
