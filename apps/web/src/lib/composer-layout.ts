@@ -4,9 +4,7 @@ import {
   PANEL_SPLIT_GAP_PX,
 } from "@/stores/diffStore";
 import { useLayoutStore } from "@/stores/layoutStore";
-
-/** Inline project-tree width in px; mirrors `--container-sidebar` (`w-sidebar`) in index.css. */
-export const SIDEBAR_WIDTH_PX = 304;
+import { useSidebarWidthStore } from "@/components/sidebar/sidebarWidthStore";
 
 /** Gap between the project tree and the chat/panel row in App.tsx. */
 export const LAYOUT_COLUMN_GAP_PX = 0;
@@ -28,7 +26,7 @@ export function setLayoutMeasurements(contentRowWidth: number, outerRowWidth: nu
 /** Width of the chat + right-panel split row, or a conservative fallback before mount. */
 export function getContentRowWidth(): number {
   if (measuredContentRowWidth > 0) return measuredContentRowWidth;
-  return Math.max(COMPOSER_MIN_WIDTH, window.innerWidth - SIDEBAR_WIDTH_PX);
+  return Math.max(COMPOSER_MIN_WIDTH, window.innerWidth - useSidebarWidthStore.getState().width);
 }
 
 /** Width of the row that may include an inline project tree, or a fallback before mount. */
@@ -45,11 +43,11 @@ export function minContentWidthForSideBySidePanel(panelWidth: number): number {
 }
 
 /**
- * Minimum outer-row width to dock the project tree inline while reserving
- * `contentNeed` pixels for the chat/panel row.
+ * Minimum outer-row width to dock the project tree inline at its current width
+ * while reserving `contentNeed` pixels for the chat/panel row.
  */
 export function minOuterWidthForInlineSidebar(contentNeed: number): number {
-  return contentNeed + LAYOUT_COLUMN_GAP_PX + SIDEBAR_WIDTH_PX;
+  return contentNeed + LAYOUT_COLUMN_GAP_PX + useSidebarWidthStore.getState().width;
 }
 
 /** Whether the content row can host composer and an inline panel side by side. */

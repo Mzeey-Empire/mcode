@@ -1,24 +1,15 @@
+import type { ReactNode } from "react";
 import { ProjectTree, useWorkspaceStore } from "@/features/projects";
-import {
-  Settings,
-  ArrowLeft,
-  ExternalLink,
-  Braces,
-  Search,
-  SquarePen,
-  GitPullRequest,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ArrowLeft, Search, SquarePen } from "lucide-react";
+import { Button, IconButton } from "@/components/ui/button";
 import { SettingsNav } from "@/components/settings/SettingsNav";
 import type { SettingsSection } from "@/components/settings/settings-nav";
-import { UpdateIndicator } from "./UpdateIndicator";
 import { useUiStore } from "@/stores/uiStore";
 import { SidebarHeader } from "@/components/shell/SidebarHeader";
 import { cn } from "@/lib/utils";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
-
-/** True when running inside the Electron shell. */
-const IS_DESKTOP = typeof window !== "undefined" && !!window.desktopBridge;
+import { SidebarFooter } from "./SidebarFooter";
+import { useSidebarWidthStore } from "./sidebarWidthStore";
 
 interface SidebarProps {
   /** Optional sizing overrides supplied by the sidebar shell. */
@@ -45,20 +36,35 @@ function getSettingsNavProps(settingsOpen: boolean | undefined, settingsSection:
   return settingsOpen && settingsSection && onSettingsSection ? { section: settingsSection, onSection: onSettingsSection } : null;
 }
 
-function SidebarBody({ settingsOpen, settingsSection, onSettingsSection, primarySurface, onNewThread, onOpenThreadSearch, onOpenPullRequests }: { settingsOpen: boolean | undefined; settingsSection: SettingsSection | undefined; onSettingsSection: ((section: SettingsSection) => void) | undefined; primarySurface: string; onNewThread: () => void; onOpenThreadSearch: () => void; onOpenPullRequests: () => void }) {
-  const settingsNavProps = getSettingsNavProps(settingsOpen, settingsSection, onSettingsSection);
-  return <div data-testid="sidebar-body" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-    {settingsNavProps ? <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain"><SettingsNav {...settingsNavProps} /></div> : <><div className="grid shrink-0 gap-0.5 px-1.5 py-2">
-      <Button data-testid="sidebar-new-thread" variant="ghost" size="compact" className="h-8 justify-start gap-2 rounded-md px-1.5 text-body-small font-normal text-muted shadow-none hover:text-ink" onClick={onNewThread}><SquarePen size={15} aria-hidden />New thread</Button>
-      <Button variant="ghost" size="compact" className="h-8 justify-start gap-2 rounded-md px-1.5 text-body-small font-normal text-muted hover:text-ink" onClick={onOpenThreadSearch}><Search size={15} aria-hidden />Search threads</Button>
-      <Button variant="ghost" size="compact" aria-current={primarySurface === "pullRequests" ? "page" : undefined} className={cn("h-8 justify-start gap-2 rounded-md px-1.5 text-body-small font-normal shadow-none", primarySurface === "pullRequests" ? "bg-selected/55 text-ink" : "text-muted hover:text-ink")} onClick={onOpenPullRequests}><GitPullRequest size={15} aria-hidden />Pull requests</Button>
-    </div><ProjectTree /></>}
+function SidebarGoZone() {
+  const setPrimarySurface = useUiStore((s) => s.setPrimarySurface);
+  return <div className="flex shrink-0 items-center gap-2 px-3">
+    <button type="button" className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-control bg-panel px-2 text-left text-body-small text-muted transition-colors duration-(--duration-fast) hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-focus" onClick={() => useCommandPaletteStore.getState().open({ intent: "threadSearch" })}>
+      <Search size={16} strokeWidth={1.5} aria-hidden className="shrink-0" />
+      <span>Search</span>
+    </button>
+    <IconButton data-testid="sidebar-new-thread" aria-label="New thread" onClick={() => { setPrimarySurface("chat"); useWorkspaceStore.getState().beginNewThread(); }}>
+      <SquarePen strokeWidth={1.5} aria-hidden />
+    </IconButton>
   </div>;
 }
 
-function SidebarFooter({ settingsOpen, onOpenSettings, onEditSettings }: { settingsOpen: boolean | undefined; onOpenSettings: () => void; onEditSettings: () => void }) {
-  return <div className="border-t border-border/40 p-3 space-y-1"><UpdateIndicator />
-    {settingsOpen ? IS_DESKTOP && <Button variant="ghost" className="flex w-full items-center gap-2 rounded p-1.5 text-sm text-muted hover:bg-selected hover:text-ink" onClick={onEditSettings}><Braces size={14} />Edit settings.json<ExternalLink size={11} /></Button> : <Button variant="ghost" className="flex w-full items-center gap-2 rounded p-1.5 text-sm text-muted hover:bg-selected hover:text-ink" onClick={onOpenSettings}><Settings size={16} />Settings</Button>}
+function SidebarBody({ settingsOpen, settingsSection, onSettingsSection }: { settingsOpen: boolean | undefined; settingsSection: SettingsSection | undefined; onSettingsSection: ((section: SettingsSection) => void) | undefined }) {
+  const settingsNavProps = getSettingsNavProps(settingsOpen, settingsSection, onSettingsSection);
+  if (settingsNavProps) {
+    return <div data-testid="sidebar-body" className="min-h-0 flex-1 overflow-y-auto overscroll-contain"><SettingsNav {...settingsNavProps} /></div>;
+  }
+  return <>
+    <SidebarGoZone />
+    <div data-testid="sidebar-body" className="flex min-h-0 flex-1 flex-col overflow-hidden px-1.5"><ProjectTree /></div>
+  </>;
+}
+
+// Only this frame reads the width, so a seam drag re-renders one div rather than the project tree.
+function SidebarFrame({ settingsOpen, className, children }: { settingsOpen: boolean | undefined; className: string | undefined; children: ReactNode }) {
+  const width = useSidebarWidthStore((s) => s.width);
+  return <div data-testid="sidebar" style={{ width }} className={cn("flex h-full flex-col gap-4 bg-page pb-3", settingsOpen ? "max-w-[42vw] md:max-w-none" : "max-w-[55vw] md:max-w-none", className)}>
+    {children}
   </div>;
 }
 
@@ -71,21 +77,12 @@ export function Sidebar({
   onOpenSettings,
   onCloseSettings,
 }: SidebarProps) {
-  const primarySurface = useUiStore((s) => s.primarySurface);
-  const setPrimarySurface = useUiStore((s) => s.setPrimarySurface);
-
-  const handleEditJson = () => {
-    if (window.desktopBridge) {
-      void window.desktopBridge.openSettingsFile();
-    }
-  };
-
   return (
-    <div className={cn("flex h-full flex-col bg-page", settingsOpen ? "w-40 max-w-[42vw] sm:w-56 md:w-sidebar md:max-w-none" : "w-sidebar max-w-[55vw] md:max-w-none", className)}>
+    <SidebarFrame settingsOpen={settingsOpen} className={className}>
       <SidebarHeader />
       {settingsOpen ? <SettingsBackRow onCloseSettings={onCloseSettings} /> : null}
-      <SidebarBody settingsOpen={settingsOpen} settingsSection={settingsSection} onSettingsSection={onSettingsSection} primarySurface={primarySurface} onNewThread={() => { setPrimarySurface("chat"); useWorkspaceStore.getState().beginNewThread(); }} onOpenThreadSearch={() => useCommandPaletteStore.getState().open({ intent: "threadSearch" })} onOpenPullRequests={() => setPrimarySurface("pullRequests")} />
-      <SidebarFooter settingsOpen={settingsOpen} onOpenSettings={onOpenSettings} onEditSettings={handleEditJson} />
-    </div>
+      <SidebarBody settingsOpen={settingsOpen} settingsSection={settingsSection} onSettingsSection={onSettingsSection} />
+      <SidebarFooter settingsOpen={settingsOpen} onOpenSettings={onOpenSettings} />
+    </SidebarFrame>
   );
 }

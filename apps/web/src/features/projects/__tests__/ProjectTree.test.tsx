@@ -991,6 +991,17 @@ describe("ProjectTree thread interactions", () => {
     );
   });
 
+  it("shows the drop well instead of the old empty text when there are no projects", () => {
+    setupStoreMocks({ workspaces: [] });
+
+    render(<ProjectTree />);
+
+    expect(screen.getByTestId("project-drop-well")).toHaveTextContent("No projects");
+    expect(screen.getByText("Use + to add a project.")).toBeInTheDocument();
+    expect(screen.queryByText("No projects yet")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add project" })).toBeInTheDocument();
+  });
+
   it("optically aligns the provider mark and separates it from the thread title", () => {
     setupStoreMocks();
 

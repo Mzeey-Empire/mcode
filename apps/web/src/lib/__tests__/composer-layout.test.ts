@@ -1,7 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
 import {
-  SIDEBAR_WIDTH_PX,
   LAYOUT_COLUMN_GAP_PX,
   canFitInlineSidebar,
   canFitSideBySidePanel,
@@ -12,6 +11,7 @@ import {
   preferredSplitPanelWidth,
 } from "@/lib/composer-layout";
 import { COMPOSER_MIN_WIDTH, PANEL_MIN_WIDTH, PANEL_SPLIT_GAP_PX } from "@/stores/diffStore";
+import { useSidebarWidthStore } from "@/components/sidebar/sidebarWidthStore";
 
 describe("composer-layout", () => {
   it("computes side-by-side minimum from composer, divider, and panel width", () => {
@@ -23,10 +23,16 @@ describe("composer-layout", () => {
     );
   });
 
-  it("computes inline sidebar minimum from content need and column divider", () => {
-    expect(minOuterWidthForInlineSidebar(COMPOSER_MIN_WIDTH)).toBe(
-      COMPOSER_MIN_WIDTH + LAYOUT_COLUMN_GAP_PX + SIDEBAR_WIDTH_PX,
-    );
+  it("computes inline sidebar minimum from content need and the live sidebar width", () => {
+    useSidebarWidthStore.getState().resetWidth();
+    expect(minOuterWidthForInlineSidebar(600)).toBe(600 + LAYOUT_COLUMN_GAP_PX + 304);
+
+    useSidebarWidthStore.getState().setWidth(220);
+    expect(minOuterWidthForInlineSidebar(600)).toBe(600 + LAYOUT_COLUMN_GAP_PX + 220);
+
+    useSidebarWidthStore.getState().setWidth(340);
+    expect(minOuterWidthForInlineSidebar(600)).toBe(600 + LAYOUT_COLUMN_GAP_PX + 340);
+    useSidebarWidthStore.getState().resetWidth();
   });
 
   it("reports side-by-side fit from content-row width", () => {

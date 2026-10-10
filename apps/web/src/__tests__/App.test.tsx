@@ -12,6 +12,7 @@ import { App } from "../app/App";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useRecoveryIncidentStore } from "@/features/recovery/state/recoveryIncidentStore";
 import { useUiStore } from "@/stores/uiStore";
+import { useSidebarWidthStore } from "@/components/sidebar/sidebarWidthStore";
 import { useNavigationHistoryStore } from "@/stores/navigationHistoryStore";
 import { executeCommand, getAllCommands } from "@/lib/command-registry";
 
@@ -161,14 +162,15 @@ describe("App", () => {
       sidebarFloating: true,
     });
 
+    useSidebarWidthStore.getState().setWidth(256);
+
     render(<App />);
 
     const floatingSidebar = screen.getByTestId("sidebar-floating");
     expect(floatingSidebar).toHaveClass("bg-page");
-    expect(floatingSidebar.firstElementChild).toHaveClass(
-      "w-full",
-      "max-w-none",
-    );
+    expect(floatingSidebar.firstElementChild).toHaveClass("max-w-none");
+    expect(floatingSidebar.firstElementChild).toHaveStyle({ width: "256px" });
+    useSidebarWidthStore.getState().resetWidth();
     expect(floatingSidebar).toHaveClass(
       "animate-in",
       "slide-in-from-left-4",

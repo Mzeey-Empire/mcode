@@ -112,28 +112,24 @@ describe('Sidebar "Edit settings.json" button', () => {
     renderProjectSidebar();
 
     const newThread = screen.getByRole("button", { name: "New thread" });
-    const searchThreads = screen.getByRole("button", {
-      name: "Search threads",
-    });
+    const search = screen.getByRole("button", { name: "Search" });
     expect(newThread).not.toHaveClass("bg-button-secondary");
-    expect(searchThreads).not.toHaveClass("bg-button-secondary");
+    expect(search).not.toHaveClass("bg-button-secondary");
   });
 
-  it("keeps New thread and Search threads ahead of Pull requests without a duplicate Chat action", () => {
+  it("puts Search before New thread and Pull requests in the footer, without a duplicate Chat action", () => {
     renderProjectSidebar();
 
     expect(
       screen.queryByRole("button", { name: "Chat" }),
     ).not.toBeInTheDocument();
+    const search = screen.getByRole("button", { name: "Search" });
     const newThread = screen.getByRole("button", { name: "New thread" });
-    const searchThreads = screen.getByRole("button", {
-      name: "Search threads",
-    });
-    const pullRequests = screen.getByRole("button", { name: "Pull requests" });
-    expect(newThread.compareDocumentPosition(searchThreads)).toBe(
+    const pullRequests = within(screen.getByTestId("sidebar-footer")).getByRole("button", { name: "Pull requests" });
+    expect(search.compareDocumentPosition(newThread)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
-    expect(searchThreads.compareDocumentPosition(pullRequests)).toBe(
+    expect(newThread.compareDocumentPosition(pullRequests)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
   });

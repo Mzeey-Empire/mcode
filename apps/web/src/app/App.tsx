@@ -10,6 +10,7 @@ import {
   type RefObject,
 } from "react";
 import { Sidebar } from "@/components/sidebar/Sidebar";
+import { SidebarResizeSeam } from "@/components/sidebar/SidebarResizeSeam";
 import { ChatView } from "@/features/conversation";
 import { openSubagentDetail, openSubagentsRoster } from "@/features/subagents";
 import { useUpdateStore } from "@/stores/updateStore";
@@ -190,9 +191,9 @@ function DockedSidebar({
       }`}
     >
       <div
-        className={`min-w-0 overflow-hidden transition-[opacity,transform] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+        className={`relative min-w-0 overflow-hidden transition-[opacity,transform] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
           visible
-            ? "translate-x-0 border-r border-border/45 opacity-100 duration-250"
+            ? "translate-x-0 opacity-100 duration-250"
             : "-translate-x-2 opacity-0 duration-200"
         }`}
       >
@@ -203,6 +204,7 @@ function DockedSidebar({
           onOpenSettings={() => setSettingsOpen(true)}
           onCloseSettings={closeSettings}
         />
+        <SidebarResizeSeam />
       </div>
     </div>
   );
@@ -243,14 +245,14 @@ function FloatingSidebar({
         data-testid="sidebar-floating"
         aria-hidden={exiting}
         inert={exiting}
-        className={`fixed top-1.5 bottom-1.5 left-1.5 z-(--layer-modal) flex w-sidebar overflow-hidden rounded-lg bg-page shadow-floating ring-1 ring-border/40 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none ${
+        className={`fixed top-1.5 bottom-1.5 left-1.5 z-(--layer-modal) flex overflow-hidden rounded-lg bg-page shadow-floating ring-1 ring-border/40 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none ${
           exiting
             ? "pointer-events-none animate-out fade-out-0 slide-out-to-left-4 duration-200"
             : "animate-in fade-in-0 slide-in-from-left-4 duration-250"
         }`}
       >
         <Sidebar
-          className="w-full max-w-none"
+          className="max-w-none"
           settingsOpen={false}
           settingsSection={settingsSection}
           onSettingsSection={setSettingsSection}
