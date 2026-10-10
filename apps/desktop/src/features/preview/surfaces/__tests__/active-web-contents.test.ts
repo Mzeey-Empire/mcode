@@ -1,5 +1,8 @@
 import * as NodeEvents from "node:events";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getSession,
   previewTabScopeKey,
@@ -13,12 +16,15 @@ import {
 import { resolveActivePreviewWebContents } from "../active-web-contents.js";
 
 const ipcHandlers: Record<string, (...args: unknown[]) => unknown> = {};
+const profileRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-active-profiles-"));
+afterAll(() => NodeFS.rmSync(profileRoot, { recursive: true, force: true }));
 const fakeGuests: FakeGuest[] = [];
 const allWindows: FakeWindow[] = [];
 const previewPartition = {
   setPermissionCheckHandler: vi.fn(),
   setPermissionRequestHandler: vi.fn(),
   on: vi.fn(),
+  webRequest: { onCompleted: vi.fn() },
   clearStorageData: vi.fn(async () => undefined),
   clearCache: vi.fn(async () => undefined),
 };
@@ -76,7 +82,7 @@ function makeWindow(id: number): FakeWindow {
 function surface(tabId: string) {
   return {
     identity: {
-      workspaceId: "workspace-A",
+      workspaceId: "11111111-1111-4111-8111-111111111111",
       scope: { kind: "thread" as const, id: "thread-A" },
       tabId,
     },
@@ -94,9 +100,9 @@ function makeSession(
   tabIds: string[],
 ): PreviewSession {
   const session = getSession(window as never);
-  session.workspaceId = "workspace-A";
+  session.workspaceId = "11111111-1111-4111-8111-111111111111";
   session.lastPreviewThreadId = "thread-A";
-  session.tabsByThread.set(previewTabScopeKey("workspace-A", "thread-A"), {
+  session.tabsByThread.set(previewTabScopeKey("11111111-1111-4111-8111-111111111111", "thread-A"), {
     threadId: "thread-A",
     activeTabId,
     tabs: tabIds.map((id, index) => ({
@@ -122,12 +128,14 @@ function prepareAndAdopt(
 }
 
 vi.mock("electron", () => ({
+  app: { getPath: () => profileRoot },
   BrowserWindow: {
     fromWebContents: vi.fn((sender: unknown) =>
       allWindows.find((window) => window.webContents === sender) ?? null,
     ),
   },
   ipcMain: {
+    on: vi.fn(),
     handle: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => {
       ipcHandlers[channel] = handler;
     }),

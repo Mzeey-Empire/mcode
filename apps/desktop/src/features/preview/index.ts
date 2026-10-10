@@ -10,7 +10,7 @@ export type {
 
 import { ipcMain } from "electron";
 import { registerNavigationHandlers } from "./navigation/handlers.js";
-import { registerCaptureHandlers, registerWebRequestInterceptor } from "./capture/handlers.js";
+import { registerCaptureHandlers } from "./capture/handlers.js";
 import { registerOverlayHandlers } from "./capture/overlay.js";
 import { registerSpillHandlers } from "./capture/spill-store.js";
 import { registerTabHandlers } from "./tabs/handlers.js";
@@ -18,7 +18,7 @@ import { getPerfCounters } from "./observability/perf-counters.js";
 import { registerPreviewSurfaceHandlers } from "./surfaces/registry.js";
 import { registerDesignModeHandlers } from "./design/handlers.js";
 import { registerBrowserAutomationHandlers } from "./automation/index.js";
-import { registerPreviewSessionPolicy } from "./security/electron-session-policy.js";
+import { registerBrowserProfileHandlers } from "./security/profile-handlers.js";
 import { abortOverlayCapture } from "./capture/overlay.js";
 import { sessions } from "./state/window-session.js";
 import { clearDiscardTimers } from "./tabs/discard-scheduler.js";
@@ -39,11 +39,10 @@ export function disposePreviewForWindow(win: import("electron").BrowserWindow): 
 
 /** Registers all preview:* IPC handlers. Call once at app startup. */
 export function registerPreviewBrowserHandlers(platform: NodeJS.Platform): void {
-  const previewPartition = registerPreviewSessionPolicy();
+  registerBrowserProfileHandlers();
 
   registerNavigationHandlers();
   registerCaptureHandlers();
-  registerWebRequestInterceptor(previewPartition);
   registerOverlayHandlers();
   registerSpillHandlers();
   registerTabHandlers();
@@ -53,11 +52,7 @@ export function registerPreviewBrowserHandlers(platform: NodeJS.Platform): void 
   ipcMain.handle("preview:get-perf-counters", () => getPerfCounters());
 }
 
-export {
-  PREVIEW_PARTITION,
-  PreviewSessionAdapter,
-  previewSessionAdapter,
-} from "./security/electron-session-policy.js";
+export { browserProfiles } from "./security/browser-profiles.js";
 export { PREVIEW_POPUP_REQUESTED_CHANNEL } from "./contracts/popup.js";
 export type { PreviewPopupRequest } from "./contracts/popup.js";
 export {

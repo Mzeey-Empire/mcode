@@ -25,6 +25,38 @@ import { useProjectActionStore } from "@/features/projects/environment/state/pro
 import { useThreadStartupStore } from "@/features/thread-startup";
 import { buildVolatileItems } from "@/features/conversation/messages/virtual-items";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
+import { createMockWorkspace } from "@/__tests__/mocks/transport";
+
+describe("workspace deletion Browser profiles", () => {
+  const workspaceId = "11111111-1111-4111-8111-111111111111";
+  const remove = vi.fn(async () => undefined);
+  const originalBridge = Object.getOwnPropertyDescriptor(window, "desktopBridge");
+
+  beforeEach(() => {
+    remove.mockClear();
+    Object.defineProperty(window, "desktopBridge", { configurable: true, value: { preview: { profiles: { remove } } } });
+    useWorkspaceStore.setState({ workspaces: [createMockWorkspace({ id: workspaceId })], activeWorkspaceId: null });
+    startPushListeners();
+  });
+  afterEach(() => {
+    stopPushListeners();
+    if (originalBridge) Object.defineProperty(window, "desktopBridge", originalBridge);
+    else delete window.desktopBridge;
+  });
+
+  it("removes the local profile when any client deletes the workspace", () => {
+    pushEmitter.emit("workspace.deleted", { workspaceId });
+    expect(remove.mock.calls).toEqual([[workspaceId]]);
+    expect(useWorkspaceStore.getState().workspaces).toEqual([]);
+  });
+
+  it("removes workspace state without a desktop bridge", () => {
+    delete window.desktopBridge;
+    pushEmitter.emit("workspace.deleted", { workspaceId });
+    expect(useWorkspaceStore.getState().workspaces).toEqual([]);
+    expect(remove).not.toHaveBeenCalled();
+  });
+});
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {

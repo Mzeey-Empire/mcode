@@ -68,7 +68,7 @@ Internal guides are grouped in topic subfolders. Use this index to find a guide.
 ## Architecture decision records
 
 Point-in-time decisions. New ADRs take the next free number below. Numbers
-0018 and 0020 are each used twice historically; start new ADRs at 0023.
+0018 and 0020 are each used twice historically; start new ADRs at 0025.
 
 - [0001: Provider CLI discovery is per-provider; version policy is the one provider-blind seam](adr/0001-per-provider-cli-discovery-shared-version-policy.md)
 - [0002: Preview tab discard policy](adr/0002-preview-tab-discard-policy.md)
@@ -95,6 +95,7 @@ Point-in-time decisions. New ADRs take the next free number below. Numbers
 - [0021: Thread control authority and lifecycle](adr/0021-thread-control-authority-and-lifecycle.md)
 - [0022: Server-owned streaming durability and provider-native recovery](adr/0022-server-owned-streaming-durability-and-provider-native-recovery.md)
 - [0023: Durable plan versions](adr/0023-durable-plan-versions.md)
+- [0024: One browser profile per project](adr/0024-one-browser-profile-per-project.md)
 
 ## Agent runbooks
 

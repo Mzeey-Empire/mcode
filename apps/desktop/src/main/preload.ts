@@ -226,6 +226,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
    * without this namespace; the renderer checks `desktopBridge?.preview` before use.
    */
   preview: {
+    profiles: {
+      remove(workspaceId: string): Promise<void> {
+        return ipcRenderer.invoke("preview:profiles.remove", workspaceId);
+      },
+      reconcile(workspaceIds: readonly string[]): Promise<void> {
+        return ipcRenderer.invoke("preview:profiles.reconcile", [...workspaceIds]);
+      },
+    },
     sync(payload: {
       visible: boolean;
       bounds: { x: number; y: number; width: number; height: number } | null;
