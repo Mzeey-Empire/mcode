@@ -5,7 +5,7 @@ import { ChangesEntryBlock, ChangesEntryState } from "./entries/changes";
 import { CommitOrPushEntryBlock } from "./entries/commit";
 import { CreateBranchEntryBlock } from "./entries/create-branch";
 import { LocalEntryBlock, LocalEntryState } from "./entries/local";
-import { PlansEntryBlock } from "./entries/plans";
+import { TasksEntryBlock } from "./entries/tasks";
 import { PullRequestEntryBlock } from "./entries/pull-request";
 import { RecapEntryBlock, RecapEntryState } from "./entries/recap";
 import { RepositoryEntryBlock, RepositoryEntryState } from "./entries/repository";
@@ -51,7 +51,7 @@ export const OVERVIEW_ENTRIES: readonly OverviewEntry[] = [
   { id: "save-recovery", section: "activity", order: 10, subjects: ["thread"], Entry: SaveRecoveryEntryBlock },
   { id: "changes", section: "activity", order: 20, subjects: ["thread"], Entry: ChangesEntryBlock, State: ChangesEntryState },
   { id: "repository", section: "activity", order: 30, subjects: ["thread"], Entry: RepositoryEntryBlock, State: RepositoryEntryState },
-  { id: "plans", section: "activity", order: 40, subjects: ["thread"], Entry: PlansEntryBlock },
+  { id: "tasks", section: "activity", order: 40, subjects: ["thread"], Entry: TasksEntryBlock },
   { id: "local", section: "lane", order: 50, subjects: ["thread"], Entry: LocalEntryBlock, State: LocalEntryState },
   { id: "create-branch", section: "lane", order: 60, subjects: ["thread"], Entry: CreateBranchEntryBlock },
   { id: "branch", section: "lane", order: 70, subjects: ["thread"], Entry: BranchEntryBlock, State: BranchEntryState },

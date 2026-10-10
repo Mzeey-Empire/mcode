@@ -57,6 +57,10 @@ interface TaskState {
   taskBubbleByThread: Record<string, TaskBubble>;
   /** Threads keeping unsettled prior tasks until the next turn reports parent tasks. */
   pendingTaskBubbleReplacementByThread: Record<string, boolean>;
+  /** Whether the composer tray shows its full task list, keyed by thread ID. */
+  trayExpandedByThread: Record<string, boolean>;
+  /** Show or hide the composer tray's full task list. */
+  setTrayExpanded: (threadId: string, expanded: boolean) => void;
   /** Replace all tasks for a thread (top-level TodoWrite). */
   setTasks: (threadId: string, tasks: readonly TaskItem[], sourceMessageId?: string | null) => void;
   /** Replace only tasks belonging to a specific group, preserving other groups. */
@@ -93,6 +97,12 @@ export const useTaskStore = create<TaskState>((set) => ({
   tasksByThread: {},
   taskBubbleByThread: {},
   pendingTaskBubbleReplacementByThread: {},
+  trayExpandedByThread: {},
+  setTrayExpanded: (threadId, expanded) =>
+    set((s) => {
+      if ((s.trayExpandedByThread[threadId] ?? false) === expanded) return {};
+      return { trayExpandedByThread: { ...s.trayExpandedByThread, [threadId]: expanded } };
+    }),
   setTasks: (threadId, tasks, sourceMessageId) =>
     set((s) => {
       const bubble: TaskBubble = { tasks: parentTasks(tasks), sourceMessageId: sourceMessageId ?? null };
@@ -129,13 +139,16 @@ export const useTaskStore = create<TaskState>((set) => ({
       const next = { ...s.tasksByThread };
       const nextBubble = { ...s.taskBubbleByThread };
       const nextPending = { ...s.pendingTaskBubbleReplacementByThread };
+      const nextExpanded = { ...s.trayExpandedByThread };
       delete next[threadId];
       delete nextBubble[threadId];
       delete nextPending[threadId];
+      delete nextExpanded[threadId];
       return {
         tasksByThread: next,
         taskBubbleByThread: nextBubble,
         pendingTaskBubbleReplacementByThread: nextPending,
+        trayExpandedByThread: nextExpanded,
       };
     }),
   prepareTaskBubbleForNewTurn: (threadId) =>

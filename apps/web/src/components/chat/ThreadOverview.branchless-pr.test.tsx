@@ -140,7 +140,7 @@ vi.mock("@/stores/diffStore", async (importOriginal) => {
 
 vi.mock("@/stores/threadStore", () => ({
   useThreadStore: vi.fn((selector: (state: unknown) => unknown) =>
-    selector({ records: mockThreadRecords, fetchProviderUsage: vi.fn() }),
+    selector({ records: mockThreadRecords, runningThreadIds: new Set<string>(), fetchProviderUsage: vi.fn() }),
   ),
 }));
 

@@ -60,7 +60,7 @@ describe("overview registry", () => {
       ["save-recovery", "activity", 10],
       ["changes", "activity", 20],
       ["repository", "activity", 30],
-      ["plans", "activity", 40],
+      ["tasks", "activity", 40],
       ["local", "lane", 50],
       ["create-branch", "lane", 60],
       ["branch", "lane", 70],
@@ -87,6 +87,7 @@ describe("overview registry", () => {
   });
 
   it("renders the direct-thread rows grouped by section under the header", async () => {
+    mockLoadedEntries();
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
     await waitFor(() => expect(mockTransport.getRemoteUrl).toHaveBeenCalledWith(thread.workspace_id, thread.id));
     const card = screen.getByTestId("thread-overview-card");
