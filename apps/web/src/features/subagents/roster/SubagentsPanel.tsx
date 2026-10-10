@@ -1,350 +1,80 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
+import type { SubagentRoster, SubagentRosterEntry, CanonicalSubagentStopResult } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ProviderIcon } from "@/components/ui/provider-icon";
-import { formatSubagentIdentity } from "../identity/format-subagent-identity";
-import { SubagentStopControl } from "../lifecycle/SubagentStopControl";
-import {
-  useClearSubagentDetail,
-  useSelectSubagentDetail,
-  useSubagentDetailSelection,
-  type SubagentRosterTab,
-} from "../state";
-import { openSubagentDetail, openSubagentsRoster } from "../detail/open-subagent-detail";
-import { NarrativeDetailView } from "../detail/NarrativeDetailView";
-import {
-  dedupeNarrativeRoster,
-  narrativeRowStatus,
-  narrativeRowTab,
-  resolveCanonicalSubagentSelection,
-  resolveNarrativeSubagentSelection,
-  useNarrativeSubagentRoster,
-  type ProjectedSubagentRow,
-} from "./narrative-subagents";
-
-export { resolveCanonicalSubagentSelection } from "./narrative-subagents";
 import { getTransport } from "@/transport";
-import { resolveModelDisplayLabel } from "@/lib/format-model-label";
 import { formatRelative } from "@/lib/format-relative";
-import {
-  getConversationResidency,
-  MessageList,
-  SubagentProviderScope,
-  useSubagentProvider,
-} from "@/features/conversation";
-import {
-  formatSubagentDisplayName,
-  type CanonicalSubagentRoster,
-  type CanonicalSubagentRosterRow,
-  type CanonicalSubagentStopResult,
-} from "@mcode/contracts";
+import { getConversationResidency, MessageList, SubagentProviderScope } from "@/features/conversation";
+import { SubagentStopControl } from "../lifecycle/SubagentStopControl";
+import { useClearSubagentDetail, useSelectSubagentDetail, useSubagentDetailSelection } from "../state";
+import { useSubagentRoster, useSubagentRosterStore } from "../state/subagentRosterStore";
+import { subagentStatusLabel } from "../subagent-status";
+import { NarrativeDetailView } from "../detail/NarrativeDetailView";
+import { openSubagentDetail, openSubagentsRoster } from "../detail/open-subagent-detail";
 
-type StopAllTarget = {
-  readonly id: string;
-  readonly owningParentThreadId: string;
-  readonly identity: string;
-  readonly lineage: string;
-};
-
+type StopAllTarget = { readonly id: string; readonly owningParentThreadId: string; readonly identity: string; readonly lineage: string };
 type StopAllTargetStatus = "idle" | "pending" | "success" | "failed";
 
 function stopAllStatusLabel(status: StopAllTargetStatus): string | null {
   switch (status) {
-    case "pending":
-      return "Stopping";
-    case "success":
-      return "Stopped";
-    case "failed":
-      return "Failed";
-    default:
-      return null;
+    case "pending": return "Stopping";
+    case "success": return "Stopped";
+    case "failed": return "Failed";
+    default: return null;
   }
 }
 
-function formatReasoningLevel(value: string): string {
-  return value
-    .trim()
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`)
-    .join(" ");
-}
-
-function canonicalIdentity(row: CanonicalSubagentRosterRow): string {
-  return formatSubagentIdentity(row.identity ?? "Subagent");
-}
-
-function canonicalTitle(row: CanonicalSubagentRosterRow): string {
-  return row.task ? formatSubagentDisplayName(row.task) : canonicalIdentity(row);
-}
-
-function canonicalIsActive(row: CanonicalSubagentRosterRow): boolean {
-  return row.activityState === "Active" || row.activityState === "Starting";
-}
-
-function canonicalStatus(row: CanonicalSubagentRosterRow): string {
-  if (canonicalIsActive(row)) return "Active";
-  if (row.terminalOutcome === "Errored") return "Failed";
-  return row.terminalOutcome ?? row.activityState;
-}
-
-function canonicalConfiguration(row: CanonicalSubagentRosterRow): string {
-  return [
-    row.model ? resolveModelDisplayLabel(row.model) : undefined,
-    row.reasoning ? formatReasoningLevel(row.reasoning) : undefined,
-  ].filter((value): value is string => value !== undefined).join(" · ");
-}
-
-function canonicalLineage(row: CanonicalSubagentRosterRow, rows: readonly CanonicalSubagentRosterRow[]): string {
-  const identities = new Map(rows.map((candidate) => [candidate.id, canonicalIdentity(candidate)]));
-  return row.lineage
-    .slice(0, -1)
-    .filter((id) => id !== row.owningParentThreadId)
-    .map((id) => identities.get(id) ?? id)
-    .join(" / ");
-}
-
-function canonicalNamedLineage(row: CanonicalSubagentRosterRow, rows: readonly CanonicalSubagentRosterRow[]): string {
-  const identities = new Map(rows.map((candidate) => [candidate.id, canonicalIdentity(candidate)]));
-  return row.lineage
-    .slice(0, -1)
-    .filter((id) => id !== row.owningParentThreadId)
-    .map((id) => identities.get(id))
-    .filter((identity): identity is string => identity !== undefined)
-    .join(" / ");
-}
-
-function CanonicalRosterRow({
-  row,
-  rows,
-  onSelect,
-  onStop,
-  onTerminal,
-  testId,
-}: {
-  readonly row: CanonicalSubagentRosterRow;
-  readonly rows: readonly CanonicalSubagentRosterRow[];
-  readonly onSelect: () => void;
-  readonly onStop: () => Promise<CanonicalSubagentStopResult>;
-  readonly onTerminal: () => Promise<void> | void;
-  readonly testId: string;
+function RosterRow({ row, onSelect, onStop, onTerminal }: {
+  row: SubagentRosterEntry; onSelect: () => void;
+  onStop: () => Promise<CanonicalSubagentStopResult>; onTerminal: () => Promise<void>;
 }) {
-  const active = canonicalIsActive(row);
-  const status = canonicalStatus(row);
-  const lineage = canonicalLineage(row, rows);
-  const configuration = canonicalConfiguration(row);
-  const provider = useSubagentProvider();
+  const active = row.status === "running";
+  const configuration = [row.subagentType, row.model, row.stepCount > 0 ? `${row.stepCount} steps` : null].filter(Boolean).join(" · ");
   return (
-    <div data-testid={testId} className="flex w-full min-w-0 items-center rounded-none transition-colors duration-150 motion-reduce:transition-none hover:bg-hover/30">
-      <Button
-        type="button"
-        variant="ghost"
-        onClick={onSelect}
-        aria-label={`Open ${canonicalIdentity(row)} details, ${status}`}
-        data-subagent-id={row.id}
-        className="h-auto min-w-0 flex-1 justify-start gap-3 rounded-none px-6 py-2.5 text-left focus-visible:ring-inset"
-      >
-        <ProviderIcon provider={provider} size={20} />
-        <CanonicalRosterMetadata row={row} active={active} status={status} lineage={lineage} configuration={configuration} />
-      </Button>
-      <SubagentStopControl
-        active={active}
-        canStop={row.canStop}
-        label={canonicalIdentity(row)}
-        onStop={onStop}
-        onTerminal={onTerminal}
-        className="mr-3"
-      />
-    </div>
-  );
-}
-
-function CanonicalRosterMetadata({
-  row,
-  active,
-  status,
-  lineage,
-  configuration,
-}: {
-  readonly row: CanonicalSubagentRosterRow;
-  readonly active: boolean;
-  readonly status: string;
-  readonly lineage: string;
-  readonly configuration: string | undefined;
-}) {
-  const lastActiveAt = active ? null : row.endedAt ?? row.updatedAt;
-  const lastActiveLabel = lastActiveAt ? formatRelative(lastActiveAt) : null;
-  return (
-    <span className="min-w-0 flex-1">
-      <span className="flex min-w-0 items-center gap-2">
-        <span className="min-w-0 flex-1 text-fade text-sm font-medium text-ink">{canonicalTitle(row)}</span>
-        <CanonicalRosterTimestamp active={active} status={status} lastActiveAt={lastActiveAt} lastActiveLabel={lastActiveLabel} />
-      </span>
-      {lineage && <span className="mt-0.5 block text-fade text-xs text-muted" aria-label={`Lineage: ${lineage}`}>{lineage}</span>}
-      {row.task && <span className="mt-0.5 block text-fade text-xs text-muted">{canonicalIdentity(row)}</span>}
-      {configuration && <span className="mt-0.5 block text-fade font-mono text-xs text-muted">{configuration}</span>}
-      {!active && row.hasActiveDescendant && <span className="mt-0.5 block text-xs text-primary">Active descendant</span>}
-    </span>
-  );
-}
-
-function CanonicalRosterTimestamp({
-  active,
-  status,
-  lastActiveAt,
-  lastActiveLabel,
-}: {
-  readonly active: boolean;
-  readonly status: string;
-  readonly lastActiveAt: string | null;
-  readonly lastActiveLabel: string | null;
-}) {
-  if (active) return null;
-  return (
-    <span className="flex shrink-0 items-center gap-1.5 font-mono text-xs tabular-nums text-muted">
-      {status !== "Completed" && <span>{status}</span>}
-      {status !== "Completed" && lastActiveLabel && <span aria-hidden>·</span>}
-      {lastActiveAt && lastActiveLabel && (
-        <Tooltip>
-          <TooltipTrigger render={<time dateTime={lastActiveAt}>{lastActiveLabel}</time>} />
-          <TooltipContent>{new Date(lastActiveAt).toLocaleString()}</TooltipContent>
-        </Tooltip>
-      )}
-    </span>
-  );
-}
-
-/** Roster row for an in-thread subagent that has no canonical child thread. */
-function NarrativeRosterRow({
-  row,
-  onSelect,
-  testId,
-}: {
-  readonly row: ProjectedSubagentRow;
-  readonly onSelect: () => void;
-  readonly testId: string;
-}) {
-  const identity = formatSubagentIdentity(row.identity);
-  const title = row.task ? formatSubagentDisplayName(row.task) : identity;
-  const status = narrativeRowStatus(row);
-  const active = narrativeRowTab(row) === "active";
-  const provider = useSubagentProvider();
-  const lastActiveAt = new Date(row.activityAt).toISOString();
-  const lastActiveLabel = active ? null : formatRelative(lastActiveAt);
-  return (
-    <div data-testid={testId} className="flex w-full min-w-0 items-center rounded-none transition-colors duration-150 motion-reduce:transition-none hover:bg-hover/30">
-      <Button
-        type="button"
-        variant="ghost"
-        onClick={onSelect}
-        aria-label={`Open ${identity} details, ${status}`}
-        data-subagent-id={row.id}
-        className="h-auto min-w-0 flex-1 justify-start gap-3 rounded-none px-6 py-2.5 text-left focus-visible:ring-inset"
-      >
-        <ProviderIcon provider={provider} size={20} />
+    <div data-testid={active ? "subagent-active-row" : "subagent-finished-row"} className="flex w-full min-w-0 items-center rounded-none transition-colors duration-150 motion-reduce:transition-none hover:bg-hover/30">
+      <Button type="button" variant="ghost" onClick={onSelect}
+        aria-label={`Open ${row.title} details, ${subagentStatusLabel(row.status)}`} data-subagent-id={row.id}
+        className="h-auto min-w-0 flex-1 justify-start gap-3 rounded-none px-6 py-2.5 text-left focus-visible:ring-inset">
+        <ProviderIcon provider={row.provider} size={20} />
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 flex-1 text-fade text-sm font-medium text-ink">{title}</span>
-            {!active && (
-              <span className="flex shrink-0 items-center gap-1.5 font-mono text-xs tabular-nums text-muted">
-                {status !== "Completed" && <span>{status}</span>}
-                {status !== "Completed" && lastActiveLabel && <span aria-hidden>·</span>}
-                {lastActiveLabel && (
-                  <Tooltip>
-                    <TooltipTrigger render={<time dateTime={lastActiveAt}>{lastActiveLabel}</time>} />
-                    <TooltipContent>{new Date(lastActiveAt).toLocaleString()}</TooltipContent>
-                  </Tooltip>
-                )}
-              </span>
-            )}
+            <span className="min-w-0 flex-1 text-fade text-sm font-medium text-ink">{row.title}</span>
+            <span className="shrink-0 font-mono text-xs text-muted">{subagentStatusLabel(row.status)}</span>
+            {row.endedAt && <time dateTime={row.endedAt} className="shrink-0 font-mono text-xs text-muted">{formatRelative(row.endedAt)}</time>}
           </span>
-          {row.task && <span className="mt-0.5 block text-fade text-xs text-muted">{identity}</span>}
-          {row.activity && <span className="mt-0.5 block text-fade text-xs text-muted">{row.activity}</span>}
+          {configuration && <span className="mt-0.5 block text-fade font-mono text-xs text-muted">{configuration}</span>}
         </span>
       </Button>
+      <SubagentStopControl active={active} canStop={row.canStop} label={row.title} onStop={onStop} onTerminal={onTerminal} className="mr-3" />
     </div>
   );
 }
 
-function CanonicalDetailView({
-  row,
-  rows,
-  onBack,
-  onStop,
-  onTerminal,
-}: {
-  readonly row: CanonicalSubagentRosterRow;
-  readonly rows: readonly CanonicalSubagentRosterRow[];
-  readonly onBack: () => void;
-  readonly onStop: () => Promise<CanonicalSubagentStopResult>;
-  readonly onTerminal: () => Promise<void> | void;
+function TranscriptDetail({ row, childThreadId, onBack, onStop, onTerminal }: {
+  row: SubagentRosterEntry; childThreadId: string; onBack: () => void;
+  onStop: () => Promise<CanonicalSubagentStopResult>; onTerminal: () => Promise<void>;
 }) {
-  const identity = canonicalIdentity(row);
-  const title = canonicalTitle(row);
-  const lineage = canonicalLineage(row, rows);
-  const active = canonicalIsActive(row);
-  const configuration = canonicalConfiguration(row);
-  const provider = useSubagentProvider();
-  const [displayLeaseAcquired, setDisplayLeaseAcquired] = useState(false);
   useEffect(() => {
     const residency = getConversationResidency();
-    residency.mountDisplayConversation(row.id);
-    // oxlint-disable-next-line react/set-state-in-effect -- The conversation residency lease controls when its transcript can render.
-    setDisplayLeaseAcquired(true);
-    return () => residency.unmountDisplayConversation(row.id);
-  }, [row.id]);
-  return (
-    <section className="flex min-h-0 flex-1 flex-col" aria-label={`${identity} subagent details`}>
-      <header className="flex shrink-0 items-center gap-2 border-b border-border/50 px-4 py-3">
-        <Button type="button" variant="ghost" size="icon-compact" onClick={onBack} aria-label="Back to subagents" className="shrink-0">
-          <ArrowLeft size={15} aria-hidden />
-        </Button>
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <ProviderIcon provider={provider} size={20} />
-          <div className="min-w-0 flex-1">
-            <h2 className="text-fade text-sm font-semibold">{title}</h2>
-            {row.task && <p className="text-fade text-xs text-muted">{identity}</p>}
-            {lineage && <p className="text-fade text-xs text-muted">{lineage}</p>}
-          </div>
-          <span role="status" className="sr-only">
-            {canonicalStatus(row)}
-          </span>
-          {configuration && <span className="shrink-0 font-mono text-xs text-muted">{configuration}</span>}
-        </div>
-      </header>
-      <div className="min-h-0 flex-1">
-        {displayLeaseAcquired && (
-          <MessageList
-            displayThreadId={row.id}
-            onSubagentSelect={openSubagentDetail}
-            onOpenSubagents={openSubagentsRoster}
-          />
-        )}
-      </div>
-      {active && row.canStop && (
-        <div data-testid="subagent-detail-actions" className="flex shrink-0 justify-end border-t border-border/40 px-4 py-2">
-          <SubagentStopControl
-            active={active}
-            canStop={row.canStop}
-            label={identity}
-            onStop={onStop}
-            onTerminal={onTerminal}
-          />
-        </div>
-      )}
-    </section>
-  );
+    residency.mountDisplayConversation(childThreadId);
+    return () => residency.unmountDisplayConversation(childThreadId);
+  }, [childThreadId]);
+  return <section className="flex min-h-0 flex-1 flex-col" aria-label={`${row.title} subagent details`}>
+    <header className="flex shrink-0 items-center gap-2 border-b border-border/50 px-4 py-3">
+      <Button type="button" variant="ghost" size="icon-compact" onClick={onBack} aria-label="Back to subagents"><ArrowLeft size={15} aria-hidden /></Button>
+      <ProviderIcon provider={row.provider} size={20} />
+      <h2 className="text-fade text-sm font-semibold">{row.title}</h2>
+      <span role="status" className="sr-only">{subagentStatusLabel(row.status)}</span>
+    </header>
+    <div className="min-h-0 flex-1"><MessageList displayThreadId={childThreadId} onSubagentSelect={openSubagentDetail} onOpenSubagents={openSubagentsRoster} /></div>
+    {row.status === "running" && row.canStop && <div data-testid="subagent-detail-actions" className="flex shrink-0 justify-end border-t border-border/40 px-4 py-2">
+      <SubagentStopControl active canStop label={row.title} onStop={onStop} onTerminal={onTerminal} />
+    </div>}
+  </section>;
 }
 
 function StopAllConfirmationDialog({
@@ -450,60 +180,10 @@ function StopAllConfirmationDialog({
   );
 }
 
-type CanonicalRosterState = {
-  readonly threadId: string;
-  readonly status: "pending" | "success" | "error";
-  readonly roster: CanonicalSubagentRoster | null;
-};
-
-function useCanonicalRoster(threadId: string): {
-  readonly state: CanonicalRosterState;
-  readonly refresh: () => Promise<void>;
-} {
-  const [state, setState] = useState<CanonicalRosterState>({ threadId, status: "pending", roster: null });
-  const rosterLoadRef = useRef<(() => Promise<void>) | null>(null);
-  const requestGenerationRef = useRef(0);
-  const acceptedGenerationRef = useRef(0);
-  useEffect(() => {
-    let cancelled = false;
-    // oxlint-disable-next-line react/set-state-in-effect -- A new parent thread starts a new polled roster transport snapshot.
-    setState({ threadId, status: "pending", roster: null });
-    const load = async () => {
-      const requestGeneration = ++requestGenerationRef.current;
-      try {
-        const loaded = await getTransport().loadCanonicalSubagentRoster(threadId);
-        if (cancelled) return;
-        setState((previous) => {
-          if (requestGeneration < acceptedGenerationRef.current) return previous;
-          if (previous.threadId === threadId && previous.roster && loaded.rosterRevision < previous.roster.rosterRevision) return previous;
-          acceptedGenerationRef.current = requestGeneration;
-          return { threadId, status: "success", roster: loaded };
-        });
-      } catch {
-        if (cancelled) return;
-        setState((previous) => {
-          if (requestGeneration < acceptedGenerationRef.current) return previous;
-          if (previous.threadId === threadId && previous.roster) return previous;
-          return { threadId, status: "error", roster: null };
-        });
-      }
-    };
-    rosterLoadRef.current = load;
-    void load();
-    const timer = window.setInterval(() => void load(), 1_500);
-    return () => {
-      cancelled = true;
-      if (rosterLoadRef.current === load) rosterLoadRef.current = null;
-      window.clearInterval(timer);
-    };
-  }, [threadId]);
-  return { state, refresh: () => rosterLoadRef.current?.() ?? Promise.resolve() };
-}
 
 function useStopAllControl(
   threadId: string,
-  canonicalRoster: CanonicalSubagentRoster | null,
-  canonicalRows: readonly CanonicalSubagentRosterRow[],
+  canonicalRoster: SubagentRoster | null,
   refreshRoster: () => Promise<void>,
 ): {
   readonly open: boolean;
@@ -526,28 +206,17 @@ function useStopAllControl(
   const [stopAllTargets, setStopAllTargets] = useState<readonly StopAllTarget[] | null>(null);
   const [stopAllStatuses, setStopAllStatuses] = useState<ReadonlyMap<string, StopAllTargetStatus>>(new Map());
   const [stopAllBatchActive, setStopAllBatchActive] = useState(false);
-  useEffect(() => {
-    lifecycleGenerationRef.current += 1;
-    stopAllBatchRef.current = false;
-    // oxlint-disable-next-line react/set-state-in-effect -- Switching the parent thread invalidates all pending stop-all targets.
-    setStopAllOpen(false);
-    setStopAllTargets(null);
-    setStopAllStatuses(new Map());
-    setStopAllBatchActive(false);
-    return () => {
-      lifecycleGenerationRef.current += 1;
-    };
-  }, [threadId]);
+  useEffect(() => () => { lifecycleGenerationRef.current += 1; }, []);
 
   const openStopAll = () => {
     if (stopAllBatchRef.current || stopAllBatchActive || !canonicalRoster) return;
-    const eligibleTargets = canonicalRoster.active
+    const eligibleTargets = canonicalRoster.entries.filter((row) => row.status === "running")
       .filter((row) => row.canStop)
       .map((row) => ({
-        id: row.id,
-        owningParentThreadId: row.owningParentThreadId,
-        identity: canonicalIdentity(row),
-        lineage: canonicalNamedLineage(row, canonicalRows),
+        id: row.childThreadId ?? row.id,
+        owningParentThreadId: threadId,
+        identity: row.title,
+        lineage: "",
       }));
     if (eligibleTargets.length < 2) return;
     setStopAllTargets(eligibleTargets);
@@ -629,260 +298,70 @@ function useStopAllControl(
   };
 }
 
-function useCanonicalDetail(threadId: string, canonicalState: CanonicalRosterState): {
-  readonly selection: ReturnType<typeof useSubagentDetailSelection>;
-  readonly selectedRow: CanonicalSubagentRosterRow | undefined;
-  readonly rows: readonly CanonicalSubagentRosterRow[];
-  readonly isCurrentRequest: boolean;
-  readonly viewportRef: React.RefObject<HTMLDivElement | null>;
-  readonly selectRow: (id: string, originTab: SubagentRosterTab) => void;
-} {
-  const selection = useSubagentDetailSelection(threadId);
-  const selectDetail = useSelectSubagentDetail();
-  const viewportRef = useRef<HTMLDivElement | null>(null);
-  const isCurrentRequest = canonicalState.threadId === threadId;
-  const rows = canonicalState.roster
-    ? [...canonicalState.roster.active, ...canonicalState.roster.done]
-    : [];
-  const selectedRow = selection ? resolveCanonicalSubagentSelection(selection.id, rows) : undefined;
-  useEffect(() => {
-    if (!selection || selection.originTab !== undefined || !isCurrentRequest || canonicalState.status === "pending" || !canonicalState.roster || !selectedRow) return;
-    const originTab: SubagentRosterTab = canonicalState.roster.active.some((row) => row.id === selectedRow.id)
-      ? "active"
-      : "finished";
-    selectDetail(threadId, { ...selection, originTab });
-  }, [canonicalState.roster, canonicalState.status, isCurrentRequest, selectDetail, selectedRow, selection, threadId]);
-  return {
-    selection,
-    selectedRow,
-    rows,
-    isCurrentRequest,
-    viewportRef,
-    selectRow: (id, originTab) => selectDetail(threadId, { id, originTab, scrollTop: viewportRef.current?.scrollTop ?? 0 }),
-  };
-}
 
-function canonicalRosterPlaceholder(
-  isCurrentRequest: boolean,
-  canonicalState: CanonicalRosterState,
-): { readonly placeholder: React.ReactElement } | { readonly roster: CanonicalSubagentRoster } {
-  if (!isCurrentRequest || canonicalState.status === "pending") {
-    return {
-      placeholder: (
-        <section className="flex min-h-0 flex-1 items-center justify-center px-4" aria-label="Subagents" data-testid="subagents-loading" role="status">
-          <p className="text-sm text-muted">Loading subagents…</p>
-        </section>
-      ),
-    };
-  }
-  if (canonicalState.status !== "success" || !canonicalState.roster) {
-    return {
-      placeholder: (
-        <section className="flex min-h-0 flex-1 items-center justify-center px-4" aria-label="Subagents" data-testid="subagents-error" role="alert">
-          <div className="max-w-md space-y-1 text-center">
-            <p className="font-medium text-ink">Could not load subagents</p>
-            <p className="text-sm text-muted">The canonical roster is unavailable.</p>
-          </div>
-        </section>
-      ),
-    };
-  }
-  return { roster: canonicalState.roster };
-}
 
-/** Clears the detail selection and restores roster scroll and row focus. */
-function backToRoster(
-  threadId: string,
-  scrollTop: number,
-  viewportRef: React.RefObject<HTMLDivElement | null>,
-  focusId: string,
-  clearDetail: (threadId: string) => void,
-): () => void {
-  return () => {
-    clearDetail(threadId);
-    window.requestAnimationFrame(() => {
-      if (viewportRef.current) viewportRef.current.scrollTop = scrollTop;
-      document.querySelector<HTMLElement>(`[data-subagent-id="${CSS.escape(focusId)}"]`)?.focus();
-    });
-  };
-}
-
-function SubagentRosterList({
-  canonicalRoster,
-  narrative,
-  detail,
-  stopAll,
-  refreshRoster,
-}: {
-  readonly canonicalRoster: CanonicalSubagentRoster;
-  readonly narrative: { readonly active: readonly ProjectedSubagentRow[]; readonly finished: readonly ProjectedSubagentRow[] };
-  readonly detail: ReturnType<typeof useCanonicalDetail>;
-  readonly stopAll: ReturnType<typeof useStopAllControl>;
-  readonly refreshRoster: () => Promise<void>;
-}) {
-  const activeRows = canonicalRoster.active;
-  const doneRows = canonicalRoster.done;
-  const eligibleStopAllCount = activeRows.filter((row) => row.canStop).length;
-  const isEmpty = activeRows.length === 0 && doneRows.length === 0
-    && narrative.active.length === 0 && narrative.finished.length === 0;
-  return (
-    <section ref={stopAll.panelRef} tabIndex={-1} className="flex min-h-0 flex-1 flex-col" aria-label="Subagents">
-      <ScrollArea className="min-h-0 flex-1" viewportRef={detail.viewportRef}>
-        {isEmpty ? (
-          <p data-testid="subagents-empty" className="px-4 py-6 text-sm text-muted">
-            Sub-agents will appear here when this thread delegates work.
-          </p>
-        ) : (
-          <div className="pb-3">
-            {(activeRows.length + narrative.active.length) > 0 && (
-              <section aria-labelledby="subagents-active-heading">
-                <div className="flex items-center gap-2 px-6 pb-1 pt-6">
-                  <h2 id="subagents-active-heading" className="text-sm font-semibold text-ink">Active</h2>
-                  <Badge variant="ghost" size="compact" className="px-0 font-mono font-normal text-muted hover:bg-transparent">
-                    {activeRows.length + narrative.active.length}
-                  </Badge>
-                  {eligibleStopAllCount >= 2 && (
-                    <Button
-                      ref={stopAll.triggerRef}
-                      type="button"
-                      variant="outline"
-                      size="compact"
-                      onClick={stopAll.openStopAll}
-                      disabled={stopAll.batchActive}
-                      aria-label="Stop all active sub-agents"
-                      data-testid="subagent-stop-all"
-                      className="ml-auto"
-                    >
-                      Stop all
-                    </Button>
-                  )}
-                </div>
-                {canonicalRoster.active.map((row) => (
-                     <CanonicalRosterRow
-                      key={row.id}
-                      row={row}
-                      rows={detail.rows}
-                      testId="subagent-roster-row"
-                      onSelect={() => detail.selectRow(row.id, "active")}
-                      onStop={() => getTransport().stopCanonicalSubagent(row.owningParentThreadId, row.id)}
-                      onTerminal={refreshRoster}
-                    />
-                  ))}
-                {narrative.active.map((row) => (
-                  <NarrativeRosterRow
-                    key={row.id}
-                    row={row}
-                    testId="subagent-roster-row"
-                    onSelect={() => detail.selectRow(row.id, "active")}
-                  />
-                ))}
-              </section>
-            )}
-            {(doneRows.length + narrative.finished.length) > 0 && (
-              <section aria-labelledby="subagents-done-heading">
-                <div className="flex items-center gap-2 px-6 pb-1 pt-6">
-                  <h2 id="subagents-done-heading" className="text-sm font-semibold text-ink">Done</h2>
-                  <Badge variant="ghost" size="compact" className="px-0 font-mono font-normal text-muted hover:bg-transparent">
-                    {doneRows.length + narrative.finished.length}
-                  </Badge>
-                </div>
-                {canonicalRoster.done.map((row) => (
-                     <CanonicalRosterRow
-                      key={row.id}
-                      row={row}
-                      rows={detail.rows}
-                      testId="subagent-finished-row"
-                      onSelect={() => detail.selectRow(row.id, "finished")}
-                      onStop={() => getTransport().stopCanonicalSubagent(row.owningParentThreadId, row.id)}
-                      onTerminal={refreshRoster}
-                    />
-                  ))}
-                {narrative.finished.map((row) => (
-                  <NarrativeRosterRow
-                    key={row.id}
-                    row={row}
-                    testId="subagent-finished-row"
-                    onSelect={() => detail.selectRow(row.id, "finished")}
-                  />
-                ))}
-              </section>
-            )}
-          </div>
-        )}
-      </ScrollArea>
-      <StopAllConfirmationDialog
-        open={stopAll.open}
-        targets={stopAll.targets}
-        statuses={stopAll.statuses}
-        batchActive={stopAll.batchActive}
-        triggerRef={stopAll.triggerRef}
-        panelRef={stopAll.panelRef}
-        cancelRef={stopAll.cancelRef}
-        onOpenChange={stopAll.onOpenChange}
-        onCancel={() => stopAll.onOpenChange(false, { cancel: () => undefined })}
-        onConfirm={stopAll.confirm}
-      />
-    </section>
-  );
-}
-
-/** Renders the canonical child roster for the selected parent thread. */
-/** Sub-agents roster and detail for one parent thread. */
+/** Render the shared server roster with the existing list and detail presentation. */
 export function SubagentsPanel({ threadId }: { readonly threadId: string }) {
-  return (
-    <SubagentProviderScope threadId={threadId}>
-      <SubagentsPanelContent threadId={threadId} />
-    </SubagentProviderScope>
-  );
+  return <SubagentProviderScope threadId={threadId}><SubagentsPanelContent key={threadId} threadId={threadId} /></SubagentProviderScope>;
 }
 
 function SubagentsPanelContent({ threadId }: { readonly threadId: string }) {
-  const { state: canonicalState, refresh: refreshRoster } = useCanonicalRoster(threadId);
+  const roster = useSubagentRoster(threadId);
+  const error = useSubagentRosterStore((state) => state.errors.has(threadId));
+  const refresh = () => useSubagentRosterStore.getState().refresh(threadId);
+  const selection = useSubagentDetailSelection(threadId);
+  const selectDetail = useSelectSubagentDetail();
   const clearDetail = useClearSubagentDetail();
-  const detail = useCanonicalDetail(threadId, canonicalState);
-  const narrativeRoster = useNarrativeSubagentRoster(threadId);
-  const stopAll = useStopAllControl(threadId, canonicalState.roster, detail.rows, refreshRoster);
-  const rosterView = canonicalRosterPlaceholder(detail.isCurrentRequest, canonicalState);
-  if ("placeholder" in rosterView) return rosterView.placeholder;
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const stopAll = useStopAllControl(threadId, roster ?? null, refresh);
+  const selected = roster?.entries.find((entry) => entry.id === selection?.id);
+  const stopRow = (row: SubagentRosterEntry) => {
+    if (!row.childThreadId) return Promise.reject(new Error("Subagent cannot be stopped independently"));
+    return getTransport().stopCanonicalSubagent(threadId, row.childThreadId);
+  };
+  const onBack = () => {
+    clearDetail(threadId);
+    window.requestAnimationFrame(() => {
+      if (viewportRef.current) viewportRef.current.scrollTop = selection?.scrollTop ?? 0;
+      if (selected) document.querySelector<HTMLElement>(`[data-subagent-id="${CSS.escape(selected.id)}"]`)?.focus();
+    });
+  };
+  if (selected) {
+    return selected.tier === "transcript" && selected.childThreadId
+      ? <TranscriptDetail row={selected} childThreadId={selected.childThreadId} onBack={onBack} onStop={() => stopRow(selected)} onTerminal={refresh} />
+      : <NarrativeDetailView key={selected.id} threadId={threadId} row={selected} revision={`${roster?.epoch}:${roster?.revision}`} onBack={onBack} />;
+  }
+  return <SubagentRosterList roster={roster} error={error} stopAll={stopAll} viewportRef={viewportRef} refresh={refresh}
+    stopRow={stopRow} onSelect={(row, tab) => selectDetail(threadId, { id: row.id, originTab: tab, scrollTop: viewportRef.current?.scrollTop ?? 0 })} />;
+}
 
-  const canonicalRoster = rosterView.roster;
-  // Canonical rows win identity claims; narrative rows cover in-thread
-  // providers (Devin, Claude Task) that never create canonical children.
-  const narrative = dedupeNarrativeRoster(narrativeRoster, detail.rows);
-  const selection = detail.selection;
-  if (!selection) {
-    return <SubagentRosterList
-      canonicalRoster={canonicalRoster}
-      narrative={narrative}
-      detail={detail}
-      stopAll={stopAll}
-      refreshRoster={refreshRoster}
-    />;
-  }
-  if (detail.selectedRow) {
-    const selectedCanonicalRow = detail.selectedRow;
-    return <CanonicalDetailView
-      key={selectedCanonicalRow.id}
-      row={selectedCanonicalRow}
-      rows={detail.rows}
-      onStop={() => getTransport().stopCanonicalSubagent(selectedCanonicalRow.owningParentThreadId, selectedCanonicalRow.id)}
-      onTerminal={refreshRoster}
-      onBack={backToRoster(threadId, selection.scrollTop, detail.viewportRef, selectedCanonicalRow.id, clearDetail)}
-    />;
-  }
-  const selectedNarrativeRow = resolveNarrativeSubagentSelection(selection.id, narrative);
-  if (selectedNarrativeRow) {
-    return <NarrativeDetailView
-      key={selectedNarrativeRow.id}
-      row={selectedNarrativeRow}
-      onBack={backToRoster(threadId, selection.scrollTop, detail.viewportRef, selectedNarrativeRow.id, clearDetail)}
-    />;
-  }
-  return <SubagentRosterList
-    canonicalRoster={canonicalRoster}
-    narrative={narrative}
-    detail={detail}
-    stopAll={stopAll}
-    refreshRoster={refreshRoster}
-  />;
+function SubagentRosterList({ roster, error, stopAll, viewportRef, refresh, stopRow, onSelect }: {
+  roster: SubagentRoster | undefined; error: boolean; stopAll: ReturnType<typeof useStopAllControl>;
+  viewportRef: React.RefObject<HTMLDivElement | null>; refresh: () => Promise<void>;
+  stopRow: (row: SubagentRosterEntry) => Promise<CanonicalSubagentStopResult>;
+  onSelect: (row: SubagentRosterEntry, tab: "active" | "finished") => void;
+}) {
+  const rows = roster?.entries ?? [];
+  const active = rows.filter((row) => row.status === "running");
+  const done = rows.filter((row) => row.status !== "running");
+  return <section ref={stopAll.panelRef} tabIndex={-1} className="flex min-h-0 flex-1 flex-col" aria-label="Subagents">
+    {error && <div data-testid="subagents-error" role="alert" className="px-4 py-3">Couldn't load subagents <Button variant="ghost" onClick={() => void refresh()}>Retry</Button></div>}
+    {!roster && !error && <p className="px-4 py-6 text-sm text-muted">Loading subagents…</p>}
+    <ScrollArea className="min-h-0 flex-1" viewportRef={viewportRef}>
+      {roster && rows.length === 0 && <p data-testid="subagents-empty" className="px-4 py-6 text-sm text-muted">Sub-agents will appear here when this thread delegates work.</p>}
+      {[{ label: "Running", rows: active, tab: "active" as const }, { label: "Done", rows: done, tab: "finished" as const }].map((group) => group.rows.length > 0 && <section key={group.tab} aria-label={group.label}>
+        <div className="flex items-center gap-2 px-6 pb-1 pt-6">
+          <h2 className="text-sm font-semibold text-ink">{group.label}</h2>
+          <Badge variant="ghost" size="compact" className="px-0 font-mono font-normal text-muted">{group.rows.length}</Badge>
+          {group.tab === "active" && active.filter((row) => row.canStop).length >= 2 && <Button ref={stopAll.triggerRef} variant="ghost" size="compact" onClick={stopAll.openStopAll}>Stop all</Button>}
+        </div>
+        {group.rows.map((row) => <RosterRow key={row.id} row={row}
+          onSelect={() => onSelect(row, group.tab)}
+          onStop={() => stopRow(row)} onTerminal={refresh} />)}
+      </section>)}
+    </ScrollArea>
+    <StopAllConfirmationDialog open={stopAll.open} targets={stopAll.targets} statuses={stopAll.statuses} batchActive={stopAll.batchActive}
+      triggerRef={stopAll.triggerRef} panelRef={stopAll.panelRef} cancelRef={stopAll.cancelRef} onOpenChange={stopAll.onOpenChange}
+      onCancel={() => stopAll.onOpenChange(false, { cancel: () => undefined })} onConfirm={stopAll.confirm} />
+  </section>;
 }

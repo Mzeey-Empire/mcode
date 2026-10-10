@@ -386,21 +386,15 @@ export {
   CANONICAL_SUBAGENT_LINEAGE_MAX_DEPTH,
   CANONICAL_SUBAGENT_ROSTER_MAX_CHILDREN,
   CANONICAL_SUBAGENT_TASK_MAX_LENGTH,
-  CanonicalSubagentRosterRequestSchema,
   CanonicalSubagentStopRequestSchema,
   CanonicalSubagentTerminalOutcomeSchema,
   CanonicalSubagentStopResultSchema,
-  CanonicalSubagentRosterRowSchema,
-  CanonicalSubagentRosterSchema,
   canonicalSubagentTerminalOutcome,
 } from "./models/canonical-subagent-roster.js";
 export type {
-  CanonicalSubagentRosterRequest,
   CanonicalSubagentStopRequest,
   CanonicalSubagentTerminalOutcome,
   CanonicalSubagentStopResult,
-  CanonicalSubagentRosterRow,
-  CanonicalSubagentRoster,
 } from "./models/canonical-subagent-roster.js";
 export {
   CONVERSATION_OLDER_PAGE_MAX_BYTES,
@@ -462,7 +456,7 @@ export {
   SUBAGENT_IDENTITY_KEY_MAX_LENGTH,
   SUBAGENT_METADATA_MAX_LENGTH,
   SUBAGENT_PROMPT_MAX_LENGTH,
-  SubagentDetailSchema,
+  SubagentDetailTargetSchema,
   SubagentPresentationSchema,
   createCanonicalSubagentPresentation,
   createSubagentPresentation,
@@ -482,7 +476,7 @@ export {
 export type {
   ToolCallRecord,
   ToolCallStatus,
-  SubagentDetail,
+  SubagentDetailTarget,
   SubagentPresentation,
 } from "./models/tool-call-record.js";
 
@@ -1553,3 +1547,7 @@ export { LegacyTerminalRecordSchema } from "./ws/terminal-legacy.js";
 export { BrowserHistoryEntrySchema, BrowserServerThumbnailSchema, BrowserHistorySchema } from "./models/browser-preview.js";
 export type { BrowserHistoryEntry, BrowserServerThumbnail, BrowserHistory } from "./models/browser-preview.js";
 export type { LegacyTerminalRecord, LegacyTerminalCreateResult } from "./ws/terminal-legacy.js";
+
+
+export * from "./models/subagent-roster.js";
+export { SUBAGENT_REPORTING } from "./providers/interfaces.js";

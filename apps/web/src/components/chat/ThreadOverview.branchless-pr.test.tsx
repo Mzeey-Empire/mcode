@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import type {
   GitRef,
+  SubagentRosterEntry,
   WorkspaceEnvironmentActionRun,
   WorkspaceEnvironmentAutomaticSetupSnapshot,
 } from "@mcode/contracts";
@@ -21,6 +22,7 @@ import { createRightPanelState, useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { setLayoutMeasurements } from "@/lib/composer-layout";
+import { useSubagentRosterStore } from "@/features/subagents/state/subagentRosterStore";
 import { invalidateBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";
 
 const {
@@ -180,6 +182,20 @@ import { ThreadOverview } from "./ThreadOverview";
 import { canStartBranchlessCreatePr } from "@/features/thread-overview/branch-creation";
 import { ProjectEnvironmentPanel } from "@/features/projects/environment";
 
+function rosterEntry(id: string, overrides: Partial<SubagentRosterEntry> = {}): SubagentRosterEntry {
+  return { id: `call:${id}`, provider: "codex", title: id, prompt: null, subagentType: null, model: null,
+    stepCount: 0, status: "done", startedAt: "2026-10-10T10:00:00.000Z", endedAt: null,
+    tier: "transcript", canStop: false, sourceToolCallId: id, childThreadId: null,
+    sourceMessageId: null, parentEntryId: null, ...overrides };
+}
+
+function seedSubagentRoster(threadId: string, entries: SubagentRosterEntry[]): void {
+  useSubagentRosterStore.setState({
+    rosters: new Map([[threadId, { owningParentThreadId: threadId, epoch: "test", revision: 1, entries, truncated: false }]]),
+    errors: new Set(),
+  });
+}
+
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: "thread-1",
@@ -304,6 +320,7 @@ describe("ThreadOverview branchless Create PR", () => {
     mockStartWorkspaceSetup.mockReset();
     mockOpenSubagentsPanel.mockReset();
     mockThreadRecords.clear();
+    useSubagentRosterStore.setState({ rosters: new Map(), errors: new Set() });
     useBrowserAutomationStore.setState({
       liveTargets: new Map(),
       lifecycleTabs: new Map(),
@@ -825,18 +842,7 @@ describe("ThreadOverview branchless Create PR", () => {
     expect(screen.queryByTestId("thread-overview-subagents")).not.toBeInTheDocument();
     first.unmount();
 
-    mockThreadRecords.set(thread.id, {
-      ...createEmptyThreadRecord(),
-      toolCalls: [{
-        id: "agent-1",
-        toolName: "Agent",
-        toolInput: { agentName: "Explorer" },
-        output: null,
-        isError: false,
-        isComplete: false,
-      }],
-      narrativeByMessage: {},
-    });
+    seedSubagentRoster(thread.id, [rosterEntry("agent-1", { provider: "claude", status: "running" })]);
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 
     const summary = screen.getByTestId("thread-overview-subagents");
@@ -853,17 +859,9 @@ describe("ThreadOverview branchless Create PR", () => {
 
   it("renders the sub-agent summary in Activity, above the Usage summary", () => {
     const thread = makeThread();
+    seedSubagentRoster(thread.id, [rosterEntry("agent-1", { provider: "claude", status: "running" })]);
     mockThreadRecords.set(thread.id, {
       ...createEmptyThreadRecord(),
-      toolCalls: [{
-        id: "agent-1",
-        toolName: "Agent",
-        toolInput: { agentName: "Explorer" },
-        output: null,
-        isError: false,
-        isComplete: false,
-      }],
-      narrativeByMessage: {},
       usageByProvider: {
         claude: {
           providerId: "claude",
@@ -882,18 +880,7 @@ describe("ThreadOverview branchless Create PR", () => {
 
   it("bounds the disc stack to three, lets the text carry the total, and omits the zero active count", () => {
     const thread = makeThread();
-    mockThreadRecords.set(thread.id, {
-      ...createEmptyThreadRecord(),
-      toolCalls: Array.from({ length: 8 }, (_, index) => ({
-        id: `agent-${index}`,
-        toolName: "Agent",
-        toolInput: { agentName: `Worker ${index}` },
-        output: "Done",
-        isError: false,
-        isComplete: true,
-      })),
-      narrativeByMessage: {},
-    });
+    seedSubagentRoster(thread.id, Array.from({ length: 8 }, (_, index) => rosterEntry(`agent-${index}`)));
 
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 
@@ -904,44 +891,17 @@ describe("ThreadOverview branchless Create PR", () => {
     expect(summary.querySelectorAll('[data-testid="provider-disc"]')).toHaveLength(3);
   });
 
-  it("counts repeated Codex paths as one logical subagent and keeps pathless calls separate", () => {
+  it("counts failed and stopped entries as done", () => {
     const thread = makeThread();
-    const explorerDispatches = Array.from({ length: 4 }, (_, index) => ({
-      id: `explorer-${index}`,
-      toolName: "Agent",
-      toolInput: {
-        codexCollabKind: "spawnAgent",
-        agentName: "explorer",
-        agentPath: "/root/explorer",
-      },
-      output: "Done",
-      isError: false,
-      isComplete: true,
-      lastActivityAt: index,
-    }));
-    mockThreadRecords.set(thread.id, {
-      ...createEmptyThreadRecord(),
-      toolCalls: [
-        ...explorerDispatches,
-        {
-          id: "legacy",
-          toolName: "Agent",
-          toolInput: { agentName: "Explorer" },
-          output: "Done",
-          isError: false,
-          isComplete: true,
-          lastActivityAt: 10,
-        },
-      ],
-      narrativeByMessage: {},
-    });
+    seedSubagentRoster(thread.id, [
+      rosterEntry("failed", { status: "failed" }),
+      rosterEntry("stopped", { provider: "claude", status: "stopped" }),
+      rosterEntry("running", { status: "running" }),
+    ]);
 
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 
-    const summary = screen.getByTestId("thread-overview-subagents");
-    expect(summary).toHaveAccessibleName("Subagents, 0 active, 2 done");
-    expect(summary).toHaveTextContent("2 done");
-    expect(summary.querySelectorAll('[data-testid="provider-disc"]')).toHaveLength(2);
+    expect(screen.getByTestId("thread-overview-subagents")).toHaveAccessibleName("Subagents, 1 active, 2 done");
   });
 
   it("creates a named branch from the branchless worktree row", async () => {

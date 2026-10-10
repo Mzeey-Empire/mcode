@@ -1,3 +1,4 @@
+import { SUBAGENT_REPORTING } from "@mcode/contracts";
 import * as NodeEvents from "node:events";
 import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
@@ -267,6 +268,7 @@ function partRoleOf(
 @injectable()
 export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentProvider, ISessionEvictable, IApprovalReviewCapable {
   readonly id: ProviderId = "opencode";
+  readonly subagentReporting = SUBAGENT_REPORTING.opencode;
   readonly descriptor = Object.freeze({
     id: "opencode" as const,
     capabilities: OPENCODE_SUPPORTED_CAPABILITIES.map((name) => ({ name, support: "supported" as const })),
