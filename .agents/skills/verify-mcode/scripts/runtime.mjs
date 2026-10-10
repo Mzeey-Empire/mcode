@@ -1455,30 +1455,27 @@ async function proveSubagent(run) {
 async function observeSubagentLifecycle(run) {
   let childThreadId = null;
   const verified = await waitForAsync(async () => {
-    const roster = await run.socket.rpc("canonicalAgent.roster", {
+    const roster = await run.socket.rpc("subagent.roster", {
       owningParentThreadId: run.threadId,
     }, run.proofDeadline);
-    if (Array.isArray(roster?.active) && roster.active.length > 0) {
-      run.report.subagentActiveSeen = true;
-    }
-    const child = Array.isArray(roster?.done)
-      ? roster.done.find((row) => row?.terminalOutcome === "Completed")
-      : null;
+    const children = Array.isArray(roster?.entries) ? roster.entries.filter((row) => row?.childThreadId) : [];
+    if (children.some((row) => row.status === "running")) run.report.subagentActiveSeen = true;
+    const child = children.find((row) => row.status === "done");
     if (!child) return false;
-    childThreadId = child.id;
+    childThreadId = child.childThreadId;
     return recordSubagentChildReport(run, child);
   }, run.proofDeadline);
   if (verified) return;
   throw actionable(
     `The Codex subagent workflow was incomplete${childThreadId ? " for the recorded child" : ""}`,
-    "Inspect the redacted receipt, Codex protocol trace, and canonical roster before retrying with Terra.",
+    "Inspect the redacted receipt, Codex protocol trace, and subagent roster before retrying with Terra.",
   );
 }
 
 async function recordSubagentChildReport(run, child) {
   run.report.subagentCompleted = true;
   run.report.subagentTaskRetained = hasDescriptiveSubagentTask(child);
-  const conversation = await run.socket.rpc("conversation.page", { threadId: child.id, limit: 100 }, run.proofDeadline);
+  const conversation = await run.socket.rpc("conversation.page", { threadId: child.childThreadId, limit: 100 }, run.proofDeadline);
   run.report.subagentParentMessageRetained = hasMessageText(
     conversation,
     "user",
@@ -1489,7 +1486,7 @@ async function recordSubagentChildReport(run, child) {
     // The V2 subAgentActivity spawn never carries the delegated prompt, so no
     // child user message can be synthesized. Require retention only when the
     // delegation call itself carried the prompt (V1 collabAgentToolCall).
-    run.report.subagentParentMessagePromptAbsent = !(await delegationPromptCarried(run, child.id));
+    run.report.subagentParentMessagePromptAbsent = !(await delegationPromptCarried(run, child.childThreadId));
   }
   return run.report.subagentActiveSeen
     && run.report.subagentTaskRetained
@@ -1498,9 +1495,9 @@ async function recordSubagentChildReport(run, child) {
 }
 
 function hasDescriptiveSubagentTask(child) {
-  if (typeof child?.task !== "string") return false;
-  const task = child.task.trim().toLowerCase();
-  const identity = typeof child.identity === "string" ? child.identity.trim().toLowerCase() : "subagent";
+  if (typeof child?.title !== "string") return false;
+  const task = child.title.trim().toLowerCase();
+  const identity = typeof child.subagentType === "string" ? child.subagentType.trim().toLowerCase() : "subagent";
   return task.includes("verify") && task !== identity && task !== "subagent";
 }
 
