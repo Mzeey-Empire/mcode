@@ -84,10 +84,11 @@ keeps managed worktrees on the automatic gate path.
 
 ## Cancellation must settle owned commands
 
-Cancelling a queued prompt removes only that prompt and its stored attachments.
-It does not stop Setup. **Stop** interrupts automatic Setup but leaves its gate
-blocked. Opening a recovery terminal also leaves the gate unchanged. These
-operations cannot imply permission to dispatch queued prompts.
+`thread.startup.cancel` records cancellation intent and contains automatic
+Setup before marking the startup cancelled. After containment, it discards
+pending Turns and clears the Setup gate so a kept Thread accepts new sends.
+The cancelled prompt remains in the transcript and cannot replay through
+Continue or Retry. Opening a recovery terminal leaves the gate unchanged.
 
 A finished attempt does not prove that its process resources have been
 released. [Stop and Retry](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts#L440)

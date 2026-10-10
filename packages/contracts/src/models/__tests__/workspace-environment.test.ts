@@ -8,7 +8,6 @@ import {
   WorkspaceEnvironmentErrorSchema,
   WorkspaceEnvironmentSetupAttemptSchema,
   WorkspaceEnvironmentAutomaticSetupSnapshotSchema,
-  WorkspaceEnvironmentQueuedTurnCancelInputSchema,
   WorkspaceEnvironmentAutomaticSetupStopInputSchema,
   WorkspaceEnvironmentAutomaticSetupRetryInputSchema,
   WorkspaceEnvironmentAutomaticSetupTerminalInputSchema,
@@ -288,9 +287,6 @@ describe("workspace environment contracts", () => {
   });
 
   it("validates strict targeted automatic Setup recovery inputs and Terminal results", () => {
-    expect(WorkspaceEnvironmentQueuedTurnCancelInputSchema().safeParse({ threadId: "thread-1" }).success).toBe(false);
-    expect(WorkspaceEnvironmentQueuedTurnCancelInputSchema().parse({ threadId: "thread-1", queuedTurnId: "queued-1" })).toEqual({ threadId: "thread-1", queuedTurnId: "queued-1" });
-    expect(WorkspaceEnvironmentQueuedTurnCancelInputSchema().safeParse({ threadId: "thread-1", queuedTurnId: "queued-1", extra: true }).success).toBe(false);
     expect(WorkspaceEnvironmentAutomaticSetupStopInputSchema().safeParse({ threadId: "" }).success).toBe(false);
     expect(WorkspaceEnvironmentAutomaticSetupRetryInputSchema().safeParse({ threadId: "thread-1", extra: true }).success).toBe(false);
     expect(WorkspaceEnvironmentAutomaticSetupTerminalInputSchema().parse({ threadId: "thread-1" })).toEqual({ threadId: "thread-1" });

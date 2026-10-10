@@ -58,11 +58,6 @@ export class WorkspaceEnvironmentAutomaticRepository {
     return this.writer.execute(workspaceEnvironmentAutomaticWriteOperations.continueWithoutSetup, [input, this.now()]);
   }
 
-  /** Commit cancelQueuedTurn through its database owner. */
-  cancelQueuedTurn(...input: Parameters<WorkspaceEnvironmentAutomaticStore["cancelQueuedTurn"]>): Promise<ReturnType<WorkspaceEnvironmentAutomaticStore["cancelQueuedTurn"]>> {
-    return this.writer.execute(workspaceEnvironmentAutomaticWriteOperations.cancelQueuedTurn, [input, this.now()]);
-  }
-
   /** Discard a cancelled startup's pending Turns and gate in one writer transaction. */
   cancelStartupTurns(threadId: string): Promise<void> {
     return this.writer.execute(workspaceEnvironmentAutomaticWriteOperations.cancelStartupTurns, [[threadId], this.now()]);

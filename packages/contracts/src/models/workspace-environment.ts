@@ -598,17 +598,6 @@ export type WorkspaceEnvironmentAutomaticSetupContinueInput = z.infer<
   ReturnType<typeof WorkspaceEnvironmentAutomaticSetupContinueInputSchema>
 >;
 
-/** Request to cancel one Turn that is still queued behind Setup. */
-export const WorkspaceEnvironmentQueuedTurnCancelInputSchema = lazySchema(() =>
-  z.object({
-    threadId: z.string().min(1).max(256),
-    queuedTurnId: z.string().min(1).max(256),
-  }).strict(),
-);
-export type WorkspaceEnvironmentQueuedTurnCancelInput = z.infer<
-  ReturnType<typeof WorkspaceEnvironmentQueuedTurnCancelInputSchema>
->;
-
 /** Request to stop the active automatic Setup attempt for one Thread. */
 export const WorkspaceEnvironmentAutomaticSetupStopInputSchema = lazySchema(() =>
   z.object({ threadId: z.string().min(1).max(256) }).strict(),
