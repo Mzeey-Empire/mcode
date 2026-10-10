@@ -1,5 +1,5 @@
 import {
-  ProviderIdSchema, createSubagentPresentation, type ProviderId, type SubagentDetail, type SubagentRosterEntry,
+  createSubagentPresentation, type ProviderId, type SubagentDetail, type SubagentRosterEntry,
   type SubagentStatus, type SubagentPresentation, type ToolCallRecord,
 } from "@mcode/contracts";
 import type { CreateToolCallRecordInput } from "../tools/persistence/tool-call-record-store.js";
@@ -35,15 +35,18 @@ export function rosterToolCall(record: ToolCallRecord, provider: string | null, 
 
 /** Normalize canonical and narrative outcomes at the server boundary. */
 export function subagentStatusFrom(status: string | null, parentStopped = false): SubagentStatus {
-  const normalized = NORMALIZED_STATUS[status?.toLowerCase() ?? "running"] ?? "running";
+  // Unrecognized persisted outcomes must not keep the active count stuck forever.
+  const normalized = NORMALIZED_STATUS.get(status?.toLowerCase() ?? "") ?? "failed";
   return parentStopped && normalized !== "done" ? "stopped" : normalized;
 }
 
-const NORMALIZED_STATUS: Readonly<Record<string, SubagentStatus>> = {
-  cancelled: "stopped", interrupted: "stopped", stopped: "stopped",
-  completed: "done", done: "done", success: "done",
-  errored: "failed", error: "failed", failed: "failed",
-};
+const NORMALIZED_STATUS = new Map<string, SubagentStatus>([
+  ["running", "running"], ["active", "running"],
+  ["pending", "running"], ["starting", "running"],
+  ["cancelled", "stopped"], ["interrupted", "stopped"], ["stopped", "stopped"],
+  ["completed", "done"], ["done", "done"], ["success", "done"],
+  ["errored", "failed"], ["error", "failed"], ["failed", "failed"],
+]);
 
 /** Find a root Agent through exact parent-call links, including old nested Devin markers. */
 export function rootAgent<T extends { toolCallId?: string; toolName: string; parentToolCallId?: string }>(
@@ -63,8 +66,7 @@ export function rootAgent<T extends { toolCallId?: string; toolName: string; par
 }
 
 /** Project one narrative root using only its message identity and reported fields. */
-export function narrativeRosterEntry(call: RosterToolCall, stepCount: number, fallbackProvider: ProviderId, childSteps: boolean): SubagentRosterEntry {
-  const provider = ProviderIdSchema.parse(call.provider ?? fallbackProvider);
+export function narrativeRosterEntry(call: RosterToolCall, stepCount: number, provider: ProviderId, childSteps: boolean): SubagentRosterEntry {
   return {
     id: `call:${call.toolCallId}`, provider, ...narrativeMetadata(call),
     stepCount, status: subagentStatusFrom(call.status, call.parentStopped),

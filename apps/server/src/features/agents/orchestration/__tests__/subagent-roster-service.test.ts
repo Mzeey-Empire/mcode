@@ -60,6 +60,72 @@ function child(sourceItemId?: string): CanonicalChildRow {
 afterEach(async () => { vi.useRealTimers(); vi.restoreAllMocks(); await closeAgentStorageTestDatabases(); });
 
 describe("SubagentRosterService", () => {
+  it("falls back to the thread provider for legacy message providers", () => {
+    const { db, call, service } = harness("claude");
+    message(db, "legacy", null);
+    message(db, "known", "codex");
+    db.prepare("UPDATE messages SET provider = ? WHERE id = ?").run("retired-provider", "legacy");
+    call("legacy-call", "legacy");
+    call("known-call", "known");
+    expect(service.loadRoster(request).entries.map((row) => [row.id, row.provider, row.tier])).toEqual([
+      ["call:known-call", "codex", "meta"], ["call:legacy-call", "claude", "steps"],
+    ]);
+    expect(service.loadDetail({ ...request, entryId: "call:legacy-call" })).toEqual({
+      entryId: "call:legacy-call", totalSteps: 0, steps: [], summary: null,
+    });
+  });
+
+  it("reports a missing parent without leaking a schema validation error", () => {
+    const { service } = harness();
+    expect(() => service.loadRoster({ owningParentThreadId: "missing" })).toThrow(/parent thread not found/i);
+  });
+
+  it("keeps unknown persisted statuses out of the active count", () => {
+    const { db, call, service } = harness();
+    message(db, "message", "claude");
+    call("unknown", "message");
+    db.prepare("UPDATE tool_call_records SET status = ? WHERE id = ?").run("legacy-status", "unknown");
+    expect(service.loadRoster(request).entries.map((row) => row.status)).toEqual(["failed"]);
+    db.prepare("UPDATE messages SET outcome = 'cancelled' WHERE id = ?").run("message");
+    expect(service.loadRoster(request).entries.map((row) => row.status)).toEqual(["stopped"]);
+  });
+
+  it("invalidates on turn completion without hydrating historical calls", () => {
+    const { db, call, narrative, service } = harness();
+    message(db, "message", "claude");
+    call("unrelated", "message", { toolName: "Read" });
+    const load = vi.spyOn(narrative, "loadSubagentCalls");
+    service.turnFinished("parent");
+    expect(load).not.toHaveBeenCalled();
+    expect(service.loadRoster(request).revision).toBe(0);
+    call("agent", "message");
+    load.mockClear();
+    service.turnFinished("parent");
+    expect(load).not.toHaveBeenCalled();
+    expect(service.loadRoster(request).revision).toBe(1);
+  });
+
+  it("releases stop markers after persistence while retaining unsaved stops", async () => {
+    const { db, call, narrative, service } = harness();
+    message(db, "message", "claude");
+    call("saved", "message");
+    narrative.beginTurn("parent");
+    narrative.bufferToolCall("parent", { toolCallId: "unsaved", toolName: "Agent", toolInput: {} });
+    await service.stopDescendants("parent");
+    expect(service.loadRoster(request).entries.map((row) => row.status)).toEqual(["stopped", "stopped"]);
+    db.prepare("UPDATE tool_call_records SET status = 'completed' WHERE id = ?").run("saved");
+    service.turnFinished("parent");
+    expect(service["stoppedCalls"].get("parent")).toEqual(new Set(["unsaved"]));
+    call("unsaved", "message", { status: "failed" });
+    db.prepare("UPDATE messages SET outcome = 'cancelled' WHERE id = ?").run("message");
+    narrative.clearTurn("parent");
+    service.turnFinished("parent");
+    expect(service["stoppedCalls"].size).toBe(0);
+    expect(service.loadRoster(request).entries.map((row) => [row.id, row.status])).toEqual([
+      ["call:saved", "done"], ["call:unsaved", "stopped"],
+    ]);
+  });
+
   it("merges mixed providers, dedupes exact source calls, and preserves identity through enrichment", () => {
     const { db, call, children, service } = harness("codex");
     message(db, "claude-message", "claude");
@@ -226,6 +292,9 @@ describe("subagentStatusFrom", () => {
     ["Running", "running"], ["Completed", "done"], ["Errored", "failed"],
     ["Cancelled", "stopped"], ["Interrupted", "stopped"], ["cancelled", "stopped"],
     ["completed", "done"], ["failed", "failed"],
+    ["Active", "running"], ["legacy-status", "failed"], [null, "failed"],
+    ["Pending", "running"], ["Starting", "running"],
+    ["constructor", "failed"], ["__proto__", "failed"],
   ])("normalizes %s to %s", (input, expected) => expect(subagentStatusFrom(input)).toBe(expected));
   it("normalizes parent cancellation without changing an already successful result", () => {
     expect(subagentStatusFrom("running", true)).toBe("stopped");

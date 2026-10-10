@@ -20,8 +20,8 @@ import {
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { eq } from "drizzle-orm";
-import { threads } from "../../../runtime/persistence/sqlite/schema.js";
+import { and, eq, inArray, ne, or } from "drizzle-orm";
+import { messages, threads, toolCallRecords } from "../../../runtime/persistence/sqlite/schema.js";
 import { NarrativeStore } from "../conversation/narrative/narrative-store.js";
 import { broadcast } from "../../../application/transport/push.js";
 import { narrativeRosterEntry, narrativeSubagentDetail, rootAgent, subagentStatusFrom, subagentModelLabel, type RosterToolCall } from "./subagent-roster-projection.js";
@@ -37,7 +37,7 @@ export class SubagentRosterService {
   private readonly revisions = new Map<string, number>();
   private readonly canonicalRevisions = new Map<string, number>();
   private readonly pendingPushes = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly stoppedCalls = new Set<string>();
+  private readonly stoppedCalls = new Map<string, Set<string>>();
   private readonly activeStops = new Map<string, Promise<CanonicalSubagentStopResult>>();
   private acceptedProgress: AcceptedSubagentProgress | undefined;
 
@@ -78,9 +78,9 @@ export class SubagentRosterService {
     const entries = new Map<string, SubagentRosterEntry>();
     const roots = calls.filter((call) => call.toolName === "Agent" && rootAgent(call, byId)?.toolCallId === call.toolCallId);
     for (const call of roots) {
-      const provider = ProviderIdSchema.parse(call.provider ?? fallback);
+      const provider = ProviderIdSchema.safeParse(call.provider).data ?? fallback;
       const steps = this.stepsFor(call.toolCallId, calls, byId);
-      const entry = narrativeRosterEntry(rootEvidence(call, calls, byId), steps.length, fallback, SUBAGENT_REPORTING[provider]?.childSteps ?? false);
+      const entry = narrativeRosterEntry(rootEvidence(call, calls, byId), steps.length, provider, SUBAGENT_REPORTING[provider]?.childSteps ?? false);
       entries.set(entry.id, entry);
     }
     for (const child of children) {
@@ -113,7 +113,19 @@ export class SubagentRosterService {
 
   /** Refresh terminal outcomes after narrative persistence completes. */
   turnFinished(threadId: string): void {
-    if (this.callsFor(threadId).some((call) => call.toolName === "Agent")) this.changed(threadId);
+    this.clearPersistedStops(threadId);
+    if (this.narrative.hasSubagentCalls(threadId)) this.changed(threadId);
+  }
+
+  private clearPersistedStops(threadId: string): void {
+    const stopped = this.stoppedCalls.get(threadId);
+    if (!stopped) return;
+    const terminal = drizzle(this.db).select({ id: toolCallRecords.id }).from(toolCallRecords)
+      .innerJoin(messages, eq(messages.id, toolCallRecords.messageId))
+      .where(and(eq(messages.threadId, threadId), inArray(toolCallRecords.id, [...stopped]),
+        or(ne(toolCallRecords.status, "running"), inArray(messages.outcome, ["cancelled", "interrupted"])))).all();
+    for (const call of terminal) stopped.delete(call.id);
+    if (stopped.size === 0) this.stoppedCalls.delete(threadId);
   }
 
   private canonicalChanged(threadId: string, revision: number): void {
@@ -135,13 +147,16 @@ export class SubagentRosterService {
 
   private callsFor(threadId: string): RosterToolCall[] {
     return this.narrative.loadSubagentCalls(threadId).map((call) => ({
-      ...call, parentStopped: call.parentStopped || this.stoppedCalls.has(`${threadId}:${call.toolCallId}`),
+      ...call, parentStopped: call.parentStopped || (this.stoppedCalls.get(threadId)?.has(call.toolCallId) ?? false),
     }));
   }
 
   private threadProvider(threadId: string): ProviderId {
     const row = drizzle(this.db).select({ provider: threads.provider }).from(threads).where(eq(threads.id, threadId)).get();
-    return ProviderIdSchema.parse(row?.provider);
+    if (!row) throw new Error("Subagent parent thread not found");
+    const provider = ProviderIdSchema.safeParse(row.provider);
+    if (!provider.success) throw new Error("Subagent parent thread provider is unavailable");
+    return provider.data;
   }
 
   private stepsFor(id: string, calls: readonly RosterToolCall[], byId: ReadonlyMap<string, RosterToolCall>): RosterToolCall[] {
@@ -176,9 +191,11 @@ export class SubagentRosterService {
 
   /** Stop every active descendant before its parent terminalizes. */
   async stopDescendants(owningParentThreadId: string): Promise<void> {
+    const stopped = this.stoppedCalls.get(owningParentThreadId) ?? new Set<string>();
     for (const call of this.callsFor(owningParentThreadId)) {
-      if (call.status === "running") this.stoppedCalls.add(`${owningParentThreadId}:${call.toolCallId}`);
+      if (call.status === "running") stopped.add(call.toolCallId);
     }
+    if (stopped.size > 0) this.stoppedCalls.set(owningParentThreadId, stopped);
     this.turnFinished(owningParentThreadId);
     const targets = (this.acceptedProgress?.loadActiveSubagentStopTargets(owningParentThreadId)
       ?? this.durability.loadActiveSubagentStopTargets(owningParentThreadId))
