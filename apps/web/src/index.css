@@ -88,6 +88,10 @@
   --layer-sticky: 10;
   --layer-dropdown: 20;
   --layer-floating-panel: 30;
+  /* The hosted Browser page lives in a fixed root outside the panel, so Design
+     overlays need their own layer above it and below modals. */
+  --layer-browser-surface: 30;
+  --layer-browser-overlay: 35;
   --layer-modal-backdrop: 40;
   --layer-modal: 50;
   --layer-toast: 60;

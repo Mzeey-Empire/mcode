@@ -31,9 +31,11 @@ function previewSurfaceClassName(
   webviewLayerInteractive: boolean,
   showLocalPorts: boolean,
 ): string {
+  // No z-index here: a stacking context on the surface would trap the Design
+  // layer below the Browser surface host root, which paints the hosted page.
   return cn(
     "relative min-h-[min(40vh,20rem)] min-w-0 flex-1 basis-0",
-    "z-(--layer-base) rounded-tl-md",
+    "rounded-tl-md",
     responsiveViewportSize ? "overflow-auto bg-hover/20" : "overflow-hidden",
     webviewLayerInteractive && "pointer-events-none",
     showLocalPorts && "overflow-y-auto",
@@ -80,7 +82,7 @@ interface BrowserPageLayerProps {
   readonly designLayer: ReactNode;
 }
 
-/** Renders the existing page surface and status layers without adding a DOM wrapper. */
+/** Renders the page surface and status layers, with Design overlays in their own layer above the hosted page. */
 export function BrowserPageLayer({
   warmWebviewTabs,
   browserWorkspaceId,
@@ -268,7 +270,15 @@ export function BrowserPageLayer({
             />
           </div>
         </RenderWhen>
-        {designLayer}
+        {/* The hosted page paints later in the DOM from the Browser surface
+            host root, so Design overlays need a higher layer to stay visible. */}
+        <div
+          data-testid="preview-design-layer"
+          className="pointer-events-none absolute inset-0 z-(--layer-browser-overlay)"
+          style={{ clipPath: coveredLeft ? `inset(0 0 0 ${coveredLeft}px)` : undefined }}
+        >
+          {designLayer}
+        </div>
         <RenderValue value={pageError}>
           {(pageError) => (
           <PreviewErrorPanel

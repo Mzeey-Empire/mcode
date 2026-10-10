@@ -887,7 +887,6 @@ describe("PreviewPanel: full panel state", () => {
     expect(screen.queryByTestId("preview-webview-surface")).not.toBeInTheDocument();
     expect(screen.getByTestId("browser-local-ports")).toBeInTheDocument();
     expect(screen.getByTestId("preview-surface")).toHaveClass(
-      "z-(--layer-base)",
       "overflow-hidden",
       "rounded-tl-md",
     );
@@ -903,7 +902,6 @@ describe("PreviewPanel: full panel state", () => {
     expect(screen.queryByTestId("preview-webview")).not.toBeInTheDocument();
     expect(screen.getByTestId("browser-local-ports")).toBeInTheDocument();
     expect(screen.getByTestId("preview-surface")).toHaveClass(
-      "z-(--layer-base)",
       "overflow-hidden",
       "rounded-tl-md",
     );
