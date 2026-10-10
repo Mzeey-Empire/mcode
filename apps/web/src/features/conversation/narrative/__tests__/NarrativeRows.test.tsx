@@ -13,7 +13,7 @@ function thought(index: number): NarrativeItem {
 
 describe("NarrativeRows", () => {
   it("keeps all dense narrative text in order without browsing controls", () => {
-    render(<NarrativeRows items={Array.from({ length: 50 }, (_, index) => thought(index))} allToolCalls={[]} />);
+    render(<NarrativeRows items={Array.from({ length: 50 }, (_, index) => thought(index))} />);
 
     expect(screen.getAllByText(/^Narrative row \d+$/).map((row) => row.textContent))
       .toEqual(Array.from({ length: 50 }, (_, index) => `Narrative row ${index}`));
@@ -22,14 +22,14 @@ describe("NarrativeRows", () => {
 
   it("retains earlier text when streaming crosses the former summary threshold", () => {
     const items = Array.from({ length: 24 }, (_, index) => thought(index));
-    const { rerender } = render(<NarrativeRows items={items} allToolCalls={[]} animateEntry />);
+    const { rerender } = render(<NarrativeRows items={items} animateEntry />);
 
-    rerender(<NarrativeRows items={[...items, thought(24)]} allToolCalls={[]} animateEntry />);
+    rerender(<NarrativeRows items={[...items, thought(24)]} animateEntry />);
 
     expect(screen.getAllByText(/^Narrative row \d+$/).map((row) => row.textContent))
       .toEqual(Array.from({ length: 25 }, (_, index) => `Narrative row ${index}`));
 
-    rerender(<NarrativeRows items={[]} allToolCalls={[]} />);
+    rerender(<NarrativeRows items={[]} />);
     expect(screen.queryAllByText(/^Narrative row \d+$/)).toEqual([]);
     expect(screen.queryByRole("button", { name: /Browse all|Previous|Next|Summary/ })).toBeNull();
   });

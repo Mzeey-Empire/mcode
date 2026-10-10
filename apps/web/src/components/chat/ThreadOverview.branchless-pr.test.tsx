@@ -847,11 +847,10 @@ describe("ThreadOverview branchless Create PR", () => {
 
     const summary = screen.getByTestId("thread-overview-subagents");
     expect(summary).toHaveAccessibleName("Subagents, 1 active, 0 done");
-    expect(summary).toHaveTextContent("1 active, 0 done");
+    expect(summary).toHaveTextContent("1 active · 0 done");
     expect(summary).not.toHaveTextContent("total");
     expect(summary.querySelectorAll('[data-testid="provider-disc"]')).toHaveLength(1);
     expect(screen.queryByTestId("thread-overview-subagents-running")).not.toBeInTheDocument();
-    expect(screen.getByText("Subagents").compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     expect(summary.querySelector('[data-provider-icon="claude"]')).toBeInTheDocument();
     fireEvent.click(summary);
     expect(mockOpenSubagentsPanel).toHaveBeenCalledOnce();

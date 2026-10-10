@@ -1,42 +1,45 @@
+import { useEffect } from "react";
+import { useShallow } from "zustand/shallow";
+import type { SubagentRoster } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { ProviderDiscStack } from "@/components/ui/provider-icon";
 import { openSubagentsRoster } from "@/features/subagents";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { cn } from "@/lib/utils";
-import { useSubagentRoster } from "@/features/subagents/state/subagentRosterStore";
+import { useSubagentRosterStore } from "@/features/subagents/state/subagentRosterStore";
 import { subagentOverviewCounts } from "@/features/subagents/subagent-status";
 import { type Thread } from "@/transport";
 import { OVERVIEW_ROW_CLASS, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 
+type SubagentsSummary = readonly [active: number, done: number, ...providers: string[]];
+
+// A flat tuple of primitives so a roster push that changes nothing visible here
+// does not re-render the row.
+function subagentsSummary(roster: SubagentRoster | undefined): SubagentsSummary {
+  const entries = roster?.entries ?? [];
+  const { active, done } = subagentOverviewCounts(entries);
+  return [active, done, ...entries.slice(0, 3).map((entry) => entry.provider)];
+}
+
 function SubagentsEntry({ thread }: { thread: Thread }) {
-  const roster = useSubagentRoster(thread.id);
-  const counts = subagentOverviewCounts(roster?.entries ?? []);
-  const subagentTotal = counts.active + counts.done;
-  const subagentProviders = roster?.entries.map((entry) => entry.provider) ?? [];
-  const subagentStateCopy = [
-    counts.active > 0 ? `${counts.active} active` : null,
-    `${counts.done} done`,
-  ].filter(Boolean).join(", ");
-  return (<ThreadOverviewWhen when={subagentTotal > 0}>
-    <>
-      <div className="px-2 pt-1 text-xs font-medium text-muted">
-        Subagents
-      </div>
-      <Button
-        variant="ghost"
-        size="compact"
-        type="button"
-        data-testid="thread-overview-subagents"
-        onClick={() => openSubagentsRoster()}
-        aria-label={`Subagents, ${counts.active} active, ${counts.done} done`}
-        className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-start gap-2")}
-      >
-        <ProviderDiscStack providers={subagentProviders} />
-        <span className="shrink-0 text-xs tabular-nums text-muted">
-          {subagentStateCopy}
-        </span>
-      </Button>
-    </>
+  const [active, done, ...providers] = useSubagentRosterStore(
+    useShallow((state) => subagentsSummary(state.rosters.get(thread.id))),
+  );
+  useEffect(() => { void useSubagentRosterStore.getState().ensure(thread.id); }, [thread.id]);
+  const copy = active > 0 ? `${active} active · ${done} done` : `${done} done`;
+  return (<ThreadOverviewWhen when={active + done > 0}>
+    <Button
+      variant="ghost"
+      size="compact"
+      type="button"
+      data-testid="thread-overview-subagents"
+      onClick={() => openSubagentsRoster()}
+      aria-label={`Subagents, ${active} active, ${done} done`}
+      className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-start gap-2")}
+    >
+      <ProviderDiscStack providers={providers} />
+      <span className="shrink-0 text-xs tabular-nums text-muted">{copy}</span>
+    </Button>
   </ThreadOverviewWhen>);
 }
 

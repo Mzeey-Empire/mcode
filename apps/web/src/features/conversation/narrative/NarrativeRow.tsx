@@ -1,5 +1,4 @@
 import { memo } from "react";
-import type { ToolCall } from "@/transport/types";
 import type { NarrativeItem, SubagentRosterTarget } from "./types";
 import { ThoughtBlock } from "./ThoughtBlock";
 import { ToolSummaryLine } from "./ToolSummaryLine";
@@ -15,8 +14,6 @@ export interface NarrativeRowProps {
   rowId: string;
   /** Narrative item rendered in this row. */
   item: NarrativeItem;
-  /** Full turn graph retained for the sub-agent detail contract. */
-  allToolCalls: readonly ToolCall[];
   /** Opens a selected canonical child through the composition root. */
   onSubagentSelect?: (id: string, target: SubagentRosterTarget) => void;
   /** Opens the owning thread's Subagents roster for aggregate activity. */
@@ -99,7 +96,6 @@ export function areNarrativeRowPropsEqual(
 
 function renderItem(
   item: NarrativeItem,
-  allToolCalls: readonly ToolCall[],
   onSubagentSelect?: (id: string, target: SubagentRosterTarget) => void,
   onOpenSubagents?: (target: SubagentRosterTarget) => void,
 ): React.ReactNode {
@@ -119,12 +115,7 @@ function renderItem(
     case "subagent":
       return (
         <SubagentRow
-          toolCall={item.toolCall}
           participants={item.participants}
-          lifecycle={item.lifecycle}
-          children={item.children}
-          hooks={item.hooks}
-          allToolCalls={allToolCalls}
           activities={item.activities}
           onOpenSubagents={onOpenSubagents}
           onSubagentSelect={onSubagentSelect}
@@ -145,13 +136,12 @@ function renderItem(
 export const NarrativeRow = memo(function NarrativeRow({
   rowId,
   item,
-  allToolCalls,
   onSubagentSelect,
   onOpenSubagents,
 }: NarrativeRowProps) {
   return (
     <NarrativePerformanceRow rowId={rowId}>
-      {renderItem(item, allToolCalls, onSubagentSelect, onOpenSubagents)}
+      {renderItem(item, onSubagentSelect, onOpenSubagents)}
     </NarrativePerformanceRow>
   );
 }, areNarrativeRowPropsEqual);

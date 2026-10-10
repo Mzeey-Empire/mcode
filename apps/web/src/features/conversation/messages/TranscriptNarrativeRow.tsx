@@ -57,10 +57,10 @@ export function TranscriptNarrativeRow({ row, threadId, expanded, entering, onTo
       <>
         {loader}
         <AnimatedCollapsible open={row.transition !== "exiting"} className={row.transition === "entering" ? "starting:grid-rows-[0fr]" : undefined}>
-          <NarrativeRow rowId={row.key} item={row.item} allToolCalls={row.allToolCalls} />
+          <NarrativeRow rowId={row.key} item={row.item} />
         </AnimatedCollapsible>
       </>
     );
   }
-  return <>{loader}<NarrativeRow rowId={row.key} item={row.item} allToolCalls={row.allToolCalls} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} /></>;
+  return <>{loader}<NarrativeRow rowId={row.key} item={row.item} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} /></>;
 }

@@ -1,12 +1,8 @@
 import { useMemo } from "react";
 import { useThreadRecord } from "@/stores/thread-selectors";
-import type { NarrativeItem, SubagentRosterTarget } from "./types";
-import type { ToolCall } from "@/transport/types";
+import type { SubagentRosterTarget } from "./types";
 import { NarrativeRows } from "./NarrativeRows";
-import {
-  buildPersistedNarrativeItems,
-  recordToToolCall,
-} from "./build-persisted-narrative";
+import { buildPersistedNarrativeItems } from "./build-persisted-narrative";
 import { NarrativePerformanceBoundary } from "./NarrativePerformanceBoundary";
 
 /** Props for `PersistedNarrative`. */
@@ -46,17 +42,10 @@ export function PersistedNarrative({
 }: PersistedNarrativeProps) {
   const records = useThreadRecord(threadId, (r) => r.narrativeByMessage[messageId]);
 
-  const { items, allToolCalls } = useMemo(() => {
-    if (!records) {
-      return {
-        items: [] as NarrativeItem[],
-        allToolCalls: [] as ToolCall[],
-      };
-    }
-    const built = buildPersistedNarrativeItems({ ...records, messageContent });
-    const liveTools: ToolCall[] = records.tools.map(recordToToolCall);
-    return { items: built, allToolCalls: liveTools };
-  }, [records, messageContent]);
+  const items = useMemo(
+    () => records ? buildPersistedNarrativeItems({ ...records, messageContent }) : [],
+    [records, messageContent],
+  );
 
   if (!records) return null;
   if (items.length === 0) return null;
@@ -66,7 +55,6 @@ export function PersistedNarrative({
     <div className="relative min-w-0 max-w-full">
       <NarrativeRows
         items={items}
-        allToolCalls={allToolCalls}
         onSubagentSelect={onSubagentSelect}
         onOpenSubagents={onOpenSubagents}
       />
