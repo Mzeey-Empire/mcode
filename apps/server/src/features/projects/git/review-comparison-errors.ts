@@ -26,7 +26,7 @@ export function reviewComparisonFailure(error: unknown): Exclude<ReviewCompariso
   const kind = failureKind(error);
   const summary = kind === "timeout" ? "Git comparison timed out"
     : kind === "worktree-missing" ? "The worktree folder is missing"
-    : kind === "unsafe-ref" ? "The comparison contains an unsafe ref" : "Could not load this comparison";
+    : kind === "unsafe-ref" ? "The comparison contains an unsafe ref" : "Git reported an error";
   return { status: "failed", failure: { kind, summary, detail } };
 }
 
