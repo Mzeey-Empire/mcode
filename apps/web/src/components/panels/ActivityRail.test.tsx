@@ -110,15 +110,18 @@ describe("ActivityRail expansion", () => {
   it("keeps a fixed footprint on the right edge and expands leftward over the body", () => {
     renderRail();
     const rail = screen.getByTestId("activity-rail");
-    const surface = rail.firstElementChild;
+    const surface = screen.getByTestId("activity-rail-surface");
+    const captionStrip = screen.getByTestId("activity-rail-caption-strip");
 
     expect(rail).toHaveClass("z-(--layer-floating-panel)", "w-(--container-right-rail)", "flex-none");
-    expect(surface).toHaveClass("absolute", "right-0", "border-l", "pt-14", "w-(--container-right-rail)");
+    expect(surface).toHaveClass("absolute", "right-0", "border-l", "top-row-comfortable", "w-(--container-right-rail)");
 
     fireEvent.focus(screen.getByRole("button", { name: "Terminal" }));
 
     expect(rail).toHaveClass("w-(--container-right-rail)");
     expect(surface).toHaveClass("right-0", "w-(--container-right-rail-expanded)");
+    // Row 1's panel controls sit left of this strip; widening it would cover them.
+    expect(captionStrip).toHaveClass("h-row-comfortable", "w-(--container-right-rail)");
   });
 
   it("marks only the active entry with the selected fill and amber edge", () => {
@@ -297,7 +300,7 @@ describe("ActivityRail expansion", () => {
     );
 
     const rail = screen.getByTestId("activity-rail");
-    const railOverlay = rail.firstElementChild;
+    const railOverlay = screen.getByTestId("activity-rail-surface");
     const guest = screen.getByTestId("renderer-guest");
     const terminal = screen.getByRole("button", { name: "Terminal" });
     expect(railOverlay).toHaveClass("w-(--container-right-rail)");

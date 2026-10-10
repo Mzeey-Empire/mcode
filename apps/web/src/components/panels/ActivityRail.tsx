@@ -811,15 +811,17 @@ function ActivityRailView({
       onFocusCapture={onFocusCapture}
       onBlurCapture={onBlurCapture}
     >
-      {/* Anchored to the window edge, so hover expansion grows leftward over the
-          body. The top 56 sits under the caption buttons and drags the window. */}
+      {/* The top 48 sits under the caption buttons and drags the window. It never
+          widens, so the expanded rail cannot cover row 1's panel controls. */}
+      <div aria-hidden data-testid="activity-rail-caption-strip" className="window-drag absolute top-0 right-0 h-row-comfortable w-(--container-right-rail) border-l border-border bg-background" />
+      {/* Anchored to the window edge, so hover expansion grows leftward over the body. */}
       <div
+        data-testid="activity-rail-surface"
         className={cn(
-          "absolute inset-y-0 right-0 flex flex-col items-stretch gap-1 overflow-hidden border-l border-border bg-background p-2 pt-14 transition-[width] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+          "absolute top-row-comfortable right-0 bottom-0 flex flex-col items-stretch gap-1 overflow-hidden border-l border-border bg-background p-2 transition-[width] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
           expanded ? "w-(--container-right-rail-expanded)" : "w-(--container-right-rail)",
         )}
       >
-      <div aria-hidden className="window-drag absolute inset-x-0 top-0 h-14" />
       <RailTabInstances
         workspaceId={workspaceId}
         tabInstances={tabInstances}
