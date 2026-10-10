@@ -27,7 +27,6 @@ import type {
   WorkspaceEnvironmentActionRun,
 } from "./types";
 import { TurnRuntimeSnapshotSchema, WS_CHANNELS, WS_METHODS } from "@mcode/contracts";
-import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { TerminalErrorCodeSchema } from "@mcode/contracts";
 import type {
   CreateAndSendResult,
@@ -574,9 +573,11 @@ export function createWsTransport(
       // The client-side optimistic Set is lost on reload/reconnect; this
       // restores live-session indicators for threads the server is still running.
       const hydration = hydrateRunningThreadsFromServer((method, params) => rpc(method, params as Record<string, unknown>));
-      const observedAttention = threadAttentionStore.getState().byThreadId;
-      void rpc<import("@mcode/contracts").ThreadAttention[]>("thread.listAttention", {})
-        .then((attention) => threadAttentionStore.getState().hydrate(attention, observedAttention))
+      void import("@/features/thread-attention/thread-attention-store").then(({ threadAttentionStore }) => {
+        const observedAttention = threadAttentionStore.getState().byThreadId;
+        return rpc<import("@mcode/contracts").ThreadAttention[]>("thread.listAttention", {})
+          .then((attention) => threadAttentionStore.getState().hydrate(attention, observedAttention));
+      })
         .catch((error: unknown) => console.warn("[thread-attention] hydration failed", error));
 
       // Expose a sentinel in dev/test builds so Playwright can synchronize on
