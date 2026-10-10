@@ -24,6 +24,7 @@ import { NarrativeStore } from "../../conversation/narrative/narrative-store.js"
 import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-startup-repo.js";
 import { ThreadStartupService } from "../../../thread-startup/thread-startup-service.js";
 import type { TerminalCommandCompletion } from "../../../terminal/commands/terminal-command-service.js";
+import { routeThreadStartupRpc } from "../../../thread-startup/transport/thread-startup-rpc.js";
 
 const roots: string[] = [];
 
@@ -296,6 +297,69 @@ describe("AgentService.createAndSend defaults", () => {
       expect.objectContaining({ state: "dispatched" }),
       expect.objectContaining({ state: "dispatched" }),
     ]);
+  });
+
+  it("dispatches a new turn on a kept thread after setup cancellation without replaying the first prompt", async () => {
+    const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-agent-kept-cancelled-startup-"));
+    roots.push(root);
+    const setupCompletion = deferred<TerminalCommandCompletion>();
+    const setupRelease = deferred<void>();
+    const { threadRepo, workspaceRepo, threadService, service, provider, automaticSetup, threadStartups } = createAgentServiceHarness(({ db, threadRepo: threads, threadStartups: startups }) =>
+      new WorkspaceEnvironmentService({
+        mcodeDir: root, database: db, databaseWriter: persistenceRuntime.writer,
+        threads: { findById: (id) => threads.findById(id) },
+        terminalCommands: {
+          prepare: async () => ({
+            kind: "ready",
+            command: {
+              snapshot: { checkoutPath: "/repo/.worktrees/managed", terminal: { executable: "sh", arguments: ["-c", "bun run setup"] } },
+              start: async () => await setupCompletion.promise,
+              close: async () => {
+                setupCompletion.resolve({ kind: "exited", exitCode: 1, output: "", outputTruncated: false });
+                setupRelease.resolve();
+                return { kind: "contained" };
+              },
+              waitForRelease: async () => await setupRelease.promise,
+            },
+          }),
+        },
+        threadStartups: startups, platform: "linux",
+      }),
+    );
+    if (!(automaticSetup instanceof WorkspaceEnvironmentService)) throw new Error("Expected automatic setup service");
+    automaticSetup.setAutomaticSetupDispatcher({ dispatch: (submission) => service.dispatchQueuedAutomaticTurn(submission) });
+    const workspace = await workspaceRepo.create("Repo", "/repo");
+    const managed = await threadRepo.create(workspace.id, "Kept thread", "worktree", "feature/managed", true, "claude");
+    vi.mocked(threadService.create).mockImplementation(async (_workspaceId, _title, _mode, _branch, options) => {
+      await requireThreadCreationOptions(options).lifecycle?.onThreadPersisted(managed);
+      return managed;
+    });
+    await automaticSetup.save({ workspaceId: workspace.id, sourceRevision: null,
+      document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] } });
+    const startupId = "00000000-0000-4000-8000-000000000024";
+    const creating = service.createAndSend({ workspaceId: workspace.id, content: "Cancelled first prompt",
+      mode: "worktree", branch: "feature/managed", startupId });
+    await vi.waitFor(() => expect(automaticSetup.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running"));
+    await routeThreadStartupRpc("thread.startup.cancel", { startupId }, {
+      threadStartupService: threadStartups, workspaceEnvironmentService: automaticSetup, agentService: service,
+    });
+    await creating;
+    expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", phase: "setup" });
+    expect(provider.sendTurn).not.toHaveBeenCalled();
+
+    await service.sendMessage({ threadId: managed.id, content: "New prompt after Keep thread" });
+    await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
+    expect(provider.sendTurn.mock.calls[0]?.[0]).toMatchObject({ message: "New prompt after Keep thread" });
+    expect(automaticSetup.getAutomaticSetup({ threadId: managed.id })).toMatchObject({
+      gate: "not-required", queuedTurns: [{ state: "cancelled" }],
+    });
+    await expect(automaticSetup.continueAutomaticSetup({ threadId: managed.id })).rejects.toMatchObject({
+      code: "WORKSPACE_ENVIRONMENT_SETUP_UNAVAILABLE",
+    });
+    await expect(automaticSetup.retryAutomaticSetup({ threadId: managed.id })).resolves.toEqual(
+      automaticSetup.getAutomaticSetup({ threadId: managed.id }),
+    );
+    expect(provider.sendTurn).toHaveBeenCalledOnce();
   });
 
   it("does not admit the queued provider turn when cancellation wins during admission", async () => {

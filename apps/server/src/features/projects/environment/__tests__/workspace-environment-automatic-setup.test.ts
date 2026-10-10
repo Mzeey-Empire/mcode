@@ -193,9 +193,9 @@ describe("automatic Project Setup", () => {
     expect(start).not.toHaveBeenCalled();
     expect(dispatch).not.toHaveBeenCalled();
     expect(service.getAutomaticSetup({ threadId: "thread-1" })).toMatchObject({
-      gate: "blocked",
-      attempt: { state: "interrupted" },
-      queuedTurns: [{ state: "queued" }],
+      gate: "not-required",
+      attempt: null,
+      queuedTurns: [{ state: "cancelled" }],
     });
   });
 

@@ -500,6 +500,24 @@ export class WorkspaceEnvironmentAutomaticStore {
     })();
   }
 
+  /** Discard pending startup Turns and clear the gate without replaying their messages. */
+  cancelStartupTurns(threadId: string): void {
+    this.db.transaction(() => {
+      this.orm.update(workspaceEnvironmentQueuedTurns)
+        .set({ state: "cancelled" })
+        .where(and(
+          eq(workspaceEnvironmentQueuedTurns.threadId, threadId),
+          inArray(workspaceEnvironmentQueuedTurns.state, ["queued", "released", "dispatching"]),
+        ))
+        .run();
+      this.orm.update(workspaceEnvironmentSetupGates)
+        .set({ state: "not-required", attemptId: null, updatedAt: this.now() })
+        .where(eq(workspaceEnvironmentSetupGates.threadId, threadId))
+        .run();
+      this.pruneTerminalTurns(threadId);
+    })();
+  }
+
   /** Cancel one still-queued Turn and remove its visible user message in the same transaction. */
   cancelQueuedTurn(input: { readonly threadId: string; readonly queuedTurnId: string }): WorkspaceEnvironmentCancelledQueuedTurn {
     let attachments: readonly StoredAttachment[] = [];

@@ -63,6 +63,11 @@ export class WorkspaceEnvironmentAutomaticRepository {
     return this.writer.execute(workspaceEnvironmentAutomaticWriteOperations.cancelQueuedTurn, [input, this.now()]);
   }
 
+  /** Discard a cancelled startup's pending Turns and gate in one writer transaction. */
+  cancelStartupTurns(threadId: string): Promise<void> {
+    return this.writer.execute(workspaceEnvironmentAutomaticWriteOperations.cancelStartupTurns, [[threadId], this.now()]);
+  }
+
   /** Commit interruptCurrentAttempt through its database owner. */
   interruptCurrentAttempt(...input: Parameters<WorkspaceEnvironmentAutomaticStore["interruptCurrentAttempt"]>): Promise<ReturnType<WorkspaceEnvironmentAutomaticStore["interruptCurrentAttempt"]>> {
     return this.writer.execute(workspaceEnvironmentAutomaticWriteOperations.interruptCurrentAttempt, [input, this.now()]);
