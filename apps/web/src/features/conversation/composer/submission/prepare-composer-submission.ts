@@ -10,7 +10,7 @@ import type { PreparedComposerSubmission } from "./composer-submission-types";
 export interface PrepareComposerSubmissionOptions {
   annotationScopeId?: string;
   form: ComposerFormController;
-  isThreadScaffold: boolean;
+  startingThread: boolean;
   discardEmptyEdit(): boolean;
   resolvePreviewAnnotations(
     annotations: PreviewAnnotationBundle | undefined,
@@ -21,7 +21,7 @@ export interface PrepareComposerSubmissionOptions {
 export async function prepareComposerSubmission({
   annotationScopeId,
   form,
-  isThreadScaffold,
+  startingThread,
   discardEmptyEdit,
   resolvePreviewAnnotations,
 }: PrepareComposerSubmissionOptions): Promise<PreparedComposerSubmission | null> {
@@ -48,7 +48,7 @@ export async function prepareComposerSubmission({
     discardEmptyEdit();
     return null;
   }
-  if (isThreadScaffold) return null;
+  if (startingThread) return null;
 
   try {
     const prepared = createComposerSubmission({

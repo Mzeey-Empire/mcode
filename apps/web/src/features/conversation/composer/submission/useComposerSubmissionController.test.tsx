@@ -82,7 +82,7 @@ function useHarness(
     isNewThread: true,
     workspaceId: "workspace-1",
     isAgentRunning: false,
-    isThreadScaffold: false,
+    startingThread: false,
     form,
     execution: execution(executionOverrides),
     queue: {

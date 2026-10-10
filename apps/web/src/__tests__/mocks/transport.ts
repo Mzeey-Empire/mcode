@@ -140,8 +140,6 @@ export const mockTransport: McodeTransport = {
   getWorkspaceSetupAttempt: vi.fn().mockResolvedValue(null),
   getAutomaticSetup: vi.fn().mockResolvedValue({ gate: "not-required", attempt: null, queuedTurns: [] }),
   continueAutomaticSetup: vi.fn(),
-  cancelQueuedAutomaticTurn: vi.fn(),
-  stopAutomaticSetup: vi.fn(),
   retryAutomaticSetup: vi.fn(),
   openAutomaticSetupTerminal: vi.fn(),
   listWorkspaceActionRuns: vi.fn().mockResolvedValue([]),

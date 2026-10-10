@@ -5,7 +5,7 @@ import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { useDiffStore } from "@/stores/diffStore";
 import { useToastStore } from "@/stores/toastStore";
 import { getTransport } from "@/transport";
-import { useThreadStartupStore } from "./state/thread-startup-store";
+import { type StartupCancelRequest, useThreadStartupStore } from "./state/thread-startup-store";
 
 const TERMINAL_STATES: ReadonlySet<ThreadStartup["state"]> = new Set(["completed", "failed", "cancelled", "interrupted"]);
 const SCRIPT_RETRY_MS = 1_000;
@@ -45,20 +45,23 @@ export function useStartupSetupScript(startup: ThreadStartup | undefined): strin
 }
 
 /**
- * Cancels a live startup until composer Stop and Esc take over cancellation.
+ * Cancels a live startup from the trail, the composer Stop and Esc.
  *
- * Returns no callback once the startup has ended or cancellation is already requested.
+ * Returns no callback once the startup has ended or a cancellation is in flight. A request that failed
+ * offers the callback again, even though the server already holds the intent: a failed agent stop or
+ * transport error can succeed on retry. A failed setup containment cannot; the retry reports it again.
  */
 export function useStartupCancel(startup: ThreadStartup | undefined, startupId: string | undefined): (() => void) | undefined {
-  const [requested, setRequested] = useState<string | null>(null);
   const id = startup?.startupId ?? startupId;
+  const ownRequest = useThreadStartupStore((state) => (id ? state.cancelRequestByStartupId[id] : undefined));
   const cancel = useCallback(() => {
     if (!id) return;
-    setRequested(id);
+    const store = useThreadStartupStore.getState();
+    store.setCancelRequest(id, "in-flight");
     getTransport().cancelThreadStartup(id).then(
-      (next) => useThreadStartupStore.getState().apply(next),
+      (next) => store.apply(next),
       (error: unknown) => {
-        setRequested(null);
+        store.setCancelRequest(id, "failed");
         useToastStore.getState().show({
           kind: "failed",
           title: "Could not cancel startup",
@@ -67,9 +70,28 @@ export function useStartupCancel(startup: ThreadStartup | undefined, startupId: 
       },
     );
   }, [id]);
-  if (!id || requested === id) return undefined;
-  if (startup && (TERMINAL_STATES.has(startup.state) || startup.cancellation === "requested")) return undefined;
-  return cancel;
+  if (!id) return undefined;
+  return canOfferCancel(startup, ownRequest) ? cancel : undefined;
+}
+
+function canOfferCancel(startup: ThreadStartup | undefined, ownRequest: StartupCancelRequest | undefined): boolean {
+  if (startup && TERMINAL_STATES.has(startup.state)) return false;
+  if (ownRequest) return ownRequest === "failed";
+  return startup?.cancellation !== "requested";
+}
+
+/**
+ * The composer's starting state, present while the thread's startup has not ended.
+ *
+ * Before the record arrives, a pending startup counts as starting.
+ */
+export function useStartingThread(
+  startup: ThreadStartup | undefined,
+  pending: { readonly startupId: string } | undefined,
+): { readonly onCancel: (() => void) | undefined } | undefined {
+  const onCancel = useStartupCancel(startup, pending?.startupId);
+  if (startup ? TERMINAL_STATES.has(startup.state) : !pending) return undefined;
+  return { onCancel };
 }
 
 /** Opens the automatic setup terminal for a thread in its right panel. */

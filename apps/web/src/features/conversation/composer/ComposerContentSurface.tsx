@@ -57,7 +57,6 @@ interface ComposerContentSurfaceProps {
     readonly planPanelOpen: boolean;
     readonly isAgentRunning: boolean;
     readonly isStopPending: boolean;
-    readonly setupBlocked: boolean;
     readonly provider?: string;
     readonly planPending: boolean;
     readonly queuedSend: boolean;
@@ -86,7 +85,7 @@ interface ComposerContentSurfaceProps {
     readonly selectedTextCommentEditor?: SelectedTextCommentEditorDraft;
     readonly unavailableSelectedTextCommentIds: readonly string[];
     readonly hasRetryState: boolean;
-    readonly isThreadScaffold: boolean;
+    readonly startingThread: boolean;
     readonly hasContent: boolean;
     readonly showInlineComposerOptions: boolean;
     readonly attachmentInputRef: RefObject<HTMLInputElement | null>;
@@ -144,6 +143,8 @@ interface ComposerContentSurfaceProps {
     readonly onDetachGoal: ComposerAgentControlsProps["onDetachGoal"];
     readonly onDetachOrchestration: ComposerAgentControlsProps["onDetachOrchestration"];
     readonly onStop: () => void;
+    /** Cancels the thread's startup; absent once cancellation is requested. */
+    readonly onCancelStartup?: () => void;
     readonly onClearSelectedTextComments: () => void;
     readonly onEditSelectedTextComment: (comment: SelectedTextComment) => void;
     readonly onDeleteSelectedTextComment: (comment: SelectedTextComment) => void;
@@ -187,6 +188,8 @@ function ComposerQueueSurface({
   );
 
   if (!canShowQueue) return null;
+  // Nothing may reach agent.send while the thread is starting, queued messages included.
+  const paused = model.planPending || model.startingThread;
 
   return (
     <ComposerQueueList
@@ -194,11 +197,11 @@ function ComposerQueueSurface({
       isAgentRunning={model.isAgentRunning}
       provider={model.provider}
       isEditing={Boolean(model.editingFromQueue)}
-      isPaused={model.planPending}
+      isPaused={paused}
       onLoadIntoComposer={actions.onLoadIntoComposer}
-      onResume={() => model.planPending ? Promise.resolve() : actions.onResumeQueuedMessage()}
+      onResume={() => paused ? Promise.resolve() : actions.onResumeQueuedMessage()}
       onSendNow={(message) =>
-        model.planPending ? Promise.resolve() : actions.onSendQueuedMessageNow(message)
+        paused ? Promise.resolve() : actions.onSendQueuedMessageNow(message)
       }
     />
   );
@@ -277,7 +280,7 @@ function ComposerQueueEditNotice({
 }
 
 function getEditorPlaceholder(model: ComposerContentSurfaceProps["model"]) {
-  if (model.setupBlocked) return "Resolve Automatic Setup before sending a follow-up";
+  if (model.startingThread) return "Do anything";
   if (model.isStaleWorktree) return "Worktree directory no longer exists. This thread is read-only.";
   if (model.planPending) return "Answer the planning questions above";
   if (model.goalPending) return "Describe the goal...";
@@ -291,10 +294,10 @@ function ComposerEditorSurface({
   model,
   actions,
 }: Pick<ComposerContentSurfaceProps, "model" | "actions">) {
-  const disabled = model.setupBlocked || model.planPending || model.isStaleWorktree || Boolean(model.providerReason);
+  const disabled = model.startingThread || model.planPending || model.isStaleWorktree || Boolean(model.providerReason);
 
   return (
-    <div className="relative" ref={model.editorContainerRef} onPaste={actions.onPaste}>
+    <div className={cn("relative", model.startingThread && "opacity-50")} ref={model.editorContainerRef} onPaste={actions.onPaste}>
       <ComposerEditor
         onChange={actions.onEditorChange}
         onSubmit={actions.onSubmit}
@@ -378,14 +381,14 @@ function ComposerAttachmentSurface({
   );
 }
 
-function ComposerThreadScaffoldStatus({
-  isThreadScaffold,
-}: Pick<ComposerContentSurfaceProps["model"], "isThreadScaffold">) {
-  if (!isThreadScaffold) return null;
+function ComposerStartingSpinner({
+  startingThread,
+}: Pick<ComposerContentSurfaceProps["model"], "startingThread">) {
+  if (!startingThread) return null;
 
   return (
-    <span className="flex items-center gap-1.5 text-xs text-muted">
-      Preparing thread…
+    <span className="flex size-8 items-center justify-center" data-testid="composer-starting-spinner">
+      <Spinner size={20} className="text-muted" />
     </span>
   );
 }
@@ -394,7 +397,8 @@ function ComposerInlineStopButton({
   model,
   actions,
 }: Pick<ComposerContentSurfaceProps, "model" | "actions">) {
-  if (!model.isAgentRunning || !model.hasContent || model.planPending) return null;
+  // The starting Stop already cancels the dispatched first turn, so a second Stop would be redundant.
+  if (model.startingThread || !model.isAgentRunning || !model.hasContent || model.planPending) return null;
 
   return (
     <Tooltip>
@@ -453,16 +457,16 @@ function ComposerContextWindowTracker({
   );
 }
 
-export type ComposerSendButtonVisualState = "scaffold" | "queue" | "stop" | "stopping" | "send" | "empty";
-type ComposerSendButtonCopy = "choose-project" | "starting-thread" | "queue-message" | "stop-agent" | "stopping-agent" | "send-message";
+export type ComposerSendButtonVisualState = "starting" | "queue" | "stop" | "stopping" | "send" | "empty";
+type ComposerSendButtonCopy = "choose-project" | "cancel-startup" | "queue-message" | "stop-agent" | "stopping-agent" | "send-message";
 
 export function getComposerSendButtonVisualState({
-  isThreadScaffold,
+  startingThread,
   isAgentRunning,
   isStopPending,
   hasContent,
-}: Pick<ComposerContentSurfaceProps["model"], "isThreadScaffold" | "isAgentRunning" | "isStopPending" | "hasContent">): ComposerSendButtonVisualState {
-  if (isThreadScaffold) return "scaffold";
+}: Pick<ComposerContentSurfaceProps["model"], "startingThread" | "isAgentRunning" | "isStopPending" | "hasContent">): ComposerSendButtonVisualState {
+  if (startingThread) return "starting";
   if (isStopPending) return "stopping";
   if (isAgentRunning) return hasContent ? "queue" : "stop";
   return hasContent ? "send" : "empty";
@@ -470,19 +474,19 @@ export function getComposerSendButtonVisualState({
 
 function getComposerSendButtonCopy({
   needsWorkspace,
-  isThreadScaffold,
+  startingThread,
   isAgentRunning,
   isStopPending,
   hasContent,
 }: {
   readonly needsWorkspace: boolean;
-  readonly isThreadScaffold: boolean;
+  readonly startingThread: boolean;
   readonly isAgentRunning: boolean;
   readonly isStopPending: boolean;
   readonly hasContent: boolean;
 }): ComposerSendButtonCopy {
   if (needsWorkspace) return "choose-project";
-  if (isThreadScaffold) return "starting-thread";
+  if (startingThread) return "cancel-startup";
   if (isStopPending) return "stopping-agent";
   if (isAgentRunning) return hasContent ? "queue-message" : "stop-agent";
   return "send-message";
@@ -493,32 +497,34 @@ export function isComposerSendButtonDisabled({
   providerReason,
   isStaleWorktree,
   planPending,
-  isThreadScaffold,
+  startingThread,
   isAgentRunning,
   isStopPending,
   hasContent,
-  setupBlocked,
+  canCancelStartup,
   targetPending,
 }: {
   readonly needsWorkspace: boolean;
   readonly providerReason: ComposerContentSurfaceProps["model"]["providerReason"];
   readonly isStaleWorktree: boolean;
   readonly planPending: boolean;
-  readonly isThreadScaffold: boolean;
+  readonly startingThread: boolean;
   readonly isAgentRunning: boolean;
   readonly isStopPending: boolean;
   readonly hasContent: boolean;
-  readonly setupBlocked: boolean;
+  readonly canCancelStartup: boolean;
   readonly targetPending: boolean;
 }) {
+  // A starting thread never sends, so its button is only Stop for the startup.
+  if (startingThread) return !canCancelStartup;
   // With content the button sends, so it waits for a known target branch. Without content it stops a running agent.
-  return setupBlocked || needsWorkspace || Boolean(providerReason) || isStaleWorktree || planPending
-    || isThreadScaffold || isStopPending || (hasContent ? targetPending : !isAgentRunning);
+  return needsWorkspace || Boolean(providerReason) || isStaleWorktree || planPending
+    || isStopPending || (hasContent ? targetPending : !isAgentRunning);
 }
 
 /** Button variant per send state. Send is the round primary; Stop is neutral by rule: an ink circle with a background-colour square. */
 export const SEND_BUTTON_VARIANT: Record<ComposerSendButtonVisualState, "default" | "ink"> = {
-  scaffold: "default",
+  starting: "ink",
   queue: "default",
   stop: "ink",
   stopping: "ink",
@@ -528,7 +534,7 @@ export const SEND_BUTTON_VARIANT: Record<ComposerSendButtonVisualState, "default
 
 const SEND_BUTTON_COPY: Record<ComposerSendButtonCopy, string> = {
   "choose-project": "Choose a project",
-  "starting-thread": "Starting thread",
+  "cancel-startup": "Cancel startup",
   "queue-message": "Queue message",
   "stop-agent": "Stop agent",
   "stopping-agent": "Stopping",
@@ -542,9 +548,9 @@ function ComposerSendButton({
 }: Pick<ComposerContentSurfaceProps, "model" | "actions"> & { readonly needsWorkspace: boolean }) {
   const visualState = getComposerSendButtonVisualState(model);
   const copy = getComposerSendButtonCopy({ ...model, needsWorkspace });
-  const disabled = isComposerSendButtonDisabled({ ...model, needsWorkspace });
-  const onClick = model.isThreadScaffold
-    ? undefined
+  const disabled = isComposerSendButtonDisabled({ ...model, needsWorkspace, canCancelStartup: actions.onCancelStartup !== undefined });
+  const onClick = model.startingThread
+    ? actions.onCancelStartup
     : model.isAgentRunning && !model.hasContent
       ? actions.onStop
       : actions.onSubmit;
@@ -558,9 +564,9 @@ function ComposerSendButton({
       disabled={disabled}
       aria-label={SEND_BUTTON_COPY[copy]}
     >
-      {visualState === "scaffold" || visualState === "stopping" ? (
+      {visualState === "stopping" ? (
         <Spinner size={16} className="text-current" />
-      ) : visualState === "stop" ? (
+      ) : visualState === "stop" || visualState === "starting" ? (
         <div className="size-3.5 rounded-[2px] bg-current" />
       ) : (
         <ArrowUp />
@@ -582,7 +588,7 @@ function ComposerControlBar({
   model,
   actions,
 }: Pick<ComposerContentSurfaceProps, "model" | "actions">) {
-  const disabled = model.setupBlocked || model.planPending || model.isStaleWorktree || Boolean(model.providerReason);
+  const disabled = model.planPending || model.isStaleWorktree || Boolean(model.providerReason);
 
   return (
     <div
@@ -636,7 +642,7 @@ function ComposerControlBar({
         {model.providerNoticeTrigger}
       </div>
       <div className={cn("ml-auto flex max-w-full flex-wrap items-center justify-end gap-1", !model.showInlineComposerOptions && "basis-full")}>
-        <ComposerThreadScaffoldStatus isThreadScaffold={model.isThreadScaffold} />
+        <ComposerStartingSpinner startingThread={model.startingThread} />
         <ComposerInlineStopButton model={model} actions={actions} />
         <ComposerContextWindowTracker model={model} />
         <ComposerSendButton

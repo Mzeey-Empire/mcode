@@ -17,8 +17,6 @@ import {
   WorkspaceEnvironmentAutomaticSetupSnapshotSchema,
   WorkspaceEnvironmentAutomaticSetupGetInputSchema,
   WorkspaceEnvironmentAutomaticSetupContinueInputSchema,
-  WorkspaceEnvironmentQueuedTurnCancelInputSchema,
-  WorkspaceEnvironmentAutomaticSetupStopInputSchema,
   WorkspaceEnvironmentAutomaticSetupRetryInputSchema,
   WorkspaceEnvironmentAutomaticSetupTerminalInputSchema,
   WorkspaceEnvironmentAutomaticSetupTerminalSchema,
@@ -42,8 +40,6 @@ import type {
   WorkspaceEnvironmentAutomaticSetupSnapshot,
   WorkspaceEnvironmentAutomaticSetupGetInput,
   WorkspaceEnvironmentAutomaticSetupContinueInput,
-  WorkspaceEnvironmentQueuedTurnCancelInput,
-  WorkspaceEnvironmentAutomaticSetupStopInput,
   WorkspaceEnvironmentAutomaticSetupRetryInput,
   WorkspaceEnvironmentAutomaticSetupTerminalInput,
   WorkspaceEnvironmentAutomaticSetupTerminal,
@@ -514,8 +510,6 @@ type WorkspaceEnvironmentSetupWsMethodName =
   | "workspace.environment.setup.get"
   | "workspace.environment.automaticSetup.get"
   | "workspace.environment.automaticSetup.continue"
-  | "workspace.environment.automaticSetup.cancelQueuedTurn"
-  | "workspace.environment.automaticSetup.stop"
   | "workspace.environment.automaticSetup.retry"
   | "workspace.environment.automaticSetup.openTerminal";
 
@@ -549,14 +543,6 @@ const workspaceEnvironmentSetupMethods = (): Record<
   },
   "workspace.environment.automaticSetup.continue": {
     params: WorkspaceEnvironmentAutomaticSetupContinueInputSchema() as z.ZodType<WorkspaceEnvironmentAutomaticSetupContinueInput>,
-    result: WorkspaceEnvironmentAutomaticSetupSnapshotSchema() as z.ZodType<WorkspaceEnvironmentAutomaticSetupSnapshot>,
-  },
-  "workspace.environment.automaticSetup.cancelQueuedTurn": {
-    params: WorkspaceEnvironmentQueuedTurnCancelInputSchema() as z.ZodType<WorkspaceEnvironmentQueuedTurnCancelInput>,
-    result: WorkspaceEnvironmentAutomaticSetupSnapshotSchema() as z.ZodType<WorkspaceEnvironmentAutomaticSetupSnapshot>,
-  },
-  "workspace.environment.automaticSetup.stop": {
-    params: WorkspaceEnvironmentAutomaticSetupStopInputSchema() as z.ZodType<WorkspaceEnvironmentAutomaticSetupStopInput>,
     result: WorkspaceEnvironmentAutomaticSetupSnapshotSchema() as z.ZodType<WorkspaceEnvironmentAutomaticSetupSnapshot>,
   },
   "workspace.environment.automaticSetup.retry": {

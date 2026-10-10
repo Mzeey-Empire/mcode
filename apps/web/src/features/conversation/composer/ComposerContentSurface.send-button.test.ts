@@ -10,18 +10,18 @@ const disabledArgs = {
   providerReason: null,
   isStaleWorktree: false,
   planPending: false,
-  isThreadScaffold: false,
+  startingThread: false,
   isAgentRunning: true,
   isStopPending: false,
   hasContent: false,
-  setupBlocked: false,
+  canCancelStartup: false,
   targetPending: false,
 } as const;
 
 describe("composer send button stopping state", () => {
   it("shows a distinct stopping state while the stop request is in flight", () => {
     expect(getComposerSendButtonVisualState({
-      isThreadScaffold: false,
+      startingThread: false,
       isAgentRunning: true,
       isStopPending: true,
       hasContent: false,
@@ -30,7 +30,7 @@ describe("composer send button stopping state", () => {
 
   it("stays in stopping state even when the composer has queued content", () => {
     expect(getComposerSendButtonVisualState({
-      isThreadScaffold: false,
+      startingThread: false,
       isAgentRunning: true,
       isStopPending: true,
       hasContent: true,
@@ -43,7 +43,7 @@ describe("composer send button stopping state", () => {
 
   it("returns to the stop state once the request settles", () => {
     expect(getComposerSendButtonVisualState({
-      isThreadScaffold: false,
+      startingThread: false,
       isAgentRunning: true,
       isStopPending: false,
       hasContent: false,
@@ -76,11 +76,32 @@ describe("composer send button with a pending target branch", () => {
   });
 });
 
+describe("composer send button while the thread is starting", () => {
+  const starting = { ...disabledArgs, startingThread: true, isAgentRunning: false } as const;
+
+  it("shows Stop, never Send, even with typed content", () => {
+    for (const hasContent of [false, true]) {
+      const state = getComposerSendButtonVisualState({ startingThread: true, isAgentRunning: false, isStopPending: false, hasContent });
+      expect(state).toBe("starting");
+      expect(SEND_BUTTON_VARIANT[state]).toBe("ink");
+    }
+  });
+
+  it("keeps Stop enabled while the startup can be cancelled", () => {
+    expect(isComposerSendButtonDisabled({ ...starting, canCancelStartup: true })).toBe(false);
+    expect(isComposerSendButtonDisabled({ ...starting, hasContent: true, canCancelStartup: true })).toBe(false);
+  });
+
+  it("disables Stop once cancellation is requested", () => {
+    expect(isComposerSendButtonDisabled({ ...starting, canCancelStartup: false })).toBe(true);
+  });
+});
+
 describe("composer Stop colour", () => {
   it("renders Stop and Stopping as the neutral ink circle, never primary or destructive", () => {
     const stopStates = (["stop", "stopping"] as const).map((isStopPending) =>
       getComposerSendButtonVisualState({
-        isThreadScaffold: false,
+        startingThread: false,
         isAgentRunning: true,
         isStopPending: isStopPending === "stopping",
         hasContent: false,

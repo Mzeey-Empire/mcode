@@ -50,6 +50,7 @@ import { ComposerContentSurface } from "./ComposerContentSurface";
 import { ComposerProviderNoticeSurface } from "./ComposerProviderNoticeSurface";
 import { ComposerStatusStrip } from "./ComposerStatusStrip";
 import { useComposerSurfaceState } from "./useComposerSurfaceState";
+import { useComposerStartup, type ComposerStartingThread } from "./useComposerStartup";
 import {
   removeSelectedTextComment,
   saveSelectedTextComment,
@@ -229,8 +230,8 @@ interface ComposerProps {
   workspaceId?: string;
   /** Draft-thread binding: `null` tracks a fresh new-thread composer, a string opens that draft. */
   draftId?: string | null;
-  /** Locks normal input while automatic Setup holds the first Turn. */
-  setupBlocked?: boolean;
+  /** Set while this thread's startup has not ended: the editor is inert, and Stop or Esc cancels the startup. */
+  startingThread?: ComposerStartingThread;
   /** When set, the composer is in fork mode; submit creates a forked thread instead of sending. */
   branchFromMessageId?: string;
   /** Preview content of the message being forked from, shown as a quote. */
@@ -280,7 +281,7 @@ export function Composer({
   isNewThread,
   workspaceId,
   draftId,
-  setupBlocked = false,
+  startingThread: startingThreadStartup,
   branchFromMessageId,
   branchFromMessageContent,
   onBranchModeExit,
@@ -423,7 +424,12 @@ export function Composer({
     isAgentRunning,
   });
   const annotationScopeId = surfaceState.annotationScopeId;
-  const isThreadScaffold = surfaceState.isThreadScaffold;
+  const { startingThread, cancelStartup } = useComposerStartup(
+    surfaceState.startingThread,
+    startingThreadStartup,
+    branchFromMessageId !== undefined,
+    composerContainerRef,
+  );
   const contextEntry = useThreadRecord(threadId, (r) => r.context);
   const handoffStatus = useThreadStore((s) =>
     threadId ? getHandoffStatus(getThreadRecord(s.records, threadId)) : undefined,
@@ -553,7 +559,7 @@ export function Composer({
     isNewThread: isNewThread === true,
     branchFromMessageId,
     isAgentRunning,
-    isThreadScaffold,
+    startingThread,
     annotationScopeId,
     form,
     execution,
@@ -649,7 +655,6 @@ export function Composer({
             planPanelOpen,
             isAgentRunning,
             isStopPending,
-            setupBlocked,
             provider,
             planPending,
             queuedSend: Boolean(queuedSend),
@@ -675,7 +680,7 @@ export function Composer({
             selectedTextCommentEditor: form.state.selectedTextCommentEditor,
             unavailableSelectedTextCommentIds,
             hasRetryState,
-            isThreadScaffold: surfaceState.isThreadScaffold,
+            startingThread,
             hasContent: surfaceState.hasContent,
             showInlineComposerOptions,
             attachmentInputRef,
@@ -729,6 +734,7 @@ export function Composer({
             onDetachGoal: agentControls.detachGoal,
             onDetachOrchestration: agentControls.detachOrchestration,
             onStop: handleStop,
+            onCancelStartup: cancelStartup,
             onClearSelectedTextComments: () => setSelectedTextComments([], undefined),
             onOpenSelectedTextCommentSource: (comment) => onOpenSelectedTextCommentSource?.(comment),
             onEditSelectedTextComment: (comment) => setSelectedTextCommentEditor({
