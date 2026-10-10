@@ -355,6 +355,8 @@ interface PendingPermissionEntry {
   routing?: CodexCanonicalEventRouting;
   unanswerable?: boolean;
   replying?: boolean;
+  /** A drain that skipped this entry mid-write; a failed write settles it with this reason. */
+  deferredDrain?: "session_stopped" | "turn_ended";
   sessionId: string;
   threadId: string;
   body: ApprovalRequestBody;
@@ -2828,8 +2830,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const decision = this.nativeApprovalDecision(choice, response);
     entry.resolve(mapDecisionToCodexResponse(entry.method, decision, entry.params));
     if (!await entry.acknowledged) {
-      // Codex never got the answer, so the turn-end or stop drain must still settle this request.
+      // Codex never got the answer, so a stop or turn end that skipped this write settles it now.
       entry.replying = false;
+      if (entry.deferredDrain) this.drainPending((pending) => pending === entry, entry.deferredDrain);
       return { status: "failed", message: "The answer did not reach Codex" };
     }
     if (!this.pendingPermissions.delete(requestId)) return { status: "not_pending" };
@@ -2866,8 +2869,12 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    */
   private drainPending(predicate: (entry: PendingPermissionEntry) => boolean, reason: "session_stopped" | "turn_ended" = "session_stopped"): void {
     for (const [requestId, entry] of Array.from(this.pendingPermissions)) {
+      if (!predicate(entry)) continue;
       // An answer awaiting its write acknowledgement belongs to resolveApproval, which publishes the real outcome.
-      if (!predicate(entry) || entry.replying) continue;
+      if (entry.replying) {
+        entry.deferredDrain = reason;
+        continue;
+      }
       this.pendingPermissions.delete(requestId);
       const response = mapDecisionToCodexResponse(entry.method, "cancelled", entry.params);
       entry.resolve(response);

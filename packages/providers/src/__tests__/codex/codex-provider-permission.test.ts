@@ -159,7 +159,6 @@ describe("CodexProvider permission flow", () => {
     expect(resolved).toEqual([]);
     nativeRequest.responseWritten?.(delivered);
     expect(await delivery).toEqual(delivered ? { status: "resolved" } : { status: "failed", message: "The answer did not reach Codex" });
-    if (!delivered) provider.stopSession(sessionId).catch(() => undefined);
     await vi.runAllTimersAsync();
     await stopped;
 
