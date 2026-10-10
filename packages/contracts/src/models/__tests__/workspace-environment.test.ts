@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_WORKSPACE_ENVIRONMENT_DOCUMENT,
+  encodeEnvironmentDocument,
   WORKSPACE_ENVIRONMENT_COMMAND_MAX_BYTES,
   WORKSPACE_ENVIRONMENT_SCRIPT_MAX_BYTES,
   WorkspaceEnvironmentCommandSchema,
@@ -23,6 +25,58 @@ const validDocument = {
   actions: [{ id: "opaque-id", name: "Run app", command: validCommand }],
 };
 
+describe("encodeEnvironmentDocument", () => {
+  it("keeps an untouched default at 0.0.1", () => {
+    const encoded = encodeEnvironmentDocument(DEFAULT_WORKSPACE_ENVIRONMENT_DOCUMENT);
+    expect(encoded.document).toEqual({ version: "0.0.1", actions: [] });
+    expect(new TextDecoder().decode(encoded.bytes)).toBe('{"version":"0.0.1","actions":[]}');
+  });
+
+  it("preserves legacy Setup and platform overrides without migrating", () => {
+    const document = {
+      ...validDocument,
+      setup: { default: "bun install", windows: "bun install --frozen-lockfile" },
+    };
+    const encoded = encodeEnvironmentDocument(document);
+    expect(encoded.document).toEqual(document);
+    expect(JSON.parse(new TextDecoder().decode(encoded.bytes))).toEqual(document);
+  });
+
+  it("derives 0.0.1 when a 0.1.0 document has no new fields", () => {
+    const encoded = encodeEnvironmentDocument({ version: "0.1.0", actions: [] });
+    expect(encoded.document).toEqual({ version: "0.0.1", actions: [] });
+    expect(new TextDecoder().decode(encoded.bytes)).toBe('{"version":"0.0.1","actions":[]}');
+  });
+
+  it.each([
+    { icon: "future-tool" },
+    { runOnStartup: true },
+    { runOnStartup: false },
+    { runOnCleanup: true },
+    { runOnCleanup: false },
+    { futureAction: { enabled: false } },
+  ])("writes 0.1.0 for action metadata %j", (metadata) => {
+    const action = { id: "run", name: "Run", command: validCommand, ...metadata };
+    const input = { version: "0.0.1", actions: [action] };
+    const encoded = encodeEnvironmentDocument(input);
+    const expected = { version: "0.1.0", actions: [action] };
+    expect(encoded.document).toEqual(expected);
+    expect(JSON.parse(new TextDecoder().decode(encoded.bytes))).toEqual(expected);
+    expect(input.version).toBe("0.0.1");
+  });
+
+  it("writes 0.1.0 for unknown top-level keys", () => {
+    const encoded = encodeEnvironmentDocument({ version: "0.0.1", actions: [], future: { order: ["run"] } });
+    const expected = { version: "0.1.0", actions: [], future: { order: ["run"] } };
+    expect(encoded.document).toEqual(expected);
+    expect(JSON.parse(new TextDecoder().decode(encoded.bytes))).toEqual(expected);
+  });
+
+  it("rejects promotion while legacy Setup is still present", () => {
+    expect(() => encodeEnvironmentDocument({ ...validDocument, future: true })).toThrow("Move Setup into an action first.");
+  });
+});
+
 describe("workspace environment contracts", () => {
   it("accepts the exact versioned document shape and preserves action ids", () => {
     const result = WorkspaceEnvironmentDocumentSchema().parse(validDocument);
@@ -30,18 +84,67 @@ describe("workspace environment contracts", () => {
     expect(result.actions[0]?.id).toBe("opaque-id");
   });
 
-  it("rejects missing scripts, byte-boundary overflow, null bytes, and unknown keys", () => {
+  it("rejects missing scripts, byte-boundary overflow, null bytes, and unknown command keys", () => {
     expect(WorkspaceEnvironmentCommandSchema().safeParse({}).success).toBe(false);
     expect(WorkspaceEnvironmentCommandSchema().safeParse({ default: "x".repeat(WORKSPACE_ENVIRONMENT_SCRIPT_MAX_BYTES + 1) }).success).toBe(false);
     expect(WorkspaceEnvironmentCommandSchema().safeParse({ default: "é".repeat(Math.floor(WORKSPACE_ENVIRONMENT_SCRIPT_MAX_BYTES / 2) + 1) }).success).toBe(false);
     expect(WorkspaceEnvironmentCommandSchema().safeParse({ default: "ok\0bad" }).success).toBe(false);
     expect(WorkspaceEnvironmentCommandSchema().safeParse({ default: "ok", extra: "no" }).success).toBe(false);
-    expect(WorkspaceEnvironmentDocumentSchema().safeParse({ ...validDocument, extra: true }).success).toBe(false);
-    expect(WorkspaceEnvironmentDocumentSchema().safeParse({ ...validDocument, actions: [{ ...validDocument.actions[0], extra: true }] }).success).toBe(false);
+  });
+
+  it.each(["0.0.1", "0.1.0"])("accepts version %s and preserves unknown document and action keys", (version) => {
+    const document = {
+      version,
+      futureDocument: { enabled: true },
+      actions: [{ id: "run", name: "Run", command: validCommand, futureAction: [1, "two"] }],
+    };
+    expect(WorkspaceEnvironmentDocumentSchema().parse(document)).toEqual(document);
+  });
+
+  it("rejects 0.1.0 Setup with a field-level migration message", () => {
+    const parsed = WorkspaceEnvironmentDocumentSchema().safeParse({ ...validDocument, version: "0.1.0" });
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(workspaceEnvironmentValidationIssues(parsed.error)).toEqual([{
+      path: ["setup"],
+      code: "INVALID_VALUE",
+      reason: "invalid_value",
+      message: "Move Setup into an action first.",
+    }]);
+  });
+
+  it.each(["document", "action"])("counts unknown %s keys toward the 128KB cap", (location) => {
+    const extra = { future: "é".repeat(65_536) };
+    const parsed = WorkspaceEnvironmentDocumentSchema().safeParse({
+      version: "0.1.0",
+      ...(location === "document" ? extra : {}),
+      actions: [{ id: "run", name: "Run", command: validCommand, ...(location === "action" ? extra : {}) }],
+    });
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(workspaceEnvironmentValidationIssues(parsed.error)).toEqual([
+      expect.objectContaining({ path: [], reason: "document_too_large" }),
+    ]);
+  });
+
+  it.each(["future-tool", "a", "a".repeat(32)])("accepts portable icon id %s", (icon) => {
+    const document = { version: "0.1.0", actions: [{ id: "run", name: "Run", command: validCommand, icon }] };
+    expect(WorkspaceEnvironmentDocumentSchema().parse(document)).toEqual(document);
+  });
+
+  it.each(["", "Uppercase", "-tool", "../tool", "a".repeat(33)])("rejects invalid icon id %s", (icon) => {
+    const parsed = WorkspaceEnvironmentDocumentSchema().safeParse({
+      version: "0.1.0", actions: [{ id: "run", name: "Run", command: validCommand, icon }],
+    });
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(workspaceEnvironmentValidationIssues(parsed.error)).toEqual([
+      expect.objectContaining({ path: ["actions", 0, "icon"], reason: "invalid_value" }),
+    ]);
   });
 
   it("returns stable structured reasons for unsupported versions and size limits", () => {
-    const version = WorkspaceEnvironmentDocumentSchema().safeParse({ ...validDocument, version: "9.9.9" });
+    const version = WorkspaceEnvironmentDocumentSchema().safeParse({ ...validDocument, version: "0.2.0" });
     expect(version.success).toBe(false);
     if (!version.success) {
       expect(workspaceEnvironmentValidationIssues(version.error)).toEqual(expect.arrayContaining([

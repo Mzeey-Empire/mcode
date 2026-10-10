@@ -68,11 +68,13 @@ describe("workspace environment RPC", () => {
       params: {
         workspaceId: "workspace-1",
         sourceRevision: null,
-        document: { version: "0.0.1", actions: [], extra: true },
+        document: { version: "0.2.0", actions: [] },
       },
     }), deps);
-    expect(malformed.error?.code).toBe("WORKSPACE_ENVIRONMENT_VALIDATION");
-    expect(malformed.error?.data).toEqual(expect.objectContaining({ issues: expect.any(Array) }));
+    expect(malformed.error?.code).toBe("WORKSPACE_ENVIRONMENT_UNSUPPORTED_VERSION");
+    expect(malformed.error?.data).toEqual(expect.objectContaining({
+      issues: [expect.objectContaining({ path: ["document", "version"], reason: "unsupported_version" })],
+    }));
   });
 
   it("routes storage selection and approval clearing through the workspace environment boundary", async () => {
