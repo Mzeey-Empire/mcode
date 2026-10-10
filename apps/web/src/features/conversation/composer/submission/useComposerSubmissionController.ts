@@ -59,7 +59,7 @@ export interface UseComposerSubmissionControllerOptions {
   isNewThread: boolean;
   branchFromMessageId?: string;
   isAgentRunning: boolean;
-  isThreadScaffold: boolean;
+  startingThread: boolean;
   annotationScopeId?: string;
   form: ComposerFormController;
   execution: ComposerExecutionTargetController;
@@ -79,7 +79,7 @@ export function useComposerSubmissionController({
   isNewThread,
   branchFromMessageId,
   isAgentRunning,
-  isThreadScaffold,
+  startingThread,
   annotationScopeId,
   form,
   execution,
@@ -193,7 +193,7 @@ export function useComposerSubmissionController({
     const submission = await prepareComposerSubmission({
       annotationScopeId,
       form,
-      isThreadScaffold,
+      startingThread,
       discardEmptyEdit: queue.discardEmptyEdit,
       resolvePreviewAnnotations: queue.resolvePreviewAnnotations,
     });
@@ -230,7 +230,7 @@ export function useComposerSubmissionController({
     if (checkoutPending) return "checkout-pending";
     await executePreparedDispatch(submission, target);
     return "complete";
-  }, [annotationScopeId, branchFromMessageId, completeQueued, executePreparedDispatch, execution, form, isAgentRunning, isNewThread, isThreadScaffold, queue, queuePrepared, threadId, workspaceId]);
+  }, [annotationScopeId, branchFromMessageId, completeQueued, executePreparedDispatch, execution, form, isAgentRunning, isNewThread, startingThread, queue, queuePrepared, threadId, workspaceId]);
 
   const submit = useCallback(async () => {
     if (submitInFlightRef.current) return;

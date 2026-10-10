@@ -45,7 +45,7 @@ export function useStartupSetupScript(startup: ThreadStartup | undefined): strin
 }
 
 /**
- * Cancels a live startup until composer Stop and Esc take over cancellation.
+ * Cancels a live startup from the trail, the composer Stop and Esc.
  *
  * Returns no callback once the startup has ended or cancellation is already requested.
  */
@@ -70,6 +70,20 @@ export function useStartupCancel(startup: ThreadStartup | undefined, startupId: 
   if (!id || requested === id) return undefined;
   if (startup && (TERMINAL_STATES.has(startup.state) || startup.cancellation === "requested")) return undefined;
   return cancel;
+}
+
+/**
+ * The composer's starting state, present while the thread's startup has not ended.
+ *
+ * Before the record arrives, a pending startup counts as starting.
+ */
+export function useStartingThread(
+  startup: ThreadStartup | undefined,
+  pending: { readonly startupId: string } | undefined,
+): { readonly onCancel: (() => void) | undefined } | undefined {
+  const onCancel = useStartupCancel(startup, pending?.startupId);
+  if (startup ? TERMINAL_STATES.has(startup.state) : !pending) return undefined;
+  return { onCancel };
 }
 
 /** Opens the automatic setup terminal for a thread in its right panel. */

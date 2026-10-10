@@ -62,7 +62,7 @@ function getComposerLocks(
   startupPending: boolean,
 ) {
   return {
-    isThreadScaffold: Boolean(
+    startingThread: Boolean(
       input.activeThread?.clientPreparing || input.activeThread?.clientError || startupPending,
     ),
     isModelFullyLocked: input.isAgentRunning && !input.branchFromMessageId,

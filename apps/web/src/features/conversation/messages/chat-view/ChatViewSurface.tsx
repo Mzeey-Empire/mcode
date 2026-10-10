@@ -24,12 +24,13 @@ import { useThreadDraftStore, type ThreadDraftPayload } from "@/stores/threadDra
 import { OverviewLayer } from "@/features/thread-overview/overview-layer";
 import { ProjectAutomaticSetupCard, useProjectAutomaticSetup } from "@/features/projects/environment";
 import { ProjectCommandApprovalDialog } from "@/features/projects/environment/ProjectCommandApprovalDialog";
-import { StartupStepsTrail, editStartupSetupScript, openStartupSetupTerminal, useThreadStartup } from "@/features/thread-startup";
+import { StartupStepsTrail, editStartupSetupScript, openStartupSetupTerminal, useStartingThread, useThreadStartup } from "@/features/thread-startup";
 import { useThreadStartupLookup, useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { type WorkspaceThread, type ClientPreparingContext } from "@/lib/workspace-thread";
 import type { PendingStartup } from "@/features/projects/state/workspaceStore";
 import type { SubagentRosterTarget } from "../../narrative";
 import { Composer } from "../../composer/Composer";
+import type { ComposerStartingThread } from "../../composer/useComposerStartup";
 import { SavingDelayedDialog } from "../../saving/SavingDelayedDialog";
 import { TurnSavingNotice } from "../../saving/TurnSavingNotice";
 import { MessageBubble } from "../MessageBubble";
@@ -205,11 +206,13 @@ function PreparingThreadSurface({
   state,
   startup,
   pendingStartup,
+  startingThread,
 }: {
   thread: WorkspaceThread;
   state: ChatViewState;
   startup: ReturnType<typeof useThreadStartup>;
   pendingStartup: PendingStartup | undefined;
+  startingThread: ComposerStartingThread | undefined;
 }) {
   const echoedStartup = useEchoedPendingStartup(thread, pendingStartup);
   const needsSetupRecovery = startupNeedsSetupRecovery(startup);
@@ -218,7 +221,7 @@ function PreparingThreadSurface({
     needsSetupRecovery && thread.mode === "worktree" && thread.worktree_managed === true,
   );
   return (
-    <div className="flex h-full flex-col bg-background" data-testid="thread-preparing-shell">
+    <div className="flex h-full flex-col bg-background" data-testid="thread-preparing-shell" data-thread-view>
       <ThreadHeader state={state} />
       <div className="min-h-0 flex-1 overflow-y-auto pt-4">
         <PreparingTranscriptRow>
@@ -230,7 +233,7 @@ function PreparingThreadSurface({
             : <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={pendingStartup} actions={<StartupAutomaticSetupActions automaticSetup={automaticSetup} thread={thread} startup={startup} pendingStartup={pendingStartup} />} />}
         </PreparingTranscriptRow>
       </div>
-      <Composer threadId={thread.id} workspaceId={state.activeWorkspaceId ?? undefined} />
+      <Composer threadId={thread.id} workspaceId={state.activeWorkspaceId ?? undefined} startingThread={startingThread} />
     </div>
   );
 }
@@ -671,12 +674,12 @@ function ChatMessageStage({ state, interactions, automaticSetup, startupTrail, s
 }
 
 /** Renders the composer and plan question wizard for an active thread. */
-function ActiveThreadComposer({ state, interactions, pendingSelectedTextComment, pendingSelectedTextCommentDeletion, pendingSelectedTextCommentEditor, unavailableSelectedTextCommentIds, setupBlocked }: Pick<ChatViewSurfaceProps, "state" | "interactions" | "pendingSelectedTextComment" | "pendingSelectedTextCommentDeletion" | "pendingSelectedTextCommentEditor" | "unavailableSelectedTextCommentIds"> & { readonly setupBlocked: boolean }) {
+function ActiveThreadComposer({ state, interactions, pendingSelectedTextComment, pendingSelectedTextCommentDeletion, pendingSelectedTextCommentEditor, unavailableSelectedTextCommentIds, startingThread }: Pick<ChatViewSurfaceProps, "state" | "interactions" | "pendingSelectedTextComment" | "pendingSelectedTextCommentDeletion" | "pendingSelectedTextCommentEditor" | "unavailableSelectedTextCommentIds"> & { readonly startingThread: ComposerStartingThread | undefined }) {
   const thread = state.activeThread!;
   return (
     <div data-testid="chat-composer-stage" className="relative flex-shrink-0" style={{ paddingRight: state.overviewPaddingRight }}>
       <PlanQuestionWizard threadId={thread.id} />
-      <Composer threadId={thread.id} workspaceId={state.activeWorkspaceId ?? undefined} branchFromMessageId={state.branchFromMessageId} branchFromMessageContent={state.branchFromMessageContent} selectedTextComment={pendingSelectedTextComment ?? undefined} onSelectedTextCommentConsumed={interactions.onSelectedTextCommentConsumed} selectedTextCommentDeletion={pendingSelectedTextCommentDeletion ?? undefined} onSelectedTextCommentDeletionConsumed={interactions.onSelectedTextCommentDeletionConsumed} selectedTextCommentEditorUpdate={pendingSelectedTextCommentEditor} onSelectedTextCommentEditorUpdateConsumed={interactions.onSelectedTextCommentEditorChangeConsumed} onOpenSelectedTextCommentSource={interactions.onOpenSelectedTextCommentSource} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} onBranchModeExit={interactions.onExitForkMode} setupBlocked={setupBlocked} />
+      <Composer threadId={thread.id} workspaceId={state.activeWorkspaceId ?? undefined} branchFromMessageId={state.branchFromMessageId} branchFromMessageContent={state.branchFromMessageContent} selectedTextComment={pendingSelectedTextComment ?? undefined} onSelectedTextCommentConsumed={interactions.onSelectedTextCommentConsumed} selectedTextCommentDeletion={pendingSelectedTextCommentDeletion ?? undefined} onSelectedTextCommentDeletionConsumed={interactions.onSelectedTextCommentDeletionConsumed} selectedTextCommentEditorUpdate={pendingSelectedTextCommentEditor} onSelectedTextCommentEditorUpdateConsumed={interactions.onSelectedTextCommentEditorChangeConsumed} onOpenSelectedTextCommentSource={interactions.onOpenSelectedTextCommentSource} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} onBranchModeExit={interactions.onExitForkMode} startingThread={startingThread} />
     </div>
   );
 }
@@ -692,7 +695,7 @@ function ConversationTransitionState({ threadId, threadTitle }: { threadId: stri
 }
 
 /** Renders the fully active conversation surface. */
-function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: ReturnType<typeof useThreadStartup> }) {
+function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: ReturnType<typeof useThreadStartup>; readonly startingThread: ComposerStartingThread | undefined }) {
   const {
     state,
     interactions,
@@ -709,6 +712,7 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
     onOpenSubagents,
     dismissedError,
     startup,
+    startingThread,
   } = props;
   const thread = state.activeThread!;
   const automaticSetup = useProjectAutomaticSetup(
@@ -720,7 +724,7 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
   return (
     // The docked card's reserve takes the right gutter's room, so rows and the composer use 24px
     // gutters while docked. That keeps the composer at 520 or wider down to OVERVIEW_DOCK_MIN_CANVAS.
-    <div ref={state.chatPaneRef} className={cn("relative flex h-full flex-col bg-background", state.overviewPaddingRight && "[--chat-gutter:--spacing(6)]")} data-testid="chat-view">
+    <div ref={state.chatPaneRef} className={cn("relative flex h-full flex-col bg-background", state.overviewPaddingRight && "[--chat-gutter:--spacing(6)]")} data-testid="chat-view" data-thread-view>
       <OverviewLayer>
         <ThreadHeader state={state} rename={{ editingThreadId, onEditingThreadIdChange, onSaveTitle: interactions.onSaveTitle }} />
         <ActiveThreadBanners state={state} recovery={recovery} />
@@ -730,7 +734,7 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
         <TurnSavingNotice lostProgress={state.lostProgress} />
         <ChatMessageStage state={state} interactions={interactions} automaticSetup={automaticSetup} startupTrail={startup ? <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={undefined} /> : undefined} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />
         {showCliError && <CliErrorNotice error={state.sessionError!} onDismiss={interactions.onDismissCliError} onOpenSettings={interactions.onOpenSettings} />}
-        <ActiveThreadComposer state={state} interactions={interactions} pendingSelectedTextComment={pendingSelectedTextComment} pendingSelectedTextCommentDeletion={pendingSelectedTextCommentDeletion} pendingSelectedTextCommentEditor={pendingSelectedTextCommentEditor} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} setupBlocked={automaticSetup.snapshot.gate === "blocked"} />
+        <ActiveThreadComposer state={state} interactions={interactions} pendingSelectedTextComment={pendingSelectedTextComment} pendingSelectedTextCommentDeletion={pendingSelectedTextCommentDeletion} pendingSelectedTextCommentEditor={pendingSelectedTextCommentEditor} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} startingThread={startingThread} />
       </OverviewLayer>
     </div>
   );
@@ -749,9 +753,10 @@ export function ChatViewSurface(props: ChatViewSurfaceProps) {
   });
   const startupDismissed = useThreadStartupStore((s) =>
     startupLookup.startup ? s.dismissedStartupIds.has(startupLookup.startup.startupId) : false);
+  const startingThread = useStartingThread(startupLookup.startup, pendingStartup);
   if (!state.activeThreadId) return <NewThreadStartColumn projectName={state.activeWorkspaceName || undefined} workspaceId={state.activeWorkspaceId ?? undefined} draftId={state.activeDraftId} />;
   if (!state.activeThread) return <MissingThreadSurface />;
-  if (shouldKeepPreparingShell(state.activeThread, state, startupLookup.startup, startupLookup.resolving, pendingStartup, startupDismissed)) return <PreparingThreadSurface thread={state.activeThread} state={state} startup={startupLookup.startup} pendingStartup={pendingStartup} />;
+  if (shouldKeepPreparingShell(state.activeThread, state, startupLookup.startup, startupLookup.resolving, pendingStartup, startupDismissed)) return <PreparingThreadSurface thread={state.activeThread} state={state} startup={startupLookup.startup} pendingStartup={pendingStartup} startingThread={startingThread} />;
   // Keeping a cancelled startup's thread dismisses its record, so the trail leaves the transcript too.
-  return <ActiveThreadSurface {...props} startup={startupDismissed ? undefined : startupLookup.startup} />;
+  return <ActiveThreadSurface {...props} startup={startupDismissed ? undefined : startupLookup.startup} startingThread={startingThread} />;
 }

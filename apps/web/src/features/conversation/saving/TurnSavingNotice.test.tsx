@@ -92,7 +92,7 @@ describe("turn saving notice", () => {
       thoughtSegments: [{ text: "Working", startedAt: Date.parse(pending.oldestPendingAt) }] }) });
     render(<ConnectedRuntimeNotice />);
     expect(screen.getByText("Running measure")).toBeInTheDocument();
-    expect(getComposerSendButtonVisualState({ isThreadScaffold: false, isAgentRunning: true, isStopPending: false, hasContent: false })).toBe("stop");
+    expect(getComposerSendButtonVisualState({ startingThread: false, isAgentRunning: true, isStopPending: false, hasContent: false })).toBe("stop");
     const payloads = [{ type: "execution.checkpoint" as const, operationKind: "worker-lost" as const },
       { type: "turn.response-bound" as const, messageId: "interrupted-response", outcome: "interrupted" as const, endedAt: pending.oldestPendingAt },
       { type: "turn.interrupted" as const, endedAt: pending.oldestPendingAt, reason: "Turn interrupted" }];
@@ -109,7 +109,7 @@ describe("turn saving notice", () => {
     expect(record?.thoughtSegments[0]?.endedAt).toBeDefined();
     const running = useThreadStore.getState().runningThreadIds.has(pending.threadId);
     expect(running).toBe(false);
-    expect(getComposerSendButtonVisualState({ isThreadScaffold: false, isAgentRunning: running, isStopPending: false, hasContent: false })).toBe("empty");
+    expect(getComposerSendButtonVisualState({ startingThread: false, isAgentRunning: running, isStopPending: false, hasContent: false })).toBe("empty");
     await act(async () => {
       useThreadStore.getState().handleCanonicalProgress({ phase: "accepted", threadId: pending.threadId, epoch: "old-epoch", from: 3, through: 4,
         events: [{ eventId: "lost-publication", routing: { threadId: pending.threadId, turnId: "turn", executionId: pending.executionId },

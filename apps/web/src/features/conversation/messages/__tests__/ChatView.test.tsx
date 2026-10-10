@@ -169,7 +169,7 @@ vi.mock("@/features/conversation/residency/conversation-residency", async (impor
 
 // Composer and MessageList have deep dependencies; stub them out.
 vi.mock("../../composer/Composer", () => ({
-  Composer: ({ setupBlocked = false }: { readonly setupBlocked?: boolean }) => <button data-testid="composer" disabled={setupBlocked}>Send</button>,
+  Composer: ({ startingThread }: { readonly startingThread?: unknown }) => <button data-testid="composer" disabled={startingThread !== undefined}>Send</button>,
 }));
 
 vi.mock("../MessageList", () => ({
@@ -640,7 +640,6 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const queuedMessage = screen.getByTestId("queued-first-user-message");
     expect(setupBlock.compareDocumentPosition(queuedMessage) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     expect(screen.getByLabelText("Environment setup terminal")).toHaveTextContent("di");
-    expect(screen.getByTestId("composer")).toBeDisabled();
     expect(chatViewTransportMock.getAutomaticSetup).toHaveBeenCalledWith(thread.id);
   });
 
@@ -715,6 +714,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     render(<ChatView />);
 
     expect(screen.getByTestId("thread-preparing-shell")).toBeInTheDocument();
+    expect(screen.getByTestId("composer")).toBeDisabled();
     expect(screen.getAllByTestId("startup-trail")).toHaveLength(1);
     expect(screen.queryByTestId("chat-message-stage")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Environment setup")).toBeNull();
