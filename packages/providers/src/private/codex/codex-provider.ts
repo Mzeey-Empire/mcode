@@ -68,6 +68,7 @@ import {
 import {
   buildCodexInput,
   hasCodexInternalThreadControlMcp,
+  isCodexCompactCommand,
   mapCodexRateLimitsToUsage,
   mergeCodexUsageInfo,
   nativeCollabSpawnThreadIds,
@@ -75,8 +76,8 @@ import {
 } from "./codex-input-mapper.js";
 import { traceCodexIngest } from "./codex-trace.js";
 import type {
-  TurnInputPart,
   CodexNotification,
+  CodexTurnInput,
   CodexTurnOptions,
   CompletedItem,
   SandboxMode,
@@ -374,7 +375,7 @@ interface PreparedCodexTurn {
   threadId: string;
   sandbox: SandboxMode;
   browserPermissionCapability: "observe" | "interact" | "privileged";
-  input: TurnInputPart[];
+  input: CodexTurnInput;
   turnOptions: CodexTurnOptions;
   threadControlEligible: boolean;
 }
@@ -396,7 +397,7 @@ interface CodexSpawnContext {
   resumeFrom: string | undefined;
   sandbox: SandboxMode;
   approvalPolicy: "never" | "on-request";
-  pendingSpawn: { input: string | TurnInputPart[]; turnOptions: CodexTurnOptions; turnExecutionId: string; threadControlEligible: boolean } | undefined;
+  pendingSpawn: { input: CodexTurnInput; turnOptions: CodexTurnOptions; turnExecutionId: string; threadControlEligible: boolean } | undefined;
   stagedExecutionId: string | undefined;
   threadControlEligible: boolean;
   browserAccess: { stage: BrowserAutomationSessionLeaseStage; workspaceId: string; permissionCapability: "observe" | "interact" | "privileged" } | undefined;
@@ -722,7 +723,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private pendingSpawnTurns = new Map<
     string,
     {
-      input: string | TurnInputPart[];
+      input: CodexTurnInput;
       turnOptions: CodexTurnOptions;
       turnExecutionId: string;
       turnId: string;
@@ -1172,7 +1173,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     return sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
   }
 
-  private async resolveCodexTurnInput(request: TurnRequest<"codex">, threadId: string): Promise<TurnInputPart[] | undefined> {
+  private async resolveCodexTurnInput(request: TurnRequest<"codex">, threadId: string): Promise<CodexTurnInput | undefined> {
+    if (isCodexCompactCommand(request.message, request.attachments, request.mentions ?? [])) return { kind: "compact" };
     const skillCatalog = await this.codexSkillCatalog(request.message, request.cwd);
     try {
       return await buildCodexInput(request.message, request.attachments, skillCatalog, request.mentions ?? []);
@@ -1796,7 +1798,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private startStagedCodexTurn(
     context: CodexSpawnContext,
     server: CodexAppServer,
-    staged: { input: string | TurnInputPart[]; turnOptions: CodexTurnOptions; turnExecutionId: string; turnId: string; deliveryAttempt: number; signal: AbortSignal },
+    staged: { input: CodexTurnInput; turnOptions: CodexTurnOptions; turnExecutionId: string; turnId: string; deliveryAttempt: number; signal: AbortSignal },
   ): void {
     const state = this.runtime.get(context.sessionId);
     if (!state || state.server !== server) { this.releasePendingCodexRequest(context.sessionId, staged.signal); return; }
@@ -2496,7 +2498,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     sessionId: string,
     threadId: string,
     server: CodexAppServer,
-    input: string | TurnInputPart[],
+    input: CodexTurnInput,
     turnOptions: CodexTurnOptions | undefined,
     turnExecutionId: string,
     signal: AbortSignal,
@@ -2528,7 +2530,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     sessionId: string,
     threadId: string,
     server: CodexAppServer,
-    input: string | TurnInputPart[],
+    input: CodexTurnInput,
     turnOptions: CodexTurnOptions | undefined,
     turnExecutionId: string,
   ): Promise<void> {
@@ -2589,7 +2591,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private async waitForCodexTurn(
     run: CodexTurnRun,
     server: CodexAppServer,
-    input: string | TurnInputPart[],
+    input: CodexTurnInput,
     turnOptions: CodexTurnOptions | undefined,
     turnExecutionId: string,
     completion: CodexTurnCompletionState,
@@ -2689,7 +2691,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private async sendCodexTurnStart(
     run: CodexTurnRun,
     server: CodexAppServer,
-    input: string | TurnInputPart[],
+    input: CodexTurnInput,
     turnOptions: CodexTurnOptions | undefined,
     turnExecutionId: string,
     completion: CodexTurnCompletionState,
@@ -2698,7 +2700,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     reject: (error: unknown) => void,
   ): Promise<void> {
     try {
-      const turnId = await server.sendTurn(input, turnOptions);
+      const turnId = Array.isArray(input) ? await server.sendTurn(input, turnOptions) : await server.startCompaction();
       if (run.seq !== run.entry.runTurnSeq) return;
       run.entry.turnStartResponsePending = false;
       run.entry.pendingTurnStartNotification = undefined;

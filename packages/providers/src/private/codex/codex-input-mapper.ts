@@ -67,6 +67,18 @@ export async function buildCodexInput(
   return inputs;
 }
 
+/**
+ * Returns whether a message is the bare `/compact` command, typed or picked as
+ * a composer chip. Native compaction takes no input, so any argument,
+ * attachment, or other mention keeps the message as ordinary text rather than
+ * silently dropping it.
+ */
+export function isCodexCompactCommand(message: string, attachments: AttachmentMeta[] | undefined, mentions: readonly MessageMention[]): boolean {
+  return message.trim() === "/compact"
+    && (attachments?.length ?? 0) === 0
+    && mentions.every((mention) => mention.kind === "command" && mention.label === "compact");
+}
+
 /** Returns the native child thread id exposed by a sub-agent activity notification. */
 export function nativeSubAgentThreadId(notification: { method?: string; params?: Record<string, unknown> }): string | undefined {
   if (!isItemLifecycleNotification(notification.method)) return undefined;

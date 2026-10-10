@@ -194,6 +194,14 @@ export interface TurnInterruptParams { threadId: string; turnId: string }
 /** Result returned by the `turn/interrupt` RPC method. */
 export type TurnInterruptResult = Record<string, never>;
 
+/** Parameters for the `thread/compact/start` RPC method. */
+export interface ThreadCompactStartParams { threadId: string }
+/** Result returned by the `thread/compact/start` RPC method. The compaction turn id arrives only on `turn/started`. */
+export type ThreadCompactStartResult = Record<string, never>;
+
+/** Input for one Codex turn: message parts sent with `turn/start`, or a request for native context compaction. */
+export type CodexTurnInput = TurnInputPart[] | { kind: "compact" };
+
 /** Native lifecycle state for a Codex thread goal. */
 export type ThreadGoalStatus = "active" | "paused" | "blocked" | "usageLimited" | "budgetLimited" | "complete";
 
