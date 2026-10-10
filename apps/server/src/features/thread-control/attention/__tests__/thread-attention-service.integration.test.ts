@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { ApprovalRequest, ThreadAttention, TurnOutcome } from "@mcode/contracts";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { ThreadRepo } from "../../persistence/thread-repo.js";
+import { ThreadStore } from "../../persistence/thread-store.js";
 import { createThreadPersistenceTestRuntime } from "../../testing/thread-persistence-test-runtime.js";
 import { ApprovalService } from "../../../agents/approvals/approval-service.js";
 import { TurnSnapshotRepo } from "../../../agents/turns/persistence/turn-snapshot-repo.js";
@@ -12,7 +13,8 @@ import { CanonicalExecutionSemanticWriter } from "../../../agents/canonical/cano
 import { ExecutionWorkerHandler } from "../../../agents/execution/execution-worker-handler.js";
 import { deriveTurnAssistantMessageId } from "../../../agents/turns/turn-assistant-message-id.js";
 import { MessageStore } from "../../../agents/conversation/persistence/message-store.js";
-import { ThreadAttentionService } from "../thread-attention-service.js";
+import { invalidateAttentionOnSettledTurns, ThreadAttentionService } from "../thread-attention-service.js";
+import { notifyCommittedCanonicalEvents, subscribeCommittedCanonicalEvents } from "../../../agents/canonical/committed-canonical-events.js";
 import { approvalWaitingSource } from "../approval-waiting-source.js";
 
 const BEFORE = "2026-10-10T10:00:00.000Z";
@@ -143,6 +145,25 @@ describe("thread attention through real SQLite and the serialized writer", () =>
     expect(t.service.get(t.a.id)?.lastTurn).toEqual({
       sequence: 3, outcome: "completed", endedAt: "2026-10-10T10:02:00.000Z", changedFileCount: null,
     });
+  });
+
+  it("pushes attention once when a saved canonical batch settles a turn", async () => {
+    const t = await fixture();
+    const unsubscribe = invalidateAttentionOnSettledTurns(t.service, subscribeCommittedCanonicalEvents);
+    try {
+      t.settle(3);
+      new ThreadStore(t.database).recordTurnOutcome(t.a.id, "completed", ENDED);
+      expect(t.pushes).toEqual([]);
+      const event = (type: string) => ({ routing: { threadId: t.a.id }, payload: { type } }) as unknown as Parameters<typeof notifyCommittedCanonicalEvents>[0][number];
+      notifyCommittedCanonicalEvents([event("turn.started")]);
+      expect(t.pushes).toEqual([]);
+      notifyCommittedCanonicalEvents([event("message.recorded"), event("turn.completed")]);
+      notifyCommittedCanonicalEvents([event("turn.completed")]);
+      expect(t.pushes).toEqual([{ threadId: t.a.id, waiting: null,
+        lastTurn: { outcome: "completed", endedAt: ENDED, sequence: 3, changedFileCount: null }, seen: { sequence: null, at: null } }]);
+    } finally {
+      unsubscribe();
+    }
   });
 
   it("advances once, returns both marks, and pauses completed status atomically", async () => {

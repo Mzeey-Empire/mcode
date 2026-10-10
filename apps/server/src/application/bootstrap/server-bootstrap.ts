@@ -98,7 +98,8 @@ import { WorkspaceTerminalPreferencesService } from "../../features/terminal/pre
 import { TerminalDiagnosticsService } from "../../features/terminal/diagnostics/terminal-diagnostics-service.js";
 import { MessageRepo } from "../../features/agents/conversation/persistence/message-repo.js";
 import { ThreadRepo } from "../../features/thread-control/persistence/thread-repo.js";
-import { ThreadAttentionService } from "../../features/thread-control/attention/thread-attention-service.js";
+import { invalidateAttentionOnSettledTurns, ThreadAttentionService } from "../../features/thread-control/attention/thread-attention-service.js";
+import { subscribeCommittedCanonicalEvents } from "../../features/agents/canonical/committed-canonical-events.js";
 import { approvalWaitingSource } from "../../features/thread-control/attention/approval-waiting-source.js";
 import { ToolCallRecordRepo } from "../../features/agents/tools/persistence/tool-call-record-repo.js";
 import { ThoughtSegmentRepo } from "../../features/agents/conversation/narrative/persistence/thought-segment-repo.js";
@@ -474,6 +475,7 @@ const threadAttentionService = new ThreadAttentionService(db, databaseWriter, [a
 threadRepo.attention = threadAttentionService;
 turnSnapshotRepo.attention = threadAttentionService;
 snapshotRefPins.attention = threadAttentionService;
+invalidateAttentionOnSettledTurns(threadAttentionService, subscribeCommittedCanonicalEvents);
 const planService = createPlanService(databaseWriter, workerOwnedTurnRuntime, planRepo, planTurnService);
 const reliabilityHarness = createReliabilityHarnessAdapter(databaseWriter, undefined, {
   streamAssistant: (threadId) => agentReliability.streamAssistantText(threadId),

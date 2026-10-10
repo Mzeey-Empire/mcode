@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite";
-import { ThreadAttentionSchema, type ThreadAttention, type ThreadWaitingKind } from "@mcode/contracts";
+import {
+  ThreadAttentionSchema, type CanonicalAgentEventEnvelope, type ThreadAttention, type ThreadWaitingKind,
+} from "@mcode/contracts";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { threadWriteOperations } from "../persistence/thread-write-operations.js";
 
@@ -88,4 +90,20 @@ export class ThreadAttentionService {
       seen: { sequence: row.seenSequence, at: row.seenAt },
     });
   }
+}
+
+const settledTurnEvents = new Set(["turn.completed", "turn.errored", "turn.cancelled", "turn.interrupted"]);
+
+/**
+ * Accepted executions settle through saved canonical batches and never release a committed AgentEvent,
+ * so attention follows the same durable signal every client renders from.
+ */
+export function invalidateAttentionOnSettledTurns(
+  attention: Pick<ThreadAttentionService, "invalidate">,
+  subscribe: (listener: (events: readonly CanonicalAgentEventEnvelope[]) => void) => () => void,
+): () => void {
+  return subscribe((events) => {
+    const settled = new Set(events.flatMap((event) => settledTurnEvents.has(event.payload.type) ? [event.routing.threadId] : []));
+    for (const threadId of settled) attention.invalidate(threadId);
+  });
 }
