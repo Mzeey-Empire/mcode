@@ -4,9 +4,11 @@
  */
 
 import * as NodeFS from "node:fs";
+import * as NodeFSPromises from "node:fs/promises";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { injectable, inject, delay } from "tsyringe";
-import type { Workspace } from "@mcode/contracts";
+import type { Workspace, WorkspaceCreateErrorCode, WorkspaceCreateResult } from "@mcode/contracts";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
@@ -15,6 +17,7 @@ import { logger } from "@mcode/shared";
 import type { GitExecutor } from "../git/execution/index.js";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { projectLifecycleWriteOperations } from "./project-lifecycle-write-operations.js";
+import { isTooBroadFolder } from "./workspace-path.js";
 import { TerminalBackend, TERMINAL_BACKEND_TOKEN } from "../../terminal/backends/terminal-backend.js";
 
 /** Handles workspace creation, rename, listing, and two-phase deletion. */
@@ -31,18 +34,23 @@ export class WorkspaceService {
   ) {}
 
   /**
-   * Create a new workspace, or return the existing one if the path is already registered.
+   * Create a new workspace, or return the existing one (`reused: true`) if the path is already
+   * registered. Rejects a path that is not an absolute, readable, specific folder with a typed
+   * error instead of throwing. The name defaults to the folder name.
    * Detects whether the path is a git repository and stores the result.
    * If a soft-deleted workspace occupies the path and cleanup has finished (no threads
    * remain), it is evicted automatically. If cleanup is still in progress, force-deletes
    * the stale workspace so the user can re-add immediately.
    */
-  async create(name: string, path: string): Promise<Workspace> {
-    const existing = this.workspaceRepo.findByPath(path);
+  async create(name: string | undefined, requestedPath: string): Promise<WorkspaceCreateResult> {
+    const validated = await validateWorkspacePath(requestedPath);
+    if (!validated.ok) return validated;
+    const { path } = validated;
+    const existing = this.workspaceRepo.findByPath(path) ?? await this.findLegacyAlias(path);
     if (existing) {
       const current = await this.writer.execute(projectLifecycleWriteOperations.reuseWorkspace, [existing.id]);
       if (!current) throw new Error("Workspace was deleted while it was being reopened");
-      return current;
+      return { ok: true, workspace: current, reused: true };
     }
 
     // A soft-deleted workspace may still occupy this path. findByPath filters those
@@ -54,7 +62,8 @@ export class WorkspaceService {
     }
 
     const isGitRepo = await this.detectGitRepo(path);
-    return this.workspaceRepo.create(name, path, isGitRepo);
+    const workspace = await this.workspaceRepo.create(name ?? NodePath.basename(path), path, isGitRepo);
+    return { ok: true, workspace, reused: false };
   }
 
   /**
@@ -128,6 +137,18 @@ export class WorkspaceService {
     await this.workspaceRepo.setIsGitRepo(id, isGitRepo);
   }
 
+  /**
+   * Rows registered before paths were canonicalized may hold a symlink, junction, or differently
+   * cased alias of `canonicalPath`. Only runs when the exact lookup misses.
+   */
+  private async findLegacyAlias(canonicalPath: string): Promise<Workspace | null> {
+    for (const workspace of this.workspaceRepo.listAll()) {
+      const resolved = await NodeFSPromises.realpath(workspace.path).catch(() => null);
+      if (resolved === canonicalPath) return workspace;
+    }
+    return null;
+  }
+
   /** Check whether a filesystem path is inside a git repository. */
   private async detectGitRepo(path: string): Promise<boolean> {
     try {
@@ -142,5 +163,44 @@ export class WorkspaceService {
       logger.info("WorkspaceService: path is not a git repo", { path });
       return false;
     }
+  }
+}
+
+function registrationFailure(code: WorkspaceCreateErrorCode, message: string): Extract<WorkspaceCreateResult, { ok: false }> {
+  return { ok: false, error: { code, message } };
+}
+
+async function validateWorkspacePath(requestedPath: string): Promise<
+  { ok: true; path: string } | Extract<WorkspaceCreateResult, { ok: false }>
+> {
+  const expandedPath = requestedPath.replace(/^~(?=$|[\\/])/, NodeOS.homedir());
+  if (!NodePath.isAbsolute(expandedPath)) {
+    return registrationFailure("path_not_absolute", "Choose an absolute folder path.");
+  }
+
+  try {
+    const details = await NodeFSPromises.stat(expandedPath);
+    if (!details.isDirectory()) {
+      return registrationFailure("not_a_directory", "That's a file, not a folder.");
+    }
+    const path = await NodeFSPromises.realpath(expandedPath);
+    if (await isTooBroadFolder(path)) {
+      return registrationFailure("too_broad", "Choose a project folder, not your home folder or a filesystem root.");
+    }
+    await NodeFSPromises.access(path, NodeFS.constants.R_OK);
+    return { ok: true, path };
+  } catch (error) {
+    return registrationFilesystemError(error);
+  }
+}
+
+function registrationFilesystemError(error: unknown): Extract<WorkspaceCreateResult, { ok: false }> {
+  if (!(error instanceof Error) || !("code" in error)) throw error;
+  switch (error.code) {
+    case "ENOENT": return registrationFailure("path_not_found", "This folder doesn't exist.");
+    case "ENOTDIR": return registrationFailure("not_a_directory", "That's a file, not a folder.");
+    case "EACCES":
+    case "EPERM": return registrationFailure("permission_denied", "Mcode can't read this folder.");
+    default: throw error;
   }
 }

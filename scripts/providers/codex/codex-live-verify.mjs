@@ -86,7 +86,8 @@ w(`[ws-rpc] workspaces=${workspaces.length}`);
 let ws_id = workspaces.find((x) => x.name === "codex-trace")?.id;
 if (!ws_id) {
   const created = await rpc("workspace.create", { name: "codex-trace", path: TRACE_CWD });
-  ws_id = created.id;
+  if (!created.ok) throw new Error(`Workspace registration failed (${created.error.code}): ${created.error.message}`);
+  ws_id = created.workspace.id;
   w(`[ws-rpc] created workspace ${ws_id}`);
 } else {
   w(`[ws-rpc] reusing workspace ${ws_id}`);

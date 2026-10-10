@@ -102,7 +102,9 @@ export async function createThread(run) {
   const workspaces = await run.socket.rpc('workspace.list', {});
   let workspace = workspaces.find((item) => NodePath.resolve(item.path).toLowerCase() === fixturePath.toLowerCase());
   if (!workspace) {
-    workspace = await run.socket.rpc('workspace.create', { name: 'Live durability fixture', path: fixturePath });
+    const created = await run.socket.rpc('workspace.create', { name: 'Live durability fixture', path: fixturePath });
+    if (!created.ok) throw new Error(`Workspace registration failed (${created.error.code}): ${created.error.message}`);
+    workspace = created.workspace;
     run.createdWorkspace = workspace.id;
   }
   run.thread = await run.socket.rpc('agent.createAndSend', {

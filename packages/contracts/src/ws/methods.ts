@@ -597,6 +597,47 @@ const workspaceEnvironmentActionMethods = (): Record<
 
 type WsMethodDefinition = { params: z.ZodTypeAny; result: z.ZodTypeAny };
 
+/** Reasons a folder cannot be registered as a workspace. */
+export const WorkspaceCreateErrorCodeSchema = lazySchema(() => z.enum([
+  "path_not_absolute",
+  "path_not_found",
+  "not_a_directory",
+  "too_broad",
+  "permission_denied",
+]));
+
+/** Stable registration failure codes for client-side copy. */
+export type WorkspaceCreateErrorCode = z.infer<ReturnType<typeof WorkspaceCreateErrorCodeSchema>>;
+
+/** Registration either opens a workspace or explains why the folder is invalid. */
+export const WorkspaceCreateResultSchema = lazySchema(() => z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), workspace: WorkspaceSchema(), reused: z.boolean() }),
+  z.object({
+    ok: z.literal(false),
+    error: z.object({ code: WorkspaceCreateErrorCodeSchema(), message: z.string().min(1).max(512) }),
+  }),
+]));
+
+/** Result of registering or reopening a workspace folder. */
+export type WorkspaceCreateResult = z.infer<ReturnType<typeof WorkspaceCreateResultSchema>>;
+
+/** One folder listing for the add-project folder picker. */
+export const FilesystemBrowseResultSchema = lazySchema(() => z.object({
+  path: z.string(),
+  parent: z.string().nullable(),
+  entries: z.array(z.object({ name: z.string(), isDir: z.boolean() })),
+  /**
+   * What the requested path names on disk. Only `folder` lists the path itself; `file` lists its
+   * folder and `missing` lists the nearest existing ancestor.
+   */
+  requestedPath: z.enum(["folder", "file", "missing"]),
+  /** The listed folder is home or a filesystem root, which `workspace.create` refuses. */
+  isTooBroad: z.boolean(),
+}));
+
+/** Result of browsing a folder in the add-project folder picker. */
+export type FilesystemBrowseResult = z.infer<ReturnType<typeof FilesystemBrowseResultSchema>>;
+
 /** All WebSocket methods with runtime-validating parameter and result schemas. */
 export const WS_METHODS = lazySchema(() => ({
   /** Registers this WebSocket as a visible-browser automation host. */
@@ -661,8 +702,11 @@ export const WS_METHODS = lazySchema(() => ({
     result: z.array(WorkspaceSchema()),
   },
   "workspace.create": {
-    params: z.object({ name: z.string(), path: z.string() }),
-    result: WorkspaceSchema(),
+    params: z.object({
+      path: z.string().trim().min(1).max(4096),
+      name: z.string().trim().min(1).max(120).optional(),
+    }),
+    result: WorkspaceCreateResultSchema(),
   },
   /** Rename a workspace without changing its filesystem path. */
   "workspace.rename": {
@@ -719,12 +763,7 @@ export const WS_METHODS = lazySchema(() => ({
   /** Browse the host filesystem starting at the given path, for the folder picker. */
   "filesystem.browse": {
     params: z.object({ path: z.string() }),
-    result: z.object({
-      path: z.string(),
-      parent: z.string().nullable(),
-      entries: z.array(z.object({ name: z.string(), isDir: z.boolean() })),
-      isExactDirectory: z.boolean(),
-    }),
+    result: FilesystemBrowseResultSchema(),
   },
   "thread.list": {
     params: z.object({ workspaceId: z.string() }),

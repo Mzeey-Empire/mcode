@@ -133,39 +133,43 @@ describe("CommandPalette", () => {
     expect(mocks.palette.close).toHaveBeenCalledOnce();
   });
 
-  it("shows the enabled add-project tooltip and confirms the selected folder", async () => {
+  it("adds the browsed folder from the Add chip", () => {
     const confirm = vi.fn();
     mocks.palette.query = "~/project";
     mocks.palette.pendingConfirm = confirm;
-    const user = userEvent.setup();
 
     render(<CommandPalette />);
 
-    const addProject = screen.getByTestId("palette-add-folder");
-    await user.hover(addProject.parentElement!);
-    await waitFor(() => {
-      expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveTextContent(
-        "Add this folder as a project",
-      );
-    });
-
-    fireEvent.click(addProject);
+    const add = screen.getByRole("button", { name: "Add project" });
+    expect(add).toHaveTextContent("AddCtrl Enter");
+    fireEvent.click(add);
     expect(confirm).toHaveBeenCalledOnce();
   });
 
-  it("shows the disabled add-project tooltip while keeping the action unavailable", async () => {
-    mocks.palette.query = "~/project";
-    const user = userEvent.setup();
+  it("disables the Add chip when the browsed folder cannot be added", () => {
+    mocks.palette.query = "~/";
 
     render(<CommandPalette />);
 
-    const addProject = screen.getByTestId("palette-add-folder");
-    expect(addProject).toBeDisabled();
-    await user.hover(addProject.parentElement!);
-    await waitFor(() => {
-      expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveTextContent(
-        "Choose a folder before adding a project",
-      );
-    });
+    expect(screen.getByRole("button", { name: "Add project" })).toBeDisabled();
+  });
+
+  it("swaps the search icon for a back arrow that leaves the path", () => {
+    mocks.palette.viewStack = [{ kind: "root" }, { kind: "sources" }];
+    mocks.palette.query = "~/";
+
+    render(<CommandPalette />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(mocks.palette.setQuery).toHaveBeenCalledWith("");
+  });
+
+  it("shows neither the back arrow nor the Add chip outside a path", () => {
+    mocks.palette.viewStack = [{ kind: "root" }, { kind: "sources" }];
+
+    render(<CommandPalette />);
+
+    expect(screen.queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add project" })).not.toBeInTheDocument();
   });
 });

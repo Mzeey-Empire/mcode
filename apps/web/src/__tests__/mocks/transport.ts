@@ -104,7 +104,7 @@ export const mockTransport: McodeTransport = {
   respondToBrowserAutomationRequest: vi.fn().mockResolvedValue(undefined),
   heartbeatBrowserAutomationHost: vi.fn().mockResolvedValue(undefined),
   cancelBrowserAutomationRequest: vi.fn().mockResolvedValue(undefined),
-  createWorkspace: vi.fn(),
+  createWorkspace: vi.fn<McodeTransport["createWorkspace"]>(),
   listWorkspaces: vi.fn().mockResolvedValue([]),
   renameWorkspace: vi.fn().mockResolvedValue(createMockWorkspace()),
   readWorkspaceEnvironment: vi.fn().mockResolvedValue({
@@ -144,7 +144,7 @@ export const mockTransport: McodeTransport = {
   pinWorkspace: vi.fn().mockResolvedValue(undefined),
   removeRecent: vi.fn().mockResolvedValue(undefined),
   enrichWorkspaces: vi.fn().mockResolvedValue({ items: [] }),
-  filesystemBrowse: vi.fn().mockResolvedValue({ path: "/", parent: null, entries: [], isExactDirectory: true }),
+  filesystemBrowse: vi.fn().mockResolvedValue({ path: "/", parent: null, entries: [], requestedPath: "folder", isTooBroad: false }),
   createThread: vi.fn(),
   listThreads: vi.fn().mockResolvedValue([]),
   listRecentThreads: vi.fn().mockResolvedValue([]),

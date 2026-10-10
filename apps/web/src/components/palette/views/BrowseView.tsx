@@ -1,24 +1,45 @@
-import { useState, useEffect, useCallback, useMemo, useReducer } from "react";
-import { Folder, ArrowUp } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo, useReducer, useRef } from "react";
+import { ChevronRight, Folder } from "lucide-react";
+import type { FilesystemBrowseResult, WorkspaceCreateErrorCode } from "@mcode/contracts";
 import { CommandGroup, CommandItem, CommandList, CommandEmpty } from "@/components/ui/command";
 import { Button } from "@/components/ui/button";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { getTransport } from "@/transport";
-import { isMac } from "@/lib/platform";
-import { Kbd } from "@/components/ui/kbd";
+import { isMac, isWindows } from "@/lib/platform";
 import {
   splitBrowseQuery,
   filterBrowseEntries,
   getPaletteMode,
 } from "../CommandPalette.logic";
+import { PaletteFooterHints, type PaletteHint } from "../PaletteFooterHints";
 
-interface BrowseResult {
-  path: string;
-  parent: string | null;
-  entries: { name: string; isDir: boolean }[];
-  isExactDirectory: boolean;
-}
+type BrowseResult = FilesystemBrowseResult;
+
+const BROWSE_HINTS: readonly PaletteHint[] = [
+  { keys: ["↑", "↓"], label: "Navigate" },
+  { keys: ["Enter"], label: "Open" },
+  { keys: ["Alt", "↑"], label: "Parent" },
+  { keys: ["Esc"], label: "Close" },
+];
+
+const REGISTRATION_ERROR_COPY: Record<WorkspaceCreateErrorCode, string> = {
+  path_not_absolute: "Type the full path to the folder.",
+  path_not_found: "This folder doesn't exist.",
+  not_a_directory: "That's a file, not a folder.",
+  too_broad: "Pick a project folder, not your home folder or a drive.",
+  permission_denied: "Mcode can't read this folder.",
+};
+
+const RESOLUTION_WARNING_COPY: Record<Exclude<BrowseResult["requestedPath"], "folder">, string> = {
+  missing: REGISTRATION_ERROR_COPY.path_not_found,
+  file: REGISTRATION_ERROR_COPY.not_a_directory,
+};
+
+// The workspace store keeps the raw failure; transport and server messages are not user copy.
+const UNEXPECTED_ADD_ERROR_COPY = "Mcode couldn't add this folder. Try again.";
+
+const FILE_MANAGER_NAME = isWindows ? "File Explorer" : isMac ? "Finder" : "Files";
 
 type BrowseDirectoryState =
   | { readonly requestKey: string; readonly result: BrowseResult; readonly error: null }
@@ -38,11 +59,6 @@ function browseDirectoryReducer(
   return { requestKey: action.requestKey, result: null, error: "Could not browse this path." };
 }
 
-interface BrowseCapabilities {
-  canAddCurrentDirectory: boolean;
-  canAscend: boolean;
-}
-
 /**
  * Filesystem browser rendered inside the unified palette when the input
  * query is a path (~/, /foo, ./, ../, C:\…) or the bare `/` drives trigger.
@@ -53,7 +69,9 @@ interface BrowseCapabilities {
  *   client-side substring filter against the returned entries.
  * - `Enter` on a highlighted folder appends its name + a trailing `/` to the
  *   query, descending into it.
- * - `Cmd/Ctrl+Enter` adds an exact, explicitly chosen directory as a project.
+ * - `Cmd/Ctrl+Enter` adds an exact, explicitly chosen directory as a project, unless it is home
+ *   or a filesystem root.
+ * - On desktop, the footer opens the native folder dialog and adds the chosen folder.
  */
 export function BrowseView() {
   const query = useCommandPaletteStore((state) => state.query);
@@ -68,7 +86,7 @@ export function BrowseView() {
   const { directoryPath, leafFilter } = getBrowseQueryParts(query, isDrivesMode);
   const [browseAttempt, setBrowseAttempt] = useState(0);
   const { result, loading, error } = useBrowseDirectory(directoryPath, browseAttempt);
-  const { addError, isAdding, handleAdd } = useBrowseAddAction({
+  const { addError, canAdd, handleAdd, handlePickFolder } = useBrowseAddAction({
     query,
     leafFilter,
     isDrivesMode,
@@ -89,18 +107,10 @@ export function BrowseView() {
     () => getFilteredEntries(result, leafFilter),
     [result, leafFilter],
   );
-  const { canAddCurrentDirectory, canAscend } = getBrowseCapabilities({
-    query,
-    leafFilter,
-    isDrivesMode,
-    result,
-    loading,
-    error,
-    isAdding,
-  });
+  const canAscend = Boolean(!isDrivesMode && leafFilter === "" && result?.parent);
 
   useRegisteredBrowseActions({
-    canAddCurrentDirectory,
+    canAddCurrentDirectory: canAdd,
     handleAdd,
     canAscend,
     handleAscend,
@@ -117,13 +127,14 @@ export function BrowseView() {
         isDrivesMode={isDrivesMode}
         leafFilter={leafFilter}
         filteredEntries={filteredEntries}
-        canAscend={canAscend}
         onSelect={handleSelect}
-        onAscend={handleAscend}
       />
       <BrowseError error={error} onRetry={() => setBrowseAttempt((attempt) => attempt + 1)} />
-      <BrowseAddError addError={addError} onRetry={handleAdd} />
-      <BrowseShortcuts canAscend={canAscend} canAddCurrentDirectory={canAddCurrentDirectory} />
+      <BrowseAddError addError={addError} />
+      <PaletteFooterHints
+        hints={BROWSE_HINTS}
+        trailing={window.desktopBridge ? <OpenInFileManager onClick={handlePickFolder} /> : null}
+      />
     </>
   );
 }
@@ -163,39 +174,7 @@ function getFilteredEntries(result: BrowseResult | null, leafFilter: string) {
   return filterBrowseEntries(result.entries, leafFilter);
 }
 
-function getBrowseCapabilities({
-  query,
-  leafFilter,
-  isDrivesMode,
-  result,
-  loading,
-  error,
-  isAdding,
-}: {
-  query: string;
-  leafFilter: string;
-  isDrivesMode: boolean;
-  result: BrowseResult | null;
-  loading: boolean;
-  error: string | null;
-  isAdding: boolean;
-}): BrowseCapabilities {
-  return {
-    canAddCurrentDirectory: canAddCurrentDirectory({
-      query,
-      leafFilter,
-      isDrivesMode,
-      result,
-      loading,
-      error,
-      isAdding,
-    }),
-    canAscend: Boolean(!isDrivesMode && leafFilter === "" && result?.parent),
-  };
-}
-
 function canAddCurrentDirectory({
-  query,
   leafFilter,
   isDrivesMode,
   result,
@@ -203,7 +182,6 @@ function canAddCurrentDirectory({
   error,
   isAdding,
 }: {
-  query: string;
   leafFilter: string;
   isDrivesMode: boolean;
   result: BrowseResult | null;
@@ -211,16 +189,18 @@ function canAddCurrentDirectory({
   error: string | null;
   isAdding: boolean;
 }): boolean {
-  const isHomeRoot = query === "~" || query === "~/" || query === "~\\";
   return Boolean(
     !isDrivesMode &&
-      !isHomeRoot &&
       !loading &&
       !error &&
       !isAdding &&
       leafFilter === "" &&
-      result?.isExactDirectory,
+      isAddableFolder(result),
   );
+}
+
+function isAddableFolder(result: BrowseResult | null): boolean {
+  return Boolean(result?.requestedPath === "folder" && !result.isTooBroad);
 }
 
 function useBrowseAddAction({
@@ -240,17 +220,25 @@ function useBrowseAddAction({
   result: BrowseResult | null;
   loading: boolean;
   error: string | null;
-  createWorkspace: (name: string, path: string) => Promise<{ id: string }>;
+  createWorkspace: ReturnType<typeof useWorkspaceStore.getState>["createWorkspace"];
   beginNewThread: (workspaceId?: string | null) => void;
   close: () => void;
 }) {
   const [addErrorState, setAddErrorState] = useState<{
     readonly query: string;
     readonly message: string;
+    readonly rejectedPath: string | null;
   } | null>(null);
   const [isAdding, setIsAdding] = useState(false);
-  const isCurrentDirectoryAddable = canAddCurrentDirectory({
-    query,
+  // Set synchronously so a second Add or dialog pick cannot start before the first re-renders.
+  const addInFlight = useRef(false);
+  // A rejection belongs to the path that produced it; returning to that path later re-checks it.
+  if (addErrorState && addErrorState.query !== query) setAddErrorState(null);
+  const currentError = addErrorState?.query === query ? addErrorState : null;
+  const addError = currentError?.message ?? null;
+  // The listing that made this folder addable is stale once the server rejects it.
+  const isRejected = currentError !== null && currentError.rejectedPath === result?.path;
+  const isCurrentDirectoryAddable = !isRejected && canAddCurrentDirectory({
     leafFilter,
     isDrivesMode,
     result,
@@ -259,26 +247,40 @@ function useBrowseAddAction({
     isAdding,
   });
 
-  const addError = addErrorState?.query === query ? addErrorState.message : null;
-
-  const handleAdd = useCallback(async () => {
-    if (!isCurrentDirectoryAddable || !result) return;
-    const target = result.path;
-    const name = target.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "Untitled";
-    setAddErrorState(null);
-    setIsAdding(true);
+  // A reused registration opens the existing project the same way a new one does.
+  const addFolder = useCallback(async (choosePath: () => Promise<string | null | undefined>) => {
+    if (addInFlight.current) return;
+    addInFlight.current = true;
     try {
-      const workspace = await createWorkspace(name, target);
-      beginNewThread(workspace.id);
+      const path = await choosePath();
+      if (!path) return;
+      setAddErrorState(null);
+      setIsAdding(true);
+      const created = await createWorkspace(undefined, path);
+      if (!created.ok) {
+        setAddErrorState({ query, message: REGISTRATION_ERROR_COPY[created.error.code], rejectedPath: path });
+        return;
+      }
+      beginNewThread(created.workspace.id);
       close();
     } catch {
-      setAddErrorState({ query, message: "Could not add this folder. Try again." });
+      setAddErrorState({ query, message: UNEXPECTED_ADD_ERROR_COPY, rejectedPath: null });
     } finally {
+      addInFlight.current = false;
       setIsAdding(false);
     }
-  }, [beginNewThread, close, createWorkspace, isCurrentDirectoryAddable, query, result]);
+  }, [beginNewThread, close, createWorkspace, query]);
 
-  return { addError, isAdding, handleAdd };
+  const handleAdd = useCallback(async () => {
+    if (isCurrentDirectoryAddable && result) await addFolder(async () => result.path);
+  }, [addFolder, isCurrentDirectoryAddable, result]);
+
+  const handlePickFolder = useCallback(
+    () => addFolder(async () => window.desktopBridge?.showOpenDialog({ title: "Add a project folder" })),
+    [addFolder],
+  );
+
+  return { addError, canAdd: isCurrentDirectoryAddable, handleAdd, handlePickFolder };
 }
 
 function useBrowseNavigation({
@@ -351,9 +353,7 @@ function BrowseList({
   isDrivesMode,
   leafFilter,
   filteredEntries,
-  canAscend,
   onSelect,
-  onAscend,
 }: {
   loading: boolean;
   error: string | null;
@@ -361,12 +361,18 @@ function BrowseList({
   isDrivesMode: boolean;
   leafFilter: string;
   filteredEntries: BrowseResult["entries"];
-  canAscend: boolean;
   onSelect: (entryName: string) => void;
-  onAscend: () => void;
 }) {
   return (
-    <CommandList className="max-h-[360px] overflow-y-auto py-2">
+    <CommandList className="max-h-80">
+      <BrowseEntries
+        error={error}
+        result={result}
+        isDrivesMode={isDrivesMode}
+        leafFilter={leafFilter}
+        filteredEntries={filteredEntries}
+        onSelect={onSelect}
+      />
       <BrowseMessages
         loading={loading}
         error={error}
@@ -374,16 +380,6 @@ function BrowseList({
         isDrivesMode={isDrivesMode}
         leafFilter={leafFilter}
         filteredEntries={filteredEntries}
-      />
-      <BrowseEntries
-        error={error}
-        result={result}
-        isDrivesMode={isDrivesMode}
-        leafFilter={leafFilter}
-        filteredEntries={filteredEntries}
-        canAscend={canAscend}
-        onSelect={onSelect}
-        onAscend={onAscend}
       />
     </CommandList>
   );
@@ -411,7 +407,7 @@ function BrowseMessages({
       <BrowseResolutionWarning
         loading={loading}
         error={error}
-        isExactDirectory={result?.isExactDirectory}
+        requestedPath={result?.requestedPath}
         isDrivesMode={isDrivesMode}
       />
       <BrowseEmptyMessage
@@ -438,19 +434,19 @@ function BrowsePathErrorMessage({ error }: { error: string | null }) {
 function BrowseResolutionWarning({
   loading,
   error,
-  isExactDirectory,
+  requestedPath,
   isDrivesMode,
 }: {
   loading: boolean;
   error: string | null;
-  isExactDirectory: boolean | undefined;
+  requestedPath: BrowseResult["requestedPath"] | undefined;
   isDrivesMode: boolean;
 }) {
-  if (loading || error || isExactDirectory !== false || isDrivesMode) return null;
+  if (loading || error || !requestedPath || requestedPath === "folder" || isDrivesMode) return null;
 
   return (
     <div data-testid="browse-resolution-warning" className="mx-3 mb-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning" role="alert">
-      This path is not a folder. Choose a listed folder or revise the path.
+      {RESOLUTION_WARNING_COPY[requestedPath]}
     </div>
   );
 }
@@ -483,50 +479,45 @@ function BrowseEntries({
   isDrivesMode,
   leafFilter,
   filteredEntries,
-  canAscend,
   onSelect,
-  onAscend,
 }: {
   error: string | null;
   result: BrowseResult | null;
   isDrivesMode: boolean;
   leafFilter: string;
   filteredEntries: BrowseResult["entries"];
-  canAscend: boolean;
   onSelect: (entryName: string) => void;
-  onAscend: () => void;
 }) {
   if (error) return null;
 
   return (
-    <CommandGroup heading={isDrivesMode ? "Drives" : "Folders"} className="px-2 pb-1">
-      {canAscend && result?.parent && leafFilter === "" && (
-        <CommandItem
-          key="__parent__"
-          value="__parent__"
-          keywords={[".."]}
-          onSelect={onAscend}
-          className="h-[40px] gap-3 px-[12px] text-body-small text-ink/85"
-        >
-          <ArrowUp size={14} className="shrink-0 text-primary/80" />
-          <span className="font-mono">..</span>
-          <span className="ml-auto text-caption text-muted/55">Parent folder</span>
-        </CommandItem>
-      )}
+    <CommandGroup heading={getEntriesHeading(result, isDrivesMode, leafFilter)}>
       {filteredEntries.map((entry) => (
         <CommandItem
           key={entry.name}
           value={entry.name}
           keywords={[entry.name]}
           onSelect={() => onSelect(entry.name)}
-          className="h-[40px] gap-3 px-[12px] text-body-small"
+          className="group/row gap-2 px-2 py-1.5 text-body-small"
         >
-          <Folder size={15} className="shrink-0 text-muted/70" />
-          <span className="text-fade text-ink">{entry.name}</span>
+          <Folder aria-hidden className="size-[1.4rem] shrink-0 text-muted group-aria-selected/row:text-ink" strokeWidth={1.5} />
+          <span className="text-fade text-ink group-aria-selected/row:font-medium">{entry.name}</span>
+          <ChevronRight aria-hidden className="ml-auto hidden size-[1.4rem] shrink-0 text-muted group-aria-selected/row:block" strokeWidth={1.5} />
         </CommandItem>
       ))}
     </CommandGroup>
   );
+}
+
+// Naming the folder only once it can be added tells the user which folder Add would register.
+function getEntriesHeading(result: BrowseResult | null, isDrivesMode: boolean, leafFilter: string): string {
+  if (isDrivesMode) return "Drives";
+  if (leafFilter !== "" || !isAddableFolder(result)) return "Folders";
+  return `Folders in ${folderName(result?.path ?? "")}`;
+}
+
+function folderName(path: string): string {
+  return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path;
 }
 
 function BrowseError({ error, onRetry }: { error: string | null; onRetry: () => void }) {
@@ -542,37 +533,26 @@ function BrowseError({ error, onRetry }: { error: string | null; onRetry: () => 
   );
 }
 
-function BrowseAddError({ addError, onRetry }: { addError: string | null; onRetry: () => void }) {
+function BrowseAddError({ addError }: { addError: string | null }) {
   if (!addError) return null;
 
   return (
-    <div data-testid="browse-add-error" className="flex items-center justify-between gap-3 border-t border-border/60 px-4 py-2 text-xs" role="alert">
-      <span className="text-destructive">{addError}</span>
-      <Button type="button" size="compact" variant="ghost" onClick={onRetry}>
-        Retry
-      </Button>
-    </div>
+    <p data-testid="browse-add-error" role="alert" className="px-2.5 pt-1 pb-1.5 text-caption text-destructive">
+      {addError}
+    </p>
   );
 }
 
-function BrowseShortcuts({
-  canAscend,
-  canAddCurrentDirectory,
-}: BrowseCapabilities) {
+function OpenInFileManager({ onClick }: { onClick: () => void }) {
   return (
-    <div
-      data-testid="browse-shortcuts"
-      className="hidden min-h-[44px] shrink-0 items-center justify-between gap-3 border-t border-border/60 bg-hover/20 px-[16px] py-[10px] text-caption text-muted/75 sm:flex"
+    <Button
+      type="button"
+      variant="ghost"
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onClick}
+      className="h-6 rounded-badge px-1.5 text-caption text-muted hover:text-ink"
     >
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="flex shrink-0 items-center gap-1.5"><Kbd>Enter</Kbd> Open folder</span>
-        {canAscend && <span className="flex shrink-0 items-center gap-1.5"><Kbd>Alt+↑</Kbd> Back</span>}
-      </div>
-      {canAddCurrentDirectory && (
-        <span className="flex shrink-0 items-center gap-1.5">
-          <Kbd>{isMac ? "⌘+Enter" : "Ctrl+Enter"}</Kbd> Add project
-        </span>
-      )}
-    </div>
+      Open in {FILE_MANAGER_NAME}
+    </Button>
   );
 }

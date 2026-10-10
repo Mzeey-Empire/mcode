@@ -10,6 +10,7 @@ import {
   ProviderIdSchema,
   type ChecksStatus,
   type CreateAndSendResult,
+  type WorkspaceCreateResult,
   type MessageMention,
   type PreviewAnnotationBundle,
   type SelectedTextComment,
@@ -609,7 +610,7 @@ interface WorkspaceState {
 
   // Workspace actions
   loadWorkspaces: () => Promise<void>;
-  createWorkspace: (name: string, path: string) => Promise<Workspace>;
+  createWorkspace: (name: string | undefined, path: string) => Promise<WorkspaceCreateResult>;
   /** Rename a workspace and refresh its local record. */
   renameWorkspace: (id: string, name: string) => Promise<void>;
   deleteWorkspace: (id: string) => Promise<void>;
@@ -1139,7 +1140,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   createWorkspace: async (name, path) => {
     set({ error: null });
     try {
-      const workspace = await getTransport().createWorkspace(name, path);
+      const result = await getTransport().createWorkspace(name, path);
+      // A rejected folder is an expected outcome the caller shows inline, not a store error.
+      if (!result.ok) return result;
+      const { workspace } = result;
       // The server is idempotent on path: re-adding an existing folder returns
       // the live workspace (bumped to the top server-side). Dedupe by id before
       // prepending so a re-add moves the existing entry to the front instead of
@@ -1150,7 +1154,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           ...state.workspaces.filter((w) => w.id !== workspace.id),
         ],
       }));
-      return workspace;
+      return result;
     } catch (e) {
       set({ error: String(e) });
       throw e;

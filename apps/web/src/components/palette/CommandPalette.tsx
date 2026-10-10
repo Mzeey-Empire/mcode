@@ -1,10 +1,10 @@
-import { useEffect, type KeyboardEventHandler } from "react";
+import { useEffect, type KeyboardEventHandler, type MouseEvent } from "react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { Command as CommandPrimitive } from "cmdk";
-import { Plus, SearchIcon } from "lucide-react";
+import { ArrowLeft, SearchIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Command } from "@/components/ui/command";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { isMac } from "@/lib/platform";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { setContext } from "@/lib/context-tracker";
 import { RootView } from "./views/RootView";
@@ -149,6 +149,7 @@ export function CommandPalette() {
                 }
               }}
               onAddClick={() => pendingConfirm?.()}
+              onBack={() => setQuery("")}
             />
 
             <PaletteViewContent browseMode={browseMode} top={top} />
@@ -159,10 +160,11 @@ export function CommandPalette() {
   );
 }
 
-/**
- * Input row with the search icon on the left and the browse confirmation
- * action on the right when a folder path is active.
- */
+// Clicking a path-row control must not blur the input, or cmdk drops its highlighted row.
+function keepInputFocus(event: MouseEvent): void {
+  event.preventDefault();
+}
+
 function PaletteInput({
   placeholder,
   query,
@@ -173,6 +175,7 @@ function PaletteInput({
   modeLabel,
   onKeyDown,
   onAddClick,
+  onBack,
 }: {
   placeholder: string;
   query: string;
@@ -183,15 +186,30 @@ function PaletteInput({
   modeLabel: string;
   onKeyDown: KeyboardEventHandler<HTMLInputElement>;
   onAddClick: () => void;
+  onBack: () => void;
 }) {
   return (
     <>
       <div
         data-slot="palette-input-wrapper"
         data-palette-mode={modeLabel}
-        className="flex h-[3.4rem] shrink-0 items-center gap-2 px-2.5"
+        className={cn("flex h-[3.4rem] shrink-0 items-center", browseMode ? "gap-1 px-1" : "gap-2 px-2.5")}
       >
-        <SearchIcon aria-hidden className="size-[1.4rem] shrink-0 text-muted" strokeWidth={1.5} />
+        {browseMode ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-inline-sm"
+            aria-label="Back"
+            className="rounded-badge"
+            onMouseDown={keepInputFocus}
+            onClick={onBack}
+          >
+            <ArrowLeft aria-hidden className="size-[1.4rem]" strokeWidth={1.5} />
+          </Button>
+        ) : (
+          <SearchIcon aria-hidden className="size-[1.4rem] shrink-0 text-muted" strokeWidth={1.5} />
+        )}
         <CommandPrimitive.Input
           autoFocus
           data-slot="palette-input"
@@ -206,33 +224,20 @@ function PaletteInput({
           )}
         />
         {browseMode && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <span className="inline-flex shrink-0">
-                  <Button
-                    type="button"
-                    variant="default"
-                    size="compact"
-                    data-testid="palette-add-folder"
-                    disabled={!canAdd}
-                    onMouseDown={(e) => {
-                      // Prevent the input from losing focus, which would dismiss cmdk highlight.
-                      e.preventDefault();
-                    }}
-                    onClick={onAddClick}
-                    className="h-[2.6rem] gap-1.5 px-2.5 text-caption"
-                  >
-                    <Plus size={14} />
-                    Add project
-                  </Button>
-                </span>
-              }
-            />
-            <TooltipContent>
-              {canAdd ? "Add this folder as a project" : "Choose a folder before adding a project"}
-            </TooltipContent>
-          </Tooltip>
+          <Button
+            type="button"
+            variant="ghost"
+            data-testid="palette-add-chip"
+            disabled={!canAdd}
+            aria-label="Add project"
+            aria-keyshortcuts={isMac ? "Meta+Enter" : "Control+Enter"}
+            onMouseDown={keepInputFocus}
+            onClick={onAddClick}
+            className="h-6 gap-1.5 rounded-badge border-border px-2 text-caption"
+          >
+            <span className="font-medium text-ink">Add</span>
+            <span className="font-normal text-muted">{isMac ? "⌘ Enter" : "Ctrl Enter"}</span>
+          </Button>
         )}
       </div>
       <div aria-hidden data-slot="palette-divider" className="mx-0.5 mt-0.5 mb-1 h-px shrink-0 bg-border" />

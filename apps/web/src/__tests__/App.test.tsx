@@ -62,7 +62,7 @@ vi.mock("@/transport", async () => ({
       path: "/",
       parent: null,
       entries: [],
-      isExactDirectory: true,
+      requestedPath: "folder",
     }),
     getSettings: vi.fn().mockResolvedValue({}),
     getPullRequestCapabilities: vi.fn().mockResolvedValue({

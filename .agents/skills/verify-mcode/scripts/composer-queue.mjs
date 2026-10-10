@@ -852,6 +852,11 @@ export function cursorSettingEvidence(record) {
 }
 
 /** Finds the fixture workspace or records uncertain ownership before creating one. */
+/** The workspace a `workspace.create` result registered, or null when it rejected the folder. */
+function registeredWorkspace(created) {
+  return created?.ok ? created.workspace : null;
+}
+
 export async function ensureFixtureWorkspace(socket, repoRoot, record, persist) {
   const fixturePath = getRuntimePaths(repoRoot).fixtureRepoDir;
   const workspaces = await socket.rpc("workspace.list", {});
@@ -865,10 +870,11 @@ export async function ensureFixtureWorkspace(socket, repoRoot, record, persist) 
   }
   record.workspaceCreationPending = true;
   persist();
-  const workspace = await socket.rpc("workspace.create", {
+  const created = await socket.rpc("workspace.create", {
     name: `Composer queue ${record.provider} ${record.marker}`,
     path: fixturePath,
   });
+  const workspace = registeredWorkspace(created);
   if (!isSafeId(workspace?.id) || typeof workspace?.name !== "string") {
     throw new Error("workspace.create did not return the owned fixture workspace");
   }

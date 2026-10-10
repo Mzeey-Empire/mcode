@@ -1179,7 +1179,7 @@ NodeTest.test("owns and deletes only a unique verifier fixture workspace", async
   const receipt = createReceipt(repo);
   const socket = { rpc: async (method, params) => {
     if (method === "workspace.list") return [];
-    if (method === "workspace.create") return { id: "owned", name: params.name, path: params.path };
+    if (method === "workspace.create") return { ok: true, workspace: { id: "owned", name: params.name, path: params.path }, reused: false };
     throw new Error(`unexpected ${method}`);
   } };
   try {
@@ -1216,7 +1216,7 @@ NodeTest.test("retains a cleanup failure when fixture create reconciliation is a
   const receipt = createReceipt(repo);
   const socket = { rpc: async (method) => {
     if (method === "workspace.list") return [];
-    if (method === "workspace.create") return { id: "wrong", path: repo };
+    if (method === "workspace.create") return { ok: true, workspace: { id: "wrong", path: repo }, reused: false };
     throw new Error(`unexpected ${method}`);
   } };
   try {

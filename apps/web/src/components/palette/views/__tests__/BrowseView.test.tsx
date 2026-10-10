@@ -43,12 +43,14 @@ vi.mock("@/transport", () => ({
   getTransport: () => ({ filesystemBrowse: mocks.filesystemBrowse }),
 }));
 
-vi.mock("@/lib/platform", () => ({ isMac: false }));
+vi.mock("@/lib/platform", () => ({ isMac: false, isWindows: true }));
 
 vi.mock("@/components/ui/command", () => ({
   CommandList: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   CommandEmpty: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  CommandGroup: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  CommandGroup: ({ heading, children }: { heading: string; children: React.ReactNode }) => (
+    <section aria-label={heading}>{children}</section>
+  ),
   CommandItem: ({
     children,
     onSelect,
@@ -72,21 +74,24 @@ describe("BrowseView", () => {
         { name: "Projects", isDir: true },
         { name: "README.md", isDir: false },
       ],
-      isExactDirectory: true,
+      requestedPath: "folder",
+      isTooBroad: false,
     });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    delete window.desktopBridge;
   });
 
-  it("filters folders with the leaf query and descends into the selected folder", async () => {
+  it("filters folders with the leaf query without offering Add, and descends into the selected folder", async () => {
     mocks.palette.query = "~/pro";
 
     render(<BrowseView />);
 
     const project = await screen.findByRole("button", { name: /projects/i });
     expect(screen.queryByRole("button", { name: /documents/i })).not.toBeInTheDocument();
+    expect(mocks.getPendingConfirm()).toBeNull();
 
     fireEvent.click(project);
 
@@ -112,7 +117,8 @@ describe("BrowseView", () => {
       path: "/",
       parent: null,
       entries: [{ name: "C:", isDir: true }],
-      isExactDirectory: true,
+      requestedPath: "folder",
+      isTooBroad: true,
     });
 
     render(<BrowseView />);
@@ -122,5 +128,188 @@ describe("BrowseView", () => {
     expect(mocks.palette.setQuery).toHaveBeenCalledWith("C:\\");
     expect(mocks.getPendingConfirm()).toBeNull();
     expect(mocks.getPendingBack()).toBeNull();
+  });
+
+  it("keeps Add unavailable in a folder too broad to add", async () => {
+    mocks.filesystemBrowse.mockResolvedValue({
+      path: "/home/mcode",
+      parent: "/home",
+      entries: [{ name: "src", isDir: true }],
+      requestedPath: "folder",
+      isTooBroad: true,
+    });
+
+    render(<BrowseView />);
+
+    expect(await screen.findByRole("region", { name: "Folders" })).toBeInTheDocument();
+    expect(mocks.getPendingConfirm()).toBeNull();
+  });
+
+  it("names an addable folder and opens the project it registers", async () => {
+    mocks.palette.query = "~/src/mcode/";
+    const workspace = { id: "ws-mcode" };
+    mocks.workspace.createWorkspace.mockResolvedValue({ ok: true, workspace, reused: true });
+    mocks.filesystemBrowse.mockResolvedValue({
+      path: "/home/mcode/src/mcode",
+      parent: "/home/mcode/src",
+      entries: [{ name: "apps", isDir: true }],
+      requestedPath: "folder",
+      isTooBroad: false,
+    });
+
+    render(<BrowseView />);
+
+    expect(await screen.findByRole("region", { name: "Folders in mcode" })).toBeInTheDocument();
+    await waitFor(() => expect(mocks.getPendingConfirm()).toEqual(expect.any(Function)));
+    mocks.getPendingConfirm()?.();
+
+    await waitFor(() => expect(mocks.palette.close).toHaveBeenCalledOnce());
+    expect(mocks.workspace.createWorkspace).toHaveBeenCalledWith(undefined, "/home/mcode/src/mcode");
+    expect(mocks.workspace.beginNewThread).toHaveBeenCalledWith("ws-mcode");
+  });
+
+  it("names an empty folder above its empty state and keeps it addable", async () => {
+    mocks.palette.query = "~/src/mcode/";
+    mocks.filesystemBrowse.mockResolvedValue({
+      path: "/home/mcode/src/mcode",
+      parent: "/home/mcode/src",
+      entries: [],
+      requestedPath: "folder",
+      isTooBroad: false,
+    });
+
+    render(<BrowseView />);
+
+    const empty = await screen.findByText("No subfolders here.");
+    const heading = screen.getByRole("region", { name: "Folders in mcode" });
+    expect(heading.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await waitFor(() => expect(mocks.getPendingConfirm()).toEqual(expect.any(Function)));
+  });
+
+  it("says a typed folder does not exist and keeps Add unavailable", async () => {
+    mocks.palette.query = "~/src/gone/";
+    mocks.filesystemBrowse.mockResolvedValue({
+      path: "/home/mcode/src",
+      parent: "/home/mcode",
+      entries: [{ name: "mcode", isDir: true }],
+      requestedPath: "missing",
+      isTooBroad: false,
+    });
+
+    render(<BrowseView />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("This folder doesn't exist.");
+    expect(mocks.getPendingConfirm()).toBeNull();
+  });
+
+  it("says why a folder could not be added and keeps the palette open", async () => {
+    mocks.palette.query = "~/gone/";
+    mocks.workspace.createWorkspace.mockResolvedValue({
+      ok: false,
+      error: { code: "path_not_found", message: "server copy" },
+    });
+
+    render(<BrowseView />);
+
+    await waitFor(() => expect(mocks.getPendingConfirm()).toEqual(expect.any(Function)));
+    mocks.getPendingConfirm()?.();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("This folder doesn't exist.");
+    expect(mocks.palette.close).not.toHaveBeenCalled();
+    expect(mocks.workspace.beginNewThread).not.toHaveBeenCalled();
+    expect(mocks.getPendingConfirm()).toBeNull();
+  });
+
+  it("shows fixed copy instead of a transport failure and lets the user retry", async () => {
+    mocks.palette.query = "~/projects/";
+    mocks.workspace.createWorkspace.mockRejectedValue(new Error("socket closed: ECONNRESET 127.0.0.1"));
+
+    render(<BrowseView />);
+
+    await waitFor(() => expect(mocks.getPendingConfirm()).toEqual(expect.any(Function)));
+    mocks.getPendingConfirm()?.();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Mcode couldn't add this folder. Try again.");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("ECONNRESET");
+    expect(mocks.getPendingConfirm()).toEqual(expect.any(Function));
+  });
+
+  it("offers Add again when the user leaves a rejected path and comes back", async () => {
+    mocks.palette.query = "~/gone/";
+    mocks.workspace.createWorkspace.mockResolvedValueOnce({
+      ok: false,
+      error: { code: "path_not_found", message: "server copy" },
+    });
+
+    const { rerender } = render(<BrowseView />);
+    await waitFor(() => expect(mocks.getPendingConfirm()).toEqual(expect.any(Function)));
+    mocks.getPendingConfirm()?.();
+    await screen.findByRole("alert");
+
+    mocks.palette.query = "~/other/";
+    rerender(<BrowseView />);
+    mocks.palette.query = "~/gone/";
+    rerender(<BrowseView />);
+
+    await waitFor(() => expect(mocks.getPendingConfirm()).toEqual(expect.any(Function)));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("starts one registration while an add is still pending", async () => {
+    let finish: (value: unknown) => void = () => {};
+    mocks.workspace.createWorkspace.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    const showOpenDialog = vi.fn().mockResolvedValue("/home/mcode/src/app");
+    window.desktopBridge = { showOpenDialog } as unknown as typeof window.desktopBridge;
+    mocks.palette.query = "~/projects/";
+
+    render(<BrowseView />);
+    await waitFor(() => expect(mocks.getPendingConfirm()).toEqual(expect.any(Function)));
+    const confirm = mocks.getPendingConfirm();
+    confirm?.();
+    confirm?.();
+    fireEvent.click(screen.getByRole("button", { name: "Open in File Explorer" }));
+    finish({ ok: true, workspace: { id: "ws-projects" }, reused: false });
+
+    await waitFor(() => expect(mocks.palette.close).toHaveBeenCalledOnce());
+    expect(mocks.workspace.createWorkspace).toHaveBeenCalledOnce();
+    expect(showOpenDialog).not.toHaveBeenCalled();
+    expect(mocks.workspace.beginNewThread).toHaveBeenCalledWith("ws-projects");
+  });
+
+  it("hides Open in File Explorer on the web", async () => {
+    render(<BrowseView />);
+
+    await screen.findByRole("button", { name: /projects/i });
+    expect(screen.queryByRole("button", { name: /open in/i })).not.toBeInTheDocument();
+  });
+
+  it("adds the folder chosen in the native dialog on desktop", async () => {
+    const showOpenDialog = vi.fn().mockResolvedValue("/home/mcode/src/app");
+    window.desktopBridge = { showOpenDialog } as unknown as typeof window.desktopBridge;
+    mocks.workspace.createWorkspace.mockResolvedValue({ ok: true, workspace: { id: "ws-app" }, reused: false });
+
+    render(<BrowseView />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open in File Explorer" }));
+
+    await waitFor(() => expect(mocks.workspace.beginNewThread).toHaveBeenCalledWith("ws-app"));
+    expect(mocks.workspace.createWorkspace).toHaveBeenCalledWith(undefined, "/home/mcode/src/app");
+    expect(mocks.palette.close).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the browsed folder addable when a folder picked in the dialog is rejected", async () => {
+    window.desktopBridge = { showOpenDialog: vi.fn().mockResolvedValue("/") } as unknown as typeof window.desktopBridge;
+    mocks.palette.query = "~/projects/";
+    mocks.workspace.createWorkspace.mockResolvedValue({
+      ok: false,
+      error: { code: "too_broad", message: "server copy" },
+    });
+
+    render(<BrowseView />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open in File Explorer" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Pick a project folder, not your home folder or a drive.");
+    expect(mocks.getPendingConfirm()).toEqual(expect.any(Function));
   });
 });

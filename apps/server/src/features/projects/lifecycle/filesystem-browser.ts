@@ -5,10 +5,12 @@
  */
 
 import { injectable } from "tsyringe";
+import type { FilesystemBrowseResult } from "@mcode/contracts";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
+import { isTooBroadFolder } from "./workspace-path.js";
 
 /** Maximum number of directory entries returned in a single browse response. */
 const MAX_ENTRIES = 500;
@@ -23,7 +25,7 @@ let cachedDrivesAt = 0;
 type BrowseTarget = {
   path: string;
   isDirectory: boolean;
-  isExactDirectory: boolean;
+  requestedPath: FilesystemBrowseResult["requestedPath"];
 };
 
 /**
@@ -62,13 +64,7 @@ export class FilesystemBrowser {
    *
    * Returns at most 500 entries. Directories sort before files; both groups are sorted alphabetically.
    */
-  async browse(input: string): Promise<{
-    path: string;
-    parent: string | null;
-    entries: { name: string; isDir: boolean }[];
-    /** Whether the requested path resolved to an existing directory without fallback. */
-    isExactDirectory: boolean;
-  }> {
+  async browse(input: string): Promise<FilesystemBrowseResult> {
     if (isWindowsDrivePicker(input)) return windowsDrivePickerResponse();
 
     const target = await resolveBrowseTarget(input);
@@ -90,7 +86,8 @@ export class FilesystemBrowser {
       path: dir,
       parent: parentDir === dir ? null : parentDir,
       entries,
-      isExactDirectory: target.isExactDirectory,
+      requestedPath: target.requestedPath,
+      isTooBroad: await isTooBroadFolder(await NodeFSPromises.realpath(dir)),
     };
   }
 }
@@ -99,17 +96,13 @@ function isWindowsDrivePicker(input: string): boolean {
   return input === "/" && NodeOS.platform() === "win32";
 }
 
-function windowsDrivePickerResponse(): {
-  path: string;
-  parent: null;
-  entries: { name: string; isDir: boolean }[];
-  isExactDirectory: false;
-} {
+function windowsDrivePickerResponse(): FilesystemBrowseResult {
   return {
     path: "/",
     parent: null,
     entries: listWindowsDrives(),
-    isExactDirectory: false,
+    requestedPath: "missing",
+    isTooBroad: true,
   };
 }
 
@@ -127,7 +120,7 @@ async function resolveBrowseTarget(input: string): Promise<BrowseTarget | null> 
       return {
         path,
         isDirectory: details.isDirectory(),
-        isExactDirectory: !resolvedToAncestor && details.isDirectory(),
+        requestedPath: resolvedToAncestor ? "missing" : details.isDirectory() ? "folder" : "file",
       };
     } catch {
       resolvedToAncestor = true;
@@ -143,5 +136,5 @@ async function resolveBrowseTarget(input: string): Promise<BrowseTarget | null> 
 async function resolveFallbackBrowseTarget(): Promise<BrowseTarget | null> {
   if (NodeOS.platform() === "win32") return null;
   const details = await NodeFSPromises.stat("/");
-  return { path: "/", isDirectory: details.isDirectory(), isExactDirectory: false };
+  return { path: "/", isDirectory: details.isDirectory(), requestedPath: "missing" };
 }
