@@ -26,7 +26,6 @@ import {
   GitBranch,
   GitBranchMinus,
   ChevronRight,
-  FolderPlus,
   Folder,
   FolderCheck,
   FolderOpen,
@@ -61,7 +60,8 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
+import { Button, IconButton } from "@/components/ui/button";
+import { ProjectDropWell } from "./ProjectDropWell";
 import { Spinner } from "@/components/ui/spinner";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1064,29 +1064,12 @@ export function ProjectTree() {
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="mb-1 flex items-center justify-between px-3 py-1.5">
-        <span className="text-xs font-medium text-muted">
-          Projects
-        </span>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-compact"
-                onClick={handleOpenFolder}
-                aria-label="Add project"
-                className="text-muted hover:text-ink"
-              >
-                <Plus size={15} />
-              </Button>
-            }
-          />
-          <TooltipContent side="right" className="text-xs">
-            Add project
-          </TooltipContent>
-        </Tooltip>
+    <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-hidden">
+      <div className="mx-1.5 flex h-8 shrink-0 items-center gap-1 pl-2">
+        <span className="min-w-0 flex-1 text-label text-muted">Projects</span>
+        <IconButton aria-label="Add project" onClick={handleOpenFolder}>
+          <Plus strokeWidth={1.5} aria-hidden />
+        </IconButton>
       </div>
 
       <div className="relative isolate min-h-0 flex-1">
@@ -1121,29 +1104,8 @@ export function ProjectTree() {
         </DndContext>
 
         {workspaces.length === 0 && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4 py-12">
-            {/* Lucide FolderPlus echoes the action below — keeps the empty state on-brand
-                with the rest of the picker (no unicode glyphs). Larger/quieter than the CTA. */}
-            <FolderPlus
-              size={28}
-              aria-hidden
-              className="text-muted/25"
-            />
-            <p className="font-mono text-caption uppercase tracking-[0.18em] text-muted/45">
-              No projects yet
-            </p>
-            <Button
-              variant="ghost"
-              size="compact"
-              onClick={handleOpenFolder}
-              className="group h-auto gap-1.5 rounded-md border border-border/50 px-2.5 py-1 text-caption font-normal text-muted/80 hover:border-border hover:bg-selected/50 hover:text-ink"
-            >
-              <FolderPlus
-                size={11}
-                className="opacity-70 group-hover:opacity-100"
-              />
-              Open a folder
-            </Button>
+          <div className="absolute inset-x-1.5 inset-y-0">
+            <ProjectDropWell />
           </div>
         )}
       </div>
