@@ -1,26 +1,16 @@
 import { useSubagentRoster } from "@/features/subagents/state/subagentRosterStore";
 import { subagentChipStatus, subagentOverviewCounts } from "@/features/subagents/subagent-status";
-import { useState } from "react";
 import { formatSubagentDisplayName, type SubagentRosterEntry } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { ProviderIcon } from "@/components/ui/provider-icon";
-import type { HookExecution, ToolCall } from "@/transport/types";
+import { cn } from "@/lib/utils";
+import type { ToolCall } from "@/transport/types";
 import { NARRATIVE_TOOL_ROW } from "./narrative-layout";
-import type { SubagentLifecycle } from "./subagent-lifecycle";
 import { useSubagentThreadId } from "./subagent-provider";
 import type { SubagentActivity, SubagentRosterTarget } from "./types";
 
 interface SubagentRowProps {
-  toolCall: ToolCall;
   participants: readonly ToolCall[];
-  lifecycle: SubagentLifecycle;
-  /** Direct children retained by the narrative builder but hidden from chat. */
-  children: readonly ToolCall[];
-  hooks: readonly HookExecution[];
-  /** Full turn graph retained for detail projection. */
-  allToolCalls?: readonly ToolCall[];
-  /** Nested depth retained for the shared narrative contract. */
-  depth?: number;
   /** Opens the selected canonical child through the composition root. */
   onSubagentSelect?: (id: string, target: SubagentRosterTarget) => void;
   /** Opens the owning thread's Subagents roster for aggregate activity. */
@@ -29,242 +19,117 @@ interface SubagentRowProps {
   activities?: readonly SubagentActivity[];
 }
 
-interface VisibleSubagentParticipant {
-  participant: ToolCall;
-  lifecycle: SubagentLifecycle;
-}
+/**
+ * One chip's view. Until the roster has an entry for the call, the chip only
+ * knows the call's own title: no provider, no status, nothing to open.
+ */
+type SubagentChipView =
+  | { kind: "pending"; key: string; title: string }
+  | { kind: "resolved"; key: string; title: string; entry: SubagentRosterEntry };
 
-interface SubagentParticipantView {
-  title: string;
-  detailTarget: string | undefined;
-  hasDetailTarget: boolean;
-  status: string;
-  unavailableMessage: string;
-}
-
-interface SubagentParticipantProps extends VisibleSubagentParticipant {
-  unavailableDetailId: string | undefined;
-  onSubagentSelect: SubagentRowProps["onSubagentSelect"];
-  onUnavailableDetail: (id: string) => void;
-}
-
-interface AggregateSubagentButtonProps {
-  label: string;
-  target: SubagentRosterTarget;
-  onOpenSubagents: SubagentRowProps["onOpenSubagents"];
-}
+const VISIBLE_CHIPS = 2;
 
 function remainingLabel(entries: readonly SubagentRosterEntry[]): string {
   const { active, done } = subagentOverviewCounts(entries);
   return [active > 0 ? `+${active} working` : "", done > 0 ? `${active > 0 ? "" : "+"}${done} finished` : ""].filter(Boolean).join(", ");
 }
 
-function transcriptUnavailableMessage(providerName: string | undefined): string {
-  return providerName
-    ? `${providerName} did not provide this subagent’s transcript.`
-    : "This provider did not provide this subagent’s transcript.";
-}
-
-function groupedSubagentActivities(
-  activities: readonly SubagentActivity[] | undefined,
-): readonly SubagentActivity[] | undefined {
-  if (!activities || activities.length <= 1) return undefined;
-  return activities;
-}
-
-function visibleSubagentParticipants(
-  groupedActivities: readonly SubagentActivity[] | undefined,
-  participants: readonly ToolCall[],
-  lifecycle: SubagentLifecycle,
-): VisibleSubagentParticipant[] {
-  if (groupedActivities) {
-    return groupedActivities.slice(0, 2).map((activity) => ({
-      participant: activity.participants.at(-1) ?? activity.toolCall,
-      lifecycle: activity.lifecycle,
-    }));
-  }
-  return participants.slice(0, 2).map((participant) => ({ participant, lifecycle }));
-}
-
-function participantTranscriptUnavailableMessage(participant: ToolCall): string {
-  const detail = participant.subagentPresentation?.detail;
-  return transcriptUnavailableMessage(
-    detail?.kind === "transcript-unavailable" ? detail.providerName : undefined,
-  );
-}
-
-function participantIdentity(participant: ToolCall): string {
-  return participant.subagentPresentation?.displayName ?? "Subagent";
+function entryForCall(entries: readonly SubagentRosterEntry[], call: ToolCall): SubagentRosterEntry | undefined {
+  return entries.find((entry) => entry.sourceToolCallId === call.id)
+    ?? entries.find((entry) => entry.sourceToolCallId === call.parentToolCallId);
 }
 
 function participantTitle(participant: ToolCall): string {
   const task = participant.subagentPresentation?.task;
-  return task ? formatSubagentDisplayName(task) : participantIdentity(participant);
+  return task ? formatSubagentDisplayName(task) : participant.subagentPresentation?.displayName ?? "Subagent";
 }
 
-function projectSubagentParticipant(participant: ToolCall, entry: SubagentRosterEntry | undefined): SubagentParticipantView {
-  return {
-    title: entry?.title ?? participantTitle(participant),
-    detailTarget: entry?.id,
-    hasDetailTarget: entry !== undefined,
-    status: entry ? subagentChipStatus(entry.status) : "",
-    unavailableMessage: participantTranscriptUnavailableMessage(participant),
-  };
+function subagentChipView(participant: ToolCall, entry: SubagentRosterEntry | undefined): SubagentChipView {
+  return entry
+    ? { kind: "resolved", key: participant.id, title: entry.title, entry }
+    : { kind: "pending", key: participant.id, title: participantTitle(participant) };
 }
 
-function entryForParticipant(entries: readonly SubagentRosterEntry[], participant: ToolCall): SubagentRosterEntry | undefined {
-  return entries.find((entry) => entry.sourceToolCallId === participant.id)
-    ?? entries.find((entry) => entry.sourceToolCallId === participant.parentToolCallId);
+function chipParticipants(participants: readonly ToolCall[], grouped: readonly SubagentActivity[] | undefined): readonly ToolCall[] {
+  return grouped
+    ? grouped.map((activity) => activity.participants.at(-1) ?? activity.toolCall)
+    : participants;
 }
 
-function handleSubagentSelection(
-  participant: ToolCall,
-  lifecycle: SubagentLifecycle,
-  detailTarget: string | undefined,
-  onSubagentSelect: SubagentRowProps["onSubagentSelect"],
-  onUnavailableDetail: (id: string) => void,
-): void {
-  if (!detailTarget) {
-    onUnavailableDetail(participant.id);
-    return;
-  }
-  onSubagentSelect?.(
-    detailTarget,
-    lifecycle === "finished" ? "finished" : "active",
-  );
-}
-
-function SubagentTranscriptNotice({
-  participantId,
-  unavailableDetailId,
-  message,
-}: {
-  participantId: string;
-  unavailableDetailId: string | undefined;
-  message: string;
-}) {
-  if (unavailableDetailId !== participantId || !message) return null;
-
+function SubagentChip({ view, onSubagentSelect }: { view: SubagentChipView; onSubagentSelect: SubagentRowProps["onSubagentSelect"] }) {
+  const entry = view.kind === "resolved" ? view.entry : undefined;
+  const word = entry ? subagentChipStatus(entry.status) : "";
+  const statusId = `subagent-status-${view.key}`;
   return (
-    <span data-testid="subagent-transcript-unavailable" role="status" className="text-xs text-muted">
-      {message}
-    </span>
-  );
-}
-
-function SubagentParticipant({
-  participant,
-  unavailableDetailId,
-  onSubagentSelect,
-  onUnavailableDetail,
-}: SubagentParticipantProps) {
-  const roster = useSubagentRoster(useSubagentThreadId());
-  const entry = entryForParticipant(roster?.entries ?? [], participant);
-  const view = projectSubagentParticipant(participant, entry);
-  const provider = entry?.provider ?? "";
-
-  return (
-    <span className="flex min-w-0 shrink items-center gap-1">
+    <span className="flex min-w-0 shrink">
       <Button
         type="button"
         variant="ghost"
         size="compact"
-        onClick={() => handleSubagentSelection(
-          participant,
-          entry?.status === "running" ? "started" : "finished",
-          view.detailTarget,
-          onSubagentSelect,
-          onUnavailableDetail,
-        )}
-        className="min-w-0 shrink gap-1 rounded-full px-2 text-left transition-colors duration-150 motion-reduce:transition-none hover:bg-hover/30"
-        aria-label={`${view.hasDetailTarget ? "Open" : "Show"} ${view.title} subagent details`}
         disabled={!entry}
-        aria-describedby={`subagent-status-${participant.id}`}
+        onClick={() => entry && onSubagentSelect?.(entry.id, entry.status === "running" ? "active" : "finished")}
+        aria-label={`${entry ? "Open" : "Show"} ${view.title} subagent details`}
+        aria-describedby={statusId}
+        className="h-7 min-w-0 shrink justify-start gap-1.5 rounded-full border-border pr-2.5 pl-1.5 text-left text-xs disabled:opacity-100 hover:bg-hover/30 motion-reduce:transition-none"
       >
-        <ProviderIcon provider={provider} size={16} />
-        <span className="min-w-0 text-fade text-xs font-medium text-ink/85">
-          {view.title}
-        </span>
+        {entry && (
+          <span className="flex h-5 w-4 shrink-0 items-center justify-center">
+            <ProviderIcon provider={entry.provider} size={16} />
+          </span>
+        )}
+        <span className="min-w-0 text-fade font-medium text-ink">{view.title}</span>
+        {entry && (
+          <span aria-hidden className={cn("shrink-0", entry.status === "failed" ? "text-error" : "text-muted")}>
+            {word}
+          </span>
+        )}
       </Button>
-      <span id={`subagent-status-${participant.id}`} role="status" className="sr-only">
-        {view.status}
-      </span>
-      <SubagentTranscriptNotice
-        participantId={participant.id}
-        unavailableDetailId={unavailableDetailId}
-        message={view.unavailableMessage}
-      />
-      <span className="shrink-0 text-xs text-muted">
-        {view.status}
-      </span>
+      <span id={statusId} role="status" className="sr-only">{word}</span>
     </span>
   );
 }
 
-function AggregateSubagentButton({
-  label,
-  target,
-  onOpenSubagents,
-}: AggregateSubagentButtonProps) {
+function OverflowChip({ entries, onOpenSubagents }: { entries: readonly SubagentRosterEntry[]; onOpenSubagents: SubagentRowProps["onOpenSubagents"] }) {
+  const label = remainingLabel(entries);
   if (!label) return null;
-
+  const target: SubagentRosterTarget = entries.some((entry) => entry.status === "running") ? "active" : "finished";
   return (
     <Button
       type="button"
       variant="ghost"
       size="compact"
       onClick={() => onOpenSubagents?.(target)}
-      className="shrink-0 justify-start rounded-full px-2 text-left text-xs text-muted hover:bg-hover/30"
+      className="h-7 rounded-full border-border px-2.5 text-xs text-muted hover:bg-hover/30"
       aria-label={`Open full Subagents roster, ${label}`}
     >
-      <span className="whitespace-nowrap">{label}</span>
+      {label}
     </Button>
   );
 }
 
-/** Renders one identity-only sub-agent lifecycle row in the chat narrative. */
+/** Renders a turn's subagents as provider chips whose words come from the thread's roster. */
 export function SubagentRow({
   participants,
-  lifecycle,
   onSubagentSelect,
   onOpenSubagents,
   activities,
 }: SubagentRowProps) {
-  const [unavailableDetailId, setUnavailableDetailId] = useState<string>();
-  const groupedActivities = groupedSubagentActivities(activities);
-  const visibleParticipants = visibleSubagentParticipants(
-    groupedActivities,
-    participants,
-    lifecycle,
-  );
-  const remainingActivities = groupedActivities?.slice(2) ?? [];
-  const roster = useSubagentRoster(useSubagentThreadId());
-  const remainingEntries = remainingActivities.flatMap((activity) => {
-    const entry = entryForParticipant(roster?.entries ?? [], activity.toolCall);
+  const entries = useSubagentRoster(useSubagentThreadId())?.entries ?? [];
+  const grouped = activities && activities.length > 1 ? activities : undefined;
+  const chips = chipParticipants(participants, grouped)
+    .slice(0, VISIBLE_CHIPS)
+    .map((participant) => subagentChipView(participant, entryForCall(entries, participant)));
+  const remainingEntries = (grouped?.slice(VISIBLE_CHIPS) ?? []).flatMap((activity) => {
+    const entry = entryForCall(entries, activity.toolCall);
     return entry ? [entry] : [];
   });
-  const aggregateLabel = remainingLabel(remainingEntries);
-  const aggregateTarget = remainingEntries.some((entry) => entry.status === "running") ? "active" : "finished";
 
   return (
-    <div className={`${NARRATIVE_TOOL_ROW} min-w-0 gap-2`}>
-      <div className={`flex min-w-0 flex-1 items-center overflow-hidden ${groupedActivities ? "gap-1" : "gap-2"}`}>
-        {visibleParticipants.map(({ participant, lifecycle: participantLifecycle }) => (
-          <SubagentParticipant
-            key={participant.id}
-            participant={participant}
-            lifecycle={participantLifecycle}
-            unavailableDetailId={unavailableDetailId}
-            onSubagentSelect={onSubagentSelect}
-            onUnavailableDetail={setUnavailableDetailId}
-          />
-        ))}
-      </div>
-      <AggregateSubagentButton
-        label={aggregateLabel}
-        target={aggregateTarget}
-        onOpenSubagents={onOpenSubagents}
-      />
+    <div className={NARRATIVE_TOOL_ROW}>
+      {chips.map((view) => (
+        <SubagentChip key={view.key} view={view} onSubagentSelect={onSubagentSelect} />
+      ))}
+      <OverflowChip entries={remainingEntries} onOpenSubagents={onOpenSubagents} />
     </div>
   );
 }

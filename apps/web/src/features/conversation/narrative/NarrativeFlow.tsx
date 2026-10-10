@@ -88,7 +88,6 @@ export function NarrativeFlow({
       {timelineItems.length > 0 && (
         <NarrativeRows
           items={timelineItems}
-          allToolCalls={toolCalls}
           animateEntry
           onSubagentSelect={onSubagentSelect}
           onOpenSubagents={onOpenSubagents}

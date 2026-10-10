@@ -1,6 +1,6 @@
 import type { Message, ToolCall } from "@/transport/types";
 import { buildNarrativeItems } from "../narrative/build-narrative";
-import { buildPersistedNarrativeItems, recordToToolCall } from "../narrative/build-persisted-narrative";
+import { buildPersistedNarrativeItems } from "../narrative/build-persisted-narrative";
 import type { NarrativeItem } from "../narrative/types";
 import type { ToolCallTransition } from "./useToolCallTransitions";
 import { type ChatVirtualItem, type CurrentTurnResponseIdentity, type PersistedNarrativeRecords, type PersistedNarrativeRecordsByMessage } from "./virtual-items";
@@ -18,7 +18,6 @@ export interface TranscriptNarrativeItem {
   readonly messageId?: string;
   readonly item: NarrativeItem;
   readonly index: number;
-  readonly allToolCalls: readonly ToolCall[];
   readonly transition?: "entering" | "exiting";
 }
 
@@ -104,7 +103,6 @@ function visiblePersistedRecords(
 function narrativeRows(
   prefix: string,
   items: readonly NarrativeItem[],
-  allToolCalls: readonly ToolCall[],
   messageId?: string,
 ): TranscriptNarrativeItem[] {
   const occurrences = new Map<string, number>();
@@ -118,7 +116,6 @@ function narrativeRows(
       messageId,
       item,
       index,
-      allToolCalls,
     };
   });
 }
@@ -206,7 +203,6 @@ function persistedFoldRows(
   return narrativeRows(
     outcomeExecutionId ?? fold.messageId,
     buildPersistedNarrativeItems({ ...visibleRecords, messageContent: fold.messageContent }),
-    visibleRecords.tools.map(recordToToolCall),
     fold.messageId,
   );
 }
@@ -221,7 +217,7 @@ function liveNarrativeRows(
     return transition?.phase === "exiting" ? transition.call : call;
   });
   const current = new Map(item.toolCalls.map((call) => [call.id, call]));
-  const rows = narrativeRows(prefix, buildNarrativeItems({ ...item, toolCalls }).items, item.toolCalls);
+  const rows = narrativeRows(prefix, buildNarrativeItems({ ...item, toolCalls }).items);
   return rows.map((row) => {
     if (row.item.type !== "active-tool") return row;
     return {
