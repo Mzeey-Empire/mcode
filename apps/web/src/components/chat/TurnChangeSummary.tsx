@@ -159,8 +159,12 @@ export function TurnChangeSummary({ messageId, filesChanged, isLatestTurn, manua
     })();
   }, [expanded, diffStats, messageId]);
 
-  /** Open the Changes tab on the Turn view showing this turn's diff. */
-  const openReviewPanel = useCallback(async () => {
+  /**
+   * Open the Changes tab on the Turn view showing this turn's diff. The turn
+   * is always selected, even when its snapshot is gone: the comparison then
+   * says so, where switching to All turns would show a different diff.
+   */
+  const openReviewPanel = useCallback(() => {
     const { activeThreadId: threadId, activeWorkspaceId: workspaceId } =
       useWorkspaceStore.getState();
     if (!threadId || !workspaceId) return null;
@@ -170,39 +174,21 @@ export function TurnChangeSummary({ messageId, filesChanged, isLatestTurn, manua
     store.setRightPanelTab(workspaceId, threadId, "changes");
 
     const serverMsgId = readThreadRecord(threadId).serverMessageIds[messageId] ?? messageId;
-    // A cached snapshot list may predate this turn's row (or a failed refresh);
-    // only trust a positive hit, so refetch before accepting a miss.
-    let snapshots = store.snapshotsByThread[threadId];
-    if (!snapshots?.some((s) => s.message_id === serverMsgId)) {
-      try {
-        snapshots = await getTransport().listSnapshots(threadId);
-        useDiffStore.getState().setSnapshots(threadId, snapshots);
-      } catch (err) {
-        console.warn("[TurnChangeSummary] Failed to load snapshots:", err);
-      }
-    }
-
-    if (snapshots?.some((s) => s.message_id === serverMsgId)) {
-      store.setReviewTurnForThread(threadId, serverMsgId);
-      // Pin the pick as the per-thread override so the live default cannot
-      // revert this deliberate choice (ADR-0011).
-      store.setReviewViewForThread(threadId, "turn");
-      return { threadId, viewKey: `turn:${serverMsgId}` };
-    }
-    // The turn cannot be resolved to a snapshot; fall back to All turns.
-    store.setReviewViewForThread(threadId, "cumulative");
-    return { threadId, viewKey: "cumulative" };
+    store.setReviewTurnForThread(threadId, serverMsgId);
+    // Pin the pick as the per-thread override so the live default cannot
+    // revert this deliberate choice (ADR-0011).
+    store.setReviewViewForThread(threadId, "turn");
+    return { threadId, viewKey: `turn:${serverMsgId}` };
   }, [messageId]);
 
   const handleViewDiff = useCallback(() => {
-    void openReviewPanel();
+    openReviewPanel();
   }, [openReviewPanel]);
 
   /** Open the Changes tab and scroll the comparison to this file. */
   const handleJumpToFile = useCallback((filePath: string) => {
-    void openReviewPanel().then((result) => {
-      if (result) useDiffStore.getState().requestReviewFileJump(result.threadId, filePath, result.viewKey);
-    });
+    const result = openReviewPanel();
+    if (result) useDiffStore.getState().requestReviewFileJump(result.threadId, filePath, result.viewKey);
   }, [openReviewPanel]);
 
   return (
