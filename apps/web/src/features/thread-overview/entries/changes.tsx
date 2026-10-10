@@ -286,10 +286,12 @@ function useChangesState(thread: Thread) {
       stayedOpenRef.current = false;
       return;
     }
-    const delay = stayedOpenRef.current ? SETTLED_RESOLVE_DEBOUNCE_MS : 0;
+    const stayedOpen = stayedOpenRef.current;
     stayedOpenRef.current = true;
     // A running turn bumps the diff revision on every file write; its live file effects cover the row.
     if (isRunning) return;
+    // Opening the card refreshes; later runs at the same revision come from this effect's own cache write.
+    if (stayedOpen && hasCurrentChangeSummary) return;
 
     let cancelled = false;
     const loadChangeSummary = async () => {
@@ -314,13 +316,16 @@ function useChangesState(thread: Thread) {
       }
     };
 
-    const timer = setTimeout(() => void loadChangeSummary(), delay);
+    const timer = setTimeout(() => void loadChangeSummary(), stayedOpen ? SETTLED_RESOLVE_DEBOUNCE_MS : 0);
 
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [cachedSnapshotKey, cachedSnapshots, diffRevision, isRunning, open, setSnapshots, thread.id, thread.workspace_id]);
+  }, [
+    cachedSnapshotKey, cachedSnapshots, diffRevision, hasCurrentChangeSummary, isRunning, open, setSnapshots,
+    thread.id, thread.workspace_id,
+  ]);
   return { changeSummary, hasChanges, isChangeSummaryFailed, isChangeSummaryLoading, showChangeSummary };
 }
 

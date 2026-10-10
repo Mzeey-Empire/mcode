@@ -128,6 +128,19 @@ describe("overview Changes, Tasks and Usage rows", () => {
     expect(screen.getByTestId("thread-overview-change-summary")).toHaveTextContent("+4 −9");
   });
 
+  it("resolves once on settle when the snapshot cache starts empty", async () => {
+    useDiffStore.setState({ snapshotsByThread: {} });
+    vi.mocked(mockTransport.listSnapshots).mockResolvedValue([]);
+    setRunning(true);
+    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await flushTimers(500);
+
+    act(() => setRunning(false));
+    await flushTimers(2_000);
+
+    expect(mockTransport.getReviewComparison).toHaveBeenCalledTimes(1);
+  });
+
   it("hides the Changes row when there are no changes", async () => {
     vi.mocked(mockTransport.getReviewComparison).mockResolvedValue({
       status: "ready",
