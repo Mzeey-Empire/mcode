@@ -51,11 +51,15 @@ it("notifies main once per hide transition and retains the adopted guest until c
   adapter.hide();
   adapter.hide();
   expect(surfaceBridge.hidden.mock.calls).toEqual([[{ surface: { identity: IDENTITY, generation: 9 } }]]);
+  adapter.present({ left: 0, top: 0, width: 640, height: 480 });
+  expect(adapter.element.style.visibility).toBe("visible");
   let finish: (result: PreviewSurfaceBridgeResult) => void = () => { throw new Error("release not started"); };
   surfaceBridge.release.mockImplementation(() => new Promise<PreviewSurfaceBridgeResult>((resolve) => { finish = resolve; }));
   adapter.dispose();
   expect(adapter.element.isConnected).toBe(true);
+  expect(adapter.element.style.visibility).toBe("hidden");
   expect(adapter.element.style.pointerEvents).toBe("none");
+  expect(adapter.element.getAttribute("aria-hidden")).toBe("true");
   expect(surfaceBridge.release.mock.calls).toEqual([[{ surface: { identity: IDENTITY, generation: 9 }, reason: "dispose" }]]);
   finish({ ok: true });
   await vi.waitFor(() => expect(adapter.element.isConnected).toBe(false));

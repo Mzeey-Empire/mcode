@@ -310,6 +310,7 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
       .catch(() => undefined)
       .finally(() => this.frame.remove());
     this.controlIndicator.dispose();
+    this.frame.style.visibility = "hidden";
     this.frame.style.pointerEvents = "none";
     this.frame.setAttribute("aria-hidden", "true");
     if (!this.adopted) this.frame.remove();
