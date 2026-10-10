@@ -143,6 +143,38 @@ function makeProvider(
  * first turn on queueMicrotask ran before that and skipped runTurn entirely.
  */
 describe("CodexProvider first turn on new session", () => {
+  it.each([false, true])("orders one cancellation receipt before stop (failed deny: %s)", async (failedDeny) => {
+    const batches: ProviderEventBatch[] = [];
+    const provider = makeProvider(undefined, undefined, undefined, { submit: async (batch) => { batches.push(batch); return acceptedEventReceipt; } });
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    await provider.sendTurn({
+      turnId: "approval-turn", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
+      threadId, message: "lint", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "supervised",
+    });
+    const handler = appServers[0]?.options.approvalHandler;
+    assert(handler);
+    const request: CodexApprovalRequest = { rpcId: 1, method: "item/commandExecution/requestApproval", params: { command: "bun run lint", itemId: "tool-1" } };
+    const native = handler(request);
+    const [pending] = provider.listPendingApprovals();
+    assert(pending);
+    if (failedDeny) {
+      const response = provider.resolveApproval(pending.requestId, { autoDeny: "unreadable" });
+      await native;
+      request.responseWritten?.(false);
+      expect(await response).toMatchObject({ status: "failed" });
+    }
+    await provider.stopSession(sessionId);
+    await native;
+    await vi.waitFor(() => expect(submittedRuntimeEvents(batches).filter(({ event }) => event.type === "approvalDecided").map(({ event }) => event)).toEqual([{
+      type: "approvalDecided", threadId, requestId: pending.requestId, turnExecutionId: schemaValidExecutionId,
+      kind: failedDeny ? "tool" : "command", subjectLabel: failedDeny ? "Mcode couldn't read this request" : "bun run lint",
+      outcome: { status: "cancelled", reason: failedDeny ? "unanswerable" : "session_stopped" },
+      ...(failedDeny ? {} : { toolCallId: "tool-1", origin: { kind: "agent" } }),
+    }]));
+    await provider.shutdown();
+  });
+
   const threadId = "first-turn-thread";
   const sessionId = `mcode-${threadId}`;
 

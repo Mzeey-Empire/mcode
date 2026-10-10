@@ -10,6 +10,8 @@
  */
 
 import * as NodeEvents from "node:events";
+import { approvalReceipt } from "../../approvals/approval-receipt.js";
+import type { ApprovalOutcome, ApprovalChoice } from "@mcode/contracts";
 import * as NodeCrypto from "node:crypto";
 import { logger } from "@mcode/shared";
 import { buildMcodeInstructionPlan, renderMcodeInstructions } from "@mcode/thread-orchestration";
@@ -350,6 +352,9 @@ interface CodexSessionState {
 
 /** One pending codex approval bridged into the Phase 1 permission flow. */
 interface PendingPermissionEntry {
+  routing?: CodexCanonicalEventRouting;
+  unanswerable?: boolean;
+  replying?: boolean;
   sessionId: string;
   threadId: string;
   body: ApprovalRequestBody;
@@ -622,6 +627,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     if (routing && runtimeEvent.event.turnExecutionId === routing.executionId) {
       if (state.kind === "fenced") return;
       if (runtimeEvent.deliveryAttempt !== undefined && runtimeEvent.deliveryAttempt !== routing.deliveryAttempt) return;
+      this.drainApprovalsAtTurnEnd(routing, runtimeEvent.event);
       this.canonicalEventPublisher.publish(routing, {
         ...runtimeEvent,
         deliveryAttempt: routing.deliveryAttempt,
@@ -634,6 +640,12 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   private readonly canonicalEventPublisher: CodexCanonicalEventPublisher;
+
+  private drainApprovalsAtTurnEnd(routing: CodexCanonicalEventRouting, event: AgentEvent): void {
+    if (event.type === "turnComplete" || event.type === "ended" || event.type === "error") {
+      this.drainPending((entry) => entry.routing?.executionId === routing.executionId, "turn_ended");
+    }
+  }
   private readonly canonicalTurnRoutingsByThread = new Map<string, {
     kind: "active" | "fenced";
     routing: CodexCanonicalEventRouting;
@@ -2793,6 +2805,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const acknowledged = new Promise<boolean>((resolve) => { request.responseWritten = resolve; });
     return new Promise<unknown>((resolve) => {
       this.pendingPermissions.set(requestId, {
+        routing: this.canonicalTurnRoutingsByThread.get(threadId)?.routing,
         sessionId, threadId, body, acknowledged, method: request.method, params: request.params, resolve,
       });
       this.emit("approval_request", { requestId, threadId, body } satisfies ApprovalRequestEnvelope);
@@ -2803,17 +2816,23 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   async resolveApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     const entry = this.pendingPermissions.get(requestId);
     if (!entry) return { status: "not_pending" };
+    if ("autoDeny" in response) entry.unanswerable = true;
+    if (entry.replying) return { status: "failed", message: "An answer is already being sent" };
     const choice = approvalChoice(entry.body, response);
     if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
-    this.pendingPermissions.delete(requestId);
+    entry.replying = true;
     this.runtime.recordUsage(entry.sessionId);
-    const decision = "autoDeny" in response || choice?.intent === "deny" ? "deny"
-      : choice?.intent === "allow_scoped" ? "allow-session" : "allow";
+    const decision = this.nativeApprovalDecision(choice, response);
     entry.resolve(mapDecisionToCodexResponse(entry.method, decision, entry.params));
     if (!await entry.acknowledged) return { status: "failed", message: "The answer did not reach Codex" };
-    this.emit("approval_resolved", { requestId, threadId: entry.threadId,
-      outcome: approvalOutcome(choice, response) });
+    if (!this.pendingPermissions.delete(requestId)) return { status: "not_pending" };
+    this.publishApprovalDecision(requestId, entry, approvalOutcome(choice, response));
     return { status: "resolved" };
+  }
+
+  private nativeApprovalDecision(choice: ApprovalChoice | undefined, response: ApprovalResponse): Parameters<typeof mapDecisionToCodexResponse>[1] {
+    if ("autoDeny" in response || choice?.intent === "deny") return "deny";
+    return choice?.intent === "allow_scoped" ? "allow-session" : "allow";
   }
 
   /** List stable routing envelopes, optionally filtered by owning thread. */
@@ -2838,14 +2857,19 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * Used by stopSession and shutdown to unblock any in-flight approvals so the
    * codex turn can tear down cleanly.
    */
-  private drainPending(predicate: (entry: PendingPermissionEntry) => boolean): void {
+  private drainPending(predicate: (entry: PendingPermissionEntry) => boolean, reason: "session_stopped" | "turn_ended" = "session_stopped"): void {
     for (const [requestId, entry] of Array.from(this.pendingPermissions)) {
       if (!predicate(entry)) continue;
       this.pendingPermissions.delete(requestId);
       const response = mapDecisionToCodexResponse(entry.method, "cancelled", entry.params);
       entry.resolve(response);
-      this.emit("approval_resolved", { requestId, threadId: entry.threadId, outcome: { status: "cancelled", reason: "session_stopped" } });
+      this.publishApprovalDecision(requestId, entry, { status: "cancelled", reason: entry.unanswerable ? "unanswerable" : reason });
     }
+  }
+
+  private publishApprovalDecision(requestId: string, entry: PendingPermissionEntry, outcome: ApprovalOutcome): void {
+    if (entry.routing) this.canonicalEventPublisher.publish(entry.routing, providerRuntimeEvent({ ...approvalReceipt({ requestId, threadId: entry.threadId, body: entry.body }, outcome), turnExecutionId: entry.routing.executionId }));
+    this.emit("approval_resolved", { requestId, threadId: entry.threadId, outcome });
   }
 
   /**

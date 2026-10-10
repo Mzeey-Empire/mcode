@@ -1,4 +1,5 @@
 import * as NodeEvents from "node:events";
+import { approvalReceipt } from "../../approvals/approval-receipt.js";
 import * as NodeCrypto from "node:crypto";
 import { CopilotClient, approveAll } from "@github/copilot-sdk";
 import type { CopilotSession, SessionEvent, ModelInfo, PermissionRequest as NativePermissionRequest, PermissionRequestResult } from "@github/copilot-sdk";
@@ -229,7 +230,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
       this.publish(state, { type: "error", threadId: request.threadId, error: toError(error).message });
     } finally {
       unsubscribe();
-      this.cancelPermissions(turn);
+      this.cancelPermissions(state, "turn_ended");
       this.publishAssistantTextBoundary(state, turn);
       if (turn.outcome === "completed") this.publish(state, { type: "turnComplete", threadId: request.threadId, reason: "end_turn", costUsd: null, tokensIn: turn.tokensIn, tokensOut: turn.tokensOut, contextWindow: turn.contextWindow, totalProcessedTokens: turn.tokensIn + turn.tokensOut + turn.cacheRead + turn.cacheWrite, cacheReadTokens: turn.cacheRead, cacheWriteTokens: turn.cacheWrite, costMultiplier: turn.cost, providerId: this.id });
       this.publish(state, { type: "ended", threadId: request.threadId, turnExecutionId: request.turnExecutionId, ...(turn.outcome === "completed" ? {} : { outcome: turn.outcome === "cancelled" ? "cancelled" as const : "errored" as const }) });
@@ -312,12 +313,14 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
       if (!turn) continue;
       const pending = turn.pendingPermissions.get(requestId);
       if (!pending) continue;
+      if ("autoDeny" in response) pending.unanswerable = true;
       const choice = approvalChoice(pending.request.body, response);
       if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
-      turn.pendingPermissions.delete(requestId);
       if (!("autoDeny" in response) && choice?.id === "allow-session") state.sessionApproval = true;
       pending.resolve(this.nativeApprovalResult(choice, response));
+      turn.pendingPermissions.delete(requestId);
       await Promise.resolve();
+      this.publish(state, approvalReceipt(pending.request, approvalOutcome(choice, response)));
       this.emit("approval_resolved", { requestId, threadId: pending.request.threadId,
         outcome: approvalOutcome(choice, response) });
       return { status: "resolved" };
@@ -336,10 +339,15 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
       .flatMap((state) => [...state.turn?.pendingPermissions.values() ?? []].map((pending) => pending.request));
   }
 
-  private cancelPermissions(turn: CopilotTurnState): void {
+  private cancelPermissions(state: CopilotSessionState, reason: "session_stopped" | "turn_ended" = "session_stopped"): void {
+    const turn = state.turn;
+    if (!turn) return;
     for (const [requestId, pending] of turn.pendingPermissions) {
+      turn.pendingPermissions.delete(requestId);
       pending.resolve({ kind: "denied-interactively-by-user" });
-      this.emit("approval_resolved", { requestId, threadId: pending.request.threadId, outcome: { status: "cancelled", reason: "session_stopped" } });
+      const outcome = { status: "cancelled", reason: pending.unanswerable ? "unanswerable" : reason } satisfies import("@mcode/contracts").ApprovalOutcome;
+      this.publish(state, approvalReceipt(pending.request, outcome));
+      this.emit("approval_resolved", { requestId, threadId: pending.request.threadId, outcome });
     }
     turn.pendingPermissions.clear();
   }
@@ -353,7 +361,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     await state.controls;
     if (!state.turn) { if (state.utilityBusy) await bounded(state.session.abort(), 5_000, "Copilot utility interruption"); return; }
     if (state.turn.outcome === "completed" || state.turn.outcome === "failed") return;
-    this.cancelPermissions(state.turn);
+    this.cancelPermissions(state);
     state.turn.outcome ??= "cancelled";
     const turn = state.turn;
     let timer: ReturnType<typeof setTimeout> | undefined;

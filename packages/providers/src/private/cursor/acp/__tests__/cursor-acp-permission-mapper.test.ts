@@ -14,12 +14,17 @@ const options: PermissionOption[] = [
 function setup() {
   const emitApprovalRequest = vi.fn();
   const emitApprovalResolved = vi.fn();
+  const publishEvent = vi.fn();
   const bridge = new CursorAcpClientBridge({
     settings: { get: () => { throw new Error("Settings are unused by permission resolution"); } },
-    publishEvent: vi.fn(), publishNativeTurnDiff: vi.fn(), emitPlanCaptured: vi.fn(),
+    publishEvent, publishNativeTurnDiff: vi.fn(), emitPlanCaptured: vi.fn(),
     emitApprovalRequest, emitApprovalResolved,
   });
-  return { bridge, emitApprovalRequest, emitApprovalResolved };
+  const requestPermission = (
+    entry: Parameters<CursorAcpClientBridge["requestPermission"]>[0],
+    request: Parameters<CursorAcpClientBridge["requestPermission"]>[1],
+  ) => bridge.requestPermission(entry, request, (event) => publishEvent(entry, event));
+  return { bridge, requestPermission, emitApprovalRequest, emitApprovalResolved, publishEvent };
 }
 
 const entry = { permissionMode: "default" as const, threadId: "owner", mcodeSessionId: "mcode-owner",
@@ -29,7 +34,7 @@ const toolCall = { toolCallId: "tool-1", title: "Bash", kind: "execute" as const
 describe("Cursor native approval boundary", () => {
   it("keeps both reject choices and sends reject_always by its exact id", async () => {
     const test = setup();
-    const native = test.bridge.requestPermission(entry, { sessionId: "session-1", toolCall, options });
+    const native = test.requestPermission(entry, { sessionId: "session-1", toolCall, options });
     await Promise.resolve();
     const [request] = test.bridge.listPendingApprovals("owner");
     if (!request) throw new Error("Expected a pending request");
@@ -50,11 +55,34 @@ describe("Cursor native approval boundary", () => {
       requestId: request.requestId, threadId: "owner", outcome: { status: "denied", choiceLabel: "Reject always" },
     }]]);
     expect(test.bridge.listPendingApprovals()).toEqual([]);
+    expect(test.publishEvent.mock.calls.map(([, event]) => event)).toEqual([{
+      type: "approvalDecided", threadId: "owner", requestId: request.requestId, toolCallId: "tool-1",
+      kind: "command", subjectLabel: "echo ok", origin: { kind: "agent" }, outcome: { status: "denied", choiceLabel: "Reject always" },
+    }]);
+  });
+
+  it.each([false, true])("drains one receipt and preserves a failed auto-deny's cause: %s", async (failedDeny) => {
+    const test = setup();
+    const controller = new AbortController();
+    const session = { ...entry, connection: { signal: controller.signal } };
+    const native = test.requestPermission(session, { sessionId: "session-1", toolCall, options });
+    const [request] = test.bridge.listPendingApprovals();
+    if (!request) throw new Error("Missing approval");
+    if (failedDeny) {
+      controller.abort();
+      expect(await test.bridge.resolveApproval(request.requestId, { autoDeny: "unreadable" })).toMatchObject({ status: "failed" });
+    }
+    test.bridge.cancelPendingForSession("mcode-owner");
+    test.bridge.cancelAllPending();
+    await expect(native).resolves.toEqual({ outcome: { outcome: "cancelled" } });
+    expect(test.publishEvent.mock.calls.map(([, event]) => event.outcome)).toEqual([
+      { status: "cancelled", reason: failedDeny ? "unanswerable" : "session_stopped" },
+    ]);
   });
 
   it("answers a synthetic deny with native cancellation when only allow options exist", async () => {
     const test = setup();
-    const native = test.bridge.requestPermission(entry, { sessionId: "session-1", toolCall, options: options.slice(0, 2) });
+    const native = test.requestPermission(entry, { sessionId: "session-1", toolCall, options: options.slice(0, 2) });
     await Promise.resolve();
     const [request] = test.bridge.listPendingApprovals();
     if (!request) throw new Error("Expected a pending request");
@@ -67,7 +95,7 @@ describe("Cursor native approval boundary", () => {
 
   it("emits the whole oversized command for server validation", async () => {
     const test = setup();
-    const native = test.bridge.requestPermission(entry, { sessionId: "session-1", toolCall: { ...toolCall, rawInput: { command: "x".repeat(70_000) } }, options });
+    const native = test.requestPermission(entry, { sessionId: "session-1", toolCall: { ...toolCall, rawInput: { command: "x".repeat(70_000) } }, options });
     await Promise.resolve();
     const [request] = test.bridge.listPendingApprovals();
     expect(test.emitApprovalRequest.mock.calls).toEqual([[request]]);
@@ -82,7 +110,7 @@ describe("Cursor native approval boundary", () => {
     const controller = new AbortController();
     const child: { exitCode: number | null } = { exitCode: null };
     const session = { ...entry, connection: { signal: controller.signal }, child };
-    const native = test.bridge.requestPermission(session, { sessionId: "session-1", toolCall, options });
+    const native = test.requestPermission(session, { sessionId: "session-1", toolCall, options });
     const answered = vi.fn();
     void native.then(answered);
     await Promise.resolve();

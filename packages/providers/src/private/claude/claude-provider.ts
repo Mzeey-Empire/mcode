@@ -5,6 +5,8 @@
  */
 
 import * as NodeEvents from "node:events";
+import { approvalReceipt } from "../../approvals/approval-receipt.js";
+import type { ApprovalOutcome, ApprovalChoice } from "@mcode/contracts";
 import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
 import { claudeApprovalBody } from "./claude-approval.js";
 
@@ -571,6 +573,9 @@ export class ClaudeProvider
       input: unknown;
       title?: string;
       body: ApprovalRequestBody;
+      routing?: ClaudeCanonicalEventRouting;
+      signal?: AbortSignal;
+      unanswerable?: boolean;
       resolve: (decision: ClaudeApprovalDecision) => void;
     }
   >();
@@ -1027,7 +1032,7 @@ export class ClaudeProvider
     );
   }
 
-  private createCanUseTool(threadId: string): CanUseTool {
+  private createCanUseTool(threadId: string, spawnRouting?: ClaudeCanonicalEventRouting): CanUseTool {
     return async (toolName, input, options) => {
       try {
         const planExit = this.handleExitPlanMode(threadId, toolName, input);
@@ -1039,6 +1044,7 @@ export class ClaudeProvider
           toolName,
           input,
           options,
+          this.runtime.get(`mcode-${threadId}`)?.executionRouting ?? spawnRouting,
         );
       } catch (error) {
         logger.error("canUseTool callback threw unexpectedly", {
@@ -1120,6 +1126,7 @@ export class ClaudeProvider
     toolName: string,
     input: Record<string, unknown>,
     options: Parameters<CanUseTool>[2],
+    routing?: ClaudeCanonicalEventRouting,
   ): Promise<ClaudeToolPermissionResult> {
     const requestId = crypto.randomUUID();
     logger.debug("canUseTool called", { toolName, requestId, threadId });
@@ -1129,6 +1136,7 @@ export class ClaudeProvider
       toolName,
       input,
       options,
+      routing,
     );
     logger.debug("canUseTool decision", { toolName, requestId, decision });
     const result = this.toClaudePermissionResult(
@@ -1152,6 +1160,7 @@ export class ClaudeProvider
     toolName: string,
     input: Record<string, unknown>,
     options: Parameters<CanUseTool>[2],
+    routing?: ClaudeCanonicalEventRouting,
   ): Promise<ClaudeApprovalDecision> {
     return new Promise((resolve) => {
       const body = claudeApprovalBody(toolName, input, options);
@@ -1161,6 +1170,8 @@ export class ClaudeProvider
         input,
         title: options?.title,
         body,
+        routing,
+        signal: options?.signal,
         resolve,
       });
       this.emit("approval_request", { requestId, threadId, body } satisfies ApprovalRequestEnvelope);
@@ -1177,13 +1188,14 @@ export class ClaudeProvider
     resolve: (decision: ClaudeApprovalDecision) => void,
   ): void {
     const pending = this.pendingPermissions.get(requestId);
-    if (!this.pendingPermissions.delete(requestId)) return;
+    if (!pending || !this.pendingPermissions.delete(requestId)) return;
     resolve("cancelled");
-    this.emit("approval_resolved", {
-      requestId,
-      threadId: pending?.threadId,
-      outcome: { status: "cancelled", reason: "session_stopped" },
-    });
+    this.publishApprovalDecision(requestId, pending, { status: "cancelled", reason: pending.unanswerable ? "unanswerable" : "session_stopped" });
+  }
+
+  private publishApprovalDecision(requestId: string, entry: { threadId: string; body: ApprovalRequestBody; routing?: ClaudeCanonicalEventRouting }, outcome: ApprovalOutcome): void {
+    if (entry.routing) this.publishTurnEvent(entry.routing, `mcode-${entry.threadId}`, approvalReceipt({ requestId, threadId: entry.threadId, body: entry.body }, outcome));
+    this.emit("approval_resolved", { requestId, threadId: entry.threadId, outcome });
   }
 
   private toClaudePermissionResult(
@@ -1500,7 +1512,7 @@ export class ClaudeProvider
         : {},
       disallowedTools: ["EnterPlanMode", "AskUserQuestion"],
       permissionMode,
-      canUseTool: this.createCanUseTool(context.threadId),
+      canUseTool: this.createCanUseTool(context.threadId, context.routing),
       ...buildReasoningOptions(
         context.params.reasoningLevel,
         context.model,
@@ -2478,6 +2490,7 @@ export class ClaudeProvider
     event: AgentEvent,
     evidence?: ClaudeEventEvidence,
   ): void {
+    this.drainApprovalsAtTurnEnd(routing, event);
     const runtimeEvent = providerRuntimeEvent({
       ...event,
       turnExecutionId: routing.executionId,
@@ -2491,6 +2504,17 @@ export class ClaudeProvider
       [...this.claudeSessionIdentities(sessionId), ...(evidence?.sourceIdentities ?? [])],
       evidence?.nativeEventId,
     );
+  }
+
+  private drainApprovalsAtTurnEnd(routing: ClaudeCanonicalEventRouting, event: AgentEvent): void {
+    if (event.type === "turnComplete" || event.type === "ended" || event.type === "error") {
+      for (const [requestId, pending] of this.pendingPermissions) {
+        if (pending.routing?.executionId !== routing.executionId) continue;
+        this.pendingPermissions.delete(requestId);
+        pending.resolve("cancelled");
+        this.publishApprovalDecision(requestId, pending, { status: "cancelled", reason: pending.unanswerable ? "unanswerable" : "turn_ended" });
+      }
+    }
   }
 
   private claudeSessionIdentities(sessionId: string): ProviderIdentity[] {
@@ -2807,7 +2831,7 @@ export class ClaudeProvider
       if (entry.threadId === tid) {
         this.pendingPermissions.delete(requestId);
         entry.resolve("cancelled");
-        this.emit("approval_resolved", { requestId, threadId: entry.threadId, outcome: { status: "cancelled", reason: "session_stopped" } });
+        this.publishApprovalDecision(requestId, entry, { status: "cancelled", reason: entry.unanswerable ? "unanswerable" : "session_stopped" });
       }
     }
     this.goalsBySession.delete(sessionId);
@@ -2930,18 +2954,23 @@ export class ClaudeProvider
   async resolveApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     const entry = this.pendingPermissions.get(requestId);
     if (!entry) return { status: "not_pending" };
+    if ("autoDeny" in response) entry.unanswerable = true;
+    if (entry.signal?.aborted) return { status: "failed", message: "The permission callback is closed" };
     const choice = approvalChoice(entry.body, response);
     if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
-    this.pendingPermissions.delete(requestId);
     const session = this.runtime.get(`mcode-${entry.threadId}`);
     if (session) session.lastUsedAt = Date.now();
-    const decision = "autoDeny" in response ? "auto-deny" : choice?.intent === "allow_once" ? "allow"
-      : choice?.id === "allow-session" ? "allow-session" : "deny";
-    entry.resolve(decision);
+    entry.resolve(this.nativeApprovalDecision(choice, response));
+    this.pendingPermissions.delete(requestId);
     await Promise.resolve();
-    this.emit("approval_resolved", { requestId, threadId: entry.threadId,
-      outcome: approvalOutcome(choice, response) });
+    this.publishApprovalDecision(requestId, entry, approvalOutcome(choice, response));
     return { status: "resolved" };
+  }
+
+  private nativeApprovalDecision(choice: ApprovalChoice | undefined, response: ApprovalResponse): ClaudeApprovalDecision {
+    if ("autoDeny" in response) return "auto-deny";
+    if (choice?.intent === "allow_once") return "allow";
+    return choice?.id === "allow-session" ? "allow-session" : "deny";
   }
 
   /** Return stable adapter routing and the original approval body. */
@@ -2983,11 +3012,7 @@ export class ClaudeProvider
     for (const [requestId, entry] of this.pendingPermissions) {
       this.pendingPermissions.delete(requestId);
       entry.resolve("cancelled");
-      this.emit("approval_resolved", {
-        requestId,
-        threadId: entry.threadId,
-        outcome: { status: "cancelled", reason: "session_stopped" },
-      });
+      this.publishApprovalDecision(requestId, entry, { status: "cancelled", reason: entry.unanswerable ? "unanswerable" : "session_stopped" });
     }
     const results = await Promise.allSettled([this.runtime.shutdown()]);
     results.push(...await Promise.allSettled(this.streamTasks));
