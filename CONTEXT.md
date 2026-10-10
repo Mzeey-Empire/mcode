@@ -877,18 +877,19 @@ plan preview appears only from a live generated-plan event; saved plans loaded
 during app startup do not create previews. The plan preview replaces transcript
 plan artifact cards; generated plans stay out of assistant messages.
 
-### Task bubble
-The composer-adjacent surface that shows the agent's current task list for
-the active thread. Collapsed, it shows one aggregate status circle and a
-settled-over-total count; clicking it expands the list upward above the
-composer. Its status circle is derived from parent-agent tasks: active when
-any task is in progress, completed when every task is completed or cancelled,
-pending when no task has started, and mixed when settled and pending tasks
-coexist. It clears as soon as the user sends a new turn if every task is
-completed or cancelled. The task bubble shows only parent-agent tasks;
-sub-agent task groups stay with the narrative timeline where delegated work is
-attributed. It is separate from the Plan tab.
-_Avoid_: Scope task list
+### Task row
+The row in the composer tray, docked on top of the composer, that shows the
+agent's current task list for the active thread. Collapsed, it shows the list
+title, one segment per task (done, current, or pending), and a settled-over-total
+count, where settled means completed or cancelled. The title is the title of the
+plan version the list's turn implemented, else "Tasks"; it is never the thread
+title. Expanding it grows the tray upward, so the composer does not move. It
+shows only parent-agent tasks; sub-agent task groups stay with the narrative
+timeline where delegated work is attributed. When the user sends a new turn, a
+fully settled list clears; an unsettled list stays until the new turn writes
+its own parent tasks, and clears if that turn ends without doing so. It is
+separate from the Plan tab.
+_Avoid_: Task bubble, Scope task list
 
 ### Terminal tab
 A repeatable right-panel tab that represents one **shell session** against

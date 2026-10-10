@@ -13,7 +13,6 @@ import { Notice } from "@/components/ui/notice";
 import { RetryBanner } from "@/components/chat/RetryBanner";
 import { type useSlashCommand } from "@/components/chat/useSlashCommand";
 import { SpellcheckContextMenu } from "@/components/chat/SpellcheckContextMenu";
-import { TaskBubble } from "@/components/chat/TaskBubble";
 import { useFileAutocomplete } from "@/components/chat/useFileAutocomplete";
 import { ComposerEditor } from "@/components/chat/lexical";
 import { Button } from "@/components/ui/button";
@@ -33,6 +32,7 @@ import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore
 import { cn } from "@/lib/utils";
 import { ComposerAgentControls } from "./controls/ComposerAgentControls";
 import { ComposerNewThreadContext } from "./execution/ComposerNewThreadContext";
+import { ComposerTray } from "./ComposerTray";
 import { useDraftWriteFailureStore } from "@/lib/composer-draft-storage";
 import { DiffCommentsComposerAttachment } from "./DiffCommentsComposerAttachment";
 import { SelectedTextCommentsComposerAttachment } from "./SelectedTextCommentsComposerAttachment";
@@ -53,8 +53,6 @@ interface ComposerContentSurfaceProps {
     readonly activeThread?: Thread;
     readonly planPreview?: ComponentProps<typeof PlanPreview>["preview"];
     readonly planPanelOpen: boolean;
-    readonly taskBubbleTasks: readonly ComponentProps<typeof TaskBubble>["tasks"][number][];
-    readonly fileEffectSummary: ComponentProps<typeof TaskBubble>["fileEffects"];
     readonly isAgentRunning: boolean;
     readonly isStopPending: boolean;
     readonly setupBlocked: boolean;
@@ -172,19 +170,9 @@ function ComposerPlanPreview({ model }: Pick<ComposerContentSurfaceProps, "model
   );
 }
 
-function ComposerTaskBubble({ model }: Pick<ComposerContentSurfaceProps, "model">) {
-  const showTaskBubble = Boolean(
-    model.threadId && model.taskBubbleTasks.length > 0 && !model.branchFromMessageId
-      && !model.isNewThread,
-  );
-
-  if (!showTaskBubble) return null;
-
-  return (
-    <div className="mb-2 flex justify-center">
-      <TaskBubble tasks={model.taskBubbleTasks} fileEffects={model.fileEffectSummary} />
-    </div>
-  );
+function ComposerTraySurface({ model }: Pick<ComposerContentSurfaceProps, "model">) {
+  if (!model.threadId || model.branchFromMessageId || model.isNewThread) return null;
+  return <ComposerTray threadId={model.threadId} />;
 }
 
 function ComposerQueueSurface({
@@ -409,13 +397,13 @@ function ComposerInlineStopButton({
       <TooltipTrigger
         render={
           <Button
-            variant="ink"
+            variant="ghost"
             shape="round"
             size="icon-compact"
             onClick={actions.onStop}
             aria-label="Stop agent"
           >
-            <div className="h-2.5 w-2.5 rounded-sm bg-current" />
+            <div className="size-2.5 rounded-[2px] bg-ink" />
           </Button>
         }
       />
@@ -524,8 +512,8 @@ export function isComposerSendButtonDisabled({
     || isThreadScaffold || isStopPending || (hasContent ? targetPending : !isAgentRunning);
 }
 
-// Send is the round primary; Stop is neutral by rule: an ink circle with a background-colour square.
-const SEND_BUTTON_VARIANT: Record<ComposerSendButtonVisualState, "default" | "ink"> = {
+/** Button variant per send state. Send is the round primary; Stop is neutral by rule: an ink circle with a background-colour square. */
+export const SEND_BUTTON_VARIANT: Record<ComposerSendButtonVisualState, "default" | "ink"> = {
   scaffold: "default",
   queue: "default",
   stop: "ink",
@@ -561,7 +549,7 @@ function ComposerSendButton({
       type="button"
       variant={SEND_BUTTON_VARIANT[visualState]}
       shape="round"
-      size="icon-compact"
+      size="icon-default"
       onClick={onClick}
       disabled={disabled}
       aria-label={SEND_BUTTON_COPY[copy]}
@@ -569,7 +557,7 @@ function ComposerSendButton({
       {visualState === "scaffold" || visualState === "stopping" ? (
         <Spinner size={16} className="text-current" />
       ) : visualState === "stop" ? (
-        <div className="h-4 w-4 rounded-sm bg-current" />
+        <div className="size-3.5 rounded-[2px] bg-current" />
       ) : (
         <ArrowUp />
       )}
@@ -724,9 +712,9 @@ export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
   return (
     <>
       <ComposerPlanPreview {...props} />
-      <ComposerTaskBubble {...props} />
       <ComposerQueueSurface {...props} />
       <ComposerNewThreadSurface {...props} />
+      <ComposerTraySurface {...props} />
       <ComposerInputSurface {...props} />
       {props.model.queuedSend && (
         <p className="px-1 pt-1 text-xs text-muted/60">

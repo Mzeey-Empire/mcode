@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d41ff739-8732-4ca7-a975-bc830dc754dd",
-  "prevId": "065e010c-a333-4858-85ca-28a40cbe6e0d",
+  "id": "4e1af0eb-a85e-4b4e-a69c-3d8807920e17",
+  "prevId": "d41ff739-8732-4ca7-a975-bc830dc754dd",
   "tables": {
     "canonical_agent_events": {
       "name": "canonical_agent_events",
@@ -2654,6 +2654,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "trigger": {
+          "name": "trigger",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'manual'"
         },
         "action_name": {
           "name": "action_name",

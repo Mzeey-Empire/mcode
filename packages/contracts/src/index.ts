@@ -921,6 +921,26 @@ export { GitBranchSchema, WorktreeSchema, GitCommitSchema, BranchComparisonSchem
 export type { GitBranch, WorktreeInfo, GitCommit, BranchComparison, GitRemoteUrl } from "./git.js";
 export { TargetWorktreeSchema, GitRefSchema, DetachedWorktreeTargetSchema, GitRefPurposeSchema, GitRefSideSchema, pagedTargetResultSchema, GitListErrorSchema, GitRefsListParamsSchema, GitRefsListResultSchema } from "./git.js";
 export type { TargetWorktree, GitRef, DetachedWorktreeTarget, GitRefPurpose, GitRefSide, GitListError, GitRefsListParams, GitRefsListResult } from "./git.js";
+export {
+  GIT_COMMIT_MAX_PATHS,
+  GIT_COMMIT_MAX_MESSAGE_LENGTH,
+  GitGenerateCommitMessageParamsSchema,
+  GitGenerateCommitMessageResultSchema,
+  GitCommitFileSchema,
+  GitCommitParamsSchema,
+  GitCommitPushOutcomeSchema,
+  GitCommitRejectionSchema,
+  GitCommitResultSchema,
+} from "./git-commit.js";
+export type {
+  GitGenerateCommitMessageParams,
+  GitGenerateCommitMessageResult,
+  GitCommitFile,
+  GitCommitParams,
+  GitCommitPushOutcome,
+  GitCommitRejection,
+  GitCommitResult,
+} from "./git-commit.js";
 
 export { PrInfoSchema, PrDraftSchema, CreatePrParamsSchema, CreatePrResultSchema, CheckRunSchema, ChecksStatusSchema } from "./github.js";
 export type { PrInfo, PrDraft, CreatePrParams, CreatePrResult, CheckRun, ChecksStatus } from "./github.js";

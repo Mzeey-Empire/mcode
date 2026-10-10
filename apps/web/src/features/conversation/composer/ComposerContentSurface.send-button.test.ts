@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getComposerSendButtonVisualState,
   isComposerSendButtonDisabled,
+  SEND_BUTTON_VARIANT,
 } from "./ComposerContentSurface";
 
 const disabledArgs = {
@@ -72,5 +73,18 @@ describe("composer send button with a pending target branch", () => {
 
   it("keeps Stop enabled for a running parent thread while a fork waits for its branch", () => {
     expect(isComposerSendButtonDisabled({ ...disabledArgs, targetPending: true })).toBe(false);
+  });
+});
+
+describe("composer Stop colour", () => {
+  it("renders Stop and Stopping as the neutral ink circle, never primary or destructive", () => {
+    const stopStates = (["stop", "stopping"] as const).map((isStopPending) =>
+      getComposerSendButtonVisualState({
+        isThreadScaffold: false,
+        isAgentRunning: true,
+        isStopPending: isStopPending === "stopping",
+        hasContent: false,
+      }));
+    expect(stopStates.map((state) => SEND_BUTTON_VARIANT[state])).toEqual(["ink", "ink"]);
   });
 });

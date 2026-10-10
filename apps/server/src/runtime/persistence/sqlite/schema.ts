@@ -1010,3 +1010,35 @@ export const plans = sqliteTable(
     uniqueIndex("idx_plans_thread_version").on(table.threadId, table.version),
   ],
 );
+
+/**
+ * One row per Review commit click. The row, not a HEAD check, is what lets a replayed
+ * requestId return the commit it already made instead of committing twice.
+ */
+export const gitCommitRequests = sqliteTable(
+  "git_commit_requests",
+  {
+    requestId: text("request_id").primaryKey().notNull(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    threadId: text("thread_id").references(() => threads.id, { onDelete: "set null" }),
+    repoPath: text("repo_path").notNull(),
+    inputsHash: text("inputs_hash").notNull(),
+    originalHead: text("original_head"),
+    /** Branch checked out when the request was prepared; null when detached. Replays report it. */
+    branch: text("branch"),
+    state: text("state").notNull(),
+    commitSha: text("commit_sha"),
+    rejection: text("rejection"),
+    pushDestination: text("push_destination"),
+    pushState: text("push_state").notNull(),
+    pushFailure: text("push_failure"),
+    preparedAt: text("prepared_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("idx_git_commit_requests_state").on(table.state),
+    index("idx_git_commit_requests_prepared_at").on(table.preparedAt),
+    check("git_commit_requests_state", sql`${table.state} IN ('prepared', 'committed', 'rejected', 'unknown')`),
+    check("git_commit_requests_push_state", sql`${table.pushState} IN ('skipped', 'pending', 'pushed', 'failed')`),
+  ],
+);

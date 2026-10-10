@@ -46,7 +46,7 @@ describe("running-session signal", () => {
     store.handleAgentEvent({ type: "turnStarted", threadId: "t-1", fileEffectTurnId: "turn-1" } as AgentEvent);
     expect(useThreadStore.getState().runningThreadIds.size).toBe(1);
     expect(getTestThreadAgentStartTime("t-1")).toBe(firstStart);
-    expect(useTaskStore.getState().taskBubbleByThread["t-1"]).toHaveLength(1);
+    expect(useTaskStore.getState().taskBubbleByThread["t-1"]?.tasks).toHaveLength(1);
     expect(useTaskStore.getState().pendingTaskBubbleReplacementByThread["t-1"]).toBeUndefined();
     vi.restoreAllMocks();
   });
