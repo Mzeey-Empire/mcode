@@ -4415,3 +4415,76 @@ describe("CodexEventMapper", () => {
     })).toEqual([]);
   });
 });
+
+describe("CodexEventMapper context compaction", () => {
+  // Captured from codex-cli 0.162.1 answering thread/compact/start.
+  const THREAD_ID = "01a127c0-01fb-7d73-a557-336b7a522db0";
+  const TURN_ID = "01a127c0-16de-72d2-89be-c76c72fdfcf7";
+  const ITEM_ID = "01a127c0-1740-7572-9f5e-e983904efa3c";
+  const turnStarted = { method: "turn/started", params: { threadId: THREAD_ID, turn: { id: TURN_ID, rootTurnId: TURN_ID, items: [], itemsView: "notLoaded", status: "inProgress", error: null, startedAt: 1791668262, completedAt: null, durationMs: null } } };
+  const compactionStarted = { method: "item/started", params: { item: { type: "contextCompaction", id: ITEM_ID }, threadId: THREAD_ID, turnId: TURN_ID, startedAtMs: 1791668262720 } };
+  const tokenUsage = { method: "thread/tokenUsage/updated", params: { threadId: THREAD_ID, turnId: TURN_ID, tokenUsage: { total: { totalTokens: 26093, inputTokens: 26088, cachedInputTokens: 8320, cacheWriteInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 0 }, last: { totalTokens: 18189, inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 }, modelContextWindow: 258400 } } };
+  const rateLimits = { method: "account/rateLimits/updated", params: { rateLimits: { limitId: "codex", limitName: null, normalModelSlug: null, primary: { usedPercent: 83, windowDurationMins: 10080, resetsAt: 1791969915 }, secondary: null, credits: { hasCredits: true, unlimited: false, balance: "62089.9843550000" }, individualLimit: null, spendControlReached: null, planType: "pro", rateLimitReachedType: null } } };
+  const compactionCompleted = { method: "item/completed", params: { item: { type: "contextCompaction", id: ITEM_ID }, threadId: THREAD_ID, turnId: TURN_ID, completedAtMs: 1791668264633 } };
+  const turnCompleted = (status: string) => ({ method: "turn/completed", params: { threadId: THREAD_ID, turn: { id: TURN_ID, rootTurnId: TURN_ID, items: [], itemsView: "notLoaded", status, error: null, startedAt: 1791668262, completedAt: 1791668264, durationMs: 2128 } } });
+  const compacting = (active: boolean) => ({ type: "compacting", threadId: "test-thread", active });
+
+  let mapper: CodexEventMapper;
+  const eventsOf = (notification: unknown) => mapper.mapNotification(notification).map(({ event }) => event);
+
+  beforeEach(() => {
+    mapper = new CodexEventMapper("test-thread", THREAD_ID);
+    eventsOf(turnStarted);
+  });
+
+  it("maps a compaction start to Compacting active", () => {
+    expect(mapper.mapNotificationWithDisposition(compactionStarted)).toMatchObject({ events: [{ event: compacting(true) }], disposition: { kind: "mapped" } });
+  });
+
+  it("maps the matching compaction completion to Compacting inactive", () => {
+    eventsOf(compactionStarted);
+    expect(eventsOf(compactionCompleted)).toEqual([compacting(false)]);
+  });
+
+  it("orders the captured compaction turn as Compacting true, false, then turnComplete", () => {
+    const events = [compactionStarted, tokenUsage, rateLimits, compactionCompleted, turnCompleted("completed")].flatMap(eventsOf);
+    const lifecycle = events.filter(({ type }) => type !== "contextEstimate");
+    expect(lifecycle.map(({ type }) => type)).toEqual(["compacting", "compacting", "turnComplete"]);
+    expect(lifecycle.slice(0, 2)).toEqual([compacting(true), compacting(false)]);
+  });
+
+  it("does not repeat Compacting for a duplicate start", () => {
+    eventsOf(compactionStarted);
+    expect(eventsOf(compactionStarted)).toEqual([]);
+  });
+
+  it("ignores a completion with no matching start", () => {
+    expect(mapper.mapNotificationWithDisposition(compactionCompleted)).toEqual({ events: [], disposition: { kind: "ignored-with-reason", reason: "item-has-no-transcript-projection" } });
+  });
+
+  it("closes an open compaction before the turn completes", () => {
+    eventsOf(compactionStarted);
+    const events = eventsOf(turnCompleted("completed"));
+    expect(events.map(({ type }) => type)).toEqual(["compacting", "turnComplete"]);
+    expect(events[0]).toEqual(compacting(false));
+  });
+
+  it.each(["interrupted", "failed"])("closes an open compaction when the turn is %s", (status) => {
+    eventsOf(compactionStarted);
+    expect(eventsOf(turnCompleted(status))[0]).toEqual(compacting(false));
+    eventsOf(turnStarted);
+    expect(eventsOf(compactionCompleted)).toEqual([]);
+  });
+
+  it("keeps a child thread's compaction silent", () => {
+    eventsOf({ method: "item/started", params: { threadId: THREAD_ID, item: { type: "collabAgentToolCall", id: "spawn-1", tool: "spawnAgent" } } });
+    eventsOf({ method: "item/completed", params: { threadId: THREAD_ID, item: { type: "collabAgentToolCall", id: "spawn-1", tool: "spawnAgent", receiverThreadIds: ["child-1"] } } });
+    eventsOf({ method: "turn/started", params: { threadId: "child-1", turn: { id: "child-turn-1" } } });
+    const events = [
+      { method: "item/started", params: { threadId: "child-1", turnId: "child-turn-1", item: { type: "contextCompaction", id: "child-compaction" } } },
+      { method: "item/completed", params: { threadId: "child-1", turnId: "child-turn-1", item: { type: "contextCompaction", id: "child-compaction" } } },
+    ].flatMap(eventsOf);
+    expect(events).toEqual([]);
+    expect(eventsOf(turnCompleted("completed")).map(({ type }) => type)).toEqual(["turnComplete"]);
+  });
+});

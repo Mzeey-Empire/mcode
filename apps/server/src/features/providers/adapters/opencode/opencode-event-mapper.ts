@@ -265,7 +265,7 @@ function mapStepFinishPart(part: Record<string, unknown>, ctx: MapperContext): O
 }
 
 const STATE_ONLY_PART_TYPES = new Set([
-  "step-start", "snapshot", "patch", "agent", "retry", "compaction", "subtask", "file",
+  "step-start", "snapshot", "patch", "agent", "compaction", "subtask", "file",
 ]);
 
 /** Largest retained per-message text map before pruning oldest. */
@@ -425,6 +425,49 @@ function modelRefText(value: unknown): string {
   return "";
 }
 
+interface OpenCodeRetry {
+  message: unknown;
+  attempt: unknown;
+  statusCode?: unknown;
+  /** Absolute epoch milliseconds of the next attempt. */
+  nextAtMs?: unknown;
+}
+
+/** One ApiRetry shape for every upstream retry signal; fields the signal lacks are omitted. */
+function mapRetry(retry: OpenCodeRetry, ctx: MapperContext): OpenCodeMappedOutput {
+  const attempt = finiteNumberOrNull(retry.attempt);
+  const statusCode = finiteNumberOrNull(retry.statusCode);
+  const nextAtMs = finiteNumberOrNull(retry.nextAtMs);
+  return {
+    disposition: "mapped",
+    events: [withExecution({
+      type: "apiRetry",
+      threadId: ctx.threadId,
+      reason: boundedString(retry.message, MAX_DIAGNOSTIC_CHARS) ?? "retry",
+      ...(attempt === null ? {} : { attempt }),
+      ...(nextAtMs === null ? {} : { delayMs: Math.max(0, nextAtMs - Date.now()) }),
+      ...(statusCode === null ? {} : { errorStatus: statusCode }),
+    } satisfies AgentEvent, ctx)],
+  };
+}
+
+/** The only retry signal OpenCode v1.18.28 emits; idle and busy statuses carry no thread meaning. */
+function mapSessionStatus(properties: Record<string, unknown>, ctx: MapperContext): OpenCodeMappedOutput {
+  const status = properties.status;
+  if (!isRecord(status) || status.type !== "retry") return { disposition: "state-only", events: [] };
+  return mapRetry({ message: status.message, attempt: status.attempt, nextAtMs: status.next }, ctx);
+}
+
+function mapRetryPart(part: Record<string, unknown>, ctx: MapperContext): OpenCodeMappedOutput {
+  const data = isRecord(part.error) && isRecord(part.error.data) ? part.error.data : {};
+  return mapRetry({ message: data.message, attempt: part.attempt, statusCode: data.statusCode }, ctx);
+}
+
+function mapNextRetried(properties: Record<string, unknown>, ctx: MapperContext): OpenCodeMappedOutput {
+  const error = isRecord(properties.error) ? properties.error : {};
+  return mapRetry({ message: error.message, attempt: properties.attempt, statusCode: error.statusCode }, ctx);
+}
+
 /** A mid-turn model change uses the existing provider-neutral fallback event. */
 function mapModelSwitched(properties: Record<string, unknown>, ctx: MapperContext): OpenCodeMappedOutput {
   const actualModel = boundDiagnostic(modelRefText(properties.model)) || "unknown";
@@ -470,6 +513,7 @@ function mapPartByType(part: Record<string, unknown>, properties: Record<string,
   if (partType === "reasoning") return { disposition: "ignored", events: [], reason: "reasoning-not-surfaced" };
   if (partType === "tool") return mapToolPart(part, ctx);
   if (partType === "step-finish") return mapStepFinishPart(part, ctx);
+  if (partType === "retry") return mapRetryPart(part, ctx);
   if (typeof partType === "string" && STATE_ONLY_PART_TYPES.has(partType)) return { disposition: "state-only", events: [] };
   return {
     disposition: "diagnostic",
@@ -532,7 +576,6 @@ const STATE_ONLY_EVENT_TYPES = new Set([
   "session.updated",
   "session.deleted",
   "session.compacted",
-  "session.status",
   "message.removed",
   "message.part.removed",
   "permission.updated",
@@ -560,6 +603,8 @@ const EXACT_HANDLERS: Readonly<Record<string, NormalizedHandler>> = {
   "question.asked": () => mapAskRouted("question-request"),
   "question.v2.asked": () => mapAskRouted("question-request"),
   "session.next.model.switched": (properties, ctx) => mapModelSwitched(properties, ctx),
+  "session.next.retried": (properties, ctx) => mapNextRetried(properties, ctx),
+  "session.status": (properties, ctx) => mapSessionStatus(properties, ctx),
   "tui.toast.show": (properties, ctx) => mapToastShow(properties, ctx),
 };
 
@@ -582,7 +627,6 @@ const NEXT_STATE_ONLY_TYPES = new Set([
   "session.next.revert.staged",
   "session.next.revert.committed",
   "session.next.revert.cleared",
-  "session.next.retried",
   "session.next.compaction.delta",
   "permission.replied",
   "permission.v2.replied",

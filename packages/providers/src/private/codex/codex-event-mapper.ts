@@ -63,7 +63,7 @@ const TURN_CONTENT_METHODS = new Set([
   "turn/completed", "error",
 ]);
 
-/** Item types from item/completed that produce no agent events (module-level to avoid per-call allocation). */
+/** Item types with no transcript projection; main-route contextCompaction still maps to Compacting status (module-level to avoid per-call allocation). */
 const SILENT_ITEM_TYPES = new Set([
   "webSearch", "plan", "imageView", "imageGeneration",
   "contextCompaction", "enteredReviewMode", "exitedReviewMode",
@@ -226,6 +226,8 @@ export class CodexEventMapper {
    * thinking timeline scrolling after the turn footer says "done".
    */
   private turnEnded = false;
+  /** Main-thread compaction items started and not yet completed; the server rejects turnComplete while one is open. */
+  private readonly openCompactionItemIds = new Set<string>();
   /** Stable native review identities may repeat after reconnect; publish one terminal outcome. */
   private readonly completedApprovalReviewIds = new Set<string>();
   /** A completion without this matching start belongs to an old dispatch attempt. */
@@ -1951,11 +1953,30 @@ export class CodexEventMapper {
   }
 
   private mapMainToolStarted(item: CompletedItem | undefined, itemId: string | undefined, notification: CodexNotification, boundaryEvents: CodexMappedEvent[]): CodexMappedEvent[] {
+    if (item?.type === "contextCompaction" && itemId) return [...boundaryEvents, ...this.startCompaction(itemId)];
     if (!item || !itemId || !TOOL_LIKE_ITEM_TYPES.has(item.type) || item.type === "webSearch") return this.logMainItemStarted(notification.method, item?.type, boundaryEvents);
     const toolUse = this.buildToolUseEvent(item, itemId, notification);
     if (!toolUse) return this.logMainItemStarted(notification.method, item.type, boundaryEvents);
     this.startedToolUseSignatures.set(itemId, this.toolUseSignature(toolUse));
     return [...boundaryEvents, toolUse];
+  }
+
+  private startCompaction(itemId: string): CodexMappedEvent[] {
+    const alreadyOpen = this.openCompactionItemIds.size > 0;
+    this.openCompactionItemIds.add(itemId);
+    return alreadyOpen ? [] : [{ type: AgentEventType.Compacting, threadId: this.threadId, active: true }];
+  }
+
+  private finishCompaction(item: CompletedItem): CodexMappedEvent[] {
+    if (typeof item.id !== "string" || !this.openCompactionItemIds.has(item.id)) return this.consumeCompletedItem(item.type);
+    this.openCompactionItemIds.delete(item.id);
+    return this.openCompactionItemIds.size > 0 ? [] : [{ type: AgentEventType.Compacting, threadId: this.threadId, active: false }];
+  }
+
+  private closeOpenCompactions(): CodexMappedEvent[] {
+    if (this.openCompactionItemIds.size === 0) return [];
+    this.openCompactionItemIds.clear();
+    return [{ type: AgentEventType.Compacting, threadId: this.threadId, active: false }];
   }
 
   private logMainItemStarted(method: string, itemType: string | undefined, boundaryEvents: CodexMappedEvent[]): CodexMappedEvent[] {
@@ -2028,9 +2049,10 @@ export class CodexEventMapper {
   private mapMainTurnCompleted(notification: CodexNotification): CodexMappedEvent[] {
     const turn = (notification.params as { turn?: { status?: string; error?: { message?: string; codexErrorInfo?: unknown }; usage?: { input_tokens?: number; cached_input_tokens?: number; output_tokens?: number } } }).turn;
     logger.debug("Codex turn/completed", { status: turn?.status });
-    if (turn?.status === "failed") return this.mapFailedMainTurn(turn);
-    if (turn?.status === "interrupted") return this.finishInterruptedMainTurn();
-    return this.finishCompletedMainTurn(turn?.usage);
+    const compactionEnd = this.closeOpenCompactions();
+    if (turn?.status === "failed") return [...compactionEnd, ...this.mapFailedMainTurn(turn)];
+    if (turn?.status === "interrupted") return [...compactionEnd, ...this.finishInterruptedMainTurn()];
+    return [...compactionEnd, ...this.finishCompletedMainTurn(turn?.usage)];
   }
 
   private mapFailedMainTurn(turn: { error?: { message?: string; codexErrorInfo?: unknown } }): CodexMappedEvent[] {
@@ -2151,6 +2173,7 @@ export class CodexEventMapper {
     this.childNotificationsBeforeTurnByThread.clear();
     this.childNotificationsBeforeTurnCount = 0;
     this.replayedChildEvents = [];
+    this.openCompactionItemIds.clear();
     // Note: turnEnded is intentionally NOT cleared here. reset() is called
     // from inside turn/completed, and we want the latch to stay armed until
     // the next turn opens. Use prepareForTurn() before a new outbound turn.
@@ -2188,6 +2211,7 @@ export class CodexEventMapper {
       collabAgentToolCall: () => this.mapCompletedCollab(item, notification, route),
       mcpToolCall: () => this.mapCompletedMcpTool(item, notification),
       dynamicToolCall: () => this.mapCompletedMcpTool(item, notification),
+      contextCompaction: () => this.finishCompaction(item),
     };
     const events = dispatchNativeHandler<CodexMappedEvent[]>(handlers, item.type);
     if (events !== undefined) return events;

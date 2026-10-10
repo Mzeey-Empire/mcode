@@ -257,10 +257,10 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       configuredPath: z.string().optional(),
     }),
     z.object({
-      /** Emitted when the provider is rate-limited or approaching its rate limit. */
+      /** Emitted when the provider starts or stops rejecting requests for its rate limit. */
       type: z.literal(AgentEventType.RateLimited),
       threadId: z.string(),
-      /** Whether the rate limit is currently active (warning or rejected). False clears the indicator. */
+      /** True only while the provider is rejecting requests. A usage warning is not a block, so it reports false. False clears the indicator. */
       active: z.boolean(),
       /** Milliseconds until the rate limit resets. Computed from the SDK's absolute timestamp at emission time. */
       retryAfterMs: z.number().optional(),
