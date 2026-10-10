@@ -61,6 +61,7 @@ import {
   acceptExpectedWebNavigationRevision as acceptExpectedWebNavigationRevisionImplementation,
 } from "./browserAutomationHostNavigation";
 import { createBrowserAutomationBootstrapLifecycle } from "./browserAutomationHostLifecycle";
+import { OverlayGateContext } from "@/components/ui/overlay-gate";
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const HOST_REGISTRATION_RETRY_MS = 1_000;
@@ -888,12 +889,15 @@ function PersistentAutomationPreviewSurface({
         pointerEvents: layout.visible ? "auto" : "none",
       }}
     >
-      <PreviewPanel
-        threadId={scope.threadId}
-        workspaceId={scope.workspaceId}
-        automationOnly={!layout.visible}
-        coveredRight={layout.visible ? layout.coveredRight : 0}
-      />
+      {/* This surface lives outside the right panel's tree, so it gates its own body-portaled popups. */}
+      <OverlayGateContext.Provider value={layout.visible}>
+        <PreviewPanel
+          threadId={scope.threadId}
+          workspaceId={scope.workspaceId}
+          automationOnly={!layout.visible}
+          coveredRight={layout.visible ? layout.coveredRight : 0}
+        />
+      </OverlayGateContext.Provider>
     </div>
   );
 }
