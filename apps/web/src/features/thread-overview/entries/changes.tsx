@@ -239,6 +239,8 @@ function useChangesState(thread: Thread) {
     diffRevision,
   );
   const isChangeSummaryLoading = open && !hasCurrentChangeSummary && changeSummaryStatus !== "error";
+  // The fallback summary has no line totals, so a failed load must say so rather than show nothing.
+  const isChangeSummaryFailed = !hasCurrentChangeSummary && changeSummaryStatus === "error";
   useEffect(() => {
     if (!open) return;
 
@@ -271,14 +273,14 @@ function useChangesState(thread: Thread) {
       cancelled = true;
     };
   }, [cachedSnapshotKey, cachedSnapshots, diffRevision, open, setSnapshots, thread.id, thread.workspace_id]);
-  return { changeSummary, isChangeSummaryLoading, showChangeSummary };
+  return { changeSummary, isChangeSummaryFailed, isChangeSummaryLoading, showChangeSummary };
 }
 
 /** Preserves the loaded summary and its status while the overview is closed. */
 export const { Provider: ChangesEntryState, useEntryState: useChangesEntryState } = createOverviewEntryState(useChangesState);
 
 function ChangesEntry() {
-  const { changeSummary, isChangeSummaryLoading, showChangeSummary } = useChangesEntryState();
+  const { changeSummary, isChangeSummaryFailed, isChangeSummaryLoading, showChangeSummary } = useChangesEntryState();
   const openChanges = useCallback(() => {
     executeCommand("changes.toggle");
   }, []);
@@ -304,7 +306,12 @@ function ChangesEntry() {
         className="animate-thread-overview-loading h-3 w-14 shrink-0 overflow-hidden rounded-sm bg-hover/45"
       />
     </ThreadOverviewWhen>
-    <ThreadOverviewWhen when={!isChangeSummaryLoading && showChangeSummary}>
+    <ThreadOverviewWhen when={isChangeSummaryFailed}>
+      <span data-testid="thread-overview-change-failed" className="shrink-0 text-xs text-muted">
+        Unavailable
+      </span>
+    </ThreadOverviewWhen>
+    <ThreadOverviewWhen when={!isChangeSummaryLoading && !isChangeSummaryFailed && showChangeSummary}>
       <span
         data-testid="thread-overview-change-summary"
         aria-label={`${changeSummary.additions} additions, ${changeSummary.deletions} deletions`}

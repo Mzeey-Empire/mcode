@@ -340,6 +340,16 @@ describe("ThreadOverview branchless Create PR", () => {
     expect(mockGetReviewState).not.toHaveBeenCalled();
   });
 
+  it("says the Changes row is unavailable when its comparison fails", async () => {
+    mockGetReviewComparison.mockResolvedValue({
+      status: "failed", failure: { kind: "git-error", summary: "Git reported an error", detail: "fatal" },
+    });
+    render(<ThreadOverview thread={makeThread()} threadPaneWidth={1400} />);
+    expect(await screen.findByTestId("thread-overview-change-failed")).toHaveTextContent("Unavailable");
+    expect(screen.queryByTestId("thread-overview-change-loading")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("thread-overview-change-summary")).not.toBeInTheDocument();
+  });
+
   it("keeps branch choices when the uncommitted comparison fails", async () => {
     mockGetReviewComparison.mockRejectedValue(new Error("Comparison unavailable"));
     const user = userEvent.setup();
