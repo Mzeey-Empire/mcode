@@ -37,6 +37,7 @@ describe("PreviewWebview", () => {
           adopt: vi.fn().mockResolvedValue({ ok: true }),
           navigate: vi.fn().mockResolvedValue({ ok: true }),
           release: vi.fn().mockResolvedValue({ ok: true }),
+          hidden: vi.fn().mockResolvedValue({ ok: true }),
         },
         automation: { interrupt },
       },
@@ -82,6 +83,7 @@ describe("PreviewWebview", () => {
       adopt: vi.fn().mockResolvedValue({ ok: true }),
       navigate,
       release: vi.fn().mockResolvedValue({ ok: true }),
+      hidden: vi.fn().mockResolvedValue({ ok: true }),
     } } } as unknown as NonNullable<typeof window.desktopBridge>;
 
     function Probe() {
@@ -122,6 +124,7 @@ describe("PreviewWebview", () => {
       adopt: vi.fn().mockResolvedValue({ ok: true }),
       navigate: vi.fn().mockResolvedValue({ ok: true }),
       release: vi.fn().mockResolvedValue({ ok: true }),
+      hidden: vi.fn().mockResolvedValue({ ok: true }),
     }, design: {} } } as unknown as NonNullable<typeof window.desktopBridge>;
 
     try {
@@ -158,6 +161,7 @@ describe("PreviewWebview", () => {
       adopt: vi.fn().mockResolvedValue({ ok: true }),
       navigate: vi.fn().mockResolvedValue({ ok: true }),
       release,
+      hidden: vi.fn().mockResolvedValue({ ok: true }),
     } } } as unknown as NonNullable<typeof window.desktopBridge>;
     const props = {
       workspaceId: "44444444-4444-4444-8444-444444444444",
@@ -464,6 +468,7 @@ describe("PreviewWebview", () => {
           adopt: vi.fn().mockResolvedValue({ ok: true }),
           navigate: vi.fn().mockResolvedValue({ ok: true }),
           release: vi.fn().mockResolvedValue({ ok: true }),
+          hidden: vi.fn().mockResolvedValue({ ok: true }),
         },
       },
     } as unknown as NonNullable<typeof window.desktopBridge>;

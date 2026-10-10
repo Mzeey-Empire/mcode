@@ -2,8 +2,14 @@ import { z } from "zod";
 import { TerminalExecutableSchema, TerminalProfileArgumentsSchema } from "./terminal.js";
 import { lazySchema } from "../utils/lazySchema.js";
 
-/** Version of the private workspace environment document. */
-export const WORKSPACE_ENVIRONMENT_VERSION = "0.0.1" as const;
+/** Latest supported workspace environment document version. */
+export const WORKSPACE_ENVIRONMENT_VERSION = "0.1.0" as const;
+/** Document version readable by builds without action metadata support. */
+export const WORKSPACE_ENVIRONMENT_LEGACY_VERSION = "0.0.1" as const;
+const workspaceEnvironmentVersions = [
+  WORKSPACE_ENVIRONMENT_LEGACY_VERSION,
+  WORKSPACE_ENVIRONMENT_VERSION,
+] as const;
 /** Version of the canonical payload that binds an approval to a shared command. */
 export const WORKSPACE_ENVIRONMENT_APPROVAL_CONTRACT_VERSION = "0.0.1" as const;
 /** Maximum UTF-8 bytes accepted for one platform script. */
@@ -105,7 +111,7 @@ export type WorkspaceEnvironmentStorageMode = z.infer<typeof WorkspaceEnvironmen
 export const WorkspaceEnvironmentCommandTargetSchema = lazySchema(() =>
   z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("setup") }).strict(),
-    z.object({ kind: z.literal("action"), actionId: z.string().min(1).max(256) }).strict(),
+    z.object({ kind: z.literal("action"), actionId: WorkspaceEnvironmentActionIdSchema }).strict(),
   ]),
 );
 export type WorkspaceEnvironmentCommandTarget = z.infer<
@@ -644,31 +650,47 @@ export type WorkspaceEnvironmentAutomaticSetupTerminal = z.infer<
   ReturnType<typeof WorkspaceEnvironmentAutomaticSetupTerminalSchema>
 >;
 
+/** Stable action identity shared by documents and command targets. */
+export const WorkspaceEnvironmentActionIdSchema = z.string().min(1).max(256);
+/** Portable icon identifier, including icons introduced by newer builds. */
+export const WorkspaceEnvironmentActionIconIdSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/);
+
 /** A named workspace environment action with an opaque stable identity. */
 export const WorkspaceEnvironmentActionSchema = lazySchema(() =>
   z.object({
-    id: z.string().min(1).max(256),
+    id: WorkspaceEnvironmentActionIdSchema,
     name: z.string().trim().min(1).max(256),
     command: WorkspaceEnvironmentCommandSchema(),
-  }).strict(),
+    icon: WorkspaceEnvironmentActionIconIdSchema.optional(),
+    runOnStartup: z.boolean().optional(),
+    runOnCleanup: z.boolean().optional(),
+  }).passthrough(),
 );
 export type WorkspaceEnvironmentAction = z.infer<
   ReturnType<typeof WorkspaceEnvironmentActionSchema>
 >;
 
-/** Private system-local workspace environment document. */
+/** Versioned workspace environment document for local or shared storage. */
 export const WorkspaceEnvironmentDocumentSchema = lazySchema(() =>
   z.object({
     version: z.string(),
     setup: WorkspaceEnvironmentCommandSchema().optional(),
     actions: z.array(WorkspaceEnvironmentActionSchema()).max(256),
-  }).strict().superRefine((document, ctx) => {
-    if (document.version !== WORKSPACE_ENVIRONMENT_VERSION) {
+  }).passthrough().superRefine((document, ctx) => {
+    if (!workspaceEnvironmentVersions.some((version) => version === document.version)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["version"],
         message: `Unsupported workspace environment version: ${document.version}`,
         params: { code: "UNSUPPORTED_VERSION", reason: "unsupported_version" },
+      });
+    }
+    if (document.version === WORKSPACE_ENVIRONMENT_VERSION && document.setup !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["setup"],
+        message: "Move Setup into an action first.",
+        params: { code: "INVALID_VALUE", reason: "invalid_value" },
       });
     }
     const seen = new Set<string>();
@@ -697,9 +719,29 @@ export type WorkspaceEnvironmentDocument = z.infer<
   ReturnType<typeof WorkspaceEnvironmentDocumentSchema>
 >;
 
+/** Encodes the lowest compatible version and returns the exact document represented by its bytes. */
+export function encodeEnvironmentDocument(document: WorkspaceEnvironmentDocument): {
+  document: WorkspaceEnvironmentDocument;
+  bytes: Uint8Array;
+} {
+  const hasNewFields = Object.keys(document).some((key) => !["version", "setup", "actions"].includes(key))
+    || document.actions.some((action) => action.icon !== undefined
+      || action.runOnStartup !== undefined
+      || action.runOnCleanup !== undefined
+      || Object.keys(action).some((key) => !["id", "name", "command", "icon", "runOnStartup", "runOnCleanup"].includes(key)));
+  const encodedDocument = WorkspaceEnvironmentDocumentSchema().parse({
+    ...document,
+    version: hasNewFields ? WORKSPACE_ENVIRONMENT_VERSION : WORKSPACE_ENVIRONMENT_LEGACY_VERSION,
+  });
+  return {
+    document: encodedDocument,
+    bytes: new TextEncoder().encode(JSON.stringify(encodedDocument)),
+  };
+}
+
 /** Default document used before a workspace has a saved environment. */
 export const DEFAULT_WORKSPACE_ENVIRONMENT_DOCUMENT: WorkspaceEnvironmentDocument = {
-  version: WORKSPACE_ENVIRONMENT_VERSION,
+  version: WORKSPACE_ENVIRONMENT_LEGACY_VERSION,
   actions: [],
 };
 

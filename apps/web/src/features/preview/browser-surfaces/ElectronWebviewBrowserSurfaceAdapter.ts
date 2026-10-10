@@ -126,6 +126,7 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
   private adopted = false;
   private unavailable = false;
   private disposed = false;
+  private visible = false;
   private readonly frame: ElectronWebviewElement;
   private readonly controlIndicator: BrowserSurfaceControlIndicator;
   private readonly onHumanInput?: ElectronWebviewBrowserSurfaceAdapterOptions["onHumanInput"];
@@ -237,6 +238,7 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     this.frame.style.clipPath =
       `inset(0px 0px 0px ${coveredLeft}px round ${topLeftRadius} 0px 0px 0px)`;
     this.frame.style.visibility = "visible";
+    this.visible = true;
     this.frame.style.pointerEvents = presentation.inputEnabled === false ? "none" : "auto";
     this.frame.setAttribute("aria-hidden", presentation.accessible === false ? "true" : "false");
     this.controlIndicator.present(presentation);
@@ -251,6 +253,10 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
   /** Hides the webview without changing its guest document. */
   public hide(): void {
     if (this.disposed) return;
+    if (this.visible && this.adopted) {
+      void this.bridge.hidden({ surface: this.surface }).catch(() => undefined);
+    }
+    this.visible = false;
     this.frame.style.visibility = "hidden";
     this.frame.style.pointerEvents = "none";
     this.frame.setAttribute("aria-hidden", "true");
@@ -299,9 +305,15 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     this.frame.removeEventListener("ipc-message", this.onIpcMessage);
     this.frame.removeEventListener("render-process-gone", this.onRenderProcessGone);
     this.listeners.clear();
-    void Promise.resolve(this.bridge.release({ surface: this.surface, reason })).catch(() => undefined);
+    // Main must finish its last-view capture before Electron destroys the guest.
+    void Promise.resolve(this.bridge.release({ surface: this.surface, reason }))
+      .catch(() => undefined)
+      .finally(() => this.frame.remove());
     this.controlIndicator.dispose();
-    this.frame.remove();
+    this.frame.style.visibility = "hidden";
+    this.frame.style.pointerEvents = "none";
+    this.frame.setAttribute("aria-hidden", "true");
+    if (!this.adopted) this.frame.remove();
   }
 
   private waitForAdoption(): Promise<boolean> {

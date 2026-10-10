@@ -16,7 +16,7 @@ describe("reliability harness server adapter", () => {
     expect(readReliabilityHarnessCapability("relative-capability.json")).toBeNull();
   });
 
-  it("uses the capability token and bounds commands", async () => {
+  it.each(["wrong-token", `${"a".repeat(63)}é`])("rejects an incorrect capability token: %s", async (token) => {
     const database = databaseStub();
     const adapter = createReliabilityHarnessAdapter(database, {
       version: 1,
@@ -26,7 +26,7 @@ describe("reliability harness server adapter", () => {
     const response = responseStub();
     const request = requestStub(
       JSON.stringify({ control: "persistence-failure" }),
-      "wrong-token",
+      token,
     );
 
     await adapter.handleRequest(request, response, new Set() as never);

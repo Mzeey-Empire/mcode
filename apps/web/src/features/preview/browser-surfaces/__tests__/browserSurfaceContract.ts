@@ -178,7 +178,7 @@ export function runBrowserSurfaceContract(name: string, adapterFactory: BrowserS
       host.dispose(IDENTITY);
       expect(fixture.activeAdapterCount()).toBe(0);
       expect(fixture.activeSubscriptionCount()).toBe(0);
-      expect(document.body.childElementCount).toBe(baselineChildren);
+      await vi.waitFor(() => expect(document.body.childElementCount).toBe(baselineChildren));
       host.disposeHost();
     });
 

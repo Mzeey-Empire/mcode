@@ -20,8 +20,8 @@ import {
 import { routeMessage, type RouterDeps } from "./ws-router.js";
 import { addClient, removeClient } from "./push.js";
 import { handleBinaryUpload } from "../../features/attachments/transport/binary-upload.js";
-import * as NodeCrypto from "node:crypto";
-import { extractToken, buildAuthCookie } from "./auth.js";
+import { extractToken, buildAuthCookie, matchesAuthToken } from "./auth.js";
+import { handleWorkspaceImageRequest } from "../../features/projects/files/transport/workspace-image-route.js";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { getMcodeDir } from "@mcode/shared";
@@ -32,12 +32,6 @@ import type {
 import { EXTERNAL_THREAD_CONTROL_MCP_PATH } from "../../features/thread-control/index.js";
 import type { ReliabilityHarnessAdapter } from "../../runtime/reliability-harness/control.js";
 import type { ExecutionMailboxDepth } from "../../features/agents/execution/execution-mailbox-scheduler.js";
-
-/** Constant-time string comparison to prevent timing attacks on token validation. */
-function safeTokenEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  return NodeCrypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
-}
 
 /** Match stored thread IDs used for the custom attachment protocol (UUID, lowercase hex). */
 const ATTACHMENT_THREAD_SEGMENT = /^[a-f0-9-]+$/;
@@ -160,14 +154,9 @@ function matchesInstanceAttachment(
     && matchesWorktreeIdentity(presentedWorktree, expected.worktreeIdentity);
 }
 
-/** Checks the regular authenticated connection token. */
-function matchesAuthToken(presented: string | null | undefined, expected: string): boolean {
-  return typeof presented === "string" && safeTokenEqual(presented, expected);
-}
-
 /** Checks the per-instance attachment token. */
 function matchesInstanceToken(presented: string | null, expected: string | null | undefined): boolean {
-  return typeof presented === "string" && typeof expected === "string" && safeTokenEqual(presented, expected);
+  return typeof expected === "string" && matchesAuthToken(presented, expected);
 }
 
 /** Checks the worktree identity that belongs to the instance token. */
@@ -190,6 +179,7 @@ export function createWsServer(deps: WsServerDeps): {
     if (handleHealthRequest(req, res, deps)) return;
     if (handleShutdownRequest(req, res, deps)) return;
     if (handleAttachmentRequest(req, res, deps)) return;
+    if (handleWorkspaceImageRequest(req, res, deps)) return;
 
     res.writeHead(404);
     res.end("Not found");
@@ -244,7 +234,7 @@ export function createWsServer(deps: WsServerDeps): {
     }
 
     const token = extractToken(req);
-    if (!token || !safeTokenEqual(token, deps.authToken)) {
+    if (!matchesAuthToken(token, deps.authToken)) {
       logger.warn("WebSocket connection rejected: invalid token");
       ws.close(4001, "Unauthorized");
       return;
