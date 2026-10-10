@@ -65,7 +65,7 @@ export function WorkspaceTargetMenu({ mode, isGitRepo, folder, onModeChange, cla
               label={option.label}
               icon={<option.Icon />}
               checked={option.mode === mode}
-              trailing={option.mode === "direct" ? <span className="font-code text-caption text-muted">{folder}</span> : undefined}
+              trailing={option.mode === "direct" ? <FolderMeta folder={folder} /> : undefined}
               onClick={() => onModeChange(option.mode)}
             />
           ))}
@@ -73,4 +73,9 @@ export function WorkspaceTargetMenu({ mode, isGitRepo, folder, onModeChange, cla
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+// The row's trailing slot never shrinks, so an unbounded folder name would squeeze out "Local" and the check.
+function FolderMeta({ folder }: { folder: string }) {
+  return <span className="block max-w-[12rem] text-fade font-code text-caption text-muted">{folder}</span>;
 }
