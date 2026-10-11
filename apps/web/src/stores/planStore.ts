@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { PlanVersion, PlanVersionStatus } from "@mcode/contracts";
+import { getCatalogEntry, type PlanVersion, type PlanVersionStatus } from "@mcode/contracts";
 
 const statusOrder: Record<PlanVersionStatus, number> = { draft: 0, ready: 0, superseded: 1, accepted: 2 };
 
@@ -21,6 +21,23 @@ export function selectViewedPlanVersion(
 ): PlanVersion | null {
   const picked = activeVersion === null ? undefined : versions.find((v) => v.version === activeVersion);
   return picked ?? versions.at(-1) ?? null;
+}
+
+/**
+ * The word that follows "v{N}" in the Plan panel: who or what the version is.
+ * A ready version names the provider that wrote it.
+ */
+export function planVersionWord(plan: Pick<PlanVersion, "status" | "providerId">): string {
+  switch (plan.status) {
+    case "draft":
+      return "Edited by you";
+    case "accepted":
+      return "Accepted";
+    case "superseded":
+      return "Older version";
+    case "ready":
+      return plan.providerId === null ? "Agent" : getCatalogEntry(plan.providerId).name;
+  }
 }
 
 /** Zustand state shape for per-thread plan data. */

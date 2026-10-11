@@ -966,14 +966,6 @@ input[type="range"].settings-range::-moz-range-thumb {
   border-radius: 2px;
 }
 
-/* Plan panel: always reserve vertical gutter so version swaps never toggle width */
-.plan-panel-viewport {
-  overflow-x: hidden;
-  overflow-y: scroll;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-}
-
 @keyframes blink {
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0; }

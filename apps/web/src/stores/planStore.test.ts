@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { PlanVersion } from "@mcode/contracts";
-import { selectViewedPlanVersion, usePlanStore } from "./planStore";
+import { planVersionWord, selectViewedPlanVersion, usePlanStore } from "./planStore";
 
 const THREAD = "thread-plan";
 
@@ -80,5 +80,15 @@ describe("selectViewedPlanVersion", () => {
   it("shows nothing for a thread without versions", () => {
     expect(selectViewedPlanVersion([], null)).toBeNull();
     expect(selectViewedPlanVersion(versions, null)?.title).toBe("Plan 3");
+  });
+});
+
+describe("planVersionWord", () => {
+  it("names each status, and the provider for a ready version", () => {
+    expect(planVersionWord({ status: "draft", providerId: null })).toBe("Edited by you");
+    expect(planVersionWord({ status: "accepted", providerId: "codex" })).toBe("Accepted");
+    expect(planVersionWord({ status: "superseded", providerId: "codex" })).toBe("Older version");
+    expect(planVersionWord({ status: "ready", providerId: "claude" })).toBe("Claude");
+    expect(planVersionWord({ status: "ready", providerId: null })).toBe("Agent");
   });
 });
