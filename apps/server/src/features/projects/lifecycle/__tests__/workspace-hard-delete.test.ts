@@ -425,6 +425,7 @@ describe("CleanupWorker - attachment cleanup and workspace finalization", () => 
       mockAttachmentService,
       mockHandoffStorage,
       createThreadDeletionTeardownServiceMock(),
+      { run: vi.fn().mockResolvedValue(undefined) },
       TEST_HOST_RUNTIME,
     );
   });
@@ -544,6 +545,7 @@ describe("CleanupWorker - startup reconciliation", () => {
       mockAttachmentService,
       mockHandoffStorage,
       createThreadDeletionTeardownServiceMock(),
+      { run: vi.fn().mockResolvedValue(undefined) },
       TEST_HOST_RUNTIME,
     );
   });
@@ -617,7 +619,7 @@ describe("CleanupWorker - shared branch protection", () => {
     mockCleanupPolicy = createSandboxWorktreeCleanupPolicyMock();
 
     worker = new CleanupWorker(
-      cleanupJobRepo, threadRepo, mockClaudeProvider, mockGitWorktrees, mockCleanupPolicy, new RepositoryGitMutationLock(TEST_HOST_RUNTIME), workspaceRepo, mockAttachmentService, mockHandoffStorage, createThreadDeletionTeardownServiceMock(), TEST_HOST_RUNTIME);
+      cleanupJobRepo, threadRepo, mockClaudeProvider, mockGitWorktrees, mockCleanupPolicy, new RepositoryGitMutationLock(TEST_HOST_RUNTIME), workspaceRepo, mockAttachmentService, mockHandoffStorage, createThreadDeletionTeardownServiceMock(), { run: vi.fn().mockResolvedValue(undefined) }, TEST_HOST_RUNTIME);
   });
 
   afterEach(() => { worker.dispose(); });
@@ -820,6 +822,7 @@ describe("CleanupWorker - exhausted retries", () => {
       { removeForThread: vi.fn() } as unknown as AttachmentService,
       { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
       createThreadDeletionTeardownServiceMock(),
+      { run: vi.fn().mockResolvedValue(undefined) },
       TEST_HOST_RUNTIME,
     );
   });
@@ -876,7 +879,7 @@ describe("CleanupWorker - missing directory handling", () => {
     mockHandoffStorage = { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage;
 
     worker = new CleanupWorker(
-      cleanupJobRepo, threadRepo, mockClaudeProvider, mockGitWorktrees, createSandboxWorktreeCleanupPolicyMock(), new RepositoryGitMutationLock(TEST_HOST_RUNTIME), workspaceRepo, mockAttachmentService, mockHandoffStorage, createThreadDeletionTeardownServiceMock(), TEST_HOST_RUNTIME);
+      cleanupJobRepo, threadRepo, mockClaudeProvider, mockGitWorktrees, createSandboxWorktreeCleanupPolicyMock(), new RepositoryGitMutationLock(TEST_HOST_RUNTIME), workspaceRepo, mockAttachmentService, mockHandoffStorage, createThreadDeletionTeardownServiceMock(), { run: vi.fn().mockResolvedValue(undefined) }, TEST_HOST_RUNTIME);
   });
 
   afterEach(() => { worker.dispose(); });
@@ -962,7 +965,7 @@ describe("CleanupWorker - idempotent retry", () => {
     mockHandoffStorage = { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage;
 
     worker = new CleanupWorker(
-      cleanupJobRepo, threadRepo, mockClaudeProvider, mockGitWorktrees, createSandboxWorktreeCleanupPolicyMock(), new RepositoryGitMutationLock(TEST_HOST_RUNTIME), workspaceRepo, mockAttachmentService, mockHandoffStorage, createThreadDeletionTeardownServiceMock(), TEST_HOST_RUNTIME);
+      cleanupJobRepo, threadRepo, mockClaudeProvider, mockGitWorktrees, createSandboxWorktreeCleanupPolicyMock(), new RepositoryGitMutationLock(TEST_HOST_RUNTIME), workspaceRepo, mockAttachmentService, mockHandoffStorage, createThreadDeletionTeardownServiceMock(), { run: vi.fn().mockResolvedValue(undefined) }, TEST_HOST_RUNTIME);
   });
 
   afterEach(() => { worker.dispose(); });

@@ -26,6 +26,7 @@ import { HandoffStorage } from "../../handoff/index.js";
 import { pruneStaleToolOutputArtifacts } from "@mcode/providers";
 import { ThreadControlMutationReservationService } from "../index.js";
 import { ThreadDeletionTeardownService } from "../lifecycle/thread-deletion-teardown-service.js";
+import { CleanupActionRunner } from "./cleanup-action-runner.js";
 import { DATABASE_WRITER_MAX_PENDING, DatabaseWriteOutcomeUnknown } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 
 /** How often to check for due cleanup jobs (ms). */
@@ -81,6 +82,7 @@ export class CleanupWorker {
     @inject(HandoffStorage) private readonly handoffStorage: HandoffStorage,
     @inject(ThreadDeletionTeardownService)
     private readonly threadDeletionTeardownService: ThreadDeletionTeardownService,
+    @inject(CleanupActionRunner) private readonly cleanupActions: Pick<CleanupActionRunner, "run">,
     @inject("HostRuntime") private readonly hostRuntime: HostRuntime,
     @inject(ThreadControlMutationReservationService, { isOptional: true })
     mutationReservations?: ThreadControlMutationReservationService,
@@ -331,6 +333,7 @@ export class CleanupWorker {
 
     const threadIds = linkedThreads.map((thread) => thread.id);
     await Promise.all(threadIds.map((threadId) => this.teardownThreadRuntime(threadId)));
+    await this.cleanupActions.run(job.thread_id);
     const removalPath = decision.worktreePath ?? worktreePath;
     const worktreeName = removalPath.replace(/\\/g, "/").split("/").pop() ?? removalPath;
     return {
