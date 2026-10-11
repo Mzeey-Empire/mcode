@@ -1,5 +1,6 @@
 import { MessageSchema, ParentNarrativeRecoveryItemSchema, type AgentItem, type AgentModelState, type AgentTurn, type Message, type ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { recordToApprovalReceipt, recordToHookExecution, recordToToolCall } from "@/features/conversation/narrative/build-persisted-narrative";
+import { narrationSegments } from "@/features/conversation/narrative/narrative-thought-classification";
 import type { ThreadRecord } from "./thread-record";
 import { appendThoughtSegment } from "./thread-store/narrative-projection";
 import { getCanonicalRuntimeTurn } from "./thread-lifecycle";
@@ -86,7 +87,8 @@ function syncedThoughtTape(record: ThreadRecord, streaming: string | undefined):
   const segments = record.thoughtSegments;
   const last = segments.at(-1);
   if (streaming === undefined || !last || last.id?.startsWith("assistant-text:")) return {};
-  const tape = segments.filter((segment) => !segment.id?.startsWith("assistant-text:")).map((segment) => segment.text).join("");
+  const tape = narrationSegments(segments).filter((segment) => !segment.id?.startsWith("assistant-text:"))
+    .map((segment) => segment.text).join("");
   if (record.streaming !== tape || !streaming.startsWith(tape)) return {};
   return { thoughtSegments: appendThoughtSegment(segments, streaming.slice(tape.length), false) };
 }
@@ -160,6 +162,7 @@ function recoveredNarrative(turn: AgentTurn, items: readonly ParentNarrativeReco
       id: record.id, text: record.text, startedAt: Date.parse(record.started_at),
       ...(record.ended_at ? { endedAt: Date.parse(record.ended_at) } : {}),
       isExplicitNonFinal: record.is_final_response === 0 || record.ended_at !== null,
+      ...(record.kind === "reasoning" ? { kind: "reasoning" as const } : {}),
     })),
     hooks: hooks.map((item) => recordToHookExecution(item.record)),
     approvals: approvals.map((item) => recordToApprovalReceipt(item.record)),

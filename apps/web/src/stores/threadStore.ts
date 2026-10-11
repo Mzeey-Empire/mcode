@@ -101,7 +101,9 @@ import {
 import { extractPendingPlanQuestions } from "./thread-store/plan-questions";
 export { extractPendingPlanQuestions } from "./thread-store/plan-questions";
 import {
+  appendReasoningSegment,
   appendThoughtSegment,
+  closeOpenReasoningSegment,
   parseStoredAttachments,
   projectAssistantMessageBoundary,
   projectToolProgress,
@@ -1081,9 +1083,35 @@ type PendingTextChunk = {
   isFinalResponse?: boolean;
   /** Background deltas retain the streaming buffer but defer narrative projection until activation. */
   deferNarrative?: boolean;
+  /** Present for a `reasoningDelta` span, which only ever projects into a reasoning segment. */
+  reasoning?: { reasoningItemId?: string; done?: boolean };
 };
 
 const MAX_DEFERRED_NARRATIVE_EVENTS = 2048;
+
+function projectChunkSegments(segments: ThreadRecord["thoughtSegments"], chunk: PendingTextChunk) {
+  if (chunk.deferNarrative) return segments;
+  if (chunk.reasoning) return appendReasoningSegment(segments, { delta: chunk.delta, ...chunk.reasoning });
+  if (chunk.isFinalResponse) return closeOpenReasoningSegment(segments);
+  const isExplicitNonFinal = chunk.isFinalResponse === false;
+  return appendThoughtSegment(segments, chunk.delta, isExplicitNonFinal, isExplicitNonFinal ? chunk.textItemId : undefined);
+}
+
+function projectDeferredDeltaSegments(
+  segments: ThreadRecord["thoughtSegments"],
+  event: Extract<AgentEvent, { type: "reasoningDelta" | "textDelta" }>,
+) {
+  if (event.type === "reasoningDelta") return appendReasoningSegment(segments, event);
+  const delta = typeof event.delta === "string" ? event.delta : "";
+  if (!delta) return segments;
+  if (event.isFinalResponse === true) return closeOpenReasoningSegment(segments);
+  return appendThoughtSegment(segments, delta, event.isFinalResponse === false, event.textItemId);
+}
+
+/** True when a span belongs only to the narrative and never to the streamed answer buffer. */
+function isNarrativeOnlyChunk(chunk: PendingTextChunk): boolean {
+  return chunk.reasoning !== undefined || (chunk.textItemId !== undefined && chunk.isFinalResponse === false);
+}
 
 function projectPendingTextChunks(record: ThreadRecord, chunks: readonly PendingTextChunk[], textEncoder: TextEncoder,
   previousBytes: number): { patch: Partial<ThreadRecord>; bytes: number } {
@@ -1092,17 +1120,12 @@ function projectPendingTextChunks(record: ThreadRecord, chunks: readonly Pending
   let segments = record.thoughtSegments;
   let bytes = previousBytes;
   for (const chunk of chunks) {
-    if (!chunk.delta) continue;
-    if (chunk.textItemId && chunk.isFinalResponse === false) {
-      if (!chunk.deferNarrative) segments = appendThoughtSegment(segments, chunk.delta, true, chunk.textItemId);
-      continue;
-    }
+    if (!chunk.delta && !chunk.reasoning?.done) continue;
+    segments = projectChunkSegments(segments, chunk);
+    if (isNarrativeOnlyChunk(chunk)) continue;
     responseTextIsStreaming = chunk.isFinalResponse !== false || responseTextIsStreaming;
     streaming += chunk.delta;
     bytes += textEncoder.encode(chunk.delta).byteLength;
-    if (!chunk.deferNarrative && !chunk.isFinalResponse) {
-      segments = appendThoughtSegment(segments, chunk.delta, chunk.isFinalResponse === false);
-    }
   }
   return { patch: { streaming, streamingPreview: streaming.slice(-200), responseTextIsStreaming,
     ...(segments !== record.thoughtSegments ? { thoughtSegments: segments } : {}) }, bytes };
@@ -1187,6 +1210,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         textItemId: c.textItemId,
         isFinalResponse: c.isFinalResponse,
         deferNarrative: c.deferNarrative,
+        reasoning: c.reasoning,
       })));
     }
     pendingTextDeltaByThread.clear();
@@ -1212,21 +1236,13 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   const applyDeferredNarrativeEvent = (threadId: string, event: AgentEvent): void => {
-    if (event.type === "textDelta") {
-      const delta = typeof event.delta === "string" ? event.delta : "";
-      if (!delta || event.isFinalResponse === true) return;
+    if (event.type === "reasoningDelta" || event.type === "textDelta") {
       set((state) => {
-        const record = getThreadRecord(state.records, threadId);
-        return {
-          records: patchThreadRecord(state.records, threadId, {
-            thoughtSegments: appendThoughtSegment(
-              record.thoughtSegments,
-              delta,
-              event.isFinalResponse === false,
-              event.textItemId,
-            ),
-          }),
-        };
+        const segments = getThreadRecord(state.records, threadId).thoughtSegments;
+        const thoughtSegments = projectDeferredDeltaSegments(segments, event);
+        return thoughtSegments === segments
+          ? state
+          : { records: patchThreadRecord(state.records, threadId, { thoughtSegments }) };
       });
     } else if (event.type === "assistantMessageBoundary") {
       set((state) => {
@@ -1270,7 +1286,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   const deferredNarrativeEventBytes = (event: AgentEvent): number => {
-    if (event.type === "textDelta") {
+    if (event.type === "textDelta" || event.type === "reasoningDelta") {
       return (typeof event.delta === "string" ? event.delta.length : 0) * 2 + 32;
     }
     if (event.type === "toolProgress") {
@@ -2183,6 +2199,30 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     scheduleTextDeltaFlush();
   };
 
+  /** Batches reasoning into the text queue so its order against narration and answer text holds. */
+  const handleReasoningDelta = (
+    event: Extract<AgentEvent, { type: "reasoningDelta" }>,
+    runtime: { isActiveThread: boolean },
+  ): void => {
+    const delta = normalizedTextDelta(event.delta);
+    if (delta.length === 0 && event.done !== true) return;
+    if (!runtime.isActiveThread) {
+      queueDeferredNarrativeEvent(event.threadId, event);
+      return;
+    }
+    const reasoning = { reasoningItemId: event.reasoningItemId, done: event.done };
+    const chunks = pendingTextDeltaByThread.get(event.threadId) ?? [];
+    const tail = chunks.at(-1);
+    const extendsTail = tail?.reasoning
+      && tail.reasoning.done !== true
+      && tail.reasoning.reasoningItemId === event.reasoningItemId;
+    const next = extendsTail
+      ? [...chunks.slice(0, -1), { ...tail, delta: tail.delta + delta, reasoning }]
+      : [...chunks, { delta, reasoning }];
+    pendingTextDeltaByThread.set(event.threadId, next);
+    scheduleTextDeltaFlush();
+  };
+
   const handleAssistantMessageBoundary = (
     event: Extract<AgentEvent, { type: "assistantMessageBoundary" }>,
     runtime: { isActiveThread: boolean },
@@ -2774,7 +2814,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     compactSummary: ignoreAgentEvent,
     modelFallback: handleModelFallback,
     textDelta: handleTextDelta,
-    reasoningDelta: ignoreAgentEvent,
+    reasoningDelta: handleReasoningDelta,
     toolInputDelta: ignoreAgentEvent,
     toolProgress: handleToolProgress,
     contextEstimate: handleContextEstimate,

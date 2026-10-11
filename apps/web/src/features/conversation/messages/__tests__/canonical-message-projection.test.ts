@@ -409,7 +409,7 @@ describe("projectCanonicalMessageList", () => {
         if (row.type === "narrative-row") return row.item.type;
         return row.type;
       })).toEqual([
-        "message:Inspect README.md", "thought", "active-tool", "message:CHILD_PREFIX", "narrative-indicator",
+        "message:Inspect README.md", "reasoning", "active-tool", "message:CHILD_PREFIX", "narrative-indicator",
       ]);
       expect(rows.filter((row) => row.type === "message" && row.message.content === "CHILD_PREFIX"))
         .toHaveLength(1);

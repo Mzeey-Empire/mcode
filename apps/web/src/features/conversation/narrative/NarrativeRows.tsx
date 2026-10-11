@@ -1,6 +1,6 @@
 import { NarrativeRow } from "./NarrativeRow";
 import { narrativePerformanceRowId } from "./NarrativePerformanceBoundary";
-import type { NarrativeItem, SubagentRosterTarget } from "./types";
+import type { NarrativeItem, SubagentRosterTarget, ToolGroup } from "./types";
 
 /** Props for the chronological rows inside a narrative timeline item. */
 export interface NarrativeRowsProps {
@@ -19,13 +19,18 @@ export function narrativeRowMargin(index: number): string {
   return index === 0 ? "mt-0" : "mt-3";
 }
 
+function toolGroupRowKey(group: ToolGroup, index: number): string {
+  return `tool-group-${group.calls[0]?.id ?? index}`;
+}
+
 /** Returns the stable row key for one narrative item. */
 export function narrativeRowKey(item: NarrativeItem, index: number): string {
   switch (item.type) {
     case "thought":
-      return `thought-${item.segment.startedAt}-${index}`;
+    case "reasoning":
+      return `${item.type}-${item.segment.startedAt}-${index}`;
     case "tool-group":
-      return `tool-group-${item.group.calls[0]?.id ?? index}`;
+      return toolGroupRowKey(item.group, index);
     case "hook":
       return `hook-${item.hook.hookName}-${item.hook.startedAt}-${index}`;
     case "approval":

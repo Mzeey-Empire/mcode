@@ -27,7 +27,7 @@ import {
   createSubagentItem,
   createToolGroupItem,
 } from "./narrative-builder-helpers";
-import { filterPersistedFinalResponseThoughts } from "./narrative-thought-classification";
+import { filterPersistedFinalResponseThoughts, isReasoningSegment } from "./narrative-thought-classification";
 import type { ApprovalReceipt, NarrativeItem, SubagentActivity, ThoughtSegment } from "./types";
 
 /** Inputs that reconstruct a persisted turn narrative from durable records. */
@@ -179,7 +179,7 @@ export function projectPersistedNarrativeItems(
     switch (event.kind) {
       case "thought":
         flushToolGroup(items, pendingToolCalls);
-        items.push({ type: "thought", segment: event.segment, isActive: false });
+        items.push({ type: isReasoningSegment(event.segment) ? "reasoning" : "thought", segment: event.segment, isActive: false });
         break;
       case "hook":
         flushToolGroup(items, pendingToolCalls);
@@ -326,6 +326,7 @@ function recordToThoughtSegment(record: ThoughtSegmentRecord): ThoughtSegment {
     text: record.text,
     startedAt: isoToMs(record.started_at),
     endedAt: record.ended_at ? isoToMs(record.ended_at) : undefined,
+    ...(record.kind === "reasoning" ? { kind: "reasoning" as const, isExplicitNonFinal: true } : {}),
   };
   thoughtSegmentCache.set(record, segment);
   return segment;

@@ -1,6 +1,7 @@
 import type { StoredAttachment, ThoughtSegmentRecord, ToolCall } from "@/transport";
 import type { AgentEvent } from "@mcode/contracts";
 import type { ThoughtSegment } from "@/features/conversation/narrative/types";
+import { isReasoningSegment } from "@/features/conversation/narrative/narrative-thought-classification";
 
 function looksLikeContinuation(previousText: string, nextText: string): boolean {
   const lastCharacter = previousText.trimEnd().slice(-1);
@@ -12,7 +13,7 @@ function looksLikeContinuation(previousText: string, nextText: string): boolean 
 }
 
 function shouldReopenThought(last: ThoughtSegment | undefined, text: string): boolean {
-  if (!last || last.endedAt === undefined) return false;
+  if (!last || last.endedAt === undefined || isReasoningSegment(last)) return false;
   return last.text.length < 40 || looksLikeContinuation(last.text, text);
 }
 
@@ -56,6 +57,7 @@ export function appendThoughtSegment(
       { ...newThoughtSegment(text, isExplicitNonFinal), id: textItemId }];
   }
   const last = segments.at(-1);
+  if (isReasoningSegment(last)) return [...closeOpenSegments(segments), newThoughtSegment(text, isExplicitNonFinal)];
   const reopen = shouldReopenThought(last, text);
   if (!last || (last.endedAt !== undefined && !reopen)) {
     return [...segments, newThoughtSegment(text, isExplicitNonFinal)];
@@ -64,6 +66,71 @@ export function appendThoughtSegment(
     ...segments.slice(0, -1),
     extendThoughtSegment(last, text, isExplicitNonFinal, reopen),
   ];
+}
+
+function closeOpenSegments(segments: ThoughtSegment[]): ThoughtSegment[] {
+  if (!segments.some((segment) => segment.endedAt === undefined)) return segments;
+  const now = Date.now();
+  return segments.map((segment) => segment.endedAt === undefined ? { ...segment, endedAt: now } : segment);
+}
+
+/** Closes the open reasoning segment, returning the same array when none is open. */
+export function closeOpenReasoningSegment(segments: ThoughtSegment[]): ThoughtSegment[] {
+  const last = segments.at(-1);
+  if (!isReasoningSegment(last) || last?.endedAt !== undefined) return segments;
+  return closeOpenSegments(segments);
+}
+
+/** One streamed reasoning fragment as carried by a `reasoningDelta` event. */
+export interface ReasoningFragment {
+  delta: string;
+  reasoningItemId?: string;
+  done?: boolean;
+}
+
+/**
+ * Prefixed so a provider reasoning item id can never match a narration `textItemId`,
+ * which keeps id-addressed narration lookups and boundaries off reasoning rows.
+ */
+function reasoningSegmentId(reasoningItemId: string): string {
+  return `reasoning:${reasoningItemId}`;
+}
+
+function openReasoningIndex(segments: ThoughtSegment[], fragment: ReasoningFragment): number {
+  if (fragment.reasoningItemId) {
+    const id = reasoningSegmentId(fragment.reasoningItemId);
+    return segments.findIndex((segment) => segment.id === id);
+  }
+  const lastIndex = segments.length - 1;
+  const last = segments[lastIndex];
+  return isReasoningSegment(last) && last?.endedAt === undefined ? lastIndex : -1;
+}
+
+function newReasoningSegment(fragment: ReasoningFragment): ThoughtSegment {
+  const now = Date.now();
+  return {
+    ...(fragment.reasoningItemId ? { id: reasoningSegmentId(fragment.reasoningItemId) } : {}),
+    text: fragment.delta,
+    startedAt: now,
+    kind: "reasoning",
+    isExplicitNonFinal: true,
+    ...(fragment.done ? { endedAt: now } : {}),
+  };
+}
+
+/**
+ * Appends one reasoning fragment as its own segment kind. Reasoning never extends
+ * narration, and a fragment for an already closed reasoning item is ignored.
+ */
+export function appendReasoningSegment(segments: ThoughtSegment[], fragment: ReasoningFragment): ThoughtSegment[] {
+  const index = openReasoningIndex(segments, fragment);
+  if (index < 0) {
+    return fragment.delta.length === 0 ? segments : [...closeOpenSegments(segments), newReasoningSegment(fragment)];
+  }
+  const owned = segments[index];
+  if (!owned || owned.endedAt !== undefined) return segments;
+  const extended = { ...owned, text: owned.text + fragment.delta, ...(fragment.done ? { endedAt: Date.now() } : {}) };
+  return segments.map((segment, candidateIndex) => candidateIndex === index ? extended : segment);
 }
 
 /** Applies an authoritative boundary to the exact open or closed item when identified. */
@@ -77,6 +144,7 @@ export function projectAssistantMessageBoundary(
     : segments.length - 1;
   const segment = segments[index];
   if (!segment || (!("textItemId" in event && event.textItemId) && segment.endedAt !== undefined)) return undefined;
+  if (isReasoningSegment(segment)) return closeOpenReasoningSegment(segments);
   if (event.isFinalResponse) return segments.filter((_, candidateIndex) => candidateIndex !== index);
   return segments.map((candidate, candidateIndex) => candidateIndex === index
     ? { ...candidate, text: "content" in event && event.content !== undefined ? event.content : candidate.text,
@@ -122,6 +190,7 @@ export function persistedThoughtToSegment(record: ThoughtSegmentRecord): Thought
     text: record.text,
     startedAt: Number.isFinite(startedAt) ? startedAt : Date.now(),
     endedAt: Number.isFinite(endedAt) ? endedAt : undefined,
+    ...(record.kind === "reasoning" ? { kind: "reasoning" as const, isExplicitNonFinal: true } : {}),
   };
 }
 
