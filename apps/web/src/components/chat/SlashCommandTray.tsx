@@ -9,9 +9,8 @@ import { EntityIcon } from "./EntityToken";
 
 const ITEM_HEIGHT = 40;
 const VISIBLE_ITEMS = 8;
-// Rows carry no inset of their own, so the surface pads them in both presentations.
 const TRAY_SURFACE_CLASS = "px-2 py-1";
-// Docked on the composer it matches the task tray (`ComposerTray`): no border, 12px top corners.
+// Docked on the composer it matches the task tray in `ComposerTray`.
 const ATTACHED_TRAY_SURFACE_CLASS = "rounded-t-[1.2rem] border-0 bg-panel";
 
 function commandDisplayLabel(command: Command): string {

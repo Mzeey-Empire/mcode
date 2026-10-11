@@ -32,8 +32,8 @@ function ComposerPlanCapability({
     <ComposerCapabilityChip
       label={capability.label}
       icon={ListTodo}
-      removeLabel={`Turn off ${capability.label}`}
-      onRemove={onDetach}
+      turnOffLabel={`Turn off ${capability.label}`}
+      onTurnOff={onDetach}
       testId="composer-capability-plan"
     />
   );
@@ -53,8 +53,8 @@ function ComposerPendingGoalCapability({
     <ComposerCapabilityChip
       label={capability.label}
       icon={Goal}
-      removeLabel={`Turn off ${capability.label}`}
-      onRemove={onDetach}
+      turnOffLabel={`Turn off ${capability.label}`}
+      onTurnOff={onDetach}
       testId="composer-capability-goal-pending"
     />
   );
@@ -74,8 +74,8 @@ function ComposerOrchestrationCapability({
     <ComposerCapabilityChip
       label={capability.label}
       icon={Network}
-      removeLabel={`Turn off ${capability.label}`}
-      onRemove={onDetach}
+      turnOffLabel={`Turn off ${capability.label}`}
+      onTurnOff={onDetach}
       testId="composer-capability-orchestration"
     />
   );

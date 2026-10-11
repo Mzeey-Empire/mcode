@@ -8,9 +8,9 @@ interface ComposerCapabilityChipProps {
   /** Icon that identifies the capability in the compact composer row. */
   icon: LucideIcon;
   /** Accessible name and tooltip for the chip, which turns the capability off. */
-  removeLabel: string;
+  turnOffLabel: string;
   /** Turns the attached capability off. */
-  onRemove: () => void;
+  onTurnOff: () => void;
   /** Optional stable selector for focused UI verification. */
   testId?: string;
 }
@@ -19,8 +19,8 @@ interface ComposerCapabilityChipProps {
 export function ComposerCapabilityChip({
   label,
   icon: Icon,
-  removeLabel,
-  onRemove,
+  turnOffLabel,
+  onTurnOff,
   testId,
 }: ComposerCapabilityChipProps) {
   return (
@@ -31,8 +31,8 @@ export function ComposerCapabilityChip({
             type="button"
             variant="subtle"
             data-testid={testId}
-            onClick={onRemove}
-            aria-label={removeLabel}
+            onClick={onTurnOff}
+            aria-label={turnOffLabel}
             className="h-8 shrink-0 gap-1.5 rounded-control bg-selected px-2 text-body-small text-ink"
           >
             <Icon size={16} strokeWidth={1.5} className="text-ink" aria-hidden />
@@ -40,7 +40,7 @@ export function ComposerCapabilityChip({
           </Button>
         }
       />
-      <TooltipContent>{removeLabel}</TooltipContent>
+      <TooltipContent>{turnOffLabel}</TooltipContent>
     </Tooltip>
   );
 }

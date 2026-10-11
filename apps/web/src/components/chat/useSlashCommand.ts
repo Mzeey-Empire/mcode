@@ -87,7 +87,6 @@ const BUILTIN_COMMANDS: Command[] = [
 /** Regex: matches `/` at start of line or after whitespace, followed by non-space chars. */
 export const SLASH_TRIGGER_RE = /(^|\s)(\/\S*)$/;
 
-// `/plan` toggles Plan, so its row names the action selecting it takes.
 function capabilityCommandDescription(
   capability: Pick<ResolvedComposerCapability, "id" | "label">,
   planActive: boolean,
@@ -359,8 +358,7 @@ export function useSlashCommand({
       : null;
   }, [displayedSelectedIndex, filtered]);
 
-  // Derive the typed popup state. Order encodes the stale-while-revalidate
-  // priority that previously lived in a comment in SlashCommandTray:
+  // Derive the typed popup state. Order encodes the stale-while-revalidate priority:
   //   error → list (ready / staleRevalidating) → loading → empty.
   // The list branch splits on isLoading so a background refresh while cached
   // items are shown is the explicit `staleRevalidating` state, the one that

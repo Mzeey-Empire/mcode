@@ -67,8 +67,7 @@ beforeAll(() => {
 
 afterAll(() => {
   if (originalResizeObserver === undefined) {
-    // @ts-expect-error -- intentional cleanup of polyfilled global
-    delete globalThis.ResizeObserver;
+    Reflect.deleteProperty(globalThis, "ResizeObserver");
   } else {
     globalThis.ResizeObserver = originalResizeObserver;
   }

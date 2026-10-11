@@ -102,14 +102,14 @@ describe("composer capabilities", () => {
 
   it("turns an attached capability off when the chip itself is clicked", async () => {
     const user = userEvent.setup();
-    const onRemove = vi.fn();
+    const onTurnOff = vi.fn();
 
     render(
       <ComposerCapabilityChip
         label="Plan"
         icon={ListTodo}
-        removeLabel="Turn off Plan"
-        onRemove={onRemove}
+        turnOffLabel="Turn off Plan"
+        onTurnOff={onTurnOff}
       />,
     );
 
@@ -117,7 +117,7 @@ describe("composer capabilities", () => {
     expect(chip).toHaveTextContent("Plan");
     expect(screen.getAllByRole("button")).toHaveLength(1);
     await user.click(chip);
-    expect(onRemove).toHaveBeenCalledOnce();
+    expect(onTurnOff).toHaveBeenCalledOnce();
   });
 
   it("uses capability-specific icons in the add menu", async () => {

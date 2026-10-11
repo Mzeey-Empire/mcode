@@ -55,7 +55,6 @@ interface ActiveSlashTrigger {
   readonly cursorOffset: number;
 }
 
-/** Text node and offset of a collapsed caret, or null when the caret is not inside text. */
 function $getCollapsedTextCaret(): { node: TextNode; offset: number } | null {
   const selection = $getSelection();
   if (!$isRangeSelection(selection) || !selection.isCollapsed()) return null;
