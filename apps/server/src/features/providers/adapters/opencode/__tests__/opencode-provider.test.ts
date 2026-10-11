@@ -83,13 +83,24 @@ describe("OpenCode failed turns", () => {
     { name: "APIError", data: { message: "Quota exhausted", statusCode: 429, isRetryable: true }, failure: { kind: "usage_limit", status: 429, code: "APIError" } },
     { name: "APIError", data: { message: "Too many requests", statusCode: 429, isRetryable: false }, failure: { kind: "retryable", status: 429, code: "APIError" } },
     { name: "APIError", data: { message: "Invalid request", statusCode: 400, isRetryable: false }, failure: { kind: "fatal", status: 400, code: "APIError" } },
-    { name: "UnknownError", data: { message: "" }, failure: { kind: "fatal", code: "UnknownError" } },
+    { name: "UnknownError", data: { message: "" }, expectedError: "UnknownError", failure: { kind: "fatal", code: "UnknownError" } },
+    { name: "UnknownError", data: { message: " \t\n" }, expectedError: "UnknownError", failure: { kind: "fatal", code: "UnknownError" } },
+    { name: "APIError", data: { message: " \t\n", statusCode: 503 }, expectedError: "APIError", failure: { kind: "retryable", status: 503, code: "APIError" } },
+    { name: " ", data: { message: "" }, expectedError: "OpenCode session error", failure: { kind: "fatal" } },
     { name: "APIError", data: { message: "Bad metadata", statusCode: "503", isRetryable: "true" }, failure: { kind: "fatal", code: "APIError" } },
-  ])("emits one classified error for $name: $data.message", async ({ name, data, failure }) => {
+  ])("emits one classified error for $name: $data.message", async ({ name, data, expectedError, failure }) => {
     const frame = { type: "session.error", properties: { sessionID: "ses_parent", error: { name, data } } };
     const { events } = await replaySubagentFrames([frame, frame, { type: "session.idle", properties: { sessionID: "ses_parent" } }], "ses_parent");
     expect(events.filter((event) => event.type === "error").map((event) => ({ error: event.error, failure: event.failure })))
-      .toEqual([{ error: data.message, failure }]);
+      .toEqual([{ error: expectedError ?? data.message, failure }]);
+    expect(events.filter((event) => event.type === "ended").map((event) => event.outcome)).toEqual(["errored"]);
+    expect(events.filter((event) => event.type === "turnComplete")).toEqual([]);
+  });
+
+  it.each(["", " \t\n"])("uses fallback text for a thrown blank message %j", async (message) => {
+    const { events } = await replaySubagentFrames([], "ses_parent", new Error(message));
+    expect(events.filter((event) => event.type === "error").map((event) => ({ error: event.error, failure: event.failure })))
+      .toEqual([{ error: "OpenCode session error", failure: { kind: "fatal" } }]);
     expect(events.filter((event) => event.type === "ended").map((event) => event.outcome)).toEqual(["errored"]);
     expect(events.filter((event) => event.type === "turnComplete")).toEqual([]);
   });

@@ -1258,7 +1258,7 @@ class OpenCodeTurnSettler {
   settle(outcome: "completed" | "cancelled" | "errored", error?: string, failure: TurnFailure = { kind: "fatal" }): void {
     if (this.settled) return;
     this.settled = true;
-    if (error !== undefined) this.emit({ type: AgentEventType.Error, threadId: this.threadId, error, failure } satisfies AgentEvent);
+    if (error !== undefined) this.emit({ type: AgentEventType.Error, threadId: this.threadId, error: error.trim() ? error : "OpenCode session error", failure } satisfies AgentEvent);
     if (this.assistantText.trim().length > 0 && outcome !== "cancelled") {
       this.emit({ type: AgentEventType.Message, threadId: this.threadId, content: this.assistantText, tokens: null } satisfies AgentEvent);
     }

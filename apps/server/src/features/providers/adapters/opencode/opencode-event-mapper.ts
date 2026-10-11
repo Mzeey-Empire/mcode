@@ -171,9 +171,8 @@ function httpStatus(value: unknown): number | undefined {
 function classifyOpenCodeApiFailure(data: Record<string, unknown>): TurnFailure {
   const message = boundText(data.message);
   const status = httpStatus(data.statusCode) ?? httpStatus(Number(/failed with HTTP (\d{3})\b/.exec(message)?.[1]));
-  let kind: TurnFailure["kind"] = "fatal";
-  if (data.isRetryable === true || status === 429 || (status !== undefined && status >= 500)) kind = "retryable";
-  if (status === 429 && /quota|usage[ _-]limit|insufficient[ _-]credits/i.test(message)) kind = "usage_limit";
+  const kind: TurnFailure["kind"] = status === 429 && /quota|usage[ _-]limit|insufficient[ _-]credits/i.test(message) ? "usage_limit"
+    : data.isRetryable === true || status === 429 || (status !== undefined && status >= 500) ? "retryable" : "fatal";
   return { kind, ...(status === undefined ? {} : { status }) };
 }
 
@@ -190,11 +189,9 @@ export function classifyOpenCodeFailure(error: unknown): TurnFailure {
 
 function mapSessionError(properties: Record<string, unknown>, ctx: MapperContext): OpenCodeMappedOutput {
   const err = properties.error;
-  const detail = isRecord(err) && isRecord(err.data) && typeof err.data.message === "string"
-    ? boundDiagnostic(err.data.message)
-    : isRecord(err)
-      ? boundDiagnostic(JSON.stringify(err).slice(0, MAX_DIAGNOSTIC_CHARS))
-      : "OpenCode session error";
+  const message = isRecord(err) && isRecord(err.data) ? boundDiagnostic(boundText(err.data.message)) : "";
+  const name = isRecord(err) ? boundDiagnostic(boundText(err.name)).trim() : "";
+  const detail = message.trim() ? message : name || "OpenCode session error";
   const events: AgentEvent[] = [
     withExecution({ type: "error", threadId: ctx.threadId, error: detail, failure: classifyOpenCodeFailure(err) } satisfies AgentEvent, ctx),
   ];
