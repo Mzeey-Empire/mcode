@@ -9,13 +9,24 @@ export const PLAN_EDITOR_CLASS = {
   label: "cm-plan-label",
   listMarker: "cm-plan-list-marker",
   code: "cm-plan-code",
+  // `text-fade` is the app's 24px right-edge fade utility; a path line never wraps.
+  pathItem: "cm-plan-path-item text-fade",
+  pathName: "cm-plan-path-name",
+  pathFolder: "cm-plan-path-folder",
 } as const;
 
 /** One decoration the Plan editor applies, in document offsets. */
 export type PlanDecorationRange =
   | { readonly kind: "line"; readonly from: number; readonly className: string }
   | { readonly kind: "mark"; readonly from: number; readonly to: number; readonly className: string }
-  | { readonly kind: "hide"; readonly from: number; readonly to: number };
+  | { readonly kind: "hide"; readonly from: number; readonly to: number }
+  | { readonly kind: "widget"; readonly from: number; readonly text: string; readonly className: string };
+
+/** A document span covering whole lines, in document offsets. */
+export interface PlanLineSpan {
+  readonly from: number;
+  readonly to: number;
+}
 
 /**
  * Computes the read-view decorations for a plan's markdown: the first H1 is the
@@ -30,7 +41,32 @@ export function planEditorDecorations(markdown: string): PlanDecorationRange[] {
 }
 
 function rangeEnd(range: PlanDecorationRange): number {
-  return range.kind === "line" ? range.from : range.to;
+  return range.kind === "line" || range.kind === "widget" ? range.from : range.to;
+}
+
+const PREVIEW_ONLY_CLASSES: ReadonlySet<string> = new Set([
+  PLAN_EDITOR_CLASS.listMarker,
+  PLAN_EDITOR_CLASS.pathItem,
+  PLAN_EDITOR_CLASS.pathName,
+  PLAN_EDITOR_CLASS.pathFolder,
+]);
+
+function isPreviewOnly(range: PlanDecorationRange): boolean {
+  return range.kind === "hide" || range.kind === "widget" || PREVIEW_ONLY_CLASSES.has(range.className);
+}
+
+/**
+ * Drops the decorations that hide or rearrange markdown on the focused lines,
+ * so the line being edited shows its raw source. Type styles stay.
+ */
+export function visibleDecorations(
+  ranges: readonly PlanDecorationRange[],
+  focusedLines: readonly PlanLineSpan[],
+): readonly PlanDecorationRange[] {
+  if (focusedLines.length === 0) return ranges;
+  return ranges.filter(
+    (range) => !isPreviewOnly(range) || !focusedLines.some((line) => range.from >= line.from && range.from <= line.to),
+  );
 }
 
 function blockDecorations(text: string, doc: PlanSyntaxNode): PlanDecorationRange[] {
@@ -84,6 +120,8 @@ function nodeDecorations(text: string, node: PlanSyntaxNode): PlanDecorationRang
       return inlineCodeDecorations(node);
     case "ListMark":
       return listMarkDecorations(text, node);
+    case "ListItem":
+      return pathItemDecorations(text, node);
     default:
       return [];
   }
@@ -103,6 +141,51 @@ function listMarkDecorations(text: string, node: PlanSyntaxNode): PlanDecoration
   const ranges: PlanDecorationRange[] = [{ kind: "mark", from: node.from, to: node.to, className: PLAN_EDITOR_CLASS.listMarker }];
   const textStart = skipSpaces(text, node.to);
   if (textStart > node.to) ranges.push({ kind: "hide", from: node.to, to: textStart });
+  return ranges;
+}
+
+const PATH_TOKEN = /^[^\s`]*[^\s`/]$/;
+const FILE_EXTENSION = /\.[A-Za-z0-9]+$/;
+
+// A Files list item names one path: the whole item is inline code holding a
+// path or file name, or a bare token with a folder separator.
+function pathSpan(text: string, paragraph: PlanSyntaxNode): PlanLineSpan | null {
+  const code = paragraph.firstChild;
+  return code ? codedPathSpan(text, paragraph, code) : barePathSpan(text, paragraph);
+}
+
+function barePathSpan(text: string, paragraph: PlanSyntaxNode): PlanLineSpan | null {
+  const bare = text.slice(paragraph.from, paragraph.to);
+  return PATH_TOKEN.test(bare) && bare.includes("/") ? { from: paragraph.from, to: paragraph.to } : null;
+}
+
+function codedPathSpan(text: string, paragraph: PlanSyntaxNode, code: PlanSyntaxNode): PlanLineSpan | null {
+  const wholeItem = code.name === "InlineCode" && code.from === paragraph.from && code.to === paragraph.to;
+  if (!wholeItem || code.nextSibling || !code.firstChild || !code.lastChild) return null;
+  const span = { from: code.firstChild.to, to: code.lastChild.from };
+  const path = text.slice(span.from, span.to);
+  return PATH_TOKEN.test(path) && (path.includes("/") || FILE_EXTENSION.test(path)) ? span : null;
+}
+
+// The board reads name first, then folder, so the folder is hidden in place
+// and drawn again after the name.
+function pathItemDecorations(text: string, item: PlanSyntaxNode): PlanDecorationRange[] {
+  const paragraph = item.getChild("Paragraph");
+  if (!paragraph || paragraph.nextSibling) return [];
+  const span = pathSpan(text, paragraph);
+  if (!span) return [];
+  const slash = text.lastIndexOf("/", span.to - 1);
+  const nameFrom = slash >= span.from ? slash + 1 : span.from;
+  const ranges: PlanDecorationRange[] = [
+    { kind: "line", from: text.lastIndexOf("\n", item.from - 1) + 1, className: PLAN_EDITOR_CLASS.pathItem },
+    { kind: "mark", from: nameFrom, to: span.to, className: PLAN_EDITOR_CLASS.pathName },
+  ];
+  if (nameFrom > span.from) {
+    ranges.push(
+      { kind: "hide", from: span.from, to: nameFrom },
+      { kind: "widget", from: span.to, text: text.slice(span.from, nameFrom - 1), className: PLAN_EDITOR_CLASS.pathFolder },
+    );
+  }
   return ranges;
 }
 
