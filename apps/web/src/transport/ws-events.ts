@@ -8,6 +8,7 @@ import {
 import { useApprovalStore } from "@/stores/approvalStore";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { startThreadAttentionTracking } from "@/features/thread-attention/thread-attention-tracking";
+import { startThreadEventDetector } from "@/features/thread-attention/thread-event-detector";
 import { pushEmitter } from "./ws-transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useProjectIconStore } from "@/features/projects/icons/projectIconStore";
@@ -175,6 +176,7 @@ export function startPushListeners(): void {
   // Guard against double-init
   stopPushListeners();
   unsubs.push(startThreadAttentionTracking());
+  unsubs.push(startThreadEventDetector());
   unsubs.push(pushEmitter.on("thread.attention", (data) => {
     const parsed = WS_CHANNELS["thread.attention"].safeParse(data);
     if (parsed.success) threadAttentionStore.getState().apply(parsed.data);
