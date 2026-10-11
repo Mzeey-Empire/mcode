@@ -1,0 +1,148 @@
+import { useEffect, useState } from "react";
+import { Check, Layers } from "lucide-react";
+import type { CanonicalSubagentStopResult, SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
+import { Button, IconButton } from "@/components/ui/button";
+import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
+import { ProviderIcon } from "@/components/ui/provider-icon";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
+import { useToastStore } from "@/stores/toastStore";
+import { formatLiveDuration, subagentStatusLabel } from "../subagent-status";
+
+/** Props for {@link SubagentList}. */
+export interface SubagentListProps {
+  readonly roster: SubagentRoster | undefined;
+  readonly error: boolean;
+  readonly viewportRef: React.RefObject<HTMLDivElement | null>;
+  readonly onRetry: () => void;
+  readonly onSelect: (row: SubagentRosterEntry) => void;
+  readonly onStop: (row: SubagentRosterEntry) => Promise<CanonicalSubagentStopResult>;
+}
+
+const LIVE_TICK_MS = 1_000;
+
+function byNewestStart(a: SubagentRosterEntry, b: SubagentRosterEntry): number {
+  return Date.parse(b.startedAt) - Date.parse(a.startedAt);
+}
+
+/** Running rows first, then finished rows, each newest first. */
+function partitionRows(entries: readonly SubagentRosterEntry[]) {
+  const running = entries.filter((row) => row.status === "running").sort(byNewestStart);
+  const finished = entries.filter((row) => row.status !== "running").sort(byNewestStart);
+  return { running, finished };
+}
+
+/** Re-renders once a second only while something is live, so an idle list costs nothing. */
+function useNow(live: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!live) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), LIVE_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, [live]);
+  return now;
+}
+
+function elapsed(row: SubagentRosterEntry, now: number): string {
+  const end = row.endedAt ? Date.parse(row.endedAt) : now;
+  return formatLiveDuration(end - Date.parse(row.startedAt));
+}
+
+function rowMeta(row: SubagentRosterEntry): string {
+  const kind = [row.subagentType, row.model].filter(Boolean).join(" · ");
+  return [kind, row.stepCount > 0 ? `${row.stepCount} steps` : null].filter(Boolean).join(" · ");
+}
+
+function StatusTrail({ row, now }: { readonly row: SubagentRosterEntry; readonly now: number }) {
+  const time = <span className="font-mono text-xs">{elapsed(row, now)}</span>;
+  switch (row.status) {
+    case "running":
+      return <span className="flex items-center gap-1.5 text-ink"><span aria-hidden className="size-[7px] rounded-full bg-success" />{time}</span>;
+    case "done":
+      return <span className="flex items-center gap-1.5 text-muted"><Check size={12} strokeWidth={2} aria-hidden />{time}</span>;
+    case "failed":
+      return <span className="flex items-center gap-1.5 text-muted">
+        <span aria-hidden className="size-[7px] rounded-full bg-error" />
+        <span className="text-xs font-medium text-error">{subagentStatusLabel(row.status)}</span>{time}
+      </span>;
+    case "stopped":
+      return <span className="flex items-center gap-1.5 text-muted"><span className="text-xs font-medium">{subagentStatusLabel(row.status)}</span>{time}</span>;
+  }
+}
+
+function RowStop({ row, onStop }: { readonly row: SubagentRosterEntry; readonly onStop: SubagentListProps["onStop"] }) {
+  const [pending, setPending] = useState(false);
+  const stop = async () => {
+    if (pending) return;
+    setPending(true);
+    try {
+      const result = await onStop(row);
+      if (result.status === "failed" || result.status === "unsupported") {
+        useToastStore.getState().show({ kind: "failed", title: `Couldn't stop ${row.title}`, meta: result.message ?? undefined });
+      }
+    } catch {
+      useToastStore.getState().show({ kind: "failed", title: `Couldn't stop ${row.title}` });
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <IconButton shape="round" size="inline" aria-label={`Stop ${row.title}`} disabled={pending} aria-busy={pending}
+      onClick={() => void stop()}
+      className={cn("hidden group-focus-within/row:inline-flex group-hover/row:inline-flex", pending && "inline-flex")}>
+      <span aria-hidden className="size-2 rounded-[2px] bg-ink" />
+    </IconButton>
+  );
+}
+
+function SubagentListRow({ row, now, onSelect, onStop }: {
+  readonly row: SubagentRosterEntry; readonly now: number;
+  readonly onSelect: SubagentListProps["onSelect"]; readonly onStop: SubagentListProps["onStop"];
+}) {
+  const running = row.status === "running";
+  const stoppable = running && row.canStop && row.childThreadId !== null;
+  const meta = rowMeta(row);
+  return (
+    <li data-testid={running ? "subagent-active-row" : "subagent-finished-row"}
+      className={cn("group/row flex h-13 min-w-0 items-center gap-1.5 rounded-lg transition-colors duration-(--duration-fast) hover:bg-hover", stoppable && "hover:pr-1.5 focus-within:pr-1.5")}>
+      <button type="button" onClick={() => onSelect(row)} data-subagent-id={row.id}
+        aria-label={`Open ${row.title} details, ${subagentStatusLabel(row.status)}`}
+        className="flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus">
+        <ProviderIcon provider={row.provider} size={16} />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="text-fade text-sm font-medium text-ink">{row.title}</span>
+          {meta && <span className="text-fade text-xs text-muted">{meta}</span>}
+        </span>
+        <StatusTrail row={row} now={now} />
+      </button>
+      {stoppable && <RowStop row={row} onStop={onStop} />}
+    </li>
+  );
+}
+
+/** The Subagents panel list: running children, a divider, then finished children. */
+export function SubagentList({ roster, error, viewportRef, onRetry, onSelect, onStop }: SubagentListProps) {
+  const { running, finished } = partitionRows(roster?.entries ?? []);
+  const now = useNow(running.length > 0);
+  const renderRow = (row: SubagentRosterEntry) => <SubagentListRow key={row.id} row={row} now={now} onSelect={onSelect} onStop={onStop} />;
+  return (
+    <section className="flex min-h-0 flex-1 flex-col" aria-label="Subagents">
+      <PanelHeaderSlot slot="leading"><PanelTitlePill icon={<Layers size={14} aria-hidden />}>Subagents</PanelTitlePill></PanelHeaderSlot>
+      {error && <div data-testid="subagents-error" role="alert" className="flex items-center gap-2 px-4 py-3 text-sm text-ink">
+        Couldn't load subagents <Button variant="ghost" size="compact" onClick={onRetry}>Retry</Button>
+      </div>}
+      {!roster && !error && <p className="px-4 py-6 text-sm text-muted">Loading subagents…</p>}
+      <ScrollArea className="min-h-0 flex-1" viewportRef={viewportRef}>
+        {roster && running.length + finished.length === 0 && <p data-testid="subagents-empty" className="px-4 py-6 text-sm text-muted">
+          Subagents appear here when this thread delegates work.
+        </p>}
+        <ul className="flex flex-col gap-0.5 px-2 pt-1 pb-2">
+          {running.map(renderRow)}
+          {running.length > 0 && finished.length > 0 && <li aria-hidden className="px-2.5 py-1.5"><div className="h-px bg-border" /></li>}
+          {finished.map(renderRow)}
+        </ul>
+      </ScrollArea>
+    </section>
+  );
+}

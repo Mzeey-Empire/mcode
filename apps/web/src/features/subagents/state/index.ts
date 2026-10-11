@@ -3,7 +3,7 @@ import {
   type SubagentDetailSelection,
 } from "@/stores/diffStore";
 
-export type { SubagentDetailSelection, SubagentRosterTab } from "@/stores/diffStore";
+export type { SubagentDetailSelection } from "@/stores/diffStore";
 
 /** Reads the selected child for one parent thread. */
 export function useSubagentDetailSelection(threadId: string): SubagentDetailSelection | undefined {

@@ -7,14 +7,9 @@ export type { BranchComparison };
 /** Active tab in the right panel. */
 export type RightPanelTab = "tasks" | "changes" | "preview" | "terminal" | "action-terminal" | "subagents" | "coordination" | "environment";
 
-/** Selected roster view within a thread's Subagents panel. */
-export type SubagentRosterTab = "active" | "finished";
-
 /** Navigation state for one thread's Subagents detail view. */
 export interface SubagentDetailSelection {
   readonly id: string;
-  /** Canonical roster tab, unresolved for selections opened from narration. */
-  readonly originTab?: SubagentRosterTab;
   readonly scrollTop: number;
 }
 
@@ -412,11 +407,6 @@ interface DiffState {
    * and ADR-0020.
    */
   readonly rightPanelFallbackByWorkspace: Record<string, RightPanelState>;
-  /**
-   * The remembered Subagents roster view for each thread. This inner-panel state
-   * survives right-panel unmounts but is intentionally dropped with its thread.
-   */
-  readonly subagentRosterTabByThread: Record<string, SubagentRosterTab>;
   /** Selected Subagents detail and roster return position for each thread. */
   readonly subagentDetailByThread: Record<string, SubagentDetailSelection>;
   /** Explicit Files visibility choices keyed by Review scope. Missing scopes start closed. */
@@ -581,10 +571,6 @@ interface DiffState {
   closeRightPanelTab: (workspaceId: string, threadId: string | null | undefined, tab: RightPanelTab) => void;
   /** Close every tab and hide one right-panel scope while preserving its width. */
   clearRightPanel: (workspaceId: string, threadId: string | null | undefined) => void;
-  /** Read a thread's remembered Subagents roster view, if it has one. */
-  getSubagentRosterTab: (threadId: string) => SubagentRosterTab | undefined;
-  /** Remember the selected Subagents roster view for one thread. */
-  setSubagentRosterTab: (threadId: string, tab: SubagentRosterTab) => void;
   /** Open a thread-scoped Subagents detail. */
   selectSubagentDetail: (threadId: string, selection: SubagentDetailSelection) => void;
   /** Return one thread to its Subagents roster. */
@@ -667,7 +653,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   previewUrlByThread: {},
   rightPanelByThread: {},
   rightPanelFallbackByWorkspace: {},
-  subagentRosterTabByThread: {},
   subagentDetailByThread: {},
   reviewFilesVisibleByScope: readReviewFilesVisibility(),
   viewMode: "last-turn",
@@ -860,26 +845,10 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       });
     }),
 
-  getSubagentRosterTab: (threadId) => get().subagentRosterTabByThread[threadId],
-  setSubagentRosterTab: (threadId, tab) =>
-    set((state) =>
-      state.subagentRosterTabByThread[threadId] === tab
-        ? {}
-        : { subagentRosterTabByThread: { ...state.subagentRosterTabByThread, [threadId]: tab } },
-    ),
   selectSubagentDetail: (threadId, selection) =>
-    set((state) => {
-      const subagentRosterTabByThread = { ...state.subagentRosterTabByThread };
-      if (selection.originTab === undefined) {
-        delete subagentRosterTabByThread[threadId];
-      } else {
-        subagentRosterTabByThread[threadId] = selection.originTab;
-      }
-      return {
-        subagentDetailByThread: { ...state.subagentDetailByThread, [threadId]: selection },
-        subagentRosterTabByThread,
-      };
-    }),
+    set((state) => ({
+      subagentDetailByThread: { ...state.subagentDetailByThread, [threadId]: selection },
+    })),
   clearSubagentDetail: (threadId) =>
     set((state) => {
       if (!(threadId in state.subagentDetailByThread)) return {};
@@ -1061,8 +1030,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete lineWrapByThread[threadId];
       const rightPanelByThread = { ...state.rightPanelByThread };
       delete rightPanelByThread[threadId];
-      const subagentRosterTabByThread = { ...state.subagentRosterTabByThread };
-      delete subagentRosterTabByThread[threadId];
       const subagentDetailByThread = { ...state.subagentDetailByThread };
       delete subagentDetailByThread[threadId];
       const reviewViewByThread = { ...state.reviewViewByThread };
@@ -1095,7 +1062,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         previewUrlByThread: previewUrls,
         lineWrapByThread,
         rightPanelByThread,
-        subagentRosterTabByThread,
         subagentDetailByThread,
         reviewViewByThread,
         reviewViewManuallySelectedByThread,

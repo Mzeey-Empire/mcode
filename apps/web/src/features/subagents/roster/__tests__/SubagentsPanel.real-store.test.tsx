@@ -40,13 +40,13 @@ describe("SubagentsPanel real roster store", () => {
     expect(transport.loadSubagentRoster.mock.calls).toEqual([["thread-1"]]);
   });
 
-  it("renders both Claude calls and updates them on push without an interval", async () => {
+  it("renders both Claude calls and updates them on push without a polling interval", async () => {
     const interval = vi.spyOn(window, "setInterval");
     transport.loadSubagentRoster.mockResolvedValueOnce(roster([row("Inspect UI"), row("Inspect API")]))
       .mockResolvedValueOnce(roster([row("Inspect UI", "done"), row("Inspect API", "done")], 2));
     await act(async () => { render(<SubagentsPanel threadId="thread-1" />); });
     expect(screen.getAllByTestId("subagent-active-row")).toHaveLength(2);
-    expect(interval).not.toHaveBeenCalled();
+    expect(interval.mock.calls.map(([, ms]) => ms)).toEqual([1_000]);
     await act(async () => {
       pushEmitter.emit("subagents.changed", { threadId: "thread-1", epoch: "panel-boot", revision: 2 });
       await useSubagentRosterStore.getState().refresh("thread-1");

@@ -1,7 +1,7 @@
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { clearSubagentDetail, selectSubagentDetail, type SubagentRosterTab } from "../state";
+import { clearSubagentDetail, selectSubagentDetail } from "../state";
 
 /** Opens the active thread's Subagents panel. */
 export function openSubagentsPanel(): boolean {
@@ -14,26 +14,20 @@ export function openSubagentsPanel(): boolean {
   return true;
 }
 
-/** Clears the active child detail and opens the active thread's targeted Subagents roster. */
-export function openSubagentsRoster(tab?: SubagentRosterTab): boolean {
+/** Clears the active child detail and opens the active thread's Subagents list. */
+export function openSubagentsRoster(): boolean {
   const { activeWorkspaceId, activeThreadId } = useWorkspaceStore.getState();
   if (!activeWorkspaceId || !activeThreadId) return false;
 
-  const diff = useDiffStore.getState();
-  if (tab !== undefined) diff.setSubagentRosterTab(activeThreadId, tab);
   clearSubagentDetail(activeThreadId);
   return openSubagentsPanel();
 }
 
-/** Opens one child detail, preserving an unresolved roster tab for narration-origin selections. */
-export function openSubagentDetail(id: string, tab?: SubagentRosterTab): boolean {
+/** Opens one child detail in the active thread's Subagents panel. */
+export function openSubagentDetail(id: string): boolean {
   const { activeWorkspaceId, activeThreadId } = useWorkspaceStore.getState();
   if (!activeWorkspaceId || !activeThreadId || id.length === 0) return false;
 
-  selectSubagentDetail(activeThreadId, {
-    id,
-    scrollTop: 0,
-    ...(tab === undefined ? {} : { originTab: tab }),
-  });
+  selectSubagentDetail(activeThreadId, { id, scrollTop: 0 });
   return openSubagentsPanel();
 }
