@@ -46,9 +46,12 @@ and preserved execution history, without a new user message.
 
 ### Replacement turn
 A new attempt of an interrupted or errored turn, started explicitly when
-same-turn recovery is unavailable. It may repeat effects from the earlier
-attempt. The transcript shows the turn's user message once, then only the
-latest attempt; earlier attempts' records stay persisted.
+same-turn recovery is unavailable. **Retry** replays an errored turn's user
+message. **Resume** continues an interrupted turn with a hidden continuation
+prompt: in the provider's saved session when it can, otherwise in a fresh
+session seeded with the thread's recent conversation. Either may repeat effects from
+the earlier attempt. The transcript shows the turn's user message once, then
+only the latest attempt; earlier attempts' records stay persisted.
 
 ### Protocol adapter
 The per-Provider seam carrying the protocol-specific I/O the Session runtime
@@ -514,10 +517,9 @@ the pending request.
 
 ### Recovery incident
 The exact set of active turns that one backend restart interrupted. The server
-creates the incident at startup and records each affected turn with that
-identity. It may include threads from every workspace, but excludes threads
-the user completed. The incident remains stable for that server run. A client
-may dismiss it for its current app session.
+creates the incident at startup and stamps each affected turn with its
+identity, as provenance only. Clients do not read incidents: each interrupted
+turn shows its own Interrupted notice, with Resume on the thread's latest turn.
 _Avoid_: Interrupted-turn history, recovery error list
 
 ### Terminal proof
