@@ -459,7 +459,7 @@ function FileAnnotations({ file }: { readonly file: ChangedFile }) {
   if (file.kind === "added") notes.push(<span key="kind" className="text-success">new</span>);
   if (file.kind === "deleted") notes.push(<span key="kind" className="text-error">deleted</span>);
   const source = renameSource(file);
-  if (source) notes.push(<span key="kind" className="text-muted">from {source}</span>);
+  if (source) notes.push(<span key="from" className="text-muted">from {source}</span>);
   if (file.editedLater) notes.push(<span key="later" className="text-muted">edited later</span>);
   if (notes.length === 0) return null;
   return <span className="flex shrink-0 gap-2 text-caption">{notes}</span>;
