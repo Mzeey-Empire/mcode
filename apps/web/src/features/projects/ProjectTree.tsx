@@ -83,7 +83,7 @@ import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
 import { FILE_EXPLORER_ID } from "@/lib/resolveDefaultOpenInApp";
 import { getTransport } from "@/transport";
 import { useToastStore } from "@/stores/toastStore";
-import type { ChecksStatus, ThreadAttention } from "@mcode/contracts";
+import type { ChecksStatus, ThreadAttention, WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
 import type { Workspace, Thread } from "@/transport/types";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
@@ -97,7 +97,7 @@ import {
   rollUpThreadRowStates,
   type ThreadRowState,
 } from "@/features/thread-attention/thread-row-state";
-import { useProjectAutomaticSetup } from "@/features/projects/environment";
+import { useProjectAutomaticSetup, useProjectAutomaticSetupStore } from "@/features/projects/environment";
 import {
   DndContext,
   DragOverlay,
@@ -880,6 +880,7 @@ export function ProjectTree() {
   const startupThreadIds = useMemo(() => new Set(pendingStartupIds), [pendingStartupIds]);
   const attentionByThreadId = threadAttentionStore((state) => state.byThreadId);
   const onScreenThreadId = threadAttentionStore((state) => state.onScreenThreadId);
+  const setupSnapshotsByThreadId = useProjectAutomaticSetupStore((state) => state.snapshotsByThread);
   // Normalized set of existing worktree paths for stale detection.
   const validWorktreePaths = useMemo(() => {
     const set = new Set<string>();
@@ -945,6 +946,7 @@ export function ProjectTree() {
         startupThreadIds,
         attentionByThreadId,
         onScreenThreadId,
+        setupSnapshotsByThreadId,
       }),
     [
       workspaces,
@@ -960,6 +962,7 @@ export function ProjectTree() {
       startupThreadIds,
       attentionByThreadId,
       onScreenThreadId,
+      setupSnapshotsByThreadId,
     ],
   );
 
@@ -1271,6 +1274,7 @@ interface ProjectTreeRowsInput {
   readonly startupThreadIds: ReadonlySet<string>;
   readonly attentionByThreadId: Readonly<Record<string, ThreadAttention>>;
   readonly onScreenThreadId: string | null;
+  readonly setupSnapshotsByThreadId: Readonly<Record<string, WorkspaceEnvironmentAutomaticSetupSnapshot>>;
 }
 
 /** Maps workspaces to virtual rows; children live inside the group row so a
@@ -1314,8 +1318,9 @@ function buildProjectTreeRows(
 const QUIET_ROW_STATE: ThreadRowState = { kind: "quiet" };
 
 /**
- * A collapsed project has no mounted thread rows, so setup snapshots are not
- * loaded; startup and creation count as running instead.
+ * Mirrors useThreadRowState from plain inputs, because a collapsed project has
+ * no mounted thread rows to call the hook. Setup reads whatever snapshot an
+ * earlier mount already cached.
  */
 function collapsedThreadRowState(thread: WorkspaceThread, input: ProjectTreeRowsInput): ThreadRowState {
   return deriveThreadRowState({
@@ -1323,7 +1328,7 @@ function collapsedThreadRowState(thread: WorkspaceThread, input: ProjectTreeRows
     running: input.runningThreadIds.has(thread.id)
       || input.startupThreadIds.has(thread.id)
       || thread.clientPreparing === true,
-    setup: null,
+    setup: threadRowSetup(input.setupSnapshotsByThreadId[thread.id]),
     onScreen: input.onScreenThreadId === thread.id,
   });
 }
@@ -1412,11 +1417,12 @@ const ThreadRow = memo(function ThreadRow({
   const isActive = useWorkspaceStore((s) => s.activeThreadId === thread.id);
   const isRunning = useThreadStore((s) => isThreadExecuting(thread.id, s));
   const startupPending = useWorkspaceStore((s) => s.pendingStartupByThreadId[thread.id] !== undefined);
-  const automaticSetup = useProjectAutomaticSetup(
+  // Mounting fetches and caches this thread's setup snapshot, which the row state reads from the shared store.
+  useProjectAutomaticSetup(
     thread.id,
     thread.mode === "worktree" && thread.worktree_managed === true,
   );
-  const rowState = useThreadRowState(thread.id, threadRowSetup(automaticSetup.snapshot));
+  const rowState = useThreadRowState(thread.id, thread.clientPreparing === true);
   const presentation = createThreadRowPresentation(
     thread,
     rowState,

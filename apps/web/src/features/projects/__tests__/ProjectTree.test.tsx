@@ -224,6 +224,7 @@ import { useUiStore } from "@/stores/uiStore";
 import { prefetchOnPointerDown } from "@/features/conversation";
 import { ProjectTree } from "../ProjectTree";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
+import { useProjectAutomaticSetupStore } from "@/features/projects/environment";
 
 /** Build a minimal Thread fixture. */
 type TestWorkspaceThread = Thread & { clientPreparing?: boolean };
@@ -1452,6 +1453,7 @@ describe("ProjectTree action-required indicator", () => {
   // Shape matches ChecksStatus just enough for sidebar CI aggregation,
   // while keeping the action-required ring tests focused on row state.
   let currentChecks: Record<string, { aggregate: string; runs: unknown[] }>;
+  let currentPendingStartup: Record<string, true>;
 
   function installWorkspaceMock() {
     // Build the state once per install: a fresh object per selector call would
@@ -1487,7 +1489,7 @@ describe("ProjectTree action-required indicator", () => {
       worktrees: [],
       worktreesLoadedForWorkspace: null,
       error: null,
-      pendingStartupByThreadId: {},
+      pendingStartupByThreadId: currentPendingStartup,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
     vi.mocked(useWorkspaceStore).mockImplementation(((
@@ -1509,6 +1511,8 @@ describe("ProjectTree action-required indicator", () => {
     } satisfies WorkspaceEnvironmentAutomaticSetupSnapshot);
     currentThread = makeThread({ id: "thread-pending", status: "active" });
     currentChecks = {};
+    currentPendingStartup = {};
+    useProjectAutomaticSetupStore.setState({ snapshotsByThread: {}, updateEpochByThread: {} });
     installWorkspaceMock();
     // Pre-expand the workspace so its threads render.
     window.localStorage.setItem(
@@ -1633,6 +1637,14 @@ describe("ProjectTree action-required indicator", () => {
 
     expect(await screen.findByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
     expect(screen.queryByRole("img", { name: "Running" })).not.toBeInTheDocument();
+  });
+
+  it("shows a row whose first turn is still starting as running", () => {
+    currentPendingStartup = { "thread-pending": true };
+    installWorkspaceMock();
+    render(<ProjectTree />);
+
+    expect(within(screen.getByTestId("thread-status-lane")).getByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
   });
 
   it.each([
@@ -1786,6 +1798,19 @@ describe("ProjectTree action-required indicator", () => {
       expect(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Running" })).toBeVisible();
     });
 
+    it("rolls up a failed blocking setup cached by an earlier mount", () => {
+      currentThread = makeThread({ id: "thread-pending", mode: "worktree", worktree_managed: true });
+      installWorkspaceMock();
+      useProjectAutomaticSetupStore.getState().applySnapshot("thread-pending", {
+        gate: "blocked",
+        attempt: { id: "attempt-1", state: "failed", reason: "setup_failed", snapshot: null, outcome: "command_failure", createdAt: "", startedAt: "", finishedAt: "", exitCode: 1, output: "failed", outputTruncated: false },
+        queuedTurns: [],
+      });
+      render(<ProjectTree />);
+
+      expect(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
+    });
+
     it("leaves the mark to the rows once expanded", () => {
       window.localStorage.setItem("mcode-expanded-projects", JSON.stringify({ "ws-1": true }));
       applyAttention(attention("thread-pending", waitingOn("approval")));
@@ -1803,7 +1828,7 @@ describe("ProjectTree action-required indicator", () => {
     installWorkspaceMock();
     render(<ProjectTree />);
 
-    const row = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
+    const row = screen.getByRole("button", { name: /^Running Provider, Claude My Thread/i });
     const content = screen.getByTestId("thread-title").closest(".flex-col");
     expect(row.className).not.toContain("opacity-[0.72]");
     expect(content?.className).toContain("opacity-[0.72]");

@@ -4,6 +4,7 @@ import { Command } from "@/components/ui/command";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useUiStore } from "@/stores/uiStore";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
+import { useProjectAutomaticSetupStore } from "@/features/projects/environment";
 import { createMockThread, createMockWorkspace } from "@/__tests__/mocks/transport";
 import type { RecentThread } from "@/transport/types";
 
@@ -62,6 +63,7 @@ vi.mock("@/features/projects/state/workspaceStore", () => ({
       workspaces: [workspace],
       threads: [thread],
       checksById: {},
+      pendingStartupByThreadId: {},
       setActiveWorkspace: hoisted.setActiveWorkspace,
       setActiveThread: hoisted.setActiveThread,
     }),
@@ -89,6 +91,7 @@ beforeEach(() => {
     useCommandPaletteStore.getState().open({ intent: "threadSearch" });
     useCommandPaletteStore.getState().setQuery("quiet-lantern");
     threadAttentionStore.setState({ byThreadId: {}, onScreenThreadId: null });
+    useProjectAutomaticSetupStore.setState({ snapshotsByThread: {}, updateEpochByThread: {} });
   });
 });
 
@@ -128,6 +131,19 @@ describe("ThreadSearchView", () => {
     rerender(<Command shouldFilter={false}><ThreadSearchView /></Command>);
     expect(screen.getByRole("img", { name: "Failed" })).toHaveAttribute("data-status-mark", "error");
     expect(screen.queryByText("Errored")).not.toBeInTheDocument();
+  });
+
+  it("shows Setup failed from the setup snapshot the sidebar cached", () => {
+    act(() => {
+      useProjectAutomaticSetupStore.getState().applySnapshot(thread.id, {
+        gate: "blocked",
+        attempt: { id: "attempt-1", state: "failed", reason: "setup_failed", snapshot: null, outcome: "command_failure", createdAt: "", startedAt: "", finishedAt: "", exitCode: 1, output: "failed", outputTruncated: false },
+        queuedTurns: [],
+      });
+    });
+    render(<Command shouldFilter={false}><ThreadSearchView /></Command>);
+
+    expect(screen.getByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
   });
 
   it("opens the selected thread inside its project", () => {
