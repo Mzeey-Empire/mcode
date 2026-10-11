@@ -15,6 +15,9 @@ import { RealGitExecutor } from "../../git/execution/real-git-executor.js";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { RepositoryGitMutationLock } from "../../git/repository-git-mutation-lock.js";
 import { isLiteralRepoPath } from "../../git/literal-paths.js";
+import { rawGit, rawPath, readRawStates, restoreRaw, type RawPathState, type RawRestoreEntry } from "./snapshot-raw-state.js";
+import { blobIdsAt, planCheckout, pinRecovery, withSnapshotIndex } from "./snapshot-checkout.js";
+import type { StoreId } from "./snapshot-store-identity.js";
 
 const MAX_ATTRIBUTED_PATHS = 16_384;
 const MAX_PATHS_PER_GIT_CALL = 128;
@@ -344,6 +347,58 @@ export class SnapshotService {
       pathspecBatches,
     );
     return truncateUnifiedDiff(outputs.join("\n"), maxLines);
+  }
+
+  /** Read tree entries for bounded literal paths without changing the index. */
+  async blobIdsAt(cwd: string, ref: string, paths: readonly string[]) {
+    paths.forEach((name) => rawPath(cwd, name));
+    return blobIdsAt(cwd, ref, paths, batchPathspecGroups(paths.map((name) => [name])));
+  }
+
+  /** Classify current content with Git filters in an isolated index. Never used to authorize a write. */
+  async currentBlobIds(cwd: string, seedRef: string, paths: readonly string[]) {
+    const states = await this.workingTreeState(cwd, paths);
+    return withSnapshotIndex(cwd, async (env) => {
+      await rawGit(cwd, ["read-tree", seedRef], undefined, env);
+      const present = paths.filter((name) => states.get(name)?.kind !== "absent");
+      const absent = paths.filter((name) => states.get(name)?.kind === "absent");
+      if (absent.length) await rawGit(cwd, ["update-index", "--force-remove", "-z", "--stdin"], `${absent.join("\0")}\0`, env);
+      // Preview has excluded untracked ignored paths; tracked paths may still have ignored parents.
+      for (const batch of batchPathspecGroups(present.map((name) => [name]))) await rawGit(cwd, ["add", "-f", "-A", "--", ...batch], undefined, env);
+      const tree = (await rawGit(cwd, ["write-tree"], undefined, env)).toString().trim();
+      return this.blobIdsAt(cwd, tree, paths);
+    });
+  }
+
+  /** Whether Git tracks the executable bit in this repository. */
+  async tracksFileMode(cwd: string): Promise<boolean> {
+    if (hostRuntime.platform === "win32") return false;
+    return (await rawGit(cwd, ["config", "--type=bool", "--default=true", "--get", "core.fileMode"])).toString().trim() === "true";
+  }
+
+  /** Hash raw bytes and types without applying clean filters. */
+  async workingTreeState(cwd: string, paths: readonly string[]) {
+    return readRawStates(cwd, paths, await this.tracksFileMode(cwd));
+  }
+
+  /** Persist unfiltered pre-state blobs for byte-exact Undo and recovery. */
+  async captureRaw(cwd: string, paths: readonly string[]) {
+    return readRawStates(cwd, paths, await this.tracksFileMode(cwd), cwd);
+  }
+
+  /** Record precisely the bytes a checkout would produce before touching the worktree. */
+  async planCheckout(cwd: string, ref: string, operationId: string, paths: readonly string[]) {
+    return planCheckout(cwd, ref, operationId, paths, await this.blobIdsAt(cwd, ref, paths), await this.tracksFileMode(cwd));
+  }
+
+  /** Pin both raw states before persisting the prepared journal. */
+  pinRecovery(cwd: string, storeId: StoreId, operationId: string, states: readonly RawPathState[]) {
+    return pinRecovery(cwd, storeId, operationId, states);
+  }
+
+  /** Restore recorded raw states using checked sibling files and atomic renames. */
+  restoreRaw(cwd: string, operationId: string, entries: readonly RawRestoreEntry[], afterWrite?: () => Promise<void>) {
+    return restoreRaw(cwd, operationId, entries, afterWrite);
   }
 
   /** Validate that a git ref still exists (not garbage collected). */

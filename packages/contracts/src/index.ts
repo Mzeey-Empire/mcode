@@ -490,6 +490,7 @@ export { ParentNarrativeRecoveryItemSchema } from "./models/narrative-recovery.j
 export { ApprovalDecidedPayloadSchema, ApprovalReceiptRecordSchema, type ApprovalReceiptRecord } from "./models/approval-receipt.js";
 export type { ParentNarrativeRecoveryItem } from "./models/narrative-recovery.js";
 
+export * from "./models/turn-revert.js";
 export { TurnSnapshotSchema } from "./models/turn-snapshot.js";
 export type { TurnSnapshot } from "./models/turn-snapshot.js";
 export { DiffStatsSchema } from "./models/diff-stats.js";

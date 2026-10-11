@@ -77,6 +77,11 @@ import {
 import { AgentEventPublicationRegistry } from "../../features/agents/orchestration/agent-event-publication-registry.js";
 import { WorkerOwnedTurnRuntime } from "../../features/agents/execution/worker-owned-turn-runtime.js";
 import { SnapshotRefPins } from "../../features/projects/diffs/snapshots/snapshot-ref-pins.js";
+import { TurnRevertService } from "../../features/projects/diffs/revert/turn-revert-service.js";
+import { turnRevertContext } from "../../features/projects/diffs/revert/turn-revert-context.js";
+import { TurnRevertStore } from "../../features/agents/turns/persistence/turn-revert-store.js";
+import { RepositoryGitMutationLock } from "../../features/projects/git/repository-git-mutation-lock.js";
+import { SNAPSHOT_STORE_ID, type StoreId } from "../../features/projects/diffs/snapshots/snapshot-store-identity.js";
 import { AgentRuntimeCommandPort } from "../../features/agents/orchestration/agent-turn-command-port.js";
 import { ProviderTurnEventApplication } from "../../features/agents/turns/provider-turn-event-application.js";
 import { TURN_FINALIZER, TurnFinalizer } from "../../features/agents/turns/turn-finalizer.js";
@@ -661,6 +666,19 @@ async function removeExpiredSnapshots(): Promise<void> {
 }
 
 await removeExpiredSnapshots();
+const turnRevertStore = new TurnRevertStore(db);
+const turnRevertService = new TurnRevertService({
+  snapshots: snapshotService, ranges: container.resolve(TurnSnapshotRangeReader), store: turnRevertStore,
+  writer: databaseWriter, lock: container.resolve(RepositoryGitMutationLock), storeId: container.resolve<StoreId>(SNAPSHOT_STORE_ID),
+  ...turnRevertContext(db, { turnSnapshotRepo, turnSnapshotRanges: container.resolve(TurnSnapshotRangeReader),
+    snapshotService, threadService, workspaceService, gitWorktrees, sweepSnapshotPins },
+  (threadId) => agentRuntimeCommands.runtimeSnapshots().some((snapshot) => snapshot.threadId === threadId && snapshot.phase !== "idle")),
+  publish: ({ revert, receipt }) => {
+    broadcast("turn.reverted", { threadId: revert.threadId, revert, receipt });
+    broadcast("turn.diffChanged", { threadId: revert.threadId });
+  },
+});
+await turnRevertService.recoverUnfinished();
 
 /** Settles commit requests a previous process left prepared, then drops expired ones, before RPCs arrive. */
 async function settleCommitRequests(): Promise<void> {
@@ -804,6 +822,8 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   turnSteers,
   turnSnapshotRepo,
   sweepSnapshotPins,
+  turnRevertStore,
+  turnRevertService,
   turnDiffs: container.resolve(TurnDiffService),
   turnSnapshotRanges: container.resolve(TurnSnapshotRangeReader),
   snapshotService,

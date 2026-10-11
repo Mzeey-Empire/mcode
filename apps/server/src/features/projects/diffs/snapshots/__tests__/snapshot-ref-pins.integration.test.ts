@@ -50,11 +50,11 @@ function temporaryDirectory(prefix: string): string {
   return directory;
 }
 
-function git(cwd: string, args: string[]): string {
+function git(cwd: string, args: string[], env: Record<string, string> = {}): string {
   return NodeChildProcess.execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, ...COMMIT_ENV },
+    env: { ...process.env, ...COMMIT_ENV, ...env },
   }).trim();
 }
 
@@ -480,23 +480,34 @@ describe("SnapshotRefPins", () => {
     seedThread(storeA, { workspaceId: "workspace-a", path: repo, threadId: "thread-a" });
     seedThread(storeB, { workspaceId: "workspace-b", path: worktree, threadId: "thread-b" });
     const head = git(repo, ["rev-parse", "HEAD"]);
+    const oldCommit = git(repo, ["commit-tree", `${head}^{tree}`, "-m", "old orphan"], { GIT_COMMITTER_DATE: "2000-01-01T00:00:00Z" });
     for (const store of [storeA, storeB]) {
       git(repo, ["update-ref", `${storeRefPrefix(store.storeId)}snapshots/orphan-row`, head]);
-      git(repo, ["update-ref", `${storeRefPrefix(store.storeId)}reverts/hand-made`, head]);
+      git(repo, ["update-ref", `${storeRefPrefix(store.storeId)}reverts/hand-made`, oldCommit]);
     }
 
     await storeA.pins.sweep();
     expect(listRefs(repo)).toEqual([
-      `${storeRefPrefix(storeA.storeId)}reverts/hand-made`,
       `${storeRefPrefix(storeB.storeId)}reverts/hand-made`,
       `${storeRefPrefix(storeB.storeId)}snapshots/orphan-row`,
     ].sort());
 
     await storeB.pins.sweep();
-    expect(listRefs(repo)).toEqual([
-      `${storeRefPrefix(storeA.storeId)}reverts/hand-made`,
-      `${storeRefPrefix(storeB.storeId)}reverts/hand-made`,
-    ].sort());
+    expect(listRefs(repo)).toEqual([]);
+  }, TEST_TIMEOUT_MS);
+
+  it("keeps a fresh recovery ref before its journal row is inserted", async () => {
+    const repo = createRepo();
+    const worktree = addLinkedWorktree(repo);
+    const store = await newStore();
+    seedThread(store, { workspaceId: "workspace-1", path: repo, threadId: "thread-1", worktreePath: worktree });
+    const raw = await store.snapshots.captureRaw(worktree, ["a.ts"]);
+    const ref = await store.snapshots.pinRecovery(worktree, store.storeId, "in-flight", [...raw.values()]);
+
+    await store.pins.sweep();
+
+    expect(listRefs(repo)).toEqual([ref]);
+    expect(git(worktree, ["cat-file", "-t", ref])).toBe("commit");
   }, TEST_TIMEOUT_MS);
 
   it("pins in a linked worktree shared with the main checkout", async () => {

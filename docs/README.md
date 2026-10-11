@@ -98,6 +98,7 @@ Point-in-time decisions. New ADRs take the next free number below. Numbers
 - [0024: One browser profile per project](adr/0024-one-browser-profile-per-project.md)
 - [0025: Reasoning keeps the narrative persistence path](adr/0025-reasoning-keeps-the-narrative-persistence-path.md)
 - [0026: The rail lists tools; terminals and Browser pages are row-1 tabs](adr/0026-rail-lists-tools-terminals-and-pages-are-row-1-tabs.md)
+- [0027: Turn revert restores pre-turn content](adr/0027-turn-revert-restores-pre-turn-content.md)
 
 ## Agent runbooks
 
