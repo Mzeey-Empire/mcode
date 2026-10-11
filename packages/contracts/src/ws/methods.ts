@@ -375,7 +375,7 @@ const createAndSendFields = lazySchema(() =>
     /** Pull request identity used to fetch its head before the thread prepares. */
     pullRequestNumber: z.number().int().positive().optional(),
     worktreeBranchMode: z.enum(["branchless", "named"]).optional(),
-    existingWorktreePath: z.string().optional(),
+    existingWorktreePath: z.string().min(1).optional(),
     existingWorktreeBaseBranch: GitBranchNameSchema.optional(),
     attachments: z.array(AttachmentMetaSchema()).max(MAX_ATTACHMENTS).optional(),
     /** Structured Preview Annotation bundle, counted separately from normal attachments. */

@@ -15,6 +15,12 @@ describe("CreateAndSendSchema", () => {
     expect(CreateAndSendSchema().parse(input)).toEqual(input);
   });
 
+  it("rejects an empty existing worktree path instead of treating it as a new worktree", () => {
+    const result = CreateAndSendSchema().safeParse({ ...command, mode: "worktree", existingWorktreePath: "" });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues.map((issue) => issue.path)).toEqual([["existingWorktreePath"]]);
+  });
+
   it("accepts worktree and branch with start from origin", () => {
     const input = { ...command, mode: "worktree", branch: "main", startFromOrigin: true };
     expect(CreateAndSendSchema().parse(input)).toEqual(input);
