@@ -25,6 +25,7 @@ import type {
   ProviderTurnDiffUpdate,
   SessionForker,
   TurnRequest,
+  TurnFailure,
 } from "@mcode/contracts";
 import { AgentEventType, providerRuntimeEvent } from "@mcode/contracts";
 import type { ProviderHostPorts } from "@mcode/providers";
@@ -51,7 +52,7 @@ import {
   type OpenCodeHttpClient,
   type OpenCodeRequestVersion,
 } from "./opencode-http-client.js";
-import { mapOpenCodeEnvelope, normalizeOpenCodeEnvelope, type OpenCodeMappedOutput } from "./opencode-event-mapper.js";
+import { classifyOpenCodeFailure, mapOpenCodeEnvelope, normalizeOpenCodeEnvelope, type OpenCodeMappedOutput } from "./opencode-event-mapper.js";
 import {
   mapApprovalChoiceToReply,
   synthesizeOpenCodeApprovalRequest,
@@ -780,7 +781,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error("OpenCodeProvider turn error", { sessionId: req.sessionId, error: message });
-      settler.settle(state.aborted ? "cancelled" : "errored", state.aborted ? undefined : message);
+      settler.settle(state.aborted ? "cancelled" : "errored", state.aborted ? undefined : message, classifyOpenCodeFailure(error));
     }
   }
 
@@ -960,8 +961,9 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       this.maybeEmitAsk(req, endpoint, upstreamId, normalized, mapped.reason);
     }
     this.forwardTurnEvents(mapped.events, req, threadId, settler);
-    if (mapped.events.some((e) => e.type === AgentEventType.Error)) {
-      settler.settle("errored");
+    const error = mapped.events.find((event) => event.type === AgentEventType.Error);
+    if (error) {
+      settler.settle("errored", error.error, error.failure);
     } else if (mapped.events.some((e) => e.type === AgentEventType.TurnComplete)) {
       void this.confirmIdleCompleted(req, state, endpoint, upstreamId, settler);
     } else if (mapped.disposition === "mapped") {
@@ -1295,10 +1297,10 @@ class OpenCodeTurnSettler {
     return this.settled;
   }
 
-  settle(outcome: "completed" | "cancelled" | "errored", error?: string): void {
+  settle(outcome: "completed" | "cancelled" | "errored", error?: string, failure: TurnFailure = { kind: "fatal" }): void {
     if (this.settled) return;
     this.settled = true;
-    if (error) this.emit({ type: AgentEventType.Error, threadId: this.threadId, error, failure: { kind: "fatal" } } satisfies AgentEvent);
+    if (error !== undefined) this.emit({ type: AgentEventType.Error, threadId: this.threadId, error: error.trim() ? error : "OpenCode session error", failure } satisfies AgentEvent);
     if (this.assistantText.trim().length > 0 && outcome !== "cancelled") {
       this.emit({ type: AgentEventType.Message, threadId: this.threadId, content: this.assistantText, tokens: null } satisfies AgentEvent);
     }

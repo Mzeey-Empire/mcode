@@ -1,5 +1,5 @@
 import type { SessionEvent } from "@github/copilot-sdk";
-import { createSubagentPresentation, type AgentEvent } from "@mcode/contracts";
+import { createSubagentPresentation, type AgentEvent, type TurnFailure } from "@mcode/contracts";
 import { z } from "zod";
 import { normalizeQuotaSnapshots } from "./copilot-helpers.js";
 
@@ -142,7 +142,7 @@ function mapLifecycleEvent(event: SessionEvent, threadId: string, turn: CopilotT
   switch (event.type) {
     case "session.error":
       turn.settle("failed", new Error(event.data.message));
-      return [...finishAssistantText(turn, threadId), { type: "error", threadId, error: event.data.message, failure: { kind: "fatal" } }];
+      return [...finishAssistantText(turn, threadId), { type: "error", threadId, error: event.data.message, failure: classifyCopilotFailure(event.data) }];
     case "abort":
       turn.outcome ??= "cancelled";
       return [{ type: "system", threadId, subtype: "copilot_abort" }];
@@ -152,6 +152,21 @@ function mapLifecycleEvent(event: SessionEvent, threadId: string, turn: CopilotT
       return [...(turn.outcome === "completed" && turn.pendingAssistantMessage ? [] : finishAssistantText(turn, threadId)), { type: "system", threadId, subtype: "copilot_idle" }];
     default: return undefined;
   }
+}
+
+const copilotFailureDataSchema = z.object({
+  errorType: z.string().trim().min(1).max(128).optional().catch(undefined),
+  statusCode: z.number().int().min(100).max(599).optional().catch(undefined),
+});
+const copilotFailureKinds = new Map<string, TurnFailure["kind"]>([
+  ["authentication", "auth"], ["authorization", "auth"], ["quota", "usage_limit"],
+  ["rate_limit", "retryable"], ["context_limit", "fatal"],
+]);
+
+function classifyCopilotFailure(data: Extract<SessionEvent, { type: "session.error" }>["data"]): TurnFailure {
+  const { errorType: code, statusCode: status } = copilotFailureDataSchema.parse(data);
+  const kind = copilotFailureKinds.get(code ?? "") ?? (status !== undefined && status >= 500 ? "retryable" : "fatal");
+  return { kind, ...(status === undefined ? {} : { status }), ...(code === undefined ? {} : { code }) };
 }
 
 const nativeEnvelopeSchema = z.object({ id: z.string().min(1).max(200), timestamp: z.string().refine((value) => Number.isFinite(Date.parse(value))), type: z.string().min(1), parentId: z.string().nullable(), data: z.record(z.unknown()) });
