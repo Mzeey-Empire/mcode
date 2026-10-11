@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import { Globe, Terminal, Files, Diff, FileText, Layers, Network, Settings } from "lucide-react";
-import type { RightPanelTab } from "@/stores/diffStore";
+import type { RightPanelTool } from "@/stores/diffStore";
 
 /**
  * Whether a thread is active. Tab availability is filtered by scope first: some
@@ -10,18 +10,18 @@ import type { RightPanelTab } from "@/stores/diffStore";
 export type PanelScope = "threadless" | "thread";
 
 /**
- * Identifier for a creatable panel tab type. Openable types map 1:1 onto the
- * store's {@link RightPanelTab}; `"files"` is a coming-soon teaser that is shown
- * but never actually opened, so it has no backing {@link RightPanelTab}.
+ * Identifier for a creatable panel tool. Openable types map 1:1 onto the
+ * store's {@link RightPanelTool}; `"files"` is a coming-soon teaser that is shown
+ * but never actually opened, so it has no backing {@link RightPanelTool}.
  */
-export type PanelTabTypeId = RightPanelTab | "files";
+export type PanelTabTypeId = RightPanelTool | "files";
 
 /**
  * Static metadata describing one panel tab type for the availability model and
  * the empty-state card grid. Pure data — no store or React state.
  */
 export interface PanelTabType {
-  /** Stable id; openable ids are {@link RightPanelTab}, `"files"` is coming-soon only. */
+  /** Stable id; openable ids are {@link RightPanelTool}, `"files"` is coming-soon only. */
   readonly id: PanelTabTypeId;
   /** Product-facing name shown on the card (e.g. "Browser", "Review"). */
   readonly label: string;
@@ -33,8 +33,6 @@ export interface PanelTabType {
   readonly needsThread: boolean;
   /** Shown as a disabled teaser and excluded from the creatable set (Files). */
   readonly comingSoon?: boolean;
-  /** Opened only by a product workflow and therefore omitted from creation surfaces. */
-  readonly systemManaged?: boolean;
   /**
    * Command id whose keybinding renders as the card's keycap. Absent for
    * coming-soon types, which have no binding yet.
@@ -47,7 +45,7 @@ export interface PanelTabType {
  * single source of truth for how cards and rail entries are laid out, so the
  * availability helpers preserve it. Labels are the product language (Browser,
  * Review, Plan) even though the openable ids reuse the legacy
- * {@link RightPanelTab} values (preview, changes, tasks).
+ * {@link RightPanelTool} values (preview, changes, tasks).
  */
 export const PANEL_TAB_TYPES: readonly PanelTabType[] = [
   {
@@ -65,14 +63,6 @@ export const PANEL_TAB_TYPES: readonly PanelTabType[] = [
     blurb: "Start a shell",
     needsThread: false,
     commandId: "terminal.toggle",
-  },
-  {
-    id: "action-terminal",
-    label: "Project Action",
-    icon: Terminal,
-    blurb: "View Action output",
-    needsThread: true,
-    systemManaged: true,
   },
   {
     id: "files",
@@ -126,11 +116,11 @@ export const PANEL_TAB_TYPES: readonly PanelTabType[] = [
 ];
 
 /**
- * Tab types displayed in the current scope, in catalog order: scope-filtered
- * (thread-only types dropped when threadless) then cardinality-filtered
- * (singletons already open dropped). Terminal remains repeatable. Coming-soon teasers (Files) are kept so the
- * empty-state grid can render them disabled. Pure — does not read or mutate any
- * external state.
+ * Tools displayed in the current scope, in catalog order: scope-filtered
+ * (thread-only types dropped when threadless) then cardinality-filtered (open
+ * tools dropped, since the rail lists each tool once and Terminal and Browser
+ * add items from their own row-1 tab strip; ADR-0025). Coming-soon teasers
+ * (Files) are kept so the empty-state grid can render them disabled. Pure.
  */
 export function shownTabTypes(
   scope: PanelScope,
@@ -138,7 +128,7 @@ export function shownTabTypes(
 ): readonly PanelTabType[] {
   return PANEL_TAB_TYPES.filter((type) => {
     const allowedInScope = scope === "thread" || !type.needsThread;
-    return !type.systemManaged && allowedInScope && (type.id === "terminal" || !openTabs.includes(type.id));
+    return allowedInScope && !openTabs.includes(type.id);
   });
 }
 

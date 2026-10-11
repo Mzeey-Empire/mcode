@@ -379,59 +379,85 @@ describe("diffStore", () => {
   });
 
   describe("setRightPanelTab", () => {
-    it("interleaves PTY-backed terminal instances with singleton tabs", () => {
-      const { addRightPanelTerminalTab, setRightPanelTab, getRightPanel } = useDiffStore.getState();
+    it("keeps one Terminal tool however many terminal records the scope holds", () => {
+      const { ensureRightPanelTab, setRightPanelTab, getRightPanel } = useDiffStore.getState();
       setRightPanelTab("ws-1", "thread-1", "preview");
-      addRightPanelTerminalTab("ws-1", "thread-1", "pty-1");
-      setRightPanelTab("ws-1", "thread-1", "changes");
-      addRightPanelTerminalTab("ws-1", "thread-1", "pty-2");
-
-      const panel = getRightPanel("ws-1", "thread-1");
-      expect(panel.tabInstances.map((instance) => instance.id)).toEqual([
-        "singleton:preview",
-        "terminal:pty-1",
-        "singleton:changes",
-        "terminal:pty-2",
-      ]);
-      expect(panel.activeTabId).toBe("terminal:pty-2");
-    });
-
-    it("replaces a pending terminal singleton with its PTY-backed instance", () => {
-      const { addRightPanelTerminalTab, setRightPanelTab, getRightPanel } =
-        useDiffStore.getState();
+      ensureRightPanelTab("ws-1", "thread-1", "terminal");
+      ensureRightPanelTab("ws-1", "thread-1", "terminal");
       setRightPanelTab("ws-1", "thread-1", "terminal");
 
-      addRightPanelTerminalTab("ws-1", "thread-1", "pty-1");
-
       expect(getRightPanel("ws-1", "thread-1")).toMatchObject({
-        tabInstances: [{ id: "terminal:pty-1", type: "terminal" }],
-        activeTabId: "terminal:pty-1",
+        tabInstances: [
+          { id: "singleton:preview", type: "preview" },
+          { id: "singleton:terminal", type: "terminal" },
+        ],
+        activeTabId: "singleton:terminal",
       });
     });
 
-    it("retains one Action terminal identity in the background until its running Action is selected", () => {
-      const {
-        ensureRightPanelActionTerminalTab,
-        setRightPanelTab,
-        setRightPanelTabInstance,
-        getRightPanel,
-      } = useDiffStore.getState();
+    it("opens a tool in the background without stealing focus", () => {
+      const { ensureRightPanelTab, setRightPanelTab, getRightPanel } = useDiffStore.getState();
       setRightPanelTab("ws-1", "thread-1", "preview");
 
-      ensureRightPanelActionTerminalTab("ws-1", "thread-1", "build");
-      ensureRightPanelActionTerminalTab("ws-1", "thread-1", "build");
+      ensureRightPanelTab("ws-1", "thread-1", "terminal");
 
       expect(getRightPanel("ws-1", "thread-1")).toMatchObject({
         activeTabId: "singleton:preview",
+        openTabs: ["preview", "terminal"],
+      });
+    });
+
+    it("migrates per-terminal rail instances to one Terminal tool at the first position", () => {
+      // Built at runtime: the retired type name must not appear as a literal in source.
+      const legacyActionType = ["action", "terminal"].join("-");
+      const panel = createRightPanelState({
+        visible: true,
+        width: 500,
         tabInstances: [
           { id: "singleton:preview", type: "preview" },
-          { id: "action-terminal:build", type: "action-terminal" },
+          { id: "terminal:pty-1", type: "terminal" },
+          { id: "singleton:changes", type: "changes" },
+          { id: `${legacyActionType}:build`, type: legacyActionType },
+          { id: "terminal:pty-2", type: "terminal" },
+          { id: "singleton:retired", type: "retired" },
         ],
+        activeTabId: `${legacyActionType}:build`,
       });
 
-      setRightPanelTabInstance("ws-1", "thread-1", "action-terminal:build");
-      expect(getRightPanel("ws-1", "thread-1").activeTabId).toBe("action-terminal:build");
+      expect(panel.tabInstances).toEqual([
+        { id: "singleton:preview", type: "preview" },
+        { id: "singleton:terminal", type: "terminal" },
+        { id: "singleton:changes", type: "changes" },
+      ]);
+      expect(panel.activeTabId).toBe("singleton:terminal");
+      expect(panel.activeTab).toBe("terminal");
     });
+
+    it("drops the active selection when it pointed at a dropped tool", () => {
+      const panel = createRightPanelState({
+        visible: true,
+        width: 500,
+        tabInstances: [
+          { id: "singleton:changes", type: "changes" },
+          { id: "singleton:retired", type: "retired" },
+        ],
+        activeTabId: "singleton:retired",
+      });
+
+      expect(panel.tabInstances).toEqual([{ id: "singleton:changes", type: "changes" }]);
+      expect(panel.activeTabId).toBeNull();
+    });
+
+    it("keeps canonical instance arrays by identity", () => {
+      const tabInstances = [
+        { id: "singleton:preview", type: "preview" },
+        { id: "singleton:terminal", type: "terminal" },
+      ] as const;
+      const panel = createRightPanelState({ visible: true, width: 500, tabInstances, activeTabId: "singleton:terminal" });
+
+      expect(panel.tabInstances).toBe(tabInstances);
+    });
+
     it("preserves an explicit canonical null over a stale compatibility active tab", () => {
       const panel = createRightPanelState({
         visible: true,
@@ -531,27 +557,17 @@ describe("diffStore", () => {
       expect(getRightPanel("ws-1").activeTabId).toBe("singleton:changes");
     });
 
-    it("selects a repeatable tab by stable instance identity", () => {
-      useDiffStore.setState({
-        rightPanelFallbackByWorkspace: {
-          "ws-1": {
-            ...useDiffStore.getState().getRightPanel("ws-1"),
-            tabInstances: [
-              { id: "terminal:first", type: "terminal" },
-              { id: "terminal:second", type: "terminal" },
-            ],
-            activeTabId: "terminal:first",
-          },
-        },
-      });
+    it("selects a tool by stable instance identity", () => {
+      const { setRightPanelTab, setRightPanelTabInstance, getRightPanel } = useDiffStore.getState();
+      setRightPanelTab("ws-1", null, "terminal");
+      setRightPanelTab("ws-1", null, "preview");
 
-      const { setRightPanelTabInstance, getRightPanel } = useDiffStore.getState();
-      setRightPanelTabInstance("ws-1", null, "terminal:second");
+      setRightPanelTabInstance("ws-1", null, "singleton:terminal");
 
-      expect(getRightPanel("ws-1").activeTabId).toBe("terminal:second");
+      expect(getRightPanel("ws-1").activeTabId).toBe("singleton:terminal");
       expect(getRightPanel("ws-1").tabInstances).toEqual([
-        { id: "terminal:first", type: "terminal" },
-        { id: "terminal:second", type: "terminal" },
+        { id: "singleton:terminal", type: "terminal" },
+        { id: "singleton:preview", type: "preview" },
       ]);
     });
   });
@@ -726,7 +742,7 @@ describe("diffStore", () => {
   // The whole panel record is per-thread, read copy-on-write: a thread inherits
   // scope-neutral workspace fallback state until it writes its own entry, then
   // diverges. See ADR-0012 and ADR-0020.
-  describe("per-thread panel state with workspace fallback (ADR-0012/0020)", () => {
+  describe("per-thread panel state with workspace fallback (ADR-0012/0025)", () => {
     it("getRightPanelVisible defaults to closed for an unknown thread", () => {
       const { getRightPanelVisible } = useDiffStore.getState();
       expect(getRightPanelVisible("ws-1", "thread-1")).toBe(false);
@@ -772,20 +788,14 @@ describe("diffStore", () => {
       expect(panel.activeTab).toBe("preview");
     });
 
-    it("does not leak workspace Terminal instances into an untouched thread or its first write", () => {
-      const {
-        showRightPanel,
-        setRightPanelWidth,
-        setRightPanelTab,
-        addRightPanelTerminalTab,
-        getRightPanel,
-      } = useDiffStore.getState();
+    it("does not leak the workspace Terminal tool into an untouched thread or its first write", () => {
+      const { showRightPanel, setRightPanelWidth, setRightPanelTab, getRightPanel } =
+        useDiffStore.getState();
       showRightPanel("ws-1");
       setRightPanelWidth("ws-1", null, 540, "user");
       setRightPanelTab("ws-1", null, "preview");
-      addRightPanelTerminalTab("ws-1", null, "workspace-pty-1");
+      setRightPanelTab("ws-1", null, "terminal");
       setRightPanelTab("ws-1", null, "changes");
-      addRightPanelTerminalTab("ws-1", null, "workspace-pty-2");
 
       const untouched = getRightPanel("ws-1", "thread-untouched");
       expect(untouched).toMatchObject({
@@ -800,19 +810,17 @@ describe("diffStore", () => {
         activeTab: "changes",
       });
 
-      addRightPanelTerminalTab("ws-1", "thread-untouched", "thread-pty");
+      setRightPanelTab("ws-1", "thread-untouched", "terminal");
 
       expect(getRightPanel("ws-1", "thread-untouched").tabInstances).toEqual([
         { id: "singleton:preview", type: "preview" },
         { id: "singleton:changes", type: "changes" },
-        { id: "terminal:thread-pty", type: "terminal" },
+        { id: "singleton:terminal", type: "terminal" },
       ]);
-      expect(getRightPanel("ws-1", "thread-untouched").activeTabId).toBe("terminal:thread-pty");
       expect(getRightPanel("ws-1").tabInstances).toEqual([
         { id: "singleton:preview", type: "preview" },
-        { id: "terminal:workspace-pty-1", type: "terminal" },
+        { id: "singleton:terminal", type: "terminal" },
         { id: "singleton:changes", type: "changes" },
-        { id: "terminal:workspace-pty-2", type: "terminal" },
       ]);
     });
 
@@ -824,10 +832,10 @@ describe("diffStore", () => {
             width: 440,
             tabInstances: [
               { id: "singleton:preview", type: "preview" },
-              { id: "terminal:workspace-pty", type: "terminal" },
+              { id: "singleton:terminal", type: "terminal" },
               { id: "singleton:changes", type: "changes" },
             ],
-            activeTabId: "terminal:workspace-pty",
+            activeTabId: "singleton:terminal",
           }),
         },
       });
@@ -847,9 +855,9 @@ describe("diffStore", () => {
             width: 440,
             tabInstances: [
               { id: "singleton:preview", type: "preview" },
-              { id: "terminal:workspace-pty", type: "terminal" },
+              { id: "singleton:terminal", type: "terminal" },
             ],
-            activeTabId: "terminal:workspace-pty",
+            activeTabId: "singleton:terminal",
           }),
         },
       });
@@ -861,17 +869,16 @@ describe("diffStore", () => {
       });
     });
 
-    it("clears active selection when an inherited panel contains only Terminals", () => {
+    it("clears active selection when an inherited panel contains only the Terminal tool", () => {
       useDiffStore.setState({
         rightPanelFallbackByWorkspace: {
           "ws-1": createRightPanelState({
             visible: true,
             width: 440,
             tabInstances: [
-              { id: "terminal:workspace-pty-1", type: "terminal" },
-              { id: "terminal:workspace-pty-2", type: "terminal" },
+              { id: "singleton:terminal", type: "terminal" },
             ],
-            activeTabId: "terminal:workspace-pty-2",
+            activeTabId: "singleton:terminal",
           }),
         },
       });
@@ -890,30 +897,28 @@ describe("diffStore", () => {
             visible: true,
             width: 440,
             tabInstances: [
-              { id: "terminal:thread-pty-1", type: "terminal" },
+              { id: "singleton:terminal", type: "terminal" },
               { id: "singleton:changes", type: "changes" },
-              { id: "terminal:thread-pty-2", type: "terminal" },
             ],
-            activeTabId: "terminal:thread-pty-2",
+            activeTabId: "singleton:terminal",
           }),
         },
         rightPanelFallbackByWorkspace: {
           "ws-1": createRightPanelState({
             visible: true,
             width: 440,
-            tabInstances: [{ id: "terminal:workspace-pty", type: "terminal" }],
-            activeTabId: "terminal:workspace-pty",
+            tabInstances: [{ id: "singleton:terminal", type: "terminal" }],
+            activeTabId: "singleton:terminal",
           }),
         },
       });
 
       expect(useDiffStore.getState().getRightPanel("ws-1", "thread-1")).toMatchObject({
         tabInstances: [
-          { id: "terminal:thread-pty-1", type: "terminal" },
+          { id: "singleton:terminal", type: "terminal" },
           { id: "singleton:changes", type: "changes" },
-          { id: "terminal:thread-pty-2", type: "terminal" },
         ],
-        activeTabId: "terminal:thread-pty-2",
+        activeTabId: "singleton:terminal",
         activeTab: "terminal",
       });
     });
@@ -958,7 +963,7 @@ describe("diffStore", () => {
 
   // Copy-on-write divergence timing: a thread inherits the fallback *live* until
   // its first write, then snapshots and stops tracking it. See ADR-0020.
-  describe("copy-on-write divergence timing (ADR-0012/0020)", () => {
+  describe("copy-on-write divergence timing (ADR-0012/0025)", () => {
     it("an undiverged thread tracks later fallback edits without Terminal instances", () => {
       const { setRightPanelTab, getRightPanel } = useDiffStore.getState();
       setRightPanelTab("ws-1", null, "preview");

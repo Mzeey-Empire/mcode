@@ -10,7 +10,6 @@ vi.mock("@/transport", () => ({
 // Import AFTER vi.mock — vitest hoists vi.mock to the top automatically,
 // so the store sees the mocked transport when the module initializes.
 import { useTerminalStore } from "../terminalStore";
-import { createRightPanelState, useDiffStore } from "@/stores/diffStore";
 
 describe("terminalStore pause/resume wiring", () => {
   beforeEach(() => {
@@ -60,23 +59,6 @@ describe("terminalStore pause/resume wiring", () => {
     store.removeTerminal("1");
     store.addTerminal("thread", "9", "pwsh");
     expect(useTerminalStore.getState().terminals.thread.map((terminal) => terminal.id)).toEqual(["replacement", "3", "4", "5", "6", "7", "8", "9"]);
-  });
-
-  it("rebuilds panel tabs without opening a hidden panel or losing other tools", () => {
-    useDiffStore.setState({ rightPanelByThread: {
-      thread: createRightPanelState({ visible: false, width: 400, activeTabId: "terminal:old", tabInstances: [
-        { id: "singleton:changes", type: "changes" }, { id: "terminal:old", type: "terminal" },
-      ] }),
-    } });
-    const panels = useDiffStore.getState();
-    panels.reconcileRightPanelTerminals("workspace", "thread", ["first", "second"], "first");
-    expect(useDiffStore.getState().rightPanelByThread.thread).toMatchObject({
-      visible: false, width: 400, activeTabId: "terminal:first", tabInstances: [
-        { id: "singleton:changes", type: "changes" }, { id: "terminal:first", type: "terminal" }, { id: "terminal:second", type: "terminal" },
-      ],
-    });
-    panels.reconcileRightPanelTerminals("workspace", "thread", [], null);
-    expect(useDiffStore.getState().rightPanelByThread.thread.tabInstances).toEqual([{ id: "singleton:changes", type: "changes" }]);
   });
 
   it("keeps the exit code when the shell exits before create responds", () => {

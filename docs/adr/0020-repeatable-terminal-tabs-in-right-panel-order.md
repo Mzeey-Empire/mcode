@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: superseded
 ---
 
 # Shell sessions are repeatable Terminal tabs in the shared right-panel order
+
+Superseded by [ADR-0025](0025-rail-lists-tools-terminals-and-pages-are-row-1-tabs.md).
 
 The right panel previously treated every tool type as a singleton and kept
 multiple shell sessions inside one Terminal tab. That model added a second

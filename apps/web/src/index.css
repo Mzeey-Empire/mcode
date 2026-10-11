@@ -345,6 +345,23 @@
   }
 }
 
+/* A horizontal scroller (tab strips) whose right 24px fades while it
+   overflows. Same scroll-timeline gate as text-fade, but the content stays
+   scrollable and the scrollbar is hidden because the strip scrolls by wheel. */
+@utility scroll-fade-x {
+  overflow-x: auto;
+  overflow-y: hidden;
+  min-width: 0;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+  @supports (animation-timeline: scroll()) {
+    animation: text-fade-inline linear both;
+    animation-timeline: scroll(self inline);
+  }
+}
+
 /* Vertical clamp to N lines that ends in a 24px bottom fade when clamped. */
 @utility text-fade-lines-* {
   overflow: hidden;

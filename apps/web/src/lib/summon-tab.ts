@@ -1,5 +1,5 @@
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { useDiffStore, type RightPanelTab } from "@/stores/diffStore";
+import { useDiffStore, type RightPanelTool } from "@/stores/diffStore";
 import { useUiStore } from "@/stores/uiStore";
 import { PANEL_TAB_TYPES } from "@/lib/panel-tabs";
 import { hideRightPanelAdaptive, showRightPanelAdaptive } from "@/lib/right-panel-layout";
@@ -9,7 +9,7 @@ import { useTerminalStore } from "@/features/terminal";
 const deferredTerminalSummons = new Map<string, () => void>();
 
 /** Whether a tab type only makes sense once a thread exists. */
-function tabNeedsThread(tab: RightPanelTab): boolean {
+function tabNeedsThread(tab: RightPanelTool): boolean {
   return PANEL_TAB_TYPES.find((type) => type.id === tab)?.needsThread ?? false;
 }
 
@@ -53,7 +53,7 @@ function deferTerminalSummon(
 type PanelAction = "open" | "select" | "hide";
 
 function shouldDeferTerminalSummon(
-  tab: RightPanelTab,
+  tab: RightPanelTool,
   threadId: string | null,
   threads: ReturnType<typeof useWorkspaceStore.getState>["threads"],
 ): boolean {
@@ -65,7 +65,7 @@ function resolvePanelAction(
   primarySurface: ReturnType<typeof useUiStore.getState>["primarySurface"],
   panelVisible: boolean,
   panel: ReturnType<ReturnType<typeof useDiffStore.getState>["getRightPanel"]>,
-  tab: RightPanelTab,
+  tab: RightPanelTool,
 ): PanelAction {
   if (primarySurface !== "chat" || !panelVisible) return "open";
   if (!panel.openTabs.includes(tab) || panel.activeTab !== tab) return "select";
@@ -75,30 +75,22 @@ function resolvePanelAction(
 function selectPanelTab(
   workspaceId: string,
   threadId: string | null,
-  tab: RightPanelTab,
+  tab: RightPanelTool,
 ): void {
-  const { setRightPanelTab, setRightPanelTabInstance } = useDiffStore.getState();
-  if (tab !== "terminal") {
-    setRightPanelTab(workspaceId, threadId, tab);
-    return;
-  }
-
+  useDiffStore.getState().setRightPanelTab(workspaceId, threadId, tab);
+  if (tab !== "terminal") return;
+  // The Terminal tool keeps its selected record; it only needs a first PTY when it has none.
   const scopeId = threadId ?? workspaceId;
-  const latestTerminal = useTerminalStore.getState().terminals[scopeId]?.at(-1);
-  if (latestTerminal) {
-    setRightPanelTabInstance(workspaceId, threadId, `terminal:${latestTerminal.id}`);
-    useTerminalStore.getState().setActiveTerminal(scopeId, latestTerminal.id);
-    return;
+  if ((useTerminalStore.getState().terminals[scopeId]?.length ?? 0) === 0) {
+    createTerminalForScope(scopeId);
   }
-  setRightPanelTab(workspaceId, threadId, "terminal");
-  createTerminalForScope(scopeId);
 }
 
 function runPanelAction(
   action: PanelAction,
   workspaceId: string,
   threadId: string | null,
-  tab: RightPanelTab,
+  tab: RightPanelTool,
   primarySurface: ReturnType<typeof useUiStore.getState>["primarySurface"],
 ): void {
   if (action === "hide") {
@@ -126,7 +118,7 @@ function runPanelAction(
  *   refocus paths, not the hide path). The Browser tab uses this to pull focus
  *   into its URL field.
  */
-export function summonTab(tab: RightPanelTab, onFocus?: () => void): void {
+export function summonTab(tab: RightPanelTool, onFocus?: () => void): void {
   const {
     activeWorkspaceId: wid,
     activeThreadId: tid,

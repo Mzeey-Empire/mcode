@@ -31,7 +31,7 @@ function resolveScopeWorkspace(scopeId: string): {
 }
 
 /**
- * Creates one terminal and its matching right-panel rail tab. Creation is
+ * Creates one terminal and focuses the Terminal tool, where it becomes the active tab. Creation is
  * serialized per scope so concurrent UI and shortcut requests cannot exceed the
  * session cap.
  *
@@ -76,7 +76,10 @@ export function createTerminalForScope(scopeId: string): void {
             return;
           }
           useTerminalStore.getState().addTerminal(scopeId, ptyId, shell, metadata);
-          diff.addRightPanelTerminalTab(workspaceId!, panelThreadId, ptyId);
+          // Hydration may have added this record first, which makes addTerminal a
+          // no-op; the new terminal still has to become the tool's active tab.
+          useTerminalStore.getState().setActiveTerminal(scopeId, ptyId);
+          diff.setRightPanelTab(workspaceId!, panelThreadId, "terminal");
         } catch (error) {
           // The server already spawned the PTY; a failed local attach must not
           // leak it on the host.
@@ -104,7 +107,7 @@ function showCreateFailure(error: unknown): void {
   });
 }
 
-/** Ensures a Terminal tab has its first PTY-backed rail instance. */
+/** Ensures the Terminal tool has its first PTY-backed record. */
 export function ensureTerminalForScope(scopeId: string): void {
   if ((useTerminalStore.getState().terminals[scopeId]?.length ?? 0) === 0) {
     createTerminalForScope(scopeId);

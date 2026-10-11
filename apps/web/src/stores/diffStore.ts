@@ -4,8 +4,33 @@ import { defaultReviewView, type ReviewChangeState } from "@/lib/review-views";
 
 export type { BranchComparison };
 
-/** Active tab in the right panel. */
-export type RightPanelTab = "tasks" | "changes" | "preview" | "terminal" | "action-terminal" | "subagents" | "coordination" | "environment";
+/**
+ * One right-panel tool. The rail lists each open tool once; tools that hold
+ * several items (Terminal records, Browser pages) show them as row-1 tabs
+ * inside the tool. See ADR-0025.
+ */
+export type RightPanelTool =
+  | "preview"
+  | "terminal"
+  | "changes"
+  | "environment"
+  | "tasks"
+  | "subagents"
+  | "coordination";
+
+const RIGHT_PANEL_TOOLS: ReadonlySet<string> = new Set<RightPanelTool>([
+  "preview",
+  "terminal",
+  "changes",
+  "environment",
+  "tasks",
+  "subagents",
+  "coordination",
+]);
+
+function isRightPanelTool(value: string): value is RightPanelTool {
+  return RIGHT_PANEL_TOOLS.has(value);
+}
 
 /** Selected roster view within a thread's Subagents panel. */
 export type SubagentRosterTab = "active" | "finished";
@@ -126,71 +151,111 @@ export type RightPanelState = {
    * tab is open and the panel shows the card-grid empty state (ADR-0004). Tab
    * types are opened on demand rather than always present.
    */
-  readonly openTabs: readonly RightPanelTab[];
-  readonly activeTab: RightPanelTab;
-  /** Ordered tab instances. Singleton tools use deterministic IDs. */
+  readonly openTabs: readonly RightPanelTool[];
+  readonly activeTab: RightPanelTool;
+  /** Ordered open tools, one instance per tool. */
   readonly tabInstances: readonly RightPanelTabInstance[];
-  /** Stable identity of the active tab instance. */
+  /** Stable identity of the active tool instance. */
   readonly activeTabId: string | null;
 };
 
-/** One open right-panel tab, identified independently from its tool type. */
+/** One open right-panel tool. Every tool is a singleton with a deterministic id. */
 export type RightPanelTabInstance = {
-  readonly id: string;
-  readonly type: RightPanelTab;
-};
+  [T in RightPanelTool]: { readonly id: `singleton:${T}`; readonly type: T };
+}[RightPanelTool];
 
-/** Stable identity for an open singleton tool. */
-export function rightPanelSingletonId(type: RightPanelTab): string {
+/** Stable identity for an open tool. */
+export function rightPanelSingletonId<T extends RightPanelTool>(type: T): `singleton:${T}` {
   return `singleton:${type}`;
 }
 
-/** Stable rail identity for one PTY-backed Terminal tab. */
-export function rightPanelTerminalId(ptyId: string): string {
-  return `terminal:${ptyId}`;
-}
-
-/** Stable rail identity for one retained Project Action terminal slot. */
-export function rightPanelActionTerminalId(actionId: string): string {
-  return `action-terminal:${actionId}`;
+/** The rail instance for one tool. */
+export function rightPanelToolInstance(type: RightPanelTool): RightPanelTabInstance {
+  // The mapped union cannot narrow a generic `type`, so each member is spelled out.
+  switch (type) {
+    case "preview": return { id: "singleton:preview", type };
+    case "terminal": return { id: "singleton:terminal", type };
+    case "changes": return { id: "singleton:changes", type };
+    case "environment": return { id: "singleton:environment", type };
+    case "tasks": return { id: "singleton:tasks", type };
+    case "subagents": return { id: "singleton:subagents", type };
+    case "coordination": return { id: "singleton:coordination", type };
+  }
 }
 
 /** Resolve ordered instances from current or legacy in-memory panel state. */
 export function rightPanelTabInstances(
   state: Pick<RightPanelState, "openTabs"> & Partial<Pick<RightPanelState, "tabInstances">>,
 ): readonly RightPanelTabInstance[] {
-  return state.tabInstances ?? state.openTabs.map((type) => ({
-    id: rightPanelSingletonId(type),
-    type,
-  }));
+  return state.tabInstances ?? state.openTabs.map(rightPanelToolInstance);
 }
 
 /** Resolve the active tool type from canonical instance state. */
-export function rightPanelActiveTab(state: RightPanelState): RightPanelTab {
+export function rightPanelActiveTab(state: RightPanelState): RightPanelTool {
   return (
     state.tabInstances.find((instance) => instance.id === state.activeTabId)?.type ??
     "tasks"
   );
 }
 
+/** Tab instance shape accepted from older in-memory panel records. */
+export type LegacyRightPanelTabInstance = { readonly id: string; readonly type: string };
+
+/** Shell rail tabs used type `terminal`; Project Action rail tabs used `action-terminal`. */
+const LEGACY_TERMINAL_TYPE = /^(?:action-)?terminal$/;
+
+/**
+ * Collapses older per-terminal rail instances (`terminal:<ptyId>`,
+ * `action-terminal:<actionId>`) into one Terminal tool at the first one's
+ * position and drops unknown tool types. An active legacy terminal instance
+ * becomes the active Terminal tool. Returns the inputs unchanged when they are
+ * already canonical. See ADR-0025.
+ */
+export function normalizeRightPanelTabInstances(
+  instances: readonly LegacyRightPanelTabInstance[],
+  activeTabId: string | null,
+): { readonly tabInstances: readonly RightPanelTabInstance[]; readonly activeTabId: string | null } {
+  // Keep the array identity for canonical state so memoized readers stay stable.
+  if (instances.every(isCanonicalInstance) && new Set(instances.map((i) => i.type)).size === instances.length) {
+    return { tabInstances: instances, activeTabId };
+  }
+  const tabInstances: RightPanelTabInstance[] = [];
+  const seen = new Set<RightPanelTool>();
+  let nextActiveTabId: string | null = null;
+  for (const instance of instances) {
+    const type = LEGACY_TERMINAL_TYPE.test(instance.type) ? "terminal" : instance.type;
+    if (!isRightPanelTool(type)) continue;
+    const canonical = rightPanelToolInstance(type);
+    if (instance.id === activeTabId) nextActiveTabId = canonical.id;
+    if (seen.has(type)) continue;
+    seen.add(type);
+    tabInstances.push(canonical);
+  }
+  return { tabInstances, activeTabId: nextActiveTabId };
+}
+
+function isCanonicalInstance(instance: LegacyRightPanelTabInstance): instance is RightPanelTabInstance {
+  return isRightPanelTool(instance.type) && instance.id === rightPanelSingletonId(instance.type);
+}
+
 type RightPanelStateInput = Omit<
   RightPanelState,
   "openTabs" | "activeTab" | "tabInstances" | "activeTabId"
 > & {
-  readonly openTabs?: readonly RightPanelTab[];
-  readonly activeTab?: RightPanelTab;
-  readonly tabInstances?: readonly RightPanelTabInstance[];
+  readonly openTabs?: readonly RightPanelTool[];
+  readonly activeTab?: RightPanelTool;
+  readonly tabInstances?: readonly LegacyRightPanelTabInstance[];
   readonly activeTabId?: string | null;
 };
 
 /** Build panel state whose compatibility fields are derived from canonical instances. */
 export function createRightPanelState(input: RightPanelStateInput): RightPanelState {
-  const tabInstances =
-    input.tabInstances ??
-    (input.openTabs ?? []).map((type) => ({ id: rightPanelSingletonId(type), type }));
-  const activeTabId = Object.prototype.hasOwnProperty.call(input, "activeTabId")
+  const rawInstances: readonly LegacyRightPanelTabInstance[] =
+    input.tabInstances ?? (input.openTabs ?? []).map(rightPanelToolInstance);
+  const rawActiveTabId = Object.prototype.hasOwnProperty.call(input, "activeTabId")
     ? input.activeTabId ?? null
-    : tabInstances.find((instance) => instance.type === input.activeTab)?.id ?? null;
+    : rawInstances.find((instance) => instance.type === input.activeTab)?.id ?? null;
+  const { tabInstances, activeTabId } = normalizeRightPanelTabInstances(rawInstances, rawActiveTabId);
   const state = {
     ...input,
     tabInstances,
@@ -272,8 +337,8 @@ function omitByKeyPrefix<V>(record: Record<string, V>, prefix: string): Record<s
   return next;
 }
 
-/** Remove workspace-scoped Terminal instances before seeding a thread panel. */
-function withoutTerminalInstances(state: RightPanelState): RightPanelState {
+/** Remove the workspace-scoped Terminal tool before seeding a thread panel. */
+function withoutTerminalTool(state: RightPanelState): RightPanelState {
   const instances = rightPanelTabInstances(state);
   const activeTerminalIndex = instances.findIndex(
     (instance) => instance.id === state.activeTabId && instance.type === "terminal",
@@ -299,10 +364,10 @@ function withoutTerminalInstances(state: RightPanelState): RightPanelState {
 }
 
 /**
- * Projects the raw panel records for one scope without leaking workspace
- * Terminal instances into an untouched thread. Thread-owned records remain
+ * Projects the raw panel records for one scope without leaking the workspace
+ * Terminal tool into an untouched thread, whose terminal records differ. Thread-owned records remain
  * unchanged; inherited fallback state keeps visibility, width, and all
- * non-Terminal tab state. See ADR-0012 and ADR-0020.
+ * non-Terminal tab state. See ADR-0012 and ADR-0025.
  */
 export function projectRightPanelForScope(
   ownedPanel: RightPanelState | undefined,
@@ -312,14 +377,14 @@ export function projectRightPanelForScope(
   const panel = ownedPanel ?? fallbackPanel;
   if (!panel) return createDefaultRightPanelState();
   const resolved = createRightPanelState(panel);
-  return threadId && !ownedPanel ? withoutTerminalInstances(resolved) : resolved;
+  return threadId && !ownedPanel ? withoutTerminalTool(resolved) : resolved;
 }
 
 /**
  * Resolves the effective panel record for a scope (ADR-0012 copy-on-write read).
  * A thread with its own record uses it; otherwise it falls through to the
  * workspace fallback, which also serves the threadless shell. Thread reads
- * omit workspace-scoped Terminal instances before applying that fallback.
+ * omit the workspace-scoped Terminal tool before applying that fallback.
  * Defaults when neither exists yet.
  */
 function effectiveRightPanel(
@@ -409,7 +474,7 @@ interface DiffState {
    * threadless Browser/Terminal shell and seeds a not-yet-customized thread's
    * scope-neutral state (visibility, width, and non-Terminal tabs) until that
    * thread diverges into its own {@link rightPanelByThread} entry. See ADR-0012
-   * and ADR-0020.
+   * and ADR-0025.
    */
   readonly rightPanelFallbackByWorkspace: Record<string, RightPanelState>;
   /**
@@ -534,30 +599,17 @@ interface DiffState {
     width: number,
     source?: "auto" | "user" | "preserve",
   ) => void;
-  setRightPanelTab: (workspaceId: string, threadId: string | null | undefined, tab: RightPanelTab) => void;
+  setRightPanelTab: (workspaceId: string, threadId: string | null | undefined, tab: RightPanelTool) => void;
   setRightPanelTabInstance: (
     workspaceId: string,
     threadId: string | null | undefined,
     instanceId: string,
   ) => void;
-  /** Rebuilds terminal tabs from the scope's server-owned records without opening the panel. */
-  reconcileRightPanelTerminals: (
+  /** Open a tool without changing the active tool or panel visibility. No-op when it is open. */
+  ensureRightPanelTab: (
     workspaceId: string,
     threadId: string | null | undefined,
-    ptyIds: readonly string[],
-    selectedPtyId: string | null,
-  ) => void;
-  /** Append or focus one PTY-backed Terminal rail tab. */
-  addRightPanelTerminalTab: (
-    workspaceId: string,
-    threadId: string | null | undefined,
-    ptyId: string,
-  ) => void;
-  /** Retain one Project Action terminal tab without changing the active surface. */
-  ensureRightPanelActionTerminalTab: (
-    workspaceId: string,
-    threadId: string,
-    actionId: string,
+    tab: RightPanelTool,
   ) => void;
   /** Move one tab instance by one bounded position in its scope. */
   reorderRightPanelTab: (
@@ -578,7 +630,7 @@ interface DiffState {
    * none left the panel returns to the card-grid empty state. No-op when the tab
    * is not open. See ADR-0004.
    */
-  closeRightPanelTab: (workspaceId: string, threadId: string | null | undefined, tab: RightPanelTab) => void;
+  closeRightPanelTab: (workspaceId: string, threadId: string | null | undefined, tab: RightPanelTool) => void;
   /** Close every tab and hide one right-panel scope while preserving its width. */
   clearRightPanel: (workspaceId: string, threadId: string | null | undefined) => void;
   /** Read a thread's remembered Subagents roster view, if it has one. */
@@ -731,7 +783,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       const currentInstances = rightPanelTabInstances(current);
       const tabInstances = currentInstances.some((instance) => instance.id === instanceId)
         ? currentInstances
-        : [...currentInstances, { id: instanceId, type: tab }];
+        : [...currentInstances, rightPanelToolInstance(tab)];
       const panelUpdate = writeRightPanel(state, workspaceId, threadId, {
         ...current,
         tabInstances,
@@ -753,56 +805,14 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       });
     }),
 
-  reconcileRightPanelTerminals: (workspaceId, threadId, ptyIds, selectedPtyId) =>
+  ensureRightPanelTab: (workspaceId, threadId, tab) =>
     set((state) => {
       const current = effectiveRightPanel(state, workspaceId, threadId);
-      const pending: RightPanelTabInstance[] = ptyIds.map((id) => ({ id: rightPanelTerminalId(id), type: "terminal" }));
-      const tabInstances = rightPanelTabInstances(current).flatMap((instance) => {
-        if (instance.type !== "terminal") return [instance];
-        const next = pending.shift();
-        return next ? [next] : [];
-      }).concat(pending);
-      const activeTabId = tabInstances.some((instance) => instance.id === current.activeTabId)
-        ? current.activeTabId
-        : selectedPtyId ? rightPanelTerminalId(selectedPtyId) : tabInstances[0]?.id ?? null;
-      if (current.activeTabId === activeTabId &&
-        current.tabInstances.length === tabInstances.length &&
-        current.tabInstances.every((instance, index) => instance.id === tabInstances[index].id)) return state;
-      return writeRightPanel(state, workspaceId, threadId, {
-        ...current, tabInstances, activeTabId,
-        visible: current.visible && tabInstances.length > 0,
-      });
-    }),
-
-  addRightPanelTerminalTab: (workspaceId, threadId, ptyId) =>
-    set((state) => {
-      const current = effectiveRightPanel(state, workspaceId, threadId);
-      const instanceId = rightPanelTerminalId(ptyId);
-      const tabInstances = rightPanelTabInstances(current).filter(
-        (instance) => instance.id !== rightPanelSingletonId("terminal"),
-      );
-      if (tabInstances.some((instance) => instance.id === instanceId)) {
-        return writeRightPanel(state, workspaceId, threadId, {
-          ...current,
-          activeTabId: instanceId,
-        });
-      }
+      const currentInstances = rightPanelTabInstances(current);
+      if (currentInstances.some((instance) => instance.type === tab)) return {};
       return writeRightPanel(state, workspaceId, threadId, {
         ...current,
-        tabInstances: [...tabInstances, { id: instanceId, type: "terminal" }],
-        activeTabId: instanceId,
-      });
-    }),
-
-  ensureRightPanelActionTerminalTab: (workspaceId, threadId, actionId) =>
-    set((state) => {
-      const current = effectiveRightPanel(state, workspaceId, threadId);
-      const instanceId = rightPanelActionTerminalId(actionId);
-      const tabInstances = rightPanelTabInstances(current);
-      if (tabInstances.some((instance) => instance.id === instanceId)) return {};
-      return writeRightPanel(state, workspaceId, threadId, {
-        ...current,
-        tabInstances: [...tabInstances, { id: instanceId, type: "action-terminal" }],
+        tabInstances: [...currentInstances, rightPanelToolInstance(tab)],
       });
     }),
 

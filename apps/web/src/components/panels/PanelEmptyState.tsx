@@ -9,7 +9,7 @@ import {
   type PanelTabType,
   type PanelTabTypeId,
 } from "@/lib/panel-tabs";
-import type { RightPanelTab } from "@/stores/diffStore";
+import type { RightPanelTool } from "@/stores/diffStore";
 import { cn } from "@/lib/utils";
 
 /** The mcode keycap for a tab type, or null when it has no binding. */
@@ -49,7 +49,7 @@ export function PanelEmptyState({
   /** Tab types already open, dropped from the list by the cardinality filter. */
   readonly openTabs: readonly PanelTabTypeId[];
   /** Open (create-or-focus) a tab type. Never called for coming-soon teasers. */
-  onOpen: (id: RightPanelTab) => void;
+  onOpen: (id: RightPanelTool) => void;
 }) {
   const rows = shownTabTypes(scope, openTabs);
 
@@ -83,7 +83,7 @@ export function PanelEmptyState({
                 data-testid={`panel-card-${type.id}`}
                 disabled={type.comingSoon}
                 aria-label={type.comingSoon ? `${type.label} (coming soon)` : `Open ${type.label}`}
-                onClick={type.comingSoon ? undefined : () => onOpen(type.id as RightPanelTab)}
+                onClick={type.comingSoon ? undefined : () => onOpen(type.id as RightPanelTool)}
                 className={cn(
                   "h-auto w-full justify-start gap-3 whitespace-normal bg-panel px-3 py-3 text-left transition-colors",
                   type.comingSoon

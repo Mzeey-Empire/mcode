@@ -19,6 +19,7 @@ import {
 import { previewTabsScopeKey, usePreviewTabsStore } from "@/features/preview/state/previewTabsStore";
 import type { BrowserSessionLifecycleTab } from "@/features/preview";
 import { createRightPanelState, useDiffStore } from "@/stores/diffStore";
+import { useTerminalStore } from "@/features/terminal";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { setLayoutMeasurements } from "@/lib/composer-layout";
@@ -471,7 +472,7 @@ describe("ThreadOverview branchless Create PR", () => {
     expect(useOverviewStore.getState().requestedSubject).toBeNull();
   });
 
-  it("launches an idle Action in the background, then focuses its retained terminal", async () => {
+  it("launches an idle Action in the background, then focuses its terminal tab", async () => {
     const user = userEvent.setup();
     useDiffStore.setState({
       rightPanelByThread: {
@@ -494,16 +495,17 @@ describe("ThreadOverview branchless Create PR", () => {
     await waitFor(() => expect(useDiffStore.getState().getRightPanel("ws-1", "thread-1")).toMatchObject({
       visible: true,
       activeTabId: "singleton:preview",
-      tabInstances: expect.arrayContaining([{ id: "action-terminal:success", type: "action-terminal" }]),
+      tabInstances: expect.arrayContaining([{ id: "singleton:terminal", type: "terminal" }]),
     }));
 
     await user.click(action);
 
     await waitFor(() => expect(useDiffStore.getState().getRightPanel("ws-1", "thread-1")).toMatchObject({
       visible: true,
-      activeTabId: "action-terminal:success",
+      activeTabId: "singleton:terminal",
       width: 600,
     }));
+    expect(useTerminalStore.getState().terminalPanelByThread["thread-1"]?.activeTerminalId).toBe("terminal-1");
   });
 
   it("refreshes the mounted Action menu after Project settings save", async () => {

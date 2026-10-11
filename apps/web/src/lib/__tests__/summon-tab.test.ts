@@ -44,7 +44,7 @@ describe("summonTab", () => {
 
   function seedTerminal(): void {
     useTerminalStore.getState().addTerminal(TID, "pty-1", "pwsh");
-    useDiffStore.getState().addRightPanelTerminalTab(WID, TID, "pty-1");
+    useDiffStore.getState().setRightPanelTab(WID, TID, "terminal");
     useDiffStore.getState().showRightPanel(WID, TID);
   }
 
@@ -88,7 +88,7 @@ describe("summonTab", () => {
 
     it("requests a replacement PTY after the final terminal tab closes", () => {
       seedTerminal();
-      useDiffStore.getState().closeRightPanelTabInstance(WID, TID, "terminal:pty-1");
+      useDiffStore.getState().closeRightPanelTab(WID, TID, "terminal");
       useTerminalStore.getState().removeTerminal("pty-1");
       expect(panel()).toMatchObject({
         visible: false,

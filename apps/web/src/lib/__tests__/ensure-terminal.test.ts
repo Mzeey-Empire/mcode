@@ -42,7 +42,8 @@ describe("createTerminalForScope", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(terminalKill).not.toHaveBeenCalled();
     expect(useTerminalStore.getState().terminals[scopeId].map(({ id }) => id)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8"]);
-    expect(useDiffStore.getState().getRightPanel(scopeId).activeTabId).toBe("terminal:8");
+    expect(useDiffStore.getState().getRightPanel(scopeId).activeTabId).toBe("singleton:terminal");
+    expect(useTerminalStore.getState().terminalPanelByThread[scopeId]?.activeTerminalId).toBe("8");
   });
 
   it("surfaces the failure and frees the scope for retry", async () => {

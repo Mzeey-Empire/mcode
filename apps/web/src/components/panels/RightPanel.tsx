@@ -1,4 +1,3 @@
-import { TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { useShallow } from "zustand/shallow";
 import type { BrowserTabSet } from "@mcode/contracts";
@@ -36,17 +35,14 @@ import {
   type BrowserSessionLifecycleTab,
 } from "@/features/preview";
 import {
-  TerminalPoolSlot,
   useTerminalStore,
   type TerminalInstance,
 } from "@/features/terminal";
 import { createTerminalForScope } from "@/lib/ensure-terminal";
 import { toggleRightPanelAdaptive } from "@/lib/right-panel-layout";
-import { getTransport } from "@/transport";
 import { cn } from "@/lib/utils";
 import { OverlayGateContext } from "@/components/ui/overlay-gate";
 import { ResizableRightPanel } from "./ResizableRightPanel";
-import { useToastStore } from "@/stores/toastStore";
 
 /** One thread/workspace Browser panel retained by the warm LRU pool. */
 export interface WarmPreviewScope {
@@ -88,11 +84,11 @@ export function reconcileWarmPreviewScopes(
 }
 import { SubagentsPanel } from "@/features/subagents";
 import { CoordinationPanel } from "./CoordinationPanel";
-import { ProjectActionTerminalView, ProjectEnvironmentPanel } from "@/features/projects/environment";
-import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
+import { ProjectEnvironmentPanel } from "@/features/projects/environment";
+import { TerminalTool } from "./TerminalTool";
+import { BrowserToolHeader } from "./BrowserToolHeader";
 
 const EMPTY_SCOPE_TERMINALS: readonly TerminalInstance[] = [];
-const EMPTY_PROJECT_ACTION_RUNS: Readonly<Record<string, import("@mcode/contracts").WorkspaceEnvironmentActionRun>> = {};
 
 interface AgentPageSelectorState {
   readonly activeRequests: ReadonlyMap<string, BrowserAutomationActiveRequest>;
@@ -615,11 +611,10 @@ function getRightPanelClassName(panelVisible: boolean, maximized: boolean): stri
 }
 
 function RightPanelContent({
-  actionTerminalActive,
-  activeActionId,
   activeThreadId,
   activeWorkspaceId,
   activityRailExpanded,
+  browserTabSet,
   changesActive,
   headerElements,
   panelScope,
@@ -632,11 +627,10 @@ function RightPanelContent({
   warmPreviewScopes,
   onCreateTab,
 }: {
-  readonly actionTerminalActive: boolean;
-  readonly activeActionId: string | null;
   readonly activeThreadId: string | null;
   readonly activeWorkspaceId: string;
   readonly activityRailExpanded: boolean;
+  readonly browserTabSet: BrowserTabSet | null;
   readonly changesActive: boolean;
   readonly headerElements: PanelHeaderElements;
   readonly panelScope: PanelScope;
@@ -673,11 +667,6 @@ function RightPanelContent({
           threadId={activeThreadId}
           workspaceId={activeWorkspaceId}
         />
-        <ActionTerminalContent
-          active={actionTerminalActive}
-          actionId={activeActionId}
-          threadId={activeThreadId}
-        />
         <PanelHeaderSlotScope active={changesActive} elements={headerElements}>
           <ChangesPanelContent active={changesActive} />
         </PanelHeaderSlotScope>
@@ -689,7 +678,20 @@ function RightPanelContent({
           previewActive={previewActive}
           scopes={warmPreviewScopes}
         />
-        <TerminalPanelContent active={terminalActive} />
+        {previewActive && panelScopeId ? (
+          <BrowserToolHeader
+            workspaceId={activeWorkspaceId}
+            threadId={activeThreadId}
+            scopeId={panelScopeId}
+            tabSet={browserTabSet}
+          />
+        ) : null}
+        <TerminalTool
+          active={terminalActive}
+          workspaceId={activeWorkspaceId}
+          threadId={activeThreadId}
+          scopeId={panelScopeId}
+        />
       </div>
     </PanelHeaderSlotScope>
   );
@@ -773,19 +775,6 @@ function EnvironmentPanelContent({
   );
 }
 
-function ActionTerminalContent({
-  active,
-  actionId,
-  threadId,
-}: {
-  readonly active: boolean;
-  readonly actionId: string | null;
-  readonly threadId: string | null;
-}) {
-  if (!active || !threadId || !actionId) return null;
-  return <ProjectActionTerminalView key={`${threadId}:${actionId}`} threadId={threadId} actionId={actionId} />;
-}
-
 function ChangesPanelContent({ active }: { readonly active: boolean }) {
   return (
     <div className={active ? "flex flex-1 flex-col min-h-0" : "hidden"}>
@@ -823,20 +812,6 @@ function WarmPreviewSurfaces({
   });
 }
 
-function TerminalPanelContent({ active }: { readonly active: boolean }) {
-  return (
-    <div
-      className={cn(
-        "absolute inset-0 z-(--layer-base) flex min-h-0 flex-row overflow-hidden",
-        !active && "pointer-events-none opacity-0",
-      )}
-      inert={!active ? true : undefined}
-    >
-      <TerminalPoolSlot className="relative min-h-0 min-w-0 flex-1 overflow-hidden" />
-    </div>
-  );
-}
-
 /**
  * Windows and Linux caption buttons cover the rail's top strip, so the toggle
  * stays in row 1 there. Elsewhere the strip is free, and the toggle lands where
@@ -851,78 +826,45 @@ function RightPanelActivityRail({
   captionAction,
   activeThreadId,
   activeWorkspaceId,
-  browserTabSet,
   changesCount,
   changesFresh,
-  closeRightPanelTab,
   closeRightPanelTabInstance,
   onCreateTab,
   panelScope,
-  panelScopeId,
-  railTerminalLabels,
   renderedActiveTabId,
   renderedTabInstances,
   reorderRightPanelTab,
-  scopeTerminals,
   setActivityRailExpanded,
   setRightPanelTabInstance,
 }: {
   readonly captionAction: React.ReactNode;
   readonly activeThreadId: string | null;
   readonly activeWorkspaceId: string;
-  readonly browserTabSet: BrowserTabSet | null;
   readonly changesCount: number;
   readonly changesFresh: boolean;
-  readonly closeRightPanelTab: ReturnType<typeof useDiffStore.getState>["closeRightPanelTab"];
   readonly closeRightPanelTabInstance: ReturnType<typeof useDiffStore.getState>["closeRightPanelTabInstance"];
   readonly onCreateTab: (id: Parameters<ReturnType<typeof useDiffStore.getState>["setRightPanelTab"]>[2]) => void;
   readonly panelScope: PanelScope;
-  readonly panelScopeId: string | null;
-  readonly railTerminalLabels: Record<string, string>;
   readonly renderedActiveTabId: string | null;
   readonly renderedTabInstances: ReturnType<typeof projectRightPanelForScope>["tabInstances"];
   readonly reorderRightPanelTab: ReturnType<typeof useDiffStore.getState>["reorderRightPanelTab"];
-  readonly scopeTerminals: readonly TerminalInstance[];
   readonly setActivityRailExpanded: (expanded: boolean) => void;
   readonly setRightPanelTabInstance: ReturnType<typeof useDiffStore.getState>["setRightPanelTabInstance"];
 }) {
   return (
     <ActivityRail
-      workspaceId={activeWorkspaceId}
       tabInstances={renderedTabInstances}
       activeTabId={renderedActiveTabId}
       scope={panelScope}
       changesCount={changesCount}
       changesFresh={changesFresh}
-      browserTabSet={browserTabSet}
       captionAction={captionAction}
-      onSelect={(instanceId) => {
-        setRightPanelTabInstance(activeWorkspaceId, activeThreadId, instanceId);
-        setActiveTerminalForTab(renderedTabInstances, instanceId, panelScopeId);
-      }}
-      onClose={(instanceId) => closePanelTab({
-        activeThreadId,
-        activeWorkspaceId,
-        closeRightPanelTabInstance,
-        instanceId,
-        renderedTabInstances,
-      })}
+      onSelect={(instanceId) => setRightPanelTabInstance(activeWorkspaceId, activeThreadId, instanceId)}
+      // Closing the Terminal entry hides the tool; its records keep running.
+      onClose={(instanceId) => closeRightPanelTabInstance(activeWorkspaceId, activeThreadId, instanceId)}
       onReorder={(instanceId, direction) =>
         reorderRightPanelTab(activeWorkspaceId, activeThreadId, instanceId, direction)}
-      terminalCapReached={scopeTerminals.length >= TERMINAL_MAX_PER_SCOPE}
-      terminalLabels={railTerminalLabels}
       onCreate={onCreateTab}
-      onSelectBrowserPage={(instanceId, pageId) => {
-        setRightPanelTabInstance(activeWorkspaceId, activeThreadId, instanceId);
-        activateBrowserPage(activeWorkspaceId, panelScopeId, pageId);
-      }}
-      onCloseBrowserPage={(pageId) => closeBrowserPage(
-        activeThreadId,
-        activeWorkspaceId,
-        closeRightPanelTab,
-        panelScopeId,
-        pageId,
-      )}
       onExpandedChange={(expanded) => {
         setActivityRailExpanded(expanded);
         browserSurfacePresentationCoordinator.setActivityRailOverlap(
@@ -933,91 +875,15 @@ function RightPanelActivityRail({
   );
 }
 
-function setActiveTerminalForTab(
-  tabInstances: ReturnType<typeof projectRightPanelForScope>["tabInstances"],
-  instanceId: string,
-  panelScopeId: string | null,
-): void {
-  const terminal = tabInstances.find((instance) => instance.id === instanceId);
-  if (terminal?.type !== "terminal" || !panelScopeId) return;
-  useTerminalStore.getState().setActiveTerminal(panelScopeId, instanceId.slice("terminal:".length));
-}
-
-function closePanelTab({
-  activeThreadId,
-  activeWorkspaceId,
-  closeRightPanelTabInstance,
-  instanceId,
-  renderedTabInstances,
-}: {
-  readonly activeThreadId: string | null;
-  readonly activeWorkspaceId: string;
-  readonly closeRightPanelTabInstance: ReturnType<typeof useDiffStore.getState>["closeRightPanelTabInstance"];
-  readonly instanceId: string;
-  readonly renderedTabInstances: ReturnType<typeof projectRightPanelForScope>["tabInstances"];
-}): void {
-  const terminal = renderedTabInstances.find((instance) => instance.id === instanceId);
-  if (terminal?.type !== "terminal") {
-    closeRightPanelTabInstance(activeWorkspaceId, activeThreadId, instanceId);
-    return;
-  }
-  const ptyId = instanceId.slice("terminal:".length);
-  // The tab stays open on failure: the shell may still be running, and the
-  // user needs to know closing it did not stop it.
-  getTransport().terminalKill(ptyId).then(
-    () => {
-      useTerminalStore.getState().removeTerminal(ptyId);
-      closeRightPanelTabInstance(activeWorkspaceId, activeThreadId, instanceId);
-    },
-    (error: unknown) => {
-      useToastStore.getState().show({
-        kind: "failed",
-        title: "Couldn't close terminal",
-        meta: error instanceof Error ? error.message : String(error),
-      });
-    },
-  );
-}
-
-function activateBrowserPage(workspaceId: string, panelScopeId: string | null, pageId: string): void {
-  if (!panelScopeId) return;
-  void usePreviewTabsStore.getState().activatePage(workspaceId, panelScopeId, pageId);
-}
-
-function closeBrowserPage(
-  activeThreadId: string | null,
-  activeWorkspaceId: string,
-  closeRightPanelTab: ReturnType<typeof useDiffStore.getState>["closeRightPanelTab"],
-  panelScopeId: string | null,
-  pageId: string,
-): void {
-  if (!panelScopeId) return;
-  void usePreviewTabsStore.getState().closePage(activeWorkspaceId, panelScopeId, pageId, {
-    onLastClose: () => closeRightPanelTab(activeWorkspaceId, activeThreadId, "preview"),
-  });
-}
-
 type RightPanelTabType = ReturnType<typeof projectRightPanelForScope>["tabInstances"][number]["type"];
 
-function useRenderedTabState({
-  actionRunsByActionId,
-  renderedActiveTab,
-  renderedActiveTabId,
-  renderedTabInstances,
-  terminalLabels,
-}: {
-  readonly actionRunsByActionId: Readonly<Record<string, import("@mcode/contracts").WorkspaceEnvironmentActionRun>>;
-  readonly renderedActiveTab: string | null;
-  readonly renderedActiveTabId: string | null;
-  readonly renderedTabInstances: ReturnType<typeof projectRightPanelForScope>["tabInstances"];
-  readonly terminalLabels: Record<string, string>;
-}) {
+function renderedToolState(
+  renderedActiveTab: string | null,
+  renderedTabInstances: ReturnType<typeof projectRightPanelForScope>["tabInstances"],
+) {
   return {
-    actionTerminalActive: isActiveRightPanelTab(renderedActiveTab, renderedTabInstances, "action-terminal"),
-    activeActionId: getActiveActionId(renderedActiveTabId, renderedActiveTab, renderedTabInstances),
     changesActive: isActiveRightPanelTab(renderedActiveTab, renderedTabInstances, "changes"),
     previewActive: isActiveRightPanelTab(renderedActiveTab, renderedTabInstances, "preview"),
-    railTerminalLabels: useRailTerminalLabels(actionRunsByActionId, renderedTabInstances, terminalLabels),
     terminalActive: isActiveRightPanelTab(renderedActiveTab, renderedTabInstances, "terminal"),
   };
 }
@@ -1030,35 +896,37 @@ function isActiveRightPanelTab(
   return activeTab === tabType && tabInstances.some((instance) => instance.type === tabType);
 }
 
-function getActiveActionId(
-  activeTabId: string | null,
-  activeTab: string | null,
-  tabInstances: ReturnType<typeof projectRightPanelForScope>["tabInstances"],
-): string | null {
-  if (!isActiveRightPanelTab(activeTab, tabInstances, "action-terminal")) return null;
-  if (!activeTabId?.startsWith("action-terminal:")) return null;
-  return activeTabId.slice("action-terminal:".length);
+/**
+ * Keeps the Terminal tool in step with the scope's terminal records. A record
+ * this panel has not seen yet (a new shell, an action run, or the scope's
+ * records on first visit) opens the tool without stealing focus. Losing the
+ * last record closes the tool, since an empty Terminal tool has nothing to show.
+ * Closing the tool by hand leaves the records alone, so it stays closed until
+ * another record appears.
+ */
+function useTerminalToolSync(
+  workspaceId: string | null,
+  threadId: string | null,
+  scopeId: string | null,
+  terminals: readonly TerminalInstance[],
+  hydrated: boolean,
+): void {
+  const seenByScope = useRef(new Map<string, ReadonlySet<string>>());
+  useEffect(() => {
+    if (!workspaceId || !scopeId || !hydrated) return;
+    const seen = seenByScope.current.get(scopeId);
+    const ids = new Set(terminals.map((terminal) => terminal.id));
+    seenByScope.current.set(scopeId, ids);
+    const diff = useDiffStore.getState();
+    if (ids.size === 0) {
+      if ((seen?.size ?? 0) > 0) diff.closeRightPanelTab(workspaceId, threadId, "terminal");
+      return;
+    }
+    if ([...ids].some((id) => !seen?.has(id))) diff.ensureRightPanelTab(workspaceId, threadId, "terminal");
+  }, [hydrated, scopeId, terminals, threadId, workspaceId]);
 }
 
-function useRailTerminalLabels(
-  actionRunsByActionId: Readonly<Record<string, import("@mcode/contracts").WorkspaceEnvironmentActionRun>>,
-  tabInstances: ReturnType<typeof projectRightPanelForScope>["tabInstances"],
-  terminalLabels: Record<string, string>,
-): Record<string, string> {
-  return useMemo(() => ({
-    ...terminalLabels,
-    ...Object.fromEntries(
-      tabInstances
-        .filter((instance) => instance.type === "action-terminal")
-        .map((instance) => [
-          instance.id,
-          actionRunsByActionId[instance.id.slice("action-terminal:".length)]?.actionName ?? "Project Action",
-        ]),
-    ),
-  }), [actionRunsByActionId, tabInstances, terminalLabels]);
-}
-
-/** Right-side panel: a vertical activity rail navigating open singleton tabs. */
+/** Right-side panel: a vertical activity rail with one entry per open tool. */
 export function RightPanel() {
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
@@ -1070,8 +938,8 @@ export function RightPanel() {
   const toggleMaximized = useUiStore((s) => s.toggleRightPanelMaximized);
 
   // Select raw records by reference, then project the scope in useMemo. The
-  // projection removes workspace Terminal instances only for untouched
-  // threads (ADR-0020) while preserving thread-owned records.
+  // projection removes the workspace Terminal tool only for untouched threads
+  // (ADR-0025) while preserving thread-owned records.
   const ownedPanel = useDiffStore((s) =>
     activeWorkspaceId && activeThreadId
       ? s.rightPanelByThread[activeThreadId]
@@ -1151,31 +1019,7 @@ export function RightPanel() {
   const scopeTerminals = panelScopeId
     ? (terminalsByScope[panelScopeId] ?? EMPTY_SCOPE_TERMINALS)
     : EMPTY_SCOPE_TERMINALS;
-  useEffect(() => {
-    if (!activeWorkspaceId || !panelScopeId || !terminalsHydrated) return;
-    const selected = useTerminalStore.getState().getTerminalPanel(panelScopeId).activeTerminalId;
-    useDiffStore.getState().reconcileRightPanelTerminals(
-      activeWorkspaceId, activeThreadId, scopeTerminals.map((terminal) => terminal.id), selected,
-    );
-  }, [activeWorkspaceId, activeThreadId, panelScopeId, scopeTerminals, terminalsHydrated]);
-  const terminalLabels = useMemo(() => {
-    const occurrences = new Map<string, number>();
-    for (const terminal of scopeTerminals) {
-      occurrences.set(terminal.label, (occurrences.get(terminal.label) ?? 0) + 1);
-    }
-    const seen = new Map<string, number>();
-    return Object.fromEntries(scopeTerminals.map((terminal) => {
-      const ordinal = (seen.get(terminal.label) ?? 0) + 1;
-      seen.set(terminal.label, ordinal);
-      const label = occurrences.get(terminal.label)! > 1
-        ? `${terminal.label} (${ordinal})`
-        : terminal.label;
-      return [`terminal:${terminal.id}`, label];
-    }));
-  }, [scopeTerminals]);
-  const actionRunsByActionId = useProjectActionStore((state) =>
-    activeThreadId ? state.runsByThread[activeThreadId] ?? EMPTY_PROJECT_ACTION_RUNS : EMPTY_PROJECT_ACTION_RUNS,
-  );
+  useTerminalToolSync(activeWorkspaceId, activeThreadId, panelScopeId, scopeTerminals, terminalsHydrated);
 
   const {
     browserTabSet,
@@ -1204,7 +1048,6 @@ export function RightPanel() {
     setRightPanelWidth,
     setRightPanelTab,
     setRightPanelTabInstance,
-    closeRightPanelTab,
     closeRightPanelTabInstance,
     reorderRightPanelTab,
   } =
@@ -1256,20 +1099,10 @@ export function RightPanel() {
     return files.size;
   }, [snapshots]);
 
-  const {
-    actionTerminalActive,
-    activeActionId,
-    changesActive,
-    previewActive,
-    railTerminalLabels,
-    terminalActive,
-  } = useRenderedTabState({
-    actionRunsByActionId,
+  const { changesActive, previewActive, terminalActive } = renderedToolState(
     renderedActiveTab,
-    renderedActiveTabId,
     renderedTabInstances,
-    terminalLabels,
-  });
+  );
   const activePreviewScopeKey = previewActive && panelScopeId && activeWorkspaceId
     ? `${activeWorkspaceId}\u0000${panelScopeId}`
     : null;
@@ -1332,13 +1165,14 @@ export function RightPanel() {
 
   const handleCreateTab = useCallback(
     (id: Parameters<typeof setRightPanelTab>[2]) => {
-      if (id === "terminal" && panelScopeId) {
+      // An empty Terminal tool has nothing to show, so opening it starts a shell.
+      if (id === "terminal" && panelScopeId && scopeTerminals.length === 0) {
         createTerminalForScope(panelScopeId);
         return;
       }
       if (activeWorkspaceId) setRightPanelTab(activeWorkspaceId, activeThreadId, id);
     },
-    [activeThreadId, activeWorkspaceId, panelScopeId, setRightPanelTab],
+    [activeThreadId, activeWorkspaceId, panelScopeId, scopeTerminals.length, setRightPanelTab],
   );
 
   // Keep the panel (and terminal pool) mounted when hidden so xterm instances
@@ -1368,11 +1202,10 @@ export function RightPanel() {
             panelToggle={panelToggle.row1}
           />
           <RightPanelContent
-            actionTerminalActive={actionTerminalActive}
-            activeActionId={activeActionId}
             activeThreadId={activeThreadId}
             activeWorkspaceId={activeWorkspaceId}
             activityRailExpanded={activityRailExpanded}
+            browserTabSet={browserTabSet}
             changesActive={changesActive}
             headerElements={headerElements}
             panelScope={panelScope}
@@ -1390,19 +1223,14 @@ export function RightPanel() {
           captionAction={panelToggle.rail}
           activeThreadId={activeThreadId}
           activeWorkspaceId={activeWorkspaceId}
-          browserTabSet={browserTabSet}
           changesCount={changesCount}
           changesFresh={changesFresh}
-          closeRightPanelTab={closeRightPanelTab}
           closeRightPanelTabInstance={closeRightPanelTabInstance}
           onCreateTab={handleCreateTab}
           panelScope={panelScope}
-          panelScopeId={panelScopeId}
-          railTerminalLabels={railTerminalLabels}
           renderedActiveTabId={renderedActiveTabId}
           renderedTabInstances={renderedTabInstances}
           reorderRightPanelTab={reorderRightPanelTab}
-          scopeTerminals={scopeTerminals}
           setActivityRailExpanded={setActivityRailExpanded}
           setRightPanelTabInstance={setRightPanelTabInstance}
         />
