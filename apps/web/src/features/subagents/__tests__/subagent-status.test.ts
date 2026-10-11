@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SubagentRosterEntrySchema } from "@mcode/contracts";
-import { subagentChipStatus, subagentOverviewCounts, subagentStatusLabel } from "../subagent-status";
+import { formatLiveDuration, subagentChipStatus, subagentOverviewCounts, subagentStatusLabel } from "../subagent-status";
 
 describe("shared subagent surface words", () => {
   it.each([
@@ -24,5 +24,21 @@ describe("shared subagent surface words", () => {
       }));
     expect(subagentOverviewCounts(entries)).toEqual({ active: 2, done: 3 });
     expect(subagentOverviewCounts([])).toEqual({ active: 0, done: 0 });
+  });
+});
+
+describe("formatLiveDuration", () => {
+  it.each([
+    [-5_000, "0s"],
+    [999, "0s"],
+    [48_000, "48s"],
+    [59_999, "59s"],
+    [60_000, "1m 0s"],
+    [72_000, "1m 12s"],
+    [3_599_000, "59m 59s"],
+    [3_600_000, "1h 0m"],
+    [3_780_000, "1h 3m"],
+  ])("formats %d ms as %s", (ms, expected) => {
+    expect(formatLiveDuration(ms)).toBe(expected);
   });
 });

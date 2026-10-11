@@ -15,21 +15,16 @@ describe("openSubagentDetail", () => {
     useDiffStore.setState({
       rightPanelByThread: {},
       rightPanelFallbackByWorkspace: {},
-      subagentRosterTabByThread: {},
       subagentDetailByThread: {},
     });
     useUiStore.setState({ rightPanelMaximized: false, rightPanelMaximizedByLayout: false });
   });
 
   it("opens Subagents and selects the matching lifecycle detail", () => {
-    expect(openSubagentDetail("agent-1", "finished")).toBe(true);
+    expect(openSubagentDetail("agent-1")).toBe(true);
 
     const state = useDiffStore.getState();
-    expect(state.subagentDetailByThread["thread-1"]).toEqual({
-      id: "agent-1",
-      originTab: "finished",
-      scrollTop: 0,
-    });
+    expect(state.subagentDetailByThread["thread-1"]).toEqual({ id: "agent-1", scrollTop: 0 });
     expect(state.getRightPanel("workspace-1", "thread-1")).toMatchObject({
       activeTab: "subagents",
       openTabs: ["subagents"],
@@ -43,17 +38,8 @@ describe("openSubagentDetail", () => {
 
   it("does nothing without an active thread scope", () => {
     useWorkspaceStore.setState({ activeThreadId: null });
-    expect(openSubagentDetail("agent-1", "active")).toBe(false);
+    expect(openSubagentDetail("agent-1")).toBe(false);
     expect(mocks.showRightPanelAdaptive).not.toHaveBeenCalled();
-  });
-
-  it("leaves the roster tab unresolved for narrative-origin detail", () => {
-    expect(openSubagentDetail("agent-1")).toBe(true);
-
-    expect(useDiffStore.getState().subagentDetailByThread["thread-1"]).toEqual({
-      id: "agent-1",
-      scrollTop: 0,
-    });
   });
 
   it("opens the Subagents roster without selecting a detail", () => {
@@ -72,7 +58,7 @@ describe("openSubagentDetail", () => {
   it("clears the active detail before opening the full roster", () => {
     useDiffStore.setState({
       subagentDetailByThread: {
-        "thread-1": { id: "agent-1", originTab: "active", scrollTop: 24 },
+        "thread-1": { id: "agent-1", scrollTop: 24 },
       },
     });
 
@@ -85,15 +71,8 @@ describe("openSubagentDetail", () => {
     });
   });
 
-  it("targets the requested roster view before opening it", () => {
-    expect(openSubagentsRoster("finished")).toBe(true);
-
-    expect(useDiffStore.getState().getSubagentRosterTab("thread-1")).toBe("finished");
-    expect(useDiffStore.getState().subagentDetailByThread["thread-1"]).toBeUndefined();
-  });
-
   it("preserves an existing detail when reopening the panel directly", () => {
-    const selection = { id: "agent-1", originTab: "finished" as const, scrollTop: 12 };
+    const selection = { id: "agent-1", scrollTop: 12 };
     useDiffStore.setState({ subagentDetailByThread: { "thread-1": selection } });
 
     expect(openSubagentsPanel()).toBe(true);
