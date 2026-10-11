@@ -161,7 +161,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     try {
       const client = await this.getClient();
       const options = await this.sessionOptions(request, browserGrant);
-      const operation = args.resumeFrom ? resumeCopilotSession(client, args.resumeFrom, options) : client.createSession(options);
+      const operation = openCopilotSession(client, options, args.resumeFrom, request.resumeRequired === true);
       const session = await this.awaitNativeResource(operation, 30_000, "Copilot session startup");
       return { state: { sessionId: args.sessionId, session, cwd: args.cwd, request, browserGrant, browserCapability, nativeEventIds: new Set(), childInvocations: new Map(), sessionApproval: false }, pids: [] };
     } catch (error) {
@@ -513,9 +513,11 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
 
 function routingFor(request: TurnRequest<"copilot">): CanonicalLiveEventRouting { return { threadId: request.threadId, turnId: request.turnId, executionId: request.turnExecutionId, deliveryAttempt: request.deliveryAttempt ?? 1 }; }
 function toError(error: unknown): Error { return error instanceof Error ? error : new Error(String(error)); }
-/** Copilot never replaces a saved session, so a rejected resume tells the server to recover from a seeded session. */
-async function resumeCopilotSession(client: CopilotClient, nativeSessionId: string, options: Parameters<CopilotClient["resumeSession"]>[1]): Promise<CopilotSession> {
-  try { return await client.resumeSession(nativeSessionId, options); }
+/** A required resume that Copilot rejects tells the server to recover from a seeded session instead. */
+async function openCopilotSession(client: CopilotClient, options: Parameters<CopilotClient["resumeSession"]>[1], resumeFrom: string | undefined, resumeRequired: boolean): Promise<CopilotSession> {
+  if (!resumeFrom) return client.createSession(options);
+  if (!resumeRequired) return client.resumeSession(resumeFrom, options);
+  try { return await client.resumeSession(resumeFrom, options); }
   catch (error) { throw new SessionResumeUnavailableError(`Copilot could not resume the saved session: ${toError(error).message}`, { cause: error }); }
 }
 function nativeEvidence(event: SessionEvent): Record<string, unknown> {

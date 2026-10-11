@@ -321,6 +321,14 @@ describe("Copilot public factory", () => {
     expect(sdk.create).not.toHaveBeenCalled();
   });
 
+  it("keeps an ordinary resume failure out of the seeded fallback", async () => {
+    sdk.resume.mockRejectedValueOnce(new Error("native resume failed"));
+    const sent = provider.sendTurn(request({ resumeFrom: "existing-native-session" }));
+    await expect(sent).rejects.toThrow("native resume failed");
+    await expect(sent).rejects.not.toMatchObject({ failure: { code: "session_resume_unavailable" } });
+    expect(sdk.create).not.toHaveBeenCalled();
+  });
+
   it("rejects overlapping sends and fences callbacks retained after retirement", async () => {
     await provider.sendTurn(request());
     const late = [...session.handlers];
