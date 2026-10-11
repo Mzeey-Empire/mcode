@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { TurnEndNotice } from "../TurnEndNotice";
 import type { FilledNotice } from "../turn-ending-notice";
 
@@ -54,6 +55,26 @@ describe("TurnEndNotice", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Hide details" }));
     expect(screen.queryByText(/turn exec1234/)).toBeNull();
+  });
+
+  it("copies the exact raw details", async () => {
+    // userEvent installs its own clipboard, so read back what was copied.
+    const user = userEvent.setup();
+    render(<TurnEndNotice notice={FAILED} />);
+
+    await user.click(screen.getByRole("button", { name: "Details" }));
+    await user.click(screen.getByRole("button", { name: "Copy details" }));
+
+    await expect(navigator.clipboard.readText()).resolves.toBe(FAILED.details);
+  });
+
+  it("announces a filled notice politely and a quiet one not at all", () => {
+    const { unmount } = render(<TurnEndNotice notice={FAILED} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Codex stopped responding");
+    unmount();
+
+    render(<TurnEndNotice notice={{ style: "quiet", title: "You stopped" }} />);
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("renders only the actions that have handlers", () => {
