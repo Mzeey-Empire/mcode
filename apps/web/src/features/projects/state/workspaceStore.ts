@@ -1258,6 +1258,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       activeDraftId: null,
       ...(shouldClearThread ? { activeThreadId: null } : {}),
       newThreadBranch: "",
+      newThreadBranchRemote: null,
+      newThreadStartFromOrigin: id ? readRememberedStartFromOrigin(id) : false,
       worktrees: [],
       worktreesLoading: false,
       worktreesLoadedForWorkspace: null,

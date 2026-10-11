@@ -83,4 +83,15 @@ describe("Start from origin", () => {
     useWorkspaceStore.getState().setPendingNewThread(true);
     expect(useWorkspaceStore.getState().newThreadStartFromOrigin).toBe(false);
   });
+
+  it("switching projects takes the destination's remembered switch and drops a remote pick", () => {
+    useWorkspaceStore.getState().setNewThreadStartFromOrigin(true);
+    useWorkspaceStore.getState().setNewThreadBranch("origin/feature/x", "origin");
+
+    useWorkspaceStore.getState().setActiveWorkspace("ws-other");
+    expect(useWorkspaceStore.getState()).toMatchObject({ newThreadStartFromOrigin: false, newThreadBranchRemote: null });
+
+    useWorkspaceStore.getState().setActiveWorkspace(workspace.id);
+    expect(useWorkspaceStore.getState().newThreadStartFromOrigin).toBe(true);
+  });
 });
