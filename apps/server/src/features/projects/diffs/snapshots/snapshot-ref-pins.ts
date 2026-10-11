@@ -263,11 +263,15 @@ export class SnapshotRefPins {
 
   private async sweepReverts(cwd: string): Promise<void> {
     const prefix = `${storeRefPrefix(this.storeId)}reverts/`;
-    const refs = (await this.exec(cwd, ["for-each-ref", "--format=%(refname)", prefix])).trim().split("\n").filter(Boolean);
+    const refs = (await this.exec(cwd, ["for-each-ref", "--format=%(refname) %(committerdate:unix)", prefix])).trim().split("\n").filter(Boolean);
     const cutoff = new Date(Date.now() - Number(process.env.SNAPSHOT_MAX_AGE_DAYS ?? "30") * 86_400_000).toISOString();
-    for (const ref of refs) {
+    const orphanCutoff = Date.now() / 1000 - 3600;
+    for (const listed of refs) {
+      const [ref, committedAt] = listed.trim().split(" ");
+      if (!ref) continue;
       const row = this.orm.select().from(turnReverts).where(eq(turnReverts.recoveryRef, ref)).get();
-      if (row && (row.state === "prepared" || row.state === "recovery_failed" || row.createdAt >= cutoff)) continue;
+      // Another worktree can be between pinning recovery bytes and inserting its journal row.
+      if (row ? !expiredRevert(row, cutoff) : !expiredOrphan(committedAt, orphanCutoff)) continue;
       await this.exec(cwd, ["update-ref", "-d", ref]);
       if (row) await this.writer.execute(expireTurnRevert, { id: row.id });
     }
@@ -276,8 +280,7 @@ export class SnapshotRefPins {
 
   private async expireMissingRevertRefs(prefix: string, cutoff: string): Promise<void> {
     for (const row of this.orm.select().from(turnReverts).all()) {
-      if (row.recoveryRef?.startsWith(prefix) && row.createdAt < cutoff
-        && (row.state === "committed" || row.state === "rolled_back")) await this.writer.execute(expireTurnRevert, { id: row.id });
+      if (row.recoveryRef?.startsWith(prefix) && expiredRevert(row, cutoff)) await this.writer.execute(expireTurnRevert, { id: row.id });
     }
   }
 
@@ -451,4 +454,12 @@ export class SnapshotRefPins {
       return false;
     }
   }
+}
+
+function expiredOrphan(committedAt: string | undefined, cutoff: number): boolean {
+  return Boolean(committedAt) && Number(committedAt) < cutoff;
+}
+
+function expiredRevert(row: typeof turnReverts.$inferSelect, cutoff: string): boolean {
+  return (row.state === "committed" || row.state === "rolled_back") && row.createdAt < cutoff;
 }

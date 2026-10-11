@@ -1,7 +1,7 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TurnRevertFaultStop } from "../turn-revert-service.js";
 import { absentState, samePathState } from "../../snapshots/snapshot-raw-state.js";
 import { revertFixture, committed, renamed, probeSymlinks } from "./turn-revert-fixture.js";
@@ -102,7 +102,11 @@ describe("raw revert recovery", () => {
     await expect(f.service((point) => { if (point === "afterPrepare") throw new TurnRevertFaultStop(); }).apply(request)).rejects.toBeInstanceOf(TurnRevertFaultStop);
     const prepared = f.store.byRequest(request.requestId); if (!prepared?.recoveryRef) throw new Error("Missing prepared");
     const orphan = `refs/mcode/${f.storeId}/reverts/orphan`, other = `refs/mcode/${NodeCrypto.randomUUID()}/reverts/other`;
-    f.git("update-ref", orphan, prepared.recoveryRef); f.git("update-ref", other, prepared.recoveryRef);
+    vi.stubEnv("GIT_COMMITTER_DATE", "2000-01-01T00:00:00Z");
+    let oldCommit: string;
+    try { oldCommit = f.git("commit-tree", `${prepared.recoveryRef}^{tree}`, "-m", "old orphan"); }
+    finally { vi.unstubAllEnvs(); }
+    f.git("update-ref", orphan, oldCommit); f.git("update-ref", other, oldCommit);
     f.db.prepare("UPDATE turn_reverts SET created_at='2000-01-01T00:00:00.000Z'").run();
     await f.pins.sweep({ isThreadLive: () => true });
     expect(f.git("for-each-ref", "--format=%(refname)", orphan)).toBe(""); expect(f.git("cat-file", "-t", other)).toBe("commit");
