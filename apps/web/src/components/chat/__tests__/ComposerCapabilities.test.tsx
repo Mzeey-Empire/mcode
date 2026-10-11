@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ListChecks } from "lucide-react";
+import { ListTodo } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
 import { ComposerAddMenu } from "../ComposerAddMenu";
 import { ComposerCapabilityChip } from "../ComposerCapabilityChip";
@@ -100,20 +100,23 @@ describe("composer capabilities", () => {
     expect(screen.queryByRole("menu", { name: "Add to composer" })).not.toBeInTheDocument();
   });
 
-  it("removes an attached capability through its named control", async () => {
+  it("turns an attached capability off when the chip itself is clicked", async () => {
     const user = userEvent.setup();
     const onRemove = vi.fn();
 
     render(
       <ComposerCapabilityChip
         label="Plan"
-        icon={ListChecks}
-        removeLabel="Remove Plan"
+        icon={ListTodo}
+        removeLabel="Turn off Plan"
         onRemove={onRemove}
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Remove Plan" }));
+    const chip = screen.getByRole("button", { name: "Turn off Plan" });
+    expect(chip).toHaveTextContent("Plan");
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    await user.click(chip);
     expect(onRemove).toHaveBeenCalledOnce();
   });
 
