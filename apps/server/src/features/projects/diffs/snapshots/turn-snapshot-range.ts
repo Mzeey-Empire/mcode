@@ -26,7 +26,9 @@ export class TurnSnapshotRangeReader {
     if (!fromMessageId) return snapshotRange(turns[end]?.complete ? turns[end].rows : []);
     const start = turns.findIndex((turn) => turn.messageIds.includes(fromMessageId));
     if (start < 0 || start > end) return { status: "unavailable", reason: "snapshot-expired" };
-    return snapshotRange(turns.slice(start, end + 1).flatMap((turn) => turn.complete ? turn.rows : []));
+    const selected = turns.slice(start, end + 1);
+    if (selected.some((turn) => !turn.complete)) return { status: "unavailable", reason: "snapshot-expired" };
+    return snapshotRange(selected.flatMap((turn) => turn.rows));
   }
 
   /** Keep ordinals tied to message order even when snapshots disappear or attempts are replaced. */

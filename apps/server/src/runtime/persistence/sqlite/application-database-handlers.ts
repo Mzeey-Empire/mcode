@@ -6,6 +6,7 @@ import { databaseWriteHandler } from "./database-write-operation.js";
 import { sqliteMaintenanceWriteHandlers } from "./sqlite-maintenance-write-operation.js";
 import { agentStorageWriteHandlers } from "../../../features/agents/agent-storage-write-handlers.js";
 import { turnFinalizationWriteHandlers } from "../../../features/agents/turns/persistence/turn-finalization-write-operations.js";
+import { turnRevertWriteHandlers } from "../../../features/agents/turns/persistence/turn-revert-write-operations.js";
 import { conversationConversionWriteHandlers } from "../../../features/agents/conversation/migrations/conversation-conversion-write-handlers.js";
 import { canonicalRuntimeWriteHandlers } from "../../../features/agents/canonical/canonical-runtime-write-handlers.js";
 import { parentAssistantTextWriteHandlers } from "../../../features/agents/turns/parent-assistant-text-write-handlers.js";
@@ -40,6 +41,7 @@ export function applicationDatabaseHandlers(db: Database): ReadonlyMap<string, (
     ...agentStorageWriteHandlers(db),
     ...projectLifecycleWriteHandlers(db),
     ...turnFinalizationWriteHandlers(db),
+    ...turnRevertWriteHandlers(db),
     ...conversationConversionWriteHandlers(db),
     ...canonicalRuntimeWriteHandlers(db),
     ...parentAssistantTextWriteHandlers(db),

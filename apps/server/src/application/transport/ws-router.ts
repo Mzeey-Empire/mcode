@@ -114,6 +114,10 @@ import { TurnSteerConflictError, TurnSteerMentionError, asTurnSteerError } from 
 import { isMemoryRpcMethod, routeMemoryRpc } from "../../runtime/memory/transport/memory-rpc.js";
 import { isGitRpcMethod, routeGitRpc } from "../../features/projects/git/transport/git-rpc.js";
 import { isSnapshotRpcMethod, routeSnapshotRpc } from "../../features/projects/diffs/transport/snapshot-rpc.js";
+import { isTurnRevertRpcMethod, routeTurnRevertRpc } from "../../features/projects/diffs/transport/turn-revert-rpc.js";
+import type { TurnRevertService } from "../../features/projects/diffs/revert/turn-revert-service.js";
+import { TurnRevertValidationError } from "../../features/projects/diffs/revert/turn-revert-model.js";
+import type { TurnRevertStore } from "../../features/agents/turns/persistence/turn-revert-store.js";
 import { isTurnDiffRpcMethod, routeTurnDiffRpc } from "../../features/projects/diffs/transport/turn-diff-rpc.js";
 import type { TurnDiffService } from "../../features/agents/turns/turn-diff-service.js";
 import type { TurnSnapshotRangeReader } from "../../features/projects/diffs/snapshots/turn-snapshot-range.js";
@@ -296,6 +300,8 @@ export interface RouterDeps {
   turnDiffs: TurnDiffService;
   turnSnapshotRanges: TurnSnapshotRangeReader;
   snapshotService: SnapshotService;
+  turnRevertService: TurnRevertService;
+  turnRevertStore: TurnRevertStore;
   settingsService: SettingsService;
   /** Watcher service for tracking per-workspace HEAD file changes. */
   gitWatcherService: GitWatcherService;
@@ -474,7 +480,7 @@ function domainRouteError(id: string, error: unknown, message: string): WebSocke
   if (error instanceof DraftImageMissingError) {
     return { id, error: { code: error.code, message, data: { stagingId: error.stagingId } } };
   }
-  if (error instanceof SequenceAheadError) return { id, error: { code: error.code, message } };
+  if (error instanceof SequenceAheadError || error instanceof TurnRevertValidationError) return { id, error: { code: error.code, message } };
   return steerRouteError(id, error, message);
 }
 
@@ -633,6 +639,7 @@ const ROUTE_FAMILIES = [
   createRouteFamily(isAgentRpcMethod, (method, params, deps) => routeAgentRpc(method, params, deps)),
   createRouteFamily(isGitRpcMethod, (method, params, deps) => routeGitRpc(method, params, deps)),
   createRouteFamily(isSnapshotRpcMethod, (method, params, deps) => routeSnapshotRpc(method, params, deps)),
+  createRouteFamily(isTurnRevertRpcMethod, (method, params, deps) => routeTurnRevertRpc(method, params, deps)),
   createRouteFamily(isTurnDiffRpcMethod, (method, params, deps) => routeTurnDiffRpc(method, params, deps)),
   createRouteFamily(isFileRpcMethod, (method, params, deps) => routeFileRpc(method, params, deps)),
   createRouteFamily(isProjectIconRpcMethod, (method, params, deps) => routeProjectIconRpc(method, params, deps)),

@@ -12,9 +12,11 @@ import {
   storeIdentity,
   threads,
   turnSnapshots,
+  turnReverts,
   workspaces,
 } from "../../../../runtime/persistence/sqlite/schema.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { expireTurnRevert } from "../../../agents/turns/persistence/turn-revert-write-operations.js";
 import { persistInterruptedAttemptSnapshot } from "../../../agents/turns/persistence/turn-finalization-write-operations.js";
 import type { ThreadAttentionService } from "../../../thread-control/attention/thread-attention-service.js";
 import type { GitExecutor } from "../../git/execution/index.js";
@@ -22,7 +24,7 @@ import { RealGitExecutor } from "../../git/execution/real-git-executor.js";
 import { RepositoryGitMutationLock } from "../../git/repository-git-mutation-lock.js";
 import { normalizePathForComparison } from "../../../../shared/filesystem/path-identity.js";
 import { SnapshotService } from "./snapshot-service.js";
-import { SNAPSHOT_STORE_ID, type StoreId } from "./snapshot-store-identity.js";
+import { SNAPSHOT_STORE_ID, PIN_COMMIT_ENV, type StoreId } from "./snapshot-store-identity.js";
 
 /** Pin of a turn's pre-turn tree while the turn has no snapshot row yet. */
 export type BaselinePin =
@@ -63,13 +65,6 @@ const REF_ROOT = "refs/mcode";
 const REF_COMPONENT = /^[A-Za-z0-9_-]{1,128}$/;
 const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const PIN_COMMIT_MESSAGE = "mcode snapshot pin";
-/** Fixed identity so pinning works in repositories with no `user.email`. */
-const PIN_COMMIT_ENV = {
-  GIT_AUTHOR_NAME: "Mcode",
-  GIT_AUTHOR_EMAIL: "mcode@localhost",
-  GIT_COMMITTER_NAME: "Mcode",
-  GIT_COMMITTER_EMAIL: "mcode@localhost",
-} as const;
 
 function requireComponent(value: string, label: string): string {
   if (!REF_COMPONENT.test(value)) throw new Error(`Snapshot pin ${label} is not a safe ref component`);
@@ -245,6 +240,7 @@ export class SnapshotRefPins {
   }
 
   private async sweepRepository(repository: SweepRepository, options: SnapshotPinPassOptions): Promise<void> {
+    await this.sweepReverts(repository.cwd);
     for (const listed of await this.listPins(repository.cwd)) {
       if (isListedBaseline(listed)) await this.settleBaseline(repository.cwd, listed, options);
     }
@@ -263,6 +259,26 @@ export class SnapshotRefPins {
       else if (pin.kind === "baseline-tree" && !this.threadBusy(pin.threadId, options)) await this.release(cwd, pin);
     }
     return kept;
+  }
+
+  private async sweepReverts(cwd: string): Promise<void> {
+    const prefix = `${storeRefPrefix(this.storeId)}reverts/`;
+    const refs = (await this.exec(cwd, ["for-each-ref", "--format=%(refname)", prefix])).trim().split("\n").filter(Boolean);
+    const cutoff = new Date(Date.now() - Number(process.env.SNAPSHOT_MAX_AGE_DAYS ?? "30") * 86_400_000).toISOString();
+    for (const ref of refs) {
+      const row = this.orm.select().from(turnReverts).where(eq(turnReverts.recoveryRef, ref)).get();
+      if (row && (row.state === "prepared" || row.state === "recovery_failed" || row.createdAt >= cutoff)) continue;
+      await this.exec(cwd, ["update-ref", "-d", ref]);
+      if (row) await this.writer.execute(expireTurnRevert, { id: row.id });
+    }
+    await this.expireMissingRevertRefs(prefix, cutoff);
+  }
+
+  private async expireMissingRevertRefs(prefix: string, cutoff: string): Promise<void> {
+    for (const row of this.orm.select().from(turnReverts).all()) {
+      if (row.recoveryRef?.startsWith(prefix) && row.createdAt < cutoff
+        && (row.state === "committed" || row.state === "rolled_back")) await this.writer.execute(expireTurnRevert, { id: row.id });
+    }
   }
 
   private async settleBaseline(repositoryCwd: string, listed: ListedBaseline, options: SnapshotPinPassOptions): Promise<void> {

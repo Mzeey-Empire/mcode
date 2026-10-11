@@ -4,7 +4,10 @@ import type { TurnSnapshotRepo } from "../../../agents/turns/persistence/turn-sn
 import type { ThreadService } from "../../../thread-control/lifecycle/thread-service.js";
 import type { GitWorktreeService } from "../../git/git-worktree-service.js";
 import type { WorkspaceService } from "../../lifecycle/workspace-service.js";
-import { assertReviewWorktree, reviewComparisonFailure, ReviewComparisonLimitError, ReviewWorktreeMissingError } from "../../git/review-comparison-errors.js";
+import { assertReviewWorktree, reviewComparisonFailure, ReviewComparisonLimitError } from "../../git/review-comparison-errors.js";
+import { resolveSnapshotCwd } from "../snapshots/resolve-snapshot-cwd.js";
+import type { TurnRevertStore } from "../../../agents/turns/persistence/turn-revert-store.js";
+import { attributedWorkspacePaths } from "../snapshots/snapshot-attribution.js";
 import type { SnapshotService } from "../snapshots/snapshot-service.js";
 import { snapshotRange, type TurnSnapshotRange } from "../snapshots/turn-snapshot-range-model.js";
 import type { TurnSnapshotRangeReader } from "../snapshots/turn-snapshot-range.js";
@@ -24,6 +27,7 @@ export interface SnapshotRouterDeps {
   workspaceService: Pick<WorkspaceService, "findById">;
   gitWorktrees: Pick<GitWorktreeService, "resolveWorkingDir">;
   sweepSnapshotPins: () => Promise<void>;
+  turnRevertStore?: Pick<TurnRevertStore, "revertedPaths">;
 }
 
 type SnapshotHandlerMap = {
@@ -34,7 +38,9 @@ const snapshotHandlers: SnapshotHandlerMap = {
   "snapshot.getDiff": (deps, params) => readSnapshotRangeDiff(deps, rangeForSnapshot(deps, params.snapshotId), params.filePath, params.maxLines),
   "snapshot.getDiffStats": (deps, params) => readSnapshotRangeStats(deps, rangeForSnapshot(deps, params.snapshotId)),
   "snapshot.cleanup": routeSnapshotCleanup,
-  "snapshot.listByThread": (deps, params) => deps.turnSnapshotRanges.listSnapshots(params.threadId),
+  "snapshot.listByThread": (deps, params) => deps.turnSnapshotRanges.listSnapshots(params.threadId).map((row) => ({ ...row,
+    reverted_paths: (deps.turnRevertStore?.revertedPaths(row.id) ?? []).filter((path) => attributedWorkspacePaths(row).includes(path)),
+  })),
   "snapshot.getCumulativeDiff": (deps, params) => {
     const range = cumulativeRange(deps, params.threadId);
     return range.status === "ready" ? readSnapshotRangeDiff(deps, range, params.filePath, params.maxLines) : "";
@@ -81,15 +87,6 @@ export async function validateSnapshotRange(deps: SnapshotRouterDeps, range: Rea
   } catch (error) {
     return reviewComparisonFailure(error);
   }
-}
-
-function resolveSnapshotCwd(deps: SnapshotRouterDeps, first: ReadyRange["rows"][0]): string {
-  const thread = deps.threadService.findById(first.thread_id);
-  if (!thread) throw new Error(`Thread not found for snapshot: ${first.thread_id}`);
-  const workspace = deps.workspaceService.findById(thread.workspace_id);
-  if (!workspace) throw new Error(`Workspace not found: ${thread.workspace_id}`);
-  if (!first.worktree_path && thread.mode === "worktree" && !thread.worktree_path) throw new ReviewWorktreeMissingError("Thread worktree path is missing");
-  return first.worktree_path ?? deps.gitWorktrees.resolveWorkingDir(workspace.path, thread.mode, thread.worktree_path);
 }
 
 /** Read Git metadata across all joined attempts, retaining truthful failure outcomes. */
