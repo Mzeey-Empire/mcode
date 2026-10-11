@@ -1,3 +1,4 @@
+import { isTaskListToolName } from "@mcode/contracts";
 import type { HookExecution, ToolCall } from "@/transport/types";
 import {
   collapseSubagentCalls,
@@ -49,7 +50,8 @@ export interface LiveNarrativePreparation {
 export function prepareLiveNarrative(
   inputs: LiveNarrativeInputs,
 ): LiveNarrativePreparation {
-  const toolCalls = collapseSubagentCalls(inputs.toolCalls);
+  const toolCalls = collapseSubagentCalls(inputs.toolCalls)
+    .filter((toolCall) => !isTaskListToolName(toolCall.toolName));
   const thoughtSegments = filterLiveThoughtSegments(
     inputs.thoughtSegments,
     inputs.committedAssistantBody,

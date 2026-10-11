@@ -1,3 +1,4 @@
+import { isTaskListToolName } from "@mcode/contracts";
 import type { ThoughtSegmentRecord, ToolCallRecord } from "@/transport/types";
 import { collapseSubagentRecords } from "../narrative/subagent-lifecycle";
 import type { NarrativeCounts, TurnSummary } from "../narrative/types";
@@ -10,7 +11,7 @@ interface PersistedTurnRecords {
 /** Counts top-level steps and sub-agents from persisted narrative records. */
 export function persistedTurnCounts(records: PersistedTurnRecords): NarrativeCounts {
   const topLevel = collapseSubagentRecords(records.tools)
-    .filter((tool) => tool.parent_tool_call_id == null);
+    .filter((tool) => tool.parent_tool_call_id == null && !isTaskListToolName(tool.tool_name));
   return {
     steps: topLevel.length,
     thoughts: records.thoughts.length,

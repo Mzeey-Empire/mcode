@@ -108,13 +108,7 @@ function renderItem(
     case "thought":
       return <ThoughtBlock segment={item.segment} isActive={item.isActive} />;
     case "tool-group":
-      return (
-        <ToolSummaryLine
-          group={item.group}
-          hasError={item.hasError}
-          hasCancelled={item.hasCancelled}
-        />
-      );
+      return <ToolSummaryLine group={item.group} />;
     case "hook":
       return <HookRow hook={item.hook} />;
     case "approval":

@@ -1,3 +1,4 @@
+import { isTaskListToolName } from "@mcode/contracts";
 import type { BufferedToolCall } from "../conversation/narrative/narrative-turn-state.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 import type { StoredTask } from "../orchestration/persistence/task-repo.js";
@@ -39,7 +40,8 @@ export type TaskToolReduction =
 export function taskToolWriteIntents(command: TaskToolCommand): TaskToolWriteIntent[] {
   if (command.kind === "tool-result") return taskCreateIntent(command);
   const { toolName, toolInput, parentToolCallId, bufferedCalls } = command;
-  if (toolName !== "TodoWrite" && toolName !== "TaskUpdate" && toolName !== "update_plan") return [];
+  // TaskCreate writes from its result, which carries the harness task id.
+  if (!isTaskListToolName(toolName) || toolName === "TaskCreate") return [];
   const group = parentToolCallId ? groupFor(bufferedCalls, parentToolCallId) : "Tasks";
   if (toolName === "TodoWrite") return todoWriteIntents(toolInput, group);
   if (toolName === "TaskUpdate") return taskUpdateIntents(toolInput, group);

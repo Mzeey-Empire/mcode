@@ -1364,6 +1364,23 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       expect(record.input_summary).toBe("node -e \"console.log('lint ok')\"");
     });
 
+    it("persists a Codex file change as its paths, not truncated JSON", async () => {
+      const path = "F:\\dev\\worktrees\\t3\\mcode\\t3-49c74bf1\\.dev\\fixture-repo\\README.md";
+      seedAssistantMessage("m1", "done", 1);
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.bufferToolCall(THREAD, {
+        toolCallId: "fc-1",
+        toolName: "file_change",
+        toolInput: { files: path, changes: [{ path, kind: { type: "update", move_path: null } }] },
+      });
+
+      await store.persistNarrative(THREAD, "m1", "done", "completed");
+
+      const [record] = new ToolCallRecordRepo(db, agentStorageTestWriter(db)).listByMessage("m1");
+      expect(record.input_summary).toBe(path);
+    });
+
   });
 
   describe("Classification precedence + is_final_response safety net", () => {

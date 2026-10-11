@@ -63,6 +63,34 @@ describe("buildNarrativeItems counts", () => {
     expect(counts).toEqual({ steps: 0, thoughts: 0, subagents: 0 });
   });
 
+  it("a turn with TodoWrite and Read yields one row and one step", () => {
+    const { items, counts } = buildNarrativeItems({
+      toolCalls: [
+        mkTool({ id: "todo", toolName: "TodoWrite", startedAt: 1000, toolInput: { todos: [] } }),
+        mkTool({ id: "read", toolName: "Read", startedAt: 2000 }),
+      ],
+      hooks: [],
+      thoughtSegments: [],
+      streamingText: "",
+      isAgentRunning: false,
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ type: "tool-group", group: { calls: [{ id: "read" }] } });
+    expect(counts.steps).toBe(1);
+  });
+
+  it("keeps a running task-list tool out of the active rows", () => {
+    const { items, counts } = buildNarrativeItems({
+      toolCalls: [mkTool({ id: "plan", toolName: "update_plan", isComplete: false })],
+      hooks: [],
+      thoughtSegments: [],
+      streamingText: "",
+      isAgentRunning: true,
+    });
+    expect(items).toEqual([]);
+    expect(counts.steps).toBe(0);
+  });
+
   it("counts top-level tool calls as steps and Agent calls as subagents", () => {
     const tools: ToolCall[] = [
       mkTool({ id: "1", toolName: "Read", startedAt: 1000 }),

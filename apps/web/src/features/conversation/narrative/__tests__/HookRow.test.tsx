@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { HookRow } from "../HookRow";
@@ -28,14 +28,19 @@ describe("HookRow", () => {
     return collapsible;
   }
 
-  it("renders the hook row with the shared tool summary row scale", () => {
-    render(<HookRow hook={makeHook()} />);
+  it("reads a hook without output as a static row with its name and duration", () => {
+    render(<HookRow hook={makeHook({ toolName: "Bash" })} />);
+
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByText("Ran hook").parentElement).toHaveTextContent(/^Ran hookSessionStart:startupon Bash32ms$/);
+  });
+
+  it("reads a blocked hook as blocked in its meta without error colors", () => {
+    render(<HookRow hook={makeHook({ didBlock: true, durationMs: 1_200, outputLines: ["denied"], fullOutput: ["denied"] })} />);
 
     const row = screen.getByRole("button", { name: /SessionStart:startup/ });
-
-    expect(row).toHaveClass("text-sm");
-    expect(row).toHaveClass("px-2", "py-1", "rounded-md");
-    expect(screen.getByText("SessionStart:startup")).toHaveClass("text-ink/80");
+    expect(within(row).getByText("blocked · 1.2s")).toHaveClass("text-muted");
+    expect(screen.getByText("denied")).toHaveClass("text-ink/75");
   });
 
   it("renders expanded output at narrative text size", async () => {
@@ -101,6 +106,8 @@ describe("HookRow", () => {
           hook={makeHook({
             hookName: "SessionStart:startup:with-a-long-single-token-hook-name",
             toolName: "VeryLongToolNameWithoutNaturalBreaks",
+            outputLines: ["ok"],
+            fullOutput: ["ok"],
           })}
         />
       </div>,

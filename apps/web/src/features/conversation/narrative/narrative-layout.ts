@@ -17,16 +17,3 @@ export const TURN_PROSE_CLASS = "text-prose text-ink [&_p]:leading-[inherit] [&_
 /** Constrains a horizontal tool/meta row inside the virtualized chat column. */
 export const NARRATIVE_TOOL_ROW =
   "flex min-w-0 max-w-full items-center gap-2 overflow-hidden";
-
-/**
- * Monospace detail text (path, command, pattern) with ellipsis when truncated.
- *
- * @param size - `sm` for active/sub-agent rows, `md` for expanded tool-group rows.
- */
-export function narrativeToolDetailClass(size: "sm" | "md"): string {
-  const tone =
-    size === "md"
-      ? "text-sm text-muted/80"
-      : "text-xs text-muted/65";
-  return `font-mono ${tone} text-fade flex-1 min-w-0 [overflow-wrap:anywhere]`;
-}

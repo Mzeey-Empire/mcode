@@ -12,6 +12,7 @@ import {
   INTERACTION_MODES,
   ProviderIdSchema,
   isGoalOpen,
+  isTaskListToolName,
   previewAnnotationSnapshotStoredAttachments,
   CONVERSATION_HISTORY_PAGE_MAX_BYTES,
   createSubagentPresentation,
@@ -1950,13 +1951,22 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     toolCalls: readonly ToolCall[],
     parentToolCallId: string | undefined,
   ): void => {
-    if (toolName === "TodoWrite") projectTodoWriteTasks(threadId, toolInput, toolCalls, parentToolCallId);
-    if (toolName === "TaskCreate") projectTaskCreate(threadId, toolCallId, toolInput, toolCalls, parentToolCallId);
-    if (toolName === "TaskUpdate") projectTaskUpdate(threadId, toolInput, toolCalls, parentToolCallId);
-    if (toolName === "update_plan") {
-      const group = taskGroupFor(toolCalls, parentToolCallId);
-      const tasks = updatePlanTasksFromToolInput(toolInput).map((task) => ({ ...task, group }));
-      if (tasks.length > 0) writeGroupTasks(threadId, group, tasks);
+    if (!isTaskListToolName(toolName)) return;
+    switch (toolName) {
+      case "TodoWrite":
+        projectTodoWriteTasks(threadId, toolInput, toolCalls, parentToolCallId);
+        return;
+      case "TaskCreate":
+        projectTaskCreate(threadId, toolCallId, toolInput, toolCalls, parentToolCallId);
+        return;
+      case "TaskUpdate":
+        projectTaskUpdate(threadId, toolInput, toolCalls, parentToolCallId);
+        return;
+      case "update_plan": {
+        const group = taskGroupFor(toolCalls, parentToolCallId);
+        const tasks = updatePlanTasksFromToolInput(toolInput).map((task) => ({ ...task, group }));
+        if (tasks.length > 0) writeGroupTasks(threadId, group, tasks);
+      }
     }
   };
 

@@ -49,8 +49,6 @@ describe("BrowserActivityRow", () => {
     const { container } = render(
       <ToolSummaryLine
         group={{ calls: Array.from({ length: 180 }, (_, index) => browserCall({ id: `browser-${index}` })) }}
-        hasError={false}
-        hasCancelled={false}
         virtualExpansion={{ open: true, onToggle: () => undefined }}
       />,
     );
@@ -59,12 +57,17 @@ describe("BrowserActivityRow", () => {
     expect(container.textContent).not.toContain("Clicked the page");
   });
 
+  it("counts a failed call in a browser group summary", () => {
+    render(<ToolSummaryLine group={{ calls: [browserCall(), { ...editCall(), isError: true }] }} />);
+
+    // jsdom drops the count's leading space from the name; Chromium keeps it.
+    expect(screen.getByRole("button", { name: /^Used the browser, edited a file ?· 1 failed$/ })).toBeTruthy();
+  });
+
   it("renders the accepted grouped summary and chronological safe details", () => {
     const { container } = render(
       <ToolSummaryLine
         group={{ calls: [browserCall(), editCall()] }}
-        hasError={false}
-        hasCancelled={false}
       />,
     );
 
@@ -116,8 +119,6 @@ describe("BrowserActivityRow", () => {
             }),
           })],
         }}
-        hasError={false}
-        hasCancelled
       />,
     );
 
@@ -139,12 +140,10 @@ describe("BrowserActivityRow", () => {
             isError: true,
           })],
         }}
-        hasError
-        hasCancelled={false}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Used the browser" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Used the browser ?· 1 failed$/ }));
     expect(screen.getByText("Page changed before the action")).toBeTruthy();
     expect(container.textContent).not.toContain("SECRET");
     expect(screen.queryByText("errored")).toBeNull();
@@ -167,12 +166,10 @@ describe("BrowserActivityRow", () => {
             isError: false,
           })],
         }}
-        hasError={false}
-        hasCancelled={false}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Used the browser" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Used the browser ?· 1 failed$/ }));
     expect(screen.getByText("Browser action failed")).toBeTruthy();
     expect(screen.queryByText("Completed Browser actions")).toBeNull();
     expect(container.textContent).not.toContain("SECRET");
@@ -184,12 +181,10 @@ describe("BrowserActivityRow", () => {
         group={{
           calls: [browserCall({ output: null, isCancelled: true })],
         }}
-        hasError={false}
-        hasCancelled
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Used the browser" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Used the browser ?· 1 cancelled$/ }));
     expect(screen.getByText("Browser action cancelled")).toBeTruthy();
     expect(screen.queryByText("Completed Browser actions")).toBeNull();
   });
@@ -220,7 +215,7 @@ describe("BrowserActivityRow", () => {
     expect(items[0]?.type).toBe("tool-group");
     if (items[0]?.type !== "tool-group") return;
 
-    render(<ToolSummaryLine group={items[0].group} hasError={false} hasCancelled={false} />);
+    render(<ToolSummaryLine group={items[0].group} />);
     fireEvent.click(screen.getByRole("button", { name: "Used the browser" }));
     expect(screen.getByText("Resized the Browser to 390 × 844")).toBeTruthy();
   });

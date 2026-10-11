@@ -1,5 +1,5 @@
 import { useId, useState, type ReactNode } from "react";
-import { ChevronRight, ShieldAlert, SquareMousePointer } from "lucide-react";
+import { ShieldAlert, SquareMousePointer } from "lucide-react";
 import {
   projectBrowserNarrativeInput,
   projectBrowserNarrativeResult,
@@ -9,11 +9,10 @@ import {
   type BrowserNarrativeStepInput,
 } from "@mcode/contracts";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
-import { Button } from "@/components/ui/button";
 import type { ToolCall } from "@/transport/types";
 import { buildToolSummaryText } from "@/components/chat/tool-renderers/constants";
-import { NARRATIVE_TOOL_ROW } from "./narrative-layout";
-import { NarrativeSummaryLine } from "./NarrativeSummaryLine";
+import { GroupSummaryLabel } from "./GroupSummaryLabel";
+import { NarrativeToolRow } from "./NarrativeToolRow";
 
 interface BrowserActivitySummaryProps {
   virtualExpansion?: { readonly open: boolean; readonly onToggle: () => void };
@@ -298,38 +297,20 @@ function BrowserActivityLineRow({ line }: { line: BrowserActivityLine }) {
   const detailsId = useId();
   const Icon = line.privileged ? ShieldAlert : SquareMousePointer;
 
-  if (!line.receipt) {
-    return (
-      <div className={`${NARRATIVE_TOOL_ROW} py-1 text-sm`}>
-        <Icon className="size-3.5 shrink-0 text-muted/75" aria-hidden="true" />
-        <span className="min-w-0 flex-1 font-medium text-ink/65">{line.label}</span>
-      </div>
-    );
-  }
+  if (!line.receipt) return <NarrativeToolRow icon={Icon} label={line.label} />;
 
   return (
     <div className="min-w-0 max-w-full">
-      <Button
-        type="button"
-        variant="ghost"
-        size="compact"
-        onClick={() => setOpen((current) => !current)}
-        className={`${NARRATIVE_TOOL_ROW} h-auto w-full justify-start rounded-md px-0 py-1 text-left font-normal hover:bg-hover/30 aria-expanded:bg-transparent active:translate-y-0`}
-        aria-expanded={open}
-        aria-controls={detailsId}
-      >
-        <Icon className="size-3.5 shrink-0 text-muted/75" aria-hidden="true" />
-        <span className="min-w-0 flex-1 font-medium text-ink/65">{line.label}</span>
-        <ChevronRight
-          className={`size-3 shrink-0 text-muted/45 transition-transform duration-150 motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
-          aria-hidden="true"
-        />
-      </Button>
+      <NarrativeToolRow
+        icon={Icon}
+        label={line.label}
+        disclosure={{ open, onToggle: () => setOpen((current) => !current), controlsId: detailsId }}
+      />
       <AnimatedCollapsible open={open}>
         <section
           id={detailsId}
           aria-label={`${line.label} receipt`}
-          className="ml-5 mt-1 min-w-0 max-w-full overflow-hidden rounded-lg border border-border/60 bg-hover/25"
+          className="ml-6 mt-1 min-w-0 max-w-full overflow-hidden rounded-lg border border-border/60 bg-hover/25"
         >
           <header className="border-b border-border/50 px-3 py-2 text-sm font-medium text-ink/75">
             Plain text
@@ -364,16 +345,12 @@ export function BrowserActivitySummary({
   const [localOpen, setOpen] = useState(false);
   const open = virtualExpansion?.open ?? localOpen;
   return (
-    <div className="min-w-0 max-w-full rounded-md">
-      <NarrativeSummaryLine
-        open={open}
-        onToggle={virtualExpansion?.onToggle ?? (() => setOpen((current) => !current))}
-        icon={<SquareMousePointer className="size-4 shrink-0 text-muted/55" aria-hidden="true" />}
-      >
-        <span className="min-w-0 flex-1 text-fade font-medium text-ink/75">
-          {buildBrowserActivitySummary(calls, active)}
-        </span>
-      </NarrativeSummaryLine>
+    <div className="min-w-0 max-w-full">
+      <NarrativeToolRow
+        icon={SquareMousePointer}
+        label={<GroupSummaryLabel text={buildBrowserActivitySummary(calls, active)} calls={calls} />}
+        disclosure={{ open, onToggle: virtualExpansion?.onToggle ?? (() => setOpen((current) => !current)) }}
+      />
       {!virtualExpansion ? <AnimatedCollapsible open={open}>
         <ul className="mt-1 min-w-0 max-w-full space-y-1 pb-2 pl-6" aria-label="Browser activity details">
           {calls.map((call) => isBrowserNarrativeCall(call)

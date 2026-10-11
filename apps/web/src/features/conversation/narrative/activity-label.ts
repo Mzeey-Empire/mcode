@@ -68,5 +68,5 @@ export function toolActivityLabel(tool: ToolCall): string {
   return fileActivity(tool, name)
     ?? shortLabel(tool.toolInput.description)
     ?? TOOL_PHASE_LABELS[name]
-    ?? (name === "file_change" ? "Editing files" : "Working");
+    ?? "Working";
 }

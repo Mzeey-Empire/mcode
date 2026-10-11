@@ -33,6 +33,16 @@ describe("transcript narrative rows", () => {
     }
   });
 
+  it("keeps an open lone call in its own row instead of listing it as a child", () => {
+    const narrative = expandTranscriptNarrative([{
+      type: "narrative-flow", key: "live", startTime: 1000, approvals: [], hooks: [], thoughtSegments: [],
+      toolCalls: [{ id: "tool-0", toolName: "Bash", toolInput: { command: "pwd" }, output: "done", isError: false, isComplete: true, startedAt: 1200 }],
+      streamingText: "", isAgentRunning: false,
+    }], {}, new Set());
+    const rows = expandTranscriptToolGroups(narrative, new Set(narrative.map((row) => row.key)));
+    expect(rows.map(rowLabel)).toEqual(["tool-group"]);
+  });
+
   it("omits hooks from live and saved narrative rows while retaining reasoning", () => {
     const live = expandTranscriptNarrative([{
       type: "narrative-flow", key: "live", toolCalls: [], startTime: 1000,

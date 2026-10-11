@@ -3,6 +3,7 @@ import {
   createSubagentPresentation,
   decodeCanonicalSubagentDetailTarget,
   decodeSubagentAliasDetailTarget,
+  isTaskListToolName,
   resolveBrowserNarrativeTool,
 } from "@mcode/contracts";
 import type { ApprovalReceiptRecord } from "@mcode/contracts";
@@ -140,7 +141,8 @@ export function persistedHookDetailLines(record: HookExecutionRecord): string[] 
 export function preparePersistedNarrative(
   inputs: PersistedNarrativeInputs,
 ): PersistedNarrativePreparation {
-  const toolRecords = collapseSubagentRecords(inputs.tools);
+  const toolRecords = collapseSubagentRecords(inputs.tools)
+    .filter((toolRecord) => !isTaskListToolName(toolRecord.tool_name));
   const filteredThoughts = filterPersistedFinalResponseThoughts(inputs.thoughts, inputs.messageContent);
   const hierarchy = buildToolCallHierarchy(
     toolRecords,

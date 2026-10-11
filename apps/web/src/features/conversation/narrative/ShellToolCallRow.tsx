@@ -1,32 +1,41 @@
 import { type TransitionEvent, useId, useRef, useState } from "react";
-import { Check, ChevronRight, Clock, Terminal, X } from "lucide-react";
+import { Check, Clock, Terminal, X } from "lucide-react";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CopyButton } from "@/components/ui/copy-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { formatDuration } from "@/lib/time";
+import { formatClock } from "@/lib/time";
 import type { ToolCall } from "@/transport/types";
-import { NARRATIVE_TOOL_ROW, narrativeToolDetailClass } from "./narrative-layout";
+import {
+  NarrativeToolRow,
+  NarrativeToolRowDetail,
+  NarrativeToolRowMeta,
+  type NarrativeToolRowDisclosure,
+  type RowExpansion,
+  useRowExpansion,
+} from "./NarrativeToolRow";
 import { ToolOutputTruncationNotice } from "./ToolOutputTruncationNotice";
 import { extractNarrativeCommand } from "./extract-narrative-command";
 
 interface ShellToolCallRowProps {
   /** Shell invocation rendered as a nested narrative row. */
   toolCall: ToolCall;
+  /** Transcript-owned open state, so the transcript survives row unmounts. */
+  expansion?: RowExpansion;
 }
 
-/** Formats a completed tool duration for the compact child-row label. */
+/** Formats a completed tool duration as a clock; sub-second runs show none. */
 function formatToolDuration(durationMs: number | undefined): string | null {
   if (durationMs == null || !Number.isFinite(durationMs) || durationMs < 1000) return null;
-  return formatDuration(Math.round(durationMs / 1000));
+  return formatClock(Math.round(durationMs / 1000));
 }
 
 interface ShellToolCallStatus {
   duration: string | null;
+  /** Short outcome for the row meta, such as `exit 1`. */
+  failureMeta: string | null;
+  /** Outcome for the transcript footer, such as `exit code 1`. */
   failureLabel: string | null;
-  iconClassName: string;
   isRunning: boolean;
 }
 
@@ -38,115 +47,58 @@ function isShellCallRunning(toolCall: ToolCall, isCancelled: boolean): boolean {
   return !toolCall.isComplete && !toolCall.isError && !isCancelled;
 }
 
+function shellExitCode(toolCall: ToolCall): number | null {
+  return typeof toolCall.exitCode === "number" && Number.isInteger(toolCall.exitCode) ? toolCall.exitCode : null;
+}
+
 function shellFailureLabel(toolCall: ToolCall, isCancelled: boolean): string | null {
   if (isCancelled) return "cancelled";
   if (!toolCall.isError) return null;
-  if (typeof toolCall.exitCode === "number" && Number.isInteger(toolCall.exitCode)) {
-    return `exit code ${toolCall.exitCode}`;
-  }
-  return "failed";
+  const exitCode = shellExitCode(toolCall);
+  return exitCode === null ? "failed" : `exit code ${exitCode}`;
 }
 
-function shellIconClassName(toolCall: ToolCall, isRunning: boolean): string {
-  if (toolCall.isError) return "text-[var(--diff-remove)]";
-  if (isRunning) return "text-primary";
-  return "text-muted/70";
+function shellFailureMeta(toolCall: ToolCall, isCancelled: boolean): string | null {
+  if (isCancelled) return "cancelled";
+  if (!toolCall.isError) return null;
+  const exitCode = shellExitCode(toolCall);
+  return exitCode === null ? "failed" : `exit ${exitCode}`;
 }
 
 function shellToolCallStatus(toolCall: ToolCall): ShellToolCallStatus {
   const isCancelled = isShellCallCancelled(toolCall);
-  const isRunning = isShellCallRunning(toolCall, isCancelled);
   return {
     duration: toolCall.isComplete ? formatToolDuration(toolCall.durationMs) : null,
+    failureMeta: shellFailureMeta(toolCall, isCancelled),
     failureLabel: shellFailureLabel(toolCall, isCancelled),
-    iconClassName: shellIconClassName(toolCall, isRunning),
-    isRunning,
+    isRunning: isShellCallRunning(toolCall, isCancelled),
   };
 }
 
-type TooltipState = "unmounted" | "open" | "closed";
-
-/** Defers tooltip primitives until a command needs its full hover disclosure. */
-function CommandDetail({ command, detail, tooltipId }: { command: string; detail: string; tooltipId: string }) {
-  const [tooltipState, setTooltipState] = useState<TooltipState>("unmounted");
-  const trigger = (
-    <span
-      className={narrativeToolDetailClass("md")}
-      onPointerEnter={() => setTooltipState("open")}
-      onPointerLeave={() => setTooltipState("closed")}
-    >
-      {detail}
-    </span>
-  );
-
-  if (!command || tooltipState === "unmounted") return trigger;
-
-  return (
-    <Tooltip
-      open={tooltipState === "open"}
-      onOpenChange={(open) => setTooltipState(open ? "open" : "closed")}
-      triggerId={tooltipId}
-    >
-      <TooltipTrigger id={tooltipId} render={trigger} />
-      <TooltipContent>{command}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function ShellToolCallHeader({
-  command,
-  detail,
-  duration,
-  isRunning,
-  iconClassName,
-  open,
-  panelId,
-  controlsId,
-  onToggle,
-}: {
+/**
+ * A finished command reads duration then command; a failed one reads command
+ * then `exit 1 · 0:03`, so the outcome sits where the eye lands last.
+ */
+function ShellToolCallHeader({ command, detail, status, disclosure }: {
   command: string;
   detail: string;
-  duration: string | null;
-  isRunning: boolean;
-  iconClassName: string;
-  open: boolean;
-  panelId: string;
-  controlsId?: string;
-  onToggle: () => void;
+  status: ShellToolCallStatus;
+  disclosure: NarrativeToolRowDisclosure;
 }) {
+  const commandDetail = <NarrativeToolRowDetail kind="command" fullText={command || undefined}>{detail}</NarrativeToolRowDetail>;
+  const failureMeta = status.failureMeta
+    ? [status.failureMeta, status.duration].filter(Boolean).join(" · ")
+    : null;
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="compact"
-      onClick={onToggle}
-      className={`${NARRATIVE_TOOL_ROW} h-auto w-full justify-start rounded-md px-0 py-1 text-left font-normal transition-colors duration-150 hover:bg-hover/30 aria-expanded:bg-transparent active:translate-y-0 motion-reduce:transition-none dark:hover:bg-hover/30 dark:aria-expanded:bg-transparent`}
-      aria-expanded={open}
-      aria-controls={controlsId}
+    <NarrativeToolRow
+      icon={Terminal}
+      label={status.isRunning ? "Running command" : "Ran command"}
+      disclosure={disclosure}
     >
-      <Terminal className={`h-3.5 w-3.5 shrink-0 ${iconClassName}`} />
-      <span className="relative shrink-0 text-sm font-medium text-ink/75">
-        {isRunning ? "Running command" : "Ran command"}
-        {isRunning && (
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 text-ink startup-activity-shimmer startup-activity-shimmer-text"
-            data-startup-activity-shimmer-text="Running command"
-          />
-        )}
-      </span>
-      {duration && (
-        <span className="shrink-0 font-mono text-xs tabular-nums text-muted/65">
-          in {duration}
-        </span>
-      )}
-      <CommandDetail command={command} detail={detail} tooltipId={`${panelId}-command`} />
-      <ChevronRight
-        className={`h-3 w-3 shrink-0 text-muted/45 transition-transform duration-150 motion-reduce:transition-none ${
-          open ? "rotate-90" : ""
-        }`}
-      />
-    </Button>
+      {!failureMeta && status.duration ? <NarrativeToolRowMeta>{status.duration}</NarrativeToolRowMeta> : null}
+      {commandDetail}
+      {failureMeta ? <NarrativeToolRowMeta>{failureMeta}</NarrativeToolRowMeta> : null}
+    </NarrativeToolRow>
   );
 }
 
@@ -163,10 +115,6 @@ function ShellToolCallTranscript({
   isRunning: boolean;
   panelId: string;
 }) {
-  const outputClassName = toolCall.isError
-    ? "text-[var(--diff-remove)]"
-    : "text-ink/75";
-
   return (
     <section
       id={panelId}
@@ -195,7 +143,7 @@ function ShellToolCallTranscript({
       {toolCall.output && (
         <div className="group/copy relative min-w-0">
           <ScrollArea horizontalScrollbar className="max-h-64 min-w-0" viewportClassName="max-h-64" viewportProps={{ "aria-label": "Command output", tabIndex: 0 }}>
-            <pre className={`w-max min-w-full whitespace-pre px-3 py-2 pr-12 font-mono text-xs leading-5 ${outputClassName}`}>
+            <pre className="w-max min-w-full whitespace-pre px-3 py-2 pr-12 font-mono text-xs leading-5 text-ink/75">
               {toolCall.output}
             </pre>
           </ScrollArea>
@@ -231,14 +179,13 @@ function useCollapsibleTranscriptPresence(open: boolean) {
   };
 }
 
-/** Renders a nested shell call that reveals a terminal-style command transcript. */
-export function ShellToolCallRow({ toolCall }: ShellToolCallRowProps) {
-  const [manualOpen, setManualOpen] = useState<boolean | null>(null);
+/** Renders a shell call that reveals a terminal-style command transcript on click. */
+export function ShellToolCallRow({ toolCall, expansion }: ShellToolCallRowProps) {
+  const { open, onToggle } = useRowExpansion(expansion);
   const panelId = useId();
   const command = extractNarrativeCommand(toolCall);
   const detail = command.replace(/\s+/g, " ").trim() || "Output";
   const status = shellToolCallStatus(toolCall);
-  const open = manualOpen ?? status.isRunning;
   const transcript = useCollapsibleTranscriptPresence(open);
 
   return (
@@ -246,13 +193,12 @@ export function ShellToolCallRow({ toolCall }: ShellToolCallRowProps) {
       <ShellToolCallHeader
         command={command}
         detail={detail}
-        duration={status.duration}
-        isRunning={status.isRunning}
-        iconClassName={status.iconClassName}
-        open={open}
-        panelId={panelId}
-        controlsId={transcript.present ? panelId : undefined}
-        onToggle={() => setManualOpen(!open)}
+        status={status}
+        disclosure={{
+          open,
+          onToggle,
+          controlsId: transcript.present ? panelId : undefined,
+        }}
       />
 
       <AnimatedCollapsible open={open} onTransitionEnd={transcript.onTransitionEnd}>

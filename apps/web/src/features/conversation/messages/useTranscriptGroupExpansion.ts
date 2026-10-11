@@ -6,11 +6,13 @@ export function useTranscriptGroupExpansion(initialExpanded: () => ReadonlySet<s
     const expanded = initialExpanded();
     return { expanded, present: expanded, entering: new Set<string>() };
   });
-  const toggle = useCallback((key: string) => {
+  /** Closing clears the linked keys too, since any of them holds the same disclosure open. */
+  const toggle = useCallback((key: string, linkedKeys: readonly string[] = []) => {
     setState((previous) => {
       const expanded = new Set(previous.expanded);
       const entering = new Set(previous.entering);
-      if (expanded.has(key)) expanded.delete(key);
+      const keys = [key, ...linkedKeys];
+      if (keys.some((open) => expanded.has(open))) for (const open of keys) expanded.delete(open);
       else {
         expanded.add(key);
         if (!previous.present.has(key)) entering.add(key);

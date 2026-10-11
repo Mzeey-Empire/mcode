@@ -62,8 +62,6 @@ describe("narrative tool row layout classes", () => {
     const commandPreview = within(button).getByText(LONG_SHELL_COMMAND);
     const user = userEvent.setup();
 
-    expect(button).toHaveAttribute("aria-expanded", "true");
-    fireEvent.click(button);
     expect(button).toHaveAttribute("aria-expanded", "false");
     expect(commandPreview).toHaveClass("text-fade");
     await user.hover(commandPreview);
@@ -97,7 +95,7 @@ describe("narrative tool row layout classes", () => {
     expect(screen.queryByText("approval-review-1")).toBeNull();
   });
 
-  it("ToolSummaryLine keeps shell calls nested and reveals a shell transcript", async () => {
+  it("ToolSummaryLine renders a lone shell call as its own row and reveals a shell transcript", async () => {
     const group: ToolGroup = {
       calls: [
         makeBashCall({
@@ -111,17 +109,14 @@ describe("narrative tool row layout classes", () => {
 
     const { container } = render(
       <div className={COLUMN_CLASS}>
-        <ToolSummaryLine group={group} hasError={false} hasCancelled={false} />
+        <ToolSummaryLine group={group} />
       </div>,
     );
 
-    const summary = screen.getByRole("button", { name: /Ran 1 command/ });
     expect(screen.getAllByRole("button")).toHaveLength(1);
-    fireEvent.click(summary);
-
     const child = screen.getByRole("button", { name: /Ran command/ });
     expect(child).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByText("in 15s")).toBeTruthy();
+    expect(within(child).getByText("0:15")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Shell output" })).toBeNull();
     const commandPreview = within(child).getByText(LONG_SHELL_COMMAND);
     expect(child.querySelector("[data-slot='tooltip-trigger']")).toBeNull();
@@ -138,11 +133,26 @@ describe("narrative tool row layout classes", () => {
     const detail = within(child).getByText(LONG_SHELL_COMMAND);
 
     expect(detail.className).toContain("text-fade");
-    expect(detail.closest("li")?.className).toContain("min-w-0");
     expect(screen.getByRole("region", { name: "Shell output" })).toBeTruthy();
     expect(screen.getByText("Shell")).toBeTruthy();
     expect(container.querySelector("code")?.textContent).toBe(LONG_SHELL_COMMAND);
     expect(screen.getByText("command output")).toBeTruthy();
+  });
+
+  it("keeps a lone shell transcript open across a virtual row remount", () => {
+    const group: ToolGroup = {
+      calls: [makeBashCall({ id: "tc-1", isComplete: true, output: "command output" })],
+    };
+    let open = false;
+    const virtualExpansion = { get open() { return open; }, onToggle: () => { open = !open; } };
+    const first = render(<ToolSummaryLine group={group} virtualExpansion={virtualExpansion} />);
+    fireEvent.click(screen.getByRole("button", { name: /Ran command/ }));
+    first.unmount();
+
+    render(<ToolSummaryLine group={group} virtualExpansion={virtualExpansion} />);
+
+    expect(screen.getByRole("button", { name: /Ran command/ })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("command output")).toBeVisible();
   });
 
   it("ToolSummaryLine shows the persisted approval review outcome", () => {
@@ -156,10 +166,9 @@ describe("narrative tool row layout classes", () => {
       })],
     };
 
-    render(<ToolSummaryLine group={group} hasError={false} hasCancelled={false} />);
+    render(<ToolSummaryLine group={group} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /approval review/i }));
-
+    expect(screen.getByText("Reviewed")).toBeVisible();
     expect(screen.getByText("Approved")).toBeVisible();
     expect(screen.queryByText("approval-review-1")).toBeNull();
   });
@@ -173,9 +182,7 @@ describe("narrative tool row layout classes", () => {
       })],
     };
 
-    render(<ToolSummaryLine group={group} hasError={false} hasCancelled={false} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /approval review/i }));
+    render(<ToolSummaryLine group={group} />);
 
     expect(screen.getByText("Reviewing")).toBeVisible();
     expect(screen.queryByText("approval-review-1")).toBeNull();
@@ -204,15 +211,14 @@ describe("narrative tool row layout classes", () => {
     if (items[0].type !== "tool-group") return;
 
     render(
-      <ToolSummaryLine group={items[0].group} hasError={false} hasCancelled={false} />,
+      <ToolSummaryLine group={items[0].group} />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Ran 1 command/ }));
     expect(screen.getByRole("button", { name: /Ran command/ })).toHaveAttribute(
       "aria-expanded",
       "false",
     );
-    expect(screen.getByText("in 15s")).toBeTruthy();
+    expect(screen.getByText("0:15")).toBeTruthy();
   });
 
   it("ToolSummaryLine maps command_execution to terminal icon via Bash alias", () => {
@@ -228,30 +234,20 @@ describe("narrative tool row layout classes", () => {
 
     const { container } = render(
       <div className={COLUMN_CLASS}>
-        <ToolSummaryLine group={group} hasError={false} hasCancelled={false} />
+        <ToolSummaryLine group={group} />
       </div>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Ran 1 command/ }));
     fireEvent.click(screen.getByRole("button", { name: /Ran command/ }));
     expect(container.querySelector(".lucide-terminal")).toBeTruthy();
     expect(screen.getByText("Ran command")).toBeTruthy();
   });
 
-  it("ToolSummaryLine renders cancelled status at the mono-data text size", () => {
-    const group: ToolGroup = {
-      calls: [makeBashCall()],
-    };
+  it("ToolSummaryLine renders a cancelled command in mono meta text", () => {
+    render(<ToolSummaryLine group={{ calls: [makeBashCall({ isComplete: true, isCancelled: true })] }} />);
 
-    render(
-      <div className={COLUMN_CLASS}>
-        <ToolSummaryLine group={group} hasError={false} hasCancelled />
-      </div>,
-    );
-
-    for (const badge of screen.getAllByText("cancelled")) {
-      expect(badge).toHaveClass("text-xs");
-    }
+    const row = screen.getByRole("button", { name: /Ran command/ });
+    expect(within(row).getByText("cancelled")).toHaveClass("font-mono", "text-xs", "text-muted");
   });
 
   it("does not round a sub-second shell duration up to one second", () => {
@@ -259,10 +255,9 @@ describe("narrative tool row layout classes", () => {
       calls: [makeBashCall({ isComplete: true, durationMs: 500 })],
     };
 
-    render(<ToolSummaryLine group={group} hasError={false} hasCancelled={false} />);
+    render(<ToolSummaryLine group={group} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Ran 1 command/ }));
-    expect(screen.getByRole("button", { name: /Ran command/ })).not.toHaveTextContent("in 1s");
+    expect(screen.getByRole("button", { name: /Ran command/ })).not.toHaveTextContent(/0:0[01]/);
   });
 
   it("shows cancelled for a persisted cancelled shell call", () => {
@@ -270,9 +265,8 @@ describe("narrative tool row layout classes", () => {
       calls: [makeBashCall({ isComplete: true, isCancelled: true })],
     };
 
-    render(<ToolSummaryLine group={group} hasError={false} hasCancelled />);
+    render(<ToolSummaryLine group={group} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Ran 1 command/ }));
     fireEvent.click(screen.getByRole("button", { name: /Ran command/ }));
     expect(screen.getAllByText("cancelled")).toHaveLength(2);
   });
@@ -290,10 +284,9 @@ describe("narrative tool row layout classes", () => {
     };
 
     const { container } = render(
-      <ToolSummaryLine group={group} hasError={false} hasCancelled={false} />,
+      <ToolSummaryLine group={group} />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Ran 1 command/ }));
     fireEvent.click(screen.getByRole("button", { name: /Ran command/ }));
     expect(container.querySelector("code")?.textContent).toBe(LONG_SHELL_COMMAND);
     expect(container.textContent).not.toContain('{"command"');
@@ -313,10 +306,9 @@ describe("narrative tool row layout classes", () => {
     };
 
     const { container } = render(
-      <ToolSummaryLine group={group} hasError={false} hasCancelled={false} />,
+      <ToolSummaryLine group={group} />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Ran 1 command/ }));
     fireEvent.click(screen.getByRole("button", { name: /Ran command/ }));
     const command = container.querySelector("code")?.textContent ?? "";
     expect(command).toMatch(/^cd "C:\\Users\\cjnwo/);
@@ -340,11 +332,10 @@ describe("narrative tool row layout classes", () => {
 
     render(
       <div className={COLUMN_CLASS}>
-        <ToolSummaryLine group={group} hasError={false} hasCancelled={false} />
+        <ToolSummaryLine group={group} />
       </div>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Ran 1 command/ }));
     fireEvent.click(screen.getByRole("button", { name: /Ran command/ }));
 
     const notice = screen.getByText(/Output truncated/);
@@ -367,12 +358,11 @@ describe("narrative tool row layout classes", () => {
     };
 
     render(
-      <ToolSummaryLine group={group} hasError={true} hasCancelled={false} />,
+      <ToolSummaryLine group={group} />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Ran 1 command/ }));
     const child = screen.getByRole("button", { name: /Ran command/ });
-    expect(child).not.toHaveTextContent("errored");
+    expect(child).toHaveTextContent(/exit 1$/);
     fireEvent.click(child);
 
     const panel = screen.getByRole("region", { name: "Shell output" });
@@ -381,5 +371,70 @@ describe("narrative tool row layout classes", () => {
     expect(exitCode).toHaveClass("text-muted");
     expect(exitCode).toHaveAttribute("role", "status");
     expect(exitCode.closest("footer")).toHaveClass("justify-end");
+  });
+
+  it.each(["file_change", "apply_patch", "Edit"])("reads a lone failed %s as Edit failed with its file", (toolName) => {
+    const { container } = render(
+      <ToolSummaryLine
+        group={{
+          calls: [makeBashCall({
+            toolName,
+            toolInput: { file_path: "src/app/config.ts" },
+            output: "patch did not apply",
+            isComplete: true,
+            isError: true,
+          })],
+        }}
+      />,
+    );
+
+    const row = screen.getByRole("button", { name: /^Edit failed/ });
+    expect(row).toHaveTextContent(/^Edit failedconfig\.ts$/);
+    expect(container.querySelector(".lucide-pencil")).toBeTruthy();
+    expect(screen.queryByText("patch did not apply")).toBeNull();
+    fireEvent.click(row);
+    expect(screen.getByText("patch did not apply")).not.toHaveClass("text-[var(--diff-remove)]");
+  });
+
+  it("names a single Codex file change by its file", () => {
+    render(<ToolSummaryLine group={{ calls: [makeBashCall({ toolName: "file_change", toolInput: { files: "src\\lib\\time.ts" }, isComplete: true })] }} />);
+
+    expect(screen.getByText("Edited file").parentElement).toHaveTextContent(/^Edited filetime\.ts$/);
+  });
+
+  it("names a persisted file change by the file in its stored summary", () => {
+    render(<ToolSummaryLine group={{ calls: [makeBashCall({ toolName: "file_change", toolInput: { _summary: "F:\\dev\\fixture-repo\\README.md" }, isComplete: true })] }} />);
+
+    expect(screen.getByText("Edited file").parentElement).toHaveTextContent(/^Edited fileREADME\.md$/);
+  });
+
+  it("does not read a path out of an older truncated JSON summary", () => {
+    const path = "F:\\dev\\worktrees\\t3\\mcode\\t3-49c74bf1\\.dev\\fixture-repo\\README.md";
+    const _summary = JSON.stringify({ files: path, changes: [{ path, kind: { type: "update" } }] }).slice(0, 200);
+    render(<ToolSummaryLine group={{ calls: [makeBashCall({ toolName: "file_change", toolInput: { _summary }, isComplete: true })] }} />);
+
+    expect(screen.getByText("Edited file").parentElement).toHaveTextContent(/^Edited filefile_change$/);
+  });
+
+  it("summarizes several calls with their failures and lists each on open", () => {
+    render(
+      <ToolSummaryLine
+        group={{
+          calls: [
+            makeBashCall({ id: "read-1", toolName: "Read", toolInput: { file_path: "a.ts" }, isComplete: true }),
+            makeBashCall({ id: "read-2", toolName: "Read", toolInput: { file_path: "b.ts" }, isComplete: true, isError: true }),
+          ],
+        }}
+      />,
+    );
+
+    // jsdom drops the count's leading space from the name; Chromium keeps it.
+    const summary = screen.getByRole("button", { name: /^Read 2 files ?· 1 failed$/ });
+    expect(summary).toHaveAttribute("aria-expanded", "false");
+    expect(within(summary).getByText("Read 2 files")).toHaveClass("text-fade");
+    expect(within(summary).getByText("· 1 failed")).toHaveClass("shrink-0");
+    fireEvent.click(summary);
+    expect(screen.getByText("Read file")).toBeVisible();
+    expect(screen.getByText("Read failed")).toBeVisible();
   });
 });

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import {
   TOOL_ICONS,
   TOOL_LABELS,
+  TOOL_OUTCOME_VERBS,
   DEFAULT_ICON,
   buildToolSummaryText,
   resolveToolName,
@@ -11,189 +12,163 @@ import {
 import type { ToolCall } from "@/transport/types";
 import type { ToolGroup } from "./types";
 import { extractToolInputDetail } from "./tool-detail";
-import { NARRATIVE_TOOL_ROW, narrativeToolDetailClass } from "./narrative-layout";
+import { GroupSummaryLabel, type ToolCallOutcome, toolCallOutcome } from "./GroupSummaryLabel";
 import { ToolOutputTruncationNotice } from "./ToolOutputTruncationNotice";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ShellToolCallRow } from "./ShellToolCallRow";
+import { NarrativeToolRow, NarrativeToolRowDetail, useRowExpansion, type RowExpansion } from "./NarrativeToolRow";
 import {
   BrowserActivitySummary,
   isBrowserNarrativeCall,
 } from "./BrowserActivityRow";
-import { NarrativeSummaryLine } from "./NarrativeSummaryLine";
 
 interface ToolSummaryLineProps {
   /** Keeps expansion in the owning viewport when children are separate virtual rows. */
-  virtualExpansion?: { readonly open: boolean; readonly onToggle: () => void };
+  virtualExpansion?: RowExpansion;
   /** The group of consecutive tool calls to summarize. */
   group: ToolGroup;
-  /** Whether any call in the group errored. */
-  hasError: boolean;
-  /** Whether any call in the group was cancelled. */
-  hasCancelled: boolean;
 }
 
-/**
- * Returns the worst-status badge variant for a single tool call.
- * Errored calls take priority over cancelled (incomplete + error) calls.
- */
-function getCallStatus(tc: ToolCall): "completed" | "errored" | "cancelled" {
-  if (tc.isError) return "errored";
-  if (tc.isCancelled || !tc.isComplete) return "cancelled";
-  return "completed";
+function toolCallLabel(toolCall: ToolCall, outcome: ToolCallOutcome): string {
+  const canonicalName = resolveToolName(toolCall.toolName);
+  if (outcome === "completed") return TOOL_LABELS[canonicalName] ?? toolCall.toolName;
+  return `${TOOL_OUTCOME_VERBS[canonicalName] ?? toolCall.toolName} ${outcome}`;
 }
 
-interface StatusBadgeProps {
-  /** The status variant to render. */
-  status: "completed" | "errored" | "cancelled";
-}
-
-/**
- * Small monospace badge showing the outcome of a tool call.
- */
-function StatusBadge({ status }: StatusBadgeProps) {
-  const styles: Record<string, string> = {
-    completed:
-      "bg-[var(--diff-add)]/15 text-[var(--diff-add)]",
-    errored:
-      "bg-[var(--diff-remove)]/15 text-[var(--diff-remove)]",
-    cancelled:
-      "bg-muted/18 text-muted",
-  };
+function ApprovalReviewRow({ toolCall }: { toolCall: ToolCall }) {
+  const outcome = toolCallOutcome(toolCall);
+  const label = !toolCall.isComplete ? "Reviewing" : outcome === "failed" ? "Review failed" : "Reviewed";
   return (
-    <span
-      className={`rounded-sm px-1.5 py-px font-mono text-xs font-medium ${styles[status]}`}
+    <NarrativeToolRow icon={DEFAULT_ICON} label={label}>
+      {toolCall.output ? <NarrativeToolRowDetail kind="file">{toolCall.output}</NarrativeToolRowDetail> : null}
+    </NarrativeToolRow>
+  );
+}
+
+/** A failed call's output is the only thing worth disclosing for a non-shell row. */
+function FailedToolCallOutput({ toolCall, panelId }: { toolCall: ToolCall; panelId: string }) {
+  return (
+    <section
+      id={panelId}
+      aria-label="Tool output"
+      className="mt-1 flex min-w-0 max-w-full flex-col gap-1 overflow-hidden rounded-lg border border-border/60 bg-hover/25 px-3 py-2"
     >
-      {status}
-    </span>
+      <ToolOutputTruncationNotice toolCall={toolCall} />
+      <pre className="max-h-40 max-w-full overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-ink/75">
+        {toolCall.output}
+      </pre>
+    </section>
   );
 }
 
-function ApprovalReviewDetailRow({ toolCall }: { toolCall: ToolCall }) {
-  const detail = toolCall.isComplete ? toolCall.output || "Review complete" : "Reviewing";
-  const status = getCallStatus(toolCall);
+function GenericToolCallRow({ toolCall, expansion }: { toolCall: ToolCall; expansion?: RowExpansion }) {
+  const { open, onToggle } = useRowExpansion(expansion);
+  const panelId = useId();
+  const outcome = toolCallOutcome(toolCall);
+  const Icon = TOOL_ICONS[resolveToolName(toolCall.toolName)] ?? DEFAULT_ICON;
+  const detail = extractToolInputDetail(toolCall);
+  const hasFailureOutput = outcome === "failed" && Boolean(toolCall.output);
 
   return (
-    <li className="flex min-w-0 max-w-full flex-col gap-1 py-1">
-      <div className={`${NARRATIVE_TOOL_ROW} text-sm`}>
-        <DEFAULT_ICON className="size-3.5 shrink-0 text-muted/75" />
-        <span className={narrativeToolDetailClass("md")}>{detail}</span>
-        {status !== "completed" ? <StatusBadge status={status} /> : null}
-      </div>
-    </li>
+    <div className="min-w-0 max-w-full">
+      <NarrativeToolRow
+        icon={Icon}
+        label={toolCallLabel(toolCall, outcome)}
+        disclosure={hasFailureOutput
+          ? { open, onToggle, controlsId: open ? panelId : undefined }
+          : undefined}
+      >
+        <NarrativeToolRowDetail kind="file">{detail}</NarrativeToolRowDetail>
+      </NarrativeToolRow>
+      {hasFailureOutput && open ? <FailedToolCallOutput toolCall={toolCall} panelId={panelId} /> : null}
+    </div>
   );
+}
+
+/** Renders one tool call as its own collapsed row. */
+export function ToolCallRow({ toolCall, expansion }: { toolCall: ToolCall; expansion?: RowExpansion }) {
+  if (toolCall.toolName === "Approval review") return <ApprovalReviewRow toolCall={toolCall} />;
+  if (isShellTool(toolCall.toolName)) return <ShellToolCallRow toolCall={toolCall} expansion={expansion} />;
+  return <GenericToolCallRow toolCall={toolCall} expansion={expansion} />;
+}
+
+/**
+ * Whether a group renders as its lone call's own row. Such a group discloses
+ * that call's output in place, so it never lists children as separate rows.
+ */
+export function rendersAsSingleCallRow(calls: readonly ToolCall[]): boolean {
+  return calls.length === 1 && !calls.some(isBrowserNarrativeCall);
 }
 
 /** Renders one completed tool call inside a semantic list. */
-export function ToolCallDetailRow({ toolCall: tc }: { toolCall: ToolCall }) {
-  if (tc.toolName === "Approval review") return <ApprovalReviewDetailRow toolCall={tc} />;
-  if (isShellTool(tc.toolName)) return (
-    <li className="min-w-0 max-w-full">
-      <ShellToolCallRow toolCall={tc} />
-    </li>
-  );
-
-  const canonicalName = resolveToolName(tc.toolName);
-  const Icon = TOOL_ICONS[canonicalName] ?? DEFAULT_ICON;
-  const label = TOOL_LABELS[canonicalName] ?? tc.toolName;
-  const detail = extractToolInputDetail(tc);
-  const status = getCallStatus(tc);
-
+export function ToolCallDetailRow({ toolCall, expansion }: { toolCall: ToolCall; expansion?: RowExpansion }) {
   return (
-    <li className="flex min-w-0 max-w-full flex-col gap-1 py-1">
-      <div className={`${NARRATIVE_TOOL_ROW} text-sm`}>
-        <Icon className="size-3.5 shrink-0 text-muted/75" />
-        <span className="shrink-0 font-medium text-ink/65">{label}</span>
-        <Tooltip>
-          <TooltipTrigger
-            render={<span className={narrativeToolDetailClass("md")}>{detail}</span>}
-          />
-          <TooltipContent>{detail}</TooltipContent>
-        </Tooltip>
-        {status !== "completed" ? <StatusBadge status={status} /> : null}
-      </div>
-      {tc.isError && tc.output ? (
-        <div className="flex min-w-0 max-w-full flex-col gap-1">
-          <ToolOutputTruncationNotice toolCall={tc} />
-          <pre className="max-h-40 max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded bg-[var(--diff-remove)]/10 px-2 py-1 font-mono text-sm text-[var(--diff-remove)]">
-            {tc.output}
-          </pre>
-        </div>
-      ) : null}
+    <li className="min-w-0 max-w-full">
+      <ToolCallRow toolCall={toolCall} expansion={expansion} />
     </li>
   );
 }
 
+function ToolGroupRow({ calls, open, onToggle, listsChildren }: {
+  calls: readonly ToolCall[];
+  open: boolean;
+  onToggle: () => void;
+  /** False when the owning viewport renders the children as its own rows. */
+  listsChildren: boolean;
+}) {
+  const firstCall = calls[0];
+  const LeadingIcon = firstCall ? (TOOL_ICONS[resolveToolName(firstCall.toolName)] ?? DEFAULT_ICON) : DEFAULT_ICON;
+  return (
+    <>
+      <NarrativeToolRow icon={LeadingIcon} label={<GroupSummaryLabel text={buildToolSummaryText(calls)} calls={calls} />} disclosure={{ open, onToggle }} />
+      {open && listsChildren ? (
+        <AnimatedCollapsible open>
+          <ul className="mt-1 min-w-0 max-w-full space-y-1 pb-2 pl-6">
+            {calls.map((call) => <ToolCallDetailRow key={call.id} toolCall={call} />)}
+          </ul>
+        </AnimatedCollapsible>
+      ) : null}
+    </>
+  );
+}
+
 /**
- * Renders a compact one-liner summarizing a group of consecutive tool calls.
+ * Renders a group of consecutive tool calls as one collapsed row.
  *
- * The collapsed state shows a leading icon, summary text (e.g. "Read 3 files,
- * 1 search"), an optional worst-status badge, and a chevron. Clicking the row
- * expands an indented list of individual tool calls with per-call icons,
- * labels, detail text, status badges, and optional inline output blocks.
+ * A lone call is its own row, so a single edit reads "Edited file" and a lone
+ * command keeps its transcript. Several calls collapse into a summary such as
+ * "Read 3 files · 1 failed" that expands into one row per call.
  */
-export function ToolSummaryLine(props: ToolSummaryLineProps) {
+export function ToolSummaryLine({ group, virtualExpansion }: ToolSummaryLineProps) {
   const [localOpen, setOpen] = useState(false);
-  const open = props.virtualExpansion?.open ?? localOpen;
-  const onToggle = props.virtualExpansion?.onToggle ?? (() => setOpen((previous) => !previous));
-  if (props.group.calls.some(isBrowserNarrativeCall)) {
+  const { calls } = group;
+
+  if (calls.some(isBrowserNarrativeCall)) {
     return (
       <BrowserActivitySummary
-        calls={props.group.calls}
-        virtualExpansion={props.virtualExpansion}
+        calls={calls}
+        virtualExpansion={virtualExpansion}
         renderOtherCall={(call) => <ToolCallDetailRow key={call.id} toolCall={call} />}
       />
     );
   }
-  return <ToolGroupDetails {...props} open={open} onToggle={onToggle} />;
-}
 
-function ToolGroupDetails({
-  group,
-  hasError,
-  hasCancelled,
-  virtualExpansion,
-  open,
-  onToggle,
-}: ToolSummaryLineProps & { open: boolean; onToggle: () => void }) {
-  const firstCall = group.calls[0];
-  const LeadingIcon = firstCall
-    ? (TOOL_ICONS[resolveToolName(firstCall.toolName)] ?? DEFAULT_ICON)
-    : DEFAULT_ICON;
-
-  const summaryText = buildToolSummaryText(group.calls);
-
-  const worstBadge: "errored" | "cancelled" | null = hasError
-    ? "errored"
-    : hasCancelled
-    ? "cancelled"
-    : null;
-
+  const [firstCall] = calls;
   return (
     <div
-      className="min-w-0 max-w-full rounded-md"
-      data-first-tool-call-id={group.calls[0]?.id}
-      data-last-tool-call-id={group.calls[group.calls.length - 1]?.id}
+      className="min-w-0 max-w-full"
+      data-first-tool-call-id={firstCall?.id}
+      data-last-tool-call-id={calls.at(-1)?.id}
     >
-      {/* Summary row */}
-      <NarrativeSummaryLine
-        open={open}
-        onToggle={onToggle}
-        icon={<LeadingIcon className="h-3 w-3 shrink-0 text-muted/55" />}
-        badge={worstBadge ? <StatusBadge status={worstBadge} /> : undefined}
-      >
-        <span className="min-w-0 flex-1 text-fade font-medium text-ink/75">
-          {summaryText}
-        </span>
-      </NarrativeSummaryLine>
-
-      {/* Expanded detail list */}
-      {open && !virtualExpansion ? (
-        <AnimatedCollapsible open>
-          <ul className="mt-1 min-w-0 max-w-full space-y-1 pb-2 pl-6">
-            {group.calls.map((tc) => <ToolCallDetailRow key={tc.id} toolCall={tc} />)}
-          </ul>
-        </AnimatedCollapsible>
-      ) : null}
+      {rendersAsSingleCallRow(calls) && firstCall ? (
+        <ToolCallRow toolCall={firstCall} expansion={virtualExpansion} />
+      ) : (
+        <ToolGroupRow
+          calls={calls}
+          open={virtualExpansion?.open ?? localOpen}
+          onToggle={virtualExpansion?.onToggle ?? (() => setOpen((previous) => !previous))}
+          listsChildren={!virtualExpansion}
+        />
+      )}
     </div>
   );
 }

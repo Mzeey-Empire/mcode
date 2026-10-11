@@ -54,11 +54,22 @@ const SHELL_TOOL_ALIASES: Record<string, "Bash"> = {
 };
 
 /**
- * Maps provider-specific shell tool names to the canonical `Bash` label/icon set.
+ * Provider file-edit tool names normalized to `Edit` so edits get the pencil.
+ * Codex reports `file_change` items and `apply_patch` calls; Cursor ACP edit
+ * kinds already arrive as `Edit`.
+ */
+const EDIT_TOOL_ALIASES: Record<string, "Edit"> = {
+  file_change: "Edit",
+  fileChange: "Edit",
+  apply_patch: "Edit",
+};
+
+/**
+ * Maps provider-specific shell and edit tool names to the canonical label/icon set.
  */
 export function resolveToolName(toolName: string): string {
   const browserTool = toolName.match(/(?:^|__)(browser_[a-z_]+)$/)?.[1];
-  return SHELL_TOOL_ALIASES[toolName] ?? browserTool ?? toolName;
+  return SHELL_TOOL_ALIASES[toolName] ?? EDIT_TOOL_ALIASES[toolName] ?? browserTool ?? toolName;
 }
 
 /** Returns true when the tool is a shell/command execution (any provider alias). */
@@ -81,6 +92,18 @@ export const TOOL_PHASE_LABELS: Record<string, string> = {
   browser_act: "Acting on the page",
   browser_tabs: "Updating Browser tabs",
   browser_evaluate: "Evaluating the page",
+};
+
+/** Verbs for one call that did not finish, as in "Edit failed". */
+export const TOOL_OUTCOME_VERBS: Record<string, string> = {
+  Glob: "List",
+  Grep: "Search",
+  Read: "Read",
+  Edit: "Edit",
+  Write: "Write",
+  Bash: "Command",
+  WebSearch: "Web search",
+  WebFetch: "Fetch",
 };
 
 /** Singular/plural labels for tool summary text generation. */

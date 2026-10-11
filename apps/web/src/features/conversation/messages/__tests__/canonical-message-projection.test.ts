@@ -94,6 +94,27 @@ describe("projectCanonicalMessageList", () => {
     });
   });
 
+  it("does not count a task-list write as a step", () => {
+    const state = createAgentModelState();
+    state.turns[TURN_ID] = turn("Completed", "2026-08-18T12:00:05.000Z");
+    const answer = message({ id: "answer", role: "assistant", sequence: 1 });
+    state.items.answer = item("answer", "message", { projection: "message", message: answer }, STARTED_AT);
+    for (const [id, toolName] of [["todo", "TodoWrite"], ["read", "Read"]] as const) {
+      state.items[id] = item(id, "tool-call", {
+        projection: "toolCall",
+        record: {
+          id, message_id: answer.id, parent_tool_call_id: null, tool_name: toolName,
+          input_summary: "{}", output_summary: "done", status: "completed",
+          started_at: STARTED_AT, completed_at: STARTED_AT, sort_order: 0,
+        },
+      }, STARTED_AT);
+    }
+    const projection = projectCanonicalMessageList({
+      threadId: THREAD_ID, state, messages: [answer], toolCalls: [], thoughtSegments: [],
+    });
+    expect(projection?.turnSummariesByMessageId.answer?.counts.steps).toBe(1);
+  });
+
   it("projects active child reasoning and a completed tool into shared timeline inputs", () => {
     const state = createAgentModelState();
     state.turns[TURN_ID] = turn("Running");
