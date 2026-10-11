@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Globe, Terminal, Files, Diff, FileText, Layers, Network, Settings } from "lucide-react";
+import { Globe, Terminal, Files, Diff, FileText, Layers, Settings } from "lucide-react";
 import type { RightPanelTab } from "@/stores/diffStore";
 
 /**
@@ -114,13 +114,6 @@ export const PANEL_TAB_TYPES: readonly PanelTabType[] = [
     label: "Subagents",
     icon: Layers,
     blurb: "Follow delegated work",
-    needsThread: true,
-  },
-  {
-    id: "coordination",
-    label: "Coordination",
-    icon: Network,
-    blurb: "Coordinate across Projects",
     needsThread: true,
   },
 ];

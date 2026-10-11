@@ -1,4 +1,6 @@
 import { useApprovalStore } from "@/stores/approvalStore";
+import { act, renderHook } from "@testing-library/react";
+import { useMessageListData } from "@/features/conversation/messages/useMessageListData";
 import { createMockApproval } from "@/__tests__/mocks/transport";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ThreadStartup } from "@mcode/contracts";
@@ -18,7 +20,6 @@ import { startPushListeners, stopPushListeners } from "./ws-events";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useProviderCatalogStore } from "@/stores/providerCatalogStore";
 import { useDiffStore } from "@/stores/diffStore";
-import { useThreadControlStore } from "@/stores/threadControlStore";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 import { onPtyExit } from "@/features/terminal/adapters/pty-data-registry";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
@@ -311,27 +312,6 @@ describe("ws-events skills.changed", () => {
   });
 });
 
-describe("ws-events thread.controlChanged", () => {
-  afterEach(() => {
-    stopPushListeners();
-    vi.restoreAllMocks();
-  });
-
-  it("invalidates only the caller-bound Project/Thread identity", () => {
-    const refresh = vi.spyOn(useThreadControlStore.getState(), "refreshByThreadId").mockResolvedValue(undefined);
-    startPushListeners();
-
-    pushEmitter.emit("thread.controlChanged", {
-      workspaceId: "workspace-2",
-      threadId: "thread-2",
-      state: { status: "running" },
-    });
-
-    expect(refresh).toHaveBeenCalledOnce();
-    expect(refresh).toHaveBeenCalledWith("thread-2", "workspace-2");
-  });
-});
-
 describe("ws-events provider.catalogChanged", () => {
   afterEach(() => {
     stopPushListeners();
@@ -351,27 +331,33 @@ describe("ws-events provider.catalogChanged", () => {
 describe("ws-events approval.requested", () => {
   it.each(["approval.requested", "approval.resolved"] as const)("logs and drops malformed %s without changing state", (channel) => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const refresh = vi.spyOn(useThreadControlStore.getState(), "refreshByThreadId").mockResolvedValue(undefined);
-    const rehydrate = vi.spyOn(useThreadControlStore.getState(), "rehydrate").mockResolvedValue(undefined);
     const request = createMockApproval({ requestId: "pending", threadId: "thread-1" });
     useApprovalStore.setState({ approvals: [{ ...request, settled: false }], revision: 0 });
     const before = useApprovalStore.getState();
     startPushListeners();
     expect(() => pushEmitter.emit(channel, { requestId: "pending", secret: "private" })).not.toThrow();
     expect(useApprovalStore.getState()).toBe(before);
-    expect(refresh.mock.calls).toEqual([]);
-    expect(rehydrate.mock.calls).toEqual([]);
     expect(warn.mock.calls).toEqual([[`[ws-events] dropped invalid ${channel} message`]]);
   });
 
-  it("refreshes the owner and target of a thread operation", () => {
-    const refresh = vi.spyOn(useThreadControlStore.getState(), "refreshByThreadId").mockResolvedValue(undefined);
-    const request = createMockApproval({ threadId: "owner", subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "target", message: "Hello" } });
+  it("shows a cross-thread send approval only in the owner's dock", () => {
+    const request = createMockApproval({ requestId: "approval-send", threadId: "thread-A", subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "thread-B", message: "Needs approval." } });
     useApprovalStore.setState({ approvals: [], revision: 0 });
     startPushListeners();
-    pushEmitter.emit("approval.requested", request);
-    expect(refresh.mock.calls).toEqual([["owner"], ["target"]]);
-    expect(useApprovalStore.getState().approvals).toEqual([{ ...request, settled: false }]);
+    const owner = renderHook(() => useMessageListData("thread-A"));
+    const target = renderHook(() => useMessageListData("thread-B"));
+    expect(owner.result.current.permissions).toEqual([]);
+    expect(target.result.current.permissions).toEqual([]);
+
+    act(() => pushEmitter.emit("approval.requested", request));
+
+    expect(owner.result.current.permissions.map(({ requestId, threadId, subject, settled }) => ({ requestId, threadId, subject, settled }))).toEqual([{
+      requestId: "approval-send",
+      threadId: "thread-A",
+      subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "thread-B", message: "Needs approval." },
+      settled: false,
+    }]);
+    expect(target.result.current.permissions).toEqual([]);
   });
 
   afterEach(() => {

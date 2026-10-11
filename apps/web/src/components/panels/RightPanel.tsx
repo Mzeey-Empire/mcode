@@ -87,7 +87,6 @@ export function reconcileWarmPreviewScopes(
     : result;
 }
 import { SubagentsPanel } from "@/features/subagents";
-import { CoordinationPanel } from "./CoordinationPanel";
 import { ProjectActionTerminalView, ProjectEnvironmentPanel } from "@/features/projects/environment";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 
@@ -661,12 +660,6 @@ function RightPanelContent({
         />
         <PlanPanelContent activeTab={renderedActiveTab} openTabs={renderedOpenTabs} threadId={activeThreadId} />
         <SubagentsPanelContent activeTab={renderedActiveTab} openTabs={renderedTabInstances} threadId={activeThreadId} />
-        <CoordinationPanelContent
-          activeTab={renderedActiveTab}
-          openTabs={renderedOpenTabs}
-          threadId={activeThreadId}
-          workspaceId={activeWorkspaceId}
-        />
         <EnvironmentPanelContent
           activeTab={renderedActiveTab}
           openTabs={renderedOpenTabs}
@@ -734,21 +727,6 @@ function SubagentsPanelContent({
     return null;
   }
   return <SubagentsPanel key={threadId} threadId={threadId} />;
-}
-
-function CoordinationPanelContent({
-  activeTab,
-  openTabs,
-  threadId,
-  workspaceId,
-}: {
-  readonly activeTab: string | null;
-  readonly openTabs: ReturnType<typeof projectRightPanelForScope>["openTabs"];
-  readonly threadId: string | null;
-  readonly workspaceId: string;
-}) {
-  if (activeTab !== "coordination" || !openTabs.includes("coordination") || !threadId) return null;
-  return <CoordinationPanel key={threadId} workspaceId={workspaceId} threadId={threadId} />;
 }
 
 function EnvironmentPanelContent({

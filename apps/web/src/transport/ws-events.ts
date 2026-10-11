@@ -23,7 +23,6 @@ import { useProviderModelsStore } from "@/stores/providerModelsStore";
 import { usePlanStore } from "@/stores/planStore";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 import { emitPtyData, emitPtyExit } from "@/features/terminal/adapters/pty-data-registry";
-import { useThreadControlStore } from "@/stores/threadControlStore";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useThreadStartupStore } from "@/features/thread-startup";
 import { invalidateBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";
@@ -227,7 +226,6 @@ export function startPushListeners(): void {
 
       const isTerminal =
         status === "paused" || status === "interrupted" || status === "errored";
-      void useThreadControlStore.getState().refreshByThreadId(threadId);
       if (!isTerminal) return;
       useThreadStore.setState((state) => {
         const calls = getThreadRecord(state.records, threadId).toolCalls;
@@ -256,16 +254,6 @@ export function startPushListeners(): void {
       const parsed = WS_CHANNELS["thread.startup.updated"].safeParse(data);
       if (!parsed.success) return;
       useThreadStartupStore.getState().apply(parsed.data);
-    }),
-  );
-
-  // Coordination writes use a dedicated invalidation channel so the panel
-  // always re-reads persisted lineage, provenance, lifecycle, and approvals.
-  unsubs.push(
-    pushEmitter.on("thread.controlChanged", (data) => {
-      const parsed = WS_CHANNELS["thread.controlChanged"].safeParse(data);
-      if (!parsed.success) return;
-      void useThreadControlStore.getState().refreshByThreadId(parsed.data.threadId, parsed.data.workspaceId);
     }),
   );
 
@@ -602,10 +590,6 @@ export function startPushListeners(): void {
       }
       const request = parsed.data;
       useApprovalStore.getState().add(request);
-      void useThreadControlStore.getState().refreshByThreadId(request.threadId);
-      if (request.subject.kind === "thread_operation" && request.subject.targetThreadId !== request.threadId) {
-        void useThreadControlStore.getState().refreshByThreadId(request.subject.targetThreadId);
-      }
     }),
   );
 
@@ -618,7 +602,6 @@ export function startPushListeners(): void {
         return;
       }
       const { requestId } = parsed.data;
-      void useThreadControlStore.getState().rehydrate();
       if (!requestId) return;
       useApprovalStore.getState().resolve(requestId);
     }),
