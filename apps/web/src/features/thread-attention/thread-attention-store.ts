@@ -6,6 +6,11 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 /** A thread must remain focused and visible this long before its rendered outcome is seen. */
 export const ACKNOWLEDGE_SEEN_DWELL_MS = 150;
 
+/** Whether the user is looking at this Mcode window: visible and holding focus. */
+export function isWindowFocused(): boolean {
+  return document.visibilityState === "visible" && document.hasFocus();
+}
+
 interface ThreadAttentionState {
   byThreadId: Record<string, ThreadAttention>;
   visitBaselines: Record<string, number | null>;
@@ -100,7 +105,7 @@ export const threadAttentionStore = create<ThreadAttentionState>((set, get) => {
           return { visitBaselines };
         });
       }
-      const visible = document.visibilityState === "visible" && document.hasFocus() ? threadId : null;
+      const visible = isWindowFocused() ? threadId : null;
       if (onScreen === visible && rendered === sequence) return;
       if (onScreen !== visible) set({ onScreenThreadId: visible });
       onScreen = visible;
@@ -110,7 +115,7 @@ export const threadAttentionStore = create<ThreadAttentionState>((set, get) => {
       if (visible === null || sequence === null) return;
       timer = setTimeout(() => {
         timer = undefined;
-        if (onScreen === visible && document.visibilityState === "visible" && document.hasFocus()) {
+        if (onScreen === visible && isWindowFocused()) {
           void acknowledge(visible, sequence);
         }
       }, ACKNOWLEDGE_SEEN_DWELL_MS);
