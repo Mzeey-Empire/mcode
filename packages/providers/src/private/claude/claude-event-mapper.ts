@@ -27,6 +27,10 @@ export interface ClaudeEventEvidence {
   nativeEventId?: string;
 }
 const MAX_TRACKED_TOOLS = 4_096;
+/** Contract bound on one `reasoningDelta` text. */
+const MAX_REASONING_DELTA_LENGTH = 65_536;
+// Leaves room for the ":thinking:<index>" suffix inside the contract's 256-char item id bound.
+const MAX_REASONING_MESSAGE_KEY = 200;
 /**
  * Error results the Claude CLI synthesizes when a user interrupt ends a running
  * tool. They report a cancel, not a tool failure.
@@ -93,6 +97,10 @@ export class ClaudeEventMapper {
   private compacting = false;
   private readonly toolUseIds = new Set<string>();
   private readonly toolParents = new Map<string, ClaudeParentEvidence>();
+  /** Open thinking content-block index to its reasoning item id, for the message currently streaming. */
+  private readonly reasoningItemByBlock = new Map<number, string>();
+  private reasoningMessageKey: string | undefined;
+  private reasoningMessageOrdinal = 0;
   private nativeSource: Message = {};
   private readonly handlers: ReadonlyMap<
     string,
@@ -153,6 +161,8 @@ export class ClaudeEventMapper {
   resetExecution(): void {
     this.toolUseIds.clear();
     this.toolParents.clear();
+    this.reasoningItemByBlock.clear();
+    this.reasoningMessageKey = undefined;
     this.lastAssistantText = "";
     this.lastInputTokens = undefined;
     this.nativeSource = {};
@@ -515,11 +525,51 @@ export class ClaudeEventMapper {
   private streamEvent(message: Message): ClaudeMapOutcome {
     const event = objectValue(message.event);
     const usage = (event.message as { usage?: Usage } | undefined)?.usage;
+    if (event.type === "message_start") this.startReasoningMessage(event);
     if (event.type === "message_start" && usage)
       this.emitContextEstimate(usage);
+    if (event.type === "content_block_start") this.openReasoningBlock(event);
     if (event.type === "content_block_delta")
-      this.emitDelta(objectValue(event.delta));
+      this.emitDelta(objectValue(event.delta), event.index);
+    if (event.type === "content_block_stop") this.closeReasoningBlock(event.index);
     return "none";
+  }
+  private startReasoningMessage(event: Message): void {
+    this.reasoningItemByBlock.clear();
+    const messageId = validIdentity(objectValue(event.message).id);
+    this.reasoningMessageKey = messageId && messageId.length <= MAX_REASONING_MESSAGE_KEY
+      ? messageId : `message-${++this.reasoningMessageOrdinal}`;
+  }
+  /** Thinking and redacted thinking open a row at the block's true start; redacted blocks never carry text. */
+  private openReasoningBlock(event: Message): void {
+    const type = objectValue(event.content_block).type;
+    if ((type !== "thinking" && type !== "redacted_thinking") || typeof event.index !== "number") return;
+    this.reasoningMessageKey ??= `message-${++this.reasoningMessageOrdinal}`;
+    const reasoningItemId = `${this.reasoningMessageKey}:thinking:${event.index}`;
+    this.reasoningItemByBlock.set(event.index, reasoningItemId);
+    this.emitReasoningDelta("", reasoningItemId);
+  }
+  private closeReasoningBlock(index: unknown): void {
+    if (typeof index !== "number") return;
+    const reasoningItemId = this.reasoningItemByBlock.get(index);
+    if (!reasoningItemId) return;
+    this.reasoningItemByBlock.delete(index);
+    this.emitReasoningDelta("", reasoningItemId, true);
+  }
+  private emitThinkingDelta(text: unknown, index: unknown): void {
+    const reasoningItemId = typeof index === "number" ? this.reasoningItemByBlock.get(index) : undefined;
+    if (!reasoningItemId || typeof text !== "string") return;
+    for (let start = 0; start < text.length; start += MAX_REASONING_DELTA_LENGTH)
+      this.emitReasoningDelta(text.slice(start, start + MAX_REASONING_DELTA_LENGTH), reasoningItemId);
+  }
+  private emitReasoningDelta(delta: string, reasoningItemId: string, done?: true): void {
+    this.emit({
+      type: AgentEventType.ReasoningDelta,
+      threadId: this.threadId,
+      delta,
+      reasoningItemId,
+      ...(done ? { done } : {}),
+    });
   }
   private emitContextEstimate(usage: Usage): void {
     this.lastInputTokens = inputTokens(usage);
@@ -531,7 +581,8 @@ export class ClaudeEventMapper {
         contextWindow: this.lastContextWindow,
       });
   }
-  private emitDelta(delta: Message): void {
+  private emitDelta(delta: Message, index: unknown): void {
+    if (delta.type === "thinking_delta") this.emitThinkingDelta(delta.thinking, index);
     if (
       delta.type === "text_delta" &&
       typeof delta.text === "string" &&
