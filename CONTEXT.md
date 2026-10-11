@@ -941,11 +941,14 @@ Retained worktrees and Direct threads run no cleanup actions.
 _Avoid_: Teardown script, cleanup hook
 
 ### Terminal scope
-The thread or workspace a shell session runs against. When a thread is
-active, shells open in that thread's working directory (worktree or
+The thread, workspace, or home scope a shell session runs against. When a
+thread is active, shells open in that thread's working directory (worktree or
 workspace root per composer mode). With no thread, the scope is the
-workspace and shells open at the workspace root.
-_Avoid_: Using "thread id" alone when the scope may be a workspace.
+workspace and shells open at the workspace root. The home scope belongs to no
+project: provider sign-in opens its shell in the user's home directory and
+shows it in a Sign in dialog, with or without an open project. Closing that
+dialog kills the shell and re-checks provider status.
+_Avoid_: Using "thread id" alone when the scope may be a workspace or home.
 
 ### Shell session
 A running shell process (e.g. PowerShell, bash) tied to one terminal scope.

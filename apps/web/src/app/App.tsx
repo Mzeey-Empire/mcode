@@ -46,6 +46,7 @@ import {
   BrowserSurfaceHostRoot,
 } from "@/features/preview";
 import { TerminalPoolHost, TerminalPoolSlotProvider } from "@/features/terminal";
+import { SignInTerminalDialog } from "@/features/providers/SignInTerminalDialog";
 import { CanvasHeader } from "@/components/shell/CanvasHeader";
 import { ShellChromeProvider } from "@/components/shell/shell-chrome-context";
 import { installWindowChrome } from "@/components/shell/window-chrome";
@@ -403,6 +404,7 @@ function AppLayout(props: AppLayoutProps) {
         </div>
         </ShellChromeProvider>
         <TerminalPoolHost />
+        <SignInTerminalDialog />
         <BrowserSurfaceHostRoot />
         <BrowserAutomationHost />
         <Suspense fallback={null}>

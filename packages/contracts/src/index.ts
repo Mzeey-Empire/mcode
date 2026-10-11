@@ -1311,6 +1311,7 @@ export {
   TERMINAL_DEFAULT_SESSION_LIMIT,
   TERMINAL_MAX_COLS,
   TERMINAL_MAX_ROWS,
+  HOME_TERMINAL_SCOPE_ID,
   TerminalUuidSchema,
   TerminalU64Schema,
   TerminalTimestampSchema,

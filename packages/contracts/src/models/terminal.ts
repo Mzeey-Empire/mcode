@@ -51,9 +51,17 @@ export const TerminalPlatformSchema = lazySchema(() =>
   z.enum(["windows", "macos", "linux"]),
 );
 
-/** Workspace or thread scope for a shell session. */
+/**
+ * Legacy scope id for the home scope: a shell in the user's home directory that
+ * belongs to no project, used to sign in to providers. Thread and workspace
+ * scope ids are UUIDs, so this literal cannot collide with them.
+ */
+export const HOME_TERMINAL_SCOPE_ID = "home";
+
+/** Workspace, thread, or home scope for a shell session. */
 export const TerminalScopeSchema = lazySchema(() =>
   z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("home") }).strict(),
     z.object({ kind: z.literal("workspace"), workspaceId: TerminalUuidSchema() }).strict(),
     z
       .object({
@@ -387,7 +395,7 @@ export const TerminalV1BackendCapabilitiesSchema = lazySchema(() =>
     .strict(),
 );
 
-/** Workspace or thread Terminal scope. */
+/** Workspace, thread, or home Terminal scope. */
 export type TerminalScope = z.infer<ReturnType<typeof TerminalScopeSchema>>;
 /** Supported Terminal host platform. */
 export type TerminalPlatform = z.infer<ReturnType<typeof TerminalPlatformSchema>>;

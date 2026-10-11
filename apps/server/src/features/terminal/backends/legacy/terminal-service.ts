@@ -7,9 +7,10 @@
 import { injectable, inject } from "tsyringe";
 import * as NodePath from "node:path";
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 import { v4 as uuid } from "uuid";
 import { logger } from "@mcode/shared";
-import { TERMINAL_MAX_PER_SCOPE, type LegacyTerminalRecord, type LegacyTerminalCreateResult, type Settings, type TerminalProfileReference, type TerminalResolvedProfile, type TerminalScope, type WorkspaceEnvironmentActionLaunchSnapshot } from "@mcode/contracts";
+import { HOME_TERMINAL_SCOPE_ID, TERMINAL_MAX_PER_SCOPE, type LegacyTerminalRecord, type LegacyTerminalCreateResult, type Settings, type TerminalProfileReference, type TerminalResolvedProfile, type TerminalScope, type WorkspaceEnvironmentActionLaunchSnapshot } from "@mcode/contracts";
 import { TerminalFlowControl } from "./terminal-flow-control.js";
 import { TerminalReplayBuffer, replayCapBytesForScrollback } from "./terminal-replay-buffer.js";
 import type { PtyHostAdapter, PtyHostCommand } from "../../host/pty-host-adapter.js";
@@ -252,8 +253,9 @@ export class TerminalService {
     if (!this.sessions.has(session.id) || session.closePromise) throw new ActionTerminalClosedError("Terminal scope was closed");
   }
 
-  /** Resolves the checkout path used by a thread or workspace terminal session. */
+  /** Resolves the checkout path of a thread or workspace session, or the home directory for the home scope. */
   resolveWorkingDirectory(scopeId: string): string {
+    if (scopeId === HOME_TERMINAL_SCOPE_ID) return NodeOS.homedir();
     const thread = this.threadRepo.findById(scopeId);
     if (thread) {
       const workspace = this.workspaceRepo.findById(thread.workspace_id);
@@ -266,6 +268,7 @@ export class TerminalService {
   }
 
   private scopeFor(scopeId: string): TerminalScope {
+    if (scopeId === HOME_TERMINAL_SCOPE_ID) return { kind: "home" };
     const thread = this.threadRepo.findById(scopeId);
     if (thread) return { kind: "thread", workspaceId: thread.workspace_id, threadId: thread.id };
     return { kind: "workspace", workspaceId: scopeId };
