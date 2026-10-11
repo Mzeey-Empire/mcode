@@ -1,5 +1,6 @@
 import { isTaskListToolName } from "@mcode/contracts";
 import type { ThoughtSegmentRecord, ToolCallRecord } from "@/transport/types";
+import { backgroundHeldToolIds } from "../narrative/background-held-tools";
 import { collapseSubagentRecords } from "../narrative/subagent-lifecycle";
 import type { NarrativeCounts, TurnSummary } from "../narrative/types";
 
@@ -33,12 +34,17 @@ function validTimestamps(values: readonly (string | null)[]): number[] {
  * Narrative records only bound the work they recorded, so this can undercount.
  */
 export function persistedTurnDurationMs(records: PersistedTurnRecords): number | null {
+  // A background call and the steps under it keep running after the turn, so their ends are not the turn's.
+  const outlivesTurn = backgroundHeldToolIds(records.tools.map((tool) => ({
+    id: tool.id, parentId: tool.parent_tool_call_id, background: tool.background === true })));
   const starts = validTimestamps([
     ...records.tools.map((tool) => tool.started_at),
     ...records.thoughts.map((thought) => thought.started_at),
   ]);
   const ends = validTimestamps([
-    ...records.tools.map((tool) => tool.completed_at),
+    ...records.tools.filter((tool) => !outlivesTurn.has(tool.id)).map((tool) => tool.completed_at),
+    // Launching a background call is work the turn did, so a turn whose only record is that call still has an end.
+    ...records.tools.filter((tool) => tool.background === true).map((tool) => tool.started_at),
     ...records.thoughts.map((thought) => thought.ended_at),
   ]);
   if (starts.length === 0 || ends.length === 0) return null;

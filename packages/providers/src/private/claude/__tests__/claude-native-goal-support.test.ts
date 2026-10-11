@@ -49,6 +49,7 @@ function nativeSessionEntry(pushMessage: ReturnType<typeof vi.fn>, pendingToolUs
     contextWindowMode: undefined,
     lastUsedAt: Date.now(),
     pendingToolUses,
+    backgroundTools: new Map<string, string>(),
     hasFiredToolThisTurn: false,
   };
 }

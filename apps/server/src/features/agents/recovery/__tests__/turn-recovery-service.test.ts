@@ -509,6 +509,26 @@ describe("TurnRecoveryService", () => {
     }
   });
 
+  it("leaves a background call and its steps running through startup interruption so the orphan sweep can stop them", async () => {
+    narrativeStore.beginTurn(THREAD_ID);
+    narrativeStore.resetTurnCounters(THREAD_ID);
+    narrativeStore.bufferToolCall(THREAD_ID, { toolCallId: "background", toolName: "Agent", toolInput: { description: "long" } });
+    narrativeStore.markToolCallBackground(THREAD_ID, "background");
+    narrativeStore.bufferToolCall(THREAD_ID, { toolCallId: "background-step", toolName: "Bash", toolInput: { command: "ls" },
+      parentToolCallId: "background" });
+    narrativeStore.bufferToolCall(THREAD_ID, { toolCallId: "foreground", toolName: "Agent", toolInput: { description: "short" } });
+    sink.recordParentNarrativeRecovery({ executionId: EXECUTION_ID, items: narrativeStore.recoverySnapshot(THREAD_ID) });
+    const service = new TurnRecoveryService(runtimeSink, threadRepo, new AttachmentService(), defaultCheckpoints);
+
+    expect(await service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
+    expect(db.prepare("SELECT id, status, completed_at IS NULL AS open FROM tool_call_records ORDER BY id").all()).toEqual([
+      { id: "background", status: "running", open: 1 },
+      { id: "background-step", status: "running", open: 1 },
+      { id: "foreground", status: "failed", open: 0 },
+    ]);
+    expect(sink.listHeldBackgroundToolCalls()).toEqual([{ threadId: THREAD_ID, executionId: EXECUTION_ID, toolCallId: "background" }]);
+  });
+
   it("restores ordered narration, interrupted tools, completed hooks, and explicit parallel parents", async () => {
     narrativeStore.beginTurn(THREAD_ID);
     narrativeStore.resetTurnCounters(THREAD_ID);

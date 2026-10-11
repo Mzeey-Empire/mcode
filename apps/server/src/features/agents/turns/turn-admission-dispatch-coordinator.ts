@@ -900,6 +900,8 @@ export class TurnAdmissionDispatchCoordinator {
 
   private async persistThreadSettings(prepared: PreparedCommand): Promise<void> {
     const command = prepared.command;
+    // A provider-started turn carries no composer selection, so it must not overwrite the user's.
+    if (command.providerOriginated) return;
     const model = command.model ?? "claude-sonnet-4-6";
     await this.threads.updateSettings(command.threadId, {
       ...this.threadSettings(command, prepared.providerId),

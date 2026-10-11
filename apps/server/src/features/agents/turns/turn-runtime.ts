@@ -7,7 +7,7 @@ import type {
 } from "@mcode/contracts";
 
 const TURN_SCOPED_EVENT_TYPES = new Set<AgentEventType>([
-  "turnStarted", "message", "generatedAttachment", "toolUse", "toolResult",
+  "turnStarted", "message", "generatedAttachment", "toolUse", "toolResult", "toolBackgrounded",
   "turnComplete", "error", "ended", "compacting", "compactSummary",
   "modelFallback", "textDelta", "reasoningDelta", "toolInputDelta", "toolProgress", "contextEstimate",
   "assistantMessageBoundary",

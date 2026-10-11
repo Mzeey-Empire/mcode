@@ -294,6 +294,33 @@ describe("SubagentRosterService", () => {
     expect(deliver).toBeUndefined();
   });
 
+  it("refreshes when a worker-owned turn's saved ending lands its Agent rows after the accepted release", () => {
+    const { db, call, service } = harness();
+    let deliver: ((events: readonly CanonicalAgentEventEnvelope[]) => void) | undefined;
+    service.observeCommittedEvents((listener) => { deliver = listener; return () => undefined; });
+    const committed = (payload: CanonicalAgentEventEnvelope["payload"]): CanonicalAgentEventEnvelope => ({
+      eventId: `event-${payload.type}`, routing: { threadId: "parent", turnId: "turn", executionId: "execution" },
+      sourceProviderId: "claude", sourceIdentities: [], acceptedSequence: 1, durableRevision: 1,
+      serverTimestamps: { acceptedAt: NOW, persistedAt: NOW }, payload,
+    });
+    service.turnFinished("parent");
+    expect(service.loadRoster(request).revision).toBe(0);
+    message(db, "message", "claude");
+    call("background", "message");
+    deliver?.([committed({ type: "turn.started", startedAt: NOW })]);
+    expect(service.loadRoster(request).revision).toBe(0);
+    deliver?.([committed({ type: "turn.completed", endedAt: NOW })]);
+    expect(service.loadRoster(request)).toMatchObject({ revision: 1, entries: [{ sourceToolCallId: "background", status: "running" }] });
+    const late = (toolName: string): CanonicalAgentEventEnvelope => committed({ type: "item.recorded", item: {
+      id: "toolCall:background", threadId: "parent", turnId: "turn", kind: "tool-call", providerIdentities: [],
+      payload: { projection: "toolCall", record: { id: "background", tool_name: toolName } }, createdAt: NOW, updatedAt: NOW,
+    } });
+    deliver?.([late("Read")]);
+    expect(service.loadRoster(request).revision).toBe(1);
+    deliver?.([late("Agent")]);
+    expect(service.loadRoster(request).revision).toBe(2);
+  });
+
   it("coalesces narrative and canonical invalidations into one push after 250 ms", () => {
     const { db, call, service, durability } = harness();
     message(db, "message", "claude");

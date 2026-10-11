@@ -4,6 +4,7 @@ import type { AgentEvent, AgentModelState, AgentTurn, CanonicalAgentEventEnvelop
 import type { reduceAgentEventBatch } from "@mcode/contracts";
 import type { DevinMode } from "@mcode/contracts";
 import { recoverParentNarrative, steeredUserMessages } from "./parent-narrative-recovery";
+import { backgroundHeldToolIds, stepsSettledWith, type ToolCallLink } from "@/features/conversation/narrative/background-held-tools";
 import {
   AgentEventSchema,
   CANONICAL_AGENT_PROGRESS_BATCH_MAX,
@@ -827,6 +828,16 @@ function resetTurnEphemeral(_rec: ThreadRecord): Partial<ThreadRecord> {
     fileEffectTurnId: "",
     savingStatus: null,
   };
+}
+
+/**
+ * A turn the client did not start, such as the reply Claude opens after a background task, never
+ * delivers turnStarted, so nothing else clears the settled turn's live rows. That turn's fold is
+ * already in `narrativeByMessage`; left here, its rows would render as the new turn's fold.
+ */
+function succeedingTurnReset(record: ThreadRecord, executionId: string | undefined): Partial<ThreadRecord> {
+  if (!executionId || record.turnExecutionId === null || record.turnExecutionId === executionId) return {};
+  return { toolCalls: [], thoughtSegments: [], hooks: [], approvals: [], turnExecutionId: executionId };
 }
 
 function shouldFlushCanonicalText(frame: CanonicalAgentProgressFrame, state: AgentModelState): boolean {
@@ -2138,13 +2149,20 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       isError: event.isError,
       isComplete: true,
       lastActivityAt: Date.now(),
-      ...(event.outputTruncated ? { outputTruncated: true } : {}),
-      ...(event.outputTotalBytes != null ? { outputTotalBytes: event.outputTotalBytes } : {}),
-      ...(event.outputArtifactPath ? { outputArtifactPath: event.outputArtifactPath } : {}),
+      ...toolResultOptionalFields(event),
       ...(durationMs != null ? { durationMs } : {}),
-      ...(event.exitCode !== undefined ? { exitCode: event.exitCode } : {}),
     };
   };
+
+  const toolResultOptionalFields = (
+    event: Extract<AgentEvent, { type: "toolResult" }>,
+  ): Partial<Pick<ToolCall, "isCancelled" | "outputTruncated" | "outputTotalBytes" | "outputArtifactPath" | "exitCode">> => ({
+    ...(event.cancelled ? { isCancelled: true } : {}),
+    ...(event.outputTruncated ? { outputTruncated: true } : {}),
+    ...(event.outputTotalBytes != null ? { outputTotalBytes: event.outputTotalBytes } : {}),
+    ...(event.outputArtifactPath ? { outputArtifactPath: event.outputArtifactPath } : {}),
+    ...(event.exitCode !== undefined ? { exitCode: event.exitCode } : {}),
+  });
 
   const completeMatchingToolCall = (
     toolCalls: ToolCall[],
@@ -2158,8 +2176,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     }
     let matched = false;
     return toolCalls.map((toolCall) => {
+      // A background call settles only from a result carrying its own id.
       const canMatch = !matched
         && !toolCall.isComplete
+        && !toolCall.background
         && !(toolCall.toolName === "Agent" && hasActiveToolChildren(toolCalls, toolCall.id));
       if (!canMatch) return toolCall;
       matched = true;
@@ -2175,10 +2195,77 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       normalizedEvent.output,
       normalizedEvent.isError,
     );
+    if (normalizedEvent.persistedMessageId) {
+      patchRec(normalizedEvent.threadId, (record) => settleLateToolResult(record, normalizedEvent));
+      return;
+    }
     const toolInput = toolResultInput(normalizedEvent.toolInput);
     patchRec(normalizedEvent.threadId, (record) => ({
       toolCalls: completeMatchingToolCall(record.toolCalls, normalizedEvent, toolInput),
     }));
+  };
+
+  /**
+   * A late result belongs to a background call from an earlier, finished turn. It updates only the
+   * row with its exact id and the steps under it, because the first-incomplete fallback would
+   * settle an unrelated live call. The steps outlived the turn with the call, and nothing else
+   * reports their end.
+   */
+  const settleLateToolResult = (
+    record: ThreadRecord,
+    event: Extract<AgentEvent, { type: "toolResult" }>,
+  ): Partial<ThreadRecord> => {
+    const live = record.toolCalls.some((toolCall) => toolCall.id === event.toolCallId && !toolCall.isComplete);
+    return {
+      ...(live ? { toolCalls: settledLiveBackgroundCall(record.toolCalls, event) } : {}),
+      ...settlePersistedTool(record, event),
+    };
+  };
+
+  const liveToolLink = (toolCall: ToolCall): ToolCallLink => ({
+    id: toolCall.id, parentId: toolCall.parentToolCallId, background: toolCall.background === true,
+  });
+
+  const settledLiveBackgroundCall = (
+    toolCalls: ToolCall[],
+    event: Extract<AgentEvent, { type: "toolResult" }>,
+  ): ToolCall[] => {
+    const steps = stepsSettledWith(toolCalls.map(liveToolLink), event.toolCallId);
+    return toolCalls.map((toolCall) => {
+      if (toolCall.id === event.toolCallId) return completedToolCall(toolCall, event, {});
+      if (!steps.has(toolCall.id) || toolCall.isComplete) return toolCall;
+      return { ...toolCall, isComplete: true, isError: toolCall.isError || event.isError,
+        lastActivityAt: Date.now(), ...(event.cancelled ? { isCancelled: true } : {}) };
+    });
+  };
+
+  const settlePersistedTool = (
+    record: ThreadRecord,
+    event: Extract<AgentEvent, { type: "toolResult" }>,
+  ): Partial<ThreadRecord> => {
+    const messageId = event.persistedMessageId;
+    const narrative = messageId ? record.narrativeByMessage[messageId] : undefined;
+    const held = narrative?.tools.find((tool) => tool.id === event.toolCallId);
+    // A redelivered result finds the call already settled; an unloaded message refetches the saved outcome.
+    if (!messageId || !narrative || held?.status !== "running") return {};
+    const status = event.cancelled ? "cancelled" : event.isError ? "failed" : "completed";
+    const completedAt = new Date().toISOString();
+    const steps = stepsSettledWith(narrative.tools.map((tool) => ({
+      id: tool.id, parentId: tool.parent_tool_call_id, background: tool.background === true,
+    })), held.id);
+    const tools = narrative.tools.map((tool): ToolCallRecord => {
+      if (tool.id === held.id) return { ...tool, status, output_summary: event.output, completed_at: completedAt };
+      return steps.has(tool.id) && tool.status === "running" ? { ...tool, status, completed_at: completedAt } : tool;
+    });
+    return { narrativeByMessage: { ...record.narrativeByMessage, [messageId]: { ...narrative, tools } } };
+  };
+
+  const handleToolBackgrounded = (event: Extract<AgentEvent, { type: "toolBackgrounded" }>): void => {
+    patchRec(event.threadId, (record) => record.toolCalls.some((toolCall) => toolCall.id === event.toolCallId)
+      ? { toolCalls: record.toolCalls.map((toolCall) => toolCall.id === event.toolCallId
+        ? { ...toolCall, background: true }
+        : toolCall) }
+      : {});
   };
 
   const normalizedTextDelta = (value: unknown): string => typeof value === "string" ? value : "";
@@ -2407,7 +2494,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   const completedToolCalls = (toolCalls: ToolCall[], phase: ThreadRecord["runtimePhase"]): ToolCall[] => {
-    return toolCalls.map((toolCall) => toolCall.isComplete ? toolCall : { ...toolCall, isComplete: true,
+    // A background call and the steps under it outlive the turn; the call's own late result settles them.
+    const held = backgroundHeldToolIds(toolCalls.map(liveToolLink));
+    return toolCalls.map((toolCall) => toolCall.isComplete || held.has(toolCall.id) ? toolCall : { ...toolCall, isComplete: true,
       isError: toolCall.isError || phase === "errored" || phase === "interrupted",
       ...(phase === "cancelled" ? { isCancelled: true } : {}),
     });
@@ -2808,6 +2897,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     generatedAttachment: ignoreAgentEvent,
     toolUse: handleToolUse,
     toolResult: handleToolResult,
+    toolBackgrounded: handleToolBackgrounded,
     turnComplete: handleTerminalEvent,
     error: handleErrorEvent,
     ended: handleTerminalEvent,
@@ -3168,6 +3258,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     let nextRecords = records;
     const patch: Partial<ThreadRecord> = {};
     if (record.runtimePhase !== phase) patch.runtimePhase = phase;
+    Object.assign(patch, succeedingTurnReset(record, turn?.executionId));
     // Stamp the execution identity on live claims so later reconciles and the
     // child lifecycle gate can keep correlating this turn to the record.
     const executionId = activeCanonicalExecutionId(turn);
@@ -3192,8 +3283,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (!turn || turn.status === "Pending" || turn.status === "Running") return {};
     const executionId = turn.executionId ?? record.turnExecutionId;
     if (!executionId) return {};
-    const streaming = appendTerminalMessages(record, { type: "ended", threadId, turnExecutionId: executionId, reason: "canonical-terminal" }, phaseForTurnStatus(turn.status), null);
-    return { ...streaming, turnExecutionId: executionId, ...recoverParentNarrative(threadId, record.canonicalAgent.state, { ...record, ...streaming }) };
+    const reset = succeedingTurnReset(record, executionId);
+    const current = { ...record, ...reset };
+    const streaming = appendTerminalMessages(current, { type: "ended", threadId, turnExecutionId: executionId, reason: "canonical-terminal" }, phaseForTurnStatus(turn.status), null);
+    return { ...reset, ...streaming, turnExecutionId: executionId, ...recoverParentNarrative(threadId, record.canonicalAgent.state, { ...current, ...streaming }) };
   };
 
   const canonicalProgressProjection = (frame: CanonicalAgentProgressFrame, record: ThreadRecord): Partial<ThreadRecord> => {

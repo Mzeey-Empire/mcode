@@ -48,6 +48,8 @@ export interface CreateToolCallRecordInput {
   completedAt?: string;
   sortOrder: number;
   parentToolCallId?: string;
+  /** True when the provider keeps this call running after its turn ends. */
+  background?: boolean;
 }
 
 interface ToolCallRecordInsert {
@@ -100,6 +102,7 @@ function toolCallRecordFromInsert(
     output_artifact_path: nullIfUndefined(input.outputArtifactPath),
     exit_code: nullIfUndefined(input.exitCode),
     status: input.status,
+    ...(input.background === true ? { background: true } : {}),
     started_at: insert.startedAt,
     completed_at: insert.completedAt,
     sort_order: input.sortOrder,
@@ -129,6 +132,7 @@ function rowToToolCallRecord(row: ToolCallRecordRow): ToolCallRecord {
     output_artifact_path: row.outputArtifactPath,
     exit_code: row.exitCode,
     status: row.status as ToolCallStatus,
+    ...(row.background ? { background: true } : {}),
     started_at: row.startedAt,
     completed_at: row.completedAt,
     sort_order: row.sortOrder,
@@ -195,6 +199,7 @@ export class ToolCallRecordStore {
       outputArtifactPath: nullIfUndefined(input.outputArtifactPath),
       exitCode: nullIfUndefined(input.exitCode),
       status: input.status,
+      background: input.background === true,
       startedAt: insert.startedAt,
       completedAt: insert.completedAt,
       sortOrder: input.sortOrder,

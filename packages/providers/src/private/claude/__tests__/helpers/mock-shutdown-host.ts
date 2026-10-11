@@ -4,7 +4,10 @@ import { ProviderRuntimeEventSchema, type ProviderRuntimeEvent } from "@mcode/co
 /** Supplies the complete provider host contract without external processes or credentials. */
 export function mockShutdownHost(
   onEvent: (event: ProviderRuntimeEvent) => void,
-  turns: ProviderHostPorts["turns"] = { open: async () => ({ kind: "declined", reason: "unavailable" }) },
+  turns: ProviderHostPorts["turns"] = {
+    open: async () => ({ kind: "declined", reason: "unavailable" }),
+    settleBackgroundTool: async () => {},
+  },
 ): ProviderHostPorts {
   return {
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },

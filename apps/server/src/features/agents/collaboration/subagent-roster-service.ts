@@ -117,12 +117,13 @@ export class SubagentRosterService {
   /**
    * Invalidate from saved narrative tool calls. Worker-owned turns persist Agent calls and their steps without
    * passing through {@link toolChanged}, so the saved batch is the only live signal for those rosters.
+   * A saved turn ending also refreshes: worker-owned turns write their tool-call rows in that same commit,
+   * while the release that calls {@link turnFinished} runs once the ending is accepted, before it is saved.
    */
   observeCommittedEvents(subscribe = subscribeCommittedCanonicalEvents): () => void {
     return subscribe((events) => {
-      for (const threadId of new Set(events.filter(touchesNarrativeRoster).map((event) => event.routing.threadId))) {
-        this.changed(threadId);
-      }
+      for (const threadId of threadsWhere(events, touchesNarrativeRoster)) this.changed(threadId);
+      for (const threadId of threadsWhere(events, endsTurn)) this.turnFinished(threadId);
     });
   }
 
@@ -367,15 +368,31 @@ function rootEvidence(root: RosterToolCall, calls: readonly RosterToolCall[], by
   };
 }
 
+function threadsWhere(events: readonly CanonicalAgentEventEnvelope[],
+  matches: (event: CanonicalAgentEventEnvelope) => boolean): Set<string> {
+  return new Set(events.filter(matches).map((event) => event.routing.threadId));
+}
+
+const TURN_ENDINGS = new Set(["turn.completed", "turn.cancelled", "turn.interrupted", "turn.errored"]);
+
+function endsTurn(event: CanonicalAgentEventEnvelope): boolean {
+  return TURN_ENDINGS.has(event.payload.type);
+}
+
 function touchesNarrativeRoster(event: CanonicalAgentEventEnvelope): boolean {
   if (event.payload.type !== "item.recorded" || event.payload.item.kind !== "tool-call") return false;
   const { parentItemId, payload } = event.payload.item;
+  // A late background result settles a call from an earlier turn as a saved toolCall item, outside any terminal.
+  if (payload.projection === "toolCall") return toolName(payload.record) === "Agent";
   if (payload.projection !== "narrativeRecovery" && payload.projection !== "narrativeRecoveryDiscarded") return false;
   return parentItemId !== undefined || narrativeToolName(payload.narrative) === "Agent";
 }
 
 function narrativeToolName(narrative: unknown): unknown {
   if (typeof narrative !== "object" || narrative === null || !("record" in narrative)) return undefined;
-  const { record } = narrative;
+  return toolName(narrative.record);
+}
+
+function toolName(record: unknown): unknown {
   return typeof record === "object" && record !== null && "tool_name" in record ? record.tool_name : undefined;
 }

@@ -25,6 +25,7 @@ export const AgentEventType = {
   GeneratedAttachment: "generatedAttachment",
   ToolUse: "toolUse",
   ToolResult: "toolResult",
+  ToolBackgrounded: "toolBackgrounded",
   TurnComplete: "turnComplete",
   Error: "error",
   Ended: "ended",
@@ -115,6 +116,19 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       toolInput: z.record(z.unknown()).optional(),
       /** Provider-neutral Agent presentation when this result enriches a sub-agent row. */
       subagentPresentation: SubagentPresentationSchema().optional(),
+      /** True when the provider stopped a background call before it finished, so it settles as cancelled. */
+      cancelled: z.boolean().optional(),
+      /** Server-assigned assistant message whose earlier, finished turn owns this background call. */
+      persistedMessageId: z.string().optional(),
+    }),
+    z.object({
+      /**
+       * The provider acknowledged this tool call but keeps running it after its turn ends.
+       * The call stays running until a later `toolResult` settles it.
+       */
+      type: z.literal(AgentEventType.ToolBackgrounded),
+      threadId: z.string(),
+      toolCallId: z.string(),
     }),
     z.object({
       type: z.literal(AgentEventType.TurnComplete),

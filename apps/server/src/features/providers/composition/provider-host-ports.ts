@@ -131,6 +131,7 @@ export function createProviderHostPorts(
     },
     turns: {
       open: (request) => dependencies.turns().open(request),
+      settleBackgroundTool: (settlement) => dependencies.turns().settleBackgroundTool(settlement),
     },
   };
 }

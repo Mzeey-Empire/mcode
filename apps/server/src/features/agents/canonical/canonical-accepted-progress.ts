@@ -35,6 +35,7 @@ import { prepareAcceptedCollaboration } from "./accepted-collaboration-preparati
 import { AcceptedCodexCollaboration } from "./accepted-codex-collaboration.js";
 import type { SubagentStopTarget } from "../collaboration/subagent-lifecycle-durability.js";
 import type { CreateHookExecutionInput } from "../events/persistence/hook-execution-repo.js";
+import { acceptedToolRecord, lateToolResultEvents, lateToolStepEvents, settledLateToolRecord, type LateToolResult } from "./late-tool-result-events.js";
 import * as NodeUtil from "node:util";
 import { z } from "zod";
 import { prepareAcceptedFeatureObservations, prepareAcceptedThreadSystemFeatures, type AcceptedFeatureObservations, type AcceptedChildPublicationOwner } from "./accepted-feature-observations.js";
@@ -692,14 +693,48 @@ export class CanonicalAcceptedProgress {
     }
   }
 
+  /**
+   * Settle a background tool call against the finished turn that launched it, even after
+   * another turn starts. A repeated identical result is a no-op.
+   */
+  acceptLateToolResult(threadId: string, executionId: string, result: LateToolResult): void {
+    this.assertOpen();
+    const thread = this.thread(threadId);
+    this.assertAdmission(thread);
+    const turn = acceptedTerminalTurn(thread.state, threadId, executionId);
+    const execution = { threadId, turnId: turn.id, executionId };
+    const message = exactTerminalAssistant(thread.state, execution);
+    const item = thread.state.items[`toolCall:${result.toolCallId}`];
+    if (item?.threadId !== threadId || item.turnId !== turn.id) throw new Error("Late tool result requires its accepted tool call");
+    const record = settledLateToolRecord(acceptedToolRecord(item), result, message.id, new Date().toISOString());
+    if (!record) return;
+    const providerId = thread.state.threads[threadId]?.providerId ?? "server";
+    const turnItems = Object.values(thread.state.items).filter((candidate) => candidate.turnId === turn.id);
+    const events = [
+      ...lateToolResultEvents({ item, record, result, execution, providerId, publicationId: String(thread.publicationSequence + 1) }),
+      ...lateToolStepEvents({ turnItems, record, execution, providerId }),
+    ];
+    this.acceptAuxiliary(thread, `late-tool:${record.id}`, execution, events, "post-terminal");
+    thread.publicationSequence += 1;
+  }
+
+  /** Resolve once every accepted write for the thread has reached SQLite, releasing its owner slot. */
+  async waitForSaved(threadId: string): Promise<void> {
+    const thread = this.threads.get(threadId);
+    if (!thread) return;
+    const saving = thread.owner.savingState();
+    if (saving.kind === "failed") throw saving.error;
+    if (thread.owner.recoveryCut().retained.length === 0) return;
+    await new Promise<void>((resolve, reject) => thread.waiters.add({ resolve, reject }));
+  }
+
   /** Correlate a late hook with its original accepted terminal, even after another turn starts. */
   acceptLateHook(threadId: string, executionId: string, hook: Omit<CreateHookExecutionInput, "messageId">): void {
     this.assertOpen();
     if (!hook.id) throw new Error("Late hook requires its original stable identity");
     const thread = this.thread(threadId);
     this.assertAdmission(thread);
-    const turn = Object.values(thread.state.turns).find((value) => value.threadId === threadId && value.executionId === executionId);
-    if (!turn || turn.status === "Running" || turn.status === "Pending") throw new Error("Late hook requires its exact accepted terminal turn");
+    const turn = acceptedTerminalTurn(thread.state, threadId, executionId);
     const message = exactTerminalAssistant(thread.state, { threadId, turnId: turn.id, executionId });
     const record = HookExecutionRecordSchema().parse({ id: hook.id, message_id: message.id, hook_name: hook.hookName,
       tool_name: hook.toolName, phase: hook.phase, payload: hook.payload, duration_ms: hook.durationMs,
@@ -1108,13 +1143,19 @@ function auxiliaryExecution(thread: ProgressThread, threadId: string):
   return { execution: { threadId, turnId: "", executionId: syntheticThreadExecutionId(threadId) }, phase: "synthesized", nativeCursor: null };
 }
 
+function acceptedTerminalTurn(state: AgentModelState, threadId: string, executionId: string) {
+  const turn = Object.values(state.turns).find((value) => value.threadId === threadId && value.executionId === executionId);
+  if (!turn || turn.status === "Running" || turn.status === "Pending") throw new Error("Late narrative requires its exact accepted terminal turn");
+  return turn;
+}
+
 function exactTerminalAssistant(state: AgentModelState, execution: ExecutionIdentity): Message {
   for (const item of Object.values(state.items)) {
     if (item.threadId !== execution.threadId || item.turnId !== execution.turnId || item.payload.projection !== "message") continue;
     const parsed = MessageSchema().safeParse(item.payload.message);
     if (parsed.success && parsed.data.role === "assistant" && parsed.data.outcomeExecutionId === execution.executionId) return parsed.data;
   }
-  throw new Error("Late hook terminal has no assistant message");
+  throw new Error("Late narrative terminal has no assistant message");
 }
 
 function observedControlChange(change: import("./accepted-codex-collaboration.js").AcceptedCollaborationChange): CollaborationObservationChange {

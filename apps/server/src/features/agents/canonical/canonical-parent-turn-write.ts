@@ -19,6 +19,7 @@ import { ThoughtSegmentStore as ThoughtSegmentRepo } from "../conversation/narra
 import { HookExecutionStore as HookExecutionRepo } from "../events/persistence/hook-execution-store.js";
 import { PlanQuestionAnswersStore as PlanQuestionAnswersRepo } from "../planning/persistence/plan-question-answers-store.js";
 import { ToolCallRecordStore as ToolCallRecordRepo } from "../tools/persistence/tool-call-record-store.js";
+import { backgroundHeldToolIds, narrativeToolCallLinks } from "../tools/background-held-tools.js";
 import { deriveTurnAssistantMessageId } from "../turns/turn-assistant-message-id.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 import { ParentAssistantTextCheckpointStore as ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-store.js";
@@ -653,9 +654,10 @@ function settleTerminalNarrative(
   for (const item of items) {
     if (item.kind === "narrationSegment") lastThoughtOrder = Math.max(lastThoughtOrder, item.record.sort_order);
   }
+  const held = backgroundHeldToolIds(narrativeToolCallLinks(items));
   return items.map((item) => {
     if (item.kind === "approval") return { kind: "approval", record: { ...item.record, message_id: messageId } };
-    if (item.kind === "toolCall") return settleToolCall(item, messageId, outcome, endedAt);
+    if (item.kind === "toolCall") return settleToolCall(item, messageId, outcome, endedAt, held);
     if (item.kind === "hook") return settleHook(item, messageId, endedAt);
     return settleThought(item, messageId, finalText, lastThoughtOrder);
   });
@@ -673,13 +675,15 @@ function settleToolCall(
   messageId: string,
   outcome: TurnOutcome,
   endedAt: string,
+  held: ReadonlySet<string>,
 ): ParentNarrativeRecoveryItem {
-  const status = item.record.status === "running" ? terminalToolStatus(outcome) : item.record.status;
+  // A background call and the steps under it outlive their turn; only its own late result settles them.
+  const settles = item.record.status === "running" && !held.has(item.record.id);
   return { kind: "toolCall", record: {
     ...item.record,
     message_id: messageId,
-    status,
-    completed_at: item.record.status === "running" ? endedAt : item.record.completed_at,
+    status: settles ? terminalToolStatus(outcome) : item.record.status,
+    completed_at: settles ? endedAt : item.record.completed_at,
   } };
 }
 

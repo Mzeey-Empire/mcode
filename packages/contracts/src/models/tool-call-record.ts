@@ -288,6 +288,11 @@ export const ToolCallRecordSchema = lazySchema(() => z.object({
   output_artifact_path: z.string().nullable().optional(),
   exit_code: z.number().int().nullable().optional(),
   status: ToolCallStatusSchema,
+  /**
+   * True when the provider keeps running this call after its turn ends. Turn settlement
+   * leaves such a running call open; only its own late result or a stop settles it.
+   */
+  background: z.boolean().optional(),
   started_at: z.string(),
   completed_at: z.string().nullable(),
   sort_order: z.number(),

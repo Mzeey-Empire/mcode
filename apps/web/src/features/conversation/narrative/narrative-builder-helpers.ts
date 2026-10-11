@@ -4,6 +4,14 @@ import type { NarrativeItem, NarrativeCounts, SubagentActivity } from "./types";
 /** Provider tool name for delegated sub-agent work. */
 export const AGENT_TOOL_NAME = "Agent";
 
+/**
+ * True while a call still holds its turn's work open. A backgrounded call keeps running on its own,
+ * so the turn may answer and end around it; only its own row shows that it is still working.
+ */
+export function isTurnWorkRunning(toolCall: Pick<ToolCall, "isComplete" | "background">): boolean {
+  return !toolCall.isComplete && toolCall.background !== true;
+}
+
 /** Top-level calls and direct children indexed by their authoritative parent id. */
 export interface ToolCallHierarchy<T> {
   topLevel: T[];

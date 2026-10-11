@@ -227,6 +227,8 @@ export interface ToolCall {
   isComplete: boolean;
   /** True when a persisted tool call ended through cancellation. */
   isCancelled?: boolean;
+  /** True when the call keeps running after its turn ends; only its own late result completes it. */
+  background?: boolean;
   /** True when the live output preview omits middle bytes from the full output. */
   outputTruncated?: boolean;
   /** UTF-8 byte count for the full output when the server bounded the preview. */

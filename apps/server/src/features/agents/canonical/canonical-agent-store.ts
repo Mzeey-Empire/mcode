@@ -181,6 +181,13 @@ export interface CanonicalRecoveryIncidentEntry {
   interruptedAt: string;
 }
 
+/** A background tool call still running under the finished turn that launched it. */
+export interface CanonicalHeldBackgroundToolCall {
+  threadId: string;
+  executionId: string;
+  toolCallId: string;
+}
+
 /** Observable result after one canonical batch commits. */
 export interface CanonicalAgentCommitResult extends ParentTurnCommitResult {
   outcome: "committed" | "duplicate" | "conflict" | "terminal-outcome-confirmed" | "ingest-overflow";
@@ -903,6 +910,25 @@ export class CanonicalAgentStore {
       .limit(MAX_TURN_RECOVERIES + 1)
       .all();
     return this.boundedCheckpointRows(rows, "unmaterialized terminal");
+  }
+
+  /** List background tool calls still held open under a finished turn. */
+  listHeldBackgroundToolCalls(): CanonicalHeldBackgroundToolCall[] {
+    // The id range keeps the scan on tool call keys, and the substring test skips JSON
+    // parsing for the many calls that never ran in the background.
+    const rows = this.db.prepare(`
+      SELECT item.thread_id AS threadId, turn.execution_id AS executionId,
+        COALESCE(json_extract(item.payload_json, '$.record.id'), json_extract(item.payload_json, '$.narrative.record.id')) AS toolCallId
+      FROM canonical_agent_items item
+      JOIN canonical_agent_turns turn ON turn.id = item.turn_id
+      WHERE item.id >= 'toolCall:' AND item.id < 'toolCall;'
+        AND instr(item.payload_json, '"background":true') > 0
+        AND turn.status IN ('Completed', 'Cancelled', 'Interrupted', 'Errored')
+        AND COALESCE(json_extract(item.payload_json, '$.record.background'), json_extract(item.payload_json, '$.narrative.record.background')) = 1
+        AND COALESCE(json_extract(item.payload_json, '$.record.status'), json_extract(item.payload_json, '$.narrative.record.status')) = 'running'
+      ORDER BY item.thread_id, item.created_at, item.id
+    `).all() as Record<string, unknown>[];
+    return rows.map(heldBackgroundToolCallFromRow);
   }
 
   /** Reopen an unmaterialized terminal checkpoint so ordinary interruption recovery can finish it. */
@@ -3963,4 +3989,12 @@ function duplicateIdentity(envelope: CanonicalAgentEventEnvelope) {
 function requiredObservedRecord<RecordValue>(record: RecordValue | undefined): RecordValue {
   if (record === undefined) throw new Error("Accepted collaboration record is missing from its reduced family");
   return record;
+}
+
+function heldBackgroundToolCallFromRow(row: Record<string, unknown>): CanonicalHeldBackgroundToolCall {
+  const { threadId, executionId, toolCallId } = row;
+  if (typeof threadId !== "string" || typeof executionId !== "string" || typeof toolCallId !== "string") {
+    throw new Error("Held background tool call row is malformed");
+  }
+  return { threadId, executionId, toolCallId };
 }

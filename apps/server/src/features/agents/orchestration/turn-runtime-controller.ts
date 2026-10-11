@@ -125,6 +125,8 @@ interface WorkerOwnedTurn {
   persistedPublished: boolean;
   terminalOutcome?: TurnOutcome;
   releaseStarted: boolean;
+  /** The release scheduled by the committed Ended; a provider can start its next turn before it finishes. */
+  terminalRelease?: Promise<void>;
   deliveryFailed?: boolean;
   deliveryFailureHandling?: Promise<void>;
   stopInProgress?: boolean;
@@ -835,10 +837,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
     if (event.type === "ended") {
       // The callback still belongs to the route's pending set. Release on the next task.
-      setTimeout(() => { void this.releaseWorkerTurn(active).catch((error: unknown) => {
+      active.terminalRelease = new Promise<void>((resolve) => { setTimeout(resolve, 0); })
+        .then(() => this.releaseWorkerTurn(active));
+      active.terminalRelease.catch((error: unknown) => {
         logger.error("Worker-owned terminal release failed", { threadId: execution.threadId,
           error: error instanceof Error ? error.message : String(error) });
-      }); }, 0);
+      });
     }
   }
 
@@ -2072,6 +2076,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
    * is dispatched to it.
    */
   async openProviderTurn(request: { threadId: string; notice: string }): Promise<ProviderTurnOpening> {
+    await this.awaitEndedTurnRelease(request.threadId);
     const declined = this.declineProviderTurn(request.threadId);
     if (declined) return declined;
     let admitted: Awaited<ReturnType<TurnAdmissionDispatchCoordinator["admit"]>>;
@@ -2102,6 +2107,17 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       threadId: admitted.lease.threadId, turnId: admitted.request.turnId,
       executionId: admitted.lease.turnExecutionId, deliveryAttempt: 1,
     } };
+  }
+
+  /**
+   * A provider can start a turn as soon as its previous one ends, before the server has
+   * released that turn. Its committed Ended already frees the thread, so wait for the release
+   * instead of declining as busy. A failed release is logged where it runs; admission then reports the thread as held.
+   */
+  private async awaitEndedTurnRelease(threadId: string): Promise<void> {
+    const active = this.workerTurns.get(threadId);
+    if (!active?.terminalCommitted) return;
+    await active.terminalRelease?.catch(() => undefined);
   }
 
   /** Refuse provider turns while the user is stopping the thread, and stop the session as the legacy path did. */

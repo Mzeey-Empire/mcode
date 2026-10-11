@@ -15,6 +15,7 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useToastStore } from "@/stores/toastStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { SnapshotBuilder } from "@/features/conversation/hydration/snapshot-builder";
+import { persistedTurnDurationMs } from "@/features/conversation/turn/turn-summary";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -415,6 +416,162 @@ describe("handleAgentEvent branches", () => {
     )).toEqual([
       expect.objectContaining({ id: "late-hook-id", hook_name: "late-hook", duration_ms: 12 }),
     ]);
+  });
+
+  describe("background tool calls", () => {
+    const heldRecord = {
+      id: "agent-bg", message_id: "assistant-persisted", parent_tool_call_id: null, tool_name: "Agent",
+      input_summary: "{}", output_summary: "", status: "running" as const, background: true,
+      started_at: "2026-01-01T00:00:00.000Z", completed_at: null, sort_order: 1,
+    };
+
+    const dispatch = (event: Record<string, unknown>): void => {
+      useThreadStore.getState().handleAgentEvent({ threadId: "thread-1", ...event } as AgentEvent);
+    };
+
+    const launchBackgroundAgent = (): void => {
+      useThreadStore.setState((state) => ({
+        records: patchThreadRecord(state.records, "thread-1", { runtimePhase: "running" as const }),
+      }));
+      dispatch({ type: "toolUse", toolCallId: "agent-bg", toolName: "Agent", toolInput: { prompt: "survey" } });
+      dispatch({ type: "toolBackgrounded", toolCallId: "agent-bg" });
+    };
+
+    const seedPersistedNarrative = (): void => {
+      useThreadStore.setState((state) => ({
+        records: patchThreadRecord(state.records, "thread-1", (record) => ({
+          narrativeByMessage: {
+            ...record.narrativeByMessage,
+            "assistant-persisted": { tools: [heldRecord], thoughts: [], approvals: [], hooks: [] },
+          },
+        })),
+      }));
+    };
+
+    const persistedTools = () => readThreadField(
+      "thread-1",
+      (record) => record.narrativeByMessage["assistant-persisted"]?.tools,
+    );
+
+    it("keeps the Agent row running across turn end while settling its foreground siblings", () => {
+      launchBackgroundAgent();
+      dispatch({ type: "toolUse", toolCallId: "read-1", toolName: "Read", toolInput: { path: "/a" } });
+
+      dispatch({ type: "turnComplete", reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 });
+      vi.runAllTimers();
+
+      expect(getTestThreadToolCalls("thread-1")).toEqual([
+        expect.objectContaining({ id: "agent-bg", background: true, isComplete: false }),
+        expect.objectContaining({ id: "read-1", isComplete: true }),
+      ]);
+      expect(countActiveSubagentCalls(getTestThreadToolCalls("thread-1"))).toBe(1);
+    });
+
+    it.each([
+      { outcome: "completed", event: { isError: false }, status: "completed", live: { isError: false } },
+      { outcome: "failed", event: { isError: true }, status: "failed", live: { isError: true } },
+      { outcome: "stopped", event: { isError: false, cancelled: true }, status: "cancelled", live: { isCancelled: true } },
+    ])("settles the live and persisted row from a late $outcome result", ({ event, status, live }) => {
+      launchBackgroundAgent();
+      dispatch({ type: "turnComplete", reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 });
+      vi.runAllTimers();
+      seedPersistedNarrative();
+
+      dispatch({ type: "toolResult", toolCallId: "agent-bg", output: "Survey done", persistedMessageId: "assistant-persisted", ...event });
+
+      expect(getTestThreadToolCalls("thread-1")).toEqual([
+        expect.objectContaining({ id: "agent-bg", isComplete: true, output: "Survey done", ...live }),
+      ]);
+      expect(persistedTools()).toEqual([
+        expect.objectContaining({ id: "agent-bg", status, output_summary: "Survey done", completed_at: expect.any(String) }),
+      ]);
+    });
+
+    it("leaves a background agent's steps running at turn end, then settles them with its late result", () => {
+      launchBackgroundAgent();
+      dispatch({ type: "toolUse", toolCallId: "step", toolName: "Bash", toolInput: { command: "ls" }, parentToolCallId: "agent-bg" });
+      dispatch({ type: "toolUse", toolCallId: "nested", toolName: "Read", toolInput: { path: "/a" }, parentToolCallId: "step" });
+
+      dispatch({ type: "turnComplete", reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 });
+      vi.runAllTimers();
+
+      expect(getTestThreadToolCalls("thread-1")).toEqual([
+        expect.objectContaining({ id: "agent-bg", isComplete: false }),
+        expect.objectContaining({ id: "step", isComplete: false }),
+        expect.objectContaining({ id: "nested", isComplete: false }),
+      ]);
+
+      const step = { ...heldRecord, id: "step", parent_tool_call_id: "agent-bg", tool_name: "Bash", background: false, sort_order: 2 };
+      useThreadStore.setState((state) => ({
+        records: patchThreadRecord(state.records, "thread-1", (record) => ({
+          narrativeByMessage: {
+            ...record.narrativeByMessage,
+            "assistant-persisted": { tools: [heldRecord, step], thoughts: [], approvals: [], hooks: [] },
+          },
+        })),
+      }));
+      dispatch({ type: "toolResult", toolCallId: "agent-bg", output: "Stopped", isError: false, cancelled: true, persistedMessageId: "assistant-persisted" });
+
+      expect(getTestThreadToolCalls("thread-1")).toEqual([
+        expect.objectContaining({ id: "agent-bg", isComplete: true, isCancelled: true, output: "Stopped" }),
+        expect.objectContaining({ id: "step", isComplete: true, isCancelled: true, output: null }),
+        expect.objectContaining({ id: "nested", isComplete: true, isCancelled: true }),
+      ]);
+      expect(persistedTools()).toEqual([
+        expect.objectContaining({ id: "agent-bg", status: "cancelled" }),
+        expect.objectContaining({ id: "step", status: "cancelled", output_summary: "", completed_at: expect.any(String) }),
+      ]);
+    });
+
+    it("keeps the finished turn's duration when its background call settles minutes later", () => {
+      const read = { id: "read-1", message_id: "assistant-persisted", parent_tool_call_id: null, tool_name: "Read",
+        input_summary: "/a", output_summary: "ok", status: "completed" as const,
+        started_at: "2026-01-01T00:00:01.000Z", completed_at: "2026-01-01T00:00:05.000Z", sort_order: 0 };
+      useThreadStore.setState((state) => ({
+        records: patchThreadRecord(state.records, "thread-1", (record) => ({
+          narrativeByMessage: {
+            ...record.narrativeByMessage,
+            "assistant-persisted": { tools: [read, heldRecord], thoughts: [], approvals: [], hooks: [] },
+          },
+        })),
+      }));
+      vi.setSystemTime(new Date("2026-01-01T00:10:00.000Z"));
+
+      dispatch({ type: "toolResult", toolCallId: "agent-bg", output: "Survey done", isError: false, persistedMessageId: "assistant-persisted" });
+
+      const tools = persistedTools() ?? [];
+      expect(tools).toEqual([
+        expect.objectContaining({ id: "read-1" }),
+        expect.objectContaining({ id: "agent-bg", status: "completed", background: true, completed_at: "2026-01-01T00:10:00.000Z" }),
+      ]);
+      expect(persistedTurnDurationMs({ tools, thoughts: [] })).toBe(5_000);
+    });
+
+    it("never lets a late result settle a different running call, and ignores its redelivery", () => {
+      seedPersistedNarrative();
+      dispatch({ type: "toolUse", toolCallId: "wake-read", toolName: "Read", toolInput: { path: "/b" } });
+      const late = { type: "toolResult", toolCallId: "agent-bg", output: "Survey done", isError: false, persistedMessageId: "assistant-persisted" };
+
+      dispatch(late);
+      const settled = persistedTools();
+      dispatch({ ...late, output: "redelivered" });
+
+      expect(getTestThreadToolCalls("thread-1")).toEqual([
+        expect.objectContaining({ id: "wake-read", isComplete: false, output: null }),
+      ]);
+      expect(persistedTools()).toBe(settled);
+      expect(settled).toEqual([expect.objectContaining({ status: "completed", output_summary: "Survey done" })]);
+    });
+
+    it("does not let an id-less fallback result complete a background call", () => {
+      launchBackgroundAgent();
+
+      dispatch({ type: "toolResult", toolCallId: "unknown-call", output: "stray", isError: false });
+
+      expect(getTestThreadToolCalls("thread-1")).toEqual([
+        expect.objectContaining({ id: "agent-bg", isComplete: false }),
+      ]);
+    });
   });
 
   it("flushes same-frame textDelta before turnComplete persists assistant content", () => {

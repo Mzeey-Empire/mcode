@@ -284,6 +284,10 @@ export class NarrativeStore {
     this.narrativeStates.get(args[0])?.updateBufferedToolCallOutput(...args);
   }
 
+  markToolCallBackground(...args: Parameters<NarrativeTurnState["markToolCallBackground"]>): ReturnType<NarrativeTurnState["markToolCallBackground"]> {
+    this.narrativeStates.get(args[0])?.markToolCallBackground(...args);
+  }
+
   clearAgentStackOnMessage(...args: Parameters<NarrativeTurnState["clearAgentStackOnMessage"]>): ReturnType<NarrativeTurnState["clearAgentStackOnMessage"]> {
     this.narrativeStates.get(args[0])?.clearAgentStackOnMessage(...args);
   }
@@ -506,6 +510,7 @@ export class NarrativeStore {
           output_artifact_path: tool.outputArtifactPath,
           exit_code: tool.exitCode,
           status: tool.status,
+          ...(tool.background ? { background: true } : {}),
           started_at: tool.startedAt,
           completed_at: tool.completedAt,
           sort_order: tool.sortOrder,

@@ -14,6 +14,7 @@ import type { TurnOutcome } from "../../turns/turn-outcome.js";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import { assertActiveTurnRecoveryRetention } from "../../turns/active-turn-recovery-retention-policy.js";
 import type { ExecutionIdentity } from "../../execution/execution-mailbox-protocol.js";
+import { backgroundHeldToolIds } from "../../tools/background-held-tools.js";
 
 // These adapters attach explicit parents through Copilot SDK parentToolCallId and OpenCode child-session routing.
 const PROVIDERS_WITH_EXPLICIT_TOOL_PARENTS: ReadonlySet<ProviderId> = new Set(["copilot", "opencode"]);
@@ -700,6 +701,7 @@ export class NarrativeTurnState {
       outputTotalBytes?: number;
       outputArtifactPath?: string;
       exitCode?: number;
+      cancelled?: boolean;
     },
     subagentPresentation?: SubagentPresentation,
   ): void {
@@ -719,6 +721,19 @@ export class NarrativeTurnState {
       );
       this.applyAgentPresentation(toolCall, toolCall._rawToolInput ?? {}, toolCallId);
     }
+    this.recordRecoveryChange(this.toolCallRecoveryItem(toolCall));
+  }
+
+  /**
+   * Mark a running call the provider keeps alive after its turn ends. Turn
+   * settlement then leaves it running until its own late result arrives.
+   */
+  markToolCallBackground(threadId: string, toolCallId: string): void {
+    this.assertThread(threadId);
+    this.removeAgentFromStack(threadId, toolCallId);
+    const toolCall = this.mutableBufferedToolCall(threadId, toolCallId);
+    if (!toolCall || toolCall.status !== "running") return;
+    toolCall.background = true;
     this.recordRecoveryChange(this.toolCallRecoveryItem(toolCall));
   }
 
@@ -766,13 +781,14 @@ export class NarrativeTurnState {
       outputTotalBytes?: number;
       outputArtifactPath?: string;
       exitCode?: number;
+      cancelled?: boolean;
     } | undefined,
   ): void {
     const outputLimit = resolveBrowserNarrativeTool(toolCall.toolName) ? 4_000 : 500;
     toolCall.outputSummary = output.slice(0, outputLimit);
     toolCall.outputTruncated = outputMeta?.outputTruncated === true;
     this.applyOutputMetadata(toolCall, outputMeta);
-    toolCall.status = isError ? "failed" : "completed";
+    toolCall.status = outputMeta?.cancelled ? "cancelled" : isError ? "failed" : "completed";
     toolCall.completedAt = new Date().toISOString();
   }
 
@@ -961,6 +977,7 @@ export class NarrativeTurnState {
       started_at: this.requireRecoveryString(toolCall.startedAt, "tool call start time"),
       completed_at: toolCall.completedAt ?? null,
       sort_order: toolCall.sortOrder,
+      ...(toolCall.background ? { background: true } : {}),
     };
   }
 
@@ -1242,9 +1259,13 @@ export class NarrativeTurnState {
     const toolCalls = structuredClone(this.turnToolCalls);
     this.turnToolCalls = toolCalls;
     const settledAt = new Date().toISOString();
+    for (const toolCall of toolCalls) toolCall.toolCallId ??= NodeCrypto.randomUUID();
+    // A background call and the steps under it outlive the turn; their own late settlement ends them.
+    const held = backgroundHeldToolIds(toolCalls.map((toolCall) => ({
+      id: toolCall.toolCallId ?? "", parentId: toolCall.parentToolCallId, background: toolCall.background === true,
+    })));
     for (const toolCall of toolCalls) {
-      toolCall.toolCallId ??= NodeCrypto.randomUUID();
-      this.settleRunningToolCall(toolCall, outcome, settledAt);
+      if (!held.has(toolCall.toolCallId ?? "")) this.settleRunningToolCall(toolCall, outcome, settledAt);
       toolCall.messageId = messageId;
       this.prepareToolCallInput(toolCall);
     }

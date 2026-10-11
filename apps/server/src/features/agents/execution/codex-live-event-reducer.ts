@@ -40,6 +40,7 @@ const UNSUPPORTED_FEATURE_REASON = {
   generatedAttachment: null,
   toolUse: null,
   toolResult: null,
+  toolBackgrounded: null,
   turnComplete: null,
   error: null,
   ended: null,
@@ -281,6 +282,9 @@ export class CodexLiveEventReducer {
         return [this.recoveryIntent(this.narrativeDelta.prepareChanges(this.narrative.takeRecoveryChanges(event.threadId)))];
       case "toolUse": return this.toolUse(event);
       case "toolResult": return this.toolResult(event);
+      case "toolBackgrounded":
+        this.narrative.markToolCallBackground(event.threadId, event.toolCallId);
+        return [this.recovery()];
       case "hookStarted": return this.hookStarted(event);
       case "hookCompleted": return this.hookCompleted(event);
       default: return undefined;
@@ -410,6 +414,7 @@ export class CodexLiveEventReducer {
         outputTruncated: event.outputTruncated,
         outputTotalBytes: event.outputTotalBytes,
         outputArtifactPath: event.outputArtifactPath,
+        cancelled: event.cancelled,
       }, event.subagentPresentation);
     return [
       { kind: "tool-result", event },

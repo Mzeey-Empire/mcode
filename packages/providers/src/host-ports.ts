@@ -198,6 +198,21 @@ export type ProviderTurnOpening =
  */
 export interface ProviderTurnPort {
   open(request: { threadId: string; notice: string }): Promise<ProviderTurnOpening>;
+  /**
+   * Settles a tool call that kept running after its turn ended. Its turn's
+   * event route is already retired, so the result cannot use `events.submit`.
+   */
+  settleBackgroundTool(settlement: ProviderBackgroundToolSettlement): Promise<void>;
+}
+
+/** The final outcome of a background tool call whose launching turn has ended. */
+export interface ProviderBackgroundToolSettlement {
+  threadId: string;
+  /** Execution of the turn that launched the call, not the turn running now. */
+  executionId: string;
+  toolCallId: string;
+  status: "completed" | "failed" | "cancelled";
+  output: string;
 }
 
 /** Narrow server services that Provider implementations can use. */

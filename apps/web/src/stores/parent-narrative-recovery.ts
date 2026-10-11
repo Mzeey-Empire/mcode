@@ -1,6 +1,7 @@
 import { MessageSchema, ParentNarrativeRecoveryItemSchema, type AgentItem, type AgentModelState, type AgentTurn, type Message, type ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { recordToApprovalReceipt, recordToHookExecution, recordToToolCall } from "@/features/conversation/narrative/build-persisted-narrative";
 import { narrationSegments } from "@/features/conversation/narrative/narrative-thought-classification";
+import { backgroundHeldToolIds } from "@/features/conversation/narrative/background-held-tools";
 import type { ThreadRecord } from "./thread-record";
 import { appendThoughtSegment } from "./thread-store/narrative-projection";
 import { getCanonicalRuntimeTurn } from "./thread-lifecycle";
@@ -171,10 +172,14 @@ function recoveredNarrative(turn: AgentTurn, items: readonly ParentNarrativeReco
   const streaming = thoughts.filter((item) => item.record.is_final_response === 1)
     .map((item) => item.record.text).join("");
   const terminal = turn.status !== "Pending" && turn.status !== "Running";
+  // A background call and the steps under it outlive their terminal turn until the call's own late result settles them.
+  const held = backgroundHeldToolIds(tools.map(({ record }) => ({
+    id: record.id, parentId: record.parent_tool_call_id, background: record.background === true,
+  })));
   const patch: Partial<ThreadRecord> = {
     toolCalls: tools.map((item) => {
       const tool = recordToToolCall(item.record);
-      return terminal ? { ...tool, isComplete: true } : tool;
+      return terminal && !held.has(tool.id) ? { ...tool, isComplete: true } : tool;
     }),
     thoughtSegments: thoughts.filter((item) => item.record.is_final_response !== 1).map(({ record }) => ({
       id: record.id, text: record.text, startedAt: Date.parse(record.started_at),

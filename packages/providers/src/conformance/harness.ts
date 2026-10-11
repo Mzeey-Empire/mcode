@@ -592,7 +592,10 @@ function createFakeHost(sink: DeterministicCanonicalSink, calls: string[]): Prov
     },
     grants: { consume: () => { calls.push("grants.consume"); return false; } },
     events: { submit: (batch) => sink.submit(batch) },
-    turns: { open: async () => { calls.push("turns.open"); return { kind: "declined", reason: "unavailable" }; } },
+    turns: {
+      open: async () => { calls.push("turns.open"); return { kind: "declined", reason: "unavailable" }; },
+      settleBackgroundTool: async () => { calls.push("turns.settleBackgroundTool"); },
+    },
   };
 }
 

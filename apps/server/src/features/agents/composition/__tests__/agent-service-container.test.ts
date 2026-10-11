@@ -218,7 +218,7 @@ describe("AgentService container composition", () => {
     publication.start();
     const workspace = await container.resolve(WorkspaceRepo).create("provider-turn", temporaryDirectory!);
     const thread = await container.resolve(ThreadRepo).create(workspace.id, "Provider turn", "direct", "main", true, "codex");
-    await container.resolve(AgentService).sendMessage({ threadId: thread.id, content: "start a background task", provider: "codex", permissionMode: "full" });
+    await container.resolve(AgentService).sendMessage({ threadId: thread.id, content: "start a background task", provider: "codex", model: "gpt-5.5", permissionMode: "full" });
     await waitFor(() => workerRuntime?.owner.current(thread.id) === undefined);
 
     const opening = await container.resolve(TurnRuntimeController).openProviderTurn({ threadId: thread.id, notice: "Background command finished" });
@@ -237,6 +237,38 @@ describe("AgentService container composition", () => {
     const notice = (await container.resolve(MessageRepo).listByThread(thread.id, 50)).messages.find((message) => message.content === "Background command finished");
     expect(notice).toMatchObject({ role: "user", systemNotice: { kind: "provider-turn" } });
     expect(container.resolve(TurnRuntimeController).snapshot(thread.id)).toMatchObject({ phase: "completed", turnExecutionId: adopted.turnExecutionId });
+    expect(container.resolve(ThreadRepo).findById(thread.id)?.model).toBe("gpt-5.5");
+  });
+
+  it("admits a provider-started turn that opens while the ended turn is still releasing", async () => {
+    const sendTurn = vi.fn(async (request: TurnRequest) => {
+      await submitCodexEvent(workerRuntime!, request, 1, { type: "turnComplete", threadId: request.threadId,
+        turnExecutionId: request.turnExecutionId, providerId: "codex", reason: "end_turn", costUsd: null,
+        tokensIn: 1, tokensOut: 1, totalProcessedTokens: 2, contextWindow: undefined, cacheReadTokens: undefined });
+      await submitCodexEvent(workerRuntime!, request, 2, { type: "ended", threadId: request.threadId, turnExecutionId: request.turnExecutionId });
+    });
+    let releaseFence!: () => void;
+    const fenceHeld = new Promise<void>((resolve) => { releaseFence = resolve; });
+    const fence = vi.fn(() => fenceHeld);
+    registerFakeCodex(fakeCodexProvider(sendTurn, undefined, fence));
+    const publication = container.resolve(AgentEventPublicationRegistry);
+    publication.bind(() => undefined);
+    publication.start();
+    const workspace = await container.resolve(WorkspaceRepo).create("provider-turn-releasing", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Releasing", "direct", "main", true, "codex");
+    await container.resolve(AgentService).sendMessage({ threadId: thread.id, content: "launch a background agent", provider: "codex", permissionMode: "full" });
+    await waitFor(() => fence.mock.calls.length > 0);
+
+    const opening = container.resolve(TurnRuntimeController).openProviderTurn({ threadId: thread.id, notice: "Background agent finished" });
+    releaseFence();
+    const opened = await opening;
+    if (opened.kind !== "opened") throw new Error(`Provider turn was declined: ${opened.reason}`);
+    const adopted = { threadId: thread.id, turnId: opened.routing.turnId, turnExecutionId: opened.routing.executionId } as TurnRequest;
+    await submitCodexEvent(workerRuntime!, adopted, 1, { type: "turnComplete", threadId: thread.id,
+      turnExecutionId: adopted.turnExecutionId, providerId: "codex", reason: "end_turn", costUsd: null,
+      tokensIn: 1, tokensOut: 1, totalProcessedTokens: 2, contextWindow: undefined, cacheReadTokens: undefined });
+    await submitCodexEvent(workerRuntime!, adopted, 2, { type: "ended", threadId: thread.id, turnExecutionId: adopted.turnExecutionId });
+    await waitFor(() => workerRuntime?.owner.current(thread.id) === undefined);
   });
 
   it("declines a provider-started turn while a user turn holds the thread", async () => {
@@ -690,6 +722,7 @@ describe("AgentService container composition", () => {
 function fakeCodexProvider(
   sendTurn: (request: TurnRequest) => Promise<void>,
   stopSession: (sessionId: string) => Promise<void> = async () => undefined,
+  fenceCanonicalTurnEvents: () => Promise<void> = async () => undefined,
 ): IAgentProvider {
   return Object.assign(new NodeEvents.EventEmitter(), {
     id: "codex" as const,
@@ -704,7 +737,7 @@ function fakeCodexProvider(
     listModels: async () => [],
     setCanonicalTurnEventDeliveryEnabled: () => undefined,
     setCanonicalTurnDeliveryFailureHandler: () => undefined,
-    fenceCanonicalTurnEvents: async () => undefined,
+    fenceCanonicalTurnEvents,
     retireCanonicalTurnEvents: async () => undefined,
   });
 }

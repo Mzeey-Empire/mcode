@@ -400,6 +400,20 @@ describe("NarrativeStore.load (read seam)", () => {
     expect(store.listApprovals("m1")[0]?.outcome).toEqual({ status: "auto_denied", reason: "unreadable" });
   });
 
+  it("reloads a background call's flag so its late end is not read as the turn's", async () => {
+    insertMessage(db, "m1", "assistant", "Started", 1);
+    const tools = new ToolCallRecordRepo(db, agentStorageTestWriter(db));
+    await tools.bulkCreate([
+      { toolCallId: "agent", messageId: "m1", toolName: "Agent", inputSummary: "survey", outputSummary: "done",
+        status: "completed", background: true, sortOrder: 0 },
+      { toolCallId: "read", messageId: "m1", toolName: "Read", inputSummary: "a", outputSummary: "ok",
+        status: "completed", sortOrder: 1 },
+    ]);
+    const records = store.load("thread-1").flatMap((entry) => entry.kind === "toolCall" ? [entry.record] : []);
+    expect(records.map((record) => [record.id, record.background])).toEqual([["agent", true], ["read", undefined]]);
+    expect(tools.listByMessage("m1").map((record) => record.background)).toEqual([true, undefined]);
+  });
+
   it("loads only Agent trees through indexed links and isolates other threads", () => {
     insertMessage(db, "m1", "assistant", "", 1);
     insertMessage(db, "m2", "assistant", "", 2);
@@ -741,6 +755,21 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       messageId: "m1",
       identityKey: encodeSubagentAliasDetailTarget("native-late-agent"),
     }]);
+  });
+
+  it("leaves a background call's steps running when its turn is saved", () => {
+    const state = new NarrativeTurnState(THREAD);
+    state.beginTurn(THREAD);
+    state.bufferToolCall(THREAD, { toolCallId: "agent", toolName: "Agent", toolInput: { prompt: "Look around" } });
+    state.markToolCallBackground(THREAD, "agent");
+    state.bufferToolCall(THREAD, { toolCallId: "step", toolName: "Bash", toolInput: { command: "ls" }, parentToolCallId: "agent" });
+    state.bufferToolCall(THREAD, { toolCallId: "read", toolName: "Read", toolInput: { file_path: "a.txt" } });
+    const persisted = state.prepareNarrativePersistence(THREAD, "m1", "", "completed");
+    expect(persisted.toolCalls.map((tool) => [tool.toolCallId, tool.status, tool.completedAt ?? null])).toEqual([
+      ["agent", "running", null],
+      ["step", "running", null],
+      ["read", "completed", expect.any(String)],
+    ]);
   });
 
   it("detaches changed and terminally materialized records from a fork's accepted narrative", () => {

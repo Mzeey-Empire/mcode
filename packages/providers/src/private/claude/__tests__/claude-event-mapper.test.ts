@@ -4,6 +4,7 @@ import {
   ClaudeEventMapper,
   type ClaudeEventEvidence,
   type ClaudeEventMapperCallbacks,
+  type ClaudeMappedSession,
 } from "../claude-event-mapper.js";
 
 function createMapper(captureSdkSessionId = vi.fn(() => true)) {
@@ -11,7 +12,7 @@ function createMapper(captureSdkSessionId = vi.fn(() => true)) {
   const evidence: ClaudeEventEvidence[] = [];
   const callbacks: ClaudeEventMapperCallbacks = {
     emit: (event, source) => { events.push(event); evidence.push(source); },
-    getSession: () => undefined,
+    getSession: vi.fn((): ClaudeMappedSession | undefined => undefined),
     captureSdkSessionId,
     observeNativeGoalCommands: vi.fn(),
     applyNativeGoalCommandResult: vi.fn(),
@@ -22,11 +23,14 @@ function createMapper(captureSdkSessionId = vi.fn(() => true)) {
     resolveBillingMode: vi.fn(async () => "unknown"),
     isSessionStartHookSuppressed: vi.fn(() => false),
     clearSessionStartHookSuppression: vi.fn(),
+    liveExecutionId: vi.fn((): string | undefined => "EXECUTION_1"),
+    settleBackgroundTool: vi.fn(),
   };
   return {
     events,
     evidence,
     captureSdkSessionId,
+    callbacks,
     mapper: new ClaudeEventMapper("mcode-test", "test", callbacks),
   };
 }
@@ -176,6 +180,85 @@ describe("ClaudeEventMapper user interrupts", () => {
       output: "[Request interrupted by user]",
       isError: false,
     });
+  });
+});
+
+describe("ClaudeEventMapper background tools", () => {
+  const launch = (id: string) => ({
+    type: "user",
+    tool_use_result: { status: "async_launched", isAsync: true, agentId: `agent-${id}` },
+    message: { content: [{ type: "tool_result", tool_use_id: id, content: "Async agent launched successfully." }] },
+  });
+  const notification = (id: string, status: string) =>
+    ({ type: "system", subtype: "task_notification", tool_use_id: id, task_id: `task-${id}`, status, summary: `${id} ${status}` });
+
+  async function launched(ids: readonly string[]) {
+    const harness = createMapper();
+    const pendingToolUses = new Set<string>();
+    vi.mocked(harness.callbacks.getSession).mockReturnValue({ model: "sonnet", contextWindowMode: undefined, pendingToolUses, hasFiredToolThisTurn: false });
+    for (const id of ids) {
+      await harness.mapper.map({ type: "assistant", message: { content: [{ type: "tool_use", id, name: "Agent", input: {} }] } });
+      await harness.mapper.map(launch(id));
+    }
+    return { ...harness, pendingToolUses };
+  }
+
+  it("holds an async launch open instead of completing it", async () => {
+    const { events, pendingToolUses } = await launched(["AGENT_1"]);
+    expect(events.map((event) => event.type)).toEqual([AgentEventType.ToolUse, AgentEventType.ToolBackgrounded]);
+    expect(pendingToolUses.size).toBe(0);
+  });
+
+  it("settles a held call inside its own turn, even after the execution evidence resets", async () => {
+    const { events, mapper, callbacks } = await launched(["AGENT_1"]);
+    mapper.resetExecution();
+    mapper.settleBackgroundTask(notification("AGENT_1", "completed"));
+    mapper.settleBackgroundTask(notification("AGENT_1", "completed"));
+    expect(events.at(-1)).toEqual({ type: AgentEventType.ToolResult, threadId: "test", toolCallId: "AGENT_1", output: "AGENT_1 completed", isError: false });
+    expect(events.filter((event) => event.type === AgentEventType.ToolResult)).toHaveLength(1);
+    expect(callbacks.settleBackgroundTool).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["completed", "completed"],
+    ["failed", "failed"],
+    ["stopped", "cancelled"],
+  ])("hands a %s task from an ended turn to the host as %s", async (sdkStatus, status) => {
+    const { events, mapper, callbacks } = await launched(["AGENT_1"]);
+    vi.mocked(callbacks.liveExecutionId).mockReturnValue(undefined);
+    const before = events.length;
+    mapper.settleBackgroundTask(notification("AGENT_1", sdkStatus));
+    expect(callbacks.settleBackgroundTool).toHaveBeenCalledExactlyOnceWith(
+      { executionId: "EXECUTION_1", toolCallId: "AGENT_1", status, output: `AGENT_1 ${sdkStatus}` });
+    expect(events).toHaveLength(before);
+  });
+
+  it("ignores task notifications for calls it does not hold", async () => {
+    const { events, mapper, callbacks } = await launched([]);
+    mapper.settleBackgroundTask({ ...notification("BASH_1", "completed"), owned_by_subagent: true });
+    expect(events).toEqual([]);
+    expect(callbacks.settleBackgroundTool).not.toHaveBeenCalled();
+  });
+
+  it("completes an ordinary tool result even when the message names an async launch for several results", async () => {
+    const { events, mapper } = createMapper();
+    await mapper.map({ ...launch("AGENT_1"), message: { content: [
+      { type: "tool_result", tool_use_id: "AGENT_1", content: "one" },
+      { type: "tool_result", tool_use_id: "AGENT_2", content: "two" },
+    ] } });
+    expect(events.map((event) => event.type)).toEqual([AgentEventType.ToolResult, AgentEventType.ToolResult]);
+  });
+
+  it("stops every held call when the session ends, routing each to its own turn", async () => {
+    const { events, mapper, callbacks } = await launched(["AGENT_1", "AGENT_2"]);
+    vi.mocked(callbacks.liveExecutionId).mockReturnValue("EXECUTION_2");
+    mapper.settleBackgroundTask(notification("AGENT_2", "completed"));
+    vi.mocked(callbacks.settleBackgroundTool).mockClear();
+    mapper.settleAllBackgroundTools();
+    mapper.settleAllBackgroundTools();
+    expect(callbacks.settleBackgroundTool).toHaveBeenCalledExactlyOnceWith(
+      { executionId: "EXECUTION_1", toolCallId: "AGENT_1", status: "cancelled", output: "Stopped when the Claude session ended." });
+    expect(events.filter((event) => event.type === AgentEventType.ToolResult)).toEqual([]);
   });
 });
 

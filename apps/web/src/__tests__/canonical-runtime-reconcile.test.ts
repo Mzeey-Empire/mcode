@@ -409,6 +409,34 @@ describe("canonical runtime reconciliation", () => {
     expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(false);
   });
 
+  it.each([
+    ["completes in one batch", ["p1", "p2", "p3"]],
+    ["streams its start first", ["p1", "p2"]],
+  ])("drops the earlier turn's live rows when a newer turn the client did not start %s", (_label, eventIds) => {
+    seedRuntime("running", EXECUTION_ID, true);
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, turnEvents(EXECUTION_ID, "completed"));
+    const agent = { id: "agent", toolName: "Agent", toolInput: {}, output: "done", isError: false, isComplete: true, background: true };
+    useThreadStore.setState({ records: seedThreadRecord(THREAD_ID, {
+      toolCalls: [agent, { ...agent, id: "step", toolName: "Bash", background: false, parentToolCallId: "agent" }],
+      thoughtSegments: [{ text: "Launching", startedAt: 0, endedAt: 1 }],
+    }) });
+
+    const second = (eventId: string, sequence: number, payload: CanonicalAgentEventEnvelope["payload"]) => {
+      const event = envelope(eventId, sequence, OTHER_EXECUTION_ID, payload);
+      return { ...event, routing: { ...event.routing, turnId: "turn-2" } };
+    };
+    const wake = [
+      second("p1", 5, { type: "turn.created", turn: { id: "turn-2", threadId: THREAD_ID, status: "Pending", trigger: { kind: "user" },
+        permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested", attemptOf: null, providerIdentities: [],
+        startedAt: null, providerStartedAt: null, ending: null, endedAt: null, createdAt: NOW, updatedAt: NOW } }),
+      second("p2", 6, { type: "turn.started", startedAt: NOW }),
+      second("p3", 7, { type: "turn.completed", endedAt: NOW }),
+    ];
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, wake.filter((event) => eventIds.includes(event.eventId)));
+
+    expect(readThreadField(THREAD_ID, (r) => [r.turnExecutionId, r.toolCalls, r.thoughtSegments])).toEqual([OTHER_EXECUTION_ID, [], []]);
+  });
+
   it("ignores a canonical turn carrying a different execution identity", () => {
     seedRuntime("running", OTHER_EXECUTION_ID, true);
 
