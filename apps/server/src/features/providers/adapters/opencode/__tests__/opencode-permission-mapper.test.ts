@@ -5,6 +5,8 @@ import {
   synthesizeOpenCodeQuestionRequest,
 } from "../opencode-permission-mapper.js";
 
+const AGENT = { kind: "agent" } as const;
+
 describe("mapApprovalChoiceToReply", () => {
   it("maps approve-once to once, session approval to always, and deny/cancel to reject", () => {
     expect(mapApprovalChoiceToReply("once")).toBe("once");
@@ -16,7 +18,7 @@ describe("mapApprovalChoiceToReply", () => {
 
 describe("synthesizeOpenCodeApprovalRequest", () => {
   it("keeps all scope, the native tool id, and a complete always description", () => {
-    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", properties: { id: "per_1", action: "bash", resources: ["echo hi", "git status"], tool: { callID: "tool-1" } } });
+    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", origin: AGENT, properties: { id: "per_1", action: "bash", resources: ["echo hi", "git status"], tool: { callID: "tool-1" } } });
     expect(request?.requestId).toBe("per_1");
     expect(request?.threadId).toBe("owner");
     expect(request?.body.toolCallId).toBe("tool-1");
@@ -30,7 +32,7 @@ describe("synthesizeOpenCodeApprovalRequest", () => {
 
   it("omits only the scoped choice when its whole description does not fit", () => {
     const pattern = "x".repeat(501);
-    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", properties: { id: "per_1", action: "bash", resources: [pattern] } });
+    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", origin: AGENT, properties: { id: "per_1", action: "bash", resources: [pattern] } });
     expect(request?.body.choices).toEqual([
       { id: "once", intent: "allow_once", label: "Allow once" },
       { id: "reject", intent: "deny", label: "Deny" },
@@ -39,7 +41,7 @@ describe("synthesizeOpenCodeApprovalRequest", () => {
   });
 
   it("omits an unstatable always choice and supports the legacy action field", () => {
-    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", properties: { id: "per_1", permission: "edit", metadata: { secret: true } } });
+    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", origin: AGENT, properties: { id: "per_1", permission: "edit", metadata: { secret: true } } });
     expect(request?.body.subject).toEqual({ kind: "tool", toolName: "edit", preview: '{"action":"edit","resources":[]}' });
     expect(request?.body.choices.map((choice) => choice.id)).toEqual(["once", "reject"]);
   });
@@ -47,15 +49,15 @@ describe("synthesizeOpenCodeApprovalRequest", () => {
   it("preserves oversized authorization scope for automatic denial", () => {
     const action = "x".repeat(501);
     const resource = "y".repeat(70_000);
-    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", properties: { id: "per_1", action, resources: [resource] } });
+    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", origin: AGENT, properties: { id: "per_1", action, resources: [resource] } });
     expect(request?.body.subject).toEqual({ kind: "tool", toolName: action, preview: '{"action":"' + action + '","resources":["' + resource + '"]}' });
   });
 
   it("retains a usable routing id even when display data is unreadable", () => {
-    expect(synthesizeOpenCodeApprovalRequest({ threadId: "owner", properties: { id: "per_1" } })?.requestId).toBe("per_1");
-    expect(synthesizeOpenCodeApprovalRequest({ threadId: "owner", properties: {} })).toBeNull();
-    expect(synthesizeOpenCodeApprovalRequest({ threadId: "owner", properties: { id: "", action: "bash" } })).toBeNull();
-    expect(synthesizeOpenCodeApprovalRequest({ threadId: "owner", properties: { id: "x".repeat(129), action: "bash" } })).toBeNull();
+    expect(synthesizeOpenCodeApprovalRequest({ threadId: "owner", origin: AGENT, properties: { id: "per_1" } })?.requestId).toBe("per_1");
+    expect(synthesizeOpenCodeApprovalRequest({ threadId: "owner", origin: AGENT, properties: {} })).toBeNull();
+    expect(synthesizeOpenCodeApprovalRequest({ threadId: "owner", origin: AGENT, properties: { id: "", action: "bash" } })).toBeNull();
+    expect(synthesizeOpenCodeApprovalRequest({ threadId: "owner", origin: AGENT, properties: { id: "x".repeat(129), action: "bash" } })).toBeNull();
   });
 });
 
@@ -63,6 +65,7 @@ describe("synthesizeOpenCodeQuestionRequest", () => {
   it("builds bounded canonical questions with exact reply labels", () => {
     const result = synthesizeOpenCodeQuestionRequest({
       threadId: "thread-1",
+      origin: AGENT,
       properties: {
         id: "que_1",
         sessionID: "ses_1",
@@ -96,13 +99,15 @@ describe("synthesizeOpenCodeQuestionRequest", () => {
   });
 
   it("returns null without a usable id or questions", () => {
-    expect(synthesizeOpenCodeQuestionRequest({ threadId: "t", properties: {} })).toBeNull();
+    expect(synthesizeOpenCodeQuestionRequest({ threadId: "t", origin: AGENT, properties: {} })).toBeNull();
     expect(synthesizeOpenCodeQuestionRequest({
       threadId: "t",
+      origin: AGENT,
       properties: { id: "que_1", questions: [] },
     })).toBeNull();
     expect(synthesizeOpenCodeQuestionRequest({
       threadId: "t",
+      origin: AGENT,
       properties: { id: "que_1", questions: [{ header: "H" }] },
     })).toBeNull();
   });
@@ -110,6 +115,7 @@ describe("synthesizeOpenCodeQuestionRequest", () => {
   it("rejects oversized request identities and reply labels instead of changing them", () => {
     expect(synthesizeOpenCodeQuestionRequest({
       threadId: "thread-1",
+      origin: AGENT,
       properties: {
         id: `que_${"x".repeat(128)}`,
         questions: [{ header: "Deploy", question: "Deploy?", options: [{ label: "Yes" }] }],
@@ -117,6 +123,7 @@ describe("synthesizeOpenCodeQuestionRequest", () => {
     })).toBeNull();
     expect(synthesizeOpenCodeQuestionRequest({
       threadId: "thread-1",
+      origin: AGENT,
       properties: {
         id: "que_1",
         questions: [{
