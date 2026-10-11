@@ -1,4 +1,4 @@
-import type { ApprovalChoice, ApprovalOrigin, ApprovalQuestion, ApprovalRequestBody, ApprovalRequestEnvelope } from "@mcode/contracts";
+import type { ApprovalChoice, ApprovalOrigin, ApprovalQuestion, ApprovalRequestBody, ApprovalRequestEnvelope, ApprovalSubject } from "@mcode/contracts";
 import { z } from "zod";
 
 const ToolIdentitySchema = z.object({ callID: z.string().optional() });
@@ -46,26 +46,66 @@ export function mapApprovalChoiceToReply(choiceId: string): OpenCodePermissionRe
   return "reject";
 }
 
-/** Keep all resources intact; the shared scope validator decides whether they fit. */
+/** What an OpenCode ask requests now, and what an `always` reply would approve from then on. */
+interface OpenCodeAskScope {
+  action: string;
+  requested: unknown;
+  grants: unknown;
+  command: string | undefined;
+}
+
+function stringOf(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * OpenCode 1.18 sends `permission`, `patterns` and `always`; the v2 event sends `action`, `resources`
+ * and `save`. An `always` reply approves the `always` or `save` list, which is usually broader than
+ * what was requested (`node math.js` asks, `node *` is granted).
+ */
+function askScopeOf(properties: Record<string, unknown>): OpenCodeAskScope {
+  const action = stringOf(properties.action) ?? stringOf(properties.permission) ?? "";
+  const metadata = objectRecord(properties.metadata) ? properties.metadata : {};
+  return {
+    action,
+    requested: properties.resources ?? properties.patterns ?? [],
+    grants: properties.save ?? properties.always ?? [],
+    command: action === "bash" ? stringOf(metadata.command) : undefined,
+  };
+}
+
+function grantDescription(grants: unknown): string | undefined {
+  if (!Array.isArray(grants) || grants.length === 0 || !grants.every((item): item is string => typeof item === "string")) return undefined;
+  const description = grants.join(", ");
+  return description.length <= 500 ? description : undefined;
+}
+
+function askSubjectOf(scope: OpenCodeAskScope): ApprovalSubject {
+  if (scope.command !== undefined) return { kind: "command", command: scope.command };
+  return { kind: "tool", toolName: scope.action, preview: JSON.stringify({ action: scope.action, resources: scope.requested }) };
+}
+
+/**
+ * Keep all scope intact; the shared scope validator decides whether it fits. "Always allow" is
+ * offered only when OpenCode names what it would grant. The grant is not per session: OpenCode 1.18
+ * applies it to every session on the same server, and Mcode pools one server per working directory.
+ */
 export function synthesizeOpenCodeApprovalRequest(input: {
   threadId: string; properties: Record<string, unknown>; origin: ApprovalOrigin;
 }): (ApprovalRequestEnvelope & { body: ApprovalRequestBody }) | null {
   const requestId = acceptedId(input.properties.id);
   if (requestId === undefined) return null;
-  const action = typeof input.properties.action === "string" ? input.properties.action
-    : typeof input.properties.permission === "string" ? input.properties.permission : "";
-  const resources = input.properties.resources ?? [];
-  const description = Array.isArray(resources) && resources.every((item): item is string => typeof item === "string")
-    ? resources.join(", ") : undefined;
+  const scope = askScopeOf(input.properties);
+  const description = grantDescription(scope.grants);
   const choices: ApprovalChoice[] = [{ id: "once", intent: "allow_once", label: "Allow once" }];
-  if (description && description.length <= 500) choices.push({ id: "always", intent: "allow_scoped", label: "Allow for this session", description });
+  if (description) choices.push({ id: "always", intent: "allow_scoped", label: "Always allow", description });
   choices.push({ id: "reject", intent: "deny", label: "Deny" });
   const tool = ToolIdentitySchema.safeParse(input.properties.tool);
   return {
     requestId, threadId: input.threadId,
     body: {
       requestedAt: new Date().toISOString(), toolCallId: tool.success ? tool.data.callID : undefined,
-      subject: { kind: "tool", toolName: action, preview: JSON.stringify({ action, resources }) },
+      subject: askSubjectOf(scope),
       choices, noteDelivery: "next_turn", noteChoiceId: "reject", origin: input.origin,
     },
   };

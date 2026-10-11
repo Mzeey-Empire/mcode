@@ -50,6 +50,7 @@ describe("approvalReceiptCopy", () => {
   it.each([
     [{ status: "allowed", intent: "allow_once", choiceLabel: "Allow once" }, "Allowed once", true],
     [{ status: "allowed", intent: "allow_scoped", choiceLabel: "Allow for this session" }, "Allowed for this session", true],
+    [{ status: "allowed", intent: "allow_scoped", choiceLabel: "Always allow" }, "Always allowed", true],
     [{ status: "denied", choiceLabel: "Deny" }, "Denied", true],
     [{ status: "denied", choiceLabel: "Reject always" }, "Reject always", true],
     [{ status: "allowed", intent: "provider", choiceLabel: "Switch to Bypass" }, "Switch to Bypass", true],

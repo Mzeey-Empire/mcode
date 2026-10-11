@@ -10,6 +10,7 @@ import type { ApprovalReceipt } from "./types";
 const MCODE_CHOICE_RECEIPTS: Readonly<Record<string, string>> = {
   "Allow once": "Allowed once",
   "Allow for this session": "Allowed for this session",
+  "Always allow": "Always allowed",
   Deny: "Denied",
 };
 
