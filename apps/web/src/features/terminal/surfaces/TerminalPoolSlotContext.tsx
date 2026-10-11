@@ -7,9 +7,16 @@ import {
   type ReactNode,
 } from "react";
 
+/**
+ * Where the pooled terminal view can display: the right-panel Terminal tab, or
+ * the provider sign-in dialog that shows the home scope.
+ */
+export type TerminalPoolSurface = "panel" | "dialog";
+
 interface TerminalPoolSlotContextValue {
-  readonly slotEl: HTMLDivElement | null;
-  readonly setSlotRef: (el: HTMLDivElement | null) => void;
+  readonly slotEls: Readonly<Record<TerminalPoolSurface, HTMLDivElement | null>>;
+  readonly setPanelSlotRef: (el: HTMLDivElement | null) => void;
+  readonly setDialogSlotRef: (el: HTMLDivElement | null) => void;
   readonly offScreenEl: HTMLDivElement | null;
   readonly setOffScreenRef: (el: HTMLDivElement | null) => void;
 }
@@ -19,21 +26,31 @@ const TerminalPoolSlotContext = createContext<TerminalPoolSlotContextValue | nul
 );
 
 /**
- * Provides DOM mount targets for {@link TerminalPoolHost}: the right-panel slot
- * and a fixed off-screen host when the slot has no layout size.
+ * Provides DOM mount targets for {@link TerminalPoolHost}: the right-panel slot,
+ * the sign-in dialog slot, and a fixed off-screen host when no slot displays it.
  */
 export function TerminalPoolSlotProvider({ children }: { readonly children: ReactNode }) {
-  const [slotEl, setSlotEl] = useState<HTMLDivElement | null>(null);
+  const [panelSlotEl, setPanelSlotEl] = useState<HTMLDivElement | null>(null);
+  const [dialogSlotEl, setDialogSlotEl] = useState<HTMLDivElement | null>(null);
   const [offScreenEl, setOffScreenEl] = useState<HTMLDivElement | null>(null);
-  const setSlotRef = useCallback((el: HTMLDivElement | null) => {
-    setSlotEl(el);
+  const setPanelSlotRef = useCallback((el: HTMLDivElement | null) => {
+    setPanelSlotEl(el);
+  }, []);
+  const setDialogSlotRef = useCallback((el: HTMLDivElement | null) => {
+    setDialogSlotEl(el);
   }, []);
   const setOffScreenRef = useCallback((el: HTMLDivElement | null) => {
     setOffScreenEl(el);
   }, []);
   const value = useMemo(
-    () => ({ slotEl, setSlotRef, offScreenEl, setOffScreenRef }),
-    [slotEl, setSlotRef, offScreenEl, setOffScreenRef],
+    () => ({
+      slotEls: { panel: panelSlotEl, dialog: dialogSlotEl },
+      setPanelSlotRef,
+      setDialogSlotRef,
+      offScreenEl,
+      setOffScreenRef,
+    }),
+    [panelSlotEl, dialogSlotEl, setPanelSlotRef, setDialogSlotRef, offScreenEl, setOffScreenRef],
   );
   return (
     <TerminalPoolSlotContext.Provider value={value}>
@@ -57,10 +74,23 @@ export function useTerminalPoolSlot(): TerminalPoolSlotContextValue {
 }
 
 /**
- * Mount point inside the right-panel terminal tab. {@link TerminalPoolHost} portals here
- * when the slot has non-zero layout size.
+ * Mount point for the pooled terminal view, in the right-panel Terminal tab
+ * (the default) or the sign-in dialog. {@link TerminalPoolHost} portals into
+ * the slot of the surface it currently presents.
  */
-export function TerminalPoolSlot({ className }: { readonly className?: string }) {
-  const { setSlotRef } = useTerminalPoolSlot();
-  return <div ref={setSlotRef} className={className} data-testid="terminal-pool-slot" />;
+export function TerminalPoolSlot({
+  className,
+  surface = "panel",
+}: {
+  readonly className?: string;
+  readonly surface?: TerminalPoolSurface;
+}) {
+  const { setPanelSlotRef, setDialogSlotRef } = useTerminalPoolSlot();
+  return (
+    <div
+      ref={surface === "dialog" ? setDialogSlotRef : setPanelSlotRef}
+      className={className}
+      data-testid="terminal-pool-slot"
+    />
+  );
 }

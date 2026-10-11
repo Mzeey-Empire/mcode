@@ -15,6 +15,7 @@ export {
   TERMINAL_PANEL_DEFAULTS,
   useTerminalStore,
 } from "./state/terminalStore";
+export { useHomeTerminalPresented } from "./state/useHomeTerminalPresented";
 export type {
   ActiveTerminalSession,
   TerminalInstance,
