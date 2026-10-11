@@ -67,3 +67,8 @@ export type TurnRevertResult =
   | { status: "failed"; outcome: "unchanged" | "rolled_back" | "recovery_failed"; paths: string[]; detail: string };
 /** Apply and Undo outcomes; validation errors are RPC errors. The explicit type keeps the WebSocket registry declaration small. */
 export const TurnRevertResultSchema: () => z.ZodType<TurnRevertResult> = turnRevertResult;
+const turnReverted = lazySchema(() => z.object({ threadId: z.string(), revert: TurnRevertRecordSchema(), receipt: MessageSchema() }));
+/** Push payload for a committed revert. */
+export type TurnRevertedEvent = { threadId: string; revert: TurnRevertRecord; receipt: Message };
+/** Push payload for a committed revert. The explicit type keeps the WebSocket channel declaration small. */
+export const TurnRevertedEventSchema: () => z.ZodType<TurnRevertedEvent> = turnReverted;

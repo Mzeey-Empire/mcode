@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { MessageSchema } from "../models/message.js";
-import { TurnRevertRecordSchema } from "../models/turn-revert.js";
+import { TurnRevertedEventSchema } from "../models/turn-revert.js";
 import { ThreadAttentionSchema } from "../models/thread-attention.js";
 import { CanonicalAgentProgressFrameSchema } from "../models/canonical-agent-progress.js";
 import { ThreadStatusSchema } from "../models/enums.js";
@@ -161,7 +160,7 @@ export const WS_CHANNELS = {
     z.object({ workspaceId: z.string(), icon: ProjectIconSchema() }),
   )(),
   "turn.diffChanged": z.object({ threadId: z.string() }),
-  "turn.reverted": lazySchema(() => z.object({ threadId: z.string(), revert: TurnRevertRecordSchema(), receipt: MessageSchema() }))(),
+  "turn.reverted": TurnRevertedEventSchema(),
   "turn.persisted": lazySchema(() => z.object({
     threadId: z.string(),
     turnId: z.string().nullable().optional(),
