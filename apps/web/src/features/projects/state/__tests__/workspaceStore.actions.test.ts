@@ -20,6 +20,7 @@ function makeWs(overrides?: Partial<Workspace>): Workspace {
     last_opened_at: null,
     sort_order: 0,
     deleted_at: null,
+    icon_path: null,
     ...overrides,
   };
 }

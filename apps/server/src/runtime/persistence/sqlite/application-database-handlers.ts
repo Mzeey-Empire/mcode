@@ -66,6 +66,7 @@ export function applicationDatabaseHandlers(db: Database): ReadonlyMap<string, (
     [operations.prependToSortOrder.name, databaseWriteHandler(operations.prependToSortOrder, (input) => workspace.prependToSortOrder(...input))],
     [operations.reorderToIndex.name, databaseWriteHandler(operations.reorderToIndex, (input) => workspace.reorderToIndex(...input))],
     [operations.rename.name, databaseWriteHandler(operations.rename, (input) => workspace.rename(...input))],
+    [operations.setIconPath.name, databaseWriteHandler(operations.setIconPath, (input) => workspace.setIconPath(...input))],
     [operations.setPinned.name, databaseWriteHandler(operations.setPinned, (input) => workspace.setPinned(...input))],
     [operations.touchLastOpened.name, databaseWriteHandler(operations.touchLastOpened, (input) => workspace.touchLastOpened(...input))],
     [operations.removeRecent.name, databaseWriteHandler(operations.removeRecent, (input) => workspace.removeRecent(...input))],

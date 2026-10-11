@@ -23,6 +23,7 @@ export const workspaces = sqliteTable(
     sortOrder: integer("sort_order").notNull().default(0),
     isGitRepo: integer("is_git_repo").notNull().default(1),
     deletedAt: text("deleted_at"),
+    iconPath: text("icon_path"),
   },
   (table) => [
     index("idx_workspaces_sort_order").on(asc(table.sortOrder)),

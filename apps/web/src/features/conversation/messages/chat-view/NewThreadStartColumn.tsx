@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { recordFirstSend } from "@/features/thread-startup";
 import { Composer } from "../../composer/Composer";
 import { ProjectSlotHeading } from "./ProjectSlotHeading";
+import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
 
 /** Props for {@link NewThreadStartColumn}. */
 export interface NewThreadStartColumnProps {
@@ -44,7 +45,7 @@ export function NewThreadStartColumn({ projectName, workspaceId, draftId }: NewT
     <div ref={canvasRef} className={cn("relative flex h-full min-h-0 flex-col bg-background", docked && "[--chat-gutter:--spacing(6)]")}>
       <OverviewLayer>
         <CanvasHeader>
-          <NewThreadBreadcrumb projectName={projectName} />
+          <NewThreadBreadcrumb projectName={projectName} workspaceId={workspaceId} />
           {scope ? <NewThreadOverview scope={scope} overview={overview} /> : null}
         </CanvasHeader>
         <div
@@ -83,10 +84,12 @@ function NewThreadOverview({ scope, overview }: { scope: OverviewScope; overview
   );
 }
 
-function NewThreadBreadcrumb({ projectName }: { projectName: string | undefined }) {
+function NewThreadBreadcrumb({ projectName, workspaceId }: { projectName: string | undefined; workspaceId: string | undefined }) {
   return (
     <nav aria-label="Breadcrumb" className="flex h-control-compact min-w-0 items-center gap-2 rounded-2xl bg-selected px-3 text-body-small text-muted">
-      <Folder size={14} className="shrink-0" aria-hidden />
+      {projectName && workspaceId
+        ? <ProjectIcon workspaceId={workspaceId} name={projectName} size={14} />
+        : <Folder size={14} className="shrink-0" aria-hidden />}
       {projectName && (
         <>
           <span className="text-fade">{projectName}</span>

@@ -10,6 +10,7 @@ import { ChecksStatusSchema } from "../github.js";
 import { ApprovalRequestSchema, ApprovalOutcomeSchema } from "../models/approval.js";
 import { ProviderAvailabilitySchema } from "../providers/availability.js";
 import { lazySchema } from "../utils/lazySchema.js";
+import { ProjectIconSchema } from "../models/project-icon.js";
 import {
   BrowserAutomationHostDispatchTargetSchema,
   BrowserAutomationHostDispatchSchema,
@@ -160,6 +161,10 @@ export const WS_CHANNELS = {
   )(),
   /** Sidebar project order changed on the server; clients should refresh `workspace.list`. */
   "workspace.orderChanged": z.object({}),
+  /** A project's icon changed; replaces the client's entry for that workspace. */
+  "workspace.iconChanged": lazySchema(() =>
+    z.object({ workspaceId: z.string(), icon: ProjectIconSchema() }),
+  )(),
   "turn.diffChanged": z.object({ threadId: z.string() }),
   "turn.persisted": lazySchema(() => z.object({
     threadId: z.string(),

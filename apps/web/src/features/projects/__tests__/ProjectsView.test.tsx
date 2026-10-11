@@ -19,6 +19,7 @@ const hoisted = vi.hoisted(() => {
     last_opened_at: Date.now(),
     sort_order: 0,
     deleted_at: null,
+    icon_path: null,
   };
   return {
     pinnedWorkspace,

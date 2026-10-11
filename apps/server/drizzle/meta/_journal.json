@@ -561,6 +561,13 @@
       "when": 1791683996487,
       "tag": "0078_glossy_ironclad",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "6",
+      "when": 1791688665558,
+      "tag": "0079_light_human_robot",
+      "breakpoints": true
     }
   ]
 }

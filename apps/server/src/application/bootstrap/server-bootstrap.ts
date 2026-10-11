@@ -87,6 +87,7 @@ import {
 import { NarrativeStore } from "../../features/agents/conversation/narrative/narrative-store.js";
 import { LegacyConversationMigration } from "../../features/agents/conversation/migrations/legacy-conversation-migration.js";
 import { FileService } from "../../features/projects/files/file-service.js";
+import { ProjectIconService } from "../../features/projects/icons/project-icon-service.js";
 import { ConfigService } from "../../features/providers/configuration/config-service.js";
 import { SkillService } from "../../features/agents/skills/catalog/skill-service.js";
 import { CodexCatalogService } from "../../features/providers/catalog/codex-catalog-service.js";
@@ -356,6 +357,7 @@ const pullRequestService = container.resolve(PullRequestService);
 const pullRequestMutationService = container.resolve(PullRequestMutationService);
 const reviewWorktreeService = container.resolve(ReviewWorktreeService);
 const fileService = container.resolve(FileService);
+const projectIconService = container.resolve(ProjectIconService);
 const configService = container.resolve(ConfigService);
 const skillService = container.resolve(SkillService);
 const codexCatalogService = container.resolve(CodexCatalogService);
@@ -765,6 +767,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   pullRequestMutationService,
   reviewWorktreeService,
   fileService,
+  projectIconService,
   configService,
   skillService,
   codexCatalogService,

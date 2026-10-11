@@ -4,6 +4,7 @@ export type Message = import("@mcode/contracts").Message & { serverSequence?: nu
 // Import shared types for local use in the McodeTransport interface.
 import type {
   DiffStats,
+  ProjectIcon,
   WorkspaceFileList,
   WorkspaceFileChanges,
   FileReadResult,
@@ -314,6 +315,10 @@ export interface McodeTransport {
   // Workspace commands
   createWorkspace(name: string | undefined, path: string): Promise<WorkspaceCreateResult>;
   listWorkspaces(): Promise<Workspace[]>;
+  /** Resolve the icon each workspace shows; unknown or deleted ids are omitted. */
+  resolveProjectIcons(workspaceIds: string[]): Promise<ProjectIcon[]>;
+  /** Store a chosen icon path, or null to return to automatic detection. */
+  setProjectIcon(workspaceId: string, iconPath: string | null): Promise<ProjectIcon>;
   /** Rename a workspace without changing its filesystem path. */
   renameWorkspace(id: string, name: string): Promise<Workspace>;
   /** Read the selected workspace environment document and revision. */

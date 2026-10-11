@@ -39,6 +39,7 @@ export function createMockWorkspace(
     last_opened_at: null,
     sort_order: 0,
     deleted_at: null,
+    icon_path: null,
     ...overrides,
   };
 }
@@ -118,6 +119,8 @@ export const mockTransport: McodeTransport = {
   createWorkspace: vi.fn<McodeTransport["createWorkspace"]>(),
   listWorkspaces: vi.fn().mockResolvedValue([]),
   renameWorkspace: vi.fn().mockResolvedValue(createMockWorkspace()),
+  resolveProjectIcons: vi.fn().mockResolvedValue([]),
+  setProjectIcon: vi.fn<McodeTransport["setProjectIcon"]>(),
   readWorkspaceEnvironment: vi.fn().mockResolvedValue({
     document: { version: "0.0.1", actions: [] },
     revision: null,

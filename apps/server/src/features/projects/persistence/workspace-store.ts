@@ -30,6 +30,7 @@ function rowToWorkspace(row: WorkspaceRow): Workspace {
     last_opened_at: normalizeLastOpenedAt(row.lastOpenedAt),
     sort_order: row.sortOrder,
     deleted_at: row.deletedAt ?? null,
+    icon_path: row.iconPath ?? null,
   };
 }
 
@@ -103,6 +104,7 @@ export class WorkspaceStore {
       last_opened_at: null,
       sort_order: 0,
       deleted_at: null,
+      icon_path: null,
     };
   }
 
@@ -243,6 +245,15 @@ export class WorkspaceStore {
       .set({ name, updatedAt: new Date().toISOString() })
       .where(and(eq(workspaces.id, id), isNull(workspaces.deletedAt)))
       );
+    return result.changes > 0 ? this.findById(id) : null;
+  }
+
+  /** Store or clear the chosen icon path of a non-deleted workspace and return its updated record. */
+  setIconPath(id: string, iconPath: string | null): Workspace | null {
+    const result = runChanges(this.orm
+      .update(workspaces)
+      .set({ iconPath, updatedAt: new Date().toISOString() })
+      .where(and(eq(workspaces.id, id), isNull(workspaces.deletedAt))));
     return result.changes > 0 ? this.findById(id) : null;
   }
 
