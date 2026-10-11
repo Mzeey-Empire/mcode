@@ -1,8 +1,8 @@
 import { memo, type ComponentType, type RefObject } from "react";
 import { PermissionRequestCard } from "@/components/chat/PermissionRequestCard";
-import { TurnChangeSummary } from "@/components/chat/TurnChangeSummary";
 import { NarrativeFlow, type SubagentRosterTarget } from "@/features/conversation/narrative";
 import { NarrativeIndicator } from "@/features/conversation/narrative/NarrativeIndicator";
+import { TurnChangesBar } from "../../turn/TurnChangesBar";
 import { TurnMetaLine } from "../../turn/TurnMetaLine";
 import { WorkFold, workFoldLabel } from "../../turn/WorkFold";
 import { MessageBubble } from "../MessageBubble";
@@ -71,16 +71,19 @@ function MessageTranscriptItemRenderer({
   );
 }
 
-/** Renders the persisted turn-change summary. */
-function TurnChangesTranscriptItemRenderer({ item, turnExpandRef }: TranscriptItemRendererProps) {
+/** Renders the end-of-turn changes bar. */
+function TurnChangesTranscriptItemRenderer({ item, threadId, turnExpandRef }: TranscriptItemRendererProps) {
   const changes = item as Extract<ChatVirtualItem, { type: "turn-changes" }>;
   return (
-    <TurnChangeSummary
-      messageId={changes.messageId}
-      filesChanged={changes.filesChanged}
-      isLatestTurn={changes.isLatestTurn}
-      manualExpandRef={turnExpandRef}
-    />
+    <div className="my-1">
+      <TurnChangesBar
+        threadId={threadId}
+        messageId={changes.messageId}
+        filesChanged={changes.filesChanged}
+        isLatestTurn={changes.isLatestTurn}
+        manualExpandRef={turnExpandRef}
+      />
+    </div>
   );
 }
 
