@@ -1,6 +1,7 @@
 import type { Provider } from "@mcode/agent-model";
 import type {
   IAgentProvider,
+  ProviderCliFacts,
   IGoalCapable,
   ISessionEvictable,
   ICompletionCapable,
@@ -61,6 +62,10 @@ export type ClaudeProviderBoundary = IGoalCapable & ISessionEvictable & IComplet
 export interface CopilotProviderPorts {
   launch: {
     resolve(): Promise<{ cliPath: string; env: Record<string, string>; githubToken?: string }>;
+    /** Reports resolver-owned version and install source without starting the SDK. */
+    describeCli?(): ProviderCliFacts;
+    /** Clears resolver caches after a successful npm update. */
+    clearCliVersionCache?(): void;
   };
 }
 

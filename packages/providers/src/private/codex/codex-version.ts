@@ -1,10 +1,12 @@
 import * as NodeChildProcess from "node:child_process";
+import { isSemver } from "../../version-policy.js";
 
 /** Shell metacharacters that must not appear in a CLI path passed to `shell: true`. */
 const SHELL_METACHAR_RE = /[;&|`$(){}!<>"'\s\n\r]/;
 
-/** Matches a semver triplet not followed by a fourth dotted segment. */
-const SEMVER_RE = /\b(\d+\.\d+\.\d+)(?!\.\d)/;
+function parseVersion(output: string): string | null {
+  return output.trim().split(/\s+/).find(isSemver) ?? null;
+}
 
 /**
  * Cached version check results keyed by cliPath. Successes are cached for the
@@ -85,13 +87,13 @@ export function checkCodexVersion(
   }
 
   const output = (result.stdout ?? "") + (result.stderr ?? "");
-  const match = output.match(SEMVER_RE);
+  const version = parseVersion(output);
 
-  if (match == null) {
+  if (version === null) {
     return { ok: false, error: notFoundError };
   }
 
-  const success = { ok: true as const, version: match[1] };
+  const success = { ok: true as const, version };
   versionCache.set(cliPath, { result: success, checkedAt: Date.now() });
   return success;
 }
@@ -116,10 +118,10 @@ export function warmCodexVersionCache(cliPath: string): Promise<void> {
       { shell: true, timeout: 5000, windowsHide: true, encoding: "utf8" },
       (err, stdout, stderr) => {
         if (err == null) {
-          const match = ((stdout ?? "") + (stderr ?? "")).match(SEMVER_RE);
-          if (match != null) {
+          const version = parseVersion((stdout ?? "") + (stderr ?? ""));
+          if (version !== null) {
             versionCache.set(cliPath, {
-              result: { ok: true, version: match[1] },
+              result: { ok: true, version },
               checkedAt: Date.now(),
             });
           }
@@ -130,38 +132,8 @@ export function warmCodexVersionCache(cliPath: string): Promise<void> {
   });
 }
 
-/** Clears the cached version results. Exposed for testing only. */
+/** Clears installed versions after an update, and isolates version-check tests. */
 export function clearVersionCache(): void {
   versionCache.clear();
   currentCliPath = null;
-}
-
-/**
- * Returns `true` when `version` is greater than or equal to `minimum`.
- *
- * Both strings must be valid semver triplets (`major.minor.patch`). Returns
- * `false` for malformed or empty inputs instead of throwing.
- *
- * @param version - The version to test (e.g. `"1.2.3"`).
- * @param minimum - The lowest acceptable version (e.g. `"1.0.0"`).
- */
-export function meetsMinVersion(version: string, minimum: string): boolean {
-  try {
-    const parse = (v: string): [number, number, number] => {
-      const parts = v.split(".").map(Number);
-      if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) {
-        throw new Error("invalid semver");
-      }
-      return parts as [number, number, number];
-    };
-
-    const [vMaj, vMin, vPat] = parse(version);
-    const [mMaj, mMin, mPat] = parse(minimum);
-
-    if (vMaj !== mMaj) return vMaj > mMaj;
-    if (vMin !== mMin) return vMin > mMin;
-    return vPat >= mPat;
-  } catch {
-    return false;
-  }
 }

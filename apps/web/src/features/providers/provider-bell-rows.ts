@@ -1,20 +1,20 @@
-import { getCatalogEntry, type ProviderId, type ProviderRateLimit, type ProviderStatus } from "@mcode/contracts";
+import { getCatalogEntry, type ProviderCliUpdate, type ProviderId, type ProviderRateLimit, type ProviderStatus } from "@mcode/contracts";
+
+/** A CLI update the bell can show; `none` never becomes a row. */
+export type ProviderBellCliUpdate = Exclude<ProviderCliUpdate, { state: "none" }>;
 
 /** One provider that needs attention in the sidebar bell. */
-export interface ProviderBellRow {
-  providerId: ProviderId;
-  name: string;
-  kind: ProviderBellRowKind;
-  detail: string;
-  /** The terminal command that signs in; present only on signed-out rows. */
-  signInArgv?: readonly string[];
-  /** The announced model that Try starts the next thread on; present only on new-model rows. */
-  tryModelId?: string;
-}
+export type ProviderBellRow = { providerId: ProviderId; name: string } & (
+  /** `signInArgv` is the terminal command that signs in. */
+  | { kind: "signed_out"; detail: string; signInArgv: readonly string[] }
+  | { kind: "rate_limited"; detail: string }
+  | { kind: "cli_update"; installed: string | null; update: ProviderBellCliUpdate }
+  /** `tryModelId` is the announced model that Try starts the next thread on. */
+  | { kind: "new_model"; detail: string; tryModelId: string }
+);
 
 /** Row kinds in priority order: a provider shows only its first, and rows sort by it. */
-const ROW_KINDS = ["signed_out", "rate_limited", "new_model"] as const;
-type ProviderBellRowKind = (typeof ROW_KINDS)[number];
+const ROW_KINDS = ["signed_out", "rate_limited", "cli_update", "new_model"] as const satisfies readonly ProviderBellRow["kind"][];
 
 // A Map, not an object literal, so a provider-sent type such as "constructor" cannot hit a prototype member.
 const LIMIT_LABELS = new Map([
@@ -23,10 +23,11 @@ const LIMIT_LABELS = new Map([
 ]);
 
 /**
- * Turns provider statuses into bell rows. Signed out outranks rate limited, which
- * outranks a new model, both for one provider and in row order, because a
- * signed-out provider cannot start a thread at all. Unknown auth and past rate
- * limits produce no row.
+ * Turns provider statuses into bell rows, at most one per provider. Signed out
+ * outranks rate limited, which outranks a CLI update, which outranks a new
+ * model, both for one provider and in row order, because each earlier problem
+ * blocks threads harder. Unknown auth, past rate limits, and CLIs with no
+ * update produce no row.
  */
 export function deriveProviderBellRows(statuses: readonly ProviderStatus[], now: Date): ProviderBellRow[] {
   const rows: ProviderBellRow[] = [];
@@ -34,14 +35,20 @@ export function deriveProviderBellRows(statuses: readonly ProviderStatus[], now:
     const row = rowFor(status, now);
     if (row) rows.push(row);
   }
-  return rows.sort((a, b) => ROW_KINDS.indexOf(a.kind) - ROW_KINDS.indexOf(b.kind));
+  return rows.sort((a, b) => ROW_KINDS.indexOf(a.kind) - ROW_KINDS.indexOf(b.kind) || runningLast(a) - runningLast(b));
+}
+
+// A running update has no action, so it waits below the updates the user can still start or retry.
+function runningLast(row: ProviderBellRow): number {
+  return row.kind === "cli_update" && row.update.state === "running" ? 1 : 0;
 }
 
 function rowFor(status: ProviderStatus, now: Date): ProviderBellRow | null {
-  const name = getCatalogEntry(status.providerId).name;
+  const providerId = status.providerId;
+  const name = getCatalogEntry(providerId).name;
   if (status.auth.state === "signed_out") {
     return {
-      providerId: status.providerId,
+      providerId,
       name,
       kind: "signed_out",
       detail: `Signed out · threads on ${name} can't start`,
@@ -49,16 +56,14 @@ function rowFor(status: ProviderStatus, now: Date): ProviderBellRow | null {
     };
   }
   const detail = status.rateLimit ? rateLimitDetail(status.rateLimit, now) : null;
-  if (detail) return { providerId: status.providerId, name, kind: "rate_limited", detail };
+  if (detail) return { providerId, name, kind: "rate_limited", detail };
+  const update = status.cli?.update;
+  if (update && update.state !== "none") {
+    return { providerId, name, kind: "cli_update", installed: status.cli?.installed ?? null, update };
+  }
   const newest = status.newModels[0];
   if (!newest) return null;
-  return {
-    providerId: status.providerId,
-    name,
-    kind: "new_model",
-    detail: `${newest.label} is new in the model menu`,
-    tryModelId: newest.modelId,
-  };
+  return { providerId, name, kind: "new_model", detail: `${newest.label} is new in the model menu`, tryModelId: newest.modelId };
 }
 
 function rateLimitDetail(limit: ProviderRateLimit, now: Date): string | null {

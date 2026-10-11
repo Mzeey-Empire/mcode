@@ -49,7 +49,7 @@ describe("model sightings with SQLite and the application writer", () => {
     settings.provider.enabled.opencode = true;
     scope.register("Database", { useValue: owned.db });
     scope.register(ApplicationDatabaseWriter, { useValue: owned.writer });
-    scope.register(SettingsService, { useValue: { get: () => settings } });
+    scope.register(SettingsService, { useValue: { get: () => settings, on: () => () => undefined } });
     scope.register("IProviderRegistry", { useValue: {
       resolve: (id: ProviderId) => {
         const source = sources.find((provider) => provider.id === id);

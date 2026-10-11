@@ -8,8 +8,9 @@ vi.mock("@mcode/shared", () => ({
 
 vi.mock("../../private/codex/codex-version.js", () => ({
   checkCodexVersion: () => ({ ok: true, version: "0.40.0" }),
-  meetsMinVersion: () => true,
 }));
+
+vi.mock("../../version-policy.js", () => ({ meetsMinVersion: () => true }));
 
 const { sendTurnMock, getChildThreadMetadataMock, interruptChildTurnMock } = vi.hoisted(() => ({
   sendTurnMock: vi.fn().mockResolvedValue(null),

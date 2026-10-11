@@ -9,7 +9,7 @@ import { useProviderStatusStore } from "@/stores/providerStatusStore";
 import { ProvidersPopover } from "./ProvidersPopover";
 
 /**
- * Sidebar footer bell for provider sign-in and rate-limit problems and new models. A dot marks
+ * Sidebar footer bell for provider sign-in, rate-limit, CLI update, and new-model rows. A dot marks
  * that at least one provider needs attention. Opening it re-reads status
  * through the server's cache, or re-checks while a provider reads signed out.
  * It never fetches usage.
@@ -18,6 +18,7 @@ export function ProvidersBell() {
   const [open, setOpen] = useState(false);
   const statuses = useProviderStatusStore((s) => s.statuses);
   const fetchStatus = useProviderStatusStore((s) => s.fetch);
+  const updateCli = useProviderStatusStore((s) => s.updateCli);
   const rows = deriveProviderBellRows(statuses, new Date());
   // A signed-out row bypasses the cache, so a sign-in done outside Mcode clears on the next open
   // instead of after the 10 minute cache.
@@ -47,6 +48,7 @@ export function ProvidersBell() {
             setOpen(false);
             signInToProvider(argv);
           }}
+          onUpdateCli={(providerId) => void updateCli(providerId)}
           onTry={(providerId, modelId) => {
             setOpen(false);
             tryNewModel(providerId, modelId);

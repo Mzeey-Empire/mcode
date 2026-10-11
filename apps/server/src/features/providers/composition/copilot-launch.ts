@@ -5,7 +5,7 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as NodeUtil from "node:util";
 import type { CopilotProviderPorts, ProviderHostPorts } from "@mcode/providers";
-import { createNodeResolverIO, resolveCopilotCli } from "../adapters/copilot/copilot-cli-resolver.js";
+import { clearResolutionCache, createNodeResolverIO, resolveCopilotCli } from "../adapters/copilot/copilot-cli-resolver.js";
 
 const execFileAsync = NodeUtil.promisify(NodeChildProcess.execFile);
 
@@ -21,7 +21,22 @@ export function createCopilotLaunchPort(settings: { get(): { provider: { cli: { 
     try { githubToken = (await execFileAsync("gh", ["auth", "token"], { timeout: 5_000, windowsHide: true, env })).stdout.trim() || undefined; }
     catch { /* The SDK's native authentication remains available without GitHub CLI auth. */ }
     return { cliPath, env, ...(githubToken ? { githubToken } : {}) };
-  } };
+  },
+  describeCli: () => {
+    const configured = settings.get().provider.cli.copilot?.trim();
+    const resolution = resolveCopilotCli(
+      { configuredPath: configured || bundledCliPath(host.runtime) },
+      createNodeResolverIO({ ...host.environment.snapshot() }, host.runtime.platform),
+    );
+    return {
+      installed: resolution.version,
+      managedBy: !configured && resolution.source === "configured" ? "mcode" : "user",
+      resolvedPath: resolution.entry,
+      npmPackage: resolution.source === "npm-global" ? "@github/copilot" : null,
+    };
+  },
+  clearCliVersionCache: clearResolutionCache,
+  };
 }
 
 function bundledCliPath(runtime: ProviderHostPorts["runtime"]): string {

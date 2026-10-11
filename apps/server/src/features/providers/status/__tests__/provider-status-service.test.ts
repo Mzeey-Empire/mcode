@@ -8,11 +8,14 @@ import {
   SettingsSchema,
   type ProviderId,
   type ProviderStatusFacts,
+  type ProviderCliFacts,
   type Settings,
 } from "@mcode/contracts";
 import { describeDevinAuth } from "@mcode/providers";
 import { ProviderRateLimitStore } from "../provider-rate-limit-store.js";
 import { ProviderStatusService, type StatusSourceRegistry } from "../provider-status-service.js";
+import { NpmReleaseFeed } from "../npm-release-feed.js";
+import { CliUpdateRunner, type CliUpdateProcessHost } from "../cli-update-runner.js";
 import { ModelSightingsRepo } from "../model-sightings-repo.js";
 import { ModelCacheService } from "../../models/model-cache-service.js";
 import { ModelCacheRepo } from "../../models/persistence/model-cache-repo.js";
@@ -40,13 +43,17 @@ function makeService(
 ): ProviderStatusService {
   const settings = makeSettings(enabled);
   const registry: StatusSourceRegistry = { resolveAll: () => sources };
+  return new ProviderStatusService({ get: () => settings, on: () => () => undefined }, registry, rateLimits, sightings, makeCache());
+}
+
+function makeCache(): ModelCacheService {
   const cache = new ModelCacheService(cacheRepo, {
     resolve: () => { throw new Error("No model fetch expected"); },
     resolveAll: () => [],
     shutdown: async () => {},
   }, sightings);
   caches.push(cache);
-  return new ProviderStatusService({ get: () => settings }, registry, rateLimits, sightings, cache);
+  return cache;
 }
 
 function pushedStatuses(): unknown[] {
@@ -55,6 +62,170 @@ function pushedStatuses(): unknown[] {
     return status;
   });
 }
+
+function cliFixture() {
+  const settings = makeSettings({ codex: true, claude: true });
+  let listener: (next: Settings) => void = () => {};
+  const cli: ProviderCliFacts = {
+    installed: "1.0.0", managedBy: "user", resolvedPath: "/scratch/npm/bin/codex", npmPackage: "@openai/codex",
+  };
+  const request = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ version: "1.1.0" })));
+  const processRun = vi.fn<CliUpdateProcessHost["run"]>(async (args) => {
+    if (args[0] === "prefix") return { kind: "exited", code: 0, output: "/scratch/npm" };
+    cli.installed = "1.1.0";
+    return { kind: "exited", code: 0, output: "" };
+  });
+  const clearCliVersionCache = vi.fn();
+  const sources = [
+    { id: "codex" as const, describeStatus: async () => ({ ...SIGNED_IN, cli: { ...cli } }), clearCliVersionCache },
+    { id: "claude" as const, describeStatus: async () => ({ ...SIGNED_IN, cli: {
+      installed: null, managedBy: "mcode" as const, resolvedPath: null, npmPackage: "@anthropic-ai/claude-code",
+    } }) },
+  ];
+  const service = new ProviderStatusService({
+    get: () => settings,
+    on: (_event, cb) => { listener = cb; return () => {}; },
+  }, { resolveAll: () => sources }, new ProviderRateLimitStore(), sightings, makeCache(), new NpmReleaseFeed(request), new CliUpdateRunner({ platform: "linux", run: processRun }));
+  return { service, settings, cli, request, processRun, clearCliVersionCache, change: () => listener(settings) };
+}
+
+describe("ProviderStatusService CLI updates", () => {
+  it("caches independently per package with the injected clock", async () => {
+    let now = 0;
+    const request = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ version: "2.0.0" })));
+    const feed = new NpmReleaseFeed(request, () => now);
+    expect(await Promise.all([feed.latest("@openai/codex"), feed.latest("@openai/codex"), feed.latest("opencode-ai")])).toEqual(["2.0.0", "2.0.0", "2.0.0"]);
+    expect(request).toHaveBeenCalledTimes(2);
+    now = 86_399_999;
+    expect(await feed.latest("@openai/codex")).toBe("2.0.0");
+    expect(request).toHaveBeenCalledTimes(2);
+    now = 86_400_000;
+    expect(await feed.latest("@openai/codex")).toBe("2.0.0");
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not publish an update if checks turn off during a registry request", async () => {
+    const { service, settings, request, change } = cliFixture();
+    let complete: (response: Response) => void = () => {};
+    request.mockImplementation(() => new Promise((resolve) => { complete = resolve; }));
+    const pending = service.listStatus();
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    settings.updates.providerCliChecks = false;
+    change();
+    complete(new Response(JSON.stringify({ version: "1.1.0" })));
+    expect((await pending).find((s) => s.providerId === "codex")?.cli).toEqual({
+      installed: "1.0.0", managedBy: "user", latest: null, update: { state: "none" },
+    });
+    expect(broadcastMock.mock.calls.filter(([, status]) => status.cli?.update.state === "available")).toEqual([]);
+  });
+  it("caches registry results for 24 hours, encodes scoped packages and never checks bundled Claude", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const { service, request } = cliFixture();
+    const first = await service.listStatus();
+    expect([first.find((s) => s.providerId === "codex")?.cli, first.find((s) => s.providerId === "claude")?.cli]).toEqual([
+      { installed: "1.0.0", managedBy: "user", latest: "1.1.0", update: { state: "available", target: "1.1.0" } },
+      { installed: null, managedBy: "mcode", latest: null, update: { state: "none" } },
+    ]);
+    broadcastMock.mockClear();
+    await service.refresh();
+    expect(request.mock.calls.map(([url]) => url)).toEqual(["https://registry.npmjs.org/%40openai%2Fcodex/latest"]);
+    expect(pushedStatuses()).toEqual([]);
+    vi.advanceTimersByTime(24 * 60 * 60 * 1000);
+    await service.refresh();
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("times out the registry after five seconds, caches the failure, and exposes no error", async () => {
+    vi.useFakeTimers();
+    const { service, request } = cliFixture();
+    request.mockImplementation(() => new Promise(() => {}));
+    const pending = service.listStatus();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect((await pending).find((s) => s.providerId === "codex")?.cli).toEqual({
+      installed: "1.0.0", managedBy: "user", latest: null, update: { state: "none" },
+    });
+    await service.refresh();
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([{}, { version: "latest" }, { version: 12 }])("ignores malformed registry releases: %j", async (body) => {
+    const { service, request } = cliFixture();
+    request.mockResolvedValue(new Response(JSON.stringify(body)));
+    expect((await service.listStatus()).find((s) => s.providerId === "codex")?.cli?.update).toEqual({ state: "none" });
+  });
+
+  it("makes zero registry requests with checks off", async () => {
+    const { service, settings, request, processRun } = cliFixture();
+    settings.updates.providerCliChecks = false;
+    expect((await service.listStatus()).find((s) => s.providerId === "codex")?.cli).toEqual({
+      installed: "1.0.0", managedBy: "user", latest: null, update: { state: "none" },
+    });
+    await expect(service.updateCli("codex")).rejects.toThrow();
+    expect(request.mock.calls).toEqual([]);
+    expect(processRun.mock.calls).toEqual([]);
+  });
+
+  it("refreshes and pushes when checks change without waiting for the cache", async () => {
+    const { service, settings, change } = cliFixture();
+    await service.listStatus();
+    settings.updates.providerCliChecks = false;
+    change();
+    await vi.waitFor(() => expect(broadcastMock.mock.calls.at(-1)?.[1].cli).toEqual({
+      installed: "1.0.0", managedBy: "user", latest: null, update: { state: "none" },
+    }));
+    settings.updates.providerCliChecks = true;
+    change();
+    await vi.waitFor(() => expect(broadcastMock.mock.calls.at(-1)?.[1].cli.update).toEqual({ state: "available", target: "1.1.0" }));
+  });
+
+  it("shows no update for an outside-prefix CLI and rejects direct update requests", async () => {
+    const { service, cli, processRun } = cliFixture();
+    cli.resolvedPath = "/other/codex";
+    expect((await service.listStatus()).find((s) => s.providerId === "codex")?.cli?.update).toEqual({ state: "none" });
+    await expect(service.updateCli("codex")).rejects.toThrow();
+    expect(processRun.mock.calls.map(([args]) => args)).toEqual([["prefix", "-g"], ["prefix", "-g"]]);
+  });
+
+  it("retains a bounded failure across refreshes and allows a successful retry", async () => {
+    const { service, cli, processRun, clearCliVersionCache } = cliFixture();
+    processRun.mockImplementation(async (args) => args[0] === "prefix"
+      ? { kind: "exited", code: 0, output: "/scratch/npm" }
+      : { kind: "exited", code: 1, output: "x".repeat(500) });
+    const failed = await service.updateCli("codex");
+    expect(failed.cli?.update).toEqual({ state: "failed", target: "1.1.0", reason: "x".repeat(240) });
+    expect((await service.listStatus({ force: true })).find((s) => s.providerId === "codex")?.cli?.update).toEqual(failed.cli?.update);
+    expect(clearCliVersionCache).toHaveBeenCalledTimes(0);
+    processRun.mockImplementation(async (args) => {
+      if (args[0] === "prefix") return { kind: "exited", code: 0, output: "/scratch/npm" };
+      cli.installed = "1.1.0";
+      return { kind: "exited", code: 0, output: "" };
+    });
+    expect((await service.updateCli("codex")).cli?.update).toEqual({ state: "none" });
+    expect(clearCliVersionCache).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares one update, keeps running across refreshes, clears the cache and removes the row on success", async () => {
+    const { service, processRun, cli, clearCliVersionCache } = cliFixture();
+    let complete: () => void = () => {};
+    const installed = new Promise<void>((resolve) => { complete = resolve; });
+    processRun.mockImplementation(async (args) => {
+      if (args[0] === "prefix") return { kind: "exited", code: 0, output: "/scratch/npm" };
+      await installed;
+      cli.installed = "1.1.0";
+      return { kind: "exited", code: 0, output: "" };
+    });
+    const first = service.updateCli("codex");
+    const second = service.updateCli("codex");
+    expect(first).toBe(second);
+    await vi.waitFor(() => expect(processRun.mock.calls.filter(([args]) => args[0] === "install")).toHaveLength(1));
+    expect((await service.listStatus({ force: true })).find((s) => s.providerId === "codex")?.cli?.update).toEqual({ state: "running", target: "1.1.0" });
+    complete();
+    expect((await first).cli).toEqual({
+      installed: "1.1.0", managedBy: "user", latest: "1.1.0", update: { state: "none" },
+    });
+    expect(clearCliVersionCache).toHaveBeenCalledTimes(1);
+  });
+});
 
 beforeEach(() => {
   broadcastMock.mockReset();

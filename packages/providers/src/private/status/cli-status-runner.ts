@@ -1,6 +1,7 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodePath from "node:path";
 import which from "which";
+import { isSemver } from "../../version-policy.js";
 
 /** What one CLI status command did. `failed` covers a missing binary, timeout, crash, or rejected path. */
 export type CliStatusOutcome =
@@ -29,7 +30,7 @@ const ANSI_ESCAPE_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]
  */
 export function createCliStatusRunner(options: CliStatusRunnerOptions): CliStatusRunner {
   return async (binary, args) => {
-    const resolved = await resolveBinary(binary, options.env);
+    const resolved = await resolveCliStatusBinary(binary, options.env);
     if (!resolved) return { kind: "failed" };
     const shell = needsWindowsShim(resolved, options.platform);
     if (shell && SHELL_METACHAR_RE.test(resolved)) return { kind: "failed" };
@@ -39,13 +40,21 @@ export function createCliStatusRunner(options: CliStatusRunnerOptions): CliStatu
   };
 }
 
-async function resolveBinary(
+/** Resolves the same configured command and PATH used by status probes, without resolving away npm shims. */
+export async function resolveCliStatusBinary(
   binary: string,
   env: Readonly<Record<string, string | undefined>>,
 ): Promise<string | null> {
   if (NodePath.isAbsolute(binary)) return binary;
   const path = env.PATH ?? env.Path;
   return await which(binary, { nothrow: true, ...(path ? { path } : {}) });
+}
+
+/** Reads a version token from a bounded adapter probe; unknown output stays unknown. */
+export async function readCliStatusVersion(run: CliStatusRunner, binary: string): Promise<string | null> {
+  const result = await run(binary, ["--version"]);
+  if (result.kind !== "exited" || result.code !== 0) return null;
+  return result.output.trim().split(/\s+/).find(isSemver) ?? null;
 }
 
 /**

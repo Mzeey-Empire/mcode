@@ -34,6 +34,29 @@ export const ProviderRateLimitSchema = lazySchema(() =>
 /** The latest active rate limit a provider reported. */
 export type ProviderRateLimit = z.infer<ReturnType<typeof ProviderRateLimitSchema>>;
 
+/** State of a user-managed CLI update. */
+export const ProviderCliUpdateSchema = lazySchema(() =>
+  z.discriminatedUnion("state", [
+    z.object({ state: z.literal("none") }),
+    z.object({ state: z.literal("available"), target: z.string() }),
+    z.object({ state: z.literal("running"), target: z.string() }),
+    z.object({ state: z.literal("failed"), target: z.string(), reason: z.string().max(240) }),
+  ]),
+);
+/** State of a user-managed CLI update. */
+export type ProviderCliUpdate = z.infer<ReturnType<typeof ProviderCliUpdateSchema>>;
+
+/** Public CLI facts and update state. Discovery paths stay on the server. */
+export const ProviderCliStatusSchema = lazySchema(() =>
+  z.object({
+    installed: z.string().nullable(),
+    managedBy: z.enum(["mcode", "user"]),
+    latest: z.string().nullable(),
+    update: ProviderCliUpdateSchema(),
+  }),
+);
+/** Public CLI facts and update state. */
+export type ProviderCliStatus = z.infer<ReturnType<typeof ProviderCliStatusSchema>>;
 /** An unacknowledged model still available in the provider's current catalog. */
 export const ProviderNewModelSchema = lazySchema(() =>
   z.object({ modelId: z.string(), label: z.string() }).strict(),
@@ -46,6 +69,7 @@ export const ProviderStatusSchema = lazySchema(() =>
   z.object({
     providerId: ProviderIdSchema,
     auth: ProviderAuthSchema(),
+    cli: ProviderCliStatusSchema().nullable(),
     /** Null when the provider is not rate limited. */
     rateLimit: ProviderRateLimitSchema().nullable(),
     newModels: z.array(ProviderNewModelSchema()).max(5),
@@ -58,4 +82,13 @@ export type ProviderStatus = z.infer<ReturnType<typeof ProviderStatusSchema>>;
 /** Raw facts an adapter reports through `describeStatus`; the server adds the rest. */
 export interface ProviderStatusFacts {
   auth: ProviderAuth;
+  cli?: ProviderCliFacts;
+}
+
+/** Adapter-owned CLI discovery. Neither paths nor package ownership are supplied by clients. */
+export interface ProviderCliFacts {
+  installed: string | null;
+  managedBy: "mcode" | "user";
+  resolvedPath: string | null;
+  npmPackage: string | null;
 }

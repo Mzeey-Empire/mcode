@@ -1,4 +1,5 @@
-import { meetsMinVersion } from "./private/codex/codex-version.js";
+import { meetsMinVersion } from "./version-policy.js";
+export { meetsMinVersion } from "./version-policy.js";
 
 /** Returns true when a dotted provider version meets the required floor. */
 export function isProviderVersionAtLeast(version: string, minimum: string): boolean {

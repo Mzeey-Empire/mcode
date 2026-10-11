@@ -2,11 +2,26 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { describe, expect, it } from "vitest";
-import { createCliStatusRunner } from "../cli-status-runner.js";
+import { createCliStatusRunner, readCliStatusVersion } from "../cli-status-runner.js";
 
 const run = createCliStatusRunner({ platform: process.platform, env: process.env, timeoutMs: 2_000 });
 
 describe("createCliStatusRunner", () => {
+  it.each([
+    ["2.1.0 (Claude Code)", "2.1.0"],
+    ["1.0.0-beta.1", "1.0.0-beta.1"],
+    ["unknown version", null],
+    ["1.2.3.4", null],
+  ])("reads the adapter version from %s", async (output, expected) => {
+    expect(await readCliStatusVersion(async (_binary, args) => {
+      expect(args).toEqual(["--version"]);
+      return { kind: "exited", code: 0, output };
+    }, "provider")).toBe(expected);
+  });
+
+  it("does not treat version output from a failed probe as installed", async () => {
+    expect(await readCliStatusVersion(async () => ({ kind: "exited", code: 1, output: "1.2.3" }), "provider")).toBeNull();
+  });
   it("keeps the output of a non-zero exit and strips ANSI colour", async () => {
     const script = "process.stdout.write('\\u001b[90mNot logged in\\u001b[0m'); process.exit(1)";
     const outcome = await run(process.execPath, ["-e", script]);
