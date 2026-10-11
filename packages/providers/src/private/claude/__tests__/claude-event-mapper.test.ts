@@ -210,6 +210,25 @@ describe("ClaudeEventMapper rate limits", () => {
   });
 });
 
+describe("ClaudeEventMapper api retries", () => {
+  async function eventsFor(message: Record<string, unknown>): Promise<AgentEvent[]> {
+    const { events, mapper } = createMapper();
+    await mapper.map({ type: "system", subtype: "api_retry", ...message });
+    return events;
+  }
+
+  it("carries the status, attempt and delay of a retry", async () => {
+    await expect(eventsFor({ error: "server_error", attempt: 2, max_retries: 10, retry_delay_ms: 8000, error_status: 502 }))
+      .resolves.toEqual([{ type: AgentEventType.ApiRetry, threadId: "test", reason: "server_error", attempt: 2, maxRetries: 10, delayMs: 8000, errorStatus: 502 }]);
+  });
+
+  it("leaves the status out of a connection error retry", async () => {
+    const [event] = await eventsFor({ error: "connection_error", attempt: 1, max_retries: 10, retry_delay_ms: 500, error_status: null });
+    expect(event).toEqual({ type: AgentEventType.ApiRetry, threadId: "test", reason: "connection_error", attempt: 1, maxRetries: 10, delayMs: 500 });
+    expect(event).not.toHaveProperty("errorStatus", expect.anything());
+  });
+});
+
 describe("ClaudeEventMapper failure classification", () => {
   function failures(events: AgentEvent[]) {
     return events.flatMap((event) => event.type === AgentEventType.Error ? [event.failure] : []);
