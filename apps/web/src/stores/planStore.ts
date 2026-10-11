@@ -24,6 +24,15 @@ export function selectViewedPlanVersion(
 }
 
 /**
+ * Whether the Plan editor accepts typing: only on the thread's latest version,
+ * only while it is a draft or ready, and never while a turn runs.
+ */
+export function isPlanVersionEditable(viewed: PlanVersion, latest: PlanVersion, threadExecuting: boolean): boolean {
+  if (threadExecuting || viewed.id !== latest.id) return false;
+  return viewed.status === "draft" || viewed.status === "ready";
+}
+
+/**
  * The word that follows "v{N}" in the Plan panel: who or what the version is.
  * A ready version names the provider that wrote it.
  */
