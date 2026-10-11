@@ -1,6 +1,6 @@
 import * as NodeEvents from "node:events";
 import type * as NodeChildProcess from "node:child_process";
-import type { ClientSideConnection, SessionNotification } from "@agentclientprotocol/sdk";
+import { RequestError, type ClientSideConnection, type SessionNotification } from "@agentclientprotocol/sdk";
 import { AgentEventType, getDefaultSettings, type TurnRequest } from "@mcode/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderHostPorts } from "../../../host-ports.js";
@@ -370,6 +370,33 @@ describe("CursorProvider session continuity", () => {
           type: "message",
           content: expect.stringContaining("late failed text"),
         }),
+      ]));
+    } finally {
+      start.mockRestore();
+      await (provider as unknown as { runtime: { shutdown(): Promise<void> } }).runtime.shutdown();
+    }
+  });
+
+  it("classifies an ACP authentication rejection of the prompt as auth", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("cursor-session-1", 101);
+    const start = vi.spyOn(AcpSessionRuntime, "start").mockResolvedValue(fake.runtime);
+    const provider = new CursorProvider(host, {
+      settings: { get: () => getDefaultSettings() },
+      skills: { list: () => [] },
+    }, 60_000);
+    vi.mocked(fake.runtime.prompt).mockRejectedValue(new RequestError(-32000, "Authentication required"));
+
+    try {
+      await provider.sendTurn(turn("prompt", "execution-auth"));
+
+      expect(submittedRuntimeEvents(host)).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: "error",
+          error: "Authentication required",
+          failure: { kind: "auth", code: "-32000" },
+        }),
+        expect.objectContaining({ type: "ended", turnExecutionId: "execution-auth" }),
       ]));
     } finally {
       start.mockRestore();

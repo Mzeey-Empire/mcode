@@ -54,8 +54,11 @@ const UPSTREAM_CANCEL_RE =
  * e.g. `v: [resource_exhausted] Error`. Per Cursor's docs this is almost always
  * short-term burst throttling (too many requests in a short window), not a hard
  * usage quota — so the right recovery is a brief backoff then a single retry.
+ * A bare HTTP 429 (e.g. in ACP `data.details`) is the same throttling.
  */
-const CURSOR_RATE_LIMIT_RE = /\bresource_exhausted\b/i;
+const CURSOR_RATE_LIMIT_RE = /\bresource_exhausted\b|\b429\b/i;
+
+const CURSOR_HTTP_STATUS_RE = /\b(429|500|502|503|504)\b/;
 
 /**
  * Upper bound of random jitter (ms) added to the configured rate-limit backoff.
@@ -66,13 +69,24 @@ export const CURSOR_RATE_LIMIT_RETRY_JITTER_MS = 2000;
 
 /**
  * Returns true when a Cursor prompt failed because the backend rate-limited the
- * request (`resource_exhausted`). Distinct from {@link looksLikeUpstreamStreamCancel}
+ * request (`resource_exhausted` or an HTTP 429). Distinct from {@link looksLikeUpstreamStreamCancel}
  * because the recovery differs: a rate limit needs a backoff before retrying.
  *
  * @param message - Serialized error (`Error.message` or stderr snippet).
  */
 export function looksLikeCursorRateLimit(message: string): boolean {
   return CURSOR_RATE_LIMIT_RE.test(message);
+}
+
+/**
+ * Returns the first standalone retryable HTTP status (429, 500, 502, 503, 504)
+ * named in a Cursor failure message.
+ *
+ * @param message - Serialized error (`Error.message` or stderr snippet).
+ */
+export function cursorHttpStatus(message: string): number | undefined {
+  const match = CURSOR_HTTP_STATUS_RE.exec(message);
+  return match ? Number(match[1]) : undefined;
 }
 
 /**

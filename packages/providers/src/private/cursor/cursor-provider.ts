@@ -45,6 +45,7 @@ import { CursorAcpClientBridge } from "./acp/cursor-acp-client-bridge.js";
 import { createCursorAcpTurnState } from "./acp/cursor-acp-event-mapper.js";
 import { CursorNativeTurnDiff } from "./acp/cursor-native-turn-diff.js";
 import { cursorAcpProcessIdentity } from "./acp/cursor-acp-process-identity.js";
+import { classifyCursorFailure } from "./acp/cursor-failure-classifier.js";
 import { cursorSessionRecoveryErrorMessage } from "./acp/cursor-session-recovery-error.js";
 import { CursorAcpProcessSpawner } from "./runtime/cursor-acp-process-spawner.js";
 import { CursorTurnExecutor } from "./runtime/cursor-turn-executor.js";
@@ -682,7 +683,7 @@ export class CursorProvider
       threadId: context.threadId,
       turnExecutionId: context.req.turnExecutionId,
       error: errorMessage,
-      failure: { kind: "fatal" },
+      failure: classifyCursorFailure(error),
     } satisfies AgentEvent);
     this.publishCursorEvent(context.routing, {
       type: AgentEventType.Ended,

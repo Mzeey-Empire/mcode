@@ -4,6 +4,7 @@ import {
   CURSOR_RATE_LIMIT_RETRY_JITTER_MS,
   buildCursorAcpContinueAfterDisconnectPrompt,
   computeCursorRateLimitBackoffMs,
+  cursorHttpStatus,
   interruptibleDelay,
   isLikelyTransientCursorPromptFailure,
   looksLikeAcpConnectionClosed,
@@ -82,9 +83,28 @@ describe("looksLikeCursorRateLimit", () => {
     expect(isLikelyTransientCursorPromptFailure("v: [resource_exhausted] Error")).toBe(true);
   });
 
+  it("treats a standalone HTTP 429 as a rate limit that needs the backoff", () => {
+    expect(looksLikeCursorRateLimit("Internal error: 429 Too Many Requests")).toBe(true);
+  });
+
   it("ignores unrelated messages", () => {
     expect(looksLikeCursorRateLimit("Internal Server Error")).toBe(false);
     expect(looksLikeCursorRateLimit("resourceexhausted")).toBe(false);
+    expect(looksLikeCursorRateLimit("request 14290 failed")).toBe(false);
+  });
+});
+
+describe("cursorHttpStatus", () => {
+  it("returns the first standalone retryable status", () => {
+    expect(cursorHttpStatus("Internal error: 429 Too Many Requests")).toBe(429);
+    expect(cursorHttpStatus("upstream 502 Bad Gateway after 503")).toBe(502);
+    expect(cursorHttpStatus("HTTP 500")).toBe(500);
+    expect(cursorHttpStatus("504 Gateway Timeout")).toBe(504);
+  });
+
+  it("ignores other statuses and embedded digits", () => {
+    expect(cursorHttpStatus("401 Unauthorized")).toBeUndefined();
+    expect(cursorHttpStatus("request 15003 failed")).toBeUndefined();
   });
 });
 

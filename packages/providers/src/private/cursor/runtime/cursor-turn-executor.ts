@@ -23,6 +23,7 @@ import {
   shouldSuppressCursorPromptError,
 } from "../acp/cursor-acp-transient-retry.js";
 import { createCursorAcpTurnState } from "../acp/cursor-acp-event-mapper.js";
+import { classifyCursorFailure } from "../acp/cursor-failure-classifier.js";
 import { cursorSessionRecoveryErrorMessage } from "../acp/cursor-session-recovery-error.js";
 import { resolveCursorAssistantMessageContent } from "../stream-json/cursor-stream-event-mapper.js";
 import type { CursorSessionState } from "../cursor-session-state.js";
@@ -387,7 +388,7 @@ export class CursorTurnExecutor {
     if (userStopped) {
       this.emitStoppedTurn(entry, errorMessage, emitTurnEvent);
     } else {
-      this.emitPromptFailure(entry, cursorCfg, errorMessage, stderrTail, emitTurnEvent);
+      this.emitPromptFailure(entry, cursorCfg, error, stderrTail, emitTurnEvent);
     }
     emitTurnEvent({
       type: AgentEventType.Ended,
@@ -407,10 +408,11 @@ export class CursorTurnExecutor {
   private emitPromptFailure(
     entry: CursorSessionState,
     cursorCfg: CursorProviderConfig,
-    errorMessage: string,
+    error: unknown,
     stderrTail: string[] | undefined,
     emitTurnEvent: CursorTurnEventEmitter,
   ): void {
+    const errorMessage = cursorSessionRecoveryErrorMessage(error);
     logger.error("Cursor ACP prompt failed", {
       threadId: entry.threadId,
       stickyHeavyCommitted: entry.stickyHeavyInstructionsSent,
@@ -427,7 +429,7 @@ export class CursorTurnExecutor {
       type: AgentEventType.Error,
       threadId: entry.threadId,
       error: errorMessage,
-      failure: { kind: "fatal" },
+      failure: classifyCursorFailure(error),
     } satisfies AgentEvent);
   }
 
