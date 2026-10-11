@@ -748,8 +748,6 @@ function canAutoDrainQueuedMessage(threadId: string): boolean {
     (thread) => thread.id === threadId && thread.deleted_at == null,
   );
   if (!threadExists || isThreadExecuting(threadId)) return false;
-  // Derived from the phase rather than set by each ending handler, so every path that settles a turn holds the queue.
-  if (endedWithoutCompleting(getThreadRuntimePhase(threadId, getThreadRecord(useThreadStore.getState().records, threadId)))) return false;
   const queueState = useQueueStore.getState();
   return !queueState.autoDrainSuppressedThreadIds.has(threadId)
     && queueState.editingThreadId !== threadId
@@ -4407,6 +4405,29 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
   },
   };
+});
+
+/**
+ * Holds a thread's queued follow-ups when its latest turn ends without completing.
+ * Observing the phase catches every writer that settles a turn (events, persistence, canonical
+ * reconciliation, snapshots), and the hold lives in the queue store because thread records are
+ * evicted when the user switches threads while the queue is not.
+ */
+useThreadStore.subscribe((state, previous) => {
+  if (state.records === previous.records) return;
+  const queues = useQueueStore.getState().queues;
+  for (const threadId of Object.keys(queues)) {
+    if (!queues[threadId]?.length) continue;
+    const record = state.records.get(threadId);
+    const before = previous.records.get(threadId);
+    if (!record || record === before) continue;
+    const ended = endedWithoutCompleting(getThreadRuntimePhase(threadId, record));
+    const wasEnded = before !== undefined && endedWithoutCompleting(getThreadRuntimePhase(threadId, before));
+    if (ended && !wasEnded) {
+      clearDequeueTimer(threadId);
+      useQueueStore.getState().suppressAutoDrain(threadId);
+    }
+  }
 });
 
 import { useApprovalStore } from "./approvalStore";

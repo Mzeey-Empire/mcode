@@ -123,6 +123,21 @@ describe("queued follow-ups after a turn ends", () => {
     await expectQueueHeld();
   });
 
+  it("keeps the queue held after the user switches away and the thread's record is retired", async () => {
+    useThreadStore.getState().handleAgentEvent(ended("errored"));
+    scheduleDrainAfterEdit(THREAD_ID);
+    useThreadStore.setState({ currentThreadId: "other-thread", records: new Map() });
+
+    await expectQueueHeld();
+  });
+
+  it("leaves later follow-ups free to drain when nothing was queued at the ending", () => {
+    useQueueStore.getState().clearQueue(THREAD_ID);
+    useThreadStore.getState().handleAgentEvent(ended("errored"));
+
+    expect(useQueueStore.getState().autoDrainSuppressedThreadIds.has(THREAD_ID)).toBe(false);
+  });
+
   it("holds the queue when the provider is lost", async () => {
     useThreadStore.getState().handleAgentEvent({ type: "ended", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, reason: "provider_lost" });
     await vi.advanceTimersByTimeAsync(1_000);
