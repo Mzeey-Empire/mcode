@@ -153,7 +153,6 @@ export const threads = sqliteTable(
   ],
 );
 
-/** Server-owned startup lifecycle records that can exist before their thread. */
 /** One user-authorized retry deadline per thread. */
 export const turnRetrySchedules = sqliteTable("turn_retry_schedules", {
   threadId: text("thread_id").primaryKey().notNull().references(() => threads.id, { onDelete: "cascade" }),
@@ -163,6 +162,7 @@ export const turnRetrySchedules = sqliteTable("turn_retry_schedules", {
   createdAt: text("created_at").notNull(),
 });
 
+/** Server-owned startup lifecycle records that can exist before their thread. */
 export const threadStartups = sqliteTable(
   "thread_startups",
   {

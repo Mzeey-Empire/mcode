@@ -122,10 +122,12 @@ export class ThreadService {
     const thread = this.threadRepo.findById(threadId);
     if (!thread || thread.deleted_at !== null) return false;
     this.acceptedProgress?.assertThreadDeletionSupported(threadId);
-    await this.retryScheduler?.unschedule(threadId);
 
     if (cleanupWorktree && thread.worktree_path) {
+      // Stop the retry before asynchronous cleanup safety checks can admit it.
+      await this.retryScheduler?.unschedule(threadId);
       if (await this.projectWorktreeService.scheduleCleanup(threadId)) {
+        // Disarm any retry scheduled while cleanup safety checks were pending.
         await this.retryScheduler?.unschedule(threadId);
         return true;
       }
@@ -141,6 +143,7 @@ export class ThreadService {
       await this.handoffStorage.deleteThreadFiles(threadId);
       return this.threadRepo.hardDelete(threadId, { preserveActiveDescendants: true });
     });
+    // Disarm any retry scheduled during teardown or persistent deletion.
     await this.retryScheduler?.unschedule(threadId);
     return deleted;
   }

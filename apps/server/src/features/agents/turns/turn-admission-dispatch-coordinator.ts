@@ -1,5 +1,4 @@
 import * as NodeFS from "node:fs";
-import type { TurnRetryScheduler } from "../recovery/turn-retry-scheduler.js";
 import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 import {
@@ -50,6 +49,7 @@ import {
   type GoalCommandEffectReceipt,
 } from "../goals/goal-lifecycle-service.js";
 import { PlanTurnService } from "../planning/plan-turn-service.js";
+import type { TurnRetryScheduler } from "../recovery/turn-retry-scheduler.js";
 import {
   type ParentTurnDurability,
 } from "./parent-turn-durability.js";

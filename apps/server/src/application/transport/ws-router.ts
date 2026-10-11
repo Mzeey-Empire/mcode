@@ -252,6 +252,7 @@ export interface RouterDeps {
   subagentRosterService: SubagentRosterService;
   /** Owns restart reconciliation and explicit turn recovery actions. */
   turnRecoveryService: TurnRecoveryService;
+  /** Owns durable scheduled retries and their cancellation. */
   turnRetryScheduler: TurnRetryScheduler;
   /** Owns durable approvals for protected delegated-thread mutations. */
   threadControlService: ThreadControlService;

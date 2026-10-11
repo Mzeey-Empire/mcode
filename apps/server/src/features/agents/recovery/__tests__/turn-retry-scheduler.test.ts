@@ -160,13 +160,52 @@ describe("TurnRetryScheduler", () => {
     expect(threads.findById(THREAD_ID)?.scheduled_retry).toBeNull();
   });
 
+  it("does not write or publish when no retry is scheduled", async () => {
+    const writer = vi.spyOn(agentStorageTestWriter(db), "execute");
+    await scheduler.unschedule(THREAD_ID);
+    expect(writer).not.toHaveBeenCalled();
+    expect(published).toEqual([]);
+  });
+
+  it("loads scheduled and unscheduled threads together in one query per list", async () => {
+    const second = await threads.create("workspace-retry", "Second", "worktree", "second");
+    const unscheduled = await threads.create("workspace-retry", "Unscheduled", "worktree", "third");
+    db.prepare("UPDATE threads SET worktree_path = ?").run(NodePath.dirname(db.filename));
+    const retry = await scheduler.schedule(input());
+    const secondRetry = { turnId: "second-turn", at: "2026-10-11T12:02:00.000Z" };
+    await store.upsert({ threadId: second.id, turnId: secondRetry.turnId, executionId: EXECUTION_ID,
+      runAt: secondRetry.at, createdAt: NOW });
+    const prepare = vi.spyOn(db, "prepare");
+    const reads = [
+      () => threads.listByWorkspace("workspace-retry"),
+      () => threads.listRecent(),
+      () => threads.search({ query: "" }).threads,
+      () => threads.listAllByWorkspace("workspace-retry"),
+      () => threads.findWorktreeThreadsByWorkspace("workspace-retry"),
+    ];
+    for (const read of reads) {
+      prepare.mockClear();
+      expect(Object.fromEntries(read().map((thread) => [thread.id, thread.scheduled_retry])))
+        .toEqual({ [THREAD_ID]: retry, [second.id]: secondRetry, [unscheduled.id]: null });
+      expect(prepare).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("cancels a stored retry even when no timer is armed", async () => {
+    await scheduler.schedule(input());
+    await scheduler.shutdown();
+    await scheduler.unschedule(THREAD_ID);
+    expect(store.get(THREAD_ID)).toBeNull();
+    expect(published.at(-1)).toEqual({ threadId: THREAD_ID, retry: null });
+  });
+
   it("cancels durably, publishes null and remains idempotent", async () => {
     await scheduler.schedule(input());
     await scheduler.unschedule(THREAD_ID);
     await scheduler.unschedule(THREAD_ID);
     expect(store.listAll()).toEqual([]);
     expect(clock.timers.size).toBe(0);
-    expect(published.slice(1)).toEqual([{ threadId: THREAD_ID, retry: null }, { threadId: THREAD_ID, retry: null }]);
+    expect(published.slice(1)).toEqual([{ threadId: THREAD_ID, retry: null }]);
     await clock.advance(120_000);
     expect(dispatch).toHaveBeenCalledTimes(0);
   });
@@ -276,7 +315,7 @@ describe("TurnRetryScheduler", () => {
     expect(clock.timers.size).toBe(0);
   });
 
-  it("disarms the timer immediately through the thread deletion service", async () => {
+  it.each([false, true])("disarms retries through thread deletion, including rescheduling during teardown: %s", async (reschedule) => {
     await scheduler.schedule(input());
     const writer = agentStorageTestWriter(db);
     const workspaces = new WorkspaceRepo(db, writer);
@@ -285,7 +324,10 @@ describe("TurnRetryScheduler", () => {
       new GitWorktreeService(workspaces, git, hostRuntime),
       new SandboxWorktreeCleanupPolicy(new WorktreeSafetyService(git, hostRuntime), new GitRepositoryService(workspaces, git), hostRuntime));
     const deletion = new ThreadService(threads, worktreeService, new AttachmentService(), new HandoffStorage(), {
-      teardownThread: async () => {},
+      teardownThread: async () => {
+        await scheduler.unschedule(THREAD_ID);
+        if (reschedule) await scheduler.schedule(input("2026-10-11T12:02:00.000Z"));
+      },
       deletePersistentData: async (_ids, remove) => remove(),
     }, scheduler);
     expect(await deletion.delete(THREAD_ID, false)).toBe(true);

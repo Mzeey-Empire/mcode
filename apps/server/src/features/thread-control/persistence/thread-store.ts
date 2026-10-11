@@ -21,7 +21,11 @@ import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.
 import { transcriptMessageVisibility } from "../../agents/conversation/persistence/transcript-visibility.js";
 import { SequenceAheadError } from "../attention/sequence-ahead-error.js";
 
-type ThreadRow = typeof threads.$inferSelect;
+type ThreadRow = typeof threads.$inferSelect & {
+  scheduledRetry: typeof turnRetrySchedules.$inferSelect | null;
+};
+
+const threadSelection = { ...getTableColumns(threads), scheduledRetry: turnRetrySchedules };
 
 const canonicalChildVisibility = sql`NOT EXISTS (
   SELECT 1
@@ -56,11 +60,10 @@ function parseCleanupState(value: string | null): Thread["cleanup_state"] {
     : null;
 }
 
-function rowToThread(row: ThreadRow, db: Database): Thread {
-  const schedule = drizzle(db).select({ turnId: turnRetrySchedules.turnId, at: turnRetrySchedules.runAt })
-    .from(turnRetrySchedules).where(eq(turnRetrySchedules.threadId, row.id)).get();
+function rowToThread(row: ThreadRow): Thread {
+  const schedule = row.scheduledRetry;
   return {
-    scheduled_retry: schedule ? ScheduledTurnRetrySchema().parse(schedule) : null,
+    scheduled_retry: schedule ? ScheduledTurnRetrySchema().parse({ turnId: schedule.turnId, at: schedule.runAt }) : null,
     ...rowToThreadIdentity(row),
     ...rowToThreadLifecycle(row),
     ...rowToThreadPreferences(row),
@@ -278,7 +281,6 @@ function searchConditions(opts: ThreadSearchOptions): (SQL | undefined)[] {
 
 function createSearchResult(
   rows: Array<ThreadRow & { wId: string; wName: string; wPath: string }>,
-  db: Database,
 ): { threads: Thread[]; workspaces: { id: string; name: string; path: string }[] } {
   const workspaceMap = new Map<string, { id: string; name: string; path: string }>();
   for (const row of rows) {
@@ -286,7 +288,7 @@ function createSearchResult(
       workspaceMap.set(row.wId, { id: row.wId, name: row.wName, path: row.wPath });
     }
   }
-  return { threads: rows.map((row) => rowToThread(row, db)), workspaces: [...workspaceMap.values()] };
+  return { threads: rows.map(rowToThread), workspaces: [...workspaceMap.values()] };
 }
 
 function resolveNextBaseBranch(
@@ -430,8 +432,9 @@ export class ThreadStore {
   /** Find a thread by its primary key, optionally constrained to one external owner. */
   findById(id: string, options: { createdByIntegrationId?: string } = {}): Thread | null {
     const row = this.orm
-      .select()
+      .select(threadSelection)
       .from(threads)
+      .leftJoin(turnRetrySchedules, eq(turnRetrySchedules.threadId, threads.id))
       .where(and(
         eq(threads.id, id),
         options.createdByIntegrationId === undefined
@@ -440,7 +443,7 @@ export class ThreadStore {
       ))
       .get();
 
-    return row ? rowToThread(row, this.db) : null;
+    return row ? rowToThread(row) : null;
   }
 
   /** List non-deleted threads for a workspace, most recent first. */
@@ -448,8 +451,9 @@ export class ThreadStore {
     const clampedLimit = Math.max(1, Math.min(1000, limit));
 
     const rows = this.orm
-      .select()
+      .select(threadSelection)
       .from(threads)
+      .leftJoin(turnRetrySchedules, eq(turnRetrySchedules.threadId, threads.id))
       .where(and(
         eq(threads.workspaceId, workspaceId),
         isNull(threads.deletedAt),
@@ -459,7 +463,7 @@ export class ThreadStore {
       .limit(clampedLimit)
       .all();
 
-    return rows.map((row) => rowToThread(row, this.db));
+    return rows.map(rowToThread);
   }
 
   /**
@@ -476,12 +480,13 @@ export class ThreadStore {
 
     const rows = this.orm
       .select({
-        ...getTableColumns(threads),
+        ...threadSelection,
         workspaceName: workspaces.name,
         workspacePath: workspaces.path,
       })
       .from(threads)
       .innerJoin(workspaces, eq(workspaces.id, threads.workspaceId))
+      .leftJoin(turnRetrySchedules, eq(turnRetrySchedules.threadId, threads.id))
       .where(and(
         isNull(threads.deletedAt),
         isNull(threads.userCompletedAt),
@@ -492,7 +497,7 @@ export class ThreadStore {
       .all();
 
     return rows.map((row) => ({
-      ...rowToThread(row, this.db),
+      ...rowToThread(row),
       workspace_name: row.workspaceName,
       workspace_path: row.workspacePath,
     }));
@@ -504,19 +509,20 @@ export class ThreadStore {
 
     const rows = this.orm
       .select({
-        ...getTableColumns(threads),
+        ...threadSelection,
         wId: workspaces.id,
         wName: workspaces.name,
         wPath: workspaces.path,
       })
       .from(threads)
       .innerJoin(workspaces, eq(workspaces.id, threads.workspaceId))
+      .leftJoin(turnRetrySchedules, eq(turnRetrySchedules.threadId, threads.id))
       .where(and(...searchConditions(opts)))
       .orderBy(...resolveSearchOrder(opts.sort))
       .limit(clampedLimit)
       .all();
 
-    return createSearchResult(rows, this.db);
+    return createSearchResult(rows);
   }
 
   /** Update a thread's lifecycle status. Returns true if a row was changed. */
@@ -1162,11 +1168,12 @@ export class ThreadStore {
    */
   findWorktreeThreadsByWorkspace(workspaceId: string): Thread[] {
     const rows = this.orm
-      .select()
+      .select(threadSelection)
       .from(threads)
+      .leftJoin(turnRetrySchedules, eq(turnRetrySchedules.threadId, threads.id))
       .where(and(eq(threads.workspaceId, workspaceId), isNotNull(threads.worktreePath)))
       .all();
-    return rows.map((row) => rowToThread(row, this.db));
+    return rows.map(rowToThread);
   }
 
   /**
@@ -1175,11 +1182,12 @@ export class ThreadStore {
    */
   listAllByWorkspace(workspaceId: string): Thread[] {
     const rows = this.orm
-      .select()
+      .select(threadSelection)
       .from(threads)
+      .leftJoin(turnRetrySchedules, eq(turnRetrySchedules.threadId, threads.id))
       .where(eq(threads.workspaceId, workspaceId))
       .all();
-    return rows.map((row) => rowToThread(row, this.db));
+    return rows.map(rowToThread);
   }
 
   /**

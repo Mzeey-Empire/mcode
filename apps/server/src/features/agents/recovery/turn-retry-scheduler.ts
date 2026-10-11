@@ -74,6 +74,7 @@ export class TurnRetryScheduler {
 
   /** Cancel immediately in memory, then publish only after the durable deletion. */
   async unschedule(threadId: string): Promise<void> {
+    if (!this.armed.has(threadId) && !this.store.get(threadId)) return;
     this.disarm(threadId);
     await this.store.delete(threadId);
     this.publish({ threadId, retry: null });
