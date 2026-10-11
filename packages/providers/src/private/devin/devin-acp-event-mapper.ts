@@ -154,12 +154,11 @@ function mapMessageChunk(
   if (content?.type !== "text" || typeof content.text !== "string" || !content.text) return [];
   const acc = state.accumulator;
   if (isThought) {
-    // Thought text is never part of the user-facing final response.
+    // Thought text is model reasoning, never narration or the final response. ACP has no item id.
     return [...closeAssistantText(threadId, state), {
-      type: AgentEventType.TextDelta,
+      type: AgentEventType.ReasoningDelta,
       threadId,
       delta: content.text,
-      isFinalResponse: false,
     }];
   }
   acc.assistantText += content.text;

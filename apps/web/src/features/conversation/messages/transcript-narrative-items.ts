@@ -96,6 +96,7 @@ export function expandTranscriptToolGroups(
 function rowIdentity(item: NarrativeItem): string {
   switch (item.type) {
     case "thought": return `thought:${item.segment.startedAt}`;
+    case "reasoning": return `reasoning:${item.segment.startedAt}`;
     case "tool-group": return `tool:${item.group.calls[0]?.id}`;
     case "active-tool": return `tool:${item.toolCall.id}`;
     case "hook": return `hook:${item.hook.hookName}:${item.hook.startedAt}`;

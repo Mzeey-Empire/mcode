@@ -172,6 +172,8 @@ export interface TurnStartParams {
   approvalsReviewer?: "user" | "auto_review" | null;
   /** Override reasoning effort for this turn and subsequent turns. */
   effort?: ReasoningEffort | null;
+  /** Reasoning summary detail for this turn and subsequent turns. */
+  summary?: "auto" | "concise" | "detailed" | "none" | null;
   /**
    * OpenAI API service tier for this turn (e.g. `"priority"`). Omitted for default processing.
    * Field name matches codex-rs app-server generated TypeScript (camelCase).

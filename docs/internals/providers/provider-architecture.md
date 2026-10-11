@@ -111,8 +111,8 @@ Shell tools always read `Running <command>` from `toolInput.command`, so every p
 For other tools, Read, Edit and Write name the file; otherwise set `toolInput.description` on `ToolUse` to supply a short action label. Keep credentials out of this description.
 Without either, the UI uses the tool category. `ToolResult` ends that action.
 Non-final `TextDelta` events can supply a Markdown summary heading, such as `**Inspecting layout**`.
-The tool label sits inside the status precedence in `deriveRunStatus`; a complete heading from the current open thought segment, then `Thinking`, is the fallback.
-Completed tools, child tools, and closed thought segments do not supply the label. Plain narration does not become an inferred activity.
+The tool label sits inside the status precedence in `deriveRunStatus`; a complete heading from the current open narration segment, then `Thinking`, is the fallback.
+Completed tools, child tools, closed thought segments, and reasoning blocks do not supply the label. Plain narration does not become an inferred activity.
 Codex already forwards non-final summary deltas. Claude and Cursor use the same tool and narration events; adapters can add descriptions without a wire-schema change.
 
 A provider emits a `ProviderRuntimeEvent`. Its `event` is provider-neutral data

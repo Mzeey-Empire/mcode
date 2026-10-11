@@ -247,6 +247,14 @@ export class NarrativeStore {
     return this.stateFor(args[0]).openOrExtendThought(...args);
   }
 
+  openOrExtendReasoning(...args: Parameters<NarrativeTurnState["openOrExtendReasoning"]>): ReturnType<NarrativeTurnState["openOrExtendReasoning"]> {
+    return this.stateFor(args[0]).openOrExtendReasoning(...args);
+  }
+
+  closeOpenReasoning(...args: Parameters<NarrativeTurnState["closeOpenReasoning"]>): ReturnType<NarrativeTurnState["closeOpenReasoning"]> {
+    return this.narrativeStates.get(args[0])?.closeOpenReasoning(...args) ?? false;
+  }
+
   settleAssistantTextItem(...args: Parameters<NarrativeTurnState["settleAssistantTextItem"]>): ReturnType<NarrativeTurnState["settleAssistantTextItem"]> {
     return this.stateFor(args[0]).settleAssistantTextItem(...args);
   }
@@ -514,6 +522,7 @@ export class NarrativeStore {
           ended_at: thought.endedAt,
           sort_order: thought.sortOrder,
           is_final_response: thought.isFinalResponse,
+          kind: thought.kind,
         },
       })),
       ...hookRows.map((hook) => NarrativeEntrySchema().parse({

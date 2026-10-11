@@ -14,7 +14,7 @@ export function persistedTurnCounts(records: PersistedTurnRecords): NarrativeCou
     .filter((tool) => tool.parent_tool_call_id == null && !isTaskListToolName(tool.tool_name));
   return {
     steps: topLevel.length,
-    thoughts: records.thoughts.length,
+    thoughts: records.thoughts.filter((thought) => thought.kind !== "reasoning").length,
     subagents: topLevel.filter((tool) => tool.tool_name === "Agent").length,
   };
 }

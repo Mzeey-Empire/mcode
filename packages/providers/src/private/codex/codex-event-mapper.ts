@@ -55,6 +55,9 @@ const NOTICE_KIND_BY_SUBTYPE: Record<string, SystemNoticeMetadata["kind"]> = {
   "provider.notice.unknown-event": "diagnostic",
 };
 
+/** Joins reasoning summary and content parts as markdown paragraphs, live and on completion alike. */
+const REASONING_PART_SEPARATOR = "\n\n";
+
 /** Methods whose late content cannot change an already completed turn. */
 const TURN_CONTENT_METHODS = new Set([
   "item/started", "item/completed", "item/agentMessage/delta",
@@ -92,13 +95,19 @@ const SILENT_ITEM_TYPES = new Set([
  * on Codex receiver threads use `receiverThreadIds` from completed `spawnAgent`
  * collabs mapped to the collab item id.
  *
- * Thinking stream: `item/reasoning/*` plus experimental `item/plan/delta` map to non-final
- * text deltas (`AgentEventType.TextDelta` with `isFinalResponse: false`) so the UI can show thought segments.
+ * Thinking stream: `item/reasoning/*` maps to `AgentEventType.ReasoningDelta` keyed by the
+ * native reasoning item id, and `item/completed` for that item emits the unstreamed suffix
+ * with `done: true`. Experimental `item/plan/delta` stays a non-final text delta (narration).
  *
  * Native phase classifies assistant text when available. Item completion closes
  * text immediately; phase-less items retain exact identity for later promotion.
  * Only the owning native turn completion ends execution.
  */
+/** Streamed fragments carry no stable native event id, so child dedupe must pass them through. */
+function isStreamedFragment(event: AgentEvent): boolean {
+  return event.type === AgentEventType.TextDelta || event.type === AgentEventType.ReasoningDelta;
+}
+
 /** Item types that appear as user-visible tools in the narrative. */
 const TOOL_LIKE_ITEM_TYPES = new Set([
   "commandExecution", "mcpToolCall", "dynamicToolCall",
@@ -135,8 +144,13 @@ export class CodexEventMapper {
   private finalAssistantText: string | undefined;
   private assistantIdentityScope: string = NodeCrypto.randomUUID();
   private assistantFallbackSequence = 0;
-  /** Dedupes `item/completed` reasoning payloads against streamed reasoning deltas. */
-  private lastReasoningText = "";
+  /**
+   * Streamed reasoning text per native reasoning item, so `item/completed` emits only the
+   * unstreamed suffix of its own item. One turn can carry several reasoning items.
+   */
+  private readonly streamedReasoningByItem = new Map<string, string>();
+  /** Last summary or content part streamed per reasoning item, so a new part starts a new paragraph. */
+  private readonly reasoningPartByItem = new Map<string, string>();
   /** Per-turn sequence for synthetic update_plan tool calls from turn/plan/updated. */
   private planUpdateSeq = 0;
   private readonly threadId: string;
@@ -445,7 +459,7 @@ export class CodexEventMapper {
   private dedupeChildEvents(events: CodexMappedEvent[]): CodexMappedEvent[] {
     const deduped: CodexMappedEvent[] = [];
     for (const event of events) {
-      if (event.type === AgentEventType.TextDelta || !("codexChild" in event) || !event.codexChild?.nativeEventId) {
+      if (isStreamedFragment(event) || !("codexChild" in event) || !event.codexChild?.nativeEventId) {
         deduped.push(event);
         continue;
       }
@@ -1953,12 +1967,20 @@ export class CodexEventMapper {
   }
 
   private mapMainToolStarted(item: CompletedItem | undefined, itemId: string | undefined, notification: CodexNotification, boundaryEvents: CodexMappedEvent[]): CodexMappedEvent[] {
-    if (item?.type === "contextCompaction" && itemId) return [...boundaryEvents, ...this.startCompaction(itemId)];
+    const lifecycleStart = this.startLifecycleItem(item?.type, itemId);
+    if (lifecycleStart) return [...boundaryEvents, ...lifecycleStart];
     if (!item || !itemId || !TOOL_LIKE_ITEM_TYPES.has(item.type) || item.type === "webSearch") return this.logMainItemStarted(notification.method, item?.type, boundaryEvents);
     const toolUse = this.buildToolUseEvent(item, itemId, notification);
     if (!toolUse) return this.logMainItemStarted(notification.method, item.type, boundaryEvents);
     this.startedToolUseSignatures.set(itemId, this.toolUseSignature(toolUse));
     return [...boundaryEvents, toolUse];
+  }
+
+  private startLifecycleItem(itemType: string | undefined, itemId: string | undefined): CodexMappedEvent[] | undefined {
+    if (!itemId) return undefined;
+    if (itemType === "contextCompaction") return this.startCompaction(itemId);
+    if (itemType === "reasoning") return this.startReasoning(itemId);
+    return undefined;
   }
 
   private startCompaction(itemId: string): CodexMappedEvent[] {
@@ -1989,11 +2011,43 @@ export class CodexEventMapper {
   }
 
   private mapReasoningDelta(notification: CodexNotification): CodexMappedEvent[] {
-    const params = notification.params as { delta?: unknown; text?: unknown };
-    const delta = typeof params.delta === "string" ? params.delta : typeof params.text === "string" ? params.text : "";
-    if (!delta) return [];
-    this.lastReasoningText += delta;
-    return [...this.drainPendingAssistantBoundary(false), { type: AgentEventType.TextDelta, threadId: this.threadId, delta, isFinalResponse: false }];
+    const params = notification.params as { delta?: unknown; text?: unknown; itemId?: unknown; summaryIndex?: unknown; contentIndex?: unknown };
+    const text = typeof params.delta === "string" ? params.delta : typeof params.text === "string" ? params.text : "";
+    if (!text) return [];
+    const itemId = typeof params.itemId === "string" && params.itemId ? params.itemId : undefined;
+    const key = itemId ?? "";
+    const streamed = this.streamedReasoningByItem.get(key) ?? "";
+    const delta = (this.startsNewReasoningPart(key, params) && streamed ? REASONING_PART_SEPARATOR : "") + text;
+    this.streamedReasoningByItem.set(key, streamed + delta);
+    return [...this.drainPendingAssistantBoundary(false), this.reasoningDelta(delta, itemId)];
+  }
+
+  private startsNewReasoningPart(key: string, params: { summaryIndex?: unknown; contentIndex?: unknown }): boolean {
+    const part = typeof params.summaryIndex === "number" ? `summary:${params.summaryIndex}` : typeof params.contentIndex === "number" ? `content:${params.contentIndex}` : undefined;
+    if (part === undefined) return false;
+    const previous = this.reasoningPartByItem.get(key);
+    this.reasoningPartByItem.set(key, part);
+    return previous !== undefined && previous !== part;
+  }
+
+  /**
+   * Opens the block when the model starts reasoning. Codex sends summary text in one burst
+   * seconds later, so a block opened at the first text would always read as zero duration.
+   */
+  private startReasoning(itemId: string): CodexMappedEvent[] {
+    if (this.streamedReasoningByItem.has(itemId)) return [];
+    this.streamedReasoningByItem.set(itemId, "");
+    return [this.reasoningDelta("", itemId)];
+  }
+
+  private reasoningDelta(delta: string, reasoningItemId: string | undefined, done?: true): CodexMappedEvent {
+    return {
+      type: AgentEventType.ReasoningDelta,
+      threadId: this.threadId,
+      delta,
+      ...(reasoningItemId ? { reasoningItemId } : {}),
+      ...(done ? { done } : {}),
+    };
   }
 
   private mapPlanDelta(notification: CodexNotification): CodexMappedEvent[] {
@@ -2149,7 +2203,8 @@ export class CodexEventMapper {
     this.finalAssistantText = undefined;
     this.assistantFallbackSequence = 0;
     this.assistantIdentityScope = NodeCrypto.randomUUID();
-    this.lastReasoningText = "";
+    this.streamedReasoningByItem.clear();
+    this.reasoningPartByItem.clear();
     this.planUpdateSeq = 0;
     this.commandOutputBuffers.clear();
     this.startedToolUseSignatures.clear();
@@ -2219,11 +2274,20 @@ export class CodexEventMapper {
     return this.consumeCompletedItem(item.type);
   }
 
+  /**
+   * Closes one reasoning item with the suffix its deltas did not stream. Summary and full-text
+   * deltas share one positional buffer, matching how `completedReasoningText` joins them.
+   * An item with no text that never streamed (encrypted reasoning) has no row to close.
+   */
   private mapCompletedReasoning(item: CompletedItem): CodexMappedEvent[] {
     const full = this.completedReasoningText(item);
-    const delta = full.length > this.lastReasoningText.length ? full.slice(this.lastReasoningText.length) : "";
-    this.lastReasoningText = full;
-    return delta ? [{ type: AgentEventType.TextDelta, threadId: this.threadId, delta, isFinalResponse: false }] : [];
+    const key = item.id ?? "";
+    const streamed = this.streamedReasoningByItem.get(key);
+    if (streamed === undefined && !full) return [];
+    const prefix = streamed ?? "";
+    this.streamedReasoningByItem.set(key, full.length > prefix.length ? full : prefix);
+    const delta = full.length > prefix.length ? full.slice(prefix.length) : "";
+    return [this.reasoningDelta(delta, item.id, true)];
   }
 
   private completedReasoningText(item: CompletedItem): string {
@@ -2231,7 +2295,7 @@ export class CodexEventMapper {
     const reasoningContent = Array.isArray(item.reasoningContent) ? item.reasoningContent : [];
     const rawContent = (item as { content?: unknown }).content;
     const content = reasoningContent.length > 0 ? reasoningContent : this.stringContentArray(rawContent);
-    return [...summary, ...content].join("\n");
+    return [...summary, ...content].join(REASONING_PART_SEPARATOR);
   }
 
   private stringContentArray(value: unknown): string[] {

@@ -293,14 +293,27 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   }
 
   private applyNarrativeEvent(providerId: ProviderId, event: AgentEvent): EventApplicationResult {
+    return this.applyAssistantOutputEvent(providerId, event) ?? this.applyNarrativeStructureEvent(event);
+  }
+
+  private applyAssistantOutputEvent(providerId: ProviderId, event: AgentEvent): EventApplicationResult {
+    switch (event.type) {
+      case AgentEventType.TextDelta: return this.applyTextDelta(event);
+      case AgentEventType.ReasoningDelta:
+        this.narrative.openOrExtendReasoning(event.threadId, event);
+        return true;
+      case AgentEventType.GeneratedAttachment: return this.applyGeneratedAttachment(event);
+      case AgentEventType.Message: return this.applyMessage(providerId, event);
+      case AgentEventType.AssistantMessageBoundary: return this.applyAssistantMessageBoundary(event);
+      default: return undefined;
+    }
+  }
+
+  private applyNarrativeStructureEvent(event: AgentEvent): EventApplicationResult {
     switch (event.type) {
       case AgentEventType.ApprovalDecided:
         this.narrative.recordApproval(event);
         return true;
-      case AgentEventType.TextDelta: return this.applyTextDelta(event);
-      case AgentEventType.GeneratedAttachment: return this.applyGeneratedAttachment(event);
-      case AgentEventType.Message: return this.applyMessage(providerId, event);
-      case AgentEventType.AssistantMessageBoundary: return this.applyAssistantMessageBoundary(event);
       case AgentEventType.ToolUse: return this.applyToolUse(event);
       case AgentEventType.HookStarted: return this.applyHookStarted(event);
       case AgentEventType.HookCompleted: return this.applyHookCompleted(event);
@@ -339,6 +352,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   }
 
   private applyTextDelta(event: Extract<AgentEvent, { type: "textDelta" }>): boolean {
+    if (event.isFinalResponse !== false) this.narrative.closeOpenReasoning(event.threadId);
     if (event.isFinalResponse === true) {
       this.finalizer.appendStreamingText(event.threadId, event.delta);
     } else if (event.isFinalResponse === false) {

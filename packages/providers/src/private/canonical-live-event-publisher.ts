@@ -6,7 +6,7 @@ import {
   type ProviderId,
   type ProviderRuntimeEvent,
 } from "@mcode/contracts";
-import type { ProviderEventBatch, ProviderEventSinkPort } from "../host-ports.js";
+import { volatileIngestClass, type ProviderEventBatch, type ProviderEventSinkPort } from "../host-ports.js";
 
 const MAX_PENDING_EVENTS_PER_EXECUTION = 1_024;
 
@@ -231,7 +231,7 @@ export class CanonicalLiveEventPublisher {
       sourceIdentities,
       ...(native ? {} : { sourceSequence }),
       providerTimestamp: timestamp,
-      ...(runtimeEvent.event.type === AgentEventType.TextDelta ? { ingestClass: "volatile" as const } : {}),
+      ...volatileIngestClass(runtimeEvent.event),
       payload: {
         type: "item.recorded",
         item: {

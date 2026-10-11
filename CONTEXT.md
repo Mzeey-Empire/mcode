@@ -401,18 +401,24 @@ become part of the final response or get grouped as preamble narration.
 Classification is resolved later by the `AssistantMessageBoundary` signal.
 
 ### Reasoning block
-Structured reasoning output emitted by the provider when extended thinking
-is enabled (e.g. Claude's `thinking` content blocks). A reasoning block is
-its own distinct response object in the SDK — **not** the same as a stream
-of text deltas. Mcode does not yet surface reasoning blocks; they will
-become visible when extended thinking is wired into the UI.
+The model's own thinking, as distinct from the text it says to the user.
+Providers stream it as `reasoningDelta` events, never as text deltas. Codex
+reasoning items carry a native id, and the item's completion closes the
+block. Cursor and Devin thought chunks carry no id. The timeline shows a
+reasoning block as a collapsed **Thought** row that the user can open to
+read. Claude `thinking` content blocks are not yet surfaced.
+
+A reasoning block is never narration and never the final response. It does
+not merge with neighbouring narration and does not supply the live activity
+label. It persists as a `thought_segments` row with `kind = 'reasoning'`.
+Rows without a kind are narration.
 
 ### Narration segment
 A contiguous group of text deltas the agent emitted **before** a tool call
 within a turn — the agent's narration of what it is about to do. Distinct
 from the final response (text deltas emitted *after* all tool calls have
-resolved) and distinct from a reasoning block (only emitted when extended
-thinking is on). Classification happens at the `AssistantMessageBoundary`
+resolved) and distinct from a reasoning block (the model's thinking, which
+arrives as `reasoningDelta`). Classification happens at the `AssistantMessageBoundary`
 event: a `stop_reason` of `tool_use` closes the buffered deltas as a
 narration segment; `end_turn` / `stop_sequence` / `max_tokens` / `refusal`
 reclassifies them as final-response text instead.
@@ -424,9 +430,9 @@ The boundary signal is the same either way; only the moment of certainty
 differs.
 
 > **Codebase mismatch (rename pending).** The code currently calls this
-> concept `ThoughtSegment` (table: `thought_segments`). That name is
-> misleading — these are not SDK "thoughts." A follow-up rename to
-> `NarrationSegment` is planned.
+> concept `ThoughtSegment` (table: `thought_segments`). The same type and
+> table also hold reasoning blocks, told apart by `kind`. A follow-up
+> rename to `NarrationSegment` is planned.
 
 ### Final response
 The text the agent produces after all tool calls in a turn have resolved,
@@ -434,7 +440,7 @@ intended as the user-facing reply for that turn. Identified by the SDK's
 terminal `stop_reason` (`end_turn`, `stop_sequence`, `max_tokens`,
 `refusal`) and persisted as the assistant message's `content`. Distinct
 from narration segments (which are persisted to a separate table) and from
-reasoning blocks (not yet surfaced).
+reasoning blocks.
 
 ### Streaming checkpoint
 A server-owned durable record of user-visible output accepted during an

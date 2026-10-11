@@ -5,7 +5,7 @@ import {
   createSubagentPresentation, mergeSubagentPresentation, resolveBrowserNarrativeTool,
   resolveSubagentDuration, resolveSubagentMetadata, resolveSubagentPrompt,
   encodeCanonicalSubagentDetailTarget, encodeSubagentAliasDetailTarget,
-  type ParentNarrativeRecoveryItem, type SubagentPresentation, type AgentEvent,
+  type ParentNarrativeRecoveryItem, type SubagentPresentation, type AgentEvent, type ThoughtSegmentKind,
 } from "@mcode/contracts";
 import type { CreateToolCallRecordInput } from "../../tools/persistence/tool-call-record-repo.js";
 import type { CreateThoughtSegmentInput } from "./persistence/thought-segment-repo.js";
@@ -41,9 +41,13 @@ function persistedSubagentIdentityKey(presentation: SubagentPresentation | undef
     : undefined;
 }
 
-/** In-flight thought segment accumulated from consecutive textDelta events. */
+/**
+ * In-flight segment accumulated from consecutive narration or reasoning deltas.
+ * A turn has at most one, so a delta of the other kind closes it.
+ */
 interface OpenThought {
   id: string;
+  kind: ThoughtSegmentKind;
   text: string;
   startedAt: string;
   sortOrder: number;
@@ -174,6 +178,11 @@ export class NarrativeTurnState {
   private turnSortCounters = 0;
   private turnOpenThought: OpenThought | null = null;
   private turnThoughts: CreateThoughtSegmentInput[] = [];
+  /**
+   * Provider reasoning ids are only stable within one execution and can repeat across turns,
+   * so each block gets a fresh segment id; this map keeps re-delivery of a block idempotent.
+   */
+  private reasoningSegmentIds = new Map<string, string>();
   private turnOpenHooks = new Map<string, OpenHook>();
   private turnHooks: CreateHookExecutionInput[] = [];
   private readonly effectSink: ((effect: NarrativeTurnStateEffect) => void) | undefined;
@@ -202,6 +211,7 @@ export class NarrativeTurnState {
     copy.turnSortCounters = this.turnSortCounters;
     copy.turnOpenThought = structuredClone(this.turnOpenThought);
     copy.turnThoughts = [...this.turnThoughts];
+    copy.reasoningSegmentIds = new Map(this.reasoningSegmentIds);
     copy.turnOpenHooks = new Map(this.turnOpenHooks);
     copy.turnHooks = [...this.turnHooks];
     copy.pendingEffects.push(...structuredClone(this.pendingEffects));
@@ -249,6 +259,7 @@ export class NarrativeTurnState {
     this.turnToolCalls = [];
     this.turnOpenThought = null;
     this.turnThoughts = [];
+    this.reasoningSegmentIds.clear();
     this.turnOpenHooks = new Map();
     this.turnHooks = [];
     this.recoveryChanges.clear();
@@ -276,30 +287,60 @@ export class NarrativeTurnState {
   }
 
   /**
-   * Open or extend the in-flight thought segment from a non-final `textDelta`.
+   * Open or extend the in-flight narration segment from a non-final `textDelta`.
    * The sort order is allocated lazily on the first delta so consecutive deltas
    * keep the same slot, taken BEFORE any following tool call's slot — matching
    * the live client builder. Never touches the `agentCallStack` (Trap 2).
    */
   openOrExtendThought(threadId: string, delta: string, textItemId?: string): void {
     this.assertThread(threadId);
-    if (textItemId && (this.turnThoughts.some((thought) => thought.id === textItemId)
-      || this.recoveryDiscards.has(`narrationSegment:${textItemId}`))) return;
-    if (textItemId && this.turnOpenThought && this.turnOpenThought.id !== textItemId) this.closeOpenThought(threadId);
-    const open = this.turnOpenThought;
-    if (!open) {
-      const sortOrder = this.nextSortOrder(threadId);
-      this.turnOpenThought = {
-        id: textItemId ?? NodeCrypto.randomUUID(),
-        text: delta,
-        startedAt: new Date().toISOString(),
-        sortOrder,
-      };
-    } else {
-      open.text += delta;
+    this.openOrExtendSegment(threadId, "narration", delta, textItemId);
+  }
+
+  /**
+   * Open or extend the in-flight reasoning segment from a `reasoningDelta`. A block
+   * without a provider id extends the open reasoning segment; `done` closes it.
+   */
+  openOrExtendReasoning(threadId: string, event: Extract<AgentEvent, { type: "reasoningDelta" }>): void {
+    this.assertThread(threadId);
+    const providerId = event.reasoningItemId;
+    let id: string | undefined;
+    if (providerId !== undefined) {
+      id = this.reasoningSegmentIds.get(providerId) ?? NodeCrypto.randomUUID();
+      this.reasoningSegmentIds.set(providerId, id);
     }
-    const updated = this.turnOpenThought;
-    if (updated) this.recordRecoveryChange(this.openThoughtRecoveryItem(updated));
+    if (!this.openOrExtendSegment(threadId, "reasoning", event.delta, id)) return;
+    if (event.done) this.closeOpenThought(threadId);
+  }
+
+  /**
+   * Close the open segment only when it is reasoning; any answer text or boundary ends a reasoning block.
+   * Returns whether a segment closed, so callers know a recovery change is pending.
+   */
+  closeOpenReasoning(threadId: string): boolean {
+    this.assertThread(threadId);
+    if (this.turnOpenThought?.kind !== "reasoning") return false;
+    this.closeOpenThought(threadId);
+    return true;
+  }
+
+  /** Returns false when the identified segment already settled, so a re-delivered block is a no-op. */
+  private openOrExtendSegment(threadId: string, kind: ThoughtSegmentKind, delta: string, id?: string): boolean {
+    if (id && (this.turnThoughts.some((thought) => thought.id === id)
+      || this.recoveryDiscards.has(`narrationSegment:${id}`))) return false;
+    const current = this.turnOpenThought;
+    if (current && (current.kind !== kind || (id && current.id !== id))) this.closeOpenThought(threadId);
+    const open = this.turnOpenThought ?? {
+      id: id ?? NodeCrypto.randomUUID(),
+      kind,
+      text: "",
+      startedAt: new Date().toISOString(),
+      sortOrder: this.nextSortOrder(threadId),
+    };
+    open.text += delta;
+    this.turnOpenThought = open;
+    this.recordRecoveryChange(this.openThoughtRecoveryItem(open));
+    return true;
   }
 
   /**
@@ -315,7 +356,8 @@ export class NarrativeTurnState {
     const thought: CreateThoughtSegmentInput = {
       id: open.id,
       messageId: "",
-      ...(open.id.startsWith("assistant-text:") ? { isFinalResponse: 0 } : {}),
+      ...(open.kind === "reasoning" ? { kind: open.kind } : {}),
+      ...(open.kind === "reasoning" || open.id.startsWith("assistant-text:") ? { isFinalResponse: 0 } : {}),
       text: open.text,
       startedAt: open.startedAt,
       endedAt: new Date().toISOString(),
@@ -331,6 +373,7 @@ export class NarrativeTurnState {
   settleAssistantTextItem(threadId: string, boundary: Extract<AgentEvent, { type: "assistantMessageBoundary" }>):
     { kind: "unchanged" } | { kind: "closed" } | { kind: "promoted"; text: string } {
     this.assertThread(threadId);
+    this.closeOpenReasoning(threadId);
     const id = boundary.textItemId;
     if (!id) {
       if (boundary.isFinalResponse) return { kind: "promoted", text: this.takeOpenThought(threadId) };
@@ -925,6 +968,7 @@ export class NarrativeTurnState {
         ended_at: thought.endedAt ?? null,
         sort_order: thought.sortOrder,
         ...(thought.isFinalResponse !== undefined ? { is_final_response: thought.isFinalResponse } : {}),
+        ...(thought.kind !== undefined ? { kind: thought.kind } : {}),
       },
     };
   }
@@ -939,6 +983,7 @@ export class NarrativeTurnState {
         started_at: openThought.startedAt,
         ended_at: null,
         sort_order: openThought.sortOrder,
+        ...(openThought.kind === "reasoning" ? { kind: openThought.kind } : {}),
       },
     };
   }
@@ -1305,7 +1350,7 @@ export class NarrativeTurnState {
     maxSortOrder: number,
   ): boolean {
     if (thought.isFinalResponse === 1) return true;
-    if (thought.id?.startsWith("assistant-text:")) return false;
+    if (thought.kind === "reasoning" || thought.id?.startsWith("assistant-text:")) return false;
     if (text === message) return true;
     return thought.sortOrder === maxSortOrder && message.endsWith(text);
   }
@@ -1333,6 +1378,7 @@ export class NarrativeTurnState {
     this.turnToolCalls = [];
     this.turnOpenThought = null;
     this.turnThoughts = [];
+    this.reasoningSegmentIds.clear();
     this.turnOpenHooks = new Map<string, OpenHook>();
     this.turnHooks = [];
     this.recoveryChanges.clear();

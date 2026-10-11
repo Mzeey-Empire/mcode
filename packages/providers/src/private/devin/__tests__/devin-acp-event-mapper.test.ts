@@ -90,7 +90,7 @@ describe("mapDevinAcpSessionNotification", () => {
     expect(state.accumulator.assistantFinalText).toBe("");
   });
 
-  it("emits thought deltas without polluting the assistant text", () => {
+  it("emits thought chunks as reasoning deltas without polluting the assistant text", () => {
     const state = createDevinAcpTurnState();
     const events = mapDevinAcpSessionNotification(
       notification({
@@ -101,7 +101,7 @@ describe("mapDevinAcpSessionNotification", () => {
       state,
     );
     expect(events).toEqual([
-      { type: "textDelta", threadId: THREAD, delta: "thinking", isFinalResponse: false },
+      { type: "reasoningDelta", threadId: THREAD, delta: "thinking" },
     ]);
     expect(state.accumulator.assistantText).toBe("");
   });

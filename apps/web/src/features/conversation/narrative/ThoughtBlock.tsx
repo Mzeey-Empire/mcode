@@ -8,17 +8,14 @@ interface ThoughtBlockProps {
 }
 
 /**
- * Renders a single text content block (formerly the "thought" row) as plain
- * body prose in the timeline.
+ * Renders a single narration segment as plain body prose in the timeline.
  *
- * Despite the historical name, this component no longer dims or italicises
- * its content. The renderer was originally responsible for "preamble" text —
- * text streamed before a tool call with `stop_reason: tool_use`. The
- * Anthropic Messages API tags both pre-tool and post-tool text as `text`-typed
- * content blocks, and only `thinking`-typed blocks represent genuine internal
- * reasoning the user should not have to read. Rendering preamble text as a
- * dimmed aside hid the actual answer in flows like the goal stop-hook, where
- * the model answers fully before running a verification tool call.
+ * Despite the historical name, this component renders narration, not model
+ * reasoning. Narration is text the agent says to the user before or between
+ * tool calls. Rendering it as a dimmed aside hid the actual answer in flows
+ * like the goal stop-hook, where the model answers fully before running a
+ * verification tool call. Reasoning blocks (`reasoningDelta`, segment kind
+ * `reasoning`) render through `ThoughtRow` as a collapsed row instead.
  *
  * Delegates to `DeltaBlock` so live and persisted text rows share one
  * renderer — typewriter reveal and an end-of-text cursor while the segment

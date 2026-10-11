@@ -280,7 +280,7 @@ function projectedThoughtSegments(items: readonly AgentItem[], terminal: boolean
     if (text === undefined || startedAt === undefined) continue;
     const hasLaterItem = items.some((candidate) => compareItems(candidate, item) > 0);
     const endedAt = terminal || hasLaterItem ? timestamp(item.updatedAt) ?? startedAt : undefined;
-    thoughts.push({ text, startedAt, ...(endedAt === undefined ? {} : { endedAt }), isExplicitNonFinal: true });
+    thoughts.push({ text, startedAt, ...(endedAt === undefined ? {} : { endedAt }), isExplicitNonFinal: true, kind: "reasoning" });
   }
   return thoughts;
 }

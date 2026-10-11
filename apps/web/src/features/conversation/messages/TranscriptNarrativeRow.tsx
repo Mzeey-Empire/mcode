@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import { useThreadStore } from "@/stores/threadStore";
 import { useThreadRecord } from "@/stores/thread-selectors";
@@ -6,8 +6,9 @@ import { BrowserActivityCall, isBrowserNarrativeCall } from "../narrative/Browse
 import { ActiveToolRow } from "../narrative/ActiveToolRow";
 import { NarrativeRow } from "../narrative/NarrativeRow";
 import type { RowExpansion } from "../narrative/NarrativeToolRow";
+import { ThoughtRow } from "../narrative/ThoughtRow";
 import { ToolCallDetailRow, ToolSummaryLine } from "../narrative/ToolSummaryLine";
-import type { SubagentRosterTarget } from "../narrative/types";
+import type { SubagentRosterTarget, ThoughtSegment } from "../narrative/types";
 import { toolCallDisclosureKey, transcriptGroupCallKeys, type TranscriptNarrativeItem, type TranscriptToolItem } from "./transcript-narrative-items";
 
 interface TranscriptNarrativeRowProps {
@@ -61,6 +62,35 @@ function ToolChildRow({ row, open, entering, expansion }: {
   );
 }
 
+/** A stable toggle keeps the collapsed reasoning header memoized while its text streams. */
+function TranscriptThoughtRow({ rowKey, segment, isActive, expanded, onToggle }: {
+  rowKey: string;
+  segment: ThoughtSegment;
+  isActive: boolean;
+  expanded: boolean;
+  onToggle: TranscriptNarrativeRowProps["onToggle"];
+}) {
+  const toggle = useCallback(() => onToggle(rowKey, [], rowKey), [onToggle, rowKey]);
+  const expansion = useMemo(() => ({ open: expanded, onToggle: toggle }), [expanded, toggle]);
+  return <ThoughtRow segment={segment} isActive={isActive} virtualExpansion={expansion} />;
+}
+
+/** Rows whose open state lives in the transcript owner, so it survives virtual unmounts. */
+function disclosureItemRow(
+  row: TranscriptNarrativeItem,
+  expanded: boolean,
+  callExpansion: RowExpansion | undefined,
+  onToggle: TranscriptNarrativeRowProps["onToggle"],
+) {
+  if (row.item.type === "tool-group") {
+    return <ToolSummaryLine {...row.item} virtualExpansion={callExpansion ?? { open: expanded, onToggle: () => onToggle(row.key, transcriptGroupCallKeys(row)) }} />;
+  }
+  if (row.item.type === "reasoning") {
+    return <TranscriptThoughtRow rowKey={row.key} segment={row.item.segment} isActive={row.item.isActive} expanded={expanded} onToggle={onToggle} />;
+  }
+  return null;
+}
+
 /** Renders group summaries and children as peers in the transcript viewport. */
 export function TranscriptNarrativeRow({ row, threadId, expanded, callExpanded = false, entering, onToggle, onSubagentSelect, onOpenSubagents }: TranscriptNarrativeRowProps) {
   const loader = row.messageId && threadId
@@ -70,9 +100,8 @@ export function TranscriptNarrativeRow({ row, threadId, expanded, callExpanded =
   if (row.type === "tool-row") {
     return <>{loader}<ToolChildRow row={row} open={expanded} entering={entering} expansion={callExpansion} /></>;
   }
-  if (row.item.type === "tool-group") {
-    return <>{loader}<ToolSummaryLine {...row.item} virtualExpansion={callExpansion ?? { open: expanded, onToggle: () => onToggle(row.key, transcriptGroupCallKeys(row)) }} /></>;
-  }
+  const disclosureRow = disclosureItemRow(row, expanded, callExpansion, onToggle);
+  if (disclosureRow) return <>{loader}{disclosureRow}</>;
   if (row.item.type === "active-tool") {
     return (
       <>

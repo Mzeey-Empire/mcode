@@ -481,8 +481,8 @@ export type {
   SubagentPresentation,
 } from "./models/tool-call-record.js";
 
-export { ThoughtSegmentRecordSchema } from "./models/thought-segment.js";
-export type { ThoughtSegmentRecord } from "./models/thought-segment.js";
+export { ThoughtSegmentKindSchema, ThoughtSegmentRecordSchema } from "./models/thought-segment.js";
+export type { ThoughtSegmentKind, ThoughtSegmentRecord } from "./models/thought-segment.js";
 
 export { HookExecutionRecordSchema } from "./models/hook-execution.js";
 export type { HookExecutionRecord } from "./models/hook-execution.js";

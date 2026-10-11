@@ -1,0 +1,1 @@
+ALTER TABLE `thought_segments` ADD `kind` text DEFAULT 'narration' NOT NULL;

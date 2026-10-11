@@ -2,6 +2,7 @@ import type { ToolCall } from "@/transport/types";
 import { isShellTool, resolveToolName, TOOL_PHASE_LABELS } from "@/components/chat/tool-renderers/constants";
 import { stripPlanFences } from "@/lib/plan-fences";
 import { extractNarrativeCommand } from "./extract-narrative-command";
+import { isReasoningSegment } from "./narrative-thought-classification";
 import type { ThoughtSegment } from "./types";
 
 const LABEL_LIMIT = 120;
@@ -19,10 +20,16 @@ function withoutHiddenPlan(text: string): string {
   return text.includes("plan") ? stripPlanFences(text, true) : text;
 }
 
+function openNarrationSegment(segments: readonly ThoughtSegment[]): ThoughtSegment | undefined {
+  const current = segments.at(-1);
+  // Reasoning headings are the model's private planning, not what the agent says it is doing.
+  return current && current.endedAt === undefined && !isReasoningSegment(current) ? current : undefined;
+}
+
 /** Extracts a complete Markdown heading from the current open narration segment. */
 export function currentActivityHeading(segments: readonly ThoughtSegment[]): string | undefined {
-  const current = segments.at(-1);
-  if (!current || current.endedAt !== undefined) return undefined;
+  const current = openNarrationSegment(segments);
+  if (!current) return undefined;
   const text = withoutHiddenPlan(current.text);
   // Bound work on long streams and exclude a cut-off first line.
   const tail = text.slice(-4096);

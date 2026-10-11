@@ -224,6 +224,7 @@ export class ConversationDisplayMaterializationStore {
       endedAt: placeholder("endedAt"),
       sortOrder: placeholder("sortOrder"),
       isFinalResponse: placeholder("isFinalResponse"),
+      kind: placeholder("kind"),
     }).onConflictDoUpdate({
       target: thoughtSegments.id,
       set: {
@@ -233,6 +234,7 @@ export class ConversationDisplayMaterializationStore {
         endedAt: sql`excluded.ended_at`,
         sortOrder: sql`excluded.sort_order`,
         isFinalResponse: sql`excluded.is_final_response`,
+        kind: sql`excluded.kind`,
       },
     }).prepare();
   }
@@ -612,6 +614,7 @@ export class ConversationDisplayMaterializationStore {
       endedAt: nullableString(record.ended_at),
       sortOrder: numberValue(record.sort_order),
       isFinalResponse: numberValue(record.is_final_response),
+      kind: record.kind === "reasoning" ? "reasoning" : "narration",
     });
   }
 
@@ -652,6 +655,7 @@ export class ConversationDisplayMaterializationStore {
       endedAt: row.updatedAt,
       sortOrder,
       isFinalResponse: 0,
+      kind: "reasoning",
     });
     return { kind: "narrationSegment", id };
   }

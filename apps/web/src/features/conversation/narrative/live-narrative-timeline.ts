@@ -12,7 +12,11 @@ import {
   createSubagentItem,
   createToolGroupItem,
 } from "./narrative-builder-helpers";
-import { filterThoughtsMatchingAssistantBody } from "./narrative-thought-classification";
+import {
+  filterThoughtsMatchingAssistantBody,
+  isReasoningSegment,
+  narrationSegments,
+} from "./narrative-thought-classification";
 import type { ApprovalReceipt, NarrativeItem, SubagentActivity, ThoughtSegment } from "./types";
 
 /** Inputs that describe the volatile narrative state for one live turn. */
@@ -222,7 +226,7 @@ function liveStreamingSuffix(
   hasRunningTopLevelTool: boolean,
 ): string {
   if (!isAgentRunning || hasRunningTopLevelTool) return "";
-  const thoughtTape = thoughtSegments.filter((segment) => !segment.id?.startsWith("assistant-text:"))
+  const thoughtTape = narrationSegments(thoughtSegments).filter((segment) => !segment.id?.startsWith("assistant-text:"))
     .map((segment) => segment.text).join("");
   return streamingText.startsWith(thoughtTape)
     ? streamingText.slice(thoughtTape.length)
@@ -309,7 +313,8 @@ function projectThoughtEvent(
   // (tool call, message boundary, turn end) already closed it. Keeping it
   // "active" would pin a trailing table or fence on its assembling skeleton
   // forever, since closed-ness there depends on text that will never arrive.
-  items.push({ type: "thought", segment, isActive: isAgentRunning && segment.endedAt == null });
+  const isActive = isAgentRunning && segment.endedAt == null;
+  items.push({ type: isReasoningSegment(segment) ? "reasoning" : "thought", segment, isActive });
   return false;
 }
 
@@ -322,7 +327,7 @@ function shouldPromoteThoughtToFinalDelta(
 ): boolean {
   if (streamingSuffix.length > 0 || segment.startedAt !== latestThoughtStartedAt) return false;
   if (segment.endedAt != null || hasRunningTopLevelTool || !isAgentRunning) return false;
-  return !segment.isExplicitNonFinal;
+  return !segment.isExplicitNonFinal && !isReasoningSegment(segment);
 }
 
 function collectSiblingSubagentEvents(

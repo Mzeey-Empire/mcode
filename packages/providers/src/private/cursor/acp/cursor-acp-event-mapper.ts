@@ -196,9 +196,11 @@ function mapAgentLanguageChunk(
 }
 
 /**
- * Maps ACP `agent_thought_chunk` to an explicitly non-final TextDelta so reasoning
- * renders as a thought segment and can never be classified as the final response.
- * Thought text is not assistant output, so the accumulator stays untouched.
+ * Maps ACP `agent_thought_chunk` to a ReasoningDelta so it renders as a collapsed
+ * Thought row and can never be classified as narration or the final response.
+ * ACP chunks carry no reasoning item id; the consumer's single open reasoning
+ * segment owns consecutive chunks. Thought text is not assistant output, so the
+ * accumulator stays untouched.
  */
 function mapAgentThoughtChunk(
   threadId: string,
@@ -209,10 +211,9 @@ function mapAgentThoughtChunk(
 ): AgentEvent[] {
   if (update.content.type !== "text" || !update.content.text) return [];
   return [...closeAssistantText(threadId, state), {
-    type: AgentEventType.TextDelta,
+    type: AgentEventType.ReasoningDelta,
     threadId,
     delta: update.content.text,
-    isFinalResponse: false,
   }];
 }
 
