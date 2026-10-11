@@ -874,21 +874,22 @@ its content scope and availability. Browser and Terminal can use the workspace
 root without a thread; Plan requires a thread.
 
 ### Tab availability
-The rule set governing which tab types a user can create at a given moment.
-Browser, Review, Plan, and Files are **singletons** at the top level.
-Terminal is repeatable: each open Terminal tab represents one **shell
-session**. The set of **creatable** types is filtered by **scope** (types
-needing a thread are dropped when no thread is active) and by
-**cardinality** (open singleton types are dropped, while Terminal remains
-creatable until its limit of four shell sessions per terminal scope is
-reached). When exactly one type is creatable, the add affordance opens it
-directly instead of showing a menu; when none are, the add affordance is
-hidden. The empty panel and the add menu present this same creatable-types
-set. Tabs share one creation-ordered sequence regardless of type. A newly
-created tab appends to that sequence. The user can reorder any tab by pointer
-drag or keyboard movement without changing its content or the panel's size.
-Each thread preserves its own tab order. The workspace-level panel used with
-no active thread preserves a separate order.
+The rule set governing which tools a user can open at a given moment. The rail
+lists each open tool once: Browser, Terminal, Review, Plan, and Files. The set
+of **creatable** tools is filtered by **scope** (tools needing a thread are
+dropped when no thread is active) and by whether the tool is already open.
+When exactly one tool is creatable, the add affordance opens it directly
+instead of showing a menu; when none are, the add affordance is hidden. The
+empty panel and the add menu present this same creatable set. Tools share one
+creation-ordered sequence; the user can reorder any tool by pointer drag or
+keyboard movement without changing its content or the panel's size. Each
+thread preserves its own order. The workspace-level panel used with no active
+thread preserves a separate order.
+
+Terminal and Browser hold several items, shown as row-1 tabs inside the tool
+with a round + that adds one. Terminal allows eight **terminal records** per
+terminal scope, counting shells and Project Action runs alike; at that limit
+its + is disabled and says why. See ADR-0026.
 
 ### Plan tab
 The right-panel tab that shows a thread's plan as a read-only document. Its
@@ -913,14 +914,15 @@ separate from the Plan tab.
 _Avoid_: Task bubble, Scope task list
 
 ### Terminal tab
-A repeatable right-panel tab that represents one **shell session** against
-the active **terminal scope** (a thread when one is active, otherwise the
-workspace root). Creating another shell session creates another Terminal
-tab. Selecting a Terminal tab shows only that tab's shell session. Closing
-a Terminal tab closes its shell session and terminates the entire process
-tree rooted at that shell. If closing it leaves no right-panel tabs, the
-right panel closes. When a shell exits on its own, its Terminal tab keeps the
-exit status and retained output until the user closes it or deletes its scope.
+A row-1 tab inside the Terminal tool that represents one **terminal record**
+in the active **terminal scope** (a thread when one is active, otherwise the
+workspace root): a **shell session** or an **action terminal**. Selecting a
+Terminal tab shows only that record. Closing a Terminal tab terminates the
+entire process tree rooted at its shell; closing the last one closes the
+Terminal tool. Closing the Terminal tool from the rail hides it without
+stopping its records. When a shell exits on its own, its Terminal tab keeps
+the exit status and retained output until the user closes it or deletes its
+scope.
 
 ### Action terminal
 
@@ -961,7 +963,7 @@ _Avoid_: Mounting a view for every open shell (background shells stay
 server-side only).
 
 ### Terminal view
-The in-app rendering of one shell session's output in the Terminal tab.
+The in-app rendering of one shell session's output in the Terminal tool.
 Only the **active shell** has a view; others keep running without one. Hiding
 the terminal surface preserves that view for a fast return. Switching shells
 replaces it. A returning view follows the latest output when the user was at

@@ -5,7 +5,9 @@ import type { OverviewSubject } from "@/features/thread-overview/overview-subjec
 import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
-import { rightPanelActionTerminalId, useDiffStore } from "@/stores/diffStore";
+import { useDiffStore } from "@/stores/diffStore";
+import { useTerminalStore } from "@/features/terminal";
+import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { newThreadOverviewKey, useOverviewStore } from "@/stores/overviewStore";
 import { type Thread } from "@/transport";
 import { Settings } from "lucide-react";
@@ -27,6 +29,14 @@ function canRunManualProjectSetup(thread: Thread): boolean {
   );
 }
 
+/** The record a Project Action runs in, matched by owner first and by the run's session as a fallback. */
+function findActionTerminalId(threadId: string, actionId: string): string | null {
+  const records = useTerminalStore.getState().terminals[threadId] ?? [];
+  const owned = records.find((terminal) => terminal.actionId === actionId);
+  if (owned) return owned.id;
+  return useProjectActionStore.getState().runsByThread[threadId]?.[actionId]?.terminalSessionId ?? null;
+}
+
 function useThreadProjectActions(thread: Thread) {
   return useProjectActions(thread.workspace_id, thread.id);
 }
@@ -40,27 +50,19 @@ function ProjectActions({ thread }: { thread: Thread }) {
   const projectActions = useProjectActionsState();
   const startProjectAction = useCallback(async (actionId: string) => {
     const run = await projectActions.start(actionId);
-    useDiffStore.getState().ensureRightPanelActionTerminalTab(
-      thread.workspace_id,
-      thread.id,
-      run.actionId,
-    );
+    useDiffStore.getState().ensureRightPanelTab(thread.workspace_id, thread.id, "terminal");
     return run;
   }, [projectActions, thread.id, thread.workspace_id]);
   const approveProjectAction = useCallback(async (actionId: string, approval: import("@mcode/contracts").WorkspaceEnvironmentCommandApproval) => {
     const run = await projectActions.approve(actionId, approval);
-    useDiffStore.getState().ensureRightPanelActionTerminalTab(thread.workspace_id, thread.id, run.actionId);
+    useDiffStore.getState().ensureRightPanelTab(thread.workspace_id, thread.id, "terminal");
     return run;
   }, [projectActions, thread.id, thread.workspace_id]);
   const focusProjectAction = useCallback((actionId: string) => {
-    const panels = useDiffStore.getState();
-    panels.ensureRightPanelActionTerminalTab(thread.workspace_id, thread.id, actionId);
     showRightPanelAdaptive(thread.workspace_id, thread.id);
-    panels.setRightPanelTabInstance(
-      thread.workspace_id,
-      thread.id,
-      rightPanelActionTerminalId(actionId),
-    );
+    useDiffStore.getState().setRightPanelTab(thread.workspace_id, thread.id, "terminal");
+    const ptyId = findActionTerminalId(thread.id, actionId);
+    if (ptyId) useTerminalStore.getState().setActiveTerminal(thread.id, ptyId);
   }, [thread.id, thread.workspace_id]);
   const canRunManualSetup = canRunManualProjectSetup(thread);
   return (<ProjectActionMenu

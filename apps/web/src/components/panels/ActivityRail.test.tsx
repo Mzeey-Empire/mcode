@@ -1,52 +1,26 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BrowserTabSet } from "@mcode/contracts";
-import { rightPanelSingletonId, type RightPanelTab } from "@/stores/diffStore";
-import {
-  browserAutomationTargetKey,
-  useBrowserAutomationStore,
-} from "@/features/preview";
+import { rightPanelSingletonId, rightPanelToolInstance, type RightPanelTool } from "@/stores/diffStore";
 import { ActivityRail } from "./ActivityRail";
 
 const EXPECTED_EXPAND_DELAY_MS = 140;
 const EXPECTED_COLLAPSE_DELAY_MS = 250;
-const workspaceId = "workspace-1";
-
-const browserTabSet: BrowserTabSet = {
-  threadId: "thread-activity-rail",
-  activeTabId: "browser-page",
-  tabs: [
-    {
-      id: "browser-page",
-      url: "https://example.com",
-      title: "Example",
-      faviconUrl: null,
-      active: true,
-      threadId: "thread-activity-rail",
-      warm: true,
-    },
-  ],
-};
 
 const handlers = {
   onSelect: vi.fn(),
   onClose: vi.fn(),
   onReorder: vi.fn(),
   onCreate: vi.fn(),
-  onSelectBrowserPage: vi.fn(),
-  onCloseBrowserPage: vi.fn(),
 };
 
-function railElement(openTabs: readonly RightPanelTab[] = ["terminal", "changes"]) {
+function railElement(openTabs: readonly RightPanelTool[] = ["terminal", "changes"]) {
   return (
     <ActivityRail
-      tabInstances={openTabs.map((type) => ({ id: rightPanelSingletonId(type), type }))}
-      workspaceId={workspaceId}
+      tabInstances={openTabs.map(rightPanelToolInstance)}
       activeTabId={rightPanelSingletonId("terminal")}
       scope="thread"
       changesCount={3}
       changesFresh={false}
-      browserTabSet={null}
       {...handlers}
     />
   );
@@ -62,7 +36,6 @@ describe("ActivityRail expansion", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
-    useBrowserAutomationStore.setState({ controllers: new Map(), pendingAgentOpens: new Map() });
   });
 
   afterEach(() => {
@@ -116,16 +89,12 @@ describe("ActivityRail expansion", () => {
     expect(screen.getAllByTestId("rail-active-edge")).toHaveLength(1);
   });
 
-  it("keeps the remembered Browser page unfilled while another tool owns the panel", () => {
-    render(
-      <ActivityRail
-        {...railElement(["preview", "terminal"]).props}
-        browserTabSet={browserTabSet}
-      />,
-    );
-    const page = screen.getByRole("button", { name: "Browser page: Example" });
+  it("lists Browser and Terminal as one entry each, whatever they hold", () => {
+    render(railElement(["preview", "terminal"]));
 
-    expect(page).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Browser" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Terminal" })).toHaveAttribute("aria-pressed", "true");
+    expect(document.querySelectorAll("[data-rail-instance]")).toHaveLength(2);
     expect(screen.getAllByTestId("rail-active-edge")).toHaveLength(1);
   });
 
@@ -184,12 +153,10 @@ describe("ActivityRail expansion", () => {
     render(
       <ActivityRail
         tabInstances={[{ id: rightPanelSingletonId("terminal"), type: "terminal" }]}
-        workspaceId={workspaceId}
         activeTabId={rightPanelSingletonId("terminal")}
         scope="thread"
         changesCount={0}
         changesFresh={false}
-        browserTabSet={null}
         {...handlers}
         captionAction={<button type="button" onClick={onClosePanel}>Close panel</button>}
       />,
@@ -209,16 +176,15 @@ describe("ActivityRail expansion", () => {
     expect(handlers.onCreate).toHaveBeenCalledWith("preview");
   });
 
-  it("disables the terminal choice at eight records and explains the limit", () => {
-    render(<ActivityRail {...railElement().props} terminalCapReached />);
+  it("offers Terminal in the add menu only while the tool is closed", () => {
+    const { rerender } = render(railElement(["changes"]));
     fireEvent.click(screen.getByRole("button", { name: "New tab" }));
-    const terminal = screen.getByRole("menuitem", { name: "Terminal" });
-    expect(terminal).toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(terminal);
-    expect(handlers.onCreate).not.toHaveBeenCalled();
-    fireEvent.focus(terminal);
-    act(() => vi.runAllTimers());
-    expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveTextContent("8 terminals are open. Close one to open another.");
+    expect(screen.getByRole("menuitem", { name: "Terminal" })).not.toHaveAttribute("aria-disabled");
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+
+    rerender(railElement(["terminal", "changes"]));
+    fireEvent.click(screen.getByRole("button", { name: "New tab" }));
+    expect(screen.queryByRole("menuitem", { name: "Terminal" })).not.toBeInTheDocument();
   });
 
   it("collapses after a focused rail control is removed", () => {
@@ -277,84 +243,6 @@ describe("ActivityRail expansion", () => {
     act(() => vi.advanceTimersByTime(EXPECTED_COLLAPSE_DELAY_MS));
     expect(rail).toHaveAttribute("data-expanded", "false");
   });
-  it("uses the amber pointer favicon and accessible name for an agent-controlled page", () => {
-    const page = browserTabSet.tabs[0]!;
-    useBrowserAutomationStore.setState({
-      controllers: new Map([
-        [
-          browserAutomationTargetKey(workspaceId, page.threadId, page.id),
-          { tabId: page.id, controller: "agent", controlEpoch: 1 },
-        ],
-      ]),
-    });
-
-    render(
-      <ActivityRail
-        {...railElement(["preview"]).props}
-        browserTabSet={browserTabSet}
-      />,
-    );
-
-    expect(screen.getByTestId("browser-agent-control-indicator")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Browser page: Example, agent controls Browser" })).toBeInTheDocument();
-    expect(screen.queryByRole("img")).not.toBeInTheDocument();
-  });
-
-  it("keeps an Action terminal selectable and closeable after another tab becomes active", () => {
-    render(
-      <ActivityRail
-        tabInstances={[
-          { id: "action-terminal:build", type: "action-terminal" },
-          { id: rightPanelSingletonId("preview"), type: "preview" },
-        ]}
-        workspaceId={workspaceId}
-        activeTabId={rightPanelSingletonId("preview")}
-        scope="thread"
-        changesCount={0}
-        changesFresh={false}
-        browserTabSet={null}
-        terminalLabels={{ "action-terminal:build": "Build" }}
-        {...handlers}
-      />,
-    );
-
-    const actionTerminal = screen.getByRole("button", { name: "Build" });
-    fireEvent.click(actionTerminal);
-    expect(handlers.onSelect).toHaveBeenCalledWith("action-terminal:build");
-
-    fireEvent.focus(actionTerminal);
-    fireEvent.click(screen.getByRole("button", { name: "Close Build" }));
-    expect(handlers.onClose).toHaveBeenCalledWith("action-terminal:build");
-  });
-
-  it("uses the amber pointer while an agent-created page is still opening", () => {
-    const page = browserTabSet.tabs[0]!;
-    useBrowserAutomationStore.setState({
-      pendingAgentOpens: new Map([
-        [
-          "pending-open",
-          {
-            workspaceId: "workspace-1",
-            threadId: page.threadId,
-            tabId: page.id,
-            url: page.url,
-            startedAt: 1,
-          },
-        ],
-      ]),
-    });
-
-    render(
-      <ActivityRail
-        {...railElement(["preview"]).props}
-        browserTabSet={browserTabSet}
-      />,
-    );
-
-    expect(screen.getByTestId("browser-agent-control-indicator")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Browser page: Example, agent controls Browser" })).toBeInTheDocument();
-  });
-
   it("reorders only from a focused rail tab keyboard shortcut", () => {
     renderRail();
     const terminal = screen.getByRole("button", { name: "Terminal" });
@@ -478,32 +366,27 @@ describe("ActivityRail expansion", () => {
     expect(handlers.onClose).toHaveBeenCalledWith("singleton:terminal");
   });
 
-  it("treats Browser pages as one top-level drag item", () => {
-    render(
-      <ActivityRail
-        {...railElement(["preview", "terminal"]).props}
-        browserTabSet={browserTabSet}
-      />,
-    );
-    const page = screen.getByRole("button", { name: "Browser page: Example" });
-    const browserItem = page.closest("[data-rail-instance]") as HTMLElement;
-    const terminalItem = screen
-      .getByRole("button", { name: "Terminal" })
+  it("moves the Terminal tool as a whole", () => {
+    render(railElement(["terminal", "preview"]));
+    const terminal = screen.getByRole("button", { name: "Terminal" });
+    const terminalItem = terminal.closest("[data-rail-instance]") as HTMLElement;
+    const browserItem = screen
+      .getByRole("button", { name: "Browser" })
       .closest("[data-rail-instance]") as HTMLElement;
-    vi.spyOn(browserItem, "getBoundingClientRect").mockReturnValue({
-      top: 0,
-      bottom: 80,
-    } as DOMRect);
     vi.spyOn(terminalItem, "getBoundingClientRect").mockReturnValue({
-      top: 88,
-      bottom: 128,
+      top: 0,
+      bottom: 40,
+    } as DOMRect);
+    vi.spyOn(browserItem, "getBoundingClientRect").mockReturnValue({
+      top: 48,
+      bottom: 88,
     } as DOMRect);
 
-    fireEvent.pointerDown(page, { button: 0, pointerId: 3, clientY: 20 });
-    fireEvent.pointerMove(page, { pointerId: 3, clientY: 70 });
-    expect(handlers.onReorder).not.toHaveBeenCalled();
-    fireEvent.pointerMove(page, { pointerId: 3, clientY: 88 });
-    expect(handlers.onReorder).toHaveBeenCalledWith("singleton:preview", 1);
+    fireEvent.pointerDown(terminal, { button: 0, pointerId: 3, clientY: 20 });
+    fireEvent.pointerMove(terminal, { pointerId: 3, clientY: 48 });
+
+    expect(handlers.onReorder).toHaveBeenCalledTimes(1);
+    expect(handlers.onReorder).toHaveBeenCalledWith("singleton:terminal", 1);
   });
 
   it("leaves keyboard boundary handling to the store and does not intercept content", () => {

@@ -345,6 +345,37 @@
   }
 }
 
+/* A horizontal scroller (tab strips) that fades 24px at each edge hiding
+   content. The owner sets data-overflow-start / data-overflow-end from its
+   scroll position, since a scroll timeline cannot tell which edge is hidden.
+   The scrollbar is hidden because the strip scrolls by wheel and chevrons. */
+@utility scroll-fade-x {
+  overflow-x: auto;
+  overflow-y: hidden;
+  min-width: 0;
+  scrollbar-width: none;
+  /* Tabs scrolled into view land clear of the fades. */
+  scroll-padding-inline: var(--spacing-text-fade);
+  --scroll-fade-start: 0px;
+  --scroll-fade-end: 0px;
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black var(--scroll-fade-start),
+    black calc(100% - var(--scroll-fade-end)),
+    transparent
+  );
+  &::-webkit-scrollbar {
+    display: none;
+  }
+  &[data-overflow-start] {
+    --scroll-fade-start: var(--spacing-text-fade);
+  }
+  &[data-overflow-end] {
+    --scroll-fade-end: var(--spacing-text-fade);
+  }
+}
+
 /* Vertical clamp to N lines that ends in a 24px bottom fade when clamped. */
 @utility text-fade-lines-* {
   overflow: hidden;

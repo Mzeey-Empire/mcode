@@ -14,6 +14,8 @@ export interface TerminalInstance {
   readonly cwd?: string;
   readonly createdAt?: string;
   readonly kind?: "shell" | "action";
+  /** Project Action that owns this record; set only when `kind` is `"action"`. */
+  readonly actionId?: string;
 }
 
 /** Server-authoritative PTY identity returned during reconnect. */
@@ -183,6 +185,7 @@ function reconcileTerminalInstance(
     cwd: session.cwd,
     createdAt: session.createdAt,
     kind: session.kind ?? "shell",
+    actionId: session.actionId,
     exit: session.state === "exited"
       ? { code: session.exitCode ?? null, signal: null, reason: "natural" }
       : undefined,

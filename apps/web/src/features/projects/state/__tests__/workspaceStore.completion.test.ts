@@ -120,7 +120,7 @@ describe("workspaceStore completion lifecycle", () => {
     panelStore.setRightPanelTab("workspace-1", null, "changes");
     panelStore.showRightPanel("workspace-1", completed.id);
     panelStore.setRightPanelTab("workspace-1", completed.id, "preview");
-    panelStore.addRightPanelTerminalTab("workspace-1", completed.id, "pty-1");
+    panelStore.ensureRightPanelTab("workspace-1", completed.id, "terminal");
 
     await useWorkspaceStore.getState().completeThread(completed.id);
 
@@ -143,7 +143,7 @@ describe("workspaceStore completion lifecycle", () => {
     });
     const panelStore = useDiffStore.getState();
     panelStore.setRightPanelTab("workspace-1", completed.id, "preview");
-    panelStore.addRightPanelTerminalTab("workspace-1", completed.id, "pty-1");
+    panelStore.ensureRightPanelTab("workspace-1", completed.id, "terminal");
 
     useWorkspaceStore.getState().applyThreadLifecycle(completed);
     useWorkspaceStore.getState().applyThreadLifecycle(completed);

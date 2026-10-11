@@ -6,8 +6,7 @@ import type {
   ReactNode,
 } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Globe, MousePointer2, Plus, X } from "lucide-react";
-import type { BrowserTabInfo, BrowserTabSet } from "@mcode/contracts";
+import { Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -25,11 +24,7 @@ import {
   type PanelScope,
   type PanelTabType,
 } from "@/lib/panel-tabs";
-import type { RightPanelTab, RightPanelTabInstance } from "@/stores/diffStore";
-import {
-  isBrowserAutomationAgentControlled,
-  useBrowserAutomationStore,
-} from "@/features/preview";
+import type { RightPanelTool, RightPanelTabInstance } from "@/stores/diffStore";
 import { cn } from "@/lib/utils";
 
 /** Past this many changed files the Review badge renders "{cap}+" instead of the exact count. */
@@ -182,23 +177,15 @@ function ReorderableRailItem({
 }
 
 /** Catalog metadata (product label + icon) for an openable tab, by store id. */
-function metaForTab(id: RightPanelTab): PanelTabType | undefined {
+function metaForTab(id: RightPanelTool): PanelTabType | undefined {
   return PANEL_TAB_TYPES.find((t) => t.id === id);
 }
 
-function railDomId(id: RightPanelTab): string {
+function railDomId(id: RightPanelTool): string {
   return id === "changes" ? "review" : id;
 }
 
 /** The mcode keycap for a tab type, or null when it has no binding. */
-const TERMINAL_CAP_REASON = "8 terminals are open. Close one to open another.";
-
-function newTabUnavailableReason(type: PanelTabType, terminalCapReached: boolean): string | null {
-  if (type.comingSoon) return "Coming soon";
-  if (terminalCapReached && type.id === "terminal") return TERMINAL_CAP_REASON;
-  return null;
-}
-
 function tabKeycap(type: PanelTabType): string | null {
   if (!type.commandId) return null;
   const binding = getKeybindingForCommand(type.commandId);
@@ -211,7 +198,7 @@ function tabKeycap(type: PanelTabType): string | null {
  * color. The visible rail glyph is icon-only, so this is the tab's only name.
  */
 function railAccessibleLabel(
-  id: RightPanelTab,
+  id: RightPanelTool,
   label: string,
   changesCount: number,
   changesFresh: boolean,
@@ -237,7 +224,7 @@ function RailStatus({
   changesCount,
   changesFresh,
 }: {
-  id: RightPanelTab;
+  id: RightPanelTool;
   active: boolean;
   expanded: boolean;
   changesCount: number;
@@ -273,7 +260,6 @@ function RailStatus({
 /** One rail entry: a select glyph, plus a hover-revealed × to close. */
 function RailTab({
   id,
-  label: labelOverride,
   active,
   expanded,
   changesCount,
@@ -281,18 +267,17 @@ function RailTab({
   onSelect,
   onClose,
 }: {
-  id: RightPanelTab;
-  label?: string;
+  id: RightPanelTool;
   active: boolean;
   expanded: boolean;
   changesCount: number;
   changesFresh: boolean;
-  onSelect: (id: RightPanelTab) => void;
-  onClose: (id: RightPanelTab) => void;
+  onSelect: (id: RightPanelTool) => void;
+  onClose: (id: RightPanelTool) => void;
 }) {
-  const presentation = getRailTabPresentation(id, labelOverride);
-  if (!presentation) return null;
-  const { Icon, label } = presentation;
+  const meta = metaForTab(id);
+  if (!meta) return null;
+  const { icon: Icon, label } = meta;
   return (
     <div className="group relative w-full">
       {active && <RailActiveEdge />}
@@ -356,186 +341,6 @@ function RailTab({
   );
 }
 
-function getRailTabPresentation(id: RightPanelTab, labelOverride: string | undefined) {
-  const meta = metaForTab(id);
-  if (!meta) return null;
-  return { Icon: meta.icon, label: labelOverride ?? meta.label };
-}
-
-/** Human-readable name for a browser page, used as its rail tooltip / a11y name. */
-function pageLabel(page: BrowserTabInfo): string {
-  if (page.title && page.title.trim().length > 0) return page.title;
-  if (page.url && page.url.trim().length > 0) {
-    try {
-      const u = new URL(page.url);
-      return u.host || u.pathname || page.url;
-    } catch {
-      return page.url;
-    }
-  }
-  return "New page";
-}
-
-/**
- * One browser page in the rail's page switcher: a favicon glyph (globe
- * fallback) with the active-tab lamp when its browser owns the panel, plus a
- * hover-revealed × to close it. Selecting a page focuses the Browser tab and
- * switches the guest to that page.
- */
-function BrowserPageRailTab({
-  page,
-  workspaceId,
-  active,
-  browserActive,
-  expanded,
-  onSelect,
-  onClose,
-}: {
-  page: BrowserTabInfo;
-  workspaceId: string;
-  active: boolean;
-  browserActive: boolean;
-  expanded: boolean;
-  onSelect: (pageId: string) => void;
-  onClose: (pageId: string) => void;
-}) {
-  const label = pageLabel(page);
-  const agentControlled = useBrowserAutomationStore(
-    (state) => isBrowserAutomationAgentControlled(state, workspaceId, page.threadId, page.id),
-  );
-  const activePage = active && browserActive;
-  return (
-    <div className="group relative w-full">
-      {activePage && <RailActiveEdge />}
-      <RailTooltip content={label} disabled={expanded}>
-        <Button
-          type="button"
-          variant="ghost"
-          size="compact"
-          data-rail-browser-page={page.id}
-          data-active={active ? "true" : undefined}
-          // Pressed drives the ghost variant's selected fill, so only the live
-          // page claims it; `data-active` still marks the remembered page.
-          aria-pressed={activePage}
-          // The live page (active, and Browser owns the panel) is the current
-          // page in the switcher; expose that beyond the visual lamp.
-          aria-current={activePage ? "page" : undefined}
-          aria-label={`Browser page: ${label}${agentControlled ? ", agent controls Browser" : ""}`}
-          onClick={() => onSelect(page.id)}
-          className={cn(RAIL_ENTRY_CLASS, "justify-start", browserPageRailClass(active, browserActive))}
-        >
-          <BrowserPageRailGlyph agentControlled={agentControlled} faviconUrl={page.faviconUrl} />
-          <span
-            aria-hidden
-            className={cn(
-              "absolute left-8 right-8 text-fade text-left font-medium text-ink transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
-              expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
-            )}
-          >
-            {label}
-          </span>
-        </Button>
-      </RailTooltip>
-      <RailTooltip content={`Close ${label}`} disabled={expanded}>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-compact"
-          aria-label={`Close page ${label}`}
-          data-rail-close
-          onClick={(e) => {
-            e.stopPropagation();
-            onClose(page.id);
-          }}
-          className={cn(
-            RAIL_TRAILING_CONTROL_CLASS,
-            "text-muted opacity-0 transition-opacity motion-reduce:duration-0 motion-reduce:transition-none hover:bg-panel hover:text-ink",
-            expanded
-              ? "focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
-              : "pointer-events-none",
-          )}
-        >
-          <X size={12} />
-        </Button>
-      </RailTooltip>
-    </div>
-  );
-}
-
-function browserPageRailClass(active: boolean, browserActive: boolean): string {
-  if (active && browserActive) return RAIL_ACTIVE_CLASS;
-  // Ink alone marks the page Browser will show; a fill would read as a second selection.
-  if (active) return "text-ink hover:bg-hover";
-  return RAIL_IDLE_CLASS;
-}
-
-function BrowserPageRailGlyph({
-  agentControlled,
-  faviconUrl,
-}: {
-  agentControlled: boolean;
-  faviconUrl: string | null;
-}) {
-  if (agentControlled) {
-    return (
-      <MousePointer2
-        data-testid="browser-agent-control-indicator"
-        size={RAIL_ICON_SIZE}
-        className="text-primary"
-        aria-hidden
-      />
-    );
-  }
-  if (faviconUrl) {
-    return <img src={faviconUrl} alt="" width={RAIL_ICON_SIZE} height={RAIL_ICON_SIZE} className="rounded-[3px]" />;
-  }
-  return <Globe size={RAIL_ICON_SIZE} />;
-}
-
-/**
- * The Browser tab's rail presence: its open pages as favicon entries, grouped
- * together so they read as one switcher under the Browser tab. The rail is the
- * page switcher (there is no horizontal strip); the active page's favicon is
- * the Browser glyph, and closing the last page closes the Browser tab.
- */
-function BrowserPageGroup({
-  tabSet,
-  workspaceId,
-  browserActive,
-  expanded,
-  onSelectPage,
-  onClosePage,
-}: {
-  tabSet: BrowserTabSet;
-  workspaceId: string;
-  browserActive: boolean;
-  expanded: boolean;
-  onSelectPage: (pageId: string) => void;
-  onClosePage: (pageId: string) => void;
-}) {
-  return (
-    <div
-      data-testid="rail-browser-pages"
-      role="group"
-      aria-label="Browser pages"
-      className="flex w-full flex-col items-stretch gap-1 rounded-lg bg-ink/[0.03]"
-    >
-      {tabSet.tabs.map((page) => (
-        <BrowserPageRailTab
-          key={page.id}
-          page={page}
-          workspaceId={workspaceId}
-          active={page.id === tabSet.activeTabId}
-          browserActive={browserActive}
-          expanded={expanded}
-          onSelect={onSelectPage}
-          onClose={onClosePage}
-        />
-      ))}
-    </div>
-  );
-}
-
 /**
  * The dynamic add control: hidden when nothing is creatable, opens the one
  * creatable type directly when exactly one remains, otherwise a menu of the
@@ -548,13 +353,11 @@ function RailAddControl({
   openTabs,
   expanded,
   onCreate,
-  terminalCapReached,
 }: {
   scope: PanelScope;
-  openTabs: readonly RightPanelTab[];
+  openTabs: readonly RightPanelTool[];
   expanded: boolean;
-  onCreate: (id: RightPanelTab) => void;
-  readonly terminalCapReached?: boolean;
+  onCreate: (id: RightPanelTool) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const shown = shownTabTypes(scope, openTabs);
@@ -567,15 +370,14 @@ function RailAddControl({
   if (creatable.length === 1) {
     const only = creatable[0];
     return (
-      <RailTooltip content={terminalCapReached && only.id === "terminal" ? TERMINAL_CAP_REASON : `New ${only.label}`} disabled={expanded && !terminalCapReached}>
+      <RailTooltip content={`New ${only.label}`} disabled={expanded}>
         <span className="block">
           <Button
             variant="ghost"
             size="compact"
             className="relative h-8 w-full justify-start overflow-hidden rounded-lg px-2 text-muted hover:text-ink"
             aria-label={`New ${only.label}`}
-            disabled={terminalCapReached && only.id === "terminal"}
-            onClick={() => onCreate(only.id as RightPanelTab)}
+            onClick={() => onCreate(only.id as RightPanelTool)}
           >
             <Plus />
             <span
@@ -620,7 +422,7 @@ function RailAddControl({
       </RailTooltip>
       <DropdownMenuContent side="left" align="start" sideOffset={6} className="min-w-[184px]">
         {shown.map((type) => {
-          const unavailableReason = newTabUnavailableReason(type, terminalCapReached ?? false);
+          const unavailableReason = type.comingSoon ? "Coming soon" : null;
           return (
             <DropdownMenuItem
               key={type.id}
@@ -628,7 +430,7 @@ function RailAddControl({
               icon={<type.icon />}
               shortcut={tabKeycap(type) ?? undefined}
               disabledReason={unavailableReason}
-              onClick={unavailableReason ? undefined : () => onCreate(type.id as RightPanelTab)}
+              onClick={unavailableReason ? undefined : () => onCreate(type.id as RightPanelTool)}
             />
           );
         })}
@@ -638,24 +440,15 @@ function RailAddControl({
 }
 
 interface ActivityRailProps {
-  readonly workspaceId: string;
   readonly tabInstances: readonly RightPanelTabInstance[];
   readonly activeTabId: string | null;
   readonly scope: PanelScope;
   readonly changesCount: number;
   readonly changesFresh: boolean;
-  /** The Browser tab's open pages, or null when none are known (web build / not yet loaded). */
-  readonly browserTabSet: BrowserTabSet | null;
   onSelect: (instanceId: string) => void;
   onClose: (instanceId: string) => void;
   onReorder: (instanceId: string, direction: -1 | 1) => void;
-  onCreate: (id: RightPanelTab) => void;
-  /** Whether this scope has reached the eight-record terminal cap. */
-  readonly terminalCapReached?: boolean;
-  /** PTY-backed rail labels keyed by terminal tab identity. */
-  readonly terminalLabels?: Readonly<Record<string, string>>;
-  onSelectBrowserPage: (instanceId: string, pageId: string) => void;
-  onCloseBrowserPage: (pageId: string) => void;
+  onCreate: (id: RightPanelTool) => void;
   /** Publishes the floating state so Browser surfaces exclude the covered edge. */
   readonly onExpandedChange?: (expanded: boolean) => void;
   /** A control for the caption strip when no window caption buttons cover it. */
@@ -673,75 +466,40 @@ interface ActivityRailViewProps extends ActivityRailProps {
   onBlurCapture: (event: ReactFocusEvent<HTMLDivElement>) => void;
 }
 
+/** One rail entry per open tool; Terminal records and Browser pages are tabs inside their tool. */
 function RailTabInstances({
-  workspaceId,
   tabInstances,
   activeTabId,
   changesCount,
   changesFresh,
-  browserTabSet,
   expanded,
   onSelect,
   onClose,
   onReorder,
-  terminalLabels,
-  onSelectBrowserPage,
-  onCloseBrowserPage,
 }: Pick<
   ActivityRailViewProps,
-  | "workspaceId"
   | "tabInstances"
   | "activeTabId"
   | "changesCount"
   | "changesFresh"
-  | "browserTabSet"
   | "expanded"
   | "onSelect"
   | "onClose"
   | "onReorder"
-  | "terminalLabels"
-  | "onSelectBrowserPage"
-  | "onCloseBrowserPage"
 >) {
-  return tabInstances.map((instance) => {
-    const { id: instanceId, type: id } = instance;
-    // The Browser tab becomes its page switcher: when its pages are known,
-    // render them as a favicon group instead of the single tab glyph. With
-    // none known yet (or a web build with no bridge), fall back to the tab
-    // glyph so Browser is still selectable.
-    if (id === "preview" && browserTabSet && browserTabSet.tabs.length > 0) {
-      return (
-        <ReorderableRailItem key={instanceId} instanceId={instanceId} onReorder={onReorder}>
-          <BrowserPageGroup
-            tabSet={browserTabSet}
-            workspaceId={workspaceId}
-            browserActive={activeTabId === instanceId}
-            expanded={expanded}
-            onSelectPage={(pageId) => onSelectBrowserPage(instanceId, pageId)}
-            onClosePage={onCloseBrowserPage}
-          />
-        </ReorderableRailItem>
-      );
-    }
-    return (
-      <ReorderableRailItem key={instanceId} instanceId={instanceId} onReorder={onReorder}>
-        <RailTab
-          id={id}
-          label={
-            id === "terminal" || id === "action-terminal"
-              ? terminalLabels?.[instanceId] ?? (id === "terminal" ? "Terminal" : "Project Action")
-              : undefined
-          }
-          active={instanceId === activeTabId}
-          expanded={expanded}
-          changesCount={changesCount}
-          changesFresh={changesFresh}
-          onSelect={() => onSelect(instanceId)}
-          onClose={() => onClose(instanceId)}
-        />
-      </ReorderableRailItem>
-    );
-  });
+  return tabInstances.map(({ id: instanceId, type }) => (
+    <ReorderableRailItem key={instanceId} instanceId={instanceId} onReorder={onReorder}>
+      <RailTab
+        id={type}
+        active={instanceId === activeTabId}
+        expanded={expanded}
+        changesCount={changesCount}
+        changesFresh={changesFresh}
+        onSelect={() => onSelect(instanceId)}
+        onClose={() => onClose(instanceId)}
+      />
+    </ReorderableRailItem>
+  ));
 }
 
 function RailFooter({
@@ -749,8 +507,7 @@ function RailFooter({
   tabInstances,
   expanded,
   onCreate,
-  terminalCapReached,
-}: Pick<ActivityRailViewProps, "scope" | "tabInstances" | "expanded" | "onCreate" | "terminalCapReached">) {
+}: Pick<ActivityRailViewProps, "scope" | "tabInstances" | "expanded" | "onCreate">) {
   const openTabs = tabInstances.map((instance) => instance.type);
   return (
     <>
@@ -762,34 +519,22 @@ function RailFooter({
           openTabs={openTabs}
           expanded={expanded}
           onCreate={onCreate}
-          terminalCapReached={terminalCapReached}
         />
-      )}
-      {terminalCapReached && (
-        <span className="sr-only" role="status">
-          8 terminals are open. Close one to open another.
-        </span>
       )}
     </>
   );
 }
 
 function ActivityRailView({
-  workspaceId,
   tabInstances,
   activeTabId,
   scope,
   changesCount,
   changesFresh,
-  browserTabSet,
   onSelect,
   onClose,
   onReorder,
   onCreate,
-  terminalCapReached,
-  terminalLabels,
-  onSelectBrowserPage,
-  onCloseBrowserPage,
   captionAction,
   railRef,
   expanded,
@@ -834,26 +579,20 @@ function ActivityRailView({
         )}
       >
       <RailTabInstances
-        workspaceId={workspaceId}
         tabInstances={tabInstances}
         activeTabId={activeTabId}
         changesCount={changesCount}
         changesFresh={changesFresh}
-        browserTabSet={browserTabSet}
         expanded={expanded}
         onSelect={onSelect}
         onClose={onClose}
         onReorder={onReorder}
-        terminalLabels={terminalLabels}
-        onSelectBrowserPage={onSelectBrowserPage}
-        onCloseBrowserPage={onCloseBrowserPage}
       />
       <RailFooter
         scope={scope}
         tabInstances={tabInstances}
         expanded={expanded}
         onCreate={onCreate}
-        terminalCapReached={terminalCapReached}
       />
       </div>
     </div>
@@ -861,26 +600,21 @@ function ActivityRailView({
 }
 
 /**
- * Vertical activity rail on the panel's right edge: open tabs (hover-× close)
- * and an add control once a tab exists. Panel-level controls live in the
+ * Vertical activity rail on the panel's right edge: one entry per open tool
+ * (hover-× close, drag or Alt+Shift+Arrow to reorder whole tools) and an add
+ * control once a tool is open (ADR-0026). Panel-level controls live in the
  * panel header, not here.
  */
 export function ActivityRail({
-  workspaceId,
   tabInstances,
   activeTabId,
   scope,
   changesCount,
   changesFresh,
-  browserTabSet,
   onSelect,
   onClose,
   onReorder,
   onCreate,
-  terminalCapReached,
-  terminalLabels,
-  onSelectBrowserPage,
-  onCloseBrowserPage,
   onExpandedChange,
   captionAction,
 }: ActivityRailProps) {
@@ -976,21 +710,15 @@ export function ActivityRail({
 
   return (
     <ActivityRailView
-      workspaceId={workspaceId}
       tabInstances={tabInstances}
       activeTabId={activeTabId}
       scope={scope}
       changesCount={changesCount}
       changesFresh={changesFresh}
-      browserTabSet={browserTabSet}
       onSelect={onSelect}
       onClose={onClose}
       onReorder={onReorder}
       onCreate={onCreate}
-      terminalCapReached={terminalCapReached}
-      terminalLabels={terminalLabels}
-      onSelectBrowserPage={onSelectBrowserPage}
-      onCloseBrowserPage={onCloseBrowserPage}
       captionAction={captionAction}
       railRef={railRef}
       expanded={expanded}

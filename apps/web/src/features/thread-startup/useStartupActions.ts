@@ -129,10 +129,9 @@ export function useStartingThread(
 export async function openStartupSetupTerminal(workspaceId: string, threadId: string): Promise<void> {
   try {
     const { ptyId, shell } = await getTransport().openAutomaticSetupTerminal(threadId);
-    // The rail tab only attaches to a visible panel, so reveal it before adding the tab.
     showRightPanelAdaptive(workspaceId, threadId);
     useTerminalStore.getState().addTerminal(threadId, ptyId, shell);
-    useDiffStore.getState().addRightPanelTerminalTab(workspaceId, threadId, ptyId);
+    useDiffStore.getState().setRightPanelTab(workspaceId, threadId, "terminal");
   } catch (error) {
     useToastStore.getState().show({
       kind: "failed",
