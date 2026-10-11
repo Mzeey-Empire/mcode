@@ -666,6 +666,7 @@ export const canonicalAgentTurns = sqliteTable(
     startedAt: text("started_at"),
     providerStartedAt: text("provider_started_at"),
     endedAt: text("ended_at"),
+    endingJson: text("ending_json"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
