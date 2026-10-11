@@ -1608,7 +1608,8 @@ export class ClaudeProvider
         threadId: context.threadId,
         error:
           "Message could not be delivered: session was shutting down. Please try again.",
-        failure: { kind: "fatal" },
+        // The session is stopped below, so a retry starts a fresh one.
+        failure: { kind: "retryable" },
       } satisfies AgentEvent);
       await this.runtime.stop(context.params.sessionId);
     } else {
@@ -1620,7 +1621,8 @@ export class ClaudeProvider
         type: AgentEventType.Error,
         threadId: context.threadId,
         error: errorMessage,
-        failure: { kind: "fatal" },
+        // Backpressure: the queue drains as the SDK consumes the earlier prompts.
+        failure: { kind: "retryable" },
       } satisfies AgentEvent);
     }
     throw error;
@@ -2113,7 +2115,9 @@ export class ClaudeProvider
       cwd,
     });
     const ownedProcess = this.createOwnedClaudeProcess(sessionId);
-    options.env = { ...args.env };
+    // Without it, some startup failures end on stderr alone and reach us with no
+    // startup_failure_reason to classify them by.
+    options.env = { ...args.env, CLAUDE_CODE_STARTUP_FAILURE_RESULTS: "1" };
     options.pathToClaudeCodeExecutable = this.resolveClaudeExecutable();
     options.spawnClaudeCodeProcess = ownedProcess.spawn;
     let query: Query;
@@ -2554,7 +2558,7 @@ export class ClaudeProvider
         error: tail
           ? `${message}\n\nClaude Code stderr (tail):\n${tail}`
           : message,
-        failure: { kind: "fatal" },
+        failure: state.mapper.classifyStreamFailure(error, Date.now()),
       } satisfies AgentEvent,
     );
   }

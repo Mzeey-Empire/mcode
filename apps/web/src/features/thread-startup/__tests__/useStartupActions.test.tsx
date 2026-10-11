@@ -97,7 +97,7 @@ describe("useStartupFetchDecision", () => {
     state: "blocked",
     phase: "fetch",
     steps: [
-      { phase: "fetch", state: "running", startedAt: T0 },
+      { phase: "fetch", state: "running", startedAt: T0, detail: { phase: "fetch", ref: "origin/main", branch: "main" } },
       { phase: "thread", state: "pending" },
       { phase: "worktree", state: "pending" },
       { phase: "setup", state: "pending" },
@@ -117,7 +117,7 @@ describe("useStartupFetchDecision", () => {
 
   it("is offered only while the origin fetch is blocked", () => {
     expect(renderHook(() => useStartupFetchDecision(startup())).result.current).toBeUndefined();
-    expect(renderHook(() => useStartupFetchDecision(fetchBlocked)).result.current).toMatchObject({ pending: null });
+    expect(renderHook(() => useStartupFetchDecision(fetchBlocked)).result.current).toMatchObject({ pending: null, localBranch: "main" });
   });
 
   it("sends the decision and disables both actions until the server answers", async () => {

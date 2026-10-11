@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import * as NodeOS from "node:os";
 import { describe, expect, it, vi } from "vitest";
 import type {
   PtyHostAdapter,
@@ -87,6 +88,7 @@ function createService(options: {
   readonly environment?: Record<string, string>;
   readonly sessionLimit?: number;
   readonly host?: PtyHostAdapter;
+  readonly knownWorkspaces?: boolean;
 } = {}) {
   const environment = options.environment ?? { PATH: process.env.PATH ?? "" };
   const host = new FakeHost();
@@ -105,7 +107,7 @@ function createService(options: {
         ? { id, workspace_id: "workspace", mode: "direct", worktree_path: null }
         : null,
     } as never,
-    { findById: () => ({ path: process.cwd() }) } as never,
+    { findById: () => (options.knownWorkspaces === false ? null : { path: process.cwd() }) } as never,
     { resolveWorkingDir: () => process.cwd() } as never,
     settings as never,
     { getEnv: () => environment } as never,
@@ -150,6 +152,26 @@ function exit(sessionId: string, code = 0) {
     reason: "natural" as const,
   };
 }
+
+describe("TerminalService home scope", () => {
+  it("starts a home-scope shell in the home directory with the home launch scope", async () => {
+    const { service, launch, host } = createService({ knownWorkspaces: false });
+    const created = await service.create("home", launch);
+    expect(created.cwd).toBe(NodeOS.homedir());
+    expect(created.threadId).toBe("home");
+    expect(host.creates[0]?.cwd).toBe(NodeOS.homedir());
+    expect(host.creates[0]?.launch.scope).toEqual({ kind: "home" });
+    await service.shutdown();
+  });
+
+  it("still rejects an unknown non-home scope", async () => {
+    const { service, launch } = createService({ knownWorkspaces: false });
+    await expect(service.create("00000000-0000-4000-8000-000000000009", launch)).rejects.toThrow(
+      "Thread or workspace not found: 00000000-0000-4000-8000-000000000009",
+    );
+    expect(service.listActiveSessions()).toEqual([]);
+  });
+});
 
 describe("TerminalService host ownership", () => {
   it("counts host-start reservations and cancels them when their scope is torn down", async () => {

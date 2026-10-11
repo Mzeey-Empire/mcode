@@ -45,6 +45,8 @@ export function useQueuedMessageDispatch(threadId: string | undefined): {
       const leased = Boolean(useQueueStore.getState().inFlightQueuedMessages[threadId]);
       const route = sendNowRoute(threadId, useThreadStore.getState(), leased);
       if (route.kind === "steer") {
+        // Steering is an explicit send too, so the rest of the queue follows once this turn completes.
+        useQueueStore.getState().resumeAutoDrain(threadId);
         await steerQueuedMessage(threadId, message.id, route.turnExecutionId);
         return;
       }

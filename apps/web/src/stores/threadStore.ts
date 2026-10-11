@@ -116,7 +116,7 @@ import {
 } from "./thread-store/usage";
 export { mergeProviderUsageSnapshot } from "./thread-store/usage";
 
-import { getCanonicalRuntimePhase, getCanonicalRuntimeTurn, getThreadRuntimePhase, isThreadRuntimeActive, phaseForTurnStatus } from "./thread-lifecycle";
+import { endedWithoutCompleting, getCanonicalRuntimePhase, getCanonicalRuntimeTurn, getThreadRuntimePhase, isThreadRuntimeActive, phaseForTurnStatus } from "./thread-lifecycle";
 
 function activeCanonicalExecutionId(turn: AgentTurn | undefined): string | undefined {
   if (!turn || (turn.status !== "Pending" && turn.status !== "Running")) return undefined;
@@ -542,8 +542,6 @@ interface ThreadState {
   ) => void;
   /** Clear the interrupt file-notice banner for one thread (user dismissed). */
   clearInterruptStopFileNotice: (threadId: string) => void;
-  /** Clears composer recall state for one thread after the Composer applies it. */
-  clearComposerRecallFromStop: (threadId: string) => void;
 
   /** Update handoff metadata for a child thread. */
   setHandoffMeta: (threadId: string, meta: HandoffMeta) => void;
@@ -2578,6 +2576,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   const releaseProviderLostRuntime = (threadId: string): void => {
+    // The phase goes idle with the ending still unknown, so hold the queue explicitly rather than drain on a guess.
+    clearDequeueTimer(threadId);
+    useQueueStore.getState().suppressAutoDrain(threadId);
     clearStreamingTextUsage(threadId);
     patchRec(threadId, {
       agentStartTime: undefined,
@@ -2639,7 +2640,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     conversationResidency.retainInactiveConversation(event.threadId);
     if (event.type === "turnComplete") updateTurnContext(event);
     cleanupTerminalRuntime(event.threadId, phase);
-    if (!guardrail) scheduleDrainAfterEdit(event.threadId);
+    if (phase === "completed" && !guardrail) scheduleDrainAfterEdit(event.threadId);
   };
 
   const releaseProviderLostTerminal = (
@@ -2746,39 +2747,27 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     });
   };
 
-  const agentErrorMessage = (threadId: string, error: string): Message => ({
-    ...createSystemMessage(threadId, JSON.stringify({ __type: "agent_error", message: error })),
-  });
-
   const handleErrorEvent = (
     event: Extract<AgentEvent, { type: "error" }>,
     runtime: { incomingExecutionId: string | undefined; runtimeActive: boolean; runtimeRecord: ThreadRecord },
   ): void => {
     if (!runtime.runtimeActive || (runtime.incomingExecutionId && runtime.runtimeRecord.turnExecutionId !== runtime.incomingExecutionId)) return;
     clearStreamingTextUsage(event.threadId);
-    const message = agentErrorMessage(event.threadId, event.error);
-    patchRec(event.threadId, (record) => {
-      const { messages, evicted } = capMessages([...record.messages, message]);
-      return {
-        error: event.error,
-        errorSource: "turn",
-        runtimePhase: "errored",
-        streaming: "",
-        streamingPreview: "",
+    patchRec(event.threadId, () => ({
+      error: event.error,
+      errorSource: "turn",
+      runtimePhase: "errored",
+      streaming: "",
+      streamingPreview: "",
       responseTextIsStreaming: false,
-        agentStartTime: undefined,
-        currentTurnMessageId: "",
-        currentTurnResponseKey: "",
-        toolCalls: [],
-        isCompacting: false,
-        rateLimit: undefined,
-        apiRetry: undefined,
-        messages,
-        ...(evicted ? { hasMoreMessages: true } : {}),
-      };
-    });
-    clearDequeueTimer(event.threadId);
-    useQueueStore.getState().clearQueue(event.threadId);
+      agentStartTime: undefined,
+      currentTurnMessageId: "",
+      currentTurnResponseKey: "",
+      toolCalls: [],
+      isCompacting: false,
+      rateLimit: undefined,
+      apiRetry: undefined,
+    }));
     useWorkspaceStore.setState((workspace) => ({
       threads: workspace.threads.map((thread) => thread.id === event.threadId ? { ...thread, status: "errored" as const } : thread),
     }));
@@ -2930,25 +2919,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     ...definedThreadSettingsPatch(patch),
     ...nullableThreadSettingsPatch(patch),
   });
-
-  const latestUserMessageContent = (threadId: string): string | null => {
-    const messages = getRec(threadId).messages;
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      if (messages[index].role === "user") return messages[index].content;
-    }
-    return null;
-  };
-
-  const recallCancelledUndispatchedMessage = (
-    threadId: string,
-    status: string,
-    dispatchState: string,
-    phase: ThreadRecord["runtimePhase"],
-  ): string | null => {
-    if (status !== "cancelled" || dispatchState !== "not-dispatched" || phase !== "cancelled") return null;
-    if (get().currentThreadId !== threadId) return null;
-    return latestUserMessageContent(threadId);
-  };
 
   type TurnPersistedPayload = Parameters<ThreadState["handleTurnPersisted"]>[0];
 
@@ -3702,20 +3672,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     }));
     const beforeStop = get().records.get(threadId);
     const executionAtStop = beforeStop?.turnExecutionId ?? null;
-    patchRec(threadId, { awaitingUserStopPersist: true, composerRecallFromStop: undefined });
+    patchRec(threadId, { awaitingUserStopPersist: true });
     try {
       const result = await getTransport().stopAgent(threadId);
       get().applyThreadRuntimeSnapshot(result.snapshot);
-
-      const lastUserText = recallCancelledUndispatchedMessage(
-        threadId,
-        result.status,
-        result.dispatchState,
-        result.snapshot.phase,
-      );
-      if (lastUserText !== null) {
-        patchRec(threadId, { composerRecallFromStop: { text: lastUserText } });
-      }
     } catch (e) {
       handleStopCommandFailure(threadId, executionAtStop, e);
     }
@@ -4411,10 +4371,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     patchRec(threadId, { interruptStopFileNotice: undefined });
   },
 
-  clearComposerRecallFromStop: (threadId) => {
-    patchRec(threadId, { composerRecallFromStop: undefined });
-  },
-
   handleTurnPersisted: (payload) => {
     flushPendingTextDeltas();
     conversationResidency.invalidateConversation(payload.threadId);
@@ -4449,6 +4405,30 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
   },
   };
+});
+
+/**
+ * Holds a thread's queued follow-ups when its latest turn ends without completing.
+ * Observing the phase catches every writer that settles a turn (events, persistence, canonical
+ * reconciliation, snapshots), and the hold lives in the queue store because thread records are
+ * evicted when the user switches threads while the queue is not.
+ */
+useThreadStore.subscribe((state, previous) => {
+  if (state.records === previous.records) return;
+  const { queues, editingThreadId } = useQueueStore.getState();
+  // A message open in the editor is popped from its queue but is still queued input.
+  const pending = Object.keys(queues).filter((threadId) => queues[threadId]?.length || threadId === editingThreadId);
+  for (const threadId of pending) {
+    const record = state.records.get(threadId);
+    const before = previous.records.get(threadId);
+    if (!record || record === before) continue;
+    const ended = endedWithoutCompleting(getThreadRuntimePhase(threadId, record));
+    const wasEnded = before !== undefined && endedWithoutCompleting(getThreadRuntimePhase(threadId, before));
+    if (ended && !wasEnded) {
+      clearDequeueTimer(threadId);
+      useQueueStore.getState().suppressAutoDrain(threadId);
+    }
+  }
 });
 
 import { useApprovalStore } from "./approvalStore";

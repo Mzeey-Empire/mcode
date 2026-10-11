@@ -193,6 +193,11 @@ export class CanonicalAgentBoundary {
     return this.reader.loadLatestTurn(...args);
   }
 
+  /** Read the canonical preconditions for retrying an attempt. */
+  loadTurnRetryState(...args: Parameters<CanonicalAgentStore["loadTurnRetryState"]>): ReturnType<CanonicalAgentStore["loadTurnRetryState"]> {
+    return this.reader.loadTurnRetryState(...args);
+  }
+
   /** Load one durable ingest checkpoint. */
   loadCheckpoint(...args: Parameters<CanonicalAgentStore["loadCheckpoint"]>): ReturnType<CanonicalAgentStore["loadCheckpoint"]> {
     return this.reader.loadCheckpoint(...args);

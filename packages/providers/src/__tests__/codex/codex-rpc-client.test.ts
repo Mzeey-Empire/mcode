@@ -10,7 +10,7 @@ vi.mock("@mcode/shared", () => ({
   },
 }));
 
-import { CodexRpcClient } from "../../private/codex/codex-rpc-client.js";
+import { CodexRpcClient, CodexTransportError } from "../../private/codex/codex-rpc-client.js";
 
 /** Creates a fresh pair of PassThrough streams and a CodexRpcClient for each test. */
 function makeClient() {
@@ -58,6 +58,7 @@ describe("CodexRpcClient", () => {
     vi.advanceTimersByTime(100);
 
     await expect(promise).rejects.toThrow("Timed out waiting for initialize (50ms)");
+    await expect(promise).rejects.toBeInstanceOf(CodexTransportError);
     client.dispose();
   });
 
@@ -190,6 +191,7 @@ describe("CodexRpcClient", () => {
     stdout.emit("close");
 
     await expect(promise).rejects.toThrow("Stream closed");
+    await expect(promise).rejects.toBeInstanceOf(CodexTransportError);
     client.dispose();
   });
 
@@ -224,6 +226,7 @@ describe("CodexRpcClient", () => {
     stdout.push('{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}\n');
 
     await expect(promise).rejects.toThrow("Method not found");
+    await expect(promise).rejects.not.toBeInstanceOf(CodexTransportError);
     client.dispose();
   });
 

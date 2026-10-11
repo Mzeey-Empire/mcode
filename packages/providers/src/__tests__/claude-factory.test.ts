@@ -430,6 +430,7 @@ describe("Claude public factory core and capabilities", () => {
     await provider.sendTurn(request());
     await vi.waitFor(() => expect(events().filter(({ event }) => event.type === AgentEventType.Ended)).toHaveLength(trace.expected.terminalCount));
     expect(events().filter(({ event }) => event.type === AgentEventType.Error || event.type === AgentEventType.Ended || event.type === AgentEventType.TurnComplete).map(({ event }) => event.type)).toEqual([AgentEventType.Error, AgentEventType.Ended]);
+    expect(events().flatMap(({ event }) => event.type === AgentEventType.Error ? [event.failure] : [])).toEqual([{ kind: "auth", code: "authentication_failed" }]);
     expect(events().filter(({ event }) => event.type === AgentEventType.ToolUse)).toEqual(trace.expected.toolStarts);
     expect(events().filter(({ event }) => event.type === AgentEventType.ToolResult)).toEqual(trace.expected.toolResults);
     const errorDraft = drafts.find((draft) => draft.payload.type === "item.recorded" && draft.payload.item.payload.projection === "providerRuntimeEvent" && draft.payload.item.payload.runtimeEvent.event.type === AgentEventType.Error);

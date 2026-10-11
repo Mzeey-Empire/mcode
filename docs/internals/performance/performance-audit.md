@@ -274,7 +274,9 @@ bun run perf:pull-requests
 ```
 
 The command builds the web app, checks the Vite manifest, and runs the selector
-p95 and layout-rule Vitest files. The test fixtures use only fake GitHub
+p95 and layout-rule Vitest files. The selector p95 file is named
+`*.perf.test.ts`, so the default parallel test run skips it. Its 2 ms budget
+only holds without other test workers competing for the CPU. The test fixtures use only fake GitHub
 transport responses and must not send a real comment, review, readiness change,
 close, or merge.
 

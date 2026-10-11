@@ -10,6 +10,8 @@ import {
 } from "@/features/terminal/state/terminalStore";
 import { TerminalView, loadXtermModules } from "./TerminalView";
 import { useTerminalPoolSlot } from "./TerminalPoolSlotContext";
+import { resolvePoolPresentation } from "./resolvePoolPresentation";
+import { useHomeTerminalPresented } from "@/features/terminal/state/useHomeTerminalPresented";
 import { isContainerReadyForFit } from "./safeFit";
 import { dispatchTerminalPoolRefit } from "./terminalPoolRefit";
 import { resolveActiveTerminalId } from "./resolveActiveTerminalId";
@@ -271,14 +273,15 @@ function TerminalPoolPortal({
 
 /**
  * Mounts at most one terminal view (ADR-0010): the active shell on the active
- * scope, portaled into the right-panel slot while the Terminal tab is open.
+ * scope, portaled into the right-panel slot while the Terminal tab is open, or
+ * into the sign-in dialog while the home scope is presented.
  *
  * The last active view stays warm offscreen when the panel closes. Switching
  * terminals replaces that view only after the next terminal has hydrated from
  * server scrollback. Other shells keep running without renderer instances.
  */
 export function TerminalPoolHost() {
-  const { slotEl, offScreenEl } = useTerminalPoolSlot();
+  const { slotEls, offScreenEl } = useTerminalPoolSlot();
   const [mountEl] = useState(() => {
     const element = document.createElement("div");
     element.className = "relative h-full min-h-0 w-full overflow-hidden";
@@ -286,12 +289,19 @@ export function TerminalPoolHost() {
   });
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
-  // The terminal binds to the active thread, or to the workspace itself in the
-  // threadless new-thread view. The store keys this as an opaque scope id.
-  const terminalScopeId = activeThreadId ?? activeWorkspaceId;
   // The whole panel record is per-thread, falling back to the workspace record
   // for the threadless shell and uncustomized threads (ADR-0012).
-  const terminalTabVisible = useTerminalTabVisible(activeWorkspaceId, activeThreadId);
+  const panelTerminalTabVisible = useTerminalTabVisible(activeWorkspaceId, activeThreadId);
+  const homePresented = useHomeTerminalPresented();
+  const presentation = resolvePoolPresentation({
+    homePresented,
+    activeThreadId,
+    activeWorkspaceId,
+    panelTerminalTabVisible,
+  });
+  const terminalScopeId = presentation.scopeId;
+  const terminalTabVisible = presentation.visible;
+  const slotEl = slotEls[presentation.surface];
 
   // #749: warm the xterm module cache as soon as the terminal tab opens so the
   // first view mounts without paying the cold dynamic-import cost.

@@ -46,6 +46,7 @@ import {
   BrowserSurfaceHostRoot,
 } from "@/features/preview";
 import { TerminalPoolHost, TerminalPoolSlotProvider } from "@/features/terminal";
+import { SignInTerminalDialog } from "@/features/providers/SignInTerminalDialog";
 import { CanvasHeader } from "@/components/shell/CanvasHeader";
 import { ShellChromeProvider } from "@/components/shell/shell-chrome-context";
 import { installWindowChrome } from "@/components/shell/window-chrome";
@@ -75,8 +76,10 @@ const LazyCommandPalette = lazy(async () => {
   return { default: m.CommandPalette };
 });
 
+// Imported by path, not through the feature barrel, which App also imports
+// statically. A barrel import would fold the surface back into the entry chunk.
 const LazyPullRequestSurface = lazy(async () => {
-  const m = await import("@/features/pull-requests");
+  const m = await import("@/features/pull-requests/surfaces/PullRequestSurface");
   return { default: m.PullRequestSurface };
 });
 
@@ -403,6 +406,7 @@ function AppLayout(props: AppLayoutProps) {
         </div>
         </ShellChromeProvider>
         <TerminalPoolHost />
+        <SignInTerminalDialog />
         <BrowserSurfaceHostRoot />
         <BrowserAutomationHost />
         <Suspense fallback={null}>

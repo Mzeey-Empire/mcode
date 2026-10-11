@@ -69,6 +69,14 @@ export function getCanonicalRuntimeTurn(threadId: string, record: ThreadRecord):
   return latest;
 }
 
+/**
+ * True when the thread's latest turn ended without completing. Only a completion drains
+ * queued follow-ups; any other ending holds them until the user sends explicitly.
+ */
+export function endedWithoutCompleting(phase: TurnRuntimePhase): boolean {
+  return phase === "cancelled" || phase === "interrupted" || phase === "errored";
+}
+
 /** Runtime phase equivalent of one canonical turn status. */
 export function phaseForTurnStatus(status: AgentTurnStatus): TurnRuntimePhase {
   switch (status) {

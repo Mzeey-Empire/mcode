@@ -302,8 +302,10 @@ export {
   MAX_TURN_RECOVERIES,
   RecoveryIncidentEntrySchema,
   RecoveryIncidentSchema,
+  TurnRetryParamsSchema,
+  TurnRetryResultSchema,
 } from "./models/turn-recovery.js";
-export type { RecoveryIncidentEntry, RecoveryIncident } from "./models/turn-recovery.js";
+export type { RecoveryIncidentEntry, RecoveryIncident, TurnRetryParams, TurnRetryResult } from "./models/turn-recovery.js";
 
 export {
   MessageSchema,
@@ -1311,6 +1313,7 @@ export {
   TERMINAL_DEFAULT_SESSION_LIMIT,
   TERMINAL_MAX_COLS,
   TERMINAL_MAX_ROWS,
+  HOME_TERMINAL_SCOPE_ID,
   TerminalUuidSchema,
   TerminalU64Schema,
   TerminalTimestampSchema,

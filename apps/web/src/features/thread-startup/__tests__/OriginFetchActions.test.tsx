@@ -23,7 +23,7 @@ const fetchBlocked: ThreadStartup = {
   state: "blocked",
   phase: "fetch",
   steps: [
-    { phase: "fetch", state: "running", startedAt: T0 },
+    { phase: "fetch", state: "running", startedAt: T0, detail: { phase: "fetch", ref: "origin/main", branch: "main" } },
     { phase: "thread", state: "pending" },
     { phase: "worktree", state: "pending" },
     { phase: "setup", state: "pending" },
@@ -57,7 +57,7 @@ describe("OriginFetchActions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(startupTransport.resolveThreadStartup).toHaveBeenCalledWith(startupId, "retry");
-    expect(screen.getByRole("button", { name: "Continue from local" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Start from local main" })).toBeDisabled();
     await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled());
     expect(apply).toHaveBeenCalledWith(answered);
   });
@@ -66,14 +66,25 @@ describe("OriginFetchActions", () => {
     startupTransport.resolveThreadStartup.mockRejectedValue(new Error("socket closed"));
     render(<BlockedTrailActions startup={fetchBlocked} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Continue from local" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start from local main" }));
 
     expect(startupTransport.resolveThreadStartup).toHaveBeenCalledWith(startupId, "continue");
     expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Continue from local" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Start from local main" })).toBeEnabled());
     expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
     expect(useToastStore.getState().toasts).toMatchObject([
-      { kind: "failed", title: "Could not continue from local", meta: "socket closed" },
+      { kind: "failed", title: "Could not start from local main", meta: "socket closed" },
     ]);
+  });
+
+  it("names the local branch from the fetch ref when the detail carries no branch", () => {
+    const releaseBlocked: ThreadStartup = {
+      ...fetchBlocked,
+      steps: fetchBlocked.steps.map((step) =>
+        step.phase === "fetch" ? { ...step, detail: { phase: "fetch", ref: "origin/release/2.0" } } : step),
+    };
+    render(<BlockedTrailActions startup={releaseBlocked} />);
+
+    expect(screen.getByRole("button", { name: "Start from local release/2.0" })).toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ProviderStatus } from "@mcode/contracts";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -87,15 +87,17 @@ describe("ProvidersBell", () => {
     expect(mockTransport.listProviderStatus).toHaveBeenCalledWith(true);
   });
 
-  it("keeps Sign in focusable but disabled without an open project", async () => {
+  it("enables Sign in without an open project, runs the row's login command and closes the popover", async () => {
     useWorkspaceStore.setState({ activeWorkspaceId: null });
     serve([DEVIN_SIGNED_OUT]);
     render(<ProvidersBell />);
 
     const signIn = within(await openBell()).getByRole("button", { name: "Sign in" });
-    expect(signIn).toHaveAttribute("aria-disabled", "true");
+    expect(signIn).not.toHaveAttribute("aria-disabled");
+    expect(signIn).toBeEnabled();
     fireEvent.click(signIn);
-    expect(signInMock).not.toHaveBeenCalled();
+    expect(signInMock).toHaveBeenCalledWith(["devin", "auth", "login"]);
+    await waitFor(() => expect(screen.queryByTestId("providers-popover")).toBeNull());
   });
 
   it("describes rate limits with their label and local reset time", async () => {

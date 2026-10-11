@@ -236,6 +236,43 @@ describe("buildStableItems", () => {
     expect(items[3]).toMatchObject({ steps: 7, subagents: 1 });
   });
 
+  describe("turn endings", () => {
+    const summary = {
+      a1: { counts: { steps: 2, thoughts: 0, subagents: 0 }, durationMs: 5_000, approvalReview: { mode: "manual", reason: "manual-requested" } },
+    } as const;
+    const failed = { style: "filled", icon: "failed", title: "Codex couldn't finish this turn", primary: { action: "retry", label: "Retry" } } as const;
+    const endingsFor = (messageId: string, foldLabel: string | null) => ({
+      [messageId]: { turnId: "turn-1", view: { foldLabel, notice: failed } },
+    });
+    const build = (messages: Message[], endings: ReturnType<typeof endingsFor>) =>
+      buildStableItems(messages, undefined, undefined, undefined, undefined, summary, undefined, undefined, undefined, endings);
+
+    it("closes a failed turn with its notice after the meta line", () => {
+      const items = build(
+        [makeMessage({ id: "u1", role: "user" }), makeMessage({ id: "a1", role: "assistant" })],
+        endingsFor("a1", "Failed after 5s"),
+      );
+
+      expect(items.map((item) => item.key)).toEqual(["u1", "work-fold:a1", "a1", "turn-meta-line:a1", "turn-end-notice:a1"]);
+      expect(items.at(-1)).toEqual({ key: "turn-end-notice:a1", type: "turn-end-notice", messageId: "a1", turnId: "turn-1", notice: failed });
+    });
+
+    it("hides the fold when the provider never started", () => {
+      const items = build(
+        [makeMessage({ id: "u1", role: "user" }), makeMessage({ id: "a1", role: "assistant" })],
+        endingsFor("a1", null),
+      );
+
+      expect(items.map((item) => item.key)).toEqual(["u1", "a1", "turn-meta-line:a1", "turn-end-notice:a1"]);
+    });
+
+    it("puts the notice under the prompt when the turn has no reply", () => {
+      const items = build([makeMessage({ id: "u1", role: "user" })], endingsFor("u1", null));
+
+      expect(items.map((item) => item.key)).toEqual(["u1", "turn-end-notice:u1"]);
+    });
+  });
+
   it("projects a completed current agent response without file-change metadata", () => {
     const items = buildStableItems(
       [makeMessage({ id: "a1", content: "completed response" })],

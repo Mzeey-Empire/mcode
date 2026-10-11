@@ -11,6 +11,7 @@ import { supportsTurnSteer } from "@/features/conversation/composer/composer-cap
 import { stripPreviewAnnotationFence } from "@/features/preview/capture/preview-annotation-append";
 import { isDeliveryUnknown, useQueueStore, type QueuedMessage } from "@/stores/queueStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
+import { useThreadStore } from "@/stores/threadStore";
 import { PreviewAnnotationBundleChip } from "./PreviewAnnotationBundleChip";
 
 const EMPTY_QUEUE: QueuedMessage[] = [];
@@ -43,6 +44,8 @@ export function ComposerQueueList({
   const canSteer = useProviderAvailabilityStore((s) =>
     providerId.success && supportsTurnSteer(s.getAvailability(providerId.data)?.capabilities ?? []));
   const route = useSendNowRoute(threadId);
+  const held = useQueueStore((s) => s.autoDrainSuppressedThreadIds.has(threadId));
+  const idle = useThreadStore((s) => !s.runningThreadIds.has(threadId));
   if (queue.length === 0) return null;
 
   const canSendNow = (message: QueuedMessage) => !isPaused
@@ -56,32 +59,35 @@ export function ComposerQueueList({
   };
 
   return (
-    <ul aria-label="Queued messages" className="m-0 list-none p-0">
-      {queue.map((message, index) => (
-        <li key={message.id} className="flex h-10 items-center gap-2">
-          <span className="flex size-4 shrink-0 items-center justify-center">
-            <CornerDownRight className="size-4 text-muted" strokeWidth={1.5} aria-hidden />
-          </span>
-          <QueueRowText message={message} />
-          {isDeliveryUnknown(message) ? (
-            <DeliveryUnknownActions
-              position={index + 1}
-              onSendAgain={() => void sendHeldSteerAgain(threadId, message)}
-              onRemove={() => void remove(message)}
-            />
-          ) : (
-            <QueueRowActions
-              position={index + 1}
-              pending={pendingLabel(message)}
-              canSendNow={canSendNow(message)}
-              onSendNow={() => onSendNow(message)}
-              onEdit={() => void edit(message)}
-              onRemove={() => void remove(message)}
-            />
-          )}
-        </li>
-      ))}
-    </ul>
+    <>
+      {held && idle ? <p className="text-caption text-muted">Paused</p> : null}
+      <ul aria-label="Queued messages" className="m-0 list-none p-0">
+        {queue.map((message, index) => (
+          <li key={message.id} className="flex h-10 items-center gap-2">
+            <span className="flex size-4 shrink-0 items-center justify-center">
+              <CornerDownRight className="size-4 text-muted" strokeWidth={1.5} aria-hidden />
+            </span>
+            <QueueRowText message={message} />
+            {isDeliveryUnknown(message) ? (
+              <DeliveryUnknownActions
+                position={index + 1}
+                onSendAgain={() => void sendHeldSteerAgain(threadId, message)}
+                onRemove={() => void remove(message)}
+              />
+            ) : (
+              <QueueRowActions
+                position={index + 1}
+                pending={pendingLabel(message)}
+                canSendNow={canSendNow(message)}
+                onSendNow={() => onSendNow(message)}
+                onEdit={() => void edit(message)}
+                onRemove={() => void remove(message)}
+              />
+            )}
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 
@@ -90,25 +96,25 @@ function QueueRowText({ message }: { message: QueuedMessage }) {
   const annotations = message.previewAnnotations;
   return (
     <>
-      <span className="text-fade flex-1 text-body-small text-ink">
-        {text || <span className="sr-only">Preview annotation</span>}
-      </span>
-      {annotations && annotations.annotations.length > 0 ? (
-        <PreviewAnnotationBundleChip
-          bundle={annotations}
-          testId="queue-annotation-bundle"
-          className="shrink-0 rounded-md px-1.5 py-0.5 text-xs"
-        />
-      ) : null}
-      {message.attachments.length > 0 ? (
-        <span
-          className="flex shrink-0 items-center gap-0.5 text-body-small tabular-nums text-muted"
-          aria-label={`${message.attachments.length} ${message.attachments.length === 1 ? "attachment" : "attachments"}`}
-        >
-          <Paperclip className="size-4" strokeWidth={1.5} aria-hidden />
-          {message.attachments.length}
+        <span className="text-fade flex-1 text-body-small text-ink">
+          {text || <span className="sr-only">Preview annotation</span>}
         </span>
-      ) : null}
+        {annotations && annotations.annotations.length > 0 ? (
+          <PreviewAnnotationBundleChip
+            bundle={annotations}
+            testId="queue-annotation-bundle"
+            className="shrink-0 rounded-md px-1.5 py-0.5 text-xs"
+          />
+        ) : null}
+        {message.attachments.length > 0 ? (
+          <span
+            className="flex shrink-0 items-center gap-0.5 text-body-small tabular-nums text-muted"
+            aria-label={`${message.attachments.length} ${message.attachments.length === 1 ? "attachment" : "attachments"}`}
+          >
+            <Paperclip className="size-4" strokeWidth={1.5} aria-hidden />
+            {message.attachments.length}
+          </span>
+        ) : null}
     </>
   );
 }

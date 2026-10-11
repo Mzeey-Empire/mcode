@@ -1,5 +1,5 @@
 import type { SessionEvent } from "@github/copilot-sdk";
-import { createSubagentPresentation, type AgentEvent } from "@mcode/contracts";
+import { createSubagentPresentation, type AgentEvent, type TurnFailure } from "@mcode/contracts";
 import { z } from "zod";
 import { normalizeQuotaSnapshots } from "./copilot-helpers.js";
 
@@ -8,6 +8,8 @@ export interface CopilotTurnState {
   outcome?: "completed" | "cancelled" | "failed";
   nativeIdleObserved: boolean;
   assistantText?: { messageId: string; content: string };
+  /** Open reasoning block, so the final `assistant.reasoning` emits only the text its deltas missed. */
+  reasoning?: { reasoningId: string; content: string };
   pendingAssistantMessage?: Extract<SessionEvent, { type: "assistant.message" }>;
   tokensIn: number;
   tokensOut: number;
@@ -38,9 +40,41 @@ function mapAssistantEvent(event: SessionEvent, threadId: string, turn: CopilotT
       turn.assistantText!.content += event.data.deltaContent;
       return [...events, { type: "textDelta", threadId, delta: event.data.deltaContent }];
     }
-    case "assistant.message": return deferAssistantMessage(event, threadId, turn);
+    case "assistant.message": return event.data.phase === "thinking" ? mapThinkingMessage(event, threadId, turn) : deferAssistantMessage(event, threadId, turn);
+    case "assistant.reasoning_delta": return mapReasoningDelta(event, threadId, turn);
+    case "assistant.reasoning": return finishReasoning(event, threadId, turn);
     default: return undefined;
   }
+}
+
+// Reasoning leaves assistant text untouched: Copilot opens each model call with assistant.turn_start, which
+// already settles prior narration, and the server closes open narration when a reasoning block opens.
+function mapReasoningDelta(event: Extract<SessionEvent, { type: "assistant.reasoning_delta" }>, threadId: string, turn: CopilotTurnState): AgentEvent[] {
+  const { reasoningId, deltaContent } = event.data;
+  if (turn.reasoning?.reasoningId !== reasoningId) turn.reasoning = { reasoningId, content: "" };
+  turn.reasoning.content += deltaContent;
+  return deltaContent ? reasoningDeltas(threadId, reasoningId, deltaContent) : [];
+}
+
+function finishReasoning(event: Extract<SessionEvent, { type: "assistant.reasoning" }>, threadId: string, turn: CopilotTurnState): AgentEvent[] {
+  const { reasoningId, content } = event.data;
+  const streamed = turn.reasoning?.reasoningId === reasoningId ? turn.reasoning.content : "";
+  if (turn.reasoning?.reasoningId === reasoningId) turn.reasoning = undefined;
+  return reasoningDeltas(threadId, reasoningId, content.startsWith(streamed) ? content.slice(streamed.length) : content, true);
+}
+
+function mapThinkingMessage(event: Extract<SessionEvent, { type: "assistant.message" }>, threadId: string, turn: CopilotTurnState): AgentEvent[] {
+  // Deltas carry no phase, so streamed text for this message already went out as answer text; repeating it as reasoning would show it twice.
+  if (!event.data.content || (turn.assistantText?.messageId === event.data.messageId && turn.assistantText.content)) return [];
+  return reasoningDeltas(threadId, event.data.messageId, event.data.content, true);
+}
+
+const MAX_REASONING_DELTA_LENGTH = 65_536;
+function reasoningDeltas(threadId: string, reasoningItemId: string, text: string, done?: true): AgentEvent[] {
+  const chunks: string[] = [];
+  for (let start = 0; start < text.length; start += MAX_REASONING_DELTA_LENGTH) chunks.push(text.slice(start, start + MAX_REASONING_DELTA_LENGTH));
+  if (chunks.length === 0) chunks.push("");
+  return chunks.map((delta, index) => ({ type: "reasoningDelta", threadId, delta, reasoningItemId, ...(done && index === chunks.length - 1 ? { done } : {}) }));
 }
 
 function resetAssistantText(turn: CopilotTurnState, threadId: string): AgentEvent[] {
@@ -58,7 +92,7 @@ function beginAssistantText(turn: CopilotTurnState, threadId: string, messageId:
 }
 
 function deferAssistantMessage(event: Extract<SessionEvent, { type: "assistant.message" }>, threadId: string, turn: CopilotTurnState): AgentEvent[] {
-  if (event.data.phase === "thinking" || !event.data.content) return [];
+  if (!event.data.content) return [];
   const events = beginAssistantText(turn, threadId, event.data.messageId);
   const streamed = turn.assistantText!.content;
   const followsStream = event.data.content.startsWith(streamed);
@@ -142,7 +176,7 @@ function mapLifecycleEvent(event: SessionEvent, threadId: string, turn: CopilotT
   switch (event.type) {
     case "session.error":
       turn.settle("failed", new Error(event.data.message));
-      return [...finishAssistantText(turn, threadId), { type: "error", threadId, error: event.data.message, failure: { kind: "fatal" } }];
+      return [...finishAssistantText(turn, threadId), { type: "error", threadId, error: event.data.message, failure: classifyCopilotFailure(event.data) }];
     case "abort":
       turn.outcome ??= "cancelled";
       return [{ type: "system", threadId, subtype: "copilot_abort" }];
@@ -152,6 +186,21 @@ function mapLifecycleEvent(event: SessionEvent, threadId: string, turn: CopilotT
       return [...(turn.outcome === "completed" && turn.pendingAssistantMessage ? [] : finishAssistantText(turn, threadId)), { type: "system", threadId, subtype: "copilot_idle" }];
     default: return undefined;
   }
+}
+
+const copilotFailureDataSchema = z.object({
+  errorType: z.string().trim().min(1).max(128).optional().catch(undefined),
+  statusCode: z.number().int().min(100).max(599).optional().catch(undefined),
+});
+const copilotFailureKinds = new Map<string, TurnFailure["kind"]>([
+  ["authentication", "auth"], ["authorization", "auth"], ["quota", "usage_limit"],
+  ["rate_limit", "retryable"], ["context_limit", "fatal"],
+]);
+
+function classifyCopilotFailure(data: Extract<SessionEvent, { type: "session.error" }>["data"]): TurnFailure {
+  const { errorType: code, statusCode: status } = copilotFailureDataSchema.parse(data);
+  const kind = copilotFailureKinds.get(code ?? "") ?? (status !== undefined && status >= 500 ? "retryable" : "fatal");
+  return { kind, ...(status === undefined ? {} : { status }), ...(code === undefined ? {} : { code }) };
 }
 
 const nativeEnvelopeSchema = z.object({ id: z.string().min(1).max(200), timestamp: z.string().refine((value) => Number.isFinite(Date.parse(value))), type: z.string().min(1), parentId: z.string().nullable(), data: z.record(z.unknown()) });
@@ -175,6 +224,7 @@ function validateData(event: SessionEvent): void {
     "subagent.completed": ["toolCallId", "agentName", "agentDisplayName"],
     "subagent.failed": ["toolCallId", "agentName", "agentDisplayName", "error"],
     "assistant.turn_start": ["turnId"], "assistant.turn_end": ["turnId"],
+    "assistant.reasoning": ["reasoningId", "content"], "assistant.reasoning_delta": ["reasoningId", "deltaContent"],
   };
   for (const key of requiredStrings[event.type] ?? []) {
     if (typeof fields.get(key) !== "string") throw new Error(`Malformed Copilot ${event.type}.${key}`);
@@ -187,10 +237,17 @@ const toolArgumentsSchema = z.record(z.unknown()).optional();
 const toolResultSchema = z.object({ content: z.string(), detailedContent: z.string().optional() }).optional();
 const nativeErrorSchema = z.object({ message: z.string() }).optional();
 const idleDataSchema = z.object({ aborted: z.boolean().optional() });
+const reasoningItemIdSchema = z.string().min(1).max(256);
 function validateOptionalData(event: SessionEvent): void {
   if (event.type === "tool.execution_start" && !toolArgumentsSchema.safeParse(event.data.arguments).success) throw new Error("Malformed Copilot tool arguments");
   if (event.type === "tool.execution_complete" && (!toolResultSchema.safeParse(event.data.result).success || !nativeErrorSchema.safeParse(event.data.error).success)) throw new Error("Malformed Copilot tool output");
   if (event.type === "session.idle" && !idleDataSchema.safeParse(event.data).success) throw new Error("Malformed Copilot idle outcome");
+  validateReasoningId(event);
+}
+function validateReasoningId(event: SessionEvent): void {
+  const reasoningId = event.type === "assistant.reasoning" || event.type === "assistant.reasoning_delta" ? event.data.reasoningId
+    : event.type === "assistant.message" && event.data.phase === "thinking" ? event.data.messageId : undefined;
+  if (reasoningId !== undefined && !reasoningItemIdSchema.safeParse(reasoningId).success) throw new Error("Malformed Copilot reasoning identity");
 }
 function validateToolAndContextData(event: SessionEvent, fields: Map<string, unknown>): void {
   if (fields.has("parentToolCallId") && typeof fields.get("parentToolCallId") !== "string") throw new Error("Malformed Copilot parent invocation identity");

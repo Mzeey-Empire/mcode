@@ -851,6 +851,7 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
     child.emit("exit", 9, "SIGKILL");
 
     expect(vi.mocked(fatal).mock.calls[0]).toHaveLength(1);
+    expect(server.lastFatalKind).toBe("retryable");
     const breadcrumb = server.lastTransportBreadcrumb;
     expect(breadcrumb).toMatchObject({ activeTurnId: "turn-redacted", exit: { code: 9, signal: "SIGKILL" } });
     expect(JSON.stringify(breadcrumb)).not.toContain("secret prompt");
@@ -1004,6 +1005,22 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
     const lastCodeUnit = retainedLine.charCodeAt(retainedLine.length - 1);
     expect(Buffer.byteLength(retainedLine, "utf8")).toBeLessThanOrEqual(16 * 1024);
     expect(lastCodeUnit < 0xd800 || lastCodeUnit > 0xdfff).toBe(true);
+  }, 10_000);
+
+  it("marks a spawn failure fatal", async () => {
+    const { child } = makeFakeChild();
+    mockWhich.mockResolvedValue("/usr/bin/codex");
+    mockSpawn.mockImplementation(() => {
+      setImmediate(() => child.emit("error", Object.assign(new Error("spawn codex ENOENT"), { code: "ENOENT" })));
+      return child;
+    });
+    const server = new CodexAppServer({ cliPath: "codex", workingDirectory: "/tmp", getSpawnEnv: () => ({}) });
+    const fatal = vi.fn();
+    server.on("fatal", fatal);
+
+    await expect(server.start()).rejects.toThrow("Failed to spawn codex app-server");
+    expect(fatal).toHaveBeenCalledTimes(1);
+    expect(server.lastFatalKind).toBe("fatal");
   }, 10_000);
 
   it("keeps kill-requested teardown silent", async () => {

@@ -1,4 +1,4 @@
-import { createSubagentPresentation, type AgentEvent } from "@mcode/contracts";
+import { createSubagentPresentation, type AgentEvent, type TurnFailure } from "@mcode/contracts";
 
 /**
  * SSE envelope accepted in both wrapped and flat shapes.
@@ -30,7 +30,12 @@ interface MapperContext {
   requestedModel?: string;
   /** Role of the message the part belongs to, when the caller tracked it. */
   partRole?: string;
-  /** Text already forwarded per message, for exactly-once streaming. */
+  /** Type of the part the envelope belongs to, when the caller tracked it; deltas carry no part type. */
+  partType?: string;
+  /**
+   * Text already forwarded, for exactly-once streaming. Answer text is keyed by
+   * message id and reasoning by part or reasoning id, so they never share a key.
+   */
   forwardedText?: Map<string, string>;
 }
 
@@ -43,6 +48,10 @@ const MAX_TEXT_BYTES = 32_768;
 const MAX_DIAGNOSTIC_CHARS = 1_000;
 const MAX_NOTICE_MESSAGE_CHARS = 960;
 const MAX_IDENTIFIER_CHARS = 512;
+/** Contract limit for `reasoningDelta.reasoningItemId`. */
+const MAX_REASONING_ID_CHARS = 256;
+/** Largest retained part-type map per turn before pruning oldest. */
+const MAX_TRACKED_PART_TYPES = 256;
 const MAX_TOOL_NAME_CHARS = 128;
 const MAX_TOOL_INPUT_STRING_CHARS = 4_096;
 const MAX_TOOL_INPUT_KEYS = 32;
@@ -164,15 +173,36 @@ function mapSessionIdle(ctx: MapperContext): OpenCodeMappedOutput {
   };
 }
 
+function httpStatus(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599 ? value : undefined;
+}
+
+function classifyOpenCodeApiFailure(data: Record<string, unknown>): TurnFailure {
+  const message = boundText(data.message);
+  const status = httpStatus(data.statusCode) ?? httpStatus(Number(/failed with HTTP (\d{3})\b/.exec(message)?.[1]));
+  const kind: TurnFailure["kind"] = status === 429 && /quota|usage[ _-]limit|insufficient[ _-]credits/i.test(message) ? "usage_limit"
+    : data.isRetryable === true || status === 429 || (status !== undefined && status >= 500) ? "retryable" : "fatal";
+  return { kind, ...(status === undefined ? {} : { status }) };
+}
+
+/** Classifies native session errors and HTTP client failures without losing their status. */
+export function classifyOpenCodeFailure(error: unknown): TurnFailure {
+  if (error instanceof Error) return classifyOpenCodeApiFailure({ message: error.message });
+  if (!isRecord(error)) return { kind: "fatal" };
+  const code = boundedString(boundText(error.name).trim(), 128);
+  const data = isRecord(error.data) ? error.data : {};
+  const failure: TurnFailure = code === "ProviderAuthError" ? { kind: "auth" }
+    : code === "APIError" ? classifyOpenCodeApiFailure(data) : { kind: "fatal" };
+  return { ...failure, ...(code === undefined ? {} : { code }) };
+}
+
 function mapSessionError(properties: Record<string, unknown>, ctx: MapperContext): OpenCodeMappedOutput {
   const err = properties.error;
-  const detail = isRecord(err) && isRecord(err.data) && typeof err.data.message === "string"
-    ? boundDiagnostic(err.data.message)
-    : isRecord(err)
-      ? boundDiagnostic(JSON.stringify(err).slice(0, MAX_DIAGNOSTIC_CHARS))
-      : "OpenCode session error";
+  const message = isRecord(err) && isRecord(err.data) ? boundDiagnostic(boundText(err.data.message)) : "";
+  const name = isRecord(err) ? boundDiagnostic(boundText(err.name)).trim() : "";
+  const detail = message.trim() ? message : name || "OpenCode session error";
   const events: AgentEvent[] = [
-    withExecution({ type: "error", threadId: ctx.threadId, error: detail, failure: { kind: "fatal" } } satisfies AgentEvent, ctx),
+    withExecution({ type: "error", threadId: ctx.threadId, error: detail, failure: classifyOpenCodeFailure(err) } satisfies AgentEvent, ctx),
   ];
   // Authentication failures are security-sensitive: they stay visible as a
   // scoped recovery notice instead of a bare error string.
@@ -204,6 +234,34 @@ function emitTextRemainder(ctx: MapperContext, key: string, text: string, isDelt
     disposition: "mapped",
     events: [withExecution({ type: "textDelta", threadId: ctx.threadId, delta: remainder } satisfies AgentEvent, ctx)],
   };
+}
+
+function reasoningOutput(ctx: MapperContext, delta: string, reasoningItemId: string | undefined, done: boolean): OpenCodeMappedOutput {
+  return {
+    disposition: "mapped",
+    events: [withExecution({
+      type: "reasoningDelta", threadId: ctx.threadId, delta,
+      ...(reasoningItemId ? { reasoningItemId } : {}),
+      ...(done ? { done: true } : {}),
+    } satisfies AgentEvent, ctx)],
+  };
+}
+
+function reasoningIdOf(value: unknown): string | undefined {
+  return boundedString(value, MAX_REASONING_ID_CHARS);
+}
+
+/**
+ * Reasoning part snapshot. The first snapshot arrives with empty text and
+ * opens the row; the one with `time.end` closes it with any unsent remainder.
+ */
+function mapReasoningPart(part: Record<string, unknown>, ctx: MapperContext): OpenCodeMappedOutput {
+  const id = reasoningIdOf(part.id);
+  const text = boundText(part.text);
+  const done = isRecord(part.time) && part.time.end !== undefined;
+  const remainder = partTextRemainder(ctx.forwardedText, id ?? "", text, false);
+  if (!remainder && text && !done) return { disposition: "state-only", events: [] };
+  return reasoningOutput(ctx, remainder, id, done);
 }
 
 function toolCallIdOf(part: Record<string, unknown>): string {
@@ -357,6 +415,18 @@ function mapNextTextDelta(properties: Record<string, unknown>, ctx: MapperContex
     disposition: "mapped",
     events: [withExecution({ type: "textDelta", threadId: ctx.threadId, delta: boundText(delta) } satisfies AgentEvent, ctx)],
   };
+}
+
+/** `session.next.reasoning.*` (v1.18.28 schema): `reasoningID` per block; `ended` repeats the full text. */
+function mapNextReasoning(type: string, properties: Record<string, unknown>, ctx: MapperContext): OpenCodeMappedOutput {
+  const id = reasoningIdOf(properties.reasoningID);
+  if (type === "session.next.reasoning.started") return reasoningOutput(ctx, "", id, false);
+  if (type === "session.next.reasoning.ended") {
+    return reasoningOutput(ctx, partTextRemainder(ctx.forwardedText, id ?? "", boundText(properties.text), false), id, true);
+  }
+  const delta = boundText(properties.delta);
+  if (!delta) return { disposition: "state-only", events: [] };
+  return reasoningOutput(ctx, partTextRemainder(ctx.forwardedText, id ?? "", delta, true), id, false);
 }
 
 function canonicalToolName(value: unknown): string {
@@ -532,7 +602,7 @@ function mapToastShow(properties: Record<string, unknown>, ctx: MapperContext): 
 function mapPartByType(part: Record<string, unknown>, properties: Record<string, unknown>, ctx: MapperContext): OpenCodeMappedOutput {
   const partType = part.type;
   if (partType === "text") return mapTextPart(part, properties, ctx);
-  if (partType === "reasoning") return { disposition: "ignored", events: [], reason: "reasoning-not-surfaced" };
+  if (partType === "reasoning") return mapReasoningPart(part, ctx);
   if (partType === "tool") return mapToolPart(part, ctx);
   if (partType === "step-finish") return mapStepFinishPart(part, ctx);
   if (partType === "retry") return mapRetryPart(part, ctx);
@@ -552,7 +622,9 @@ function mapPartByType(part: Record<string, unknown>, properties: Record<string,
 /**
  * Streaming text for one part. Upstream sends these as standalone
  * `message.part.delta` events carrying only the new slice (`field: "text"`),
- * distinct from `message.part.updated` snapshots.
+ * distinct from `message.part.updated` snapshots. Reasoning parts stream with
+ * the same `field: "text"` and no part type, so only the caller's tracked
+ * part type tells reasoning apart from answer text.
  */
 function mapPartDelta(properties: Record<string, unknown>, ctx: MapperContext): OpenCodeMappedOutput {
   if (ctx.partRole === "user") return { disposition: "state-only", events: [] };
@@ -561,6 +633,10 @@ function mapPartDelta(properties: Record<string, unknown>, ctx: MapperContext): 
   }
   const delta = typeof properties.delta === "string" ? properties.delta : "";
   if (!delta) return { disposition: "state-only", events: [] };
+  if (ctx.partType === "reasoning") {
+    const id = reasoningIdOf(properties.partID);
+    return reasoningOutput(ctx, partTextRemainder(ctx.forwardedText, id ?? "", boundText(delta), true), id, false);
+  }
   const key = boundedIdentifier(properties.messageID) ?? boundedIdentifier(properties.partID) ?? "";
   return emitTextRemainder(ctx, key, delta, true);
 }
@@ -615,6 +691,9 @@ const EXACT_HANDLERS: Readonly<Record<string, NormalizedHandler>> = {
   "message.part.updated": (properties, ctx) => mapMessagePartUpdated(properties, ctx),
   "message.part.delta": (properties, ctx) => mapPartDelta(properties, ctx),
   "session.next.text.delta": (properties, ctx) => mapNextTextDelta(properties, ctx),
+  "session.next.reasoning.started": (properties, ctx) => mapNextReasoning("session.next.reasoning.started", properties, ctx),
+  "session.next.reasoning.delta": (properties, ctx) => mapNextReasoning("session.next.reasoning.delta", properties, ctx),
+  "session.next.reasoning.ended": (properties, ctx) => mapNextReasoning("session.next.reasoning.ended", properties, ctx),
   "session.next.tool.called": (properties, ctx) => mapNextToolCalled(properties, ctx),
   "session.next.tool.success": (properties, ctx) => mapNextToolSuccess(properties, ctx),
   "session.next.tool.failed": (properties, ctx) => mapNextToolFailed(properties, ctx),
@@ -658,12 +737,6 @@ const NEXT_STATE_ONLY_TYPES = new Set([
   "question.v2.rejected",
 ]);
 
-const NEXT_IGNORED_TYPES = new Set([
-  "session.next.reasoning.started",
-  "session.next.reasoning.delta",
-  "session.next.reasoning.ended",
-]);
-
 const NEXT_COMPACTING_TYPES = new Set([
   "session.next.compaction.started",
   "session.next.compaction.ended",
@@ -692,7 +765,6 @@ function mapNormalized(normalized: NormalizedEnvelope, ctx: MapperContext): Open
   if (STATE_ONLY_EVENT_TYPES.has(type) || NEXT_STATE_ONLY_TYPES.has(type)) {
     return { disposition: "state-only", events: [] };
   }
-  if (NEXT_IGNORED_TYPES.has(type)) return { disposition: "ignored", events: [], reason: "reasoning-not-surfaced" };
   if (NEXT_COMPACTING_TYPES.has(type)) {
     return {
       disposition: "mapped",
@@ -743,6 +815,34 @@ export function mapOpenCodeEnvelope(input: unknown, ctx: MapperContext): OpenCod
   const normalized = normalizeOpenCodeEnvelope(input);
   if (!normalized) return malformedOutput(ctx);
   return mapNormalized(normalized, ctx);
+}
+
+function trackedPartId(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_IDENTIFIER_CHARS ? value : undefined;
+}
+
+/**
+ * Record a part snapshot's type and resolve the type of the part an envelope
+ * belongs to. `message.part.delta` carries only `partID`, never the part type,
+ * so the caller keeps this per-turn map and passes the result as
+ * `MapperContext.partType`. Returns undefined for envelopes that are not parts.
+ */
+export function trackOpenCodePartType(
+  partTypes: Map<string, string>,
+  normalized: { type: string; properties: Record<string, unknown> },
+): string | undefined {
+  if (normalized.type === "message.part.delta") {
+    const partId = trackedPartId(normalized.properties.partID);
+    return partId ? partTypes.get(partId) : undefined;
+  }
+  if (normalized.type !== "message.part.updated") return undefined;
+  const part = partOf(normalized.properties);
+  const partId = trackedPartId(part?.id);
+  const partType = boundedString(part?.type, MAX_IDENTIFIER_CHARS);
+  if (!partId || !partType) return partType;
+  partTypes.delete(partId);
+  rememberBounded(partTypes, partId, partType, MAX_TRACKED_PART_TYPES);
+  return partType;
 }
 
 /** True when the envelope JSON exceeds the adapter boundary budget. */

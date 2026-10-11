@@ -25,6 +25,7 @@ import type {
   ProviderTurnDiffUpdate,
   SessionForker,
   TurnRequest,
+  TurnFailure,
 } from "@mcode/contracts";
 import { AgentEventType, providerRuntimeEvent } from "@mcode/contracts";
 import type { ProviderHostPorts } from "@mcode/providers";
@@ -51,7 +52,7 @@ import {
   type OpenCodeHttpClient,
   type OpenCodeRequestVersion,
 } from "./opencode-http-client.js";
-import { mapOpenCodeEnvelope, normalizeOpenCodeEnvelope, type OpenCodeMappedOutput } from "./opencode-event-mapper.js";
+import { classifyOpenCodeFailure, mapOpenCodeEnvelope, normalizeOpenCodeEnvelope, trackOpenCodePartType, type OpenCodeMappedOutput } from "./opencode-event-mapper.js";
 import {
   mapApprovalChoiceToReply,
   synthesizeOpenCodeApprovalRequest,
@@ -149,8 +150,10 @@ interface OpenCodeTurnState {
   /** Upstream message id to role, so user parts never become assistant deltas. */
   messageRoles: Map<string, string>;
   childSessionCalls: Map<string, OpenCodeChildTask>;
-  /** Text already forwarded per message, for exactly-once streaming. */
+  /** Text already forwarded per message or reasoning part, for exactly-once streaming. */
   forwardedText: Map<string, string>;
+  /** Upstream part id to part type, so reasoning deltas never become answer text. */
+  partTypes: Map<string, string>;
   /** Native turn-diff accumulator and its monotonic push cursor for this turn. */
   nativeDiff: OpenCodeNativeTurnDiff;
   nativeDiffRevision: number;
@@ -675,6 +678,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       messageRoles: new Map<string, string>(),
       childSessionCalls: new Map<string, OpenCodeChildTask>(),
       forwardedText: new Map<string, string>(),
+      partTypes: new Map<string, string>(),
       nativeDiff: new OpenCodeNativeTurnDiff(),
       nativeDiffRevision: 0,
     };
@@ -728,6 +732,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     state.messageRoles.clear();
     state.childSessionCalls.clear();
     state.forwardedText.clear();
+    state.partTypes.clear();
     state.nativeDiff = new OpenCodeNativeTurnDiff();
     state.nativeDiffRevision = 0;
     emit({ type: AgentEventType.TurnStarted, threadId } satisfies AgentEvent);
@@ -780,7 +785,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error("OpenCodeProvider turn error", { sessionId: req.sessionId, error: message });
-      settler.settle(state.aborted ? "cancelled" : "errored", state.aborted ? undefined : message);
+      settler.settle(state.aborted ? "cancelled" : "errored", state.aborted ? undefined : message, classifyOpenCodeFailure(error));
     }
   }
 
@@ -922,6 +927,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     const threadId = this.threadIdFor(req.sessionId);
     const normalized = normalizeOpenCodeEnvelope(envelope);
     let parentToolCallId: string | undefined;
+    let partType: string | undefined;
     if (normalized) {
       const owner = sessionIdOfNormalized(normalized);
       if (owner && owner !== upstreamId) {
@@ -929,6 +935,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
         if (!parentToolCallId || !isForwardedChildEvent(normalized)) return;
       }
       this.trackMessageRole(state, normalized);
+      partType = trackOpenCodePartType(state.partTypes, normalized);
       trackChildTask(state, normalized);
       if (normalized.type === "session.diff") {
         this.publishNativeTurnDiff(req, state, normalized.properties);
@@ -939,6 +946,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       turnExecutionId: req.turnExecutionId,
       requestedModel: req.model,
       partRole: normalized ? partRoleOf(state.messageRoles, normalized) : undefined,
+      partType,
       forwardedText: state.forwardedText,
       parentToolCallId,
     });
@@ -960,8 +968,9 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       this.maybeEmitAsk(req, endpoint, upstreamId, normalized, mapped.reason);
     }
     this.forwardTurnEvents(mapped.events, req, threadId, settler);
-    if (mapped.events.some((e) => e.type === AgentEventType.Error)) {
-      settler.settle("errored");
+    const error = mapped.events.find((event) => event.type === AgentEventType.Error);
+    if (error) {
+      settler.settle("errored", error.error, error.failure);
     } else if (mapped.events.some((e) => e.type === AgentEventType.TurnComplete)) {
       void this.confirmIdleCompleted(req, state, endpoint, upstreamId, settler);
     } else if (mapped.disposition === "mapped") {
@@ -1295,10 +1304,10 @@ class OpenCodeTurnSettler {
     return this.settled;
   }
 
-  settle(outcome: "completed" | "cancelled" | "errored", error?: string): void {
+  settle(outcome: "completed" | "cancelled" | "errored", error?: string, failure: TurnFailure = { kind: "fatal" }): void {
     if (this.settled) return;
     this.settled = true;
-    if (error) this.emit({ type: AgentEventType.Error, threadId: this.threadId, error, failure: { kind: "fatal" } } satisfies AgentEvent);
+    if (error !== undefined) this.emit({ type: AgentEventType.Error, threadId: this.threadId, error: error.trim() ? error : "OpenCode session error", failure } satisfies AgentEvent);
     if (this.assistantText.trim().length > 0 && outcome !== "cancelled") {
       this.emit({ type: AgentEventType.Message, threadId: this.threadId, content: this.assistantText, tokens: null } satisfies AgentEvent);
     }

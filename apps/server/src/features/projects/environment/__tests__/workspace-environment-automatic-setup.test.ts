@@ -43,17 +43,9 @@ function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value
 }
 
 async function eventually(assertion: () => void): Promise<void> {
-  let failure: unknown;
-  for (let index = 0; index < 32; index += 1) {
-    try {
-      assertion();
-      return;
-    } catch (error) {
-      failure = error;
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-  }
-  throw failure;
+  // Bound by time, not timer ticks: Setup resolution reads the environment file from disk, and a
+  // loaded CI runner can need more than a few dozen ticks for that read to settle.
+  await vi.waitFor(assertion, { timeout: 2_000, interval: 1 });
 }
 
 async function automaticHarness({ setup = true, prepareFailure = false, attachmentStorage, threadStartups, threadIds = ["thread-1"], managed = true }: {

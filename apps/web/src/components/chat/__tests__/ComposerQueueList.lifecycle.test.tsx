@@ -111,6 +111,7 @@ describe("ComposerQueueList lifecycle", () => {
     );
     expect(screen.queryByText("first queued follow-up")).not.toBeInTheDocument();
     expect(screen.getByText("second queued follow-up")).toBeInTheDocument();
+    expect(screen.queryByText("Paused")).not.toBeInTheDocument();
   });
 
   it("keeps the queue visible and paused after a manual stop", async () => {
@@ -136,6 +137,31 @@ describe("ComposerQueueList lifecycle", () => {
     expect(screen.getByText("first queued follow-up")).toBeInTheDocument();
     expect(screen.getByText("second queued follow-up")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send queued message 1 now" })).toBeInTheDocument();
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+  });
+
+  it("pauses the queue after a failed turn until Send now resumes it", async () => {
+    vi.useFakeTimers();
+    queueMessage("first queued follow-up");
+    queueMessage("second queued follow-up");
+    runTurn();
+    render(<QueueControls />);
+
+    act(() => {
+      useThreadStore.getState().handleAgentEvent({ type: "error", threadId: THREAD_ID, error: "Overloaded", failure: { kind: "retryable" } });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(mockTransport.sendMessage).not.toHaveBeenCalled();
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Send queued message 1 now" }).click();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mockTransport.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ content: "first queued follow-up" }));
+    expect(screen.queryByText("Paused")).not.toBeInTheDocument();
   });
 
   it("hides Send now during a turn when the provider cannot steer", () => {

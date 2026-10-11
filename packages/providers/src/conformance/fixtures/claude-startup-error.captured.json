@@ -52,6 +52,7 @@
           "session_id": "NATIVE_2",
           "parent_tool_use_id": null,
           "type": "assistant",
+          "error": "authentication_failed",
           "message": {
             "content": []
           }
@@ -83,5 +84,5 @@
     "toolPairs": []
   },
   "contractVersion": 1,
-  "sourceHash": "f670825319958cbdd196e271426a521d44f823a0669333e82f7dc6de4e229907"
+  "sourceHash": "04c474dcb7514e72ba4c127067854ed44a7fde3a0aa3df99eabe81d0c0f0874f"
 }
