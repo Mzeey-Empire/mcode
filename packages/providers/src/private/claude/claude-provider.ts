@@ -1608,7 +1608,8 @@ export class ClaudeProvider
         threadId: context.threadId,
         error:
           "Message could not be delivered: session was shutting down. Please try again.",
-        failure: { kind: "fatal" },
+        // The session is stopped below, so a retry starts a fresh one.
+        failure: { kind: "retryable" },
       } satisfies AgentEvent);
       await this.runtime.stop(context.params.sessionId);
     } else {
@@ -1620,7 +1621,8 @@ export class ClaudeProvider
         type: AgentEventType.Error,
         threadId: context.threadId,
         error: errorMessage,
-        failure: { kind: "fatal" },
+        // Backpressure: the queue drains as the SDK consumes the earlier prompts.
+        failure: { kind: "retryable" },
       } satisfies AgentEvent);
     }
     throw error;
