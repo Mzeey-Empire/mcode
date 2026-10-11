@@ -1498,6 +1498,8 @@ export function createWsTransport(
       rpc<ProviderAvailability[]>("providers.listAvailability", {}),
     listProviderStatus: (force) =>
       rpc<ProviderStatus[]>("providers.listStatus", { force }),
+    acknowledgeProviderModels: (providerId) =>
+      rpc<void>("providers.acknowledgeModels", { providerId }),
 
     generateRecap: (threadId, messages, previousRecap) =>
       rpc<{ text: string }>("recap.generate", { threadId, messages, previousRecap }),

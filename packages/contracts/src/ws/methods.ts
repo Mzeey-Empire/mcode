@@ -1554,6 +1554,10 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({ force: z.boolean().optional() }),
     result: z.array(ProviderStatusSchema()),
   },
+  "providers.acknowledgeModels": {
+    params: z.object({ providerId: ProviderIdSchema }).strict(),
+    result: z.void(),
+  },
   /**
    * v1 stub for regenerating a handoff document via the live AI path.
    * Live regeneration is deferred to a follow-on plan.

@@ -4,11 +4,17 @@ import { getCatalogEntry, type ProviderId, type ProviderRateLimit, type Provider
 export interface ProviderBellRow {
   providerId: ProviderId;
   name: string;
-  kind: "signed_out" | "rate_limited";
+  kind: ProviderBellRowKind;
   detail: string;
   /** The terminal command that signs in; present only on signed-out rows. */
   signInArgv?: readonly string[];
+  /** The announced model that Try starts the next thread on; present only on new-model rows. */
+  tryModelId?: string;
 }
+
+/** Row kinds in priority order: a provider shows only its first, and rows sort by it. */
+const ROW_KINDS = ["signed_out", "rate_limited", "new_model"] as const;
+type ProviderBellRowKind = (typeof ROW_KINDS)[number];
 
 // A Map, not an object literal, so a provider-sent type such as "constructor" cannot hit a prototype member.
 const LIMIT_LABELS = new Map([
@@ -17,9 +23,10 @@ const LIMIT_LABELS = new Map([
 ]);
 
 /**
- * Turns provider statuses into bell rows. Signed out outranks rate limited,
- * both for one provider and in row order, because a signed-out provider cannot
- * start a thread at all. Unknown auth and past rate limits produce no row.
+ * Turns provider statuses into bell rows. Signed out outranks rate limited, which
+ * outranks a new model, both for one provider and in row order, because a
+ * signed-out provider cannot start a thread at all. Unknown auth and past rate
+ * limits produce no row.
  */
 export function deriveProviderBellRows(statuses: readonly ProviderStatus[], now: Date): ProviderBellRow[] {
   const rows: ProviderBellRow[] = [];
@@ -27,7 +34,7 @@ export function deriveProviderBellRows(statuses: readonly ProviderStatus[], now:
     const row = rowFor(status, now);
     if (row) rows.push(row);
   }
-  return rows.sort((a, b) => Number(a.kind === "rate_limited") - Number(b.kind === "rate_limited"));
+  return rows.sort((a, b) => ROW_KINDS.indexOf(a.kind) - ROW_KINDS.indexOf(b.kind));
 }
 
 function rowFor(status: ProviderStatus, now: Date): ProviderBellRow | null {
@@ -42,8 +49,16 @@ function rowFor(status: ProviderStatus, now: Date): ProviderBellRow | null {
     };
   }
   const detail = status.rateLimit ? rateLimitDetail(status.rateLimit, now) : null;
-  if (!detail) return null;
-  return { providerId: status.providerId, name, kind: "rate_limited", detail };
+  if (detail) return { providerId: status.providerId, name, kind: "rate_limited", detail };
+  const newest = status.newModels[0];
+  if (!newest) return null;
+  return {
+    providerId: status.providerId,
+    name,
+    kind: "new_model",
+    detail: `${newest.label} is new in the model menu`,
+    tryModelId: newest.modelId,
+  };
 }
 
 function rateLimitDetail(limit: ProviderRateLimit, now: Date): string | null {

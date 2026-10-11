@@ -34,6 +34,13 @@ export const ProviderRateLimitSchema = lazySchema(() =>
 /** The latest active rate limit a provider reported. */
 export type ProviderRateLimit = z.infer<ReturnType<typeof ProviderRateLimitSchema>>;
 
+/** An unacknowledged model still available in the provider's current catalog. */
+export const ProviderNewModelSchema = lazySchema(() =>
+  z.object({ modelId: z.string(), label: z.string() }).strict(),
+);
+/** One new-model announcement for the provider bell. */
+export type ProviderNewModel = z.infer<ReturnType<typeof ProviderNewModelSchema>>;
+
 /** What the bell knows about one enabled provider. Carries no usage by design. */
 export const ProviderStatusSchema = lazySchema(() =>
   z.object({
@@ -41,6 +48,7 @@ export const ProviderStatusSchema = lazySchema(() =>
     auth: ProviderAuthSchema(),
     /** Null when the provider is not rate limited. */
     rateLimit: ProviderRateLimitSchema().nullable(),
+    newModels: z.array(ProviderNewModelSchema()).max(5),
     checkedAt: z.string(),
   }).strict(),
 );
