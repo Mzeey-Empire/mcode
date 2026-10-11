@@ -573,9 +573,9 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     }
     if (event.outcome === undefined) return true;
     const outcome = event.outcome === "cancelled" ? "interrupted" : event.outcome;
-    // A user stop suppresses the provider's own terminal, so a provider-reported interruption means the provider ended on its own.
+    // A user stop suppresses the provider's own terminal, so a provider-reported interruption has no user cause.
     this.beginTerminalProjection(event.threadId, outcome, "ended",
-      outcome === "interrupted" ? { cause: "provider_exited" } : undefined);
+      outcome === "interrupted" ? this.runtime.providerInterruptionEnding() : undefined);
     this.runtime.clearTerminalState(event.threadId);
     return true;
   }

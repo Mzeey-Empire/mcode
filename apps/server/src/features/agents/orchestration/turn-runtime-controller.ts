@@ -152,6 +152,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private readonly turnDiffs: TurnDiffService;
   private readonly activeSessionIds = new Set<string>();
   private initialized = false;
+  /** Set once graceful shutdown begins; the process exits afterward, so it never resets. */
+  private shuttingDown = false;
   /**
    * Classifies a failed send as transient or fatal and caps the automatic
    * retry, so a brief flake doesn't cost the user a manual re-send while a
@@ -375,6 +377,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (!runtime?.turnExecutionId || !isActiveRuntimeExecution(runtime, event.turnExecutionId)) return false;
     const outcome = event.outcome === "cancelled" ? "interrupted" : event.outcome;
     return this.turnRuntime.terminalize(event.threadId, runtime.turnExecutionId, outcome);
+  }
+
+  /** The cause of a provider-reported interruption: Mcode's own shutdown stops providers, which report it as their own. */
+  providerInterruptionEnding(): TurnEndingCause {
+    return { cause: this.shuttingDown ? "app_closed" : "provider_exited" };
   }
 
   /** Clear runtime-only resources after terminal event ownership is settled. */
@@ -750,7 +757,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     input: DataOnlyParentTurnFinishInput;
     files: ReturnType<ExecutionFileEvidenceCoordinator["seal"]>;
   } {
-    const ending = workerProviderEnding(active, outcome, event);
+    const ending = workerProviderEnding(active, outcome, event, this.providerInterruptionEnding());
     const files = this.sealOptionalFileEvidence(active, outcome);
     if (!files) logger.warn("Provider terminal file evidence unavailable", { threadId: active.execution.threadId,
       executionId: active.execution.executionId, deliveryAttempt: active.deliveryAttempt });
@@ -2254,6 +2261,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Stop all active agent sessions (for graceful shutdown). */
   async stopAll(): Promise<void> {
+    this.shuttingDown = true;
     const ids = [...this.activeSessionIds];
     await Promise.all(
       ids.map(async (threadId) => {
@@ -2300,13 +2308,18 @@ function observeWorkerRetries(active: WorkerOwnedTurn, event: AgentEvent | null)
   if (event?.type === "apiRetry") active.lastRetries = observedProviderRetries(event) ?? active.lastRetries;
 }
 
-function workerProviderEnding(active: WorkerOwnedTurn, outcome: TurnOutcome, event: AgentEvent): TurnEndingCause | undefined {
+function workerProviderEnding(
+  active: WorkerOwnedTurn,
+  outcome: TurnOutcome,
+  event: AgentEvent,
+  interruption: TurnEndingCause,
+): TurnEndingCause | undefined {
   if (event.type === "error") {
     return { failure: persistTurnFailure({ failure: event.failure, provider: active.prepared.providerId,
       message: event.error, acceptedAt: Date.now(), ...(active.lastRetries ? { lastRetries: active.lastRetries } : {}) }) };
   }
-  // A user stop fences provider delivery first, so a provider-reported interruption means the provider ended on its own.
-  return event.type === "ended" && outcome === "interrupted" ? { cause: "provider_exited" } : undefined;
+  // A user stop fences provider delivery first, so a provider-reported interruption has no user cause.
+  return event.type === "ended" && outcome === "interrupted" ? interruption : undefined;
 }
 
 function unsentTerminalFields(terminal: UnsentWorkerTerminal, providerId: string): Pick<DataOnlyParentTurnFinishInput, "error" | "ending"> {

@@ -17,7 +17,7 @@ export const TURN_EVENT_QUEUE_RETAINED_LIMITS = {
 } as const;
 
 /** The terminal sources that must pass through the per-turn finalization fence. */
-export type TurnTerminalSource = "provider" | "user-stop" | "checkpoint-failure" | "shutdown";
+export type TurnTerminalSource = "provider" | "user-stop" | "checkpoint-failure";
 
 /** The terminal outcome that the pipeline can materialize. */
 export type TurnTerminalOutcome = "completed" | "errored" | "interrupted" | "cancelled";
@@ -454,5 +454,5 @@ function compactToolResultForQueue(event: AgentEvent, maximumBytes: number): Age
 }
 
 function cancelsDeferredWork(source: TurnTerminalSource): boolean {
-  return source === "user-stop" || source === "checkpoint-failure" || source === "shutdown";
+  return source === "user-stop" || source === "checkpoint-failure";
 }

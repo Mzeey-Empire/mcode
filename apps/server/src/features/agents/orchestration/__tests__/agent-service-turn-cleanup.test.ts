@@ -1931,6 +1931,26 @@ describe("AgentService Ended finalization", () => {
     expect(providerEmitter.stopSession).toHaveBeenCalledWith(`mcode-${thread.id}`);
   });
 
+  it("records a provider interruption during graceful stopAll as app_closed", async () => {
+    const workspace = await workspaceRepo.create("Test", process.cwd());
+    const thread = await threadRepo.create(workspace.id, "Shutdown thread", "direct", "main", true, "codex");
+    await service.sendMessage({ threadId: thread.id, content: "work", permissionMode: "default", model: "gpt-5", attachments: [], provider: "codex" });
+    const executionId = activeExecutionId(service, thread.id);
+    providerEmitter.stopSession.mockImplementation(() => {
+      providerEmitter.emit("event", {
+        type: AgentEventType.Ended,
+        threadId: thread.id,
+        turnExecutionId: executionId,
+        outcome: "cancelled",
+      } satisfies AgentEvent);
+    });
+
+    await service.stopAll();
+
+    await vi.waitFor(() => expect(canonicalSink.loadTurnByExecution(executionId)?.status).toBe("Interrupted"));
+    expect(canonicalSink.loadTurnByExecution(executionId)?.ending).toEqual({ outcome: "interrupted", cause: "app_closed" });
+  });
+
   it("leaves a stopAll turn unresolved when the provider sends no terminal outcome", async () => {
     const workspace = await workspaceRepo.create("Test", process.cwd());
     const thread = await threadRepo.create(workspace.id, "Shutdown without outcome", "direct", "main", true, "codex");

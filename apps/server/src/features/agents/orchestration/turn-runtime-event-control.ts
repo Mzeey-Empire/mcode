@@ -30,6 +30,8 @@ export interface TurnRuntimeEventControl {
   shouldSuppressTurnComplete(threadId: string): boolean;
   /** Return whether a transient error remains private. */
   shouldSuppressTransientTurnError(threadId: string, errorMessage: string): boolean;
+  /** Return the cause recorded when a provider reports its turn interrupted. */
+  providerInterruptionEnding(): TurnEndingCause;
   /** Clear runtime-only resources after a terminal provider event. */
   clearTerminalState(threadId: string): void;
   /** Materialize one terminal turn through the single event pipeline. */

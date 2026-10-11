@@ -379,6 +379,29 @@ describe("AgentService container composition", () => {
     await waitFor(() => canonicalPayloadTypes(thread.id).includes("turn.interrupted"));
   }, 15_000);
 
+  it("records a provider interruption during graceful stopAll as app_closed", async () => {
+    let running: TurnRequest | undefined;
+    registerFakeCodex(fakeCodexProvider(async (request) => {
+      running = request;
+    }, async () => {
+      const request = requireValue(running, "Expected a running Codex turn");
+      await submitCodexEvent(workerRuntime!, request, 1, { type: "ended",
+        threadId: request.threadId, turnExecutionId: request.turnExecutionId, outcome: "cancelled" });
+    }));
+    const registry = container.resolve(AgentEventPublicationRegistry);
+    registry.bind(() => undefined);
+    registry.start();
+    const workspace = await container.resolve(WorkspaceRepo).create("worker-shutdown", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Worker shutdown", "direct", "main", true, "codex");
+    const service = container.resolve(AgentService);
+
+    await service.sendMessage({ threadId: thread.id, content: "hello", permissionMode: "default" });
+    await service.stopAll();
+
+    await waitFor(() => canonicalPayloadTypes(thread.id).includes("turn.interrupted"));
+    expect(canonicalTurnEndings(thread.id)).toEqual([{ outcome: "interrupted", cause: "app_closed" }]);
+  }, 15_000);
+
   it("finishes the exact owned turn when canonical delivery fails after provider send", async () => {
     let sent: TurnRequest | undefined;
     let reportFailure: ((routing: { threadId: string; turnId: string;
@@ -719,6 +742,12 @@ function canonicalProviderEvents(threadId: string): AgentEvent[] {
     const event = item?.payload?.projection === "providerRuntimeEvent" ? item.payload.runtimeEvent?.event : undefined;
     return event ? [event as AgentEvent] : [];
   });
+}
+
+function canonicalTurnEndings(threadId: string): unknown[] {
+  return (container.resolve<Database>("Database").query("SELECT ending_json FROM canonical_agent_turns WHERE thread_id=?")
+    .all(threadId) as Array<{ ending_json: string | null }>)
+    .map((row) => row.ending_json === null ? null : JSON.parse(row.ending_json));
 }
 
 function canonicalPayloadTypes(threadId: string): string[] {
