@@ -1,7 +1,5 @@
 import { Button } from "@/components/ui/button";
 import { ProviderIcon } from "@/components/ui/provider-icon";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import type { ProviderBellRow } from "@/features/providers/provider-bell-rows";
 import { signInToProvider } from "@/features/providers/sign-in";
 import { cn } from "@/lib/utils";
@@ -40,31 +38,10 @@ function ProviderRow({ row }: { row: ProviderBellRow }) {
   );
 }
 
-const PILL_CLASS = "h-7 px-2.5 text-button aria-disabled:opacity-50";
-
 function SignInPill({ argv }: { argv: readonly string[] }) {
-  const hasProject = useWorkspaceStore((s) => s.activeWorkspaceId !== null);
-  if (hasProject) {
-    return (
-      <Button variant="subtle" shape="round" className={PILL_CLASS} onClick={() => signInToProvider(argv)}>
-        Sign in
-      </Button>
-    );
-  }
-  // Terminals belong to a project, so without one the pill explains the manual route instead.
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={<Button variant="subtle" shape="round" className={PILL_CLASS} disabled focusableWhenDisabled />}
-      >
-        Sign in
-      </TooltipTrigger>
-      <TooltipContent>
-        {/* One span keeps the sentence flowing; the tooltip is inline-flex and would lay each run out as a column. */}
-        <span>
-          Open a project to sign in, or run <code className="whitespace-nowrap">{argv.join(" ")}</code> in a terminal
-        </span>
-      </TooltipContent>
-    </Tooltip>
+    <Button variant="subtle" shape="round" className="h-7 px-2.5 text-button" onClick={() => signInToProvider(argv)}>
+      Sign in
+    </Button>
   );
 }

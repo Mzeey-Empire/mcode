@@ -87,15 +87,16 @@ describe("ProvidersBell", () => {
     expect(mockTransport.listProviderStatus).toHaveBeenCalledWith(true);
   });
 
-  it("keeps Sign in focusable but disabled without an open project", async () => {
+  it("enables Sign in without an open project and runs the row's login command", async () => {
     useWorkspaceStore.setState({ activeWorkspaceId: null });
     serve([DEVIN_SIGNED_OUT]);
     render(<ProvidersBell />);
 
     const signIn = within(await openBell()).getByRole("button", { name: "Sign in" });
-    expect(signIn).toHaveAttribute("aria-disabled", "true");
+    expect(signIn).not.toHaveAttribute("aria-disabled");
+    expect(signIn).toBeEnabled();
     fireEvent.click(signIn);
-    expect(signInMock).not.toHaveBeenCalled();
+    expect(signInMock).toHaveBeenCalledWith(["devin", "auth", "login"]);
   });
 
   it("describes rate limits with their label and local reset time", async () => {
