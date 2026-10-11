@@ -635,7 +635,7 @@ describe("visible Browser conformance observer", () => {
     expect(items[0]?.type).toBe("tool-group");
     if (items[0]?.type !== "tool-group") return;
     render(<ToolSummaryLine group={items[0].group} />);
-    await user.click(screen.getByRole("button", { name: "Used the browser" }));
+    await user.click(screen.getByRole("button", { name: /^Used the browser ?· 1 failed$/ }));
     expect(screen.getByText("Browser action timed out")).toBeInTheDocument();
   });
 
