@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Layers } from "lucide-react";
 import type { CanonicalSubagentStopResult, SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
 import { Button, IconButton } from "@/components/ui/button";
@@ -37,16 +37,16 @@ function useNow(live: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!live) return;
-    setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), LIVE_TICK_MS);
     return () => window.clearInterval(timer);
   }, [live]);
   return now;
 }
 
-function elapsed(row: SubagentRosterEntry, now: number): string {
-  const end = row.endedAt ? Date.parse(row.endedAt) : now;
-  return formatLiveDuration(end - Date.parse(row.startedAt));
+/** Only a running row reads the clock; a finished row without an end time has no honest duration. */
+function elapsed(row: SubagentRosterEntry, now: number): string | null {
+  const end = row.status === "running" ? now : row.endedAt && Date.parse(row.endedAt);
+  return end ? formatLiveDuration(end - Date.parse(row.startedAt)) : null;
 }
 
 function rowMeta(row: SubagentRosterEntry): string {
@@ -55,7 +55,8 @@ function rowMeta(row: SubagentRosterEntry): string {
 }
 
 function StatusTrail({ row, now }: { readonly row: SubagentRosterEntry; readonly now: number }) {
-  const time = <span className="font-mono text-xs">{elapsed(row, now)}</span>;
+  const duration = elapsed(row, now);
+  const time = duration && <span className="font-mono text-xs">{duration}</span>;
   switch (row.status) {
     case "running":
       return <span className="flex items-center gap-1.5 text-ink"><span aria-hidden className="size-[7px] rounded-full bg-success" />{time}</span>;
@@ -71,14 +72,17 @@ function StatusTrail({ row, now }: { readonly row: SubagentRosterEntry; readonly
   }
 }
 
-function RowStop({ row, onStop }: { readonly row: SubagentRosterEntry; readonly onStop: SubagentListProps["onStop"] }) {
+function RowStop({ row, onStop, onStopped }: {
+  readonly row: SubagentRosterEntry; readonly onStop: SubagentListProps["onStop"]; readonly onStopped: () => void;
+}) {
   const [pending, setPending] = useState(false);
   const stop = async () => {
     if (pending) return;
     setPending(true);
     try {
       const result = await onStop(row);
-      if (result.status === "failed" || result.status === "unsupported") {
+      if (result.status === "interrupted" || result.status === "already-terminal") onStopped();
+      else {
         useToastStore.getState().show({ kind: "failed", title: `Couldn't stop ${row.title}`, meta: result.message ?? undefined });
       }
     } catch {
@@ -90,7 +94,7 @@ function RowStop({ row, onStop }: { readonly row: SubagentRosterEntry; readonly 
   return (
     <IconButton shape="round" size="inline" aria-label={`Stop ${row.title}`} disabled={pending} aria-busy={pending}
       onClick={() => void stop()}
-      className={cn("hidden group-focus-within/row:inline-flex group-hover/row:inline-flex", pending && "inline-flex")}>
+      className={cn("hidden group-focus-within/row:inline-flex group-hover/row:inline-flex [@media(hover:none)]:inline-flex", pending && "inline-flex")}>
       <span aria-hidden className="size-2 rounded-[2px] bg-ink" />
     </IconButton>
   );
@@ -103,20 +107,21 @@ function SubagentListRow({ row, now, onSelect, onStop }: {
   const running = row.status === "running";
   const stoppable = running && row.canStop && row.childThreadId !== null;
   const meta = rowMeta(row);
+  const selectRef = useRef<HTMLButtonElement | null>(null);
   return (
     <li data-testid={running ? "subagent-active-row" : "subagent-finished-row"}
-      className={cn("group/row flex h-13 min-w-0 items-center gap-1.5 rounded-lg transition-colors duration-(--duration-fast) hover:bg-hover", stoppable && "hover:pr-1.5 focus-within:pr-1.5")}>
-      <button type="button" onClick={() => onSelect(row)} data-subagent-id={row.id}
+      className={cn("group/row flex h-13 min-w-0 items-center gap-1.5 rounded-lg transition-colors duration-(--duration-fast) hover:bg-hover", stoppable && "hover:pr-1.5 focus-within:pr-1.5 [@media(hover:none)]:pr-1.5")}>
+      <Button ref={selectRef} type="button" variant="ghost" onClick={() => onSelect(row)} data-subagent-id={row.id}
         aria-label={`Open ${row.title} details, ${subagentStatusLabel(row.status)}`}
-        className="flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus">
+        className="h-full min-w-0 flex-1 justify-start gap-2.5 rounded-lg px-2.5 text-left hover:bg-transparent focus-visible:outline-offset-[-2px]">
         <ProviderIcon provider={row.provider} size={16} />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="text-fade text-sm font-medium text-ink">{row.title}</span>
           {meta && <span className="text-fade text-xs text-muted">{meta}</span>}
         </span>
         <StatusTrail row={row} now={now} />
-      </button>
-      {stoppable && <RowStop row={row} onStop={onStop} />}
+      </Button>
+      {stoppable && <RowStop row={row} onStop={onStop} onStopped={() => selectRef.current?.focus()} />}
     </li>
   );
 }
@@ -138,9 +143,12 @@ export function SubagentList({ roster, error, viewportRef, onRetry, onSelect, on
           Subagents appear here when this thread delegates work.
         </p>}
         <ul className="flex flex-col gap-0.5 px-2 pt-1 pb-2">
-          {running.map(renderRow)}
-          {running.length > 0 && finished.length > 0 && <li aria-hidden className="px-2.5 py-1.5"><div className="h-px bg-border" /></li>}
-          {finished.map(renderRow)}
+          {/* One keyed array keeps a row mounted, and its focus, when it moves from running to finished. */}
+          {[
+            ...running.map(renderRow),
+            running.length > 0 && finished.length > 0 && <li key="divider" aria-hidden className="px-2.5 py-1.5"><div className="h-px bg-border" /></li>,
+            ...finished.map(renderRow),
+          ]}
         </ul>
       </ScrollArea>
     </section>

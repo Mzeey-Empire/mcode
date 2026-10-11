@@ -81,12 +81,15 @@ describe("SubagentList in the Subagents panel", () => {
   });
 
   it("turns a stopped row Stopped from the roster push without reopening the panel", async () => {
-    transport.loadSubagentRoster.mockResolvedValueOnce(roster([codex("worker")]))
-      .mockResolvedValue(roster([codex("worker", { status: "stopped", endedAt: at(72) })], 2));
+    transport.loadSubagentRoster.mockResolvedValue(roster([codex("worker")]));
     transport.stopCanonicalSubagent.mockResolvedValue({ childThreadId: "child-worker", status: "interrupted" });
     render(<SubagentsPanel threadId="parent" />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Stop worker" }));
+    await waitFor(() => expect(transport.loadSubagentRoster).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: "Open worker details, Running" })).toBeInTheDocument();
+
+    transport.loadSubagentRoster.mockResolvedValue(roster([codex("worker", { status: "stopped", endedAt: at(72) })], 2));
     await act(async () => {
       pushEmitter.emit("subagents.changed", { threadId: "parent", epoch: "list-boot", revision: 2 });
     });
@@ -95,6 +98,20 @@ describe("SubagentList in the Subagents panel", () => {
     const row = await screen.findByRole("button", { name: "Open worker details, Stopped" });
     expect(row).toHaveTextContent("Stopped1m 12s");
     expect(screen.queryByRole("button", { name: "Stop worker" })).not.toBeInTheDocument();
+  });
+
+  it("returns focus to the row after it stops and moves below the divider", async () => {
+    transport.loadSubagentRoster.mockResolvedValueOnce(roster([codex("worker"), entry("other")]))
+      .mockResolvedValue(roster([codex("worker", { status: "stopped", endedAt: at(5) }), entry("other")], 2));
+    transport.stopCanonicalSubagent.mockResolvedValue({ childThreadId: "child-worker", status: "interrupted" });
+    render(<SubagentsPanel threadId="parent" />);
+    const stop = await screen.findByRole("button", { name: "Stop worker" });
+    stop.focus();
+
+    fireEvent.click(stop);
+
+    const row = await screen.findByRole("button", { name: "Open worker details, Stopped" });
+    await waitFor(() => expect(row).toHaveFocus());
   });
 
   it("explains an empty roster", async () => {
@@ -133,6 +150,16 @@ describe("SubagentList live time", () => {
     expect(screen.getByRole("button", { name: "Open finished details, Done" })).toHaveTextContent("1h 3m");
     act(() => { vi.advanceTimersByTime(24_000); });
     expect(screen.getByRole("button", { name: "Open live details, Running" })).toHaveTextContent("1m 12s");
+  });
+
+  it("shows no duration for a finished row without an end time while another row ticks", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(START + 48_000);
+    renderList([entry("live"), entry("stopped", { status: "stopped", endedAt: null })]);
+
+    act(() => { vi.advanceTimersByTime(5_000); });
+
+    expect(screen.getByRole("button", { name: "Open stopped details, Stopped" })).toHaveTextContent(/^stoppedStopped$/);
   });
 
   it("schedules no timer when nothing is running", () => {
