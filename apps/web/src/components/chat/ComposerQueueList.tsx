@@ -11,6 +11,8 @@ import { supportsTurnSteer } from "@/features/conversation/composer/composer-cap
 import { stripPreviewAnnotationFence } from "@/features/preview/capture/preview-annotation-append";
 import { isDeliveryUnknown, useQueueStore, type QueuedMessage } from "@/stores/queueStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
+import { endedWithoutCompleting, getThreadRuntimePhase } from "@/stores/thread-lifecycle";
+import { getThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
 import { PreviewAnnotationBundleChip } from "./PreviewAnnotationBundleChip";
 
@@ -44,8 +46,9 @@ export function ComposerQueueList({
   const canSteer = useProviderAvailabilityStore((s) =>
     providerId.success && supportsTurnSteer(s.getAvailability(providerId.data)?.capabilities ?? []));
   const route = useSendNowRoute(threadId);
-  // A turn that ended without completing holds the queue until an explicit send.
-  const held = useQueueStore((s) => s.autoDrainSuppressedThreadIds.has(threadId));
+  const suppressed = useQueueStore((s) => s.autoDrainSuppressedThreadIds.has(threadId));
+  const endedUncompleted = useThreadStore((s) => endedWithoutCompleting(getThreadRuntimePhase(threadId, getThreadRecord(s.records, threadId))));
+  const held = suppressed || endedUncompleted;
   const idle = useThreadStore((s) => !s.runningThreadIds.has(threadId));
   if (queue.length === 0) return null;
 

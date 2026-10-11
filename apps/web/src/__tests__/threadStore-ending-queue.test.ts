@@ -1,9 +1,9 @@
-import type { AgentEvent } from "@mcode/contracts";
+import { createAgentModelState, type AgentEvent } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useQueueStore } from "@/stores/queueStore";
 import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
-import { useThreadStore } from "@/stores/threadStore";
+import { scheduleDrainAfterEdit, useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { createMockThread, mockTransport } from "./mocks/transport";
 
@@ -36,6 +36,14 @@ const ended = (outcome: "completed" | "cancelled" | "interrupted" | "errored", r
   outcome,
   reason,
 });
+
+/** A later drain request, such as cancelling a queued-message edit, must still send nothing. */
+async function expectQueueHeld(): Promise<void> {
+  scheduleDrainAfterEdit(THREAD_ID);
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(mockTransport.sendMessage).not.toHaveBeenCalled();
+  expect(queued()).toEqual(["first", "second"]);
+}
 
 describe("queued follow-ups after a turn ends", () => {
   beforeEach(() => {
@@ -79,9 +87,7 @@ describe("queued follow-ups after a turn ends", () => {
     useThreadStore.getState().handleAgentEvent(event);
     await vi.advanceTimersByTimeAsync(1_000);
 
-    expect(mockTransport.sendMessage).not.toHaveBeenCalled();
-    expect(queued()).toEqual(["first", "second"]);
-    expect(useQueueStore.getState().autoDrainSuppressedThreadIds.has(THREAD_ID)).toBe(true);
+    await expectQueueHeld();
   });
 
   it("holds the queue when a persisted Mcode stop settles the turn before any terminal event", async () => {
@@ -95,11 +101,26 @@ describe("queued follow-ups after a turn ends", () => {
       filesChanged: [],
     });
     useThreadStore.getState().handleAgentEvent(ended("cancelled", "approval_unanswerable"));
-    await vi.advanceTimersByTimeAsync(1_000);
 
-    expect(mockTransport.sendMessage).not.toHaveBeenCalled();
-    expect(queued()).toEqual(["first", "second"]);
-    expect(useQueueStore.getState().autoDrainSuppressedThreadIds.has(THREAD_ID)).toBe(true);
+    await expectQueueHeld();
+  });
+
+  it("holds the queue when canonical state settles a failed turn before any terminal event", async () => {
+    const state = createAgentModelState();
+    state.turns.t1 = {
+      id: "t1", threadId: THREAD_ID, status: "Errored", trigger: { kind: "user" }, permissionMode: "full",
+      approvalReviewMode: "manual", approvalReviewReason: "manual-requested", attemptOf: null, executionId: EXECUTION_ID,
+      providerIdentities: [], startedAt: "2026-10-11T12:00:00.000Z", providerStartedAt: "2026-10-11T12:00:00.000Z",
+      endedAt: "2026-10-11T12:00:05.000Z", createdAt: "2026-10-11T12:00:00.000Z", updatedAt: "2026-10-11T12:00:05.000Z",
+      ending: { outcome: "errored", failure: { kind: "fatal", provider: "codex", message: "boom" } },
+    };
+    useThreadStore.getState().applyCanonicalReconnectRecoveries([{
+      threadId: THREAD_ID, mode: "snapshot", snapshot: { state, revision: { conversationRevision: 1, rosterRevision: 0 } },
+    }]);
+    useThreadStore.getState().handleAgentEvent(ended("errored"));
+
+    expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(false);
+    await expectQueueHeld();
   });
 
   it("holds the queue when the provider is lost", async () => {
@@ -107,8 +128,7 @@ describe("queued follow-ups after a turn ends", () => {
     await vi.advanceTimersByTimeAsync(1_000);
 
     expect(useThreadStore.getState().records.get(THREAD_ID)?.runtimePhase).toBe("idle");
-    expect(mockTransport.sendMessage).not.toHaveBeenCalled();
-    expect(useQueueStore.getState().autoDrainSuppressedThreadIds.has(THREAD_ID)).toBe(true);
+    await expectQueueHeld();
   });
 
   it("drains the first follow-up after a completion", async () => {

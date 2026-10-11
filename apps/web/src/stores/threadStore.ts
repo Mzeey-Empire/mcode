@@ -116,7 +116,7 @@ import {
 } from "./thread-store/usage";
 export { mergeProviderUsageSnapshot } from "./thread-store/usage";
 
-import { getCanonicalRuntimePhase, getCanonicalRuntimeTurn, getThreadRuntimePhase, isThreadRuntimeActive, phaseForTurnStatus } from "./thread-lifecycle";
+import { endedWithoutCompleting, getCanonicalRuntimePhase, getCanonicalRuntimeTurn, getThreadRuntimePhase, isThreadRuntimeActive, phaseForTurnStatus } from "./thread-lifecycle";
 
 function activeCanonicalExecutionId(turn: AgentTurn | undefined): string | undefined {
   if (!turn || (turn.status !== "Pending" && turn.status !== "Running")) return undefined;
@@ -748,6 +748,8 @@ function canAutoDrainQueuedMessage(threadId: string): boolean {
     (thread) => thread.id === threadId && thread.deleted_at == null,
   );
   if (!threadExists || isThreadExecuting(threadId)) return false;
+  // Derived from the phase rather than set by each ending handler, so every path that settles a turn holds the queue.
+  if (endedWithoutCompleting(getThreadRuntimePhase(threadId, getThreadRecord(useThreadStore.getState().records, threadId)))) return false;
   const queueState = useQueueStore.getState();
   return !queueState.autoDrainSuppressedThreadIds.has(threadId)
     && queueState.editingThreadId !== threadId
@@ -2565,17 +2567,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     }));
   };
 
-  /** Only a completion drains the queue. Any other ending holds it until the user sends explicitly. */
-  const holdQueueAfterEnding = (threadId: string): void => {
-    clearDequeueTimer(threadId);
-    useQueueStore.getState().suppressAutoDrain(threadId);
-  };
-
   const cleanupTerminalRuntime = (
     threadId: string,
     phase: ThreadRecord["runtimePhase"],
   ): void => {
-    if (phase !== "completed") holdQueueAfterEnding(threadId);
     useApprovalStore.getState().clearThread(threadId);
     clearStreamingTextUsage(threadId);
     useTaskStore.getState().clearTaskBubbleIfAwaitingReplacement(threadId);
@@ -2583,7 +2578,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   const releaseProviderLostRuntime = (threadId: string): void => {
-    holdQueueAfterEnding(threadId);
+    // The phase goes idle with the ending still unknown, so hold the queue explicitly rather than drain on a guess.
+    clearDequeueTimer(threadId);
+    useQueueStore.getState().suppressAutoDrain(threadId);
     clearStreamingTextUsage(threadId);
     patchRec(threadId, {
       agentStartTime: undefined,
@@ -2773,7 +2770,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       rateLimit: undefined,
       apiRetry: undefined,
     }));
-    holdQueueAfterEnding(event.threadId);
     useWorkspaceStore.setState((workspace) => ({
       threads: workspace.threads.map((thread) => thread.id === event.threadId ? { ...thread, status: "errored" as const } : thread),
     }));
