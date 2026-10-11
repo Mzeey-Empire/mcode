@@ -184,9 +184,9 @@ vi.mock("../MessageBubble", () => ({
     </div>
   ),
 }));
-vi.mock("@/components/chat/TurnChangeSummary", () => ({
-  TurnChangeSummary: ({ filesChanged }: { filesChanged: string[] }) => (
-    <div data-testid="turn-change-summary">{filesChanged.join(",")}</div>
+vi.mock("@/features/conversation/turn/TurnChangesBar", () => ({
+  TurnChangesBar: ({ filesChanged }: { filesChanged: string[] }) => (
+    <div data-testid="turn-changes-bar">{filesChanged.join(",")}</div>
   ),
 }));
 vi.mock("@/components/chat/PermissionRequestCard", () => ({ PermissionRequestCard: () => null }));
@@ -1011,7 +1011,7 @@ describe("MessageList thread switch", () => {
 
     const { getByTestId, queryByText } = render(<MessageList displayThreadId="thread-B" />);
 
-    expect(getByTestId("turn-change-summary")).toHaveTextContent("child-only.ts");
+    expect(getByTestId("turn-changes-bar")).toHaveTextContent("child-only.ts");
     expect(queryByText("parent-only.ts")).toBeNull();
   });
 

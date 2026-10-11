@@ -27,6 +27,7 @@ import { parseDiffLines, isMarkdownFile } from "@/lib/diff-parser";
 import { parseFirstHunkLine } from "@/lib/parse-first-hunk-line";
 import { useShikiTheme } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
+import { joinPaths } from "@/lib/path";
 import { FileActionBar } from "./FileActionBar";
 import { DiffCommentEditor } from "./DiffCommentEditor";
 import { DiffPreview } from "./DiffPreview";
@@ -218,11 +219,6 @@ function statusOf(
   if (!loaded) return "loading";
   if (file.binary) return "binary";
   return (fileDiff?.hunks.length ?? 0) === 0 ? "empty" : undefined;
-}
-
-function joinPaths(base: string, rel: string): string {
-  const sep = base.includes("\\") && !base.includes("/") ? "\\" : "/";
-  return base.endsWith(sep) ? base + rel : base + sep + rel;
 }
 
 /** Props for the Review comparison diff surface. */
