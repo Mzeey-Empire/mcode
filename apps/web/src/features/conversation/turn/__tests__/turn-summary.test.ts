@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ToolCallRecord } from "@/transport/types";
+import type { ThoughtSegmentRecord, ToolCallRecord } from "@/transport/types";
 import { persistedTurnCounts, persistedTurnDurationMs } from "../turn-summary";
 
 function record(id: string, toolName: string): ToolCallRecord {
@@ -35,5 +35,13 @@ describe("persistedTurnDurationMs", () => {
     const nested = { ...record("nested", "Read"), parent_tool_call_id: "step", completed_at: "2026-08-18T12:09:30.000Z" };
 
     expect(persistedTurnDurationMs({ tools: [nested, step, agent, read], thoughts: [] })).toBe(5_000);
+  });
+
+  it("ends a turn whose only work launched a background call at that launch", () => {
+    const thought: ThoughtSegmentRecord = { id: "t", message_id: "answer", text: "", started_at: "2026-08-18T12:00:00.000Z", ended_at: null, sort_order: 0 };
+    const agent = { ...record("agent", "Agent"), background: true, started_at: "2026-08-18T12:00:03.000Z", completed_at: "2026-08-18T12:10:00.000Z" };
+
+    expect(persistedTurnDurationMs({ tools: [agent], thoughts: [] })).toBe(0);
+    expect(persistedTurnDurationMs({ tools: [agent], thoughts: [thought] })).toBe(3_000);
   });
 });

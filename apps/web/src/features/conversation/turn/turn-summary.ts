@@ -43,6 +43,8 @@ export function persistedTurnDurationMs(records: PersistedTurnRecords): number |
   ]);
   const ends = validTimestamps([
     ...records.tools.filter((tool) => !outlivesTurn.has(tool.id)).map((tool) => tool.completed_at),
+    // Launching a background call is work the turn did, so a turn whose only record is that call still has an end.
+    ...records.tools.filter((tool) => tool.background === true).map((tool) => tool.started_at),
     ...records.thoughts.map((thought) => thought.ended_at),
   ]);
   if (starts.length === 0 || ends.length === 0) return null;
