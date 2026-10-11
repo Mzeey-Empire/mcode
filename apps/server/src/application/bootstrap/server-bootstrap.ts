@@ -145,6 +145,7 @@ import { resolveWebAutomationFlag } from "../../runtime/startup/startup-policy.j
 import { listenWithPortRetry } from "../../runtime/http/http-listener.js";
 import { createReliabilityHarnessAdapter } from "../../runtime/reliability-harness/control.js";
 import { ApplicationDatabaseWriter } from "../../runtime/persistence/sqlite/application-database-writer.js";
+import { TurnSteerService } from "../../features/agents/steering/turn-steer-service.js";
 
 function createPlanService(writer: ApplicationDatabaseWriter, runtime: WorkerOwnedTurnRuntime,
   plans: PlanRepo, turns: PlanTurnService): PlanService {
@@ -453,20 +454,22 @@ settingsService.on("change", (next) => {
   }
 });
 
-/** CLI paths whose app-server has already been warmed this run. */
-const warmedCodexPaths = new Set<string>();
+/** CLI path most recently warmed, so unrelated settings changes do not probe again. */
+let warmedCodexPath: string | null = null;
 
 /**
- * Warms the Codex `--version` gate cache off the send path. No-op when the
- * provider is disabled; runs once per CLI path per app run.
+ * Warms the Codex `--version` gate cache off the send path, then republishes
+ * availability because the Codex `turn-steer` declaration follows that version.
+ * No-op when the provider is disabled or the CLI path has not changed.
  */
 function warmCodexVersionGate(s = settingsService.get()): void {
   if (!s.provider.enabled.codex) return;
   const cliPath = s.provider.cli.codex || "codex";
-  if (!warmedCodexPaths.has(cliPath)) {
-    warmedCodexPaths.add(cliPath);
-    void warmCodexProviderVersion(cliPath);
-  }
+  if (cliPath === warmedCodexPath) return;
+  warmedCodexPath = cliPath;
+  void warmCodexProviderVersion(cliPath).then(() => {
+    broadcast("providers.availability", providerAvailability.listAvailability());
+  });
 }
 
 const prDraftService = container.resolve(PrDraftService);
@@ -667,6 +670,17 @@ async function settleCommitRequests(): Promise<void> {
 }
 
 await settleCommitRequests();
+
+const turnSteers = container.resolve(TurnSteerService);
+
+/** No steer call survives a restart, so pending steers are held as uncertain before RPCs arrive. */
+async function reconcileSteers(): Promise<void> {
+  const { unknown, deleted } = await turnSteers.reconcileAtStartup();
+  if (unknown > 0) logger.info(`Held ${unknown} steers whose delivery is unknown`);
+  if (deleted > 0) logger.info(`Cleaned up ${deleted} settled steers`);
+}
+
+await reconcileSteers();
 container.resolve(AttachmentService).removeExpiredDraftImages();
 
 /** Starts workspace and worktree Git watchers, then repairs stale Git flags. */
@@ -787,6 +801,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   narrativeStore,
   canonicalSink,
   canonicalProgress: workerOwnedTurnRuntime.progress,
+  turnSteers,
   turnSnapshotRepo,
   sweepSnapshotPins,
   turnDiffs: container.resolve(TurnDiffService),

@@ -1,6 +1,7 @@
 // Models
 export * from "./models/thread-attention.js";
 export * from "./models/next-message-draft.js";
+export * from "./models/turn-steer.js";
 export * from "./models/task-list-tools.js";
 export {
   ThreadStatusSchema,
@@ -1484,6 +1485,9 @@ export type {
   ISessionEvictable,
   IProviderRegistry,
   TurnRequest,
+  TurnSteerInput,
+  TurnSteerOutcome,
+  ITurnSteerCapable,
   ProviderOptionsByProvider,
   CompletionOptions,
   ProviderFileMutationStart,
@@ -1513,6 +1517,7 @@ export type { ProviderModelInfo } from "./providers/models.js";
 export {
   isChildTurnCancellable,
   isTurnDiffSource,
+  isTurnSteerCapable,
   isApprovalReviewCapable,
   isCompletionCapable,
   isGoalCapable,

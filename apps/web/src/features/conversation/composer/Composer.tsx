@@ -502,7 +502,6 @@ export function Composer({
   const {
     queuedSend,
     queueIfGenerating,
-    resumeQueuedMessage,
     sendQueuedMessageNow,
     editing: editingFromQueue,
     loadIntoComposer,
@@ -705,7 +704,6 @@ export function Composer({
             onBranchModeExit,
             onComposerModeChange: setComposerMode,
             onLoadIntoComposer: loadIntoComposer,
-            onResumeQueuedMessage: resumeQueuedMessage,
             onSendQueuedMessageNow: sendQueuedMessageNow,
             onDragEnter: handleDragEnter,
             onDragLeave: handleDragLeave,

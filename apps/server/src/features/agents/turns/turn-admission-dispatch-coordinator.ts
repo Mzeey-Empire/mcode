@@ -28,6 +28,8 @@ import { AttachmentService } from "../../attachments/storage/attachment-service.
 import { FileService } from "../../projects/files/file-service.js";
 import { GitWorktreeService } from "../../projects/git/git-worktree-service.js";
 import { WorkspaceEnvironmentService } from "../../projects/index.js";
+import { WorkspaceEnvironmentServiceError } from "../../projects/environment/workspace-environment-errors.js";
+import { injectMentionFileContents, validateMessageMentions } from "./message-mentions.js";
 import type { WorkspaceEnvironmentQueuedTurnSubmission } from "../../projects/environment/workspace-environment-automatic-repository.js";
 import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import { ProviderAvailabilityService } from "../../providers/availability/provider-availability-service.js";
@@ -54,7 +56,6 @@ import { appendSelectedTextComments } from "./selected-text-comment-append.js";
 import { ApprovalReviewPolicy, type ApprovalReviewDecision } from "./approval-review-policy.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 
-const FILE_INJECTION_SEPARATOR = "\n\n---\n";
 
 /** Automatic setup dispatch contract exposed to the turn command facade. */
 export type { WorkspaceEnvironmentQueuedTurnSubmission };
@@ -593,13 +594,7 @@ export class TurnAdmissionDispatchCoordinator {
     mentions: readonly MessageMention[];
     providerId: ProviderId;
   }): MessageMention[] {
-    const sorted = [...input.mentions].sort((a, b) => a.range.start - b.range.start);
-    let previousEnd = 0;
-    for (const mention of sorted) {
-      this.validateMention(input, mention, previousEnd);
-      previousEnd = mention.range.end;
-    }
-    return sorted;
+    return validateMessageMentions(this.files, input, input.content, input.mentions);
   }
 
   private validateCommentMentions(command: SendMessageCommand, workspaceId: string, providerId: ProviderId): MessageMention[] {
@@ -614,27 +609,6 @@ export class TurnAdmissionDispatchCoordinator {
       content: comment.note,
       mentions: comment.mentions ?? [],
     }));
-  }
-
-  private validateMention(
-    input: { workspaceId: string; threadId: string; content: string; providerId: ProviderId },
-    mention: MessageMention,
-    previousEnd: number,
-  ): void {
-    const display = mention.kind === "command" ? `/${mention.label}` : `@${mention.label}`;
-    if (mention.range.end > input.content.length || input.content.slice(mention.range.start, mention.range.end) !== display) {
-      throw new Error(`Invalid mention range for ${display}`);
-    }
-    if (mention.range.start < previousEnd) throw new Error("Mention ranges must not overlap");
-    if (mention.kind === "file") return this.validateFileMention(input, mention.path);
-    if (mention.kind !== "command" && input.providerId !== "codex") {
-      throw new Error("Provider mentions are only supported by Codex");
-    }
-  }
-
-  private validateFileMention(input: { workspaceId: string; threadId: string }, path: string): void {
-    if (!this.files) throw new Error("File mention validation is unavailable");
-    this.files.validateMentionPath(input.workspaceId, path, input.threadId);
   }
 
   private async admitAutomaticSetup(
@@ -659,6 +633,12 @@ export class TurnAdmissionDispatchCoordinator {
           ? attachments?.stored ?? null
           : null,
       };
+    }
+    if (command.resendOfSteerId) {
+      // A resend is claimed in the transaction that starts its turn. Queued behind Setup it would
+      // dispatch later without that claim, so the held steer would never close; it waits client-side instead.
+      throw new WorkspaceEnvironmentServiceError("WORKSPACE_ENVIRONMENT_SETUP_UNAVAILABLE",
+        "Send again can run once Project Setup finishes.");
     }
     const attachments = await this.persistCommandAttachments(command);
     try {
@@ -872,6 +852,7 @@ export class TurnAdmissionDispatchCoordinator {
       approvalReviewReason: review.reason,
       providerIdentities: this.resumeIdentities(prepared),
       retryOfExecutionId: command.retryOfExecutionId,
+      ...(command.resendOfSteerId ? { resendOfSteerId: command.resendOfSteerId } : {}),
       userMessage,
       reopenThread: prepared.thread.user_completed_at !== null,
       answeredPlanQuestionMessageId: command.markPlanAnswerForMessageId,
@@ -996,19 +977,9 @@ export class TurnAdmissionDispatchCoordinator {
     return `<reply-to role="${target.role}" sequence="${target.sequence}">\n${escapeXml(body)}${suffix}\n</reply-to>\n\n${payload}`;
   }
 
-  private async injectMentionFileContents(prepared: PreparedCommand, text: string): Promise<string> {
-    const paths = new Set<string>();
-    const files: Array<{ path: string; content: string }> = [];
-    for (const mention of [...prepared.mentions, ...prepared.commentMentions]) {
-      if (mention.kind !== "file" || paths.has(mention.path)) continue;
-      if (!this.files) throw new Error("File mention injection is unavailable");
-      paths.add(mention.path);
-      this.files.validateMentionPath(prepared.workspace.id, mention.path, prepared.command.threadId);
-      const result = await this.files.read(prepared.workspace.id, mention.path, prepared.command.threadId, "text");
-      if (result.kind !== "text") continue;
-      files.push({ path: mention.path, content: result.content });
-    }
-    return buildInjectedFileMessage(text, files);
+  private injectMentionFileContents(prepared: PreparedCommand, text: string): Promise<string> {
+    return injectMentionFileContents(this.files, { workspaceId: prepared.workspace.id, threadId: prepared.command.threadId },
+      [...prepared.mentions, ...prepared.commentMentions], text);
   }
 
   private async buildTurnRequest(
@@ -1161,12 +1132,3 @@ function escapeXml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function buildInjectedFileMessage(text: string, files: readonly { path: string; content: string }[]): string {
-  if (files.length === 0) return text;
-  const blocks = files.map((file) => {
-    const content = file.content.replace(/<\/file>/gi, "<\\/file>");
-    const path = file.path.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-    return `<file path="${path}">\n${content}\n</file>`;
-  }).join("\n");
-  return `${text}${FILE_INJECTION_SEPARATOR}${blocks}`;
-}

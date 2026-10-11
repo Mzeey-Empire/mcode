@@ -353,18 +353,19 @@ describe("Workspace Behavior", () => {
     })).toBe(true);
   });
 
-  it("does not dispatch from a Continue callback captured before workspace teardown", async () => {
+  it("does not dispatch from a Send now callback captured before workspace teardown", async () => {
     const ws = createMockWorkspace({ id: "workspace-stale-continue" });
     const thread = createMockThread({ id: "thread-stale-continue", workspace_id: ws.id });
     useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id, threads: [thread], activeThreadId: thread.id });
     claimQueuedMessage(thread.id, "browser-capture-spill/stale-continue.json");
     useQueueStore.getState().settleQueuedDispatch(thread.id, useQueueStore.getState().inFlightQueuedMessages[thread.id]!.message.id, false);
+    const queued = useQueueStore.getState().queues[thread.id]![0]!;
     const { result } = renderHook(() => useQueuedMessageDispatch(thread.id));
-    const staleContinue = result.current.resumeNext;
+    const staleSendNow = result.current.sendNow;
 
     await useWorkspaceStore.getState().deleteWorkspace(ws.id);
     await act(async () => {
-      await staleContinue();
+      await staleSendNow(queued);
     });
 
     expect(mockTransport.sendMessage).not.toHaveBeenCalled();

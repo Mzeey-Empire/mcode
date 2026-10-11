@@ -94,6 +94,8 @@ describe("Provider factories", () => {
         { name: "child-cancellation", support: "supported" },
         { name: "turn-diff", support: "supported" },
         { name: "approval-review", support: "supported" },
+        // No CLI version is cached yet, and steering needs one.
+        { name: "turn-steer", support: "unsupported" },
       ]);
       expect(provider.descriptor.capabilities).not.toContainEqual(
         { name: "provider-continuation", support: "supported" },

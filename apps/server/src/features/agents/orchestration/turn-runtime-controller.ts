@@ -8,7 +8,7 @@
 import * as NodeCrypto from "node:crypto";
 import { injectable, inject, delay } from "tsyringe";
 import { logger } from "@mcode/shared";
-import { AgentEventType, ProviderRuntimeEventSchema, isSessionEvictable } from "@mcode/contracts";
+import { AgentEventType, ProviderRuntimeEventSchema, isSessionEvictable, isTurnSteerCapable } from "@mcode/contracts";
 import type { ClaudeCanonicalEventRouting, ClaudeProviderBoundary, CodexProviderBoundary, CopilotProviderBoundary, ProviderTurnOpening } from "@mcode/providers";
 import { ProviderTurnError } from "@mcode/providers";
 import type {
@@ -90,6 +90,7 @@ import {
   terminalSourceEnding,
 } from "./agent-service-helpers.js";
 import type { TurnRuntimeEventControl } from "./turn-runtime-event-control.js";
+import { TurnSteerRuntimePort, type SteerableTurn } from "../steering/turn-steer-runtime-port.js";
 
 /**
  * Bounded wait for `provider.stopSession` before the turn is force-finalized.
@@ -259,6 +260,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     @inject(delay(() => ProviderTurnEventApplication))
     private readonly eventApplication: ProviderTurnEventApplication,
     @inject(TurnDiffService) turnDiffs: TurnDiffService,
+    @inject(TurnSteerRuntimePort) steering: TurnSteerRuntimePort,
     @inject("WorkerOwnedTurnRuntime", { isOptional: true })
     private readonly workerRuntime?: WorkerOwnedTurnRuntime,
     @inject("ExecutionFileEvidenceCoordinator", { isOptional: true })
@@ -289,10 +291,39 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     });
     continuation.bind((executionId) => eventApplication.continueWithoutSaving(executionId));
     reliability.bind((threadId) => eventApplication.streamReliabilityAssistantText(threadId));
+    steering.bind({
+      runningTurn: (threadId) => this.steerableTurn(threadId),
+      recordDelivered: (message) => {
+        const progress = this.workerRuntime?.progress;
+        if (!progress) return Promise.reject(new Error("Steered messages need the worker-owned turn runtime"));
+        return progress.acceptSteeredUserMessage(message);
+      },
+    });
     workerRuntime?.providerEvents.bindCommandPreparation((execution, batch) => this.prepareWorkerEvent(execution, batch));
     workerRuntime?.providerEvents.bindCommitted((execution, result) => this.applyWorkerReceipt(execution, result));
     workerRuntime?.bindRecovered((execution) => this.handleWorkerRecovery(execution));
     this.eventPublication.registerPipelineStart(() => this.initializeProviderEvents());
+  }
+
+  /** The running worker turn a steer may join. A stopping or finishing turn takes no new messages. */
+  private steerableTurn(threadId: string): SteerableTurn | null {
+    const owned = this.workerTurns.get(threadId);
+    if (!owned || !this.acceptsNewInput(threadId, owned)) return null;
+    const provider = owned.provider;
+    const turn = { sessionId: owned.prepared.request.sessionId, threadId, turnExecutionId: owned.execution.executionId };
+    return {
+      turnExecutionId: turn.turnExecutionId,
+      workspaceId: owned.prepared.request.workspaceId,
+      providerId: provider.id,
+      steer: isTurnSteerCapable(provider) ? (input) => provider.steerTurn({ ...turn, ...input }) : null,
+    };
+  }
+
+  private acceptsNewInput(threadId: string, owned: WorkerOwnedTurn): boolean {
+    const snapshot = this.turnRuntime.snapshot(threadId);
+    if (snapshot?.phase !== "running" || snapshot.turnExecutionId !== owned.execution.executionId) return false;
+    if (owned.terminalCommitted || owned.stopRequested || owned.stopInProgress) return false;
+    return this.mutationReservations.get(threadId)?.state !== "stopping";
   }
 
   /** Initialize file tracking once for the active turn, including provider-originated resumes. */

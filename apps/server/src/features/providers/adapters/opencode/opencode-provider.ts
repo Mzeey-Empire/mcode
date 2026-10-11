@@ -278,7 +278,10 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   readonly subagentReporting = SUBAGENT_REPORTING.opencode;
   readonly descriptor = Object.freeze({
     id: "opencode" as const,
-    capabilities: OPENCODE_SUPPORTED_CAPABILITIES.map((name) => ({ name, support: "supported" as const })),
+    capabilities: [
+      ...OPENCODE_SUPPORTED_CAPABILITIES.map((name) => ({ name, support: "supported" as const })),
+      { name: "turn-steer" as const, support: "unsupported" as const },
+    ],
   });
   readonly supportsCompletion = false;
   readonly sessionForkOnResume = "unsupported" as const;

@@ -579,6 +579,10 @@ export function createWsTransport(
           .then((attention) => threadAttentionStore.getState().hydrate(attention, observedAttention));
       })
         .catch((error: unknown) => console.warn("[thread-attention] hydration failed", error));
+      // A steer sent before the drop may have no answer yet, and another window may hold steers.
+      void import("@/features/conversation/composer/queue/queued-steer")
+        .then(({ restoreQueuedSteers }) => restoreQueuedSteers())
+        .catch((error: unknown) => console.warn("[queued-steer] restore failed", error));
 
       // Expose a sentinel in dev/test builds so Playwright can synchronize on
       // hydration completion before injecting agent events. Without this, tests
@@ -1174,6 +1178,10 @@ export function createWsTransport(
         ...guardrails,
       }, { timeoutMs: SEND_MESSAGE_TIMEOUT_MS });
     },
+    steerTurn: (params) => rpc<import("@mcode/contracts").TurnSteerResult>("agent.steer", params),
+    listHeldSteers: () => rpc<import("@mcode/contracts").ListHeldSteersResult>("agent.listHeldSteers", {}),
+    settleUnknownSteer: (params) =>
+      rpc<import("@mcode/contracts").SettleUnknownSteerResult>("agent.settleUnknownSteer", params),
     getRecoveryIncident: () =>
       rpc<import("@mcode/contracts").RecoveryIncident | null>("agent.recoveryIncident", {}),
     retryTurn: (executionId) => rpc<void>("agent.retry", { executionId }),

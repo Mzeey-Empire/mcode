@@ -191,6 +191,15 @@ export interface TurnStartResult {
   /** Nested turn object (canonical per OpenAI app-server docs). */
   turn?: { id: string; [key: string]: unknown };
 }
+/** Parameters for the `turn/steer` RPC method. Codex refuses it unless `expectedTurnId` is the active turn. */
+export interface TurnSteerParams {
+  threadId: string;
+  expectedTurnId: string;
+  clientUserMessageId: string;
+  input: TurnInputPart[];
+}
+/** Result returned by the `turn/steer` RPC method. */
+export interface TurnSteerResult { turnId: string }
 /** Parameters for the `turn/interrupt` RPC method. */
 export interface TurnInterruptParams { threadId: string; turnId: string }
 /** Result returned by the `turn/interrupt` RPC method. */

@@ -54,6 +54,8 @@ import type {
   ApprovalRequestEnvelope,
   ApprovalRequestBody,
   CompletionOptions,
+  TurnSteerInput,
+  TurnSteerOutcome,
 } from "@mcode/contracts";
 import { buildReasoningOptions } from "./build-reasoning-options.js";
 import { listClaudeModels } from "./list-models.js";
@@ -152,6 +154,8 @@ interface ClaudeSessionState {
   spawnRouting: ClaudeCanonicalEventRouting;
   executionRouting: ClaudeCanonicalEventRouting;
   pushMessage: (msg: SDKUserMessage, turnExecutionId?: string) => void;
+  /** Queue a message that joins the running turn; see {@link QueuedRead}. */
+  pushAndAwaitRead: (msg: SDKUserMessage) => QueuedRead;
   closeQueue: () => void;
   model: string;
   /**
@@ -202,6 +206,13 @@ interface ClaudeSessionState {
   browserPermissionCapability: "observe" | "interact" | "privileged";
 }
 
+/** A message on the prompt queue: `read` resolves once the SDK takes it. */
+export interface QueuedRead {
+  readonly read: Promise<void>;
+  /** Takes the message back off the queue. False when the SDK already read it. */
+  readonly withdraw: () => boolean;
+}
+
 /**
  * Create an async iterable prompt queue backed by a simple push/pull bridge.
  * Messages pushed via `push()` are yielded by the iterable. Calling `close()`
@@ -209,18 +220,18 @@ interface ClaudeSessionState {
  */
 export function createPromptQueue(): {
   push: (msg: SDKUserMessage, turnExecutionId?: string) => void;
+  pushAndAwaitRead: (msg: SDKUserMessage) => QueuedRead;
   close: () => void;
   setOnPromptConsumed: (handler: (turnExecutionId?: string) => void) => void;
   iterable: AsyncIterable<SDKUserMessage>;
 } {
-  const pending: Array<{ message: SDKUserMessage; turnExecutionId?: string }> =
+  const pending: Array<{ message: SDKUserMessage; turnExecutionId?: string; onRead?: () => void }> =
     [];
   let waiting: ((result: IteratorResult<SDKUserMessage>) => void) | null = null;
   let done = false;
   let onPromptConsumed: ((turnExecutionId?: string) => void) | undefined;
 
-  const push = (msg: SDKUserMessage, turnExecutionId?: string): void => {
-    const queued = { message: msg, turnExecutionId };
+  const enqueue = (queued: { message: SDKUserMessage; turnExecutionId?: string; onRead?: () => void }): void => {
     if (done) {
       throw new Error(
         "Prompt queue is closed; message cannot be delivered to the SDK",
@@ -230,6 +241,7 @@ export function createPromptQueue(): {
       const resolve = waiting;
       waiting = null;
       onPromptConsumed?.(queued.turnExecutionId);
+      queued.onRead?.();
       resolve({ value: queued.message, done: false });
     } else {
       if (pending.length >= MAX_QUEUE_DEPTH) {
@@ -239,6 +251,23 @@ export function createPromptQueue(): {
       }
       pending.push(queued);
     }
+  };
+  const push = (msg: SDKUserMessage, turnExecutionId?: string): void => {
+    enqueue({ message: msg, turnExecutionId });
+  };
+  /** Throws when the message cannot be queued. */
+  const pushAndAwaitRead = (msg: SDKUserMessage): QueuedRead => {
+    let onRead!: () => void;
+    const read = new Promise<void>((resolve) => { onRead = resolve; });
+    const queued = { message: msg, onRead };
+    enqueue(queued);
+    const withdraw = (): boolean => {
+      const index = pending.indexOf(queued);
+      if (index < 0) return false;
+      pending.splice(index, 1);
+      return true;
+    };
+    return { read, withdraw };
   };
 
   const setOnPromptConsumed = (
@@ -266,6 +295,7 @@ export function createPromptQueue(): {
           if (pending.length > 0) {
             const queued = pending.shift()!;
             onPromptConsumed?.(queued.turnExecutionId);
+            queued.onRead?.();
             return Promise.resolve({
               value: queued.message,
               done: false,
@@ -285,7 +315,104 @@ export function createPromptQueue(): {
     },
   };
 
-  return { push, close, setOnPromptConsumed, iterable };
+  return { push, pushAndAwaitRead, close, setOnPromptConsumed, iterable };
+}
+
+const CLAUDE_STEER_TURN_GONE: TurnSteerOutcome = {
+  outcome: "rejected", reason: "turn_not_running", detail: "Claude is not running this turn.",
+};
+/** The SDK reads queued prompts as soon as they arrive, so a slow read means the query is stuck. */
+const CLAUDE_STEER_READ_TIMEOUT_MS = 10_000;
+/**
+ * Results after which the CLI still answers a read steer in the same query: the segment a
+ * `priority: "now"` message cut short, or one that completed before the CLI took the steer in.
+ */
+const CLAUDE_STEER_SEGMENT_END_REASONS: ReadonlySet<unknown> = new Set(["aborted_streaming", "aborted_tools", "completed"]);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type SdkMessageUuid = NonNullable<SDKUserMessage["uuid"]>;
+
+function isSdkMessageUuid(value: string): value is SdkMessageUuid {
+  return UUID_PATTERN.test(value);
+}
+
+/** Why the stream cannot take a steer for this execution now, or null when it can. */
+function claudeSteerRefusal(stream: ClaudeStreamLoopState, executionId: string): TurnSteerOutcome | null {
+  const startedHere = stream.currentTurnExecutionId === executionId;
+  if (stream.pendingPromptExecutionIds.includes(executionId) || (startedHere && stream.awaitingResume)) {
+    return { outcome: "rejected", reason: "provider", detail: "Claude has not started this turn yet." };
+  }
+  return !startedHere || stream.endedTurnExecutionId === executionId ? CLAUDE_STEER_TURN_GONE : null;
+}
+
+/** Resolves true when `promise` settles first, false when the timeout does. */
+async function settlesWithin(promise: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs); });
+  try {
+    return await Promise.race([promise.then(() => true as const), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const CLAUDE_STEER_UNCONFIRMED: TurnSteerOutcome = {
+  outcome: "unknown", detail: "Claude read the message but the turn ended before it answered.",
+};
+
+/** Settles every steer Claude never confirmed. Each was read, so it may still have reached the model. */
+function releaseUnconfirmedSteers(state: ClaudeStreamLoopState): void {
+  for (const settle of state.steersAwaitingTurn.values()) settle(false);
+  state.steersAwaitingTurn.clear();
+}
+
+/** Confirms the steers a frame says it answers. Older CLIs name only one, in `user_message_uuid`. */
+function confirmAnsweredSteers(state: ClaudeStreamLoopState, message: Record<string, unknown>): void {
+  const answered = Array.isArray(message.user_message_uuids) ? message.user_message_uuids : [message.user_message_uuid];
+  for (const uuid of answered) {
+    if (typeof uuid !== "string") continue;
+    state.steersAwaitingTurn.get(uuid)?.(true);
+    state.steersAwaitingTurn.delete(uuid);
+  }
+}
+
+/**
+ * Tracks steered messages through the stream and reports whether `message` is a result that ends
+ * an SDK turn but not the Mcode turn. While a read steer is still unanswered at a result, the CLI
+ * starts answering it right after, in the same query, so ending the Mcode turn there would orphan
+ * that answer.
+ */
+function absorbsSteeredSegmentEnd(state: ClaudeStreamLoopState, message: Record<string, unknown>): boolean {
+  if (state.steersAwaitingTurn.size === 0) return false;
+  confirmAnsweredSteers(state, message);
+  const absorbs = message.type === "result"
+    && CLAUDE_STEER_SEGMENT_END_REASONS.has(message.terminal_reason)
+    && state.steersAwaitingTurn.size > 0;
+  if (absorbs) state.absorbedSteeredSegmentEnd = true;
+  return absorbs;
+}
+
+/** Waits for Claude to read a queued steer, then for the frame that answers it or the turn's end. */
+async function awaitSteerAnswer(queued: QueuedRead, answered: Promise<boolean>): Promise<TurnSteerOutcome> {
+  // Taken back before the SDK read it, Claude never saw it. Left queued, a later read would
+  // deliver a message the user was told was refused or might resend.
+  if (!await settlesWithin(queued.read, CLAUDE_STEER_READ_TIMEOUT_MS) && queued.withdraw()) {
+    return { outcome: "rejected", reason: "provider", detail: "Claude did not read the message in time." };
+  }
+  // The turn's end bounds this wait, so a read steer cannot hold the call open past it.
+  return await answered ? { outcome: "accepted" } : CLAUDE_STEER_UNCONFIRMED;
+}
+
+/**
+ * True when Claude went idle after a result kept the turn open for a steer it never answered.
+ * Without this the Mcode turn would run until the user stopped it.
+ */
+function idlesWithUnansweredSteer(state: ClaudeStreamLoopState, message: Record<string, unknown>): boolean {
+  return state.absorbedSteeredSegmentEnd
+    && state.steersAwaitingTurn.size > 0
+    && message.type === "system"
+    && message.subtype === "session_state_changed"
+    && message.state === "idle";
 }
 
 /** Convert a plain string message into an SDKUserMessage. */
@@ -470,6 +597,10 @@ interface ClaudeStreamLoopState {
   providerTurnNotice?: string;
   /** Drops a declined self-started turn's output until its SDK result. */
   discardingProviderTurn: boolean;
+  /** Settles each steer Claude has not answered yet: true once a frame names it, false when the turn ends first. */
+  steersAwaitingTurn: Map<string, (answered: boolean) => void>;
+  /** A result was kept from ending the turn because a steer was still unanswered. */
+  absorbedSteeredSegmentEnd: boolean;
   mapper: ClaudeEventMapper;
 }
 
@@ -492,7 +623,7 @@ export class ClaudeProvider
   readonly id = "claude" as const;
   readonly subagentReporting = SUBAGENT_REPORTING.claude;
   readonly descriptor = Object.freeze({ id: "claude" as const, capabilities: [
-    ...(["build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "clean-fork", "orchestration", "browser-access", "thread-control"] as const).map((name) => ({ name, support: "supported" as const })),
+    ...(["build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "clean-fork", "orchestration", "browser-access", "thread-control", "turn-steer"] as const).map((name) => ({ name, support: "supported" as const })),
     { name: "provider-continuation" as const, support: "unsupported" as const },
     { name: "child-cancellation" as const, support: "unsupported" as const },
   ] });
@@ -516,6 +647,8 @@ export class ClaudeProvider
   /** Serializes every live event through the mandatory canonical sink. */
   private readonly canonicalEventPublisher: ClaudeCanonicalEventPublisher;
   private readonly streamTasks = new Set<Promise<void>>();
+  /** The loop state of each live SDK query, so a steer can check the turn the stream is on. */
+  private readonly streamStates = new WeakMap<Query, ClaudeStreamLoopState>();
   private shutdownTask: Promise<void> | undefined;
   private canonicalTurnDeliveryFailureHandler:
     | ((routing: ClaudeCanonicalEventRouting, error: Error) => void | Promise<void>)
@@ -1916,6 +2049,7 @@ export class ClaudeProvider
       spawnRouting: routing,
       executionRouting: routing,
       pushMessage: queue.push,
+      pushAndAwaitRead: queue.pushAndAwaitRead,
       closeQueue: queue.close,
       model: staged.resolvedModel,
       permissionMode: args.permissionMode,
@@ -2065,6 +2199,7 @@ export class ClaudeProvider
     isResuming: boolean,
   ): void {
     const state = this.createClaudeStreamState(sessionId, routing, isResuming);
+    this.streamStates.set(q, state);
     onConsumed((executionId) => {
       if (executionId && executionId !== state.currentTurnExecutionId)
         state.pendingPromptExecutionIds.push(executionId);
@@ -2097,6 +2232,8 @@ export class ClaudeProvider
       resumedTurnStarted: false,
       suppressEnded: false,
       discardingProviderTurn: false,
+      steersAwaitingTurn: new Map(),
+      absorbedSteeredSegmentEnd: false,
     };
     return Object.assign(state, { mapper: new ClaudeEventMapper(
       sessionId,
@@ -2177,6 +2314,14 @@ export class ClaudeProvider
       this.handleFailedClaudeResume(sessionId, state);
       return false;
     }
+    if (idlesWithUnansweredSteer(state, message)) {
+      await this.endClaudeTurn(sessionId, state);
+      return true;
+    }
+    if (absorbsSteeredSegmentEnd(state, message)) {
+      state.mapper.closeAbortedSegment(message);
+      return true;
+    }
     const outcome = await state.mapper.map(message);
     if (outcome !== "none") await this.endClaudeTurn(sessionId, state);
     return true;
@@ -2194,6 +2339,8 @@ export class ClaudeProvider
       turnExecutionId: state.currentTurnExecutionId,
     } satisfies AgentEvent);
     state.endedTurnExecutionId = state.currentTurnExecutionId;
+    releaseUnconfirmedSteers(state);
+    state.absorbedSteeredSegmentEnd = false;
     await this.waitForCanonicalExecution(state.currentRouting);
     state.awaitingResume = true;
     state.resumedTurnStarted = false;
@@ -2433,6 +2580,7 @@ export class ClaudeProvider
     state: ClaudeStreamLoopState,
   ): Promise<void> {
     this.recentStderr.delete(sessionId);
+    releaseUnconfirmedSteers(state);
     const suppressedQuery = this.suppressEndedQueries.delete(q);
     const current = this.runtime.get(sessionId);
     const superseded = this.isSupersededClaudeStream(current, q);
@@ -2826,6 +2974,34 @@ export class ClaudeProvider
         canClear: true,
       },
     };
+  }
+
+  /**
+   * Add a message to the running turn. `priority: "now"` makes Claude cut the current model
+   * stream or tool round short and answer the message inside the same SDK query; the cut-short
+   * segment's result is absorbed by {@link absorbsSteeredSegmentEnd} so the Mcode turn goes on.
+   * Accepted means Claude named the message in a frame it streamed, so the model is answering it.
+   * A read message the turn ends without answering is unknown: it may have reached the model.
+   */
+  async steerTurn(input: TurnSteerInput): Promise<TurnSteerOutcome> {
+    const session = this.runtime.get(input.sessionId);
+    const stream = session ? this.streamStates.get(session.query) : undefined;
+    if (!session || !stream) return CLAUDE_STEER_TURN_GONE;
+    const refusal = claudeSteerRefusal(stream, input.turnExecutionId);
+    if (refusal) return refusal;
+    const steerId = input.steerId;
+    if (!isSdkMessageUuid(steerId)) return { outcome: "rejected", reason: "provider", detail: "Steer id is not a UUID." };
+    const answered = new Promise<boolean>((settle) => stream.steersAwaitingTurn.set(steerId, settle));
+    let queued: QueuedRead;
+    try {
+      queued = session.pushAndAwaitRead({ ...toUserMessage(input.message, input.sessionId), priority: "now", uuid: steerId });
+    } catch (error) {
+      stream.steersAwaitingTurn.delete(steerId);
+      return { outcome: "rejected", reason: "provider", detail: error instanceof Error ? error.message : String(error) };
+    }
+    const outcome = await awaitSteerAnswer(queued, answered);
+    if (outcome.outcome === "rejected") stream.steersAwaitingTurn.delete(steerId);
+    return outcome;
   }
 
   /** Abort a running session, or record a pending stop if the session hasn't been created yet. */

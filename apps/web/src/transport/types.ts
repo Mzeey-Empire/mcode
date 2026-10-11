@@ -5,6 +5,11 @@ export type Message = import("@mcode/contracts").Message & { serverSequence?: nu
 import type {
   DiffStats,
   ProjectIcon,
+  TurnSteerParams,
+  TurnSteerResult,
+  ListHeldSteersResult,
+  SettleUnknownSteerParams,
+  SettleUnknownSteerResult,
   WorkspaceFileList,
   WorkspaceFileChanges,
   FileReadResult,
@@ -173,6 +178,11 @@ export type {
   PullRequestPatchResult,
   SendMessageInput,
   CreateAndSendInput,
+  TurnSteerParams,
+  TurnSteerResult,
+  ListHeldSteersResult,
+  SettleUnknownSteerParams,
+  SettleUnknownSteerResult,
 } from "@mcode/contracts";
 
 export type { PaginatedMessages, ConversationPage, ConversationTail, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord, TurnSnapshot } from "@mcode/contracts";
@@ -414,6 +424,12 @@ export interface McodeTransport {
 
   // Agent commands
   sendMessage(input: SendMessageInput): Promise<void>;
+  /** Add a message to the running turn. A replay with the same messageId never resends. */
+  steerTurn(params: TurnSteerParams): Promise<TurnSteerResult>;
+  /** Every steer the server holds because its delivery is unknown or its resend is queued. */
+  listHeldSteers(): Promise<ListHeldSteersResult>;
+  /** Send again or remove one held steer. */
+  settleUnknownSteer(params: SettleUnknownSteerParams): Promise<SettleUnknownSteerResult>;
   /** Read the current restart-scoped recovery incident. */
   getRecoveryIncident(): Promise<RecoveryIncident | null>;
   /** Retry one interrupted turn as a fresh provider execution. */

@@ -568,6 +568,13 @@
       "when": 1791688665558,
       "tag": "0079_light_human_robot",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "6",
+      "when": 1791691720040,
+      "tag": "0080_melted_gideon",
+      "breakpoints": true
     }
   ]
 }

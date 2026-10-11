@@ -11,9 +11,9 @@ import * as NodeReadline from "node:readline";
 import * as NodeEvents from "node:events";
 import * as NodePath from "node:path";
 import which from "which";
-import { resolveSubagentDisplayName } from "@mcode/contracts";
+import { resolveSubagentDisplayName, type TurnSteerOutcome } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
-import { CodexRpcClient } from "./codex-rpc-client.js";
+import { CodexRpcClient, CodexRpcResponseError } from "./codex-rpc-client.js";
 import { listCodexModels } from "./codex-models.js";
 import { codexIgnoredNotificationReason } from "./codex-notification-policy.js";
 import { parseCodexNotification } from "./codex-notification-validation.js";
@@ -33,6 +33,8 @@ import type {
   TurnStartResult,
   TurnInterruptParams,
   TurnInterruptResult,
+  TurnSteerParams,
+  TurnSteerResult,
   ThreadCompactStartParams,
   ThreadCompactStartResult,
   ThreadGoal,
@@ -480,6 +482,14 @@ const STDERR_TAIL_MAX_BYTES = 16 * 1024;
 const MAX_PROTOCOL_IDENTIFIER_LENGTH = 256;
 
 /** Bounds an untrusted protocol identifier before retaining it in diagnostics. */
+/** Codex's messages for a steer whose turn already ended or was replaced (`turn_processor.rs`). */
+const CODEX_STEER_TURN_GONE = [/^no active turn to steer/, /^expected active turn id /];
+
+function codexSteerRejection(message: string): TurnSteerOutcome {
+  const reason = CODEX_STEER_TURN_GONE.some((pattern) => pattern.test(message)) ? "turn_not_running" : "provider";
+  return { outcome: "rejected", reason, detail: message };
+}
+
 function boundProtocolIdentifier(value: string): string {
   let bounded = "";
   let length = 0;
@@ -1415,6 +1425,25 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
       { includeLayers: false, ...(cwd ? { cwd } : {}) },
       10000,
     );
+  }
+
+  /**
+   * Adds user input to the active main turn with `turn/steer`. Codex refuses it when
+   * `expectedTurnId` is no longer the active turn, so a steer can never start a new one.
+   */
+  async steerTurn(expectedTurnId: string, clientUserMessageId: string, input: TurnInputPart[]): Promise<TurnSteerOutcome> {
+    const threadId = this.threadId;
+    if (!threadId) return { outcome: "rejected", reason: "turn_not_running", detail: "No Codex thread is open." };
+    try {
+      await this.rpc.sendRequest<TurnSteerParams, TurnSteerResult>("turn/steer", {
+        threadId, expectedTurnId, clientUserMessageId, input,
+      });
+      return { outcome: "accepted" };
+    } catch (error) {
+      if (error instanceof CodexRpcResponseError) return codexSteerRejection(error.message);
+      // A timeout or lost connection may come after Codex took the input.
+      return { outcome: "unknown", detail: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   /**

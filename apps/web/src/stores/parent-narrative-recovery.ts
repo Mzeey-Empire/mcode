@@ -28,6 +28,24 @@ export function recoverParentNarrative(threadId: string, state: AgentModelState,
 }
 
 /**
+ * User messages the running parent turn took after its prompt (steers). The live timeline renders
+ * `record.messages`, which only the send path and the assistant response feed, so without this a
+ * steered message would show up only after a reload refetched the transcript.
+ */
+export function steeredUserMessages(threadId: string, state: AgentModelState, record: ThreadRecord): Message[] {
+  // An unloaded transcript is fetched whole later; a lone steer would render without its history.
+  if (record.messages.length === 0) return [];
+  const turn = recoverableTurn(threadId, state, record);
+  if (!turn) return [];
+  const shown = new Set(record.messages.map((message) => message.id));
+  return Object.values(state.items).flatMap((item) => {
+    if (item.turnId !== turn.id || item.payload.projection !== "message") return [];
+    const parsed = MessageSchema().safeParse(item.payload.message);
+    return parsed.success && parsed.data.role === "user" && !shown.has(parsed.data.id) ? [parsed.data] : [];
+  }).sort((left, right) => left.sequence - right.sequence);
+}
+
+/**
  * The next turn clears the ephemeral narrative, and only `narrativeByMessage` keeps a finished turn's fold.
  * Without this copy the fold and its decision receipts vanish until a reload refetches them.
  */

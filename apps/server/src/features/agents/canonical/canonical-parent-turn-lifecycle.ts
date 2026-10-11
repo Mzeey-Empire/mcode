@@ -23,7 +23,8 @@ import type {
   CanonicalAgentCheckpoint,
   CanonicalAgentCommitInput,
   CanonicalAgentCommitResult,
-  CanonicalAgentEventDraft,} from "./canonical-agent-boundary.js";
+  CanonicalAgentEventDraft,
+} from "./canonical-agent-boundary.js";
 
 /** Canonical alias for the parent-turn start durability input. */
 export type CanonicalParentTurnStartInput = ParentTurnStartInput;

@@ -110,6 +110,7 @@ import { isAttachmentRpcMethod, routeAttachmentRpc } from "../../features/attach
 import type { AttachmentService } from "../../features/attachments/storage/attachment-service.js";
 import { DraftImageMissingError } from "../../features/attachments/storage/draft-image-missing-error.js";
 import { SequenceAheadError } from "../../features/thread-control/attention/sequence-ahead-error.js";
+import { TurnSteerConflictError, TurnSteerMentionError, asTurnSteerError } from "../../features/agents/steering/turn-steer.js";
 import { isMemoryRpcMethod, routeMemoryRpc } from "../../runtime/memory/transport/memory-rpc.js";
 import { isGitRpcMethod, routeGitRpc } from "../../features/projects/git/transport/git-rpc.js";
 import { isSnapshotRpcMethod, routeSnapshotRpc } from "../../features/projects/diffs/transport/snapshot-rpc.js";
@@ -287,6 +288,8 @@ export interface RouterDeps {
   /** Canonical agent-model reader used during staged compatibility projection. */
   canonicalSink: CanonicalAgentBoundary;
   canonicalProgress?: import("../../features/agents/canonical/canonical-accepted-progress.js").CanonicalAcceptedProgress;
+  /** Durable Send now for running turns. */
+  turnSteers?: import("../../features/agents/steering/turn-steer-service.js").TurnSteerService;
   turnSnapshotRepo: TurnSnapshotRepo;
   /** Reconciles this store's snapshot pins with its rows after expired rows are deleted. */
   sweepSnapshotPins: () => Promise<void>;
@@ -472,7 +475,17 @@ function domainRouteError(id: string, error: unknown, message: string): WebSocke
     return { id, error: { code: error.code, message, data: { stagingId: error.stagingId } } };
   }
   if (error instanceof SequenceAheadError) return { id, error: { code: error.code, message } };
-  return null;
+  return steerRouteError(id, error, message);
+}
+
+function steerRouteError(id: string, error: unknown, message: string): WebSocketResponse | null {
+  if (error instanceof TurnSteerConflictError || error instanceof TurnSteerMentionError) {
+    return { id, error: { code: error.code, message } };
+  }
+  const steer = asTurnSteerError(error);
+  if (!steer) return null;
+  return { id, error: { code: steer.code, message,
+    ...(steer.code === "steer_rejected" ? { data: { detail: steer.detail ?? "" } } : {}) } };
 }
 
 function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResponse {

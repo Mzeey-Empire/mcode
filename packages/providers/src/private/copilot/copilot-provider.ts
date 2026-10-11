@@ -39,7 +39,10 @@ interface CopilotSessionState {
 export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentProvider, ISessionEvictable, ProtocolAdapter<CopilotSessionState> {
   readonly id = "copilot" as const;
   readonly subagentReporting = SUBAGENT_REPORTING.copilot;
-  readonly descriptor = Object.freeze({ id: this.id, capabilities: (["build", "plan", "completion", "permissions", "usage", "session-eviction", "clean-fork", "browser-access", "thread-control"] as const).map((name) => ({ name, support: "supported" as const })) });
+  readonly descriptor = Object.freeze({ id: this.id, capabilities: [
+    ...(["build", "plan", "completion", "permissions", "usage", "session-eviction", "clean-fork", "browser-access", "thread-control"] as const).map((name) => ({ name, support: "supported" as const })),
+    { name: "turn-steer" as const, support: "unsupported" as const },
+  ] });
   readonly supportsCompletion = true;
   readonly sessionForkOnResume = "clean" as const;
   readonly maxInputCharactersPerTurn = 16_000;

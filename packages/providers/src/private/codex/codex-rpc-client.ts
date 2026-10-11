@@ -10,6 +10,17 @@ import * as NodeEvents from "node:events";
 import type * as NodeStream from "node:stream";
 import { logger } from "@mcode/shared";
 
+/**
+ * The app-server answered a request with a JSON-RPC error. Unlike a timeout or a lost
+ * connection, this proves the server received the request and refused it.
+ */
+export class CodexRpcResponseError extends Error {
+  constructor(message: string, readonly code?: number | string) {
+    super(message);
+    this.name = "CodexRpcResponseError";
+  }
+}
+
 /** Default timeout in milliseconds for RPC requests. */
 const DEFAULT_TIMEOUT_MS = 20_000;
 
@@ -246,9 +257,7 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
       entry.resolve(msg["result"]);
       return;
     }
-    const rpcError = new Error(error.message ?? "RPC error") as Error & { code?: number | string };
-    if (error.code !== undefined) rpcError.code = error.code;
-    entry.reject(rpcError);
+    entry.reject(new CodexRpcResponseError(error.message ?? "RPC error", error.code));
   }
 
   /** Rejects all pending requests with the given error and clears the map. */
