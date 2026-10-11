@@ -826,6 +826,16 @@ function resetTurnEphemeral(_rec: ThreadRecord): Partial<ThreadRecord> {
   };
 }
 
+/**
+ * A turn the client did not start, such as the reply Claude opens after a background task, never
+ * delivers turnStarted, so nothing else clears the settled turn's live rows. That turn's fold is
+ * already in `narrativeByMessage`; left here, its rows would render as the new turn's fold.
+ */
+function succeedingTurnReset(record: ThreadRecord, executionId: string | undefined): Partial<ThreadRecord> {
+  if (!executionId || record.turnExecutionId === null || record.turnExecutionId === executionId) return {};
+  return { toolCalls: [], thoughtSegments: [], hooks: [], approvals: [], turnExecutionId: executionId };
+}
+
 function shouldFlushCanonicalText(frame: CanonicalAgentProgressFrame, state: AgentModelState): boolean {
   return frame.phase === "recovery" || Object.values(state.turns).some((turn) =>
     turn.threadId === frame.threadId && turn.status !== "Pending" && turn.status !== "Running");
@@ -3262,6 +3272,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     let nextRecords = records;
     const patch: Partial<ThreadRecord> = {};
     if (record.runtimePhase !== phase) patch.runtimePhase = phase;
+    Object.assign(patch, succeedingTurnReset(record, turn?.executionId));
     // Stamp the execution identity on live claims so later reconciles and the
     // child lifecycle gate can keep correlating this turn to the record.
     const executionId = activeCanonicalExecutionId(turn);
@@ -3286,8 +3297,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (!turn || turn.status === "Pending" || turn.status === "Running") return {};
     const executionId = turn.executionId ?? record.turnExecutionId;
     if (!executionId) return {};
-    const streaming = appendTerminalMessages(record, { type: "ended", threadId, turnExecutionId: executionId, reason: "canonical-terminal" }, phaseForTurnStatus(turn.status), null);
-    return { ...streaming, turnExecutionId: executionId, ...recoverParentNarrative(threadId, record.canonicalAgent.state, { ...record, ...streaming }) };
+    const reset = succeedingTurnReset(record, executionId);
+    const current = { ...record, ...reset };
+    const streaming = appendTerminalMessages(current, { type: "ended", threadId, turnExecutionId: executionId, reason: "canonical-terminal" }, phaseForTurnStatus(turn.status), null);
+    return { ...reset, ...streaming, turnExecutionId: executionId, ...recoverParentNarrative(threadId, record.canonicalAgent.state, { ...current, ...streaming }) };
   };
 
   const canonicalProgressProjection = (frame: CanonicalAgentProgressFrame, record: ThreadRecord): Partial<ThreadRecord> => {
