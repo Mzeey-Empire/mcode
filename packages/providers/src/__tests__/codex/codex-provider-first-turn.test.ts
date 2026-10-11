@@ -19,8 +19,9 @@ const { checkCodexVersionMock, meetsMinVersionMock } = vi.hoisted(() => ({
 
 vi.mock("../../private/codex/codex-version.js", () => ({
   checkCodexVersion: checkCodexVersionMock,
-  meetsMinVersion: meetsMinVersionMock,
 }));
+
+vi.mock("../../version-policy.js", () => ({ meetsMinVersion: meetsMinVersionMock }));
 
 const { sendTurnMock, startCompactionMock, readConfigMock, appServers, startError, startGate } = vi.hoisted(() => ({
   sendTurnMock: vi.fn().mockResolvedValue("turn-test-id"),

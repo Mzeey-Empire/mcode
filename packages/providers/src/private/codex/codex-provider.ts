@@ -59,7 +59,8 @@ import {
   isGoalOpen,
   providerRuntimeEvent,
 } from "@mcode/contracts";
-import { checkCodexVersion, currentCodexVersion, meetsMinVersion } from "./codex-version.js";
+import { checkCodexVersion, currentCodexVersion } from "./codex-version.js";
+import { meetsMinVersion } from "../../version-policy.js";
 import { CodexAppServer, warmCodexAppServer } from "./codex-app-server.js";
 import type { CodexApprovalRequest } from "./codex-app-server.js";
 import { approvalChoice, approvalOutcome } from "../../approval-scope.js";

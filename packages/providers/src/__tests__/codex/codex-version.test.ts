@@ -5,39 +5,10 @@ vi.mock("node:child_process", () => ({
 }));
 
 import * as NodeChildProcess from "node:child_process";
-import { meetsMinVersion, checkCodexVersion, clearVersionCache } from "../../private/codex/codex-version.js";
+import { checkCodexVersion, clearVersionCache } from "../../private/codex/codex-version.js";
 
 const mockSpawnSync = vi.mocked(NodeChildProcess.spawnSync);
 
-describe("meetsMinVersion", () => {
-  it("returns true when version meets minimum", () => {
-    expect(meetsMinVersion("0.37.0", "0.37.0")).toBe(true);
-  });
-
-  it("returns false when version is below minimum", () => {
-    expect(meetsMinVersion("0.36.9", "0.37.0")).toBe(false);
-  });
-
-  it("returns true when major version is higher", () => {
-    expect(meetsMinVersion("1.0.0", "0.37.0")).toBe(true);
-  });
-
-  it("returns true for much higher minor version", () => {
-    expect(meetsMinVersion("0.118.0", "0.37.0")).toBe(true);
-  });
-
-  it("returns true for patch increment", () => {
-    expect(meetsMinVersion("0.37.1", "0.37.0")).toBe(true);
-  });
-
-  it("returns false for malformed version string", () => {
-    expect(meetsMinVersion("abc", "0.37.0")).toBe(false);
-  });
-
-  it("returns false for empty string", () => {
-    expect(meetsMinVersion("", "0.37.0")).toBe(false);
-  });
-});
 
 describe("checkCodexVersion error messages", () => {
   beforeEach(() => {
@@ -124,6 +95,19 @@ describe("checkCodexVersion error messages", () => {
       expect((result as { ok: false; error: string }).error).toContain("invalid characters");
     }
     expect(mockSpawnSync).not.toHaveBeenCalled();
+  });
+
+  it("preserves prerelease versions and invalidates the installed-version cache", () => {
+    mockSpawnSync.mockReturnValue({
+      status: 0, stdout: "codex-cli 1.0.0-beta.2", stderr: "", pid: 0, output: [], signal: null,
+    });
+    expect(checkCodexVersion("codex")).toEqual({ ok: true, version: "1.0.0-beta.2" });
+    mockSpawnSync.mockReturnValue({
+      status: 0, stdout: "codex-cli 1.0.0", stderr: "", pid: 0, output: [], signal: null,
+    });
+    expect(checkCodexVersion("codex")).toEqual({ ok: true, version: "1.0.0-beta.2" });
+    clearVersionCache();
+    expect(checkCodexVersion("codex")).toEqual({ ok: true, version: "1.0.0" });
   });
 
   it("returns error when CLI exits with non-zero status", () => {
