@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
 import { TurnRevertRecordSchema, TurnRevertResultSchema } from "@mcode/contracts";
@@ -36,11 +36,20 @@ export class TurnRevertStore {
   unfinished(): StoredRevert[] {
     return drizzle(this.db).select().from(turnReverts).where(inArray(turnReverts.state, ["prepared", "recovery_failed"])).all().map(decodeRevert);
   }
-  /** Committed, non-undone forward operations currently marking a snapshot. */
-  revertedPaths(snapshotId: string): string[] {
-    return [...new Set(drizzle(this.db).select().from(turnReverts).where(eq(turnReverts.state, "committed")).all().map(decodeRevert)
-      .filter((row) => row.kind !== "undo" && !row.undoneByRevertId && row.context.snapshotIds.includes(snapshotId))
-      .flatMap((row) => row.files.map((file) => file.path)))];
+  /** Load the thread's committed operations once for all snapshot markers. */
+  revertedPathsBySnapshot(threadId: string): Map<string, Set<string>> {
+    const paths = new Map<string, Set<string>>();
+    const rows = drizzle(this.db).select().from(turnReverts)
+      .where(and(eq(turnReverts.threadId, threadId), eq(turnReverts.state, "committed"))).all().map(decodeRevert);
+    for (const row of rows) {
+      if (row.kind === "undo" || row.undoneByRevertId) continue;
+      for (const snapshotId of row.context.snapshotIds) {
+        const reverted = paths.get(snapshotId) ?? new Set<string>();
+        for (const file of row.files) reverted.add(file.path);
+        paths.set(snapshotId, reverted);
+      }
+    }
+    return paths;
   }
   /** Reconstruct the recorded outcome without inspecting or writing the worktree. */
   outcome(row: StoredRevert) {

@@ -27,7 +27,7 @@ export interface SnapshotRouterDeps {
   workspaceService: Pick<WorkspaceService, "findById">;
   gitWorktrees: Pick<GitWorktreeService, "resolveWorkingDir">;
   sweepSnapshotPins: () => Promise<void>;
-  turnRevertStore?: Pick<TurnRevertStore, "revertedPaths">;
+  turnRevertStore?: Pick<TurnRevertStore, "revertedPathsBySnapshot">;
 }
 
 type SnapshotHandlerMap = {
@@ -38,9 +38,12 @@ const snapshotHandlers: SnapshotHandlerMap = {
   "snapshot.getDiff": (deps, params) => readSnapshotRangeDiff(deps, rangeForSnapshot(deps, params.snapshotId), params.filePath, params.maxLines),
   "snapshot.getDiffStats": (deps, params) => readSnapshotRangeStats(deps, rangeForSnapshot(deps, params.snapshotId)),
   "snapshot.cleanup": routeSnapshotCleanup,
-  "snapshot.listByThread": (deps, params) => deps.turnSnapshotRanges.listSnapshots(params.threadId).map((row) => ({ ...row,
-    reverted_paths: (deps.turnRevertStore?.revertedPaths(row.id) ?? []).filter((path) => attributedWorkspacePaths(row).includes(path)),
-  })),
+  "snapshot.listByThread": (deps, params) => {
+    const reverted = deps.turnRevertStore?.revertedPathsBySnapshot(params.threadId);
+    return deps.turnSnapshotRanges.listSnapshots(params.threadId).map((row) => ({ ...row,
+      reverted_paths: [...(reverted?.get(row.id) ?? [])].filter((path) => attributedWorkspacePaths(row).includes(path)),
+    }));
+  },
   "snapshot.getCumulativeDiff": (deps, params) => {
     const range = cumulativeRange(deps, params.threadId);
     return range.status === "ready" ? readSnapshotRangeDiff(deps, range, params.filePath, params.maxLines) : "";

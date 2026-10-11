@@ -63,6 +63,7 @@ describe("turn revert server operation", () => {
     const rows = await routeSnapshotRpc("snapshot.listByThread", { threadId: "thread" }, { ...f.snapshotRouterDeps, turnRevertStore: f.store });
     expect(rows).toEqual(expect.arrayContaining([expect.objectContaining({ id: one.id, reverted_paths: ["a.ts"] }), expect.objectContaining({ id: two.id, reverted_paths: [] }), expect.objectContaining({ id: three.id, reverted_paths: ["a.ts"] })]));
     committed(await service.undo({ threadId: "thread", revertId: result.revert.id, requestId: NodeCrypto.randomUUID() })); expect(f.read("a.ts")).toEqual(Buffer.from("hand\n"));
+    expect(f.store.revertedPathsBySnapshot("thread")).toEqual(new Map());
     await f.turn("four", () => f.write("a.ts", "four\n"));
     expect(await service.preview(req)).toMatchObject({ files: [{ state: "changed_later", changedBy: "later_turn" }] });
     await expect(service.preview({ ...req, messageId: one.messageId, scope: { ...scope, fromMessageId: three.messageId } })).rejects.toThrow(/after/);
