@@ -2127,13 +2127,20 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       isError: event.isError,
       isComplete: true,
       lastActivityAt: Date.now(),
-      ...(event.outputTruncated ? { outputTruncated: true } : {}),
-      ...(event.outputTotalBytes != null ? { outputTotalBytes: event.outputTotalBytes } : {}),
-      ...(event.outputArtifactPath ? { outputArtifactPath: event.outputArtifactPath } : {}),
+      ...toolResultOptionalFields(event),
       ...(durationMs != null ? { durationMs } : {}),
-      ...(event.exitCode !== undefined ? { exitCode: event.exitCode } : {}),
     };
   };
+
+  const toolResultOptionalFields = (
+    event: Extract<AgentEvent, { type: "toolResult" }>,
+  ): Partial<Pick<ToolCall, "isCancelled" | "outputTruncated" | "outputTotalBytes" | "outputArtifactPath" | "exitCode">> => ({
+    ...(event.cancelled ? { isCancelled: true } : {}),
+    ...(event.outputTruncated ? { outputTruncated: true } : {}),
+    ...(event.outputTotalBytes != null ? { outputTotalBytes: event.outputTotalBytes } : {}),
+    ...(event.outputArtifactPath ? { outputArtifactPath: event.outputArtifactPath } : {}),
+    ...(event.exitCode !== undefined ? { exitCode: event.exitCode } : {}),
+  });
 
   const completeMatchingToolCall = (
     toolCalls: ToolCall[],
@@ -2147,8 +2154,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     }
     let matched = false;
     return toolCalls.map((toolCall) => {
+      // A background call settles only from a result carrying its own id.
       const canMatch = !matched
         && !toolCall.isComplete
+        && !toolCall.background
         && !(toolCall.toolName === "Agent" && hasActiveToolChildren(toolCalls, toolCall.id));
       if (!canMatch) return toolCall;
       matched = true;
@@ -2164,10 +2173,58 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       normalizedEvent.output,
       normalizedEvent.isError,
     );
+    if (normalizedEvent.persistedMessageId) {
+      patchRec(normalizedEvent.threadId, (record) => settleLateToolResult(record, normalizedEvent));
+      return;
+    }
     const toolInput = toolResultInput(normalizedEvent.toolInput);
     patchRec(normalizedEvent.threadId, (record) => ({
       toolCalls: completeMatchingToolCall(record.toolCalls, normalizedEvent, toolInput),
     }));
+  };
+
+  /**
+   * A late result belongs to a background call from an earlier, finished turn. It updates only the
+   * row with its exact id, because the first-incomplete fallback would settle an unrelated live call.
+   */
+  const settleLateToolResult = (
+    record: ThreadRecord,
+    event: Extract<AgentEvent, { type: "toolResult" }>,
+  ): Partial<ThreadRecord> => {
+    const live = record.toolCalls.some((toolCall) => toolCall.id === event.toolCallId && !toolCall.isComplete);
+    return {
+      ...(live ? { toolCalls: record.toolCalls.map((toolCall) => toolCall.id === event.toolCallId
+        ? completedToolCall(toolCall, event, {})
+        : toolCall) } : {}),
+      ...settlePersistedTool(record, event),
+    };
+  };
+
+  const settlePersistedTool = (
+    record: ThreadRecord,
+    event: Extract<AgentEvent, { type: "toolResult" }>,
+  ): Partial<ThreadRecord> => {
+    const messageId = event.persistedMessageId;
+    const narrative = messageId ? record.narrativeByMessage[messageId] : undefined;
+    const held = narrative?.tools.find((tool) => tool.id === event.toolCallId);
+    // A redelivered result finds the call already settled; an unloaded message refetches the saved outcome.
+    if (!messageId || !narrative || held?.status !== "running") return {};
+    const status = event.cancelled ? "cancelled" : event.isError ? "failed" : "completed";
+    const settled: ToolCallRecord = { ...held, status, output_summary: event.output, completed_at: new Date().toISOString() };
+    return {
+      narrativeByMessage: {
+        ...record.narrativeByMessage,
+        [messageId]: { ...narrative, tools: narrative.tools.map((tool) => tool.id === held.id ? settled : tool) },
+      },
+    };
+  };
+
+  const handleToolBackgrounded = (event: Extract<AgentEvent, { type: "toolBackgrounded" }>): void => {
+    patchRec(event.threadId, (record) => record.toolCalls.some((toolCall) => toolCall.id === event.toolCallId)
+      ? { toolCalls: record.toolCalls.map((toolCall) => toolCall.id === event.toolCallId
+        ? { ...toolCall, background: true }
+        : toolCall) }
+      : {});
   };
 
   const normalizedTextDelta = (value: unknown): string => typeof value === "string" ? value : "";
@@ -2396,7 +2453,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   const completedToolCalls = (toolCalls: ToolCall[], phase: ThreadRecord["runtimePhase"]): ToolCall[] => {
-    return toolCalls.map((toolCall) => toolCall.isComplete ? toolCall : { ...toolCall, isComplete: true,
+    // A background call outlives its turn; its own late result settles it.
+    return toolCalls.map((toolCall) => toolCall.isComplete || toolCall.background ? toolCall : { ...toolCall, isComplete: true,
       isError: toolCall.isError || phase === "errored" || phase === "interrupted",
       ...(phase === "cancelled" ? { isCancelled: true } : {}),
     });
@@ -2806,6 +2864,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     generatedAttachment: ignoreAgentEvent,
     toolUse: handleToolUse,
     toolResult: handleToolResult,
+    toolBackgrounded: handleToolBackgrounded,
     turnComplete: handleTerminalEvent,
     error: handleErrorEvent,
     ended: handleTerminalEvent,

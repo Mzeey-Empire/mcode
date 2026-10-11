@@ -232,7 +232,8 @@ export function startPushListeners(): void {
         if (!calls || calls.length === 0) return state;
         let mutated = false;
         const next = calls.map((tc) => {
-          if (tc.isComplete) return tc;
+          // A background call outlives the thread's turn; its own late result settles it.
+          if (tc.isComplete || tc.background) return tc;
           mutated = true;
           return {
             ...tc,

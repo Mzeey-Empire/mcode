@@ -307,9 +307,10 @@ function addPersistedProviderAgentInput(
 function persistedToolCallOptionalFields(
   record: ToolCallRecord,
   durationMs: number | undefined,
-): Partial<Pick<ToolCall, "isCancelled" | "outputTruncated" | "outputTotalBytes" | "outputArtifactPath" | "durationMs" | "exitCode">> {
-  const fields: Partial<Pick<ToolCall, "isCancelled" | "outputTruncated" | "outputTotalBytes" | "outputArtifactPath" | "durationMs" | "exitCode">> = {};
+): Partial<Pick<ToolCall, "isCancelled" | "background" | "outputTruncated" | "outputTotalBytes" | "outputArtifactPath" | "durationMs" | "exitCode">> {
+  const fields: Partial<Pick<ToolCall, "isCancelled" | "background" | "outputTruncated" | "outputTotalBytes" | "outputArtifactPath" | "durationMs" | "exitCode">> = {};
   if (record.status === "cancelled") fields.isCancelled = true;
+  if (record.background === true) fields.background = true;
   if (record.output_truncated === 1) fields.outputTruncated = true;
   if (typeof record.output_total_bytes === "number") fields.outputTotalBytes = record.output_total_bytes;
   if (record.output_artifact_path) fields.outputArtifactPath = record.output_artifact_path;

@@ -28,6 +28,8 @@ import { buildVolatileItems } from "@/features/conversation/messages/virtual-ite
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 import { createMockWorkspace } from "@/__tests__/mocks/transport";
 import { useProjectIconStore } from "@/features/projects/icons/projectIconStore";
+import { resetThreadStoreForTests, getTestThreadToolCalls } from "@/stores/thread-store-test-utils";
+import { createEmptyThreadRecord } from "@/stores/thread-record";
 
 describe("workspace deletion Browser profiles", () => {
   const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -162,6 +164,34 @@ describe("ws-events thread.lifecycleChanged", () => {
     pushEmitter.emit("thread.deleted", { threadId: "thread-1" });
 
     expect(applyThreadDeleted).toHaveBeenCalledWith("thread-1");
+  });
+});
+
+describe("ws-events thread.status", () => {
+  afterEach(() => {
+    stopPushListeners();
+    resetThreadStoreForTests();
+  });
+
+  it("stops in-flight calls on interruption but leaves a background call for its late result", () => {
+    const running = { toolInput: {}, output: null, isError: false, isComplete: false };
+    resetThreadStoreForTests({
+      records: new Map([["thread-1", {
+        ...createEmptyThreadRecord(),
+        toolCalls: [
+          { ...running, id: "agent-bg", toolName: "Agent", background: true },
+          { ...running, id: "read-1", toolName: "Read" },
+        ],
+      }]]),
+    });
+    startPushListeners();
+
+    pushEmitter.emit("thread.status", { threadId: "thread-1", status: "interrupted" });
+
+    expect(getTestThreadToolCalls("thread-1")).toEqual([
+      expect.objectContaining({ id: "agent-bg", isComplete: false, output: null }),
+      expect.objectContaining({ id: "read-1", isComplete: true, isError: true, output: "Cancelled" }),
+    ]);
   });
 });
 

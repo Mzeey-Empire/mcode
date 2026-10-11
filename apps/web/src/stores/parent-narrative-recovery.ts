@@ -156,7 +156,8 @@ function recoveredNarrative(turn: AgentTurn, items: readonly ParentNarrativeReco
   const patch: Partial<ThreadRecord> = {
     toolCalls: tools.map((item) => {
       const tool = recordToToolCall(item.record);
-      return terminal ? { ...tool, isComplete: true } : tool;
+      // A background call outlives its terminal turn until its own late result settles it.
+      return terminal && !tool.background ? { ...tool, isComplete: true } : tool;
     }),
     thoughtSegments: thoughts.filter((item) => item.record.is_final_response !== 1).map(({ record }) => ({
       id: record.id, text: record.text, startedAt: Date.parse(record.started_at),
