@@ -8,7 +8,7 @@ import { usePreviewAnnotationStore } from "../state/previewAnnotationStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { SlashCommandPopup } from "@/components/chat/SlashCommandPopup";
+import { SlashCommandTray } from "@/components/chat/SlashCommandTray";
 import type { Command } from "@/components/chat/useSlashCommand";
 import { FileTagPopup } from "@/components/chat/FileTagPopup";
 import type { useDesignAnnotationEditor } from "./useDesignAnnotationEditor";
@@ -567,7 +567,7 @@ export function DesignLayer({
         </RenderValue>
         {/* Both autocomplete popups render outside the bubble div (fixed
             position) so they can escape its overflow-hidden container. */}
-        <SlashCommandPopup
+        <SlashCommandTray
           state={bubbleSlashState}
           selectedIndex={bubbleSlashSelectedIndex}
           anchorRect={bubbleSlashAnchorRect}

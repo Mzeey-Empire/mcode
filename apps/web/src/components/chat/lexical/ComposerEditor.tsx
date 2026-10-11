@@ -22,10 +22,12 @@ interface ComposerEditorProps {
   onMentionTrigger: (text: string, cursorPos: number) => void;
   onMentionDismiss: () => void;
   isMentionPopupOpen: boolean;
-  /** Called when / trigger is detected - drives slash command popup */
+  /** Called when / trigger is detected - drives slash command tray */
   onSlashTrigger: (value: string) => void;
   onSlashDismiss: () => void;
   isSlashPopupOpen: boolean;
+  /** Called when `/name` is closed by a space; return true to consume the typed command. */
+  onInlineSlashCommand?: (commandName: string) => boolean;
   /** Ref callback to expose the LexicalEditor instance */
   editorRef?: React.MutableRefObject<LexicalEditor | null>;
   /** Ref for the rendered editable element. */
@@ -106,6 +108,7 @@ export function ComposerEditor({
   onSlashTrigger,
   onSlashDismiss,
   isSlashPopupOpen,
+  onInlineSlashCommand,
   editorRef,
   contentEditableRef,
   autoFocus,
@@ -183,6 +186,7 @@ export function ComposerEditor({
           onTrigger={onSlashTrigger}
           onDismiss={onSlashDismiss}
           isPopupOpen={isSlashPopupOpen}
+          onInlineCommand={onInlineSlashCommand}
         />
         <KeyboardPlugin
           onSubmit={onSubmit}

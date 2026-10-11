@@ -13,6 +13,7 @@ import { providerUnavailableMessage, type ProviderUnavailableReason } from "@/co
 import { Notice } from "@/components/ui/notice";
 import { RetryBanner } from "@/components/chat/RetryBanner";
 import { type useSlashCommand } from "@/components/chat/useSlashCommand";
+import { SlashCommandTray } from "@/components/chat/SlashCommandTray";
 import { SpellcheckContextMenu } from "@/components/chat/SpellcheckContextMenu";
 import { useFileAutocomplete } from "@/components/chat/useFileAutocomplete";
 import { ComposerEditor } from "@/components/chat/lexical";
@@ -77,6 +78,7 @@ interface ComposerContentSurfaceProps {
     readonly filePopup: FilePopup;
     readonly filePopupAnchorRect: DOMRect | null;
     readonly slashCommand: SlashCommand;
+    readonly workspacePath?: string;
     readonly attachmentBundle?: ComponentProps<typeof PreviewAnnotationBundleChip>["bundle"];
     readonly annotationScopeId?: string;
     readonly diffComments: readonly DraftDiffComment[];
@@ -130,6 +132,8 @@ interface ComposerContentSurfaceProps {
     readonly onEditorChange: (text: string, mentions: MessageMention[]) => void;
     readonly onSubmit: () => void;
     readonly onPopupKeyDown: (key: string) => boolean;
+    readonly onInlineSlashCommand: NonNullable<ComposerEditorProps["onInlineSlashCommand"]>;
+    readonly onSlashSelect: ComponentProps<typeof SlashCommandTray>["onSelect"];
     readonly onMentionSelect: ComponentProps<typeof FileTagPopup>["onSelect"];
     readonly onPaste: ComponentProps<"div">["onPaste"];
     readonly onMarkRestoredPreviewAnnotationsCleared: () => void;
@@ -307,6 +311,7 @@ function ComposerEditorSurface({
         onSlashTrigger={model.slashCommand.onInputChange}
         onSlashDismiss={model.slashCommand.onDismiss}
         isSlashPopupOpen={model.slashCommand.isOpen}
+        onInlineSlashCommand={actions.onInlineSlashCommand}
         editorRef={model.editorRef}
         disabled={disabled}
         isPopupOpen={model.fileAutocomplete.isOpen || model.slashCommand.isOpen}
@@ -322,6 +327,15 @@ function ComposerEditorSurface({
         selectedIndex={model.filePopup.selectedIndex}
         anchorRect={model.filePopupAnchorRect}
         presentation="composer"
+      />
+      <SlashCommandTray
+        state={model.slashCommand.state}
+        selectedIndex={model.slashCommand.selectedIndex}
+        anchorRect={model.slashCommand.anchorRect}
+        workspacePath={model.workspacePath}
+        onSelect={actions.onSlashSelect}
+        onDismiss={model.slashCommand.onDismiss}
+        onRetry={model.slashCommand.onRetry}
       />
       <SpellcheckContextMenu editorRef={model.editorContainerRef} />
     </div>

@@ -27,7 +27,7 @@ export const BUBBLE_SURFACE_INSET = "var(--selected)";
 
 const ANNOTATION_BUBBLE_KEEP_OPEN_SELECTORS = [
   "[data-preview-design-keep-open]",
-  "[data-slash-popup]",
+  "[data-slash-tray]",
   "[data-file-popup]",
   "[data-file-item]",
 ] as const;

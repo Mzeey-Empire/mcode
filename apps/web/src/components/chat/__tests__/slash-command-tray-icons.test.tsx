@@ -1,7 +1,7 @@
-/** Tests for row presentation and icon correctness in SlashCommandPopup. */
+/** Tests for row presentation and icon correctness in SlashCommandTray. */
 import { render, screen, within } from "@testing-library/react";
 import { describe, it, expect, beforeAll } from "vitest";
-import { SlashCommandPopup } from "../SlashCommandPopup";
+import { SlashCommandTray } from "../SlashCommandTray";
 import type { Command } from "../useSlashCommand";
 
 beforeAll(() => {
@@ -46,7 +46,7 @@ const COMMANDS: Command[] = [
 
 function renderPopup() {
   return render(
-    <SlashCommandPopup
+    <SlashCommandTray
       state={{ kind: "ready", items: COMMANDS }}
       selectedIndex={0}
       anchorRect={makeAnchorRect()}
@@ -78,7 +78,7 @@ function renderDuplicateSkillPopup() {
   ];
 
   return render(
-    <SlashCommandPopup
+    <SlashCommandTray
       state={{ kind: "ready", items: commands }}
       selectedIndex={0}
       anchorRect={makeAnchorRect()}
@@ -112,7 +112,7 @@ function renderLongDuplicateSkillPopup() {
   ];
 
   return render(
-    <SlashCommandPopup
+    <SlashCommandTray
       state={{ kind: "ready", items: commands }}
       selectedIndex={1}
       anchorRect={makeAnchorRect()}
@@ -148,7 +148,7 @@ function renderReservedNameCapabilities() {
   );
 
   return render(
-    <SlashCommandPopup
+    <SlashCommandTray
       state={{ kind: "ready", items: commands }}
       selectedIndex={0}
       anchorRect={makeAnchorRect()}
@@ -159,7 +159,7 @@ function renderReservedNameCapabilities() {
   );
 }
 
-describe("SlashCommandPopup row presentation", () => {
+describe("SlashCommandTray row presentation", () => {
   it("labels only the local duplicate and gives identical copies distinct accessible names", () => {
     renderDuplicateSkillPopup();
 
@@ -207,7 +207,7 @@ describe("SlashCommandPopup row presentation", () => {
     ];
 
     render(
-      <SlashCommandPopup
+      <SlashCommandTray
         state={{ kind: "ready", items: commands }}
         selectedIndex={0}
         anchorRect={makeAnchorRect()}
@@ -251,7 +251,7 @@ describe("SlashCommandPopup row presentation", () => {
     ];
 
     render(
-      <SlashCommandPopup
+      <SlashCommandTray
         state={{ kind: "ready", items: commands }}
         selectedIndex={0}
         anchorRect={makeAnchorRect()}
@@ -339,7 +339,7 @@ describe("SlashCommandPopup row presentation", () => {
   });
 });
 
-describe("SlashCommandPopup capability icons", () => {
+describe("SlashCommandTray capability icons", () => {
   it("skills render a fixed neutral BadgeCheck icon", () => {
     renderPopup();
     const skillRow = screen.getByRole("option", { name: /my-skill/ });
