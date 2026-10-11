@@ -592,7 +592,7 @@ describe("mapCursorAcpSessionNotification", () => {
     });
   });
 
-  it("maps explore-style delegation to Agent ToolUse and forwards parentToolCallId", () => {
+  it("keeps an explore call as its own tool and forwards parentToolCallId", () => {
     const state = createCursorAcpTurnState();
     const events = mapCursorAcpSessionNotification(
       {
@@ -612,17 +612,43 @@ describe("mapCursorAcpSessionNotification", () => {
       threadId,
       state,
     );
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
-      type: AgentEventType.ToolUse,
-      toolCallId: "c-exp",
-      toolName: "Agent",
+    expect(events).toEqual([
+      {
+        type: AgentEventType.ToolUse,
+        threadId,
+        toolCallId: "c-exp",
+        toolName: "exploreWorkspaceToolCall",
+        toolInput: { goal: "sketch module layout" },
+        parentToolCallId: "parent-root",
+      },
+    ]);
+  });
+
+  it("keeps a browser call as its own tool", () => {
+    const state = createCursorAcpTurnState();
+    const events = mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "c-browser",
+          title: "Browser subagent",
+          rawInput: { browserNavigateToolCall: { args: { url: "http://localhost:3000" } } },
+          status: "in_progress",
+        },
+      },
       threadId,
-      parentToolCallId: "parent-root",
-    });
-    expect((events[0] as { toolInput: Record<string, unknown> }).toolInput.goal).toBe(
-      "sketch module layout",
+      state,
     );
+    expect(events).toEqual([
+      {
+        type: AgentEventType.ToolUse,
+        threadId,
+        toolCallId: "c-browser",
+        toolName: "browserNavigateToolCall",
+        toolInput: { url: "http://localhost:3000" },
+      },
+    ]);
   });
 
   it("maps deferred Grep with totalMatches into toolInput pattern summary", () => {

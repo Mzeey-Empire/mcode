@@ -79,9 +79,7 @@ export function isCursorTaskAcpTool(
     return true;
   }
   const t = (title ?? "").trim();
-  if (/^task:/i.test(t)) return true;
-  if (/subagent/i.test(t)) return true;
-  return false;
+  return /^task:/i.test(t);
 }
 
 function stringField(record: Record<string, unknown>, key: string): string | undefined {

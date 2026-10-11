@@ -39,6 +39,13 @@ describe("cursor-acp-task", () => {
     expect(isCursorTaskAcpTool({ _toolName: "updateTodos" }, "Update TODOs")).toBe(false);
   });
 
+  it("accepts only the task tool name or the Task: title prefix", () => {
+    expect(isCursorTaskAcpTool(undefined, "Task: Read the docs")).toBe(true);
+    expect(isCursorTaskAcpTool(undefined, "Run subagent checks")).toBe(false);
+    expect(isCursorTaskAcpTool(undefined, "Explore workspace")).toBe(false);
+    expect(isCursorTaskAcpTool({ _toolName: "browser" }, "Browser")).toBe(false);
+  });
+
   it("derives provisional description from Task tool_call title", () => {
     expect(taskDescriptionFromAcpTitle("Task: Subagent task")).toBe("Subagent task");
     expect(taskDescriptionFromAcpTitle("")).toBe("Subagent task");
@@ -90,12 +97,15 @@ describe("cursor-acp-task", () => {
       threadId,
       state,
     );
-    expect(started).toHaveLength(1);
-    expect(started[0]).toMatchObject({
-      type: AgentEventType.ToolUse,
-      toolName: "Agent",
-      toolCallId: CAPTURED_TASK_TOOL_CALL.toolCallId,
-    });
+    expect(started).toEqual([
+      {
+        type: AgentEventType.ToolUse,
+        threadId,
+        toolCallId: "tool_c1b1b251-a54e-421e-ae5f-44a2aa94abc",
+        toolName: "Agent",
+        toolInput: { description: "Subagent task", subagentProviderName: "Cursor" },
+      },
+    ]);
 
     const completed = mapCursorAcpSessionNotification(
       {
@@ -113,10 +123,30 @@ describe("cursor-acp-task", () => {
     expect(completed).toEqual([]);
 
     const fromExt = cursorTaskExtToAgentEvents(threadId, CAPTURED_TASK_EXT, state);
-    expect(fromExt).toHaveLength(2);
-    expect(fromExt[0].type).toBe(AgentEventType.ToolUse);
-    expect(fromExt[1].type).toBe(AgentEventType.ToolResult);
-    expect((fromExt[0] as { toolName: string }).toolName).toBe("Agent");
+    expect(fromExt).toEqual([
+      {
+        type: AgentEventType.ToolUse,
+        threadId,
+        toolCallId: "tool_c1b1b251-a54e-421e-ae5f-44a2aa94abc",
+        toolName: "Agent",
+        toolInput: {
+          description: "Read cursor-subagent-detection.ts",
+          prompt: "Read-only task. Find and read cursor-subagent-detection.ts.",
+          subagentProviderName: "Cursor",
+          model: "composer-2.5-fast",
+          agentId: "8efdb8f5-559f-4fcd-9d90-e36f22a47192",
+          subagentType: { custom: { unspecified: {} } },
+          durationMs: 7456,
+        },
+      },
+      {
+        type: AgentEventType.ToolResult,
+        threadId,
+        toolCallId: "tool_c1b1b251-a54e-421e-ae5f-44a2aa94abc",
+        output: "Read cursor-subagent-detection.ts",
+        isError: false,
+      },
+    ]);
   });
 
   it("preserves a failed Task completion until cursor/task metadata arrives", () => {

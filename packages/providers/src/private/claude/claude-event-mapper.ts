@@ -27,6 +27,14 @@ export interface ClaudeEventEvidence {
   nativeEventId?: string;
 }
 const MAX_TRACKED_TOOLS = 4_096;
+/**
+ * Error results the Claude CLI synthesizes when a user interrupt ends a running
+ * tool. They report a cancel, not a tool failure.
+ */
+const CLAUDE_USER_INTERRUPT_RESULTS: ReadonlySet<string> = new Set([
+  "[Request interrupted by user for tool use]",
+  "[Request interrupted by user]",
+]);
 // A warning reports usage while requests still succeed, so only a rejection is a block.
 const RATE_LIMIT_ACTIVE_BY_STATUS: ReadonlyMap<string, boolean> = new Map([["allowed", false], ["allowed_warning", false], ["rejected", true]]);
 
@@ -468,15 +476,19 @@ export class ClaudeEventMapper {
 
   private toolResult(message: Message): ClaudeMapOutcome {
     const toolCallId = stringValue(message.tool_use_id);
+    const output = toolResultText(message.content);
+    if (toolCallId)
+      this.callbacks.getSession()?.pendingToolUses.delete(toolCallId);
+    // A failed result would persist the call as failed. Leaving it running lets
+    // the cancelled turn settle it as cancelled, which the roster reads as stopped.
+    if (message.is_error === true && CLAUDE_USER_INTERRUPT_RESULTS.has(output)) return "none";
     this.emit({
       type: AgentEventType.ToolResult,
       threadId: this.threadId,
       toolCallId,
-      output: toolResultText(message.content),
+      output,
       isError: Boolean(message.is_error),
     });
-    if (toolCallId)
-      this.callbacks.getSession()?.pendingToolUses.delete(toolCallId);
     return "none";
   }
   private user(message: Message): ClaudeMapOutcome {

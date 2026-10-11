@@ -34,10 +34,7 @@ import {
   cursorTaskToolCallStartedToAgentEvents,
   isCursorTaskAcpTool,
 } from "./cursor-acp-task.js";
-import {
-  extractCursorParentToolCallId,
-  resolveCursorSubagentToolName,
-} from "../events/cursor-subagent-detection.js";
+import { extractCursorParentToolCallId } from "../events/cursor-subagent-detection.js";
 
 /** Maps ACP `kind` field to Mcode tool names. */
 const TOOL_NAME_BY_ACP_KIND: Record<string, string> = {
@@ -378,7 +375,7 @@ function initialAcpToolName(
 ): string {
   let toolName = resolveAcpToolName(update);
   if (discriminator) toolName = TOOL_NAME_BY_DISCRIMINATOR[discriminator] ?? discriminator;
-  return resolveCursorSubagentToolName(toolName, discriminator, update.title);
+  return toolName;
 }
 
 function normalizeInitialAcpToolInput(
@@ -527,10 +524,7 @@ function updatedAcpToolName(
   const discriminator = rawInput ? extractToolCallDiscriminator(rawInput).discriminator : null;
   let toolName = state.toolNameByCallId.get(update.toolCallId);
   if (!toolName) toolName = resolveAcpToolName(update);
-  return {
-    toolName: resolveCursorSubagentToolName(toolName, discriminator, update.title),
-    discriminator,
-  };
+  return { toolName, discriminator };
 }
 
 function deferredAcpToolUse(

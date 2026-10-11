@@ -292,7 +292,7 @@ describe("mapDevinAcpSessionNotification", () => {
     });
   });
 
-  it("tracks subagent_started/completed updates keyed by agentId", () => {
+  it("enriches and closes the run_subagent call instead of emitting a second Agent call", () => {
     const state = createDevinAcpTurnState();
     mapDevinAcpSessionNotification(
       notification(
@@ -334,27 +334,10 @@ describe("mapDevinAcpSessionNotification", () => {
           subagentType: "scout",
           is_background: false,
           agentId: "agent-1",
-          nativeThreadId: "agent-1",
         },
-      },
-      {
-        type: "toolUse",
-        threadId: THREAD,
-        toolCallId: "agent-1",
-        toolName: "Agent",
-        toolInput: {
-          task: "survey",
-          title: "Survey repo",
-          profile: "scout",
-          description: "survey",
-          subagentType: "scout",
-          is_background: false,
-          agentId: "agent-1",
-          nativeThreadId: "agent-1",
-        },
-        parentToolCallId: "tc-parent",
       },
     ]);
+    expect(state.accumulator.pendingToolCalls.has("tc-parent")).toBe(true);
 
     const completed = mapDevinAcpSessionNotification(
       notification({
@@ -371,15 +354,76 @@ describe("mapDevinAcpSessionNotification", () => {
       {
         type: "toolResult",
         threadId: THREAD,
-        toolCallId: "agent-1",
+        toolCallId: "tc-parent",
         output: "done",
         isError: false,
       },
     ]);
     expect(state.pendingSubagentCallIds).toEqual([]);
+    expect(state.accumulator.pendingToolCalls.size).toBe(0);
+
+    const markerResult = mapDevinAcpSessionNotification(
+      notification({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "tc-parent",
+        status: "completed",
+        rawOutput: "Subagent completed",
+      }),
+      THREAD,
+      state,
+    );
+    expect(markerResult).toEqual([]);
   });
 
-  it("attributes parallel subagent_started updates to their run_subagent calls in spawn order", () => {
+  it("keeps a background subagent running when run_subagent returns first", () => {
+    const state = createDevinAcpTurnState();
+    mapDevinAcpSessionNotification(
+      notification(
+        toolCall("tc-bg", {
+          kind: "other",
+          _meta: { "cognition.ai/inferenceToolName": "run_subagent" },
+        }),
+      ),
+      THREAD,
+      state,
+    );
+    mapDevinAcpSessionNotification(
+      notification({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "agent-bg",
+        _meta: { "cognition.ai/subagent_started": { task: "watch", isBackground: true } },
+      }),
+      THREAD,
+      state,
+    );
+    const markerResult = mapDevinAcpSessionNotification(
+      notification({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "tc-bg",
+        status: "completed",
+        rawOutput: "Started background subagent",
+      }),
+      THREAD,
+      state,
+    );
+    expect(markerResult).toEqual([]);
+    expect(state.accumulator.pendingToolCalls.has("tc-bg")).toBe(true);
+
+    const completed = mapDevinAcpSessionNotification(
+      notification({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "agent-bg",
+        _meta: { "cognition.ai/subagent_completed": { summary: "watched", success: true } },
+      }),
+      THREAD,
+      state,
+    );
+    expect(completed).toEqual([
+      { type: "toolResult", threadId: THREAD, toolCallId: "tc-bg", output: "watched", isError: false },
+    ]);
+  });
+
+  it("pairs parallel subagents with their run_subagent calls in spawn order", () => {
     const state = createDevinAcpTurnState();
     const runSubagent = (toolCallId: string) =>
       notification(
@@ -388,24 +432,103 @@ describe("mapDevinAcpSessionNotification", () => {
           _meta: { "cognition.ai/inferenceToolName": "run_subagent" },
         }),
       );
-    const subagentStarted = (agentId: string) =>
+    const subagentStarted = (agentId: string, task: string) =>
       notification({
         sessionUpdate: "tool_call_update",
         toolCallId: agentId,
         status: "in_progress",
-        _meta: { "cognition.ai/subagent_started": { task: "work", title: "Work" } },
+        _meta: { "cognition.ai/subagent_started": { task } },
+      });
+    const childOf = (toolCallId: string, agentId: string) =>
+      notification(
+        toolCall(toolCallId, {
+          kind: "read",
+          _meta: {
+            "cognition.ai/inferenceToolName": "read",
+            "cognition.ai/subagent_context": { parentAgentId: agentId },
+          },
+        }),
+      );
+    const subagentCompleted = (agentId: string, summary: string) =>
+      notification({
+        sessionUpdate: "tool_call_update",
+        toolCallId: agentId,
+        _meta: { "cognition.ai/subagent_completed": { summary, success: true } },
       });
 
     mapDevinAcpSessionNotification(runSubagent("call-a"), THREAD, state);
     mapDevinAcpSessionNotification(runSubagent("call-b"), THREAD, state);
+    const first = mapDevinAcpSessionNotification(subagentStarted("agent-1", "alpha"), THREAD, state);
+    const second = mapDevinAcpSessionNotification(subagentStarted("agent-2", "beta"), THREAD, state);
+    const childOfSecond = mapDevinAcpSessionNotification(childOf("read-b", "agent-2"), THREAD, state);
+    const secondDone = mapDevinAcpSessionNotification(subagentCompleted("agent-2", "beta done"), THREAD, state);
+    const firstDone = mapDevinAcpSessionNotification(subagentCompleted("agent-1", "alpha done"), THREAD, state);
 
-    const first = mapDevinAcpSessionNotification(subagentStarted("agent-1"), THREAD, state);
-    const second = mapDevinAcpSessionNotification(subagentStarted("agent-2"), THREAD, state);
+    expect(first).toEqual([
+      {
+        type: "toolUse",
+        threadId: THREAD,
+        toolCallId: "call-a",
+        toolName: "Agent",
+        toolInput: { task: "alpha", description: "alpha", is_background: false, agentId: "agent-1" },
+      },
+    ]);
+    expect(second).toEqual([
+      {
+        type: "toolUse",
+        threadId: THREAD,
+        toolCallId: "call-b",
+        toolName: "Agent",
+        toolInput: { task: "beta", description: "beta", is_background: false, agentId: "agent-2" },
+      },
+    ]);
+    expect(childOfSecond).toEqual([
+      {
+        type: "toolUse",
+        threadId: THREAD,
+        toolCallId: "read-b",
+        toolName: "Read",
+        toolInput: { path: "file.ts" },
+        parentToolCallId: "call-b",
+      },
+    ]);
+    expect(secondDone).toEqual([
+      { type: "toolResult", threadId: THREAD, toolCallId: "read-b", output: "", isError: false },
+      { type: "toolResult", threadId: THREAD, toolCallId: "call-b", output: "beta done", isError: false },
+    ]);
+    expect(firstDone).toEqual([
+      { type: "toolResult", threadId: THREAD, toolCallId: "call-a", output: "alpha done", isError: false },
+    ]);
+  });
 
-    expect(first[0]).toMatchObject({ toolCallId: "call-a", toolInput: { nativeThreadId: "agent-1" } });
-    expect(first[1]).toMatchObject({ toolCallId: "agent-1", parentToolCallId: "call-a" });
-    expect(second[0]).toMatchObject({ toolCallId: "call-b", toolInput: { nativeThreadId: "agent-2" } });
-    expect(second[1]).toMatchObject({ toolCallId: "agent-2", parentToolCallId: "call-b" });
+  it("uses the agentId as the call when no run_subagent marker is pending", () => {
+    const state = createDevinAcpTurnState();
+    const started = mapDevinAcpSessionNotification(
+      notification({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "agent-solo",
+        _meta: { "cognition.ai/subagent_started": { task: "solo", profile: "subagent_explore" } },
+      }),
+      THREAD,
+      state,
+    );
+    expect(started).toEqual([
+      {
+        type: "toolUse",
+        threadId: THREAD,
+        toolCallId: "agent-solo",
+        toolName: "Agent",
+        toolInput: {
+          task: "solo",
+          profile: "subagent_explore",
+          description: "solo",
+          subagentType: "subagent_explore",
+          is_background: false,
+          agentId: "agent-solo",
+        },
+      },
+    ]);
+    expect(state.accumulator.pendingToolCalls.has("agent-solo")).toBe(true);
   });
 
   it("copies task to description on run_subagent markers so narrative extractors find it", () => {
@@ -427,7 +550,7 @@ describe("mapDevinAcpSessionNotification", () => {
     });
   });
 
-  it("does not park a subagent_started that arrives after its subagent_completed", () => {
+  it("closes the run_subagent call when subagent_completed beats subagent_started", () => {
     const state = createDevinAcpTurnState();
     mapDevinAcpSessionNotification(
       notification(
@@ -439,7 +562,7 @@ describe("mapDevinAcpSessionNotification", () => {
       THREAD,
       state,
     );
-    mapDevinAcpSessionNotification(
+    const completed = mapDevinAcpSessionNotification(
       notification({
         sessionUpdate: "tool_call_update",
         toolCallId: "agent-1",
@@ -448,6 +571,7 @@ describe("mapDevinAcpSessionNotification", () => {
       THREAD,
       state,
     );
+    expect(completed).toEqual([]);
     const started = mapDevinAcpSessionNotification(
       notification({
         sessionUpdate: "tool_call_update",
@@ -457,10 +581,19 @@ describe("mapDevinAcpSessionNotification", () => {
       THREAD,
       state,
     );
-    expect(started[1]).toMatchObject({ type: "toolUse", toolCallId: "agent-1" });
-    expect(state.accumulator.pendingToolCalls.has("agent-1")).toBe(false);
+    expect(started).toEqual([
+      {
+        type: "toolUse",
+        threadId: THREAD,
+        toolCallId: "tc-parent",
+        toolName: "Agent",
+        toolInput: { task: "survey", description: "survey", is_background: false, agentId: "agent-1" },
+      },
+      { type: "toolResult", threadId: THREAD, toolCallId: "tc-parent", output: "done", isError: false },
+    ]);
+    expect(state.accumulator.pendingToolCalls.size).toBe(0);
 
-    mapDevinAcpSessionNotification(
+    const markerResult = mapDevinAcpSessionNotification(
       notification({
         sessionUpdate: "tool_call_update",
         toolCallId: "tc-parent",
@@ -470,6 +603,7 @@ describe("mapDevinAcpSessionNotification", () => {
       THREAD,
       state,
     );
+    expect(markerResult).toEqual([]);
     const late = mapDevinAcpSessionNotification(
       notification({
         sessionUpdate: "agent_message_chunk",
@@ -481,7 +615,7 @@ describe("mapDevinAcpSessionNotification", () => {
     expect(late[0]).toMatchObject({ isFinalResponse: true });
   });
 
-  it("nests subagent_context child calls under the agent without blocking the final response", () => {
+  it("nests subagent_context child calls under the run_subagent call without blocking the final response", () => {
     const state = createDevinAcpTurnState();
     mapDevinAcpSessionNotification(
       notification(
@@ -523,7 +657,7 @@ describe("mapDevinAcpSessionNotification", () => {
         toolCallId: "read_0#abc",
         toolName: "Read",
         toolInput: { path: "file.ts" },
-        parentToolCallId: "agent-1",
+        parentToolCallId: "tc-parent",
       },
     ]);
     // Child markers never receive a terminal update; they must not count as pending.
@@ -539,9 +673,10 @@ describe("mapDevinAcpSessionNotification", () => {
       THREAD,
       state,
     );
-    expect(completed.map((e) => e.type)).toEqual(["toolResult", "toolResult"]);
-    expect(completed[0]).toMatchObject({ toolCallId: "read_0#abc", isError: false });
-    expect(completed[1]).toMatchObject({ toolCallId: "agent-1", output: "done" });
+    expect(completed).toEqual([
+      { type: "toolResult", threadId: THREAD, toolCallId: "read_0#abc", output: "", isError: false },
+      { type: "toolResult", threadId: THREAD, toolCallId: "tc-parent", output: "done", isError: false },
+    ]);
     expect(state.subagentChildAgentByCallId.size).toBe(0);
 
     mapDevinAcpSessionNotification(
@@ -587,8 +722,10 @@ describe("mapDevinAcpSessionNotification", () => {
       THREAD,
       state,
     );
-    expect(completed[0]).toMatchObject({ toolCallId: "child-1", isError: true });
-    expect(completed[1]).toMatchObject({ toolCallId: "agent-9", isError: true });
+    // agent-9 never started, so it has no call to close yet.
+    expect(completed).toEqual([
+      { type: "toolResult", threadId: THREAD, toolCallId: "child-1", output: "", isError: true },
+    ]);
   });
 
   it("keeps the parent link when a marker-only child gets its input later", () => {

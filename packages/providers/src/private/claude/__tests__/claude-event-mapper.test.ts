@@ -131,6 +131,54 @@ describe("ClaudeEventMapper tool results", () => {
   });
 });
 
+describe("ClaudeEventMapper user interrupts", () => {
+  async function eventsAfterResult(content: string, isError: boolean): Promise<AgentEvent[]> {
+    const { events, mapper } = createMapper();
+    await mapper.map({ type: "assistant", message: { content: [
+      { type: "tool_use", id: "AGENT_1", name: "Agent", input: { description: "Survey repo" } },
+    ] } });
+    await mapper.map({ type: "user", message: { content: [
+      { type: "tool_result", tool_use_id: "AGENT_1", content, is_error: isError },
+    ] } });
+    return events;
+  }
+
+  it("leaves an Agent call running when a user interrupt ends it", async () => {
+    await expect(eventsAfterResult("[Request interrupted by user for tool use]", true)).resolves.toEqual([
+      {
+        type: AgentEventType.ToolUse,
+        threadId: "test",
+        toolCallId: "AGENT_1",
+        toolName: "Agent",
+        toolInput: { description: "Survey repo" },
+        parentToolCallId: undefined,
+      },
+    ]);
+  });
+
+  it("still reports a real Agent failure", async () => {
+    const events = await eventsAfterResult("Subagent crashed", true);
+    expect(events.at(-1)).toEqual({
+      type: AgentEventType.ToolResult,
+      threadId: "test",
+      toolCallId: "AGENT_1",
+      output: "Subagent crashed",
+      isError: true,
+    });
+  });
+
+  it("keeps a successful result that quotes the interrupt text", async () => {
+    const events = await eventsAfterResult("[Request interrupted by user]", false);
+    expect(events.at(-1)).toEqual({
+      type: AgentEventType.ToolResult,
+      threadId: "test",
+      toolCallId: "AGENT_1",
+      output: "[Request interrupted by user]",
+      isError: false,
+    });
+  });
+});
+
 describe("ClaudeEventMapper rate limits", () => {
   async function eventsFor(rateLimitInfo: unknown): Promise<AgentEvent[]> {
     const { events, mapper } = createMapper();
