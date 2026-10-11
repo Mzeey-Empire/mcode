@@ -1811,6 +1811,23 @@ describe("ProjectTree action-required indicator", () => {
       expect(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
     });
 
+    it("keeps a setup that settles after its project collapses current", async () => {
+      window.localStorage.setItem("mcode-expanded-projects", JSON.stringify({ "ws-1": true }));
+      currentThread = makeThread({ id: "thread-pending", mode: "worktree", worktree_managed: true });
+      installWorkspaceMock();
+      const setupAttempt = { id: "attempt-1", reason: null, snapshot: null, createdAt: "", startedAt: "", outputTruncated: false } as const;
+      automaticSetupTransport.getAutomaticSetup
+        .mockResolvedValueOnce({ gate: "blocked", attempt: { ...setupAttempt, state: "running", outcome: null, finishedAt: null, exitCode: null, output: "installing" }, queuedTurns: [] })
+        .mockResolvedValue({ gate: "blocked", attempt: { ...setupAttempt, state: "failed", reason: "setup_failed", outcome: "command_failure", finishedAt: "", exitCode: 1, output: "failed" }, queuedTurns: [] });
+      render(<ProjectTree />);
+      expect(await within(screen.getByTestId("thread-status-lane")).findByRole("img", { name: "Running" })).toBeVisible();
+
+      fireEvent.click(screen.getByRole("button", { name: "Toggle threads for Test" }));
+
+      const projectRow = screen.getByTestId("project-row-ws-1");
+      expect(await within(projectRow).findByRole("img", { name: "Setup failed" }, { timeout: 3_000 })).toHaveAttribute("data-status-mark", "attention");
+    });
+
     it("leaves the mark to the rows once expanded", () => {
       window.localStorage.setItem("mcode-expanded-projects", JSON.stringify({ "ws-1": true }));
       applyAttention(attention("thread-pending", waitingOn("approval")));

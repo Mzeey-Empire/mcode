@@ -30,22 +30,77 @@ interface AutomaticSetupSnapshotState {
 }
 
 /** Holds the one automatic Setup snapshot that every surface reads for each Thread. */
-export const useProjectAutomaticSetupStore = create<AutomaticSetupSnapshotState>((set) => ({
+export const useProjectAutomaticSetupStore = create<AutomaticSetupSnapshotState>((set, get) => ({
   snapshotsByThread: {},
   updateEpochByThread: {},
-  hydrateSnapshot: (threadId, snapshot, requestEpoch) => set((state) => (
-    (state.updateEpochByThread[threadId] ?? 0) !== requestEpoch ? state : {
+  hydrateSnapshot: (threadId, snapshot, requestEpoch) => {
+    set((state) => (
+      (state.updateEpochByThread[threadId] ?? 0) !== requestEpoch ? state : {
+        snapshotsByThread: { ...state.snapshotsByThread, [threadId]: snapshot },
+      }
+    ));
+    syncAutomaticSetupPoll(threadId, get().snapshotsByThread[threadId]);
+  },
+  applySnapshot: (threadId, snapshot) => {
+    set((state) => ({
       snapshotsByThread: { ...state.snapshotsByThread, [threadId]: snapshot },
-    }
-  )),
-  applySnapshot: (threadId, snapshot) => set((state) => ({
-    snapshotsByThread: { ...state.snapshotsByThread, [threadId]: snapshot },
-    updateEpochByThread: {
-      ...state.updateEpochByThread,
-      [threadId]: (state.updateEpochByThread[threadId] ?? 0) + 1,
-    },
-  })),
+      updateEpochByThread: {
+        ...state.updateEpochByThread,
+        [threadId]: (state.updateEpochByThread[threadId] ?? 0) + 1,
+      },
+    }));
+    syncAutomaticSetupPoll(threadId, snapshot);
+  },
 }));
+
+function isAutomaticSetupActive(snapshot: WorkspaceEnvironmentAutomaticSetupSnapshot | undefined): boolean {
+  const state = snapshot?.attempt?.state;
+  return state === "queued" || state === "running";
+}
+
+// The poll belongs to the cached snapshot, not to a mounted row: a collapsed
+// project and the palette still read this snapshot, so it must keep moving
+// until setup settles even after every row that fetched it unmounts.
+const automaticSetupPolls = new Map<string, number>();
+const automaticSetupRequestSequence = new Map<string, number>();
+const automaticSetupAppliedSequence = new Map<string, number>();
+
+function syncAutomaticSetupPoll(threadId: string, snapshot: WorkspaceEnvironmentAutomaticSetupSnapshot | undefined): void {
+  const poll = automaticSetupPolls.get(threadId);
+  if (!isAutomaticSetupActive(snapshot)) {
+    if (poll !== undefined) window.clearInterval(poll);
+    automaticSetupPolls.delete(threadId);
+    return;
+  }
+  if (poll !== undefined) return;
+  automaticSetupPolls.set(threadId, window.setInterval(() => {
+    // A reset store drops the snapshot without passing through an action, so each tick rechecks.
+    const current = useProjectAutomaticSetupStore.getState().snapshotsByThread[threadId];
+    if (isAutomaticSetupActive(current)) void refreshAutomaticSetup(threadId);
+    else syncAutomaticSetupPoll(threadId, current);
+  }, 1_000));
+}
+
+/**
+ * Fetches one Thread's automatic Setup snapshot into the shared store.
+ * Drops a reply older than one already applied, or one that a user action superseded.
+ * Resolves to null when the request fails.
+ */
+export async function refreshAutomaticSetup(threadId: string): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot | null> {
+  const sequence = (automaticSetupRequestSequence.get(threadId) ?? 0) + 1;
+  automaticSetupRequestSequence.set(threadId, sequence);
+  const requestEpoch = useProjectAutomaticSetupStore.getState().updateEpochByThread[threadId] ?? 0;
+  try {
+    const next = await getTransport().getAutomaticSetup(threadId);
+    if (sequence > (automaticSetupAppliedSequence.get(threadId) ?? 0)) {
+      automaticSetupAppliedSequence.set(threadId, sequence);
+      useProjectAutomaticSetupStore.getState().hydrateSnapshot(threadId, next, requestEpoch);
+    }
+    return next;
+  } catch {
+    return null;
+  }
+}
 
 /** Reads and mutates one Thread's automatic Setup gate. */
 export function useProjectAutomaticSetup(threadId: string, enabled = true) {
@@ -59,30 +114,15 @@ export function useProjectAutomaticSetup(threadId: string, enabled = true) {
   const refresh = useCallback(async (): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot | null> => {
     const current = request.current + 1;
     request.current = current;
-    const requestEpoch = useProjectAutomaticSetupStore.getState().updateEpochByThread[threadId] ?? 0;
-    try {
-      const next = await getTransport().getAutomaticSetup(threadId);
-      if (request.current === current) {
-        useProjectAutomaticSetupStore.getState().hydrateSnapshot(threadId, next, requestEpoch);
-      }
-      return next;
-    } catch {
-      if (request.current === current) setActionState({ threadId, busy: null, error: "Could not refresh setup status" });
-      return null;
-    }
+    const next = await refreshAutomaticSetup(threadId);
+    if (next === null && request.current === current) setActionState({ threadId, busy: null, error: "Could not refresh setup status" });
+    return next;
   }, [threadId]);
 
   useEffect(() => {
     request.current += 1;
     if (enabled) void refresh();
   }, [enabled, refresh]);
-
-  useEffect(() => {
-    const state = snapshot.attempt?.state;
-    if (!enabled || (state !== "queued" && state !== "running")) return;
-    const interval = window.setInterval(() => { void refresh(); }, 1_000);
-    return () => window.clearInterval(interval);
-  }, [enabled, refresh, snapshot.attempt?.state]);
 
   const run = useCallback(async (
     action: AutomaticSetupAction,
