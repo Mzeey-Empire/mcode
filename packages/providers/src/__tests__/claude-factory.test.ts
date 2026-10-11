@@ -313,7 +313,7 @@ describe("Claude public factory core and capabilities", () => {
 
   it("declares only implemented profiles and explicitly excludes native continuation and independent child cancellation", () => {
     const { provider } = fixture();
-    expect(provider.descriptor.capabilities.filter(({ support }) => support === "supported").map(({ name }) => name)).toEqual(["build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "clean-fork", "orchestration", "browser-access", "thread-control"]);
+    expect(provider.descriptor.capabilities.filter(({ support }) => support === "supported").map(({ name }) => name)).toEqual(["build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "clean-fork", "orchestration", "browser-access", "thread-control", "turn-steer"]);
     expect(provider.descriptor.capabilities).toContainEqual({ name: "provider-continuation", support: "unsupported" });
     expect(provider.descriptor.capabilities).toContainEqual({ name: "child-cancellation", support: "unsupported" });
   });
