@@ -45,6 +45,7 @@ describe("thread switching WebSocket contracts", () => {
       provider: "codex",
       deleted_at: null,
       user_completed_at: null,
+      scheduled_retry: null,
       scheduled_deletion_at: null,
       cleanup_state: null,
       cleanup_reason: null,

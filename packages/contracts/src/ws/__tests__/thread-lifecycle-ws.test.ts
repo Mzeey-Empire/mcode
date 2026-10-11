@@ -41,6 +41,7 @@ describe("thread completion transport", () => {
       provider: "claude",
       deleted_at: null,
       user_completed_at: "2026-08-12T08:00:00.000Z",
+      scheduled_retry: null,
       scheduled_deletion_at: "2026-08-15T08:00:00.000Z",
       cleanup_state: "blocked",
       cleanup_reason: "The worktree has uncommitted changes.",
