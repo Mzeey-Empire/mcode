@@ -7,7 +7,7 @@ import type { RepositoryGitMutationLock } from "../../git/repository-git-mutatio
 import { ReviewWorktreeMissingError } from "../../git/review-comparison-errors.js";
 import type { StoreId } from "../snapshots/snapshot-store-identity.js";
 import { removeRawTemps, samePathState, type RawPathState } from "../snapshots/snapshot-raw-state.js";
-import { classifyRecovery, TurnRevertValidationError, type RecoveryPath } from "./turn-revert-model.js";
+import { classifyRecovery, TurnRevertValidationError, type RecoveryDecision, type RecoveryPath } from "./turn-revert-model.js";
 import { preparePreview, revertRange, type RevertPreviewDeps, type RevertPreviewInput } from "./turn-revert-preview.js";
 
 /** Test-only failure points cover prepare, individual writes, and the atomic commit. */
@@ -235,7 +235,7 @@ export class TurnRevertService {
       const current = requiredState(await this.deps.snapshots.workingTreeState(row.context.cwd, [entry.path]), entry.path);
       const material = available && (!entry.pre.rawBlob || await this.deps.snapshots.validateRef(row.context.cwd, entry.pre.rawBlob));
       return classifyRecovery(current, entry, material);
-    } catch { return { kind: "not_provable" } satisfies import("./turn-revert-model.js").RecoveryDecision; }
+    } catch { return { kind: "not_provable" } satisfies RecoveryDecision; }
   }
 
   private async matchesPre(cwd: string, entry: RecoveryPath): Promise<boolean> {
