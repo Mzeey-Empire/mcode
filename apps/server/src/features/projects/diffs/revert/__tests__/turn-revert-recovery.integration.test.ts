@@ -1,0 +1,155 @@
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeCrypto from "node:crypto";
+import { afterEach, describe, expect, it } from "vitest";
+import { TurnRevertFaultStop } from "../turn-revert-service.js";
+import { samePathState } from "../../snapshots/snapshot-raw-state.js";
+import { revertFixture, committed, renamed, probeSymlinks } from "./turn-revert-fixture.js";
+
+const symlinks = probeSymlinks();
+const timeout = 180_000;
+let f: Awaited<ReturnType<typeof revertFixture>>;
+afterEach(async () => { if (f) await f.close(); });
+
+describe("raw revert recovery", () => {
+  it.each(["afterPrepare", "afterWrite", "commit"] satisfies import("../turn-revert-service.js").RevertFaultPoint[])("recovers simulated death at %s once from the prepared journal", async (stop) => {
+    f = await revertFixture(); f.write("a", "before\n"); f.write("b", "before b\n");
+    const turn = await f.turn("one", () => { f.write("a", "after\n"); f.write("b", "after b\n"); });
+    const request = await f.request(turn.messageId);
+    const service = f.service((point, writes) => { if (point === stop && (point !== "afterWrite" || writes === 1)) throw new TurnRevertFaultStop(); });
+    await expect(service.apply(request)).rejects.toBeInstanceOf(TurnRevertFaultStop);
+    const row = f.store.byRequest(request.requestId); expect(row?.state).toBe("prepared");
+    if (!row?.recoveryRef) throw new Error("Missing recovery pin");
+    expect(f.git("cat-file", "-t", row.recoveryRef)).toBe("commit"); expect(row.files.map((file) => file.path)).toEqual(["a", "b"]);
+    for (const file of row.files) { expect(file.pre.kind).toBe("file"); expect(file.planned.kind).toBe("file"); expect(file.pre.sha256).not.toBe(file.planned.sha256); }
+    if (stop === "afterPrepare") { expect(f.read("a")).toEqual(Buffer.from("after\n")); expect(f.read("b")).toEqual(Buffer.from("after b\n")); }
+    await f.service().recoverUnfinished(); await f.service().recoverUnfinished();
+    expect(f.read("a")).toEqual(Buffer.from("after\n")); expect(f.read("b")).toEqual(Buffer.from("after b\n")); expect(f.store.get(row.id)?.state).toBe("rolled_back");
+    expect(f.db.query("SELECT count(*) AS n FROM messages WHERE json_extract(system_notice, '$.kind') = 'turn-revert-interrupted'").get()).toEqual({ n: 1 });
+  }, timeout);
+
+  it.each(["afterPrepare", "afterWrite", "commit"] satisfies import("../turn-revert-service.js").RevertFaultPoint[])("rolls back a thrown error at %s", async (stop) => {
+    f = await revertFixture(); f.write("a", "before\n"); const turn = await f.turn("one", () => f.write("a", "after\n"));
+    const result = await f.service((point) => { if (point === stop) throw new Error("injected failure"); }).apply(await f.request(turn.messageId));
+    expect(result).toMatchObject({ status: "failed", outcome: "rolled_back", paths: [] }); expect(f.read("a")).toEqual(Buffer.from("after\n"));
+    expect(f.db.query("SELECT count(*) AS n FROM messages WHERE json_extract(system_notice, '$.kind') = 'turn-reverted'").get()).toEqual({ n: 0 });
+  }, timeout);
+
+  it.each(["captureRaw", "planCheckout", "pinRecovery"] satisfies import("../turn-revert-service.js").RevertFaultPoint[])("a %s failure leaves files unchanged and no prepared row", async (stop) => {
+    f = await revertFixture(); f.write("a", "before\n"); const turn = await f.turn("one", () => f.write("a", "after\n"));
+    const request = await f.request(turn.messageId);
+    expect(await f.service((point) => { if (point === stop) throw new Error("injected failure"); }).apply(request)).toEqual({ status: "failed", outcome: "unchanged", paths: [], detail: "injected failure" });
+    expect(f.store.byRequest(request.requestId)).toBeNull(); expect(f.read("a")).toEqual(Buffer.from("after\n"));
+  }, timeout);
+
+  it.each(["CRLF", "mixed", "filter"])("planned %s bytes equal checkout and Undo is byte-exact", async (kind) => {
+    f = await revertFixture(); configureTextFixture(kind);
+    f.write("a.txt", "before\n# baseline\n");
+    const after = kind === "mixed" ? "after\r\n# after\nend\r\n" : "after\n# after\n";
+    const turn = await f.turn("one", () => f.write("a.txt", after));
+    // Independent oracle: an actual checkout into the original worktree with an isolated index.
+    const index = NodePath.join(f.cwd, ".git", "oracle-index");
+    const previous = process.env.GIT_INDEX_FILE;
+    process.env.GIT_INDEX_FILE = index;
+    let expected: Buffer;
+    try { f.git("read-tree", turn.before); f.git("checkout-index", "--force", "--", "a.txt"); expected = f.read("a.txt"); }
+    finally { if (previous === undefined) delete process.env.GIT_INDEX_FILE; else process.env.GIT_INDEX_FILE = previous; if (NodeFS.existsSync(index)) NodeFS.unlinkSync(index); }
+    f.write("a.txt", after);
+    const result = committed(await f.service().apply(await f.request(turn.messageId)));
+    expect(f.read("a.txt")).toEqual(expected);
+    const row = f.store.get(result.revert.id); if (!row) throw new Error("Missing row");
+    const current = await f.snapshots.workingTreeState(f.cwd, ["a.txt"]), actual = current.get("a.txt"), planned = row.files[0]?.planned;
+    if (!actual || !planned) throw new Error("Missing state"); expect(samePathState(actual, planned)).toBe(true);
+    f.git("gc", "--prune=now", "--quiet");
+    committed(await f.service().undo({ threadId: "thread", revertId: result.revert.id, requestId: NodeCrypto.randomUUID() }));
+    expect(f.read("a.txt")).toEqual(Buffer.from(after));
+    const again = committed(await f.service().apply(await f.request(turn.messageId))); f.write("a.txt", "newer\n");
+    expect(await f.service().undo({ threadId: "thread", revertId: again.revert.id, requestId: NodeCrypto.randomUUID() })).toMatchObject({ status: "stale" });
+    expect(f.read("a.txt")).toEqual(Buffer.from("newer\n"));
+  }, timeout);
+
+  it.each(["outside", "CRLF", "filter", "missing-ref"])("leaves unprovable %s recovery state alone", async (kind) => {
+    f = await revertFixture(); configureTextFixture(kind); f.write("a.txt", "before\n# baseline\n");
+    const turn = await f.turn("one", () => f.write("a.txt", "after\n# after\n")), request = await f.request(turn.messageId);
+    await expect(f.service((point) => { if (point === "afterWrite") throw new TurnRevertFaultStop(); }).apply(request)).rejects.toBeInstanceOf(TurnRevertFaultStop);
+    const row = f.store.byRequest(request.requestId); if (!row?.recoveryRef) throw new Error("Missing prepared row");
+    const changed = kind === "CRLF" ? "before\n# baseline\n" : kind === "filter" ? "before\n# changed comment\n" : "external edit\n";
+    if (kind === "missing-ref") f.git("update-ref", "-d", row.recoveryRef); else f.write("a.txt", changed);
+    const expected = f.read("a.txt"); await f.service().recoverUnfinished();
+    expect(f.read("a.txt")).toEqual(expected); expect(f.store.get(row.id)).toMatchObject({ state: "recovery_failed", failure: { paths: ["a.txt"] }, recoveryRef: row.recoveryRef });
+    if (kind !== "missing-ref") expect(f.git("cat-file", "-t", row.recoveryRef)).toBe("commit");
+  }, timeout);
+
+  it("recovers a cross-turn rename chain byte-exact", async () => {
+    f = await revertFixture(); f.write("a.ts", "original\n");
+    const one = await f.turn("one", () => f.rename("a.ts", "b.ts"), { effects: [renamed("a.ts", "b.ts")] });
+    const three = await f.turn("three", () => f.rename("b.ts", "c.ts"), { effects: [renamed("b.ts", "c.ts")] });
+    const request = await f.request(three.messageId, { kind: "file", path: "c.ts", fromMessageId: one.messageId });
+    await expect(f.service((point, n) => { if (point === "afterWrite" && n === 1) throw new TurnRevertFaultStop(); }).apply(request)).rejects.toBeInstanceOf(TurnRevertFaultStop);
+    expect(f.store.byRequest(request.requestId)?.files.map((file) => file.path)).toEqual(["a.ts", "c.ts"]);
+    await f.service().recoverUnfinished(); expect(f.read("c.ts")).toEqual(Buffer.from("original\n")); expect(f.exists("a.ts")).toBe(false); expect(f.exists("b.ts")).toBe(false);
+  }, timeout);
+
+  it("Undo survives gc in a linked worktree with no user.email; sweep owns only this store and retains unfinished pins", async () => {
+    f = await revertFixture(); f.linked(); f.write("a", "before\n");
+    const turn = await f.turn("one", () => f.write("a", "after\n")); const result = committed(await f.service().apply(await f.request(turn.messageId)));
+    f.git("gc", "--prune=now", "--quiet"); committed(await f.service().undo({ threadId: "thread", revertId: result.revert.id, requestId: NodeCrypto.randomUUID() })); expect(f.read("a")).toEqual(Buffer.from("after\n"));
+    const request = await f.request(turn.messageId);
+    await expect(f.service((point) => { if (point === "afterPrepare") throw new TurnRevertFaultStop(); }).apply(request)).rejects.toBeInstanceOf(TurnRevertFaultStop);
+    const prepared = f.store.byRequest(request.requestId); if (!prepared?.recoveryRef) throw new Error("Missing prepared");
+    const orphan = `refs/mcode/${f.storeId}/reverts/orphan`, other = `refs/mcode/${NodeCrypto.randomUUID()}/reverts/other`;
+    f.git("update-ref", orphan, prepared.recoveryRef); f.git("update-ref", other, prepared.recoveryRef);
+    f.db.prepare("UPDATE turn_reverts SET created_at='2000-01-01T00:00:00.000Z'").run();
+    await f.pins.sweep({ isThreadLive: () => true });
+    expect(f.git("for-each-ref", "--format=%(refname)", orphan)).toBe(""); expect(f.git("cat-file", "-t", other)).toBe("commit");
+    expect(f.git("cat-file", "-t", prepared.recoveryRef)).toBe("commit"); expect(f.store.get(result.revert.id)?.recoveryRef).toBeNull();
+    f.db.prepare("UPDATE turn_reverts SET state='recovery_failed' WHERE id=?").run(prepared.id);
+    await f.pins.sweep({ isThreadLive: () => true }); expect(f.git("cat-file", "-t", prepared.recoveryRef)).toBe("commit");
+  }, timeout);
+
+  it("busy covers another active thread and a send waits until the reverted baseline exists", async () => {
+    f = await revertFixture(); f.write("a", "before\n"); const turn = await f.turn("one", () => f.write("a", "after\n"));
+    f.db.prepare("INSERT INTO threads(id,workspace_id,title,branch) VALUES ('other','ws','other','main')").run();
+    f.db.prepare("INSERT INTO canonical_agent_threads(id,workspace_id,root_thread_id,provider_id,activity_state,created_at,updated_at) VALUES ('other','ws','other','codex','Idle','now','now')").run();
+    f.db.prepare("INSERT INTO canonical_agent_turns(id,thread_id,execution_id,status,trigger_json,permission_mode,created_at,updated_at) VALUES ('busy','other','busy-exec','Running','{}','supervised','now','now')").run();
+    expect(await f.service().preview({ threadId: "thread", messageId: turn.messageId, scope: { kind: "turn" } })).toEqual({ status: "busy", reason: "turn_running" });
+    f.db.prepare("UPDATE canonical_agent_turns SET status='Completed' WHERE id='busy'").run();
+    f.db.prepare("INSERT INTO thread_startups(startup_id,workspace_id,thread_id,kind,state,phase,steps_json,transcript_json,revision) VALUES ('starting','ws','other','direct','running','agent','[]','[]',1)").run();
+    expect(await f.service().preview({ threadId: "thread", messageId: turn.messageId, scope: { kind: "turn" } })).toEqual({ status: "busy", reason: "turn_running" });
+    f.db.prepare("UPDATE thread_startups SET state='completed' WHERE startup_id='starting'").run();
+    let release = () => {}, entered = () => {};
+    const pause = new Promise<void>((resolve) => { release = resolve; }), prepared = new Promise<void>((resolve) => { entered = resolve; });
+    const service = f.service(async (point) => { if (point === "afterPrepare") { entered(); await pause; } });
+    const request = await f.request(turn.messageId), applying = service.apply(request); await prepared;
+    expect(await service.preview(request)).toEqual({ status: "busy", reason: "revert_running" });
+    let captured = false;
+    const baseline = f.snapshots.captureRef(f.cwd).then((ref) => { captured = true; return ref; });
+    await Promise.resolve(); expect(captured).toBe(false); release(); committed(await applying);
+    expect(await baseline).toBe(turn.before); expect(f.read("a")).toEqual(Buffer.from("before\n"));
+  }, timeout);
+
+  it.skipIf(!symlinks)("restores symlink targets exactly and refuses a parent symlink escaping cwd", async () => {
+    f = await revertFixture(); f.git("config", "core.symlinks", "true");
+    NodeFS.symlinkSync("before-target", NodePath.join(f.cwd, "link"));
+    const turn = await f.turn("one", () => { f.remove("link"); NodeFS.symlinkSync("after-target", NodePath.join(f.cwd, "link")); });
+    const result = committed(await f.service().apply(await f.request(turn.messageId))); expect(NodeFS.readlinkSync(NodePath.join(f.cwd, "link"))).toBe("before-target");
+    committed(await f.service().undo({ threadId: "thread", revertId: result.revert.id, requestId: NodeCrypto.randomUUID() })); expect(NodeFS.readlinkSync(NodePath.join(f.cwd, "link"))).toBe("after-target");
+    await expect(f.snapshots.captureRaw(f.cwd, ["../escape"])).rejects.toThrow(/Invalid/);
+  }, timeout);
+
+  it.skipIf(process.platform === "win32")("restores executable mode and Undo restores the original mode", async () => {
+    f = await revertFixture(); f.git("config", "core.fileMode", "true"); f.write("a", "before\n"); NodeFS.chmodSync(NodePath.join(f.cwd, "a"), 0o755);
+    const turn = await f.turn("one", () => { f.write("a", "after\n"); NodeFS.chmodSync(NodePath.join(f.cwd, "a"), 0o644); });
+    const result = committed(await f.service().apply(await f.request(turn.messageId))); expect(NodeFS.statSync(NodePath.join(f.cwd, "a")).mode & 0o777).toBe(0o755);
+    committed(await f.service().undo({ threadId: "thread", revertId: result.revert.id, requestId: NodeCrypto.randomUUID() })); expect(NodeFS.statSync(NodePath.join(f.cwd, "a")).mode & 0o777).toBe(0o644);
+  }, timeout);
+});
+
+function configureTextFixture(kind: string) {
+  if (kind === "CRLF") f.git("config", "core.autocrlf", "true");
+  if (kind === "filter") {
+    f.write(".gitattributes", "*.txt filter=comments\n");
+    f.git("config", "filter.comments.clean", "sed '/^#/d'"); f.git("config", "filter.comments.smudge", "sed '$a\\# smudged'");
+    f.git("config", "filter.comments.required", "true");
+  }
+}
