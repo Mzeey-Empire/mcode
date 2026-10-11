@@ -10,6 +10,8 @@ import type {
   ListHeldSteersResult,
   SettleUnknownSteerParams,
   SettleUnknownSteerResult,
+  TurnRetryParams,
+  TurnRetryResult,
   WorkspaceFileList,
   WorkspaceFileChanges,
   FileReadResult,
@@ -435,6 +437,8 @@ export interface McodeTransport {
   getRecoveryIncident(): Promise<RecoveryIncident | null>;
   /** Retry one interrupted turn as a fresh provider execution. */
   retryTurn(executionId: string): Promise<void>;
+  /** Retry the thread's latest errored turn as a new attempt in the same provider session. */
+  retryErroredTurn(params: TurnRetryParams): Promise<TurnRetryResult>;
   /** Read one authoritative startup lifecycle by its client-generated identity. */
   getThreadStartup(startupId: string): Promise<ThreadStartup | null>;
   /** List retained startup lifecycles for one workspace during recovery. */

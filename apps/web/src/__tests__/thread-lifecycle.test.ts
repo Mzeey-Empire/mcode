@@ -13,6 +13,7 @@ import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-reco
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import { useToastStore } from "@/stores/toastStore";
+import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { mockTransport, createMockMessage } from "./mocks/transport";
 import { clearRecordCache } from "@/features/conversation/hydration/record-cache";
@@ -353,7 +354,7 @@ describe("Thread Lifecycle Behavior", () => {
     }]);
   });
 
-  it("recalls only an undispatched stopped message", async () => {
+  it.each(["not-dispatched", "dispatched"] as const)("keeps a %s stopped message in the transcript and out of the composer", async (dispatchState) => {
     const threadId = "thread-1";
     const userMessage = createMockMessage({
       id: "user-1",
@@ -375,44 +376,13 @@ describe("Thread Lifecycle Behavior", () => {
         phase: "cancelled",
       },
       status: "cancelled",
-      dispatchState: "not-dispatched",
+      dispatchState,
     });
 
     await useThreadStore.getState().stopAgent(threadId);
 
-    expect(useThreadStore.getState().records.get(threadId)?.composerRecallFromStop).toEqual({
-      text: "keep working on this",
-    });
-  });
-
-  it("does not recall a dispatched stopped message", async () => {
-    const threadId = "thread-1";
-    const userMessage = createMockMessage({
-      id: "user-1",
-      thread_id: threadId,
-      role: "user",
-      content: "keep working on this",
-    });
-    resetThreadStoreForTests({
-      currentThreadId: threadId,
-      runningThreadIds: new Set([threadId]),
-      records: new Map([[threadId, { ...createEmptyThreadRecord(), messages: [userMessage] }]]),
-    });
-    (mockTransport.stopAgent as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      threadId,
-      turnExecutionId: "00000000-0000-4000-8000-000000000001",
-      snapshot: {
-        threadId,
-        turnExecutionId: "00000000-0000-4000-8000-000000000001",
-        phase: "cancelled",
-      },
-      status: "cancelled",
-      dispatchState: "dispatched",
-    });
-
-    await useThreadStore.getState().stopAgent(threadId);
-
-    expect(useThreadStore.getState().records.get(threadId)?.composerRecallFromStop).toBeUndefined();
+    expect(useThreadStore.getState().records.get(threadId)?.messages.map((message) => message.content)).toEqual(["keep working on this"]);
+    expect(useComposerDraftStore.getState().drafts[threadId]).toBeUndefined();
   });
 
   it("when sendMessage fails, the thread is no longer marked as running", async () => {

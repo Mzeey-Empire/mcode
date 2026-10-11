@@ -1185,6 +1185,7 @@ export function createWsTransport(
     getRecoveryIncident: () =>
       rpc<import("@mcode/contracts").RecoveryIncident | null>("agent.recoveryIncident", {}),
     retryTurn: (executionId) => rpc<void>("agent.retry", { executionId }),
+    retryErroredTurn: async (params) => WS_METHODS()["turn.retry"].result.parse(await rpc<unknown>("turn.retry", params)),
     getThreadStartup: (startupId) =>
       rpc<ThreadStartup | null>("thread.startup.get", { startupId }),
     listThreadStartups: (workspaceId) =>

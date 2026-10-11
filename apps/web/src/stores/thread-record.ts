@@ -166,7 +166,6 @@ export interface ThreadRecord {
   apiRetry?: { reason: string; attempt?: number; maxRetries?: number; delayMs?: number };
   awaitingUserStopPersist?: true;
   interruptStopFileNotice?: { paths: string[] };
-  composerRecallFromStop?: { text: string };
   lastHydratedAt?: number;
 
   planQuestions: PlanQuestion[] | null;
