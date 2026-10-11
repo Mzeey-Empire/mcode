@@ -14,6 +14,7 @@ import type {
   ApprovalResponse,
   ApprovalRespondResult,
   ApprovalOutcome,
+  ApprovalOrigin,
   ApprovalRequestBody,
   ApprovalQuestion,
   ApprovalRequestEnvelope,
@@ -147,7 +148,7 @@ interface OpenCodeTurnState {
   idleConfirmPromise: Promise<void> | null;
   /** Upstream message id to role, so user parts never become assistant deltas. */
   messageRoles: Map<string, string>;
-  childSessionCalls: Map<string, string>;
+  childSessionCalls: Map<string, OpenCodeChildTask>;
   /** Text already forwarded per message, for exactly-once streaming. */
   forwardedText: Map<string, string>;
   /** Native turn-diff accumulator and its monotonic push cursor for this turn. */
@@ -192,16 +193,29 @@ function trackedMessageRole(info: Record<string, unknown> | null): { id: string;
 /** Largest retained upstream message-role map per turn before pruning oldest. */
 const MAX_TRACKED_MESSAGE_ROLES = 256;
 
+/** The `task` call that launched one child session, and the label its asks carry. */
+interface OpenCodeChildTask {
+  callId: string;
+  label: string;
+}
+
+const childTaskInputSchema = z.object({
+  description: z.string().trim().min(1).max(200).optional().catch(undefined),
+  subagent_type: z.string().trim().min(1).max(200).optional().catch(undefined),
+}).catch({});
+
 const childTaskPartSchema = z.object({
   type: z.literal("tool"), tool: z.literal("task"), callID: z.string().min(1).max(512),
-  state: z.object({ metadata: z.object({ sessionId: z.string().min(1).max(512) }) }),
+  state: z.object({ metadata: z.object({ sessionId: z.string().min(1).max(512) }), input: childTaskInputSchema.optional() }),
 });
 
 function trackChildTask(state: OpenCodeTurnState, normalized: { type: string; properties: Record<string, unknown> }): void {
   if (normalized.type !== "message.part.updated" || !sessionIdOfNormalized(normalized)) return;
   const task = childTaskPartSchema.safeParse(normalized.properties.part);
   if (!task.success) return;
-  state.childSessionCalls.set(task.data.state.metadata.sessionId, task.data.callID);
+  const input = task.data.state.input;
+  const label = input?.description ?? input?.subagent_type ?? "Subagent";
+  state.childSessionCalls.set(task.data.state.metadata.sessionId, { callId: task.data.callID, label });
   if (state.childSessionCalls.size > MAX_TRACKED_MESSAGE_ROLES) {
     const oldest = state.childSessionCalls.keys().next();
     if (!oldest.done) state.childSessionCalls.delete(oldest.value);
@@ -212,6 +226,33 @@ const childToolPartSchema = z.object({ type: z.literal("tool") });
 
 function isChildToolPart(normalized: { type: string; properties: Record<string, unknown> }): boolean {
   return normalized.type === "message.part.updated" && childToolPartSchema.safeParse(normalized.properties.part).success;
+}
+
+const ASK_EVENT_TYPES: ReadonlySet<string> = new Set(["permission.asked", "permission.v2.asked", "question.asked", "question.v2.asked"]);
+
+/**
+ * A child session blocks on its own asks, and the parent `task` call waits on
+ * the child, so dropping a child ask stalls the whole turn.
+ */
+function isForwardedChildEvent(normalized: { type: string; properties: Record<string, unknown> }): boolean {
+  return isChildToolPart(normalized) || ASK_EVENT_TYPES.has(normalized.type);
+}
+
+/** The upstream session an ask belongs to and who in Mcode is asking. */
+interface OpenCodeAskSource {
+  upstreamSessionId: string;
+  origin: ApprovalOrigin;
+}
+
+function askSourceOf(
+  state: OpenCodeTurnState,
+  upstreamId: string,
+  normalized: { properties: Record<string, unknown> },
+): OpenCodeAskSource {
+  const owner = sessionIdOfNormalized(normalized);
+  const child = owner === undefined || owner === upstreamId ? undefined : state.childSessionCalls.get(owner);
+  if (owner === undefined || child === undefined) return { upstreamSessionId: upstreamId, origin: { kind: "agent" } };
+  return { upstreamSessionId: owner, origin: { kind: "subagent", label: child.label, parentToolCallId: child.callId } };
 }
 
 function sessionIdOfNormalized(normalized: { properties: Record<string, unknown> }): string | undefined {
@@ -632,7 +673,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       idleRestart: false,
       idleConfirmPromise: null,
       messageRoles: new Map<string, string>(),
-      childSessionCalls: new Map<string, string>(),
+      childSessionCalls: new Map<string, OpenCodeChildTask>(),
       forwardedText: new Map<string, string>(),
       nativeDiff: new OpenCodeNativeTurnDiff(),
       nativeDiffRevision: 0,
@@ -884,8 +925,8 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     if (normalized) {
       const owner = sessionIdOfNormalized(normalized);
       if (owner && owner !== upstreamId) {
-        parentToolCallId = state.childSessionCalls.get(owner);
-        if (!parentToolCallId || !isChildToolPart(normalized)) return;
+        parentToolCallId = state.childSessionCalls.get(owner)?.callId;
+        if (!parentToolCallId || !isForwardedChildEvent(normalized)) return;
       }
       this.trackMessageRole(state, normalized);
       trackChildTask(state, normalized);
@@ -1097,15 +1138,16 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       executionId: req.turnExecutionId,
       deliveryAttempt: req.deliveryAttempt ?? 1,
     };
+    const source = askSourceOf(state, upstreamId, normalized);
     if (reason === "permission-request") {
-      this.maybeEmitPermissionAsk(req, endpoint, upstreamId, normalized, state, routing);
+      this.maybeEmitPermissionAsk(req, endpoint, source, normalized, state, routing);
       return;
     }
-    const synthesized = synthesizeOpenCodeQuestionRequest({ threadId, properties: normalized.properties });
+    const synthesized = synthesizeOpenCodeQuestionRequest({ threadId, properties: normalized.properties, origin: source.origin });
     if (!synthesized) return this.emitAskDiagnostic(req, threadId);
     if (this.pendingPermissions.has(synthesized.requestId)) return;
     this.pendingPermissions.set(synthesized.requestId, {
-      request: synthesized, sessionId: req.sessionId, upstreamSessionId: upstreamId, endpoint,
+      request: synthesized, sessionId: req.sessionId, upstreamSessionId: source.upstreamSessionId, endpoint,
       kind: "question", version: askVersion(normalized.type),
       signal: state.abortController.signal, routing, replying: false,
     });
@@ -1122,21 +1164,21 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   private maybeEmitPermissionAsk(
     req: TurnRequest<"opencode">,
     endpoint: OpenCodeEndpoint,
-    upstreamId: string,
+    source: OpenCodeAskSource,
     normalized: { type: string; properties: Record<string, unknown> },
     state: OpenCodeTurnState,
     routing: CanonicalLiveEventRouting,
   ): void {
     const threadId = this.threadIdFor(req.sessionId);
-    const request = synthesizeOpenCodeApprovalRequest({ threadId, properties: normalized.properties });
+    const request = synthesizeOpenCodeApprovalRequest({ threadId, properties: normalized.properties, origin: source.origin });
     if (!request) {
       const requestId = NodeCrypto.randomUUID();
       this.pendingPermissions.set(requestId, {
         request: { requestId, threadId, body: {
           requestedAt: new Date().toISOString(), subject: { kind: "tool", toolName: "Unreadable request" },
-          choices: [{ id: "deny", intent: "deny", label: "Deny" }], noteDelivery: "none", origin: { kind: "agent" },
+          choices: [{ id: "deny", intent: "deny", label: "Deny" }], noteDelivery: "none", origin: source.origin,
         } },
-        sessionId: req.sessionId, upstreamSessionId: upstreamId, endpoint, kind: "permission",
+        sessionId: req.sessionId, upstreamSessionId: source.upstreamSessionId, endpoint, kind: "permission",
         version: askVersion(normalized.type), signal: state.abortController.signal, routing, replying: false, unanswerable: true,
       });
       void this.stopSession(req.sessionId).catch(() => {
@@ -1146,7 +1188,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     }
     if (this.pendingPermissions.has(request.requestId)) return;
     const entry: OpenCodePendingAsk = {
-      request, sessionId: req.sessionId, upstreamSessionId: upstreamId, endpoint,
+      request, sessionId: req.sessionId, upstreamSessionId: source.upstreamSessionId, endpoint,
       kind: "permission", version: askVersion(normalized.type),
       signal: state.abortController.signal, routing, replying: false,
     };

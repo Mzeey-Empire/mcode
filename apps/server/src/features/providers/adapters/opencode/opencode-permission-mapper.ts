@@ -1,4 +1,4 @@
-import type { ApprovalChoice, ApprovalQuestion, ApprovalRequestBody, ApprovalRequestEnvelope } from "@mcode/contracts";
+import type { ApprovalChoice, ApprovalOrigin, ApprovalQuestion, ApprovalRequestBody, ApprovalRequestEnvelope } from "@mcode/contracts";
 import { z } from "zod";
 
 const ToolIdentitySchema = z.object({ callID: z.string().optional() });
@@ -48,7 +48,7 @@ export function mapApprovalChoiceToReply(choiceId: string): OpenCodePermissionRe
 
 /** Keep all resources intact; the shared scope validator decides whether they fit. */
 export function synthesizeOpenCodeApprovalRequest(input: {
-  threadId: string; properties: Record<string, unknown>;
+  threadId: string; properties: Record<string, unknown>; origin: ApprovalOrigin;
 }): (ApprovalRequestEnvelope & { body: ApprovalRequestBody }) | null {
   const requestId = acceptedId(input.properties.id);
   if (requestId === undefined) return null;
@@ -66,7 +66,7 @@ export function synthesizeOpenCodeApprovalRequest(input: {
     body: {
       requestedAt: new Date().toISOString(), toolCallId: tool.success ? tool.data.callID : undefined,
       subject: { kind: "tool", toolName: action, preview: JSON.stringify({ action, resources }) },
-      choices, noteDelivery: "next_turn", noteChoiceId: "reject", origin: { kind: "agent" },
+      choices, noteDelivery: "next_turn", noteChoiceId: "reject", origin: input.origin,
     },
   };
 }
@@ -121,6 +121,7 @@ function cardOf(value: unknown): ApprovalQuestion | null {
 export function synthesizeOpenCodeQuestionRequest(input: {
   threadId: string;
   properties: Record<string, unknown>;
+  origin: ApprovalOrigin;
 }): (ApprovalRequestEnvelope & { body: ApprovalRequestBody }) | null {
   const requestId = acceptedId(input.properties.id);
   if (requestId === undefined) return null;
@@ -138,7 +139,7 @@ export function synthesizeOpenCodeQuestionRequest(input: {
     body: {
       requestedAt: new Date().toISOString(), subject: { kind: "question", questions },
       choices: [{ id: "answer", intent: "allow_once", label: "Submit answers" }, { id: "reject", intent: "deny", label: "Dismiss" }],
-      noteDelivery: "none", origin: { kind: "agent" },
+      noteDelivery: "none", origin: input.origin,
     },
   };
 }
