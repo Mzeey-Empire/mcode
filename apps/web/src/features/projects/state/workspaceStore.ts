@@ -1718,6 +1718,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   },
 
   applyScheduledRetry: (threadId, retry) => {
+    const existing = get().threads.find((thread) => thread.id === threadId);
+    if (!existing) return;
+    // A thread list fetched before this change would otherwise restore the old schedule.
+    bumpThreadListMutationEpoch(existing.workspace_id);
     set((state) => ({
       threads: state.threads.map((thread) => thread.id === threadId ? { ...thread, scheduled_retry: retry } : thread),
     }));

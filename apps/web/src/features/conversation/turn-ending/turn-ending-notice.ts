@@ -123,10 +123,11 @@ function cancelledView(input: TurnEndingInput, foldLabel: string | null): TurnEn
 function erroredNotice(input: TurnEndingInput): FilledNotice {
   const failure = input.ending?.outcome === "errored" ? input.ending.failure : null;
   const notice = failure ? failureNotice(failure, input) : unclassifiedNotice(input);
-  return input.isLatestTurn ? notice : withoutPrimary(notice);
+  return input.isLatestTurn ? notice : withoutActions(notice);
 }
 
-function withoutPrimary({ primary: _primary, ...notice }: FilledNotice): FilledNotice {
+// Every action retries the turn, which the server refuses once a newer turn exists.
+function withoutActions({ primary: _primary, secondary: _secondary, ...notice }: FilledNotice): FilledNotice {
   return notice;
 }
 

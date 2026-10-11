@@ -91,6 +91,11 @@ describe("TurnEndNotice", () => {
     expect(opened).toHaveBeenCalledTimes(1);
   });
 
+  it("disables Switch model while a request is pending", () => {
+    render(<TurnEndNotice notice={USAGE_LIMIT} actions={{ switch_model: (trigger) => trigger }} pending />);
+    expect(screen.getByRole("button", { name: "Switch model" })).toBeDisabled();
+  });
+
   it("shows why the last action failed", () => {
     render(<TurnEndNotice notice={FAILED} actions={{ retry: vi.fn() }} error="The turn is no longer the latest." />);
     expect(screen.getByRole("alert").textContent).toBe("The turn is no longer the latest.");

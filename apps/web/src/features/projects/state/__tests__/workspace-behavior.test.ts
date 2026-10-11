@@ -475,6 +475,25 @@ describe("Workspace Behavior", () => {
     expect(useWorkspaceStore.getState().threads.some((t) => t.id === "child-1")).toBe(true);
   });
 
+  it("keeps a scheduled retry when a thread list fetched before it resolves afterwards", async () => {
+    const ws = createMockWorkspace({ id: "ws-retry" });
+    const thread = createMockThread({ id: "thread-retry", workspace_id: ws.id, scheduled_retry: null });
+    let listResolve!: (value: typeof thread[]) => void;
+    const listPromise = new Promise<typeof thread[]>((resolve) => {
+      listResolve = resolve;
+    });
+    useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id, threads: [thread] });
+    (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockImplementation(() => listPromise);
+
+    const loading = useWorkspaceStore.getState().loadThreads(ws.id);
+    const retry = { turnId: "turn-1", at: "2026-10-11T16:00:00.000Z" };
+    useWorkspaceStore.getState().applyScheduledRetry(thread.id, retry);
+    listResolve([thread]);
+    await loading;
+
+    expect(useWorkspaceStore.getState().threads.find((t) => t.id === thread.id)?.scheduled_retry).toEqual(retry);
+  });
+
   it("when createAndSendMessage completes while loadThreads is in flight, stale listThreads does not drop the new thread", async () => {
     const ws = createMockWorkspace({ id: "ws-first-msg" });
     const existing = createMockThread({

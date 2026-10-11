@@ -1,6 +1,6 @@
 import { createAgentModelState, type AgentItem, type AgentModelState, type AgentTurn } from "@mcode/contracts";
 import { describe, expect, it } from "vitest";
-import { projectTurnEndings, reuseTurnEndings } from "../turn-endings-projection";
+import { nextRetryAtLapse, projectTurnEndings, reuseTurnEndings } from "../turn-endings-projection";
 
 const THREAD_ID = "thread-1";
 
@@ -158,5 +158,24 @@ describe("reuseTurnEndings", () => {
     };
     expect(primary("t1")).toEqual({ action: "cancel_retry", label: "Cancel retry" });
     expect(primary("t0")).toEqual({ action: "retry_at", label: "Retry at 14:05", at: resetsAt });
+  });
+});
+
+describe("nextRetryAtLapse", () => {
+  const limitedAt = (resetsAt: string) => ({ outcome: "errored", failure: { kind: "usage_limit", provider: "codex", message: "limit", resetsAt } } as const);
+
+  it("returns the reset time while Retry at is offered, and null once it lapses", () => {
+    const resetsAt = new Date(2026, 9, 11, 14, 5).toISOString();
+    const state = stateWith([turn("t1", 0, { status: "Errored", ending: limitedAt(resetsAt) })], [messageItem("u1", "t1", "user", 0)]);
+
+    expect(nextRetryAtLapse(projectTurnEndings(THREAD_ID, state, NO_SCHEDULE))).toBe(Date.parse(resetsAt));
+    expect(nextRetryAtLapse(projectTurnEndings(THREAD_ID, state, { ...NO_SCHEDULE, now: Date.parse(resetsAt) }))).toBeNull();
+  });
+
+  it("ignores a reset that only a scheduled retry is waiting on", () => {
+    const resetsAt = new Date(2026, 9, 11, 14, 5).toISOString();
+    const state = stateWith([turn("t1", 0, { status: "Errored", ending: limitedAt(resetsAt) })], [messageItem("u1", "t1", "user", 0)]);
+
+    expect(nextRetryAtLapse(projectTurnEndings(THREAD_ID, state, { ...NO_SCHEDULE, scheduledRetry: { turnId: "t1", at: resetsAt } }))).toBeNull();
   });
 });

@@ -110,9 +110,9 @@ describe("turnEndingView: errored", () => {
     });
   });
 
-  it("drops the primary action when a later turn exists", () => {
-    const notice = turnEndingView(input({ isLatestTurn: false, ending: errored({ kind: "fatal" }) })).notice;
-    expect(notice).not.toHaveProperty("primary");
+  it("drops every action when a later turn exists", () => {
+    const notice = turnEndingView(input({ isLatestTurn: false, ending: errored({ kind: "usage_limit", limitType: "five_hour", resetsAt: localIso(14, 5) }) })).notice;
+    expect(notice).toEqual({ style: "filled", icon: "usage_limit", title: "Codex usage limit reached", detail: "5-hour limit · resets 14:05" });
   });
 
   it("omits the turn line when there is no execution id", () => {

@@ -74,7 +74,7 @@ function TurnEndActions({ notice, actions, pending }: { notice: FilledNotice; ac
   return (
     <>
       {secondary && wrapSecondary
-        ? wrapSecondary(<Button type="button" variant="ghost" className={TEXT_BUTTON}>{secondary.label}</Button>)
+        ? wrapSecondary(<Button type="button" variant="ghost" className={TEXT_BUTTON} disabled={pending}>{secondary.label}</Button>)
         : null}
       {primary && onPrimary ? (
         <Button type="button" variant="subtle" shape="round" className="h-7 px-3 text-[1.3rem]/[1.8rem] font-medium" disabled={pending} onClick={onPrimary}>

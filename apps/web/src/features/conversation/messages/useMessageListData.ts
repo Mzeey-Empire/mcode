@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScheduledTurnRetry } from "@mcode/contracts";
 import type { ToolCall } from "@/transport/types";
 import { useShallow } from "zustand/shallow";
@@ -19,6 +19,7 @@ import {
 import type { Message } from "@/transport/types";
 import {
   projectTurnEndings,
+  nextRetryAtLapse,
   reuseTurnEndings,
   type TurnEndingsProjection,
 } from "../turn-ending/turn-endings-projection";
@@ -256,13 +257,26 @@ function useTurnEndings(
   scheduledRetry: ScheduledTurnRetry | null,
 ): TurnEndingsProjection {
   const previous = useRef<TurnEndingsProjection | undefined>(undefined);
-  return useMemo(() => {
+  // A reset time passing on an idle thread changes no store state, so a timer records the wake.
+  const [wokeAt, setWokeAt] = useState(0);
+  const projection = useMemo(() => {
     if (!threadId) return NO_TURN_ENDINGS;
-    const projection = projectTurnEndings(threadId, state, { scheduledRetry, now: Date.now() });
-    previous.current = reuseTurnEndings(previous.current, projection);
+    const next = projectTurnEndings(threadId, state, { scheduledRetry, now: Math.max(wokeAt, Date.now()) });
+    previous.current = reuseTurnEndings(previous.current, next);
     return previous.current;
-  }, [threadId, state, scheduledRetry]);
+  }, [threadId, state, scheduledRetry, wokeAt]);
+  const lapseAt = nextRetryAtLapse(projection);
+  useEffect(() => {
+    if (lapseAt === null) return;
+    // Longer delays overflow setTimeout and fire at once; an early wake just re-arms.
+    const delay = Math.min(Math.max(lapseAt - Date.now(), 0), MAX_TIMEOUT_MS);
+    const timer = setTimeout(() => setWokeAt(Date.now()), delay);
+    return () => clearTimeout(timer);
+  }, [lapseAt, wokeAt]);
+  return projection;
 }
+
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 function withoutHiddenMessages(messages: Message[], hidden: ReadonlySet<string>): Message[] {
   return hidden.size > 0 && messages.some((message) => hidden.has(message.id))

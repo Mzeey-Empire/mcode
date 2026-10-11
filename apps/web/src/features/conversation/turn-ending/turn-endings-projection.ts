@@ -66,6 +66,18 @@ export function projectTurnEndings(threadId: string, state: AgentModelState, con
   return { endingsByMessageId, hiddenMessageIds };
 }
 
+/** Epoch ms when the earliest "Retry at" offer lapses into plain Retry, or null when none is showing. */
+export function nextRetryAtLapse(projection: TurnEndingsProjection): number | null {
+  let next: number | null = null;
+  for (const { view } of Object.values(projection.endingsByMessageId)) {
+    const primary = view.notice?.style === "filled" ? view.notice.primary : undefined;
+    if (primary?.action !== "retry_at") continue;
+    const at = Date.parse(primary.at);
+    if (next === null || at < next) next = at;
+  }
+  return next;
+}
+
 /**
  * Keeps the previous projection when nothing it renders changed.
  * Canonical state changes on every streamed event, and a fresh object would rebuild every stable transcript row.
