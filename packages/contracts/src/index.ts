@@ -302,8 +302,10 @@ export {
   MAX_TURN_RECOVERIES,
   RecoveryIncidentEntrySchema,
   RecoveryIncidentSchema,
+  TurnRetryParamsSchema,
+  TurnRetryResultSchema,
 } from "./models/turn-recovery.js";
-export type { RecoveryIncidentEntry, RecoveryIncident } from "./models/turn-recovery.js";
+export type { RecoveryIncidentEntry, RecoveryIncident, TurnRetryParams, TurnRetryResult } from "./models/turn-recovery.js";
 
 export {
   MessageSchema,

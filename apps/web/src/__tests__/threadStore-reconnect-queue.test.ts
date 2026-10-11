@@ -725,7 +725,7 @@ describe("threadStore reconnect and queued follow-ups", () => {
     expect(releaseBrowserCaptureSpills).toHaveBeenCalledWith(["browser-capture-spill/thread-delete.json"]);
   });
 
-  it("drains a queued follow-up when the turn ends via an outcome Ended event", async () => {
+  it("drains a queued follow-up when the turn completes via an outcome Ended event", async () => {
     vi.useFakeTimers();
     queueMessage("queued follow-up after ended");
     useThreadStore.setState({
@@ -741,7 +741,7 @@ describe("threadStore reconnect and queued follow-ups", () => {
       type: "ended",
       threadId: THREAD_ID,
       turnExecutionId: "execution-1",
-      outcome: "interrupted",
+      outcome: "completed",
     } satisfies AgentEvent);
     await vi.advanceTimersByTimeAsync(400);
 

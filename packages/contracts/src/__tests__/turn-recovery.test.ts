@@ -2,6 +2,26 @@ import { describe, expect, it } from "vitest";
 import { MAX_TURN_RECOVERIES, RecoveryIncidentSchema, WS_METHODS } from "../index.js";
 
 describe("turn recovery contracts", () => {
+  it("validates retry input and trims the optional model", () => {
+    const retry = WS_METHODS()["turn.retry"];
+    expect(retry.params.parse({ threadId: "thread-1", turnId: "turn-1", model: "  replacement  " }))
+      .toEqual({ threadId: "thread-1", turnId: "turn-1", model: "replacement" });
+    expect(retry.params.parse({ threadId: "thread-1", turnId: "turn-1" }))
+      .toEqual({ threadId: "thread-1", turnId: "turn-1" });
+    expect(retry.result.parse({ turnId: "turn-2" })).toEqual({ turnId: "turn-2" });
+    expect(retry.result.safeParse({ turnId: "turn-2", extra: true }).success).toBe(false);
+    expect(retry.result.safeParse({ turnId: "" }).success).toBe(false);
+  });
+
+  it.each([
+    { threadId: "" }, { threadId: "t".repeat(257) }, { turnId: "" },
+    { model: " " }, { model: "m".repeat(257) }, { extra: true },
+  ])("rejects invalid retry input %j", (invalid) => {
+    expect(WS_METHODS()["turn.retry"].params.safeParse({
+      threadId: "thread-1", turnId: "turn-1", ...invalid,
+    }).success).toBe(false);
+  });
+
   const incident = {
     id: "00000000-0000-4000-8000-000000000015",
     createdAt: "2026-08-10T09:03:00.000Z",

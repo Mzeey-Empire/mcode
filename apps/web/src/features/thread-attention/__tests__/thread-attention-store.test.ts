@@ -47,7 +47,7 @@ afterEach(() => {
 });
 
 describe("on-screen thread acknowledgements", () => {
-  it("uses the server sequence after a client-only error row and on the following turn", async () => {
+  it("uses the server sequence after an errored turn and on the following turn", async () => {
     useThreadStore.setState({ currentThreadId: "a", runningThreadIds: new Set(["a"]), records: new Map([["a", {
       ...createEmptyThreadRecord(), runtimePhase: "running", turnExecutionId: "execution-1",
       messages: [createMockMessage({ id: "prompt-1", thread_id: "a", role: "user", sequence: 4 })],
@@ -55,7 +55,7 @@ describe("on-screen thread acknowledgements", () => {
     stop = startThreadAttentionTracking();
     useThreadStore.getState().handleAgentEvent({ type: "error", threadId: "a", turnExecutionId: "execution-1", error: "Provider failed", failure: { kind: "fatal" } });
     expect(useThreadStore.getState().records.get("a")?.messages.map(({ role, sequence }) => ({ role, sequence })))
-      .toEqual([{ role: "user", sequence: 4 }, { role: "system", sequence: 5 }]);
+      .toEqual([{ role: "user", sequence: 4 }]);
     threadAttentionStore.getState().apply({ ...attention, lastTurn: { outcome: "errored", endedAt: NOW, sequence: 3, changedFileCount: null } });
     await vi.advanceTimersByTimeAsync(150);
     expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([]);
@@ -72,8 +72,8 @@ describe("on-screen thread acknowledgements", () => {
       settledMessage: { id: "assistant-2", sequence: 5 }, outcome: "completed", toolCallCount: 0, filesChanged: [] });
     await vi.advanceTimersByTimeAsync(150);
     expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([["a", 3], ["a", 5]]);
-    expect(useThreadStore.getState().records.get("a")?.messages.map((message) => message.sequence)).toEqual([4, 5, 7]);
-    expect(useThreadStore.getState().records.get("a")?.messages[2]).toMatchObject({ id: "assistant-2", serverSequence: 5 });
+    expect(useThreadStore.getState().records.get("a")?.messages.map((message) => message.sequence)).toEqual([4, 7]);
+    expect(useThreadStore.getState().records.get("a")?.messages[1]).toMatchObject({ id: "assistant-2", serverSequence: 5 });
   });
 
   it("acknowledges a reloaded empty ending only after its actual server prompt is rendered", async () => {

@@ -287,13 +287,6 @@ export function useComposerFormController({
     threadId,
     (record) => record.settings.orchestrationMode,
   );
-  const composerRecallFromStop = useThreadRecord(
-    threadId,
-    (record) => record.composerRecallFromStop,
-  );
-  const clearComposerRecallFromStop = useThreadStore(
-    (state) => state.clearComposerRecallFromStop,
-  );
   const clearSentComposerFields = useComposerDraftStore((state) => state.clearSentComposerFields);
   const previewReferenceQueueSignal = usePreviewReferenceQueueStore((state) => state.signal);
   const previewReferenceScopeId = threadId ?? workspaceId;
@@ -808,18 +801,6 @@ export function useComposerFormController({
     clearPendingPrefill();
     editorRef.current.focus();
   }, [clearPendingPrefill, pendingPrefill]);
-
-  useEffect(() => {
-    if (!composerRecallFromStop || !threadId) return;
-    const text = composerRecallFromStop.text;
-    clearComposerRecallFromStop(threadId);
-    // oxlint-disable-next-line react/set-state-in-effect -- The stopped-turn recall store supplies this external editor update.
-    setInput(text);
-    setMentions([]);
-    if (!editorRef.current) return;
-    writeComposerContent(editorRef.current, text);
-    editorRef.current.focus();
-  }, [clearComposerRecallFromStop, composerRecallFromStop, threadId]);
 
   useEffect(() => {
     const savedDraft = threadId ? getDraft(threadId) : undefined;

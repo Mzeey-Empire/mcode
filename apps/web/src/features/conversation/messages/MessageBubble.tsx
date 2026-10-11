@@ -1,7 +1,7 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect, useSyncExternalStore, lazy, Suspense, type ReactNode } from "react";
 import type { Message } from "@/transport";
 import { ImageIcon, RotateCcw, Copy, Check, GitFork, Target } from "lucide-react";
-import { ErrorIcon, WarningIcon } from "@/components/ui/icon-map";
+import { WarningIcon } from "@/components/ui/icon-map";
 import { cn } from "@/lib/utils";
 const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
 import { stripPlanFences } from "@/lib/plan-fences";
@@ -281,17 +281,6 @@ function GoalPill({ label, condition, hint }: { label: string; condition?: strin
   );
 }
 
-function parseAgentError(content: string): string | null {
-  try {
-    const parsed = JSON.parse(content) as { __type?: string; message?: string };
-    if (parsed.__type === "agent_error" && typeof parsed.message === "string") {
-      return parsed.message;
-    }
-  } catch {
-    // not JSON
-  }
-  return null;
-}
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { AgentDisplayState } from "./virtual-items";
 
@@ -804,22 +793,13 @@ function UserMessageContent({
   );
 }
 
-/** Renders a system message, including structured handoffs and synthetic agent errors. */
+/** Renders a system message, including structured handoffs and security notices. */
 function SystemMessageContent({ message }: Pick<MessageBubbleProps, "message">) {
   const currentSessionNotices = useThreadRecord(message.thread_id, (record) => record.sessionNotices);
   if (message.systemNotice?.scope === "session") return null;
   if (isCurrentComposerProviderNotice(message, currentSessionNotices)) return null;
   if (isHandoffMessage(message.role, message.content) && parseHandoffJson(message.content)) {
     return <HandoffCard content={message.content} />;
-  }
-  const agentError = parseAgentError(message.content);
-  if (agentError) {
-    return (
-      <div className="flex items-start gap-2.5 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm">
-        <ErrorIcon size={14} className="mt-0.5 shrink-0 text-destructive/60" />
-        <p className="text-muted leading-relaxed">{agentError}</p>
-      </div>
-    );
   }
   if (message.systemNotice?.kind === "security") {
     return (
