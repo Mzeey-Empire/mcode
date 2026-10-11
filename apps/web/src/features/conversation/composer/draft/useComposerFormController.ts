@@ -762,14 +762,15 @@ export function useComposerFormController({
 
   useEffect(() => {
     // Declared after the defaults and owner-restore effects so the announced model wins over both.
-    if (!pendingModel || !settingsLoaded || threadId || draftId) return;
+    // Choosing a project reruns owner restore, so wait for a workspace before consuming the model.
+    if (!pendingModel || !settingsLoaded || threadId || draftId || !workspaceId) return;
     updateSelection({
       modelId: pendingModel.modelId,
       provider: pendingModel.provider,
       reasoning: normalizeReasoningLevel(pendingModel.provider, pendingModel.modelId, settingsDefaultReasoning),
     });
     clearPendingModel();
-  }, [clearPendingModel, draftId, pendingModel, settingsDefaultReasoning, settingsLoaded, threadId, updateSelection]);
+  }, [clearPendingModel, draftId, pendingModel, settingsDefaultReasoning, settingsLoaded, threadId, updateSelection, workspaceId]);
 
   useEffect(() => {
     setSelection((current) => {

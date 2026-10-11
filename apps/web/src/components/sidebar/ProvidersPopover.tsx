@@ -29,12 +29,12 @@ function ProviderRow({ row, onSignIn, onTry }: { row: ProviderBellRow } & Omit<P
   const { signInArgv, tryModelId } = row;
   return (
     <li className="flex items-center gap-2.5 rounded-lg pt-2 pr-1.5 pb-2 pl-2.5">
-      <span className="flex h-5 w-4 shrink-0 items-center justify-center">
+      <span className="flex h-5 w-4 shrink-0 items-center justify-center self-start">
         <ProviderIcon provider={row.providerId} size={16} />
       </span>
-      <div className="min-w-0 flex-1">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="text-sm font-medium text-ink">{row.name}</div>
-        <div className={cn("text-xs", row.kind === "signed_out" ? "text-primary" : "text-muted")}>{row.detail}</div>
+        <div className={cn("text-fade text-xs", row.kind === "signed_out" ? "text-primary" : "text-muted")}>{row.detail}</div>
       </div>
       {signInArgv && <RowPill label="Sign in" onClick={() => onSignIn(signInArgv)} />}
       {tryModelId && <RowPill label="Try" onClick={() => onTry(row.providerId, tryModelId)} />}

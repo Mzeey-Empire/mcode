@@ -231,6 +231,27 @@ describe("useComposerFormController new-thread drafts", () => {
     expect(useComposerDraftStore.getState().pendingModel).toBeNull();
   });
 
+  it("keeps the announced model when Try runs before a project is chosen", async () => {
+    useSettingsStore.setState({ loaded: true });
+    useComposerDraftStore.getState().setPendingModel({ provider: "codex", modelId: "gpt-6-astra" });
+    const { result, rerender } = renderHook(
+      ({ workspaceId }: { workspaceId?: string }) => useComposerFormController({
+        isNewThread: true,
+        workspaceId,
+        draftId: null,
+      }),
+      { initialProps: {} as { workspaceId?: string } },
+    );
+    await waitFor(() => expect(result.current.state.selection.modelId).not.toBe(""));
+    expect(useComposerDraftStore.getState().pendingModel).not.toBeNull();
+
+    rerender({ workspaceId: "ws-1" });
+
+    await waitFor(() => expect(result.current.state.selection.modelId).toBe("gpt-6-astra"));
+    expect(result.current.state.selection.provider).toBe("codex");
+    expect(useComposerDraftStore.getState().pendingModel).toBeNull();
+  });
+
   it("restores input and selection from a bound draft entity", async () => {
     const id = useThreadDraftStore.getState().saveDraft(draftPayload("saved draft"))!;
     const { result } = renderHook(() => useComposerFormController({
