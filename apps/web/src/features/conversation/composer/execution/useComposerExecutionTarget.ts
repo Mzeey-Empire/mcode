@@ -13,6 +13,8 @@ export type ComposerExecutionTarget =
     mode: ComposerMode;
     branch: string;
     branchSource: "branch" | "pr";
+    /** Remote of a remote-only branch pick, such as `origin`; null for a local branch. */
+    branchRemote: string | null;
     pullRequestNumber?: number;
     hasWorktree: boolean;
   }
@@ -60,7 +62,7 @@ export interface ComposerExecutionTargetController {
   setMode(mode: ComposerMode): void;
   setBranchMode(mode: ComposerMode): void;
   setNewThreadMode(mode: ComposerMode): void;
-  setNewThreadBranch(branch: string): void;
+  setNewThreadBranch(branch: string, remote: string | null): void;
   setNewThreadBranchFromPullRequest(branch: string, pullRequestNumber: number): void;
 }
 
@@ -76,6 +78,7 @@ export function useComposerExecutionTarget({
   );
   const newThreadMode = useWorkspaceStore((state) => state.newThreadMode);
   const newThreadBranchSource = useWorkspaceStore((state) => state.newThreadBranchSource);
+  const newThreadBranchRemote = useWorkspaceStore((state) => state.newThreadBranchRemote);
   const newThreadPullRequestNumber = useWorkspaceStore((state) => state.newThreadPullRequestNumber);
   const selectedWorktree = useWorkspaceStore((state) => state.selectedWorktree);
   const branchExecMode = useWorkspaceStore((state) => state.branchExecMode);
@@ -121,6 +124,7 @@ export function useComposerExecutionTarget({
         mode: composerMode,
         branch: newThreadBranch.name,
         branchSource: newThreadBranchSource,
+        branchRemote: newThreadBranchRemote,
         pullRequestNumber: newThreadPullRequestNumber,
         hasWorktree: selectedWorktree !== null,
       };
@@ -135,7 +139,7 @@ export function useComposerExecutionTarget({
       };
     }
     return { kind: "existing-thread", mode: composerMode };
-  }, [branchExecMode, branchFromMessageId, forkBranch.name, branchWorktreeIsDetached, branchWorktreePath, composerMode, isNewThread, newThreadBranch.name, newThreadBranchSource, newThreadPullRequestNumber, selectedWorktree]);
+  }, [branchExecMode, branchFromMessageId, forkBranch.name, branchWorktreeIsDetached, branchWorktreePath, composerMode, isNewThread, newThreadBranch.name, newThreadBranchRemote, newThreadBranchSource, newThreadPullRequestNumber, selectedWorktree]);
   const targetPending = isTargetBranchPending({
     isGitRepo,
     target,

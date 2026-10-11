@@ -41,6 +41,7 @@ const target = {
   mode: "direct" as const,
   branch: "main",
   branchSource: "branch" as const,
+  branchRemote: null,
   hasWorktree: false,
 };
 

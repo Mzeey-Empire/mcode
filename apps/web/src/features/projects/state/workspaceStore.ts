@@ -718,7 +718,7 @@ interface WorkspaceState {
   checkoutBranch: (workspaceId: string, branch: string) => Promise<void>;
   setNewThreadMode: (mode: "direct" | "worktree" | "existing-worktree") => void;
   /** Picks a branch; `remote` is set only for a remote-only row such as `origin/x`. */
-  setNewThreadBranch: (branch: string, remote?: string | null) => void;
+  setNewThreadBranch: (branch: string, remote: string | null) => void;
   setNewThreadBranchFromPr: (branch: string, pullRequestNumber: number) => void;
 
   // Worktree actions
@@ -1856,7 +1856,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     set({ newThreadMode: mode });
   },
 
-  setNewThreadBranch: (branch, remote = null) => {
+  setNewThreadBranch: (branch, remote) => {
     set({
       newThreadBranch: branch,
       newThreadBranchSource: "branch",
