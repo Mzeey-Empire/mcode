@@ -178,6 +178,26 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     },
   },
 
+  /** OS notifications for thread events, raised while Mcode is in the background. */
+  notifications: {
+    /** Raise or replace the OS notification for one thread. */
+    show(input: { tag: string; title: string; body: string }): Promise<void> {
+      return ipcRenderer.invoke("notifications:show", input);
+    },
+    /** Listen for notification clicks; the callback receives the clicked tag. Returns the listener for cleanup. */
+    onClick(callback: (tag: string) => void) {
+      const listener = (_event: unknown, tag: unknown) => {
+        if (typeof tag === "string") callback(tag);
+      };
+      ipcRenderer.on("notifications:clicked", listener);
+      return listener;
+    },
+    /** Remove a previously registered notification click listener. */
+    offClick(listener: (...args: unknown[]) => void) {
+      ipcRenderer.removeListener("notifications:clicked", listener);
+    },
+  },
+
   /** App version and auto-update controls. */
   app: {
     /** Read the running app version (from package.json at build time). */
