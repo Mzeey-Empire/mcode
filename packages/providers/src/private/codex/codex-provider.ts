@@ -59,7 +59,7 @@ import {
   isGoalOpen,
   providerRuntimeEvent,
 } from "@mcode/contracts";
-import { checkCodexVersion, currentCodexVersion, clearVersionCache, warmCodexVersionCache } from "./codex-version.js";
+import { checkCodexVersion, currentCodexVersion, clearVersionCache } from "./codex-version.js";
 import { meetsMinVersion } from "../../version-policy.js";
 import { CodexAppServer, warmCodexAppServer } from "./codex-app-server.js";
 import type { CodexApprovalRequest } from "./codex-app-server.js";
@@ -93,7 +93,7 @@ import {
   synthesizeCodexApprovalRequest,
 } from "./codex-permission-mapper.js";
 import { CodexPromptResolutionError, parseCodexSlashInvocation } from "./codex-prompt.js";
-import { createCliStatusRunner, resolveCliStatusBinary } from "../status/cli-status-runner.js";
+import { createCliStatusRunner, readCliStatusVersion, resolveCliStatusBinary } from "../status/cli-status-runner.js";
 import { describeCodexAuth } from "../status/provider-auth-checks.js";
 
 export {
@@ -649,12 +649,10 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   async describeStatus() {
     const { cliPath } = await this.codexPorts.settings.get();
     const run = createCliStatusRunner({ platform: this.host.runtime.platform, env: this.host.environment.snapshot() });
-    await warmCodexVersionCache(cliPath);
-    const version = checkCodexVersion(cliPath);
     return {
       ...await describeCodexAuth(run, cliPath),
       cli: {
-        installed: version.ok ? version.version : null,
+        installed: await readCliStatusVersion(run, cliPath),
         managedBy: "user" as const,
         resolvedPath: await resolveCliStatusBinary(cliPath, this.host.environment.snapshot()),
         npmPackage: "@openai/codex",
