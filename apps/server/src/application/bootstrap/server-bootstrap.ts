@@ -561,6 +561,10 @@ const pullRequestCompletionEffect = new TurnPullRequestCompletionEffect(
 threadCompletionService.registerResourceOwner("ci-watcher", (threadId) =>
   ciWatcherService.teardownThread(threadId),
 );
+// A completed thread must not reopen when a retry scheduled before completion fires.
+threadCompletionService.registerResourceOwner("turn-retry", (threadId) =>
+  turnRetryScheduler.unschedule(threadId),
+);
 threadCompletionService.registerResourceOwner("workspace-environment", async (threadId) => {
   const release = workspaceEnvironmentService.beginThreadDeletion(threadId);
   try {
