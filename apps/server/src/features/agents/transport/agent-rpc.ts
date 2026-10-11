@@ -44,6 +44,7 @@ type AgentRpcMethod =
   | "agent.recoveryIncident"
   | "agent.retry"
   | "turn.retry"
+  | "turn.resume"
   | "agent.continueWithoutSaving"
   | "agent.createAndSend"
   | "agent.stop"
@@ -106,7 +107,7 @@ export interface AgentRouterDeps {
     "respondToApproval" | "listPendingApprovals"
   >;
   toolCallRecordRepo: Pick<ToolCallRecordRepo, "listByMessage" | "listByParent">;
-  turnRecoveryService: Pick<TurnRecoveryService, "currentRecoveryIncident" | "retry" | "retryTurn">;
+  turnRecoveryService: Pick<TurnRecoveryService, "currentRecoveryIncident" | "retry" | "retryErroredTurn" | "resumeTurn">;
   turnSteers?: Pick<TurnSteerService, "steer" | "listHeldSteers" | "settleUnknownSteer">;
 }
 
@@ -173,12 +174,10 @@ const agentHandlers: AgentRpcHandlerMap = {
         displayContent: command.content,
       }));
   },
-  "turn.retry": (deps, params) => deps.turnRecoveryService.retryTurn(params, (command) =>
-    sendAdmittedTurn(deps.agentService, {
-      ...command,
-      content: appendPreviewAnnotations(command.content, command.previewAnnotations),
-      displayContent: command.content,
-    })),
+  "turn.retry": (deps, params) => deps.turnRecoveryService.retryErroredTurn(params, (command) =>
+    sendRecoveryAttempt(deps.agentService, command)),
+  "turn.resume": (deps, params) => deps.turnRecoveryService.resumeTurn(params, (command) =>
+    sendRecoveryAttempt(deps.agentService, command)),
   "agent.continueWithoutSaving": (deps, params) => {
     if (!deps.agentContinuation) throw new Error("Agent turn continuation is unavailable");
     deps.agentContinuation.continueWithoutSaving(params.executionId);
@@ -247,6 +246,15 @@ const agentHandlers: AgentRpcHandlerMap = {
 function requireTurnSteers(deps: AgentRouterDeps): NonNullable<AgentRouterDeps["turnSteers"]> {
   if (!deps.turnSteers) throw new Error("Steering is unavailable");
   return deps.turnSteers;
+}
+
+/** Dispatch a server-built recovery attempt, rebuilding its provider input the way a composer send does. */
+function sendRecoveryAttempt(service: AgentRouterDeps["agentService"], command: SendMessageCommand): Promise<void> {
+  return sendAdmittedTurn(service, {
+    ...command,
+    content: appendPreviewAnnotations(command.content, command.previewAnnotations),
+    displayContent: command.content,
+  });
 }
 
 async function sendAdmittedTurn(

@@ -55,7 +55,7 @@ export const CanonicalRuntimeParentStartSchema = z.object({
         z.object({ type: z.literal("thread"), sourceThreadId: identity, sourceTurnId: identity,
           sourceProviderId: identity })]).optional(),
       selectedTextComments: SelectedTextCommentsSchema().optional(),
-      systemNotice: SystemNoticeMetadataSchema().optional() }),
+      systemNotice: SystemNoticeMetadataSchema().optional(), isInternal: z.boolean().optional() }),
   ]),
 });
 

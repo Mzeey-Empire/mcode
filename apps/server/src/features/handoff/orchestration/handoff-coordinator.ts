@@ -23,6 +23,7 @@ import { broadcast } from "../../../application/transport/push.js";
 import {
   buildHandoffContent,
   buildConversationReplay,
+  CODEX_INLINE_INPUT_MAX_CHARS,
   replayBudgetChars,
   resolveForkSnapshot,
 } from "../artifacts/handoff-builder.js";
@@ -82,7 +83,6 @@ function buildOffBandHandoffPrompt(tempPath: string, markdown: string, userMessa
   ].join("\n");
 }
 
-const CODEX_INLINE_HANDOFF_MAX_CHARS = 14_000;
 class HandoffAnchorPersistenceError extends Error {}
 const CODEX_INLINE_MAX_USER_CHARS = 4_000;
 const CODEX_HANDOFF_TRUNCATION_NOTICE =
@@ -100,7 +100,7 @@ function takeCharsWithNotice(text: string, maxChars: number, notice: string): st
 function buildInlineHandoffPrompt(markdown: string, userMessage: string): string {
   const separator = "\n\n---\n\n";
   const fullPrompt = `${markdown}${separator}${userMessage}`;
-  if (fullPrompt.length <= CODEX_INLINE_HANDOFF_MAX_CHARS) return fullPrompt;
+  if (fullPrompt.length <= CODEX_INLINE_INPUT_MAX_CHARS) return fullPrompt;
 
   const boundedUserMessage = takeCharsWithNotice(
     userMessage,
@@ -108,7 +108,7 @@ function buildInlineHandoffPrompt(markdown: string, userMessage: string): string
     CODEX_USER_TRUNCATION_NOTICE,
   );
   const markdownBudget =
-    CODEX_INLINE_HANDOFF_MAX_CHARS - separator.length - boundedUserMessage.length;
+    CODEX_INLINE_INPUT_MAX_CHARS - separator.length - boundedUserMessage.length;
   const boundedMarkdown = takeCharsWithNotice(
     markdown,
     markdownBudget,

@@ -59,6 +59,7 @@ export type ParentUserMessageWrite =
       attachments?: CreateMessageArgument[4];
       replyToMessageId?: CreateMessageArgument[5];
       quotedText?: CreateMessageArgument[6];
+      isInternal?: CreateMessageArgument[8];
       mentions?: CreateMessageArgument[9];
       previewAnnotations?: CreateMessageArgument[10];
       origin?: CreateMessageArgument[11];
@@ -84,7 +85,7 @@ export function projectParentUserMessage(messages: MessageRepo, threadId: string
     userMessage.replyToMessageId,
     userMessage.quotedText,
     undefined,
-    undefined,
+    userMessage.isInternal,
     userMessage.mentions,
     userMessage.previewAnnotations,
     userMessage.origin,
