@@ -57,6 +57,7 @@ export {
   InterruptionCauseSchema,
   PersistedTurnFailureSchema,
   SystemStopReasonSchema,
+  TurnFailureKindSchema,
   TurnStopCauseSchema,
 } from "./records.js";
 export type {
@@ -76,6 +77,7 @@ export type {
   InterruptionCause,
   PersistedTurnFailure,
   SystemStopReason,
+  TurnFailureKind,
   TurnStopCause,
 } from "./records.js";
 

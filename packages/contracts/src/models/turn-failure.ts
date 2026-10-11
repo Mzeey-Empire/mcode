@@ -1,11 +1,6 @@
 import { z } from "zod";
+import { TurnFailureKindSchema } from "../compat/agent-model.js";
 import { lazySchema } from "../utils/lazySchema.js";
-
-/** Why a turn failed, as classified by the adapter that saw the native error. */
-export const TurnFailureKindSchema = z.enum(["retryable", "usage_limit", "auth", "fatal"]);
-
-/** Why a turn failed, as classified by the adapter that saw the native error. */
-export type TurnFailureKind = z.infer<typeof TurnFailureKindSchema>;
 
 /** Adapter-classified failure carried by every provider Error event. */
 export const TurnFailureSchema = lazySchema(() =>

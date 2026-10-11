@@ -85,10 +85,15 @@ export const InterruptionCauseSchema = z.enum(["app_closed", "provider_exited", 
 /** Why an interrupted turn stopped. "unknown" covers rows written before causes existed. */
 export type InterruptionCause = z.infer<typeof InterruptionCauseSchema>;
 
+/** Why a turn failed, as classified by the adapter that saw the native error. */
+export const TurnFailureKindSchema = z.enum(["retryable", "usage_limit", "auth", "fatal"]);
+/** Why a turn failed, as classified by the adapter that saw the native error. */
+export type TurnFailureKind = z.infer<typeof TurnFailureKindSchema>;
+
 /** Provider failure persisted with an errored turn, with any reset time made absolute. */
 export const PersistedTurnFailureSchema = z
   .object({
-    kind: z.enum(["retryable", "usage_limit", "auth", "fatal"]),
+    kind: TurnFailureKindSchema,
     provider: ProviderIdSchema,
     /** Raw provider text for Details. */
     message: z.string().trim().min(1).max(8_000),
