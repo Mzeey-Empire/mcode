@@ -26,6 +26,42 @@ function toolCall(toolCallId: string, extra: Record<string, unknown> = {}): Reco
 }
 
 describe("mapDevinAcpSessionNotification", () => {
+  it("maps the captured ACP task plan to a paired TodoWrite snapshot without changing turn state", () => {
+    const state = createDevinAcpTurnState();
+    const events = mapDevinAcpSessionNotification(notification({
+      sessionUpdate: "plan",
+      entries: [
+        { content: "create a.txt", priority: "medium", status: "completed" },
+        { content: "create b.txt", priority: "medium", status: "in_progress" },
+        { content: "create c.txt", priority: "medium", status: "pending" },
+      ],
+    }), THREAD, state);
+    expect(events).toEqual([
+      {
+        type: "toolUse", threadId: THREAD, toolCallId: expect.any(String), toolName: "TodoWrite",
+        toolInput: { todos: [
+          { id: "0", content: "create a.txt", status: "completed", priority: "medium" },
+          { id: "1", content: "create b.txt", status: "in_progress", priority: "medium" },
+          { id: "2", content: "create c.txt", status: "pending", priority: "medium" },
+        ] },
+      },
+      {
+        type: "toolResult", threadId: THREAD, toolCallId: expect.any(String),
+        output: "Updated 3 todo(s)", isError: false,
+      },
+    ]);
+    const [use, result] = events;
+    if (use.type !== "toolUse" || result.type !== "toolResult") throw new Error("Expected tool pair");
+    expect(result.toolCallId).toBe(use.toolCallId);
+    expect(state).toEqual(createDevinAcpTurnState());
+  });
+
+  it("ignores empty ACP task plans", () => {
+    expect(mapDevinAcpSessionNotification(
+      notification({ sessionUpdate: "plan", entries: [] }), THREAD, createDevinAcpTurnState(),
+    )).toEqual([]);
+  });
+
   it("preserves the plan fence through the mapper and captures it exactly once", () => {
     const state = createDevinAcpTurnState();
     const deltas: string[] = [];

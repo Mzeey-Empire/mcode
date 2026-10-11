@@ -6,8 +6,8 @@
  * - the authoritative tool name is `_meta["cognition.ai/inferenceToolName"]`,
  *   not `kind` (`kind: "edit"` covers both write and write_plan, and
  *   `run_subagent` has no `kind` at all);
- * - plans arrive as `write_plan` tool calls editing `~/.devin/plans/*.md`,
- *   never as the spec `plan` update;
+ * - plan-mode plans arrive as `write_plan` tool calls editing `~/.devin/plans/*.md`,
+ *   while spec `plan` updates carry the task list and map to TodoWrite;
  * - subagent children stream orphan `tool_call_update`s keyed by agentId with
  *   `_meta.subagent_started`/`subagent_completed` and no `tool_call` marker;
  * - a subagent's inner tool calls stream as `tool_call` markers carrying
@@ -19,6 +19,7 @@
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { AgentEventType } from "@mcode/contracts";
 import type { AgentEvent } from "@mcode/contracts";
+import { acpPlanEntriesToTodos, buildTodoWriteEvents } from "../protocols/acp/acp-plan-todo-write.js";
 
 const INFERENCE_TOOL_NAME_META = "cognition.ai/inferenceToolName";
 const SUBAGENT_STARTED_META = "cognition.ai/subagent_started";
@@ -132,6 +133,10 @@ export function mapDevinAcpSessionNotification(
   if (kind === "tool_call") return mapToolCallStarted(update, threadId, state);
   if (kind === "tool_call_update") return mapToolCallUpdated(update, threadId, state);
   if (kind === "usage_update") return mapUsageUpdate(update, threadId);
+  if (kind === "plan") {
+    const todos = acpPlanEntriesToTodos(update.entries);
+    return todos.length === 0 ? [] : buildTodoWriteEvents(todos, threadId);
+  }
   return [];
 }
 

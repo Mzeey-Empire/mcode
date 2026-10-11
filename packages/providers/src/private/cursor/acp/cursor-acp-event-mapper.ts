@@ -18,9 +18,9 @@ import {
   extractCursorTodoEntries,
   normalizeCursorTodoEntry,
   reconcileCursorTodos,
-  buildTodoWriteEvents,
   type CursorTodoSnapshot,
 } from "../events/cursor-todo-snapshot.js";
+import { acpPlanEntriesToTodos, buildTodoWriteEvents } from "../../protocols/acp/acp-plan-todo-write.js";
 import { normalizeMcodeCursorToolInput } from "../events/cursor-tool-input-normalize.js";
 import type { CursorStreamAccumulator } from "../stream-json/cursor-stream-event-mapper.js";
 import {
@@ -698,31 +698,8 @@ function mapAcpPlanUpdate(
 ): AgentEvent[] {
   if (!update.entries || update.entries.length === 0) return [];
 
-  const incoming = update.entries.map((entry, i) => ({
-    id: String(i),
-    content: entry.content?.trim() || `Step ${i + 1}`,
-    status: normalizePlanStatus(entry.status),
-    priority: entry.priority,
-  }));
-
-  const todos = reconcileCursorTodos(incoming, false, todoSnapshot);
-  return buildTodoWriteEvents(todos, threadId);
-}
-
-function normalizePlanStatus(
-  status: string,
-): "pending" | "in_progress" | "completed" | "cancelled" {
-  switch (status) {
-    case "completed":
-      return "completed";
-    case "cancelled":
-    case "canceled":
-      return "cancelled";
-    case "in_progress":
-    case "inProgress":
-    case "in-progress":
-      return "in_progress";
-    default:
-      return "pending";
-  }
+  return buildTodoWriteEvents(
+    reconcileCursorTodos(acpPlanEntriesToTodos(update.entries), false, todoSnapshot),
+    threadId,
+  );
 }
