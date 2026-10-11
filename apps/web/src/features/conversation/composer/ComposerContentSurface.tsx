@@ -585,7 +585,7 @@ function ComposerControlBar({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center gap-1 border-t border-border/20 py-1.5",
+        "@container flex flex-wrap items-center gap-1 border-t border-border/20 py-1.5",
         model.showInlineComposerOptions ? "px-3 sm:gap-2.5" : "px-2",
       )}
     >

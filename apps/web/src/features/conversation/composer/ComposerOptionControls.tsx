@@ -39,7 +39,10 @@ function isAccessModeDisabled(accessMode: ComposerAccessMode, permissionLocked: 
 /** Why a locked provider dims every mode except Don't ask. */
 const PERMISSION_LOCKED_REASON = "This provider runs without approval prompts";
 
-/** Compact access-mode menu; renders generic or provider-native options. */
+/**
+ * Compact access-mode menu; renders generic or provider-native options. The
+ * trigger drops its label below 560px of the nearest `@container` ancestor.
+ */
 export function AccessModeMenu({
   accessMode,
   permissionLocked,
@@ -65,7 +68,7 @@ export function AccessModeMenu({
             className="gap-1.5 text-muted transition-colors hover:bg-hover/40 hover:text-ink"
           >
             <Icon size={14} />
-            <span className="text-sm">{selected.label}</span>
+            <span className="text-sm @max-[560px]:hidden">{selected.label}</span>
           </Button>
         }
       />
