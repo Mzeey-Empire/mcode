@@ -3,7 +3,7 @@ import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { TurnRevertFaultStop } from "../turn-revert-service.js";
-import { samePathState } from "../../snapshots/snapshot-raw-state.js";
+import { absentState, samePathState } from "../../snapshots/snapshot-raw-state.js";
 import { revertFixture, committed, renamed, probeSymlinks } from "./turn-revert-fixture.js";
 
 const symlinks = probeSymlinks();
@@ -122,9 +122,11 @@ describe("raw revert recovery", () => {
     const service = f.service(async (point) => { if (point === "afterPrepare") { entered(); await pause; } });
     const request = await f.request(turn.messageId), applying = service.apply(request); await prepared;
     expect(await service.preview(request)).toEqual({ status: "busy", reason: "revert_running" });
+    const replay = service.apply(request);
     let captured = false;
     const baseline = f.snapshots.captureRef(f.cwd).then((ref) => { captured = true; return ref; });
-    await Promise.resolve(); expect(captured).toBe(false); release(); committed(await applying);
+    await Promise.resolve(); expect(captured).toBe(false); release(); const applied = committed(await applying);
+    expect(await replay).toEqual(applied); expect(f.published).toHaveLength(1);
     expect(await baseline).toBe(turn.before); expect(f.read("a")).toEqual(Buffer.from("before\n"));
   }, timeout);
 
@@ -135,6 +137,13 @@ describe("raw revert recovery", () => {
     const result = committed(await f.service().apply(await f.request(turn.messageId))); expect(NodeFS.readlinkSync(NodePath.join(f.cwd, "link"))).toBe("before-target");
     committed(await f.service().undo({ threadId: "thread", revertId: result.revert.id, requestId: NodeCrypto.randomUUID() })); expect(NodeFS.readlinkSync(NodePath.join(f.cwd, "link"))).toBe("after-target");
     await expect(f.snapshots.captureRaw(f.cwd, ["../escape"])).rejects.toThrow(/Invalid/);
+    const external = NodeFS.mkdtempSync(NodePath.join(NodePath.dirname(f.cwd), "revert-external-"));
+    try {
+      NodeFS.writeFileSync(NodePath.join(external, "protected"), "untouched\n");
+      NodeFS.symlinkSync(external, NodePath.join(f.cwd, "escape"), "junction");
+      await expect(f.snapshots.restoreRaw(f.cwd, NodeCrypto.randomUUID(), [{ path: "escape/protected", state: absentState() }])).rejects.toThrow(/escapes/);
+      expect(NodeFS.readFileSync(NodePath.join(external, "protected"))).toEqual(Buffer.from("untouched\n"));
+    } finally { NodeFS.rmSync(external, { recursive: true, force: true }); }
   }, timeout);
 
   it.skipIf(process.platform === "win32")("restores executable mode and Undo restores the original mode", async () => {

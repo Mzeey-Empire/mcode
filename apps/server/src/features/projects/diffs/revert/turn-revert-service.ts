@@ -30,7 +30,7 @@ export interface RevertUndoInput { threadId: string; revertId: string; requestId
 
 /** Durable worktree-only restore operations, serialized with turn baseline capture. */
 export class TurnRevertService {
-  private readonly inFlight = new Map<string, string>();
+  private readonly inFlight = new Map<string, { requestId: string; callers: number }>();
   constructor(private readonly deps: TurnRevertDeps,
     private readonly fault?: (point: RevertFaultPoint, writes: number) => void | Promise<void>) {}
 
@@ -109,10 +109,12 @@ export class TurnRevertService {
 
   private async run(cwd: string, requestId: string, work: () => Promise<TurnRevertResult>): Promise<TurnRevertResult> {
     const active = this.inFlight.get(cwd);
-    if (active && active !== requestId) return { status: "busy", reason: "revert_running" };
-    this.inFlight.set(cwd, requestId);
+    if (active && active.requestId !== requestId) return { status: "busy", reason: "revert_running" };
+    const admission = active ?? { requestId, callers: 0 };
+    admission.callers++;
+    this.inFlight.set(cwd, admission);
     try { return await this.deps.lock.run(cwd, work); }
-    finally { if (!active) this.inFlight.delete(cwd); }
+    finally { if (--admission.callers === 0) this.inFlight.delete(cwd); }
   }
 
   private async replay(requestId: string, request: string): Promise<TurnRevertResult | null> {
