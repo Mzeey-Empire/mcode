@@ -16,6 +16,8 @@ import { ParentAssistantTextCoordinator } from "../../turns/parent-assistant-tex
 import { ParentNarrativeRecoveryCoordinator } from "../../turns/parent-narrative-recovery-coordinator.js";
 import { LegacyConversationMigration } from "../../conversation/migrations/legacy-conversation-migration.js";
 import { ConversationDisplayMaterializer } from "../../conversation/migrations/conversation-display-materializer.js";
+import { TurnSteerRepo } from "../../steering/persistence/turn-steer-repo.js";
+import { asTurnSteerError } from "../../steering/turn-steer.js";
 
 const NOW = "2026-10-01T10:00:00.000Z";
 const executionId = "00000000-0000-4000-8000-000000000001";
@@ -78,6 +80,26 @@ describe("main canonical operations through the sole writer", () => {
     await new MessageRepo(reader, writer).create(threadId, "user", "Later prompt", 2);
     expect(canonical.loadParentTurnUserMessage(executionId)).toMatchObject({ id: "user-1", content: "Question" });
     expect(canonical.loadParentTurnUserMessage("unknown-execution")).toBeNull();
+  });
+
+  it("admits a Send again resend once and closes another window's copy before its user message", async () => {
+    const steerId = "00000000-0000-4000-8000-0000000000a1";
+    const replacementId = "00000000-0000-4000-8000-0000000000a2";
+    const steers = new TurnSteerRepo(reader, writer);
+    await steers.insertPending({ messageId: steerId, threadId, turnExecutionId: executionId, inputsHash: "hash",
+      payload: { content: "Use staging" } });
+    await steers.settle(steerId, { state: "delivery_unknown" });
+    await steers.requeue(steerId, replacementId);
+    const resend = (turn: string, execution: string) => canonical.startParentTurn({ ...start, turnId: turn,
+      executionId: execution, resendOfSteerId: steerId,
+      userMessage: { kind: "create", messageId: replacementId, content: "Use staging", sequence: 1 } });
+
+    await expect(resend("turn-resend-1", "00000000-0000-4000-8000-0000000000b1")).resolves.toMatchObject({ outcome: "committed" });
+    const second = await resend("turn-resend-2", "00000000-0000-4000-8000-0000000000b2").then(() => null, (error: unknown) => error);
+
+    expect(asTurnSteerError(second)?.code).toBe("steer_resend_closed");
+    expect(canonical.loadTurn("turn-resend-2")).toBeNull();
+    expect(steers.find(steerId)).toMatchObject({ state: "closed" });
   });
 
   it("resumes a partially committed terminal projection and preserves a single durable revision", async () => {

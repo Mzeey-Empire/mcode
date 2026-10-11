@@ -84,6 +84,7 @@ import type {
   CompletedItem,
   SandboxMode,
   ThreadGoal,
+  TurnInputPart,
 } from "./codex-types.js";
 import {
   mapDecisionToCodexResponse,
@@ -2293,7 +2294,16 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       || state.cancelledTurnExecutionId === input.turnExecutionId) {
       return { outcome: "rejected", reason: "turn_not_running", detail: "The Codex turn is not running." };
     }
-    return state.server.steerTurn(nativeTurnId, input.steerId, input.message);
+    let parts: TurnInputPart[];
+    try {
+      // The same parts a new turn would send, so mentions and slash commands stay native in a steer.
+      parts = await buildCodexInput(input.message, undefined, await this.codexSkillCatalog(input.message, state.cwd),
+        input.mentions ?? []);
+    } catch (error) {
+      if (!(error instanceof CodexPromptResolutionError)) throw error;
+      return { outcome: "rejected", reason: "provider", detail: error.message };
+    }
+    return state.server.steerTurn(nativeTurnId, input.steerId, parts);
   }
 
   /** Graceful protocol interrupt of the in-flight turn (does not kill the process). */

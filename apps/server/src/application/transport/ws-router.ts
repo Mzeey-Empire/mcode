@@ -109,7 +109,7 @@ import { isAttachmentRpcMethod, routeAttachmentRpc } from "../../features/attach
 import type { AttachmentService } from "../../features/attachments/storage/attachment-service.js";
 import { DraftImageMissingError } from "../../features/attachments/storage/draft-image-missing-error.js";
 import { SequenceAheadError } from "../../features/thread-control/attention/sequence-ahead-error.js";
-import { TurnSteerConflictError, asTurnSteerError } from "../../features/agents/steering/turn-steer.js";
+import { TurnSteerConflictError, TurnSteerMentionError, asTurnSteerError } from "../../features/agents/steering/turn-steer.js";
 import { isMemoryRpcMethod, routeMemoryRpc } from "../../runtime/memory/transport/memory-rpc.js";
 import { isGitRpcMethod, routeGitRpc } from "../../features/projects/git/transport/git-rpc.js";
 import { isSnapshotRpcMethod, routeSnapshotRpc } from "../../features/projects/diffs/transport/snapshot-rpc.js";
@@ -472,7 +472,9 @@ function domainRouteError(id: string, error: unknown, message: string): WebSocke
     return { id, error: { code: error.code, message, data: { stagingId: error.stagingId } } };
   }
   if (error instanceof SequenceAheadError) return { id, error: { code: error.code, message } };
-  if (error instanceof TurnSteerConflictError) return { id, error: { code: error.code, message } };
+  if (error instanceof TurnSteerConflictError || error instanceof TurnSteerMentionError) {
+    return { id, error: { code: error.code, message } };
+  }
   const steer = asTurnSteerError(error);
   if (steer) {
     return { id, error: { code: steer.code, message,

@@ -257,6 +257,100 @@ describe("ClaudeProvider stream mapping", () => {
     expect(events.at(-1)?.event).toMatchObject({ type: AgentEventType.Ended, turnExecutionId: "execution" });
   });
 
+  it("keeps the turn open when a segment completes before Claude took in a steer it read", async () => {
+    const stream = steeredStream([
+      { type: "result", subtype: "success", is_error: false, terminal_reason: "completed",
+        user_message_uuids: ["first-prompt"], usage: {}, modelUsage: {} },
+      { type: "system", subtype: "status", user_message_uuids: [STEER_ID] },
+      { type: "assistant", message: { content: [{ type: "text", text: "PINEAPPLE" }] } },
+      { type: "result", subtype: "success", is_error: false, terminal_reason: "completed",
+        user_message_uuids: [STEER_ID], usage: {}, modelUsage: {} },
+    ]);
+    mockQuery.mockImplementation(stream.factory);
+    provider = new ClaudeProvider(stubEnvService(), stubJobObject());
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    const sessionId = "mcode-steer-completed";
+
+    const ended = send(provider, sessionId, events);
+    await stream.awaitingSteer;
+    const outcome = await provider.steerTurn({ sessionId, threadId: "steer-completed", turnExecutionId: "execution",
+      steerId: STEER_ID, message: "Reply with PINEAPPLE." });
+    await ended;
+
+    expect(outcome).toEqual({ outcome: "accepted" });
+    expect(events.flatMap(({ event }) => event.type === AgentEventType.Message ? [event.content] : []))
+      .toEqual(["one two", "PINEAPPLE"]);
+    expect(events.filter(({ event }) => event.type === AgentEventType.TurnComplete)).toHaveLength(1);
+    expect(events.at(-1)?.event).toMatchObject({ type: AgentEventType.Ended, turnExecutionId: "execution" });
+  });
+
+  it("ends the turn at a completed result that names the steer it answered", async () => {
+    const stream = steeredStream([
+      { type: "assistant", message: { content: [{ type: "text", text: "PINEAPPLE" }] } },
+      { type: "result", subtype: "success", is_error: false, terminal_reason: "completed",
+        user_message_uuids: ["first-prompt", STEER_ID], usage: {}, modelUsage: {} },
+    ]);
+    mockQuery.mockImplementation(stream.factory);
+    provider = new ClaudeProvider(stubEnvService(), stubJobObject());
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    const sessionId = "mcode-steer-joined";
+
+    const ended = send(provider, sessionId, events);
+    await stream.awaitingSteer;
+    await provider.steerTurn({ sessionId, threadId: "steer-joined", turnExecutionId: "execution",
+      steerId: STEER_ID, message: "Reply with PINEAPPLE." });
+    await ended;
+
+    expect(events.filter(({ event }) => event.type === AgentEventType.TurnComplete)).toHaveLength(1);
+  });
+
+  it("takes back a steer Claude does not read in time and reports it refused", async () => {
+    let segmentPlayed: () => void = () => undefined;
+    const awaitingSteer = new Promise<void>((resolve) => { segmentPlayed = resolve; });
+    let release: () => void = () => undefined;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    let reportNext: (next: IteratorResult<unknown>) => void = () => undefined;
+    const nextPrompt = new Promise<IteratorResult<unknown>>((resolve) => { reportNext = resolve; });
+    mockQuery.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+      const prompts = prompt[Symbol.asyncIterator]();
+      async function* play(): AsyncGenerator<Record<string, unknown>, void> {
+        await prompts.next();
+        yield* FIRST_SEGMENT;
+        segmentPlayed();
+        await released;
+        reportNext(await prompts.next());
+        yield { type: "result", subtype: "success", is_error: false, terminal_reason: "completed", usage: {}, modelUsage: {} };
+      }
+      return Object.assign(play(), { ...queryMethodStubs(), close: vi.fn() });
+    });
+    provider = new ClaudeProvider(stubEnvService(), stubJobObject());
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    const sessionId = "mcode-steer-unread";
+
+    const ended = send(provider, sessionId, events);
+    await awaitingSteer;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let outcome: unknown;
+    try {
+      const steering = provider.steerTurn({ sessionId, threadId: "steer-unread", turnExecutionId: "execution",
+        steerId: STEER_ID, message: "late" });
+      await vi.advanceTimersByTimeAsync(10_000);
+      outcome = await steering;
+    } finally {
+      vi.useRealTimers();
+    }
+    release();
+    void provider.stopSession(sessionId);
+
+    expect(outcome).toEqual({ outcome: "rejected", reason: "provider", detail: "Claude did not read the message in time." });
+    // The queue closed with nothing on it: the refused steer can no longer reach Claude.
+    expect(await nextPrompt).toMatchObject({ done: true });
+    await ended;
+  });
+
   it("refuses a steer for an execution the stream is not running", async () => {
     const stream = steeredStream([{ type: "result", is_error: false, usage: {}, modelUsage: {} }]);
     mockQuery.mockImplementation(stream.factory);

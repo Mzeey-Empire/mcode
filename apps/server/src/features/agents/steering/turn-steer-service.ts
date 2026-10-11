@@ -14,18 +14,32 @@ import {
   type TurnSteerParams,
   type TurnSteerResult,
 } from "@mcode/contracts";
+import { FileService } from "../../projects/files/file-service.js";
+import { injectMentionFileContents, validateMessageMentions, type MentionFiles } from "../turns/message-mentions.js";
 import { TurnSteerRepo } from "./persistence/turn-steer-repo.js";
-import { TurnSteerRuntimePort, type SteerableTurn, type TurnSteerRuntime } from "./turn-steer-runtime-port.js";
+import {
+  TurnSteerRuntimePort,
+  type SteerableTurn,
+  type TurnSteerMessage,
+  type TurnSteerRuntime,
+} from "./turn-steer-runtime-port.js";
 import {
   TURN_STEER_RETENTION_DAYS,
   TurnSteerConflictError,
   TurnSteerError,
+  TurnSteerMentionError,
   hashTurnSteerInputs,
   toHeldSteer,
   type TurnSteerPayload,
   type TurnSteerRecord,
   type TurnSteerRejection,
 } from "./turn-steer.js";
+
+/**
+ * How long a steer the provider took waits for its transcript save. A save stuck in retries would
+ * otherwise hold the call open; past this the steer reads as uncertain and a late save still delivers it.
+ */
+export const TURN_STEER_SAVE_TIMEOUT_MS = 10_000;
 
 /** Test-only points where a steer stops as if the server died there. */
 export type TurnSteerFaultPoint = "after-provider-accepted";
@@ -64,6 +78,7 @@ export class TurnSteerService {
   constructor(
     @inject(TurnSteerRepo) private readonly repo: TurnSteerRepo,
     @inject(TurnSteerRuntimePort) private readonly runtime: TurnSteerRuntime,
+    @inject(FileService) private readonly files: MentionFiles,
   ) {}
 
   /** Add a message to the running turn. Every thrown `TurnSteerError` means the provider never took it. */
@@ -79,6 +94,7 @@ export class TurnSteerService {
     let turn: NewSteer["turn"];
     try {
       turn = this.steerableTurn(params);
+      this.validateMentions(turn, params);
     } catch (error) {
       return Promise.reject(error);
     }
@@ -125,15 +141,42 @@ export class TurnSteerService {
     }
     const steer = turn.steer;
     if (!steer) throw new TurnSteerError("steer_unsupported", "This provider cannot add a message to a running turn.");
-    return { turnExecutionId: turn.turnExecutionId, steer };
+    return { ...turn, steer };
+  }
+
+  /** The checks `agent.send` applies, so a steer cannot carry a mention a new turn would refuse. */
+  private validateMentions(turn: SteerableTurn, params: TurnSteerParams): void {
+    if (!params.mentions?.length) return;
+    try {
+      validateMessageMentions(this.files, { workspaceId: turn.workspaceId, threadId: params.threadId,
+        providerId: turn.providerId }, params.content, params.mentions);
+    } catch (error) {
+      throw new TurnSteerMentionError(error);
+    }
+  }
+
+  /** The provider gets the text `agent.send` would give it; the transcript keeps what the user wrote. */
+  private async providerMessage(turn: NewSteer["turn"], params: TurnSteerParams): Promise<TurnSteerMessage> {
+    const mentions = params.mentions ?? [];
+    if (mentions.length === 0) return { steerId: params.messageId, message: params.content };
+    if (turn.providerId === "codex") return { steerId: params.messageId, message: params.content, mentions };
+    try {
+      const message = await injectMentionFileContents(this.files, { workspaceId: turn.workspaceId,
+        threadId: params.threadId }, mentions, params.content);
+      return { steerId: params.messageId, message, mentions };
+    } catch (error) {
+      throw new TurnSteerMentionError(error);
+    }
   }
 
   private async deliver(steer: NewSteer, options: TurnSteerOptions): Promise<TurnSteerResult> {
     const { params, payload, inputsHash, turn } = steer;
     const messageId = params.messageId;
+    // Before the row, so a mention whose file cannot be read leaves nothing held.
+    const message = await this.providerMessage(turn, params);
     await this.repo.insertPending({ messageId, threadId: params.threadId, turnExecutionId: params.turnExecutionId,
       inputsHash, payload });
-    const outcome = await this.callAdapter(turn, params);
+    const outcome = await this.callAdapter(turn, params, message);
     if (outcome.outcome === "rejected") {
       const rejection: TurnSteerRejection = { code: outcome.reason === "turn_not_running" ? "turn_not_running" : "steer_rejected",
         detail: outcome.detail };
@@ -143,8 +186,8 @@ export class TurnSteerService {
     if (outcome.outcome === "unknown") return this.markUnknown(messageId);
     stopAt(options, "after-provider-accepted");
     try {
-      await this.runtime.recordDelivered({ threadId: params.threadId, turnExecutionId: params.turnExecutionId,
-        messageId, content: payload.content, ...(payload.mentions ? { mentions: payload.mentions } : {}) });
+      await withinSaveTimeout(this.runtime.recordDelivered({ threadId: params.threadId, turnExecutionId: params.turnExecutionId,
+        messageId, content: payload.content, ...(payload.mentions ? { mentions: payload.mentions } : {}) }));
     } catch (error) {
       // The provider holds the message but the transcript does not, so it must not read as delivered.
       // If the save lands later it still marks the row delivered.
@@ -155,9 +198,9 @@ export class TurnSteerService {
     return { status: "delivered", messageId };
   }
 
-  private async callAdapter(turn: NewSteer["turn"], params: TurnSteerParams) {
+  private async callAdapter(turn: NewSteer["turn"], params: TurnSteerParams, message: TurnSteerMessage) {
     try {
-      return await turn.steer({ steerId: params.messageId, message: params.content });
+      return await turn.steer(message);
     } catch (error) {
       // A throw after the request may have gone out cannot prove the provider refused it.
       logger.warn("Steer adapter call failed", { threadId: params.threadId, messageId: params.messageId,
@@ -210,6 +253,25 @@ function rejectionError(rejection: TurnSteerRejection): TurnSteerError {
   return rejection.code === "turn_not_running"
     ? new TurnSteerError("turn_not_running", "The turn ended before the provider took the message.")
     : new TurnSteerError("steer_rejected", "The provider refused the message.", rejection.detail);
+}
+
+async function withinSaveTimeout(save: Promise<void>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new TurnSteerSaveTimeout()), TURN_STEER_SAVE_TIMEOUT_MS);
+  });
+  try {
+    await Promise.race([save, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+class TurnSteerSaveTimeout extends Error {
+  constructor() {
+    super(`Steered message was not saved within ${TURN_STEER_SAVE_TIMEOUT_MS}ms`);
+    this.name = "TurnSteerSaveTimeout";
+  }
 }
 
 function stopAt(options: TurnSteerOptions, point: TurnSteerFaultPoint): void {

@@ -151,7 +151,10 @@ export interface TurnSteerInput {
   turnExecutionId: string;
   /** Mcode's operation identity, passed to providers that accept a client id for the input. */
   steerId: string;
+  /** Text to add. Mentioned file contents are already appended for providers without native mentions. */
   message: string;
+  /** Validated mentions with ranges in `message`, as in {@link TurnRequest.mentions}. */
+  mentions?: readonly MessageMention[];
 }
 
 /**

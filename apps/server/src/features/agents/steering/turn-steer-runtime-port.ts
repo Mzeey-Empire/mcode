@@ -1,15 +1,21 @@
-import type { TurnSteerOutcome } from "@mcode/contracts";
+import type { MessageMention, ProviderId, TurnSteerOutcome } from "@mcode/contracts";
 import type { AcceptedSteerMessage } from "../canonical/canonical-accepted-progress.js";
 
 /** One message for the turn a {@link SteerableTurn} names. The runtime fills in the session and turn. */
 export interface TurnSteerMessage {
   readonly steerId: string;
+  /** Text for the provider, with mentioned file contents already appended where the provider needs them. */
   readonly message: string;
+  /** Validated mentions, for providers that read them natively. */
+  readonly mentions?: readonly MessageMention[];
 }
 
 /** The turn a steer may join. `steer` is null when the thread's provider cannot steer. */
 export interface SteerableTurn {
   readonly turnExecutionId: string;
+  /** Where the turn's mentions resolve, as for `agent.send`. */
+  readonly workspaceId: string;
+  readonly providerId: ProviderId;
   readonly steer: ((input: TurnSteerMessage) => Promise<TurnSteerOutcome>) | null;
 }
 

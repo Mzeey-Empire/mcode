@@ -3,15 +3,21 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
-import type { TurnSteerOutcome, TurnSteerParams } from "@mcode/contracts";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { MessageMention, ProviderId, TurnSteerOutcome, TurnSteerParams } from "@mcode/contracts";
+import { hostRuntime } from "@mcode/shared/node/host-runtime";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import type { AcceptedSteerMessage } from "../../canonical/canonical-accepted-progress.js";
+import { FileService } from "../../../projects/files/file-service.js";
+import { FakeGitExecutor } from "../../../projects/git/execution/fake-git-executor.js";
+import { GitWorktreeService } from "../../../projects/git/git-worktree-service.js";
+import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
+import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { TurnSteerRepo } from "../../steering/persistence/turn-steer-repo.js";
 import { TurnSteerStore } from "../../steering/persistence/turn-steer-store.js";
 import type { SteerableTurn, TurnSteerMessage, TurnSteerRuntime } from "../../steering/turn-steer-runtime-port.js";
-import { TurnSteerFaultStop, TurnSteerService } from "../../steering/turn-steer-service.js";
+import { TURN_STEER_SAVE_TIMEOUT_MS, TurnSteerFaultStop, TurnSteerService } from "../../steering/turn-steer-service.js";
 
 const NOW = "2026-10-11T09:00:00.000Z";
 const THREAD = "thread-steer";
@@ -27,8 +33,12 @@ const steerParams = (overrides: Partial<TurnSteerParams> = {}): TurnSteerParams 
 /** The turn runtime as steering sees it: a running turn, a provider answer, and the transcript save. */
 class FakeTurnRuntime implements TurnSteerRuntime {
   running: { turnExecutionId: string; steerable: boolean } | null = { turnExecutionId: EXECUTION, steerable: true };
+  providerId: ProviderId = "claude";
   respond: (input: TurnSteerMessage) => Promise<TurnSteerOutcome> = async () => ({ outcome: "accepted" });
   saveFails = false;
+  /** When set, the transcript save waits on this instead of landing at once. */
+  saveGate: Promise<void> | null = null;
+  readonly saveStarted = deferred<void>();
   readonly sent: TurnSteerMessage[] = [];
   readonly saved: AcceptedSteerMessage[] = [];
 
@@ -38,12 +48,16 @@ class FakeTurnRuntime implements TurnSteerRuntime {
     if (threadId !== THREAD || !this.running) return null;
     return {
       turnExecutionId: this.running.turnExecutionId,
+      workspaceId: "workspace",
+      providerId: this.providerId,
       steer: this.running.steerable ? (input) => { this.sent.push(input); return this.respond(input); } : null,
     };
   }
 
   async recordDelivered(message: AcceptedSteerMessage): Promise<void> {
     if (this.saveFails) throw new Error("transcript write failed");
+    this.saveStarted.resolve();
+    if (this.saveGate) await this.saveGate;
     this.saved.push(message);
     await this.repo.markDelivered(message.messageId);
   }
@@ -57,6 +71,7 @@ function deferred<T>() {
 
 describe("durable Send now", () => {
   let directory: string;
+  let workspaceDir: string;
   let dbPath: string;
   let db: Database;
   let writer: ApplicationDatabaseWriter;
@@ -67,15 +82,17 @@ describe("durable Send now", () => {
   beforeEach(() => {
     directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-turn-steer-"));
     dbPath = NodePath.join(directory, "app.sqlite");
+    workspaceDir = NodePath.join(directory, "repo");
+    NodeFS.mkdirSync(workspaceDir);
     db = openDatabase({ dbPath });
     db.prepare("INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
-      .run("workspace", "Workspace", directory, NOW, NOW);
+      .run("workspace", "Workspace", workspaceDir, NOW, NOW);
     db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
       .run(THREAD, "workspace", "Thread", "main", "codex", NOW, NOW);
     writer = new ApplicationDatabaseWriter(dbPath);
     repo = new TurnSteerRepo(db, writer);
     runtime = new FakeTurnRuntime(repo);
-    service = new TurnSteerService(repo, runtime);
+    service = new TurnSteerService(repo, runtime, files());
   });
 
   afterEach(async () => {
@@ -90,8 +107,15 @@ describe("durable Send now", () => {
     writer = new ApplicationDatabaseWriter(dbPath);
     repo = new TurnSteerRepo(db, writer);
     runtime = new FakeTurnRuntime(repo);
-    service = new TurnSteerService(repo, runtime);
+    service = new TurnSteerService(repo, runtime, files());
     return service.reconcileAtStartup();
+  }
+
+  function files(): FileService {
+    const workspaces = new WorkspaceRepo(db, writer);
+    const git = new FakeGitExecutor();
+    return new FileService(workspaces, new ThreadRepo(db, writer), new GitWorktreeService(workspaces, git, hostRuntime),
+      git, hostRuntime);
   }
 
   async function steerUncertain() {
@@ -108,6 +132,76 @@ describe("durable Send now", () => {
       content: "Use the staging database instead." }]);
     expect(repo.find(STEER_ID)?.state).toBe("delivered");
     expect(service.listHeldSteers()).toEqual([]);
+  });
+
+  it("reports a steer whose transcript save hangs as uncertain, and a late save still delivers it", async () => {
+    const save = deferred<void>();
+    runtime.saveGate = save.promise;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const result = service.steer(steerParams());
+      await runtime.saveStarted.promise;
+      await vi.advanceTimersByTimeAsync(TURN_STEER_SAVE_TIMEOUT_MS);
+      await expect(result).resolves.toEqual({ status: "delivery_unknown", messageId: STEER_ID });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(repo.find(STEER_ID)?.state).toBe("delivery_unknown");
+
+    save.resolve();
+    await expect.poll(() => repo.find(STEER_ID)?.state).toBe("delivered");
+    await expect(service.steer(steerParams())).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
+    expect(runtime.sent).toHaveLength(1);
+  });
+
+  describe("mentions", () => {
+    const content = "Follow @notes.md for the rollout.";
+    const fileMention = (path: string): MessageMention => ({
+      id: "mention-notes", kind: "file", label: "notes.md", path, range: { start: 7, end: 16 },
+    });
+
+    beforeEach(() => {
+      NodeFS.writeFileSync(NodePath.join(workspaceDir, "notes.md"), "Roll out region by region.");
+      NodeFS.writeFileSync(NodePath.join(directory, "notes.md"), "outside the workspace");
+    });
+
+    it("gives a provider without native mentions the file contents a new turn would get", async () => {
+      const mentions = [fileMention("notes.md")];
+      await expect(service.steer(steerParams({ content, mentions })))
+        .resolves.toEqual({ status: "delivered", messageId: STEER_ID });
+
+      expect(runtime.sent).toEqual([{ steerId: STEER_ID, mentions,
+        message: `${content}
+
+---
+<file path="notes.md">
+Roll out region by region.
+</file>` }]);
+      expect(runtime.saved).toEqual([{ threadId: THREAD, turnExecutionId: EXECUTION, messageId: STEER_ID, content, mentions }]);
+    });
+
+    it("passes mentions to Codex as they are, since it reads them natively", async () => {
+      runtime.providerId = "codex";
+      const mentions = [fileMention("notes.md")];
+      await expect(service.steer(steerParams({ content, mentions })))
+        .resolves.toEqual({ status: "delivered", messageId: STEER_ID });
+
+      expect(runtime.sent).toEqual([{ steerId: STEER_ID, message: content, mentions }]);
+    });
+
+    it.each([
+      ["a range that does not cover its label", { ...fileMention("notes.md"), range: { start: 0, end: 9 } }],
+      ["a path outside the workspace", fileMention("../notes.md")],
+      ["a file that does not exist", fileMention("missing.md")],
+      ["an agent mention on a provider without them",
+        { id: "mention-agent", kind: "agent", label: "notes.md", name: "notes", path: "agents/notes.md", range: { start: 7, end: 16 } }],
+    ] satisfies Array<[string, MessageMention]>)("refuses %s before writing a row or calling the provider", async (_, mention) => {
+      const steering = service.steer(steerParams({ content, mentions: [mention] }));
+
+      await expect(steering).rejects.toMatchObject({ name: "TurnSteerMentionError", code: "INVALID_PARAMS" });
+      expect(runtime.sent).toEqual([]);
+      expect(repo.find(STEER_ID)).toBeNull();
+    });
   });
 
   it("joins a duplicate that arrives while the provider call is in flight", async () => {

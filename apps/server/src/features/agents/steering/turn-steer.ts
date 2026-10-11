@@ -123,6 +123,16 @@ export class TurnSteerConflictError extends Error {
   }
 }
 
+/** A steer's mentions failed the checks `agent.send` applies, so it was never sent. */
+export class TurnSteerMentionError extends Error {
+  readonly code = "INVALID_PARAMS";
+
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = "TurnSteerMentionError";
+  }
+}
+
 /**
  * Recover a steer failure thrown inside a database writer transaction. The writer rebuilds
  * errors as plain `Error`s, so the class is matched by name and code instead.

@@ -261,6 +261,25 @@ describe("Codex provider lifecycle through native transport", () => {
     }
   });
 
+  it("steers with the native mention parts a new turn would send", async () => {
+    const { provider, child } = createProvider();
+    const message = "also read @notes.md";
+    const steer = { sessionId: request.sessionId, threadId: request.threadId, turnExecutionId: request.turnExecutionId,
+      steerId: STEER_ID, message,
+      mentions: [{ id: "mention-notes", kind: "file" as const, label: "notes.md", path: "docs/notes.md", range: { start: 10, end: 19 } }] };
+    try {
+      await provider.sendTurn(request);
+      await vi.waitFor(async () => expect(await provider.steerTurn(steer)).toEqual({ outcome: "accepted" }));
+
+      expect(child.requests.filter(({ method }) => method === "turn/steer").map(({ params }) => params)).toEqual([
+        { threadId: "native-thread", expectedTurnId: "native-turn-1", clientUserMessageId: STEER_ID,
+          input: [{ type: "mention", name: "notes.md", path: "docs/notes.md" }, { type: "text", text: message }] },
+      ]);
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
   it.each([["0.98.9", false], ["0.99.0", true]])("declares turn-steer for Codex CLI %s: %s", (version, supported) => {
     const { provider } = createProvider();
     cli.version = version;

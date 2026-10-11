@@ -313,6 +313,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const turn = { sessionId: owned.prepared.request.sessionId, threadId, turnExecutionId: owned.execution.executionId };
     return {
       turnExecutionId: turn.turnExecutionId,
+      workspaceId: owned.prepared.request.workspaceId,
+      providerId: provider.id,
       steer: isTurnSteerCapable(provider) ? (input) => provider.steerTurn({ ...turn, ...input }) : null,
     };
   }

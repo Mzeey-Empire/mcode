@@ -598,11 +598,12 @@ export class MessageStore {
 
   /**
    * Provider system notices may follow a user prompt without starting another conversation turn.
-   * Steered messages join the running turn instead of starting one, so they are skipped too.
+   * Delivered steers join the running turn instead of starting one, so they are skipped too. A steer
+   * the provider never took may later be sent as a prompt under the same id, which must still count.
    */
   isLatestNonSystemMessage(threadId: string, messageId: string): boolean {
     const steered = this.orm.select({ messageId: turnSteers.messageId }).from(turnSteers)
-      .where(eq(turnSteers.messageId, messages.id));
+      .where(and(eq(turnSteers.messageId, messages.id), eq(turnSteers.state, "delivered")));
     const latest = this.orm.select({ id: messages.id }).from(messages)
       .where(and(eq(messages.threadId, threadId), inArray(messages.role, ["user", "assistant"]), notExists(steered)))
       .orderBy(desc(messages.sequence)).limit(1).get();
