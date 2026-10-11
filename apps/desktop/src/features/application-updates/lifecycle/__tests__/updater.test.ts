@@ -191,9 +191,14 @@ describe("updater lifecycle", () => {
     }
   });
 
-  it.each(["signature invalid", "net::ERR_TIMED_OUT"])("retries download-phase error events: %s", async (message) => {
+  it.each([
+    { message: "signature invalid", phase: "download-progress" },
+    { message: "net::ERR_TIMED_OUT", phase: "download-progress" },
+    { message: "net::ERR_TIMED_OUT", phase: "update-available" },
+  ] as const)("retries download-phase error events: $message after $phase", async ({ message, phase }) => {
     current = createLifecycle();
-    current.listeners.get("download-progress")?.({ percent: 42 });
+    if (phase === "download-progress") current.listeners.get(phase)?.({ percent: 42 });
+    else current.listeners.get(phase)?.({ version: "0.14.0" });
     current.listeners.get("error")?.(new Error(message));
 
     expect(current.status.get()).toEqual({ state: "error", message, failedOperation: "download" });

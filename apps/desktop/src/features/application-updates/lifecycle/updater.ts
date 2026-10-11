@@ -287,8 +287,10 @@ export function createUpdaterLifecycle(
         notification.show();
       }
     });
+    // With auto-download on, a download can fail before its first progress event, while still "available".
     updater.on("error", (error) => {
-      publishFailure(error, status.get().state === "downloading" ? "download" : "check");
+      const { state } = status.get();
+      publishFailure(error, state === "downloading" || state === "available" ? "download" : "check");
     });
 
     initialCheckTimeoutId = timer.setTimeout(runScheduledCheck, 10_000);
