@@ -57,6 +57,7 @@ import type {
   ProviderModelInfo,
   ProviderUsageInfo,
   ProviderAvailability,
+  ProviderStatus,
   PrDraft,
   CreatePrResult,
   ChecksStatus,
@@ -843,6 +844,8 @@ export interface McodeTransport {
   getProviderUsage(providerId: string): Promise<ProviderUsageInfo>;
   /** Fetch the current availability snapshot for all registered providers. */
   listProviderAvailability(): Promise<ProviderAvailability[]>;
+  /** Fetch sign-in and rate-limit state for enabled providers; `force` bypasses the server's 10-minute cache. */
+  listProviderStatus(force?: boolean): Promise<ProviderStatus[]>;
 
   /** Generate a stateless one-line conversational recap from bounded messages. */
   generateRecap(
