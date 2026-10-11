@@ -18,7 +18,7 @@ const plan: PlanVersion = {
 };
 
 beforeEach(() => {
-  usePlanStore.setState({ plansByThread: {}, activeVersionByThread: {}, generatingThreads: new Set() });
+  usePlanStore.setState({ plansByThread: {}, activeVersionByThread: {} });
   vi.clearAllMocks();
 });
 

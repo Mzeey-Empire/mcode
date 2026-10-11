@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, t
 import { usePlanStore } from "@/stores/planStore";
 import { PlanChrome } from "./PlanChrome";
 import { PlanDocument, type PlanComment } from "./PlanDocument";
-import { PlanSkeleton } from "./PlanSkeleton";
 import type { PlanVersion } from "@mcode/contracts";
 import { useThreadStore } from "@/stores/threadStore";
 import { Button } from "@/components/ui/button";
@@ -61,7 +60,6 @@ function PlanFeedbackBar({ commentCount, feedbackBarRef, onSendFeedback }: { com
 export function PlanPanel({ threadId }: PlanPanelProps) {
   const plans = usePlanStore((s) => s.plansByThread[threadId] ?? EMPTY_PLANS);
   const activeVersion = usePlanStore((s) => s.activeVersionByThread[threadId] ?? null);
-  const isGenerating = usePlanStore((s) => s.generatingThreads.has(threadId));
   const setActiveVersion = usePlanStore((s) => s.setActiveVersion);
 
   const [comments, dispatchComments] = useReducer(planCommentsReducer, []);
@@ -131,7 +129,6 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
       await useThreadStore.getState().sendPlanAction(threadId, lines.join("\n"), "revise");
       dispatchComments({ type: "reset" });
     } catch (err) {
-      usePlanStore.getState().setGenerating(threadId, false);
       console.error("[plan] send feedback failed:", err);
     }
   }, [nonEmptyComments, activePlan, threadId]);
@@ -147,8 +144,7 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
           "revise",
         );
       } catch (err) {
-        usePlanStore.getState().setGenerating(threadId, false);
-        console.error("[plan] revise failed:", err);
+          console.error("[plan] revise failed:", err);
       }
     }
   }, [nonEmptyComments, handleSendFeedback, activePlan, threadId]);
@@ -171,10 +167,6 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
       console.error("[plan] implement failed:", err);
     }
   }, [activePlan, threadId]);
-
-  if (isGenerating) {
-    return <PlanSkeleton title={activePlan?.title} />;
-  }
 
   if (!activePlan) return null;
 

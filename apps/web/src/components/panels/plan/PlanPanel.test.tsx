@@ -46,7 +46,6 @@ describe("PlanPanel", () => {
     usePlanStore.setState({
       plansByThread: {},
       activeVersionByThread: {},
-      generatingThreads: new Set(),
     });
     vi.clearAllMocks();
   });

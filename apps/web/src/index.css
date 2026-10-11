@@ -1162,19 +1162,13 @@ input[type="range"].settings-range::-moz-range-thumb {
   }
 }
 
-/* Plan panel skeleton animations: sliding progress bar and fading shimmer blocks. */
-@keyframes plan-slide {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(430%); }
-}
-
+/* Fading shimmer blocks for loading placeholders. */
 @keyframes plan-fade {
   0%, 100% { opacity: 0.35; }
   50% { opacity: 0.15; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [class*="animate-[plan-slide"],
   [class*="animate-[plan-fade"] {
     animation: none;
   }

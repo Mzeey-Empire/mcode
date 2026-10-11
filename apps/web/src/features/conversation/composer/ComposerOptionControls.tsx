@@ -5,12 +5,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useDiffStore } from "@/stores/diffStore";
-import { usePlanStore } from "@/stores/planStore";
-import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { hideRightPanelAdaptive, showRightPanelAdaptive } from "@/lib/right-panel-layout";
-import { cn } from "@/lib/utils";
-import { Eye, KeyRound, ListChecks, ShieldCheck } from "lucide-react";
+import { Eye, KeyRound, ShieldCheck } from "lucide-react";
 import type { ComponentType } from "react";
 
 export type ComposerAccessMode = "supervised" | "automatic" | "full";
@@ -22,9 +17,8 @@ export interface AccessModeOption {
   icon: ComponentType<{ size?: number; className?: string }>;
 }
 
-/** Props shared by Composer's compact and inline option controls. */
+/** Props for Composer's access-mode control. */
 export interface ComposerOptionControlsProps {
-  threadId?: string;
   accessMode: string;
   /** True when the provider requires Full access and cannot offer the supervised mode. */
   permissionLocked: boolean;
@@ -52,7 +46,7 @@ export function AccessModeMenu({
   approvalReviewSupported,
   modes,
   onAccessModeChange,
-}: Omit<ComposerOptionControlsProps, "threadId" | "accessMode"> & {
+}: Omit<ComposerOptionControlsProps, "accessMode"> & {
   accessMode: string;
   modes?: readonly AccessModeOption[];
 }) {
@@ -93,85 +87,4 @@ export function AccessModeMenu({
       </DropdownMenuContent>
     </DropdownMenu>
   );
-}
-
-function useComposerPlanPanel(threadId: string | undefined) {
-  const hasPlans = usePlanStore(
-    (state) =>
-      Boolean(
-        threadId &&
-          ((state.plansByThread[threadId]?.length ?? 0) > 0 ||
-            state.generatingThreads.has(threadId)),
-      ),
-  );
-  const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
-  const panelVisible = useDiffStore((state) =>
-    activeWorkspaceId ? state.getRightPanelVisible(activeWorkspaceId, threadId) : false,
-  );
-
-  const togglePlanPanel = () => {
-    if (!threadId || !activeWorkspaceId) return;
-    if (panelVisible) {
-      hideRightPanelAdaptive(activeWorkspaceId, threadId);
-      return;
-    }
-    showRightPanelAdaptive(activeWorkspaceId, threadId);
-    useDiffStore.getState().setRightPanelTab(activeWorkspaceId, threadId, "tasks");
-  };
-
-  return { hasPlans, panelVisible, togglePlanPanel };
-}
-
-/** Renders the shared access selector and optional plan-panel control. */
-export function ComposerOptionsMenu({
-  threadId,
-  accessMode,
-  permissionLocked,
-  approvalReviewSupported,
-  onAccessModeChange,
-}: ComposerOptionControlsProps) {
-  const { hasPlans, panelVisible, togglePlanPanel } = useComposerPlanPanel(threadId);
-
-  return (
-    <>
-      <AccessModeMenu
-        accessMode={accessMode}
-        permissionLocked={permissionLocked}
-        approvalReviewSupported={approvalReviewSupported}
-        onAccessModeChange={onAccessModeChange}
-      />
-      {hasPlans && (
-        <Button
-          variant="ghost"
-          size="compact"
-          onClick={togglePlanPanel}
-          aria-pressed={panelVisible}
-          className={cn(
-            "gap-1.5 transition-colors hover:bg-hover/40",
-            panelVisible ? "text-primary hover:text-primary" : "text-muted hover:text-ink",
-          )}
-        >
-          <ListChecks size={14} />
-          <span className="text-sm">Plan</span>
-        </Button>
-      )}
-    </>
-  );
-}
-
-/** Inline Composer controls for wide layouts. */
-export function InlineComposerOptions({
-  threadId,
-  accessMode,
-  permissionLocked,
-  approvalReviewSupported,
-  onAccessModeChange,
-}: ComposerOptionControlsProps) {
-  return <ComposerOptionsMenu
-    threadId={threadId}
-    accessMode={accessMode}
-    permissionLocked={permissionLocked}
-    approvalReviewSupported={approvalReviewSupported}
-    onAccessModeChange={onAccessModeChange}
-  />;
 }

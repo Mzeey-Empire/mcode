@@ -25,9 +25,7 @@ import {
   insertSlashCommandNode,
   removeSlashCommandTrigger,
 } from "@/components/chat/lexical";
-import { usePlanStore } from "@/stores/planStore";
 import type { OverviewPresentation } from "@/stores/overviewStore";
-import { useDiffStore } from "@/stores/diffStore";
 
 import { handleSlashCommandTrayKey, useSlashCommand } from "@/components/chat/useSlashCommand";
 import type { Command } from "@/components/chat/useSlashCommand";
@@ -305,14 +303,6 @@ export function Composer({
   // doesn't briefly render the popover trigger and snap to inline buttons.
   const showInlineComposerOptions = showComposerOptionsInline(composerWidth);
 
-  const planPreview = usePlanStore((s) =>
-    threadId ? s.livePreviewByThread[threadId] : undefined,
-  );
-  const planPanelOpen = useDiffStore((s) => {
-    if (!workspaceId || !threadId) return false;
-    const panel = s.getRightPanel(workspaceId, threadId);
-    return panel.visible && panel.activeTab === "tasks" && panel.openTabs.includes("tasks");
-  });
 
   const activeThread = useWorkspaceThread(threadId, (thread) => thread);
   const form = useComposerFormController({
@@ -392,11 +382,6 @@ export function Composer({
     setMode: setComposerMode,
     setBranchMode: setBranchExecMode,
   } = execution;
-  useEffect(() => {
-    if (threadId && planPanelOpen) {
-      usePlanStore.getState().clearLivePreview(threadId);
-    }
-  }, [planPanelOpen, threadId]);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const handleAttachmentDrop = useCallback((event: React.DragEvent) => {
     if (handleDrop(event)) editorRef.current?.focus();
@@ -661,8 +646,6 @@ export function Composer({
             branchFromMessageId,
             branchFromMessageContent,
             activeThread,
-            planPreview,
-            planPanelOpen,
             isAgentRunning,
             isStopPending,
             provider,
