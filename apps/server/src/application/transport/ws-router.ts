@@ -472,15 +472,17 @@ function domainRouteError(id: string, error: unknown, message: string): WebSocke
     return { id, error: { code: error.code, message, data: { stagingId: error.stagingId } } };
   }
   if (error instanceof SequenceAheadError) return { id, error: { code: error.code, message } };
+  return steerRouteError(id, error, message);
+}
+
+function steerRouteError(id: string, error: unknown, message: string): WebSocketResponse | null {
   if (error instanceof TurnSteerConflictError || error instanceof TurnSteerMentionError) {
     return { id, error: { code: error.code, message } };
   }
   const steer = asTurnSteerError(error);
-  if (steer) {
-    return { id, error: { code: steer.code, message,
-      ...(steer.code === "steer_rejected" ? { data: { detail: steer.detail ?? "" } } : {}) } };
-  }
-  return null;
+  if (!steer) return null;
+  return { id, error: { code: steer.code, message,
+    ...(steer.code === "steer_rejected" ? { data: { detail: steer.detail ?? "" } } : {}) } };
 }
 
 function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResponse {
