@@ -1,8 +1,12 @@
-import { Check, Zap } from "lucide-react";
-import { Switch } from "@/components/ui/switch";
+import type { ReactNode } from "react";
+import { Zap } from "lucide-react";
+import { FOCUS_RING_CLASS } from "@/components/ui/focus-ring";
+import { SegmentedControl, type SegmentedOption } from "@/components/ui/segmented-control";
+import { SteppedSlider } from "@/components/ui/slider";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
 import { supports1MContextWindow, supportsThinkingToggle } from "@/lib/model-registry";
-import { useThreadStore } from "@/stores/threadStore";
+import { useThreadStore, type ThreadSettings } from "@/stores/threadStore";
 import { cn } from "@/lib/utils";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
 
@@ -165,41 +169,100 @@ function ComposerModelPreferenceSummaryContent({ state }: { state: ModelPreferen
   );
 }
 
-function ComposerReasoningOptions({
+function persistThreadSetting(
+  actionProps: ModelPreferenceActionProps,
+  settings: Partial<ThreadSettings>,
+  { skipForks }: { skipForks: boolean },
+) {
+  if (!actionProps.threadId || (skipForks && actionProps.branchFromMessageId)) return;
+  void useThreadStore.getState().setThreadSettings(actionProps.threadId, settings);
+}
+
+function ComposerFastModeToggle({
   state,
   actionProps,
 }: {
   state: ModelPreferenceState;
   actionProps: ModelPreferenceActionProps;
 }) {
-  if (state.reasoningLevels.length === 0) return null;
+  if (!state.hasCodexFast) return <span aria-hidden="true" className="size-8" />;
 
   return (
-    <>
-      <div className="px-3 pt-1.5 pb-1 text-xs font-medium uppercase tracking-wider text-muted/60 select-none">Reasoning effort</div>
-      {state.reasoningLevels.map((reasoning) => (
-        <button
-          key={reasoning}
-          onClick={() => {
-            actionProps.onSelectionChange({ reasoning });
-            if (actionProps.threadId) {
-              void useThreadStore.getState().setThreadSettings(actionProps.threadId, { reasoningLevel: reasoning });
-            }
-          }}
-          className={cn(
-            "flex w-full items-center justify-between rounded px-3 py-1.5 text-xs",
-            actionProps.selection.reasoning === reasoning
-              ? "bg-selected text-ink"
-              : "text-ink hover:bg-selected/50 hover:text-ink",
-          )}
-        >
-          <span>{reasoningLabel(reasoning)}</span>
-          {actionProps.selection.reasoning === reasoning && <Check size={10} className="shrink-0 text-ink" />}
-        </button>
-      ))}
-    </>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            data-testid="composer-codex-fast-switch"
+            aria-label="Fast mode"
+            aria-pressed={state.codexFastMode}
+            onClick={() => {
+              const checked = !state.codexFastMode;
+              const codexFastMode = checked === actionProps.defaults.globalCodexFast ? null : checked;
+              actionProps.onSelectionChange({ codexFastMode });
+              persistThreadSetting(actionProps, { codexFastMode }, { skipForks: true });
+            }}
+            className={cn(
+              "flex size-8 items-center justify-center rounded-full transition-colors duration-(--duration-fast) ease-(--ease-standard)",
+              FOCUS_RING_CLASS,
+              state.codexFastMode ? "bg-primary text-primary-ink hover:bg-primary-hover" : "text-muted hover:bg-hover hover:text-ink",
+            )}
+          />
+        }
+      >
+        <Zap size={14} aria-hidden="true" />
+      </TooltipTrigger>
+      <TooltipContent side="top">Fast mode</TooltipContent>
+    </Tooltip>
   );
 }
+
+function ComposerReasoningSlider({
+  state,
+  actionProps,
+}: {
+  state: ModelPreferenceState;
+  actionProps: ModelPreferenceActionProps;
+}) {
+  // One level leaves nothing to choose, and the header label already names it.
+  if (state.reasoningLevels.length < 2) return null;
+  const { reasoning } = actionProps.selection;
+
+  return (
+    <SteppedSlider
+      // An off-ladder level selects no stop, so choosing any stop, including the first, commits it.
+      value={state.reasoningLevels.indexOf(reasoning)}
+      stops={state.reasoningLevels.length}
+      aria-label="Reasoning effort"
+      getStopLabel={(stop) => reasoningLabel(state.reasoningLevels[stop] ?? reasoning)}
+      onValueChange={(stop) => {
+        const reasoning = state.reasoningLevels[stop];
+        if (!reasoning) return;
+        actionProps.onSelectionChange({ reasoning });
+        persistThreadSetting(actionProps, { reasoningLevel: reasoning }, { skipForks: false });
+      }}
+    />
+  );
+}
+
+function ComposerPreferenceRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <span className="text-body-small text-muted">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+const CONTEXT_WINDOW_OPTIONS = [
+  { value: "200k", label: "200K" },
+  { value: "1m", label: "1M" },
+] as const satisfies readonly SegmentedOption[];
+
+const THINKING_OPTIONS = [
+  { value: "off", label: "Off" },
+  { value: "on", label: "On" },
+] as const satisfies readonly SegmentedOption[];
 
 function ComposerContextWindowOptions({
   state,
@@ -211,30 +274,19 @@ function ComposerContextWindowOptions({
   if (!state.has1M) return null;
 
   return (
-    <>
-      {state.reasoningLevels.length > 0 && <div className="my-1 h-px bg-border/60" />}
-      <div className="px-3 pt-1.5 pb-1 text-xs font-medium uppercase tracking-wider text-muted/60 select-none">Context window</div>
-      {(["200k", "1m"] as const).map((nextContextWindow) => (
-        <button
-          key={nextContextWindow}
-          onClick={() => {
-            actionProps.onSelectionChange({ contextWindow: nextContextWindow });
-            if (actionProps.threadId && !actionProps.branchFromMessageId) {
-              void useThreadStore.getState().setThreadSettings(actionProps.threadId, { contextWindow: nextContextWindow });
-            }
-          }}
-          className={cn(
-            "flex w-full items-center justify-between rounded px-3 py-1.5 text-xs",
-            state.contextWindow === nextContextWindow
-              ? "bg-selected text-ink"
-              : "text-ink hover:bg-selected/50 hover:text-ink",
-          )}
-        >
-          <span className="tabular-nums">{nextContextWindow === "1m" ? "1M tokens" : "200K tokens"}</span>
-          {state.contextWindow === nextContextWindow && <Check size={10} className="shrink-0 text-ink" />}
-        </button>
-      ))}
-    </>
+    <ComposerPreferenceRow label="Context">
+      <SegmentedControl
+        size="compact"
+        aria-label="Context window"
+        options={CONTEXT_WINDOW_OPTIONS}
+        value={state.contextWindow}
+        onChange={(value) => {
+          const contextWindow: ContextWindowMode = value === "1m" ? "1m" : "200k";
+          actionProps.onSelectionChange({ contextWindow });
+          persistThreadSetting(actionProps, { contextWindow }, { skipForks: true });
+        }}
+      />
+    </ComposerPreferenceRow>
   );
 }
 
@@ -248,70 +300,19 @@ function ComposerThinkingOptions({
   if (!state.hasThinking) return null;
 
   return (
-    <>
-      {(state.reasoningLevels.length > 0 || state.has1M) && <div className="my-1 h-px bg-border/60" />}
-      <div className="px-3 pt-1.5 pb-1 text-xs font-medium uppercase tracking-wider text-muted/60 select-none">Thinking</div>
-      {[false, true].map((nextThinking) => (
-        <button
-          key={String(nextThinking)}
-          onClick={() => {
-            actionProps.onSelectionChange({ thinking: nextThinking });
-            if (actionProps.threadId && !actionProps.branchFromMessageId) {
-              void useThreadStore.getState().setThreadSettings(actionProps.threadId, { thinking: nextThinking });
-            }
-          }}
-          className={cn(
-            "flex w-full items-center justify-between rounded px-3 py-1.5 text-xs",
-            state.thinking === nextThinking
-              ? "bg-selected text-ink"
-              : "text-ink hover:bg-selected/50 hover:text-ink",
-          )}
-        >
-          <span>{nextThinking ? "On" : "Off"}</span>
-          {state.thinking === nextThinking && <Check size={10} className="shrink-0 text-ink" />}
-        </button>
-      ))}
-    </>
-  );
-}
-
-function ComposerFastModeOption({
-  state,
-  actionProps,
-}: {
-  state: ModelPreferenceState;
-  actionProps: ModelPreferenceActionProps;
-}) {
-  if (!state.hasCodexFast) return null;
-
-  return (
-    <>
-      {(state.reasoningLevels.length > 0 || state.has1M || state.hasThinking) && <div className="my-1 h-px bg-border/60" />}
-      <div className="px-3 pt-1.5 pb-1 text-xs font-medium uppercase tracking-wider text-muted/60 select-none">Fast mode</div>
-      <label
-        className={cn(
-          "flex w-full cursor-pointer items-center justify-between rounded px-3 py-1.5 text-xs",
-          state.codexFastMode
-            ? "bg-selected/50 text-ink"
-            : "text-ink hover:bg-selected/50 hover:text-ink",
-        )}
-      >
-        <span>Fast</span>
-        <Switch
-          data-testid="composer-codex-fast-switch"
-          checked={state.codexFastMode}
-          onCheckedChange={(checked) => {
-            const codexFastMode = checked === actionProps.defaults.globalCodexFast ? null : checked;
-            actionProps.onSelectionChange({ codexFastMode });
-            if (actionProps.threadId && !actionProps.branchFromMessageId) {
-              void useThreadStore.getState().setThreadSettings(actionProps.threadId, { codexFastMode });
-            }
-          }}
-          aria-label="Fast mode"
-          onClick={(event) => event.stopPropagation()}
-        />
-      </label>
-    </>
+    <ComposerPreferenceRow label="Thinking">
+      <SegmentedControl
+        size="compact"
+        aria-label="Thinking"
+        options={THINKING_OPTIONS}
+        value={state.thinking ? "on" : "off"}
+        onChange={(value) => {
+          const thinking = value === "on";
+          actionProps.onSelectionChange({ thinking });
+          persistThreadSetting(actionProps, { thinking }, { skipForks: true });
+        }}
+      />
+    </ComposerPreferenceRow>
   );
 }
 
@@ -340,11 +341,16 @@ export function ComposerModelPreferenceSettings({
   const actionProps = { threadId, branchFromMessageId, selection, defaults, onSelectionChange };
 
   return (
-    <div role="group" aria-label={state.preferenceTooltip}>
-      <ComposerReasoningOptions state={state} actionProps={actionProps} />
+    <div role="group" aria-label={state.preferenceTooltip} className="flex w-full flex-col gap-2 p-1">
+      <div className="grid grid-cols-[3.2rem_minmax(0,1fr)_3.2rem] items-center">
+        <ComposerFastModeToggle state={state} actionProps={actionProps} />
+        <span data-testid="composer-settings-label" className="text-fade text-center text-label text-ink">
+          {state.preferenceLabel}
+        </span>
+      </div>
+      <ComposerReasoningSlider state={state} actionProps={actionProps} />
       <ComposerContextWindowOptions state={state} actionProps={actionProps} />
       <ComposerThinkingOptions state={state} actionProps={actionProps} />
-      <ComposerFastModeOption state={state} actionProps={actionProps} />
     </div>
   );
 }
