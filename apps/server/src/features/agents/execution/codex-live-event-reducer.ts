@@ -48,6 +48,7 @@ const UNSUPPORTED_FEATURE_REASON = {
   compactSummary: null,
   modelFallback: null,
   textDelta: null,
+  reasoningDelta: "reasoning is not yet applied to the execution narrative",
   toolInputDelta: null,
   toolProgress: null,
   contextEstimate: null,

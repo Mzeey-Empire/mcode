@@ -2774,6 +2774,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     compactSummary: ignoreAgentEvent,
     modelFallback: handleModelFallback,
     textDelta: handleTextDelta,
+    reasoningDelta: ignoreAgentEvent,
     toolInputDelta: ignoreAgentEvent,
     toolProgress: handleToolProgress,
     contextEstimate: handleContextEstimate,

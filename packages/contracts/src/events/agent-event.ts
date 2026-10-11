@@ -33,6 +33,7 @@ export const AgentEventType = {
   CompactSummary: "compactSummary",
   ModelFallback: "modelFallback",
   TextDelta: "textDelta",
+  ReasoningDelta: "reasoningDelta",
   ToolInputDelta: "toolInputDelta",
   ToolProgress: "toolProgress",
   ContextEstimate: "contextEstimate",
@@ -196,6 +197,17 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
        * non-final and promote the last assistant item at turn completion.
        */
       isFinalResponse: z.boolean().optional(),
+    }),
+    z.object({
+      /** Provider reasoning (Claude thinking, Codex reasoning, ACP agent_thought_chunk). Never final-response text. */
+      type: z.literal(AgentEventType.ReasoningDelta),
+      threadId: z.string(),
+      /** Reasoning text; "" when the provider reports reasoning without text (redacted or omitted thinking). */
+      delta: z.string().max(65_536),
+      /** Provider-stable id of one reasoning block in this execution. A new id closes the previous block. */
+      reasoningItemId: z.string().min(1).max(256).optional(),
+      /** Provider's explicit end of this block. Otherwise the block closes at the next non-reasoning semantic event. */
+      done: z.boolean().optional(),
     }),
     z.object({
       /** Incremental JSON fragment emitted while Claude builds a tool call's input. */
