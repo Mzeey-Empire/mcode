@@ -1,10 +1,12 @@
 import type { TurnFailure } from "@mcode/contracts";
+import { ProviderTurnError } from "../../../provider-turn-error.js";
 import { ACP_AUTH_REQUIRED_CODE, acpRequestErrorCode } from "../../protocols/acp/acp-request-error.js";
 import { cursorHttpStatus, isLikelyTransientCursorPromptFailure } from "./cursor-acp-transient-retry.js";
 import { cursorSessionRecoveryErrorMessage } from "./cursor-session-recovery-error.js";
 
 /** Classifies a failed Cursor ACP turn into the provider-neutral failure shape. */
 export function classifyCursorFailure(error: unknown): TurnFailure {
+  if (error instanceof ProviderTurnError) return error.failure;
   const acpCode = acpRequestErrorCode(error);
   if (acpCode === ACP_AUTH_REQUIRED_CODE) return { kind: "auth", code: String(acpCode) };
   const message = cursorSessionRecoveryErrorMessage(error);

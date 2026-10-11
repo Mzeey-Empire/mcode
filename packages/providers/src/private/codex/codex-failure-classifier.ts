@@ -1,5 +1,6 @@
 import type { TurnFailure, TurnFailureKind } from "@mcode/contracts";
 import { failureCode, failureRetries, httpStatus, kindByHttpStatus, retryAfterMsUntil, turnFailure } from "../turn-failure-fields.js";
+import { ProviderTurnError } from "../../provider-turn-error.js";
 import { CodexRpcResponseError, CodexTransportError } from "./codex-rpc-client.js";
 import type { CodexHttpErrorInfoName, CodexRateLimitWindow, CodexUnitErrorInfo } from "./codex-types.js";
 
@@ -88,6 +89,7 @@ function codexFailureKind(code: string | undefined, status: number | undefined):
  * only a lost connection is retryable and anything else, including a JSON-RPC refusal, is fatal.
  */
 export function classifyCodexLocalFailure(error: unknown): TurnFailure {
+  if (error instanceof ProviderTurnError) return error.failure;
   if (error instanceof CodexTransportError) return { kind: "retryable" };
   const code = error instanceof CodexRpcResponseError && error.code !== undefined ? String(error.code) : undefined;
   return turnFailure("fatal", { code: failureCode(code) });

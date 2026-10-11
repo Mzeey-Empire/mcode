@@ -185,6 +185,24 @@ describe("OpenCodeProvider resume cursor", () => {
     await provider.shutdown();
   });
 
+  it.each([
+    ["the saved session is gone", { verify: async () => { throw new Error("OpenCode session history failed with HTTP 404"); } }, "ses_gone"],
+    ["the prompt races a deletion", { prompt: async () => { throw new Error("OpenCode prompt_async failed with HTTP 404"); } }, "ses_race_gone"],
+    ["the cursor is unreadable", {}, JSON.stringify({ schemaVersion: 99, sessionId: "ses_kept" })],
+  ])("ends a required resume errored without a fresh session when %s", async (_case, scenario, resumeFrom) => {
+    const http = fakeHttp(scenario);
+    const { provider, submitted } = testProvider(http as never, testPool());
+    await provider.sendTurn(turnRequest({ resumeFrom, resumeRequired: true }));
+    expect(http.createSession).not.toHaveBeenCalled();
+    const events = submittedEvents(submitted);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "error",
+      failure: { kind: "fatal", code: "session_resume_unavailable" },
+    }));
+    expect(events).not.toContainEqual(expect.objectContaining({ subtype: "sdk_session_invalidated" }));
+    await provider.shutdown();
+  });
+
   it("only a confirmed 404 starts fresh; other verify failures propagate without reset", async () => {
     const http = fakeHttp({
       verify: async () => {

@@ -19,6 +19,7 @@ import { CopilotCleanForker } from "./copilot-clean-forker.js";
 import { buildCopilotInternalMcpServers, composeCopilotSystemMessage, inferModelGroup, normalizeQuotaSnapshots, readUserInstructions, userSkillDirectories } from "./copilot-helpers.js";
 import { mapCopilotEvent, type CopilotTurnState } from "./copilot-event-mapper.js";
 import { describeCopilotAuth } from "../status/provider-auth-checks.js";
+import { SessionResumeUnavailableError } from "../../provider-turn-error.js";
 
 interface CopilotSessionState {
   sessionId: string;
@@ -41,7 +42,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
   readonly id = "copilot" as const;
   readonly subagentReporting = SUBAGENT_REPORTING.copilot;
   readonly descriptor = Object.freeze({ id: this.id, capabilities: [
-    ...(["build", "plan", "completion", "permissions", "usage", "session-eviction", "clean-fork", "browser-access", "thread-control"] as const).map((name) => ({ name, support: "supported" as const })),
+    ...(["build", "plan", "completion", "permissions", "usage", "session-eviction", "clean-fork", "browser-access", "thread-control", "session-resume"] as const).map((name) => ({ name, support: "supported" as const })),
     { name: "turn-steer" as const, support: "unsupported" as const },
   ] });
   readonly supportsCompletion = true;
@@ -160,7 +161,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     try {
       const client = await this.getClient();
       const options = await this.sessionOptions(request, browserGrant);
-      const operation = args.resumeFrom ? client.resumeSession(args.resumeFrom, options) : client.createSession(options);
+      const operation = args.resumeFrom ? resumeCopilotSession(client, args.resumeFrom, options) : client.createSession(options);
       const session = await this.awaitNativeResource(operation, 30_000, "Copilot session startup");
       return { state: { sessionId: args.sessionId, session, cwd: args.cwd, request, browserGrant, browserCapability, nativeEventIds: new Set(), childInvocations: new Map(), sessionApproval: false }, pids: [] };
     } catch (error) {
@@ -512,6 +513,11 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
 
 function routingFor(request: TurnRequest<"copilot">): CanonicalLiveEventRouting { return { threadId: request.threadId, turnId: request.turnId, executionId: request.turnExecutionId, deliveryAttempt: request.deliveryAttempt ?? 1 }; }
 function toError(error: unknown): Error { return error instanceof Error ? error : new Error(String(error)); }
+/** Copilot never replaces a saved session, so a rejected resume tells the server to recover from a seeded session. */
+async function resumeCopilotSession(client: CopilotClient, nativeSessionId: string, options: Parameters<CopilotClient["resumeSession"]>[1]): Promise<CopilotSession> {
+  try { return await client.resumeSession(nativeSessionId, options); }
+  catch (error) { throw new SessionResumeUnavailableError(`Copilot could not resume the saved session: ${toError(error).message}`, { cause: error }); }
+}
 function nativeEvidence(event: SessionEvent): Record<string, unknown> {
   const evidence: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(event.data)) {

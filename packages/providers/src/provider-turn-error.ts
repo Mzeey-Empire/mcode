@@ -13,3 +13,18 @@ export class ProviderTurnError extends Error {
     this.failure = failure;
   }
 }
+
+/** Failure code for a turn that had to continue a saved session that no longer exists. */
+export const SESSION_RESUME_UNAVAILABLE_CODE = "session_resume_unavailable";
+
+/**
+ * Thrown when a saved provider session cannot be resumed. A turn sent with
+ * `resumeRequired` fails with this instead of quietly starting a fresh session,
+ * so the server can decide how to continue.
+ */
+export class SessionResumeUnavailableError extends ProviderTurnError {
+  constructor(message: string, options?: { readonly cause?: unknown }) {
+    super(message, { kind: "fatal", code: SESSION_RESUME_UNAVAILABLE_CODE }, options);
+    this.name = "SessionResumeUnavailableError";
+  }
+}

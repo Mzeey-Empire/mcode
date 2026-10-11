@@ -31,6 +31,7 @@ import { AgentEventType, providerRuntimeEvent } from "@mcode/contracts";
 import type { ProviderHostPorts } from "@mcode/providers";
 import {
   OpenCodeNativeTurnDiff,
+  SessionResumeUnavailableError,
   approvalChoice,
   approvalOutcome,
   approvalReceipt,
@@ -63,7 +64,7 @@ import {
 import { formatOpenCodeResumeCursor, parseOpenCodeResumeCursor } from "./opencode-resume-cursor.js";
 import { probeOpenCodeCli } from "./opencode-cli.js";
 
-const OPENCODE_SUPPORTED_CAPABILITIES = ["build", "plan", "permissions", "session-eviction", "turn-diff"] as const;
+const OPENCODE_SUPPORTED_CAPABILITIES = ["build", "plan", "permissions", "session-eviction", "turn-diff", "session-resume"] as const;
 
 /** Visible notice when a missing upstream session forces a fresh start. */
 const OPENCODE_SESSION_INVALIDATED_SUBTYPE = "sdk_session_invalidated";
@@ -842,6 +843,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       }
     } catch (error) {
       if (!retried && !state.aborted && isMissingSessionError(error)) {
+        if (req.resumeRequired) throw new SessionResumeUnavailableError("OpenCode could not resume the saved session", { cause: error });
         logger.info("OpenCode upstream session missing; starting fresh", { sessionId: req.sessionId });
         this.emitSessionInvalidatedNotice(emit, threadId, upstreamId);
         state.upstreamSessionId = "";
@@ -882,10 +884,13 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
         return;
       } catch (error) {
         if (!isMissingSessionError(error)) throw error;
+        if (req.resumeRequired) throw new SessionResumeUnavailableError("OpenCode could not resume the saved session", { cause: error });
         logger.info("OpenCode upstream session missing; starting fresh", { sessionId: req.sessionId });
         this.emitSessionInvalidatedNotice(emit, threadId, resumed);
       }
     }
+    // A required resume never replaces the saved session; the server recovers from a seeded session instead.
+    if (req.resumeRequired) throw new SessionResumeUnavailableError("OpenCode has no saved session to resume");
     const created = await this.http.createSession(endpoint, req.threadId);
     // Validate the upstream id before it becomes the durable resume cursor.
     state.upstreamSessionId = formatOpenCodeResumeCursor(created.id);

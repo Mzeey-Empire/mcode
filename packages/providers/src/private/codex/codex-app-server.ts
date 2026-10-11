@@ -13,6 +13,7 @@ import * as NodePath from "node:path";
 import which from "which";
 import { resolveSubagentDisplayName, type TurnFailureKind, type TurnSteerOutcome } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
+import { SessionResumeUnavailableError } from "../../provider-turn-error.js";
 import { CodexRpcClient, CodexRpcResponseError, CodexTransportError } from "./codex-rpc-client.js";
 import { listCodexModels } from "./codex-models.js";
 import { codexIgnoredNotificationReason } from "./codex-notification-policy.js";
@@ -242,6 +243,11 @@ export interface CodexAppServerOptions {
    * to `thread/start`.
    */
   resumeThreadId?: string;
+  /**
+   * Fail with `SessionResumeUnavailableError` when `resumeThreadId` cannot be
+   * resumed, instead of falling back to `thread/start`.
+   */
+  requireResume?: boolean;
   /**
    * Optional hook invoked when the codex app-server issues a server-initiated
    * approval RPC. Replaces the default auto-deny fallback in supervised mode.
@@ -1653,6 +1659,9 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
       const recoverable = isRecoverableCodexResumeError(error);
       logger.warn("Codex thread/resume failed", { resumeThreadId, error: String(error), recoverable });
       if (!recoverable) throw error;
+      if (this.options.requireResume) {
+        throw new SessionResumeUnavailableError("Codex could not resume the saved thread", { cause: error });
+      }
       this._resumeFailed = true;
     }
   }
