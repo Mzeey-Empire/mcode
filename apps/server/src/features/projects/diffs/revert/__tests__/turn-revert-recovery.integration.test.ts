@@ -75,6 +75,23 @@ describe("raw revert recovery", () => {
     expect(f.store.byRequest(first.requestId)?.state).toBe("rolled_back");
   }, timeout);
 
+  it("startup unwinds an interrupted retry before the failed revert it retried", async () => {
+    f = await revertFixture(); f.write("a", "before a\n"); f.write("b", "before b\n");
+    const turn = await f.turn("one", () => { f.write("a", "after a\n"); f.write("b", "after b\n"); });
+    const first = await f.request(turn.messageId);
+    const failed = await f.service((point, writes) => {
+      if (point === "afterWrite" && writes === 1) { f.write("b", "edited b\n"); throw new Error("injected failure"); }
+    }).apply(first);
+    expect(failed).toMatchObject({ status: "failed", outcome: "recovery_failed", paths: ["b"] });
+    const retry = await f.request(turn.messageId);
+    await expect(f.service((point) => { if (point === "commit") throw new TurnRevertFaultStop(); }).apply(retry)).rejects.toBeInstanceOf(TurnRevertFaultStop);
+    expect(f.read("b")).toEqual(Buffer.from("before b\n"));
+    await f.service().recoverUnfinished();
+    expect(f.read("a")).toEqual(Buffer.from("after a\n")); expect(f.read("b")).toEqual(Buffer.from("edited b\n"));
+    expect(f.store.byRequest(retry.requestId)?.state).toBe("rolled_back");
+    expect(f.store.byRequest(first.requestId)).toMatchObject({ state: "recovery_failed", failure: { paths: ["b"] } });
+  }, timeout);
+
   it("a replay that settles a prepared row writes no receipt", async () => {
     f = await revertFixture(); f.write("a", "before\n"); const turn = await f.turn("one", () => f.write("a", "after\n"));
     const request = await f.request(turn.messageId);

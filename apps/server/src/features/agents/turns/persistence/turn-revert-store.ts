@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { and, eq, gt, inArray } from "drizzle-orm";
+import { and, desc, eq, gt, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
 import { TurnRevertRecordSchema, TurnRevertResultSchema } from "@mcode/contracts";
@@ -33,8 +33,10 @@ export class TurnRevertStore {
     return row ? decodeRevert(row) : null;
   }
   /** Rows startup must retry regardless of age. */
+  /** Newest first: a retry wrote over its failed predecessor, so it must be unwound before the predecessor is judged. */
   unfinished(): StoredRevert[] {
-    return drizzle(this.db).select().from(turnReverts).where(inArray(turnReverts.state, ["prepared", "recovery_failed"])).all().map(decodeRevert);
+    return drizzle(this.db).select().from(turnReverts).where(inArray(turnReverts.state, ["prepared", "recovery_failed"]))
+      .orderBy(desc(turnReverts.createdAt)).all().map(decodeRevert);
   }
   /** Paths a later committed operation in the same checkout has written since `row` was prepared. */
   laterCommittedPaths(row: StoredRevert): Set<string> {
