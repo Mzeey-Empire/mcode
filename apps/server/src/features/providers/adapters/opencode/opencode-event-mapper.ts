@@ -245,7 +245,7 @@ function mapToolPart(part: Record<string, unknown>, ctx: MapperContext): OpenCod
   const state = isRecord(part.state) ? part.state : undefined;
   const status = typeof state?.status === "string" ? state.status : "pending";
   const toolCallId = toolCallIdOf(part);
-  const toolName = boundedString(part.tool, MAX_TOOL_NAME_CHARS) ?? "unknown";
+  const toolName = canonicalToolName(part.tool);
   if (status === "completed") return mapToolCompleted(toolCallId, state, ctx);
   if (status !== "pending" && status !== "running") return mapToolFailed(toolCallId, state, ctx);
   return mapToolRunning(toolCallId, toolName, state, ctx);
@@ -345,9 +345,15 @@ function mapNextTextDelta(properties: Record<string, unknown>, ctx: MapperContex
   };
 }
 
+function canonicalToolName(value: unknown): string {
+  const name = boundedString(value, MAX_TOOL_NAME_CHARS) ?? "unknown";
+  // The task-list reducer keys on TodoWrite, while OpenCode uses lowercase tool names.
+  return name === "todowrite" ? "TodoWrite" : name;
+}
+
 function mapNextToolCalled(properties: Record<string, unknown>, ctx: MapperContext): OpenCodeMappedOutput {
   const toolCallId = boundedIdentifier(properties.callID) ?? "tool-unknown";
-  const toolName = boundedString(properties.tool, MAX_TOOL_NAME_CHARS) ?? "unknown";
+  const toolName = canonicalToolName(properties.tool);
   return {
     disposition: "mapped",
     events: [withExecution({

@@ -14,14 +14,7 @@
 import * as NodeCrypto from "node:crypto";
 import { AgentEventType } from "@mcode/contracts";
 import type { AgentEvent } from "@mcode/contracts";
-
-/** Normalized todo shape, matching threadStore's TodoWrite interception contract. */
-export interface NormalizedCursorTodo {
-  id: string;
-  content: string;
-  status: "pending" | "in_progress" | "completed" | "cancelled";
-  priority?: string;
-}
+import { coerceTodoStatus, type TodoWriteItem } from "../../protocols/acp/acp-plan-todo-write.js";
 
 /**
  * Per-thread todo snapshot, persisted across prompts so cursor's
@@ -32,22 +25,12 @@ export interface NormalizedCursorTodo {
  * task order remains stable across patches.
  */
 export interface CursorTodoSnapshot {
-  todos: Map<string, NormalizedCursorTodo>;
+  todos: Map<string, TodoWriteItem>;
 }
 
 /** Factory for a fresh per-thread todo snapshot. */
 export function createCursorTodoSnapshot(): CursorTodoSnapshot {
   return { todos: new Map() };
-}
-
-/** Coerce an arbitrary status field to a TodoWrite-compatible status. */
-export function coercePlanStatus(
-  s: unknown,
-): "pending" | "in_progress" | "completed" | "cancelled" {
-  if (s === "in_progress" || s === "inProgress" || s === "in-progress") return "in_progress";
-  if (s === "completed") return "completed";
-  if (s === "cancelled" || s === "canceled") return "cancelled";
-  return "pending";
 }
 
 /** Keys we have observed cursor-agent using to ship the todo collection. */
@@ -110,8 +93,8 @@ export function extractCursorTodoEntries(
 export function normalizeCursorTodoEntry(
   entry: Record<string, unknown>,
   index: number,
-): NormalizedCursorTodo {
-  const todo: NormalizedCursorTodo = {
+): TodoWriteItem {
+  const todo: TodoWriteItem = {
     id: stringField(entry, "id") ?? String(index + 1),
     content:
       stringField(entry, "content") ??
@@ -120,7 +103,7 @@ export function normalizeCursorTodoEntry(
       stringField(entry, "step") ??
       stringField(entry, "description") ??
       "",
-    status: coercePlanStatus(entry.status),
+    status: coerceTodoStatus(entry.status),
   };
   const priority = stringField(entry, "priority");
   if (priority) todo.priority = priority;
@@ -160,10 +143,10 @@ export function isCursorUpdateTodosTool(
  * gracefully to "always replace" by returning `incoming` as-is.
  */
 export function reconcileCursorTodos(
-  incoming: NormalizedCursorTodo[],
+  incoming: TodoWriteItem[],
   merge: boolean,
   snapshot: CursorTodoSnapshot | undefined,
-): NormalizedCursorTodo[] {
+): TodoWriteItem[] {
   if (!snapshot) return incoming;
 
   if (!merge) {
@@ -175,7 +158,7 @@ export function reconcileCursorTodos(
   for (const t of incoming) {
     const existing = snapshot.todos.get(t.id);
     if (existing) {
-      const merged: NormalizedCursorTodo = {
+      const merged: TodoWriteItem = {
         id: existing.id,
         content: t.content || existing.content,
         status: t.status,
@@ -223,37 +206,6 @@ export function cursorUpdateTodosExtNotificationToAgentEvents(
   const incoming = asRecords.map((e, i) => normalizeCursorTodoEntry(e, i));
   const todos = reconcileCursorTodos(incoming, merge, snapshot);
 
-  return [
-    {
-      type: AgentEventType.ToolUse,
-      threadId,
-      toolCallId,
-      toolName: "TodoWrite",
-      toolInput: { todos },
-    },
-    {
-      type: AgentEventType.ToolResult,
-      threadId,
-      toolCallId,
-      output: `Updated ${todos.length} todo(s)`,
-      isError: false,
-    },
-  ];
-}
-
-/**
- * Synthesizes a paired TodoWrite `ToolUse` + `ToolResult` from an already-
- * reconciled todo list. Caller is responsible for merge/replace semantics
- * via {@link reconcileCursorTodos}; this just constructs the events.
- *
- * The `toolCallId` carries a `cursor-todos-` prefix so it is easy to grep
- * out of agent traces.
- */
-export function buildTodoWriteEvents(
-  todos: NormalizedCursorTodo[],
-  threadId: string,
-): AgentEvent[] {
-  const toolCallId = `cursor-todos-${NodeCrypto.randomUUID()}`;
   return [
     {
       type: AgentEventType.ToolUse,

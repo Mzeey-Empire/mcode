@@ -9,39 +9,15 @@
 
 import { describe, it, expect } from "vitest";
 import {
-  coercePlanStatus,
   createCursorTodoSnapshot,
   reconcileCursorTodos,
   extractCursorTodoEntries,
   normalizeCursorTodoEntry,
   isCursorUpdateTodosTool,
-  buildTodoWriteEvents,
   cursorUpdateTodosExtNotificationToAgentEvents,
 } from "../cursor-todo-snapshot.js";
-import type { NormalizedCursorTodo } from "../cursor-todo-snapshot.js";
+import type { TodoWriteItem } from "../../../protocols/acp/acp-plan-todo-write.js";
 import { AgentEventType } from "@mcode/contracts";
-
-describe("coercePlanStatus", () => {
-  it("returns the canonical status for known values", () => {
-    expect(coercePlanStatus("pending")).toBe("pending");
-    expect(coercePlanStatus("in_progress")).toBe("in_progress");
-    expect(coercePlanStatus("inProgress")).toBe("in_progress");
-    expect(coercePlanStatus("in-progress")).toBe("in_progress");
-    expect(coercePlanStatus("completed")).toBe("completed");
-    expect(coercePlanStatus("cancelled")).toBe("cancelled");
-  });
-
-  it("normalizes the American 'canceled' spelling to 'cancelled'", () => {
-    expect(coercePlanStatus("canceled")).toBe("cancelled");
-  });
-
-  it("falls back to 'pending' for unknown or non-string input", () => {
-    expect(coercePlanStatus(undefined)).toBe("pending");
-    expect(coercePlanStatus(null)).toBe("pending");
-    expect(coercePlanStatus(42)).toBe("pending");
-    expect(coercePlanStatus("done")).toBe("pending");
-  });
-});
 
 describe("createCursorTodoSnapshot", () => {
   it("returns a fresh snapshot with an empty Map", () => {
@@ -59,7 +35,7 @@ describe("createCursorTodoSnapshot", () => {
 });
 
 describe("reconcileCursorTodos", () => {
-  const todo = (id: string, status: NormalizedCursorTodo["status"], content = id): NormalizedCursorTodo => ({
+  const todo = (id: string, status: TodoWriteItem["status"], content = id): TodoWriteItem => ({
     id,
     content,
     status,
@@ -161,37 +137,6 @@ describe("isCursorUpdateTodosTool", () => {
   it("does not match unrelated tools", () => {
     expect(isCursorUpdateTodosTool({ _toolName: "shell" }, "Run command", "shell")).toBe(false);
     expect(isCursorUpdateTodosTool(undefined, "Read file", "read")).toBe(false);
-  });
-});
-
-describe("buildTodoWriteEvents", () => {
-  it("emits a paired ToolUse + ToolResult with the exact todo list", () => {
-    const todos: NormalizedCursorTodo[] = [
-      { id: "1", content: "first", status: "pending" },
-      { id: "2", content: "second", status: "completed" },
-    ];
-    const events = buildTodoWriteEvents(todos, "thread-abc");
-    expect(events).toHaveLength(2);
-
-    const [use, result] = events;
-    expect(use.type).toBe(AgentEventType.ToolUse);
-    if (use.type !== AgentEventType.ToolUse) throw new Error("unreachable");
-    expect(use.threadId).toBe("thread-abc");
-    expect(use.toolName).toBe("TodoWrite");
-    expect(use.toolInput).toEqual({ todos });
-
-    expect(result.type).toBe(AgentEventType.ToolResult);
-    if (result.type !== AgentEventType.ToolResult) throw new Error("unreachable");
-    expect(result.threadId).toBe("thread-abc");
-    expect(result.toolCallId).toBe(use.toolCallId);
-    expect(result.isError).toBe(false);
-    expect(result.output).toContain("2");
-  });
-
-  it("uses a deterministic prefix for the toolCallId so it can be correlated in logs", () => {
-    const events = buildTodoWriteEvents([{ id: "1", content: "x", status: "pending" }], "t");
-    if (events[0].type !== AgentEventType.ToolUse) throw new Error("unreachable");
-    expect(events[0].toolCallId.startsWith("cursor-todos-")).toBe(true);
   });
 });
 

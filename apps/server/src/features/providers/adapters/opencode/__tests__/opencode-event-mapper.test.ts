@@ -4,6 +4,64 @@ import { mapOpenCodeEnvelope } from "../opencode-event-mapper.js";
 const CTX = { threadId: "thread-1", turnExecutionId: "11111111-1111-4111-8111-111111111111" };
 
 describe("mapOpenCodeEnvelope", () => {
+  it("maps the captured running todowrite part to the canonical task-list tool", () => {
+    const out = mapOpenCodeEnvelope({
+      type: "message.part.updated",
+      properties: { sessionID: "ses_1", part: {
+        type: "tool", tool: "todowrite", callID: "call_01", id: "prt_1", messageID: "msg_1", sessionID: "ses_1",
+        state: { status: "running", input: { todos: [
+          { content: "create a.txt", status: "pending", priority: "medium" },
+          { content: "create b.txt", status: "pending", priority: "medium" },
+        ] }, time: { start: 1791678705254 } },
+      } },
+    }, CTX);
+    expect(out.events).toEqual([{
+      type: "toolUse", threadId: "thread-1", turnExecutionId: CTX.turnExecutionId,
+      toolCallId: "call_01", toolName: "TodoWrite", toolInput: { todos: [
+        { content: "create a.txt", status: "pending", priority: "medium" },
+        { content: "create b.txt", status: "pending", priority: "medium" },
+      ] },
+    }]);
+  });
+
+  it("keeps the pending todowrite part's empty input", () => {
+    const out = mapOpenCodeEnvelope({
+      type: "message.part.updated",
+      properties: { sessionID: "ses_1", part: {
+        type: "tool", tool: "todowrite", callID: "call_01", id: "prt_1", messageID: "msg_1", sessionID: "ses_1",
+        state: { status: "pending", input: {} },
+      } },
+    }, CTX);
+    expect(out.events).toEqual([{
+      type: "toolUse", threadId: "thread-1", turnExecutionId: CTX.turnExecutionId,
+      toolCallId: "call_01", toolName: "TodoWrite", toolInput: {},
+    }]);
+  });
+
+  it("canonicalizes todowrite in session.next.tool.called", () => {
+    const out = mapOpenCodeEnvelope({
+      type: "session.next.tool.called",
+      properties: { sessionID: "ses_1", assistantMessageID: "msg_1", callID: "call_01", tool: "todowrite",
+        input: { todos: [{ content: "create a.txt", status: "completed", priority: "medium" }] },
+      },
+    }, CTX);
+    expect(out.events).toEqual([{
+      type: "toolUse", threadId: "thread-1", turnExecutionId: CTX.turnExecutionId,
+      toolCallId: "call_01", toolName: "TodoWrite",
+      toolInput: { todos: [{ content: "create a.txt", status: "completed", priority: "medium" }] },
+    }]);
+  });
+
+  it("ignores todo.updated snapshots to avoid duplicate task-list writes", () => {
+    expect(mapOpenCodeEnvelope({
+      type: "todo.updated",
+      properties: { sessionID: "ses_1", todos: [
+        { content: "create a.txt", status: "pending", priority: "medium" },
+        { content: "create b.txt", status: "pending", priority: "medium" },
+      ] },
+    }, CTX)).toEqual({ disposition: "ignored", events: [], reason: "noise:todo.updated" });
+  });
+
   it("preserves repeated delta text while deduplicating full snapshots", () => {
     const context = { ...CTX, forwardedText: new Map<string, string>() };
     const events = ["```", "`", "`"].flatMap((delta) => mapOpenCodeEnvelope({ type: "message.part.delta",
