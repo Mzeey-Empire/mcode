@@ -35,6 +35,7 @@ function snapshot(overrides: Partial<TurnSnapshot>): TurnSnapshot {
     worktree_path: null,
     created_at: "2026-10-01T10:00:00.000Z",
     attempt_count: 1,
+    reverted_paths: [],
     ...overrides,
   };
 }
