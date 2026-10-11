@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, gt, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
 import { TurnRevertRecordSchema, TurnRevertResultSchema } from "@mcode/contracts";
@@ -35,6 +35,12 @@ export class TurnRevertStore {
   /** Rows startup must retry regardless of age. */
   unfinished(): StoredRevert[] {
     return drizzle(this.db).select().from(turnReverts).where(inArray(turnReverts.state, ["prepared", "recovery_failed"])).all().map(decodeRevert);
+  }
+  /** Paths a later committed operation in the same checkout has written since `row` was prepared. */
+  laterCommittedPaths(row: StoredRevert): Set<string> {
+    const later = drizzle(this.db).select().from(turnReverts)
+      .where(and(eq(turnReverts.state, "committed"), gt(turnReverts.createdAt, row.createdAt))).all().map(decodeRevert);
+    return new Set(later.filter((other) => other.context.cwd === row.context.cwd).flatMap((other) => other.files.map((file) => file.path)));
   }
   /** Load the thread's committed operations once for all snapshot markers. */
   revertedPathsBySnapshot(threadId: string): Map<string, Set<string>> {

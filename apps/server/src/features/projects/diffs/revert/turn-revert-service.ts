@@ -122,7 +122,8 @@ export class TurnRevertService {
     let row = this.deps.store.byRequest(requestId);
     if (!row) return null;
     if (row.context.request !== request) throw new TurnRevertValidationError("requestId is already bound to different revert parameters");
-    if (row.state === "prepared") { await this.recover(row); row = this.requiredRow(row.id); }
+    // The retrying caller receives the outcome directly, so this settle writes no receipt.
+    if (row.state === "prepared") { await this.recover(row, { kind: "runtime", detail: "Revert interrupted" }); row = this.requiredRow(row.id); }
     return this.deps.store.outcome(row);
   }
 
@@ -203,7 +204,10 @@ export class TurnRevertService {
     const failed = new Set<string>();
     const restore: RecoveryPath[] = [];
     const available = await this.recoveryAvailable(row);
-    for (const entry of row.files) {
+    // A later committed revert or Undo can leave bytes identical to this row's planned state; those paths are now its.
+    const superseded = this.deps.store.laterCommittedPaths(row);
+    const owned = row.files.filter((entry) => !superseded.has(entry.path));
+    for (const entry of owned) {
       const decision = await this.recoveryDecision(row, entry, available);
       if (decision.kind === "equal_planned") restore.push(entry);
       else if (decision.kind !== "equal_pre") failed.add(entry.path);
@@ -212,7 +216,7 @@ export class TurnRevertService {
     const safe = restore.filter((entry) => ![...failed].some((name) => entry.path.startsWith(`${name}/`) || name.startsWith(`${entry.path}/`)));
     try { await this.deps.snapshots.restoreRaw(cwd, row.id, safe.map((entry) => ({ path: entry.path, state: entry.pre }))); }
     catch (error) { detail = `${detail}: ${errorDetail(error)}`.slice(0, 500); }
-    for (const entry of row.files) {
+    for (const entry of owned) {
       if (!await this.matchesPre(cwd, entry)) failed.add(entry.path);
     }
     const paths = [...failed];
@@ -241,7 +245,7 @@ export class TurnRevertService {
 }
 
 function interruptedReceipt(row: StoredRevert, paths: string[]): string {
-  const outcome = paths.length ? `${paths.length} files could not be put back: ${paths.join(", ")}` : "Files were put back.";
+  const outcome = paths.length ? `${paths.length} ${paths.length === 1 ? "file" : "files"} could not be put back: ${paths.join(", ")}` : "Files were put back.";
   return `Revert of ${row.context.label} was interrupted. ${outcome}`;
 }
 

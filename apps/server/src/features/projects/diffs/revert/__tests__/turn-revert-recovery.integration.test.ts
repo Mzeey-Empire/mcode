@@ -55,7 +55,32 @@ describe("raw revert recovery", () => {
     await f.service().recoverUnfinished();
     expect(f.read("a")).toEqual(Buffer.from("external\n"));
     expect(f.store.byRequest(request.requestId)?.state).toBe("recovery_failed");
-    expect(f.db.query("SELECT count(*) AS n FROM messages WHERE json_extract(system_notice, '$.kind') = 'turn-revert-interrupted'").get()).toEqual({ n: 1 });
+    expect(f.db.query("SELECT content FROM messages WHERE json_extract(system_notice, '$.kind') = 'turn-revert-interrupted'").all())
+      .toEqual([{ content: "Revert of Turn 1 was interrupted. 1 file could not be put back: a" }]);
+  }, timeout);
+
+  it("startup retry of a failed revert leaves paths a later committed revert wrote", async () => {
+    f = await revertFixture(); f.write("a", "before a\n"); f.write("b", "before b\n");
+    const turn = await f.turn("one", () => { f.write("a", "after a\n"); f.write("b", "after b\n"); });
+    const first = await f.request(turn.messageId);
+    const failed = await f.service((point, writes) => {
+      if (point === "afterWrite" && writes === 1) { f.write("b", "edited b\n"); throw new Error("injected failure"); }
+    }).apply(first);
+    expect(failed).toMatchObject({ status: "failed", outcome: "recovery_failed", paths: ["b"] });
+    expect(f.read("a")).toEqual(Buffer.from("after a\n"));
+    committed(await f.service().apply(await f.request(turn.messageId)));
+    expect(f.read("a")).toEqual(Buffer.from("before a\n")); expect(f.read("b")).toEqual(Buffer.from("before b\n"));
+    await f.service().recoverUnfinished();
+    expect(f.read("a")).toEqual(Buffer.from("before a\n")); expect(f.read("b")).toEqual(Buffer.from("before b\n"));
+    expect(f.store.byRequest(first.requestId)?.state).toBe("rolled_back");
+  }, timeout);
+
+  it("a replay that settles a prepared row writes no receipt", async () => {
+    f = await revertFixture(); f.write("a", "before\n"); const turn = await f.turn("one", () => f.write("a", "after\n"));
+    const request = await f.request(turn.messageId);
+    await expect(f.service((point) => { if (point === "afterPrepare") throw new TurnRevertFaultStop(); }).apply(request)).rejects.toBeInstanceOf(TurnRevertFaultStop);
+    expect(await f.service().apply(request)).toMatchObject({ status: "failed", outcome: "rolled_back", paths: [] });
+    expect(f.db.query("SELECT count(*) AS n FROM messages WHERE json_extract(system_notice, '$.kind') = 'turn-revert-interrupted'").get()).toEqual({ n: 0 });
   }, timeout);
 
   it.each(["captureRaw", "planCheckout", "pinRecovery"] satisfies import("../turn-revert-service.js").RevertFaultPoint[])("a %s failure leaves files unchanged and no prepared row", async (stop) => {
