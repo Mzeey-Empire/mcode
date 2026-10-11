@@ -205,8 +205,9 @@ export class ClaudeEventMapper {
       { content?: Message[]; stop_reason?: string | null } | undefined;
     const content = assistant?.content ?? [];
     const parentToolCallId = parentId(message);
-    // A subagent's API error ends only that subagent, not the turn.
-    if (!parentToolCallId && typeof message.error === "string") this.assistantError = message.error;
+    // A subagent's API error ends only that subagent, not the turn. A later main-thread message
+    // without an error means the CLI recovered, so the earlier error no longer explains a failure.
+    if (!parentToolCallId) this.assistantError = typeof message.error === "string" ? message.error : undefined;
     const text = content
       .filter((block) => block.type === "text")
       .map((block) => stringValue(block.text))

@@ -1,6 +1,6 @@
 import type { SDKAssistantMessageError } from "@anthropic-ai/claude-agent-sdk";
 import type { TurnFailure, TurnFailureKind } from "@mcode/contracts";
-import { failureCode, failureRetries, httpStatus, retryAfterMsUntil, turnFailure } from "../turn-failure-fields.js";
+import { failureCode, failureRetries, httpStatus, kindByHttpStatus, retryAfterMsUntil, turnFailure } from "../turn-failure-fields.js";
 
 /** The last `rate_limit_event.rate_limit_info` the turn saw. */
 export interface ClaudeRateLimitEvidence {
@@ -37,7 +37,7 @@ export interface ClaudeFailureEvidence {
 const ASSISTANT_ERROR_KINDS: ReadonlyArray<readonly [SDKAssistantMessageError, TurnFailureKind]> = [
   ["authentication_failed", "auth"],
   ["oauth_org_not_allowed", "auth"],
-  ["rate_limit", "usage_limit"],
+  // "Credit balance is too low": waiting does not lift it, so it carries no reset window.
   ["billing_error", "usage_limit"],
   ["server_error", "retryable"],
   ["overloaded", "retryable"],
@@ -48,6 +48,8 @@ const ASSISTANT_ERROR_KINDS: ReadonlyArray<readonly [SDKAssistantMessageError, T
   ["verification_required", "fatal"],
   ["cloud_credential_error", "fatal"],
 ];
+// "rate_limit" is absent too: the CLI sends it for any 429, including short capacity throttling,
+// so only a live subscription rejection makes it a usage limit (see claudeFailureKind).
 // "unknown" is deliberately absent so the other signals still decide the kind.
 const KIND_BY_ASSISTANT_ERROR: ReadonlyMap<string, TurnFailureKind> = new Map(ASSISTANT_ERROR_KINDS);
 
@@ -71,7 +73,7 @@ const RETRYABLE_STREAM_ERROR_CODES: ReadonlySet<string> = new Set([
  */
 export function classifyClaudeFailure(evidence: ClaudeFailureEvidence, now: number): TurnFailure {
   const kind = claudeFailureKind(evidence, now);
-  const usageLimit = kind === "usage_limit" ? evidence.rateLimit : undefined;
+  const usageLimit = kind === "usage_limit" && stillRejected(evidence.rateLimit, now) ? evidence.rateLimit : undefined;
   return turnFailure(kind, {
     status: httpStatus(evidence.apiErrorStatus),
     code: claudeFailureCode(evidence),
@@ -85,7 +87,11 @@ function claudeFailureKind(evidence: ClaudeFailureEvidence, now: number): TurnFa
   const named = lookup(KIND_BY_ASSISTANT_ERROR, evidence.assistantError) ?? lookup(KIND_BY_STARTUP_FAILURE, evidence.startupFailureReason);
   if (named) return named;
   if (stillRejected(evidence.rateLimit, now)) return "usage_limit";
-  if ((httpStatus(evidence.apiErrorStatus) ?? 0) >= 500) return "retryable";
+  if (evidence.assistantError === "rate_limit") return "retryable";
+  const status = httpStatus(evidence.apiErrorStatus);
+  // A status that predicts the same failure again leaves the stream code a chance to say otherwise.
+  const statusKind = status === undefined ? undefined : kindByHttpStatus(status);
+  if (statusKind !== undefined && statusKind !== "fatal") return statusKind;
   if (evidence.streamErrorCode !== undefined && RETRYABLE_STREAM_ERROR_CODES.has(evidence.streamErrorCode)) return "retryable";
   return "fatal";
 }

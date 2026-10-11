@@ -256,6 +256,14 @@ describe("ClaudeEventMapper failure classification", () => {
     ]);
   });
 
+  it("forgets an API error the CLI recovered from within the turn", async () => {
+    const { events, mapper } = createMapper();
+    await mapper.map({ type: "assistant", parent_tool_use_id: null, error: "max_output_tokens", message: { content: [] } });
+    await mapper.map({ type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "text", text: "continuing" }] } });
+    await mapper.map({ type: "result", subtype: "success", is_error: true, result: "Bad gateway", api_error_status: 502 });
+    expect(failures(events)).toEqual([{ kind: "retryable", status: 502 }]);
+  });
+
   it("does not treat a usage warning as a usage limit", async () => {
     const { events, mapper } = createMapper();
     await mapper.map({ type: "rate_limit_event", rate_limit_info: { status: "allowed_warning", resetsAt: 1_700_003_600, rateLimitType: "five_hour" } });
