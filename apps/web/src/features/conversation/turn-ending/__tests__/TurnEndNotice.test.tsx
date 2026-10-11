@@ -1,10 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { mockTransport } from "@/__tests__/mocks/transport";
+import { useTerminalStore } from "@/features/terminal";
+import { useProviderStatusStore } from "@/stores/providerStatusStore";
+import { ThreadTurnEndNotice } from "../ThreadTurnEndNotice";
 import { TurnEndNotice } from "../TurnEndNotice";
 import type { FilledNotice } from "../turn-ending-notice";
 
-afterEach(cleanup);
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
+
+afterEach(() => {
+  cleanup();
+  useProviderStatusStore.setState({ statuses: [] });
+  useTerminalStore.setState({ terminals: {}, ptyToThread: {}, terminalPanelByThread: {} });
+});
 
 const FAILED: FilledNotice = {
   style: "filled",
@@ -87,5 +97,45 @@ describe("TurnEndNotice", () => {
   it("shows why the last action failed", () => {
     render(<TurnEndNotice notice={FAILED} actions={{ retry: vi.fn() }} error="The turn is no longer the latest." />);
     expect(screen.getByRole("alert").textContent).toBe("The turn is no longer the latest.");
+  });
+});
+
+describe("ThreadTurnEndNotice", () => {
+  const SIGNED_OUT_NOTICE: FilledNotice = {
+    style: "filled",
+    icon: "failed",
+    title: "Claude is signed out",
+    detail: "Threads on Claude can't run until you sign in",
+    primary: { action: "sign_in", label: "Sign in" },
+  };
+
+  it("runs the provider's sign-in command from the status store when Sign in is clicked", () => {
+    vi.mocked(mockTransport.terminalWrite).mockClear();
+    useProviderStatusStore.setState({ statuses: [{
+      providerId: "claude",
+      auth: { state: "signed_out", signIn: { kind: "terminal", argv: ["claude", "/login"] } },
+      cli: null, rateLimit: null, newModels: [], checkedAt: "2026-10-11T12:00:00.000Z",
+    }] });
+    useTerminalStore.getState().addTerminal("home", "pty-home-live", "pwsh", { state: "running" });
+
+    render(<ThreadTurnEndNotice threadId="thread-1" turnId="turn-1" providerId="claude" notice={SIGNED_OUT_NOTICE} />);
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(mockTransport.terminalWrite).toHaveBeenCalledWith("pty-home-live", "claude /login\r");
+  });
+
+  it("hides Sign in when the thread's provider is unknown", () => {
+    render(<ThreadTurnEndNotice threadId="thread-1" turnId="turn-1" providerId={null} notice={SIGNED_OUT_NOTICE} />);
+
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+  });
+
+  it("retries the notice's turn", () => {
+    vi.mocked(mockTransport.retryErroredTurn).mockClear();
+    render(<ThreadTurnEndNotice threadId="thread-1" turnId="turn-1" providerId="claude" notice={FAILED} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(mockTransport.retryErroredTurn).toHaveBeenCalledWith({ threadId: "thread-1", turnId: "turn-1" });
   });
 });
