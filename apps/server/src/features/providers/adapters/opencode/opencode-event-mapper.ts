@@ -238,7 +238,7 @@ function mapToolCompleted(toolCallId: string, state: Record<string, unknown> | u
     disposition: "mapped",
     events: [withExecution({
       type: "toolResult", threadId: ctx.threadId, toolCallId,
-      output: toolName === "Agent" ? (/<task_result>([\s\S]*?)<\/task_result>/.exec(output)?.[1]?.trim() ?? output) : output,
+      output: toolName === "Agent" ? (/<task_result>([\s\S]*?)(?:<\/task_result>|$)/.exec(output)?.[1]?.trim() ?? output) : output,
       isError: false, ...(ctx.parentToolCallId ? { parentToolCallId: ctx.parentToolCallId } : {}),
     } satisfies AgentEvent, ctx)],
   };

@@ -44,6 +44,18 @@ describe("Copilot subagent mapping", () => {
     expect(events.filter((event) => event.type === "textDelta")).toEqual([{ type: "textDelta", threadId: "thread", delta: "REDACTED_CONTENT" }]);
   });
 
+  it("preserves the task prompt instead of replacing it with the agent description", () => {
+    const turn = turnState();
+    const metadata = { id: "EVENT_1", parentId: null, timestamp: "2000-01-01T00:00:00.000Z" };
+    mapCopilotEvent({ ...metadata, type: "tool.execution_start", data: {
+      toolCallId: "TOOL_1", toolName: "task", arguments: { prompt: "Inspect the parser" },
+    } }, "thread", turn);
+    const events = mapCopilotEvent({ ...metadata, id: "EVENT_2", type: "subagent.started", data: {
+      toolCallId: "TOOL_1", agentName: "explore", agentDisplayName: "Explorer", agentDescription: "Explores code",
+    } }, "thread", turn);
+    expect(events).toMatchObject([{ type: "toolUse", toolName: "Agent", toolInput: { prompt: "Inspect the parser" } }]);
+  });
+
   it("retains failure even when the enclosing task completes successfully and falls back to the display name", () => {
     const turn = turnState();
     const events = trace(true, false).flatMap((event) => mapCopilotEvent(event, "thread", turn));

@@ -96,7 +96,7 @@ function startTool(event: Extract<SessionEvent, { type: "tool.execution_start" }
 function startSubagent(event: Extract<SessionEvent, { type: "subagent.started" }>, threadId: string, turn: CopilotTurnState): AgentEvent[] {
   const tool = turn.tools.get(event.data.toolCallId);
   const input = { ...tool?.input, description: tool?.input?.description ?? event.data.agentDisplayName,
-    prompt: event.data.agentDescription, subagentType: event.data.agentName };
+    prompt: tool?.input?.prompt ?? event.data.agentDescription, subagentType: event.data.agentName };
   return [{ type: "toolUse", threadId, toolCallId: event.data.toolCallId, toolName: "Agent", toolInput: input,
     parentToolCallId: tool?.parentToolCallId, subagentPresentation: createSubagentPresentation(input, event.data.toolCallId) }];
 }

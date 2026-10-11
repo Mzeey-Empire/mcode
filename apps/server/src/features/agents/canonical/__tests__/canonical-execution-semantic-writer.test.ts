@@ -303,7 +303,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     const owner = new OtherProviderLiveEventEffects("copilot", execution, "user-1");
     const canonical = new CanonicalAgentBoundary(db);
     const accepted = new CanonicalAcceptedEventWrite(db, canonical, writer);
-    for (const [index, subtype] of ["copilot_native:session.start", "copilot_child:assistant.message", "copilot_idle"].entries()) {
+    for (const [index, subtype] of ["copilot_native:session.start", "copilot_native:session.info", "copilot_idle"].entries()) {
       const ordinal = index + 2;
       const native: AgentEvent = { type: "system", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, subtype };
       const prepared = owner.prepare(native);

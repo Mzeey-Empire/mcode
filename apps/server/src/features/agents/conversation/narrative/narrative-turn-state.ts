@@ -5,7 +5,7 @@ import {
   createSubagentPresentation, mergeSubagentPresentation, resolveBrowserNarrativeTool,
   resolveSubagentDuration, resolveSubagentMetadata, resolveSubagentPrompt,
   encodeCanonicalSubagentDetailTarget, encodeSubagentAliasDetailTarget,
-  type ParentNarrativeRecoveryItem, type SubagentPresentation, type AgentEvent, type ThoughtSegmentKind,
+  type ParentNarrativeRecoveryItem, type SubagentPresentation, type AgentEvent, type ThoughtSegmentKind, type ProviderId,
 } from "@mcode/contracts";
 import type { CreateToolCallRecordInput } from "../../tools/persistence/tool-call-record-repo.js";
 import type { CreateThoughtSegmentInput } from "./persistence/thought-segment-repo.js";
@@ -442,11 +442,12 @@ export class NarrativeTurnState {
 
   /**
    * Get the current parent tool call ID for a thread's active Agent nesting.
-   * This is the fallback consulted by `index.ts` enrichment and
-   * {@link bufferToolCall} when the SDK omits `parent_tool_use_id` (Trap 1).
+   * This is the fallback consulted by {@link bufferToolCall} when the Claude
+   * SDK omits `parent_tool_use_id` (Trap 1).
    */
-  getCurrentParentToolCallId(threadId: string): string | undefined {
+  getCurrentParentToolCallId(threadId: string, providerId?: ProviderId): string | undefined {
     this.assertThread(threadId);
+    if (providerId !== "claude") return undefined;
     return this.getStackDerivedParentFallback(threadId);
   }
 
@@ -479,15 +480,15 @@ export class NarrativeTurnState {
   /**
    * Buffer a tool call event for later persistence and return the parent tool
    * call ID attributed to it. An explicit provider parent always wins. The
-   * stack fallback applies only to non-Agent calls when exactly one Agent is
-   * still running (Trap 1). Agent calls never inherit a stack-derived parent
+   * stack fallback applies only to Claude non-Agent calls when exactly one
+   * Agent is still running (Trap 1). Agent calls never inherit a stack-derived parent
    * and are pushed onto the `agentCallStack` (Trap 2 push site).
    */
-  bufferToolCall(threadId: string, event: BufferToolCallEvent): string | undefined {
+  bufferToolCall(threadId: string, event: BufferToolCallEvent, providerId?: ProviderId): string | undefined {
     this.assertThread(threadId);
     const buffer = this.turnToolCalls;
     const stack = this.agentCallStack;
-    const parentToolCallId = this.resolveParentToolCallId(threadId, event);
+    const parentToolCallId = this.resolveParentToolCallId(threadId, event, providerId);
     this.logParentToolCallAttribution(threadId, event, parentToolCallId, stack.length);
     const existing = this.mutableBufferedToolCall(threadId, event.toolCallId);
     if (existing) {
@@ -507,10 +508,11 @@ export class NarrativeTurnState {
   private resolveParentToolCallId(
     threadId: string,
     event: BufferToolCallEvent,
+    providerId: ProviderId | undefined,
   ): string | undefined {
     this.assertThread(threadId);
     if (event.toolName === "Agent") return event.parentToolCallId;
-    return event.parentToolCallId ?? this.getStackDerivedParentFallback(threadId);
+    return event.parentToolCallId ?? this.getCurrentParentToolCallId(threadId, providerId);
   }
 
   private logParentToolCallAttribution(

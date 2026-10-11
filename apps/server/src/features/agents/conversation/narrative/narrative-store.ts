@@ -19,7 +19,7 @@ import { ApprovalReceiptStore, approvalReceiptRecord } from "../../approvals/app
  * `docs/internals/conversation/narrative-pipeline.md` are enforced here:
  *
  * - Trap 1: {@link bufferToolCall} prefers the SDK `parent_tool_use_id` and only
- *   falls back to {@link getCurrentParentToolCallId} when exactly one Agent on
+ *   falls back to {@link getCurrentParentToolCallId} for Claude when exactly one Agent on
  *   the stack is still running.
  * - Trap 2: the `agentCallStack` is mutated only by {@link bufferToolCall}
  *   (push on Agent), {@link updateBufferedToolCallOutput} (pop on Agent result),

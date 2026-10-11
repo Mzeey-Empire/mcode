@@ -30,12 +30,16 @@ describe("mapOpenCodeEnvelope", () => {
     expect(events.at(-1)).toMatchObject({ type: "toolResult", output: "`add`", isError: false });
   });
 
-  it.each(["plain summary", "<task_result>\nwrapped summary\n</task_result>"])("extracts task output %s", (output) => {
+  it.each([
+    ["plain summary", "plain summary"],
+    ["<task_result>\nwrapped summary\n</task_result>", "wrapped summary"],
+    ["<task_result>\ntruncated summary\n", "truncated summary"],
+  ])("extracts task output %s", (output, expectedSummary) => {
     const result = mapOpenCodeEnvelope({ type: "message.part.updated", properties: { part: {
       type: "tool", tool: "task", callID: "task", state: { status: "completed", output },
     } } }, CTX);
     expect(result.events).toEqual([{ ...CTX, type: "toolResult", toolCallId: "task", isError: false,
-      output: output === "plain summary" ? "plain summary" : "wrapped summary" }]);
+      output: expectedSummary }]);
   });
 
   it("maps the captured running todowrite part to the canonical task-list tool", () => {
