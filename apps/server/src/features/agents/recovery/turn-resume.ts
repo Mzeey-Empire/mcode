@@ -47,9 +47,6 @@ export function buildSeededResumeWire(replay: string): string {
   return `${SEED_HEADER}\n\n${replay}${SEED_SEPARATOR}${RESUME_CONTINUATION_PROMPT}`;
 }
 
-/** Subscribes a listener to committed canonical events and returns the unsubscribe function. */
-export type CommittedEventsSubscription = typeof subscribeCommittedCanonicalEvents;
-
 /**
  * Watches one native resume attempt through committed canonical events. `started` resolves when the provider
  * accepts the attempt. `resumeUnavailable` turns true when the attempt errors because the provider could not
@@ -61,9 +58,9 @@ export class NativeResumeWatch {
   private unavailable = false;
   private unsubscribe: (() => void) | undefined;
 
-  constructor(private readonly turnId: string, subscribe: CommittedEventsSubscription = subscribeCommittedCanonicalEvents) {
+  constructor(private readonly turnId: string) {
     this.started = new Promise((resolve) => { this.resolveStarted = resolve; });
-    this.unsubscribe = subscribe((events) => this.observe(events));
+    this.unsubscribe = subscribeCommittedCanonicalEvents((events) => this.observe(events));
   }
 
   /** True once the attempt ended because its native session could not be resumed. */

@@ -63,7 +63,7 @@ export class TurnRecoveryService {
 
   /**
    * Interrupt executions for which no current provider can prove the exact live execution. Each one is stamped
-   * with this startup's recovery incident id as provenance; the thread's Interrupted notice offers Resume.
+   * with this startup's recovery incident id as provenance.
    */
   async reconcileOnStartup(): Promise<{ interrupted: string[] }> {
     await this.parentAssistantTextCheckpoints.importRecoveryJournals();
@@ -188,7 +188,6 @@ export class TurnRecoveryService {
     return { turnId: await this.dispatchSeededResume(target, executionId, dispatch), mode: "seeded-session" };
   }
 
-  /** Answer once the provider accepts the native attempt, the attempt settles, or the wait bound passes. */
   private async awaitNativeDecision(
     turnId: string,
     watch: NativeResumeWatch,
@@ -220,7 +219,6 @@ export class TurnRecoveryService {
     return turnId;
   }
 
-  /** Replay the visible conversation through the interrupted turn's input, sized for the thread's model. */
   private seededResumeWire(target: RecoverableTurn): string {
     const providerId = ProviderIdSchema.parse(target.thread.provider);
     const budget = seededReplayBudget(providerId, replayBudgetChars(target.thread.model ?? ""));
@@ -296,7 +294,6 @@ export class TurnRecoveryService {
     };
   }
 
-  /** A hidden continuation prompt carrying the thread's current turn settings. */
   private continuationCommand(target: RecoverableTurn, retryOfExecutionId: string): SendMessageCommand {
     return {
       ...this.threadSettings(target.thread),
