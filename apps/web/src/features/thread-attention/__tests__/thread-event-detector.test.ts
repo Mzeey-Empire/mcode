@@ -138,6 +138,16 @@ describe("thread event toasts", () => {
     expect(toasts()).toEqual([]);
   });
 
+  it("toasts a turn that arrives before its thread row loads, once the row loads", () => {
+    const rows = useWorkspaceStore.getState().threads;
+    useWorkspaceStore.setState({ threads: rows.filter((thread) => thread.id !== "a") });
+    stop = startThreadEventDetector();
+    push(turn("a", 4));
+    expect(toasts()).toEqual([]);
+    useWorkspaceStore.setState({ threads: rows });
+    expect(toasts()).toEqual([finishedA]);
+  });
+
   it("takes the toast back when another client sees the turn", () => {
     stop = startThreadEventDetector();
     push(turn("a", 4));

@@ -119,6 +119,8 @@ export function startThreadEventDetector(): () => void {
   const shown = new Map<string, string>();
   // Threads a store change outside attention can still move: unaccounted facts or a live toast.
   const watched = new Set<string>();
+  // A missing row means deleted only once it has loaded; before that its facts wait like a running turn.
+  const loaded = new Set<string>();
 
   const withdraw = (threadId: string): void => {
     shown.delete(threadId);
@@ -135,8 +137,10 @@ export function startThreadEventDetector(): () => void {
     shown.set(threadId, event.key);
   };
 
-  const account = (threadId: string, { state, facts, onScreen }: Sighting, snapshot: boolean): void => {
-    if (onScreen || snapshot || state.kind !== "running") accounted.set(threadId, facts);
+  const account = (threadId: string, { thread, state, facts, onScreen }: Sighting, snapshot: boolean): void => {
+    if (thread) loaded.add(threadId);
+    const settled = loaded.has(threadId) && state.kind !== "running";
+    if (onScreen || snapshot || settled) accounted.set(threadId, facts);
     if (shown.has(threadId) || !sameFacts(accounted.get(threadId), facts)) watched.add(threadId);
     else watched.delete(threadId);
   };
