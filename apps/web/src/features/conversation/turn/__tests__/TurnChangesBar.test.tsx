@@ -204,6 +204,7 @@ describe("TurnChangesBar", () => {
     resolveStats([stat("src/a.ts", 3, 1), stat("src/b.ts", 0, 2)]);
     await waitFor(() => expect(header()).toHaveTextContent("Changed 2 files+3−3"));
     expect(row("src/a.ts")).toHaveTextContent("a.ts+3−1");
+    expect(row("src/b.ts")).toHaveTextContent(/^b\.ts−2$/);
   });
 
   it("counts a turn with an empty recorded summary over its git range", async () => {

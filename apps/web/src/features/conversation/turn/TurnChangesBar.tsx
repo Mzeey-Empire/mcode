@@ -485,15 +485,15 @@ function FileLanes({ file, status }: { readonly file: ChangedFile; readonly stat
   );
 }
 
-/** The +N and −N count columns. A null side leaves its column empty. */
+/** The +N and −N count columns. A null or zero side leaves its column empty, as the header does. */
 function LineLanes({ additions, deletions }: { readonly additions: number | null; readonly deletions: number | null }) {
   return (
     <>
       <span className="flex w-[4rem] shrink-0 justify-end font-mono text-caption tabular-nums text-success">
-        {additions === null ? null : `+${additions}`}
+        {additions ? `+${additions}` : null}
       </span>
       <span className="flex w-[3.6rem] shrink-0 justify-end font-mono text-caption tabular-nums text-error">
-        {deletions === null ? null : `−${deletions}`}
+        {deletions ? `−${deletions}` : null}
       </span>
     </>
   );
