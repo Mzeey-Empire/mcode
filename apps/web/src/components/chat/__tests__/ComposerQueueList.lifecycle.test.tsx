@@ -26,6 +26,8 @@ function queueMessage(content: string): void {
     attachments: [],
     model: "claude-sonnet-4-6",
     permissionMode: "full",
+    // The composer records the thread's mode on every message.
+    orchestrationMode: "standard",
   });
 }
 
@@ -223,12 +225,16 @@ describe("ComposerQueueList lifecycle", () => {
       model: "",
       permissionMode: "full",
     });
+    useQueueStore.getState().enqueue(THREAD_ID, {
+      content: "proactive", attachments: [], model: "", permissionMode: "full", orchestrationMode: "proactive",
+    });
     runTurn();
     render(<QueueControls provider="codex" />);
 
     expect(screen.getByRole("button", { name: "Send queued message 1 now" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Send queued message 2 now" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Send queued message 3 now" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send queued message 4 now" })).not.toBeInTheDocument();
   });
 
   it("drops a resend on Edit when another window already sent it", async () => {

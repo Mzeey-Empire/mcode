@@ -23,7 +23,8 @@ export function isSteerable(message: QueuedMessage): boolean {
     && !message.previewAnnotations
     && !message.browserCaptureSpillPaths?.length
     && !message.goalObjective
-    && !message.orchestrationMode
+    // Every message records the thread's mode; only proactive asks for a turn of its own.
+    && message.orchestrationMode !== "proactive"
     && !message.devinMode
     && (message.displayContent === undefined || message.displayContent === message.content);
 }
