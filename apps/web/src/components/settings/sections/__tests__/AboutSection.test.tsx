@@ -79,3 +79,23 @@ describe("AboutSection update status label", () => {
     expect(describeStatus(status)).toBe(label);
   });
 });
+
+describe("AboutSection provider CLI checks", () => {
+  beforeEach(() => {
+    saves.length = 0;
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("defaults on and saves the setting when switched off", async () => {
+    render(<AboutSection />);
+    const toggle = screen.getByRole("switch", { name: "Provider CLI checks" });
+    expect(toggle).toBeChecked();
+    expect(screen.getByText("Ask the npm registry once a day for newer provider CLIs.")).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(saves.map((save) => save.partial)).toEqual([{ updates: { providerCliChecks: false } }]));
+  });
+});

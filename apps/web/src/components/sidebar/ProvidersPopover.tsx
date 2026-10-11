@@ -1,29 +1,35 @@
+import type { ReactNode } from "react";
+import type { ProviderId } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { ProviderIcon } from "@/components/ui/provider-icon";
-import type { ProviderBellRow } from "@/features/providers/provider-bell-rows";
+import { Spinner } from "@/components/ui/spinner";
+import type { ProviderBellCliUpdate, ProviderBellRow } from "@/features/providers/provider-bell-rows";
 import { cn } from "@/lib/utils";
 
 /** Props for {@link ProvidersPopover}. */
 interface ProvidersPopoverProps {
   rows: readonly ProviderBellRow[];
   onSignIn: (argv: readonly string[]) => void;
+  onUpdateCli: (providerId: ProviderId) => void;
 }
 
 /** Body of the sidebar Providers popover: a header and one row per provider that needs attention. */
-export function ProvidersPopover({ rows, onSignIn }: ProvidersPopoverProps) {
+export function ProvidersPopover({ rows, onSignIn, onUpdateCli }: ProvidersPopoverProps) {
   return (
     <div data-testid="providers-popover">
       <div className="flex h-9 items-center px-2.5 text-button text-ink">Providers</div>
       {rows.length > 0 && (
         <ul>
-          {rows.map((row) => <ProviderRow key={row.providerId} row={row} onSignIn={onSignIn} />)}
+          {rows.map((row) => (
+            <ProviderRow key={row.providerId} row={row} onSignIn={onSignIn} onUpdateCli={onUpdateCli} />
+          ))}
         </ul>
       )}
     </div>
   );
 }
 
-function ProviderRow({ row, onSignIn }: { row: ProviderBellRow; onSignIn: (argv: readonly string[]) => void }) {
+function ProviderRow({ row, onSignIn, onUpdateCli }: { row: ProviderBellRow } & Omit<ProvidersPopoverProps, "rows">) {
   return (
     <li className="flex items-center gap-2.5 rounded-lg pt-2 pr-1.5 pb-2 pl-2.5">
       <span className="flex h-5 w-4 shrink-0 items-center justify-center">
@@ -31,17 +37,63 @@ function ProviderRow({ row, onSignIn }: { row: ProviderBellRow; onSignIn: (argv:
       </span>
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-ink">{row.name}</div>
-        <div className={cn("text-xs", row.kind === "signed_out" ? "text-primary" : "text-muted")}>{row.detail}</div>
+        <RowDetail row={row} />
       </div>
-      {row.signInArgv && <SignInPill argv={row.signInArgv} onSignIn={onSignIn} />}
+      <RowAction row={row} onSignIn={onSignIn} onUpdateCli={onUpdateCli} />
     </li>
   );
 }
 
-function SignInPill({ argv, onSignIn }: { argv: readonly string[]; onSignIn: (argv: readonly string[]) => void }) {
+function RowDetail({ row }: { row: ProviderBellRow }) {
+  if (row.kind === "cli_update") return <CliUpdateDetail installed={row.installed} update={row.update} />;
+  return <div className={cn("text-xs", row.kind === "signed_out" ? "text-primary" : "text-muted")}>{row.detail}</div>;
+}
+
+function CliUpdateDetail({ installed, update }: { installed: string | null; update: ProviderBellCliUpdate }) {
+  if (update.state === "failed") return <div className="text-xs break-words text-muted">{update.reason}</div>;
+  if (update.state === "running") {
+    return <DetailLine><span>Updating to</span><Version value={update.target} /></DetailLine>;
+  }
   return (
-    <Button variant="subtle" shape="round" className="h-7 px-2.5 text-button" onClick={() => onSignIn(argv)}>
-      Sign in
+    <DetailLine>
+      <span>CLI</span>
+      <Version value={update.target} />
+      <span>{installed ? "available · you have" : "available"}</span>
+      {installed && <Version value={installed} />}
+    </DetailLine>
+  );
+}
+
+function DetailLine({ children }: { children: ReactNode }) {
+  return <div className="flex flex-wrap gap-x-1.5 text-xs text-muted">{children}</div>;
+}
+
+function Version({ value }: { value: string }) {
+  return <span className="font-mono">{value}</span>;
+}
+
+function RowAction({ row, onSignIn, onUpdateCli }: { row: ProviderBellRow } & Omit<ProvidersPopoverProps, "rows">) {
+  if (row.kind === "signed_out") return <ActionPill label="Sign in" onClick={() => onSignIn(row.signInArgv)} />;
+  if (row.kind !== "cli_update") return null;
+  if (row.update.state === "running") {
+    return (
+      <span className="flex size-7 shrink-0 items-center justify-center">
+        <Spinner size={16} aria-label={`Updating ${row.name} CLI`} />
+      </span>
+    );
+  }
+  return (
+    <ActionPill
+      label={row.update.state === "failed" ? "Retry" : "Update"}
+      onClick={() => onUpdateCli(row.providerId)}
+    />
+  );
+}
+
+function ActionPill({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <Button variant="subtle" shape="round" className="h-7 shrink-0 px-2.5 text-button" onClick={onClick}>
+      {label}
     </Button>
   );
 }

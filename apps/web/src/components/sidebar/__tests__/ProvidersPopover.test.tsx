@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { ProviderStatus } from "@mcode/contracts";
+import type { ProviderCliUpdate, ProviderStatus } from "@mcode/contracts";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { deriveProviderBellRows } from "@/features/providers/provider-bell-rows";
+import { deriveProviderBellRows, type ProviderBellRow } from "@/features/providers/provider-bell-rows";
 import { useProviderStatusStore } from "@/stores/providerStatusStore";
 import { ProvidersBell } from "../ProvidersBell";
 
@@ -17,7 +17,15 @@ const NOW = new Date(2026, 0, 1, 15, 0);
 const FOUR_PM = new Date(2026, 0, 1, 16, 0).toISOString();
 
 function status(providerId: ProviderStatus["providerId"], overrides: Partial<ProviderStatus>): ProviderStatus {
-  return { providerId, auth: { state: "signed_in" }, rateLimit: null, checkedAt: NOW.toISOString(), ...overrides };
+  return { providerId, auth: { state: "signed_in" }, cli: null, rateLimit: null, checkedAt: NOW.toISOString(), ...overrides };
+}
+
+function codexCli(update: ProviderCliUpdate): ProviderStatus {
+  return status("codex", { cli: { installed: "0.41.2", managedBy: "user", latest: "0.48.0", update } });
+}
+
+function summarize(row: ProviderBellRow) {
+  return [row.providerId, row.kind, row.kind === "cli_update" ? row.update.state : row.detail];
 }
 
 const DEVIN_SIGNED_OUT = status("devin", {
@@ -37,6 +45,7 @@ function openBell() {
 beforeEach(() => {
   vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
   vi.mocked(mockTransport.listProviderStatus).mockClear();
+  vi.mocked(mockTransport.updateProviderCli).mockReset();
   vi.mocked(mockTransport.getProviderUsage).mockClear();
   signInMock.mockClear();
   useWorkspaceStore.setState({ activeWorkspaceId: "ws-1" });
@@ -114,6 +123,62 @@ describe("ProvidersBell", () => {
   });
 });
 
+describe("ProvidersBell CLI updates", () => {
+  it("offers an update with both versions in mono and applies the returned status", async () => {
+    serve([codexCli({ state: "available", target: "0.48.0" })]);
+    vi.mocked(mockTransport.updateProviderCli).mockResolvedValue(codexCli({ state: "running", target: "0.48.0" }));
+    render(<ProvidersBell />);
+
+    expect(screen.getByTestId("providers-bell-dot")).toBeInTheDocument();
+    const popover = await openBell();
+    expect(within(popover).getByText("Codex")).toBeInTheDocument();
+    expect(within(popover).getByText("CLI")).toBeInTheDocument();
+    expect(within(popover).getByText("0.48.0")).toHaveClass("font-mono");
+    expect(within(popover).getByText("available · you have")).toBeInTheDocument();
+    expect(within(popover).getByText("0.41.2")).toHaveClass("font-mono");
+
+    fireEvent.click(within(popover).getByRole("button", { name: "Update" }));
+    expect(mockTransport.updateProviderCli).toHaveBeenCalledWith("codex");
+    expect(await within(popover).findByRole("img", { name: "Updating Codex CLI" })).toBeInTheDocument();
+    expect(within(popover).getByText("Updating to")).toBeInTheDocument();
+    expect(within(popover).queryByRole("button", { name: "Update" })).toBeNull();
+  });
+
+  it("omits the installed version when the CLI did not report one", async () => {
+    serve([status("codex", { cli: { installed: null, managedBy: "user", latest: "0.48.0", update: { state: "available", target: "0.48.0" } } })]);
+    render(<ProvidersBell />);
+
+    const popover = await openBell();
+    expect(within(popover).getByText("available")).toBeInTheDocument();
+    expect(within(popover).queryByText("available · you have")).toBeNull();
+  });
+
+  it("shows a failed update's reason with a Retry that runs the update again", async () => {
+    const reason = "npm ERR! code EACCES";
+    serve([codexCli({ state: "failed", target: "0.48.0", reason })]);
+    vi.mocked(mockTransport.updateProviderCli).mockResolvedValue(codexCli({ state: "failed", target: "0.48.0", reason }));
+    render(<ProvidersBell />);
+
+    const popover = await openBell();
+    expect(within(popover).getByText(reason)).toBeInTheDocument();
+    fireEvent.click(within(popover).getByRole("button", { name: "Retry" }));
+    expect(mockTransport.updateProviderCli).toHaveBeenCalledWith("codex");
+  });
+
+  it("keeps the row when the update request itself fails", async () => {
+    serve([codexCli({ state: "available", target: "0.48.0" })]);
+    vi.mocked(mockTransport.updateProviderCli).mockRejectedValue(new Error("socket closed"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<ProvidersBell />);
+
+    const popover = await openBell();
+    fireEvent.click(within(popover).getByRole("button", { name: "Update" }));
+    await waitFor(() => expect(consoleError).toHaveBeenCalled());
+    expect(within(popover).getByRole("button", { name: "Update" })).toBeInTheDocument();
+    consoleError.mockRestore();
+  });
+});
+
 describe("deriveProviderBellRows", () => {
   it("drops past limits and unknown auth, and ranks signed out above rate limited", () => {
     const rows = deriveProviderBellRows([
@@ -123,7 +188,7 @@ describe("deriveProviderBellRows", () => {
       { ...DEVIN_SIGNED_OUT, rateLimit: { resetsAt: FOUR_PM, limitType: null } },
     ], NOW);
 
-    expect(rows.map((row) => [row.providerId, row.kind, row.detail])).toEqual([
+    expect(rows.map(summarize)).toEqual([
       ["devin", "signed_out", "Signed out · threads on Devin can't start"],
       ["codex", "rate_limited", "Weekly limit reached · resets 16:00"],
     ]);
@@ -134,9 +199,36 @@ describe("deriveProviderBellRows", () => {
       status("claude", { rateLimit: { resetsAt: FOUR_PM, limitType: "opus_weekly" } }),
       status("codex", { rateLimit: { resetsAt: FOUR_PM, limitType: null } }),
     ], NOW);
-    expect(rows.map((row) => row.detail)).toEqual([
+    expect(rows.map((row) => summarize(row)[2])).toEqual([
       "opus_weekly reached · resets 16:00",
       "Rate limited · resets 16:00",
     ]);
+  });
+
+  it("sorts rows with an action first and keeps one row per provider", () => {
+    const rows = deriveProviderBellRows([
+      status("claude", { rateLimit: { resetsAt: FOUR_PM, limitType: null } }),
+      codexCli({ state: "available", target: "0.48.0" }),
+      { ...DEVIN_SIGNED_OUT, cli: { installed: "1.0.0", managedBy: "user", latest: "1.1.0", update: { state: "available", target: "1.1.0" } } },
+      status("cursor", {
+        rateLimit: { resetsAt: FOUR_PM, limitType: null },
+        cli: { installed: "1.0.0", managedBy: "user", latest: "1.1.0", update: { state: "available", target: "1.1.0" } },
+      }),
+    ], NOW);
+
+    expect(rows.map(summarize)).toEqual([
+      ["devin", "signed_out", "Signed out · threads on Devin can't start"],
+      ["codex", "cli_update", "available"],
+      ["claude", "rate_limited", "Rate limited · resets 16:00"],
+      ["cursor", "rate_limited", "Rate limited · resets 16:00"],
+    ]);
+  });
+
+  it("shows no row for a CLI with no update, such as Mcode's bundled Claude", () => {
+    const rows = deriveProviderBellRows([
+      status("claude", { cli: { installed: null, managedBy: "mcode", latest: null, update: { state: "none" } } }),
+      codexCli({ state: "none" }),
+    ], NOW);
+    expect(rows).toEqual([]);
   });
 });

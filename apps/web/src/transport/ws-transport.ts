@@ -1498,6 +1498,8 @@ export function createWsTransport(
       rpc<ProviderAvailability[]>("providers.listAvailability", {}),
     listProviderStatus: (force) =>
       rpc<ProviderStatus[]>("providers.listStatus", { force }),
+    updateProviderCli: (providerId) =>
+      rpc<ProviderStatus>("providers.updateCli", { providerId }),
 
     generateRecap: (threadId, messages, previousRecap) =>
       rpc<{ text: string }>("recap.generate", { threadId, messages, previousRecap }),
