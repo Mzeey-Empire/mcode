@@ -17,22 +17,36 @@ describe("mapApprovalChoiceToReply", () => {
 });
 
 describe("synthesizeOpenCodeApprovalRequest", () => {
-  it("keeps all scope, the native tool id, and a complete always description", () => {
-    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", origin: AGENT, properties: { id: "per_1", action: "bash", resources: ["echo hi", "git status"], tool: { callID: "tool-1" } } });
+  it("shows an OpenCode 1.18 bash ask as its command and describes always by the granted patterns", () => {
+    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", origin: AGENT, properties: {
+      id: "per_1", sessionID: "ses_1", permission: "bash", patterns: ["node math.js"], metadata: { command: "node math.js" },
+      always: ["node *"], tool: { messageID: "msg_1", callID: "tool-1" },
+    } });
     expect(request?.requestId).toBe("per_1");
     expect(request?.threadId).toBe("owner");
     expect(request?.body.toolCallId).toBe("tool-1");
-    expect(request?.body.subject).toEqual({ kind: "tool", toolName: "bash", preview: '{"action":"bash","resources":["echo hi","git status"]}' });
+    expect(request?.body.subject).toEqual({ kind: "command", command: "node math.js" });
     expect(request?.body.choices).toEqual([
       { id: "once", intent: "allow_once", label: "Allow once" },
-      { id: "always", intent: "allow_scoped", label: "Allow for this session", description: "echo hi, git status" },
+      { id: "always", intent: "allow_scoped", label: "Always allow", description: "node *" },
       { id: "reject", intent: "deny", label: "Deny" },
     ]);
   });
 
+  it("keeps all v2 scope and describes always by the saved list, not the requested resources", () => {
+    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", origin: AGENT, properties: { id: "per_1", action: "read", resources: ["src/a.ts", "src/b.ts"], save: ["src/*"] } });
+    expect(request?.body.subject).toEqual({ kind: "tool", toolName: "read", preview: '{"action":"read","resources":["src/a.ts","src/b.ts"]}' });
+    expect(request?.body.choices.find((choice) => choice.id === "always")?.description).toBe("src/*");
+  });
+
+  it("offers no always choice when the ask names nothing it would grant", () => {
+    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", origin: AGENT, properties: { id: "per_1", action: "bash", resources: ["echo hi"] } });
+    expect(request?.body.choices.map((choice) => choice.id)).toEqual(["once", "reject"]);
+  });
+
   it("omits only the scoped choice when its whole description does not fit", () => {
     const pattern = "x".repeat(501);
-    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", origin: AGENT, properties: { id: "per_1", action: "bash", resources: [pattern] } });
+    const request = synthesizeOpenCodeApprovalRequest({ threadId: "owner", origin: AGENT, properties: { id: "per_1", action: "bash", resources: [pattern], save: [pattern] } });
     expect(request?.body.choices).toEqual([
       { id: "once", intent: "allow_once", label: "Allow once" },
       { id: "reject", intent: "deny", label: "Deny" },

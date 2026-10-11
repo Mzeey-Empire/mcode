@@ -439,6 +439,10 @@ describe("OpenCodeProvider subagent asks", () => {
         kind: "subagent", label: "Run node math.js once and report output", parentToolCallId: "23a1e412-d94b-44c5-aa4e-2806cde517cc",
       }],
     ]);
+    expect(cards.map((card) => [card.body.subject, card.body.choices.find((choice) => choice.id === "always")?.description])).toEqual([
+      [{ kind: "command", command: "ls math.js 2>&1 | head -5" }, "ls *, head *"],
+      [{ kind: "command", command: "node math.js" }, "node *"],
+    ]);
 
     expect(await provider.resolveApproval(parentAsk, { choiceId: "once" })).toEqual({ status: "resolved" });
     expect(http.replyPermission).toHaveBeenCalledWith(expect.anything(), capturedParent, parentAsk, "once", "legacy", expect.anything());
