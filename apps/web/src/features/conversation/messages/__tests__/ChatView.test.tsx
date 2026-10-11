@@ -1134,7 +1134,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.queryByTestId("chat-message-stage")).not.toBeInTheDocument();
   });
 
-  it("keeps the authoritative cancelled startup trail when optimistic creation rejects", () => {
+  it("keeps the authoritative cancelled startup trail when optimistic creation rejects", async () => {
     const cancelledStartupId = "00000000-0000-4000-8000-000000000021";
     const startupThread = {
       ...makeThread({ id: "thread-placeholder", title: "Cancelled setup" }),
@@ -1160,13 +1160,14 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       createdAt: "2026-09-02T12:00:00.000Z",
       updatedAt: "2026-09-02T12:00:00.000Z",
     });
-    setupWorkspaceMock(defaultWorkspaceState({
+    const workspace = defaultWorkspaceState({
       activeThreadId: startupThread.id,
       threads: [startupThread],
       pendingStartupByThreadId: {
         [startupThread.id]: { startupId: cancelledStartupId, context: "new-worktree", queuedMessage: "Build the feature" },
       },
-    }));
+    });
+    setupWorkspaceMock(workspace);
     const persistedRecord = {
       ...createEmptyThreadRecord(),
       messages: [createMockMessage({ id: "cancelled-message", thread_id: startupThread.id })],
@@ -1188,6 +1189,10 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
     expect(screen.queryByText("Error: Thread startup was cancelled")).toBeNull();
     expect(screen.queryByTestId("chat-message-stage")).not.toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Keep thread" }));
+    expect(workspace.loadThreads).toHaveBeenCalledWith(startupThread.workspace_id);
+    expect(useThreadStartupStore.getState().dismissedStartupIds.has(cancelledStartupId)).toBe(true);
   });
 
   it("moves the first message to a new-thread draft when a startup stops before setup begins", async () => {
@@ -1236,6 +1241,45 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(saved?.draft.input).toBe("Build the feature");
     expect(workspace.deleteThread).toHaveBeenCalledWith(thread.id, true);
     expect(workspace.openThreadDraft).toHaveBeenCalledWith(thread.workspace_id, saved?.id);
+  });
+
+  it("edits the persisted first message and keeps Start from origin once the queued copy is gone", async () => {
+    const thread = makeThread({ id: "thread-reloaded-cancel", title: "Build the feature", mode: "worktree", worktree_managed: true, base_branch: "main" });
+    useThreadStartupStore.getState().apply({
+      startupId: "00000000-0000-4000-8000-000000000028",
+      workspaceId: thread.workspace_id,
+      kind: "managed-worktree",
+      state: "cancelled",
+      phase: "setup",
+      steps: [
+        { phase: "fetch", state: "completed", detail: { phase: "fetch", ref: "origin/main", branch: "main" } },
+        { phase: "thread", state: "completed" },
+        { phase: "worktree", state: "completed" },
+        { phase: "setup", state: "cancelled" },
+        { phase: "agent", state: "pending" },
+      ],
+      transcript: [],
+      cancellation: "requested",
+      revision: 1,
+      threadId: thread.id,
+      createdAt: "2026-09-02T12:00:00.000Z",
+      updatedAt: "2026-09-02T12:00:00.000Z",
+    });
+    useThreadDraftStore.setState({ drafts: {} });
+    const workspace = defaultWorkspaceState({ activeThreadId: thread.id, threads: [thread] });
+    setupWorkspaceMock(workspace);
+    const record = {
+      ...createEmptyThreadRecord(),
+      messages: [createMockMessage({ id: "first", thread_id: thread.id, role: "user", content: "Build the feature\nwith tests" })],
+    };
+    chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id, activeRecord: record, records: new Map([[thread.id, record]]) });
+
+    render(<ChatView />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Edit message" }));
+
+    const saved = Object.values(useThreadDraftStore.getState().drafts)[0];
+    expect(saved?.draft.input).toBe("Build the feature\nwith tests");
+    expect(saved?.target).toMatchObject({ mode: "worktree", branch: "main", branchSource: "branch", startFromOrigin: true });
   });
 
   it("moves the full unsent draft before Edit message removes the stopped thread", async () => {

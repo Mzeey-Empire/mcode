@@ -128,16 +128,32 @@ function startupKind(context: ClientPreparingContext | undefined, startup: Retur
 
 const TEXT_ACTION_CLASS = "px-2 text-caption text-ink";
 
-function EditMessageAction({ thread, pendingStartup }: { readonly thread: WorkspaceThread; readonly pendingStartup: PendingStartup | undefined }) {
+function EditMessageAction({ thread, startup, pendingStartup }: {
+  readonly thread: WorkspaceThread;
+  readonly startup: ThreadStartup;
+  readonly pendingStartup: PendingStartup | undefined;
+}) {
   const [editing, setEditing] = useState(false);
   const edit = () => {
     setEditing(true);
-    editStartupMessage(thread, pendingStartup?.queuedMessage).catch((error: unknown) => {
+    editStartupMessage(thread, startup, pendingStartup?.queuedMessage).catch((error: unknown) => {
       setEditing(false);
       useToastStore.getState().show({ kind: "failed", title: "Could not edit the message", meta: error instanceof Error ? error.message : undefined });
     });
   };
   return <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} loading={editing} onClick={edit}>Edit message</Button>;
+}
+
+/**
+ * Keep thread for a cancelled startup. A thread this client was still creating shows as a local
+ * placeholder, so keeping it also loads the durable thread the server made in its place.
+ */
+function KeepThreadAction({ thread, startup }: { readonly thread: WorkspaceThread; readonly startup: ThreadStartup }) {
+  const keep = () => {
+    useThreadStartupStore.getState().dismissStartup(startup.startupId);
+    if (thread.clientError) void useWorkspaceStore.getState().loadThreads(thread.workspace_id);
+  };
+  return <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} onClick={keep}>Keep thread</Button>;
 }
 
 function AgentRetryAction({ threadId }: { readonly threadId: string }) {
@@ -156,8 +172,9 @@ function ThreadStartupActions({ thread, startup, pendingStartup }: {
     case "cancelled":
       return (
         <>
-          <EditMessageAction thread={thread} pendingStartup={pendingStartup} />
-          <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} onClick={() => useThreadStartupStore.getState().dismissStartup(startup.startupId)}>Keep thread</Button>
+          <EditMessageAction thread={thread} startup={startup} pendingStartup={pendingStartup} />
+          {/* A startup cancelled before the server made its thread leaves nothing to keep. */}
+          {startup.threadId ? <KeepThreadAction thread={thread} startup={startup} /> : null}
         </>
       );
     case "creation-failed":
@@ -165,7 +182,7 @@ function ThreadStartupActions({ thread, startup, pendingStartup }: {
         <>
           {/* Only this client's pending creation can be replayed, so a reloaded failure offers Edit message alone. */}
           {thread.clientError ? <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} onClick={() => { void useWorkspaceStore.getState().retryPreparingThread(thread.id); }}>Retry</Button> : null}
-          <EditMessageAction thread={thread} pendingStartup={pendingStartup} />
+          <EditMessageAction thread={thread} startup={startup} pendingStartup={pendingStartup} />
         </>
       );
     case "agent-failed":
