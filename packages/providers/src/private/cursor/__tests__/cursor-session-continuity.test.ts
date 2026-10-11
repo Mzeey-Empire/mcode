@@ -404,6 +404,65 @@ describe("CursorProvider session continuity", () => {
     }
   });
 
+  it("announces a rate-limit retry read from ACP error data before prompting the replacement", async () => {
+    const host = createHost();
+    const first = createFakeRuntime("cursor-session-1", 101);
+    const second = createFakeRuntime("cursor-session-2", 202);
+    const runtimes = [first.runtime, second.runtime];
+    const start = vi.spyOn(AcpSessionRuntime, "start").mockImplementation(async () => {
+      const runtime = runtimes.shift();
+      if (!runtime) throw new Error("Unexpected Cursor ACP spawn");
+      return runtime;
+    });
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    const defaults = getDefaultSettings();
+    const settings = {
+      ...defaults,
+      provider: {
+        ...defaults.provider,
+        cursor: { ...defaults.provider.cursor, retryTransientFailuresOnce: true, rateLimitRetryBackoffMs: 0 },
+      },
+    };
+    const provider = new CursorProvider(host, {
+      settings: { get: () => settings },
+      skills: { list: () => [] },
+    }, 60_000);
+    vi.mocked(first.runtime.prompt).mockRejectedValue(
+      new RequestError(-32603, "Internal error", { details: "429 Too Many Requests" }),
+    );
+    let eventsAtRetryPrompt: unknown[] = [];
+    vi.mocked(second.runtime.prompt).mockImplementation(async () => {
+      eventsAtRetryPrompt = submittedRuntimeEvents(host);
+      return { stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1 } };
+    });
+
+    try {
+      await provider.sendTurn(turn("prompt", "execution-rate-limit"));
+
+      const apiRetry = {
+        type: "apiRetry",
+        threadId: "thread-1",
+        reason: "rate_limit",
+        attempt: 1,
+        maxRetries: 1,
+        delayMs: 0,
+        errorStatus: 429,
+        turnExecutionId: "execution-rate-limit",
+      };
+      expect(eventsAtRetryPrompt).toContainEqual(apiRetry);
+      const events = submittedRuntimeEvents(host);
+      expect(events).toContainEqual(expect.objectContaining({
+        type: "turnComplete",
+        turnExecutionId: "execution-rate-limit",
+      }));
+      expect(events.some((event) => (event as { type?: string }).type === "error")).toBe(false);
+    } finally {
+      random.mockRestore();
+      start.mockRestore();
+      await (provider as unknown as { runtime: { shutdown(): Promise<void> } }).runtime.shutdown();
+    }
+  });
+
   it("does not create a replacement after a transient first-turn failure without a saved logical session", async () => {
     const host = createHost();
     const first = createFakeRuntime("cursor-session-1", 101);

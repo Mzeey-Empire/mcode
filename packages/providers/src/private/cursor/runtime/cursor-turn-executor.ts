@@ -16,6 +16,7 @@ import { resolveCursorStickyInstructionBlob } from "../instructions/cursor-acp-s
 import {
   buildCursorAcpContinueAfterDisconnectPrompt,
   computeCursorRateLimitBackoffMs,
+  cursorHttpStatus,
   interruptibleDelay,
   isLikelyTransientCursorPromptFailure,
   looksLikeAcpConnectionClosed,
@@ -67,6 +68,20 @@ interface CursorTurnExecutionState {
   isContinueRetry: boolean;
   instructionMarkdown: string | undefined;
   instructionMarkdownReady: boolean;
+  pendingRetry: CursorPendingRetry | undefined;
+}
+
+/**
+ * A retry decided after a failed prompt. It is announced at the top of the next
+ * attempt because only then does the replacement entry have routing bound.
+ */
+interface CursorPendingRetry {
+  error: unknown;
+  attempt: number;
+  maxRetries: number;
+  delayMs: number | undefined;
+  reason: "rate_limit" | "connection_closed" | "transient_failure";
+  errorStatus: number | undefined;
 }
 
 interface CursorPromptAttempt {
@@ -92,6 +107,7 @@ export class CursorTurnExecutor {
       isContinueRetry: false,
       instructionMarkdown: undefined,
       instructionMarkdownReady: false,
+      pendingRetry: undefined,
     };
     const emitTurnEvent = (event: AgentEvent): void => {
       this.deps.publishEvent(execution.currentEntry, { ...event, turnExecutionId });
@@ -155,6 +171,7 @@ export class CursorTurnExecutor {
         executionId: turnExecutionId,
         deliveryAttempt,
       }, attempt === 0);
+      await this.announcePendingRetry(execution, turnExecutionId);
       await this.preparePromptAttempt(execution.currentEntry, resume, model);
       const promptAttempt = this.buildPromptAttempt(execution, cursorCfg);
       try {
@@ -169,6 +186,30 @@ export class CursorTurnExecutor {
         await this.retryPromptAfterFailure(error, execution, cursorCfg, attempt, maxAttempts);
       }
     }
+  }
+
+  private async announcePendingRetry(
+    execution: CursorTurnExecutionState,
+    turnExecutionId: string,
+  ): Promise<void> {
+    const retry = execution.pendingRetry;
+    if (!retry) return;
+    execution.pendingRetry = undefined;
+    const entry = execution.currentEntry;
+    this.deps.publishEvent(entry, {
+      type: AgentEventType.ApiRetry,
+      threadId: entry.threadId,
+      reason: retry.reason,
+      attempt: retry.attempt,
+      maxRetries: retry.maxRetries,
+      ...(retry.delayMs === undefined ? {} : { delayMs: retry.delayMs }),
+      ...(retry.errorStatus === undefined ? {} : { errorStatus: retry.errorStatus }),
+      turnExecutionId,
+    } satisfies AgentEvent);
+    if (retry.delayMs !== undefined) {
+      await interruptibleDelay(retry.delayMs, () => entry.pendingUserStopAbort);
+    }
+    this.throwIfUserStopRequested(entry, retry.error);
   }
 
   private bindActiveTurnState(
@@ -292,12 +333,15 @@ export class CursorTurnExecutor {
     );
     if (!retryOnNewConnection) throw error;
     execution.currentEntry = retryOnNewConnection;
+    const retry = { error, attempt, maxRetries: maxAttempts - 1, errorStatus: cursorHttpStatus(errorMessage) };
     if (looksLikeAcpConnectionClosed(errorMessage)) {
       this.prepareDisconnectRetry(execution);
+      execution.pendingRetry = { ...retry, reason: "connection_closed", delayMs: undefined };
       return;
     }
     if (looksLikeCursorRateLimit(errorMessage)) {
-      await this.retryAfterRateLimit(execution.currentEntry, cursorCfg, attempt, error, errorMessage);
+      const delayMs = this.rateLimitBackoffMs(execution.currentEntry, cursorCfg, attempt, errorMessage);
+      execution.pendingRetry = { ...retry, reason: "rate_limit", delayMs };
       return;
     }
     logger.warn("Cursor ACP prompt retry after transient CLI failure", {
@@ -305,6 +349,7 @@ export class CursorTurnExecutor {
       attempt,
       error: errorMessage,
     });
+    execution.pendingRetry = { ...retry, reason: "transient_failure", delayMs: undefined };
   }
 
   private throwIfUserStopRequested(entry: CursorSessionState, error: unknown): void {
@@ -330,13 +375,12 @@ export class CursorTurnExecutor {
     execution.isContinueRetry = true;
   }
 
-  private async retryAfterRateLimit(
+  private rateLimitBackoffMs(
     entry: CursorSessionState,
     cursorCfg: CursorProviderConfig,
     attempt: number,
-    error: unknown,
     errorMessage: string,
-  ): Promise<void> {
+  ): number {
     const backoffMs = computeCursorRateLimitBackoffMs(cursorCfg.rateLimitRetryBackoffMs);
     logger.warn("Cursor ACP prompt rate-limited; backing off before one retry", {
       threadId: entry.threadId,
@@ -344,8 +388,7 @@ export class CursorTurnExecutor {
       backoffMs,
       error: errorMessage,
     });
-    await interruptibleDelay(backoffMs, () => entry.pendingUserStopAbort);
-    this.throwIfUserStopRequested(entry, error);
+    return backoffMs;
   }
 
   private emitSuccessfulTurn(
