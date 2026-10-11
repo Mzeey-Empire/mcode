@@ -1,7 +1,7 @@
 import { AgentEventType } from "@mcode/contracts";
 import type { ProviderRuntimeEvent } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
-import type { ProviderEventDraft, ProviderEventSinkPort } from "../../host-ports.js";
+import { volatileIngestClass, type ProviderEventDraft, type ProviderEventSinkPort } from "../../host-ports.js";
 
 const MAX_PENDING_EVENTS_PER_EXECUTION = 1_024;
 const RESERVED_TERMINAL_EVENTS = 4;
@@ -194,7 +194,7 @@ export class CodexCanonicalEventPublisher {
       sourceIdentities: [],
       sourceSequence,
       providerTimestamp: timestamp,
-      ...(runtimeEvent.event.type === AgentEventType.TextDelta ? { ingestClass: "volatile" as const } : {}),
+      ...volatileIngestClass(runtimeEvent.event),
       payload: {
         type: "item.recorded",
         item: {

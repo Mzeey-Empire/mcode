@@ -92,13 +92,19 @@ const SILENT_ITEM_TYPES = new Set([
  * on Codex receiver threads use `receiverThreadIds` from completed `spawnAgent`
  * collabs mapped to the collab item id.
  *
- * Thinking stream: `item/reasoning/*` plus experimental `item/plan/delta` map to non-final
- * text deltas (`AgentEventType.TextDelta` with `isFinalResponse: false`) so the UI can show thought segments.
+ * Thinking stream: `item/reasoning/*` maps to `AgentEventType.ReasoningDelta` keyed by the
+ * native reasoning item id, and `item/completed` for that item emits the unstreamed suffix
+ * with `done: true`. Experimental `item/plan/delta` stays a non-final text delta (narration).
  *
  * Native phase classifies assistant text when available. Item completion closes
  * text immediately; phase-less items retain exact identity for later promotion.
  * Only the owning native turn completion ends execution.
  */
+/** Streamed fragments carry no stable native event id, so child dedupe must pass them through. */
+function isStreamedFragment(event: AgentEvent): boolean {
+  return event.type === AgentEventType.TextDelta || event.type === AgentEventType.ReasoningDelta;
+}
+
 /** Item types that appear as user-visible tools in the narrative. */
 const TOOL_LIKE_ITEM_TYPES = new Set([
   "commandExecution", "mcpToolCall", "dynamicToolCall",
@@ -135,8 +141,11 @@ export class CodexEventMapper {
   private finalAssistantText: string | undefined;
   private assistantIdentityScope: string = NodeCrypto.randomUUID();
   private assistantFallbackSequence = 0;
-  /** Dedupes `item/completed` reasoning payloads against streamed reasoning deltas. */
-  private lastReasoningText = "";
+  /**
+   * Streamed reasoning text per native reasoning item, so `item/completed` emits only the
+   * unstreamed suffix of its own item. One turn can carry several reasoning items.
+   */
+  private readonly streamedReasoningByItem = new Map<string, string>();
   /** Per-turn sequence for synthetic update_plan tool calls from turn/plan/updated. */
   private planUpdateSeq = 0;
   private readonly threadId: string;
@@ -445,7 +454,7 @@ export class CodexEventMapper {
   private dedupeChildEvents(events: CodexMappedEvent[]): CodexMappedEvent[] {
     const deduped: CodexMappedEvent[] = [];
     for (const event of events) {
-      if (event.type === AgentEventType.TextDelta || !("codexChild" in event) || !event.codexChild?.nativeEventId) {
+      if (isStreamedFragment(event) || !("codexChild" in event) || !event.codexChild?.nativeEventId) {
         deduped.push(event);
         continue;
       }
@@ -1989,11 +1998,23 @@ export class CodexEventMapper {
   }
 
   private mapReasoningDelta(notification: CodexNotification): CodexMappedEvent[] {
-    const params = notification.params as { delta?: unknown; text?: unknown };
+    const params = notification.params as { delta?: unknown; text?: unknown; itemId?: unknown };
     const delta = typeof params.delta === "string" ? params.delta : typeof params.text === "string" ? params.text : "";
     if (!delta) return [];
-    this.lastReasoningText += delta;
-    return [...this.drainPendingAssistantBoundary(false), { type: AgentEventType.TextDelta, threadId: this.threadId, delta, isFinalResponse: false }];
+    const itemId = typeof params.itemId === "string" && params.itemId ? params.itemId : undefined;
+    const key = itemId ?? "";
+    this.streamedReasoningByItem.set(key, (this.streamedReasoningByItem.get(key) ?? "") + delta);
+    return [...this.drainPendingAssistantBoundary(false), this.reasoningDelta(delta, itemId)];
+  }
+
+  private reasoningDelta(delta: string, reasoningItemId: string | undefined, done?: true): CodexMappedEvent {
+    return {
+      type: AgentEventType.ReasoningDelta,
+      threadId: this.threadId,
+      delta,
+      ...(reasoningItemId ? { reasoningItemId } : {}),
+      ...(done ? { done } : {}),
+    };
   }
 
   private mapPlanDelta(notification: CodexNotification): CodexMappedEvent[] {
@@ -2149,7 +2170,7 @@ export class CodexEventMapper {
     this.finalAssistantText = undefined;
     this.assistantFallbackSequence = 0;
     this.assistantIdentityScope = NodeCrypto.randomUUID();
-    this.lastReasoningText = "";
+    this.streamedReasoningByItem.clear();
     this.planUpdateSeq = 0;
     this.commandOutputBuffers.clear();
     this.startedToolUseSignatures.clear();
@@ -2219,11 +2240,20 @@ export class CodexEventMapper {
     return this.consumeCompletedItem(item.type);
   }
 
+  /**
+   * Closes one reasoning item with the suffix its deltas did not stream. Summary and full-text
+   * deltas share one positional buffer, matching how `completedReasoningText` joins them.
+   * An item with no text that never streamed (encrypted reasoning) has no row to close.
+   */
   private mapCompletedReasoning(item: CompletedItem): CodexMappedEvent[] {
     const full = this.completedReasoningText(item);
-    const delta = full.length > this.lastReasoningText.length ? full.slice(this.lastReasoningText.length) : "";
-    this.lastReasoningText = full;
-    return delta ? [{ type: AgentEventType.TextDelta, threadId: this.threadId, delta, isFinalResponse: false }] : [];
+    const key = item.id ?? "";
+    const streamed = this.streamedReasoningByItem.get(key);
+    if (streamed === undefined && !full) return [];
+    const prefix = streamed ?? "";
+    this.streamedReasoningByItem.set(key, full.length > prefix.length ? full : prefix);
+    const delta = full.length > prefix.length ? full.slice(prefix.length) : "";
+    return [this.reasoningDelta(delta, item.id, true)];
   }
 
   private completedReasoningText(item: CompletedItem): string {

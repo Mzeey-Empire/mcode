@@ -114,7 +114,7 @@ describe("mapCursorAcpSessionNotification", () => {
     expect(resolveCursorAssistantMessageContent(state.accumulator)).toBe("After");
   });
 
-  it("maps agent_thought_chunk to a non-final TextDelta without touching assistant text", () => {
+  it("maps agent_thought_chunk to a ReasoningDelta without touching assistant text", () => {
     const state = createCursorAcpTurnState();
     const ev = mapCursorAcpSessionNotification(
       {
@@ -129,10 +129,9 @@ describe("mapCursorAcpSessionNotification", () => {
     );
     expect(ev).toEqual([
       {
-        type: AgentEventType.TextDelta,
+        type: AgentEventType.ReasoningDelta,
         threadId,
         delta: "Thinking out loud...",
-        isFinalResponse: false,
       },
     ]);
     expect(state.accumulator.assistantText).toBe("");
@@ -158,7 +157,7 @@ describe("mapCursorAcpSessionNotification", () => {
     expect(resolveCursorAssistantMessageContent(state.accumulator)).toBe("The file defines the entry point.");
   });
 
-  it("settles an unknown preamble before an explicitly nonfinal thought and preserves repeated thought chunks", () => {
+  it("settles an unknown preamble before reasoning and preserves repeated thought chunks", () => {
     const state = createCursorAcpTurnState();
     const notifications: SessionNotification[] = [
       { sessionId: "s", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Let me check. " } } },
@@ -168,8 +167,8 @@ describe("mapCursorAcpSessionNotification", () => {
     expect(notifications.flatMap((notification) => mapCursorAcpSessionNotification(notification, threadId, state))).toEqual([
       { type: "textDelta", threadId, delta: "Let me check. " },
       { type: "assistantMessageBoundary", threadId, isFinalResponse: false },
-      { type: "textDelta", threadId, delta: "Inspect the caller. ", isFinalResponse: false },
-      { type: "textDelta", threadId, delta: "Then inspect its return value.", isFinalResponse: false },
+      { type: "reasoningDelta", threadId, delta: "Inspect the caller. " },
+      { type: "reasoningDelta", threadId, delta: "Then inspect its return value." },
     ]);
     expect(state.accumulator.assistantText).toBe("Let me check. ");
     expect(state.accumulator.assistantFinalText).toBe("");
@@ -189,7 +188,8 @@ describe("mapCursorAcpSessionNotification", () => {
       if (transition.update.sessionUpdate === "agent_message_chunk") state.accumulator.pendingToolCalls.add("pending-tool");
       const mapped = mapCursorAcpSessionNotification(transition, threadId, state);
       expect(mapped[0]).toEqual({ type: "assistantMessageBoundary", threadId, isFinalResponse: true });
-      expect(mapped[1]?.type).toBe(transition.update.sessionUpdate === "tool_call" ? "toolUse" : "textDelta");
+      const update = transition.update.sessionUpdate;
+      expect(mapped[1]?.type).toBe(update === "tool_call" ? "toolUse" : update === "agent_thought_chunk" ? "reasoningDelta" : "textDelta");
       expect(state.accumulator.assistantFinalText).toBe("Intermediate answer. ");
     }
   });

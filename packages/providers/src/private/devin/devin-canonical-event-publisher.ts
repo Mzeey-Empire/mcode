@@ -1,8 +1,7 @@
 import { logger } from "@mcode/shared";
-import { AgentEventType } from "@mcode/contracts";
 import type { ProviderRuntimeEvent } from "@mcode/contracts";
 import type { ProviderIdentity } from "@mcode/agent-model";
-import type { ProviderEventDraft, ProviderEventSinkPort } from "../../host-ports.js";
+import { volatileIngestClass, type ProviderEventDraft, type ProviderEventSinkPort } from "../../host-ports.js";
 
 const MAX_PENDING_EVENTS_PER_EXECUTION = 1_024;
 
@@ -148,7 +147,7 @@ export class DevinCanonicalEventPublisher {
       sourceIdentities,
       sourceSequence,
       providerTimestamp: timestamp,
-      ...(runtimeEvent.event.type === AgentEventType.TextDelta ? { ingestClass: "volatile" as const } : {}),
+      ...volatileIngestClass(runtimeEvent.event),
       payload: {
         type: "item.recorded",
         item: {

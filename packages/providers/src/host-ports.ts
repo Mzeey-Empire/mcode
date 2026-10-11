@@ -3,7 +3,7 @@ import type {
   CanonicalAgentEvent,
   ProviderIdentity,
 } from "@mcode/agent-model";
-import type { InteractionMode } from "@mcode/contracts";
+import { AgentEventType, type AgentEvent, type InteractionMode } from "@mcode/contracts";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 
 /** Provider event input submitted to the server-owned canonical event sink. */
@@ -16,6 +16,16 @@ export interface ProviderEventDraft {
   providerTimestamp?: string;
   ingestClass?: "volatile";
   payload: CanonicalAgentEvent;
+}
+
+/**
+ * Streamed text and reasoning fragments are superseded by the settled item that follows,
+ * so the sink may coalesce or shed them under pressure without losing durable state.
+ */
+export function volatileIngestClass(event: Pick<AgentEvent, "type">): Pick<ProviderEventDraft, "ingestClass"> {
+  return event.type === AgentEventType.TextDelta || event.type === AgentEventType.ReasoningDelta
+    ? { ingestClass: "volatile" }
+    : {};
 }
 
 /** Supplies one server-owned environment snapshot to a Provider session spawn. */

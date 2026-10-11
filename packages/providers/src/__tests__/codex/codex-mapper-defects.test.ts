@@ -85,7 +85,7 @@ describe("CodexEventMapper defect regressions", () => {
       params: { delta: "visible", itemId: "rs1" },
     });
     expect(fresh.length).toBeGreaterThan(0);
-    expect(fresh[0]!.event.type).toBe(AgentEventType.TextDelta);
+    expect(fresh[0]!.event.type).toBe(AgentEventType.ReasoningDelta);
   });
 
   it("resumes emitting events after the next turn/started", () => {
@@ -114,7 +114,7 @@ describe("CodexEventMapper defect regressions", () => {
       params: { delta: "fresh thought", itemId: "rs2" },
     });
     expect(fresh.length).toBeGreaterThan(0);
-    expect(fresh[0]!.event.type).toBe(AgentEventType.TextDelta);
+    expect(fresh[0]!.event.type).toBe(AgentEventType.ReasoningDelta);
   });
 
   // -------------------------------------------------------------------------

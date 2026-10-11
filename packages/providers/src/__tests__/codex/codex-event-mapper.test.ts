@@ -3529,11 +3529,11 @@ describe("CodexEventMapper", () => {
     ]);
   });
 
-  it("maps reasoning stream notifications to non-final text deltas", () => {
+  it("maps reasoning stream notifications to reasoning deltas keyed by item", () => {
     const eSummary = mapper.mapNotification({
       jsonrpc: "2.0",
       method: "item/reasoning/summaryTextDelta",
-      params: { delta: "Plan: " },
+      params: { delta: "Plan: ", itemId: "rs_1" },
     } as never);
     const eText = mapper.mapNotification({
       jsonrpc: "2.0",
@@ -3541,10 +3541,10 @@ describe("CodexEventMapper", () => {
       params: { text: "step 1" },
     } as never);
     expect(eSummary.map((runtimeEvent) => runtimeEvent.event)).toEqual([
-      { type: "textDelta", threadId: "test-thread", delta: "Plan: ", isFinalResponse: false },
+      { type: "reasoningDelta", threadId: "test-thread", delta: "Plan: ", reasoningItemId: "rs_1" },
     ]);
     expect(eText.map((runtimeEvent) => runtimeEvent.event)).toEqual([
-      { type: "textDelta", threadId: "test-thread", delta: "step 1", isFinalResponse: false },
+      { type: "reasoningDelta", threadId: "test-thread", delta: "step 1" },
     ]);
     expect(mapper.mapNotification({
       jsonrpc: "2.0",
@@ -3553,7 +3553,7 @@ describe("CodexEventMapper", () => {
     } as never)).toEqual([]);
   });
 
-  it("emits non-final textDelta for item/completed reasoning item (summary + content)", () => {
+  it("emits a done reasoning delta for item/completed reasoning item (summary + content)", () => {
     const events = mapper.mapNotification({
       jsonrpc: "2.0",
       method: "item/completed",
@@ -3563,10 +3563,11 @@ describe("CodexEventMapper", () => {
     });
     expect(events.map((runtimeEvent) => runtimeEvent.event)).toEqual([
       {
-        type: "textDelta",
+        type: "reasoningDelta",
         threadId: "test-thread",
         delta: "Plan step 1\nPlan step 2\nRaw detail",
-        isFinalResponse: false,
+        reasoningItemId: "r1",
+        done: true,
       },
     ]);
   });
@@ -3585,8 +3586,41 @@ describe("CodexEventMapper", () => {
       },
     } as never);
     expect(rest.map((runtimeEvent) => runtimeEvent.event)).toEqual([
-      { type: "textDelta", threadId: "test-thread", delta: " world", isFinalResponse: false },
+      { type: "reasoningDelta", threadId: "test-thread", delta: " world", done: true },
     ]);
+  });
+
+  it("dedupes each reasoning item in a turn against its own streamed text", () => {
+    const reasoningDelta = (itemId: string, delta: string) => mapper.mapNotification({
+      jsonrpc: "2.0", method: "item/reasoning/summaryTextDelta", params: { itemId, delta },
+    } as never);
+    const completed = (id: string, summary: string[]) => mapper.mapNotification({
+      jsonrpc: "2.0", method: "item/completed", params: { item: { type: "reasoning", id, summary, content: [] } },
+    } as never);
+
+    const events = [
+      ...reasoningDelta("rs_1", "First idea"),
+      ...completed("rs_1", ["First idea"]),
+      ...reasoningDelta("rs_2", "Second"),
+      ...completed("rs_2", ["Second idea"]),
+    ].map((runtimeEvent) => runtimeEvent.event);
+
+    expect(events).toEqual([
+      { type: "reasoningDelta", threadId: "test-thread", delta: "First idea", reasoningItemId: "rs_1" },
+      { type: "reasoningDelta", threadId: "test-thread", delta: "", reasoningItemId: "rs_1", done: true },
+      { type: "reasoningDelta", threadId: "test-thread", delta: "Second", reasoningItemId: "rs_2" },
+      { type: "reasoningDelta", threadId: "test-thread", delta: " idea", reasoningItemId: "rs_2", done: true },
+    ]);
+    expect(events.some((event) => event.type === "textDelta")).toBe(false);
+  });
+
+  it("emits nothing for a completed reasoning item with no text and no stream", () => {
+    const events = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: { item: { type: "reasoning", id: "rs_encrypted", summary: [], content: [] } },
+    } as never);
+    expect(events).toEqual([]);
   });
 
   // ---------------------------------------------------------------------------

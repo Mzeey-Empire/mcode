@@ -77,6 +77,7 @@ const TRACE_EVENT_SUMMARIZERS: Record<string, (event: AgentEvent) => Record<stri
   [AgentEventType.ToolResult]: summarizeTraceToolResult,
   [AgentEventType.System]: summarizeTraceSystem,
   [AgentEventType.TextDelta]: summarizeTraceTextDelta,
+  [AgentEventType.ReasoningDelta]: summarizeTraceReasoningDelta,
   [AgentEventType.ToolInputDelta]: summarizeTraceToolInputDelta,
   [AgentEventType.ToolProgress]: summarizeTraceToolProgress,
   [AgentEventType.Message]: summarizeTraceMessage,
@@ -121,6 +122,10 @@ function summarizeTraceSystem(event: AgentEvent): Record<string, unknown> {
 function summarizeTraceTextDelta(event: AgentEvent): Record<string, unknown> {
   const delta = event as Extract<AgentEvent, { type: typeof AgentEventType.TextDelta }>;
   return { type: delta.type, deltaChars: delta.delta?.length ?? 0 };
+}
+
+function summarizeTraceReasoningDelta(event: AgentEvent): Record<string, unknown> {
+  return { type: event.type, deltaChars: event.type === AgentEventType.ReasoningDelta ? event.delta.length : 0 };
 }
 
 function summarizeTraceToolInputDelta(event: AgentEvent): Record<string, unknown> {
