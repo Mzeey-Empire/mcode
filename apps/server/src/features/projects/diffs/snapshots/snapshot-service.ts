@@ -371,8 +371,8 @@ export class SnapshotService {
 
   /** Whether Git tracks the executable bit in this repository. */
   async tracksFileMode(cwd: string): Promise<boolean> {
-    const config = (await rawGit(cwd, ["config", "--get-regexp", "^core\\.(filemode|repositoryformatversion)$"])).toString();
-    return hostRuntime.platform !== "win32" && /core\.filemode true/.test(config);
+    if (hostRuntime.platform === "win32") return false;
+    return (await rawGit(cwd, ["config", "--type=bool", "--default=true", "--get", "core.fileMode"])).toString().trim() === "true";
   }
 
   /** Hash raw bytes and types without applying clean filters. */

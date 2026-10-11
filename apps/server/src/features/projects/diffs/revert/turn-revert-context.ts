@@ -7,6 +7,7 @@ import { attributedWorkspacePaths } from "../snapshots/snapshot-attribution.js";
 import { resolveSnapshotCwd } from "../snapshots/resolve-snapshot-cwd.js";
 import type { SnapshotRouterDeps } from "../transport/snapshot-rpc.js";
 import type { ReadyRevertRange } from "./turn-revert-preview.js";
+import { ReviewWorktreeMissingError } from "../../git/review-comparison-errors.js";
 
 /** Resolve active turns and later attribution across every thread sharing this checkout. */
 export function turnRevertContext(db: Database, deps: SnapshotRouterDeps, runtimeBusy: (threadId: string) => boolean) {
@@ -14,7 +15,11 @@ export function turnRevertContext(db: Database, deps: SnapshotRouterDeps, runtim
   const resolveCwd = (threadId: string, worktreePath?: string | null) => resolveSnapshotCwd(deps, { thread_id: threadId, worktree_path: worktreePath ?? null });
   async function sameCwd(threadId: string, cwd: string, worktreePath?: string | null) {
     try { return await NodeFSPromises.realpath(resolveCwd(threadId, worktreePath)) === await NodeFSPromises.realpath(cwd); }
-    catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return false; throw error; }
+    catch (error) {
+      if (error instanceof ReviewWorktreeMissingError) return false;
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+      throw error;
+    }
   }
   return {
     resolveCwd,

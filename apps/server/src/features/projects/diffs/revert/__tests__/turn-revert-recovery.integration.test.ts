@@ -21,7 +21,7 @@ describe("raw revert recovery", () => {
     const row = f.store.byRequest(request.requestId); expect(row?.state).toBe("prepared");
     if (!row?.recoveryRef) throw new Error("Missing recovery pin");
     expect(f.git("cat-file", "-t", row.recoveryRef)).toBe("commit"); expect(row.files.map((file) => file.path)).toEqual(["a", "b"]);
-    for (const file of row.files) { expect(file.pre.kind).toBe("file"); expect(file.planned.kind).toBe("file"); expect(file.pre.sha256).not.toBe(file.planned.sha256); }
+    for (const file of row.files) { expect(file.pre.kind).toBe("file"); expect(file.planned?.kind).toBe("file"); expect(file.pre.sha256).not.toBe(file.planned?.sha256); }
     if (stop === "afterPrepare") { expect(f.read("a")).toEqual(Buffer.from("after\n")); expect(f.read("b")).toEqual(Buffer.from("after b\n")); }
     await f.service().recoverUnfinished(); await f.service().recoverUnfinished();
     expect(f.read("a")).toEqual(Buffer.from("after\n")); expect(f.read("b")).toEqual(Buffer.from("after b\n")); expect(f.store.get(row.id)?.state).toBe("rolled_back");
@@ -68,13 +68,15 @@ describe("raw revert recovery", () => {
     expect(f.read("a.txt")).toEqual(Buffer.from("newer\n"));
   }, timeout);
 
-  it.each(["outside", "CRLF", "filter", "missing-ref"])("leaves unprovable %s recovery state alone", async (kind) => {
+  it.each(["outside", "CRLF", "filter", "missing-ref", "missing-planned"])("leaves unprovable %s recovery state alone", async (kind) => {
     f = await revertFixture(); configureTextFixture(kind); f.write("a.txt", "before\n# baseline\n");
     const turn = await f.turn("one", () => f.write("a.txt", "after\n# after\n")), request = await f.request(turn.messageId);
     await expect(f.service((point) => { if (point === "afterWrite") throw new TurnRevertFaultStop(); }).apply(request)).rejects.toBeInstanceOf(TurnRevertFaultStop);
     const row = f.store.byRequest(request.requestId); if (!row?.recoveryRef) throw new Error("Missing prepared row");
     const changed = kind === "CRLF" ? "before\n# baseline\n" : kind === "filter" ? "before\n# changed comment\n" : "external edit\n";
-    if (kind === "missing-ref") f.git("update-ref", "-d", row.recoveryRef); else f.write("a.txt", changed);
+    if (kind === "missing-ref") f.git("update-ref", "-d", row.recoveryRef);
+    else if (kind === "missing-planned") f.db.prepare("UPDATE turn_reverts SET files=json_remove(files, '$[0].planned') WHERE id=?").run(row.id);
+    else f.write("a.txt", changed);
     const expected = f.read("a.txt"); await f.service().recoverUnfinished();
     expect(f.read("a.txt")).toEqual(expected); expect(f.store.get(row.id)).toMatchObject({ state: "recovery_failed", failure: { paths: ["a.txt"] }, recoveryRef: row.recoveryRef });
     if (kind !== "missing-ref") expect(f.git("cat-file", "-t", row.recoveryRef)).toBe("commit");
@@ -94,6 +96,8 @@ describe("raw revert recovery", () => {
     f = await revertFixture(); f.linked(); f.write("a", "before\n");
     const turn = await f.turn("one", () => f.write("a", "after\n")); const result = committed(await f.service().apply(await f.request(turn.messageId)));
     f.git("gc", "--prune=now", "--quiet"); committed(await f.service().undo({ threadId: "thread", revertId: result.revert.id, requestId: NodeCrypto.randomUUID() })); expect(f.read("a")).toEqual(Buffer.from("after\n"));
+    const rollbackRequest = await f.request(turn.messageId);
+    expect(await f.service((point) => { if (point === "afterPrepare") throw new Error("rollback"); }).apply(rollbackRequest)).toMatchObject({ status: "failed", outcome: "rolled_back" });
     const request = await f.request(turn.messageId);
     await expect(f.service((point) => { if (point === "afterPrepare") throw new TurnRevertFaultStop(); }).apply(request)).rejects.toBeInstanceOf(TurnRevertFaultStop);
     const prepared = f.store.byRequest(request.requestId); if (!prepared?.recoveryRef) throw new Error("Missing prepared");
@@ -103,6 +107,7 @@ describe("raw revert recovery", () => {
     await f.pins.sweep({ isThreadLive: () => true });
     expect(f.git("for-each-ref", "--format=%(refname)", orphan)).toBe(""); expect(f.git("cat-file", "-t", other)).toBe("commit");
     expect(f.git("cat-file", "-t", prepared.recoveryRef)).toBe("commit"); expect(f.store.get(result.revert.id)?.recoveryRef).toBeNull();
+    expect(f.store.byRequest(rollbackRequest.requestId)?.recoveryRef).toBeNull();
     f.db.prepare("UPDATE turn_reverts SET state='recovery_failed' WHERE id=?").run(prepared.id);
     await f.pins.sweep({ isThreadLive: () => true }); expect(f.git("cat-file", "-t", prepared.recoveryRef)).toBe("commit");
   }, timeout);
@@ -117,6 +122,7 @@ describe("raw revert recovery", () => {
     f.db.prepare("INSERT INTO thread_startups(startup_id,workspace_id,thread_id,kind,state,phase,steps_json,transcript_json,revision) VALUES ('starting','ws','other','direct','running','agent','[]','[]',1)").run();
     expect(await f.service().preview({ threadId: "thread", messageId: turn.messageId, scope: { kind: "turn" } })).toEqual({ status: "busy", reason: "turn_running" });
     f.db.prepare("UPDATE thread_startups SET state='completed' WHERE startup_id='starting'").run();
+    f.db.prepare("INSERT INTO threads(id,workspace_id,title,branch,mode) VALUES ('missing-worktree','ws','missing','main','worktree')").run();
     let release = () => {}, entered = () => {};
     const pause = new Promise<void>((resolve) => { release = resolve; }), prepared = new Promise<void>((resolve) => { entered = resolve; });
     const service = f.service(async (point) => { if (point === "afterPrepare") { entered(); await pause; } });

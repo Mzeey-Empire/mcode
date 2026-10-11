@@ -8,7 +8,7 @@ import type { RepositoryGitMutationLock } from "../../git/repository-git-mutatio
 import { ReviewWorktreeMissingError } from "../../git/review-comparison-errors.js";
 import type { StoreId } from "../snapshots/snapshot-store-identity.js";
 import { removeRawTemps, samePathState, type RawPathState } from "../snapshots/snapshot-raw-state.js";
-import { classifyRecovery, TurnRevertValidationError, type RevertPath } from "./turn-revert-model.js";
+import { classifyRecovery, TurnRevertValidationError, type RecoveryPath } from "./turn-revert-model.js";
 import { preparePreview, revertRange, type RevertPreviewDeps, type RevertPreviewInput } from "./turn-revert-preview.js";
 
 /** Test-only failure points cover prepare, individual writes, and the atomic commit. */
@@ -44,7 +44,8 @@ export class TurnRevertService {
 
   /** Apply once per request id and reject stale raw evidence under the repository lock. */
   async apply(input: RevertApplyInput): Promise<TurnRevertResult> {
-    const cwd = await this.cwd(input);
+    const recorded = this.deps.store.byRequest(input.requestId);
+    const cwd = recorded ? recorded.context.cwd : await this.cwd(input);
     if (cwd === null) return { status: "unavailable", reason: "worktree_missing" };
     return this.run(cwd, input.requestId, async () => {
       const request = applyRequestKey(input);
@@ -72,13 +73,13 @@ export class TurnRevertService {
       if (!row || !await this.canUndo(row)) return { status: "unavailable", reason: "recovery_expired" };
       if (await this.deps.busy(row.context.cwd)) return { status: "busy", reason: "turn_running" };
       const current = await this.deps.snapshots.workingTreeState(row.context.cwd, row.files.map((file) => file.path));
-      if (row.files.some((file) => !samePathState(requiredState(current, file.path), file.planned))) {
+      if (row.files.some((file) => !file.planned || !samePathState(requiredState(current, file.path), file.planned))) {
         return { status: "stale", preview: (await preparePreview(this.deps, targetInput(row))).preview };
       }
       const id: string = NodeCrypto.randomUUID();
       try {
         await this.fault?.("pinRecovery", 0);
-        const files = row.files.map((file) => ({ ...file, pre: file.planned, planned: file.pre }));
+        const files = row.files.map((file) => ({ ...file, pre: requiredPlanned(file), planned: file.pre }));
         const recoveryRef = await this.deps.snapshots.pinRecovery(row.context.cwd, this.deps.storeId, id, files.flatMap((file) => [file.pre, file.planned]));
         await this.deps.writer.execute(prepareTurnRevert, { id, requestId: input.requestId, threadId: row.threadId,
           targetMessageId: row.targetMessageId, fromMessageId: row.fromMessageId, kind: "undo", path: row.path, undoesRevertId: row.id,
@@ -171,11 +172,11 @@ export class TurnRevertService {
     try {
       await this.fault?.("afterPrepare", 0);
       let writes = 0;
-      await this.deps.snapshots.restoreRaw(row.context.cwd, id, row.files.map((file) => ({ path: file.path, state: file.planned })), async () => {
+      await this.deps.snapshots.restoreRaw(row.context.cwd, id, row.files.map((file) => ({ path: file.path, state: requiredPlanned(file) })), async () => {
         await this.fault?.("afterWrite", ++writes);
       });
       const current = await this.deps.snapshots.workingTreeState(row.context.cwd, row.files.map((file) => file.path));
-      if (row.files.some((file) => !samePathState(requiredState(current, file.path), file.planned))) throw new Error("Worktree changed during revert");
+      if (row.files.some((file) => !samePathState(requiredState(current, file.path), requiredPlanned(file)))) throw new Error("Worktree changed during revert");
       await this.commit(row, writes);
     } catch (error) {
       if (error instanceof TurnRevertFaultStop) throw error;
@@ -199,7 +200,7 @@ export class TurnRevertService {
   private async recover(row: StoredRevert, detail = "Revert interrupted"): Promise<void> {
     const cwd = row.context.cwd;
     const failed = new Set<string>();
-    const restore: RevertPath[] = [];
+    const restore: RecoveryPath[] = [];
     const available = await this.recoveryAvailable(row);
     for (const entry of row.files) {
       const decision = await this.recoveryDecision(row, entry, available);
@@ -223,7 +224,7 @@ export class TurnRevertService {
     catch { return false; }
   }
 
-  private async recoveryDecision(row: StoredRevert, entry: RevertPath, available: boolean) {
+  private async recoveryDecision(row: StoredRevert, entry: RecoveryPath, available: boolean) {
     try {
       await removeRawTemps(row.context.cwd, row.id, [entry.path]);
       const current = requiredState(await this.deps.snapshots.workingTreeState(row.context.cwd, [entry.path]), entry.path);
@@ -232,7 +233,7 @@ export class TurnRevertService {
     } catch { return { kind: "not_provable" } satisfies import("./turn-revert-model.js").RecoveryDecision; }
   }
 
-  private async matchesPre(cwd: string, entry: RevertPath): Promise<boolean> {
+  private async matchesPre(cwd: string, entry: RecoveryPath): Promise<boolean> {
     try { return samePathState(requiredState(await this.deps.snapshots.workingTreeState(cwd, [entry.path]), entry.path), entry.pre); }
     catch { return false; }
   }
@@ -252,6 +253,11 @@ function requiredState(states: Map<string, RawPathState>, name: string): RawPath
   const state = states.get(name);
   if (!state) throw new Error("Missing recorded path state");
   return state;
+}
+
+function requiredPlanned(file: RecoveryPath): RawPathState {
+  if (!file.planned) throw new Error("Missing planned path state");
+  return file.planned;
 }
 
 function errorDetail(error: unknown): string { return (error instanceof Error ? error.message : String(error)).slice(0, 500); }

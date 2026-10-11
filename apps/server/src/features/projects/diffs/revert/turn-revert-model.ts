@@ -7,6 +7,10 @@ export const RevertPathSchema = z.object({ path: z.string(), previousPath: z.str
   pre: RawPathStateSchema, planned: RawPathStateSchema });
 /** One journaled path. */
 export type RevertPath = z.infer<typeof RevertPathSchema>;
+/** Missing planned evidence is recoverable as an unresolved path, never permission to write. */
+export const RecoveryPathSchema = RevertPathSchema.extend({ planned: RawPathStateSchema.nullish() });
+/** Read-side evidence may be incomplete; new journal writes still require both states. */
+export type RecoveryPath = z.infer<typeof RecoveryPathSchema>;
 /** A semantically invalid request, distinguished from an execution or filesystem failure. */
 export class TurnRevertValidationError extends Error {
   readonly code = "INVALID_PARAMS";
@@ -22,8 +26,9 @@ export function transitionRevert(from: RevertState, to: RevertState): RevertStat
 /** Recovery distinguishes evidence that authorizes a write from a later edit or lost evidence. */
 export type RecoveryDecision = { kind: "equal_pre" } | { kind: "equal_planned" } | { kind: "changed" } | { kind: "not_provable" };
 /** Shared by rollback and restart recovery; filtered Git ids never enter this decision. */
-export function classifyRecovery(current: PathState, entry: RevertPath, materialAvailable: boolean): RecoveryDecision {
+export function classifyRecovery(current: PathState, entry: RecoveryPath, materialAvailable: boolean): RecoveryDecision {
   if (samePathState(current, entry.pre)) return { kind: "equal_pre" };
+  if (!entry.planned) return { kind: "not_provable" };
   if (!samePathState(current, entry.planned)) return { kind: "changed" };
   return { kind: materialAvailable ? "equal_planned" : "not_provable" };
 }

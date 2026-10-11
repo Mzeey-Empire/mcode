@@ -88,7 +88,10 @@ describe("turn revert server operation", () => {
       committed(await service.undo({ threadId: "thread", revertId: result.revert.id, requestId: NodeCrypto.randomUUID() }));
       expect(f.read("c.ts")).toEqual(Buffer.from("original\n")); expect(f.exists("a.ts")).toBe(false);
     }
-    if (kind !== "turns") committed(await f.service().apply(await f.request(last.messageId)));
+    if (kind !== "turns") {
+      committed(await f.service().apply(await f.request(last.messageId)));
+      expect(f.read("a.ts")).toEqual(Buffer.from("original\n")); expect(f.exists("b.ts")).toBe(false); expect(f.exists("c.ts")).toBe(false);
+    }
   }, timeout);
 
   it("rejects incomplete retry and range evidence", async () => {
@@ -98,6 +101,8 @@ describe("turn revert server operation", () => {
     await f.snapshotRepo.deleteExpired(30);
     for (const scope of [{ kind: "turn" }, { kind: "file", path: "a" }, { kind: "file", path: "a", fromMessageId: one.messageId }] satisfies import("@mcode/contracts").TurnRevertScope[]) {
       expect(await f.service().preview({ threadId: "thread", messageId: two.messageId, scope })).toEqual({ status: "unavailable", reason: "snapshot_missing" });
+      expect(await f.service().apply({ threadId: "thread", messageId: two.messageId, scope, previewToken: "expired", requestId: NodeCrypto.randomUUID() }))
+        .toEqual({ status: "unavailable", reason: "snapshot_missing" });
     }
     expect(f.read("a")).toEqual(Buffer.from("two"));
     const last = await f.turn("last", () => f.write("last", "last"));
@@ -116,6 +121,8 @@ describe("turn revert server operation", () => {
     if (direction === "file-to-folder") {
       f.write("node/unrelated", "keep\n");
       expect(await f.service().preview({ threadId: "thread", messageId: turn.messageId, scope: { kind: "turn" } })).toMatchObject({ skipped: [{ path: "node", reason: "folder_in_the_way" }] });
+      expect(await f.service().apply(await f.request(turn.messageId))).toMatchObject({ status: "stale", preview: { status: "nothing_to_revert" } });
+      expect(f.read("node/child")).toEqual(Buffer.from("new child\n"));
       expect(f.read("node/unrelated")).toEqual(Buffer.from("keep\n"));
     }
   }, timeout);

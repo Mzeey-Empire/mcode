@@ -4,10 +4,10 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
 import { TurnRevertRecordSchema, TurnRevertResultSchema } from "@mcode/contracts";
 import { turnReverts } from "../../../../runtime/persistence/sqlite/schema.js";
-import { RevertContextSchema, RevertPathSchema } from "../../../projects/diffs/revert/turn-revert-model.js";
+import { RevertContextSchema, RecoveryPathSchema } from "../../../projects/diffs/revert/turn-revert-model.js";
 import { MessageStore } from "../../conversation/persistence/message-store.js";
 
-const revertFiles = z.array(RevertPathSchema).max(512);
+const revertFiles = z.array(RecoveryPathSchema).max(512);
 const revertFailure = z.object({ paths: z.array(z.string()), detail: z.string() });
 
 /** Decode JSON once at the storage boundary. */
