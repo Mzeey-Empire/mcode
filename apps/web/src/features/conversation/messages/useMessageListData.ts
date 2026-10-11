@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useMemo } from "react";
 import type { ToolCall } from "@/transport/types";
 import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -16,18 +16,13 @@ import {
   type AgentDisplayState,
 } from "./virtual-items";
 import type { Message } from "@/transport/types";
-import {
-  projectTurnEndings,
-  reuseTurnEndings,
-  type TurnEndingsProjection,
-} from "../turn-ending/turn-endings-projection";
+import { useTurnEndings } from "../turn-ending/useTurnEndings";
 import type { ThoughtSegment } from "../narrative/types";
 import type { RunHoldingSignals, RunRetry } from "../narrative/run-status";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
 const EMPTY_TURN_MAP: Record<string, string> = {};
 const EMPTY_FILES_CHANGED: Record<string, string[]> = {};
-const NO_TURN_ENDINGS: TurnEndingsProjection = { endingsByMessageId: {}, hiddenMessageIds: new Set() };
 
 function resolveDisplayedThreadId(displayThreadId: string | undefined, activeThreadId: string | null | undefined) {
   return displayThreadId ?? activeThreadId;
@@ -245,18 +240,6 @@ export function useMessageListData(displayThreadId: string | undefined) {
     turnSummariesByMessageId: canonicalActivity.turnSummariesByMessageId,
     turnEndingsByMessageId: turnEndings.endingsByMessageId,
   };
-}
-
-function useTurnEndings(
-  threadId: string | null | undefined,
-  state: Parameters<typeof projectTurnEndings>[1],
-): TurnEndingsProjection {
-  const previous = useRef<TurnEndingsProjection | undefined>(undefined);
-  return useMemo(() => {
-    if (!threadId) return NO_TURN_ENDINGS;
-    previous.current = reuseTurnEndings(previous.current, projectTurnEndings(threadId, state));
-    return previous.current;
-  }, [threadId, state]);
 }
 
 function withoutHiddenMessages(messages: Message[], hidden: ReadonlySet<string>): Message[] {

@@ -1,4 +1,4 @@
-import type { AgentItem, AgentModelState, AgentTurn, Message, TurnOutcome } from "@mcode/contracts";
+import { ProviderIdSchema, type AgentItem, type AgentModelState, type AgentTurn, type Message, type ProviderId, type TurnOutcome } from "@mcode/contracts";
 import { MODEL_PROVIDERS } from "@/lib/model-registry";
 import { sameTurnEndNotice, turnEndingView, type TurnEndingView } from "./turn-ending-notice";
 
@@ -6,6 +6,8 @@ import { sameTurnEndNotice, turnEndingView, type TurnEndingView } from "./turn-e
 export interface TurnEnding {
   /** Latest attempt's canonical turn id; Retry targets it. */
   turnId: string;
+  /** The thread's provider, which Sign in targets; null when the thread record is not loaded. */
+  providerId: ProviderId | null;
   view: TurnEndingView;
 }
 
@@ -21,12 +23,16 @@ interface TurnMessages {
   assistantMessageIds: string[];
 }
 
-/** Project each logical turn as its first user message plus its latest attempt. */
-export function projectTurnEndings(threadId: string, state: AgentModelState): TurnEndingsProjection {
+/**
+ * Project each logical turn as its first user message plus its latest attempt.
+ * `providerSignedOut` is the thread provider's live sign-in condition, which picks an auth failure's primary action.
+ */
+export function projectTurnEndings(threadId: string, state: AgentModelState, providerSignedOut: boolean): TurnEndingsProjection {
   const turns = Object.values(state.turns).filter((turn) => turn.threadId === threadId).sort(compareTurns);
   const messagesByTurn = turnMessages(threadId, state.items);
   const logicalTurns = groupAttempts(turns);
-  const providerLabel = providerName(state.threads[threadId]?.providerId);
+  const providerId = knownProviderId(state.threads[threadId]?.providerId);
+  const providerLabel = providerName(providerId);
   const endingsByMessageId: Record<string, TurnEnding> = {};
   const hiddenMessageIds = new Set<string>();
 
@@ -39,13 +45,14 @@ export function projectTurnEndings(threadId: string, state: AgentModelState): Tu
     if (!status || !anchor) return;
     endingsByMessageId[anchor] = {
       turnId: latest.id,
+      providerId,
       view: turnEndingView({
         status,
         ending: latest.ending,
         providerStartedAt: latest.providerStartedAt,
         durationMs: turnDurationMs(latest),
         providerLabel,
-        providerSignedOut: false,
+        providerSignedOut,
         scheduledRetryAt: null,
         // The startup trail owns only the thread's first attempt; a retry of it gets an ordinary notice.
         isStartupTurn: index === 0 && latest === first,
@@ -76,7 +83,7 @@ function sameEndings(left: TurnEndingsProjection["endingsByMessageId"], right: T
   return Object.keys(left).length === ids.length && ids.every((id) => {
     const before = left[id];
     const after = right[id]!;
-    return before !== undefined && before.turnId === after.turnId && sameView(before.view, after.view);
+    return before !== undefined && before.turnId === after.turnId && before.providerId === after.providerId && sameView(before.view, after.view);
   });
 }
 
@@ -149,7 +156,13 @@ function terminalOutcome(turn: AgentTurn): TurnOutcome | undefined {
   return TERMINAL_OUTCOMES[turn.status];
 }
 
-function providerName(providerId: string | undefined): string {
+// Canonical records carry any provider string; only a known provider can be signed in to or labelled.
+function knownProviderId(providerId: string | undefined): ProviderId | null {
+  const parsed = ProviderIdSchema.safeParse(providerId);
+  return parsed.success ? parsed.data : null;
+}
+
+function providerName(providerId: ProviderId | null): string {
   return MODEL_PROVIDERS.find((provider) => provider.id === providerId)?.name ?? "The provider";
 }
 
