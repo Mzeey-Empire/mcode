@@ -4,9 +4,14 @@ const identity = z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/);
 const parent = identity.nullable().optional();
 const common = { uuid: identity, session_id: identity, parent_tool_use_id: parent };
 const tool = z.enum(["Agent", "Read"]);
+/** `SDKAssistantMessageError`: a closed code set, so it carries no user content. */
+const assistantError = z.enum([
+  "authentication_failed", "oauth_org_not_allowed", "account_on_hold", "verification_required", "billing_error", "rate_limit",
+  "overloaded", "invalid_request", "model_not_found", "server_error", "unknown", "max_output_tokens", "cloud_credential_error",
+]);
 const messages = z.discriminatedUnion("type", [
   z.object({ ...common, type: z.literal("system"), subtype: z.literal("init") }).strict(),
-  z.object({ ...common, type: z.literal("assistant"), message: z.object({ content: z.array(z.object({ type: z.literal("tool_use"), id: identity, name: tool }).strict()).max(16) }).strict() }).strict(),
+  z.object({ ...common, type: z.literal("assistant"), error: assistantError.optional(), message: z.object({ content: z.array(z.object({ type: z.literal("tool_use"), id: identity, name: tool }).strict()).max(16) }).strict() }).strict(),
   z.object({ ...common, type: z.literal("user"), message: z.object({ content: z.array(z.object({ type: z.literal("tool_result"), tool_use_id: identity, is_error: z.boolean().optional() }).strict()).max(16) }).strict() }).strict(),
   z.object({ ...common, type: z.literal("tool_progress"), tool_use_id: identity, tool_name: tool, elapsed_time_seconds: z.number().nonnegative().optional() }).strict(),
   z.object({ ...common, type: z.literal("result"), is_error: z.boolean() }).strict(),

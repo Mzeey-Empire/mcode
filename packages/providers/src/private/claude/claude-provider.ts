@@ -2554,7 +2554,7 @@ export class ClaudeProvider
         error: tail
           ? `${message}\n\nClaude Code stderr (tail):\n${tail}`
           : message,
-        failure: { kind: "fatal" },
+        failure: state.mapper.classifyStreamFailure(error, Date.now()),
       } satisfies AgentEvent,
     );
   }
