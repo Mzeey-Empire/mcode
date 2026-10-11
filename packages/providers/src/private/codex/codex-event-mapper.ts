@@ -24,6 +24,8 @@ import type {
   McpServerStartupStatus,
   ThreadGoal,
 } from "./codex-types.js";
+import { classifyCodexFailure, readCodexErrorInfo, type CodexRateLimitWindows } from "./codex-failure-classifier.js";
+import { readCodexRateLimits } from "./codex-input-mapper.js";
 
 type CodexMappedEvent = AgentEvent & {
   codexChild?: CodexChildEvidence;
@@ -159,6 +161,10 @@ export class CodexEventMapper {
   /** Native turn identity that owns direct approval-review notifications. */
   private activeMainTurnId: string | undefined;
   private turnTokenUsage: CodexTokenUsage | undefined;
+  /** Retries Codex announced with `error.willRetry` during the current turn. */
+  private turnRetriesMade = 0;
+  /** Account limits outlive turns: Codex reports them when they change, not when a turn fails. */
+  private readonly accountRateLimits: CodexRateLimitWindows = {};
   private turnTokenBaseline: Pick<CodexTokenUsage["total"], "totalTokens" | "cachedInputTokens" | "outputTokens"> | undefined;
   /** Per-item streaming command output buffers, keyed by itemId. */
   private readonly commandOutputBuffers = new Map<string, BoundedToolOutputBuffer>();
@@ -1884,7 +1890,8 @@ export class CodexEventMapper {
   }
 
   private mapActiveMainNotification(notification: CodexNotification): CodexMappedEvent[] {
-    if (notification.method === "thread/started" || notification.method === "account/updated" || notification.method === "account/rateLimits/updated") return [];
+    if (notification.method === "account/rateLimits/updated") return this.recordAccountRateLimits(notification.params);
+    if (notification.method === "thread/started" || notification.method === "account/updated") return [];
     const handlers: Record<string, () => CodexMappedEvent[]> = {
       "item/started": () => this.mapMainItemStarted(notification),
       "item/reasoning/textDelta": () => this.mapReasoningDelta(notification),
@@ -2109,10 +2116,23 @@ export class CodexEventMapper {
     return [...compactionEnd, ...this.finishCompletedMainTurn(turn?.usage)];
   }
 
+  private recordAccountRateLimits(params: unknown): CodexMappedEvent[] {
+    const update = readCodexRateLimits(params);
+    // Updates are sparse: a window the update leaves out keeps its last known value.
+    if (update?.primary) this.accountRateLimits.primary = update.primary;
+    if (update?.secondary) this.accountRateLimits.secondary = update.secondary;
+    return [];
+  }
+
   private mapFailedMainTurn(turn: { error?: { message?: string; codexErrorInfo?: unknown } }): CodexMappedEvent[] {
     const error = turn.error?.message ?? "Codex turn failed";
     logger.error("Codex turn failed", { error, codexErrorInfo: turn.error?.codexErrorInfo });
-    const errorEvent: CodexMappedEvent = { type: AgentEventType.Error, threadId: this.threadId, error, failure: { kind: "fatal" } };
+    const failure = classifyCodexFailure({
+      codexErrorInfo: turn.error?.codexErrorInfo,
+      rateLimits: this.accountRateLimits,
+      retriesMade: this.turnRetriesMade,
+    }, Date.now());
+    const errorEvent: CodexMappedEvent = { type: AgentEventType.Error, threadId: this.threadId, error, failure };
     const events = [...this.drainPendingAssistantBoundary(false), ...this.finishActiveApprovalReviews("Review failed"), errorEvent];
     this.completeMainTurnState();
     return events;
@@ -2183,18 +2203,31 @@ export class CodexEventMapper {
   }
 
   private mapMainError(notification: CodexNotification): CodexMappedEvent[] {
-    const params = notification.params as { error?: { message?: string }; willRetry?: boolean };
+    const params = notification.params as { error?: { message?: string; codexErrorInfo?: unknown }; willRetry?: boolean };
     const error = params.error?.message ?? "Unknown error from codex app-server";
     logger.debug("Codex error notification", { error, willRetry: params.willRetry ?? false });
     const event = params.willRetry
-      ? { type: AgentEventType.ApiRetry, threadId: this.threadId, reason: error }
+      ? this.apiRetryEvent(error, params.error?.codexErrorInfo)
       : { type: AgentEventType.System, threadId: this.threadId, subtype: "provider.notice.codex-error", message: error };
     return [...this.drainPendingAssistantBoundary(false), event];
+  }
+
+  private apiRetryEvent(reason: string, codexErrorInfo: unknown): CodexMappedEvent {
+    this.turnRetriesMade += 1;
+    const errorStatus = readCodexErrorInfo(codexErrorInfo).status;
+    return {
+      type: AgentEventType.ApiRetry,
+      threadId: this.threadId,
+      reason,
+      attempt: this.turnRetriesMade,
+      ...(errorStatus === undefined ? {} : { errorStatus }),
+    };
   }
 
   /** Resets per-turn accumulated state between turns. */
   reset(): void {
     this.turnTokenUsage = undefined;
+    this.turnRetriesMade = 0;
     this.turnTokenBaseline = undefined;
     this.assistantItems.clear();
     this.assistantItemAliases.clear();
