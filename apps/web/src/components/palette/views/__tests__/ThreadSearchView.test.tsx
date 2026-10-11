@@ -91,7 +91,7 @@ beforeEach(() => {
     useCommandPaletteStore.getState().open({ intent: "threadSearch" });
     useCommandPaletteStore.getState().setQuery("quiet-lantern");
     threadAttentionStore.setState({ byThreadId: {}, onScreenThreadId: null });
-    useProjectAutomaticSetupStore.setState({ snapshotsByThread: {}, updateEpochByThread: {} });
+    useProjectAutomaticSetupStore.setState({ snapshotsByThread: {}, updateEpochByThread: {}, refreshFailedByThread: {} });
   });
 });
 

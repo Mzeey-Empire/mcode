@@ -48,7 +48,7 @@ const failed: WorkspaceEnvironmentAutomaticSetupSnapshot = {
 afterEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
-  useProjectAutomaticSetupStore.setState({ snapshotsByThread: {}, updateEpochByThread: {} });
+  useProjectAutomaticSetupStore.setState({ snapshotsByThread: {}, updateEpochByThread: {}, refreshFailedByThread: {} });
 });
 
 describe("ProjectAutomaticSetupControl", () => {
@@ -207,5 +207,30 @@ describe("ProjectAutomaticSetupControl", () => {
     expect(screen.getByText("installing dependencies")).toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     expect(screen.getByText("running project bootstrap")).toBeInTheDocument();
+  });
+
+  it("says a running setup's status may be stale while its refresh fails", async () => {
+    vi.useFakeTimers();
+    transport.getAutomaticSetup
+      .mockResolvedValueOnce({
+        ...failed,
+        attempt: { ...failed.attempt!, state: "running", reason: null, outcome: null, finishedAt: null, exitCode: null, output: "installing dependencies" },
+      })
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(failed);
+
+    function Setup() {
+      const automaticSetup = useProjectAutomaticSetup("thread-1");
+      return <ProjectAutomaticSetupCard snapshot={automaticSetup.snapshot} busy={automaticSetup.busy} error={automaticSetup.error} onRetry={automaticSetup.retrySetup} onContinue={automaticSetup.continueWithoutSetup} />;
+    }
+
+    render(<Setup />);
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not refresh setup status");
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(screen.getByRole("heading", { name: "Environment setup failed" })).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

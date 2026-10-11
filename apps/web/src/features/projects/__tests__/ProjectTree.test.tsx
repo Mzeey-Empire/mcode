@@ -1512,7 +1512,7 @@ describe("ProjectTree action-required indicator", () => {
     currentThread = makeThread({ id: "thread-pending", status: "active" });
     currentChecks = {};
     currentPendingStartup = {};
-    useProjectAutomaticSetupStore.setState({ snapshotsByThread: {}, updateEpochByThread: {} });
+    useProjectAutomaticSetupStore.setState({ snapshotsByThread: {}, updateEpochByThread: {}, refreshFailedByThread: {} });
     installWorkspaceMock();
     // Pre-expand the workspace so its threads render.
     window.localStorage.setItem(
