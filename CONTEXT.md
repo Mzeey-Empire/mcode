@@ -83,14 +83,24 @@ workspace is the main folder the user set up first. Worktrees rooted under
 that folder may host their own threads, but those threads still belong to
 the parent workspace.
 
-Workspace-level settings do not exist yet. All user-facing settings (default
-provider, utility provider, etc.) are global (user-level) today. Providers
-are installed on the user's machine, not on the workspace.
+The only workspace-level setting is the chosen [project icon](#project-icon).
+All other user-facing settings (default provider, utility provider, etc.) are
+global (user-level) today. Providers are installed on the user's machine, not
+on the workspace.
 
 **Project** is the user-facing name for a Workspace. Every UI string ("Add
 project", "Recent Projects", "No projects yet") says _project_; the code and
 this glossary say _Workspace_. They are the same thing.
 _Avoid_: using "project" in code or schema; reserve it for user-facing copy.
+
+### Project icon
+The small image that identifies a project in the sidebar, the new-thread
+breadcrumb, and the project chooser. A file the user chose inside the project
+wins. Otherwise Mcode looks for a favicon or logo in common places, such as
+`public/favicon.svg` or the icon an `index.html` links to. With neither, the
+project shows a monogram of its name's first letter. The icon always comes from
+the workspace folder, so every worktree of a project shows the same one.
+_Avoid_: "favicon" for the general idea; a favicon is only one source.
 
 ### Worktree
 A git worktree provisioned under a workspace so a thread can run against
