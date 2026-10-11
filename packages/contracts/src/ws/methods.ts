@@ -424,7 +424,8 @@ export const CreateAndSendSchema: () => z.ZodType<CreateAndSendInput, z.ZodTypeD
   createAndSendFields().refine(
     (d) => !d.forkedFromMessageId || d.parentThreadId,
     { message: "forkedFromMessageId requires parentThreadId", path: ["forkedFromMessageId"] },
-  ).refine((d) => d.mode !== "worktree" || Boolean(d.branch?.trim()), {
+  // An existing worktree's branch comes from its checkout, so only a new worktree must name one.
+  ).refine((d) => d.mode !== "worktree" || d.existingWorktreePath !== undefined || Boolean(d.branch?.trim()), {
     message: "Worktree mode requires a non-empty branch", path: ["branch"],
   }).superRefine((d, context) => {
     if (!d.startFromOrigin) return;

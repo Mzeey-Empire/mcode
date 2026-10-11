@@ -10,6 +10,11 @@ describe("CreateAndSendSchema", () => {
     if (!result.success) expect(result.error.issues.map((issue) => issue.path)).toEqual([["branch"]]);
   });
 
+  it("accepts an existing worktree without a branch, since its checkout names it", () => {
+    const input = { ...command, mode: "worktree", existingWorktreePath: "/checkout" };
+    expect(CreateAndSendSchema().parse(input)).toEqual(input);
+  });
+
   it("accepts worktree and branch with start from origin", () => {
     const input = { ...command, mode: "worktree", branch: "main", startFromOrigin: true };
     expect(CreateAndSendSchema().parse(input)).toEqual(input);

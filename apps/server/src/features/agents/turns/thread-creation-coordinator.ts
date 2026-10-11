@@ -113,7 +113,7 @@ class StartupCancelledError extends Error {
 }
 
 function initialBranch(command: CreateAndSendCommand): string {
-  if (command.mode === "worktree" && !command.branch?.trim()) {
+  if (command.mode === "worktree" && command.existingWorktreePath === undefined && !command.branch?.trim()) {
     throw new Error("Worktree mode requires a non-empty branch");
   }
   return command.branch ?? "main";
