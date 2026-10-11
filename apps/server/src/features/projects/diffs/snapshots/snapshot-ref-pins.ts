@@ -271,7 +271,8 @@ export class SnapshotRefPins {
       const [ref, committedAt] = listed.trim().split(" ");
       if (!ref) continue;
       const row = this.orm.select().from(turnReverts).where(eq(turnReverts.recoveryRef, ref)).get();
-      // Another worktree can be between pinning recovery bytes and inserting its journal row.
+      // The sweep locks the repository's first workspace path while a revert locks its own checkout, so a revert
+      // in a linked worktree can be between pinning recovery bytes and inserting its journal row.
       if (row ? !expiredRevert(row, cutoff) : !expiredOrphan(committedAt, orphanCutoff)) continue;
       await this.exec(cwd, ["update-ref", "-d", ref]);
       if (row) await this.writer.execute(expireTurnRevert, { id: row.id });
