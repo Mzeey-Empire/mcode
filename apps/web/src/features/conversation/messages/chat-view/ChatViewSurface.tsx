@@ -17,14 +17,11 @@ import { PlanQuestionWizard } from "@/components/chat/PlanQuestionWizard";
 import { ThreadTitleEditor } from "@/components/chat/ThreadTitleEditor";
 import { CanvasHeader } from "@/components/shell/CanvasHeader";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { useToastStore } from "@/stores/toastStore";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
-import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
-import { useThreadDraftStore, type ThreadDraftPayload } from "@/stores/threadDraftStore";
 import { OverviewLayer } from "@/features/thread-overview/overview-layer";
-import { ProjectAutomaticSetupCard, useProjectAutomaticSetup } from "@/features/projects/environment";
-import { ProjectCommandApprovalDialog } from "@/features/projects/environment/ProjectCommandApprovalDialog";
-import { OriginFetchActions, StartupStepsTrail, editStartupSetupScript, openStartupSetupTerminal, useFirstSendMotion, useStartingThread, useStartupFetchDecision, useThreadStartup } from "@/features/thread-startup";
+import { StartupStepsTrail, editStartupMessage, editStartupSetupScript, openStartupSetupTerminal, startupDecision, useFirstSendMotion, useStartingThread, useStartupTurnRetry, useThreadStartup } from "@/features/thread-startup";
 import { useThreadStartupLookup, useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { type WorkspaceThread, type ClientPreparingContext } from "@/lib/workspace-thread";
 import type { PendingStartup } from "@/features/projects/state/workspaceStore";
@@ -129,57 +126,70 @@ function startupKind(context: ClientPreparingContext | undefined, startup: Retur
   return "direct";
 }
 
-function showsAuthoritativeCancellation(thread: WorkspaceThread, startup: ReturnType<typeof useThreadStartup>): boolean {
-  return Boolean(thread.clientError) && startup?.state === "cancelled";
+const TEXT_ACTION_CLASS = "px-2 text-caption text-ink";
+
+function EditMessageAction({ thread, pendingStartup }: { readonly thread: WorkspaceThread; readonly pendingStartup: PendingStartup | undefined }) {
+  const [editing, setEditing] = useState(false);
+  const edit = () => {
+    setEditing(true);
+    editStartupMessage(thread, pendingStartup?.queuedMessage).catch((error: unknown) => {
+      setEditing(false);
+      useToastStore.getState().show({ kind: "failed", title: "Could not edit the message", meta: error instanceof Error ? error.message : undefined });
+    });
+  };
+  return <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} loading={editing} onClick={edit}>Edit message</Button>;
 }
 
-/** Recovery actions for a cancelled startup on a durable thread. */
-function CancelledStartupActions({ thread, startup }: { thread: WorkspaceThread; startup: NonNullable<ReturnType<typeof useThreadStartup>> }) {
-  const startOver = async () => {
-    // The vetoed message survives only in the restored draft (already consumed
-    // by the in-shell composer) or the husk thread's title. Set the prefill
-    // after delete: pendingPrefill is consumed by whichever composer is mounted
-    // when it lands, and the in-shell composer would eat it.
-    const prefill = useComposerDraftStore.getState().getDraft(thread.id)?.input || thread.title;
-    await useWorkspaceStore.getState().deleteThread(thread.id, thread.mode === "worktree");
-    if (prefill) useComposerDraftStore.getState().setPendingPrefill(prefill);
-  };
-  return (
-    <>
-      <Button
-        type="button"
-        variant="outline"
-        size="compact"
-        onClick={() => { void startOver().catch(() => undefined); }}
-      >
-        Start over
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="compact"
-        onClick={() => useThreadStartupStore.getState().dismissStartup(startup.startupId)}
-      >
-        Keep thread
-      </Button>
-    </>
-  );
+function AgentRetryAction({ threadId }: { readonly threadId: string }) {
+  const turnRetry = useStartupTurnRetry(threadId);
+  if (!turnRetry) return null;
+  return <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} loading={turnRetry.pending} onClick={turnRetry.retry}>Retry</Button>;
+}
+
+/** Thread-scoped actions for a stopped startup; the trail renders the setup and fetch decisions itself. */
+function ThreadStartupActions({ thread, startup, pendingStartup }: {
+  readonly thread: WorkspaceThread;
+  readonly startup: ThreadStartup;
+  readonly pendingStartup: PendingStartup | undefined;
+}) {
+  switch (startupDecision(startup)) {
+    case "cancelled":
+      return (
+        <>
+          <EditMessageAction thread={thread} pendingStartup={pendingStartup} />
+          <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} onClick={() => useThreadStartupStore.getState().dismissStartup(startup.startupId)}>Keep thread</Button>
+        </>
+      );
+    case "creation-failed":
+      return (
+        <>
+          {/* Only this client's pending creation can be replayed, so a reloaded failure offers Edit message alone. */}
+          {thread.clientError ? <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} onClick={() => { void useWorkspaceStore.getState().retryPreparingThread(thread.id); }}>Retry</Button> : null}
+          <EditMessageAction thread={thread} pendingStartup={pendingStartup} />
+        </>
+      );
+    case "agent-failed":
+      return <AgentRetryAction threadId={thread.id} />;
+    default:
+      return null;
+  }
 }
 
 /** The thread's startup trail with the recovery actions for its current state. */
-function ThreadStartupTrail({ thread, startup, pendingStartup, actions }: {
+function ThreadStartupTrail({ thread, startup, pendingStartup }: {
   readonly thread: WorkspaceThread;
   readonly startup: ReturnType<typeof useThreadStartup>;
   readonly pendingStartup: PendingStartup | undefined;
-  readonly actions?: ReactNode;
 }) {
   const threadId = startup?.threadId;
+  // A dismissed startup keeps its trail as history but no longer asks for a decision.
+  const dismissed = useThreadStartupStore((s) => startup ? s.dismissedStartupIds.has(startup.startupId) : false);
   return (
     <StartupStepsTrail
       startup={startup}
       startupId={pendingStartup?.startupId ?? startup?.startupId}
       kind={startupKind(pendingStartup?.context, startup)}
-      actions={startup?.state === "cancelled" ? <CancelledStartupActions thread={thread} startup={startup} /> : actions}
+      actions={startup && !dismissed ? <ThreadStartupActions thread={thread} startup={startup} pendingStartup={pendingStartup} /> : undefined}
       onOpenTerminal={threadId ? () => { void openStartupSetupTerminal(thread.workspace_id, threadId); } : undefined}
       onEditScript={threadId ? () => editStartupSetupScript(thread.workspace_id, threadId) : undefined}
     />
@@ -189,11 +199,6 @@ function ThreadStartupTrail({ thread, startup, pendingStartup, actions }: {
 /** One row laid out like a MessageList row, so the durable thread opens without a jump. */
 function PreparingTranscriptRow({ children, ref }: { readonly children: ReactNode; readonly ref?: Ref<HTMLDivElement> }) {
   return <div ref={ref} className="w-full px-4 py-2 sm:px-8"><div className={cn(PRIMARY_CONTENT_RAIL_CLASS, "min-w-0")}>{children}</div></div>;
-}
-
-/** Whether a resolved startup is stuck in a state the automatic-setup card can recover from. */
-function startupNeedsSetupRecovery(startup: ReturnType<typeof useThreadStartup>): boolean {
-  return startup?.state === "blocked" || startup?.state === "failed" || startup?.state === "interrupted";
 }
 
 /**
@@ -216,11 +221,6 @@ function PreparingThreadSurface({
 }) {
   const echoedStartup = useEchoedPendingStartup(thread, pendingStartup);
   const motion = useFirstSendMotion(thread.id);
-  const needsSetupRecovery = startupNeedsSetupRecovery(startup);
-  const automaticSetup = useProjectAutomaticSetup(
-    thread.id,
-    needsSetupRecovery && thread.mode === "worktree" && thread.worktree_managed === true,
-  );
   return (
     <div className="flex h-full flex-col bg-background" data-testid="thread-preparing-shell" data-thread-view>
       <ThreadHeader state={state} />
@@ -229,9 +229,10 @@ function PreparingThreadSurface({
           <MessageBubble message={preparingUserMessage(thread, echoedStartup)} />
         </PreparingTranscriptRow>
         <PreparingTranscriptRow ref={motion.steps}>
-          {thread.clientError && !showsAuthoritativeCancellation(thread, startup)
+          {/* A creation error the server never recorded as a stopped startup has no trail state to show. */}
+          {thread.clientError && !startupDecision(startup)
             ? <CollapsibleError error={thread.clientError} onRetry={() => { void useWorkspaceStore.getState().retryPreparingThread(thread.id); }} onDismiss={() => useWorkspaceStore.getState().dismissPreparingThread(thread.id)} />
-            : <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={pendingStartup} actions={<StartupAutomaticSetupActions automaticSetup={automaticSetup} thread={thread} startup={startup} pendingStartup={pendingStartup} />} />}
+            : <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={pendingStartup} />}
         </PreparingTranscriptRow>
       </div>
       <div ref={motion.composer}>
@@ -503,139 +504,12 @@ function ConversationStageContent({
   );
 }
 
-/** Renders the conversation stage without taking over MessageList scrolling. */
-function SetupRecoveryActions({ automaticSetup }: { readonly automaticSetup: ReturnType<typeof useProjectAutomaticSetup> }) {
-  const retrying = automaticSetup.busy === "retry";
-  const continuing = automaticSetup.busy === "continue";
-  return (
-    <>
-      <Button type="button" variant="outline" size="compact" disabled={automaticSetup.busy !== null} onClick={() => { void automaticSetup.retrySetup(); }}>
-        {retrying ? <Spinner size={12} aria-hidden /> : null}
-        Retry setup
-      </Button>
-      <Button type="button" variant="outline" size="compact" disabled={automaticSetup.busy !== null} onClick={() => { void automaticSetup.continueWithoutSetup(); }}>
-        {continuing ? <Spinner size={12} aria-hidden /> : null}
-        Continue without setup
-      </Button>
-    </>
-  );
-}
-
-function preserveIncompleteDraft(thread: WorkspaceThread, draft: ThreadDraftPayload["draft"]): string {
-  const id = useThreadDraftStore.getState().saveDraft({
-    workspaceId: thread.workspace_id,
-    draft,
-    selection: {
-      interactionMode: thread.interaction_mode ?? "build",
-      permissionMode: thread.permission_mode ?? "full",
-      orchestrationMode: thread.orchestration_mode ?? "standard",
-      approvalReviewMode: "manual",
-      thinking: thread.thinking,
-    },
-    target: {
-      mode: "worktree",
-      // An empty branch follows the project's current-else-default branch when the draft reopens.
-      branch: thread.base_branch || thread.branch,
-      branchSource: "branch",
-      branchRemote: null,
-      startFromOrigin: false,
-      selectedWorktree: null,
-    },
-  });
-  if (!id) throw new Error("Could not keep this draft");
-  useComposerDraftStore.getState().removeDraftAfterAttachmentTransfer(thread.id);
-  return id;
-}
-
-function RemoveIncompleteThreadAction({ thread, pendingStartup }: {
-  readonly thread: WorkspaceThread;
-  readonly pendingStartup: PendingStartup | undefined;
-}) {
-  const [removing, setRemoving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const remove = async () => {
-    const draftStore = useComposerDraftStore.getState();
-    const workspace = useWorkspaceStore.getState();
-    const draft = draftStore.getDraft(thread.id);
-    const prompt = pendingStartup?.queuedMessage || thread.title;
-    const threadDraftStore = useThreadDraftStore.getState();
-    let savedDraftId: string | null = null;
-    setRemoving(true);
-    setError(null);
-    try {
-      if (draft) savedDraftId = preserveIncompleteDraft(thread, draft);
-      await workspace.deleteThread(thread.id, true);
-    } catch (failure) {
-      if (savedDraftId && draft) {
-        draftStore.saveDraft(thread.id, draft);
-        threadDraftStore.removeDraftAfterAttachmentTransfer(savedDraftId);
-      }
-      setError(String(failure));
-      return;
-    } finally {
-      setRemoving(false);
-    }
-    if (savedDraftId) workspace.openThreadDraft(thread.workspace_id, savedDraftId);
-    else if (prompt) draftStore.setPendingPrefill(prompt);
-  };
-  return (
-    <>
-      <Button type="button" variant="outline" size="compact" disabled={removing} onClick={() => { void remove(); }}>
-        Remove incomplete thread
-      </Button>
-      {error && <span role="alert">{error}</span>}
-    </>
-  );
-}
-
-function StartupAutomaticSetupActions({ automaticSetup, thread, startup, pendingStartup }: {
-  readonly automaticSetup: ReturnType<typeof useProjectAutomaticSetup>;
-  readonly thread: WorkspaceThread;
-  readonly startup: ReturnType<typeof useThreadStartup>;
-  readonly pendingStartup: PendingStartup | undefined;
-}) {
-  const fetchDecision = useStartupFetchDecision(startup);
-  if (fetchDecision) return <OriginFetchActions decision={fetchDecision} />;
-  if (endedBeforeSetupRan(automaticSetup, thread, startup)) {
-    return <RemoveIncompleteThreadAction thread={thread} pendingStartup={pendingStartup} />;
-  }
-  return <StartupAutomaticSetupAction automaticSetup={automaticSetup} />;
-}
-
-/** A managed worktree startup that failed before its agent ran and never attempted setup. */
-function endedBeforeSetupRan(
-  automaticSetup: ReturnType<typeof useProjectAutomaticSetup>,
-  thread: WorkspaceThread,
-  startup: ReturnType<typeof useThreadStartup>,
-): boolean {
-  return startup?.threadId === thread.id
-    && thread.mode === "worktree" && thread.worktree_managed === true
-    && (startup.state === "failed" || startup.state === "interrupted")
-    && startup.phase !== "agent"
-    && automaticSetup.snapshotLoaded && !automaticSetup.snapshot.attempt;
-}
-
-function StartupAutomaticSetupAction({ automaticSetup }: { readonly automaticSetup: ReturnType<typeof useProjectAutomaticSetup> }) {
-  const attempt = automaticSetup.snapshot.attempt;
-  switch (attempt?.state) {
-    case "awaiting-approval":
-      return (
-        <ProjectCommandApprovalDialog
-          approval={attempt.snapshot?.approval ?? null}
-          script={attempt.snapshot?.script ?? null}
-          onApprove={async () => {
-            await automaticSetup.approveSetup();
-            return true;
-          }}
-          onCancel={() => undefined}
-        />
-      );
-    case "failed":
-    case "interrupted":
-      return <SetupRecoveryActions automaticSetup={automaticSetup} />;
-    default:
-      return null;
-  }
+function startupHoldsShell(startup: ThreadStartup, state: ChatViewState, startupDismissed: boolean): boolean {
+  // A cancelled startup leaves an ordinary empty thread behind: keep the record
+  // visible with its actions until the user dismisses it or starts a new turn.
+  if (startup.state === "cancelled") return !startupDismissed && !state.isAgentRunning;
+  // A startup whose agent failed has a durable first message, so the transcript shows it with the trail and its Retry.
+  return !state.targetPaintable || (startup.state !== "completed" && startupDecision(startup) !== "agent-failed");
 }
 
 function shouldKeepPreparingShell(
@@ -648,19 +522,12 @@ function shouldKeepPreparingShell(
 ): boolean {
   if (thread.clientPreparing || thread.clientError) return true;
   if (hasConversationHold(state)) return false;
-  // A cancelled startup leaves an ordinary empty thread behind: keep the record
-  // visible with its actions until the user dismisses it or starts a new turn.
-  if (startup?.state === "cancelled") return !startupDismissed && !state.isAgentRunning;
-  if (startup !== undefined) return !state.targetPaintable || startup.state !== "completed";
+  if (startup !== undefined) return startupHoldsShell(startup, state, startupDismissed);
   return pendingStartup !== undefined && startupResolving;
 }
 
-function ChatMessageStage({ state, interactions, automaticSetup, startupTrail, selectedTextCommentEditor, selectedTextCommentSourceNavigation, onSubagentSelect, onOpenSubagents }: Pick<ChatViewSurfaceProps, "state" | "interactions" | "selectedTextCommentEditor" | "selectedTextCommentSourceNavigation" | "onSubagentSelect" | "onOpenSubagents"> & { readonly automaticSetup: ReturnType<typeof useProjectAutomaticSetup>; readonly startupTrail: ReactNode }) {
+function ChatMessageStage({ state, interactions, startupTrail, selectedTextCommentEditor, selectedTextCommentSourceNavigation, onSubagentSelect, onOpenSubagents }: Pick<ChatViewSurfaceProps, "state" | "interactions" | "selectedTextCommentEditor" | "selectedTextCommentSourceNavigation" | "onSubagentSelect" | "onOpenSubagents"> & { readonly startupTrail: ReactNode }) {
   const thread = state.activeThread!;
-  // An empty leading row still takes its 16px padding, which would push the transcript below the preparing surface.
-  const automaticSetupTranscriptBlock = thread.mode === "worktree" && thread.worktree_managed === true && automaticSetup.snapshot.gate === "blocked"
-    ? <ProjectAutomaticSetupCard snapshot={automaticSetup.snapshot} busy={automaticSetup.busy} error={automaticSetup.error} onContinue={automaticSetup.continueWithoutSetup} onRetry={automaticSetup.retrySetup} onApprove={automaticSetup.approveSetup} />
-    : undefined;
   const messageListProps = {
     contentPaddingRight: state.overviewPaddingRight,
     onBranch: interactions.onBranch,
@@ -682,7 +549,7 @@ function ChatMessageStage({ state, interactions, automaticSetup, startupTrail, s
   };
   return (
     <div data-testid="chat-message-stage" className="animate-fade-up-in flex-1 min-h-0">
-      <ConversationStageContent stage={getConversationStage(state)} state={state} thread={thread} leadingContent={automaticSetupTranscriptBlock} afterFirstUserContent={startupTrail} messageListProps={messageListProps} />
+      <ConversationStageContent stage={getConversationStage(state)} state={state} thread={thread} leadingContent={undefined} afterFirstUserContent={startupTrail} messageListProps={messageListProps} />
     </div>
   );
 }
@@ -729,10 +596,6 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
     startingThread,
   } = props;
   const thread = state.activeThread!;
-  const automaticSetup = useProjectAutomaticSetup(
-    thread.id,
-    thread.mode === "worktree" && thread.worktree_managed === true,
-  );
   const conversationErrorBanner = state.messageCount > 0 || state.isAgentRunning ? conversationErrorLabel(state) : null;
   const showCliError = isVisibleCliError(state.sessionError, dismissedError);
   return (
@@ -746,7 +609,7 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
         <HandoffFallbackNotice threadId={thread.id} />
         <SavingDelayedDialog open={state.savingStatus?.mode === "saving-delayed"} onStopSafely={interactions.onStopSafely} onContinueWithoutSaving={interactions.onContinueWithoutSaving} />
         <TurnSavingNotice lostProgress={state.lostProgress} />
-        <ChatMessageStage state={state} interactions={interactions} automaticSetup={automaticSetup} startupTrail={startup ? <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={undefined} /> : undefined} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />
+        <ChatMessageStage state={state} interactions={interactions} startupTrail={startup ? <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={undefined} /> : undefined} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />
         {showCliError && <CliErrorNotice error={state.sessionError!} onDismiss={interactions.onDismissCliError} onOpenSettings={interactions.onOpenSettings} />}
         <ActiveThreadComposer state={state} interactions={interactions} pendingSelectedTextComment={pendingSelectedTextComment} pendingSelectedTextCommentDeletion={pendingSelectedTextCommentDeletion} pendingSelectedTextCommentEditor={pendingSelectedTextCommentEditor} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} startingThread={startingThread} />
       </OverviewLayer>
@@ -771,6 +634,5 @@ export function ChatViewSurface(props: ChatViewSurfaceProps) {
   if (!state.activeThreadId) return <NewThreadStartColumn projectName={state.activeWorkspaceName || undefined} workspaceId={state.activeWorkspaceId ?? undefined} draftId={state.activeDraftId} />;
   if (!state.activeThread) return <MissingThreadSurface />;
   if (shouldKeepPreparingShell(state.activeThread, state, startupLookup.startup, startupLookup.resolving, pendingStartup, startupDismissed)) return <PreparingThreadSurface thread={state.activeThread} state={state} startup={startupLookup.startup} pendingStartup={pendingStartup} startingThread={startingThread} />;
-  // Keeping a cancelled startup's thread dismisses its record, so the trail leaves the transcript too.
-  return <ActiveThreadSurface {...props} startup={startupDismissed ? undefined : startupLookup.startup} startingThread={startingThread} />;
+  return <ActiveThreadSurface {...props} startup={startupLookup.startup} startingThread={startingThread} />;
 }

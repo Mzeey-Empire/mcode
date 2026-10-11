@@ -7,6 +7,10 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 const startupTransport = {
   cancelThreadStartup: vi.fn(),
   getAutomaticSetup: vi.fn(),
+  retryAutomaticSetup: vi.fn(),
+  continueAutomaticSetup: vi.fn(),
+  approveWorkspaceEnvironmentCommand: vi.fn(),
+  resolveThreadStartup: vi.fn(),
 };
 
 vi.mock("@/transport", () => ({
@@ -60,12 +64,18 @@ function rowLabels() {
 }
 
 describe("StartupStepsTrail", () => {
-  beforeEach(() => setupScript(null));
+  beforeEach(() => {
+    setupScript(null);
+    const gate = { gate: "not-required", attempt: null, queuedTurns: [] };
+    startupTransport.retryAutomaticSetup.mockResolvedValue(gate);
+    startupTransport.continueAutomaticSetup.mockResolvedValue(gate);
+    startupTransport.approveWorkspaceEnvironmentCommand.mockResolvedValue(undefined);
+    startupTransport.resolveThreadStartup.mockResolvedValue(startup({ revision: 9 }));
+  });
 
   afterEach(() => {
     vi.useRealTimers();
-    startupTransport.cancelThreadStartup.mockReset();
-    startupTransport.getAutomaticSetup.mockReset();
+    for (const mock of Object.values(startupTransport)) mock.mockReset();
     useThreadStartupStore.setState({ recordsByStartupId: {}, startupIdByThreadId: {} });
   });
 
@@ -95,17 +105,20 @@ describe("StartupStepsTrail", () => {
     expect(startupTransport.getAutomaticSetup).toHaveBeenCalledTimes(1);
   });
 
-  it("re-reads the script while setup runs until the attempt records it, then stops", async () => {
+  it("re-reads the script on each pushed revision until the attempt records it, never on a timer", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse(at(3)) });
-    renderTrail({ startup: startup(), kind: "managed-worktree" });
+    const { rerender } = renderTrail({ startup: startup(), kind: "managed-worktree" });
     await waitFor(() => expect(startupTransport.getAutomaticSetup).toHaveBeenCalledTimes(1));
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(startupTransport.getAutomaticSetup).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("startup-step-setup")).not.toHaveTextContent("bun install");
 
     setupScript("bun install");
-    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
-    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("bun install");
+    rerender(<TooltipProvider><StartupStepsTrail startup={startup({ revision: 2 })} kind="managed-worktree" /></TooltipProvider>);
+    await waitFor(() => expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("bun install"));
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    rerender(<TooltipProvider><StartupStepsTrail startup={startup({ revision: 3 })} kind="managed-worktree" /></TooltipProvider>);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
     expect(startupTransport.getAutomaticSetup).toHaveBeenCalledTimes(2);
   });
 
@@ -157,7 +170,7 @@ describe("StartupStepsTrail", () => {
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
   });
 
-  it("shows a setup the server blocked on a failed command as failed, keeping its output reachable", async () => {
+  it("offers Retry setup, Skip setup and Show output for a setup that failed, without Cancel", async () => {
     setupScript("bun install");
     renderTrail({
       startup: startup({
@@ -177,9 +190,67 @@ describe("StartupStepsTrail", () => {
     expect(screen.getByTestId("startup-step-setup")).toHaveAttribute("data-tone", "failed");
     expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("Setup failedexit 1 · 0:14");
     expect(screen.getByRole("alert")).toHaveTextContent("error: lockfile had changes");
-    await userEvent.click(screen.getByRole("button", { name: "Show setup output" }));
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Show output" }));
     expect(screen.getByRole("log", { name: "Setup output" })).toHaveTextContent("error: lockfile had changes");
     expect(screen.getByRole("button", { name: "Open terminal" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide output" })).toHaveAttribute("aria-expanded", "true");
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry setup" }));
+    expect(startupTransport.retryAutomaticSetup).toHaveBeenCalledWith("thread-1");
+    await userEvent.click(screen.getByRole("button", { name: "Skip setup" }));
+    expect(startupTransport.continueAutomaticSetup).toHaveBeenCalledWith("thread-1");
+  });
+
+  it("asks to run a shared setup with its command, then runs it on the server's approval", async () => {
+    const approval = { target: "setup", fingerprint: "fp-1" };
+    startupTransport.getAutomaticSetup.mockResolvedValue({
+      gate: "blocked",
+      attempt: { state: "awaiting-approval", snapshot: { script: "bun install\nbun run build", approval } },
+      queuedTurns: [],
+    });
+    renderTrail({
+      startup: startup({
+        state: "blocked",
+        steps: [
+          { phase: "thread", state: "completed" },
+          { phase: "setup", state: "blocked", startedAt: at(2) },
+          { phase: "agent", state: "pending" },
+        ],
+        block: { code: "SETUP_APPROVAL_REQUIRED", message: "Setup needs approval", actions: ["retry", "continue"] },
+      }),
+      kind: "managed-worktree",
+    });
+
+    expect(screen.getByTestId("startup-step-setup")).toHaveAttribute("data-tone", "approval");
+    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent(/^Setup needs approval$/);
+    await waitFor(() => expect(screen.getByTestId("startup-detail")).toHaveTextContent("$ bun install"));
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Run setup" }));
+    expect(startupTransport.approveWorkspaceEnvironmentCommand).toHaveBeenCalledWith("thread-1", "setup", "fp-1");
+    await userEvent.click(screen.getByRole("button", { name: "Skip setup" }));
+    expect(startupTransport.continueAutomaticSetup).toHaveBeenCalledWith("thread-1");
+  });
+
+  it("offers Retry and Start from local for a failed origin fetch, without Cancel", async () => {
+    renderTrail({
+      startup: startup({
+        state: "blocked",
+        phase: "fetch",
+        steps: [
+          { phase: "fetch", state: "blocked", startedAt: at(0), endedAt: at(3), detail: { phase: "fetch", ref: "origin/main", branch: "main" } },
+          { phase: "thread", state: "pending" },
+          { phase: "worktree", state: "pending" },
+        ],
+        block: { code: "start_from_origin_failed", message: "Could not fetch origin/main", actions: ["retry", "continue"] },
+      }),
+      kind: "managed-worktree",
+    });
+
+    expect(screen.getByTestId("startup-detail")).toHaveTextContent("Could not fetch origin/main");
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Start from local main" }));
+    expect(startupTransport.resolveThreadStartup).toHaveBeenCalledWith(startupId, "continue");
   });
 
   it("shows only the current attempt's output after Retry setup", async () => {
@@ -287,6 +358,7 @@ describe("StartupStepsTrail", () => {
       kind: "managed-worktree",
     });
     expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("Cancelled0:09");
+    expect(screen.getByTestId("startup-step-setup")).toHaveAttribute("data-tone", "cancelled");
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
   });
 });

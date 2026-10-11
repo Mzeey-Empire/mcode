@@ -12,9 +12,3 @@ export {
   ProjectActionTerminalView,
   useProjectActions,
 } from "./ProjectActionControl";
-/** Automatic Project Setup gate controls rendered in the Thread transcript. */
-export {
-  ProjectAutomaticSetupCard,
-  useProjectAutomaticSetup,
-  useProjectAutomaticSetupStore,
-} from "./ProjectAutomaticSetupControl";

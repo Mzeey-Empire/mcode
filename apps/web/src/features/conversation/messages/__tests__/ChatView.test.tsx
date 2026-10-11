@@ -157,7 +157,8 @@ vi.mock("@/stores/composerDraftStore", () => ({
   ),
 }));
 
-vi.mock("@/transport", () => ({
+vi.mock("@/transport", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/transport")>(),
   getTransport: chatViewGetTransportMock,
 }));
 
@@ -210,7 +211,7 @@ import { useRecoveryIncidentStore } from "@/features/recovery/state/recoveryInci
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { createMockMessage } from "@/__tests__/mocks/transport";
 import { useThreadStartupStore } from "@/features/thread-startup";
-import { useProjectAutomaticSetupStore } from "@/features/projects/environment/ProjectAutomaticSetupControl";
+import { useToastStore } from "@/stores/toastStore";
 import { useThreadDraftStore } from "@/stores/threadDraftStore";
 import {
   __resetThreadSwitchTelemetryForTests,
@@ -593,56 +594,6 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(chatViewTransportMock.continueWithoutSaving).not.toHaveBeenCalled();
   });
 
-  it("places failed automatic Setup before the queued first user message", async () => {
-    const thread = makeThread({ mode: "worktree", worktree_managed: true });
-    const activeRecord = createEmptyThreadRecord();
-    activeRecord.messages = [createMockMessage({
-      id: "message-1",
-      thread_id: thread.id,
-      role: "user",
-      content: "Build the feature",
-    })];
-    const failedSetup: WorkspaceEnvironmentAutomaticSetupSnapshot = {
-      gate: "blocked",
-      attempt: {
-        id: "attempt-1",
-        state: "failed",
-        reason: "setup_failed",
-        snapshot: {
-          platform: "windows",
-          script: "di",
-          checkoutPath: "C:\\repo",
-          terminal: { executable: "pwsh.exe", arguments: ["-Command", "di"] },
-        },
-        outcome: "command_failure",
-        createdAt: "2026-08-22T12:00:00.000Z",
-        startedAt: "2026-08-22T12:00:00.000Z",
-        finishedAt: "2026-08-22T12:00:01.000Z",
-        exitCode: 1,
-        output: "command not found",
-        outputTruncated: false,
-      },
-      queuedTurns: [{
-        id: "submission-1",
-        messageId: "message-1",
-        state: "queued",
-        createdAt: "2026-08-22T12:00:00.000Z",
-        dispatchedAt: null,
-      }],
-    };
-    chatViewTransportMock.getAutomaticSetup.mockResolvedValue(failedSetup);
-    setupWorkspaceMock(defaultWorkspaceState({ threads: [thread] }));
-    chatViewThreadMockRef.current = defaultThreadState({ activeRecord });
-
-    render(<ChatView />);
-
-    const setupBlock = await screen.findByLabelText("Environment setup");
-    const queuedMessage = screen.getByTestId("queued-first-user-message");
-    expect(setupBlock.compareDocumentPosition(queuedMessage) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
-    expect(screen.getByLabelText("Environment setup terminal")).toHaveTextContent("di");
-    expect(chatViewTransportMock.getAutomaticSetup).toHaveBeenCalledWith(thread.id);
-  });
-
   it("keeps the preparing shell and setup recovery actions while Setup is blocked", async () => {
     const startupId = "00000000-0000-4000-8000-000000000001";
     const thread = makeThread({ mode: "worktree", worktree_managed: true });
@@ -719,7 +670,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.queryByTestId("chat-message-stage")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Environment setup")).toBeNull();
     await user.click(await screen.findByRole("button", { name: "Retry setup" }));
-    await user.click(screen.getByRole("button", { name: "Continue without setup" }));
+    await user.click(screen.getByRole("button", { name: "Skip setup" }));
     expect(chatViewTransportMock.retryAutomaticSetup).toHaveBeenCalledWith(thread.id);
     expect(chatViewTransportMock.continueAutomaticSetup).toHaveBeenCalledWith(thread.id);
   });
@@ -1183,7 +1134,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.queryByTestId("chat-message-stage")).not.toBeInTheDocument();
   });
 
-  it("keeps the authoritative cancelled startup card when optimistic creation rejects", () => {
+  it("keeps the authoritative cancelled startup trail when optimistic creation rejects", () => {
     const cancelledStartupId = "00000000-0000-4000-8000-000000000021";
     const startupThread = {
       ...makeThread({ id: "thread-placeholder", title: "Cancelled setup" }),
@@ -1232,12 +1183,14 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.getByTestId("startup-step-setup")).toHaveAttribute("data-tone", "cancelled");
     expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("Cancelled");
     expect(screen.getByTestId("startup-step-agent")).toHaveAttribute("data-tone", "pending");
-    expect(screen.getByRole("button", { name: "Start over" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit message" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Keep thread" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
     expect(screen.queryByText("Error: Thread startup was cancelled")).toBeNull();
     expect(screen.queryByTestId("chat-message-stage")).not.toBeInTheDocument();
   });
 
-  it("offers removal after a bound managed startup stops before setup begins", async () => {
+  it("moves the first message to a new-thread draft when a startup stops before setup begins", async () => {
     const thread = makeThread({
       id: "thread-incomplete",
       title: "Incomplete thread",
@@ -1264,10 +1217,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       createdAt: "2026-09-02T12:00:00.000Z",
       updatedAt: "2026-09-02T12:00:00.000Z",
     });
-    let resolveSetup!: (snapshot: WorkspaceEnvironmentAutomaticSetupSnapshot) => void;
-    chatViewTransportMock.getAutomaticSetup.mockReturnValueOnce(new Promise((resolve) => {
-      resolveSetup = resolve;
-    }));
+    useThreadDraftStore.setState({ drafts: {} });
     const workspace = defaultWorkspaceState({
       activeThreadId: thread.id,
       threads: [thread],
@@ -1279,17 +1229,16 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
 
     render(<ChatView />);
-    expect(screen.queryByRole("button", { name: "Remove incomplete thread" })).toBeNull();
-    await act(async () => {
-      resolveSetup({ gate: "not-required", attempt: null, queuedTurns: [] });
-    });
-    await userEvent.setup().click(screen.getByRole("button", { name: "Remove incomplete thread" }));
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Edit message" }));
 
+    const saved = Object.values(useThreadDraftStore.getState().drafts)[0];
+    expect(saved?.draft.input).toBe("Build the feature");
     expect(workspace.deleteThread).toHaveBeenCalledWith(thread.id, true);
-    expect(chatViewSetPendingPrefillMock).toHaveBeenCalledWith("Build the feature");
+    expect(workspace.openThreadDraft).toHaveBeenCalledWith(thread.workspace_id, saved?.id);
   });
 
-  it("moves the full unsent draft before removing an incomplete thread", async () => {
+  it("moves the full unsent draft before Edit message removes the stopped thread", async () => {
     const thread = makeThread({
       id: "thread-incomplete-rich-draft",
       mode: "worktree",
@@ -1317,7 +1266,6 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       createdAt: "2026-09-02T12:00:00.000Z",
       updatedAt: "2026-09-02T12:00:00.000Z",
     });
-    chatViewTransportMock.getAutomaticSetup.mockResolvedValueOnce({ gate: "not-required", attempt: null, queuedTurns: [] });
     const workspace = defaultWorkspaceState({ activeThreadId: thread.id, threads: [thread] });
     workspace.deleteThread.mockRejectedValueOnce(new Error("Delete failed"));
     setupWorkspaceMock(workspace);
@@ -1343,14 +1291,14 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
     render(<ChatView />);
     const user = userEvent.setup();
-    const remove = await screen.findByRole("button", { name: "Remove incomplete thread" });
-    await user.click(remove);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Delete failed");
+    const edit = await screen.findByRole("button", { name: "Edit message" });
+    await user.click(edit);
+    await waitFor(() => expect(useToastStore.getState().toasts[0]).toEqual(expect.objectContaining({ title: "Could not edit the message", meta: "Delete failed" })));
     expect(useThreadDraftStore.getState().drafts).toEqual({});
     expect(chatViewSaveDraftMock).toHaveBeenCalledWith(thread.id, draft);
     expect(revokePreview).not.toHaveBeenCalled();
 
-    await user.click(remove);
+    await user.click(edit);
 
     const saved = Object.values(useThreadDraftStore.getState().drafts)[0];
     expect(saved?.draft).toEqual(draft);
@@ -1363,7 +1311,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     revokePreview.mockRestore();
   });
 
-  it("does not offer incomplete-thread removal when agent startup fails after checkout", async () => {
+  it("offers no Edit message or Retry when agent startup fails without an errored turn", async () => {
     const thread = makeThread({
       id: "thread-agent-failed",
       mode: "worktree",
@@ -1389,15 +1337,13 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       createdAt: "2026-09-02T12:00:00.000Z",
       updatedAt: "2026-09-02T12:00:00.000Z",
     });
-    chatViewTransportMock.getAutomaticSetup.mockResolvedValue({ gate: "not-required", attempt: null, queuedTurns: [] });
     setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: thread.id, threads: [thread] }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
 
     render(<ChatView />);
-    await waitFor(() => expect(useProjectAutomaticSetupStore.getState().snapshotsByThread[thread.id])
-      .toEqual({ gate: "not-required", attempt: null, queuedTurns: [] }));
     expect(screen.getByTestId("startup-step-agent")).toHaveTextContent("Thread didn't start");
-    expect(screen.queryByRole("button", { name: "Remove incomplete thread" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit message" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
   it("keeps a recovered startup visible while the durable thread hydrates", () => {

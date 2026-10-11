@@ -4,11 +4,13 @@ import type { ThreadStartup, ThreadStartupKind } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { OriginFetchActions } from "./OriginFetchActions";
 import { StartupSetupOutput } from "./StartupSetupOutput";
-import { useStartupCancel, useStartupSetupScript } from "./useStartupActions";
+import { useStartupCancel, useStartupFetchDecision, useStartupSetupDecision, useStartupSetupGate, type StartupSetupGate } from "./useStartupActions";
 import {
   placeholderTrailRows,
   setupCommandLine,
+  startupDecision,
   startupHasLiveStep,
   startupTrailRows,
   startupTrailAnnouncement,
@@ -25,7 +27,10 @@ export interface StartupStepsTrailProps {
   readonly startupId?: string;
   /** Kind used to draw pending placeholder rows before the record arrives. */
   readonly kind: ThreadStartupKind;
-  /** Recovery and decision controls rendered in the action row. */
+  /**
+   * Thread-scoped recovery controls for the action row. The trail renders the setup and fetch
+   * decisions itself, since they act on the startup alone.
+   */
   readonly actions?: ReactNode;
   readonly onOpenTerminal?: () => void;
   readonly onEditScript?: () => void;
@@ -36,8 +41,9 @@ const LABEL_CLASS: Record<TrailRowTone, string> = {
   live: "font-medium text-ink",
   pending: "text-muted",
   failed: "font-medium text-error",
+  approval: "font-medium text-ink",
   skipped: "text-muted",
-  cancelled: "font-medium text-ink",
+  cancelled: "font-medium text-muted",
 };
 
 function StatusMark({ tone }: { readonly tone: TrailRowTone }) {
@@ -50,6 +56,8 @@ function StatusMark({ tone }: { readonly tone: TrailRowTone }) {
       return <span className="size-1 rounded-full bg-muted" />;
     case "failed":
       return <CircleAlert size={14} className="text-error" />;
+    case "approval":
+      return <CircleAlert size={14} className="text-muted" />;
     case "skipped":
       return <Minus size={12} className="text-muted" />;
     case "cancelled":
@@ -133,27 +141,85 @@ function useLiveNow(live: boolean): number {
   return now;
 }
 
-function StartupDetailLine({ startup }: { readonly startup: ThreadStartup | undefined }) {
+function approvalDetail(startup: ThreadStartup | undefined, setupScript: string | undefined): string | undefined {
+  const command = setupCommandLine(setupScript);
+  return command ? `$ ${command}` : startup?.block?.message;
+}
+
+function detailText(startup: ThreadStartup | undefined, setupScript: string | undefined): string | undefined {
+  if (startupDecision(startup) === "setup-approval") return approvalDetail(startup, setupScript);
   const reason = startup?.block ?? startup?.error;
-  const detail = reason?.detail ?? reason?.message;
+  return reason?.detail ?? reason?.message;
+}
+
+function StartupDetailLine({ startup, setupScript }: { readonly startup: ThreadStartup | undefined; readonly setupScript: string | undefined }) {
+  const detail = detailText(startup, setupScript);
   if (!detail) return null;
   return <p role="alert" data-testid="startup-detail" className="whitespace-pre-wrap break-words pb-2 pl-6 pt-1 font-mono text-caption text-muted">{detail}</p>;
 }
 
-function TrailActions({ actions, onCancel }: { readonly actions: ReactNode; readonly onCancel?: () => void }) {
-  if (!actions && !onCancel) return null;
+/** Paper 04f text action: a compact ghost button set in ink at caption size. */
+const TEXT_ACTION_CLASS = "px-2 text-caption text-ink";
+
+function SetupFailedActions({ threadId, gate, outputOpen, onToggleOutput }: {
+  readonly threadId: string;
+  readonly gate: StartupSetupGate;
+  readonly outputOpen: boolean;
+  readonly onToggleOutput: () => void;
+}) {
+  const decision = useStartupSetupDecision(threadId, gate.approval);
+  const busy = decision.pending !== null;
   return (
-    <div data-testid="startup-actions" className="flex flex-wrap items-center gap-2 pl-4">
-      {actions}
-      {onCancel ? <Button type="button" variant="ghost" size="compact" className="px-2 text-caption text-ink" onClick={onCancel}>Cancel</Button> : null}
-    </div>
+    <>
+      <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} disabled={busy} loading={decision.pending === "retry"} onClick={() => decision.run("retry")}>Retry setup</Button>
+      <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} disabled={busy} loading={decision.pending === "skip"} onClick={() => decision.run("skip")}>Skip setup</Button>
+      <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} aria-expanded={outputOpen} onClick={onToggleOutput}>{outputOpen ? "Hide output" : "Show output"}</Button>
+    </>
   );
 }
 
-function TrailSteps({ startup, kind, setupScript, onOpenTerminal, onEditScript }: Pick<StartupStepsTrailProps, "startup" | "kind" | "onOpenTerminal" | "onEditScript"> & {
-  readonly setupScript: string | undefined;
+function SetupApprovalActions({ threadId, gate }: { readonly threadId: string; readonly gate: StartupSetupGate }) {
+  const decision = useStartupSetupDecision(threadId, gate.approval);
+  const busy = decision.pending !== null;
+  return (
+    <>
+      <Button type="button" variant="default" size="compact" className="px-3 text-caption" disabled={busy || !gate.approval} loading={decision.pending === "approve"} onClick={() => decision.run("approve")}>Run setup</Button>
+      <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} disabled={busy} loading={decision.pending === "skip"} onClick={() => decision.run("skip")}>Skip setup</Button>
+    </>
+  );
+}
+
+function FetchFailedActions({ startup }: { readonly startup: ThreadStartup }) {
+  const decision = useStartupFetchDecision(startup);
+  return decision ? <OriginFetchActions decision={decision} /> : null;
+}
+
+/** The startup-scoped decision the trail offers itself, ahead of any thread-scoped host actions. */
+function StartupDecisionActions({ startup, gate, outputOpen, onToggleOutput }: {
+  readonly startup: ThreadStartup;
+  readonly gate: StartupSetupGate;
+  readonly outputOpen: boolean;
+  readonly onToggleOutput: () => void;
 }) {
-  const [outputOpen, setOutputOpen] = useState(false);
+  const decision = startupDecision(startup);
+  if (decision === "fetch-failed") return <FetchFailedActions startup={startup} />;
+  if (!startup.threadId) return null;
+  if (decision === "setup-failed") return <SetupFailedActions threadId={startup.threadId} gate={gate} outputOpen={outputOpen} onToggleOutput={onToggleOutput} />;
+  if (decision === "setup-approval") return <SetupApprovalActions threadId={startup.threadId} gate={gate} />;
+  return null;
+}
+
+function offersOwnDecision(startup: ThreadStartup | undefined): startup is ThreadStartup {
+  const decision = startupDecision(startup);
+  if (decision === "fetch-failed") return true;
+  return (decision === "setup-failed" || decision === "setup-approval") && startup?.threadId !== undefined;
+}
+
+function TrailSteps({ startup, kind, setupScript, outputOpen, onToggleOutput, onOpenTerminal, onEditScript }: Pick<StartupStepsTrailProps, "startup" | "kind" | "onOpenTerminal" | "onEditScript"> & {
+  readonly setupScript: string | undefined;
+  readonly outputOpen: boolean;
+  readonly onToggleOutput: () => void;
+}) {
   const now = useLiveNow(startupHasLiveStep(startup));
   const rows = startup ? startupTrailRows(startup, { now, setupCommand: setupCommandLine(setupScript) }) : placeholderTrailRows(kind);
   const setupOutput = startup && outputOpen
@@ -161,24 +227,48 @@ function TrailSteps({ startup, kind, setupScript, onOpenTerminal, onEditScript }
     : null;
   return rows.map((row) => (
     <div key={row.phase} className="flex flex-col gap-0.5">
-      <TrailRow row={row} expanded={outputOpen} onToggle={() => setOutputOpen((open) => !open)} />
-      {row.expandable && setupOutput ? <div className="pb-1.5 pl-6 pt-1">{setupOutput}</div> : null}
+      <TrailRow row={row} expanded={outputOpen} onToggle={onToggleOutput} />
+      {row.phase === "setup" && setupOutput ? <div className="pb-1.5 pl-6 pt-1">{setupOutput}</div> : null}
     </div>
   ));
+}
+
+function TrailActions({ startup, gate, outputOpen, onToggleOutput, actions, onCancel }: {
+  readonly startup: ThreadStartup | undefined;
+  readonly gate: StartupSetupGate;
+  readonly outputOpen: boolean;
+  readonly onToggleOutput: () => void;
+  readonly actions: ReactNode;
+  readonly onCancel: (() => void) | undefined;
+}) {
+  const ownDecision = offersOwnDecision(startup) ? startup : undefined;
+  if (!ownDecision && !actions && !onCancel) return null;
+  // Paper indents the approval row to the label column and packs its filled button tighter.
+  const approval = startupDecision(startup) === "setup-approval";
+  return (
+    <div data-testid="startup-actions" className={cn("flex flex-wrap items-center", approval ? "gap-1 pl-6" : "gap-2 pl-4")}>
+      {ownDecision ? <StartupDecisionActions startup={ownDecision} gate={gate} outputOpen={outputOpen} onToggleOutput={onToggleOutput} /> : null}
+      {actions}
+      {onCancel ? <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} onClick={onCancel}>Cancel</Button> : null}
+    </div>
+  );
 }
 
 /**
  * Renders one thread startup as a quiet trail of steps under the first user message.
  *
  * A completed startup collapses to a single "Started in" row that expands back to the steps.
+ * A stopped startup shows the Paper 04f decision for its state, and none of them offers Cancel.
  */
 export function StartupStepsTrail({ startup, startupId, kind, actions, onOpenTerminal, onEditScript }: StartupStepsTrailProps) {
-  const setupScript = useStartupSetupScript(startup);
-  const onCancel = useStartupCancel(startup, startupId);
+  const gate = useStartupSetupGate(startup);
+  const liveCancel = useStartupCancel(startup, startupId);
   const [stepsOpen, setStepsOpen] = useState(false);
+  const [outputOpen, setOutputOpen] = useState(false);
+  const toggleOutput = () => setOutputOpen((open) => !open);
   const completedStartup = startup?.state === "completed" ? startup : undefined;
   const startedRow = completedStartup
-    ? <StartedRow startup={completedStartup} setupCommand={setupCommandLine(setupScript)} expanded={stepsOpen} onToggle={() => setStepsOpen((open) => !open)} />
+    ? <StartedRow startup={completedStartup} setupCommand={setupCommandLine(gate.script)} expanded={stepsOpen} onToggle={() => setStepsOpen((open) => !open)} />
     : null;
   const announcement = <p role="status" className="sr-only">{startupTrailAnnouncement(startup)}</p>;
   if (completedStartup && !stepsOpen) return <section aria-label="Thread startup" data-testid="startup-trail">{announcement}{startedRow}</section>;
@@ -186,9 +276,9 @@ export function StartupStepsTrail({ startup, startupId, kind, actions, onOpenTer
     <section aria-label="Thread startup" data-testid="startup-trail" className="flex flex-col gap-0.5">
       {announcement}
       {startedRow}
-      <TrailSteps startup={startup} kind={kind} setupScript={setupScript} onOpenTerminal={onOpenTerminal} onEditScript={onEditScript} />
-      <StartupDetailLine startup={startup} />
-      <TrailActions actions={actions} onCancel={onCancel} />
+      <TrailSteps startup={startup} kind={kind} setupScript={gate.script} outputOpen={outputOpen} onToggleOutput={toggleOutput} onOpenTerminal={onOpenTerminal} onEditScript={onEditScript} />
+      <StartupDetailLine startup={startup} setupScript={gate.script} />
+      <TrailActions startup={startup} gate={gate} outputOpen={outputOpen} onToggleOutput={toggleOutput} actions={actions} onCancel={startup?.state === "blocked" ? undefined : liveCancel} />
     </section>
   );
 }
