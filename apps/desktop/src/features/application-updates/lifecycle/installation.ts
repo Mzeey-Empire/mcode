@@ -93,12 +93,22 @@ export function createInstallationLifecycle(
     if (idleStreak === 2) await quitAndInstallSafely();
   };
 
-  const installWhenIdle = (): void => {
+  // A failed install leaves the downloaded payload on disk, so a retry can install it again.
+  const installableUpdate = (): Extract<UpdateStatus, { state: "downloaded" }> | null => {
     const current = status.get();
-    if (!active || !application.isPackaged || current.state !== "downloaded") return;
-    if (idleInterval !== null) return;
+    if (current.state === "downloaded") return current;
+    if (current.state === "error" && current.failedOperation === "install" && downloadedUpdate) {
+      return { ...downloadedUpdate, installWhenIdle: false };
+    }
+    return null;
+  };
+
+  const installWhenIdle = (): void => {
+    if (!active || !application.isPackaged || idleInterval !== null) return;
+    const update = installableUpdate();
+    if (!update) return;
     idleInterval = timer.setInterval(() => { void pollForIdle(); }, 5_000);
-    status.publish({ ...current, installWhenIdle: true });
+    status.publish({ ...update, installWhenIdle: true });
   };
 
   const createBeforeInstallHook = (
@@ -217,10 +227,9 @@ export function createInstallationLifecycle(
     installUpdate: async () => {
       cancelInstallWhenIdle();
       if (!active || !application.isPackaged) return false;
-      const current = status.get();
-      if (current.state === "error" && current.failedOperation === "install" && downloadedUpdate) {
-        status.publish({ ...downloadedUpdate, installWhenIdle: false });
-      } else if (current.state !== "downloaded") return false;
+      const update = installableUpdate();
+      if (!update) return false;
+      if (status.get().state !== "downloaded") status.publish(update);
       return quitAndInstallSafely();
     },
     register: () => {

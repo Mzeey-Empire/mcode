@@ -335,6 +335,20 @@ describe("update installation lifecycle", () => {
     expect(current.updater.quitAndInstall).not.toHaveBeenCalled();
   });
 
+  it("re-arms idle installation from a failed install", async () => {
+    vi.useFakeTimers();
+    current.lifecycle.setBeforeInstallHook(async () => { throw new Error("server unavailable"); });
+    await expect(current.lifecycle.installUpdate()).resolves.toBe(false);
+    current.lifecycle.setBeforeInstallHook(async () => {});
+
+    current.lifecycle.installWhenIdle();
+    expect(current.status.get()).toEqual({
+      state: "downloaded", version: "0.14.0", releaseNotes: "Bug fixes", installWhenIdle: true,
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(current.updater.quitAndInstall).toHaveBeenCalledOnce();
+  });
+
   it("retains auto-install-on-quit while armed", async () => {
     vi.useFakeTimers();
     current.application.quit.mockImplementation(() => {
