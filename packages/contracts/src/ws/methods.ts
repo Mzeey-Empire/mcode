@@ -120,6 +120,7 @@ import { TERMINAL_V1_METHODS, type TerminalV1MethodName } from "./terminal.js";
 import { ProviderModelInfoSchema } from "../providers/models.js";
 import { ProviderUsageInfoSchema } from "../providers/usage.js";
 import { ProviderAvailabilitySchema } from "../providers/availability.js";
+import { ProviderStatusSchema } from "../providers/provider-status.js";
 import {
   ProviderCatalogRequestSchema,
   ProviderCatalogSnapshotSchema,
@@ -1542,6 +1543,11 @@ export const WS_METHODS = lazySchema(() => ({
   "providers.listAvailability": {
     params: z.object({}),
     result: z.array(ProviderAvailabilitySchema()),
+  },
+  /** Sign-in and rate-limit status for enabled providers. `force` skips the 10-minute cache. */
+  "providers.listStatus": {
+    params: z.object({ force: z.boolean().optional() }),
+    result: z.array(ProviderStatusSchema()),
   },
   /**
    * v1 stub for regenerating a handoff document via the live AI path.

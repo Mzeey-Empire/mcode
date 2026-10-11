@@ -10,6 +10,7 @@ import { PlanVersionSchema } from "../models/plan.js";
 import { ChecksStatusSchema } from "../github.js";
 import { ApprovalRequestSchema, ApprovalOutcomeSchema } from "../models/approval.js";
 import { ProviderAvailabilitySchema } from "../providers/availability.js";
+import { ProviderStatusSchema } from "../providers/provider-status.js";
 import { lazySchema } from "../utils/lazySchema.js";
 import { ProjectIconSchema } from "../models/project-icon.js";
 import {
@@ -147,6 +148,8 @@ export const WS_CHANNELS = {
     .strict(),
   /** Full-list broadcast of provider availability. Replaces the client cache. */
   "providers.availability": z.array(ProviderAvailabilitySchema()),
+  /** One provider's status changed. Carries no threadId, so every client receives it. */
+  "providers.statusChanged": ProviderStatusSchema(),
   "branch.changed": lazySchema(() =>
     z.object({ workspaceId: z.string(), branch: z.string().nullable() }),
   )(),
