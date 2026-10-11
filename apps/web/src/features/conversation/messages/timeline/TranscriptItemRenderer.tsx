@@ -5,6 +5,8 @@ import { NarrativeIndicator } from "@/features/conversation/narrative/NarrativeI
 import { TurnChangesBar } from "../../turn/TurnChangesBar";
 import { TurnMetaLine } from "../../turn/TurnMetaLine";
 import { WorkFold, workFoldLabel } from "../../turn/WorkFold";
+import { TurnEndNotice } from "../../turn-ending/TurnEndNotice";
+import { useTurnRetry } from "../../turn-ending/useTurnRetry";
 import { MessageBubble } from "../MessageBubble";
 import { VisibleNarrativeLoader } from "../TranscriptNarrativeRow";
 import type { ChatVirtualItem } from "../virtual-items";
@@ -143,6 +145,21 @@ function NarrativeIndicatorTranscriptItemRenderer({ item }: TranscriptItemRender
   );
 }
 
+type TurnEndNoticeItem = Extract<ChatVirtualItem, { type: "turn-end-notice" }>;
+
+/** Renders a settled turn's end notice with the actions this build supports. */
+function TurnEndNoticeTranscriptItemRenderer({ item, threadId }: TranscriptItemRendererProps) {
+  const ending = item as TurnEndNoticeItem;
+  return threadId
+    ? <RetryableTurnEndNotice threadId={threadId} ending={ending} />
+    : <TurnEndNotice notice={ending.notice} />;
+}
+
+function RetryableTurnEndNotice({ threadId, ending }: { threadId: string; ending: TurnEndNoticeItem }) {
+  const { retry, pending, error } = useTurnRetry(threadId, ending.turnId);
+  return <TurnEndNotice notice={ending.notice} actions={{ retry }} pending={pending} error={error} />;
+}
+
 const TRANSCRIPT_ITEM_COMPONENTS: Record<ChatVirtualItem["type"], TranscriptItemComponent> = {
   message: MessageTranscriptItemRenderer,
   "turn-changes": TurnChangesTranscriptItemRenderer,
@@ -151,6 +168,7 @@ const TRANSCRIPT_ITEM_COMPONENTS: Record<ChatVirtualItem["type"], TranscriptItem
   "work-fold": WorkFoldTranscriptItemRenderer,
   "turn-meta-line": TurnMetaLineTranscriptItemRenderer,
   "narrative-indicator": NarrativeIndicatorTranscriptItemRenderer,
+  "turn-end-notice": TurnEndNoticeTranscriptItemRenderer,
 };
 
 /** Compares render props that determine the selected virtual item subtree. */

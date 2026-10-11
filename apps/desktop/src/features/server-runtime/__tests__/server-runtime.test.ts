@@ -64,19 +64,26 @@ describe("ServerRuntime Desktop Window seam", () => {
     ["unsafe", Number.MAX_SAFE_INTEGER + 1],
     ["oversized", 1e100],
     ["malformed", "two"],
-  ] as const)("returns zero for %s active-agent values", async (_label, activeAgents) => {
+  ] as const)("rejects %s active-agent values", async (_label, activeAgents) => {
     globalThis.fetch = vi.fn(async () =>
       new Response(JSON.stringify({ activeAgents }), { status: 200 }),
     ) as unknown as typeof fetch;
 
-    await expect(createRuntime().getActiveAgentCount()).resolves.toBe(0);
+    await expect(createRuntime().getActiveAgentCount()).rejects.toThrow("invalid active-agent count");
   });
 
-  it("returns zero when the health endpoint is unavailable", async () => {
+  it("rejects when the health endpoint is unavailable", async () => {
     globalThis.fetch = vi
       .fn()
       .mockRejectedValueOnce(new Error("server unavailable")) as unknown as typeof fetch;
 
-    await expect(createRuntime().getActiveAgentCount()).resolves.toBe(0);
+    await expect(createRuntime().getActiveAgentCount()).rejects.toThrow("server unavailable");
+  });
+
+  it("rejects a failed health response and a missing port", async () => {
+    globalThis.fetch = vi.fn(async () => new Response("", { status: 503 })) as unknown as typeof fetch;
+
+    await expect(createRuntime().getActiveAgentCount()).rejects.toThrow("HTTP 503");
+    await expect(createRuntime(0).getActiveAgentCount()).rejects.toThrow("port is not available");
   });
 });

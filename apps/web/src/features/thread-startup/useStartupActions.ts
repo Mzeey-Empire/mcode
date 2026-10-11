@@ -87,12 +87,26 @@ export interface StartupFetchDecision {
   /** The decision on its way to the server; both actions stay disabled until it settles. */
   readonly pending: FetchDecision | null;
   readonly resolve: (action: FetchDecision) => void;
+  /** The local branch the worktree falls back to when the user continues without the fetch. */
+  readonly localBranch: string;
 }
 
-/** Offers the fetch decision only while the startup is blocked on a failed origin fetch. */
+function fetchLocalBranch(startup: ThreadStartup | undefined): string | undefined {
+  const detail = startup?.steps.find((step) => step.phase === "fetch")?.detail;
+  if (detail?.phase !== "fetch") return undefined;
+  return detail.branch ?? detail.ref.replace(/^origin\//, "");
+}
+
+/**
+ * Offers the fetch decision only while the startup is blocked on a failed origin fetch.
+ *
+ * The server records the fetch step's ref and branch before it blocks, so a block without
+ * that detail offers no decision instead of guessing which local branch to start from.
+ */
 export function useStartupFetchDecision(startup: ThreadStartup | undefined): StartupFetchDecision | undefined {
   const [pending, setPending] = useState<FetchDecision | null>(null);
   const id = startup?.startupId;
+  const localBranch = fetchLocalBranch(startup);
   const resolve = useCallback((action: FetchDecision) => {
     if (!id) return;
     setPending(action);
@@ -101,14 +115,14 @@ export function useStartupFetchDecision(startup: ThreadStartup | undefined): Sta
       (error: unknown) => {
         useToastStore.getState().show({
           kind: "failed",
-          title: action === "retry" ? "Could not retry the fetch" : "Could not continue from local",
+          title: action === "retry" ? "Could not retry the fetch" : `Could not start from local ${localBranch}`,
           meta: error instanceof Error ? error.message : undefined,
         });
       },
     ).finally(() => setPending(null));
-  }, [id]);
+  }, [id, localBranch]);
   const blocked = startup?.state === "blocked" && startup.phase === "fetch" && startup.block?.code === "start_from_origin_failed";
-  return blocked ? { pending, resolve } : undefined;
+  return blocked && localBranch !== undefined ? { pending, resolve, localBranch } : undefined;
 }
 
 /**

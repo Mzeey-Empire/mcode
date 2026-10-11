@@ -125,7 +125,8 @@ function codexUsageCategoryOrder(category: QuotaCategory): number {
   return 2;
 }
 
-function readCodexRateLimits(payload: unknown): CodexRateLimitsPayload["rateLimits"] {
+/** Reads the primary and secondary windows from an `account/rateLimits` payload, keeping only finite numbers. */
+export function readCodexRateLimits(payload: unknown): CodexRateLimitsPayload["rateLimits"] {
   if (!isRecord(payload) || !isRecord(payload.rateLimits)) return undefined;
   return {
     primary: readCodexRateLimitWindow(payload.rateLimits.primary),

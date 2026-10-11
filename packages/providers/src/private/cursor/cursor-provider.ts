@@ -45,6 +45,7 @@ import { CursorAcpClientBridge } from "./acp/cursor-acp-client-bridge.js";
 import { createCursorAcpTurnState } from "./acp/cursor-acp-event-mapper.js";
 import { CursorNativeTurnDiff } from "./acp/cursor-native-turn-diff.js";
 import { cursorAcpProcessIdentity } from "./acp/cursor-acp-process-identity.js";
+import { classifyCursorFailure } from "./acp/cursor-failure-classifier.js";
 import { cursorSessionRecoveryErrorMessage } from "./acp/cursor-session-recovery-error.js";
 import { CursorAcpProcessSpawner } from "./runtime/cursor-acp-process-spawner.js";
 import { CursorTurnExecutor } from "./runtime/cursor-turn-executor.js";
@@ -52,6 +53,8 @@ import {
   CursorSideChannel,
 } from "./handoff/cursor-side-channel.js";
 import { CursorCleanForker } from "./handoff/cursor-clean-forker.js";
+import { createCliStatusRunner } from "../status/cli-status-runner.js";
+import { describeCursorAuth } from "../status/provider-auth-checks.js";
 import type {
   CursorAcpSessionEntry,
   CursorBrowserContext,
@@ -155,6 +158,7 @@ export class CursorProvider
       ...CURSOR_SUPPORTED_CAPABILITIES.map((name) => ({ name, support: "supported" as const })),
       { name: "provider-continuation" as const, support: "unsupported" as const },
       { name: "child-cancellation" as const, support: "unsupported" as const },
+      { name: "turn-steer" as const, support: "unsupported" as const },
     ],
   });
   readonly supportsCompletion = false;
@@ -336,6 +340,12 @@ export class CursorProvider
       });
     }
     return this.sideChannel;
+  }
+
+  /** Reports sign-in from `cursor-agent status`, trying the same binaries sessions spawn. */
+  async describeStatus() {
+    const run = createCliStatusRunner({ platform: this.host.runtime.platform, env: this.host.environment.snapshot() });
+    return describeCursorAuth(run, cursorCliProbeBinaries(this.cursorPorts.settings.get()));
   }
 
   /** Lists models by running `cursor-agent models` (falls back when discovery fails). */
@@ -673,7 +683,7 @@ export class CursorProvider
       threadId: context.threadId,
       turnExecutionId: context.req.turnExecutionId,
       error: errorMessage,
-      failure: { kind: "fatal" },
+      failure: classifyCursorFailure(error),
     } satisfies AgentEvent);
     this.publishCursorEvent(context.routing, {
       type: AgentEventType.Ended,

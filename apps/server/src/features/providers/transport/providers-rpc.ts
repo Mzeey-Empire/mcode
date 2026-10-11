@@ -22,6 +22,7 @@ import type { DevinCatalogService } from "../catalog/devin-catalog-service.js";
 import type { ProviderCatalogService } from "../catalog/provider-catalog-service.js";
 import type { ConfigService } from "../configuration/config-service.js";
 import type { ModelCacheService } from "../models/model-cache-service.js";
+import type { ProviderStatusService } from "../status/provider-status-service.js";
 import type { SkillService } from "../../agents/skills/catalog/skill-service.js";
 import type { GitWorktreeService } from "../../projects/git/git-worktree-service.js";
 import type { WorkspaceService } from "../../projects/lifecycle/workspace-service.js";
@@ -36,6 +37,7 @@ type ProviderRpcMethod = Extract<
   | "provider.listModes"
   | "provider.getUsage"
   | "providers.listAvailability"
+  | "providers.listStatus"
 >;
 
 type ProviderIdParams = {
@@ -49,6 +51,7 @@ type ProviderRpcParamsByMethod = {
   "provider.listModes": ProviderIdParams;
   "provider.getUsage": ProviderIdParams;
   "providers.listAvailability": Record<never, never>;
+  "providers.listStatus": { force?: boolean };
 };
 
 /** Defines the dependencies required by provider transport routes. */
@@ -68,6 +71,7 @@ export interface ProviderRouterDeps {
   >;
   modelCacheService: Pick<ModelCacheService, "listModels">;
   providerRegistry: IProviderRegistry;
+  providerStatus: Pick<ProviderStatusService, "listStatus">;
 }
 
 type ProviderRpcHandlerMap = {
@@ -90,6 +94,7 @@ const providerRpcHandlers: ProviderRpcHandlerMap = {
   },
   "provider.getUsage": (deps, params) => routeProviderUsage(deps, params.providerId),
   "providers.listAvailability": (deps) => deps.providerAvailability.listAvailability(),
+  "providers.listStatus": (deps, params) => deps.providerStatus.listStatus(params),
 };
 
 /** Checks whether a method belongs to the Provider transport route family. */

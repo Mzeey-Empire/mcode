@@ -267,23 +267,24 @@ export class ServerRuntime {
     return this.serverManager.port;
   }
 
-  /** Return the active-agent count used by Desktop Window close confirmation. */
+  /**
+   * Read the server's active-agent count.
+   *
+   * Rejects when the count cannot be read, so callers choose their own fallback. Closing the
+   * window treats an unreadable count as zero, while installing an update treats it as busy.
+   */
   async getActiveAgentCount(): Promise<number> {
-    if (!this.serverManager.port) return 0;
-    try {
-      const response = await fetch(
-        `http://localhost:${this.serverManager.port}/health`,
-        { signal: AbortSignal.timeout(3_000) },
-      );
-      if (!response.ok) return 0;
-      const payload = (await response.json()) as { activeAgents?: unknown };
-      return typeof payload.activeAgents === "number" &&
-        Number.isSafeInteger(payload.activeAgents) &&
-        payload.activeAgents >= 0
-        ? payload.activeAgents
-        : 0;
-    } catch {
-      return 0;
+    const port = this.serverManager.port;
+    if (!port) throw new Error("Server port is not available");
+    const response = await fetch(`http://localhost:${port}/health`, { signal: AbortSignal.timeout(3_000) });
+    if (!response.ok) throw new Error(`Health check failed with HTTP ${response.status}`);
+    const payload: unknown = await response.json();
+    const activeAgents = typeof payload === "object" && payload !== null && "activeAgents" in payload
+      ? payload.activeAgents
+      : undefined;
+    if (typeof activeAgents !== "number" || !Number.isSafeInteger(activeAgents) || activeAgents < 0) {
+      throw new Error("Health check returned an invalid active-agent count");
     }
+    return activeAgents;
   }
 }

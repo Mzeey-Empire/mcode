@@ -577,6 +577,32 @@ export const hookExecutions = sqliteTable(
   ],
 );
 
+/** Durable revert journal; raw pre and planned states precede every worktree write. */
+export const turnReverts = sqliteTable("turn_reverts", {
+  id: text("id").primaryKey().notNull(),
+  requestId: text("request_id").notNull().unique(),
+  requestParams: text("request_params").notNull(),
+  threadId: text("thread_id").notNull().references(() => threads.id, { onDelete: "cascade" }),
+  targetMessageId: text("target_message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+  fromMessageId: text("from_message_id").references(() => messages.id, { onDelete: "cascade" }),
+  kind: text("kind", { enum: ["turn", "file", "undo"] }).notNull(),
+  path: text("path"),
+  undoesRevertId: text("undoes_revert_id").references((): AnySQLiteColumn => turnReverts.id, { onDelete: "set null" }),
+  undoneByRevertId: text("undone_by_revert_id"),
+  state: text("state", { enum: ["prepared", "committed", "rolled_back", "recovery_failed"] }).notNull(),
+  files: text("files").notNull(),
+  recoveryRef: text("recovery_ref"),
+  failure: text("failure"),
+  receiptMessageId: text("receipt_message_id").references(() => messages.id, { onDelete: "cascade" }),
+  agentNotifiedAt: text("agent_notified_at"),
+  createdAt: text("created_at").notNull().default(timestampDefault),
+  updatedAt: text("updated_at").notNull().default(timestampDefault),
+}, (table) => [
+  index("idx_turn_reverts_thread").on(table.threadId, table.createdAt),
+  index("idx_turn_reverts_target").on(table.targetMessageId),
+  index("idx_turn_reverts_unfinished").on(table.state).where(sql`${table.state} IN ('prepared', 'recovery_failed')`),
+]);
+
 export const turnSnapshots = sqliteTable(
   "turn_snapshots",
   {
@@ -1049,5 +1075,32 @@ export const gitCommitRequests = sqliteTable(
     index("idx_git_commit_requests_prepared_at").on(table.preparedAt),
     check("git_commit_requests_state", sql`${table.state} IN ('prepared', 'committed', 'rejected', 'unknown')`),
     check("git_commit_requests_push_state", sql`${table.pushState} IN ('skipped', 'pending', 'pushed', 'failed')`),
+  ],
+);
+
+/**
+ * One row per Send now steer, written before the adapter call. The provider can hold
+ * the message before Mcode hears back, so this row, not the provider, decides whether
+ * the message may ever be sent again (decision P8).
+ */
+export const turnSteers = sqliteTable(
+  "turn_steers",
+  {
+    messageId: text("message_id").primaryKey().notNull(),
+    threadId: text("thread_id").notNull().references(() => threads.id, { onDelete: "cascade" }),
+    turnExecutionId: text("turn_execution_id").notNull(),
+    inputsHash: text("inputs_hash").notNull(),
+    payload: text("payload").notNull(),
+    state: text("state").notNull(),
+    rejection: text("rejection"),
+    /** Id the Send again resend is admitted under; claimed once by turn admission. */
+    replacementMessageId: text("replacement_message_id").unique(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("idx_turn_steers_state").on(table.state),
+    check("turn_steers_state",
+      sql`${table.state} IN ('pending', 'delivered', 'rejected', 'delivery_unknown', 'resend_queued', 'closed')`),
   ],
 );

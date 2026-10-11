@@ -4,11 +4,17 @@ import {
   type ContextWindowMode,
   type ProviderBillingMode,
   type ProviderIdentity,
+  type TurnFailure,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import type { ProviderBackgroundToolSettlement } from "../../host-ports.js";
 import { clampContextWindowToMode } from "./context-window.js";
 import { parseClaudeGoalCommandResult } from "./claude-goal-command-parser.js";
+import {
+  classifyClaudeFailure,
+  type ClaudeApiRetryEvidence,
+  type ClaudeRateLimitEvidence,
+} from "./claude-failure-classifier.js";
 
 type Message = Record<string, unknown>;
 type Usage = {
@@ -28,6 +34,10 @@ export interface ClaudeEventEvidence {
   nativeEventId?: string;
 }
 const MAX_TRACKED_TOOLS = 4_096;
+/** Contract bound on one `reasoningDelta` text. */
+const MAX_REASONING_DELTA_LENGTH = 65_536;
+// Leaves room for the ":thinking:<index>" suffix inside the contract's 256-char item id bound.
+const MAX_REASONING_MESSAGE_KEY = 200;
 /**
  * Error results the Claude CLI synthesizes when a user interrupt ends a running
  * tool. They report a cancel, not a tool failure.
@@ -104,7 +114,16 @@ export class ClaudeEventMapper {
   private compacting = false;
   private readonly toolUseIds = new Set<string>();
   private readonly toolParents = new Map<string, ClaudeParentEvidence>();
+  /** Open thinking content-block index to its reasoning item id, for the message currently streaming. */
+  private readonly reasoningItemByBlock = new Map<number, string>();
+  private reasoningMessageKey: string | undefined;
+  private reasoningMessageOrdinal = 0;
   private nativeSource: Message = {};
+  private assistantError: string | undefined;
+  private apiError: string | undefined;
+  private lastApiRetry: ClaudeApiRetryEvidence | undefined;
+  // Claude reports rate-limit info only when it changes, so the last report outlives the turn that saw it.
+  private lastRateLimit: ClaudeRateLimitEvidence | undefined;
   private readonly handlers: ReadonlyMap<
     string,
     (message: Message) => ClaudeMapOutcome | Promise<ClaudeMapOutcome>
@@ -166,9 +185,29 @@ export class ClaudeEventMapper {
   resetExecution(): void {
     this.toolUseIds.clear();
     this.toolParents.clear();
+    this.reasoningItemByBlock.clear();
+    this.reasoningMessageKey = undefined;
     this.lastAssistantText = "";
     this.lastInputTokens = undefined;
     this.nativeSource = {};
+    this.resetFailureEvidence();
+  }
+
+  /** Classifies an exception thrown by the SDK stream with the evidence the turn gathered so far. */
+  classifyStreamFailure(error: unknown, now: number): TurnFailure {
+    return classifyClaudeFailure({
+      assistantError: this.assistantError,
+      apiError: this.apiError,
+      rateLimit: this.lastRateLimit,
+      apiRetry: this.lastApiRetry,
+      streamErrorCode: nodeErrorCode(error),
+    }, now);
+  }
+
+  private resetFailureEvidence(): void {
+    this.assistantError = undefined;
+    this.apiError = undefined;
+    this.lastApiRetry = undefined;
   }
 
   /**
@@ -238,6 +277,13 @@ export class ClaudeEventMapper {
     const assistant = message.message as
       { content?: Message[]; stop_reason?: string | null } | undefined;
     const content = assistant?.content ?? [];
+    const parentToolCallId = parentId(message);
+    // A subagent's API error ends only that subagent, not the turn. A later main-thread message
+    // without an error means the CLI recovered, so the earlier error no longer explains a failure.
+    if (!parentToolCallId) {
+      this.assistantError = stringOrUndefined(message.error);
+      this.apiError = stringOrUndefined(message.api_error);
+    }
     const text = content
       .filter((block) => block.type === "text")
       .map((block) => stringValue(block.text))
@@ -250,7 +296,6 @@ export class ClaudeEventMapper {
         isFinalResponse: finalStopReason(assistant?.stop_reason ?? null),
       });
     }
-    const parentToolCallId = parentId(message);
     for (const block of content)
       if (block.type === "tool_use") this.emitToolUse(block, parentToolCallId);
     return "none";
@@ -301,7 +346,19 @@ export class ClaudeEventMapper {
     await this.emitQuotaUpdate(snapshot);
     this.emitTurnComplete(message, usage);
     this.resetResult();
+    this.resetFailureEvidence();
     return "turn_complete";
+  }
+
+  /**
+   * Close a segment the CLI cut short to answer a steered message. Its text and usage are kept,
+   * but the turn goes on, so no turn-complete event is emitted.
+   */
+  closeAbortedSegment(message: Message): void {
+    const usage = usageValue(message);
+    this.emitResultMessage(usage);
+    this.callbacks.updateUsage(metrics(message, usage));
+    this.resetResult();
   }
 
   private resultError(message: Message): ClaudeMapOutcome {
@@ -309,6 +366,7 @@ export class ClaudeEventMapper {
       this.invalidatePoisonedSession();
     else this.emitResultError(message);
     this.resetResult();
+    this.resetFailureEvidence();
     return "result_error";
   }
 
@@ -339,7 +397,17 @@ export class ClaudeEventMapper {
       subtype: message.subtype,
       payload: message,
     });
-    this.emit({ type: AgentEventType.Error, threadId: this.threadId, error, failure: { kind: "fatal" } });
+    const failure = classifyClaudeFailure({
+      assistantError: this.assistantError,
+      apiError: stringOrUndefined(message.api_error) ?? this.apiError,
+      resultSubtype: stringOrUndefined(message.subtype),
+      terminalReason: stringOrUndefined(message.terminal_reason),
+      startupFailureReason: stringOrUndefined(message.startup_failure_reason),
+      apiErrorStatus: numberValue(message.api_error_status),
+      rateLimit: this.lastRateLimit,
+      apiRetry: this.lastApiRetry,
+    }, Date.now());
+    this.emit({ type: AgentEventType.Error, threadId: this.threadId, error, failure });
   }
 
   private observeGoal(message: Message): void {
@@ -447,6 +515,7 @@ export class ClaudeEventMapper {
       });
   }
   private apiRetry(message: Message): void {
+    this.lastApiRetry = { attempt: numberValue(message.attempt), maxRetries: numberValue(message.max_retries) };
     this.emit({
       type: AgentEventType.ApiRetry,
       threadId: this.threadId,
@@ -572,11 +641,51 @@ export class ClaudeEventMapper {
   private streamEvent(message: Message): ClaudeMapOutcome {
     const event = objectValue(message.event);
     const usage = (event.message as { usage?: Usage } | undefined)?.usage;
+    if (event.type === "message_start") this.startReasoningMessage(event);
     if (event.type === "message_start" && usage)
       this.emitContextEstimate(usage);
+    if (event.type === "content_block_start") this.openReasoningBlock(event);
     if (event.type === "content_block_delta")
-      this.emitDelta(objectValue(event.delta));
+      this.emitDelta(objectValue(event.delta), event.index);
+    if (event.type === "content_block_stop") this.closeReasoningBlock(event.index);
     return "none";
+  }
+  private startReasoningMessage(event: Message): void {
+    this.reasoningItemByBlock.clear();
+    const messageId = validIdentity(objectValue(event.message).id);
+    this.reasoningMessageKey = messageId && messageId.length <= MAX_REASONING_MESSAGE_KEY
+      ? messageId : `message-${++this.reasoningMessageOrdinal}`;
+  }
+  /** Thinking and redacted thinking open a row at the block's true start; redacted blocks never carry text. */
+  private openReasoningBlock(event: Message): void {
+    const type = objectValue(event.content_block).type;
+    if ((type !== "thinking" && type !== "redacted_thinking") || typeof event.index !== "number") return;
+    this.reasoningMessageKey ??= `message-${++this.reasoningMessageOrdinal}`;
+    const reasoningItemId = `${this.reasoningMessageKey}:thinking:${event.index}`;
+    this.reasoningItemByBlock.set(event.index, reasoningItemId);
+    this.emitReasoningDelta("", reasoningItemId);
+  }
+  private closeReasoningBlock(index: unknown): void {
+    if (typeof index !== "number") return;
+    const reasoningItemId = this.reasoningItemByBlock.get(index);
+    if (!reasoningItemId) return;
+    this.reasoningItemByBlock.delete(index);
+    this.emitReasoningDelta("", reasoningItemId, true);
+  }
+  private emitThinkingDelta(text: unknown, index: unknown): void {
+    const reasoningItemId = typeof index === "number" ? this.reasoningItemByBlock.get(index) : undefined;
+    if (!reasoningItemId || typeof text !== "string") return;
+    for (let start = 0; start < text.length; start += MAX_REASONING_DELTA_LENGTH)
+      this.emitReasoningDelta(text.slice(start, start + MAX_REASONING_DELTA_LENGTH), reasoningItemId);
+  }
+  private emitReasoningDelta(delta: string, reasoningItemId: string, done?: true): void {
+    this.emit({
+      type: AgentEventType.ReasoningDelta,
+      threadId: this.threadId,
+      delta,
+      reasoningItemId,
+      ...(done ? { done } : {}),
+    });
   }
   private emitContextEstimate(usage: Usage): void {
     this.lastInputTokens = inputTokens(usage);
@@ -588,7 +697,8 @@ export class ClaudeEventMapper {
         contextWindow: this.lastContextWindow,
       });
   }
-  private emitDelta(delta: Message): void {
+  private emitDelta(delta: Message, index: unknown): void {
+    if (delta.type === "thinking_delta") this.emitThinkingDelta(delta.thinking, index);
     if (
       delta.type === "text_delta" &&
       typeof delta.text === "string" &&
@@ -642,6 +752,7 @@ export class ClaudeEventMapper {
       | undefined;
     const active = info?.status === undefined ? undefined : RATE_LIMIT_ACTIVE_BY_STATUS.get(info.status);
     if (!info || active === undefined) return "none";
+    this.lastRateLimit = { status: info.status, resetsAt: info.resetsAt, rateLimitType: info.rateLimitType };
     this.emit(active
       ? {
         type: AgentEventType.RateLimited,
@@ -709,6 +820,13 @@ function toolResultText(content: unknown): string {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+/** Node system errors carry their errno name in `code`, e.g. "ECONNRESET". */
+function nodeErrorCode(error: unknown): string | undefined {
+  return error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : undefined;
 }
 function stringOr(value: unknown, fallback: string): string {
   return typeof value === "string" && value.length > 0 ? value : fallback;

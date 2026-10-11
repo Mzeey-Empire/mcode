@@ -14,8 +14,6 @@ import { SidebarResizeSeam } from "@/components/sidebar/SidebarResizeSeam";
 import { ChatView } from "@/features/conversation";
 import { openSubagentDetail, openSubagentsRoster } from "@/features/subagents";
 import { useUpdateStore } from "@/stores/updateStore";
-import { useToastStore } from "@/stores/toastStore";
-import { friendlyUpdateError } from "@/lib/update-error-message";
 import type { UpdateStatus } from "@/transport/desktop-bridge";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { ShortcutHelpDialog } from "@/components/ShortcutHelpDialog";
@@ -48,6 +46,7 @@ import {
   BrowserSurfaceHostRoot,
 } from "@/features/preview";
 import { TerminalPoolHost, TerminalPoolSlotProvider } from "@/features/terminal";
+import { SignInTerminalDialog } from "@/features/providers/SignInTerminalDialog";
 import { CanvasHeader } from "@/components/shell/CanvasHeader";
 import { ShellChromeProvider } from "@/components/shell/shell-chrome-context";
 import { installWindowChrome } from "@/components/shell/window-chrome";
@@ -77,8 +76,10 @@ const LazyCommandPalette = lazy(async () => {
   return { default: m.CommandPalette };
 });
 
+// Imported by path, not through the feature barrel, which App also imports
+// statically. A barrel import would fold the surface back into the entry chunk.
 const LazyPullRequestSurface = lazy(async () => {
-  const m = await import("@/features/pull-requests");
+  const m = await import("@/features/pull-requests/surfaces/PullRequestSurface");
   return { default: m.PullRequestSurface };
 });
 
@@ -405,6 +406,7 @@ function AppLayout(props: AppLayoutProps) {
         </div>
         </ShellChromeProvider>
         <TerminalPoolHost />
+        <SignInTerminalDialog />
         <BrowserSurfaceHostRoot />
         <BrowserAutomationHost />
         <Suspense fallback={null}>
@@ -646,17 +648,6 @@ export function App() {
     });
 
     const listener = bridge.onUpdateStatus((status) => {
-      // Errors are rare and recoverable (a genuine update failure, not a
-      // transient gateway blip — those are filtered in the main process). A
-      // non-blocking toast states what happened without a persistent red bar.
-      if (status.state === "error") {
-        const friendly = friendlyUpdateError(status.message);
-        useToastStore.getState().show({
-          kind: "failed",
-          title: friendly.title,
-          meta: friendly.body,
-        });
-      }
       useUpdateStore.getState().setStatus(status);
     });
     return () => bridge.offUpdateStatus(listener);

@@ -33,12 +33,17 @@ import type { PlanService } from "../planning/plan-service.js";
 import type { RecapService } from "../recap/recap-service.js";
 import type { TurnRecoveryService } from "../recovery/turn-recovery-service.js";
 import type { ToolCallRecordRepo } from "../tools/persistence/tool-call-record-repo.js";
+import type { TurnSteerService } from "../steering/turn-steer-service.js";
 
 type AgentRpcMethod =
   | "agent.send"
   | "agent.confirmMessage"
+  | "agent.steer"
+  | "agent.listHeldSteers"
+  | "agent.settleUnknownSteer"
   | "agent.recoveryIncident"
   | "agent.retry"
+  | "turn.retry"
   | "agent.continueWithoutSaving"
   | "agent.createAndSend"
   | "agent.stop"
@@ -101,7 +106,8 @@ export interface AgentRouterDeps {
     "respondToApproval" | "listPendingApprovals"
   >;
   toolCallRecordRepo: Pick<ToolCallRecordRepo, "listByMessage" | "listByParent">;
-  turnRecoveryService: Pick<TurnRecoveryService, "currentRecoveryIncident" | "retry">;
+  turnRecoveryService: Pick<TurnRecoveryService, "currentRecoveryIncident" | "retry" | "retryTurn">;
+  turnSteers?: Pick<TurnSteerService, "steer" | "listHeldSteers" | "settleUnknownSteer">;
 }
 
 type AgentRpcHandlerMap = {
@@ -155,6 +161,9 @@ const agentHandlers: AgentRpcHandlerMap = {
     }
     return { admitted: await deps.messageRepo.confirmUserMessage(params.threadId, params.messageId) };
   },
+  "agent.steer": (deps, params) => requireTurnSteers(deps).steer(params),
+  "agent.listHeldSteers": (deps) => requireTurnSteers(deps).listHeldSteers(),
+  "agent.settleUnknownSteer": (deps, params) => requireTurnSteers(deps).settleUnknownSteer(params),
   "agent.recoveryIncident": (deps) => deps.turnRecoveryService.currentRecoveryIncident(),
   "agent.retry": async (deps, params) => {
     await deps.turnRecoveryService.retry(params.executionId, (command) =>
@@ -164,6 +173,12 @@ const agentHandlers: AgentRpcHandlerMap = {
         displayContent: command.content,
       }));
   },
+  "turn.retry": (deps, params) => deps.turnRecoveryService.retryTurn(params, (command) =>
+    sendAdmittedTurn(deps.agentService, {
+      ...command,
+      content: appendPreviewAnnotations(command.content, command.previewAnnotations),
+      displayContent: command.content,
+    })),
   "agent.continueWithoutSaving": (deps, params) => {
     if (!deps.agentContinuation) throw new Error("Agent turn continuation is unavailable");
     deps.agentContinuation.continueWithoutSaving(params.executionId);
@@ -228,6 +243,11 @@ const agentHandlers: AgentRpcHandlerMap = {
   "approval.listPending": (deps, params) => deps.approvalService.listPendingApprovals(params.threadId),
   "recap.generate": (deps, params) => deps.recapService.generate(params),
 };
+
+function requireTurnSteers(deps: AgentRouterDeps): NonNullable<AgentRouterDeps["turnSteers"]> {
+  if (!deps.turnSteers) throw new Error("Steering is unavailable");
+  return deps.turnSteers;
+}
 
 async function sendAdmittedTurn(
   service: AgentRouterDeps["agentService"],

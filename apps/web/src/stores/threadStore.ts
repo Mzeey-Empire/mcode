@@ -3,7 +3,7 @@ import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode,
 import type { AgentEvent, AgentModelState, AgentTurn, CanonicalAgentEventEnvelope, CanonicalAgentProgressFrame, CanonicalAgentProgressRecovery, CanonicalAgentReconnectRecovery, ContextWindowMode, MessageMention, NarrativeDetailCursor, NarrativeEntry, ReasoningLevel, OrchestrationMode, PlanQuestion, PlanAnswer, ProviderUsageInfo, GoalLookupResult, PreviewAnnotationBundle, SelectedTextComment, TurnFileEffectSummary, TurnRuntimeSnapshot, TurnOutcome } from "@mcode/contracts";
 import type { reduceAgentEventBatch } from "@mcode/contracts";
 import type { DevinMode } from "@mcode/contracts";
-import { recoverParentNarrative } from "./parent-narrative-recovery";
+import { recoverParentNarrative, steeredUserMessages } from "./parent-narrative-recovery";
 import { backgroundHeldToolIds, stepsSettledWith, type ToolCallLink } from "@/features/conversation/narrative/background-held-tools";
 import {
   AgentEventSchema,
@@ -19,9 +19,9 @@ import {
   createSubagentPresentation,
   mergeSubagentPresentation,
 } from "@mcode/contracts";
-import { getTransport } from "@/transport";
+import { getTransport, RpcError } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { useQueueStore } from "./queueStore";
+import { useQueueStore, type QueuedMessage } from "./queueStore";
 import { LruCache } from "@/lib/lru-cache";
 import { useTaskStore, coerceTaskStatus } from "./taskStore";
 import { usePlanStore } from "./planStore";
@@ -117,7 +117,7 @@ import {
 } from "./thread-store/usage";
 export { mergeProviderUsageSnapshot } from "./thread-store/usage";
 
-import { getCanonicalRuntimePhase, getCanonicalRuntimeTurn, getThreadRuntimePhase, isThreadRuntimeActive, phaseForTurnStatus } from "./thread-lifecycle";
+import { endedWithoutCompleting, getCanonicalRuntimePhase, getCanonicalRuntimeTurn, getThreadRuntimePhase, isThreadRuntimeActive, phaseForTurnStatus } from "./thread-lifecycle";
 
 function activeCanonicalExecutionId(turn: AgentTurn | undefined): string | undefined {
   if (!turn || (turn.status !== "Pending" && turn.status !== "Running")) return undefined;
@@ -443,7 +443,7 @@ interface ThreadState {
   // Message actions
   loadOlderMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
   loadNewerMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
-  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string, planAction?: import("@mcode/contracts").PlanAction, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts").ApprovalReviewMode, devinMode?: DevinMode, messageId?: string) => Promise<boolean>;
+  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string, planAction?: import("@mcode/contracts").PlanAction, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts").ApprovalReviewMode, devinMode?: DevinMode, messageId?: string, resendOfSteerId?: string) => Promise<boolean>;
   /** Remove one durably cancelled message from the resident thread transcript. */
   removePersistedMessage: (threadId: string, messageId: string) => void;
   stopAgent: (threadId: string) => Promise<void>;
@@ -543,8 +543,6 @@ interface ThreadState {
   ) => void;
   /** Clear the interrupt file-notice banner for one thread (user dismissed). */
   clearInterruptStopFileNotice: (threadId: string) => void;
-  /** Clears composer recall state for one thread after the Composer applies it. */
-  clearComposerRecallFromStop: (threadId: string) => void;
 
   /** Update handoff metadata for a child thread. */
   setHandoffMeta: (threadId: string, meta: HandoffMeta) => void;
@@ -758,6 +756,44 @@ function canAutoDrainQueuedMessage(threadId: string): boolean {
 }
 
 /**
+ * Sends a claimed queue item and settles its lease. A resend reuses the replacement id the
+ * server issued, so admission can claim the held steer it replaces.
+ */
+export async function sendQueuedMessage(threadId: string, message: QueuedMessage): Promise<void> {
+  const resendOfSteerId = message.steer?.state === "resend" ? message.steer.resendOfSteerId : undefined;
+  try {
+    const sent = await useThreadStore.getState().sendMessage(
+      threadId,
+      message.content,
+      message.model || undefined,
+      message.permissionMode,
+      message.attachments.length > 0 ? message.attachments : undefined,
+      message.displayContent,
+      message.reasoningLevel,
+      message.provider,
+      message.contextWindow,
+      message.thinking,
+      message.codexFastMode,
+      undefined,
+      undefined,
+      undefined,
+      message.mentions,
+      message.previewAnnotations,
+      message.goalObjective,
+      message.orchestrationMode,
+      undefined,
+      message.approvalReviewMode,
+      message.devinMode,
+      resendOfSteerId ? message.id : undefined,
+      resendOfSteerId,
+    );
+    useQueueStore.getState().settleQueuedDispatch(threadId, message.id, sent);
+  } catch {
+    useQueueStore.getState().settleQueuedDispatch(threadId, message.id, false);
+  }
+}
+
+/**
  * Resume auto-drain for a thread that was paused while the user edited a
  * queued message. Schedules the same 400ms-delayed check used when a turn
  * completes. No-op when the thread is busy or the queue is empty.
@@ -769,40 +805,8 @@ export function scheduleDrainAfterEdit(threadId: string): void {
   const timer = setTimeout(() => {
     dequeueTimers.delete(threadId);
     if (!canAutoDrainQueuedMessage(threadId)) return;
-    const queueState = useQueueStore.getState();
-    const next = queueState.claimNextQueuedMessage(threadId);
-    if (next) {
-      void (async (): Promise<void> => {
-        try {
-          const sent = await useThreadStore.getState().sendMessage(
-            threadId,
-            next.content,
-            next.model,
-            next.permissionMode,
-            next.attachments.length > 0 ? next.attachments : undefined,
-            next.displayContent,
-            next.reasoningLevel,
-            next.provider,
-            next.contextWindow,
-            next.thinking,
-            next.codexFastMode,
-            undefined,
-            undefined,
-            undefined,
-            next.mentions,
-            next.previewAnnotations,
-            next.goalObjective,
-            next.orchestrationMode,
-            undefined,
-            undefined,
-            next.devinMode,
-          );
-          useQueueStore.getState().settleQueuedDispatch(threadId, next.id, sent);
-        } catch {
-          useQueueStore.getState().settleQueuedDispatch(threadId, next.id, false);
-        }
-      })();
-    }
+    const next = useQueueStore.getState().claimNextQueuedMessage(threadId);
+    if (next) void sendQueuedMessage(threadId, next);
   }, 400);
   dequeueTimers.set(threadId, timer);
 }
@@ -1018,6 +1022,13 @@ export const TOOL_CALL_CACHE_SIZE = 200;
  * Enforce the sliding window cap on a messages array.
  * Returns the trimmed array and whether messages were evicted.
  */
+function steeredMessagesPatch(threadId: string, record: ThreadRecord): Partial<ThreadRecord> {
+  const steered = steeredUserMessages(threadId, record.canonicalAgent.state, record);
+  if (steered.length === 0) return {};
+  const { messages, evicted } = capMessages([...record.messages, ...steered]);
+  return { messages, ...(evicted ? { hasMoreMessages: true } : {}) };
+}
+
 function capMessages(messages: Message[]): { messages: Message[]; evicted: boolean } {
   const selected = selectConversationWindow(messages, {
     maxBytes: ACTIVE_CONVERSATION_MESSAGE_BYTES,
@@ -2654,6 +2665,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   const releaseProviderLostRuntime = (threadId: string): void => {
+    // The phase goes idle with the ending still unknown, so hold the queue explicitly rather than drain on a guess.
+    clearDequeueTimer(threadId);
+    useQueueStore.getState().suppressAutoDrain(threadId);
     clearStreamingTextUsage(threadId);
     patchRec(threadId, {
       agentStartTime: undefined,
@@ -2715,7 +2729,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     conversationResidency.retainInactiveConversation(event.threadId);
     if (event.type === "turnComplete") updateTurnContext(event);
     cleanupTerminalRuntime(event.threadId, phase);
-    if (!guardrail) scheduleDrainAfterEdit(event.threadId);
+    if (phase === "completed" && !guardrail) scheduleDrainAfterEdit(event.threadId);
   };
 
   const releaseProviderLostTerminal = (
@@ -2782,7 +2796,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
   const handleApiRetry = (event: Extract<AgentEvent, { type: "apiRetry" }>): void => {
     patchRec(event.threadId, {
-      apiRetry: { reason: event.reason, attempt: event.attempt, maxRetries: event.maxRetries, delayMs: event.delayMs },
+      apiRetry: { errorStatus: event.errorStatus },
     });
   };
 
@@ -2822,39 +2836,27 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     });
   };
 
-  const agentErrorMessage = (threadId: string, error: string): Message => ({
-    ...createSystemMessage(threadId, JSON.stringify({ __type: "agent_error", message: error })),
-  });
-
   const handleErrorEvent = (
     event: Extract<AgentEvent, { type: "error" }>,
     runtime: { incomingExecutionId: string | undefined; runtimeActive: boolean; runtimeRecord: ThreadRecord },
   ): void => {
     if (!runtime.runtimeActive || (runtime.incomingExecutionId && runtime.runtimeRecord.turnExecutionId !== runtime.incomingExecutionId)) return;
     clearStreamingTextUsage(event.threadId);
-    const message = agentErrorMessage(event.threadId, event.error);
-    patchRec(event.threadId, (record) => {
-      const { messages, evicted } = capMessages([...record.messages, message]);
-      return {
-        error: event.error,
-        errorSource: "turn",
-        runtimePhase: "errored",
-        streaming: "",
-        streamingPreview: "",
+    patchRec(event.threadId, () => ({
+      error: event.error,
+      errorSource: "turn",
+      runtimePhase: "errored",
+      streaming: "",
+      streamingPreview: "",
       responseTextIsStreaming: false,
-        agentStartTime: undefined,
-        currentTurnMessageId: "",
-        currentTurnResponseKey: "",
-        toolCalls: [],
-        isCompacting: false,
-        rateLimit: undefined,
-        apiRetry: undefined,
-        messages,
-        ...(evicted ? { hasMoreMessages: true } : {}),
-      };
-    });
-    clearDequeueTimer(event.threadId);
-    useQueueStore.getState().clearQueue(event.threadId);
+      agentStartTime: undefined,
+      currentTurnMessageId: "",
+      currentTurnResponseKey: "",
+      toolCalls: [],
+      isCompacting: false,
+      rateLimit: undefined,
+      apiRetry: undefined,
+    }));
     useWorkspaceStore.setState((workspace) => ({
       threads: workspace.threads.map((thread) => thread.id === event.threadId ? { ...thread, status: "errored" as const } : thread),
     }));
@@ -3007,25 +3009,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     ...definedThreadSettingsPatch(patch),
     ...nullableThreadSettingsPatch(patch),
   });
-
-  const latestUserMessageContent = (threadId: string): string | null => {
-    const messages = getRec(threadId).messages;
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      if (messages[index].role === "user") return messages[index].content;
-    }
-    return null;
-  };
-
-  const recallCancelledUndispatchedMessage = (
-    threadId: string,
-    status: string,
-    dispatchState: string,
-    phase: ThreadRecord["runtimePhase"],
-  ): string | null => {
-    if (status !== "cancelled" || dispatchState !== "not-dispatched" || phase !== "cancelled") return null;
-    if (get().currentThreadId !== threadId) return null;
-    return latestUserMessageContent(threadId);
-  };
 
   type TurnPersistedPayload = Parameters<ThreadState["handleTurnPersisted"]>[0];
 
@@ -3216,11 +3199,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   const ownsOptimisticRuntime = (
     record: ThreadRecord,
     isControlCommand: boolean,
-    activeSessionConflict: boolean,
+    promptDiscarded: boolean,
     responseKey: string,
     executionId: string | null,
   ): boolean => {
-    if (isControlCommand || activeSessionConflict) return false;
+    if (isControlCommand || promptDiscarded) return false;
     return record.currentTurnResponseKey === responseKey
       && record.turnExecutionId === executionId
       && record.runtimePhase === "running";
@@ -3230,22 +3213,25 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     threadId: string, error: unknown,
     isControlCommand: boolean, runningBeforeControl: Set<string> | undefined,
     responseKey: string, executionId: string | null, userMessageId: string,
+    alreadySent = false,
   ): boolean => {
     const message = String(error);
     const activeSessionConflict = !isControlCommand && message.includes("already has an active agent session");
+    // A resend another window already sent is a normal outcome. Its turn owns the thread now, so
+    // like a session conflict the optimistic prompt is dropped and the runtime is left alone.
+    const discardPrompt = activeSessionConflict || alreadySent;
     let invalidateFailedPrompt = false;
     set((state) => {
       const record = getThreadRecord(state.records, threadId);
       // RPC failures may arrive after canonical admission or a newer prompt.
       if (!isControlCommand && record.optimisticUserMessageId !== userMessageId) return {};
-      invalidateFailedPrompt = !isControlCommand && !activeSessionConflict;
-      const ownsRuntime = ownsOptimisticRuntime(record, isControlCommand, activeSessionConflict, responseKey, executionId);
+      invalidateFailedPrompt = !isControlCommand && !discardPrompt;
+      const ownsRuntime = ownsOptimisticRuntime(record, isControlCommand, discardPrompt, responseKey, executionId);
       return {
         records: patchThreadRecord(state.records, threadId, (current) => ({
-          error: message,
-          errorSource: "send",
+          ...(alreadySent ? {} : { error: message, errorSource: "send" as const }),
           ...(current.optimisticUserMessageId === userMessageId ? { optimisticUserMessageId: null } : {}),
-          ...(activeSessionConflict && state.currentThreadId === threadId ? { messages: current.messages.filter((item) => item.id !== userMessageId) } : {}),
+          ...(discardPrompt && state.currentThreadId === threadId ? { messages: current.messages.filter((item) => item.id !== userMessageId) } : {}),
           ...(ownsRuntime ? { agentStartTime: undefined, runtimePhase: "errored" as const } : {}),
         })),
       };
@@ -3396,6 +3382,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       const projected = { ...record, ...projection };
       const records = patchThreadRecord(state.records, frame.threadId, {
         ...projection,
+        ...(visibleChanged ? steeredMessagesPatch(frame.threadId, projected) : {}),
         ...reconcileSavedTurnStatuses(projected, drainedSavingEpoch(frame, previous)),
         serverMessageIds: { ...projected.serverMessageIds, ...canonicalSavedMessageIds(projected) },
       });
@@ -3422,7 +3409,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
           ? recoverParentNarrative(threadId, update.replica.state, { ...current, canonicalAgent: update.replica })
           : {}),
       });
-      const reconciled = reconcileCanonicalRuntime(records, state.runningThreadIds, threadId);
+      const withSteers = patchThreadRecord(records, threadId, steeredMessagesPatch(threadId, getThreadRecord(records, threadId)));
+      const reconciled = reconcileCanonicalRuntime(withSteers, state.runningThreadIds, threadId);
       return {
         records: reconciled.records,
         ...(reconciled.runningThreadIds === state.runningThreadIds ? {} : { runningThreadIds: reconciled.runningThreadIds }),
@@ -3709,7 +3697,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
    * message to local state, marks the thread as running, then dispatches
    * to the transport layer. On failure, rolls back the running state.
    */
-  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText, planAction, mentions, previewAnnotations, goalObjective, orchestrationMode, selectedTextComments, approvalReviewMode, devinMode, messageId) => {
+  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText, planAction, mentions, previewAnnotations, goalObjective, orchestrationMode, selectedTextComments, approvalReviewMode, devinMode, messageId, resendOfSteerId) => {
     conversationResidency.invalidateConversation(threadId);
 
     const { isControlCommand, runningBeforeControl } = prepareOutgoingTurn(threadId, content);
@@ -3751,12 +3739,16 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         orchestrationMode,
         selectedTextComments,
         devinMode,
+        resendOfSteerId,
       });
       return true;
     } catch (error) {
+      // Another window already settled this resend, so the queue item is spent, not retryable.
+      const alreadySent = Boolean(resendOfSteerId) && error instanceof RpcError && error.code === "steer_resend_closed";
+      if (alreadySent) useQueueStore.getState().settleQueuedDispatch(threadId, userMessage.id, true);
       return rollbackFailedSend(
         threadId, error, isControlCommand, runningBeforeControl,
-        optimisticTurnResponseKey, optimisticTurnExecutionId, userMessage.id,
+        optimisticTurnResponseKey, optimisticTurnExecutionId, userMessage.id, alreadySent,
       );
     }
   },
@@ -3773,20 +3765,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     }));
     const beforeStop = get().records.get(threadId);
     const executionAtStop = beforeStop?.turnExecutionId ?? null;
-    patchRec(threadId, { awaitingUserStopPersist: true, composerRecallFromStop: undefined });
+    patchRec(threadId, { awaitingUserStopPersist: true });
     try {
       const result = await getTransport().stopAgent(threadId);
       get().applyThreadRuntimeSnapshot(result.snapshot);
-
-      const lastUserText = recallCancelledUndispatchedMessage(
-        threadId,
-        result.status,
-        result.dispatchState,
-        result.snapshot.phase,
-      );
-      if (lastUserText !== null) {
-        patchRec(threadId, { composerRecallFromStop: { text: lastUserText } });
-      }
     } catch (e) {
       handleStopCommandFailure(threadId, executionAtStop, e);
     }
@@ -4482,10 +4464,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     patchRec(threadId, { interruptStopFileNotice: undefined });
   },
 
-  clearComposerRecallFromStop: (threadId) => {
-    patchRec(threadId, { composerRecallFromStop: undefined });
-  },
-
   handleTurnPersisted: (payload) => {
     flushPendingTextDeltas();
     conversationResidency.invalidateConversation(payload.threadId);
@@ -4520,6 +4498,30 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
   },
   };
+});
+
+/**
+ * Holds a thread's queued follow-ups when its latest turn ends without completing.
+ * Observing the phase catches every writer that settles a turn (events, persistence, canonical
+ * reconciliation, snapshots), and the hold lives in the queue store because thread records are
+ * evicted when the user switches threads while the queue is not.
+ */
+useThreadStore.subscribe((state, previous) => {
+  if (state.records === previous.records) return;
+  const { queues, editingThreadId } = useQueueStore.getState();
+  // A message open in the editor is popped from its queue but is still queued input.
+  const pending = Object.keys(queues).filter((threadId) => queues[threadId]?.length || threadId === editingThreadId);
+  for (const threadId of pending) {
+    const record = state.records.get(threadId);
+    const before = previous.records.get(threadId);
+    if (!record || record === before) continue;
+    const ended = endedWithoutCompleting(getThreadRuntimePhase(threadId, record));
+    const wasEnded = before !== undefined && endedWithoutCompleting(getThreadRuntimePhase(threadId, before));
+    if (ended && !wasEnded) {
+      clearDequeueTimer(threadId);
+      useQueueStore.getState().suppressAutoDrain(threadId);
+    }
+  }
 });
 
 import { useApprovalStore } from "./approvalStore";

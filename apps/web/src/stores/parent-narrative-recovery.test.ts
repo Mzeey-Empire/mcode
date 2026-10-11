@@ -1,6 +1,6 @@
-import { createAgentModelState, type AgentModelState, type AgentTurn } from "@mcode/contracts";
+import { createAgentModelState, type AgentModelState, type AgentTurn, type Message } from "@mcode/contracts";
 import { describe, expect, it } from "vitest";
-import { recoverParentNarrative } from "./parent-narrative-recovery";
+import { recoverParentNarrative, steeredUserMessages } from "./parent-narrative-recovery";
 import { createEmptyThreadRecord, type ThreadRecord } from "./thread-record";
 
 const NOW = "2026-10-10T12:00:00.000Z";
@@ -112,5 +112,42 @@ describe("recoverParentNarrative", () => {
     const patch = recoverParentNarrative(THREAD, turnState("Running"), record);
 
     expect(patch.narrativeByMessage).toBeUndefined();
+  });
+});
+
+function userMessage(id: string, content: string, sequence: number): Message {
+  return { id, thread_id: THREAD, role: "user", content, tool_calls: null, files_changed: null, cost_usd: null,
+    tokens_used: null, timestamp: NOW, sequence, attachments: null, is_internal: false };
+}
+
+function withMessage(state: AgentModelState, message: Message): AgentModelState {
+  state.items[`message:${message.id}`] = {
+    id: `message:${message.id}`, threadId: THREAD, turnId: "parent", kind: "message", providerIdentities: [],
+    createdAt: NOW, updatedAt: NOW, payload: { projection: "message", message },
+  };
+  return state;
+}
+
+describe("steeredUserMessages", () => {
+  const prompt = userMessage("prompt", "Run sleep 40", 1);
+  const steer = userMessage("steer", "Also reply with ONE", 3);
+  const running = (): ThreadRecord => finishedRecord({ runtimePhase: "idle", messages: [prompt] });
+
+  it("returns a message the running turn took after its prompt", () => {
+    const state = withMessage(withMessage(turnState("Running"), prompt), steer);
+
+    expect(steeredUserMessages(THREAD, state, running())).toEqual([steer]);
+  });
+
+  it("returns nothing once the steer is in the transcript", () => {
+    const state = withMessage(withMessage(turnState("Running"), prompt), steer);
+
+    expect(steeredUserMessages(THREAD, state, { ...running(), messages: [prompt, steer] })).toEqual([]);
+  });
+
+  it("leaves an unloaded transcript for the full fetch", () => {
+    const state = withMessage(turnState("Running"), steer);
+
+    expect(steeredUserMessages(THREAD, state, { ...running(), messages: [] })).toEqual([]);
   });
 });

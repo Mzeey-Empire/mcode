@@ -1,4 +1,4 @@
-import { TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts";
+import { HOME_TERMINAL_SCOPE_ID, TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts";
 import { useDiffStore } from "@/stores/diffStore";
 import { useToastStore } from "@/stores/toastStore";
 import { useTerminalStore } from "@/features/terminal";
@@ -31,13 +31,38 @@ function resolveScopeWorkspace(scopeId: string): {
 }
 
 /**
- * Creates one terminal and focuses the Terminal tool, where it becomes the active tab. Creation is
- * serialized per scope so concurrent UI and shortcut requests cannot exceed the
- * session cap.
- *
- * @param scopeId - A thread id, or a workspace id for the threadless shell.
+ * The open panel a new terminal tab can join. The panel record is per-thread
+ * (or the workspace fallback for the threadless shell), so the thread id is
+ * passed only when the scope is a thread. Null when the panel is hidden.
  */
-export function createTerminalForScope(scopeId: string): void {
+function visiblePanelFor(scopeId: string): { workspaceId: string; panelThreadId: string | undefined } | null {
+  const { workspaceId, isThread } = resolveScopeWorkspace(scopeId);
+  if (!workspaceId) return null;
+  const panelThreadId = isThread ? scopeId : undefined;
+  const diff = useDiffStore.getState();
+  if (!diff.getRightPanel(workspaceId, panelThreadId) || !diff.getRightPanelVisible(workspaceId, panelThreadId)) {
+    return null;
+  }
+  return { workspaceId, panelThreadId };
+}
+
+type AttachTarget = { readonly workspaceId: string; readonly panelThreadId: string | undefined } | "home";
+
+function attachTargetFor(scopeId: string): AttachTarget | null {
+  if (scopeId === HOME_TERMINAL_SCOPE_ID) return "home";
+  return visiblePanelFor(scopeId);
+}
+
+/**
+ * Creates one terminal and makes it the active tab of its scope. Project scopes
+ * also focus the right-panel Terminal tool; the home scope shows in the sign-in
+ * dialog instead. Creation is serialized per scope so concurrent UI and shortcut
+ * requests cannot exceed the session cap.
+ *
+ * @param scopeId - A thread id, a workspace id for the threadless shell, or the home scope id.
+ * @param onAttached - Runs with the new PTY id once its tab is attached.
+ */
+export function createTerminalForScope(scopeId: string, onAttached?: (ptyId: string) => void): void {
   if (creationInFlight.has(scopeId)) return;
   const existing = useTerminalStore.getState().terminals[scopeId];
   if ((existing?.length ?? 0) >= TERMINAL_MAX_PER_SCOPE) return;
@@ -54,19 +79,8 @@ export function createTerminalForScope(scopeId: string): void {
       .then(({ ptyId, shell, ...metadata }) => {
         release();
         try {
-          // The panel record is per-thread (or the workspace fallback for the
-          // threadless shell). Resolve the owning workspace, then read the scope's
-          // effective record, passing the thread id only when the scope is a thread.
-          const { workspaceId, isThread } = resolveScopeWorkspace(scopeId);
-          const panelThreadId = isThread ? scopeId : undefined;
-          const diff = useDiffStore.getState();
-          const panel = workspaceId
-            ? diff.getRightPanel(workspaceId, panelThreadId)
-            : undefined;
-          const panelVisible = workspaceId
-            ? diff.getRightPanelVisible(workspaceId, panelThreadId)
-            : false;
-          if (!panel || !panelVisible) {
+          const target = attachTargetFor(scopeId);
+          if (!target) {
             transport.terminalKill(ptyId).catch(() => {});
             return;
           }
@@ -79,13 +93,16 @@ export function createTerminalForScope(scopeId: string): void {
           // Hydration may have added this record first, which makes addTerminal a
           // no-op; the new terminal still has to become the tool's active tab.
           useTerminalStore.getState().setActiveTerminal(scopeId, ptyId);
-          diff.setRightPanelTab(workspaceId!, panelThreadId, "terminal");
+          if (target !== "home") {
+            useDiffStore.getState().setRightPanelTab(target.workspaceId, target.panelThreadId, "terminal");
+          }
         } catch (error) {
           // The server already spawned the PTY; a failed local attach must not
           // leak it on the host.
           transport.terminalKill(ptyId).catch(() => {});
           throw error;
         }
+        onAttached?.(ptyId);
       })
       .catch((error) => {
         release();

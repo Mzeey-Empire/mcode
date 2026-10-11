@@ -25,6 +25,7 @@ const PROVISIONAL_HEIGHT_BY_ITEM_TYPE: Record<ChatVirtualItem["type"], number> =
   "work-fold": 32,
   "turn-meta-line": 24,
   "narrative-indicator": 32,
+  "turn-end-notice": 56,
 };
 
 /** Prose thoughts wrap to several lines; a collapsed reasoning row is one 28px tool-style row. */

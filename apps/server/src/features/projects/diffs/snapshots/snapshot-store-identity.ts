@@ -20,6 +20,12 @@ export type StoreId = z.infer<typeof StoreIdSchema>;
 /** DI token for the store id of the database this server process opened. */
 export const SNAPSHOT_STORE_ID = "SnapshotStoreId";
 
+/** Fixed identity for internal pins, independent of repository user configuration. */
+export const PIN_COMMIT_ENV = {
+  GIT_AUTHOR_NAME: "Mcode", GIT_AUTHOR_EMAIL: "mcode@localhost",
+  GIT_COMMITTER_NAME: "Mcode", GIT_COMMITTER_EMAIL: "mcode@localhost",
+};
+
 /** Return this file's store id, minting a new one when the file is not where the id was recorded. */
 export const ensureStoreIdentity = databaseWriteOperation("snapshotStore.ensureIdentity", z.object({
   databasePath: z.string().min(1),

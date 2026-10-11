@@ -1,10 +1,9 @@
 import { StrictMode } from "react";
 import { render, screen, act, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import type { WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
+import type { ThreadAttention, ThreadWaitingKind, TurnOutcome, WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
 import type { Thread } from "@/transport/types";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
-import { createMockApproval } from "@/__tests__/mocks/transport";
 import { pushEmitter } from "@/transport/ws-transport";
 import { startPushListeners, stopPushListeners } from "@/transport/ws-events";
 
@@ -222,19 +221,10 @@ afterEach(() => {
 // Import after mocks are registered.
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { useUiStore } from "@/stores/uiStore";
-import { useRecoveryIncidentStore } from "@/features/recovery/state/recoveryIncidentStore";
 import { prefetchOnPointerDown } from "@/features/conversation";
 import { ProjectTree } from "../ProjectTree";
-import { useApprovalStore, type StoredApproval } from "@/stores/approvalStore";
-
-function seedApprovals(byThread: Record<string, Array<{ settled: boolean }>>): void {
-  const approvals = Object.entries(byThread).flatMap(([threadId, items]) => items.map(({ settled }, index): StoredApproval => ({
-    requestId: `${threadId}-approval-${index}`, threadId, providerId: "claude", requestedAt: "2026-07-29T00:00:00.000Z",
-    subject: { kind: "command", command: "bun run lint" }, choices: [{ id: "deny", intent: "deny", label: "Deny" }],
-    noteDelivery: "none", origin: { kind: "agent" }, settled,
-  })));
-  useApprovalStore.setState({ approvals, revision: 0 });
-}
+import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
+import { useProjectAutomaticSetupStore } from "@/features/projects/environment";
 
 /** Build a minimal Thread fixture. */
 type TestWorkspaceThread = Thread & { clientPreparing?: boolean };
@@ -498,14 +488,18 @@ describe("ProjectTree thread interactions", () => {
 
     render(<ProjectTree />);
     const action = screen.getByRole("button", { name: "Complete My Thread" });
-    expect(action).toHaveClass(
+    const actions = action.closest(".absolute");
+    expect(actions).toHaveClass(
       "opacity-0",
       "group-hover/row:opacity-100",
       "group-focus-visible/row:opacity-100",
-      "focus-visible:opacity-100",
+      "focus-within:opacity-100",
     );
-    expect(action).not.toHaveClass("group-focus-within/row:opacity-100");
-    expect(action).not.toHaveClass("focus:opacity-100");
+    expect(actions).not.toHaveClass("group-focus-within/row:opacity-100");
+    expect(within(actions as HTMLElement).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Complete My Thread",
+      "Thread options for My Thread",
+    ]);
 
     fireEvent.mouseEnter(action.closest('[role="button"]') ?? action);
     fireEvent.click(action);
@@ -1013,20 +1007,19 @@ describe("ProjectTree thread interactions", () => {
     expect(screen.getByRole("button", { name: "Add project" })).toBeInTheDocument();
   });
 
-  it("optically aligns the provider mark and separates it from the thread title", () => {
+  it("leads the row with the status lane and fades the title instead of truncating it", () => {
     setupStoreMocks();
 
     render(<ProjectTree />);
 
     const row = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
-    const provider = screen.getByLabelText("Provider, Claude");
-    const leadingIcons = provider.parentElement;
-    const leadingIconsWidth = Number.parseFloat(leadingIcons?.style.width ?? "");
-    const titleLeft = Number.parseFloat(row.style.paddingLeft);
+    const lane = within(row).getByTestId("thread-status-lane");
+    const title = within(row).getByTestId("thread-title");
 
-    expect(provider).toHaveClass("-mt-px");
-    expect(leadingIcons).toHaveClass("left-0.5");
-    expect(titleLeft - (2 + leadingIconsWidth)).toBe(4);
+    expect(row.firstElementChild).toBe(lane);
+    expect(lane).toBeEmptyDOMElement();
+    expect(title).toHaveClass("text-fade");
+    expect(title.previousElementSibling).toBe(screen.getByLabelText("Provider, Claude"));
   });
 
   it("offers Explorer and rename actions from the project menu", () => {
@@ -1460,6 +1453,7 @@ describe("ProjectTree action-required indicator", () => {
   // Shape matches ChecksStatus just enough for sidebar CI aggregation,
   // while keeping the action-required ring tests focused on row state.
   let currentChecks: Record<string, { aggregate: string; runs: unknown[] }>;
+  let currentPendingStartup: Record<string, true>;
 
   function installWorkspaceMock() {
     // Build the state once per install: a fresh object per selector call would
@@ -1495,7 +1489,7 @@ describe("ProjectTree action-required indicator", () => {
       worktrees: [],
       worktreesLoadedForWorkspace: null,
       error: null,
-      pendingStartupByThreadId: {},
+      pendingStartupByThreadId: currentPendingStartup,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
     vi.mocked(useWorkspaceStore).mockImplementation(((
@@ -1505,15 +1499,10 @@ describe("ProjectTree action-required indicator", () => {
   }
 
   beforeEach(() => {
-    useApprovalStore.setState({ approvals: [], revision: 0 });
+    threadAttentionStore.setState({ byThreadId: {}, visitBaselines: {}, onScreenThreadId: null });
     threadStoreOverrides.runningThreadIds = undefined;
     threadStoreOverrides.pendingStopCounts = undefined;
     threadStoreOverrides.runtimeByThread = undefined;
-    useRecoveryIncidentStore.setState({
-      incident: null,
-      dismissedIncidentIds: new Set<string>(),
-      retriedExecutionIds: new Set<string>(),
-    });
     automaticSetupTransport.getAutomaticSetup.mockReset();
     automaticSetupTransport.getAutomaticSetup.mockResolvedValue({
       gate: "not-required",
@@ -1522,6 +1511,8 @@ describe("ProjectTree action-required indicator", () => {
     } satisfies WorkspaceEnvironmentAutomaticSetupSnapshot);
     currentThread = makeThread({ id: "thread-pending", status: "active" });
     currentChecks = {};
+    currentPendingStartup = {};
+    useProjectAutomaticSetupStore.setState({ snapshotsByThread: {}, updateEpochByThread: {}, refreshFailedByThread: {} });
     installWorkspaceMock();
     // Pre-expand the workspace so its threads render.
     window.localStorage.setItem(
@@ -1560,69 +1551,66 @@ describe("ProjectTree action-required indicator", () => {
     window.localStorage.clear();
   });
 
-  it("renders a ring indicator when the thread has an unsettled permission request", () => {
-    seedApprovals({
-      "thread-pending": [{ settled: false }],
-    });
+  function attention(threadId: string, overrides: Partial<ThreadAttention> = {}): ThreadAttention {
+    return { threadId, waiting: null, lastTurn: null, seen: { sequence: null, at: null }, ...overrides };
+  }
+
+  function waitingOn(kind: ThreadWaitingKind): Pick<ThreadAttention, "waiting"> {
+    return { waiting: { kind, since: "2026-10-11T12:00:00.000Z" } };
+  }
+
+  function endedTurn(outcome: TurnOutcome, sequence = 7): Pick<ThreadAttention, "lastTurn"> {
+    return { lastTurn: { outcome, endedAt: "2026-10-11T12:00:00.000Z", sequence, changedFileCount: null } };
+  }
+
+  function applyAttention(value: ThreadAttention): void {
+    act(() => threadAttentionStore.getState().apply(value));
+  }
+
+  it("rings Approval required and names it on the third line", () => {
+    applyAttention(attention("thread-pending", waitingOn("approval")));
     render(<ProjectTree />);
-    expect(screen.getByRole("img", { name: "Action required" })).toHaveAttribute("data-status-mark", "attention");
+
+    expect(screen.getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
+    expect(screen.getByText("Approval required")).toHaveClass("text-primary");
   });
 
-  it("renders a solid dot (no action-required label) when there is no pending permission", () => {
-    seedApprovals({});
+  it("leaves the status lane empty for a thread with no attention facts", () => {
     render(<ProjectTree />);
-    expect(screen.queryByLabelText("Action required")).toBeNull();
+
+    expect(screen.getByTestId("thread-status-lane")).toBeEmptyDOMElement();
   });
 
-  it("clears the ring when the permission is resolved (settled=true)", () => {
-    seedApprovals({
-      "thread-pending": [{ settled: true }],
-    });
-    render(<ProjectTree />);
-    expect(screen.queryByLabelText("Action required")).toBeNull();
-  });
-
-  it("renders the ring even when the thread is actively running", () => {
-    // The amber ring must outrank the running-state primary pulse — otherwise
-    // a user who is mid-run with a pending permission wouldn't see the affordance.
-    seedApprovals({
-      "thread-pending": [{ settled: false }],
-    });
+  it("keeps the ring when the waiting thread is also running", () => {
+    applyAttention(attention("thread-pending", waitingOn("approval")));
     threadStoreOverrides.runningThreadIds = new Set(["thread-pending"]);
     render(<ProjectTree />);
-    expect(screen.getByRole("img", { name: "Action required" })).toHaveAttribute("data-status-mark", "attention");
+
+    expect(screen.getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
     expect(screen.queryByRole("img", { name: "Running" })).toBeNull();
   });
 
-  it("renders the running marker from the matching thread row state", () => {
+  it("fades a running row behind its spinner and blocks completion", () => {
     threadStoreOverrides.runningThreadIds = new Set(["thread-pending"]);
     threadStoreOverrides.runtimeByThread = {
       "thread-pending": { runtimePhase: "running", turnExecutionId: "turn-1" },
     };
     render(<ProjectTree />);
 
-    const spinner = screen.getByLabelText("Running");
-    const action = screen.getByRole("button", { name: "Complete My Thread" });
-    const title = screen.getByTestId("thread-title");
-    expect(spinner).toBeVisible();
-    expect(action).toBeDisabled();
-    expect(action).toHaveClass(
-      "opacity-0",
-      "disabled:opacity-0",
-      "group-hover/row:opacity-100",
-      "group-focus-visible/row:opacity-100",
-      "focus-visible:opacity-100",
-      "group-hover/row:disabled:opacity-100",
-      "group-focus-visible/row:disabled:opacity-100",
-    );
-    expect(action).not.toHaveClass("disabled:opacity-50");
-    expect(action).not.toContainElement(spinner);
-    expect(
-      title.compareDocumentPosition(spinner) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    const row = screen.getByRole("button", { name: /^Running Provider, Claude My Thread/i });
+    expect(within(screen.getByTestId("thread-status-lane")).getByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
+    expect(row).toHaveClass("has-[[data-status-mark=running]]:opacity-55");
+    expect(screen.getByRole("button", { name: "Complete My Thread" })).toBeDisabled();
   });
 
-  it("shows Setup running from the automatic Setup snapshot", async () => {
+  it("blocks completion while a permission is waiting", () => {
+    applyAttention(attention("thread-pending", waitingOn("approval")));
+    render(<ProjectTree />);
+
+    expect(screen.getByRole("button", { name: "Complete My Thread" })).toBeDisabled();
+  });
+
+  it("shows a running blocking setup as running", async () => {
     currentThread = makeThread({ id: "thread-pending", mode: "worktree", worktree_managed: true });
     automaticSetupTransport.getAutomaticSetup.mockResolvedValue({
       gate: "blocked",
@@ -1633,10 +1621,10 @@ describe("ProjectTree action-required indicator", () => {
 
     render(<ProjectTree />);
 
-    expect(await screen.findByRole("img", { name: "Setup running" })).toHaveAttribute("data-status-mark", "running");
+    expect(await screen.findByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
   });
 
-  it("shows Awaiting response for a failed blocking setup", async () => {
+  it("shows Setup failed for a failed blocking setup", async () => {
     currentThread = makeThread({ id: "thread-pending", mode: "worktree", worktree_managed: true });
     automaticSetupTransport.getAutomaticSetup.mockResolvedValue({
       gate: "blocked",
@@ -1647,138 +1635,77 @@ describe("ProjectTree action-required indicator", () => {
 
     render(<ProjectTree />);
 
-    expect(await screen.findByRole("img", { name: "Awaiting response" })).toHaveAttribute("data-status-mark", "attention");
-    expect(screen.queryByLabelText("Setup running")).not.toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
+    expect(screen.queryByRole("img", { name: "Running" })).not.toBeInTheDocument();
+  });
+
+  it("shows a row whose first turn is still starting as running", () => {
+    currentPendingStartup = { "thread-pending": true };
+    installWorkspaceMock();
+    render(<ProjectTree />);
+
+    expect(within(screen.getByTestId("thread-status-lane")).getByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
   });
 
   it.each([
-    ["completed", "Completed", "success"],
+    ["completed", "Finished", "success"],
     ["errored", "Failed", "error"],
-  ] as const)(
-    "shows the %s turn notification blob when a PR has checks",
-    (status, label, markState) => {
-      currentThread = makeThread({
-        id: "thread-pending",
-        status,
-        mode: "worktree",
-        pr_number: 42,
-        pr_status: "open",
-      });
-      currentChecks = {
-        "thread-pending": {
-          aggregate: "passing",
-          runs: [
-            {
-              name: "build",
-              status: "completed",
-              conclusion: "success",
-            },
-          ],
-        },
-      };
-      installWorkspaceMock();
-
-      render(<ProjectTree />);
-
-      const blob = screen.getByLabelText(label);
-      expect(blob).toBeVisible();
-      expect(blob).toHaveAttribute("data-status-mark", markState);
-    },
-  );
-
-  it("shows interruption only for the exact recovery incident entry", () => {
-    currentThread = makeThread({
-      id: "thread-pending",
-      status: "interrupted",
-      mode: "worktree",
-      pr_number: 42,
-      pr_status: "open",
-    });
-    installWorkspaceMock();
-    useRecoveryIncidentStore.setState({
-      incident: {
-        id: "00000000-0000-4000-8000-000000000101",
-        createdAt: "2026-09-01T12:00:00.000Z",
-        entries: [{
-          workspaceId: "ws-2",
-          workspaceName: "Other Project",
-          threadId: "other-thread",
-          threadTitle: "Other Thread",
-          executionId: "00000000-0000-4000-8000-000000000102",
-          startedAt: "2026-09-01T11:59:55.000Z",
-          interruptedAt: "2026-09-01T12:00:00.000Z",
-          durationMs: 5_000,
-        }],
-      },
-    });
-
+    ["interrupted", "Interrupted", "attention"],
+  ] as const)("marks an unseen %s turn as %s", (outcome, label, markState) => {
+    applyAttention(attention("thread-pending", endedTurn(outcome)));
     render(<ProjectTree />);
-    expect(screen.queryByLabelText("Interrupted")).toBeNull();
 
-    act(() => {
-      useRecoveryIncidentStore.setState({
-        incident: {
-          id: "00000000-0000-4000-8000-000000000103",
-          createdAt: "2026-09-01T12:00:00.000Z",
-          entries: [{
-            workspaceId: "ws-1",
-            workspaceName: "Test Project",
-            threadId: "thread-pending",
-            threadTitle: "My Thread",
-            executionId: "00000000-0000-4000-8000-000000000104",
-            startedAt: "2026-09-01T11:59:55.000Z",
-            interruptedAt: "2026-09-01T12:00:00.000Z",
-            durationMs: 5_000,
-          }],
-        },
-      });
-    });
-
-    expect(screen.getByLabelText("Interrupted")).toBeVisible();
-
-    act(() => {
-      useRecoveryIncidentStore.getState().markEntriesRetried([
-        "00000000-0000-4000-8000-000000000104",
-      ]);
-    });
-
-    expect(screen.queryByLabelText("Interrupted")).toBeNull();
+    expect(screen.getByRole("img", { name: label })).toHaveAttribute("data-status-mark", markState);
+    expect(screen.getByText(label)).toBeVisible();
+    expect(screen.queryByText("Errored")).not.toBeInTheDocument();
   });
 
-  it("keeps update time out of the thread row and shows it in hover details", async () => {
-    const updatedAt = "2026-08-12T07:15:00.000Z";
-    setupStoreMocks({
-      thread: makeThread({
-        id: "thread-updated",
-        title: "Updated Thread",
-        updated_at: updatedAt,
-      }),
-    });
+  it("shows nothing for an unseen cancelled turn", () => {
+    applyAttention(attention("thread-pending", endedTurn("cancelled")));
     render(<ProjectTree />);
 
-    const row = screen.getByRole("button", {
-      name: /^Provider, Claude Updated Thread/i,
-    });
-    const compactTime = new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(updatedAt));
+    expect(screen.getByTestId("thread-status-lane")).toBeEmptyDOMElement();
+  });
 
-    expect(row).not.toHaveTextContent(/\b(?:now|\d+[mhd]|\d+mo)\b/);
+  it("clears Finished when another client marks the turn seen", () => {
+    applyAttention(attention("thread-pending", endedTurn("completed", 7)));
+    render(<ProjectTree />);
+    expect(screen.getByRole("img", { name: "Finished" })).toBeVisible();
+
+    startPushListeners();
+    try {
+      act(() => pushEmitter.emit("thread.attention", attention("thread-pending", {
+        ...endedTurn("completed", 7),
+        seen: { sequence: 7, at: "2026-10-11T12:01:00.000Z" },
+      })));
+
+      expect(screen.queryByRole("img", { name: "Finished" })).not.toBeInTheDocument();
+      expect(screen.getByTestId("thread-status-lane")).toBeEmptyDOMElement();
+    } finally {
+      stopPushListeners();
+    }
+  });
+
+  it("keeps Approval required on screen but quiets an on-screen outcome", () => {
+    applyAttention(attention("thread-pending", { ...waitingOn("approval"), ...endedTurn("completed") }));
+    act(() => threadAttentionStore.setState({ onScreenThreadId: "thread-pending" }));
+    render(<ProjectTree />);
+    expect(screen.getByRole("img", { name: "Approval required" })).toBeVisible();
+
+    applyAttention(attention("thread-pending", endedTurn("completed")));
+
+    expect(screen.getByTestId("thread-status-lane")).toBeEmptyDOMElement();
+  });
+
+  it("shows the row's time on its branch line and the exact time in hover details", async () => {
+    const updatedAt = new Date(Date.now() - 5 * 60_000).toISOString();
+    setupStoreMocks({ thread: makeThread({ id: "thread-updated", title: "Updated Thread", updated_at: updatedAt }) });
+    render(<ProjectTree />);
+
+    const row = screen.getByRole("button", { name: /^Provider, Claude Updated Thread Branch, main 5m /i });
+    const exactTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(updatedAt));
     row.focus();
-    expect(
-      await screen.findByTestId("thread-preview-thread-updated"),
-    ).toHaveTextContent(`Updated ${compactTime}`);
-  });
-
-  it("disables completion while running or waiting for permission", () => {
-    threadStoreOverrides.runningThreadIds = new Set(["thread-pending"]);
-    seedApprovals({
-      "thread-pending": [{ settled: false }],
-    });
-    render(<ProjectTree />);
-
-    expect(screen.getByRole("button", { name: "Complete My Thread" })).toBeDisabled();
+    expect(await screen.findByTestId("thread-preview-thread-updated")).toHaveTextContent(`Updated ${exactTime}`);
   });
 
   it("marks only the owning sidebar row when a cross-thread send approval arrives", () => {
@@ -1787,144 +1714,142 @@ describe("ProjectTree action-required indicator", () => {
       makeThread({ id: "thread-B", title: "Thread B" }),
     ] });
     render(<ProjectTree />);
-    expect(screen.queryByRole("img", { name: "Action required" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Approval required" })).not.toBeInTheDocument();
     startPushListeners();
     try {
-      act(() => pushEmitter.emit("approval.requested", createMockApproval({
-        requestId: "approval-send",
-        threadId: "thread-A",
-        subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "thread-B", message: "Needs approval." },
-      })));
+      // The server keys a supervised thread_send wait on the sending thread, not its target.
+      act(() => pushEmitter.emit("thread.attention", attention("thread-A", waitingOn("approval"))));
 
-      const ownerRow = screen.getByRole("button", { name: /^Provider, Claude Thread A/ });
+      const ownerRow = screen.getByRole("button", { name: /^Approval required Provider, Claude Thread A/ });
       const targetRow = screen.getByRole("button", { name: /^Provider, Claude Thread B/ });
-      expect(within(ownerRow).getByRole("img", { name: "Action required" })).toHaveAttribute("data-status-mark", "attention");
-      expect(within(targetRow).queryByRole("img", { name: "Action required" })).not.toBeInTheDocument();
+      expect(within(ownerRow).getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
+      expect(within(targetRow).getByTestId("thread-status-lane")).toBeEmptyDOMElement();
     } finally {
       stopPushListeners();
     }
   });
 
-  it("renders the ring on the right edge when the thread has a pr_number", () => {
-    currentThread = makeThread({
-      id: "thread-pending",
-      status: "active",
-      mode: "worktree",
-      pr_number: 42,
-      pr_status: "open",
-    });
-    installWorkspaceMock();
-    seedApprovals({
-      "thread-pending": [{ settled: false }],
-    });
-    render(<ProjectTree />);
-    const indicator = screen.getByRole("img", { name: "Action required" });
-    expect(indicator).toHaveAttribute("data-status-mark", "attention");
-    expect(indicator.className).not.toContain("absolute");
-  });
-
-  it("prefers the ring over a CI status dot on the PR overlay", () => {
-    // Pending permission must win over any CI-check indicator: the user's
-    // attention is required and CI state is merely informational.
-    currentThread = makeThread({
-      id: "thread-pending",
-      status: "active",
-      mode: "worktree",
-      pr_number: 42,
-      pr_status: "open",
-    });
+  it("names the wait instead of the PR line when a PR thread needs the user", () => {
+    currentThread = makeThread({ id: "thread-pending", status: "active", mode: "worktree", pr_number: 42, pr_status: "open" });
     currentChecks = {
-      "thread-pending": {
-        aggregate: "failing",
-        runs: [{ name: "ci", status: "completed", conclusion: "failure" }],
-      },
+      "thread-pending": { aggregate: "failing", runs: [{ name: "ci", status: "completed", conclusion: "failure" }] },
     };
     installWorkspaceMock();
-    seedApprovals({
-      "thread-pending": [{ settled: false }],
+    applyAttention(attention("thread-pending", waitingOn("approval")));
+    render(<ProjectTree />);
+
+    expect(screen.getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
+    expect(screen.queryByTestId("thread-pr-indicator-thread-pending")).toBeNull();
+  });
+
+  describe("collapsed project", () => {
+    beforeEach(() => {
+      window.localStorage.setItem("mcode-expanded-projects", JSON.stringify({ "ws-1": false }));
     });
-    render(<ProjectTree />);
-    expect(screen.getByRole("img", { name: "Action required" })).toHaveAttribute("data-status-mark", "attention");
-    expect(screen.queryByTestId("thread-pr-ci-thread-pending")).toBeNull();
+
+    it("shows the highest-priority mark among its threads", () => {
+      setupStoreMocks({ threads: [
+        makeThread({ id: "thread-done", title: "Done" }),
+        makeThread({ id: "thread-run", title: "Run" }),
+        makeThread({ id: "thread-wait", title: "Wait" }),
+      ] });
+      window.localStorage.setItem("mcode-expanded-projects", JSON.stringify({ "ws-1": false }));
+      applyAttention(attention("thread-done", endedTurn("completed")));
+      threadStoreOverrides.runningThreadIds = new Set(["thread-run"]);
+      render(<ProjectTree />);
+      const projectRow = screen.getByTestId("project-row-ws-1");
+      expect(within(projectRow).getByRole("img", { name: "Running" })).toBeVisible();
+
+      applyAttention(attention("thread-wait", waitingOn("questions")));
+
+      expect(within(projectRow).getByRole("img", { name: "Answers required" })).toHaveAttribute("data-status-mark", "attention");
+      expect(projectRow.querySelectorAll("[data-status-mark]")).toHaveLength(1);
+    });
+
+    it("hides its status mark and CI roll-up when project actions appear", () => {
+      currentChecks = {
+        "thread-pending": { aggregate: "pending", runs: [{ name: "ci", status: "in_progress", conclusion: null }] },
+      };
+      installWorkspaceMock();
+      threadStoreOverrides.runningThreadIds = new Set(["thread-pending"]);
+      render(<ProjectTree />);
+
+      const projectRow = screen.getByTestId("project-row-ws-1");
+      const ciRollup = within(projectRow).getByLabelText("1 thread with checks running");
+      const status = within(projectRow).getByRole("img", { name: "Running" }).parentElement;
+      for (const element of [ciRollup, status]) {
+        expect(element).toHaveClass("group-hover/ws:opacity-0", "group-focus-within/ws:opacity-0");
+      }
+    });
+
+    it("keeps showing activity while Stop is pending", () => {
+      threadStoreOverrides.pendingStopCounts = { "thread-pending": 1 };
+      installWorkspaceMock();
+      render(<ProjectTree />);
+
+      expect(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Running" })).toBeVisible();
+    });
+
+    it("shows activity while a thread is being created", () => {
+      currentThread = { ...currentThread, clientPreparing: true };
+      installWorkspaceMock();
+      render(<ProjectTree />);
+
+      expect(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Running" })).toBeVisible();
+    });
+
+    it("rolls up a failed blocking setup cached by an earlier mount", () => {
+      currentThread = makeThread({ id: "thread-pending", mode: "worktree", worktree_managed: true });
+      installWorkspaceMock();
+      useProjectAutomaticSetupStore.getState().applySnapshot("thread-pending", {
+        gate: "blocked",
+        attempt: { id: "attempt-1", state: "failed", reason: "setup_failed", snapshot: null, outcome: "command_failure", createdAt: "", startedAt: "", finishedAt: "", exitCode: 1, output: "failed", outputTruncated: false },
+        queuedTurns: [],
+      });
+      render(<ProjectTree />);
+
+      expect(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
+    });
+
+    it("keeps a setup that settles after its project collapses current", async () => {
+      window.localStorage.setItem("mcode-expanded-projects", JSON.stringify({ "ws-1": true }));
+      currentThread = makeThread({ id: "thread-pending", mode: "worktree", worktree_managed: true });
+      installWorkspaceMock();
+      const setupAttempt = { id: "attempt-1", reason: null, snapshot: null, createdAt: "", startedAt: "", outputTruncated: false } as const;
+      automaticSetupTransport.getAutomaticSetup
+        .mockResolvedValueOnce({ gate: "blocked", attempt: { ...setupAttempt, state: "running", outcome: null, finishedAt: null, exitCode: null, output: "installing" }, queuedTurns: [] })
+        .mockResolvedValue({ gate: "blocked", attempt: { ...setupAttempt, state: "failed", reason: "setup_failed", outcome: "command_failure", finishedAt: "", exitCode: 1, output: "failed" }, queuedTurns: [] });
+      render(<ProjectTree />);
+      expect(await within(screen.getByTestId("thread-status-lane")).findByRole("img", { name: "Running" })).toBeVisible();
+
+      fireEvent.click(screen.getByRole("button", { name: "Toggle threads for Test" }));
+
+      const projectRow = screen.getByTestId("project-row-ws-1");
+      expect(await within(projectRow).findByRole("img", { name: "Setup failed" }, { timeout: 3_000 })).toHaveAttribute("data-status-mark", "attention");
+    });
+
+    it("leaves the mark to the rows once expanded", () => {
+      window.localStorage.setItem("mcode-expanded-projects", JSON.stringify({ "ws-1": true }));
+      applyAttention(attention("thread-pending", waitingOn("approval")));
+      render(<ProjectTree />);
+
+      expect(within(screen.getByTestId("project-row-ws-1")).queryByRole("img", { name: "Approval required" })).toBeNull();
+    });
   });
 
-  it("hides project status metadata when row actions appear", () => {
-    currentChecks = {
-      "thread-pending": {
-        aggregate: "pending",
-        runs: [{ name: "ci", status: "in_progress", conclusion: null }],
-      },
-    };
-    installWorkspaceMock();
-    threadStoreOverrides.runningThreadIds = new Set(["thread-pending"]);
-
-    render(<ProjectTree />);
-
-    const projectRow = screen.getByTestId("project-row-ws-1");
-    const ciRollup = within(projectRow).getByLabelText(
-      "1 thread with checks running",
-    );
-    const activeAgent = projectRow.querySelector(".status-pulse");
-
-    expect(ciRollup).toHaveClass(
-      "group-hover/ws:opacity-0",
-      "group-focus-within/ws:opacity-0",
-    );
-    expect(activeAgent).toHaveClass(
-      "group-hover/ws:opacity-0",
-      "group-focus-within/ws:opacity-0",
-    );
-  });
-
-  it("keeps project activity visible while Stop is pending", () => {
-    threadStoreOverrides.pendingStopCounts = { "thread-pending": 1 };
-    installWorkspaceMock();
-    render(<ProjectTree />);
-    expect(screen.getByTestId("project-row-ws-1").querySelector(".status-pulse")).not.toBeNull();
-  });
-
-  it("shows project activity while a thread is being created", () => {
-    currentThread = { ...currentThread, clientPreparing: true };
-    installWorkspaceMock();
-    render(<ProjectTree />);
-    expect(screen.getByTestId("project-row-ws-1").querySelector(".status-pulse")).not.toBeNull();
-  });
-
-  it("does not dim row chrome when the thread row is a client scaffold", () => {
+  it("dims only the content of a client scaffold row, not its status lane", () => {
     currentThread = {
-      ...makeThread({
-        id: "thread-pending",
-        mode: "worktree",
-        pr_number: 42,
-        pr_status: "open",
-      }),
+      ...makeThread({ id: "thread-pending", mode: "worktree", pr_number: 42, pr_status: "open" }),
       clientPreparing: true,
     } as Thread;
-    currentChecks = {
-      "thread-pending": {
-        aggregate: "pending",
-        runs: [
-          {
-            name: "build",
-            status: "in_progress",
-            conclusion: null,
-            durationMs: null,
-            startedAt: null,
-          },
-        ],
-      },
-    };
     installWorkspaceMock();
     render(<ProjectTree />);
 
-    const row = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
+    const row = screen.getByRole("button", { name: /^Running Provider, Claude My Thread/i });
+    const content = screen.getByTestId("thread-title").closest(".flex-col");
     expect(row.className).not.toContain("opacity-[0.72]");
-
-    const titleCluster = screen.getByTestId("thread-title").parentElement;
-    expect(titleCluster?.className).toContain("opacity-[0.72]");
-
-    const prIcon = screen.getByLabelText(/PR #42/);
-    expect(prIcon.className).not.toContain("opacity-[0.72]");
+    expect(content?.className).toContain("opacity-[0.72]");
+    expect(content).not.toContainElement(screen.getByTestId("thread-status-lane"));
   });
 });
 
@@ -1966,7 +1891,6 @@ describe("ProjectTree PR-ability gating by mode", () => {
   }
 
   beforeEach(() => {
-    useApprovalStore.setState({ approvals: [], revision: 0 });
     threadStoreOverrides.runningThreadIds = undefined;
     threadStoreOverrides.runtimeByThread = undefined;
     window.localStorage.setItem(
@@ -1987,7 +1911,7 @@ describe("ProjectTree PR-ability gating by mode", () => {
     expect(screen.queryByTitle(/PR #42/)).toBeNull();
   });
 
-  it("places the PR icon on the right without redundant number text", () => {
+  it("shows the PR number on the third line, under the title", () => {
     renderWithThread(
       makeThread({ mode: "worktree", pr_number: 42, pr_status: "open" }),
     );
@@ -1995,28 +1919,26 @@ describe("ProjectTree PR-ability gating by mode", () => {
     const row = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
     const title = screen.getByTestId("thread-title");
     expect(indicator).toHaveAttribute("aria-label", "PR #42, open");
-    expect(indicator).toHaveClass("-mt-px");
-    expect(screen.getByLabelText(/^Provider,/)).toBeInTheDocument();
+    expect(indicator).toHaveTextContent("PR #42");
     expect(
       title.compareDocumentPosition(indicator) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(row).toContainElement(indicator);
-    expect(screen.queryByText("#42")).toBeNull();
   });
 
   it("renders the merged PR visual for a worktree thread", () => {
     renderWithThread(
       makeThread({ mode: "worktree", pr_number: 42, pr_status: "merged" }),
     );
-    expect(screen.getByLabelText("PR #42, merged")).toBeInTheDocument();
+    expect(screen.getByLabelText("PR #42, merged")).toHaveTextContent("PR #42·Merged");
   });
 
   it.each([
-    ["passing", "Checks passing", "--diff-add-strong"],
-    ["failing", "Checks failing", "--diff-remove-strong"],
-    ["pending", "Checks running", "text-primary"],
-  ])("attaches %s CI status to the PR icon", (aggregate, label, tone) => {
+    ["passing", "Passing", "--diff-add-strong"],
+    ["failing", "Failing", "--diff-remove-strong"],
+    ["pending", "Pending", "text-primary"],
+  ])("names %s checks after the PR number", (aggregate, word, tone) => {
     renderWithThread(
       makeThread({ mode: "worktree", pr_number: 42, pr_status: "open" }),
       {
@@ -2027,20 +1949,18 @@ describe("ProjectTree PR-ability gating by mode", () => {
       },
     );
 
-    expect(screen.getByLabelText(`PR #42, open. ${label}`)).toBeInTheDocument();
-    expect(screen.getByTestId("thread-pr-ci-thread-1").className).toContain(tone);
-    expect(screen.queryByLabelText(/pending check|failing check/i)).toBeNull();
+    expect(screen.getByLabelText(`PR #42, open, checks ${word.toLowerCase()}`)).toBeInTheDocument();
+    const checks = screen.getByTestId("thread-pr-ci-thread-1");
+    expect(checks).toHaveTextContent(word);
+    expect(checks.className).toContain(tone);
   });
 
-  it("renders no leading status dot for non-PR rows", () => {
+  it("renders no status mark or PR line for a quiet non-PR row", () => {
     renderWithThread(
       makeThread({ mode: "direct", pr_number: null, status: "paused" }),
     );
-    expect(screen.queryByLabelText("Action required")).toBeNull();
-    expect(screen.queryByLabelText("Completed")).toBeNull();
-    expect(screen.queryByLabelText("Failed")).toBeNull();
-    expect(screen.queryByLabelText("Interrupted")).toBeNull();
-    expect(screen.queryByTitle(/PR #/)).toBeNull();
+    expect(screen.getByTestId("thread-status-lane")).toBeEmptyDOMElement();
+    expect(screen.queryByTestId("thread-pr-indicator-thread-1")).toBeNull();
   });
 
   it("renders a worktree indicator only for worktree rows", () => {
@@ -2078,7 +1998,7 @@ describe("ProjectTree PR-ability gating by mode", () => {
     );
     expect(preview).toHaveTextContent("Branchless Thread");
     expect(screen.getByLabelText("Project, Test Project")).toBeInTheDocument();
-    expect(screen.getByLabelText("Branch, HEAD")).toBeInTheDocument();
+    expect(within(preview).getByLabelText("Branch, HEAD")).toBeInTheDocument();
     expect(within(preview).queryByLabelText(/^Provider,/)).toBeNull();
     expect(screen.getByLabelText("Provider, Codex")).toBeInTheDocument();
     expect(screen.queryByLabelText(/^Status,/)).toBeNull();

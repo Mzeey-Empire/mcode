@@ -557,6 +557,57 @@ describe("AgentService.createAndSend defaults", () => {
     ]);
   });
 
+  it("refuses a Send again resend while automatic Setup is blocked instead of queueing it unclaimed", async () => {
+    const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-agent-queued-resend-"));
+    roots.push(root);
+    const { db, threadRepo, workspaceRepo, service, automaticSetup } = createAgentServiceHarness(({ db, threadRepo: threads }) =>
+      new WorkspaceEnvironmentService({
+        mcodeDir: root,
+        database: db,
+        databaseWriter: persistenceRuntime.writer,
+        threads: { findById: (id) => threads.findById(id) },
+        terminalCommands: { prepare: vi.fn() },
+        platform: "linux",
+      }),
+    );
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
+    const managed = (await threadRepo.create(workspace.id, "Managed", "worktree", "feature/managed", true, "claude"));
+    const environment = automaticSetup as WorkspaceEnvironmentService;
+    await environment.save({
+      workspaceId: workspace.id,
+      sourceRevision: null,
+      document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
+    });
+    (await environment.queueAutomaticFirstTurn({
+      threadId: managed.id,
+      messageId: "message-first",
+      content: "First blocked Turn",
+      attachments: [],
+      mentions: [],
+      submission: {
+        threadId: managed.id,
+        messageId: "message-first",
+        content: "First blocked Turn",
+        displayContent: "First blocked Turn",
+        model: "claude-sonnet-4-6",
+        permissionMode: "default",
+        attachments: [],
+        persistedAttachments: [],
+        mentions: [],
+        provider: "claude",
+      },
+    }));
+
+    await expect(service.sendMessage({ threadId: managed.id, content: "Use staging",
+      messageId: "00000000-0000-4000-8000-0000000000a2", resendOfSteerId: "00000000-0000-4000-8000-0000000000a1" }))
+      .rejects.toMatchObject({ code: "WORKSPACE_ENVIRONMENT_SETUP_UNAVAILABLE" });
+
+    expect(environment.getAutomaticSetup({ threadId: managed.id }).queuedTurns).toHaveLength(1);
+    expect(db.prepare("SELECT content FROM messages WHERE thread_id = ? ORDER BY sequence").all(managed.id)).toEqual([
+      { content: "First blocked Turn" },
+    ]);
+  });
+
   it("removes newly persisted attachments when the automatic queue is at capacity", async () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-agent-queued-turn-capacity-"));
     roots.push(root);

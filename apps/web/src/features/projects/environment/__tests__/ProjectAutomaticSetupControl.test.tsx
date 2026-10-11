@@ -2,8 +2,10 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
-import { getThreadStateMarker, ThreadStateMarker } from "@/components/sidebar/ThreadStateMarker";
-import { ProjectAutomaticSetupCard, useProjectAutomaticSetup, useProjectAutomaticSetupStore } from "../ProjectAutomaticSetupControl";
+import { ThreadStatusLane } from "@/features/thread-attention/ThreadStatusLane";
+import { threadRowLook, threadRowSetup } from "@/features/thread-attention/thread-row-presentation";
+import { deriveThreadRowState } from "@/features/thread-attention/thread-row-state";
+import { ProjectAutomaticSetupCard, refreshAutomaticSetup, useProjectAutomaticSetup, useProjectAutomaticSetupStore } from "../ProjectAutomaticSetupControl";
 
 const transport = vi.hoisted(() => ({
   getAutomaticSetup: vi.fn(),
@@ -46,7 +48,7 @@ const failed: WorkspaceEnvironmentAutomaticSetupSnapshot = {
 afterEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
-  useProjectAutomaticSetupStore.setState({ snapshotsByThread: {}, updateEpochByThread: {} });
+  useProjectAutomaticSetupStore.setState({ snapshotsByThread: {}, updateEpochByThread: {}, refreshFailedByThread: {} });
 });
 
 describe("ProjectAutomaticSetupControl", () => {
@@ -149,23 +151,20 @@ describe("ProjectAutomaticSetupControl", () => {
 
     function ProjectTreeMarker() {
       const automaticSetup = useProjectAutomaticSetup("thread-1");
-      const setupState = automaticSetup.snapshot.attempt?.state;
-      const marker = getThreadStateMarker({
-        thread: { status: "completed", updated_at: "2026-08-22T12:00:00.000Z" },
-        checks: undefined,
-        isRunning: false,
-        isSetupAwaitingResponse: automaticSetup.snapshot.gate === "blocked"
-          && (setupState === "failed" || setupState === "interrupted"),
-        hasPendingPermission: false,
+      const state = deriveThreadRowState({
+        attention: undefined,
+        running: false,
+        setup: threadRowSetup(automaticSetup.snapshot),
+        onScreen: false,
       });
-      return <ThreadStateMarker marker={marker} />;
+      return <ThreadStatusLane mark={threadRowLook(state).mark} />;
     }
 
     render(<><ChatSetup /><ProjectTreeMarker /></>);
 
     await screen.findByRole("heading", { name: "Environment setup failed" });
     await waitFor(() => expect(transport.getAutomaticSetup).toHaveBeenCalledTimes(2));
-    expect(await screen.findByLabelText("Awaiting response")).toBeVisible();
+    expect(await screen.findByLabelText("Setup failed")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Continue without setup" }));
 
     await waitFor(() => expect(screen.queryByLabelText("Environment setup")).not.toBeInTheDocument());
@@ -173,7 +172,7 @@ describe("ProjectAutomaticSetupControl", () => {
       resolveStaleRead!(failed);
       await staleRead;
     });
-    expect(screen.getByLabelText("Completed")).toBeVisible();
+    expect(screen.queryByLabelText("Setup failed")).not.toBeInTheDocument();
   });
 
   it("refreshes a running setup so its terminal output stays current", async () => {
@@ -208,5 +207,49 @@ describe("ProjectAutomaticSetupControl", () => {
     expect(screen.getByText("installing dependencies")).toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     expect(screen.getByText("running project bootstrap")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["an older refresh fails after a newer one succeeds", "reject-older", false],
+    ["an older refresh succeeds after a newer one fails", "resolve-older", true],
+  ] as const)("keeps the newest refresh outcome when %s", async (_case, older, refreshFailed) => {
+    let settleOlder!: { resolve: (snapshot: WorkspaceEnvironmentAutomaticSetupSnapshot) => void; reject: (error: Error) => void };
+    transport.getAutomaticSetup
+      .mockReturnValueOnce(new Promise((resolve, reject) => { settleOlder = { resolve, reject }; }))
+      .mockImplementationOnce(() => (refreshFailed ? Promise.reject(new Error("offline")) : Promise.resolve(failed)));
+
+    const olderRefresh = refreshAutomaticSetup("thread-1");
+    await refreshAutomaticSetup("thread-1");
+    if (older === "reject-older") settleOlder.reject(new Error("timed out"));
+    else settleOlder.resolve({ ...failed, gate: "released-by-continue" });
+    await olderRefresh;
+
+    expect(useProjectAutomaticSetupStore.getState().refreshFailedByThread["thread-1"] ?? false).toBe(refreshFailed);
+    expect(useProjectAutomaticSetupStore.getState().snapshotsByThread["thread-1"]).toEqual(refreshFailed ? undefined : failed);
+  });
+
+  it("says a running setup's status may be stale while its refresh fails", async () => {
+    vi.useFakeTimers();
+    transport.getAutomaticSetup
+      .mockResolvedValueOnce({
+        ...failed,
+        attempt: { ...failed.attempt!, state: "running", reason: null, outcome: null, finishedAt: null, exitCode: null, output: "installing dependencies" },
+      })
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(failed);
+
+    function Setup() {
+      const automaticSetup = useProjectAutomaticSetup("thread-1");
+      return <ProjectAutomaticSetupCard snapshot={automaticSetup.snapshot} busy={automaticSetup.busy} error={automaticSetup.error} onRetry={automaticSetup.retrySetup} onContinue={automaticSetup.continueWithoutSetup} />;
+    }
+
+    render(<Setup />);
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not refresh setup status");
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(screen.getByRole("heading", { name: "Environment setup failed" })).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

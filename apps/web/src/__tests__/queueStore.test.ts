@@ -67,35 +67,6 @@ describe("queueStore", () => {
     });
   });
 
-  describe("moveMessage", () => {
-    it("moves an item forward and clamps the target index", () => {
-      const [a, b, c] = seed(["a", "b", "c"]);
-      useQueueStore.getState().moveMessage(T, a.id, 99);
-      expect(useQueueStore.getState().queues[T].map((m) => m.id)).toEqual([
-        b.id,
-        c.id,
-        a.id,
-      ]);
-    });
-
-    it("moves an item backward to the requested index", () => {
-      const [a, b, c] = seed(["a", "b", "c"]);
-      useQueueStore.getState().moveMessage(T, c.id, 0);
-      expect(useQueueStore.getState().queues[T].map((m) => m.id)).toEqual([
-        c.id,
-        a.id,
-        b.id,
-      ]);
-    });
-
-    it("is a no-op for single-item queues or unchanged positions", () => {
-      const [solo] = seed(["only"]);
-      const beforeSingle = useQueueStore.getState().queues[T];
-      useQueueStore.getState().moveMessage(T, solo.id, 0);
-      expect(useQueueStore.getState().queues[T]).toBe(beforeSingle);
-    });
-  });
-
   describe("insertAt", () => {
     it("places a new message at the requested index, shifting siblings", () => {
       const [a, b, c] = seed(["a", "b", "c"]);

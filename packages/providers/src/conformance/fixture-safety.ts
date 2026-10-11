@@ -29,6 +29,7 @@ const PROFILES = new Set([
   "provider-continuation",
   "child-cancellation",
   "approval-review",
+  "turn-steer",
 ]);
 const EVENT_KINDS = new Set(["session", "turn", "item", "terminal"]);
 const EVENT_STATUSES = new Set(["started", "completed", "interrupted", "errored"]);

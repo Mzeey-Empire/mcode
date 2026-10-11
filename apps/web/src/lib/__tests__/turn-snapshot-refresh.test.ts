@@ -42,6 +42,7 @@ describe("refreshTurnSnapshotsAfterPersist", () => {
         ref_after: "bbb",
         worktree_path: null,
         attempt_count: 1,
+        reverted_paths: [],
         created_at: new Date().toISOString(),
       },
     ]);

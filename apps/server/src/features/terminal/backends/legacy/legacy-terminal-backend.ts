@@ -1,5 +1,5 @@
 import { inject, injectable } from "tsyringe";
-import type { LegacyTerminalRecord, LegacyTerminalCreateResult, TerminalBackendCapabilities } from "@mcode/contracts";
+import { HOME_TERMINAL_SCOPE_ID, type LegacyTerminalRecord, type LegacyTerminalCreateResult, type TerminalBackendCapabilities } from "@mcode/contracts";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import {
   TerminalBackend,
@@ -45,18 +45,20 @@ export class LegacyTerminalBackend extends TerminalBackend {
     this.terminalService.setSender(sender);
   }
 
-  /** Creates one legacy PTY for a thread or workspace scope. */
+  /** Creates one legacy PTY for a thread, workspace, or home scope. */
   async create(scopeId: string, replacesPtyId?: string): Promise<LegacyTerminalCreateResult> {
-    const thread = this.threads.findById(scopeId);
-    const profile = await this.profiles.resolveLaunchProfile({
-      workspaceId: thread?.workspace_id ?? scopeId,
-    });
+    const profile = await this.profiles.resolveLaunchProfile({ workspaceId: this.profileWorkspaceId(scopeId) });
     return this.terminalService.create(scopeId, {
       executable: profile.resolvedProfile.executable,
       arguments: [...profile.resolvedProfile.arguments],
       requestedProfileId: profile.requestedProfileId,
       resolvedProfile: profile.resolvedProfile,
     }, replacesPtyId);
+  }
+
+  private profileWorkspaceId(scopeId: string): string | undefined {
+    if (scopeId === HOME_TERMINAL_SCOPE_ID) return undefined;
+    return this.threads.findById(scopeId)?.workspace_id ?? scopeId;
   }
 
   /** Pauses legacy PTY output for a client request. */

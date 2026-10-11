@@ -1,5 +1,7 @@
 import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
+import * as NodeFS from "node:fs";
+import { z } from "zod";
 import { ApprovalRequestBodySchema } from "@mcode/contracts";
 import { OpenCodeProvider } from "../opencode-provider.js";
 import { OpenCodeServerPool } from "../opencode-server-pool.js";
@@ -397,6 +399,90 @@ describe("OpenCodeProvider permission flow", () => {
     const events = submittedEvents(submitted);
     expect(events.filter((event) => event.type === "system" && event.subtype === "sdk_session_invalidated")).toHaveLength(1);
     expect(events.filter((event) => event.type === "ended").map((event) => event.outcome)).toEqual(["cancelled"]);
+    await provider.shutdown();
+  });
+});
+
+const capturedTraceSchema = z.object({ events: z.array(z.unknown()) });
+
+describe("OpenCodeProvider subagent asks", () => {
+  const capturedParent = "ses_ed4fbe2b1ffeXhzbidwy7SYFPJ";
+  const parentAsk = "per_12b045999001Nz6BidSlAsFs7D";
+  const childAsk = "per_12b04d34f0017kQynO4vvCEFBm";
+
+  function childTask(sessionId: string, input: Record<string, unknown>) {
+    return {
+      type: "message.part.updated",
+      properties: { part: { sessionID: "ses_1", type: "tool", tool: "task", callID: "task-1", state: { status: "running", metadata: { sessionId }, input } } },
+    };
+  }
+
+  function childShellAsk(id: string, sessionID: string) {
+    return { type: "permission.v2.asked", properties: { id, sessionID, action: "bash", resources: ["node math.js"], tool: { callID: "child-bash" } } };
+  }
+
+  it("cards the captured subagent ask as the subagent's, replies to its session, and drains it on stop", async () => {
+    const fixture = capturedTraceSchema.parse(JSON.parse(NodeFS.readFileSync(new URL("./fixtures/task-subagent-permission.captured.json", import.meta.url), "utf8")));
+    const http = fakeHttp(fixture.events);
+    http.createSession.mockResolvedValue({ id: capturedParent });
+    const { provider } = testProvider(http);
+    const cards: ApprovalRequestEnvelope[] = [];
+    const resolved: unknown[] = [];
+    provider.on("approval_request", (request) => cards.push(request));
+    provider.on("approval_resolved", (payload) => resolved.push(payload));
+
+    const sending = provider.sendTurn(turnRequest());
+    await vi.waitFor(() => expect(cards).toHaveLength(2));
+    expect(cards.map((card) => [card.requestId, card.body.toolCallId, card.body.origin])).toEqual([
+      [parentAsk, "dd465a06-32c3-425d-b6d1-341cb96ea1b7", { kind: "agent" }],
+      [childAsk, "call_00_wxoiedrdv1i13ggek13bwye9", {
+        kind: "subagent", label: "Run node math.js once and report output", parentToolCallId: "23a1e412-d94b-44c5-aa4e-2806cde517cc",
+      }],
+    ]);
+    expect(cards.map((card) => [card.body.subject, card.body.choices.find((choice) => choice.id === "always")?.description])).toEqual([
+      [{ kind: "command", command: "ls math.js 2>&1 | head -5" }, "ls *, head *"],
+      [{ kind: "command", command: "node math.js" }, "node *"],
+    ]);
+
+    expect(await provider.resolveApproval(parentAsk, { choiceId: "once" })).toEqual({ status: "resolved" });
+    expect(http.replyPermission).toHaveBeenCalledWith(expect.anything(), capturedParent, parentAsk, "once", "legacy", expect.anything());
+    await provider.stopSession("mcode-thread-1");
+    await sending;
+    expect(resolved).toContainEqual({ requestId: childAsk, threadId: "thread-1", outcome: { status: "cancelled", reason: "session_stopped" } });
+    expect(provider.listPendingApprovals("thread-1")).toEqual([]);
+    await provider.shutdown();
+  });
+
+  it("relays a supervised subagent decision to the subagent's own session", async () => {
+    const http = fakeHttp([childTask("ses_child", { subagent_type: "general" }), childShellAsk("per_child", "ses_child")]);
+    const { provider } = testProvider(http);
+    const cards: ApprovalRequestEnvelope[] = [];
+    provider.on("approval_request", (request) => cards.push(request));
+
+    const sending = provider.sendTurn(turnRequest());
+    await vi.waitFor(() => expect(cards).toHaveLength(1));
+    expect(cards[0]?.body.origin).toEqual({ kind: "subagent", label: "general", parentToolCallId: "task-1" });
+    expect(await provider.resolveApproval("per_child", { choiceId: "reject" })).toEqual({ status: "resolved" });
+    expect(http.replyPermission).toHaveBeenCalledWith(expect.anything(), "ses_child", "per_child", "reject", "v2", expect.anything());
+    await provider.stopSession("mcode-thread-1");
+    await sending;
+    await provider.shutdown();
+  });
+
+  it("auto-answers a subagent ask in full access and ignores asks from unrelated sessions", async () => {
+    const http = fakeHttp([
+      childTask("ses_child", { description: "Check the build" }),
+      childShellAsk("per_stranger", "ses_stranger"),
+      childShellAsk("per_child", "ses_child"),
+    ]);
+    const { provider, submitted } = testProvider(http);
+    const cards: ApprovalRequestEnvelope[] = [];
+    provider.on("approval_request", (request) => cards.push(request));
+
+    await provider.sendTurn({ ...turnRequest(), permissionMode: "full" });
+    expect(cards).toEqual([]);
+    expect(http.replyPermission.mock.calls.map((call) => call.slice(1, 5))).toEqual([["ses_child", "per_child", "always", "v2"]]);
+    expect(submittedEvents(submitted).filter((event) => event.type === "ended").map((event) => event.outcome)).toEqual(["completed"]);
     await provider.shutdown();
   });
 });

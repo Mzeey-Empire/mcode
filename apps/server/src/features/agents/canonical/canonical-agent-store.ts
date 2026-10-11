@@ -847,6 +847,20 @@ export class CanonicalAgentStore {
     return row ? this.turnFromRow(row) : null;
   }
 
+  /** Check admission order and running turns without ordering by mutable update timestamps. */
+  loadTurnRetryState(threadId: string, turnId: string): { hasLaterTurn: boolean; hasRunningTurn: boolean } {
+    // Row insertion order distinguishes starts even when their timestamps are identical.
+    const state = this.orm.select({
+      hasLaterTurn: sql<boolean>`EXISTS (SELECT 1 FROM canonical_agent_turns later
+        WHERE later.thread_id = ${threadId}
+          AND later.rowid > (SELECT rowid FROM canonical_agent_turns WHERE id = ${turnId}))`.mapWith(Boolean),
+      hasRunningTurn: sql<boolean>`EXISTS (SELECT 1 FROM canonical_agent_turns running
+        WHERE running.thread_id = ${threadId} AND running.status IN ('Pending', 'Running'))`.mapWith(Boolean),
+    }).from(canonicalAgentTurns).where(eq(canonicalAgentTurns.id, turnId)).get();
+    if (!state) throw new Error(`Retry turn not found: ${turnId}`);
+    return state;
+  }
+
   /** Load one durable ingest checkpoint. */
   loadCheckpoint(executionId: string): CanonicalAgentCheckpoint | null {
     return this.reads.loadCheckpoint(executionId);

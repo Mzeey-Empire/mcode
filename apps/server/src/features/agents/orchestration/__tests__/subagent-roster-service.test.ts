@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "bun:sqlite";
 import type { AgentItem, CanonicalAgentEventEnvelope, ProviderId } from "@mcode/contracts";
+import { SUBAGENT_REPORTING } from "@mcode/contracts";
 import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
@@ -24,7 +25,7 @@ function message(db: Database, id: string, provider: ProviderId | null, outcome:
     .run(id, NOW, provider, outcome);
 }
 
-function harness(provider: ProviderId = "claude") {
+function harness(provider: ProviderId = "claude", reporting = SUBAGENT_REPORTING) {
   const db = openAgentStorageTestDatabase();
   db.prepare("INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES ('workspace', 'Fixture', '.dev/fixture-repo', ?, ?)").run(NOW, NOW);
   db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES ('parent', 'workspace', 'Fixture', 'main', ?, ?, ?)").run(provider, NOW, NOW);
@@ -39,7 +40,7 @@ function harness(provider: ProviderId = "claude") {
     interruptSubagentTurns: async () => undefined,
     finishSubagentTurn: async () => ({ status: "Interrupted" }),
   };
-  const service = new SubagentRosterService(durability, new ProviderRegistry([]), narrative, db);
+  const service = new SubagentRosterService(durability, new ProviderRegistry([]), narrative, db, reporting);
   const records = new ToolCallRecordStore(db);
   const call = (id: string, messageId: string, options: Partial<CreateToolCallRecordInput> = {}) => records.create({
     toolCallId: id, messageId, toolName: "Agent", displayName: "Inspect", inputSummary: "Inspect the build",
@@ -60,6 +61,32 @@ function child(sourceItemId?: string): CanonicalChildRow {
 afterEach(async () => { vi.useRealTimers(); vi.restoreAllMocks(); await closeAgentStorageTestDatabases(); });
 
 describe("SubagentRosterService", () => {
+  it("projects one Copilot row with child steps and its task summary", () => {
+    const { db, call, service } = harness("copilot");
+    message(db, "message", "copilot");
+    call("task", "message", { subagentPrompt: "Inspect the implementation", subagentType: "explore", status: "completed", outputSummary: "Found the export" });
+    call("read", "message", { toolName: "Read", parentToolCallId: "task", status: "completed", sortOrder: 1 });
+    call("grep", "message", { toolName: "Grep", parentToolCallId: "task", status: "completed", sortOrder: 2 });
+    expect(service.loadRoster(request).entries.map((row) => [row.id, row.provider, row.tier, row.stepCount, row.status, row.prompt, row.subagentType])).toEqual([
+      ["call:task", "copilot", "steps", 2, "done", "Inspect the implementation", "explore"],
+    ]);
+    const detail = service.loadDetail({ ...request, entryId: "call:task" });
+    expect(detail.steps.map((step) => [step.toolCallId, step.status])).toEqual([["read", "done"], ["grep", "done"]]);
+    expect(detail.summary).toBe("Found the export");
+  });
+
+  it.each([true, false])("uses OpenCode childSteps=%s only when there are no recorded steps", (childSteps) => {
+    const { db, call, service } = harness("opencode", { ...SUBAGENT_REPORTING, opencode: { childTranscript: false, childSteps } });
+    message(db, "message", "opencode");
+    call("task", "message");
+    expect(service.loadRoster(request).entries.map((row) => [row.id, row.tier, row.stepCount])).toEqual([
+      ["call:task", childSteps ? "steps" : "meta", 0],
+    ]);
+    if (!childSteps) expect(() => service.loadDetail({ ...request, entryId: "call:task" })).toThrow();
+    call("read", "message", { toolName: "Read", parentToolCallId: "task", status: "completed" });
+    expect(service.loadRoster(request).entries.map((row) => [row.id, row.tier, row.stepCount])).toEqual([["call:task", "steps", 1]]);
+  });
+
   it("falls back to the thread provider for legacy message providers", () => {
     const { db, call, service } = harness("claude");
     message(db, "legacy", null);
@@ -167,7 +194,7 @@ describe("SubagentRosterService", () => {
   });
 
   it("uses only persisted evidence for Copilot tiers and denies other parents' details", () => {
-    const { db, call, service } = harness("copilot");
+    const { db, call, service } = harness("copilot", { ...SUBAGENT_REPORTING, copilot: { childTranscript: false, childSteps: false } });
     message(db, "message", "copilot");
     call("empty", "message"); call("with-steps", "message");
     call("read", "message", { toolName: "Read", parentToolCallId: "with-steps" });

@@ -70,7 +70,7 @@ import type {
   TerminalCustomProfile,
   TerminalProfileReference,
 } from "@mcode/contracts";
-import type { PaginatedMessages, ConversationPage, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationTail, SubagentRoster, SubagentDetail, CanonicalSubagentStopResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability, GoalLookupResult } from "@mcode/contracts";
+import type { PaginatedMessages, ConversationPage, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationTail, SubagentRoster, SubagentDetail, CanonicalSubagentStopResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability, ProviderStatus, GoalLookupResult } from "@mcode/contracts";
 import {
   TERMINAL_DATA_TAG,
   decodeTerminalDataFrame,
@@ -579,6 +579,10 @@ export function createWsTransport(
           .then((attention) => threadAttentionStore.getState().hydrate(attention, observedAttention));
       })
         .catch((error: unknown) => console.warn("[thread-attention] hydration failed", error));
+      // A steer sent before the drop may have no answer yet, and another window may hold steers.
+      void import("@/features/conversation/composer/queue/queued-steer")
+        .then(({ restoreQueuedSteers }) => restoreQueuedSteers())
+        .catch((error: unknown) => console.warn("[queued-steer] restore failed", error));
 
       // Expose a sentinel in dev/test builds so Playwright can synchronize on
       // hydration completion before injecting agent events. Without this, tests
@@ -1174,9 +1178,14 @@ export function createWsTransport(
         ...guardrails,
       }, { timeoutMs: SEND_MESSAGE_TIMEOUT_MS });
     },
+    steerTurn: (params) => rpc<import("@mcode/contracts").TurnSteerResult>("agent.steer", params),
+    listHeldSteers: () => rpc<import("@mcode/contracts").ListHeldSteersResult>("agent.listHeldSteers", {}),
+    settleUnknownSteer: (params) =>
+      rpc<import("@mcode/contracts").SettleUnknownSteerResult>("agent.settleUnknownSteer", params),
     getRecoveryIncident: () =>
       rpc<import("@mcode/contracts").RecoveryIncident | null>("agent.recoveryIncident", {}),
     retryTurn: (executionId) => rpc<void>("agent.retry", { executionId }),
+    retryErroredTurn: async (params) => WS_METHODS()["turn.retry"].result.parse(await rpc<unknown>("turn.retry", params)),
     getThreadStartup: (startupId) =>
       rpc<ThreadStartup | null>("thread.startup.get", { startupId }),
     listThreadStartups: (workspaceId) =>
@@ -1487,6 +1496,8 @@ export function createWsTransport(
       rpc<ProviderUsageInfo>("provider.getUsage", { providerId }),
     listProviderAvailability: () =>
       rpc<ProviderAvailability[]>("providers.listAvailability", {}),
+    listProviderStatus: (force) =>
+      rpc<ProviderStatus[]>("providers.listStatus", { force }),
 
     generateRecap: (threadId, messages, previousRecap) =>
       rpc<{ text: string }>("recap.generate", { threadId, messages, previousRecap }),

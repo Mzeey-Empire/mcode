@@ -34,6 +34,7 @@ import {
   isAgentRpcMethod,
   routeAgentRpc,
 } from "../../features/agents/transport/agent-rpc.js";
+import { turnRecoveryErrorCode } from "../../features/agents/recovery/turn-recovery-error.js";
 import type {
   FilesystemBrowser,
   GitComparisonService,
@@ -110,9 +111,14 @@ import { isAttachmentRpcMethod, routeAttachmentRpc } from "../../features/attach
 import type { AttachmentService } from "../../features/attachments/storage/attachment-service.js";
 import { DraftImageMissingError } from "../../features/attachments/storage/draft-image-missing-error.js";
 import { SequenceAheadError } from "../../features/thread-control/attention/sequence-ahead-error.js";
+import { TurnSteerConflictError, TurnSteerMentionError, asTurnSteerError } from "../../features/agents/steering/turn-steer.js";
 import { isMemoryRpcMethod, routeMemoryRpc } from "../../runtime/memory/transport/memory-rpc.js";
 import { isGitRpcMethod, routeGitRpc } from "../../features/projects/git/transport/git-rpc.js";
 import { isSnapshotRpcMethod, routeSnapshotRpc } from "../../features/projects/diffs/transport/snapshot-rpc.js";
+import { isTurnRevertRpcMethod, routeTurnRevertRpc } from "../../features/projects/diffs/transport/turn-revert-rpc.js";
+import type { TurnRevertService } from "../../features/projects/diffs/revert/turn-revert-service.js";
+import { TurnRevertValidationError } from "../../features/projects/diffs/revert/turn-revert-model.js";
+import type { TurnRevertStore } from "../../features/agents/turns/persistence/turn-revert-store.js";
 import { isTurnDiffRpcMethod, routeTurnDiffRpc } from "../../features/projects/diffs/transport/turn-diff-rpc.js";
 import type { TurnDiffService } from "../../features/agents/turns/turn-diff-service.js";
 import type { TurnSnapshotRangeReader } from "../../features/projects/diffs/snapshots/turn-snapshot-range.js";
@@ -157,6 +163,7 @@ import {
   isProviderAvailabilityError,
 } from "../../features/providers/availability/provider-availability-errors.js";
 import type { ProviderAvailabilityService } from "../../features/providers/availability/provider-availability-service.js";
+import type { ProviderStatusService } from "../../features/providers/status/provider-status-service.js";
 
 import type { ModelCacheService } from "../../features/providers/models/model-cache-service.js";
 import type { RecapService } from "../../features/agents/recap/recap-service.js";
@@ -287,12 +294,16 @@ export interface RouterDeps {
   /** Canonical agent-model reader used during staged compatibility projection. */
   canonicalSink: CanonicalAgentBoundary;
   canonicalProgress?: import("../../features/agents/canonical/canonical-accepted-progress.js").CanonicalAcceptedProgress;
+  /** Durable Send now for running turns. */
+  turnSteers?: import("../../features/agents/steering/turn-steer-service.js").TurnSteerService;
   turnSnapshotRepo: TurnSnapshotRepo;
   /** Reconciles this store's snapshot pins with its rows after expired rows are deleted. */
   sweepSnapshotPins: () => Promise<void>;
   turnDiffs: TurnDiffService;
   turnSnapshotRanges: TurnSnapshotRangeReader;
   snapshotService: SnapshotService;
+  turnRevertService: TurnRevertService;
+  turnRevertStore: TurnRevertStore;
   settingsService: SettingsService;
   /** Watcher service for tracking per-workspace HEAD file changes. */
   gitWatcherService: GitWatcherService;
@@ -307,6 +318,8 @@ export interface RouterDeps {
   providerRegistry: IProviderRegistry;
   /** Tracks per-provider enabled flag and CLI verification state. */
   providerAvailability: ProviderAvailabilityService;
+  /** Per-provider sign-in and rate-limit state behind the sidebar bell. */
+  providerStatus: Pick<ProviderStatusService, "listStatus">;
   /** Stale-while-revalidate cache for provider model lists, backed by SQLite. */
   modelCacheService: ModelCacheService;
   /** Generates AI-powered PR draft titles and bodies. */
@@ -462,6 +475,8 @@ function validateRpcParameters(
 }
 
 function domainRouteError(id: string, error: unknown, message: string): WebSocketResponse | null {
+  const recoveryCode = turnRecoveryErrorCode(error);
+  if (recoveryCode) return { id, error: { code: recoveryCode, message } };
   if (error instanceof ThreadStartupResolveError) return { id, error: { code: error.code, message } };
   if (error instanceof WorkspaceFileNotFoundError) return { id, error: { code: error.code, message } };
   if (error instanceof ProjectIconError) return { id, error: { code: error.code, message } };
@@ -471,8 +486,18 @@ function domainRouteError(id: string, error: unknown, message: string): WebSocke
   if (error instanceof DraftImageMissingError) {
     return { id, error: { code: error.code, message, data: { stagingId: error.stagingId } } };
   }
-  if (error instanceof SequenceAheadError) return { id, error: { code: error.code, message } };
-  return null;
+  if (error instanceof SequenceAheadError || error instanceof TurnRevertValidationError) return { id, error: { code: error.code, message } };
+  return steerRouteError(id, error, message);
+}
+
+function steerRouteError(id: string, error: unknown, message: string): WebSocketResponse | null {
+  if (error instanceof TurnSteerConflictError || error instanceof TurnSteerMentionError) {
+    return { id, error: { code: error.code, message } };
+  }
+  const steer = asTurnSteerError(error);
+  if (!steer) return null;
+  return { id, error: { code: steer.code, message,
+    ...(steer.code === "steer_rejected" ? { data: { detail: steer.detail ?? "" } } : {}) } };
 }
 
 function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResponse {
@@ -620,6 +645,7 @@ const ROUTE_FAMILIES = [
   createRouteFamily(isAgentRpcMethod, (method, params, deps) => routeAgentRpc(method, params, deps)),
   createRouteFamily(isGitRpcMethod, (method, params, deps) => routeGitRpc(method, params, deps)),
   createRouteFamily(isSnapshotRpcMethod, (method, params, deps) => routeSnapshotRpc(method, params, deps)),
+  createRouteFamily(isTurnRevertRpcMethod, (method, params, deps) => routeTurnRevertRpc(method, params, deps)),
   createRouteFamily(isTurnDiffRpcMethod, (method, params, deps) => routeTurnDiffRpc(method, params, deps)),
   createRouteFamily(isFileRpcMethod, (method, params, deps) => routeFileRpc(method, params, deps)),
   createRouteFamily(isProjectIconRpcMethod, (method, params, deps) => routeProjectIconRpc(method, params, deps)),

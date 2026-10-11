@@ -20,7 +20,8 @@ import { ApprovalReceiptStore, approvalReceiptRecord } from "../../approvals/app
  *
  * - Trap 1: {@link bufferToolCall} prefers the SDK `parent_tool_use_id` and only
  *   falls back to {@link getCurrentParentToolCallId} when exactly one Agent on
- *   the stack is still running.
+ *   the stack is still running, except for providers that always send explicit
+ *   parents (Copilot, OpenCode).
  * - Trap 2: the `agentCallStack` is mutated only by {@link bufferToolCall}
  *   (push on Agent), {@link updateBufferedToolCallOutput} (pop on Agent result),
  *   and {@link clearAgentStackOnMessage} (clear at end of turn). Never on

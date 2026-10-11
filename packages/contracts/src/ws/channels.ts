@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TurnRevertedEventSchema } from "../models/turn-revert.js";
 import { ThreadAttentionSchema } from "../models/thread-attention.js";
 import { CanonicalAgentProgressFrameSchema } from "../models/canonical-agent-progress.js";
 import { ThreadStatusSchema } from "../models/enums.js";
@@ -9,6 +10,7 @@ import { PlanVersionSchema } from "../models/plan.js";
 import { ChecksStatusSchema } from "../github.js";
 import { ApprovalRequestSchema, ApprovalOutcomeSchema } from "../models/approval.js";
 import { ProviderAvailabilitySchema } from "../providers/availability.js";
+import { ProviderStatusSchema } from "../providers/provider-status.js";
 import { lazySchema } from "../utils/lazySchema.js";
 import { ProjectIconSchema } from "../models/project-icon.js";
 import {
@@ -146,6 +148,8 @@ export const WS_CHANNELS = {
     .strict(),
   /** Full-list broadcast of provider availability. Replaces the client cache. */
   "providers.availability": z.array(ProviderAvailabilitySchema()),
+  /** One provider's status changed. Carries no threadId, so every client receives it. */
+  "providers.statusChanged": ProviderStatusSchema(),
   "branch.changed": lazySchema(() =>
     z.object({ workspaceId: z.string(), branch: z.string().nullable() }),
   )(),
@@ -159,6 +163,7 @@ export const WS_CHANNELS = {
     z.object({ workspaceId: z.string(), icon: ProjectIconSchema() }),
   )(),
   "turn.diffChanged": z.object({ threadId: z.string() }),
+  "turn.reverted": TurnRevertedEventSchema(),
   "turn.persisted": lazySchema(() => z.object({
     threadId: z.string(),
     turnId: z.string().nullable().optional(),

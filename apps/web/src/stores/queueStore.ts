@@ -11,6 +11,22 @@ import type {
 } from "@mcode/contracts";
 import { releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-capture-spill";
 
+/**
+ * A queued message's steer into a running turn, while it is unsettled. The provider may
+ * already hold a `steering` or `delivery_unknown` message, so neither is ever sent again on
+ * its own; a `resend` is an ordinary queued turn whose id is the server's replacement id.
+ * `settling` holds a held item while the server settles it, and remembers what to restore.
+ */
+export type QueuedSteer =
+  | { readonly state: "steering"; readonly steerId: string; readonly turnExecutionId: string }
+  | { readonly state: "delivery_unknown"; readonly steerId: string }
+  | { readonly state: "resend"; readonly resendOfSteerId: string }
+  | {
+    readonly state: "settling";
+    readonly steerId: string;
+    readonly previous: Extract<QueuedSteer, { state: "delivery_unknown" | "resend" }>;
+  };
+
 /** A message waiting to be sent while the thread is busy with another turn. */
 export interface QueuedMessage {
   id: string;
@@ -45,6 +61,19 @@ export interface QueuedMessage {
   browserCaptureSpillPaths?: string[];
   /** Unix timestamp (ms) when this message was enqueued. */
   queuedAt: number;
+  /** Present while a steer of this message is unsettled or it is the resend of one. */
+  steer?: QueuedSteer;
+}
+
+/** True while the provider may hold this message, so the dispatcher must not send it. */
+export function isHeldQueuedMessage(message: QueuedMessage): boolean {
+  const state = message.steer?.state;
+  return state === "steering" || state === "delivery_unknown" || state === "settling";
+}
+
+/** True when Mcode cannot tell whether the provider took this message's steer. */
+export function isDeliveryUnknown(message: QueuedMessage): boolean {
+  return message.steer?.state === "delivery_unknown";
 }
 
 const MAX_QUEUE_DEPTH = 20;
@@ -81,9 +110,9 @@ interface QueueState {
     threadId: string,
     message: Omit<QueuedMessage, "id" | "queuedAt">,
   ) => boolean;
-  /** Atomically reserve the next visible message for one queued send. */
+  /** Atomically reserve the next visible message for one queued send, skipping held steers. */
   claimNextQueuedMessage: (threadId: string) => QueuedMessage | undefined;
-  /** Atomically reserve one visible message for Send now. */
+  /** Atomically reserve one visible message for Send now. A held steer cannot be claimed. */
   claimQueuedMessage: (threadId: string, messageId: string) => QueuedMessage | undefined;
   /** Commit an accepted queued send or restore a failed lease at its original FIFO position. */
   settleQueuedDispatch: (threadId: string, messageId: string, accepted: boolean) => void;
@@ -105,11 +134,15 @@ interface QueueState {
     displayContent?: string,
     mentions?: MessageMention[],
   ) => void;
+  /** Record a steer's progress on a queued message; `steer: undefined` returns it to the plain queue. */
+  setQueuedSteer: (threadId: string, messageId: string, steer: QueuedSteer | undefined) => void;
   /**
-   * Move a queued message to a new index (0-based). Indices are clamped to the
-   * queue length. No-op if the message is no longer in the queue.
+   * Turn a delivery-unknown item into the queued resend Send again stored. The item takes the
+   * replacement id; when another copy already holds that id, this one is dropped.
    */
-  moveMessage: (threadId: string, messageId: string, toIndex: number) => void;
+  requeueAsResend: (threadId: string, steerId: string, replacementMessageId: string) => void;
+  /** Append a held steer the server reported and this window has no copy of. */
+  adoptHeldSteer: (threadId: string, message: QueuedMessage) => void;
   /**
    * Remove a specific queued message and return it. Used by the queue editor
    * while it prepares the edited replacement.
@@ -230,7 +263,8 @@ export const useQueueStore = create<QueueState>((set, get) => ({
 
   claimNextQueuedMessage: (threadId) => {
     const current = get().queues[threadId] ?? [];
-    return get().claimQueuedMessage(threadId, current[0]?.id ?? "");
+    const next = current.find((message) => !isHeldQueuedMessage(message));
+    return get().claimQueuedMessage(threadId, next?.id ?? "");
   },
 
   claimQueuedMessage: (threadId, messageId) => {
@@ -240,6 +274,7 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     const index = current.findIndex((message) => message.id === messageId);
     if (index === -1) return undefined;
     const message = current[index];
+    if (isHeldQueuedMessage(message)) return undefined;
     set((latest) => {
       if (latest.inFlightQueuedMessages[threadId]) return latest;
       const messages = latest.queues[threadId] ?? [];
@@ -352,18 +387,42 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     });
   },
 
-  moveMessage: (threadId, messageId, toIndex) => {
+  setQueuedSteer: (threadId, messageId, steer) => {
     set((state) => {
       const current = state.queues[threadId];
-      if (!current || current.length < 2) return state;
-      const fromIndex = current.findIndex((m) => m.id === messageId);
-      if (fromIndex === -1) return state;
-      const clamped = Math.max(0, Math.min(toIndex, current.length - 1));
-      if (clamped === fromIndex) return state;
+      const index = current?.findIndex((message) => message.id === messageId) ?? -1;
+      if (!current || index === -1) return state;
+      const { steer: _previous, ...plain } = current[index];
+      void _previous;
       const nextList = [...current];
-      const [item] = nextList.splice(fromIndex, 1);
-      nextList.splice(clamped, 0, item);
+      nextList[index] = steer ? { ...plain, steer } : plain;
       return { queues: { ...state.queues, [threadId]: nextList } };
+    });
+  },
+
+  requeueAsResend: (threadId, steerId, replacementMessageId) => {
+    set((state) => {
+      const current = state.queues[threadId] ?? [];
+      const index = current.findIndex((message) => message.steer?.state === "delivery_unknown"
+        && message.steer.steerId === steerId);
+      if (index === -1) return state;
+      const leased = state.inFlightQueuedMessages[threadId]?.message.id === replacementMessageId;
+      const duplicate = leased || current.some((message) => message.id === replacementMessageId);
+      const nextList = duplicate
+        ? current.filter((_, itemIndex) => itemIndex !== index)
+        : current.map((message, itemIndex) => itemIndex === index
+          ? { ...message, id: replacementMessageId, steer: { state: "resend", resendOfSteerId: steerId } as const }
+          : message);
+      return { queues: { ...state.queues, [threadId]: nextList } };
+    });
+  },
+
+  adoptHeldSteer: (threadId, message) => {
+    set((state) => {
+      const current = state.queues[threadId] ?? [];
+      if (current.some((item) => item.id === message.id)) return state;
+      if (state.inFlightQueuedMessages[threadId]?.message.id === message.id) return state;
+      return { queues: { ...state.queues, [threadId]: [...current, message] } };
     });
   },
 

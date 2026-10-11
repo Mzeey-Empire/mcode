@@ -1,6 +1,6 @@
 import { assert, describe, expect, it, vi } from "vitest";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
-import type { AgentEvent, PlanCapture } from "@mcode/contracts";
+import { AgentEventSchema, type AgentEvent, type PlanCapture } from "@mcode/contracts";
 import { createClaudeProvider } from "../../factories.js";
 import { fixtureHost } from "../../private/claude/__tests__/helpers/provider-fixture.js";
 import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
@@ -603,6 +603,36 @@ describe("Provider fixture pipeline", () => {
       process.chdir(priorCwd);
       NodeFS.rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("Classified failures after core fixture replay", () => {
+  it("retains Copilot quota classification after the captured core trace", () => {
+    const fixture = loadProviderFixtureManifest(NodePath.resolve(import.meta.dirname, "../fixtures/copilot-core.captured.json"));
+    assert(fixture.input.copilotNativeEvents);
+    const state: CopilotTurnState = { nativeIdleObserved: false, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0,
+      tools: new Map(), pendingPermissions: new Map(), settle: () => undefined, completed: Promise.resolve() };
+    for (const event of fixture.input.copilotNativeEvents) mapCopilotEvent(event, "THREAD_1", state);
+    const events = mapCopilotEvent({ type: "session.error", id: "EVENT_999", timestamp: "2000-01-01T00:00:00.000Z", parentId: null,
+      data: { errorType: "quota", statusCode: 429, message: "Synthetic quota exhausted" },
+    }, "THREAD_1", state);
+    expect(events.filter((event) => event.type === "error").map((event) => AgentEventSchema().parse(event))).toEqual([
+      { type: "error", threadId: "THREAD_1", error: "Synthetic quota exhausted", failure: { kind: "usage_limit", status: 429, code: "quota" } },
+    ]);
+  });
+
+  it("retains OpenCode authentication classification after the synthetic core trace", () => {
+    const fixture = loadProviderFixtureManifest(NodePath.resolve(import.meta.dirname, "../fixtures/opencode-core.synthetic.json"));
+    const trace = fixture.input.planTrace;
+    assert(trace?.providerId === "opencode");
+    const context = { threadId: "THREAD_1", partRole: "assistant", forwardedText: new Map<string, string>() };
+    for (const event of trace.events) mapOpenCodeEnvelope(event, context);
+    const { events } = mapOpenCodeEnvelope({ type: "session.error", properties: {
+      error: { name: "ProviderAuthError", data: { providerID: "anthropic", message: "Synthetic login expired" } },
+    } }, context);
+    expect(events.filter((event) => event.type === "error").map((event) => AgentEventSchema().parse(event))).toEqual([
+      { type: "error", threadId: "THREAD_1", error: "Synthetic login expired", failure: { kind: "auth", code: "ProviderAuthError" } },
+    ]);
   });
 });
 

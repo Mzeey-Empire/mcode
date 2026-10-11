@@ -34,6 +34,8 @@ import type {
   ParentTurnStartInput,
 } from "../turns/parent-turn-durability.js";
 import { ThreadStore as ThreadRepo } from "../../thread-control/persistence/thread-store.js";
+import { TurnSteerStore } from "../steering/persistence/turn-steer-store.js";
+import { TurnSteerError } from "../steering/turn-steer.js";
 import {
   type CanonicalAgentBatchedCommitResult,
   type CanonicalAgentCommitInput,
@@ -97,6 +99,8 @@ export interface DataOnlyParentTurnStartInput extends Omit<ParentTurnStartInput,
   userMessage: ParentUserMessageWrite;
   reopenThread?: boolean;
   answeredPlanQuestionMessageId?: string;
+  /** Uncertain steer whose queued resend this turn sends; claimed with the user message. */
+  resendOfSteerId?: string;
 }
 
 /** Values for one canonical event and checkpoint transaction. */
@@ -161,6 +165,7 @@ export class CanonicalParentTurnWrite {
   private readonly hookRecords: HookExecutionRepo;
   private readonly threads: ThreadRepo;
   private readonly planAnswers: PlanQuestionAnswersRepo;
+  private readonly steers: TurnSteerStore;
   private readonly stagedAssistant: ReturnType<Database["prepare"]>;
   private readonly assistantTextCheckpoints: ParentAssistantTextCheckpointService;
   private readonly turnDiffs: TurnDiffRepo;
@@ -177,6 +182,7 @@ export class CanonicalParentTurnWrite {
     this.narrative = new NarrativeReadStore(this.toolRecords, this.thoughtRecords, this.hookRecords, new ApprovalReceiptStore(db));
     this.threads = new ThreadRepo(db);
     this.planAnswers = new PlanQuestionAnswersRepo(db);
+    this.steers = new TurnSteerStore(db);
     this.stagedAssistant = db.prepare("SELECT role, content FROM messages WHERE id = ? AND thread_id = ?");
     this.assistantTextCheckpoints = new ParentAssistantTextCheckpointService(db);
     this.turnDiffs = new TurnDiffRepo(db);
@@ -259,6 +265,9 @@ export class CanonicalParentTurnWrite {
     return this.canonical.startParentTurn({
       ...input,
       projectUserMessage: () => {
+        // Claimed before the insert: a second window's copy carries the same replacement id and
+        // would otherwise fail on the messages primary key instead of reporting the closed resend.
+        this.claimSteerResend(input.resendOfSteerId, input.userMessage.messageId);
         if (input.reopenThread && !this.threads.reopen(input.thread.id)) {
           throw new Error(`Thread not found: ${input.thread.id}`);
         }
@@ -269,6 +278,14 @@ export class CanonicalParentTurnWrite {
         return message;
       },
     });
+  }
+
+  /** Admit a Send again resend once; any other window's copy fails here and starts no turn. */
+  private claimSteerResend(resendOfSteerId: string | undefined, messageId: string | undefined): void {
+    if (!resendOfSteerId) return;
+    if (!messageId || !this.steers.claimResend(resendOfSteerId, messageId)) {
+      throw new TurnSteerError("steer_resend_closed", "This resend was already sent or removed.");
+    }
   }
 
   /** Commit a plain canonical event batch and its checkpoint before publication. */

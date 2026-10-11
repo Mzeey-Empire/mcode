@@ -153,7 +153,7 @@ export function AboutSection() {
       }
     } catch {
       // The main process broadcasts an error status via IPC, which surfaces as
-      // status.state === "error" and renders "Check failed" in the status label.
+      // status.state === "error" and renders the failed operation in the status label.
     } finally {
       setChecking(false);
     }
@@ -256,12 +256,18 @@ export function AboutSection() {
   );
 }
 
+const FAILURE_LABEL: Record<Extract<UpdateStatus, { state: "error" }>["failedOperation"], string> = {
+  check: "Check failed",
+  download: "Download failed",
+  install: "Install failed",
+};
+
 /**
  * Short status label shown beside the button.
  * @param status - Current update status from the Electron main process.
  * @returns Human-readable label, or empty string when nothing noteworthy is happening.
  */
-function describeStatus(status: UpdateStatus): string {
+export function describeStatus(status: UpdateStatus): string {
   switch (status.state) {
     case "idle":
     case "not-available":
@@ -273,8 +279,8 @@ function describeStatus(status: UpdateStatus): string {
     case "downloading":
       return `${status.percent}%`;
     case "downloaded":
-      return `v${status.version} ready`;
+      return status.installWhenIdle ? `v${status.version} installs when idle` : `v${status.version} ready`;
     case "error":
-      return "Check failed";
+      return FAILURE_LABEL[status.failedOperation];
   }
 }

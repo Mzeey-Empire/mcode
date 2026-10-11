@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  ListHeldSteersResultSchema, SettleUnknownSteerParamsSchema, SettleUnknownSteerResultSchema,
+  TurnSteerParamsSchema, TurnSteerResultSchema,
+  type ListHeldSteersResult, type SettleUnknownSteerParams, type SettleUnknownSteerResult,
+  type TurnSteerParams, type TurnSteerResult,
+} from "../models/turn-steer.js";
 import { AcknowledgeSeenResultSchema, ThreadAttentionSchema } from "../models/thread-attention.js";
 import { AgentProgressPositionSchema, AgentThreadIdSchema } from "../compat/agent-model.js";
 import { WorkspaceSchema, WorkspaceEnrichmentSchema } from "../models/workspace.js";
@@ -92,9 +98,10 @@ import {
 } from "../git-commit.js";
 import { PrInfoSchema, PrDraftSchema, CreatePrResultSchema, ChecksStatusSchema, PullRequestTargetsListParamsSchema, PullRequestTargetsListResultSchema } from "../github.js";
 import { TurnSnapshotSchema } from "../models/turn-snapshot.js";
+import { TurnRevertScopeSchema, TurnRevertPreviewSchema, TurnRevertResultSchema } from "../models/turn-revert.js";
 import { AgentStopResultSchema, TurnRuntimeSnapshotSchema } from "../models/turn-runtime.js";
 import { CanonicalSubagentStopRequestSchema, CanonicalSubagentStopResultSchema } from "../models/canonical-subagent-roster.js";
-import { RecoveryIncidentSchema } from "../models/turn-recovery.js";
+import { RecoveryIncidentSchema, TurnRetryParamsSchema, TurnRetryResultSchema } from "../models/turn-recovery.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
 import { PlanSaveVersionSchema, PlanVersionSchema, PlanActionSchema } from "../models/plan.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
@@ -113,6 +120,7 @@ import { TERMINAL_V1_METHODS, type TerminalV1MethodName } from "./terminal.js";
 import { ProviderModelInfoSchema } from "../providers/models.js";
 import { ProviderUsageInfoSchema } from "../providers/usage.js";
 import { ProviderAvailabilitySchema } from "../providers/availability.js";
+import { ProviderStatusSchema } from "../providers/provider-status.js";
 import {
   ProviderCatalogRequestSchema,
   ProviderCatalogSnapshotSchema,
@@ -345,6 +353,11 @@ export const SendMessageSchema = lazySchema(() => z.object({
     planAction: PlanActionSchema().optional(),
     /** Objective installed as a provider goal immediately before this turn dispatches. */
     goalObjective: GoalObjectiveSchema().optional(),
+    /**
+     * Set only when sending the resend of an uncertain steer. Admission claims the
+     * held steer once, or fails with `steer_resend_closed` and starts no turn.
+     */
+    resendOfSteerId: z.string().uuid().optional(),
 }));
 
 /** Validated command for sending a message to an existing thread. */
@@ -1039,6 +1052,21 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({ threadId: z.string().min(1), messageId: z.string().uuid() }).strict(),
     result: z.object({ admitted: z.boolean() }).strict(),
   },
+  /** Add a message to the running turn without stopping it. Replays with the same messageId never resend. */
+  "agent.steer": {
+    params: TurnSteerParamsSchema() as z.ZodType<TurnSteerParams>,
+    result: TurnSteerResultSchema() as z.ZodType<TurnSteerResult>,
+  },
+  /** Every steer held because its delivery is unknown or its resend is queued. */
+  "agent.listHeldSteers": {
+    params: z.object({}).strict(),
+    result: ListHeldSteersResultSchema() as z.ZodType<ListHeldSteersResult>,
+  },
+  /** Send again or remove one held steer. */
+  "agent.settleUnknownSteer": {
+    params: SettleUnknownSteerParamsSchema() as z.ZodType<SettleUnknownSteerParams>,
+    result: SettleUnknownSteerResultSchema() as z.ZodType<SettleUnknownSteerResult>,
+  },
   /** Read the current restart-scoped recovery incident, if one exists. */
   "agent.recoveryIncident": {
     params: z.object({}).strict(),
@@ -1048,6 +1076,11 @@ export const WS_METHODS = lazySchema(() => ({
   "agent.retry": {
     params: z.object({ executionId: z.string().uuid() }).strict(),
     result: z.void(),
+  },
+  /** Retry an errored attempt on the thread's existing provider session. */
+  "turn.retry": {
+    params: TurnRetryParamsSchema(),
+    result: TurnRetryResultSchema(),
   },
   /** Continue one active response after the user accepts an unsaved text stream. */
   "agent.continueWithoutSaving": {
@@ -1418,6 +1451,18 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({ threadId: AgentThreadIdSchema, comparisonId: z.string().min(1).max(TURN_DIFF_COMPARISON_ID_MAX_LENGTH), filePath: z.string().min(1).max(4096) }),
     result: ReviewFileDiffResultSchema(),
   },
+  "turn.revert.preview": {
+    params: z.object({ threadId: z.string().min(1).max(256), messageId: z.string().min(1).max(256), scope: TurnRevertScopeSchema() }),
+    result: TurnRevertPreviewSchema(),
+  },
+  "turn.revert.apply": {
+    params: z.object({ threadId: z.string().min(1).max(256), messageId: z.string().min(1).max(256), scope: TurnRevertScopeSchema(), previewToken: z.string().min(1).max(128), requestId: z.string().uuid() }),
+    result: TurnRevertResultSchema(),
+  },
+  "turn.revert.undo": {
+    params: z.object({ threadId: z.string().min(1).max(256), revertId: z.string().min(1).max(64), requestId: z.string().uuid() }),
+    result: TurnRevertResultSchema(),
+  },
   "snapshot.getDiff": {
     params: z.object({
       snapshotId: z.string(),
@@ -1503,6 +1548,11 @@ export const WS_METHODS = lazySchema(() => ({
   "providers.listAvailability": {
     params: z.object({}),
     result: z.array(ProviderAvailabilitySchema()),
+  },
+  /** Sign-in and rate-limit status for enabled providers. `force` skips the 10-minute cache. */
+  "providers.listStatus": {
+    params: z.object({ force: z.boolean().optional() }),
+    result: z.array(ProviderStatusSchema()),
   },
   /**
    * v1 stub for regenerating a handoff document via the live AI path.

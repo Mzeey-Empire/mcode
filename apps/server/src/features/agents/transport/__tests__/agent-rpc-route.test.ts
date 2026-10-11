@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { routeMessage, type RouterDeps } from "../../../../application/transport/ws-router.js";
 import { routeAgentRpc, type AgentRouterDeps } from "../agent-rpc.js";
 import { PlanServiceError } from "../../planning/plan-service.js";
+import { TurnSteerConflictError, TurnSteerError, TurnSteerMentionError } from "../../steering/turn-steer.js";
 import type { PlanVersion } from "@mcode/contracts";
 import type { SendMessageCommand } from "../../turns/turn-admission-dispatch-coordinator.js";
 
@@ -25,7 +26,7 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
     thoughtSegmentRepo: { listByMessage: unused },
     threadControlService: { respondToApproval: unused, listPendingApprovals: unused },
     toolCallRecordRepo: { listByMessage: unused, listByParent: unused },
-    turnRecoveryService: { currentRecoveryIncident: unused, retry: unused },
+    turnRecoveryService: { currentRecoveryIncident: unused, retry: unused, retryTurn: unused },
   };
   return { deps, close: () => undefined };
 }
@@ -182,6 +183,80 @@ describe("routeMessage Agent RPCs", () => {
     }), deps);
     expect(rejected.error?.code).toBe("INVALID_PARAMS");
     expect(respondToApproval).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("routeMessage steer RPCs", () => {
+  const STEER_ID = "6f1c2b8e-3d4a-4c5b-9e7f-0a1b2c3d4e5f";
+  const steerParams = { threadId: "thread-1", turnExecutionId: "execution-1", messageId: STEER_ID, content: "Use staging." };
+  const steerRequest = (params: unknown) => JSON.stringify({ id: "steer-1", method: "agent.steer", params });
+  const steerDeps = (steer: (params: unknown) => Promise<unknown>) =>
+    ({ turnSteers: { steer, listHeldSteers: vi.fn(), settleUnknownSteer: vi.fn() } }) as unknown as RouterDeps;
+
+  it("forwards a valid steer and returns its result", async () => {
+    const steer = vi.fn(async () => ({ status: "delivered", messageId: STEER_ID }));
+    await expect(routeMessage(steerRequest(steerParams), steerDeps(steer)))
+      .resolves.toEqual({ id: "steer-1", result: { status: "delivered", messageId: STEER_ID } });
+    expect(steer.mock.calls).toEqual([[steerParams]]);
+  });
+
+  it.each([
+    ["a non-uuid message id", { ...steerParams, messageId: "steer-1" }],
+    ["empty content", { ...steerParams, content: "" }],
+    ["attachments", { ...steerParams, attachments: [] }],
+  ])("rejects %s before the service runs", async (_case, params) => {
+    const steer = vi.fn();
+    const response = await routeMessage(steerRequest(params), steerDeps(steer));
+    expect(response.error?.code).toBe("INVALID_PARAMS");
+    expect(steer).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["turn_not_running", new TurnSteerError("turn_not_running", "The turn is no longer running."),
+      { code: "turn_not_running", message: "The turn is no longer running." }],
+    ["steer_unsupported", new TurnSteerError("steer_unsupported", "This provider cannot add a message to a running turn."),
+      { code: "steer_unsupported", message: "This provider cannot add a message to a running turn." }],
+    ["steer_rejected", new TurnSteerError("steer_rejected", "The provider refused the message.", "input too large"),
+      { code: "steer_rejected", message: "The provider refused the message.", data: { detail: "input too large" } }],
+    ["an id conflict", new TurnSteerConflictError(),
+      { code: "INVALID_PARAMS", message: "This steer id was already used with different inputs." }],
+    ["a refused mention", new TurnSteerMentionError(new Error("Mention path is outside the workspace.")),
+      { code: "INVALID_PARAMS", message: "Mention path is outside the workspace." }],
+  ])("maps %s to its wire error", async (_case, failure, error) => {
+    const response = await routeMessage(steerRequest(steerParams), steerDeps(async () => { throw failure; }));
+    expect(response).toEqual({ id: "steer-1", error });
+  });
+
+  it("maps a resend claim refused inside the database writer to steer_resend_closed", async () => {
+    // The writer rebuilds thrown errors as plain Errors that keep only name, message and code.
+    const rebuilt = Object.assign(new Error("This resend was already sent or removed."),
+      { name: "TurnSteerError", code: "steer_resend_closed" });
+    const sendMessage = vi.fn(async () => { throw rebuilt; });
+    const response = await routeMessage(JSON.stringify({ id: "send-1", method: "agent.send",
+      params: { threadId: "thread-1", content: "Use staging.", resendOfSteerId: STEER_ID } }),
+    { agentService: { sendMessage } } as unknown as RouterDeps);
+    expect(response).toEqual({ id: "send-1",
+      error: { code: "steer_resend_closed", message: "This resend was already sent or removed." } });
+    expect(sendMessage.mock.calls[0]?.[0]).toMatchObject({ resendOfSteerId: STEER_ID });
+  });
+
+  it("forwards held steer listing and settling", async () => {
+    const held = [{ messageId: STEER_ID, threadId: "thread-1", content: "Use staging.", state: "delivery_unknown" }];
+    const listHeldSteers = vi.fn(() => held);
+    const settleUnknownSteer = vi.fn(async () => ({ status: "removed" }));
+    const deps = { turnSteers: { steer: vi.fn(), listHeldSteers, settleUnknownSteer } } as unknown as RouterDeps;
+
+    await expect(routeMessage(JSON.stringify({ id: "held-1", method: "agent.listHeldSteers", params: {} }), deps))
+      .resolves.toEqual({ id: "held-1", result: held });
+    await expect(routeMessage(JSON.stringify({ id: "settle-1", method: "agent.settleUnknownSteer",
+      params: { messageId: STEER_ID, action: "remove" } }), deps))
+      .resolves.toEqual({ id: "settle-1", result: { status: "removed" } });
+    expect(settleUnknownSteer.mock.calls).toEqual([[{ messageId: STEER_ID, action: "remove" }]]);
+
+    const invalid = await routeMessage(JSON.stringify({ id: "settle-2", method: "agent.settleUnknownSteer",
+      params: { messageId: STEER_ID, action: "retry" } }), deps);
+    expect(invalid.error?.code).toBe("INVALID_PARAMS");
+    expect(settleUnknownSteer).toHaveBeenCalledTimes(1);
   });
 });
 

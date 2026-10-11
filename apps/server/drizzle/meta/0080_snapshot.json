@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "9975039b-c903-40aa-a746-c5455d362037",
+  "id": "714b0a5c-4ea9-4f89-9e82-c404ec3c8b15",
   "prevId": "3a8b6121-516b-4cf4-be12-bc906cd56c94",
   "tables": {
     "approval_receipts": {
@@ -4428,14 +4428,6 @@
           "autoincrement": false,
           "default": "'running'"
         },
-        "background": {
-          "name": "background",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
         "started_at": {
           "name": "started_at",
           "type": "text",
@@ -4730,6 +4722,120 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
+    },
+    "turn_steers": {
+      "name": "turn_steers",
+      "columns": {
+        "message_id": {
+          "name": "message_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "turn_execution_id": {
+          "name": "turn_execution_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "inputs_hash": {
+          "name": "inputs_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "rejection": {
+          "name": "rejection",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "replacement_message_id": {
+          "name": "replacement_message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "turn_steers_replacement_message_id_unique": {
+          "name": "turn_steers_replacement_message_id_unique",
+          "columns": [
+            "replacement_message_id"
+          ],
+          "isUnique": true
+        },
+        "idx_turn_steers_state": {
+          "name": "idx_turn_steers_state",
+          "columns": [
+            "state"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "turn_steers_thread_id_threads_id_fk": {
+          "name": "turn_steers_thread_id_threads_id_fk",
+          "tableFrom": "turn_steers",
+          "tableTo": "threads",
+          "columnsFrom": [
+            "thread_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "turn_steers_state": {
+          "name": "turn_steers_state",
+          "value": "\"turn_steers\".\"state\" IN ('pending', 'delivered', 'rejected', 'delivery_unknown', 'resend_queued', 'closed')"
+        }
+      }
     },
     "workspace_environment_automatic_setup_attempts": {
       "name": "workspace_environment_automatic_setup_attempts",

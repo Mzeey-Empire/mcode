@@ -9,6 +9,10 @@ export const ACKNOWLEDGE_SEEN_DWELL_MS = 150;
 interface ThreadAttentionState {
   byThreadId: Record<string, ThreadAttention>;
   visitBaselines: Record<string, number | null>;
+  /** The active thread while its window is visible and focused; its outcomes count as seen. */
+  onScreenThreadId: string | null;
+  /** Counts snapshot hydrations, so observers can tell a reconnect replay from a live change. */
+  hydrations: number;
   apply(attention: ThreadAttention): void;
   hydrate(attention: ThreadAttention[], observed: Record<string, ThreadAttention>): void;
   refreshOnScreen(activeThreadId: string | null, renderedSequence: number | null): void;
@@ -18,9 +22,21 @@ function laterMark(previous: SeenMark | undefined, current: SeenMark): SeenMark 
   return previous && (previous.sequence ?? -1) > (current.sequence ?? -1) ? previous : current;
 }
 
+function withAttention(byThreadId: Record<string, ThreadAttention>, attention: ThreadAttention): Record<string, ThreadAttention> {
+  return { ...byThreadId, [attention.threadId]: {
+    ...attention, seen: laterMark(byThreadId[attention.threadId]?.seen, attention.seen),
+  } };
+}
+
 function pauseCompletedThread(threadId: string): void {
   useWorkspaceStore.setState((state) => ({ threads: state.threads.map((thread) =>
     thread.id === threadId && thread.status === "completed" ? { ...thread, status: "paused" } : thread) }));
+}
+
+function pauseIfSeenCompleted(attention: ThreadAttention): void {
+  if (attention.lastTurn?.outcome === "completed" && (attention.seen.sequence ?? -1) >= attention.lastTurn.sequence) {
+    pauseCompletedThread(attention.threadId);
+  }
 }
 
 /** Attention facts, optimistic acknowledgements, and the baseline for the current visit. */
@@ -59,25 +75,20 @@ export const threadAttentionStore = create<ThreadAttentionState>((set, get) => {
   };
 
   return {
-    byThreadId: {}, visitBaselines: {},
+    byThreadId: {}, visitBaselines: {}, onScreenThreadId: null, hydrations: 0,
     apply: (attention) => {
-      set((state) => ({ byThreadId: { ...state.byThreadId, [attention.threadId]: {
-        ...attention, seen: laterMark(state.byThreadId[attention.threadId]?.seen, attention.seen),
-      } } }));
-      if (attention.lastTurn?.outcome === "completed" && (attention.seen.sequence ?? -1) >= attention.lastTurn.sequence) {
-        pauseCompletedThread(attention.threadId);
-      }
+      set((state) => ({ byThreadId: withAttention(state.byThreadId, attention) }));
+      pauseIfSeenCompleted(attention);
     },
     hydrate: (attention, observed) => {
-      const received = new Map(attention.map((item) => [item.threadId, item]));
-      for (const [threadId, old] of Object.entries(observed)) {
-        if (get().byThreadId[threadId] === old && !received.has(threadId)) {
-          get().apply({ ...old, waiting: null, lastTurn: null });
-        }
-      }
-      for (const item of attention) {
-        if (get().byThreadId[item.threadId] === observed[item.threadId]) get().apply(item);
-      }
+      const current = get().byThreadId;
+      const received = new Set(attention.map((item) => item.threadId));
+      const cleared = Object.entries(observed).flatMap(([threadId, old]) =>
+        current[threadId] === old && !received.has(threadId) ? [{ ...old, waiting: null, lastTurn: null }] : []);
+      const updates = [...cleared, ...attention.filter((item) => current[item.threadId] === observed[item.threadId])];
+      // One set per snapshot, so the counter and the facts it replays land together.
+      set((state) => ({ hydrations: state.hydrations + 1, byThreadId: updates.reduce(withAttention, state.byThreadId) }));
+      updates.forEach(pauseIfSeenCompleted);
     },
     refreshOnScreen: (threadId, sequence) => {
       if (activeThread !== threadId) {
@@ -91,6 +102,7 @@ export const threadAttentionStore = create<ThreadAttentionState>((set, get) => {
       }
       const visible = document.visibilityState === "visible" && document.hasFocus() ? threadId : null;
       if (onScreen === visible && rendered === sequence) return;
+      if (onScreen !== visible) set({ onScreenThreadId: visible });
       onScreen = visible;
       rendered = sequence;
       clearTimeout(timer);

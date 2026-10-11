@@ -5,6 +5,13 @@ export type Message = import("@mcode/contracts").Message & { serverSequence?: nu
 import type {
   DiffStats,
   ProjectIcon,
+  TurnSteerParams,
+  TurnSteerResult,
+  ListHeldSteersResult,
+  SettleUnknownSteerParams,
+  SettleUnknownSteerResult,
+  TurnRetryParams,
+  TurnRetryResult,
   WorkspaceFileList,
   WorkspaceFileChanges,
   FileReadResult,
@@ -52,6 +59,7 @@ import type {
   ProviderModelInfo,
   ProviderUsageInfo,
   ProviderAvailability,
+  ProviderStatus,
   PrDraft,
   CreatePrResult,
   ChecksStatus,
@@ -173,6 +181,11 @@ export type {
   PullRequestPatchResult,
   SendMessageInput,
   CreateAndSendInput,
+  TurnSteerParams,
+  TurnSteerResult,
+  ListHeldSteersResult,
+  SettleUnknownSteerParams,
+  SettleUnknownSteerResult,
 } from "@mcode/contracts";
 
 export type { PaginatedMessages, ConversationPage, ConversationTail, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord, TurnSnapshot } from "@mcode/contracts";
@@ -416,10 +429,18 @@ export interface McodeTransport {
 
   // Agent commands
   sendMessage(input: SendMessageInput): Promise<void>;
+  /** Add a message to the running turn. A replay with the same messageId never resends. */
+  steerTurn(params: TurnSteerParams): Promise<TurnSteerResult>;
+  /** Every steer the server holds because its delivery is unknown or its resend is queued. */
+  listHeldSteers(): Promise<ListHeldSteersResult>;
+  /** Send again or remove one held steer. */
+  settleUnknownSteer(params: SettleUnknownSteerParams): Promise<SettleUnknownSteerResult>;
   /** Read the current restart-scoped recovery incident. */
   getRecoveryIncident(): Promise<RecoveryIncident | null>;
   /** Retry one interrupted turn as a fresh provider execution. */
   retryTurn(executionId: string): Promise<void>;
+  /** Retry the thread's latest errored turn as a new attempt in the same provider session. */
+  retryErroredTurn(params: TurnRetryParams): Promise<TurnRetryResult>;
   /** Read one authoritative startup lifecycle by its client-generated identity. */
   getThreadStartup(startupId: string): Promise<ThreadStartup | null>;
   /** List retained startup lifecycles for one workspace during recovery. */
@@ -829,6 +850,8 @@ export interface McodeTransport {
   getProviderUsage(providerId: string): Promise<ProviderUsageInfo>;
   /** Fetch the current availability snapshot for all registered providers. */
   listProviderAvailability(): Promise<ProviderAvailability[]>;
+  /** Fetch sign-in and rate-limit state for enabled providers; `force` bypasses the server's 10-minute cache. */
+  listProviderStatus(force?: boolean): Promise<ProviderStatus[]>;
 
   /** Generate a stateless one-line conversational recap from bounded messages. */
   generateRecap(

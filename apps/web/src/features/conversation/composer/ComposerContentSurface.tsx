@@ -10,7 +10,6 @@ import { FileTagPopup, type useFileTagPopup } from "@/components/chat/FileTagPop
 import { PreviewAnnotationBundleChip } from "@/components/chat/PreviewAnnotationBundleChip";
 import { providerUnavailableMessage, type ProviderUnavailableReason } from "@/components/chat/provider-unavailable";
 import { Notice } from "@/components/ui/notice";
-import { RetryBanner } from "@/components/chat/RetryBanner";
 import { type useSlashCommand } from "@/components/chat/useSlashCommand";
 import { SlashCommandTray } from "@/components/chat/SlashCommandTray";
 import { SpellcheckContextMenu } from "@/components/chat/SpellcheckContextMenu";
@@ -83,7 +82,6 @@ interface ComposerContentSurfaceProps {
     readonly selectedTextComments: readonly SelectedTextComment[];
     readonly selectedTextCommentEditor?: SelectedTextCommentEditorDraft;
     readonly unavailableSelectedTextCommentIds: readonly string[];
-    readonly hasRetryState: boolean;
     readonly startingThread: boolean;
     readonly hasContent: boolean;
     readonly showInlineComposerOptions: boolean;
@@ -119,7 +117,6 @@ interface ComposerContentSurfaceProps {
     readonly onBranchModeExit?: () => void;
     readonly onComposerModeChange: (mode: ComposerMode) => void;
     readonly onLoadIntoComposer: ComponentProps<typeof ComposerQueueList>["onLoadIntoComposer"];
-    readonly onResumeQueuedMessage: () => Promise<void>;
     readonly onSendQueuedMessageNow: NonNullable<ComponentProps<typeof ComposerQueueList>["onSendNow"]>;
     readonly onDragEnter: DragEventHandler<HTMLDivElement>;
     readonly onDragLeave: DragEventHandler<HTMLDivElement>;
@@ -156,35 +153,25 @@ interface ComposerContentSurfaceProps {
   };
 }
 
-function ComposerTraySurface({ model }: Pick<ComposerContentSurfaceProps, "model">) {
-  if (!model.threadId || model.branchFromMessageId || model.isNewThread) return null;
-  return <ComposerTray threadId={model.threadId} />;
-}
-
-function ComposerQueueSurface({
+function ComposerTraySurface({
   model,
   actions,
 }: Pick<ComposerContentSurfaceProps, "model" | "actions">) {
-  const canShowQueue = Boolean(
-    model.threadId && !model.branchFromMessageId && !model.isNewThread,
-  );
-
-  if (!canShowQueue) return null;
+  if (!model.threadId || model.branchFromMessageId || model.isNewThread) return null;
   // Nothing may reach agent.send while the thread is starting, queued messages included.
   const paused = model.planPending || model.startingThread;
-
   return (
-    <ComposerQueueList
-      threadId={model.threadId!}
-      isAgentRunning={model.isAgentRunning}
-      provider={model.provider}
-      isEditing={Boolean(model.editingFromQueue)}
-      isPaused={paused}
-      onLoadIntoComposer={actions.onLoadIntoComposer}
-      onResume={() => paused ? Promise.resolve() : actions.onResumeQueuedMessage()}
-      onSendNow={(message) =>
-        paused ? Promise.resolve() : actions.onSendQueuedMessageNow(message)
-      }
+    <ComposerTray
+      threadId={model.threadId}
+      queue={(
+        <ComposerQueueList
+          threadId={model.threadId}
+          provider={model.provider}
+          isPaused={paused}
+          onLoadIntoComposer={actions.onLoadIntoComposer}
+          onSendNow={(message) => { if (!paused) void actions.onSendQueuedMessageNow(message); }}
+        />
+      )}
     />
   );
 }
@@ -361,9 +348,6 @@ function ComposerAttachmentSurface({
     <>
       <AnnotationAttachmentRow model={model} actions={actions} />
       <AttachmentPreview attachments={model.attachments} onRemove={actions.onRemoveAttachment} />
-      {model.hasRetryState && model.threadId && (
-        <RetryBanner threadId={model.threadId} />
-      )}
       {model.isDragOver && (
         <div className="absolute inset-0 z-(--layer-sticky) flex items-center justify-center rounded-xl bg-primary/10 backdrop-blur-sm">
           <span className="text-sm font-medium text-primary">Drop files here</span>
@@ -712,7 +696,6 @@ function DraftWriteFailureNotice() {
 export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
   return (
     <>
-      <ComposerQueueSurface {...props} />
       <ComposerNewThreadSurface {...props} />
       <ComposerTraySurface {...props} />
       <ComposerInputSurface {...props} />

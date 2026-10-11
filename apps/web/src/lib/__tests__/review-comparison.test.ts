@@ -8,7 +8,7 @@ function snapshot(id: string, effects: FileEffect[]): TurnSnapshot {
     message_id: id,
     thread_id: "thread-1",
     ref_before: `${id}-before`,
-    ref_after: `${id}-after`, attempt_count: 1,
+    ref_after: `${id}-after`, attempt_count: 1, reverted_paths: [],
     files_changed: effects.map((effect) => effect.path),
     file_effects: {
       revision: 1,

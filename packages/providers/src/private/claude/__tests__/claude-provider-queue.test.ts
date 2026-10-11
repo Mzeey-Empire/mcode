@@ -37,6 +37,20 @@ describe("createPromptQueue (#292)", () => {
     expect(got).toEqual(["a", "b"]);
   });
 
+  it("withdraws a message the SDK has not read, and not one it has", async () => {
+    const q = createPromptQueue();
+    const unread = q.pushAndAwaitRead(msg("unread"));
+    expect(unread.withdraw()).toBe(true);
+    const taken = q.pushAndAwaitRead(msg("taken"));
+    const iterator = q.iterable[Symbol.asyncIterator]();
+
+    expect((await iterator.next()).value?.message.content).toBe("taken");
+    await taken.read;
+    expect(taken.withdraw()).toBe(false);
+    q.close();
+    expect((await iterator.next()).done).toBe(true);
+  });
+
   it("does not retain execution identity when enqueue fails", async () => {
     const q = createPromptQueue();
     const consumed: string[] = [];
@@ -221,6 +235,7 @@ describe("ClaudeProvider sendMessage on closed queue (#292)", () => {
     const errorEvents = events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Error);
     expect(errorEvents.length).toBeGreaterThan(0);
     expect(errorEvents.some((runtimeEvent) => /queue full/i.test(runtimeEvent.event.error ?? ""))).toBe(true);
+    expect(errorEvents.map((runtimeEvent) => runtimeEvent.event.failure)).toEqual(errorEvents.map(() => ({ kind: "retryable" })));
     expect(errorEvents.every((runtimeEvent) => !/shutting down/i.test(runtimeEvent.event.error ?? ""))).toBe(true);
   });
 });

@@ -16,6 +16,7 @@ import type {
 import type { DevinMode } from "@mcode/contracts";
 import { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
 import type { ApprovalReceipt, ThoughtSegment } from "@/features/conversation/narrative/types";
+import type { ProviderRetry } from "@/features/conversation/turn-ending/provider-retry";
 import {
   createCanonicalAgentReplica,
   type CanonicalAgentReplica,
@@ -163,10 +164,9 @@ export interface ThreadRecord {
 
   lastFallback?: { requestedModel: string; actualModel: string };
   rateLimit?: { retryAfterMs?: number; limitType?: string; utilization?: number };
-  apiRetry?: { reason: string; attempt?: number; maxRetries?: number; delayMs?: number };
+  apiRetry?: ProviderRetry;
   awaitingUserStopPersist?: true;
   interruptStopFileNotice?: { paths: string[] };
-  composerRecallFromStop?: { text: string };
   lastHydratedAt?: number;
 
   planQuestions: PlanQuestion[] | null;

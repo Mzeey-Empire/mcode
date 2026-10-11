@@ -8,6 +8,7 @@ import {
 import { useApprovalStore } from "@/stores/approvalStore";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { startThreadAttentionTracking } from "@/features/thread-attention/thread-attention-tracking";
+import { startThreadEventDetector } from "@/features/thread-attention/thread-event-detector";
 import { pushEmitter } from "./ws-transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useProjectIconStore } from "@/features/projects/icons/projectIconStore";
@@ -18,6 +19,7 @@ import { getThreadRecord, patchThreadRecord } from "@/stores/thread-record";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
+import { useProviderStatusStore } from "@/stores/providerStatusStore";
 import { useProviderCatalogStore } from "@/stores/providerCatalogStore";
 import { useProviderModelsStore } from "@/stores/providerModelsStore";
 import { usePlanStore } from "@/stores/planStore";
@@ -162,6 +164,7 @@ function handleTerminalData(data: unknown): void {
  * - `approval.requested` -- approval awaiting a user decision
  * - `approval.resolved` -- an approval was settled
  * - `providers.availability` -- server-pushed provider availability snapshot forwarded to providerAvailabilityStore
+ * - `providers.statusChanged` -- one provider's sign-in or rate-limit state changed; forwarded to providerStatusStore
  * - `workspace.gitStatusChanged` -- workspace git status changed (e.g. non-git folder became a repo), updates is_git_repo flag
  * - `workspace.orderChanged` -- sidebar project order changed on the server; refreshes workspace list
  * - `workspace.iconChanged` -- a project's chosen icon changed; replaces its cached icon
@@ -173,6 +176,7 @@ export function startPushListeners(): void {
   // Guard against double-init
   stopPushListeners();
   unsubs.push(startThreadAttentionTracking());
+  unsubs.push(startThreadEventDetector());
   unsubs.push(pushEmitter.on("thread.attention", (data) => {
     const parsed = WS_CHANNELS["thread.attention"].safeParse(data);
     if (parsed.success) threadAttentionStore.getState().apply(parsed.data);
@@ -614,6 +618,13 @@ export function startPushListeners(): void {
       // Reject malformed payloads rather than overwriting the store with garbage.
       if (!Array.isArray(data)) return;
       useProviderAvailabilityStore.getState().replace(data as ProviderAvailability[]);
+    }),
+  );
+
+  unsubs.push(
+    pushEmitter.on("providers.statusChanged", (data) => {
+      const parsed = WS_CHANNELS["providers.statusChanged"].safeParse(data);
+      if (parsed.success) useProviderStatusStore.getState().apply(parsed.data);
     }),
   );
 

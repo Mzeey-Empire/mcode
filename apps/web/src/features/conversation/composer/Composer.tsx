@@ -418,10 +418,6 @@ export function Composer({
   const handoffStatus = useThreadStore((s) =>
     threadId ? getHandoffStatus(getThreadRecord(s.records, threadId)) : undefined,
   );
-  const hasRetryState = useThreadRecord(
-    threadId,
-    (r) => !!(r.rateLimit || r.apiRetry),
-  );
   const planPending = useThreadRecord(
     threadId,
     (r) => r.planQuestionsStatus === "pending",
@@ -502,7 +498,6 @@ export function Composer({
   const {
     queuedSend,
     queueIfGenerating,
-    resumeQueuedMessage,
     sendQueuedMessageNow,
     editing: editingFromQueue,
     loadIntoComposer,
@@ -673,7 +668,6 @@ export function Composer({
             selectedTextComments: form.state.selectedTextComments,
             selectedTextCommentEditor: form.state.selectedTextCommentEditor,
             unavailableSelectedTextCommentIds,
-            hasRetryState,
             startingThread,
             hasContent: surfaceState.hasContent,
             showInlineComposerOptions,
@@ -705,7 +699,6 @@ export function Composer({
             onBranchModeExit,
             onComposerModeChange: setComposerMode,
             onLoadIntoComposer: loadIntoComposer,
-            onResumeQueuedMessage: resumeQueuedMessage,
             onSendQueuedMessageNow: sendQueuedMessageNow,
             onDragEnter: handleDragEnter,
             onDragLeave: handleDragLeave,

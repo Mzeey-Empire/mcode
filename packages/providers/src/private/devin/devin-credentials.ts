@@ -10,6 +10,8 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { parse as parseToml } from "smol-toml";
+import type { ProviderStatusFacts } from "@mcode/contracts";
+import { ProviderTurnError } from "../../provider-turn-error.js";
 
 /** Resolved Devin ACP authentication material. */
 export interface DevinAcpCredentials {
@@ -31,29 +33,55 @@ export function resolveDevinAcpCredentials(
     const value = env[name]?.trim();
     if (value) return { apiKey: value, apiServerUrl: validatedApiServerUrl(env) };
   }
-  const fromFile = readDevinCredentialsFile(platform);
+  const fromFile = readDevinCredentialsFile(env, platform);
   if (fromFile) return fromFile;
-  throw new Error(MISSING_CREDENTIALS_MESSAGE);
+  throw new ProviderTurnError(MISSING_CREDENTIALS_MESSAGE, { kind: "auth", code: "missing_credentials" });
 }
 
-function credentialsFileCandidates(platform: NodeJS.Platform): string[] {
-  const home = NodeOS.homedir();
+/**
+ * Reports Devin sign-in from the same lookup ACP authentication uses, so the
+ * bell says "signed out" exactly when a Devin thread would fail to start.
+ */
+export function describeDevinAuth(
+  env: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform,
+): ProviderStatusFacts {
+  try {
+    resolveDevinAcpCredentials(env, platform);
+    return { auth: { state: "signed_in" } };
+  } catch {
+    return { auth: { state: "signed_out", signIn: { kind: "terminal", argv: ["devin", "auth", "login"] } } };
+  }
+}
+
+function homeDirectory(env: Readonly<Record<string, string | undefined>>, platform: NodeJS.Platform): string {
+  return (platform === "win32" ? env.USERPROFILE : env.HOME)?.trim() || NodeOS.homedir();
+}
+
+function credentialsFileCandidates(
+  env: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform,
+): string[] {
+  const home = homeDirectory(env, platform);
   if (platform === "win32") {
-    const appData = process.env.APPDATA;
+    const appData = env.APPDATA;
     return [
       ...(appData ? [NodePath.join(appData, "devin", "credentials.toml")] : []),
       NodePath.join(home, "AppData", "Roaming", "devin", "credentials.toml"),
     ];
   }
-  const xdgData = process.env.XDG_DATA_HOME;
+  const xdgData = env.XDG_DATA_HOME;
   return [
     ...(xdgData ? [NodePath.join(xdgData, "devin", "credentials.toml")] : []),
     NodePath.join(home, ".local", "share", "devin", "credentials.toml"),
   ];
 }
 
-function readDevinCredentialsFile(platform: NodeJS.Platform): DevinAcpCredentials | undefined {
-  for (const filePath of credentialsFileCandidates(platform)) {
+function readDevinCredentialsFile(
+  env: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform,
+): DevinAcpCredentials | undefined {
+  for (const filePath of credentialsFileCandidates(env, platform)) {
     let parsed: Record<string, unknown>;
     try {
       parsed = parseToml(NodeFS.readFileSync(filePath, "utf-8")) as Record<string, unknown>;

@@ -1,6 +1,7 @@
 // Models
 export * from "./models/thread-attention.js";
 export * from "./models/next-message-draft.js";
+export * from "./models/turn-steer.js";
 export * from "./models/task-list-tools.js";
 export {
   ThreadStatusSchema,
@@ -301,8 +302,10 @@ export {
   MAX_TURN_RECOVERIES,
   RecoveryIncidentEntrySchema,
   RecoveryIncidentSchema,
+  TurnRetryParamsSchema,
+  TurnRetryResultSchema,
 } from "./models/turn-recovery.js";
-export type { RecoveryIncidentEntry, RecoveryIncident } from "./models/turn-recovery.js";
+export type { RecoveryIncidentEntry, RecoveryIncident, TurnRetryParams, TurnRetryResult } from "./models/turn-recovery.js";
 
 export {
   MessageSchema,
@@ -489,6 +492,7 @@ export { ParentNarrativeRecoveryItemSchema } from "./models/narrative-recovery.j
 export { ApprovalDecidedPayloadSchema, ApprovalReceiptRecordSchema, type ApprovalReceiptRecord } from "./models/approval-receipt.js";
 export type { ParentNarrativeRecoveryItem } from "./models/narrative-recovery.js";
 
+export * from "./models/turn-revert.js";
 export { TurnSnapshotSchema } from "./models/turn-snapshot.js";
 export type { TurnSnapshot } from "./models/turn-snapshot.js";
 export { DiffStatsSchema } from "./models/diff-stats.js";
@@ -1309,6 +1313,7 @@ export {
   TERMINAL_DEFAULT_SESSION_LIMIT,
   TERMINAL_MAX_COLS,
   TERMINAL_MAX_ROWS,
+  HOME_TERMINAL_SCOPE_ID,
   TerminalUuidSchema,
   TerminalU64Schema,
   TerminalTimestampSchema,
@@ -1484,6 +1489,9 @@ export type {
   ISessionEvictable,
   IProviderRegistry,
   TurnRequest,
+  TurnSteerInput,
+  TurnSteerOutcome,
+  ITurnSteerCapable,
   ProviderOptionsByProvider,
   CompletionOptions,
   ProviderFileMutationStart,
@@ -1493,6 +1501,7 @@ export type {
 
 export * from "./providers/catalog.js";
 export * from "./providers/availability.js";
+export * from "./providers/provider-status.js";
 export { CURSOR_STATIC_MODEL_FALLBACK } from "./providers/cursor-static-fallback.js";
 export {
   DEVIN_STATIC_MODEL_FALLBACK,
@@ -1513,6 +1522,7 @@ export type { ProviderModelInfo } from "./providers/models.js";
 export {
   isChildTurnCancellable,
   isTurnDiffSource,
+  isTurnSteerCapable,
   isApprovalReviewCapable,
   isCompletionCapable,
   isGoalCapable,

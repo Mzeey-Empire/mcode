@@ -12,7 +12,8 @@ import { SUBAGENT_REPORTING } from "@mcode/contracts";
 
 import * as NodeEvents from "node:events";
 import { approvalReceipt } from "../../approvals/approval-receipt.js";
-import type { ApprovalOutcome, ApprovalChoice } from "@mcode/contracts";
+import type { ApprovalOutcome, ApprovalChoice, TurnFailure } from "@mcode/contracts";
+import { classifyCodexLocalFailure } from "./codex-failure-classifier.js";
 import * as NodeCrypto from "node:crypto";
 import { logger } from "@mcode/shared";
 import { buildMcodeInstructionPlan, renderMcodeInstructions } from "@mcode/thread-orchestration";
@@ -50,13 +51,15 @@ import type {
   ProviderFileMutationStart,
   ProviderTurnDiffUpdate,
   ProviderCapabilityName,
+  TurnSteerInput,
+  TurnSteerOutcome,
 } from "@mcode/contracts";
 import {
   AgentEventType,
   isGoalOpen,
   providerRuntimeEvent,
 } from "@mcode/contracts";
-import { checkCodexVersion, meetsMinVersion } from "./codex-version.js";
+import { checkCodexVersion, currentCodexVersion, meetsMinVersion } from "./codex-version.js";
 import { CodexAppServer, warmCodexAppServer } from "./codex-app-server.js";
 import type { CodexApprovalRequest } from "./codex-app-server.js";
 import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
@@ -82,12 +85,15 @@ import type {
   CompletedItem,
   SandboxMode,
   ThreadGoal,
+  TurnInputPart,
 } from "./codex-types.js";
 import {
   mapDecisionToCodexResponse,
   synthesizeCodexApprovalRequest,
 } from "./codex-permission-mapper.js";
 import { CodexPromptResolutionError, parseCodexSlashInvocation } from "./codex-prompt.js";
+import { createCliStatusRunner } from "../status/cli-status-runner.js";
+import { describeCodexAuth } from "../status/provider-auth-checks.js";
 
 export {
   hasCodexInternalThreadControlMcp,
@@ -103,6 +109,8 @@ const STOP_SETTLE_TIMEOUT_MS = 10_000;
 const STOP_DRAIN_REUSE_TIMEOUT_MS = 3_000;
 const USAGE_WARMUP_RETRY_MS = 60_000;
 const CODEX_MIN_VERSION = "0.37.0";
+/** First CLI whose app-server answers `turn/steer` with `expectedTurnId`; older ones declare `turn-steer` unsupported. */
+const CODEX_TURN_STEER_MIN_VERSION = "0.99.0";
 // The installed 0.153.4 app-server exposes approvalsReviewer plus the gated
 // item/autoApprovalReview lifecycle used by this adapter.
 const CODEX_AUTO_REVIEW_VALIDATED_VERSION = "0.153.4";
@@ -135,6 +143,19 @@ const CODEX_SUPPORTED_CAPABILITIES = [
   "turn-diff",
   "approval-review",
 ] as const satisfies readonly ProviderCapabilityName[];
+
+function codexDescriptor(turnSteer: "supported" | "unsupported") {
+  return Object.freeze({
+    id: "codex" as const,
+    capabilities: [
+      ...CODEX_SUPPORTED_CAPABILITIES.map((name) => ({ name, support: "supported" as const })),
+      { name: "turn-steer" as const, support: turnSteer },
+    ],
+  });
+}
+
+const CODEX_DESCRIPTOR_WITH_STEER = codexDescriptor("supported");
+const CODEX_DESCRIPTOR_WITHOUT_STEER = codexDescriptor("unsupported");
 
 const TURN_SCOPED_EVENT_TYPES = new Set<AgentEvent["type"]>([
   "turnStarted", "message", "generatedAttachment", "toolUse", "toolResult",
@@ -584,10 +605,13 @@ function completedAssistantText(item: CompletedItem | undefined): string {
 export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProvider, IApprovalReviewCapable, IGoalCapable, ISessionEvictable, ProtocolAdapter<CodexSessionState> {
   readonly id = "codex" as const;
   readonly subagentReporting = SUBAGENT_REPORTING.codex;
-  readonly descriptor = Object.freeze({
-    id: "codex" as const,
-    capabilities: CODEX_SUPPORTED_CAPABILITIES.map((name) => ({ name, support: "supported" as const })),
-  });
+  /** `turn-steer` follows the cached CLI version, so it reads unsupported until the version check succeeds. */
+  get descriptor() {
+    const version = currentCodexVersion();
+    return version !== null && meetsMinVersion(version, CODEX_TURN_STEER_MIN_VERSION)
+      ? CODEX_DESCRIPTOR_WITH_STEER
+      : CODEX_DESCRIPTOR_WITHOUT_STEER;
+  }
   /** Codex CLI is an agentic tool with no one-shot text completion mode. */
   readonly supportsCompletion = false;
   readonly sessionForkOnResume = "clean" as const;
@@ -618,6 +642,13 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   /** Returns the live Codex model catalog in provider order. */
   async listModels(): Promise<ProviderModelInfo[]> {
     return this.codexPorts.catalog.listModels();
+  }
+
+  /** Reports sign-in from `codex login status`, which honors the same CODEX_HOME sessions use. */
+  async describeStatus() {
+    const { cliPath } = await this.codexPorts.settings.get();
+    const run = createCliStatusRunner({ platform: this.host.runtime.platform, env: this.host.environment.snapshot() });
+    return describeCodexAuth(run, cliPath);
   }
 
   /** Return the latest Codex account rate-limit state pushed by the app-server. */
@@ -864,6 +895,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private emitTurnFailure(
     threadId: string,
     error: string,
+    failure: TurnFailure,
     outcome?: CodexEndedOutcome,
     emitEnded = true,
     turnExecutionId?: string,
@@ -872,7 +904,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       type: AgentEventType.Error,
       threadId,
       error,
-      failure: { kind: "fatal" },
+      failure,
       ...(turnExecutionId ? { turnExecutionId } : {}),
     } satisfies AgentEvent));
     if (!turnExecutionId) return undefined;
@@ -1182,7 +1214,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     } catch (error) {
       if (!(error instanceof CodexPromptResolutionError)) throw error;
       logger.debug("Codex prompt expansion failed", { promptName: error.promptName, cause: error.cause instanceof Error ? error.cause.message : String(error.cause) });
-      this.emitTurnFailure(threadId, error.message, undefined, true, request.turnExecutionId);
+      this.emitTurnFailure(threadId, error.message, { kind: "fatal" }, undefined, true, request.turnExecutionId);
       return undefined;
     }
   }
@@ -1253,7 +1285,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const preflight = this.checkCodexCliPreflight(turn.cliPath);
     if (preflight.ok) return true;
     const error = preflight.reason === "unavailable" ? preflight.error : `Codex CLI version ${preflight.version} is not supported. Minimum required: ${CODEX_MIN_VERSION}. Update with: npm install -g @openai/codex`;
-    this.emitTurnFailure(turn.threadId, error, undefined, true, turn.request.turnExecutionId);
+    this.emitTurnFailure(turn.threadId, error, { kind: "fatal" }, undefined, true, turn.request.turnExecutionId);
     return false;
   }
 
@@ -1287,7 +1319,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       this.releaseStagedCodexTurn(request.sessionId, turn.signal);
       const message = error instanceof Error ? error.message : String(error);
       logger.error("CodexAppServer start failed", { sessionId: request.sessionId, error: message });
-      this.emitTurnFailure(threadId, message, undefined, true, request.turnExecutionId);
+      this.emitTurnFailure(threadId, message, classifyCodexLocalFailure(error), undefined, true, request.turnExecutionId);
       return undefined;
     }
   }
@@ -1341,7 +1373,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     state.turnDiffRevision = 0;
     void this.dispatchReusedCodexTurn(turn, state).catch((error: unknown) => {
       if (turn.signal.aborted) this.emitCancelledCodexRequest(turn.request);
-      else this.emitTurnFailure(turn.threadId, error instanceof Error ? error.message : String(error), "errored", true, turn.request.turnExecutionId);
+      else this.emitTurnFailure(turn.threadId, error instanceof Error ? error.message : String(error), classifyCodexLocalFailure(error), "errored", true, turn.request.turnExecutionId);
       this.releaseStagedCodexTurn(turn.request.sessionId, turn.signal);
       this.releasePendingCodexRequest(turn.request.sessionId, turn.signal);
     });
@@ -1567,7 +1599,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
           method: notification.method, errorType: error instanceof Error ? error.name : "unknown" });
       }
     });
-    server.on("fatal", (error: string) => this.handleCodexServerFatal(context, server, mapper, error));
+    server.on("fatal", (error: string) => this.handleCodexServerFatal(context, server, mapper, error, { kind: server.lastFatalKind }));
     this.attachFatalDrain(context.sessionId, server);
     server.on("exit", () => {
       // Only evict when this server is still the pooled one — a drained
@@ -1654,6 +1686,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     server: CodexAppServer,
     mapper: CodexEventMapper,
     error: string,
+    failure: TurnFailure,
   ): void {
     if (this.activeCodexServers.get(context.sessionId) !== server) return;
     logger.error("CodexAppServer fatal", { sessionId: context.sessionId, error, breadcrumb: server.lastTransportBreadcrumb });
@@ -1663,7 +1696,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       const runtimeEvent = providerRuntimeEvent(executionId ? { ...event, turnExecutionId: executionId } : event);
       this.emitRuntimeEvent(entry ? this.withCodexTurnAttempt(entry, runtimeEvent, executionId) : runtimeEvent);
     });
-    this.emitCodexTransportFailure(context.threadId, error, entry, executionId);
+    this.emitCodexTransportFailure(context.threadId, error, failure, entry, executionId);
     if (this.runtime.get(context.sessionId)?.server === server) {
       void this.runtime.stop(context.sessionId);
     }
@@ -1679,13 +1712,13 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     }
   }
 
-  private emitCodexTransportFailure(threadId: string, error: string, entry: CodexSessionState | undefined, executionId: string | undefined): void {
+  private emitCodexTransportFailure(threadId: string, error: string, failure: TurnFailure, entry: CodexSessionState | undefined, executionId: string | undefined): void {
     if (!entry || !executionId) {
-      this.emitTurnFailure(threadId, error, "errored", true, executionId);
+      this.emitTurnFailure(threadId, error, failure, "errored", true, executionId);
       return;
     }
     // Confirmed process failure must retain the active attempt's terminal routing.
-    this.emitCodexTurnEvent(entry, { type: AgentEventType.Error, threadId, error, failure: { kind: "fatal" } }, executionId);
+    this.emitCodexTurnEvent(entry, { type: AgentEventType.Error, threadId, error, failure }, executionId);
     this.emitCodexTurnEvent(entry, { type: AgentEventType.Ended, threadId, turnExecutionId: executionId, outcome: "errored" }, executionId);
   }
 
@@ -2263,6 +2296,28 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     return state.pendingTurnId != null || state.abortPendingTurnWait !== undefined;
   }
 
+  /** Add a message to the running main turn. Refused here, before any request, when that turn is not current. */
+  async steerTurn(input: TurnSteerInput): Promise<TurnSteerOutcome> {
+    const state = this.runtime.get(input.sessionId);
+    const nativeTurnId = state?.currentNativeTurnId;
+    // currentNativeTurnId outlives turn/completed; the binding phase drops to idle at completion.
+    if (!state || !nativeTurnId || state.turnBindingPhase !== "bound"
+      || state.currentTurnExecutionId !== input.turnExecutionId
+      || state.cancelledTurnExecutionId === input.turnExecutionId) {
+      return { outcome: "rejected", reason: "turn_not_running", detail: "The Codex turn is not running." };
+    }
+    let parts: TurnInputPart[];
+    try {
+      // The same parts a new turn would send, so mentions and slash commands stay native in a steer.
+      parts = await buildCodexInput(input.message, undefined, await this.codexSkillCatalog(input.message, state.cwd),
+        input.mentions ?? []);
+    } catch (error) {
+      if (!(error instanceof CodexPromptResolutionError)) throw error;
+      return { outcome: "rejected", reason: "provider", detail: error.message };
+    }
+    return state.server.steerTurn(nativeTurnId, input.steerId, parts);
+  }
+
   /** Graceful protocol interrupt of the in-flight turn (does not kill the process). */
   async interrupt(state: CodexSessionState): Promise<void> {
     const turnExecutionId = executionForDrain(state);
@@ -2513,7 +2568,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
         const error = err instanceof Error ? err.message : String(err);
         logger.error("Codex goal install failed", { sessionId, error });
         this.emitGoalCleared(sessionId, "rollback");
-        this.emitTurnFailure(threadId, error, "errored", true, turnExecutionId);
+        this.emitTurnFailure(threadId, error, classifyCodexLocalFailure(err), "errored", true, turnExecutionId);
         return;
       }
       if (signal.aborted) return;
@@ -2746,7 +2801,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       const message = error instanceof Error ? error.message : String(error);
       logger.error("Codex turn failed", { sessionId, error: message });
       this.emitCodexPendingAssistantBoundary(run.entry, turnExecutionId);
-      completion.deferredEnded = this.emitTurnFailure(threadId, message, completion.endedOutcome, false, turnExecutionId);
+      completion.deferredEnded = this.emitTurnFailure(threadId, message, classifyCodexLocalFailure(error), completion.endedOutcome, false, turnExecutionId);
     }
     return false;
   }

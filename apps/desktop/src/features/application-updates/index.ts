@@ -32,6 +32,8 @@ export interface ApplicationUpdatesDependencies {
   ipc: ApplicationUpdateIpc;
   /** Stop and replace the Server Runtime before installation. */
   forceReplace: () => Promise<void>;
+  /** Read the server's current number of running agents. */
+  getActiveAgentCount: () => Promise<number>;
 }
 
 /** Public feature API for update initialization, controls, status, and cleanup. */
@@ -43,6 +45,10 @@ export interface ApplicationUpdates {
   checkForUpdatesNow(): Promise<UpdateStatus>;
   downloadUpdate(): Promise<void>;
   installUpdate(): Promise<boolean>;
+  /** Arm installation once running agents finish. */
+  installWhenIdle(): void;
+  /** Cancel a scheduled idle installation. */
+  cancelInstallWhenIdle(): void;
   applyReleaseLineSwitch(
     releaseLine: "stable" | "nightly",
     options?: { allowDowngrade?: boolean },
@@ -59,6 +65,7 @@ export function createApplicationUpdates(
     application: dependencies.application,
     timer: dependencies.timer,
     settings: dependencies.settings,
+    getActiveAgentCount: dependencies.getActiveAgentCount,
     status,
   });
   const updater = createUpdaterLifecycle({
@@ -98,6 +105,8 @@ export function createApplicationUpdates(
     checkForUpdatesNow: () => updater.checkForUpdatesNow(),
     downloadUpdate: () => updater.downloadUpdate(),
     installUpdate: () => installation.installUpdate(),
+    installWhenIdle: () => installation.installWhenIdle(),
+    cancelInstallWhenIdle: () => installation.cancelInstallWhenIdle(),
     applyReleaseLineSwitch: (releaseLine, options) =>
       updater.applyReleaseLineSwitch(releaseLine, options),
   };

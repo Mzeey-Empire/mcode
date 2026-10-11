@@ -34,8 +34,8 @@ vi.mock("@/features/projects", async (importOriginal) => ({
   ProjectTree: () => <div data-testid="project-tree" />,
 }));
 
-vi.mock("./UpdateIndicator", () => ({
-  UpdateIndicator: () => <div data-testid="update-indicator" />,
+vi.mock("./UpdateButton", () => ({
+  UpdateButton: () => <div data-testid="update-button" />,
 }));
 
 import { Sidebar } from "./Sidebar";
@@ -88,8 +88,8 @@ describe("Sidebar", () => {
 
     expect(onOpenSettings).toHaveBeenCalledOnce();
     expect(hoisted.setPrimarySurface).toHaveBeenCalledWith("pullRequests");
-    expect(within(footer).getByRole("button", { name: "Notifications" })).toBeDisabled();
-    expect(within(screen.getByTestId("sidebar-update-slot")).getByTestId("update-indicator")).toBeInTheDocument();
+    expect(within(footer).getByRole("button", { name: "Providers" })).toBeEnabled();
+    expect(within(screen.getByTestId("sidebar-update-slot")).getByTestId("update-button")).toBeInTheDocument();
   });
 
   it("shows Pull requests as the current page only while that surface is open", () => {

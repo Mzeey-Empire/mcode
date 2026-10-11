@@ -196,6 +196,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     installUpdate(): Promise<boolean> {
       return ipcRenderer.invoke("app:install-update");
     },
+    /** Arm installation once running agents finish. */
+    installWhenIdle(): Promise<void> {
+      return ipcRenderer.invoke("app:install-when-idle");
+    },
+    /** Cancel a scheduled idle installation. */
+    cancelInstallWhenIdle(): Promise<void> {
+      return ipcRenderer.invoke("app:cancel-install-when-idle");
+    },
     /** Trigger download of a discovered update (when auto-download is off). */
     downloadUpdate(): Promise<void> {
       return ipcRenderer.invoke("app:download-update");

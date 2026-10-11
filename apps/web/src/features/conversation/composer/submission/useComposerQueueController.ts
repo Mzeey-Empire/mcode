@@ -82,7 +82,6 @@ export function useComposerQueueController({
   return {
     ...editing,
     ...handoff,
-    resumeQueuedMessage: dispatch.resumeNext,
     sendQueuedMessageNow: dispatch.sendNow,
     clearAnnotations,
   };

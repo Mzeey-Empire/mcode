@@ -8,6 +8,8 @@ import { isTurnWorkRunning } from "../narrative/narrative-builder-helpers";
 import { deriveRunStatus, type RunHoldingSignals, type RunStatus } from "../narrative/run-status";
 import { isRoutineProviderNotice } from "../notices/provider-notices";
 import { approvalReviewNote, persistedTurnCounts, persistedTurnDurationMs } from "../turn/turn-summary";
+import { sameTurnEndNotice, type TurnEndNoticeView } from "../turn-ending/turn-ending-notice";
+import type { TurnEnding } from "../turn-ending/turn-endings-projection";
 
 /**
  * A plan-questions assistant message is a COMPLETED "ask the user" turn whose
@@ -138,6 +140,8 @@ export interface TranscriptProjectionInput {
   persistedNarrativeByMessage?: PersistedNarrativeRecordsByMessage;
   /** Canonical child turn summaries keyed by assistant message id. */
   turnSummariesByMessageId?: Record<string, TurnSummary>;
+  /** Settled turn endings keyed by the message each notice follows. */
+  turnEndingsByMessageId?: Readonly<Record<string, TurnEnding>>;
   /** In-memory tool calls for the active turn. */
   toolCalls: readonly ToolCall[];
   /** Start time for active-turn timing displays. */
@@ -215,6 +219,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       responseTextIsStreaming: input.responseTextIsStreaming,
       persistedNarrativeByMessage: input.persistedNarrativeByMessage,
       turnSummariesByMessageId: input.turnSummariesByMessageId,
+      turnEndingsByMessageId: input.turnEndingsByMessageId,
       currentTurnLiveNarrative: settledLiveNarrative(input),
     };
     const stableItems = sameStableTranscriptInput(previousStableInput, stableInput)
@@ -229,6 +234,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
         stableInput.agentDisplayState,
         stableInput.responseTextIsStreaming,
         stableInput.currentTurnLiveNarrative,
+        stableInput.turnEndingsByMessageId,
       );
     previousStableInput = stableInput;
     previousStableItems = stableItems;
@@ -254,20 +260,19 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
 
 type StableTranscriptInput = Pick<TranscriptProjectionInput,
   "messages" | "persistedFilesChanged" | "latestTurnWithChanges" | "currentTurn" | "agentDisplayState"
-  | "responseTextIsStreaming" | "persistedNarrativeByMessage" | "turnSummariesByMessageId"> & {
+  | "responseTextIsStreaming" | "persistedNarrativeByMessage" | "turnSummariesByMessageId"
+  | "turnEndingsByMessageId"> & {
   currentTurnLiveNarrative: SettledLiveNarrative | undefined;
 };
 
+const STABLE_TRANSCRIPT_KEYS = [
+  "messages", "persistedFilesChanged", "latestTurnWithChanges", "currentTurn", "agentDisplayState",
+  "responseTextIsStreaming", "persistedNarrativeByMessage", "turnSummariesByMessageId", "turnEndingsByMessageId",
+  "currentTurnLiveNarrative",
+] as const satisfies readonly (keyof StableTranscriptInput)[];
+
 function sameStableTranscriptInput(previous: StableTranscriptInput | undefined, current: StableTranscriptInput): boolean {
-  return previous !== undefined && previous.messages === current.messages
-    && previous.persistedFilesChanged === current.persistedFilesChanged
-    && previous.latestTurnWithChanges === current.latestTurnWithChanges
-    && previous.currentTurn === current.currentTurn
-    && previous.agentDisplayState === current.agentDisplayState
-    && previous.responseTextIsStreaming === current.responseTextIsStreaming
-    && previous.persistedNarrativeByMessage === current.persistedNarrativeByMessage
-    && previous.turnSummariesByMessageId === current.turnSummariesByMessageId
-    && previous.currentTurnLiveNarrative === current.currentTurnLiveNarrative;
+  return previous !== undefined && STABLE_TRANSCRIPT_KEYS.every((key) => previous[key] === current[key]);
 }
 
 function hasLiveNarrative(input: TranscriptProjectionInput): boolean {
@@ -367,6 +372,15 @@ export type ChatVirtualItem =
       startTime: number | undefined;
       /** False once the turn ended — tells the component to play its exit. */
       isAgentRunning: boolean;
+    }
+  | {
+      key: string;
+      type: "turn-end-notice";
+      /** Message the notice follows: the turn's last answer, or its user message when none was written. */
+      messageId: string;
+      /** Latest attempt's turn id, which Retry targets. */
+      turnId: string;
+      notice: TurnEndNoticeView;
     };
 
 /**
@@ -383,9 +397,10 @@ export function buildStableItems(
   currentAgentDisplayState?: AgentDisplayState,
   responseTextIsStreaming?: boolean,
   currentTurnLiveNarrative?: SettledLiveNarrative,
+  turnEndingsByMessageId?: Readonly<Record<string, TurnEnding>>,
 ): ChatVirtualItem[] {
   return messages.flatMap((message) => isRoutineProviderNotice(message) ? [] : stableItemsForMessage(message, {
-    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState, responseTextIsStreaming, currentTurnLiveNarrative,
+    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState, responseTextIsStreaming, currentTurnLiveNarrative, turnEndingsByMessageId,
   }));
 }
 
@@ -399,6 +414,7 @@ interface StableItemInput {
   responseTextIsStreaming?: boolean;
   /** What the settled current turn's live state can put under its fold. */
   currentTurnLiveNarrative?: SettledLiveNarrative;
+  turnEndingsByMessageId?: Readonly<Record<string, TurnEnding>>;
 };
 
 function isCurrentResponse(message: Message, input: StableItemInput): boolean {
@@ -497,16 +513,29 @@ function turnChangesItem(message: Message, input: StableItemInput): ChatVirtualI
     : undefined;
 }
 
+function turnEndNoticeItem(message: Message, ending: TurnEnding | undefined): ChatVirtualItem | undefined {
+  return ending?.view.notice
+    ? { key: `turn-end-notice:${message.id}`, type: "turn-end-notice", messageId: message.id, turnId: ending.turnId, notice: ending.view.notice }
+    : undefined;
+}
+
 function stableItemsForMessage(message: Message, input: StableItemInput): ChatVirtualItem[] {
-  if (message.role !== "assistant") return [messageVirtualItem(message, input)];
+  const ending = input.turnEndingsByMessageId?.[message.id];
+  if (message.role !== "assistant") return definedItems([messageVirtualItem(message, input), turnEndNoticeItem(message, ending)]);
   const settled = !isAgentDisplayActive(currentResponseState(message, input));
   const summary = settled ? settledTurnSummary(message, input) : undefined;
-  const items: Array<ChatVirtualItem | undefined> = [
-    summary && workFoldItem(message, input, summary),
+  // A turn the provider never started has no work to fold, whatever the records hold.
+  const showFold = ending?.view.foldLabel !== null;
+  return definedItems([
+    summary && showFold ? workFoldItem(message, input, summary) : undefined,
     messageVirtualItem(message, input),
     summary && turnMetaLineItem(message, summary),
     turnChangesItem(message, input),
-  ];
+    turnEndNoticeItem(message, ending),
+  ]);
+}
+
+function definedItems(items: ReadonlyArray<ChatVirtualItem | undefined>): ChatVirtualItem[] {
   return items.filter((item): item is ChatVirtualItem => item !== undefined);
 }
 
@@ -645,6 +674,10 @@ function sameTurnMetaLineItem(left: ChatVirtualItem, right: ChatVirtualItem): bo
   return left.type === "turn-meta-line" && right.type === "turn-meta-line" && left.messageId === right.messageId && left.steps === right.steps && left.subagents === right.subagents;
 }
 
+function sameTurnEndNoticeItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
+  return left.type === "turn-end-notice" && right.type === "turn-end-notice" && left.turnId === right.turnId && sameTurnEndNotice(left.notice, right.notice);
+}
+
 function sameNarrativeIndicatorItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
   return left.type === "narrative-indicator" && right.type === "narrative-indicator" && [left.status.label === right.status.label, left.status.icon === right.status.icon, left.stepCount === right.stepCount, left.startTime === right.startTime, left.isAgentRunning === right.isAgentRunning].every(Boolean);
 }
@@ -657,6 +690,7 @@ const VIRTUAL_ITEM_EQUALITY: Record<ChatVirtualItem["type"], (left: ChatVirtualI
   "work-fold": sameWorkFoldItem,
   "turn-meta-line": sameTurnMetaLineItem,
   "narrative-indicator": sameNarrativeIndicatorItem,
+  "turn-end-notice": sameTurnEndNoticeItem,
 };
 
 function sameVirtualItem(left: ChatVirtualItem | undefined, right: ChatVirtualItem): boolean {

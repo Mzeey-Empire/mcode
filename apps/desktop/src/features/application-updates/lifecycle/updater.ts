@@ -123,6 +123,26 @@ export function createUpdaterLifecycle(
     win.focus();
   };
 
+  // A check that fails on a network blip is retried by the next scheduled check, so it stays quiet.
+  // A download that fails mid-way is surfaced either way, or the half-done download would vanish.
+  const publishFailure = (error: unknown, failedOperation: "check" | "download"): void => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (failedOperation === "check" && isTransientNetworkError(error)) {
+      console.warn("[auto-updater] Transient network failure, will retry:", message);
+      status.publish({ state: "idle" });
+      return;
+    }
+    console.error(`[auto-updater] Update ${failedOperation} failed:`, message);
+    status.publish({ state: "error", message, failedOperation });
+  };
+
+  // Scheduled checks would replace download progress or an armed install with "checking".
+  const runScheduledCheck = (): void => {
+    const current = status.get().state;
+    if (current === "downloading" || current === "downloaded") return;
+    void checkForUpdatesNow();
+  };
+
   const checkForUpdatesNow = (): Promise<UpdateStatus> => {
     if (!initialized) {
       return Promise.resolve({
@@ -145,8 +165,7 @@ export function createUpdaterLifecycle(
         if (operationGeneration !== generation || !initialized) {
           return status.get();
         }
-        const message = err instanceof Error ? err.message : String(err);
-        status.publish({ state: "error", message });
+        publishFailure(err, "check");
       } finally {
         if (operationGeneration === generation) inFlightCheck = null;
       }
@@ -181,14 +200,16 @@ export function createUpdaterLifecycle(
   };
 
   const downloadUpdate = async (): Promise<void> => {
-    if (!initialized || status.get().state !== "available") return;
+    if (!initialized) return;
+    const current = status.get();
+    if (current.state !== "available" && !(current.state === "error" && current.failedOperation === "download")) return;
     const operationGeneration = generation;
+    status.publish({ state: "downloading", percent: 0 });
     try {
       await updater.downloadUpdate();
     } catch (err) {
       if (operationGeneration !== generation || !initialized) return;
-      const message = err instanceof Error ? err.message : String(err);
-      status.publish({ state: "error", message });
+      publishFailure(err, "download");
     }
   };
 
@@ -254,6 +275,7 @@ export function createUpdaterLifecycle(
         state: "downloaded",
         version: update.version,
         releaseNotes,
+        installWhenIdle: false,
       });
 
       if (Notification.isSupported()) {
@@ -265,30 +287,17 @@ export function createUpdaterLifecycle(
         notification.show();
       }
     });
+    // With auto-download on, a download can fail before its first progress event, while still "available".
     updater.on("error", (error) => {
-      const err = error as { message?: string; code?: string; statusCode?: number };
-      const message = err instanceof Error ? err.message : String(error);
-      if (isTransientNetworkError(error)) {
-        console.warn(
-          "[auto-updater] Transient network failure, will retry:",
-          message,
-        );
-        status.publish({ state: "idle" });
-        return;
-      }
-      console.error("[auto-updater] Error checking for updates:", message);
-      status.publish({ state: "error", message });
+      const { state } = status.get();
+      publishFailure(error, state === "downloading" || state === "available" ? "download" : "check");
     });
 
-    initialCheckTimeoutId = timer.setTimeout(() => {
-      void checkForUpdatesNow();
-    }, 10_000);
+    initialCheckTimeoutId = timer.setTimeout(runScheduledCheck, 10_000);
 
     const intervalMs = intervalToMs(updaterSettings.checkInterval);
     if (isFinite(intervalMs)) {
-      checkIntervalId = timer.setInterval(() => {
-        void checkForUpdatesNow();
-      }, intervalMs);
+      checkIntervalId = timer.setInterval(runScheduledCheck, intervalMs);
     }
   };
 

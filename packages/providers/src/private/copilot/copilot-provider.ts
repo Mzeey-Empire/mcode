@@ -18,6 +18,7 @@ import { CanonicalLiveEventPublisher, type CanonicalLiveEventRouting } from "../
 import { CopilotCleanForker } from "./copilot-clean-forker.js";
 import { buildCopilotInternalMcpServers, composeCopilotSystemMessage, inferModelGroup, normalizeQuotaSnapshots, readUserInstructions, userSkillDirectories } from "./copilot-helpers.js";
 import { mapCopilotEvent, type CopilotTurnState } from "./copilot-event-mapper.js";
+import { describeCopilotAuth } from "../status/provider-auth-checks.js";
 
 interface CopilotSessionState {
   sessionId: string;
@@ -39,7 +40,10 @@ interface CopilotSessionState {
 export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentProvider, ISessionEvictable, ProtocolAdapter<CopilotSessionState> {
   readonly id = "copilot" as const;
   readonly subagentReporting = SUBAGENT_REPORTING.copilot;
-  readonly descriptor = Object.freeze({ id: this.id, capabilities: (["build", "plan", "completion", "permissions", "usage", "session-eviction", "clean-fork", "browser-access", "thread-control"] as const).map((name) => ({ name, support: "supported" as const })) });
+  readonly descriptor = Object.freeze({ id: this.id, capabilities: [
+    ...(["build", "plan", "completion", "permissions", "usage", "session-eviction", "clean-fork", "browser-access", "thread-control"] as const).map((name) => ({ name, support: "supported" as const })),
+    { name: "turn-steer" as const, support: "unsupported" as const },
+  ] });
   readonly supportsCompletion = true;
   readonly sessionForkOnResume = "clean" as const;
   readonly maxInputCharactersPerTurn = 16_000;
@@ -437,6 +441,10 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
   async getUsage() {
     const quota = await (await this.getClient()).rpc.account.getQuota();
     return { providerId: this.id, quotaCategories: normalizeQuotaSnapshots(quota.quotaSnapshots ?? {}) };
+  }
+  /** Reports sign-in from the SDK's own auth status; a slow or failed SDK reads as unknown. */
+  async describeStatus() {
+    return describeCopilotAuth(async () => bounded((await this.getClient()).getAuthStatus(), 5_000, "Copilot auth status"));
   }
   /** Runs an isolated utility completion with native configuration discovery. */
   async complete(prompt: string, model: string, cwd: string, _options?: CompletionOptions): Promise<string> {

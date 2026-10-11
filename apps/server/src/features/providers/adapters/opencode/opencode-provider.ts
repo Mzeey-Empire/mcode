@@ -2,8 +2,10 @@ import { SUBAGENT_REPORTING } from "@mcode/contracts";
 import * as NodeEvents from "node:events";
 import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
+import { z } from "zod";
 import { logger } from "@mcode/shared";
 import type {
+  ProviderStatusFacts,
   AgentEvent,
   ApprovalReviewSupport,
   IAgentProvider,
@@ -12,6 +14,7 @@ import type {
   ApprovalResponse,
   ApprovalRespondResult,
   ApprovalOutcome,
+  ApprovalOrigin,
   ApprovalRequestBody,
   ApprovalQuestion,
   ApprovalRequestEnvelope,
@@ -22,10 +25,18 @@ import type {
   ProviderTurnDiffUpdate,
   SessionForker,
   TurnRequest,
+  TurnFailure,
 } from "@mcode/contracts";
 import { AgentEventType, providerRuntimeEvent } from "@mcode/contracts";
 import type { ProviderHostPorts } from "@mcode/providers";
-import { OpenCodeNativeTurnDiff, approvalChoice, approvalOutcome, approvalReceipt } from "@mcode/providers";
+import {
+  OpenCodeNativeTurnDiff,
+  approvalChoice,
+  approvalOutcome,
+  approvalReceipt,
+  createCliStatusRunner,
+  describeOpenCodeAuth,
+} from "@mcode/providers";
 import { SettingsService } from "../../../settings/settings-service.js";
 import { EnvService } from "../../../../runtime/environment/env-service.js";
 import { CleanForker } from "../../../handoff/index.js";
@@ -41,7 +52,7 @@ import {
   type OpenCodeHttpClient,
   type OpenCodeRequestVersion,
 } from "./opencode-http-client.js";
-import { mapOpenCodeEnvelope, normalizeOpenCodeEnvelope, type OpenCodeMappedOutput } from "./opencode-event-mapper.js";
+import { classifyOpenCodeFailure, mapOpenCodeEnvelope, normalizeOpenCodeEnvelope, trackOpenCodePartType, type OpenCodeMappedOutput } from "./opencode-event-mapper.js";
 import {
   mapApprovalChoiceToReply,
   synthesizeOpenCodeApprovalRequest,
@@ -138,8 +149,11 @@ interface OpenCodeTurnState {
   idleConfirmPromise: Promise<void> | null;
   /** Upstream message id to role, so user parts never become assistant deltas. */
   messageRoles: Map<string, string>;
-  /** Text already forwarded per message, for exactly-once streaming. */
+  childSessionCalls: Map<string, OpenCodeChildTask>;
+  /** Text already forwarded per message or reasoning part, for exactly-once streaming. */
   forwardedText: Map<string, string>;
+  /** Upstream part id to part type, so reasoning deltas never become answer text. */
+  partTypes: Map<string, string>;
   /** Native turn-diff accumulator and its monotonic push cursor for this turn. */
   nativeDiff: OpenCodeNativeTurnDiff;
   nativeDiffRevision: number;
@@ -181,6 +195,68 @@ function trackedMessageRole(info: Record<string, unknown> | null): { id: string;
 
 /** Largest retained upstream message-role map per turn before pruning oldest. */
 const MAX_TRACKED_MESSAGE_ROLES = 256;
+
+/** The `task` call that launched one child session, and the label its asks carry. */
+interface OpenCodeChildTask {
+  callId: string;
+  label: string;
+}
+
+const childTaskInputSchema = z.object({
+  description: z.string().trim().min(1).max(200).optional().catch(undefined),
+  subagent_type: z.string().trim().min(1).max(200).optional().catch(undefined),
+}).catch({});
+
+const childTaskPartSchema = z.object({
+  type: z.literal("tool"), tool: z.literal("task"), callID: z.string().min(1).max(512),
+  state: z.object({ metadata: z.object({ sessionId: z.string().min(1).max(512) }), input: childTaskInputSchema.optional() }),
+});
+
+function trackChildTask(state: OpenCodeTurnState, normalized: { type: string; properties: Record<string, unknown> }): void {
+  if (normalized.type !== "message.part.updated" || !sessionIdOfNormalized(normalized)) return;
+  const task = childTaskPartSchema.safeParse(normalized.properties.part);
+  if (!task.success) return;
+  const input = task.data.state.input;
+  const label = input?.description ?? input?.subagent_type ?? "Subagent";
+  state.childSessionCalls.set(task.data.state.metadata.sessionId, { callId: task.data.callID, label });
+  if (state.childSessionCalls.size > MAX_TRACKED_MESSAGE_ROLES) {
+    const oldest = state.childSessionCalls.keys().next();
+    if (!oldest.done) state.childSessionCalls.delete(oldest.value);
+  }
+}
+
+const childToolPartSchema = z.object({ type: z.literal("tool") });
+
+function isChildToolPart(normalized: { type: string; properties: Record<string, unknown> }): boolean {
+  return normalized.type === "message.part.updated" && childToolPartSchema.safeParse(normalized.properties.part).success;
+}
+
+const ASK_EVENT_TYPES: ReadonlySet<string> = new Set(["permission.asked", "permission.v2.asked", "question.asked", "question.v2.asked"]);
+
+/**
+ * A child session blocks on its own asks, and the parent `task` call waits on
+ * the child, so dropping a child ask stalls the whole turn.
+ */
+function isForwardedChildEvent(normalized: { type: string; properties: Record<string, unknown> }): boolean {
+  return isChildToolPart(normalized) || ASK_EVENT_TYPES.has(normalized.type);
+}
+
+/** The upstream session an ask belongs to and who in Mcode is asking. */
+interface OpenCodeAskSource {
+  upstreamSessionId: string;
+  origin: ApprovalOrigin;
+}
+
+function askSourceOf(
+  state: OpenCodeTurnState,
+  upstreamId: string,
+  normalized: { properties: Record<string, unknown> },
+): OpenCodeAskSource {
+  const owner = sessionIdOfNormalized(normalized);
+  const child = owner === undefined || owner === upstreamId ? undefined : state.childSessionCalls.get(owner);
+  if (owner === undefined || child === undefined) return { upstreamSessionId: upstreamId, origin: { kind: "agent" } };
+  return { upstreamSessionId: owner, origin: { kind: "subagent", label: child.label, parentToolCallId: child.callId } };
+}
 
 function sessionIdOfNormalized(normalized: { properties: Record<string, unknown> }): string | undefined {
   return nestedSessionId(normalized.properties)
@@ -278,7 +354,10 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   readonly subagentReporting = SUBAGENT_REPORTING.opencode;
   readonly descriptor = Object.freeze({
     id: "opencode" as const,
-    capabilities: OPENCODE_SUPPORTED_CAPABILITIES.map((name) => ({ name, support: "supported" as const })),
+    capabilities: [
+      ...OPENCODE_SUPPORTED_CAPABILITIES.map((name) => ({ name, support: "supported" as const })),
+      { name: "turn-steer" as const, support: "unsupported" as const },
+    ],
   });
   readonly supportsCompletion = false;
   readonly sessionForkOnResume = "unsupported" as const;
@@ -349,6 +428,16 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       reason: "opencode-lacks-native-approval-review",
       liveChangeScope: "none",
     };
+  }
+
+  /**
+   * Reports sign-in from `opencode auth list`. An attached serve URL may hold
+   * credentials this machine cannot see, so it reads as unknown.
+   */
+  async describeStatus(): Promise<ProviderStatusFacts> {
+    if (this.settingsService.get().provider.opencode.serveUrl) return { auth: { state: "unknown" } };
+    const run = createCliStatusRunner({ platform: this.host.runtime.platform, env: this.envService.getEnv() });
+    return describeOpenCodeAuth(run, this.cliPath());
   }
 
   async listModels(): Promise<ProviderModelInfo[]> {
@@ -587,7 +676,9 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       idleRestart: false,
       idleConfirmPromise: null,
       messageRoles: new Map<string, string>(),
+      childSessionCalls: new Map<string, OpenCodeChildTask>(),
       forwardedText: new Map<string, string>(),
+      partTypes: new Map<string, string>(),
       nativeDiff: new OpenCodeNativeTurnDiff(),
       nativeDiffRevision: 0,
     };
@@ -639,7 +730,9 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     state.aborted = false;
     state.abortController = new AbortController();
     state.messageRoles.clear();
+    state.childSessionCalls.clear();
     state.forwardedText.clear();
+    state.partTypes.clear();
     state.nativeDiff = new OpenCodeNativeTurnDiff();
     state.nativeDiffRevision = 0;
     emit({ type: AgentEventType.TurnStarted, threadId } satisfies AgentEvent);
@@ -692,7 +785,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error("OpenCodeProvider turn error", { sessionId: req.sessionId, error: message });
-      settler.settle(state.aborted ? "cancelled" : "errored", state.aborted ? undefined : message);
+      settler.settle(state.aborted ? "cancelled" : "errored", state.aborted ? undefined : message, classifyOpenCodeFailure(error));
     }
   }
 
@@ -833,10 +926,17 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     if (state.aborted) return;
     const threadId = this.threadIdFor(req.sessionId);
     const normalized = normalizeOpenCodeEnvelope(envelope);
+    let parentToolCallId: string | undefined;
+    let partType: string | undefined;
     if (normalized) {
-      this.trackMessageRole(state, normalized);
       const owner = sessionIdOfNormalized(normalized);
-      if (owner && owner !== upstreamId) return;
+      if (owner && owner !== upstreamId) {
+        parentToolCallId = state.childSessionCalls.get(owner)?.callId;
+        if (!parentToolCallId || !isForwardedChildEvent(normalized)) return;
+      }
+      this.trackMessageRole(state, normalized);
+      partType = trackOpenCodePartType(state.partTypes, normalized);
+      trackChildTask(state, normalized);
       if (normalized.type === "session.diff") {
         this.publishNativeTurnDiff(req, state, normalized.properties);
       }
@@ -846,7 +946,9 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       turnExecutionId: req.turnExecutionId,
       requestedModel: req.model,
       partRole: normalized ? partRoleOf(state.messageRoles, normalized) : undefined,
+      partType,
       forwardedText: state.forwardedText,
+      parentToolCallId,
     });
     this.dispatchMappedEnvelope(req, state, endpoint, upstreamId, threadId, mapped, normalized, settler);
   }
@@ -866,8 +968,9 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       this.maybeEmitAsk(req, endpoint, upstreamId, normalized, mapped.reason);
     }
     this.forwardTurnEvents(mapped.events, req, threadId, settler);
-    if (mapped.events.some((e) => e.type === AgentEventType.Error)) {
-      settler.settle("errored");
+    const error = mapped.events.find((event) => event.type === AgentEventType.Error);
+    if (error) {
+      settler.settle("errored", error.error, error.failure);
     } else if (mapped.events.some((e) => e.type === AgentEventType.TurnComplete)) {
       void this.confirmIdleCompleted(req, state, endpoint, upstreamId, settler);
     } else if (mapped.disposition === "mapped") {
@@ -1044,15 +1147,16 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       executionId: req.turnExecutionId,
       deliveryAttempt: req.deliveryAttempt ?? 1,
     };
+    const source = askSourceOf(state, upstreamId, normalized);
     if (reason === "permission-request") {
-      this.maybeEmitPermissionAsk(req, endpoint, upstreamId, normalized, state, routing);
+      this.maybeEmitPermissionAsk(req, endpoint, source, normalized, state, routing);
       return;
     }
-    const synthesized = synthesizeOpenCodeQuestionRequest({ threadId, properties: normalized.properties });
+    const synthesized = synthesizeOpenCodeQuestionRequest({ threadId, properties: normalized.properties, origin: source.origin });
     if (!synthesized) return this.emitAskDiagnostic(req, threadId);
     if (this.pendingPermissions.has(synthesized.requestId)) return;
     this.pendingPermissions.set(synthesized.requestId, {
-      request: synthesized, sessionId: req.sessionId, upstreamSessionId: upstreamId, endpoint,
+      request: synthesized, sessionId: req.sessionId, upstreamSessionId: source.upstreamSessionId, endpoint,
       kind: "question", version: askVersion(normalized.type),
       signal: state.abortController.signal, routing, replying: false,
     });
@@ -1069,21 +1173,21 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   private maybeEmitPermissionAsk(
     req: TurnRequest<"opencode">,
     endpoint: OpenCodeEndpoint,
-    upstreamId: string,
+    source: OpenCodeAskSource,
     normalized: { type: string; properties: Record<string, unknown> },
     state: OpenCodeTurnState,
     routing: CanonicalLiveEventRouting,
   ): void {
     const threadId = this.threadIdFor(req.sessionId);
-    const request = synthesizeOpenCodeApprovalRequest({ threadId, properties: normalized.properties });
+    const request = synthesizeOpenCodeApprovalRequest({ threadId, properties: normalized.properties, origin: source.origin });
     if (!request) {
       const requestId = NodeCrypto.randomUUID();
       this.pendingPermissions.set(requestId, {
         request: { requestId, threadId, body: {
           requestedAt: new Date().toISOString(), subject: { kind: "tool", toolName: "Unreadable request" },
-          choices: [{ id: "deny", intent: "deny", label: "Deny" }], noteDelivery: "none", origin: { kind: "agent" },
+          choices: [{ id: "deny", intent: "deny", label: "Deny" }], noteDelivery: "none", origin: source.origin,
         } },
-        sessionId: req.sessionId, upstreamSessionId: upstreamId, endpoint, kind: "permission",
+        sessionId: req.sessionId, upstreamSessionId: source.upstreamSessionId, endpoint, kind: "permission",
         version: askVersion(normalized.type), signal: state.abortController.signal, routing, replying: false, unanswerable: true,
       });
       void this.stopSession(req.sessionId).catch(() => {
@@ -1093,7 +1197,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     }
     if (this.pendingPermissions.has(request.requestId)) return;
     const entry: OpenCodePendingAsk = {
-      request, sessionId: req.sessionId, upstreamSessionId: upstreamId, endpoint,
+      request, sessionId: req.sessionId, upstreamSessionId: source.upstreamSessionId, endpoint,
       kind: "permission", version: askVersion(normalized.type),
       signal: state.abortController.signal, routing, replying: false,
     };
@@ -1200,10 +1304,10 @@ class OpenCodeTurnSettler {
     return this.settled;
   }
 
-  settle(outcome: "completed" | "cancelled" | "errored", error?: string): void {
+  settle(outcome: "completed" | "cancelled" | "errored", error?: string, failure: TurnFailure = { kind: "fatal" }): void {
     if (this.settled) return;
     this.settled = true;
-    if (error) this.emit({ type: AgentEventType.Error, threadId: this.threadId, error, failure: { kind: "fatal" } } satisfies AgentEvent);
+    if (error !== undefined) this.emit({ type: AgentEventType.Error, threadId: this.threadId, error: error.trim() ? error : "OpenCode session error", failure } satisfies AgentEvent);
     if (this.assistantText.trim().length > 0 && outcome !== "cancelled") {
       this.emit({ type: AgentEventType.Message, threadId: this.threadId, content: this.assistantText, tokens: null } satisfies AgentEvent);
     }

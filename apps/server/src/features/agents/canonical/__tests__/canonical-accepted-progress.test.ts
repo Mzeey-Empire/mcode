@@ -27,6 +27,7 @@ import { ThoughtSegmentStore } from "../../conversation/narrative/persistence/th
 import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";
 import { ProgressAdmissionError } from "../../execution/execution-writer-failure.js";
 import { persistTurnFailure } from "../turn-ending.js";
+import { TurnSteerStore } from "../../steering/persistence/turn-steer-store.js";
 
 const copilotSdk = vi.hoisted(() => ({ session: undefined as CopilotPersistenceSession | undefined }));
 vi.mock("../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js", () => ({
@@ -277,6 +278,34 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(db.prepare("SELECT content FROM messages WHERE thread_id = ? AND role = 'assistant'").get(execution.threadId)).toEqual({ content: "Still completes" });
     expect(new CanonicalAgentBoundary(db, () => {}).loadTurn(execution.turnId)?.status).toBe("Completed");
     expect((await send(6, { kind: "release" })).result.kind).toBe("released");
+  });
+
+  it("saves a steered message into the running turn and marks its steer delivered in the same write", async () => {
+    await send(1, start("codex"));
+    const steers = new TurnSteerStore(db);
+    const onTime = "6f1c2b8e-3d4a-4c5b-9e7f-0a1b2c3d4e5f";
+    const late = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+    for (const [messageId, content] of [[onTime, "Use staging."], [late, "Also run lint."]] as const) {
+      steers.insertPending({ messageId, threadId: execution.threadId, turnExecutionId: execution.executionId,
+        inputsHash: "inputs", payload: { content } });
+    }
+    // A replay or restart already marked this one uncertain; the save still proves delivery.
+    steers.settle(late, { state: "delivery_unknown" });
+
+    await progress.acceptSteeredUserMessage({ threadId: execution.threadId, turnExecutionId: execution.executionId,
+      messageId: onTime, content: "Use staging." });
+    await progress.acceptSteeredUserMessage({ threadId: execution.threadId, turnExecutionId: execution.executionId,
+      messageId: late, content: "Also run lint." });
+
+    expect(db.prepare("SELECT id, role, content, is_internal FROM messages WHERE id IN (?, ?) ORDER BY sequence")
+      .all(onTime, late)).toEqual([
+      { id: onTime, role: "user", content: "Use staging.", is_internal: 0 },
+      { id: late, role: "user", content: "Also run lint.", is_internal: 0 },
+    ]);
+    expect([steers.find(onTime)?.state, steers.find(late)?.state]).toEqual(["delivered", "delivered"]);
+    expect(() => progress.acceptSteeredUserMessage({ threadId: execution.threadId, turnExecutionId: "another-execution",
+      messageId: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e", content: "Too late." }))
+      .toThrow("Steered message has no matching accepted execution");
   });
 
   it("preserves the durable child roster revision across a parent follow-up and fresh recovery owner", async () => {

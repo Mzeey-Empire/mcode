@@ -16,7 +16,8 @@
     "clean-fork",
     "orchestration",
     "browser-access",
-    "thread-control"
+    "thread-control",
+    "turn-steer"
   ],
   "scenario": "core lifecycle structure",
   "sourceHash": "f0ffac4e64f0baec2ebe87528a350ac844c500e9f964e271c7a115315b1704a8",

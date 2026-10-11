@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
 import { backgroundHeldToolIds, narrativeToolCallLinks } from "../tools/background-held-tools.js";
 import {
@@ -8,6 +8,7 @@ import {
   messages,
 } from "../../../runtime/persistence/sqlite/schema.js";
 import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts";
+import { TurnRecoveryError } from "../recovery/turn-recovery-error.js";
 import type {
   AgentThread,
   AgentTurn,
@@ -416,9 +417,12 @@ export class CanonicalParentTurnLifecycle {
       .set({ phase: "retried", updatedAt })
       .where(and(
         eq(canonicalAgentIngestCheckpoints.executionId, retryOfExecutionId),
-        inArray(canonicalAgentIngestCheckpoints.phase, ["interrupted", "errored"]),
+        // The outcome decides retryability; the phase differs by writer (a live ending checkpoints "finalized").
+        ne(canonicalAgentIngestCheckpoints.phase, "retried"),
         inArray(canonicalAgentIngestCheckpoints.terminalOutcome, ["interrupted", "errored"]),
       )));
-    if (consumed.changes !== 1) throw new Error(`Interrupted execution not found: ${retryOfExecutionId}`);
+    if (consumed.changes !== 1) {
+      throw new TurnRecoveryError("TURN_RETRY_CONFLICT", `Execution is no longer retryable: ${retryOfExecutionId}`);
+    }
   }
 }

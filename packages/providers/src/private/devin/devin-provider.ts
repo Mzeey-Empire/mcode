@@ -27,6 +27,7 @@ import {
   type ProviderModelInfo,
   type SessionForker,
   type Settings,
+  type TurnFailure,
   type TurnRequest,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
@@ -34,12 +35,18 @@ import { acpApprovalChoices, acpNoteChoiceId, approvalChoice, approvalOutcome } 
 import type { ProviderHostPorts } from "../../host-ports.js";
 import { SessionRuntime, type SpawnArgs, type SpawnResult } from "../session-runtime.js";
 import { AcpSessionRuntime } from "../protocols/acp/acp-session-runtime.js";
+import {
+  ACP_AUTH_REQUIRED_CODE,
+  acpRequestErrorCode,
+  describeAcpError,
+} from "../protocols/acp/acp-request-error.js";
+import { ProviderTurnError } from "../../provider-turn-error.js";
 import type {
   AcpPermissionRequest,
   AcpPermissionOutcome,
   AcpSessionUpdate,
 } from "../protocols/acp/acp-session-types.js";
-import { resolveDevinAcpCredentials } from "./devin-credentials.js";
+import { describeDevinAuth, resolveDevinAcpCredentials } from "./devin-credentials.js";
 import { DevinCanonicalEventPublisher, type DevinCanonicalEventRouting } from "./devin-canonical-event-publisher.js";
 import {
   createDevinAcpTurnState,
@@ -122,17 +129,38 @@ const CANCEL_SETTLE_TIMEOUT_MS = 10_000;
 /** Bound on a follow-up send's wait for a user-stop drain before it respawns instead. */
 const STOP_DRAIN_REUSE_TIMEOUT_MS = 3_000;
 
-/** `Ended` outcome for stop reasons that cut the turn short; others stay a normal completion. */
-const STOP_OUTCOMES: Record<string, "cancelled" | "interrupted" | "errored"> = {
-  cancelled: "cancelled",
-  interrupted: "interrupted",
-  quota_exhausted: "interrupted",
-  auth_required: "interrupted",
-  content_filter: "interrupted",
-  tool_rejected: "interrupted",
-  shutdown: "interrupted",
-  restart: "interrupted",
-  error: "errored",
+/** How a stop reason that cut the turn short ends it; an errored ending carries its failure. */
+type DevinStopEnding =
+  | { outcome: "cancelled" | "interrupted" }
+  | { outcome: "errored"; message: string; failure: TurnFailure };
+
+/** Endings for stop reasons that cut the turn short; others stay a normal completion. */
+const STOP_ENDINGS: Readonly<Record<string, DevinStopEnding>> = {
+  cancelled: { outcome: "cancelled" },
+  interrupted: { outcome: "interrupted" },
+  tool_rejected: { outcome: "interrupted" },
+  shutdown: { outcome: "interrupted" },
+  restart: { outcome: "interrupted" },
+  quota_exhausted: {
+    outcome: "errored",
+    message: "Devin usage quota is exhausted.",
+    failure: { kind: "usage_limit", code: "quota_exhausted" },
+  },
+  auth_required: {
+    outcome: "errored",
+    message: "Devin is signed out. Run `devin auth login`, then retry.",
+    failure: { kind: "auth", code: "auth_required" },
+  },
+  content_filter: {
+    outcome: "errored",
+    message: "Devin stopped because a content filter blocked the response.",
+    failure: { kind: "fatal", code: "content_filter" },
+  },
+  error: {
+    outcome: "errored",
+    message: "Devin stopped with an error.",
+    failure: { kind: "fatal", code: "error" },
+  },
 };
 
 /**
@@ -144,13 +172,24 @@ function effectiveStopReason(stopReason: string | undefined, stopCause: string |
   return stopReason ?? "end_turn";
 }
 
-/** Maps the effective stop reason to an `Ended` outcome; a user stop always wins. */
-function turnOutcomeFor(
-  reason: string,
-  pendingUserStopAbort: boolean,
-): "cancelled" | "interrupted" | "errored" | undefined {
-  if (pendingUserStopAbort) return "cancelled";
-  return STOP_OUTCOMES[reason];
+/** Maps the effective stop reason to its ending; a user stop always wins. */
+function stopEndingFor(reason: string, pendingUserStopAbort: boolean): DevinStopEnding | undefined {
+  if (pendingUserStopAbort) return { outcome: "cancelled" };
+  return STOP_ENDINGS[reason];
+}
+
+/** Classifies a thrown Devin turn failure into the provider-neutral failure shape. */
+function classifyDevinFailure(error: unknown): TurnFailure {
+  if (error instanceof ProviderTurnError) return error.failure;
+  const code = acpRequestErrorCode(error);
+  if (code === ACP_AUTH_REQUIRED_CODE) return { kind: "auth", code: String(code) };
+  return code === undefined ? { kind: "fatal" } : { kind: "fatal", code: String(code) };
+}
+
+/** Wraps a dispatch failure so the server receives the adapter's classification. */
+function toProviderTurnError(error: unknown): ProviderTurnError {
+  if (error instanceof ProviderTurnError) return error;
+  return new ProviderTurnError(describeAcpError(error), classifyDevinFailure(error), { cause: error });
 }
 
 /**
@@ -172,6 +211,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       { name: "permissions", support: "supported" },
       { name: "session-eviction", support: "supported" },
       { name: "clean-fork", support: "supported" },
+      { name: "turn-steer", support: "unsupported" },
     ],
   };
   readonly supportsCompletion = false;
@@ -258,6 +298,11 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
   // ---------------------------------------------------------------------
   // Model discovery
   // ---------------------------------------------------------------------
+
+  /** Reports sign-in from the same credential lookup ACP authentication uses. */
+  async describeStatus() {
+    return describeDevinAuth(this.host.environment.snapshot(), this.host.runtime.platform);
+  }
 
   /**
    * Lists Devin's account-scoped model catalog by opening a throwaway ACP
@@ -387,7 +432,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       entry.turnChain = run.then(() => undefined, () => undefined);
       await run;
     } catch (error) {
-      if (!signal.aborted || error !== signal.reason) throw error;
+      if (!signal.aborted || error !== signal.reason) throw toProviderTurnError(error);
       this.canonicalEvents.publish(routing, providerRuntimeEvent({ type: AgentEventType.Ended,
         threadId: req.threadId, turnExecutionId: req.turnExecutionId, outcome: "cancelled" }), []);
       await this.canonicalEvents.waitForExecution(routing);
@@ -462,7 +507,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     this.emit("turn_started", { sessionId: entry.mcodeSessionId });
     try {
       const response = await this.promptWithAutoContinue(entry, req, routing);
-      this.emitSuccessfulTurn(entry, response, req, routing);
+      this.emitPromptResponse(entry, response, req, routing);
       this.emit("turn_complete", { sessionId: entry.mcodeSessionId });
     } catch (error) {
       this.emitFailedTurn(entry, error, req, routing);
@@ -582,7 +627,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   /**
-   * Retains `usage_update.cost` on the session so {@link emitSuccessfulTurn}
+   * Retains `usage_update.cost` on the session so {@link emitPromptResponse}
    * can report it as `costUsd`. Devin has not been observed emitting this
    * field; only a numeric USD amount is accepted when it does.
    */
@@ -621,22 +666,51 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     }
   }
 
-  private emitSuccessfulTurn(
+  private emitPromptResponse(
     entry: DevinAcpSessionEntry,
     response: { stopReason?: string; usage?: Record<string, number> },
     req: TurnRequest<"devin">,
     routing: DevinCanonicalEventRouting,
   ): void {
-    const text = resolveAssistantText(entry.activeTurnState);
-    if (text.length > 0) {
-      this.publishEntryEvent(entry, routing, {
-        type: AgentEventType.Message,
-        threadId: entry.threadId,
-        content: text,
-        tokens: null,
-      });
-    }
+    this.emitAssistantText(entry, routing);
     const reason = effectiveStopReason(response.stopReason, entry.activeTurnState?.stopCause ?? null);
+    const ending = stopEndingFor(reason, entry.pendingUserStopAbort);
+    if (ending?.outcome === "errored") {
+      // TurnComplete settles the turn as completed, so an errored stop must not send it.
+      this.publishEntryEvent(entry, routing, {
+        type: AgentEventType.Error,
+        threadId: entry.threadId,
+        error: ending.message,
+        failure: ending.failure,
+      });
+    } else {
+      this.emitTurnComplete(entry, response, reason, routing);
+    }
+    this.publishEntryEvent(entry, routing, {
+      type: AgentEventType.Ended,
+      threadId: entry.threadId,
+      turnExecutionId: req.turnExecutionId,
+      ...(ending ? { outcome: ending.outcome } : {}),
+    });
+  }
+
+  private emitAssistantText(entry: DevinAcpSessionEntry, routing: DevinCanonicalEventRouting): void {
+    const text = resolveAssistantText(entry.activeTurnState);
+    if (text.length === 0) return;
+    this.publishEntryEvent(entry, routing, {
+      type: AgentEventType.Message,
+      threadId: entry.threadId,
+      content: text,
+      tokens: null,
+    });
+  }
+
+  private emitTurnComplete(
+    entry: DevinAcpSessionEntry,
+    response: { stopReason?: string; usage?: Record<string, number> },
+    reason: string,
+    routing: DevinCanonicalEventRouting,
+  ): void {
     const usage = response.usage ?? {};
     this.publishEntryEvent(entry, routing, {
       type: AgentEventType.TurnComplete,
@@ -648,13 +722,6 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       ...(typeof usage.cachedReadTokens === "number" ? { cacheReadTokens: usage.cachedReadTokens } : {}),
       providerId: this.id,
     });
-    const outcome = turnOutcomeFor(reason, entry.pendingUserStopAbort);
-    this.publishEntryEvent(entry, routing, {
-      type: AgentEventType.Ended,
-      threadId: entry.threadId,
-      turnExecutionId: req.turnExecutionId,
-      ...(outcome ? { outcome } : {}),
-    });
   }
 
   private emitFailedTurn(
@@ -664,29 +731,22 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     routing: DevinCanonicalEventRouting,
   ): void {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    const interrupted = resolveAssistantText(entry.activeTurnState);
     const cancelled = entry.pendingUserStopAbort || /cancel/i.test(errorMessage);
     if (cancelled) {
-      if (interrupted.length > 0) {
-        this.publishEntryEvent(entry, routing, {
-          type: AgentEventType.Message,
-          threadId: entry.threadId,
-          content: interrupted,
-          tokens: null,
-        });
-      }
+      this.emitAssistantText(entry, routing);
     } else {
+      const description = describeAcpError(error);
       logger.error("Devin ACP prompt failed", {
         threadId: entry.threadId,
         acpSessionId: entry.acpSessionId,
         stderrTail: entry.stderrTailLines.slice(-16),
-        error: errorMessage,
+        error: description,
       });
       this.publishEntryEvent(entry, routing, {
         type: AgentEventType.Error,
         threadId: entry.threadId,
-        error: errorMessage,
-        failure: { kind: "fatal" },
+        error: description,
+        failure: classifyDevinFailure(error),
       });
     }
     this.publishEntryEvent(entry, routing, {
@@ -1013,14 +1073,22 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     env: Readonly<Record<string, string | undefined>>,
   ): Promise<void> {
     const credentials = resolveDevinAcpCredentials(env, this.host.runtime.platform);
-    await runtime.state.connection.authenticate({
-      methodId: "windsurf-api-key",
-      _meta: {
-        headless: true,
-        api_key: credentials.apiKey,
-        ...(credentials.apiServerUrl ? { api_server_url: credentials.apiServerUrl } : {}),
-      },
-    });
+    try {
+      await runtime.state.connection.authenticate({
+        methodId: "windsurf-api-key",
+        _meta: {
+          headless: true,
+          api_key: credentials.apiKey,
+          ...(credentials.apiServerUrl ? { api_server_url: credentials.apiServerUrl } : {}),
+        },
+      });
+    } catch (error) {
+      // Devin rejects a bad key with a generic -32603 ("Authentication failed:
+      // ... invalid api key"), so the ACP code alone would read as fatal.
+      const code = acpRequestErrorCode(error);
+      if (code === undefined) throw error;
+      throw new ProviderTurnError(describeAcpError(error), { kind: "auth", code: String(code) }, { cause: error });
+    }
   }
 
   private async deliverSessionUpdate(

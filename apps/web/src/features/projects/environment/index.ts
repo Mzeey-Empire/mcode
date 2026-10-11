@@ -16,4 +16,5 @@ export {
 export {
   ProjectAutomaticSetupCard,
   useProjectAutomaticSetup,
+  useProjectAutomaticSetupStore,
 } from "./ProjectAutomaticSetupControl";

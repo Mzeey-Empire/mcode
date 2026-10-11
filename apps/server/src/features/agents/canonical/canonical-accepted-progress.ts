@@ -49,11 +49,21 @@ import type { PlanFileWriter } from "../planning/plan-file-writer.js";
 type AcceptedExecutionWriteIntent = ({ readonly kind: "execution"; readonly operation: ExecutionSemanticOperation;
     readonly terminal?: ExecutionTerminalPersistenceReceipt }
   | { readonly kind: "plan-answer"; readonly assistant: Message }
+  | { readonly kind: "steer"; readonly message: Message }
   | { readonly kind: "control" }) & {
   readonly phase: string;
   readonly nativeCursor: unknown | null;
   readonly features?: AcceptedFeatureWriteMetadata;
 };
+
+/** A message the provider took mid-turn, recorded under its steer id. */
+export interface AcceptedSteerMessage {
+  readonly threadId: string;
+  readonly turnExecutionId: string;
+  readonly messageId: string;
+  readonly content: string;
+  readonly mentions?: Message["mentions"];
+}
 
 const MAX_OWNERS = 8;
 const LOCAL_LIMITS = { maxEvents: 8_192, maxBytes: 16 * 1024 * 1024,
@@ -94,6 +104,8 @@ export class CanonicalAcceptedProgress {
   private pendingSaved: readonly CanonicalAcceptedWriteReceipt[] = [];
   private closing = false;
   private readonly deletingThreads = new Set<string>();
+  /** Steer callers wait for their transcript save, keyed by accepted operation id. */
+  private readonly steerSaves = new Map<string, { threadId: string; resolve(): void; reject(error: Error): void }>();
 
   constructor(private readonly canonical: CanonicalAgentBoundary, private readonly writer: CanonicalAgentWriterClient,
     private readonly planFiles?: PlanFileWriter) {
@@ -527,6 +539,66 @@ export class CanonicalAcceptedProgress {
     return true;
   }
 
+  /**
+   * Append a message the provider took mid-turn to the running turn. Resolves once the save that also
+   * marks its steer row delivered commits, so `delivered` is never reported for an unsaved transcript.
+   */
+  acceptSteeredUserMessage(input: AcceptedSteerMessage): Promise<void> {
+    this.assertOpen();
+    const thread = this.thread(input.threadId);
+    this.assertAdmission(thread);
+    const head = thread.head;
+    if (!head || head.execution.executionId !== input.turnExecutionId) {
+      throw new Error("Steered message has no matching accepted execution");
+    }
+    const operationId = `steer:${input.messageId}`;
+    const acceptedAt = new Date().toISOString();
+    const itemId = `message:${input.messageId}`;
+    // The turn's assistant message keeps the sequence after its prompt, so the steer sorts after it.
+    const message: Message = { id: input.messageId, thread_id: input.threadId, role: "user", content: input.content,
+      tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, timestamp: acceptedAt,
+      sequence: Math.max(thread.messageSequence, head.assistant.sequence + 1), attachments: null,
+      ...(input.mentions?.length ? { mentions: input.mentions } : {}), is_internal: false };
+    const events: import("./canonical-agent-boundary.js").CanonicalAgentEventDraft[] = [{ eventId: `${operationId}:message`,
+      routing: { ...head.execution, itemId }, sourceProviderId: head.providerId, sourceIdentities: [],
+      payload: { type: "item.recorded", item: { id: itemId, threadId: input.threadId, turnId: head.execution.turnId,
+        kind: "message", providerIdentities: [], payload: { projection: "message", message },
+        createdAt: acceptedAt, updatedAt: acceptedAt } } }];
+    let candidate = thread.state;
+    const admission = thread.owner.accept({ operationId, execution: head.execution, admission: "control", events,
+      write: { kind: "steer", message, phase: head.phase, nativeCursor: head.nativeCursor } }, (batch) => {
+      const reduction = reduceAgentEventBatch(thread.state, acceptedEnvelopes(batch));
+      if (reduction.outcome !== "applied") return false;
+      candidate = compactReduction(reduction.state);
+      return true;
+    });
+    if (admission.kind === "rejected") throw new ProgressAdmissionError(admission.reason);
+    if (admission.kind === "duplicate") throw new Error("Steered message was already accepted");
+    const saved = new Promise<void>((resolve, reject) => {
+      this.steerSaves.set(operationId, { threadId: input.threadId, resolve, reject });
+    });
+    thread.state = candidate;
+    this.advanceMessageSequence(thread, events);
+    this.publishAccepted(admission.batch);
+    this.saves.enqueue(admission.batch);
+    this.publishSaving(input.threadId);
+    return saved;
+  }
+
+  private settleSteerSave(operationId: string, error?: Error): void {
+    const waiter = this.steerSaves.get(operationId);
+    if (!waiter) return;
+    this.steerSaves.delete(operationId);
+    if (error) waiter.reject(error);
+    else waiter.resolve();
+  }
+
+  private rejectSteerSaves(error: Error, threadId?: string): void {
+    for (const [operationId, waiter] of this.steerSaves) {
+      if (threadId === undefined || waiter.threadId === threadId) this.settleSteerSave(operationId, error);
+    }
+  }
+
   /** Bind exact active-execution shutdown when saved receipts or their capacity cannot be trusted. */
   bindPermanentFailure(callback: (execution: ExecutionIdentity, error: Error) => Promise<void>): void {
     this.onPermanentFailure = callback;
@@ -700,6 +772,7 @@ export class CanonicalAcceptedProgress {
     if (!thread) return;
     thread.commandPending = true;
     for (const waiter of thread.waiters) waiter.reject(new Error("Accepted conversation was deleted"));
+    this.rejectSteerSaves(new Error("Accepted conversation was deleted"), threadId);
     thread.waiters.clear();
     await this.saves.discardThread(ownerId);
     thread.owner.discard();
@@ -730,6 +803,7 @@ export class CanonicalAcceptedProgress {
       for (const waiter of thread.waiters) waiter.reject(error);
       thread.waiters.clear();
     }
+    this.rejectSteerSaves(error);
     return this.saves.close();
   }
 
@@ -856,6 +930,7 @@ export class CanonicalAcceptedProgress {
     const completed = this.pendingSaved;
     this.pendingSaved = [];
     this.publishSaving(batch.execution.threadId);
+    this.settleSteerSave(batch.operationId);
     this.publishSavedTerminal(batch);
     if (thread.owner.recoveryCut().retained.length === 0) {
       for (const waiter of thread.waiters) waiter.resolve();
@@ -906,6 +981,7 @@ export class CanonicalAcceptedProgress {
     const thread = this.saveThread(batch.execution.threadId);
     thread.owner.recordFailure(failure);
     if (failure.exhausted) {
+      this.settleSteerSave(batch.operationId, failure.error);
       thread.commandPending = false;
       for (const waiter of thread.waiters) waiter.reject(failure.error);
       thread.waiters.clear();
@@ -1029,9 +1105,10 @@ function isControl(operation: ExecutionSemanticOperation): boolean {
 }
 
 function compatibilityFields(write: AcceptedExecutionWriteIntent, final: boolean):
-  Pick<CanonicalAcceptedWriteInput, "compatibility" | "terminalOutcome" | "planAnswer" | "features"> {
+  Pick<CanonicalAcceptedWriteInput, "compatibility" | "terminalOutcome" | "planAnswer" | "steerMessage" | "features"> {
   if (!final) return {};
   if (write.kind === "control") return { features: write.features };
+  if (write.kind === "steer") return { steerMessage: write.message };
   if (write.kind === "plan-answer") return { planAnswer: write.assistant };
   const operation = write.operation;
   return isTerminal(operation) ? { compatibility: operation, terminalOutcome: operation.mutation.outcome, features: write.features }

@@ -3441,8 +3441,61 @@ describe("CodexEventMapper", () => {
       type: "error",
       threadId: "test-thread",
       error: message,
-      failure: { kind: "fatal" },
+      failure: { kind: "usage_limit", code: "usageLimitExceeded" },
     });
+  });
+
+  it("gives a usage-limited turn the reset of the fullest account window, even one reported before the turn", () => {
+    vi.useFakeTimers({ now: 1_791_960_000_000 });
+    try {
+      mapper.mapNotification({ jsonrpc: "2.0", method: "account/rateLimits/updated", params: { rateLimits: {
+        primary: { usedPercent: 40, windowDurationMins: 300, resetsAt: 1_791_961_000 },
+        secondary: { usedPercent: 100, windowDurationMins: 10080, resetsAt: 1_791_969_915 },
+      } } });
+      mapper.mapNotification({ jsonrpc: "2.0", method: "turn/completed", params: { turn: { status: "completed" } } });
+      mapper.prepareForTurn();
+      // Sparse update: the secondary window keeps its earlier value.
+      mapper.mapNotification({ jsonrpc: "2.0", method: "account/rateLimits/updated", params: { rateLimits: {
+        primary: { usedPercent: 60, windowDurationMins: 300, resetsAt: 1_791_961_000 },
+        secondary: null,
+      } } });
+      const events = mapper.mapNotification({
+        jsonrpc: "2.0",
+        method: "turn/completed",
+        params: { turn: { status: "failed", error: { message: "limit", codexErrorInfo: "usageLimitExceeded" } } },
+      });
+      expect(ProviderRuntimeEventSchema().parse(events[0]).event).toMatchObject({
+        type: "error",
+        failure: { kind: "usage_limit", code: "usageLimitExceeded", retryAfterMs: 9_915_000, limitType: "seven_day" },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("classifies a failed turn after Codex retries with the forwarded status and retry count", () => {
+    const retry = (httpStatusCode: number | null) => mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "error",
+      params: { willRetry: true, error: { message: "stream disconnected", codexErrorInfo: { responseStreamDisconnected: { httpStatusCode } } } },
+    });
+    expect(retry(502).map(({ event }) => ProviderRuntimeEventSchema().parse({ event }).event)).toEqual([
+      { type: "apiRetry", threadId: "test-thread", reason: "stream disconnected", attempt: 1, errorStatus: 502 },
+    ]);
+    expect(retry(null).map(({ event }) => event)).toEqual([
+      { type: "apiRetry", threadId: "test-thread", reason: "stream disconnected", attempt: 2 },
+    ]);
+    const failed = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: { turn: { status: "failed", error: { message: "gave up", codexErrorInfo: { responseTooManyFailedAttempts: { httpStatusCode: 503 } } } } },
+    });
+    expect(failed.map(({ event }) => event)).toEqual([{
+      type: "error",
+      threadId: "test-thread",
+      error: "gave up",
+      failure: { kind: "retryable", status: 503, code: "responseTooManyFailedAttempts", retries: { made: 2 } },
+    }]);
   });
 
   it("falls back to generic error message when turn/completed failed has no error.message", () => {

@@ -77,6 +77,11 @@ import {
 import { AgentEventPublicationRegistry } from "../../features/agents/orchestration/agent-event-publication-registry.js";
 import { WorkerOwnedTurnRuntime } from "../../features/agents/execution/worker-owned-turn-runtime.js";
 import { SnapshotRefPins } from "../../features/projects/diffs/snapshots/snapshot-ref-pins.js";
+import { TurnRevertService } from "../../features/projects/diffs/revert/turn-revert-service.js";
+import { turnRevertContext } from "../../features/projects/diffs/revert/turn-revert-context.js";
+import { TurnRevertStore } from "../../features/agents/turns/persistence/turn-revert-store.js";
+import { RepositoryGitMutationLock } from "../../features/projects/git/repository-git-mutation-lock.js";
+import { SNAPSHOT_STORE_ID, type StoreId } from "../../features/projects/diffs/snapshots/snapshot-store-identity.js";
 import { AgentRuntimeCommandPort } from "../../features/agents/orchestration/agent-turn-command-port.js";
 import { ProviderTurnEventApplication } from "../../features/agents/turns/provider-turn-event-application.js";
 import { TURN_FINALIZER, TurnFinalizer } from "../../features/agents/turns/turn-finalizer.js";
@@ -126,6 +131,11 @@ import { WorkspaceRepo } from "../../features/projects/persistence/workspace-rep
 import { CleanupWorker } from "../../features/thread-control/cleanup/cleanup-worker.js";
 import { ProviderAvailabilityService } from "../../features/providers/availability/provider-availability-service.js";
 import { ProviderUsageWarmupService } from "../../features/providers/availability/provider-usage-warmup-service.js";
+import {
+  ProviderRateLimitStore,
+  recordRateLimitEvents,
+} from "../../features/providers/status/provider-rate-limit-store.js";
+import { ProviderStatusService } from "../../features/providers/status/provider-status-service.js";
 import { ProviderRegistry } from "../../features/providers/composition/provider-registry.js";
 import { ProviderEventIngress } from "../../features/providers/composition/provider-event-ingress.js";
 import type { CursorProviderBoundary } from "@mcode/providers";
@@ -146,6 +156,7 @@ import { resolveWebAutomationFlag } from "../../runtime/startup/startup-policy.j
 import { listenWithPortRetry } from "../../runtime/http/http-listener.js";
 import { createReliabilityHarnessAdapter } from "../../runtime/reliability-harness/control.js";
 import { ApplicationDatabaseWriter } from "../../runtime/persistence/sqlite/application-database-writer.js";
+import { TurnSteerService } from "../../features/agents/steering/turn-steer-service.js";
 
 function createPlanService(writer: ApplicationDatabaseWriter, runtime: WorkerOwnedTurnRuntime,
   plans: PlanRepo, turns: PlanTurnService): PlanService {
@@ -175,6 +186,8 @@ process.title =
 
 const PREFERRED_PORT = parseInt(process.env.MCODE_PORT ?? "19400", 10);
 const MAX_PORT_ATTEMPTS = 10;
+/** Background sign-in re-check cadence; the bell also refreshes when opened. */
+const PROVIDER_STATUS_REFRESH_MS = 6 * 60 * 60 * 1000;
 
 /** Path to the server lock file used for service discovery across instances. */
 const LOCK_FILE_PATH = NodePath.join(getMcodeDir(), "server.lock");
@@ -421,6 +434,8 @@ const enricher = container.resolve(WorkspaceEnricher);
 const filesystemBrowser = container.resolve(FilesystemBrowser);
 const modelCacheService = container.resolve(ModelCacheService);
 const providerUsageWarmup = container.resolve(ProviderUsageWarmupService);
+const providerStatus = container.resolve(ProviderStatusService);
+providerEventIngress.observeDelivered(recordRateLimitEvents(container.resolve(ProviderRateLimitStore)));
 recordStartupCheckpoint("services resolved");
 
 await seedAgentRuntimeWorkspace({
@@ -455,20 +470,22 @@ settingsService.on("change", (next) => {
   }
 });
 
-/** CLI paths whose app-server has already been warmed this run. */
-const warmedCodexPaths = new Set<string>();
+/** CLI path most recently warmed, so unrelated settings changes do not probe again. */
+let warmedCodexPath: string | null = null;
 
 /**
- * Warms the Codex `--version` gate cache off the send path. No-op when the
- * provider is disabled; runs once per CLI path per app run.
+ * Warms the Codex `--version` gate cache off the send path, then republishes
+ * availability because the Codex `turn-steer` declaration follows that version.
+ * No-op when the provider is disabled or the CLI path has not changed.
  */
 function warmCodexVersionGate(s = settingsService.get()): void {
   if (!s.provider.enabled.codex) return;
   const cliPath = s.provider.cli.codex || "codex";
-  if (!warmedCodexPaths.has(cliPath)) {
-    warmedCodexPaths.add(cliPath);
-    void warmCodexProviderVersion(cliPath);
-  }
+  if (cliPath === warmedCodexPath) return;
+  warmedCodexPath = cliPath;
+  void warmCodexProviderVersion(cliPath).then(() => {
+    broadcast("providers.availability", providerAvailability.listAvailability());
+  });
 }
 
 const prDraftService = container.resolve(PrDraftService);
@@ -648,6 +665,8 @@ providerAvailability
     // blocking `codex --version` spawnSync.
     warmCodexVersionGate();
     providerUsageWarmup.warmEnabledProviders(true);
+    void providerStatus.refresh();
+    setInterval(() => void providerStatus.refresh(), PROVIDER_STATUS_REFRESH_MS).unref();
     const modelProviders = startupModelProviderIds(providerAvailability.listAvailability());
     void modelCacheService.refreshProviders(modelProviders).catch((err: unknown) => {
       logger.warn("Model cache startup refresh failed", {
@@ -667,6 +686,19 @@ async function removeExpiredSnapshots(): Promise<void> {
 }
 
 await removeExpiredSnapshots();
+const turnRevertStore = new TurnRevertStore(db);
+const turnRevertService = new TurnRevertService({
+  snapshots: snapshotService, ranges: container.resolve(TurnSnapshotRangeReader), store: turnRevertStore,
+  writer: databaseWriter, lock: container.resolve(RepositoryGitMutationLock), storeId: container.resolve<StoreId>(SNAPSHOT_STORE_ID),
+  ...turnRevertContext(db, { turnSnapshotRepo, turnSnapshotRanges: container.resolve(TurnSnapshotRangeReader),
+    snapshotService, threadService, workspaceService, gitWorktrees, sweepSnapshotPins },
+  (threadId) => agentRuntimeCommands.runtimeSnapshots().some((snapshot) => snapshot.threadId === threadId && snapshot.phase !== "idle")),
+  publish: ({ revert, receipt }) => {
+    broadcast("turn.reverted", { threadId: revert.threadId, revert, receipt });
+    broadcast("turn.diffChanged", { threadId: revert.threadId });
+  },
+});
+await turnRevertService.recoverUnfinished();
 
 /** Settles commit requests a previous process left prepared, then drops expired ones, before RPCs arrive. */
 async function settleCommitRequests(): Promise<void> {
@@ -676,6 +708,17 @@ async function settleCommitRequests(): Promise<void> {
 }
 
 await settleCommitRequests();
+
+const turnSteers = container.resolve(TurnSteerService);
+
+/** No steer call survives a restart, so pending steers are held as uncertain before RPCs arrive. */
+async function reconcileSteers(): Promise<void> {
+  const { unknown, deleted } = await turnSteers.reconcileAtStartup();
+  if (unknown > 0) logger.info(`Held ${unknown} steers whose delivery is unknown`);
+  if (deleted > 0) logger.info(`Cleaned up ${deleted} settled steers`);
+}
+
+await reconcileSteers();
 container.resolve(AttachmentService).removeExpiredDraftImages();
 
 /** Starts workspace and worktree Git watchers, then repairs stale Git flags. */
@@ -796,8 +839,11 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   narrativeStore,
   canonicalSink,
   canonicalProgress: workerOwnedTurnRuntime.progress,
+  turnSteers,
   turnSnapshotRepo,
   sweepSnapshotPins,
+  turnRevertStore,
+  turnRevertService,
   turnDiffs: container.resolve(TurnDiffService),
   turnSnapshotRanges: container.resolve(TurnSnapshotRangeReader),
   snapshotService,
@@ -809,6 +855,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   planService,
   providerRegistry,
   providerAvailability,
+  providerStatus,
   modelCacheService,
   prDraftService,
   ciWatcherService,

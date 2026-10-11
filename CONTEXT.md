@@ -45,9 +45,10 @@ Provider-native continuation of an existing turn with the same turn identity
 and preserved execution history, without a new user message.
 
 ### Replacement turn
-A new turn linked to an interrupted turn when same-turn recovery is
-unavailable. It is explicitly initiated and may repeat effects from the
-interrupted turn.
+A new attempt of an interrupted or errored turn, started explicitly when
+same-turn recovery is unavailable. It may repeat effects from the earlier
+attempt. The transcript shows the turn's user message once, then only the
+latest attempt; earlier attempts' records stay persisted.
 
 ### Protocol adapter
 The per-Provider seam carrying the protocol-specific I/O the Session runtime
@@ -492,13 +493,11 @@ user sees the same final result; only the cost during streaming differs.
 
 ### Turn outcome
 How a turn ended, as one of four mutually-exclusive states:
-**completed** (the agent finished its work normally), **cancelled** (the user
-explicitly stopped the turn), **interrupted** (infrastructure or a process
-disappeared before a terminal outcome), or **errored** (a known terminal
-provider or turn failure).
-
-Canonical persistence preserves all four outcomes, including `Cancelled`.
-Legacy thread status still maps cancelled turns to `interrupted`.
+**completed** (the agent finished its work normally), **cancelled** (the user,
+or Mcode itself, explicitly stopped the turn), **interrupted** (infrastructure
+or a process disappeared before a terminal outcome), or **errored** (a known
+terminal provider or turn failure). Users see these as Stopped, Interrupted
+and Failed; a cancelled turn records whether the user or Mcode stopped it.
 
 ### Thread attention
 Server facts combining a live wait, the last settled turn outcome, and a
@@ -941,11 +940,14 @@ Retained worktrees and Direct threads run no cleanup actions.
 _Avoid_: Teardown script, cleanup hook
 
 ### Terminal scope
-The thread or workspace a shell session runs against. When a thread is
-active, shells open in that thread's working directory (worktree or
+The thread, workspace, or home scope a shell session runs against. When a
+thread is active, shells open in that thread's working directory (worktree or
 workspace root per composer mode). With no thread, the scope is the
-workspace and shells open at the workspace root.
-_Avoid_: Using "thread id" alone when the scope may be a workspace.
+workspace and shells open at the workspace root. The home scope belongs to no
+project: provider sign-in opens its shell in the user's home directory and
+shows it in a Sign in dialog, with or without an open project. Closing that
+dialog kills the shell and re-checks provider status.
+_Avoid_: Using "thread id" alone when the scope may be a workspace or home.
 
 ### Shell session
 A running shell process (e.g. PowerShell, bash) tied to one terminal scope.

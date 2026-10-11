@@ -191,6 +191,15 @@ export interface TurnStartResult {
   /** Nested turn object (canonical per OpenAI app-server docs). */
   turn?: { id: string; [key: string]: unknown };
 }
+/** Parameters for the `turn/steer` RPC method. Codex refuses it unless `expectedTurnId` is the active turn. */
+export interface TurnSteerParams {
+  threadId: string;
+  expectedTurnId: string;
+  clientUserMessageId: string;
+  input: TurnInputPart[];
+}
+/** Result returned by the `turn/steer` RPC method. */
+export interface TurnSteerResult { turnId: string }
 /** Parameters for the `turn/interrupt` RPC method. */
 export interface TurnInterruptParams { threadId: string; turnId: string }
 /** Result returned by the `turn/interrupt` RPC method. */
@@ -457,8 +466,44 @@ export interface ThreadSettingsUpdatedPayload {
 
 // turn/completed payload
 
-/** Error detail from a failed turn or error notification. */
-export interface TurnErrorInfo { message?: string; codexErrorInfo?: string; additionalDetails?: unknown }
+/** Payload-free `CodexErrorInfo` variants, serialized as bare camelCase strings. */
+export type CodexUnitErrorInfo =
+  | "contextWindowExceeded"
+  | "sessionBudgetExceeded"
+  | "usageLimitExceeded"
+  | "rateLimitExceeded"
+  | "flexUnavailable"
+  | "serverOverloaded"
+  | "cyberPolicy"
+  | "misalignmentPolicyViolation"
+  | "tooManyDenials"
+  | "internalServerError"
+  | "unauthorized"
+  | "badRequest"
+  | "threadRollbackFailed"
+  | "sandboxError";
+
+/** `CodexErrorInfo` variants that forward the upstream HTTP status. */
+export type CodexHttpErrorInfoName =
+  | "httpConnectionFailed"
+  | "responseStreamConnectionFailed"
+  | "responseStreamDisconnected"
+  | "responseTooManyFailedAttempts";
+
+/**
+ * Codex app-server `CodexErrorInfo` (app-server-protocol v2/shared.rs).
+ * Data variants serialize as a single-key object; the untagged `Other` variant can be any string or object.
+ */
+export type CodexErrorInfo =
+  | CodexUnitErrorInfo
+  | { [Name in CodexHttpErrorInfoName]: Record<Name, { httpStatusCode?: number | null }> }[CodexHttpErrorInfoName]
+  | { activeTurnNotSteerable: { turnKind: "review" | "compact" } }
+  | "other"
+  | string
+  | Record<string, unknown>;
+
+/** Error detail from a failed turn or error notification (app-server-protocol v2 `TurnError`). */
+export interface TurnErrorInfo { message?: string; codexErrorInfo?: CodexErrorInfo | null; additionalDetails?: string | null }
 
 /** The `turn` object nested inside a `turn/completed` payload. */
 export interface TurnResult {

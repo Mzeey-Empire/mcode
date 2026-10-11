@@ -2,6 +2,7 @@ import { useId, useRef, type KeyboardEvent, type ReactNode, type RefObject } fro
 import { Check, ChevronUp, ListChecks, X } from "lucide-react";
 import { IconButton } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useQueueStore } from "@/stores/queueStore";
 import {
   useTaskProgress,
   useTaskStore,
@@ -138,17 +139,19 @@ function TaskRow({ progress, expanded, listId, chevronRef, onToggle }: TaskRowPr
 
 /**
  * Tray docked on top of the composer. Shows the thread's parent-agent task
- * list as one row; expanding it grows the tray upward so the composer stays put.
+ * list as one row, with the queued messages below it; expanding the task list
+ * grows the tray upward so the composer stays put.
  */
-export function ComposerTray({ threadId }: { threadId: string }) {
+export function ComposerTray({ threadId, queue }: { threadId: string; queue: ReactNode }) {
   const progress = useTaskProgress(threadId);
   const expanded = useTaskStore((s) => s.trayExpandedByThread[threadId] ?? false);
   const setExpanded = (next: boolean) => useTaskStore.getState().setTrayExpanded(threadId, next);
   const listId = useId();
   const chevronRef = useRef<HTMLButtonElement>(null);
   const listContainerRef = useRef<HTMLDivElement>(null);
+  const hasQueue = useQueueStore((s) => (s.queues[threadId]?.length ?? 0) > 0);
 
-  if (!progress) return null;
+  if (!progress && !hasQueue) return null;
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Escape" || !expanded) return;
@@ -164,18 +167,21 @@ export function ComposerTray({ threadId }: { threadId: string }) {
       className="mx-3.5 flex flex-col rounded-t-[1.2rem] bg-panel px-2 py-1"
       onKeyDown={handleKeyDown}
     >
-      {expanded && (
+      {progress && expanded && (
         <div ref={listContainerRef}>
           <TaskList threadId={threadId} id={listId} />
         </div>
       )}
-      <TaskRow
-        progress={progress}
-        expanded={expanded}
-        listId={listId}
-        chevronRef={chevronRef}
-        onToggle={() => setExpanded(!expanded)}
-      />
+      {progress && (
+        <TaskRow
+          progress={progress}
+          expanded={expanded}
+          listId={listId}
+          chevronRef={chevronRef}
+          onToggle={() => setExpanded(!expanded)}
+        />
+      )}
+      {queue}
     </div>
   );
 }

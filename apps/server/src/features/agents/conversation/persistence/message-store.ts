@@ -6,7 +6,7 @@
 import * as NodeCrypto from "node:crypto";
 import { notSessionNotice, transcriptMessageVisibility } from "./transcript-visibility.js";
 import type { Changes, Database } from "bun:sqlite";
-import { and, asc, count, desc, eq, getTableColumns, gt, inArray, isNotNull, lt, lte, placeholder, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, getTableColumns, gt, inArray, isNotNull, lt, lte, notExists, placeholder, sql, type SQL } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type {
   Message,
@@ -28,7 +28,7 @@ import {
   SystemNoticeMetadataSchema,
   THREAD_GET_TRANSCRIPT_MAX_BYTES,
 } from "@mcode/contracts";
-import { messages, threads, toolCallRecords } from "../../../../runtime/persistence/sqlite/schema.js";
+import { messages, threads, toolCallRecords, turnSteers } from "../../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../../runtime/persistence/sqlite/drizzle-changes.js";
 
 type MessageRow = typeof messages.$inferSelect & { toolCallCount?: number };
@@ -596,10 +596,16 @@ export class MessageStore {
       .orderBy(desc(messages.sequence)).limit(1).get() ?? null;
   }
 
-  /** Provider system notices may follow a user prompt without starting another conversation turn. */
+  /**
+   * Provider system notices may follow a user prompt without starting another conversation turn.
+   * Delivered steers join the running turn instead of starting one, so they are skipped too. A steer
+   * the provider never took may later be sent as a prompt under the same id, which must still count.
+   */
   isLatestNonSystemMessage(threadId: string, messageId: string): boolean {
+    const steered = this.orm.select({ messageId: turnSteers.messageId }).from(turnSteers)
+      .where(and(eq(turnSteers.messageId, messages.id), eq(turnSteers.state, "delivered")));
     const latest = this.orm.select({ id: messages.id }).from(messages)
-      .where(and(eq(messages.threadId, threadId), inArray(messages.role, ["user", "assistant"])))
+      .where(and(eq(messages.threadId, threadId), inArray(messages.role, ["user", "assistant"]), notExists(steered)))
       .orderBy(desc(messages.sequence)).limit(1).get();
     return latest?.id === messageId;
   }

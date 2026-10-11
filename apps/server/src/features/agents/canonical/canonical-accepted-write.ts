@@ -13,6 +13,7 @@ import type { CanonicalExecutionSemanticWriter } from "./canonical-execution-sem
 import { PlanQuestionAnswersStore as PlanQuestionAnswersRepo } from "../planning/persistence/plan-question-answers-store.js";
 import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";
 import { AcceptedFeatureWriteMetadataSchema, persistAcceptedFeatureWrite } from "./accepted-feature-write.js";
+import { TurnSteerStore } from "../steering/persistence/turn-steer-store.js";
 
 /** Immutable storage intent, validated again on the dedicated SQLite worker. */
 export const CanonicalAcceptedWriteInputSchema = z.object({
@@ -28,6 +29,8 @@ export const CanonicalAcceptedWriteInputSchema = z.object({
   error: z.string().max(8_000).optional(),
   compatibility: z.unknown().optional(),
   planAnswer: MessageSchema().optional(),
+  /** A user message the provider took mid-turn; its steer row is marked delivered in this transaction. */
+  steerMessage: MessageSchema().optional(),
   features: AcceptedFeatureWriteMetadataSchema().optional(),
 }).strict();
 /** Already-prepared data to append without interpreting a provider event. */
@@ -39,6 +42,7 @@ export class CanonicalAcceptedEventWrite {
   private readonly orm;
   private readonly planAnswers;
   private readonly messages;
+  private readonly steers;
   private readonly advancePublicationHead;
 
   constructor(private readonly db: Database, private readonly canonical: CanonicalAgentBoundary,
@@ -46,6 +50,7 @@ export class CanonicalAcceptedEventWrite {
     this.orm = drizzle(db);
     this.planAnswers = new PlanQuestionAnswersRepo(db);
     this.messages = new MessageRepo(db);
+    this.steers = new TurnSteerStore(db);
     this.advancePublicationHead = db.prepare(`INSERT INTO canonical_writer_live_publication_heads (thread_id, last_sequence)
       VALUES (?, ?) ON CONFLICT(thread_id) DO UPDATE SET last_sequence = MAX(last_sequence, excluded.last_sequence)`);
   }
@@ -65,13 +70,7 @@ export class CanonicalAcceptedEventWrite {
     if (result.outcome !== "committed") throw new Error("Accepted progress did not append a new durable prefix");
     this.persistPublicationHead(parsed);
     this.persistFeatures(input.execution.threadId, parsed.features);
-    if (parsed.planAnswer) {
-      if (parsed.planAnswer.thread_id !== input.execution.threadId || parsed.planAnswer.role !== "assistant") {
-        throw new Error("Accepted plan answer belongs to another assistant message");
-      }
-      this.stagePlanAnswer(parsed.planAnswer, parsed.phase);
-      this.planAnswers.markAnswered(parsed.planAnswer.id, parsed.planAnswer.thread_id);
-    }
+    this.stageMessages(parsed, input.execution.threadId);
     if (input.compatibility) this.compatibility?.confirmAcceptedCompatibility(input.compatibility, result.conversationRevision);
     return {
       receipt: { operationId, contentHash: parsed.contentHash, predecessor: parsed.predecessor,
@@ -79,6 +78,17 @@ export class CanonicalAcceptedEventWrite {
       revision: { conversationRevision: result.conversationRevision, rosterRevision: result.rosterRevision },
       events: result.events,
     };
+  }
+
+  private stageMessages(parsed: z.infer<typeof CanonicalAcceptedWriteInputSchema>, threadId: string): void {
+    if (parsed.planAnswer) {
+      if (parsed.planAnswer.thread_id !== threadId || parsed.planAnswer.role !== "assistant") {
+        throw new Error("Accepted plan answer belongs to another assistant message");
+      }
+      this.stagePlanAnswer(parsed.planAnswer, parsed.phase);
+      this.planAnswers.markAnswered(parsed.planAnswer.id, parsed.planAnswer.thread_id);
+    }
+    if (parsed.steerMessage) this.stageSteerMessage(parsed.steerMessage, threadId);
   }
 
   private stagePlanAnswer(assistant: z.infer<ReturnType<typeof MessageSchema>>, phase: string): void {
@@ -90,6 +100,24 @@ export class CanonicalAcceptedEventWrite {
     this.messages.createAssistantIdempotent({ id: assistant.id, threadId: assistant.thread_id,
       content: assistant.content, sequence: assistant.sequence, model: assistant.model ?? null,
       attachments: assistant.attachments ?? [], isInternal: phase !== "finalized" });
+  }
+
+  /**
+   * The messages row reserves the steer's sequence, because the next prompt numbers itself from
+   * this table. The provider already holds the message, so a steer row that a replay or restart
+   * moved on is left alone instead of failing the save.
+   */
+  private stageSteerMessage(message: z.infer<ReturnType<typeof MessageSchema>>, threadId: string): void {
+    if (message.thread_id !== threadId || message.role !== "user") {
+      throw new Error("Accepted steer message belongs to another thread or role");
+    }
+    const existing = this.messages.findByIdInThreadIncludingInternal(threadId, message.id);
+    if (existing && existing.role !== "user") throw new Error("Accepted steer message conflicts with an existing message");
+    if (!existing) {
+      this.messages.create(threadId, "user", message.content, message.sequence, undefined, undefined, undefined,
+        undefined, false, message.mentions ?? undefined, undefined, undefined, message.id);
+    }
+    this.steers.markDelivered(message.id);
   }
 
   private persistFeatures(threadId: string, metadata: unknown): void {

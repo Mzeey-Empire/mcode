@@ -1,7 +1,8 @@
-import { Bell, Braces, ExternalLink, GitPullRequest, Settings } from "lucide-react";
+import { Braces, ExternalLink, GitPullRequest, Settings } from "lucide-react";
 import { Button, IconButton } from "@/components/ui/button";
 import { useUiStore } from "@/stores/uiStore";
-import { UpdateIndicator } from "./UpdateIndicator";
+import { ProvidersBell } from "./ProvidersBell";
+import { UpdateButton } from "./UpdateButton";
 
 /** Props for {@link SidebarFooter}. */
 interface SidebarFooterProps {
@@ -14,7 +15,7 @@ interface SidebarFooterProps {
 /** True when running inside the Electron shell. */
 const IS_DESKTOP = typeof window !== "undefined" && !!window.desktopBridge;
 
-/** Bottom strip of the sidebar: Settings, Pull requests and Notifications icons, with the update slot on the right. */
+/** Bottom strip of the sidebar: Settings, Pull requests and Providers icons, with the update slot on the right. */
 export function SidebarFooter({ settingsOpen, onOpenSettings }: SidebarFooterProps) {
   if (settingsOpen) return <SettingsFileFooter />;
   return (
@@ -24,13 +25,10 @@ export function SidebarFooter({ settingsOpen, onOpenSettings }: SidebarFooterPro
           <Settings strokeWidth={1.5} aria-hidden />
         </IconButton>
         <PullRequestsButton />
-        {/* Inert until the notification centre lands (S09-04). */}
-        <IconButton aria-label="Notifications" disabled>
-          <Bell strokeWidth={1.5} aria-hidden />
-        </IconButton>
+        <ProvidersBell />
       </div>
       <div data-testid="sidebar-update-slot" className="flex min-w-0 justify-end">
-        <UpdateIndicator />
+        <UpdateButton />
       </div>
     </footer>
   );
@@ -54,7 +52,7 @@ function PullRequestsButton() {
 function SettingsFileFooter() {
   return (
     <footer data-testid="sidebar-footer" className="shrink-0 space-y-1 px-3">
-      <UpdateIndicator />
+      <UpdateButton />
       {IS_DESKTOP && <Button
         variant="ghost"
         className="w-full justify-start text-muted hover:text-ink"
