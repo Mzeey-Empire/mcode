@@ -3565,7 +3565,7 @@ describe("CodexEventMapper", () => {
       {
         type: "reasoningDelta",
         threadId: "test-thread",
-        delta: "Plan step 1\nPlan step 2\nRaw detail",
+        delta: "Plan step 1\n\nPlan step 2\n\nRaw detail",
         reasoningItemId: "r1",
         done: true,
       },
@@ -3632,6 +3632,19 @@ describe("CodexEventMapper", () => {
       { type: "reasoningDelta", threadId: "test-thread", delta: "", reasoningItemId: "rs_2" },
       { type: "reasoningDelta", threadId: "test-thread", delta: "", reasoningItemId: "rs_2", done: true },
     ]);
+  });
+
+  it("separates streamed summary parts into paragraphs and completes without a duplicate suffix", () => {
+    const notify = (method: string, params: object) => mapper.mapNotification({ jsonrpc: "2.0", method, params } as never);
+    const events = [
+      ...notify("item/reasoning/summaryTextDelta", { itemId: "rs_1", delta: "**Planning**", summaryIndex: 0 }),
+      ...notify("item/reasoning/summaryPartAdded", { itemId: "rs_1", summaryIndex: 1 }),
+      ...notify("item/reasoning/summaryTextDelta", { itemId: "rs_1", delta: "**Checking", summaryIndex: 1 }),
+      ...notify("item/reasoning/summaryTextDelta", { itemId: "rs_1", delta: " history**", summaryIndex: 1 }),
+      ...notify("item/completed", { item: { type: "reasoning", id: "rs_1", summary: ["**Planning**", "**Checking history**"], content: [] } }),
+    ].map((runtimeEvent) => runtimeEvent.event);
+
+    expect(events.map((event) => event.type === "reasoningDelta" ? event.delta : event.type)).toEqual(["**Planning**", "\n\n**Checking", " history**", ""]);
   });
 
   it("emits nothing for a completed reasoning item with no text and no stream", () => {

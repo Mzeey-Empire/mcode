@@ -55,6 +55,9 @@ const NOTICE_KIND_BY_SUBTYPE: Record<string, SystemNoticeMetadata["kind"]> = {
   "provider.notice.unknown-event": "diagnostic",
 };
 
+/** Joins reasoning summary and content parts as markdown paragraphs, live and on completion alike. */
+const REASONING_PART_SEPARATOR = "\n\n";
+
 /** Methods whose late content cannot change an already completed turn. */
 const TURN_CONTENT_METHODS = new Set([
   "item/started", "item/completed", "item/agentMessage/delta",
@@ -146,6 +149,8 @@ export class CodexEventMapper {
    * unstreamed suffix of its own item. One turn can carry several reasoning items.
    */
   private readonly streamedReasoningByItem = new Map<string, string>();
+  /** Last summary or content part streamed per reasoning item, so a new part starts a new paragraph. */
+  private readonly reasoningPartByItem = new Map<string, string>();
   /** Per-turn sequence for synthetic update_plan tool calls from turn/plan/updated. */
   private planUpdateSeq = 0;
   private readonly threadId: string;
@@ -2006,13 +2011,23 @@ export class CodexEventMapper {
   }
 
   private mapReasoningDelta(notification: CodexNotification): CodexMappedEvent[] {
-    const params = notification.params as { delta?: unknown; text?: unknown; itemId?: unknown };
-    const delta = typeof params.delta === "string" ? params.delta : typeof params.text === "string" ? params.text : "";
-    if (!delta) return [];
+    const params = notification.params as { delta?: unknown; text?: unknown; itemId?: unknown; summaryIndex?: unknown; contentIndex?: unknown };
+    const text = typeof params.delta === "string" ? params.delta : typeof params.text === "string" ? params.text : "";
+    if (!text) return [];
     const itemId = typeof params.itemId === "string" && params.itemId ? params.itemId : undefined;
     const key = itemId ?? "";
-    this.streamedReasoningByItem.set(key, (this.streamedReasoningByItem.get(key) ?? "") + delta);
+    const streamed = this.streamedReasoningByItem.get(key) ?? "";
+    const delta = (this.startsNewReasoningPart(key, params) && streamed ? REASONING_PART_SEPARATOR : "") + text;
+    this.streamedReasoningByItem.set(key, streamed + delta);
     return [...this.drainPendingAssistantBoundary(false), this.reasoningDelta(delta, itemId)];
+  }
+
+  private startsNewReasoningPart(key: string, params: { summaryIndex?: unknown; contentIndex?: unknown }): boolean {
+    const part = typeof params.summaryIndex === "number" ? `summary:${params.summaryIndex}` : typeof params.contentIndex === "number" ? `content:${params.contentIndex}` : undefined;
+    if (part === undefined) return false;
+    const previous = this.reasoningPartByItem.get(key);
+    this.reasoningPartByItem.set(key, part);
+    return previous !== undefined && previous !== part;
   }
 
   /**
@@ -2189,6 +2204,7 @@ export class CodexEventMapper {
     this.assistantFallbackSequence = 0;
     this.assistantIdentityScope = NodeCrypto.randomUUID();
     this.streamedReasoningByItem.clear();
+    this.reasoningPartByItem.clear();
     this.planUpdateSeq = 0;
     this.commandOutputBuffers.clear();
     this.startedToolUseSignatures.clear();
@@ -2279,7 +2295,7 @@ export class CodexEventMapper {
     const reasoningContent = Array.isArray(item.reasoningContent) ? item.reasoningContent : [];
     const rawContent = (item as { content?: unknown }).content;
     const content = reasoningContent.length > 0 ? reasoningContent : this.stringContentArray(rawContent);
-    return [...summary, ...content].join("\n");
+    return [...summary, ...content].join(REASONING_PART_SEPARATOR);
   }
 
   private stringContentArray(value: unknown): string[] {
