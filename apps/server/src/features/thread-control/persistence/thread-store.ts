@@ -7,13 +7,14 @@ import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { and, asc, desc, eq, getTableColumns, gt, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import { DevinModeSchema, ReasoningLevelSchema, type AcknowledgeSeenResult, type TurnOutcome } from "@mcode/contracts";
+import { DevinModeSchema, ReasoningLevelSchema, ScheduledTurnRetrySchema, type AcknowledgeSeenResult, type TurnOutcome } from "@mcode/contracts";
 import type { DevinMode, Thread, RecentThread, ThreadMode, ThreadStatus, ReasoningLevel, InteractionMode, OrchestrationMode, PermissionMode, ContextWindowMode } from "@mcode/contracts";
 import {
   canonicalAgentThreads,
   cleanupJobs,
   pullRequestReviewLinks,
   threads,
+  turnRetrySchedules,
   workspaces,
 } from "../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
@@ -55,8 +56,11 @@ function parseCleanupState(value: string | null): Thread["cleanup_state"] {
     : null;
 }
 
-function rowToThread(row: ThreadRow): Thread {
+function rowToThread(row: ThreadRow, db: Database): Thread {
+  const schedule = drizzle(db).select({ turnId: turnRetrySchedules.turnId, at: turnRetrySchedules.runAt })
+    .from(turnRetrySchedules).where(eq(turnRetrySchedules.threadId, row.id)).get();
   return {
+    scheduled_retry: schedule ? ScheduledTurnRetrySchema().parse(schedule) : null,
     ...rowToThreadIdentity(row),
     ...rowToThreadLifecycle(row),
     ...rowToThreadPreferences(row),
@@ -185,6 +189,7 @@ function createThreadRecord(input: ThreadCreateRecordInput): Thread {
     deleted_at: null,
     user_completed_at: null,
     scheduled_deletion_at: null,
+    scheduled_retry: null,
     cleanup_state: null,
     cleanup_reason: null,
     last_context_tokens: null,
@@ -273,6 +278,7 @@ function searchConditions(opts: ThreadSearchOptions): (SQL | undefined)[] {
 
 function createSearchResult(
   rows: Array<ThreadRow & { wId: string; wName: string; wPath: string }>,
+  db: Database,
 ): { threads: Thread[]; workspaces: { id: string; name: string; path: string }[] } {
   const workspaceMap = new Map<string, { id: string; name: string; path: string }>();
   for (const row of rows) {
@@ -280,7 +286,7 @@ function createSearchResult(
       workspaceMap.set(row.wId, { id: row.wId, name: row.wName, path: row.wPath });
     }
   }
-  return { threads: rows.map(rowToThread), workspaces: [...workspaceMap.values()] };
+  return { threads: rows.map((row) => rowToThread(row, db)), workspaces: [...workspaceMap.values()] };
 }
 
 function resolveNextBaseBranch(
@@ -434,7 +440,7 @@ export class ThreadStore {
       ))
       .get();
 
-    return row ? rowToThread(row) : null;
+    return row ? rowToThread(row, this.db) : null;
   }
 
   /** List non-deleted threads for a workspace, most recent first. */
@@ -453,7 +459,7 @@ export class ThreadStore {
       .limit(clampedLimit)
       .all();
 
-    return rows.map(rowToThread);
+    return rows.map((row) => rowToThread(row, this.db));
   }
 
   /**
@@ -486,7 +492,7 @@ export class ThreadStore {
       .all();
 
     return rows.map((row) => ({
-      ...rowToThread(row),
+      ...rowToThread(row, this.db),
       workspace_name: row.workspaceName,
       workspace_path: row.workspacePath,
     }));
@@ -510,7 +516,7 @@ export class ThreadStore {
       .limit(clampedLimit)
       .all();
 
-    return createSearchResult(rows);
+    return createSearchResult(rows, this.db);
   }
 
   /** Update a thread's lifecycle status. Returns true if a row was changed. */
@@ -834,6 +840,7 @@ export class ThreadStore {
         .where(eq(threads.id, id))
         );
       if (result.changes > 0) {
+        tx.delete(turnRetrySchedules).where(eq(turnRetrySchedules.threadId, id)).run();
         tx.update(pullRequestReviewLinks)
           .set({ primaryThreadId: null, updatedAt: now })
           .where(eq(pullRequestReviewLinks.primaryThreadId, id))
@@ -1159,7 +1166,7 @@ export class ThreadStore {
       .from(threads)
       .where(and(eq(threads.workspaceId, workspaceId), isNotNull(threads.worktreePath)))
       .all();
-    return rows.map(rowToThread);
+    return rows.map((row) => rowToThread(row, this.db));
   }
 
   /**
@@ -1172,7 +1179,7 @@ export class ThreadStore {
       .from(threads)
       .where(eq(threads.workspaceId, workspaceId))
       .all();
-    return rows.map(rowToThread);
+    return rows.map((row) => rowToThread(row, this.db));
   }
 
   /**

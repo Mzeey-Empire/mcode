@@ -6,6 +6,7 @@ import { ProjectActionService } from "../../projects/environment/project-action-
 import { WorkspaceEnvironmentService } from "../../projects/environment/workspace-environment-service.js";
 import { ThreadRepo } from "../persistence/thread-repo.js";
 import { ThreadTeardownService } from "./thread-teardown-service.js";
+import { TurnRetryScheduler } from "../../agents/recovery/turn-retry-scheduler.js";
 
 /** Stops every runtime resource that belongs to one thread before deletion. */
 @injectable()
@@ -39,10 +40,12 @@ export class ThreadDeletionTeardownService {
     @inject(CiWatcherService) private readonly ciWatcherService: CiWatcherService,
     @inject(ThreadTeardownService) private readonly threadTeardownService: ThreadTeardownService,
     @inject(GitWatcherService) private readonly gitWatcherService: GitWatcherService,
+    @inject(TurnRetryScheduler, { isOptional: true }) private readonly retryScheduler?: Pick<TurnRetryScheduler, "unschedule">,
   ) {}
 
   /** Stop thread work and detach its file watcher before persistent data is removed. */
   async teardownThread(threadId: string): Promise<void> {
+    await this.retryScheduler?.unschedule(threadId);
     const releaseDeletionBarrier = this.workspaceEnvironmentService.beginThreadDeletion(threadId);
     let releaseActionAdmission: (() => void) | undefined;
     try {

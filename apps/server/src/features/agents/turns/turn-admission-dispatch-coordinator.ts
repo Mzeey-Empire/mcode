@@ -1,4 +1,5 @@
 import * as NodeFS from "node:fs";
+import type { TurnRetryScheduler } from "../recovery/turn-retry-scheduler.js";
 import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 import {
@@ -210,6 +211,7 @@ export class TurnAdmissionDispatchCoordinator {
     private readonly files: FileService | undefined,
     private readonly platform: NodeJS.Platform,
     private readonly parentStartOwner?: TurnParentStartOwner,
+    private readonly retryScheduler?: Pick<TurnRetryScheduler, "unschedule">,
   ) {}
 
   /** Admit one command and return an immutable package for the runtime owner. */
@@ -218,11 +220,14 @@ export class TurnAdmissionDispatchCoordinator {
     runtime: TurnRuntimeAdmissionAuthority,
     canReserve?: () => boolean,
   ): Promise<TurnAdmissionResult> {
+    await this.retryScheduler?.unschedule(command.threadId);
     const release = command.stagedDraftImageIds?.length
       ? this.attachments.leaseDraftImages(command.threadId, command.stagedDraftImageIds)
       : undefined;
     try {
       const admitted = await this.admitLeased(command, runtime, canReserve);
+      // A schedule can be requested while preparation awaits I/O and the old attempt is still latest.
+      await this.retryScheduler?.unschedule(command.threadId);
       command.onAdmissionComplete?.();
       return admitted;
     } finally {

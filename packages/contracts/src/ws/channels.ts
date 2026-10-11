@@ -12,6 +12,7 @@ import { ApprovalRequestSchema, ApprovalOutcomeSchema } from "../models/approval
 import { ProviderAvailabilitySchema } from "../providers/availability.js";
 import { ProviderStatusSchema } from "../providers/provider-status.js";
 import { lazySchema } from "../utils/lazySchema.js";
+import { ThreadRetryScheduledSchema } from "../models/turn-recovery.js";
 import { ProjectIconSchema } from "../models/project-icon.js";
 import {
   BrowserAutomationHostDispatchTargetSchema,
@@ -32,6 +33,7 @@ export const CANONICAL_AGENT_EVENT_BATCH_MAX = 256;
 
 /** All push channel definitions keyed by channel name. */
 export const WS_CHANNELS = {
+  "thread.retryScheduled": ThreadRetryScheduledSchema(),
   "thread.attention": ThreadAttentionSchema(),
   /** Invalidates the owning parent's unified subagent roster. */
   "subagents.changed": z.object({

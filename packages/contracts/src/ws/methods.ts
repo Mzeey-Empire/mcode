@@ -101,7 +101,7 @@ import { TurnSnapshotSchema } from "../models/turn-snapshot.js";
 import { TurnRevertScopeSchema, TurnRevertPreviewSchema, TurnRevertResultSchema } from "../models/turn-revert.js";
 import { AgentStopResultSchema, TurnRuntimeSnapshotSchema } from "../models/turn-runtime.js";
 import { CanonicalSubagentStopRequestSchema, CanonicalSubagentStopResultSchema } from "../models/canonical-subagent-roster.js";
-import { RecoveryIncidentSchema, TurnRetryParamsSchema, TurnRetryResultSchema } from "../models/turn-recovery.js";
+import { RecoveryIncidentSchema, ScheduledTurnRetrySchema, TurnRetryParamsSchema, TurnRetryResultSchema, TurnRetryScheduleParamsSchema, TurnRetryUnscheduleParamsSchema } from "../models/turn-recovery.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
 import { PlanSaveVersionSchema, PlanVersionSchema, PlanActionSchema } from "../models/plan.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
@@ -1081,6 +1081,14 @@ export const WS_METHODS = lazySchema(() => ({
   "turn.retry": {
     params: TurnRetryParamsSchema(),
     result: TurnRetryResultSchema(),
+  },
+  "turn.retry.schedule": {
+    params: TurnRetryScheduleParamsSchema(),
+    result: ScheduledTurnRetrySchema(),
+  },
+  "turn.retry.unschedule": {
+    params: TurnRetryUnscheduleParamsSchema(),
+    result: z.void(),
   },
   /** Continue one active response after the user accepts an unsaved text stream. */
   "agent.continueWithoutSaving": {

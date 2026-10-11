@@ -304,8 +304,12 @@ export {
   RecoveryIncidentSchema,
   TurnRetryParamsSchema,
   TurnRetryResultSchema,
+  ScheduledTurnRetrySchema,
+  TurnRetryScheduleParamsSchema,
+  TurnRetryUnscheduleParamsSchema,
+  ThreadRetryScheduledSchema,
 } from "./models/turn-recovery.js";
-export type { RecoveryIncidentEntry, RecoveryIncident, TurnRetryParams, TurnRetryResult } from "./models/turn-recovery.js";
+export type { RecoveryIncidentEntry, RecoveryIncident, TurnRetryParams, TurnRetryResult, ScheduledTurnRetry, TurnRetryScheduleParams } from "./models/turn-recovery.js";
 
 export {
   MessageSchema,

@@ -22,6 +22,7 @@ import { killOrphanedServer, reapOrphanedPtys } from "../../runtime/process/orph
 import { PtyPidRegistry } from "../../features/terminal/host/pty-pid-registry.js";
 
 // Services
+import { TurnRetryScheduler } from "../../features/agents/recovery/turn-retry-scheduler.js";
 import {
   FilesystemBrowser,
   GitComparisonService,
@@ -357,6 +358,7 @@ workspaceEnvironmentService.setAutomaticSetupDispatcher({
   const subagentRosterService = container.resolve(SubagentRosterService);
   const stopObservingSubagentRosters = subagentRosterService.observeCommittedEvents();
 const turnRecoveryService = container.resolve(TurnRecoveryService);
+const turnRetryScheduler = container.resolve(TurnRetryScheduler);
 const threadControlService = container.resolve(ThreadControlService);
 const threadStartupService = container.resolve(ThreadStartupService);
 const threadStartupFetchDecisions = container.resolve(ThreadStartupFetchDecisions);
@@ -507,6 +509,10 @@ const reliabilityHarness = createReliabilityHarnessAdapter(databaseWriter, undef
 const jobObject = container.resolve<JobObject>("JobObject");
 
 const portPush = new PortPush();
+turnRetryScheduler.onChange((event) => {
+  broadcast("thread.retryScheduled", event);
+  portPush.send("thread.retryScheduled", event);
+});
 
 /** IPC push server for named pipe / Unix domain socket transport. */
 const ipcServer = new IpcPushServer();
@@ -805,6 +811,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   goalLifecycleService,
   subagentRosterService,
   turnRecoveryService,
+  turnRetryScheduler,
   threadControlService,
   threadStartupService,
   threadStartupFetchDecisions,
@@ -1024,6 +1031,7 @@ async function bootstrapServer(): Promise<void> {
       },
     });
     await recoverTurnsAtStartup();
+    await turnRetryScheduler.start();
     recordStartupCheckpoint("turn recovery completed");
     await settleOrphanedBackgroundToolsAtStartup();
     recordStartupCheckpoint("orphaned background tools settled");
@@ -1071,6 +1079,7 @@ async function shutdown(): Promise<void> {
 
   shutdownCoordinator.setPhase("drain admitted transport work");
   await stopAdmissionAndDrain();
+  await turnRetryScheduler.shutdown();
 
   // 0. Close the MessagePort stream transport
   shutdownCoordinator.setPhase("detach message transport");

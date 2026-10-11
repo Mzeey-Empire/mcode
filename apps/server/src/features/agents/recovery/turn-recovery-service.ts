@@ -116,8 +116,7 @@ export class TurnRecoveryService {
   /** Admit a new attempt of the latest errored turn without replacing its provider session. */
   async retryTurn(input: TurnRetryParams, dispatch: (command: SendMessageCommand) => Promise<void>): Promise<TurnRetryResult> {
     const turn = this.requireRetryableTurn(input);
-    const thread = this.threadRepo.findById(input.threadId);
-    if (!thread) throw new TurnRecoveryError("TURN_RETRY_NOT_FOUND", "Retry thread not found");
+    const thread = this.requireRetryThread(input.threadId);
     const message = this.canonicalSink.loadUserMessage(turn.id);
     if (!message) throw new TurnRecoveryError("TURN_RETRY_INPUT_MISSING", "Accepted retry input not found");
     const attachments = this.attachmentService.prepareRetryAttachments(thread.id, message.attachments ?? []);
@@ -133,7 +132,9 @@ export class TurnRecoveryService {
     return { turnId };
   }
 
-  private requireRetryableTurn(input: TurnRetryParams) {
+  /** Check the shared eligibility rules without consuming the attempt. */
+  requireRetryableTurn(input: TurnRetryParams) {
+    this.requireRetryThread(input.threadId);
     const turn = this.canonicalSink.loadTurn(input.turnId);
     if (!turn || turn.threadId !== input.threadId || !turn.executionId) {
       throw new TurnRecoveryError("TURN_RETRY_NOT_FOUND", "Retry turn not found in this thread");
@@ -147,6 +148,14 @@ export class TurnRecoveryService {
     this.requireTerminalStartup(input.threadId);
     if (turn.status !== "Errored") throw new TurnRecoveryError("TURN_RETRY_NOT_ERRORED", "Only errored turns can be retried");
     return { ...turn, executionId: turn.executionId };
+  }
+
+  private requireRetryThread(threadId: string) {
+    const thread = this.threadRepo.findById(threadId);
+    if (!thread || thread.deleted_at !== null) {
+      throw new TurnRecoveryError("TURN_RETRY_NOT_FOUND", "Retry thread not found");
+    }
+    return thread;
   }
 
   private requireTerminalStartup(threadId: string): void {

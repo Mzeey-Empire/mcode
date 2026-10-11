@@ -2,6 +2,32 @@ import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
 import { AgentTurnIdSchema } from "../compat/agent-model.js";
 
+/** One explicitly scheduled retry of an errored attempt. */
+export const ScheduledTurnRetrySchema = lazySchema(() => z.object({
+  turnId: AgentTurnIdSchema,
+  at: z.string().datetime({ offset: true }),
+}).strict());
+/** Persisted retry notice restored when a thread is loaded. */
+export type ScheduledTurnRetry = z.infer<ReturnType<typeof ScheduledTurnRetrySchema>>;
+
+/** Schedule the latest errored attempt on a thread. */
+export const TurnRetryScheduleParamsSchema = lazySchema(() => ScheduledTurnRetrySchema().extend({
+  threadId: z.string().min(1).max(256),
+}).strict());
+/** Input to the scheduled retry command. */
+export type TurnRetryScheduleParams = z.infer<ReturnType<typeof TurnRetryScheduleParamsSchema>>;
+
+/** Cancel a thread's pending retry. */
+export const TurnRetryUnscheduleParamsSchema = lazySchema(() => z.object({
+  threadId: z.string().min(1).max(256),
+}).strict());
+
+/** A committed change to a thread's scheduled retry. */
+export const ThreadRetryScheduledSchema = lazySchema(() => z.object({
+  threadId: z.string(),
+  retry: ScheduledTurnRetrySchema().nullable(),
+}).strict());
+
 /** Retry the latest errored attempt, optionally switching its model. */
 export const TurnRetryParamsSchema = lazySchema(() => z.object({
   threadId: z.string().min(1).max(256),
