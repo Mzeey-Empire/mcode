@@ -78,7 +78,6 @@ export function useComposerExecutionTarget({
   );
   const newThreadMode = useWorkspaceStore((state) => state.newThreadMode);
   const newThreadBranchSource = useWorkspaceStore((state) => state.newThreadBranchSource);
-  const newThreadBranchRemote = useWorkspaceStore((state) => state.newThreadBranchRemote);
   const newThreadPullRequestNumber = useWorkspaceStore((state) => state.newThreadPullRequestNumber);
   const selectedWorktree = useWorkspaceStore((state) => state.selectedWorktree);
   const branchExecMode = useWorkspaceStore((state) => state.branchExecMode);
@@ -124,7 +123,7 @@ export function useComposerExecutionTarget({
         mode: composerMode,
         branch: newThreadBranch.name,
         branchSource: newThreadBranchSource,
-        branchRemote: newThreadBranchRemote,
+        branchRemote: newThreadBranch.remote,
         pullRequestNumber: newThreadPullRequestNumber,
         hasWorktree: selectedWorktree !== null,
       };
@@ -139,7 +138,7 @@ export function useComposerExecutionTarget({
       };
     }
     return { kind: "existing-thread", mode: composerMode };
-  }, [branchExecMode, branchFromMessageId, forkBranch.name, branchWorktreeIsDetached, branchWorktreePath, composerMode, isNewThread, newThreadBranch.name, newThreadBranchRemote, newThreadBranchSource, newThreadPullRequestNumber, selectedWorktree]);
+  }, [branchExecMode, branchFromMessageId, forkBranch.name, branchWorktreeIsDetached, branchWorktreePath, composerMode, isNewThread, newThreadBranch.name, newThreadBranch.remote, newThreadBranchSource, newThreadPullRequestNumber, selectedWorktree]);
   const targetPending = isTargetBranchPending({
     isGitRepo,
     target,

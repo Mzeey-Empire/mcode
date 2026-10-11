@@ -10,8 +10,11 @@ import { useNewThreadTargetSelection } from "../useComposerTargetSelection";
 
 // The branch resolver lists refs over the transport; the picked branch is all these tests need.
 vi.mock("../useTargetBranch", () => ({
-  useNewThreadTargetBranch: () => ({ name: useWorkspaceStore.getState().newThreadBranch, unknown: null }),
-  useForkTargetBranch: () => ({ name: "", unknown: "missing" }),
+  useNewThreadTargetBranch: () => {
+    const { newThreadBranch, newThreadBranchRemote } = useWorkspaceStore.getState();
+    return { name: newThreadBranch, remote: newThreadBranchRemote, unknown: null };
+  },
+  useForkTargetBranch: () => ({ name: "", remote: null, unknown: "missing" }),
 }));
 
 const workspaceId = "ws-origin";

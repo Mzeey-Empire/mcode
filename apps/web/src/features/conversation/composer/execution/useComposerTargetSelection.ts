@@ -116,7 +116,6 @@ export function useNewThreadTargetSelection(workspaceId: string | undefined, mod
   const branchSource = useWorkspaceStore((state) => state.newThreadBranchSource);
   const pullRequestNumber = useWorkspaceStore((state) => state.newThreadPullRequestNumber);
   const selectedWorktree = useWorkspaceStore((state) => state.selectedWorktree);
-  const branchRemote = useWorkspaceStore((state) => state.newThreadBranchRemote);
   const startFromOrigin = useWorkspaceStore((state) => state.newThreadStartFromOrigin);
   const setNewThreadStartFromOrigin = useWorkspaceStore((state) => state.setNewThreadStartFromOrigin);
   const setNewThreadBranch = useWorkspaceStore((state) => state.setNewThreadBranch);
@@ -136,7 +135,7 @@ export function useNewThreadTargetSelection(workspaceId: string | undefined, mod
       number: branchSource === "pr" ? pullRequestNumber : undefined,
       select: setNewThreadBranchFromPr,
     };
-    const forced = branchSource === "branch" && branchRemote === "origin";
+    const forced = branchSource === "branch" && branch.remote === "origin";
     const origin = { checked: forced || startFromOrigin, forced, set: setNewThreadStartFromOrigin };
     return { ...base, target: newWorktreePick(branch, pullRequest, setNewThreadBranch, origin), baseBranch: null };
   }
