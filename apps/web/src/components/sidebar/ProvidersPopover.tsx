@@ -60,7 +60,10 @@ function SignInPill({ argv }: { argv: readonly string[] }) {
         Sign in
       </TooltipTrigger>
       <TooltipContent>
-        Open a project to sign in, or run <code>{argv.join(" ")}</code> in a terminal
+        {/* One span keeps the sentence flowing; the tooltip is inline-flex and would lay each run out as a column. */}
+        <span>
+          Open a project to sign in, or run <code className="whitespace-nowrap">{argv.join(" ")}</code> in a terminal
+        </span>
       </TooltipContent>
     </Tooltip>
   );
