@@ -381,6 +381,7 @@ describe("Thread Lifecycle Behavior", () => {
 
     await useThreadStore.getState().stopAgent(threadId);
 
+    expect(mockTransport.stopAgent).toHaveBeenCalledTimes(1);
     expect(useThreadStore.getState().records.get(threadId)?.messages.map((message) => message.content)).toEqual(["keep working on this"]);
     expect(useComposerDraftStore.getState().drafts[threadId]).toBeUndefined();
   });
