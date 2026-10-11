@@ -18,8 +18,8 @@ export function ProvidersBell() {
   const statuses = useProviderStatusStore((s) => s.statuses);
   const fetchStatus = useProviderStatusStore((s) => s.fetch);
   const rows = deriveProviderBellRows(statuses, new Date());
-  // A signed-out row bypasses the cache: users often sign in and leave the terminal open,
-  // so the re-check on closing the sign-in dialog alone would keep a stale "Signed out" row.
+  // A signed-out row bypasses the cache, so a sign-in done outside Mcode clears on the next open
+  // instead of after the 10 minute cache.
   const hasSignedOut = rows.some((row) => row.kind === "signed_out");
   return (
     <Popover

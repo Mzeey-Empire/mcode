@@ -4,8 +4,6 @@ import { closeSignInTerminal } from "./sign-in";
 
 /**
  * Modal that shows the home-scope terminal running a provider sign-in command.
- * It is open exactly while the home scope holds a terminal, and closing it
- * kills that terminal and re-checks provider status.
  */
 export function SignInTerminalDialog() {
   const open = useHomeTerminalPresented();

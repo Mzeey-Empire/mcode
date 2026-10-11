@@ -48,7 +48,6 @@ function visiblePanelFor(scopeId: string): { workspaceId: string; panelThreadId:
 
 type AttachTarget = { readonly workspaceId: string; readonly panelThreadId: string | undefined } | "home";
 
-/** The home scope shows in the sign-in dialog, so it needs no open right panel. */
 function attachTargetFor(scopeId: string): AttachTarget | null {
   if (scopeId === HOME_TERMINAL_SCOPE_ID) return "home";
   return visiblePanelFor(scopeId);
@@ -61,7 +60,7 @@ function attachTargetFor(scopeId: string): AttachTarget | null {
  * requests cannot exceed the session cap.
  *
  * @param scopeId - A thread id, a workspace id for the threadless shell, or the home scope id.
- * @param onAttached - Runs with the new PTY id once its tab is in the panel.
+ * @param onAttached - Runs with the new PTY id once its tab is attached.
  */
 export function createTerminalForScope(scopeId: string, onAttached?: (ptyId: string) => void): void {
   if (creationInFlight.has(scopeId)) return;

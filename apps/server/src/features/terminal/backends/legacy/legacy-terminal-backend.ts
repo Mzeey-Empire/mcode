@@ -56,7 +56,6 @@ export class LegacyTerminalBackend extends TerminalBackend {
     }, replacesPtyId);
   }
 
-  /** The home scope has no workspace, so it launches with the global default profile. */
   private profileWorkspaceId(scopeId: string): string | undefined {
     if (scopeId === HOME_TERMINAL_SCOPE_ID) return undefined;
     return this.threads.findById(scopeId)?.workspace_id ?? scopeId;
