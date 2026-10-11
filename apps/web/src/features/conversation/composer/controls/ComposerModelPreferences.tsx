@@ -1,9 +1,5 @@
-import { useState } from "react";
-import { Check, ChevronDown, Zap } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Check, Zap } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
 import { supports1MContextWindow, supportsThinkingToggle } from "@/lib/model-registry";
 import { useThreadStore } from "@/stores/threadStore";
@@ -21,7 +17,6 @@ export interface ComposerModelPreferenceDefaults {
 export interface ComposerModelPreferencesProps {
   threadId?: string;
   branchFromMessageId?: string;
-  show: boolean;
   selection: ComposerAgentSelection;
   defaults: ComposerModelPreferenceDefaults;
   reasoningLevels: ReasoningLevel[];
@@ -137,43 +132,36 @@ function getModelPreferenceState(
   };
 }
 
-function ComposerModelPreferencesTrigger({ state }: { state: ModelPreferenceState }) {
+/** Whether the selected model exposes any reasoning, context window, Thinking, or Fast setting. */
+export function hasModelPreferences(
+  selection: ComposerAgentSelection,
+  defaults: ComposerModelPreferenceDefaults,
+  reasoningLevels: ReasoningLevel[],
+): boolean {
+  return getModelPreferenceState(selection, defaults, reasoningLevels).canShowPreferences;
+}
+
+function ComposerModelPreferenceSummaryContent({ state }: { state: ModelPreferenceState }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <PopoverTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="compact"
-                className="gap-1.5 text-muted transition-colors hover:bg-hover/40 hover:text-ink"
-              >
-                {state.hasCodexFast && state.codexFastMode && (
-                  <Zap
-                    size={12}
-                    aria-hidden="true"
-                    data-testid="composer-fast-mode-icon"
-                    className="shrink-0 text-ink/80"
-                  />
-                )}
-                <span className="text-sm">{state.preferenceLabel}</span>
-                {state.reasoningLevels.length > 0 && state.has1M && state.contextWindow === "1m" && (
-                  <span
-                    data-testid="composer-1m-badge"
-                    className="rounded-sm bg-ink/5 px-1 py-px text-xs font-medium uppercase tracking-wide text-ink/80 ring-1 ring-inset ring-ink/10 tabular-nums"
-                  >
-                    1M
-                  </span>
-                )}
-                <ChevronDown size={11} />
-              </Button>
-            }
-          />
-        }
-      />
-      <TooltipContent>{state.preferenceTooltip}</TooltipContent>
-    </Tooltip>
+    <>
+      {state.hasCodexFast && state.codexFastMode && (
+        <Zap
+          size={12}
+          aria-hidden="true"
+          data-testid="composer-fast-mode-icon"
+          className="size-3 shrink-0 text-ink/80"
+        />
+      )}
+      <span data-testid="composer-model-preference-label">{state.preferenceLabel}</span>
+      {state.reasoningLevels.length > 0 && state.has1M && state.contextWindow === "1m" && (
+        <span
+          data-testid="composer-1m-badge"
+          className="rounded-sm bg-ink/5 px-1 py-px text-xs font-medium uppercase tracking-wide text-ink/80 ring-1 ring-inset ring-ink/10 tabular-nums"
+        >
+          1M
+        </span>
+      )}
+    </>
   );
 }
 
@@ -327,47 +315,36 @@ function ComposerFastModeOption({
   );
 }
 
-function ComposerModelPreferenceMenu({
-  state,
-  actionProps,
-}: {
-  state: ModelPreferenceState;
-  actionProps: ModelPreferenceActionProps;
-}) {
-  return (
-    <PopoverContent side="top" align="start" className="w-auto min-w-[224px] p-1">
-      <ComposerReasoningOptions state={state} actionProps={actionProps} />
-      <ComposerContextWindowOptions state={state} actionProps={actionProps} />
-      <ComposerThinkingOptions state={state} actionProps={actionProps} />
-      <ComposerFastModeOption state={state} actionProps={actionProps} />
-    </PopoverContent>
-  );
+/** The selected model's preference summary for the model trigger, such as "High" or "Fast"; null when the model has none. */
+export function ComposerModelPreferenceSummary({
+  selection,
+  defaults,
+  reasoningLevels,
+}: Pick<ComposerModelPreferencesProps, "selection" | "defaults" | "reasoningLevels">) {
+  const state = getModelPreferenceState(selection, defaults, reasoningLevels);
+  if (!state.canShowPreferences) return null;
+  return <ComposerModelPreferenceSummaryContent state={state} />;
 }
 
-/** Owns the model preference menu and persists its selected thread settings. */
-export function ComposerModelPreferences({
+/** The selected model's settings (reasoning, context window, Thinking, Fast), persisted to the thread as they change. */
+export function ComposerModelPreferenceSettings({
   threadId,
   branchFromMessageId,
-  show,
   selection,
   defaults,
   reasoningLevels,
   onSelectionChange,
 }: ComposerModelPreferencesProps) {
-  const [showPreferences, setShowPreferences] = useState(false);
   const state = getModelPreferenceState(selection, defaults, reasoningLevels);
+  if (!state.canShowPreferences) return null;
   const actionProps = { threadId, branchFromMessageId, selection, defaults, onSelectionChange };
 
-  if (!state.canShowPreferences && showPreferences) {
-    setShowPreferences(false);
-  }
-
-  if (!show || !state.canShowPreferences) return null;
-
   return (
-    <Popover open={showPreferences} onOpenChange={setShowPreferences}>
-      <ComposerModelPreferencesTrigger state={state} />
-      <ComposerModelPreferenceMenu state={state} actionProps={actionProps} />
-    </Popover>
+    <div role="group" aria-label={state.preferenceTooltip}>
+      <ComposerReasoningOptions state={state} actionProps={actionProps} />
+      <ComposerContextWindowOptions state={state} actionProps={actionProps} />
+      <ComposerThinkingOptions state={state} actionProps={actionProps} />
+      <ComposerFastModeOption state={state} actionProps={actionProps} />
+    </div>
   );
 }
