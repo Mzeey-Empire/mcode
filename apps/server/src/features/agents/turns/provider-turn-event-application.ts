@@ -293,7 +293,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   }
 
   private applyNarrativeEvent(providerId: ProviderId, event: AgentEvent): EventApplicationResult {
-    return this.applyAssistantOutputEvent(providerId, event) ?? this.applyNarrativeStructureEvent(event);
+    return this.applyAssistantOutputEvent(providerId, event) ?? this.applyNarrativeStructureEvent(providerId, event);
   }
 
   private applyAssistantOutputEvent(providerId: ProviderId, event: AgentEvent): EventApplicationResult {
@@ -309,12 +309,12 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     }
   }
 
-  private applyNarrativeStructureEvent(event: AgentEvent): EventApplicationResult {
+  private applyNarrativeStructureEvent(providerId: ProviderId, event: AgentEvent): EventApplicationResult {
     switch (event.type) {
       case AgentEventType.ApprovalDecided:
         this.narrative.recordApproval(event);
         return true;
-      case AgentEventType.ToolUse: return this.applyToolUse(event);
+      case AgentEventType.ToolUse: return this.applyToolUse(providerId, event);
       case AgentEventType.HookStarted: return this.applyHookStarted(event);
       case AgentEventType.HookCompleted: return this.applyHookCompleted(event);
       case AgentEventType.ToolResult: return this.applyToolResult(event);
@@ -397,9 +397,9 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     return event.isFinalResponse === false ? this.classifyUnclassifiedAssistantTextAsNarration(event) : true;
   }
 
-  private applyToolUse(event: Extract<AgentEvent, { type: "toolUse" }>): boolean {
+  private applyToolUse(providerId: ProviderId, event: Extract<AgentEvent, { type: "toolUse" }>): boolean {
     this.narrative.closeOpenThought(event.threadId);
-    const parentToolCallId = this.narrative.bufferToolCall(event.threadId, event);
+    const parentToolCallId = this.narrative.bufferToolCall(event.threadId, event, providerId);
     this.featureEffects.subagentToolChanged(event.threadId, event.toolCallId);
     this.observePersistence(event.threadId, this.featureEffects.onToolUse(event.threadId, { ...event, parentToolCallId }), "Task request persistence");
     if (!this.runtime.consumeEarlyFileEffect(event)) this.fileEffects.observeToolUse(event);

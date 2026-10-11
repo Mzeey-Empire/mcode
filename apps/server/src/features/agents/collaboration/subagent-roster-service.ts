@@ -49,6 +49,7 @@ export class SubagentRosterService {
     @inject("IProviderRegistry") private readonly providers: IProviderRegistry,
     @inject(NarrativeStore) private readonly narrative: NarrativeStore,
     @inject("Database") private readonly db: Database,
+    @inject("SubagentReporting", { isOptional: true }) private readonly reporting = SUBAGENT_REPORTING,
   ) {}
 
   /** Resolve controls through retained family identities before their saved rows exist. */
@@ -82,7 +83,7 @@ export class SubagentRosterService {
     for (const call of roots) {
       const provider = ProviderIdSchema.safeParse(call.provider).data ?? fallback;
       const steps = this.stepsFor(call.toolCallId, calls, byId);
-      const entry = narrativeRosterEntry(rootEvidence(call, calls, byId), steps.length, provider, SUBAGENT_REPORTING[provider]?.childSteps ?? false);
+      const entry = narrativeRosterEntry(rootEvidence(call, calls, byId), steps.length, provider, this.reporting[provider]?.childSteps ?? false);
       entries.set(entry.id, entry);
     }
     for (const child of children) {

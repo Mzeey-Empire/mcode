@@ -335,22 +335,25 @@ misattributed to `a4`.
 
 **The rule.** The Claude Agent SDK puts `parent_tool_use_id` on every stream
 message that originates inside a sub-agent. **That is the authoritative
-source.** The agent-call stack is only a fallback for code paths where the
-SDK doesn't surface this field (older paths, edge cases).
+source.** The agent-call stack is a fallback when a provider omits the parent,
+except for providers that always send explicit parents (Copilot, OpenCode).
+Copilot uses SDK `parentToolCallId`; OpenCode uses child-session routing.
+Their unparented tools remain top-level even while an Agent is running.
 
 **Where this is wired:**
 
 - `claude-provider.ts` reads `anyMsg.parent_tool_use_id` and forwards it as
   `parentToolCallId` on the `ToolUse` event.
-- `index.ts` checks `if (event.parentToolCallId)` first — if set,
-  leave it. Only falls back to `narrativeStore.getCurrentParentToolCallId`
-  when the SDK omitted it.
-- `narrative-turn-state.ts bufferToolCall` does the same dance for the persistence
-  buffer: SDK value wins, stack is a fallback. (AgentService's `bufferToolCall`
-  is a thin wrapper that delegates here, then persists TodoWrite task state.)
+- `ProviderTurnEventApplication` passes the ingress provider identity to
+  `narrativeStore.bufferToolCall` and uses the attributed parent for task state.
+- `narrative-turn-state.ts bufferToolCall` prefers the explicit provider parent.
+  Non-Agent calls can use `getCurrentParentToolCallId` as a fallback unless the
+  provider is in `PROVIDERS_WITH_EXPLICIT_TOOL_PARENTS`. An omitted provider
+  keeps the fallback enabled.
 
 **Stack fallback contract:** `getCurrentParentToolCallId` does **not** return
-`stack[stack.length - 1]`. It only returns a parent when **exactly one** Agent
+`stack[stack.length - 1]`. For providers that are not opted out, including an
+omitted provider, it only returns a parent when **exactly one** Agent
 ID on `agentCallStack` still has `status: "running"` in the in-memory turn
 buffer. Otherwise it returns `undefined` so coordinator tool calls after
 parallel subagents do not inherit the last subagent as their parent. Nested
@@ -541,8 +544,9 @@ verification via the running app is required.
 If you change something and one of these stops being true, you are about to
 ship a bug:
 
-1. Every `ToolUse` event broadcast to the client carries `parentToolCallId`
-   (either from SDK or from the agentCallStack fallback).
+1. Explicit `parentToolCallId` values survive tool attribution. Non-Agent calls
+   may infer a missing parent from the agent-call stack, except for providers
+   that always send explicit parents (Copilot, OpenCode).
 2. `agentCallStack` is mutated only by `bufferToolCall` (push on Agent),
    `updateBufferedToolCallOutput` (pop on Agent result), and the
    `Message`-event clear at end of turn.

@@ -1183,15 +1183,35 @@ describe("NarrativeStore write seam (server-side traps)", () => {
         .toBe(encodeSubagentAliasDetailTarget("native-late-agent"));
     });
 
-    it("falls back to the only running Agent when the SDK omits the parent", () => {
+    it.each(["claude", "cursor", "devin", undefined] as const)("falls back to the only running Agent when %s omits the parent", (providerId) => {
       store.beginTurn(THREAD);
       store.resetTurnCounters(THREAD);
       store.bufferToolCall(THREAD, toolUse("solo", "Agent"));
 
-      // SDK omitted parentToolCallId; exactly one Agent is running → attributed.
-      expect(store.getCurrentParentToolCallId(THREAD)).toBe("solo");
-      const childParent = store.bufferToolCall(THREAD, toolUse("child", "Read"));
+      // No explicit parentToolCallId; exactly one Agent is running.
+      expect(store.getCurrentParentToolCallId(THREAD, providerId)).toBe("solo");
+      const childParent = store.bufferToolCall(THREAD, toolUse("child", "Read"), providerId);
       expect(childParent).toBe("solo");
+    });
+
+    it.each(["copilot", "opencode"] as const)("keeps %s parent tools top-level while an Agent runs", async (providerId) => {
+      seedAssistantMessage("m1", "", 1);
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.bufferToolCall(THREAD, toolUse("solo", "Agent"), providerId);
+
+      expect(store.getCurrentParentToolCallId(THREAD, providerId)).toBeUndefined();
+      expect(store.bufferToolCall(THREAD, toolUse("parent-read", "Read"), providerId)).toBeUndefined();
+      expect(store.bufferToolCall(THREAD, toolUse("child-read", "Read", "solo"), providerId)).toBe("solo");
+      expect(store.getBufferedToolCalls(THREAD).map((tool) => [tool.toolCallId, tool.parentToolCallId])).toEqual([
+        ["solo", undefined], ["parent-read", undefined], ["child-read", "solo"],
+      ]);
+
+      await store.persistNarrative(THREAD, "m1", "", "completed");
+      expect(new ToolCallRecordRepo(db, agentStorageTestWriter(db)).listByMessage("m1")
+        .map((tool) => [tool.id, tool.parent_tool_call_id])).toEqual([
+        ["solo", null], ["parent-read", null], ["child-read", "solo"],
+      ]);
     });
 
     it("replaces an inferred duplicate parent with explicit provider attribution and retains it", async () => {
@@ -1199,13 +1219,13 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       store.beginTurn(THREAD);
       store.resetTurnCounters(THREAD);
       store.bufferToolCall(THREAD, toolUse("agent-a", "Agent"));
-      expect(store.bufferToolCall(THREAD, toolUse("child-x", "Read"))).toBe("agent-a");
+      expect(store.bufferToolCall(THREAD, toolUse("child-x", "Read"), "claude")).toBe("agent-a");
 
       store.bufferToolCall(THREAD, toolUse("agent-b", "Agent"));
-      expect(store.bufferToolCall(THREAD, toolUse("child-x", "Read", "agent-b"))).toBe("agent-b");
+      expect(store.bufferToolCall(THREAD, toolUse("child-x", "Read", "agent-b"), "claude")).toBe("agent-b");
 
       store.updateBufferedToolCallOutput(THREAD, "agent-b", "done", false);
-      expect(store.bufferToolCall(THREAD, toolUse("child-x", "Read"))).toBe("agent-b");
+      expect(store.bufferToolCall(THREAD, toolUse("child-x", "Read"), "claude")).toBe("agent-b");
       store.updateBufferedToolCallOutput(THREAD, "child-x", "read", false);
       await store.persistNarrative(THREAD, "m1", "", "completed");
 
@@ -1223,8 +1243,8 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       store.bufferToolCall(THREAD, toolUse("a1", "Agent"));
       store.bufferToolCall(THREAD, toolUse("a2", "Agent"));
 
-      expect(store.getCurrentParentToolCallId(THREAD)).toBeUndefined();
-      const childParent = store.bufferToolCall(THREAD, toolUse("child", "Read"));
+      expect(store.getCurrentParentToolCallId(THREAD, "claude")).toBeUndefined();
+      const childParent = store.bufferToolCall(THREAD, toolUse("child", "Read"), "claude");
       expect(childParent).toBeUndefined();
     });
   });
@@ -1237,19 +1257,19 @@ describe("NarrativeStore write seam (server-side traps)", () => {
 
       // A sub-agent streams text mid-flight; the fallback parent must survive.
       store.openOrExtendThought(THREAD, "thinking out loud");
-      expect(store.getCurrentParentToolCallId(THREAD)).toBe("solo");
-      expect(store.bufferToolCall(THREAD, toolUse("child", "Read"))).toBe("solo");
+      expect(store.getCurrentParentToolCallId(THREAD, "claude")).toBe("solo");
+      expect(store.bufferToolCall(THREAD, toolUse("child", "Read"), "claude")).toBe("solo");
     });
 
     it("pops the Agent from the stack on its toolResult", () => {
       store.beginTurn(THREAD);
       store.resetTurnCounters(THREAD);
       store.bufferToolCall(THREAD, toolUse("solo", "Agent"));
-      expect(store.getCurrentParentToolCallId(THREAD)).toBe("solo");
+      expect(store.getCurrentParentToolCallId(THREAD, "claude")).toBe("solo");
 
       store.updateBufferedToolCallOutput(THREAD, "solo", "done", false);
       // Agent finished → no running Agent → coordinator tools do not inherit it.
-      expect(store.getCurrentParentToolCallId(THREAD)).toBeUndefined();
+      expect(store.getCurrentParentToolCallId(THREAD, "claude")).toBeUndefined();
     });
 
     it("persists tool output truncation metadata", async () => {
@@ -1280,7 +1300,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       store.bufferToolCall(THREAD, toolUse("a2", "Agent"));
 
       store.clearAgentStackOnMessage(THREAD);
-      expect(store.getCurrentParentToolCallId(THREAD)).toBeUndefined();
+      expect(store.getCurrentParentToolCallId(THREAD, "claude")).toBeUndefined();
     });
   });
 

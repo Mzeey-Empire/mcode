@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@mcode/contracts";
+import { createSubagentPresentation, type AgentEvent } from "@mcode/contracts";
 
 /**
  * SSE envelope accepted in both wrapped and flat shapes.
@@ -24,6 +24,7 @@ export interface OpenCodeMappedOutput {
 
 interface MapperContext {
   threadId: string;
+  parentToolCallId?: string;
   turnExecutionId?: string;
   /** Model requested by Mcode before the upstream reroute signal. */
   requestedModel?: string;
@@ -214,19 +215,31 @@ function toolInputOf(state: Record<string, unknown> | undefined): Record<string,
 }
 
 function mapToolRunning(toolCallId: string, toolName: string, state: Record<string, unknown> | undefined, ctx: MapperContext): OpenCodeMappedOutput {
+  const toolInput = toolInputOf(state);
+  if (toolName === "Agent") {
+    toolInput.subagentType = toolInput.subagent_type;
+    const metadata = isRecord(state?.metadata) ? state.metadata : {};
+    const model = isRecord(metadata.model) ? metadata.model : {};
+    toolInput.model = boundedString(model.modelID, MAX_IDENTIFIER_CHARS);
+  }
   return {
     disposition: "mapped",
     events: [withExecution({
-      type: "toolUse", threadId: ctx.threadId, toolCallId, toolName, toolInput: toolInputOf(state),
+      type: "toolUse", threadId: ctx.threadId, toolCallId, toolName, toolInput,
+      ...(ctx.parentToolCallId ? { parentToolCallId: ctx.parentToolCallId } : {}),
+      ...(toolName === "Agent" ? { subagentPresentation: createSubagentPresentation(toolInput, toolCallId) } : {}),
     } satisfies AgentEvent, ctx)],
   };
 }
 
-function mapToolCompleted(toolCallId: string, state: Record<string, unknown> | undefined, ctx: MapperContext): OpenCodeMappedOutput {
+function mapToolCompleted(toolCallId: string, state: Record<string, unknown> | undefined, ctx: MapperContext, toolName: string): OpenCodeMappedOutput {
+  const output = boundText(state?.output);
   return {
     disposition: "mapped",
     events: [withExecution({
-      type: "toolResult", threadId: ctx.threadId, toolCallId, output: boundText(state?.output), isError: false,
+      type: "toolResult", threadId: ctx.threadId, toolCallId,
+      output: toolName === "Agent" ? (/<task_result>([\s\S]*?)(?:<\/task_result>|$)/.exec(output)?.[1]?.trim() ?? output) : output,
+      isError: false, ...(ctx.parentToolCallId ? { parentToolCallId: ctx.parentToolCallId } : {}),
     } satisfies AgentEvent, ctx)],
   };
 }
@@ -237,6 +250,7 @@ function mapToolFailed(toolCallId: string, state: Record<string, unknown> | unde
     events: [withExecution({
       type: "toolResult", threadId: ctx.threadId, toolCallId,
       output: boundText(typeof state?.error === "string" ? state.error : "Tool failed"), isError: true,
+      ...(ctx.parentToolCallId ? { parentToolCallId: ctx.parentToolCallId } : {}),
     } satisfies AgentEvent, ctx)],
   };
 }
@@ -246,7 +260,7 @@ function mapToolPart(part: Record<string, unknown>, ctx: MapperContext): OpenCod
   const status = typeof state?.status === "string" ? state.status : "pending";
   const toolCallId = toolCallIdOf(part);
   const toolName = canonicalToolName(part.tool);
-  if (status === "completed") return mapToolCompleted(toolCallId, state, ctx);
+  if (status === "completed") return mapToolCompleted(toolCallId, state, ctx, toolName);
   if (status !== "pending" && status !== "running") return mapToolFailed(toolCallId, state, ctx);
   return mapToolRunning(toolCallId, toolName, state, ctx);
 }
@@ -347,6 +361,7 @@ function mapNextTextDelta(properties: Record<string, unknown>, ctx: MapperContex
 
 function canonicalToolName(value: unknown): string {
   const name = boundedString(value, MAX_TOOL_NAME_CHARS) ?? "unknown";
+  if (name === "task") return "Agent";
   // The task-list reducer keys on TodoWrite, while OpenCode uses lowercase tool names.
   return name === "todowrite" ? "TodoWrite" : name;
 }

@@ -100,6 +100,7 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       type: z.literal(AgentEventType.ToolResult),
       threadId: z.string(),
       toolCallId: z.string(),
+      parentToolCallId: z.string().optional(),
       output: z.string(),
       isError: z.boolean(),
       /** Process exit code when the provider reports one for a shell command. */
@@ -220,6 +221,7 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       /** Heartbeat emitted while a tool is executing, carrying elapsed wall-clock time. */
       type: z.literal(AgentEventType.ToolProgress),
       threadId: z.string(),
+      parentToolCallId: z.string().optional(),
       /** Identifier of the tool call this progress event belongs to. */
       toolCallId: z.string(),
       /** Name of the tool currently executing. */
