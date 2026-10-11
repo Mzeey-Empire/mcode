@@ -11,6 +11,8 @@ import { SettingsService } from "../../settings/settings-service.js";
 import { ProviderRateLimitStore } from "./provider-rate-limit-store.js";
 
 const LIST_CACHE_MS = 10 * 60 * 1000;
+// Generous enough for a cold SDK start; a check past it would otherwise hold every caller of refresh().
+const CHECK_TIMEOUT_MS = 30_000;
 const UNKNOWN_AUTH: ProviderAuth = { state: "unknown" };
 
 type StatusSource = Pick<IAgentProvider, "id" | "describeStatus">;
@@ -74,7 +76,7 @@ export class ProviderStatusService {
   private async describeAuth(provider: StatusSource): Promise<ProviderAuth> {
     if (!provider.describeStatus) return UNKNOWN_AUTH;
     try {
-      return (await provider.describeStatus()).auth;
+      return (await withTimeout(provider.describeStatus(), CHECK_TIMEOUT_MS)).auth;
     } catch (error) {
       // Only the error name is logged: provider messages can quote CLI output holding an account email.
       logger.warn("Provider status check failed", {
@@ -106,6 +108,22 @@ export class ProviderStatusService {
   private enabledProviders(): StatusSource[] {
     const enabled = this.settings.get().provider.enabled;
     return this.registry.resolveAll().filter((provider) => enabled[provider.id]);
+  }
+}
+
+class StatusCheckTimeoutError extends Error {
+  override name = "StatusCheckTimeoutError";
+}
+
+async function withTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new StatusCheckTimeoutError()), timeoutMs);
+  });
+  try {
+    return await Promise.race([operation, deadline]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

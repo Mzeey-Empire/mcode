@@ -120,6 +120,23 @@ describe("ProviderStatusService refresh", () => {
     expect(statuses.map((status) => status.auth)).toEqual([{ state: "unknown" }, { state: "unknown" }]);
   });
 
+  it("gives up on a hung check after 30 seconds so the refresh still settles", async () => {
+    vi.useFakeTimers();
+    const service = makeService({ claude: true, copilot: true }, [
+      { id: "claude", describeStatus: async () => SIGNED_IN },
+      { id: "copilot", describeStatus: () => new Promise<ProviderStatusFacts>(() => {}) },
+    ]);
+
+    const pending = service.listStatus();
+    await vi.advanceTimersByTimeAsync(30_000);
+    const statuses = await pending;
+
+    expect(statuses.map((status) => [status.providerId, status.auth.state])).toEqual([
+      ["claude", "signed_in"],
+      ["copilot", "unknown"],
+    ]);
+  });
+
   it("serves the cache for 10 minutes unless forced", async () => {
     vi.useFakeTimers({ now: new Date("2026-01-01T12:00:00Z") });
     const describeStatus = vi.fn(async () => SIGNED_IN);
