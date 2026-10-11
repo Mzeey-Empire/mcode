@@ -91,6 +91,21 @@ describe("recoverParentNarrative", () => {
     expect(settledPatch.toolCalls).toEqual([expect.objectContaining({ id: "agent-bg", isComplete: true, output: "Survey done" })]);
   });
 
+  it("keeps a background call's steps running after its turn ends", () => {
+    const held = { ...tool, id: "agent-bg", tool_name: "Agent", status: "running", background: true, completed_at: null };
+    const step = { ...tool, id: "bash-step", tool_name: "Bash", parent_tool_call_id: "agent-bg", status: "running", completed_at: null };
+    const state = turnState("Completed");
+    state.items.tool = { ...state.items.tool, payload: { projection: "toolCall", record: held } };
+    state.items.step = { ...state.items.tool, id: "step", payload: { projection: "toolCall", record: step } };
+
+    const patch = recoverParentNarrative(THREAD, state, finishedRecord());
+
+    expect(patch.toolCalls).toEqual([
+      expect.objectContaining({ id: "agent-bg", isComplete: false }),
+      expect.objectContaining({ id: "bash-step", isComplete: false }),
+    ]);
+  });
+
   it("leaves the cache alone while the turn is still running", () => {
     const record = finishedRecord({ runtimePhase: "idle" });
 
