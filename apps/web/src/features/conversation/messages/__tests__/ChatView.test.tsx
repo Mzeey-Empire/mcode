@@ -323,6 +323,7 @@ function defaultWorkspaceState(overrides: Partial<{
     setPendingNewThread: vi.fn(),
     updateThreadTitle: overrides.updateThreadTitle ?? vi.fn().mockResolvedValue(undefined),
     recoverPreparingThreads: vi.fn().mockResolvedValue(undefined),
+    adoptPreparingThread: vi.fn().mockResolvedValue(undefined),
     retryPreparingThread: vi.fn(),
     dismissPreparingThread: vi.fn(),
     loadWorktrees: vi.fn(),
@@ -1191,8 +1192,8 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.queryByTestId("chat-message-stage")).not.toBeInTheDocument();
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Keep thread" }));
-    expect(workspace.loadThreads).toHaveBeenCalledWith(startupThread.workspace_id);
-    expect(useThreadStartupStore.getState().dismissedStartupIds.has(cancelledStartupId)).toBe(true);
+    expect(workspace.adoptPreparingThread).toHaveBeenCalledWith(startupThread.id);
+    await vi.waitFor(() => expect(useThreadStartupStore.getState().dismissedStartupIds.has(cancelledStartupId)).toBe(true));
   });
 
   it("moves the first message to a new-thread draft when a startup stops before setup begins", async () => {

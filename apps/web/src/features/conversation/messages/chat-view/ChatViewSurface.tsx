@@ -146,14 +146,25 @@ function EditMessageAction({ thread, startup, pendingStartup }: {
 
 /**
  * Keep thread for a cancelled startup. A thread this client was still creating shows as a local
- * placeholder, so keeping it also loads the durable thread the server made in its place.
+ * placeholder under its own id, so keeping it first swaps in the durable thread the server made.
  */
 function KeepThreadAction({ thread, startup }: { readonly thread: WorkspaceThread; readonly startup: ThreadStartup }) {
+  const [keeping, setKeeping] = useState(false);
   const keep = () => {
-    useThreadStartupStore.getState().dismissStartup(startup.startupId);
-    if (thread.clientError) void useWorkspaceStore.getState().loadThreads(thread.workspace_id);
+    if (!thread.clientError) {
+      useThreadStartupStore.getState().dismissStartup(startup.startupId);
+      return;
+    }
+    setKeeping(true);
+    useWorkspaceStore.getState().adoptPreparingThread(thread.id).then(
+      () => useThreadStartupStore.getState().dismissStartup(startup.startupId),
+      (error: unknown) => {
+        setKeeping(false);
+        useToastStore.getState().show({ kind: "failed", title: "Could not keep the thread", meta: error instanceof Error ? error.message : undefined });
+      },
+    );
   };
-  return <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} onClick={keep}>Keep thread</Button>;
+  return <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} loading={keeping} onClick={keep}>Keep thread</Button>;
 }
 
 function AgentRetryAction({ threadId }: { readonly threadId: string }) {

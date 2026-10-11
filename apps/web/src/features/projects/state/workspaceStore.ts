@@ -681,6 +681,11 @@ interface WorkspaceState {
   retryPreparingThread: (placeholderId: string) => Promise<Thread>;
   /** Resolve in-memory placeholders against authoritative startup records after reconnect. */
   recoverPreparingThreads: () => Promise<void>;
+  /**
+   * Replace a failed placeholder with the durable thread its startup made, and select it when the
+   * placeholder was selected. Rejects when the startup has no thread the server can return.
+   */
+  adoptPreparingThread: (placeholderId: string) => Promise<Thread>;
   /** Remove a failed or abandoned placeholder row and drop selection when it was active. */
   dismissPreparingThread: (placeholderId: string) => void;
   /**
@@ -1589,6 +1594,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     creationRetries.set(placeholderId, operation);
     void operation.finally(() => creationRetries.delete(placeholderId)).catch(() => {});
     return operation;
+  },
+
+  adoptPreparingThread: async (placeholderId) => {
+    const recovered = await reconcilePendingCreation(placeholderId);
+    if (typeof recovered === "string") throw new Error("The server has no thread for this startup yet");
+    return recovered;
   },
 
   recoverPreparingThreads: async () => {
