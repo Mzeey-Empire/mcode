@@ -81,6 +81,7 @@ import { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progr
 import { PostTerminalHookCompletionEffect } from "../turns/post-terminal-hook-completion-effect.js";
 import { ThreadCreationCoordinator } from "../turns/thread-creation-coordinator.js";
 import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
+import { ThreadStartupFetchDecisions } from "../../thread-startup/thread-startup-fetch-decisions.js";
 import { ProviderSessionCursorPersistence } from "../turns/provider-session-cursor-persistence.js";
 import { ProviderTurnEventApplication } from "../turns/provider-turn-event-application.js";
 import {
@@ -280,6 +281,8 @@ export function registerAgentServices(container: DependencyContainer): void {
       () => c.resolve(ThreadService),
       c.resolve(TURN_ADMISSION_DISPATCH_COORDINATOR),
       c.resolve(GitRepositoryService),
+      c.resolve(WorkspaceRepo),
+      c.resolve(ThreadStartupFetchDecisions),
       () => c.resolve(ThreadBranchingService),
       () => c.resolve(PlanTurnService),
       () => c.resolve(ThreadStartupService),

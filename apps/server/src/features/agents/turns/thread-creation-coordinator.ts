@@ -18,7 +18,9 @@ import type {
 
 import { ThreadService } from "../../thread-control/index.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
-import { GitRepositoryService } from "../../projects/git/git-repository-service.js";
+import { GitRepositoryService, OriginFetchError } from "../../projects/git/git-repository-service.js";
+import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
+import { ThreadStartupFetchDecisions } from "../../thread-startup/thread-startup-fetch-decisions.js";
 import { ThreadBranchingService, type BranchedThreadLifecycle } from "../../projects/worktrees/thread-branching-service.js";
 import { PlanTurnService } from "../planning/plan-turn-service.js";
 import { ThreadStartupConflictError, ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
@@ -53,6 +55,8 @@ export interface CreateThreadForTurnInput {
   title: string;
   mode: "direct" | "worktree";
   branch: string;
+  /** Commit-ish used for a detached checkout while preserving branch as its review base. */
+  startPoint?: string;
   pullRequestNumber?: number;
   worktreeBranchMode?: "branchless" | "named";
   provider: ProviderId;
@@ -76,6 +80,7 @@ interface BranchedInitialTurnParams {
   approvalReviewMode?: ApprovalReviewMode;
   mode: "direct" | "worktree";
   branch: string;
+  startFromOrigin?: boolean;
   pullRequestNumber?: number;
   worktreeBranchMode?: "branchless" | "named";
   existingWorktreePath?: string;
@@ -107,6 +112,13 @@ class StartupCancelledError extends Error {
   }
 }
 
+function initialBranch(command: CreateAndSendCommand): string {
+  if (command.mode === "worktree" && !command.branch?.trim()) {
+    throw new Error("Worktree mode requires a non-empty branch");
+  }
+  return command.branch ?? "main";
+}
+
 /** Owns persistence and worktree provisioning for a thread before first-turn admission. */
 @injectable()
 export class ThreadCreationCoordinator {
@@ -115,8 +127,10 @@ export class ThreadCreationCoordinator {
   constructor(
     @inject(ThreadRepo) private readonly threads: ThreadRepo,
     private readonly threadService: () => ThreadService,
-    @inject(TURN_ADMISSION_DISPATCH_COORDINATOR) private readonly admissions: TurnAdmissionDispatchCoordinator,
-    private readonly gitRepository: Pick<GitRepositoryService, "fetchBranch">,
+    @inject(TURN_ADMISSION_DISPATCH_COORDINATOR) private readonly admissions: Pick<TurnAdmissionDispatchCoordinator, "admitInitialAutomaticTurn" | "createAttachedExistingWorktreeThread">,
+    private readonly gitRepository: Pick<GitRepositoryService, "fetchBranch" | "fetchOriginTrackingBranch">,
+    @inject(WorkspaceRepo) private readonly workspaces: Pick<WorkspaceRepo, "findById">,
+    @inject(ThreadStartupFetchDecisions) private readonly fetchDecisions: ThreadStartupFetchDecisions,
     private readonly branching?: () => ThreadBranchingService | undefined,
     private readonly plans: () => PlanTurnService | undefined = () => undefined,
     private readonly startups: () => ThreadStartupService | undefined = () => undefined,
@@ -220,7 +234,7 @@ export class ThreadCreationCoordinator {
       permissionMode = "default",
       approvalReviewMode,
       mode = "direct",
-      branch = "main",
+      startFromOrigin,
       pullRequestNumber,
       worktreeBranchMode = "branchless",
       existingWorktreePath,
@@ -246,7 +260,7 @@ export class ThreadCreationCoordinator {
       orchestrationMode,
     } = command;
     const params: BranchedInitialTurnParams = {
-      workspaceId, content, model, permissionMode, approvalReviewMode, mode, branch, pullRequestNumber, worktreeBranchMode,
+      workspaceId, content, model, permissionMode, approvalReviewMode, mode, branch: initialBranch(command), startFromOrigin, pullRequestNumber, worktreeBranchMode,
       existingWorktreePath, existingWorktreeBaseBranch, attachments, reasoningLevel,
       provider, interactionMode, parentThreadId, forkedFromMessageId,
       title: titleFrom(displayContent ?? content), maxBudgetUsd, maxTurns,
@@ -261,13 +275,14 @@ export class ThreadCreationCoordinator {
     params: BranchedInitialTurnParams,
     startup?: ThreadStartup,
   ): Promise<CreatedInitialTurn> {
-    const creation = {
+    const startupId = startup?.startupId;
+    const creation: CreateThreadForTurnInput = {
       workspaceId: params.workspaceId,
       title: params.title,
       mode: params.mode,
       branch: params.branch,
       pullRequestNumber: params.pullRequestNumber,
-      worktreeBranchMode: params.worktreeBranchMode,
+      worktreeBranchMode: params.startFromOrigin ? "branchless" : params.worktreeBranchMode,
       provider: params.provider,
       model: params.model,
       permissionMode: params.permissionMode,
@@ -280,14 +295,15 @@ export class ThreadCreationCoordinator {
       devinMode: params.devinMode,
     };
     try {
-      await this.fetchInitialBranch(params, startup?.startupId);
-      const thread = await this.createStandaloneThread(params, creation, startup?.startupId);
-      await this.startManagedSetup(startup?.startupId, startup?.kind);
+      await this.fetchInitialBranch(params, startupId);
+      const startPoint = params.startFromOrigin ? await this.fetchOrigin(params, startupId) : undefined;
+      const thread = await this.createStandaloneThread(params, { ...creation, startPoint }, startupId);
+      await this.startManagedSetup(startupId, startup?.kind);
       const automatic = await this.admitInitialTurn(command, params, thread.id);
-      return this.initialTurnResult(command, params, thread, automatic, startup?.startupId);
+      return this.initialTurnResult(command, params, thread, automatic, startupId);
     } catch (error) {
       if (error instanceof StartupCancelledError || error instanceof DatabaseWriteOutcomeUnknown) throw error;
-      await this.failStartup(startup?.startupId, error);
+      await this.failStartup(startupId, error);
       throw error;
     }
   }
@@ -350,6 +366,45 @@ export class ThreadCreationCoordinator {
       throw cause;
     }
     await this.cancelIfRequested(startupId);
+  }
+
+  private async fetchOrigin(params: BranchedInitialTurnParams, startupId: string | undefined): Promise<string | undefined> {
+    const workspace = this.workspaces.findById(params.workspaceId);
+    if (!workspace) throw new Error(`Workspace not found: ${params.workspaceId}`);
+    if (startupId) await this.startups()?.advance(startupId, "fetch");
+    for (;;) {
+      await this.cancelIfRequested(startupId);
+      try {
+        await this.gitRepository.fetchOriginTrackingBranch(workspace.path, params.branch);
+      } catch (error) {
+        await this.cancelIfRequested(startupId);
+        const startups = this.startups();
+        if (!startupId || !startups) throw error;
+        const decision = await this.waitForFetchDecision(startups, startupId, params.branch, error);
+        await this.cancelIfRequested(startupId);
+        if (decision === "continue") {
+          await startups.skip(startupId, "fetch");
+          await this.cancelIfRequested(startupId);
+          return undefined;
+        }
+        await startups.resume(startupId);
+        continue;
+      }
+      await this.cancelIfRequested(startupId);
+      return `refs/remotes/origin/${params.branch}`;
+    }
+  }
+
+  private waitForFetchDecision(startups: ThreadStartupService, startupId: string, branch: string, error: unknown) {
+    return this.fetchDecisions.wait(startupId, async () => {
+      await startups.block(startupId, {
+        code: "start_from_origin_failed",
+        message: error instanceof OriginFetchError ? error.message : "Could not fetch from origin.",
+        detail: error instanceof OriginFetchError ? `${error.code}: ${error.detail ?? error.message}`.slice(0, 2000) : startupErrorDetail(error),
+        actions: ["retry", "continue"],
+      }, { phase: "fetch", ref: `origin/${branch}`, branch });
+      if (startups.isCancellationRequested(startupId)) this.fetchDecisions.cancel(startupId);
+    });
   }
 
   private async admitInitialTurn(
@@ -429,7 +484,8 @@ export class ThreadCreationCoordinator {
     startupId: string | undefined,
   ): Promise<Thread & { warnings?: string[] }> {
     const created = await this.threadService().create(input.workspaceId, input.title, "worktree", input.branch, {
-      branchless: input.worktreeBranchMode !== "named",
+      branchless: input.startPoint !== undefined || input.worktreeBranchMode !== "named",
+      startPoint: input.startPoint,
       provider: input.provider,
       ...this.managedLifecycle(startupId),
     });
@@ -468,7 +524,8 @@ export class ThreadCreationCoordinator {
       kind: params.existingWorktreePath
         ? "attached-worktree"
         : params.mode === "worktree" ? "managed-worktree" : "direct",
-      fetch: params.pullRequestNumber !== undefined && !params.existingWorktreePath && !params.parentThreadId ? {
+      fetch: params.startFromOrigin ? { ref: `origin/${params.branch}`, branch: params.branch }
+        : params.pullRequestNumber !== undefined && !params.existingWorktreePath && !params.parentThreadId ? {
         ref: `pull/${params.pullRequestNumber}/head`,
         pullRequestNumber: params.pullRequestNumber,
         branch: params.branch,

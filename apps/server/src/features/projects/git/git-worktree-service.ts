@@ -38,7 +38,7 @@ type WorktreeCreationRequest = {
   name: string;
   path: string;
   repoPath: string;
-  options: { branchless?: boolean; baseRef?: string };
+  options: { branchless?: boolean; baseRef?: string; startPoint?: string };
 };
 
 type WorktreeRemovalRequest = {
@@ -88,7 +88,7 @@ export class GitWorktreeService {
     repoPath: string,
     name: string,
     branchName?: string,
-    options: { branchless?: boolean; baseRef?: string } = {},
+    options: { branchless?: boolean; baseRef?: string; startPoint?: string } = {},
   ): Promise<WorktreeInfo & { createdBranch: boolean; warnings: string[] }> {
     const request = this.createWorktreeRequest(repoPath, name, branchName, options);
     const createdBranch = await this.shouldCreateBranch(request);
@@ -200,7 +200,7 @@ export class GitWorktreeService {
     repoPath: string,
     name: string,
     branchName: string | undefined,
-    options: { branchless?: boolean; baseRef?: string },
+    options: { branchless?: boolean; baseRef?: string; startPoint?: string },
   ): WorktreeCreationRequest {
     validateWorktreeName(name);
     if (!NodeFS.existsSync(repoPath)) throw new Error(`Repository path does not exist: ${repoPath}`);
@@ -347,7 +347,7 @@ function normalizeWorktreePath(path: string): string {
 
 function createWorktreeArgs(request: WorktreeCreationRequest, createdBranch: boolean): string[] {
   const args = ["-C", request.repoPath, "worktree", "add"];
-  if (request.options.branchless) return [...args, "--detach", request.path, request.branch];
+  if (request.options.branchless) return [...args, "--detach", request.path, request.options.startPoint ?? request.branch];
   if (!createdBranch) return [...args, request.path, request.branch];
   args.push(request.path, "-b", request.branch);
   if (request.options.baseRef) args.push(request.options.baseRef);

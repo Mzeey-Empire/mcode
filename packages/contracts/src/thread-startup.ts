@@ -231,6 +231,13 @@ export const ThreadStartupCancelInputSchema = lazySchema(() =>
 /** Request to record cancellation intent for one startup. */
 export type ThreadStartupCancelInput = z.infer<ReturnType<typeof ThreadStartupCancelInputSchema>>;
 
+/** Decision that releases a blocked origin fetch before thread creation. */
+export const ThreadStartupResolveInputSchema = lazySchema(() =>
+  z.object({ startupId: z.string().uuid(), action: z.enum(["retry", "continue"]) }).strict(),
+);
+/** Decision that releases a blocked origin fetch before thread creation. */
+export type ThreadStartupResolveInput = z.infer<ReturnType<typeof ThreadStartupResolveInputSchema>>;
+
 function validateThreadStartup(value: ThreadStartup, context: z.RefinementCtx): void {
   const expectedPhases = getThreadStartupPhases(value.kind, value.steps.some((step) => step.phase === "fetch"));
   validateSteps(value, expectedPhases, context);

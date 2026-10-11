@@ -171,6 +171,7 @@ import {
 } from "../pull-requests.js";
 import {
   ThreadStartupCancelInputSchema,
+  ThreadStartupResolveInputSchema,
   ThreadStartupGetInputSchema,
   ThreadStartupListInputSchema,
   ThreadStartupListResultSchema,
@@ -357,8 +358,7 @@ export const SendMessageSchema = lazySchema(() => z.object({
 /** Validated command for sending a message to an existing thread. */
 export type SendMessageInput = z.infer<ReturnType<typeof SendMessageSchema>>;
 
-/** Schema for creating a thread and sending a message in one call. */
-export const CreateAndSendSchema = lazySchema(() =>
+const createAndSendFields = lazySchema(() =>
   z.object({
     workspaceId: z.string(),
     /** Client-generated identity for a persisted startup lifecycle. */
@@ -370,6 +370,8 @@ export const CreateAndSendSchema = lazySchema(() =>
     approvalReviewMode: ApprovalReviewModeSchema.optional(),
     mode: ThreadModeSchema.optional(),
     branch: z.string().optional(),
+    /** Fetch the selected origin branch before creating a new detached worktree. */
+    startFromOrigin: z.boolean().optional(),
     /** Pull request identity used to fetch its head before the thread prepares. */
     pullRequestNumber: z.number().int().positive().optional(),
     worktreeBranchMode: z.enum(["branchless", "named"]).optional(),
@@ -411,14 +413,27 @@ export const CreateAndSendSchema = lazySchema(() =>
     parentThreadId: z.string().optional(),
     /** Fork-point message ID in the parent thread. Defaults to last persisted message. */
     forkedFromMessageId: z.string().optional(),
-  }).refine(
-  (d) => !d.forkedFromMessageId || d.parentThreadId,
-  { message: "forkedFromMessageId requires parentThreadId", path: ["forkedFromMessageId"] },
-  ),
+  }),
 );
 
 /** Validated command for creating a thread and sending its first message. */
-export type CreateAndSendInput = z.infer<ReturnType<typeof CreateAndSendSchema>>;
+export type CreateAndSendInput = z.infer<ReturnType<typeof createAndSendFields>>;
+
+/** Schema for creating a thread and sending a message in one call. */
+export const CreateAndSendSchema: () => z.ZodType<CreateAndSendInput, z.ZodTypeDef, z.input<ReturnType<typeof createAndSendFields>>> = lazySchema(() =>
+  createAndSendFields().refine(
+    (d) => !d.forkedFromMessageId || d.parentThreadId,
+    { message: "forkedFromMessageId requires parentThreadId", path: ["forkedFromMessageId"] },
+  ).refine((d) => d.mode !== "worktree" || Boolean(d.branch?.trim()), {
+    message: "Worktree mode requires a non-empty branch", path: ["branch"],
+  }).superRefine((d, context) => {
+    if (!d.startFromOrigin) return;
+    if (d.mode !== "worktree") context.addIssue({ code: "custom", message: "Start from origin requires worktree mode", path: ["mode"] });
+    if (d.pullRequestNumber !== undefined) context.addIssue({ code: "custom", message: "Start from origin cannot target a pull request", path: ["pullRequestNumber"] });
+    if (d.existingWorktreePath !== undefined) context.addIssue({ code: "custom", message: "Start from origin requires a new worktree", path: ["existingWorktreePath"] });
+    if (d.parentThreadId !== undefined) context.addIssue({ code: "custom", message: "Start from origin cannot branch from a parent thread", path: ["parentThreadId"] });
+  }),
+);
 
 /** Result schema for agent.createAndSend: a Thread, runtime handshake, and optional warnings. */
 export const CreateAndSendResultSchema = lazySchema(() =>
@@ -1078,6 +1093,11 @@ export const WS_METHODS = lazySchema(() => ({
   /** Cancel startup and stop bound managed Project Setup before terminalization. */
   "thread.startup.cancel": {
     params: ThreadStartupCancelInputSchema(),
+    result: ThreadStartupSchema(),
+  },
+  /** Resolve a blocked origin fetch before a thread exists. */
+  "thread.startup.resolve": {
+    params: ThreadStartupResolveInputSchema(),
     result: ThreadStartupSchema(),
   },
   /** Create one external thread-control pairing and return its credential once. */
