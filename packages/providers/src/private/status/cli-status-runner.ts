@@ -19,7 +19,7 @@ export interface CliStatusRunnerOptions {
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 const MAX_OUTPUT_BYTES = 64 * 1024;
-const SHELL_METACHAR_RE = /[;&|`$(){}!<>"'%^\s\n\r]/;
+const SHELL_METACHAR_RE = /[;&|`$(){}!<>"'%^\n\r]/;
 const ANSI_ESCAPE_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g");
 
 /**
@@ -33,7 +33,9 @@ export function createCliStatusRunner(options: CliStatusRunnerOptions): CliStatu
     if (!resolved) return { kind: "failed" };
     const shell = needsWindowsShim(resolved, options.platform);
     if (shell && SHELL_METACHAR_RE.test(resolved)) return { kind: "failed" };
-    return await execStatus(resolved, args, shell, options);
+    if (!shell) return await execStatus(resolved, args, false, options);
+    // One prebuilt command line, because Node deprecates passing args alongside `shell: true` (DEP0190).
+    return await execStatus([`"${resolved}"`, ...args].join(" "), [], true, options);
   };
 }
 
@@ -49,7 +51,8 @@ async function resolveBinary(
 /**
  * npm installs Windows CLIs as `.cmd` shims, which Node can only start through
  * cmd.exe. The arguments are fixed adapter constants and the path is rejected
- * when it holds shell metacharacters, so the shell sees no caller input.
+ * when it holds shell metacharacters, so the shell sees no caller input. The
+ * path is quoted so installs under "Program Files" still start.
  */
 function needsWindowsShim(resolved: string, platform: NodeJS.Platform): boolean {
   return platform === "win32" && /\.(cmd|bat)$/i.test(resolved);
