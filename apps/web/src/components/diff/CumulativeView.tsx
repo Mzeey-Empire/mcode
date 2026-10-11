@@ -6,12 +6,10 @@ interface CumulativeViewProps {
   threadId: string;
   comparison: ReviewComparison;
   cacheVersion: string | number;
-  refreshing: boolean;
-  onRefresh: () => void;
 }
 
-/** Deduplicated file list across all snapshots for the "All" cumulative view. */
-export function CumulativeView({ threadId, comparison, cacheVersion, refreshing, onRefresh }: CumulativeViewProps) {
+/** Deduplicated file list across all snapshots for the All turns view. */
+export function CumulativeView({ threadId, comparison, cacheVersion }: CumulativeViewProps) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <FileList
@@ -20,9 +18,6 @@ export function CumulativeView({ threadId, comparison, cacheVersion, refreshing,
         id={threadId}
         threadId={threadId}
         cacheVersion={cacheVersion}
-        refreshable
-        refreshing={refreshing}
-        onRefresh={onRefresh}
         jumpViewKey="cumulative"
       />
     </div>

@@ -20,7 +20,7 @@ describe("refreshTurnSnapshotsAfterPersist", () => {
       diffRevisionByScope: {},
       rightPanelByThread: {},
       rightPanelFallbackByWorkspace: {},
-      viewMode: "last-turn",
+      viewMode: "turn",
     });
     useWorkspaceStore.setState({
       activeThreadId: THREAD_ID,

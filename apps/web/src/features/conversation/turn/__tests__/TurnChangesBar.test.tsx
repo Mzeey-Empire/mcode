@@ -107,10 +107,10 @@ describe("TurnChangesBar", () => {
     useDiffStore.setState({
       snapshotsByThread: {},
       reviewFileJumpRequest: null,
-      selectedTurnMessageIdByThread: {},
+      selectedTurnByThread: {},
       reviewViewByThread: {},
       reviewViewManuallySelectedByThread: {},
-      viewMode: "last-turn",
+      viewMode: "turn",
     });
   });
 
@@ -181,7 +181,7 @@ describe("TurnChangesBar", () => {
     expect(screen.getByRole("button", { name: "Collapse all folders" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Review all" }));
-    expect(useDiffStore.getState().selectedTurnMessageIdByThread["thread-1"]).toBe("msg-1");
+    expect(useDiffStore.getState().selectedTurnByThread["thread-1"]).toBe("msg-1");
   });
 
   it("hides the collapse-all control when the list has no folders", () => {
@@ -303,7 +303,7 @@ describe("TurnChangesBar", () => {
     expect(row("src/gone.ts")).toHaveTextContent(/^gone\.ts$/);
   });
 
-  it("opens Review on this turn from the header", async () => {
+  it("pins its own turn when opening Review from the latest turn's header", async () => {
     useWorkspaceStore.setState({ activeThreadId: "thread-other", activeWorkspaceId: "workspace-2" });
     seedSnapshots([withEffects([effect("src/a.ts")])]);
     const user = userEvent.setup();
@@ -313,30 +313,31 @@ describe("TurnChangesBar", () => {
 
     expect(showRightPanelAdaptive).toHaveBeenCalledWith("workspace-1", "thread-1");
     expect(useDiffStore.getState().reviewViewByThread["thread-1"]).toBe("turn");
-    expect(useDiffStore.getState().selectedTurnMessageIdByThread["thread-1"]).toBe("msg-1");
+    expect(useDiffStore.getState().selectedTurnByThread["thread-1"]).toBe("msg-1");
   });
 
-  it("opens Review on this turn from the menu", async () => {
+  it("pins an older turn when opening Review from its menu", async () => {
     seedSnapshots([withEffects([effect("src/a.ts")])]);
     const user = userEvent.setup();
 
-    renderBar();
+    renderBar({ isLatestTurn: false });
     await user.click(screen.getByRole("button", { name: "Turn actions" }));
     await user.click(await screen.findByRole("menuitem", { name: "Review changes" }));
 
     expect(showRightPanelAdaptive).toHaveBeenCalledWith("workspace-1", "thread-1");
     expect(useDiffStore.getState().reviewViewByThread["thread-1"]).toBe("turn");
-    expect(useDiffStore.getState().selectedTurnMessageIdByThread["thread-1"]).toBe("msg-1");
+    expect(useDiffStore.getState().selectedTurnByThread["thread-1"]).toBe("msg-1");
   });
 
-  it("opens Review on this turn and jumps to a clicked file", async () => {
+  it("opens Review on an older turn and jumps to a clicked file", async () => {
     seedSnapshots([withEffects([effect("src/a.ts"), effect("src/b.ts")])]);
     const user = userEvent.setup();
 
-    renderBar();
+    renderBar({ isLatestTurn: false });
+    await user.click(screen.getByRole("button", { expanded: false, name: /^Changed/ }));
     await user.click(screen.getByRole("button", { name: "Review src/b.ts" }));
 
-    expect(useDiffStore.getState().selectedTurnMessageIdByThread["thread-1"]).toBe("msg-1");
+    expect(useDiffStore.getState().selectedTurnByThread["thread-1"]).toBe("msg-1");
     expect(useDiffStore.getState().reviewFileJumpRequest).toMatchObject({
       scopeId: "thread-1",
       path: "src/b.ts",

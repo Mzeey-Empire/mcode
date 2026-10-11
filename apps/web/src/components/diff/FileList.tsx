@@ -1,28 +1,10 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
-import {
-  FileSearch,
-  Files,
-  TextWrap,
-  Columns2,
-  RefreshCw,
-  ChevronsDownUp,
-  ChevronsUpDown,
-} from "lucide-react";
-import { MoreIcon } from "@/components/ui/icon-map";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FileSearch } from "lucide-react";
 import type { ReviewFileChange } from "@mcode/contracts";
 import { FileTypeIcon } from "@/components/ui/file-type-icon";
 import { useDiffStore, type DiffSource } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
 import {
   Command,
   CommandEmpty,
@@ -34,10 +16,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
-import { usePanelHeaderMenuOpen } from "@/components/panels/shell/PanelHeader";
 import { ReviewDiffView } from "./ReviewDiffView";
-import { ReviewToolbarSlotContext } from "./review-toolbar-slot";
-import { Spinner } from "@/components/ui/spinner";
 
 const PIERRE_WORKER_POOL_SIZE = 3;
 
@@ -63,12 +42,6 @@ interface FileListProps {
   defaultFilesExpanded?: boolean;
   /** Extra identity for mutable comparisons whose ref names can stay stable while content changes. */
   cacheVersion?: string | number;
-  /** Whether this comparison can change and exposes manual refresh. */
-  refreshable?: boolean;
-  /** Whether the parent is retaining settled content while a replacement loads. */
-  refreshing?: boolean;
-  /** Refresh the complete comparison through the owning Review lifecycle. */
-  onRefresh?: () => void;
   /**
    * Identity of the view rendering this list (e.g. `turn:<messageId>`).
    * View-keyed jump requests are consumed only by the list whose key matches,
@@ -81,7 +54,7 @@ interface FileListProps {
 /**
  * Renders the changed files through pierre's virtualized CodeView: one scroll
  * container, one item per file, with headers, collapsed context bands, and
- * inline comments. The toolbar above it stays in the outer scroll region.
+ * inline comments. Its controls live in the Review header's row 2.
  */
 export function FileList({
   files,
@@ -90,12 +63,8 @@ export function FileList({
   threadId,
   defaultFilesExpanded = false,
   cacheVersion = 0,
-  refreshable = false,
-  refreshing = false,
-  onRefresh,
   jumpViewKey,
 }: FileListProps) {
-  const [jumpOpen, setJumpOpen] = usePanelHeaderMenuOpen();
   const [jumpTarget, setJumpTarget] = useState<{ path: string; token: number } | null>(null);
   const [highlightPath, setHighlightPath] = useState<string | null>(null);
   const jumpTokenRef = useRef(0);
@@ -109,27 +78,9 @@ export function FileList({
     [files],
   );
 
-  // Report this view's changed-file count so the toolbar can badge it. The
-  // active Review view always renders exactly one FileList, so its count is the
-  // view's count; clear on unmount so a switching view doesn't show a stale badge.
-  const setReviewFileCount = useDiffStore((s) => s.setReviewFileCount);
-  useEffect(() => {
-    setReviewFileCount(files.length);
-    return () => setReviewFileCount(null);
-  }, [files.length, setReviewFileCount]);
-
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
-  // FileList's `threadId` prop is the diff scope (thread or workspace id), which
-  // is also the key the Files navigator visibility is stored under.
-  const filesVisible = useDiffStore((s) => s.reviewFilesVisibleByScope[threadId] ?? false);
-  const setReviewFilesVisible = useDiffStore((s) => s.setReviewFilesVisible);
   const renderMode = useDiffStore((s) => s.renderMode);
-  const setRenderMode = useDiffStore((s) => s.setRenderMode);
-  const toggleLineWrap = useDiffStore((s) => s.toggleLineWrap);
   const lineWrap = useDiffStore((s) => (activeThreadId ? s.getLineWrap(activeThreadId) : true));
-  const setBulkDiffExpand = useDiffStore((s) => s.setBulkDiffExpand);
-  const bulkDiffExpand = useDiffStore((s) => s.bulkDiffExpand);
-  const allExpanded = bulkDiffExpand?.expand ?? defaultFilesExpanded;
 
   useEffect(() => {
     return () => {
@@ -139,7 +90,6 @@ export function FileList({
 
   const jumpToFile = useCallback((path: string) => {
     const token = ++jumpTokenRef.current;
-    setJumpOpen(false);
     setJumpTarget({ path, token });
     setHighlightPath(path);
 
@@ -148,7 +98,7 @@ export function FileList({
       setHighlightPath((current) => (current === path ? null : current));
       highlightClearRef.current = null;
     }, 1500);
-  }, [setJumpOpen]);
+  }, []);
 
   const clearJumpTarget = useCallback((token: number) => {
     setJumpTarget((current) => (current?.token === token ? null : current));
@@ -197,26 +147,6 @@ export function FileList({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <FileListToolbar
-        activeThreadId={activeThreadId}
-        filesVisible={filesVisible}
-        onToggleFiles={() => setReviewFilesVisible(threadId, !filesVisible)}
-        refreshable={refreshable}
-        refreshInProgress={refreshing}
-        onRefresh={onRefresh}
-        lineWrap={lineWrap}
-        toggleLineWrap={toggleLineWrap}
-        allExpanded={allExpanded}
-        onToggleAll={() => setBulkDiffExpand(!allExpanded)}
-        jumpOpen={jumpOpen}
-        onJumpOpenChange={setJumpOpen}
-        sortedFiles={sortedFiles.map((f) => f.path)}
-        onJumpToFile={jumpToFile}
-        renderMode={renderMode}
-        onToggleRenderMode={() =>
-          setRenderMode(renderMode === "unified" ? "side-by-side" : "unified")
-        }
-      />
       {/* jsdom and non-DOM environments have no Worker; pierre falls back to
           main-thread highlighting when no pool provider is present. */}
       {typeof Worker === "undefined" ? (
@@ -257,234 +187,6 @@ export function FileList({
   );
 }
 
-/** Props for {@link ReviewStateControls}. */
-interface ReviewStateControlsProps {
-  /** Diff scope (thread or workspace id) that owns the Files navigator visibility. */
-  scopeId: string;
-  refreshable: boolean;
-  refreshing: boolean;
-  onRefresh: () => void;
-}
-
-/**
- * The toolbar controls for a comparison with no file list to show. Loading,
- * empty and failed bodies have no FileList to portal them, yet the toolbar
- * must keep Refresh and the Files toggle in every state. Controls that act on
- * shown diffs (jump, expand, wrap, render mode) have nothing to act on here.
- */
-export function ReviewStateControls({ scopeId, refreshable, refreshing, onRefresh }: ReviewStateControlsProps) {
-  const filesVisible = useDiffStore((s) => s.reviewFilesVisibleByScope[scopeId] ?? false);
-  const setReviewFilesVisible = useDiffStore((s) => s.setReviewFilesVisible);
-  return (
-    <ReviewToolbarControls>
-      {refreshable ? (
-        <ReviewOptionsMenu refreshInProgress={refreshing} onRefresh={onRefresh} />
-      ) : null}
-      <RefreshProgress refreshInProgress={refreshing} />
-      <FilesToggle filesVisible={filesVisible} onToggle={() => setReviewFilesVisible(scopeId, !filesVisible)} />
-    </ReviewToolbarControls>
-  );
-}
-
-/** Props for the persistent controls above a changed-file list. */
-interface FileListToolbarProps {
-  activeThreadId: string | null;
-  filesVisible: boolean;
-  onToggleFiles: () => void;
-  refreshable: boolean;
-  refreshInProgress: boolean;
-  onRefresh?: () => void;
-  lineWrap: boolean;
-  toggleLineWrap: (threadId: string) => void;
-  allExpanded: boolean;
-  onToggleAll: () => void;
-  jumpOpen: boolean;
-  onJumpOpenChange: (open: boolean) => void;
-  sortedFiles: string[];
-  onJumpToFile: (path: string) => void;
-  renderMode: "unified" | "side-by-side";
-  onToggleRenderMode: () => void;
-}
-
-/** Renders the controls for review display, navigation, and refresh. */
-function FileListToolbar({
-  activeThreadId,
-  filesVisible,
-  onToggleFiles,
-  refreshable,
-  refreshInProgress,
-  onRefresh,
-  lineWrap,
-  toggleLineWrap,
-  allExpanded,
-  onToggleAll,
-  jumpOpen,
-  onJumpOpenChange,
-  sortedFiles,
-  onJumpToFile,
-  renderMode,
-  onToggleRenderMode,
-}: FileListToolbarProps) {
-  return (
-    <ReviewToolbarControls>
-      <ReviewOptionsMenu refreshInProgress={refreshInProgress} onRefresh={refreshable ? onRefresh : undefined}>
-        <ReviewDisplayItems
-          activeThreadId={activeThreadId}
-          lineWrap={lineWrap}
-          toggleLineWrap={toggleLineWrap}
-          allExpanded={allExpanded}
-          onToggleAll={onToggleAll}
-        />
-      </ReviewOptionsMenu>
-      <RefreshProgress refreshInProgress={refreshInProgress} />
-      <FilesToggle filesVisible={filesVisible} onToggle={onToggleFiles} />
-      <FileJumpPopover
-        open={jumpOpen}
-        onOpenChange={onJumpOpenChange}
-        files={sortedFiles}
-        onJumpToFile={onJumpToFile}
-      />
-      <RenderModeToggle renderMode={renderMode} onToggle={onToggleRenderMode} />
-    </ReviewToolbarControls>
-  );
-}
-
-/** Places toolbar controls in the Review panel's toolbar row. */
-function ReviewToolbarControls({ children }: { children: ReactNode }) {
-  const toolbarSlot = useContext(ReviewToolbarSlotContext);
-  // The Review panel supplies a slot inside the top toolbar row so the two
-  // rows collapse into one. Standalone renders fall back to a sticky bar.
-  if (toolbarSlot) return createPortal(children, toolbarSlot);
-  return (
-    <div className="sticky top-0 z-(--layer-dropdown) flex items-center gap-0.5 bg-background/95 px-2 py-1.5 border-b border-border backdrop-blur-sm">
-      {children}
-    </div>
-  );
-}
-
-/** Shows that a comparison refresh is running. */
-function RefreshProgress({ refreshInProgress }: { refreshInProgress: boolean }) {
-  if (!refreshInProgress) return null;
-  return (
-    <span
-      role="status"
-      aria-label="Refreshing comparison"
-      data-testid="review-refresh-progress"
-      className="inline-flex h-6 w-6 items-center justify-center text-muted/55"
-    >
-      <Spinner size={12} />
-    </span>
-  );
-}
-
-/** Props for the Files navigator toggle. */
-interface FilesToggleProps {
-  filesVisible: boolean;
-  onToggle: () => void;
-}
-
-/** Toggles the docked/floating Files navigator for the active comparison. */
-function FilesToggle({ filesVisible, onToggle }: FilesToggleProps) {
-  const label = filesVisible ? "Hide files" : "Show files";
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-compact"
-            aria-label={label}
-            aria-pressed={filesVisible}
-            data-testid="review-files-toggle"
-            className={cn(
-              "h-6 w-6 transition-colors",
-              filesVisible
-                ? "bg-hover text-ink"
-                : "text-muted/50 hover:bg-hover/40 hover:text-ink/70",
-            )}
-            onClick={onToggle}
-          >
-            <Files size={13} aria-hidden />
-          </Button>
-        }
-      />
-      <TooltipContent side="bottom" className="text-xs">
-        {label}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-/** Props for the review-options menu. */
-interface ReviewOptionsMenuProps {
-  refreshInProgress: boolean;
-  /** Omitted where the comparison cannot change, which hides Refresh. */
-  onRefresh?: () => void;
-  /** Options that act on shown diffs, absent when no diff is shown. */
-  children?: ReactNode;
-}
-
-/** Renders Refresh and the options that change how the current review appears. */
-function ReviewOptionsMenu({ refreshInProgress, onRefresh, children }: ReviewOptionsMenuProps) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        aria-label="Review options"
-        data-testid="review-options-menu"
-        className="ml-auto inline-flex h-6 w-6 items-center justify-center rounded text-muted/50 outline-none transition-colors hover:bg-hover/40 hover:text-ink/70 focus-visible:ring-1 focus-visible:ring-focus"
-      >
-        <MoreIcon size={13} />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" sideOffset={6} className="min-w-[190px]">
-        {onRefresh ? (
-          <DropdownMenuItem
-            label={refreshInProgress ? "Refreshing" : "Refresh"}
-            icon={refreshInProgress ? <Spinner size={16} /> : <RefreshCw />}
-            disabledReason={refreshInProgress ? "A refresh is already running" : null}
-            onClick={onRefresh}
-            data-testid="review-option-refresh"
-          />
-        ) : null}
-        {children}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-/** Props for the diff display options. */
-interface ReviewDisplayItemsProps {
-  activeThreadId: string | null;
-  lineWrap: boolean;
-  toggleLineWrap: (threadId: string) => void;
-  allExpanded: boolean;
-  onToggleAll: () => void;
-}
-
-/** Menu items that change how shown diffs wrap and expand. */
-function ReviewDisplayItems({ activeThreadId, lineWrap, toggleLineWrap, allExpanded, onToggleAll }: ReviewDisplayItemsProps) {
-  return (
-    <>
-      <DropdownMenuItem
-        label={lineWrap ? "Disable word wrap" : "Enable word wrap"}
-        icon={<TextWrap />}
-        disabledReason={activeThreadId ? null : "Open a thread to change word wrap"}
-        onClick={() => {
-          if (activeThreadId) toggleLineWrap(activeThreadId);
-        }}
-        data-testid="review-option-word-wrap"
-      />
-      <DropdownMenuSeparator />
-      <DropdownMenuItem
-        label={allExpanded ? "Collapse all" : "Expand all"}
-        icon={allExpanded ? <ChevronsDownUp /> : <ChevronsUpDown />}
-        onClick={onToggleAll}
-        data-testid="review-option-toggle-all"
-      />
-    </>
-  );
-}
-
 /** Props for the changed-file jump popover. */
 interface FileJumpPopoverProps {
   open: boolean;
@@ -493,8 +195,8 @@ interface FileJumpPopoverProps {
   onJumpToFile: (path: string) => void;
 }
 
-/** Renders the searchable changed-file jump control. */
-function FileJumpPopover({ open, onOpenChange, files, onJumpToFile }: FileJumpPopoverProps) {
+/** The searchable changed-file jump control that row 2 of the Review header hosts. */
+export function FileJumpPopover({ open, onOpenChange, files, onJumpToFile }: FileJumpPopoverProps) {
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <Tooltip>
@@ -569,46 +271,6 @@ function FileJumpItem({ filePath, onSelect }: FileJumpItemProps) {
         )}
       </span>
     </CommandItem>
-  );
-}
-
-/** Props for the unified/split render-mode control. */
-interface RenderModeToggleProps {
-  renderMode: "unified" | "side-by-side";
-  onToggle: () => void;
-}
-
-/** Renders the unified/split render-mode control. */
-function RenderModeToggle({ renderMode, onToggle }: RenderModeToggleProps) {
-  const isSideBySide = renderMode === "side-by-side";
-  const label = isSideBySide ? "Switch to unified view" : "Switch to split view";
-
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-compact"
-            onClick={onToggle}
-            aria-pressed={isSideBySide}
-            aria-label={label}
-            className={cn(
-              "h-6 w-6 transition-colors",
-              isSideBySide
-                ? "bg-hover text-ink"
-                : "text-muted/50 hover:bg-hover/40 hover:text-ink/70",
-            )}
-          >
-            <Columns2 size={13} />
-          </Button>
-        }
-      />
-      <TooltipContent side="bottom" className="text-xs">
-        {label}
-      </TooltipContent>
-    </Tooltip>
   );
 }
 

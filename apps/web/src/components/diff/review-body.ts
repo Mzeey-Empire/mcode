@@ -72,7 +72,6 @@ function emptyBody(context: ReviewBodyContext): ReviewBody {
       return context.turnOrdinal === null
         ? { kind: "empty", title: "No file changes in this turn", detail: "The agent answered without editing files" }
         : { kind: "empty", title: `No file changes in Turn ${context.turnOrdinal}`, detail: "The agent answered without editing files" };
-    case "last-turn":
     case "cumulative":
       return { kind: "empty", title: "No file changes in this thread yet" };
     case "unstaged":

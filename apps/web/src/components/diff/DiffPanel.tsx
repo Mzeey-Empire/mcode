@@ -2,20 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type
 import type { ReviewComparison, ReviewFileChange, ReviewTurn } from "@mcode/contracts";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useWorkspaceFileRefresh } from "@/features/projects/files/useWorkspaceFileRefresh";
-import { useDiffStore } from "@/stores/diffStore";
+import { useDiffStore, type ReviewTurnSelection } from "@/stores/diffStore";
 import { getTransport } from "@/transport";
-import { DiffToolbar } from "./DiffToolbar";
-import { LastTurnView } from "./LastTurnView";
+import { ReviewHeader } from "./ReviewHeader";
+import { FileList } from "./FileList";
 import { CumulativeView } from "./CumulativeView";
 import { GitDiffView, type GitView } from "./GitDiffView";
 import type { DiffSource } from "@/stores/diffStore";
 import { filesPaneNotice, reviewBody, type ReviewBody, type ReviewOutcome } from "./review-body";
 import { ReviewLoadingPulse, ReviewStateBody } from "./ReviewStateBody";
-import { ReviewStateControls } from "./FileList";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { WorktreeFilesPane } from "./WorktreeFilesPane";
-import { ReviewToolbarSlotContext } from "./review-toolbar-slot";
 import { cumulativeReviewFiles } from "@/lib/review-comparison";
 
 const FILES_PANEL_MIN_WIDTH = 280;
@@ -41,7 +39,8 @@ interface SettledComparison {
   readonly outcome: ReviewOutcome;
   readonly git: GitComparisonSource | null;
   readonly cacheVersion: string | number;
-  readonly liveRevision?: number;
+  /** The turn a Turn view comparison resolved to, which names its jump key and ordinal. */
+  readonly turnMessageId: string | null;
 }
 
 interface ComparisonLoadInput {
@@ -51,8 +50,10 @@ interface ComparisonLoadInput {
   readonly branchRange: { readonly base: string; readonly target: string } | null;
   readonly mutableComparisonRevision: number;
   readonly selectedCommitSha: string | null;
-  readonly selectedTurnMessageId: string | null;
-  readonly reviewTurns: readonly ReviewTurn[] | undefined;
+  /** The Turn view's resolved turn: the pinned one, or the newest while following latest. */
+  readonly turnMessageId: string | null;
+  /** Whether the Turn view's list has ever loaded; other views ignore the list. */
+  readonly reviewTurnsLoaded: boolean;
   readonly reviewTurnsError: string | null;
   readonly snapshotVersion: string;
   readonly snapshots: readonly Snapshot[] | undefined;
@@ -76,24 +77,39 @@ function canLoadComparison(input: ComparisonLoadInput, snapshotsLoading: boolean
 }
 
 /**
- * An unpicked Turn view waits for the turn list: the picker seeds the latest
- * turn as soon as it arrives, and only an empty list means "No turns yet". A
- * failed list stops the wait so the body can report it.
+ * A Turn view following latest waits for the turn list to name the newest
+ * turn. A failed list stops the wait so the body can report it.
  */
 function isAwaitingTurnSelection(input: ComparisonLoadInput): boolean {
-  if (input.viewMode !== "turn" || input.selectedTurnMessageId) return false;
-  return input.reviewTurns === undefined ? input.reviewTurnsError === null : input.reviewTurns.length > 0;
+  return input.viewMode === "turn" &&
+    !input.turnMessageId &&
+    !input.reviewTurnsLoaded &&
+    input.reviewTurnsError === null;
 }
 
 /**
- * Only an unpicked Turn view whose list never arrived is blocked by the list
- * error. A picked turn, or a list kept from an earlier load, still compares.
+ * Only a Turn view following latest whose list never arrived is blocked by
+ * the list error. A pinned turn, or a list kept from an earlier load, still
+ * compares.
  */
 function isTurnListBlocking(input: ComparisonLoadInput): boolean {
   return input.viewMode === "turn" &&
-    !input.selectedTurnMessageId &&
-    input.reviewTurns === undefined &&
+    !input.turnMessageId &&
+    !input.reviewTurnsLoaded &&
     input.reviewTurnsError !== null;
+}
+
+/** The turn the Turn view compares: the pinned turn, or the newest turn while following latest. */
+function resolveTurnMessageId(
+  selection: ReviewTurnSelection,
+  reviewTurns: readonly ReviewTurn[] | undefined,
+): string | null {
+  if (selection !== "latest") return selection;
+  const newest = reviewTurns?.reduce<ReviewTurn | undefined>(
+    (latest, turn) => (latest === undefined || turn.ordinal > latest.ordinal ? turn : latest),
+    undefined,
+  );
+  return newest?.messageId ?? null;
 }
 
 function isUnavailableBranchComparison(input: ComparisonLoadInput): boolean {
@@ -125,6 +141,7 @@ async function loadGitComparison(
     outcome,
     git: { source: metadata.source, id: metadata.id },
     cacheVersion: input.mutableComparisonRevision,
+    turnMessageId: null,
   };
 }
 
@@ -167,6 +184,7 @@ async function loadCumulativeComparison(input: ComparisonLoadInput): Promise<Loa
       : result,
     git: null,
     cacheVersion: input.snapshotVersion,
+    turnMessageId: null,
   };
 }
 
@@ -186,35 +204,26 @@ function withSnapshotFileFacts(comparison: ReviewComparison, snapshots: readonly
 }
 
 async function loadTurnDiffComparison(input: ComparisonLoadInput): Promise<LoadedComparison> {
-  // "turn" passes the picked operand; "last-turn" passes none and the server
-  // resolves the latest turn's evidence. An unpicked "turn" must not ask at
-  // all: operand-less requests resolve live/latest state the user never chose.
-  if (input.viewMode === "turn" && !input.selectedTurnMessageId) {
+  // Without a resolved turn there is nothing to ask for: an operand-less
+  // request would resolve live state the user never chose.
+  if (!input.turnMessageId) {
     return {
       outcome: isTurnListBlocking(input) && input.reviewTurnsError !== null
         ? { status: "request-failed", detail: input.reviewTurnsError }
         : { status: "unselected" },
       git: null,
       cacheVersion: input.mutableComparisonRevision,
-      liveRevision: input.mutableComparisonRevision,
+      turnMessageId: null,
     };
   }
-  const outcome = await getTransport().getTurnDiffComparison(
-    input.activeThreadId!,
-    input.viewMode === "turn" ? input.selectedTurnMessageId ?? undefined : undefined,
-  );
+  const outcome = await getTransport().getTurnDiffComparison(input.activeThreadId!, input.turnMessageId);
   return {
     outcome,
     git: null,
+    // A live turn's diff id carries its revision, so it also versions the patch cache.
     cacheVersion: readyComparison(outcome)?.turnDiff?.id ?? input.mutableComparisonRevision,
-    liveRevision: input.mutableComparisonRevision,
+    turnMessageId: input.turnMessageId,
   };
-}
-
-/** A live comparison from before the latest mutation is stale; drop it until the refetch settles. */
-function currentSettledComparison(settled: SettledComparison | null, mutableComparisonRevision: number): SettledComparison | null {
-  const live = readyComparison(settled?.outcome)?.turnDiff?.phase === "live";
-  return live && settled?.liveRevision !== mutableComparisonRevision ? null : settled;
 }
 
 function readyComparison(outcome: ReviewOutcome | null | undefined): ReviewComparison | null {
@@ -237,10 +246,9 @@ interface DiffPanelStore {
   readonly filesVisible: boolean;
   readonly requestReviewFileJump: DiffStoreState["requestReviewFileJump"];
   readonly selectedCommitSha: DiffStoreState["selectedCommitSha"];
-  readonly selectedTurnMessageId: string | null;
+  readonly turnSelection: ReviewTurnSelection;
   readonly reviewTurns: readonly ReviewTurn[] | undefined;
   readonly reviewTurnsError: string | null;
-  readonly setReviewDiffStat: DiffStoreState["setReviewDiffStat"];
   readonly setReviewTurns: DiffStoreState["setReviewTurns"];
   readonly setReviewTurnsError: DiffStoreState["setReviewTurnsError"];
   readonly setReviewFilesVisible: DiffStoreState["setReviewFilesVisible"];
@@ -288,8 +296,9 @@ function useDiffPanelStore(): DiffPanelStore {
     filesVisible,
     requestReviewFileJump: useDiffStore((state) => state.requestReviewFileJump),
     selectedCommitSha: useDiffStore((state) => state.selectedCommitSha),
-    selectedTurnMessageId: useDiffStore((state) =>
-      activeThreadId ? (state.selectedTurnMessageIdByThread[activeThreadId] ?? null) : null,
+    // An absent selection follows the latest turn.
+    turnSelection: useDiffStore((state) =>
+      activeThreadId ? (state.selectedTurnByThread[activeThreadId] ?? "latest") : "latest",
     ),
     reviewTurns: useDiffStore((state) =>
       activeThreadId ? state.reviewTurnsByThread[activeThreadId] : undefined,
@@ -297,7 +306,6 @@ function useDiffPanelStore(): DiffPanelStore {
     reviewTurnsError: useDiffStore((state) =>
       activeThreadId ? (state.reviewTurnsErrorByThread[activeThreadId] ?? null) : null,
     ),
-    setReviewDiffStat: useDiffStore((state) => state.setReviewDiffStat),
     setReviewTurns: useDiffStore((state) => state.setReviewTurns),
     setReviewTurnsError: useDiffStore((state) => state.setReviewTurnsError),
     setReviewFilesVisible: useDiffStore((state) => state.setReviewFilesVisible),
@@ -372,8 +380,9 @@ interface ComparisonController {
   readonly comparisonFiles: readonly ReviewFileChange[];
   readonly comparisonLoading: boolean;
   readonly comparisonPending: boolean;
+  /** Reloads the shown comparison; after a failed turn list it retries the list instead. */
   readonly onRefreshComparison: () => void;
-  readonly onRetryComparison: () => void;
+  readonly visibleComparison: ReviewComparison | null;
   readonly visibleSettled: SettledComparison | null;
 }
 
@@ -382,33 +391,24 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
   const [comparisonLoading, setComparisonLoading] = useState(false);
   const [snapshotRefreshRevision, setSnapshotRefreshRevision] = useState(0);
   const [turnListRevision, setTurnListRevision] = useState(0);
-  const {
-    activeThreadId,
-    bumpDiffRevision,
-    diffScopeId,
-    setReviewDiffStat,
-    setSnapshots,
-    snapshotsLoading,
-    viewMode,
-  } = store;
+  const { activeThreadId, bumpDiffRevision, diffScopeId, setSnapshots, snapshotsLoading, viewMode } = store;
   const comparisonIdentityRef = useRef("");
   const refreshRequestRef = useRef(0);
   const settledRevisionRef = useRef(0);
-  const mutableComparisonRevision = getMutableComparisonRevision(
-    store.viewMode,
-    store.diffRevision,
-    isPickedTurnLive(store.reviewTurns, store.selectedTurnMessageId),
-  );
+  const { turnMessageId, reviewTurnsLoaded, reviewTurnsError, turnLive } = turnComparisonFacts(store);
+  const mutableComparisonRevision = getMutableComparisonRevision(viewMode, store.diffRevision, turnLive);
   const branchRange = useMemo(
     () => getBranchRange(store.branchComparison),
     [store.branchComparison],
   );
+  // Following latest keeps one identity across turns, so the shown diff stays
+  // up until the next turn's comparison settles instead of flashing to loading.
   const comparisonIdentity = getComparisonIdentity(
-    store.diffScopeId,
-    store.viewMode,
+    diffScopeId,
+    viewMode,
     store.selectedCommitSha,
     branchRange,
-    store.selectedTurnMessageId,
+    store.turnSelection,
   );
   const snapshotVersion = getSnapshotVersion(store.snapshots);
   const comparisonLoadInput = useMemo<ComparisonLoadInput>(() => ({
@@ -418,9 +418,9 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     branchRange,
     mutableComparisonRevision,
     selectedCommitSha: store.selectedCommitSha,
-    selectedTurnMessageId: store.selectedTurnMessageId,
-    reviewTurns: store.reviewTurns,
-    reviewTurnsError: store.reviewTurnsError,
+    turnMessageId,
+    reviewTurnsLoaded,
+    reviewTurnsError,
     snapshotVersion,
     snapshots: store.snapshots,
     viewMode: store.viewMode,
@@ -428,32 +428,25 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     branchRange,
     mutableComparisonRevision,
     snapshotVersion,
-    store.reviewTurns,
-    store.reviewTurnsError,
+    reviewTurnsLoaded,
+    reviewTurnsError,
     store.activeThreadClientOnly,
     store.activeThreadId,
     store.activeWorkspaceId,
     store.branchComparison,
     store.selectedCommitSha,
-    store.selectedTurnMessageId,
     store.snapshots,
     store.viewMode,
+    turnMessageId,
   ]);
-  const currentSettled = currentSettledComparison(settled, mutableComparisonRevision);
   // While the Turn view waits for its list, an earlier list failure is not
   // the answer; the pulse shows instead.
   const visibleSettled = isAwaitingTurnSelection(comparisonLoadInput)
     ? null
-    : getVisibleSettledComparison(currentSettled, comparisonIdentity);
+    : getVisibleSettledComparison(settled, comparisonIdentity);
   const visibleComparison = readyComparison(visibleSettled?.outcome);
-  const comparisonFiles = visibleComparison?.files ?? [];
 
   comparisonIdentityRef.current = comparisonIdentity;
-
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect -- The toolbar-owned store must synchronize with the comparison rendered by this panel.
-    setReviewDiffStat(toReviewDiffStat(visibleComparison));
-  }, [setReviewDiffStat, visibleComparison]);
 
   useEffect(() => {
     if (!diffScopeId || !canLoadComparison(comparisonLoadInput, snapshotsLoading)) return;
@@ -469,7 +462,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     }).catch((error: unknown) => {
       if (cancelled) return;
       settledRevisionRef.current += 1;
-      setSettled({ identity: comparisonIdentity, outcome: requestFailedOutcome(error), git: null, cacheVersion: "" });
+      setSettled(failedComparison(comparisonIdentity, error));
       setComparisonLoading(false);
     });
     return () => { cancelled = true; };
@@ -481,13 +474,24 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     snapshotsLoading,
   ]);
 
+  const turnListBlocking = isTurnListBlocking(comparisonLoadInput);
   const onRefreshComparison = useCallback(() => {
-    if (cannotRefreshComparison(diffScopeId, comparisonLoading, viewMode)) return;
+    if (turnListBlocking) {
+      setTurnListRevision((revision) => revision + 1);
+      return;
+    }
+    if (!diffScopeId || comparisonLoading) return;
+    // A commit never changes, but a failed read of it is still worth asking again.
+    if (viewMode === "commit") {
+      setSnapshotRefreshRevision((revision) => revision + 1);
+      return;
+    }
     if (isGitView(viewMode)) {
-      bumpDiffRevision(diffScopeId!);
+      bumpDiffRevision(diffScopeId);
       return;
     }
     if (!activeThreadId) return;
+    setTurnListRevision((revision) => revision + 1);
     const settledRevision = settledRevisionRef.current;
     refreshSnapshots({
       activeThreadId,
@@ -500,7 +504,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
       onFailed: (error) => {
         // A comparison that settled after this refresh began is newer than the failure.
         if (settledRevisionRef.current !== settledRevision) return;
-        setSettled({ identity: comparisonIdentity, outcome: requestFailedOutcome(error), git: null, cacheVersion: "" });
+        setSettled(failedComparison(comparisonIdentity, error));
       },
     });
   }, [
@@ -510,23 +514,9 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     comparisonLoading,
     diffScopeId,
     setSnapshots,
+    turnListBlocking,
     viewMode,
   ]);
-
-  // Retry reruns the same comparison even where Refresh is hidden: a failed
-  // commit comparison is immutable but still worth asking again.
-  const turnListBlocking = isTurnListBlocking(comparisonLoadInput);
-  const onRetryComparison = useCallback(() => {
-    if (turnListBlocking) {
-      setTurnListRevision((revision) => revision + 1);
-      return;
-    }
-    if (viewMode === "commit") {
-      setSnapshotRefreshRevision((revision) => revision + 1);
-      return;
-    }
-    onRefreshComparison();
-  }, [onRefreshComparison, turnListBlocking, viewMode]);
 
   useEffect(() => () => {
     refreshRequestRef.current += 1;
@@ -535,31 +525,67 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
   useInitialSnapshots(store.activeThreadId, store.snapshots, store.setSnapshots, store.setSnapshotsLoading);
   useReviewTurns(
     store.activeThreadClientOnly ? null : store.activeThreadId,
-    store.viewMode,
-    `${snapshotVersion}#${turnListRevision}`,
+    reviewTurnsFetchKey(store, snapshotVersion, turnListRevision),
     store.setReviewTurns,
     store.setReviewTurnsError,
   );
 
   return {
     branchRange,
-    comparisonFiles,
+    comparisonFiles: visibleComparison?.files ?? [],
     comparisonLoading,
     comparisonPending: store.snapshotsLoading || comparisonLoading || !visibleSettled,
     onRefreshComparison,
-    onRetryComparison,
+    visibleComparison,
     visibleSettled,
   };
 }
 
-/** A running turn's evidence moves with the worktree, so it refetches on each mutation; a settled turn never changes. */
-function getMutableComparisonRevision(viewMode: DiffViewMode, diffRevision: number, pickedTurnLive: boolean): number {
-  if (viewMode === "turn") return pickedTurnLive ? diffRevision : 0;
-  return viewMode === "last-turn" || (isGitView(viewMode) && viewMode !== "commit") ? diffRevision : 0;
+/**
+ * What the Turn view's load reads from the turn list. The list refetches for
+ * availability in every view, so other views read none of it, and the Turn
+ * view reads only whether it loaded; a refetch alone never reloads a diff.
+ */
+function turnComparisonFacts(store: DiffPanelStore): {
+  readonly turnMessageId: string | null;
+  readonly reviewTurnsLoaded: boolean;
+  readonly reviewTurnsError: string | null;
+  readonly turnLive: boolean;
+} {
+  if (store.viewMode !== "turn") {
+    return { turnMessageId: null, reviewTurnsLoaded: false, reviewTurnsError: null, turnLive: false };
+  }
+  const turnMessageId = resolveTurnMessageId(store.turnSelection, store.reviewTurns);
+  return {
+    turnMessageId,
+    reviewTurnsLoaded: store.reviewTurns !== undefined,
+    reviewTurnsError: store.reviewTurnsError,
+    turnLive: isTurnLive(store.reviewTurns, turnMessageId),
+  };
 }
 
-function isPickedTurnLive(reviewTurns: readonly ReviewTurn[] | undefined, selectedTurnMessageId: string | null): boolean {
-  return reviewTurns?.some((turn) => turn.messageId === selectedTurnMessageId && turn.phase === "live") ?? false;
+/**
+ * Following latest refetches the list on each worktree change, so a turn that
+ * starts editing becomes the newest row while it runs.
+ */
+function reviewTurnsFetchKey(store: DiffPanelStore, snapshotVersion: string, turnListRevision: number): string {
+  const followsLatest = store.viewMode === "turn" && store.turnSelection === "latest";
+  return `${snapshotVersion}#${turnListRevision}#${followsLatest ? store.diffRevision : ""}`;
+}
+
+/** A thrown request carries no typed outcome, so it settles as a failure with its message. */
+function failedComparison(identity: string, error: unknown): SettledComparison {
+  return { identity, outcome: requestFailedOutcome(error), git: null, cacheVersion: "", turnMessageId: null };
+}
+
+/** A running turn's evidence moves with the worktree, so it refetches on each mutation; a settled turn never changes. */
+function getMutableComparisonRevision(viewMode: DiffViewMode, diffRevision: number, turnLive: boolean): number {
+  if (viewMode === "turn") return turnLive ? diffRevision : 0;
+  return isGitView(viewMode) && viewMode !== "commit" ? diffRevision : 0;
+}
+
+function isTurnLive(reviewTurns: readonly ReviewTurn[] | undefined, turnMessageId: string | null): boolean {
+  return reviewTurns?.some((turn) => turn.messageId === turnMessageId && turn.phase === "live") ?? false;
 }
 
 function getBranchRange(
@@ -574,20 +600,20 @@ function getComparisonIdentity(
   viewMode: DiffViewMode,
   selectedCommitSha: string | null,
   branchRange: { readonly base: string; readonly target: string } | null,
-  selectedTurnMessageId: string | null,
+  turnSelection: ReviewTurnSelection,
 ): string {
-  return `${diffScopeId ?? "none"}:${viewMode}:${comparisonOperand(viewMode, selectedCommitSha, branchRange, selectedTurnMessageId)}`;
+  return `${diffScopeId ?? "none"}:${viewMode}:${comparisonOperand(viewMode, selectedCommitSha, branchRange, turnSelection)}`;
 }
 
 function comparisonOperand(
   viewMode: DiffViewMode,
   selectedCommitSha: string | null,
   branchRange: { readonly base: string; readonly target: string } | null,
-  selectedTurnMessageId: string | null,
+  turnSelection: ReviewTurnSelection,
 ): string {
   if (viewMode === "commit") return selectedCommitSha ?? "";
   if (viewMode === "branch" && branchRange) return `${branchRange.base}...${branchRange.target}`;
-  if (viewMode === "turn") return selectedTurnMessageId ?? "";
+  if (viewMode === "turn") return turnSelection;
   return "";
 }
 
@@ -600,19 +626,6 @@ function getVisibleSettledComparison(
   comparisonIdentity: string,
 ): SettledComparison | null {
   return settled?.identity === comparisonIdentity ? settled : null;
-}
-
-function toReviewDiffStat(comparison: ReviewComparison | null): DiffStoreState["reviewDiffStat"] {
-  if (!comparison) return null;
-  return { additions: comparison.additions, deletions: comparison.deletions };
-}
-
-function cannotRefreshComparison(
-  diffScopeId: string | null,
-  comparisonLoading: boolean,
-  viewMode: DiffViewMode,
-): boolean {
-  return !diffScopeId || comparisonLoading || viewMode === "commit";
 }
 
 function refreshSnapshots({
@@ -679,19 +692,19 @@ function useInitialSnapshots(
 }
 
 /**
- * Loads the thread's turn list for the Turn view's picker and ordinals. It
- * refetches whenever `fetchKey` changes: new snapshots, so a finished turn
- * appears, or a retry after a failed list.
+ * Loads the thread's turn list, which the Turn picker, the body's ordinals and
+ * the view menu's availability all read. It refetches whenever `fetchKey`
+ * changes: new snapshots, so a finished turn appears, or a retry after a
+ * failed list.
  */
 function useReviewTurns(
   threadId: string | null,
-  viewMode: DiffViewMode,
   fetchKey: string,
   setReviewTurns: DiffStoreState["setReviewTurns"],
   setReviewTurnsError: DiffStoreState["setReviewTurnsError"],
 ): void {
   useEffect(() => {
-    if (!threadId || viewMode !== "turn") return;
+    if (!threadId) return;
     let cancelled = false;
     // A retry is in flight, so the old failure no longer describes the list.
     setReviewTurnsError(threadId, null);
@@ -701,14 +714,14 @@ function useReviewTurns(
       if (!cancelled) setReviewTurnsError(threadId, error instanceof Error ? error.message : String(error));
     });
     return () => { cancelled = true; };
-  }, [fetchKey, setReviewTurns, setReviewTurnsError, threadId, viewMode]);
+  }, [fetchKey, setReviewTurns, setReviewTurnsError, threadId]);
 }
 
 /**
- * The Review (Changes) tab body: toolbar + a single scrollable diff. Dual-scope —
- * with no thread it renders the git working-tree views (Unstaged/Staged/Commit/
- * Branch) against the workspace root; with a thread it renders the turn views
- * (Last turn, Cumulative). Each view renders exactly one diff.
+ * The Review (Changes) tab body: the two-row header and a single scrollable
+ * diff. Dual-scope: with no thread it renders the git working-tree views
+ * (Unstaged, Staged, Commit, Branch) against the workspace root; with a thread
+ * it adds the turn views (Turn, All turns). Each view renders exactly one diff.
  */
 export function DiffPanel() {
   const panelRootRef = useRef<HTMLDivElement>(null);
@@ -741,7 +754,7 @@ export function DiffPanel() {
   const body = comparison.visibleSettled
     ? reviewBody(comparison.visibleSettled.outcome, {
       view: viewMode,
-      turnOrdinal: selectedTurnOrdinal(viewMode, store.reviewTurns, store.selectedTurnMessageId),
+      turnOrdinal: turnOrdinal(store.reviewTurns, comparison.visibleSettled.turnMessageId),
       branchRange: comparison.branchRange,
     })
     : null;
@@ -751,12 +764,22 @@ export function DiffPanel() {
   };
 
   return (
-    <DiffPanelLayout panelRootRef={panelRootRef}>
+    <DiffPanelLayout
+      panelRootRef={panelRootRef}
+      header={
+        <ReviewHeader
+          scopeId={diffScopeId}
+          comparison={comparison.visibleComparison}
+          refreshing={comparison.comparisonLoading}
+          onRefresh={comparison.onRefreshComparison}
+          defaultFilesExpanded={viewMode !== "cumulative"}
+        />
+      }
+    >
       <DiffPanelView
         body={body}
         comparison={comparison}
         scopeId={reviewScopeId(activeThreadId, activeWorkspaceId, viewMode)}
-        selectedTurnMessageId={store.selectedTurnMessageId}
         viewMode={viewMode}
       />
       <ReviewFilesPane
@@ -773,20 +796,18 @@ export function DiffPanel() {
         onClose={() => setFilesVisible(false)}
         onRefresh={comparison.onRefreshComparison}
         onWidthChange={setFilesPanelWidth}
-        viewMode={viewMode}
       />
     </DiffPanelLayout>
   );
 }
 
-/** The Turn view names its turn by ordinal; other views have no single turn to name. */
-function selectedTurnOrdinal(
-  viewMode: DiffViewMode,
+/** The shown Turn comparison names its turn by ordinal; other views carry no turn. */
+function turnOrdinal(
   reviewTurns: readonly ReviewTurn[] | undefined,
-  selectedTurnMessageId: string | null,
+  turnMessageId: string | null,
 ): number | null {
-  if (viewMode !== "turn" || !selectedTurnMessageId) return null;
-  return reviewTurns?.find((turn) => turn.messageId === selectedTurnMessageId)?.ordinal ?? null;
+  if (!turnMessageId) return null;
+  return reviewTurns?.find((turn) => turn.messageId === turnMessageId)?.ordinal ?? null;
 }
 
 /** Git views read the workspace root; thread views need a thread. */
@@ -801,21 +822,20 @@ function reviewScopeId(
 
 function DiffPanelLayout({
   children,
+  header,
   panelRootRef,
 }: {
   readonly children: readonly [ReactNode, ReactNode];
+  readonly header: ReactNode;
   readonly panelRootRef: RefObject<HTMLDivElement | null>;
 }) {
-  const [fileControlsSlot, setFileControlsSlot] = useState<HTMLDivElement | null>(null);
   const [view, filesPane] = children;
   return (
     <div ref={panelRootRef} className="flex flex-1 flex-col overflow-hidden min-h-0">
-      <DiffToolbar controlsSlotRef={setFileControlsSlot} />
+      {header}
       <div className="relative flex min-h-0 flex-1">
         <ScrollArea className="min-h-0 min-w-0 flex-1">
-          <ReviewToolbarSlotContext.Provider value={fileControlsSlot}>
-            {view}
-          </ReviewToolbarSlotContext.Provider>
+          {view}
         </ScrollArea>
         {filesPane}
       </div>
@@ -827,37 +847,24 @@ function DiffPanelView({
   body,
   comparison,
   scopeId,
-  selectedTurnMessageId,
   viewMode,
 }: {
   readonly body: ReviewBody | null;
   readonly comparison: ComparisonController;
   readonly scopeId: string | null;
-  readonly selectedTurnMessageId: string | null;
   readonly viewMode: DiffViewMode;
 }) {
   if (!scopeId) return null;
-  const controls = (
-    <ReviewStateControls
-      scopeId={scopeId}
-      refreshable={viewMode !== "commit"}
-      refreshing={comparison.comparisonLoading}
-      onRefresh={comparison.onRetryComparison}
-    />
-  );
   if (!body || !comparison.visibleSettled) {
-    return comparison.comparisonPending ? <>{controls}<ReviewLoadingPulse /></> : null;
+    return comparison.comparisonPending ? <ReviewLoadingPulse /> : null;
   }
   if (body.kind !== "ready") {
-    return <>{controls}<ReviewStateBody body={body} onRetry={comparison.onRetryComparison} /></>;
+    return <ReviewStateBody body={body} onRetry={comparison.onRefreshComparison} />;
   }
   return (
     <ReadyComparisonView
       comparison={body.comparison}
-      onRefresh={comparison.onRefreshComparison}
-      refreshing={comparison.comparisonLoading}
       scopeId={scopeId}
-      selectedTurnMessageId={selectedTurnMessageId}
       settled={comparison.visibleSettled}
       viewMode={viewMode}
     />
@@ -866,18 +873,12 @@ function DiffPanelView({
 
 function ReadyComparisonView({
   comparison,
-  onRefresh,
-  refreshing,
   scopeId,
-  selectedTurnMessageId,
   settled,
   viewMode,
 }: {
   readonly comparison: ReviewComparison;
-  readonly onRefresh: () => void;
-  readonly refreshing: boolean;
   readonly scopeId: string;
-  readonly selectedTurnMessageId: string | null;
   readonly settled: SettledComparison;
   readonly viewMode: DiffViewMode;
 }) {
@@ -890,32 +891,27 @@ function ReadyComparisonView({
         id={settled.git.id}
         cacheVersion={settled.cacheVersion}
         threadId={scopeId}
-        immutable={viewMode === "commit"}
-        refreshing={refreshing}
-        onRefresh={onRefresh}
       />
     );
   }
   if (viewMode === "cumulative") {
-    return (
-      <CumulativeView
-        threadId={scopeId}
-        comparison={comparison}
-        cacheVersion={settled.cacheVersion}
-        refreshing={refreshing}
-        onRefresh={onRefresh}
-      />
-    );
+    return <CumulativeView threadId={scopeId} comparison={comparison} cacheVersion={settled.cacheVersion} />;
   }
+  // A ready turn comparison always carries its turn-diff id; without one there are no patches to read.
+  const turnDiffId = comparison.turnDiff?.id;
+  if (!turnDiffId) return null;
   return (
-    <LastTurnView
-      threadId={scopeId}
-      comparison={comparison}
-      cacheVersion={settled.cacheVersion}
-      refreshing={refreshing}
-      onRefresh={onRefresh}
-      jumpViewKey={viewMode === "turn" ? `turn:${selectedTurnMessageId ?? ""}` : "last-turn"}
-    />
+    <div data-testid="review-turn" className="flex h-full min-h-0 flex-col">
+      <FileList
+        files={comparison.files}
+        source="turn-diff"
+        id={turnDiffId}
+        threadId={scopeId}
+        cacheVersion={settled.cacheVersion}
+        defaultFilesExpanded
+        jumpViewKey={`turn:${settled.turnMessageId ?? ""}`}
+      />
+    </div>
   );
 }
 
@@ -933,7 +929,6 @@ function ReviewFilesPane({
   onClose,
   onRefresh,
   onWidthChange,
-  viewMode,
 }: {
   readonly activePath: string | null;
   readonly comparisonFiles: readonly ReviewFileChange[];
@@ -948,7 +943,6 @@ function ReviewFilesPane({
   readonly onClose: () => void;
   readonly onRefresh: () => void;
   readonly onWidthChange: (width: number) => void;
-  readonly viewMode: DiffViewMode;
 }) {
   // Docked only: the pane never floats. When the panel is too narrow to hold
   // both minimum widths the pane collapses; widening restores it.
@@ -968,7 +962,7 @@ function ReviewFilesPane({
       onWidthChange={onWidthChange}
       onCollapseRequest={onClose}
       onClose={onClose}
-      refreshable={viewMode !== "commit"}
+      refreshable
       refreshing={comparisonLoading}
       onRefresh={onRefresh}
       onActivate={onActivate}

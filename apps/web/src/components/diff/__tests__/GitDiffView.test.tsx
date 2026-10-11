@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { GitDiffView } from "../GitDiffView";
 
 vi.mock("../FileList", () => ({
-  FileList: ({ files, refreshable, refreshing }: { files: { path: string }[]; refreshable: boolean; refreshing: boolean }) => (
-    <div data-testid="file-list" data-refreshable={refreshable} data-refreshing={refreshing}>{files.map((file) => file.path).join(",")}</div>
+  FileList: ({ files, source, id }: { files: { path: string }[]; source: string; id: string }) => (
+    <div data-testid="file-list" data-source={source} data-id={id}>{files.map((file) => file.path).join(",")}</div>
   ),
 }));
 
@@ -20,17 +20,11 @@ const resolved = {
 };
 
 describe("GitDiffView", () => {
-  it("renders one settled comparison and hides refresh for immutable commits", () => {
-    render(<GitDiffView {...resolved} threadId="thread-1" refreshing={false} immutable onRefresh={vi.fn()} />);
+  it("renders one settled comparison from its git source", () => {
+    render(<GitDiffView {...resolved} threadId="thread-1" />);
 
     expect(screen.getByTestId("file-list")).toHaveTextContent("selected.ts");
-    expect(screen.getByTestId("file-list")).toHaveAttribute("data-refreshable", "false");
-  });
-
-  it("keeps the settled comparison visible while its replacement loads", () => {
-    render(<GitDiffView {...resolved} threadId="thread-1" refreshing immutable={false} onRefresh={vi.fn()} />);
-
-    expect(screen.getByTestId("file-list")).toHaveTextContent("selected.ts");
-    expect(screen.getByTestId("file-list")).toHaveAttribute("data-refreshing", "true");
+    expect(screen.getByTestId("file-list")).toHaveAttribute("data-source", "commit");
+    expect(screen.getByTestId("file-list")).toHaveAttribute("data-id", "bbbbbbbb2");
   });
 });

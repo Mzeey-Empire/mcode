@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useDiffStore } from "@/stores/diffStore";
 import { pathsToReviewFiles } from "@/lib/review-comparison";
-import { FileList, ReviewStateControls } from "../FileList";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import type { ReviewFileChange } from "@mcode/contracts";
+import { FileList } from "../FileList";
+import { ReviewHeader } from "../ReviewHeader";
 
 vi.mock("@/hooks/useOpenInApps", () => ({
   useOpenInApps: () => [],
@@ -11,11 +14,28 @@ vi.mock("@/hooks/useOpenInApps", () => ({
 
 const transport = vi.hoisted(() => ({
   getSnapshotDiff: vi.fn(),
+  getReviewState: vi.fn(),
 }));
 
 vi.mock("@/transport", () => ({
   getTransport: () => transport,
 }));
+
+/** The header's jump control and the list it scrolls, as the Review panel pairs them. */
+function ReviewWithJump({ files }: { readonly files: ReviewFileChange[] }) {
+  return (
+    <>
+      <ReviewHeader
+        scopeId="thread-1"
+        comparison={{ files, additions: 0, deletions: 0 }}
+        refreshing={false}
+        onRefresh={() => {}}
+        defaultFilesExpanded={false}
+      />
+      <FileList files={files} source="snapshot" id="snap-1" threadId="thread-1" />
+    </>
+  );
+}
 
 class ObserverMock {
   observe = vi.fn();
@@ -30,7 +50,9 @@ describe("FileList jump to file", () => {
       inlineDiffCache: {},
       renderMode: "unified",
       lineWrapByThread: {},
+      reviewFileJumpRequest: null,
     });
+    useWorkspaceStore.setState({ activeWorkspaceId: null, activeThreadId: null, threads: [], workspaces: [] });
     Element.prototype.scrollIntoView = vi.fn();
     HTMLElement.prototype.scrollTo = vi.fn();
     window.matchMedia = vi.fn().mockReturnValue({ matches: true });
@@ -41,15 +63,8 @@ describe("FileList jump to file", () => {
     );
   });
 
-  it("opens autocomplete on demand and jumps without filtering the tree", async () => {
-    render(
-      <FileList
-        files={pathsToReviewFiles(["apps/web/src/alpha.ts", "apps/web/src/beta.ts"])}
-        source="snapshot"
-        id="snap-1"
-        threadId="thread-1"
-      />,
-    );
+  it("opens autocomplete from the header on demand and jumps the list", async () => {
+    render(<ReviewWithJump files={pathsToReviewFiles(["apps/web/src/alpha.ts", "apps/web/src/beta.ts"])} />);
 
     expect(screen.queryByTestId("review-file-filter")).not.toBeInTheDocument();
 
@@ -75,12 +90,7 @@ describe("FileList jump to file", () => {
 
     render(
       <div data-slot="scroll-area-viewport">
-        <FileList
-          files={pathsToReviewFiles(files)}
-          source="snapshot"
-          id="snap-1"
-          threadId="thread-1"
-        />
+        <ReviewWithJump files={pathsToReviewFiles(files)} />
       </div>,
     );
 
@@ -147,9 +157,6 @@ describe("FileList jump to file", () => {
       />,
     );
     // Let the consume effect run before asserting the request survived.
-    await waitFor(() =>
-      expect(screen.getByTestId("review-file-jump-trigger")).toBeInTheDocument(),
-    );
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(useDiffStore.getState().reviewFileJumpRequest).not.toBeNull();
     expect(transport.getSnapshotDiff).not.toHaveBeenCalled();
@@ -172,29 +179,4 @@ describe("FileList jump to file", () => {
     );
     expect(useDiffStore.getState().reviewFileJumpRequest).toBeNull();
   }, 15_000);
-});
-
-describe("ReviewStateControls", () => {
-  it("offers Refresh and Files but no controls that act on shown diffs", async () => {
-    const onRefresh = vi.fn();
-    useDiffStore.setState({ reviewFilesVisibleByScope: {} });
-    render(<ReviewStateControls scopeId="thread-1" refreshable refreshing={false} onRefresh={onRefresh} />);
-
-    expect(screen.queryByTestId("review-file-jump-trigger")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByTestId("review-files-toggle"));
-    expect(useDiffStore.getState().reviewFilesVisibleByScope["thread-1"]).toBe(true);
-
-    await userEvent.click(screen.getByTestId("review-options-menu"));
-    const refresh = await screen.findByRole("menuitem", { name: /Refresh/ });
-    expect(screen.queryByTestId("review-option-toggle-all")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("review-option-word-wrap")).not.toBeInTheDocument();
-    await userEvent.click(refresh);
-    expect(onRefresh).toHaveBeenCalledOnce();
-  });
-
-  it("drops the options menu where the comparison cannot change", () => {
-    render(<ReviewStateControls scopeId="thread-1" refreshable={false} refreshing={false} onRefresh={vi.fn()} />);
-    expect(screen.queryByTestId("review-options-menu")).not.toBeInTheDocument();
-    expect(screen.getByTestId("review-files-toggle")).toBeInTheDocument();
-  });
 });

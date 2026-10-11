@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { TurnSnapshot, BranchComparison, ReviewTurn } from "@mcode/contracts";
-import { defaultReviewView, type ReviewChangeState } from "@/lib/review-views";
+import { defaultReviewView, type ReviewChangeState, type ReviewViewAvailabilityMap } from "@/lib/review-views";
 
 export type { BranchComparison };
 
@@ -19,19 +19,24 @@ export interface SubagentDetailSelection {
 }
 
 /**
- * View mode within the Review (Changes) tab. The tab is dual-scope: the first
- * four are threadless git working-tree views (read the workspace root); the last
- * three are thread turn views. Each renders exactly one diff. See
- * {@link import("@/lib/review-views").REVIEW_VIEWS} for the selection model.
+ * View mode within the Review (Changes) tab. The two turn views need a thread;
+ * the four git views read the thread's checkout, or the workspace root without
+ * a thread. Each renders exactly one diff. See
+ * {@link import("@/lib/review-views").REVIEW_VIEW_GROUPS} for the menu.
  */
 export type DiffViewMode =
+  | "turn"
+  | "cumulative"
   | "unstaged"
   | "staged"
   | "commit"
-  | "branch"
-  | "last-turn"
-  | "turn"
-  | "cumulative";
+  | "branch";
+
+/**
+ * The Turn view's operand: `"latest"` follows the newest turn as turns arrive,
+ * and a message ID pins that one turn.
+ */
+export type ReviewTurnSelection = "latest" | (string & {});
 
 /** Diff rendering mode. */
 export type DiffRenderMode = "unified" | "side-by-side";
@@ -437,12 +442,11 @@ interface DiffState {
    */
   readonly reviewViewManuallySelectedByThread: Record<string, boolean>;
   /**
-   * The Turn view's picked operand, keyed by thread ID: the assistant message ID
-   * owning the turn whose diff renders. Persists across view switches so picking
-   * Turn again returns to the same turn. In-memory only; dropped by
-   * {@link clearThread}.
+   * The Turn view's operand per thread. An absent key follows the latest turn.
+   * Persists across view switches so Turn returns to the same pin. In-memory
+   * only; dropped by {@link clearThread}.
    */
-  readonly selectedTurnMessageIdByThread: Record<string, string>;
+  readonly selectedTurnByThread: Record<string, ReviewTurnSelection>;
   /**
    * The Branch view's current→selected comparison for the current scope, or null
    * until the picker resolves it. Drives both the ref picker and the rendered
@@ -483,10 +487,6 @@ interface DiffState {
   selectedCommitSha: string | null;
   /** Diff rendering mode. */
   renderMode: DiffRenderMode;
-  /** Changed-file count for the active Review view, shown as a toolbar badge. Null when unknown. */
-  reviewFileCount: number | null;
-  /** Total added/removed lines for the active Review view. Null while loading or unknown. */
-  reviewDiffStat: { additions: number; deletions: number } | null;
   /** Bulk expand/collapse command for the Review view's file cards; each FileEntry applies it on nonce change. */
   bulkDiffExpand: { expand: boolean; nonce: number } | null;
   /** File-tree jump request for the active Review scope. `viewKey` pins the request to the view it was issued for (e.g. `turn:<messageId>`), so an outgoing view's list cannot consume a request meant for the incoming one. */
@@ -599,7 +599,11 @@ interface DiffState {
    * they have chosen one, otherwise the change-state default (re-evaluated live
    * from `changeState`). See ADR-0011.
    */
-  getReviewView: (threadId: string, changeState: ReviewChangeState) => DiffViewMode;
+  getReviewView: (
+    threadId: string,
+    changeState: ReviewChangeState,
+    availability: ReviewViewAvailabilityMap,
+  ) => DiffViewMode;
   /**
    * Record a manual Review view pick for a thread: stores the view, sets the
    * sticky per-thread override, and makes it the rendered view. Stops live
@@ -607,11 +611,10 @@ interface DiffState {
    */
   setReviewViewForThread: (threadId: string, mode: DiffViewMode) => void;
   /**
-   * Record the Turn view's picked operand for a thread: the assistant message ID
-   * whose settled turn diff renders. Written by the per-turn change summary's
-   * diff entry points.
+   * Set the Turn view's operand for a thread: `"latest"` to follow new turns,
+   * or the assistant message ID of the turn to pin.
    */
-  setReviewTurnForThread: (threadId: string, messageId: string) => void;
+  setReviewTurnForThread: (threadId: string, selection: ReviewTurnSelection) => void;
   /**
    * Apply a freshly resolved Branch comparison for a scope, recording the revision
    * it was resolved at and preserving the user's manually picked target when that
@@ -629,10 +632,6 @@ interface DiffState {
   /** Set the Commit view's picked operand by SHA, or `null` to fall back to the latest commit. */
   setSelectedCommitSha: (sha: string | null) => void;
   setRenderMode: (mode: DiffRenderMode) => void;
-  /** Report the active Review view's changed-file count (set by FileList). */
-  setReviewFileCount: (count: number | null) => void;
-  /** Report the active Review view's total added/removed lines (set by the view). */
-  setReviewDiffStat: (stat: { additions: number; deletions: number } | null) => void;
   /** Expand or collapse every file card in the active Review view. */
   setBulkDiffExpand: (expand: boolean) => void;
   /** Ask the active Review file list to reveal one changed file. `viewKey` pins the request to the issuing view (e.g. `turn:<messageId>`); omit for requests any view in the scope may serve. */
@@ -670,18 +669,16 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   subagentRosterTabByThread: {},
   subagentDetailByThread: {},
   reviewFilesVisibleByScope: readReviewFilesVisibility(),
-  viewMode: "last-turn",
+  viewMode: "turn",
   reviewViewByThread: {},
   reviewViewManuallySelectedByThread: {},
-  selectedTurnMessageIdByThread: {},
+  selectedTurnByThread: {},
   branchComparison: null,
   branchComparisonKey: null,
   branchManuallySelectedByScope: {},
   branchResolvedRevisionByScope: {},
   selectedCommitSha: null,
   renderMode: "unified",
-  reviewFileCount: null,
-  reviewDiffStat: null,
   bulkDiffExpand: null,
   reviewFileJumpRequest: null,
   lineWrapByThread: {},
@@ -900,12 +897,12 @@ export const useDiffStore = create<DiffState>((set, get) => ({
 
   setViewMode: (mode) =>
     set({ viewMode: mode, selectedCommitSha: null, reviewFileJumpRequest: null }),
-  getReviewView: (threadId, changeState) => {
+  getReviewView: (threadId, changeState, availability) => {
     const state = get();
-    if (state.reviewViewManuallySelectedByThread[threadId]) {
-      return state.reviewViewByThread[threadId] ?? defaultReviewView("thread", changeState);
-    }
-    return defaultReviewView("thread", changeState);
+    const picked = state.reviewViewManuallySelectedByThread[threadId]
+      ? state.reviewViewByThread[threadId]
+      : undefined;
+    return picked ?? defaultReviewView("thread", changeState, availability);
   },
   setReviewViewForThread: (threadId, mode) =>
     set((s) => ({
@@ -920,12 +917,9 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       // drops it so a stale path cannot fire in an unrelated view.
       reviewFileJumpRequest: null,
     })),
-  setReviewTurnForThread: (threadId, messageId) =>
+  setReviewTurnForThread: (threadId, selection) =>
     set((s) => ({
-      selectedTurnMessageIdByThread: {
-        ...s.selectedTurnMessageIdByThread,
-        [threadId]: messageId,
-      },
+      selectedTurnByThread: { ...s.selectedTurnByThread, [threadId]: selection },
     })),
   resolveBranchComparison: (comparison, key, revision) =>
     set((s) => {
@@ -974,8 +968,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
     ),
   setSelectedCommitSha: (sha) => set({ selectedCommitSha: sha }),
   setRenderMode: (mode) => set({ renderMode: mode }),
-  setReviewFileCount: (count) => set({ reviewFileCount: count }),
-  setReviewDiffStat: (stat) => set({ reviewDiffStat: stat }),
   setBulkDiffExpand: (expand) =>
     set((s) => ({ bulkDiffExpand: { expand, nonce: (s.bulkDiffExpand?.nonce ?? 0) + 1 } })),
   requestReviewFileJump: (scopeId, path, viewKey) =>
@@ -1069,8 +1061,8 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete reviewViewByThread[threadId];
       const reviewViewManuallySelectedByThread = { ...state.reviewViewManuallySelectedByThread };
       delete reviewViewManuallySelectedByThread[threadId];
-      const selectedTurnMessageIdByThread = { ...state.selectedTurnMessageIdByThread };
-      delete selectedTurnMessageIdByThread[threadId];
+      const selectedTurnByThread = { ...state.selectedTurnByThread };
+      delete selectedTurnByThread[threadId];
       const diffRevisionByScope = { ...state.diffRevisionByScope };
       delete diffRevisionByScope[threadId];
       const reviewFilesVisibleByScope = { ...state.reviewFilesVisibleByScope };
@@ -1099,7 +1091,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         subagentDetailByThread,
         reviewViewByThread,
         reviewViewManuallySelectedByThread,
-        selectedTurnMessageIdByThread,
+        selectedTurnByThread,
         diffRevisionByScope,
         reviewFilesVisibleByScope,
         branchManuallySelectedByScope,
