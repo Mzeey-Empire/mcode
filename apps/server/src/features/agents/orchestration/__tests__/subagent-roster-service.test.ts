@@ -308,6 +308,36 @@ describe("SubagentRosterService", () => {
     expect(service.loadDetail({ ...request, entryId: "call:marker" }).summary).toBe("Found the cause");
   });
 
+  it("keeps a Cursor Task entry's id and bumps the revision when cursor/task metadata lands", () => {
+    const { narrative, service } = harness("cursor");
+    narrative.beginTurn("parent");
+    narrative.bufferToolCall("parent", { toolCallId: "task-1", toolName: "Agent",
+      toolInput: { description: "Subagent task", subagentProviderName: "Cursor" } });
+    service.toolChanged("parent", "task-1");
+    const provisional = service.loadRoster(request);
+    narrative.bufferToolCall("parent", { toolCallId: "task-1", toolName: "Agent", toolInput: {
+      description: "Read the docs", prompt: "Read docs/README.md", model: "composer-2.5-fast", subagentProviderName: "Cursor",
+    } });
+    service.toolChanged("parent", "task-1");
+    const enriched = service.loadRoster(request);
+    expect(provisional.entries.map((row) => [row.id, row.prompt, row.model])).toEqual([["call:task-1", null, null]]);
+    expect(enriched.entries.map((row) => [row.id, row.prompt, row.model])).toEqual([
+      ["call:task-1", "Read docs/README.md", "composer-2.5-fast"],
+    ]);
+    expect([provisional.revision, enriched.revision]).toEqual([1, 2]);
+  });
+
+  it("reads a Claude Agent call left running at a user stop as stopped from its cancelled status", async () => {
+    const { db, narrative, service } = harness("claude");
+    message(db, "message", "claude");
+    narrative.beginTurn("parent");
+    narrative.bufferToolCall("parent", { toolCallId: "agent-1", toolName: "Agent", toolInput: { description: "Survey repo" } });
+    await narrative.persistNarrative("parent", "message", "", "cancelled", { strict: true });
+    narrative.clearTurn("parent");
+    expect(db.prepare("SELECT status FROM tool_call_records WHERE id = ?").get("agent-1")).toEqual({ status: "cancelled" });
+    expect(service.loadRoster(request).entries.map((row) => [row.id, row.status])).toEqual([["call:agent-1", "stopped"]]);
+  });
+
   it("preserves a successful root result after an earlier nested Agent failure", () => {
     const { db, call, service } = harness();
     message(db, "message", "claude");
