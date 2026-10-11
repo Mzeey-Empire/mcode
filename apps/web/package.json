@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "perf:chunks": "vite build && bun scripts/check-web-chunks.ts",
-    "perf:pull-requests": "vite build && bun scripts/check-web-chunks.ts && vitest run src/stores/__tests__/pull-request-performance.test.ts src/lib/__tests__/pull-request-performance-metrics.test.ts",
+    "perf:pull-requests": "vite build && bun scripts/check-web-chunks.ts && MCODE_PERF_GATE=1 vitest run --no-file-parallelism src/features/pull-requests/state/__tests__/pull-request-performance.perf.test.ts src/features/pull-requests/lib/__tests__/pull-request-performance-metrics.test.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "preview": "vite preview"

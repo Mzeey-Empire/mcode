@@ -76,8 +76,10 @@ const LazyCommandPalette = lazy(async () => {
   return { default: m.CommandPalette };
 });
 
+// Imported by path, not through the feature barrel, which App also imports
+// statically. A barrel import would fold the surface back into the entry chunk.
 const LazyPullRequestSurface = lazy(async () => {
-  const m = await import("@/features/pull-requests");
+  const m = await import("@/features/pull-requests/surfaces/PullRequestSurface");
   return { default: m.PullRequestSurface };
 });
 
