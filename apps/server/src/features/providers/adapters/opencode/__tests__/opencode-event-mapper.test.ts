@@ -1,11 +1,32 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as NodeFS from "node:fs";
 import { z } from "zod";
-import { mapOpenCodeEnvelope, normalizeOpenCodeEnvelope } from "../opencode-event-mapper.js";
+import type { AgentEvent } from "@mcode/contracts";
+import { mapOpenCodeEnvelope, normalizeOpenCodeEnvelope, trackOpenCodePartType } from "../opencode-event-mapper.js";
 
 const CTX = { threadId: "thread-1", turnExecutionId: "11111111-1111-4111-8111-111111111111" };
 const capturedTraceSchema = z.object({ events: z.array(z.unknown()) });
 const capturedToolPartSchema = z.object({ type: z.literal("tool"), sessionID: z.string() });
+const capturedReasoningPartSchema = z.object({ type: z.literal("reasoning"), text: z.string() });
+
+/** Map frames the way the provider does: one turn's part-type map and forwarded-text map. */
+function replayWithPartTypes(frames: readonly unknown[]): AgentEvent[] {
+  const partTypes = new Map<string, string>();
+  const forwardedText = new Map<string, string>();
+  return frames.flatMap((frame) => {
+    const normalized = normalizeOpenCodeEnvelope(frame);
+    const partType = normalized ? trackOpenCodePartType(partTypes, normalized) : undefined;
+    return mapOpenCodeEnvelope(frame, { ...CTX, partType, forwardedText }).events;
+  });
+}
+
+function partUpdated(part: Record<string, unknown>): unknown {
+  return { type: "message.part.updated", properties: { sessionID: "ses_1", part: { sessionID: "ses_1", messageID: "msg_1", ...part } } };
+}
+
+function partDelta(partID: string, delta: string): unknown {
+  return { type: "message.part.delta", properties: { sessionID: "ses_1", messageID: "msg_1", partID, field: "text", delta } };
+}
 
 describe("mapOpenCodeEnvelope", () => {
   it("maps the captured task presentation, child reads, and result summary", () => {
@@ -464,5 +485,80 @@ describe("mapOpenCodeEnvelope retries", () => {
   it("maps a malformed retry with a generic reason and no optional fields", () => {
     expect(mapOpenCodeEnvelope({ type: "session.next.retried", properties: { attempt: "two", error: "boom" } }, CTX).events)
       .toEqual([{ type: "apiRetry", threadId: "thread-1", turnExecutionId: CTX.turnExecutionId, reason: "retry" }]);
+  });
+
+  it("maps a reasoning part's snapshots and text-field deltas to one reasoning block", () => {
+    const reasoning = { type: "reasoning" as const, threadId: "thread-1", turnExecutionId: CTX.turnExecutionId, reasoningItemId: "prt_r" };
+    expect(replayWithPartTypes([
+      partUpdated({ id: "prt_r", type: "reasoning", text: "", time: { start: 1 } }),
+      partDelta("prt_r", "Let me"),
+      partDelta("prt_r", " check."),
+      partUpdated({ id: "prt_r", type: "reasoning", text: "Let me check. Done", time: { start: 1, end: 2 } }),
+    ])).toEqual([
+      { ...reasoning, type: "reasoningDelta", delta: "" },
+      { ...reasoning, type: "reasoningDelta", delta: "Let me" },
+      { ...reasoning, type: "reasoningDelta", delta: " check." },
+      { ...reasoning, type: "reasoningDelta", delta: " Done", done: true },
+    ]);
+  });
+
+  it("closes a fully streamed reasoning part with an empty done delta", () => {
+    const events = replayWithPartTypes([
+      partUpdated({ id: "prt_r", type: "reasoning", text: "", time: { start: 1 } }),
+      partDelta("prt_r", "all of it"),
+      partUpdated({ id: "prt_r", type: "reasoning", text: "all of it", time: { start: 1, end: 2 } }),
+    ]);
+    expect(events.at(-1)).toEqual({
+      type: "reasoningDelta", threadId: "thread-1", turnExecutionId: CTX.turnExecutionId,
+      delta: "", reasoningItemId: "prt_r", done: true,
+    });
+  });
+
+  it("keeps a text part in the same message as answer text, forwarded exactly once", () => {
+    const events = replayWithPartTypes([
+      partUpdated({ id: "prt_r", type: "reasoning", text: "", time: { start: 1 } }),
+      partDelta("prt_r", "thinking"),
+      partUpdated({ id: "prt_r", type: "reasoning", text: "thinking", time: { start: 1, end: 2 } }),
+      partUpdated({ id: "prt_t", type: "text", text: "", time: { start: 3 } }),
+      partDelta("prt_t", "The answer"),
+      partDelta("prt_t", " is 4."),
+      partUpdated({ id: "prt_t", type: "text", text: "The answer is 4.", time: { start: 3, end: 4 } }),
+    ]);
+    expect(events.filter((event) => event.type === "textDelta").map((event) => event.delta)).toEqual(["The answer", " is 4."]);
+    expect(events.filter((event) => event.type === "reasoningDelta").map((event) => event.delta)).toEqual(["", "thinking", ""]);
+  });
+
+  it("maps the session.next reasoning family to open, delta, and done", () => {
+    const forwardedText = new Map<string, string>();
+    const ctx = { ...CTX, forwardedText };
+    const base = { sessionID: "ses_1", assistantMessageID: "msg_1", reasoningID: "rsn_1" };
+    const events = [
+      { type: "session.next.reasoning.started", properties: base },
+      { type: "session.next.reasoning.delta", properties: { ...base, delta: "hmm" } },
+      { type: "session.next.reasoning.ended", properties: { ...base, text: "hmm" } },
+    ].flatMap((frame) => mapOpenCodeEnvelope(frame, ctx).events);
+    const reasoning = { type: "reasoningDelta", threadId: "thread-1", turnExecutionId: CTX.turnExecutionId, reasoningItemId: "rsn_1" };
+    expect(events).toEqual([
+      { ...reasoning, delta: "" },
+      { ...reasoning, delta: "hmm" },
+      { ...reasoning, delta: "", done: true },
+    ]);
+  });
+
+  it("keeps captured reasoning out of answer text", () => {
+    const fixture = capturedTraceSchema.parse(JSON.parse(NodeFS.readFileSync(new URL("./fixtures/task-subagent.captured.json", import.meta.url), "utf8")));
+    const reasoningTexts = fixture.events.flatMap((frame) => {
+      const part = capturedReasoningPartSchema.safeParse(normalizeOpenCodeEnvelope(frame)?.properties.part);
+      return part.success && part.data.text ? [part.data.text] : [];
+    });
+    expect(reasoningTexts).toHaveLength(2);
+    const events = replayWithPartTypes(fixture.events);
+    const answer = events.flatMap((event) => event.type === "textDelta" ? [event.delta] : []).join("");
+    const thought = events.flatMap((event) => event.type === "reasoningDelta" ? [event.delta] : []).join("");
+    for (const text of reasoningTexts) {
+      expect(answer).not.toContain(text.slice(0, 20));
+      expect(thought).toContain(text);
+    }
+    expect(events.filter((event) => event.type === "reasoningDelta" && event.done)).toHaveLength(2);
   });
 });

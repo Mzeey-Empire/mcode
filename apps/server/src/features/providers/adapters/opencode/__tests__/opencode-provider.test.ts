@@ -145,9 +145,14 @@ describe("OpenCode subagent routing", () => {
     ]);
     expect(events.filter((event) => event.type === "toolResult" && !event.parentToolCallId).map((event) => event.output)).toEqual(["`add`"]);
     expect(events.filter((event) => event.type === "textDelta").map((event) => event.delta).join("")).toBe(
-      "Let me first check the files exist. Actually the task is clear: use task tool once to launch general subagent, then reply one short sentence.\n\nLet me look at the working directory. I'll just launch the subagent.\n\nBut the subagent needs to find math.js and README.md. Let me just launch it."
-      + "The subagent read both files and reported the exported function is `add`.",
+      "The subagent read both files and reported the exported function is `add`.",
     );
+    const reasoning = events.filter((event) => event.type === "reasoningDelta");
+    expect(reasoning.map((event) => event.delta).join("")).toBe(
+      "Let me first check the files exist. Actually the task is clear: use task tool once to launch general subagent, then reply one short sentence.\n\nLet me look at the working directory. I'll just launch the subagent.\n\nBut the subagent needs to find math.js and README.md. Let me just launch it.",
+    );
+    expect([...new Set(reasoning.map((event) => event.reasoningItemId))]).toEqual(["prt_129103aa9001D2P8QF9Dn73cr4"]);
+    expect(reasoning.at(-1)).toMatchObject({ delta: "", done: true });
     expect(events.filter((event) => event.type === "turnComplete").map((event) => event.reason)).toEqual(["end_turn"]);
   });
 
