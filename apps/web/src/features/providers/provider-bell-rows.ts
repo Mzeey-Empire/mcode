@@ -18,8 +18,12 @@ const LIMIT_LABELS = new Map([
 ]);
 
 // Rows with an action sort first: signing in and updating are things the user can do now,
-// a rate limit only waits.
-const KIND_RANK: Record<ProviderBellRow["kind"], number> = { signed_out: 0, cli_update: 1, rate_limited: 2 };
+// while a rate limit or a running update only waits.
+function actionRank(row: ProviderBellRow): number {
+  if (row.kind === "signed_out") return 0;
+  if (row.kind === "cli_update" && row.update.state !== "running") return 1;
+  return 2;
+}
 
 /**
  * Turns provider statuses into bell rows, at most one per provider. Within a
@@ -33,7 +37,7 @@ export function deriveProviderBellRows(statuses: readonly ProviderStatus[], now:
     const row = rowFor(status, now);
     if (row) rows.push(row);
   }
-  return rows.sort((a, b) => KIND_RANK[a.kind] - KIND_RANK[b.kind]);
+  return rows.sort((a, b) => actionRank(a) - actionRank(b));
 }
 
 function rowFor(status: ProviderStatus, now: Date): ProviderBellRow | null {

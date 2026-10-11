@@ -2,14 +2,17 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // vi.hoisted so the refs exist inside the vi.mock factory below.
-const { saves } = vi.hoisted(() => ({
+const { saves, persisted } = vi.hoisted(() => ({
   saves: [] as { partial: unknown; resolve: () => void }[],
+  persisted: { updates: { channel: "stable" } as Record<string, unknown> },
 }));
 
 // Saves stay pending until the test resolves them, and never change `settings`, like the real server round trip.
 vi.mock("@/stores/settingsStore", () => {
   const state = {
-    settings: { updates: { channel: "stable" } },
+    get settings() {
+      return persisted;
+    },
     update: (partial: unknown) =>
       new Promise<void>((resolve) => {
         saves.push({ partial, resolve });
@@ -89,6 +92,10 @@ describe("AboutSection provider CLI checks", () => {
     vi.unstubAllGlobals();
   });
 
+  afterEach(() => {
+    persisted.updates = { channel: "stable" };
+  });
+
   it("defaults on and saves the setting when switched off", async () => {
     render(<AboutSection />);
     const toggle = screen.getByRole("switch", { name: "Provider CLI checks" });
@@ -97,5 +104,15 @@ describe("AboutSection provider CLI checks", () => {
 
     fireEvent.click(toggle);
     await waitFor(() => expect(saves.map((save) => save.partial)).toEqual([{ updates: { providerCliChecks: false } }]));
+  });
+
+  it("reads a saved off setting and saves it back on", async () => {
+    persisted.updates = { channel: "stable", providerCliChecks: false };
+    render(<AboutSection />);
+    const toggle = screen.getByRole("switch", { name: "Provider CLI checks" });
+    expect(toggle).not.toBeChecked();
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(saves.map((save) => save.partial)).toEqual([{ updates: { providerCliChecks: true } }]));
   });
 });

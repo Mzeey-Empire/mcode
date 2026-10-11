@@ -32,10 +32,10 @@ export function ProvidersPopover({ rows, onSignIn, onUpdateCli }: ProvidersPopov
 function ProviderRow({ row, onSignIn, onUpdateCli }: { row: ProviderBellRow } & Omit<ProvidersPopoverProps, "rows">) {
   return (
     <li className="flex items-center gap-2.5 rounded-lg pt-2 pr-1.5 pb-2 pl-2.5">
-      <span className="flex h-5 w-4 shrink-0 items-center justify-center">
+      <span className="flex h-5 w-4 shrink-0 items-center justify-center self-start">
         <ProviderIcon provider={row.providerId} size={16} />
       </span>
-      <div className="min-w-0 flex-1">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="text-sm font-medium text-ink">{row.name}</div>
         <RowDetail row={row} />
       </div>
@@ -92,7 +92,7 @@ function RowAction({ row, onSignIn, onUpdateCli }: { row: ProviderBellRow } & Om
 
 function ActionPill({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <Button variant="subtle" shape="round" className="h-7 shrink-0 px-2.5 text-button" onClick={onClick}>
+    <Button variant="subtle" shape="round" className="h-7 shrink-0 px-2.5 text-[1.3rem]/[1.8rem] font-medium" onClick={onClick}>
       {label}
     </Button>
   );

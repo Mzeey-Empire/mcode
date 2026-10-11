@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ProviderCliUpdate, ProviderStatus } from "@mcode/contracts";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -124,9 +124,10 @@ describe("ProvidersBell", () => {
 });
 
 describe("ProvidersBell CLI updates", () => {
-  it("offers an update with both versions in mono and applies the returned status", async () => {
+  it("offers an update, shows progress from the status push, and clears the row when the update lands", async () => {
     serve([codexCli({ state: "available", target: "0.48.0" })]);
-    vi.mocked(mockTransport.updateProviderCli).mockResolvedValue(codexCli({ state: "running", target: "0.48.0" }));
+    let finish: (status: ProviderStatus) => void = () => {};
+    vi.mocked(mockTransport.updateProviderCli).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
     render(<ProvidersBell />);
 
     expect(screen.getByTestId("providers-bell-dot")).toBeInTheDocument();
@@ -139,9 +140,26 @@ describe("ProvidersBell CLI updates", () => {
 
     fireEvent.click(within(popover).getByRole("button", { name: "Update" }));
     expect(mockTransport.updateProviderCli).toHaveBeenCalledWith("codex");
-    expect(await within(popover).findByRole("img", { name: "Updating Codex CLI" })).toBeInTheDocument();
+    // The server's progress arrives as a providers.statusChanged push while the RPC is still pending.
+    act(() => useProviderStatusStore.getState().apply(codexCli({ state: "running", target: "0.48.0" })));
+    expect(within(popover).getByRole("img", { name: "Updating Codex CLI" })).toBeInTheDocument();
     expect(within(popover).getByText("Updating to")).toBeInTheDocument();
     expect(within(popover).queryByRole("button", { name: "Update" })).toBeNull();
+
+    await act(async () => finish(status("codex", { cli: { installed: "0.48.0", managedBy: "user", latest: "0.48.0", update: { state: "none" } } })));
+    expect(within(popover).queryAllByRole("listitem")).toHaveLength(0);
+    expect(screen.queryByTestId("providers-bell-dot")).toBeNull();
+  });
+
+  it("turns a running update into its failure reason with Retry when the update fails", async () => {
+    serve([codexCli({ state: "running", target: "0.48.0" })]);
+    render(<ProvidersBell />);
+    const popover = await openBell();
+
+    act(() => useProviderStatusStore.getState().apply(codexCli({ state: "failed", target: "0.48.0", reason: "npm ERR! code E404" })));
+    expect(within(popover).getByText("npm ERR! code E404")).toBeInTheDocument();
+    expect(within(popover).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(within(popover).queryByRole("img", { name: "Updating Codex CLI" })).toBeNull();
   });
 
   it("omits the installed version when the CLI did not report one", async () => {
@@ -207,6 +225,7 @@ describe("deriveProviderBellRows", () => {
 
   it("sorts rows with an action first and keeps one row per provider", () => {
     const rows = deriveProviderBellRows([
+      status("opencode", { cli: { installed: "1.0.0", managedBy: "user", latest: "1.1.0", update: { state: "running", target: "1.1.0" } } }),
       status("claude", { rateLimit: { resetsAt: FOUR_PM, limitType: null } }),
       codexCli({ state: "available", target: "0.48.0" }),
       { ...DEVIN_SIGNED_OUT, cli: { installed: "1.0.0", managedBy: "user", latest: "1.1.0", update: { state: "available", target: "1.1.0" } } },
@@ -219,6 +238,7 @@ describe("deriveProviderBellRows", () => {
     expect(rows.map(summarize)).toEqual([
       ["devin", "signed_out", "Signed out · threads on Devin can't start"],
       ["codex", "cli_update", "available"],
+      ["opencode", "cli_update", "running"],
       ["claude", "rate_limited", "Rate limited · resets 16:00"],
       ["cursor", "rate_limited", "Rate limited · resets 16:00"],
     ]);
