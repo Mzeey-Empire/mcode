@@ -224,6 +224,22 @@ describe("useQueuedMessageDispatch", () => {
     expect(queuedContents()).toEqual(["first queued follow-up", "third queued follow-up"]);
   });
 
+  it("clears an ending's hold when Send now steers into the next turn", async () => {
+    queueMessage("first queued follow-up");
+    queueMessage("second queued follow-up");
+    useQueueStore.getState().suppressAutoDrain(THREAD_ID);
+    runTurn();
+    (mockTransport.steerTurn as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ status: "delivered", messageId: "steered" });
+    const { result } = renderHook(() => useQueuedMessageDispatch(THREAD_ID));
+
+    await act(async () => {
+      await result.current.sendNow(queued(0));
+    });
+
+    expect(mockTransport.steerTurn).toHaveBeenCalledTimes(1);
+    expect(useQueueStore.getState().autoDrainSuppressedThreadIds.has(THREAD_ID)).toBe(false);
+  });
+
   it("keeps a rejected steer queued as an ordinary message and says why", async () => {
     queueMessage("queued follow-up");
     runTurn();

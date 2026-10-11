@@ -4415,9 +4415,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
  */
 useThreadStore.subscribe((state, previous) => {
   if (state.records === previous.records) return;
-  const queues = useQueueStore.getState().queues;
-  for (const threadId of Object.keys(queues)) {
-    if (!queues[threadId]?.length) continue;
+  const { queues, editingThreadId } = useQueueStore.getState();
+  // A message open in the editor is popped from its queue but is still queued input.
+  const pending = Object.keys(queues).filter((threadId) => queues[threadId]?.length || threadId === editingThreadId);
+  for (const threadId of pending) {
     const record = state.records.get(threadId);
     const before = previous.records.get(threadId);
     if (!record || record === before) continue;

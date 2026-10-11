@@ -131,6 +131,22 @@ describe("queued follow-ups after a turn ends", () => {
     await expectQueueHeld();
   });
 
+  it("holds a follow-up that was open in the editor when the turn failed", async () => {
+    useQueueStore.getState().clearQueue(THREAD_ID);
+    enqueue("first");
+    const editing = useQueueStore.getState().popMessage(THREAD_ID, useQueueStore.getState().queues[THREAD_ID]![0]!.id)!;
+    useQueueStore.getState().setEditingThreadId(THREAD_ID);
+
+    useThreadStore.getState().handleAgentEvent(ended("errored"));
+    useQueueStore.getState().insertAt(THREAD_ID, 0, editing);
+    useQueueStore.getState().setEditingThreadId(null);
+    scheduleDrainAfterEdit(THREAD_ID);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(mockTransport.sendMessage).not.toHaveBeenCalled();
+    expect(queued()).toEqual(["first"]);
+  });
+
   it("leaves later follow-ups free to drain when nothing was queued at the ending", () => {
     useQueueStore.getState().clearQueue(THREAD_ID);
     useThreadStore.getState().handleAgentEvent(ended("errored"));
