@@ -22,7 +22,7 @@ export function ReleaseNotesCard({ version, notes }: ReleaseNotesCardProps) {
       {parsed.items.length > 0 ? (
         <ul className="flex flex-col gap-2">
           {parsed.items.map((item, index) => (
-            <li key={`${index}-${item}`} className="flex gap-2.5 text-[13px] leading-5 text-ink">
+            <li key={`${index}-${item}`} className="flex gap-2.5 text-body-small text-ink">
               <span aria-hidden className="flex h-5 w-1 shrink-0 items-center">
                 <span className="size-1 rounded-full bg-muted" />
               </span>
@@ -31,11 +31,11 @@ export function ReleaseNotesCard({ version, notes }: ReleaseNotesCardProps) {
           ))}
         </ul>
       ) : parsed.fallback ? (
-        <p className="text-[13px] leading-5 text-ink">{parsed.fallback}</p>
+        <p className="text-body-small text-ink">{parsed.fallback}</p>
       ) : null}
       <button
         type="button"
-        className="self-start text-[13px] leading-5 font-medium text-link hover:text-focus focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        className="self-start text-body-small font-medium text-link hover:text-focus focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         onClick={() => void window.desktopBridge?.openExternalUrl(releaseNotesUrl(version))}
       >
         Full release notes

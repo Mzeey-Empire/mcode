@@ -45,29 +45,29 @@ export function deriveUpdateButtonView(status: UpdateStatus, context: UpdateButt
     case "not-available":
       return context.upToDateFlash ? { kind: "up-to-date" } : { kind: "rest" };
     case "available":
-      return {
-        kind: "download",
-        version: status.version,
-        versionLabel: updateVersionLabel(status.version),
-        releaseNotes: status.releaseNotes ?? null,
-      };
-    case "downloading": {
-      const percent = `${Math.round(status.percent)}%`;
-      const progressLabel = context.pendingVersion ? `${updateVersionLabel(context.pendingVersion)} · ${percent}` : percent;
-      return { kind: "downloading", progressLabel, percent: status.percent };
-    }
+      return offerView("download", status.version, status.releaseNotes);
+    case "downloading":
+      return { kind: "downloading", progressLabel: progressLabel(status.percent, context.pendingVersion), percent: status.percent };
     case "downloaded":
       return status.installWhenIdle
         ? { kind: "armed", version: status.version }
-        : {
-            kind: "install",
-            version: status.version,
-            versionLabel: updateVersionLabel(status.version),
-            releaseNotes: status.releaseNotes ?? null,
-          };
+        : offerView("install", status.version, status.releaseNotes);
     case "error":
       return { kind: "failed", message: status.message, failedOperation: status.failedOperation };
   }
+}
+
+function offerView(
+  kind: "download" | "install",
+  version: string,
+  releaseNotes: string | undefined,
+): Extract<UpdateButtonView, { kind: "download" | "install" }> {
+  return { kind, version, versionLabel: updateVersionLabel(version), releaseNotes: releaseNotes ?? null };
+}
+
+function progressLabel(percent: number, pendingVersion: string | null): string {
+  const rounded = `${Math.round(percent)}%`;
+  return pendingVersion ? `${updateVersionLabel(pendingVersion)} · ${rounded}` : rounded;
 }
 
 /** Copy for the install dialog body, singular for one agent. */
