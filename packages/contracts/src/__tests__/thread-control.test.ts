@@ -9,10 +9,6 @@ import {
   ThreadSendResultSchema,
   ThreadStopInputSchema,
   ThreadStopResultSchema,
-  ThreadControlIdentitySchema,
-  ThreadControlProjectionSchema,
-  ThreadControlUserSendInputSchema,
-  ThreadControlUserStopInputSchema,
   ThreadWaitInputSchema,
   MessageOriginSchema,
   WORKSPACE_SEARCH_LIMIT_DEFAULT,
@@ -97,82 +93,8 @@ describe("thread mutation schemas", () => {
   });
 });
 
-describe("user-facing coordination schemas", () => {
-  const identity = { workspaceId: "workspace-1", threadId: "thread-1" };
-  const thread = {
-    ...identity,
-    title: "Coordinator",
-    providerId: "codex",
-    modelId: "gpt-5.6-sol",
-    state: { status: "running" as const },
-  };
-
-  it("requires explicit Project/Thread identities for reads and mutations", () => {
-    expect(ThreadControlIdentitySchema().safeParse({ workspaceId: "workspace-1" }).success).toBe(false);
-    expect(ThreadControlUserSendInputSchema().safeParse({
-      source: identity,
-      target: { workspaceId: "workspace-2", threadId: "thread-2" },
-      message: "Follow up",
-      sourceThreadId: "forged",
-    }).success).toBe(false);
-    expect(ThreadControlUserStopInputSchema().safeParse({
-      source: identity,
-      target: { workspaceId: "workspace-2", threadId: "thread-2" },
-      sourceWorkspaceId: "forged",
-    }).success).toBe(false);
-  });
-
-  it("accepts persisted relation, provenance, lifecycle, and approval projection data", () => {
-    const projection = {
-      identity,
-      thread: { ...thread, createdAt: "2026-07-29T00:00:00.000Z", updatedAt: "2026-07-29T00:00:00.000Z" },
-      messages: [{
-        messageId: "message-1",
-        role: "user" as const,
-        content: "Delegate this",
-        createdAt: "2026-07-29T00:00:00.000Z",
-        origin: {
-          type: "thread" as const,
-          sourceThreadId: "source-thread",
-          sourceTurnId: "turn-1",
-          sourceProviderId: "claude",
-          sourceWorkspaceId: "workspace-2",
-          sourceWorkspaceName: "Source Project",
-          sourceUnavailable: false,
-          sourceThread: {
-            ...thread,
-            workspaceId: "workspace-2",
-            threadId: "source-thread",
-            title: "Source",
-            createdAt: "2026-07-29T00:00:00.000Z",
-            updatedAt: "2026-07-29T00:00:00.000Z",
-          },
-        },
-      }],
-      hasMoreMessages: false,
-      relation: {
-        source: { ...thread, workspaceId: "workspace-2", threadId: "source-thread", title: "Source" },
-        destination: thread,
-        creatorTurnId: "turn-1",
-        creatorToolCallId: "tool-1",
-        creationKind: "thread_delegation" as const,
-      },
-      children: [],
-      approvals: [{
-        requestId: "approval-1",
-        threadId: "thread-1",
-        providerId: "claude" as const,
-        requestedAt: "2026-07-29T00:00:00.000Z",
-        subject: { kind: "thread_operation" as const, operation: "thread_send" as const, targetThreadId: "thread-2", message: "Follow up" },
-        choices: [
-          { id: "allow", intent: "allow_once" as const, label: "Allow" },
-          { id: "deny", intent: "deny" as const, label: "Deny" },
-        ],
-        noteDelivery: "none" as const,
-        origin: { kind: "agent" as const },
-      }],
-    };
-    expect(ThreadControlProjectionSchema().parse(projection)).toEqual(projection);
+describe("thread message origin schema", () => {
+  it("preserves unavailable source provenance", () => {
     expect(MessageOriginSchema().parse({
       type: "thread",
       sourceThreadId: "source-thread",

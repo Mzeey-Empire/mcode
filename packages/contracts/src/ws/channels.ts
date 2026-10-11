@@ -21,7 +21,6 @@ import { TurnOutcomeSchema } from "../models/turn-outcome.js";
 import { TurnSavingStatusSchema } from "../models/turn-runtime.js";
 import { ProviderCatalogChangeSchema } from "../providers/capability-catalog.js";
 import { ProviderModelInfoSchema } from "../providers/models.js";
-import { ThreadObservedStateSchema } from "../thread-control.js";
 import { WorkspaceEnvironmentActionRunSchema } from "../models/workspace-environment.js";
 import { ThreadStartupSchema } from "../thread-startup.js";
 import { LegacyTerminalChannels } from "./terminal-legacy.js";
@@ -114,12 +113,6 @@ export const WS_CHANNELS = {
     model: z.string(),
     provider: z.string(),
   }),
-  /** Invalidates one canonical coordination projection after persisted control state changes. */
-  "thread.controlChanged": z.object({
-    workspaceId: z.string().min(1),
-    threadId: z.string().min(1),
-    state: ThreadObservedStateSchema(),
-  }).strict(),
   "thread.checkoutChanged": lazySchema(() =>
     z.object({
       threadId: z.string(),
