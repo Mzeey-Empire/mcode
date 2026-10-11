@@ -4,6 +4,7 @@ import { useTerminalStore } from "@/features/terminal";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { useDiffStore } from "@/stores/diffStore";
 import { useThreadRecord } from "@/stores/thread-selectors";
+import { useConnectionStore } from "@/stores/connectionStore";
 import { useToastStore } from "@/stores/toastStore";
 import { getTransport } from "@/transport";
 import { type StartupCancelRequest, useThreadStartupStore } from "./state/thread-startup-store";
@@ -13,51 +14,73 @@ const TERMINAL_STATES: ReadonlySet<ThreadStartup["state"]> = new Set(["completed
 export interface StartupSetupGate {
   readonly script: string | undefined;
   readonly approval: WorkspaceEnvironmentCommandApproval | undefined;
+  /** Reads the gate again, for Run setup when the approval did not load. */
+  readonly reload: () => void;
 }
 
-const EMPTY_SETUP_GATE: StartupSetupGate = { script: undefined, approval: undefined };
+type LoadedSetupGate = Omit<StartupSetupGate, "reload"> & {
+  readonly threadId: string;
+  readonly setupState: string;
+  readonly revision: number | undefined;
+  readonly reads: number;
+};
+
+function setupStarted(setupState: string | undefined): setupState is string {
+  return setupState !== undefined && setupState !== "pending";
+}
+
+/**
+ * A running step reads again until its script arrives, since the step turns running before the
+ * attempt records it. A blocked step reads again on every revision, so the approval Run setup
+ * sends always matches the script on screen.
+ */
+function gateIsCurrent(loaded: LoadedSetupGate | null, setupState: string | undefined, revision: number | undefined, reads: number): boolean {
+  if (loaded === null || loaded.setupState !== setupState || loaded.reads !== reads) return false;
+  if (setupState === "blocked") return loaded.revision === revision;
+  return setupState !== "running" || loaded.script !== undefined || loaded.revision === revision;
+}
 
 /**
  * Reads the setup script for the setup row and the approval behind a Setup needs approval block.
  *
- * The startup record carries neither, so this reads the automatic setup gate once per setup step
- * state change. The step turns running before the attempt records its script, so until the script
- * arrives each pushed startup revision reads the gate again. Nothing here runs on a timer.
+ * The startup record carries neither, so this reads the automatic setup gate when the setup step
+ * changes, when the connection returns after a failed read, and when the user asks again. Nothing
+ * here runs on a timer.
  */
-type LoadedSetupGate = StartupSetupGate & { readonly threadId: string; readonly setupState: string; readonly revision: number | undefined };
-
-function gateIsCurrent(loaded: LoadedSetupGate | null, setupState: string | undefined, revision: number | undefined): boolean {
-  if (loaded === null || loaded.setupState !== setupState) return false;
-  return setupState !== "running" || loaded.script !== undefined || loaded.revision === revision;
-}
-
 export function useStartupSetupGate(startup: ThreadStartup | undefined): StartupSetupGate {
   const threadId = startup?.threadId;
   const setupState = startup?.steps.find((step) => step.phase === "setup")?.state;
   const revision = startup?.revision;
+  const connected = useConnectionStore((state) => state.status === "connected");
   const [loaded, setLoaded] = useState<LoadedSetupGate | null>(null);
+  const [reads, setReads] = useState(0);
   const current = loaded?.threadId === threadId ? loaded : null;
-  const settled = gateIsCurrent(current, setupState, revision);
+  const settled = gateIsCurrent(current, setupState, revision, reads);
   useEffect(() => {
-    if (!threadId || !setupState || setupState === "pending" || settled) return;
+    // A read that failed while offline is not settled, so the reconnect below reads again.
+    if (!threadId || !setupStarted(setupState) || settled) return;
     let active = true;
     getTransport().getAutomaticSetup(threadId).then(
       (snapshot) => {
         if (!active) return;
         const attempt = snapshot.attempt?.snapshot;
-        setLoaded({ threadId, setupState, revision, script: attempt?.script ?? undefined, approval: attempt?.approval ?? undefined });
+        setLoaded({ threadId, setupState, revision, reads, script: attempt?.script ?? undefined, approval: attempt?.approval ?? undefined });
       },
-      // The script only labels rows; a missing approval leaves Run setup disabled rather than guessing.
-      () => undefined,
+      (error: unknown) => {
+        // Background reads only label rows; a failed read the user asked for says why.
+        if (active && reads > 0) showFailure("Could not load the setup command", error);
+      },
     );
     return () => {
       active = false;
     };
-  }, [threadId, setupState, revision, settled]);
-  return current ?? EMPTY_SETUP_GATE;
+  }, [threadId, setupState, revision, settled, connected, reads]);
+  const reload = useCallback(() => setReads((count) => count + 1), []);
+  return { script: current?.script, approval: current?.approval, reload };
 }
 
-type SetupDecisionAction = "retry" | "skip" | "approve";
+/** One decision a startup stopped at setup can take. */
+export type SetupDecisionAction = "retry" | "skip" | "approve";
 
 /** Retry setup, Skip setup and Run setup for a startup stopped at its setup step. */
 export interface StartupSetupDecision {

@@ -227,11 +227,17 @@ export function startupDecision(startup: Pick<ThreadStartup, "state" | "phase" |
 }
 
 /** What a screen reader hears when the trail changes state. It never includes a ticking duration. */
-export function startupTrailAnnouncement(startup: Pick<ThreadStartup, "kind" | "state" | "steps"> | undefined): string {
+export function startupTrailAnnouncement(startup: Pick<ThreadStartup, "kind" | "state" | "steps"> & Partial<Pick<ThreadStartup, "block">> | undefined): string {
   if (!startup) return "Preparing thread";
   if (startup.state === "completed") return "Thread started";
-  const current = startup.steps.filter(isTrailStep).filter((step) => step.state !== "pending").at(-1);
-  return current ? startupStepLabel(startup.kind, current) : "Preparing thread";
+  const current = latestStartedStep(startup);
+  if (!current) return "Preparing thread";
+  return awaitsApproval(current, startup.block) ? "Setup needs approval" : startupStepLabel(startup.kind, current);
+}
+
+/** The last step that has started, which is the one a stopped startup stopped at. */
+export function latestStartedStep(startup: Pick<ThreadStartup, "steps">): (ThreadStartupStep & { phase: TrailPhase }) | undefined {
+  return startup.steps.filter(isTrailStep).filter((step) => step.state !== "pending").at(-1);
 }
 
 /** Pending rows drawn before the server returns the first startup record. */

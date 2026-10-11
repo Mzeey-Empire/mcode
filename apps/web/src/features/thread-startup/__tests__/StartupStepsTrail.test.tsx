@@ -224,12 +224,71 @@ describe("StartupStepsTrail", () => {
 
     expect(screen.getByTestId("startup-step-setup")).toHaveAttribute("data-tone", "approval");
     expect(screen.getByTestId("startup-step-setup")).toHaveTextContent(/^Setup needs approval$/);
-    await waitFor(() => expect(screen.getByTestId("startup-detail")).toHaveTextContent("$ bun install"));
+    expect(screen.getByRole("status")).toHaveTextContent("Setup needs approval");
+    await waitFor(() => expect(screen.getByTestId("startup-detail").textContent).toBe("$ bun install\nbun run build"));
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Run setup" }));
     expect(startupTransport.approveWorkspaceEnvironmentCommand).toHaveBeenCalledWith("thread-1", "setup", "fp-1");
     await userEvent.click(screen.getByRole("button", { name: "Skip setup" }));
     expect(startupTransport.continueAutomaticSetup).toHaveBeenCalledWith("thread-1");
+  });
+
+  it("sets the decision under the step it stopped at, above the steps still pending", () => {
+    renderTrail({
+      startup: startup({
+        state: "blocked",
+        steps: [
+          { phase: "thread", state: "completed" },
+          { phase: "setup", state: "blocked", startedAt: at(2), endedAt: at(16), detail: { phase: "setup", exitCode: 1 } },
+          { phase: "agent", state: "pending" },
+        ],
+        block: { code: "SETUP_FAILED", message: "Project Setup did not complete successfully", actions: ["retry", "continue"], detail: "error: lockfile had changes" },
+      }),
+      kind: "managed-worktree",
+    });
+    const order = Array.from(screen.getByTestId("startup-trail").querySelectorAll("[data-testid]"), (node) => node.getAttribute("data-testid"));
+    expect(order).toEqual(["startup-step-setup", "startup-detail", "startup-actions", "startup-step-agent"]);
+  });
+
+  it("keeps the other setup actions disabled while one is on its way, and the pending one focusable", async () => {
+    setupScript("bun install");
+    startupTransport.retryAutomaticSetup.mockReturnValue(new Promise(() => undefined));
+    renderTrail({
+      startup: startup({
+        state: "blocked",
+        steps: [{ phase: "thread", state: "completed" }, { phase: "setup", state: "blocked", startedAt: at(2), endedAt: at(16) }],
+        block: { code: "SETUP_FAILED", message: "Project Setup did not complete successfully", actions: ["retry", "continue"] },
+      }),
+      kind: "managed-worktree",
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Retry setup" }));
+    expect(screen.getByRole("button", { name: "Retry setup" })).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("button", { name: "Retry setup" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Skip setup" })).toBeDisabled();
+  });
+
+  it("reads the setup command again instead of approving one that never loaded", async () => {
+    const approval = { target: "setup", fingerprint: "fp-1" };
+    startupTransport.getAutomaticSetup
+      .mockRejectedValueOnce(new Error("socket closed"))
+      .mockResolvedValue({ gate: "blocked", attempt: { state: "awaiting-approval", snapshot: { script: "bun install", approval } }, queuedTurns: [] });
+    renderTrail({
+      startup: startup({
+        state: "blocked",
+        steps: [{ phase: "thread", state: "completed" }, { phase: "setup", state: "blocked", startedAt: at(2) }],
+        block: { code: "SETUP_APPROVAL_REQUIRED", message: "Setup needs approval", actions: ["retry", "continue"] },
+      }),
+      kind: "managed-worktree",
+    });
+    await waitFor(() => expect(startupTransport.getAutomaticSetup).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("startup-detail")).toHaveTextContent("Setup needs approval");
+
+    await userEvent.click(screen.getByRole("button", { name: "Run setup" }));
+    await waitFor(() => expect(screen.getByTestId("startup-detail")).toHaveTextContent("$ bun install"));
+    expect(startupTransport.approveWorkspaceEnvironmentCommand).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Run setup" }));
+    expect(startupTransport.approveWorkspaceEnvironmentCommand).toHaveBeenCalledWith("thread-1", "setup", "fp-1");
   });
 
   it("offers Retry and Start from local for a failed origin fetch, without Cancel", async () => {
