@@ -206,6 +206,19 @@ describe("TurnChangesBar", () => {
     expect(row("src/a.ts")).toHaveTextContent("a.ts+3−1");
   });
 
+  it("counts a turn with an empty recorded summary over its git range", async () => {
+    transport.getSnapshotDiffStats.mockResolvedValue([stat("src/a.ts", 4, 0, "added")]);
+    seedSnapshots([snapshot({
+      files_changed: ["src/a.ts"],
+      file_effects: { revision: 0, fileCount: 0, additions: 0, deletions: 0, effects: [] },
+    })]);
+
+    renderBar();
+
+    await waitFor(() => expect(header()).toHaveTextContent("Changed 1 file+4"));
+    expect(transport.getSnapshotDiffStats).toHaveBeenCalledWith("snap-1");
+  });
+
   it("says Counts unavailable when the stats request fails", async () => {
     transport.getSnapshotDiffStats.mockRejectedValue(new Error("git exploded"));
     seedSnapshots([snapshot({ files_changed: ["src/a.ts", "src/b.ts"] })]);

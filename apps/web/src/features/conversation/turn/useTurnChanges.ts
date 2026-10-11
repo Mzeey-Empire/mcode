@@ -7,6 +7,7 @@ import {
   filesFromEffects,
   filesFromStats,
   pathsEditedLater,
+  recordedEffects,
   toForwardSlashes,
   type TurnChanges,
 } from "./changes-tree";
@@ -22,7 +23,7 @@ interface StatsResult {
  * snapshot spans every attempt, so only git stats over the range are true.
  */
 function needsRangeStats(snapshot: TurnSnapshot): boolean {
-  return !snapshot.file_effects || snapshot.attempt_count > 1;
+  return !recordedEffects(snapshot) || snapshot.attempt_count > 1;
 }
 
 /**
@@ -90,8 +91,9 @@ function resolveTurnChanges({ snapshot, snapshots, listSettled, stats, filesChan
     return listSettled ? { status: "unavailable", paths } : { status: "loading", paths };
   }
   const editedLater = pathsEditedLater(snapshot, snapshots);
-  if (snapshot.file_effects && !needsRangeStats(snapshot)) {
-    return { status: "ready", files: filesFromEffects(snapshot.file_effects.effects, editedLater) };
+  const effects = recordedEffects(snapshot);
+  if (effects && !needsRangeStats(snapshot)) {
+    return { status: "ready", files: filesFromEffects(effects, editedLater) };
   }
   const paths = snapshot.files_changed.map(toForwardSlashes);
   if (!stats) return { status: "loading", paths };

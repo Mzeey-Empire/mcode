@@ -218,10 +218,19 @@ export function initialCollapse(tree: ChangesTree): InitialCollapse {
   };
 }
 
-function attributedPaths(snapshot: TurnSnapshot): string[] {
-  return snapshot.file_effects
-    ? snapshot.file_effects.effects.map((effect) => effect.path)
-    : snapshot.files_changed;
+/**
+ * The snapshot's recorded file effects, or null when it has none. Snapshots
+ * from before effects were recorded come back as an empty summary rather than
+ * no summary, so an empty one defers to `files_changed`, as the server's
+ * attribution does.
+ */
+export function recordedEffects(snapshot: TurnSnapshot): readonly FileEffect[] | null {
+  const summary = snapshot.file_effects;
+  return summary && summary.fileCount > 0 ? summary.effects : null;
+}
+
+function attributedPaths(snapshot: TurnSnapshot): readonly string[] {
+  return recordedEffects(snapshot)?.map((effect) => effect.path) ?? snapshot.files_changed;
 }
 
 /** Paths that snapshots created after `snapshot` in the same thread attribute to their turns. */
