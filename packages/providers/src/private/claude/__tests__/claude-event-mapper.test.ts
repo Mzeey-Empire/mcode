@@ -264,6 +264,25 @@ describe("ClaudeEventMapper failure classification", () => {
     expect(failures(events)).toEqual([{ kind: "retryable", status: 502 }]);
   });
 
+  it("classifies by the internal api_error the CLI attaches to the failing message", async () => {
+    const { events, mapper } = createMapper();
+    await mapper.map({ type: "assistant", parent_tool_use_id: null, error: "unknown", api_error: "gateway_session_expired", message: { content: [] } });
+    await mapper.map({ type: "result", subtype: "success", is_error: true, result: "Session expired" });
+    await mapper.map({ type: "assistant", parent_tool_use_id: null, error: "rate_limit", message: { content: [] } });
+    await mapper.map({ type: "result", subtype: "success", is_error: true, result: "Extra usage required", api_error: "model_requires_usage_credits", api_error_status: 429 });
+    expect(failures(events)).toEqual([
+      { kind: "auth", code: "gateway_session_expired" },
+      { kind: "usage_limit", status: 429, code: "model_requires_usage_credits" },
+    ]);
+  });
+
+  it("ignores the api_error of a subagent message", async () => {
+    const { events, mapper } = createMapper();
+    await mapper.map({ type: "assistant", parent_tool_use_id: "tool-1", error: "unknown", api_error: "gateway_signin_required", message: { content: [] } });
+    await mapper.map({ type: "result", subtype: "success", is_error: true, result: "Bad gateway", api_error_status: 502 });
+    expect(failures(events)).toEqual([{ kind: "retryable", status: 502 }]);
+  });
+
   it("does not treat a usage warning as a usage limit", async () => {
     const { events, mapper } = createMapper();
     await mapper.map({ type: "rate_limit_event", rate_limit_info: { status: "allowed_warning", resetsAt: 1_700_003_600, rateLimitType: "five_hour" } });

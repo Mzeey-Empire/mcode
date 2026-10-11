@@ -15,7 +15,7 @@ describe("classifyClaudeFailure", () => {
     ["max_output_tokens", "fatal"],
     ["account_on_hold", "fatal"],
     ["verification_required", "fatal"],
-    ["cloud_credential_error", "fatal"],
+    ["cloud_credential_error", "auth"],
   ])("classifies assistant error %s as %s", (assistantError, kind) => {
     expect(classifyClaudeFailure({ assistantError }, NOW)).toEqual({ kind, code: assistantError });
   });
@@ -23,6 +23,31 @@ describe("classifyClaudeFailure", () => {
   it("lets other signals decide when the assistant error is unknown", () => {
     expect(classifyClaudeFailure({ assistantError: "unknown", apiErrorStatus: 503 }, NOW)).toEqual({ kind: "retryable", status: 503 });
     expect(classifyClaudeFailure({ assistantError: "unknown" }, NOW)).toEqual({ kind: "fatal" });
+  });
+
+  it.each([
+    ["gateway_signin_required", "unknown", "auth"],
+    ["gateway_session_expired", "unknown", "auth"],
+    ["api_key_auth_disabled", "invalid_request", "auth"],
+    ["org_disabled_credential", "invalid_request", "auth"],
+    ["provider_credentials", "authentication_failed", "auth"],
+    ["invalid_credential_header", "authentication_failed", "auth"],
+    ["model_requires_usage_credits", "rate_limit", "usage_limit"],
+    ["long_context_credits_required", "rate_limit", "usage_limit"],
+  ])("classifies internal api_error %s (sent with %s) as %s", (apiError, assistantError, kind) => {
+    expect(classifyClaudeFailure({ apiError, assistantError }, NOW)).toEqual({ kind, code: apiError });
+  });
+
+  it("lets the assistant error decide when the api_error is unlisted", () => {
+    expect(classifyClaudeFailure({ apiError: "pdf_too_large", assistantError: "invalid_request" }, NOW)).toEqual({ kind: "fatal", code: "pdf_too_large" });
+    expect(classifyClaudeFailure({ apiError: "no_response", assistantError: "server_error" }, NOW)).toEqual({ kind: "retryable", code: "no_response" });
+  });
+
+  it("never gives a credit requirement a reset window", () => {
+    const rateLimit = { status: "rejected", resetsAt: NOW / 1000 + 90, rateLimitType: "five_hour" };
+    expect(classifyClaudeFailure({ apiError: "model_requires_usage_credits", assistantError: "rate_limit", rateLimit }, NOW))
+      .toEqual({ kind: "usage_limit", code: "model_requires_usage_credits" });
+    expect(classifyClaudeFailure({ assistantError: "billing_error", rateLimit }, NOW)).toEqual({ kind: "usage_limit", code: "billing_error" });
   });
 
   it("classifies a missing gateway sign-in as auth", () => {

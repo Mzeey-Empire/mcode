@@ -101,6 +101,7 @@ export class ClaudeEventMapper {
   private readonly toolParents = new Map<string, ClaudeParentEvidence>();
   private nativeSource: Message = {};
   private assistantError: string | undefined;
+  private apiError: string | undefined;
   private lastApiRetry: ClaudeApiRetryEvidence | undefined;
   // Claude reports rate-limit info only when it changes, so the last report outlives the turn that saw it.
   private lastRateLimit: ClaudeRateLimitEvidence | undefined;
@@ -173,6 +174,7 @@ export class ClaudeEventMapper {
   classifyStreamFailure(error: unknown, now: number): TurnFailure {
     return classifyClaudeFailure({
       assistantError: this.assistantError,
+      apiError: this.apiError,
       rateLimit: this.lastRateLimit,
       apiRetry: this.lastApiRetry,
       streamErrorCode: nodeErrorCode(error),
@@ -181,6 +183,7 @@ export class ClaudeEventMapper {
 
   private resetFailureEvidence(): void {
     this.assistantError = undefined;
+    this.apiError = undefined;
     this.lastApiRetry = undefined;
   }
 
@@ -207,7 +210,10 @@ export class ClaudeEventMapper {
     const parentToolCallId = parentId(message);
     // A subagent's API error ends only that subagent, not the turn. A later main-thread message
     // without an error means the CLI recovered, so the earlier error no longer explains a failure.
-    if (!parentToolCallId) this.assistantError = typeof message.error === "string" ? message.error : undefined;
+    if (!parentToolCallId) {
+      this.assistantError = stringOrUndefined(message.error);
+      this.apiError = stringOrUndefined(message.api_error);
+    }
     const text = content
       .filter((block) => block.type === "text")
       .map((block) => stringValue(block.text))
@@ -323,6 +329,7 @@ export class ClaudeEventMapper {
     });
     const failure = classifyClaudeFailure({
       assistantError: this.assistantError,
+      apiError: stringOrUndefined(message.api_error) ?? this.apiError,
       resultSubtype: stringOrUndefined(message.subtype),
       terminalReason: stringOrUndefined(message.terminal_reason),
       startupFailureReason: stringOrUndefined(message.startup_failure_reason),
