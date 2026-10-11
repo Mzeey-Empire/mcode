@@ -5,6 +5,7 @@ import { INTERACTION_MODES, PERMISSION_MODES } from "@/transport";
 import { createMockThread } from "@/__tests__/mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 import {
   useThreadDraftStore,
   type ThreadDraftPayload,
@@ -214,6 +215,20 @@ describe("useComposerFormController new-thread drafts", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(Object.keys(useThreadDraftStore.getState().drafts)).toHaveLength(0);
+  });
+
+  it("starts a fresh composer on the model chosen from a new-model announcement, once", async () => {
+    useSettingsStore.setState({ loaded: true });
+    useComposerDraftStore.getState().setPendingModel({ provider: "codex", modelId: "gpt-6-astra" });
+    const { result } = renderHook(() => useComposerFormController({
+      isNewThread: true,
+      workspaceId: "ws-1",
+      draftId: null,
+    }));
+
+    await waitFor(() => expect(result.current.state.selection.modelId).toBe("gpt-6-astra"));
+    expect(result.current.state.selection.provider).toBe("codex");
+    expect(useComposerDraftStore.getState().pendingModel).toBeNull();
   });
 
   it("restores input and selection from a bound draft entity", async () => {

@@ -384,6 +384,7 @@ export const mockTransport: McodeTransport = {
   listProviderModes: vi.fn().mockResolvedValue(null),
   listProviderAvailability: vi.fn().mockResolvedValue([]),
   listProviderStatus: vi.fn().mockResolvedValue([]),
+  acknowledgeProviderModels: vi.fn().mockResolvedValue(undefined),
   setBackground: vi.fn().mockResolvedValue(undefined),
   getProviderUsage: vi.fn().mockResolvedValue({
     providerId: "claude",
