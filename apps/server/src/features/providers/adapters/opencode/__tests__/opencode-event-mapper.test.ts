@@ -1,9 +1,43 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mapOpenCodeEnvelope } from "../opencode-event-mapper.js";
+import * as NodeFS from "node:fs";
+import { z } from "zod";
+import { mapOpenCodeEnvelope, normalizeOpenCodeEnvelope } from "../opencode-event-mapper.js";
 
 const CTX = { threadId: "thread-1", turnExecutionId: "11111111-1111-4111-8111-111111111111" };
+const capturedTraceSchema = z.object({ events: z.array(z.unknown()) });
+const capturedToolPartSchema = z.object({ type: z.literal("tool"), sessionID: z.string() });
 
 describe("mapOpenCodeEnvelope", () => {
+  it("maps the captured task presentation, child reads, and result summary", () => {
+    const fixture = capturedTraceSchema.parse(JSON.parse(NodeFS.readFileSync(new URL("./fixtures/task-subagent.captured.json", import.meta.url), "utf8")));
+    const events = fixture.events.flatMap((frame) => {
+      const normalized = normalizeOpenCodeEnvelope(frame);
+      const part = capturedToolPartSchema.safeParse(normalized?.properties.part);
+      if (!part.success) return [];
+      return mapOpenCodeEnvelope(frame, { ...CTX, ...(part.data.sessionID === "ses_ed6efc38affeCX4FfwARNpGIYx"
+        ? { parentToolCallId: "call_00_xr57hsrx9heom9avd50vi5bk" } : {}) }).events;
+    });
+    const agents = events.filter((event) => event.type === "toolUse" && event.toolName === "Agent");
+    expect([...new Set(agents.map((event) => event.toolCallId))]).toEqual(["call_00_xr57hsrx9heom9avd50vi5bk"]);
+    expect(agents.at(-1)).toMatchObject({ toolInput: { description: "Read math.js and README.md",
+      prompt: "Read math.js and README.md with the read tool, then report the exported function name.", subagentType: "general", model: "big-pickle" },
+      subagentPresentation: { task: "Read math.js and README.md", displayName: "General", model: "big-pickle" } });
+    expect(events.filter((event) => event.type === "toolResult").map((event) => [event.toolCallId, event.parentToolCallId, event.isError])).toEqual([
+      ["call_00_gklh7p1tknyzzv94mr7cglmz", "call_00_xr57hsrx9heom9avd50vi5bk", false],
+      ["call_01_pnjs9yz5shlnirmegim4j9oa", "call_00_xr57hsrx9heom9avd50vi5bk", false],
+      ["call_00_xr57hsrx9heom9avd50vi5bk", undefined, false],
+    ]);
+    expect(events.at(-1)).toMatchObject({ type: "toolResult", output: "`add`", isError: false });
+  });
+
+  it.each(["plain summary", "<task_result>\nwrapped summary\n</task_result>"])("extracts task output %s", (output) => {
+    const result = mapOpenCodeEnvelope({ type: "message.part.updated", properties: { part: {
+      type: "tool", tool: "task", callID: "task", state: { status: "completed", output },
+    } } }, CTX);
+    expect(result.events).toEqual([{ ...CTX, type: "toolResult", toolCallId: "task", isError: false,
+      output: output === "plain summary" ? "plain summary" : "wrapped summary" }]);
+  });
+
   it("maps the captured running todowrite part to the canonical task-list tool", () => {
     const out = mapOpenCodeEnvelope({
       type: "message.part.updated",

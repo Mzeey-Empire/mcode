@@ -2,6 +2,7 @@ import { SUBAGENT_REPORTING } from "@mcode/contracts";
 import * as NodeEvents from "node:events";
 import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
+import { z } from "zod";
 import { logger } from "@mcode/shared";
 import type {
   AgentEvent,
@@ -138,6 +139,7 @@ interface OpenCodeTurnState {
   idleConfirmPromise: Promise<void> | null;
   /** Upstream message id to role, so user parts never become assistant deltas. */
   messageRoles: Map<string, string>;
+  childSessionCalls: Map<string, string>;
   /** Text already forwarded per message, for exactly-once streaming. */
   forwardedText: Map<string, string>;
   /** Native turn-diff accumulator and its monotonic push cursor for this turn. */
@@ -181,6 +183,28 @@ function trackedMessageRole(info: Record<string, unknown> | null): { id: string;
 
 /** Largest retained upstream message-role map per turn before pruning oldest. */
 const MAX_TRACKED_MESSAGE_ROLES = 256;
+
+const childTaskPartSchema = z.object({
+  type: z.literal("tool"), tool: z.literal("task"), callID: z.string().min(1).max(512),
+  state: z.object({ metadata: z.object({ sessionId: z.string().min(1).max(512) }) }),
+});
+
+function trackChildTask(state: OpenCodeTurnState, normalized: { type: string; properties: Record<string, unknown> }): void {
+  if (normalized.type !== "message.part.updated" || !sessionIdOfNormalized(normalized)) return;
+  const task = childTaskPartSchema.safeParse(normalized.properties.part);
+  if (!task.success) return;
+  state.childSessionCalls.set(task.data.state.metadata.sessionId, task.data.callID);
+  if (state.childSessionCalls.size > MAX_TRACKED_MESSAGE_ROLES) {
+    const oldest = state.childSessionCalls.keys().next();
+    if (!oldest.done) state.childSessionCalls.delete(oldest.value);
+  }
+}
+
+const childToolPartSchema = z.object({ type: z.literal("tool") });
+
+function isChildToolPart(normalized: { type: string; properties: Record<string, unknown> }): boolean {
+  return normalized.type === "message.part.updated" && childToolPartSchema.safeParse(normalized.properties.part).success;
+}
 
 function sessionIdOfNormalized(normalized: { properties: Record<string, unknown> }): string | undefined {
   return nestedSessionId(normalized.properties)
@@ -587,6 +611,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       idleRestart: false,
       idleConfirmPromise: null,
       messageRoles: new Map<string, string>(),
+      childSessionCalls: new Map<string, string>(),
       forwardedText: new Map<string, string>(),
       nativeDiff: new OpenCodeNativeTurnDiff(),
       nativeDiffRevision: 0,
@@ -639,6 +664,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     state.aborted = false;
     state.abortController = new AbortController();
     state.messageRoles.clear();
+    state.childSessionCalls.clear();
     state.forwardedText.clear();
     state.nativeDiff = new OpenCodeNativeTurnDiff();
     state.nativeDiffRevision = 0;
@@ -833,10 +859,15 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     if (state.aborted) return;
     const threadId = this.threadIdFor(req.sessionId);
     const normalized = normalizeOpenCodeEnvelope(envelope);
+    let parentToolCallId: string | undefined;
     if (normalized) {
-      this.trackMessageRole(state, normalized);
       const owner = sessionIdOfNormalized(normalized);
-      if (owner && owner !== upstreamId) return;
+      if (owner && owner !== upstreamId) {
+        parentToolCallId = state.childSessionCalls.get(owner);
+        if (!parentToolCallId || !isChildToolPart(normalized)) return;
+      }
+      this.trackMessageRole(state, normalized);
+      trackChildTask(state, normalized);
       if (normalized.type === "session.diff") {
         this.publishNativeTurnDiff(req, state, normalized.properties);
       }
@@ -847,6 +878,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       requestedModel: req.model,
       partRole: normalized ? partRoleOf(state.messageRoles, normalized) : undefined,
       forwardedText: state.forwardedText,
+      parentToolCallId,
     });
     this.dispatchMappedEnvelope(req, state, endpoint, upstreamId, threadId, mapped, normalized, settler);
   }

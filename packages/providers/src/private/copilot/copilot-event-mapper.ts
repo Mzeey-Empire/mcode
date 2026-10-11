@@ -1,5 +1,5 @@
 import type { SessionEvent } from "@github/copilot-sdk";
-import type { AgentEvent } from "@mcode/contracts";
+import { createSubagentPresentation, type AgentEvent } from "@mcode/contracts";
 import { z } from "zod";
 import { normalizeQuotaSnapshots } from "./copilot-helpers.js";
 
@@ -15,7 +15,7 @@ export interface CopilotTurnState {
   cacheWrite: number;
   cost?: number;
   contextWindow?: number;
-  tools: Map<string, { name: string; startedAt: number }>;
+  tools: Map<string, { name: string; startedAt: number; input?: Record<string, unknown>; parentToolCallId?: string; failed?: boolean }>;
   pendingPermissions: Map<string, { request: import("@mcode/contracts").ApprovalRequestEnvelope & { body: import("@mcode/contracts").ApprovalRequestBody }; unanswerable?: boolean; resolve: (result: import("@github/copilot-sdk").PermissionRequestResult) => void }>;
   settle: (outcome: "completed" | "cancelled" | "failed", error?: Error) => void;
   completed: Promise<void>;
@@ -26,7 +26,7 @@ export interface CopilotTurnState {
 export function mapCopilotEvent(event: SessionEvent, threadId: string, turn: CopilotTurnState): AgentEvent[] {
   validateEnvelope(event);
   validateData(event);
-  if ("parentToolCallId" in event.data && typeof event.data.parentToolCallId === "string") return [{ type: "system", threadId, subtype: `copilot_child:${event.type}` }];
+  if ("parentToolCallId" in event.data && typeof event.data.parentToolCallId === "string") return mapToolEvent(event, threadId, turn) ?? [];
   return mapAssistantEvent(event, threadId, turn) ?? mapToolEvent(event, threadId, turn) ?? mapUsageEvent(event, threadId, turn) ?? mapCompactionEvent(event, threadId) ?? mapLifecycleEvent(event, threadId, turn) ?? [{ type: "system", threadId, subtype: `copilot_native:${event.type}` }];
 }
 
@@ -71,23 +71,51 @@ function deferAssistantMessage(event: Extract<SessionEvent, { type: "assistant.m
 }
 function mapToolEvent(event: SessionEvent, threadId: string, turn: CopilotTurnState): AgentEvent[] | undefined {
   switch (event.type) {
-    case "tool.execution_start":
-      if (turn.tools.size >= 1_024) throw new Error("Copilot tool index overflowed");
-      turn.tools.set(event.data.toolCallId, { name: event.data.toolName, startedAt: Date.parse(event.timestamp) });
-      return [{ type: "toolUse", threadId, toolCallId: event.data.toolCallId, toolName: event.data.toolName, toolInput: event.data.arguments ?? {} }];
+    case "tool.execution_start": return startTool(event, threadId, turn);
     case "tool.execution_complete": return completeTool(event, threadId, turn);
     case "tool.execution_progress": return toolProgress(event, threadId, turn);
+    case "subagent.started": return startSubagent(event, threadId, turn);
+    case "subagent.failed": {
+      const tool = turn.tools.get(event.data.toolCallId);
+      if (tool) tool.failed = true;
+      return [{ type: "toolResult", threadId, toolCallId: event.data.toolCallId, parentToolCallId: tool?.parentToolCallId, output: event.data.error, isError: true }];
+    }
+    case "subagent.completed": return [];
     default: return undefined;
   }
 }
+function startTool(event: Extract<SessionEvent, { type: "tool.execution_start" }>, threadId: string, turn: CopilotTurnState): AgentEvent[] {
+  if (turn.tools.size >= 1_024) throw new Error("Copilot tool index overflowed");
+  const name = event.data.toolName === "task" ? "Agent" : event.data.toolName;
+  const input = event.data.arguments ?? {};
+  const parentToolCallId = event.data.parentToolCallId;
+  turn.tools.set(event.data.toolCallId, { name, input, parentToolCallId, startedAt: Date.parse(event.timestamp) });
+  return [{ type: "toolUse", threadId, toolCallId: event.data.toolCallId, toolName: name, toolInput: input, parentToolCallId,
+    ...(name === "Agent" ? { subagentPresentation: createSubagentPresentation(input, event.data.toolCallId) } : {}) }];
+}
+function startSubagent(event: Extract<SessionEvent, { type: "subagent.started" }>, threadId: string, turn: CopilotTurnState): AgentEvent[] {
+  const tool = turn.tools.get(event.data.toolCallId);
+  const input = { ...tool?.input, description: tool?.input?.description ?? event.data.agentDisplayName,
+    prompt: event.data.agentDescription, subagentType: event.data.agentName };
+  return [{ type: "toolUse", threadId, toolCallId: event.data.toolCallId, toolName: "Agent", toolInput: input,
+    parentToolCallId: tool?.parentToolCallId, subagentPresentation: createSubagentPresentation(input, event.data.toolCallId) }];
+}
 function completeTool(event: Extract<SessionEvent, { type: "tool.execution_complete" }>, threadId: string, turn: CopilotTurnState): AgentEvent[] {
+  const tool = turn.tools.get(event.data.toolCallId);
   turn.tools.delete(event.data.toolCallId);
-  return [{ type: "toolResult", threadId, toolCallId: event.data.toolCallId, output: event.data.result?.detailedContent ?? event.data.result?.content ?? event.data.error?.message ?? "", isError: !event.data.success }];
+  return [{ type: "toolResult", threadId, toolCallId: event.data.toolCallId, parentToolCallId: event.data.parentToolCallId ?? tool?.parentToolCallId, output: toolOutput(event.data), isError: tool?.failed === true || !event.data.success }];
+}
+function toolOutput(data: Extract<SessionEvent, { type: "tool.execution_complete" }>["data"]): string {
+  return data.result?.detailedContent ?? data.result?.content ?? data.error?.message ?? "";
+}
+
+function nativeParentToolCallId(event: SessionEvent): string | undefined {
+  return "parentToolCallId" in event.data && typeof event.data.parentToolCallId === "string" ? event.data.parentToolCallId : undefined;
 }
 function toolProgress(event: Extract<SessionEvent, { type: "tool.execution_progress" }>, threadId: string, turn: CopilotTurnState): AgentEvent[] {
   const tool = turn.tools.get(event.data.toolCallId);
   const at = Date.parse(event.timestamp);
-  return [{ type: "toolProgress", threadId, toolCallId: event.data.toolCallId, toolName: tool?.name ?? "", elapsedSeconds: Math.max(0, (at - (tool?.startedAt ?? at)) / 1_000) }];
+  return [{ type: "toolProgress", threadId, toolCallId: event.data.toolCallId, parentToolCallId: nativeParentToolCallId(event) ?? tool?.parentToolCallId, toolName: tool?.name ?? "", elapsedSeconds: Math.max(0, (at - (tool?.startedAt ?? at)) / 1_000) }];
 }
 function mapUsageEvent(event: SessionEvent, threadId: string, turn: CopilotTurnState): AgentEvent[] | undefined {
   if (event.type === "session.usage_info") {
