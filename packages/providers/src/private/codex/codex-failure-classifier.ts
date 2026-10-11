@@ -1,5 +1,6 @@
 import type { TurnFailure, TurnFailureKind } from "@mcode/contracts";
 import { failureCode, failureRetries, httpStatus, kindByHttpStatus, retryAfterMsUntil, turnFailure } from "../turn-failure-fields.js";
+import { CodexRpcResponseError, CodexTransportError } from "./codex-rpc-client.js";
 import type { CodexHttpErrorInfoName, CodexRateLimitWindow, CodexUnitErrorInfo } from "./codex-types.js";
 
 /** The latest known Codex account rate-limit windows. */
@@ -81,9 +82,22 @@ function codexFailureKind(code: string | undefined, status: number | undefined):
   return KIND_BY_CODEX_ERROR.get(code) ?? "fatal";
 }
 
+/**
+ * Classifies an error Mcode raised itself while driving the app-server, before or outside a
+ * `turn/completed`. These carry no `codexErrorInfo` (app-server JSON-RPC errors have none), so
+ * only a lost connection is retryable and anything else, including a JSON-RPC refusal, is fatal.
+ */
+export function classifyCodexLocalFailure(error: unknown): TurnFailure {
+  if (error instanceof CodexTransportError) return { kind: "retryable" };
+  const code = error instanceof CodexRpcResponseError && error.code !== undefined ? String(error.code) : undefined;
+  return turnFailure("fatal", { code: failureCode(code) });
+}
+
 /** Reads the variant name and forwarded HTTP status from a native `CodexErrorInfo`. */
 export function readCodexErrorInfo(value: unknown): CodexErrorInfoSummary {
-  // "other" is the serialized untagged fallback and names nothing.
+  // "other" is the serialized untagged fallback and names nothing. codex-rs folds both
+  // exhausted stream and timeout retries and content filters, invalid requests, and spawn
+  // failures into it (protocol/src/error.rs to_codex_protocol_error), so it stays fatal.
   if (typeof value === "string") return value === "other" ? {} : { code: failureCode(value) };
   if (!isRecord(value)) return {};
   const names = Object.keys(value);

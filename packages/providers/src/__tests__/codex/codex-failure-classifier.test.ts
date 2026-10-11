@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { classifyCodexFailure, readCodexErrorInfo } from "../../private/codex/codex-failure-classifier.js";
+import { enrichHandshakeError } from "../../private/codex/codex-app-server.js";
+import { classifyCodexFailure, classifyCodexLocalFailure, readCodexErrorInfo } from "../../private/codex/codex-failure-classifier.js";
+import { CodexRpcResponseError, CodexTransportError } from "../../private/codex/codex-rpc-client.js";
 
 const NOW = 1_700_000_000_000;
 const NOW_SECONDS = NOW / 1000;
@@ -109,5 +111,23 @@ describe("readCodexErrorInfo", () => {
     expect(readCodexErrorInfo({})).toEqual({});
     expect(readCodexErrorInfo({ badRequest: null, unauthorized: null })).toEqual({});
     expect(readCodexErrorInfo(["unauthorized"])).toEqual({});
+  });
+});
+
+describe("classifyCodexLocalFailure", () => {
+  it("treats a lost or timed-out connection as retryable, even after stderr is folded in", () => {
+    expect(classifyCodexLocalFailure(new CodexTransportError("Stream closed while waiting for response"))).toEqual({ kind: "retryable" });
+    const handshake = enrichHandshakeError(new CodexTransportError("Timed out waiting for initialize (30000ms)"), "auth refresh slow");
+    expect(classifyCodexLocalFailure(handshake)).toEqual({ kind: "retryable" });
+  });
+
+  it("treats a refused request as fatal and keeps its JSON-RPC code", () => {
+    expect(classifyCodexLocalFailure(new CodexRpcResponseError("Invalid params", -32602))).toEqual({ kind: "fatal", code: "-32602" });
+    expect(classifyCodexLocalFailure(enrichHandshakeError(new CodexRpcResponseError("Not logged in"), "boom"))).toEqual({ kind: "fatal" });
+  });
+
+  it("treats any other local error as fatal", () => {
+    expect(classifyCodexLocalFailure(new Error("sendTurn called before thread was established"))).toEqual({ kind: "fatal" });
+    expect(classifyCodexLocalFailure("not an error")).toEqual({ kind: "fatal" });
   });
 });

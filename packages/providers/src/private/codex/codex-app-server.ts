@@ -11,9 +11,9 @@ import * as NodeReadline from "node:readline";
 import * as NodeEvents from "node:events";
 import * as NodePath from "node:path";
 import which from "which";
-import { resolveSubagentDisplayName, type TurnSteerOutcome } from "@mcode/contracts";
+import { resolveSubagentDisplayName, type TurnFailureKind, type TurnSteerOutcome } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
-import { CodexRpcClient, CodexRpcResponseError } from "./codex-rpc-client.js";
+import { CodexRpcClient, CodexRpcResponseError, CodexTransportError } from "./codex-rpc-client.js";
 import { listCodexModels } from "./codex-models.js";
 import { codexIgnoredNotificationReason } from "./codex-notification-policy.js";
 import { parseCodexNotification } from "./codex-notification-validation.js";
@@ -725,7 +725,9 @@ export function enrichHandshakeError(err: unknown, stderr: string | null): Error
   if (!stderr || base.includes(stderr)) {
     return err instanceof Error ? err : new Error(base);
   }
-  return new Error(`${base} (codex app-server reported: ${stderr})`);
+  const message = `${base} (codex app-server reported: ${stderr})`;
+  // Keep the class: it is what tells a dropped handshake (retryable) from a refused one.
+  return err instanceof CodexTransportError ? new CodexTransportError(message) : new Error(message);
 }
 
 /** Maximum code points of stderr excerpt embedded in the user-facing fatal message. */
@@ -941,7 +943,8 @@ export async function warmCodexAppServer(
  * Emits:
  * - `notification(data: unknown)` - JSON-RPC notification forwarded from the RPC client
  * - `activity()` - a server-initiated request arrived
- * - `fatal(error: string)` - unrecoverable error from stderr, unexpected exit, or handshake failure
+ * - `fatal(error: string)` - unrecoverable error from stderr, unexpected exit, or spawn failure;
+ *   {@link CodexAppServer.lastFatalKind} says whether a new app-server could get past it
  * - `exit(code: number | null, signal: string | null)` - child process exit
  */
 export class CodexAppServer extends NodeEvents.EventEmitter {
@@ -973,6 +976,11 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
   private readonly stderrTail = new StderrTail();
   /** Most recent immutable crash context, available without changing fatal listener arity. */
   private _lastTransportBreadcrumb: CodexTransportBreadcrumb | null = null;
+  private _lastFatalKind: TurnFailureKind = "fatal";
+  /** Whether the most recent `fatal` event could clear on a fresh app-server, read by its listeners. */
+  public get lastFatalKind(): TurnFailureKind {
+    return this._lastFatalKind;
+  }
   /** Most recent immutable crash context, if the child exited unexpectedly. */
   public get lastTransportBreadcrumb(): CodexTransportBreadcrumb | null {
     return this._lastTransportBreadcrumb;
@@ -1016,7 +1024,7 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     if (spawnError) {
       this._isAlive = false;
       const msg = `Failed to spawn codex app-server: ${spawnError.message}`;
-      this.emit("fatal", msg);
+      this.emitFatal(msg, "fatal");
       throw new Error(msg);
     }
 
@@ -1122,7 +1130,7 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
       approvalHandler: this.options.approvalHandler,
       sendResponse: (id, result) => this.rpc.sendResponse(id, result),
     }).catch(() => {
-      this.emit("fatal", "Could not deliver the approval response");
+      this.emitFatal("Could not deliver the approval response", "retryable");
     }).finally(() => {
       if (this.activeRequestId === request.id) this.activeRequestId = null;
     });
@@ -1555,7 +1563,8 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
             this.stderrTail.add(line);
             const msg = `Codex app-server fatal stderr: ${line}`;
             logger.error(msg, { cliPath: this.cliPath });
-            this.emit("fatal", msg);
+            // Every FATAL_PATTERNS entry is a network failure, which can clear.
+            this.emitFatal(msg, "retryable");
             this.kill().catch((err: unknown) => {
               logger.error("CodexAppServer: kill after fatal stderr failed", { error: String(err) });
             });
@@ -1571,6 +1580,11 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
       this.stderrTail.add(line);
       logger.debug("Codex stderr", { line });
     });
+  }
+
+  private emitFatal(message: string, kind: TurnFailureKind): void {
+    this._lastFatalKind = kind;
+    this.emit("fatal", message);
   }
 
   /** Wires the child process exit event to update state and emit events. */
@@ -1597,7 +1611,8 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
         }) satisfies CodexTransportBreadcrumb;
         this._lastTransportBreadcrumb = breadcrumb;
         logger.error(msg, { cliPath, exit, stderrTail, breadcrumb });
-        this.emit("fatal", msg);
+        // A crash says nothing about the request; a fresh app-server may well finish it.
+        this.emitFatal(msg, "retryable");
       }
     });
   }
