@@ -112,6 +112,32 @@ describe("thread event toasts", () => {
     expect(toasts()).toEqual([]);
   });
 
+  it("toasts a live turn that a reconnect snapshot kept in place", () => {
+    setRunning("a");
+    stop = startThreadEventDetector();
+    const observed = threadAttentionStore.getState().byThreadId;
+    push(turn("a", 4));
+    threadAttentionStore.getState().hydrate([turn("a", 2, "completed", 2)], observed);
+    setRunning();
+    expect(toasts()).toEqual([finishedA]);
+  });
+
+  it("does not bring back a toast that expired", () => {
+    stop = startThreadEventDetector();
+    push(turn("a", 4));
+    vi.advanceTimersByTime(8_000);
+    setRunning("b");
+    push(turn("a", 4));
+    expect(toasts()).toEqual([]);
+  });
+
+  it("takes the toast back when its thread is deleted", () => {
+    stop = startThreadEventDetector();
+    push(turn("a", 6, "errored"));
+    useWorkspaceStore.setState((state) => ({ threads: state.threads.filter((thread) => thread.id !== "a") }));
+    expect(toasts()).toEqual([]);
+  });
+
   it("takes the toast back when another client sees the turn", () => {
     stop = startThreadEventDetector();
     push(turn("a", 4));

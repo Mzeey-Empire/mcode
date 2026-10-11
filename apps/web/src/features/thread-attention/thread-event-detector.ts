@@ -98,7 +98,9 @@ function sight(threadId: string): Sighting {
   const attention = byThreadId[threadId];
   const thread = findThread(threadId);
   const state = readThreadRowState(threadId, thread?.clientPreparing === true);
-  return { thread, state, event: eventOf(state, attention), facts: factsOf(attention), onScreen: onScreenThreadId === threadId };
+  // A deleted thread keeps its attention facts but has nothing left to open.
+  const event = thread ? eventOf(state, attention) : null;
+  return { thread, state, event, facts: factsOf(attention), onScreen: onScreenThreadId === threadId };
 }
 
 function sameFacts(left: ThreadFacts | undefined, right: ThreadFacts): boolean {
@@ -119,8 +121,8 @@ export function startThreadEventDetector(): () => void {
   const watched = new Set<string>();
 
   const withdraw = (threadId: string): void => {
-    useToastStore.getState().dismissByKey(threadId);
     shown.delete(threadId);
+    useToastStore.getState().dismissByKey(threadId);
   };
 
   const retractStale = (threadId: string, { event, onScreen }: Sighting): void => {
@@ -154,7 +156,20 @@ export function startThreadEventDetector(): () => void {
   };
 
   const unsubscribeAttention = threadAttentionStore.subscribe((state, previous) => {
-    evaluateAll(state.hydrations !== previous.hydrations);
+    const hydrated = state.hydrations !== previous.hydrations;
+    // A hydration keeps a newer live fact in place, and that fact is still news.
+    for (const threadId of Object.keys(state.byThreadId)) {
+      evaluate(threadId, hydrated && state.byThreadId[threadId] !== previous.byThreadId[threadId]);
+    }
+  });
+  // A toast that expired, was closed, or was pushed out of the lane stops holding its thread.
+  const unsubscribeToasts = useToastStore.subscribe(({ toasts }) => {
+    const live = new Set(toasts.map((toast) => toast.dedupeKey));
+    for (const threadId of shown.keys()) {
+      if (live.has(threadId)) continue;
+      shown.delete(threadId);
+      evaluate(threadId, false);
+    }
   });
   const unsubscribeThread = useThreadStore.subscribe(evaluateWatched);
   const unsubscribeWorkspace = useWorkspaceStore.subscribe(evaluateWatched);
@@ -166,6 +181,7 @@ export function startThreadEventDetector(): () => void {
     unsubscribeThread();
     unsubscribeWorkspace();
     unsubscribeSetup();
+    unsubscribeToasts();
     for (const threadId of shown.keys()) withdraw(threadId);
   };
 }
