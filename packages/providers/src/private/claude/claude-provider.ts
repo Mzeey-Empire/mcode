@@ -2113,7 +2113,9 @@ export class ClaudeProvider
       cwd,
     });
     const ownedProcess = this.createOwnedClaudeProcess(sessionId);
-    options.env = { ...args.env };
+    // Without it, some startup failures end on stderr alone and reach us with no
+    // startup_failure_reason to classify them by.
+    options.env = { ...args.env, CLAUDE_CODE_STARTUP_FAILURE_RESULTS: "1" };
     options.pathToClaudeCodeExecutable = this.resolveClaudeExecutable();
     options.spawnClaudeCodeProcess = ownedProcess.spawn;
     let query: Query;
