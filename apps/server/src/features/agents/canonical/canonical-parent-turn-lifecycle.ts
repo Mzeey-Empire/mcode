@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
 import {
   canonicalAgentIngestCheckpoints,
@@ -410,7 +410,8 @@ export class CanonicalParentTurnLifecycle {
       .set({ phase: "retried", updatedAt })
       .where(and(
         eq(canonicalAgentIngestCheckpoints.executionId, retryOfExecutionId),
-        inArray(canonicalAgentIngestCheckpoints.phase, ["interrupted", "errored"]),
+        // The outcome decides retryability; the phase differs by writer (a live ending checkpoints "finalized").
+        ne(canonicalAgentIngestCheckpoints.phase, "retried"),
         inArray(canonicalAgentIngestCheckpoints.terminalOutcome, ["interrupted", "errored"]),
       )));
     if (consumed.changes !== 1) {

@@ -251,6 +251,17 @@ describe("TurnRecoveryService", () => {
       expect(threadRepo.findById(THREAD_ID)?.sdk_session_id).toBe("existing-session");
     });
 
+    it("retries a failed turn that the live semantic writer finalized", async () => {
+      failTurn();
+      // A live provider ending checkpoints phase 'finalized' and keeps the outcome separately.
+      db.prepare("UPDATE canonical_agent_ingest_checkpoints SET phase = 'finalized' WHERE execution_id = ?").run(EXECUTION_ID);
+
+      const result = await service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, admit);
+
+      expect(sink.loadTurn(result.turnId)).toMatchObject({ status: "Running", attemptOf: TURN_ID });
+      expect(sink.loadCheckpoint(EXECUTION_ID)?.phase).toBe("retried");
+    });
+
     it("keeps retry chains flat and rejects a second retry of each consumed attempt", async () => {
       failTurn();
       const first = await service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, admit);
