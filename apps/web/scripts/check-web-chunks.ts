@@ -6,9 +6,9 @@ const EAGER_CHUNK_MAX_GZIP_BYTES = 500 * 1_024;
 const DIST_DIRECTORY = NodePath.resolve(import.meta.dirname, "../dist");
 const MANIFEST_PATH = NodePath.join(DIST_DIRECTORY, ".vite/manifest.json");
 const REQUIRED_DYNAMIC_ENTRIES = [
-  "src/components/pull-requests/PullRequestSurface.tsx",
-  "src/components/pull-requests/PullRequestCode.tsx",
-  "src/components/pull-requests/RemoteMarkdownRenderer.tsx",
+  "src/features/pull-requests/surfaces/PullRequestSurface.tsx",
+  "src/features/pull-requests/surfaces/PullRequestCode.tsx",
+  "src/features/pull-requests/surfaces/RemoteMarkdownRenderer.tsx",
 ] as const;
 
 interface ManifestChunk {
