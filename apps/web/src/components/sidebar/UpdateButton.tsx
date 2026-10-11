@@ -1,0 +1,256 @@
+import { useEffect, useRef, useState, type ReactElement } from "react";
+import { ArrowUp, Check, CircleAlert, Download, RefreshCw } from "lucide-react";
+import { Button, IconButton } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger, type PopoverRootChangeEventDetails } from "@/components/ui/popover";
+import { Spinner } from "@/components/ui/spinner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { friendlyUpdateError } from "@/lib/update-error-message";
+import { cn } from "@/lib/utils";
+import { useUpdateStore } from "@/stores/updateStore";
+import { getTransport } from "@/transport";
+import { deriveUpdateButtonView, isNightlyVersion, type FailedUpdateOperation } from "@/features/updates/update-button-state";
+import { InstallUpdateDialog } from "./InstallUpdateDialog";
+import { ReleaseNotesCard } from "./ReleaseNotesCard";
+
+/** How long "Up to date" holds after a user-started check finds nothing. */
+export const UP_TO_DATE_FLASH_MS = 3_000;
+/** Hover delay before the release notes card opens. */
+export const RELEASE_NOTES_HOVER_DELAY_MS = 300;
+
+const FILLED_CLASS = "gap-1.5 bg-selected px-2 text-caption hover:bg-button-secondary-hover";
+const GHOST_TEXT_CLASS = "gap-1.5 px-2 text-caption font-normal text-muted";
+
+interface InstallPrompt {
+  readonly version: string;
+  readonly runningAgents: number | null;
+}
+
+type DesktopAppBridge = NonNullable<Window["desktopBridge"]>["app"];
+
+/**
+ * Sidebar footer update control. One slot walks the whole update lifecycle:
+ * check, download, install (asking first when agents are running), retry.
+ * Renders nothing outside the desktop shell.
+ */
+export function UpdateButton() {
+  const app = window.desktopBridge?.app;
+  if (!app) return null;
+  return <DesktopUpdateButton app={app} />;
+}
+
+function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
+  const status = useUpdateStore((s) => s.status);
+  const pendingVersion = useUpdateStore((s) => s.pendingVersion);
+  const [upToDateFlash, setUpToDateFlash] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<InstallPrompt | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+  }, []);
+
+  // Only a check the user started may flash "Up to date"; background checks resolve silently.
+  const check = async () => {
+    const result = await app.checkForUpdates();
+    if (result.state !== "not-available") return;
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    setUpToDateFlash(true);
+    flashTimer.current = setTimeout(() => setUpToDateFlash(false), UP_TO_DATE_FLASH_MS);
+  };
+
+  const install = async (version: string) => {
+    const runningAgents = await readRunningAgents();
+    if (runningAgents === 0) {
+      await app.installUpdate();
+      return;
+    }
+    setInstallPrompt({ version, runningAgents });
+  };
+
+  const retry = (operation: FailedUpdateOperation) => {
+    if (operation === "check") return void check();
+    if (operation === "download") return void app.downloadUpdate();
+    return void install(pendingVersion ?? "");
+  };
+
+  const view = deriveUpdateButtonView(status, { upToDateFlash, pendingVersion });
+
+  return (
+    <>
+      {renderView()}
+      {installPrompt && (
+        <InstallUpdateDialog
+          version={installPrompt.version}
+          runningAgents={installPrompt.runningAgents}
+          onCancel={() => setInstallPrompt(null)}
+          onRestartNow={() => {
+            setInstallPrompt(null);
+            void app.installUpdate();
+          }}
+          onInstallWhenIdle={() => {
+            setInstallPrompt(null);
+            void app.installWhenIdle();
+          }}
+        />
+      )}
+    </>
+  );
+
+  function renderView(): ReactElement {
+    switch (view.kind) {
+      case "rest":
+        return (
+          <IconButton aria-label="Check for updates" shape="round" variant="ghost" onClick={() => void check()}>
+            <RefreshCw strokeWidth={1.5} aria-hidden />
+          </IconButton>
+        );
+      case "checking":
+        return (
+          <span role="status" aria-label="Checking for updates" className="flex size-8 items-center justify-center">
+            <Spinner size={16} className="text-muted" />
+          </span>
+        );
+      case "up-to-date":
+        return (
+          <span role="status" className={cn("inline-flex h-8 items-center", GHOST_TEXT_CLASS)}>
+            <Check className="size-4" strokeWidth={1.5} aria-hidden />
+            Up to date
+          </span>
+        );
+      case "download":
+        return (
+          <ReleaseNotesHover version={view.version} notes={view.releaseNotes} nightlyTooltip={`Download ${view.version}`}>
+            <Button variant="ghost" className={FILLED_CLASS} onClick={() => void app.downloadUpdate()}>
+              <Download strokeWidth={1.5} aria-hidden />
+              Download
+              <VersionText>{view.versionLabel}</VersionText>
+            </Button>
+          </ReleaseNotesHover>
+        );
+      case "downloading":
+        return (
+          <span
+            role="status"
+            aria-label={`Downloading update, ${Math.round(view.percent)}%`}
+            className={cn("inline-flex h-8 items-center rounded-control", FILLED_CLASS, "hover:bg-selected")}
+          >
+            <ProgressRing percent={view.percent} />
+            <VersionText>{view.progressLabel}</VersionText>
+          </span>
+        );
+      case "install":
+        return (
+          <ReleaseNotesHover version={view.version} notes={view.releaseNotes} nightlyTooltip={`Install ${view.version}`}>
+            <Button variant="ghost" className={FILLED_CLASS} onClick={() => void install(view.version)}>
+              <ArrowUp strokeWidth={1.5} aria-hidden />
+              Install
+              <VersionText>{view.versionLabel}</VersionText>
+            </Button>
+          </ReleaseNotesHover>
+        );
+      case "armed":
+        return (
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="ghost" className={FILLED_CLASS} />}>
+              <ArrowUp strokeWidth={1.5} aria-hidden />
+              Installs when idle
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="end">
+              <DropdownMenuItem label="Cancel scheduled install" onClick={() => void app.cancelInstallWhenIdle()} />
+            </DropdownMenuContent>
+          </DropdownMenu>
+        );
+      case "failed": {
+        const friendly = friendlyUpdateError(view.message);
+        const operation = view.failedOperation;
+        return (
+          <Tooltip>
+            <TooltipTrigger render={<Button variant="ghost" className={GHOST_TEXT_CLASS} onClick={() => retry(operation)} />}>
+              <CircleAlert strokeWidth={1.5} aria-hidden />
+              Retry update
+            </TooltipTrigger>
+            <TooltipContent className="flex-col items-start gap-0.5">
+              <span className="font-medium">{friendly.title}</span>
+              <span className="text-muted">{friendly.body}</span>
+            </TooltipContent>
+          </Tooltip>
+        );
+      }
+    }
+  }
+}
+
+// An unreadable count is treated as "agents may be running" so Install never silently stops work.
+async function readRunningAgents(): Promise<number | null> {
+  try {
+    return await getTransport().getActiveAgentCount();
+  } catch {
+    return null;
+  }
+}
+
+function VersionText({ children }: { children: string }) {
+  return <span className="font-mono text-caption font-normal text-muted">{children}</span>;
+}
+
+interface ReleaseNotesHoverProps {
+  readonly version: string;
+  readonly notes: string | null;
+  /** Full-version tooltip, shown only for nightly builds whose label hides the version. */
+  readonly nightlyTooltip: string;
+  readonly children: ReactElement;
+}
+
+function ReleaseNotesHover({ version, notes, nightlyTooltip, children }: ReleaseNotesHoverProps) {
+  const [open, setOpen] = useState(false);
+  // The trigger's click downloads or installs; only hover and dismissals move the card.
+  const onOpenChange = (next: boolean, details: PopoverRootChangeEventDetails) => {
+    if (details.reason !== "trigger-press") setOpen(next);
+  };
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <Tooltip disabled={!isNightlyVersion(version)}>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger
+              openOnHover
+              delay={RELEASE_NOTES_HOVER_DELAY_MS}
+              closeDelay={150}
+              render={children}
+            />
+          }
+        />
+        <TooltipContent side="right" className="font-mono">
+          {nightlyTooltip}
+        </TooltipContent>
+      </Tooltip>
+      <PopoverContent side="top" align="end" sideOffset={8} initialFocus={false} className="w-[340px] rounded-dialog p-4">
+        <ReleaseNotesCard version={version} notes={notes} />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+const RING_RADIUS = 6;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+function ProgressRing({ percent }: { percent: number }) {
+  const clamped = Math.min(100, Math.max(0, percent));
+  return (
+    <svg aria-hidden viewBox="0 0 16 16" className="size-4 -rotate-90">
+      <circle cx="8" cy="8" r={RING_RADIUS} fill="none" strokeWidth="1.5" className="stroke-control-border" />
+      <circle
+        cx="8"
+        cy="8"
+        r={RING_RADIUS}
+        fill="none"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeDasharray={RING_CIRCUMFERENCE}
+        strokeDashoffset={RING_CIRCUMFERENCE * (1 - clamped / 100)}
+        className="stroke-ink"
+      />
+    </svg>
+  );
+}
