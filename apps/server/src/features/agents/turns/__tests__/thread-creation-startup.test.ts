@@ -84,14 +84,18 @@ describe("ThreadCreationCoordinator start from origin", { timeout: 20_000 }, () 
     expect(() => resolve("retry")).toThrow(expect.objectContaining({ code: "STARTUP_NOT_BLOCKED_ON_FETCH" }));
   });
 
-  it.each(["no_origin", "branch_missing", "network_or_auth"])("continues from local main after %s", async (failure) => {
+  it.each([
+    ["no_origin", "This project has no origin remote."],
+    ["branch_missing", 'Branch "main" does not exist on origin.'],
+    ["network_or_auth", "Could not fetch from origin. Check your connection and Git access."],
+  ])("continues from local main after %s", async (failure, message) => {
     const { coordinator, command, startups, repoPath, origin, localSha, resolve } = await originHarness();
     if (failure === "no_origin") git(repoPath, "remote", "remove", "origin");
     if (failure === "branch_missing") git(origin, "update-ref", "-d", "refs/heads/main");
     if (failure === "network_or_auth") git(repoPath, "remote", "set-url", "origin", "http://127.0.0.1:1/unreachable.git");
     const creation = coordinator.createInitialTurn(command);
     await vi.waitFor(() => expect(startups.get(managedStartupId)?.state).toBe("blocked"), { timeout: 10_000 });
-    expect(startups.get(managedStartupId)?.block?.detail?.split(":")[0]).toBe(failure);
+    expect(startups.get(managedStartupId)?.block).toMatchObject({ message, detail: expect.stringMatching(/^(fatal|error): /) });
     resolve("continue");
     const created = await creation;
     expect(git(created.thread.worktree_path ?? "", "rev-parse", "HEAD")).toBe(localSha);

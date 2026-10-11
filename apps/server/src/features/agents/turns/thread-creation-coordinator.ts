@@ -400,7 +400,7 @@ export class ThreadCreationCoordinator {
       await startups.block(startupId, {
         code: "start_from_origin_failed",
         message: error instanceof OriginFetchError ? error.message : "Could not fetch from origin.",
-        detail: error instanceof OriginFetchError ? `${error.code}: ${error.detail ?? error.message}`.slice(0, 2000) : startupErrorDetail(error),
+        detail: error instanceof OriginFetchError ? (error.detail || error.message) : startupErrorDetail(error),
         actions: ["retry", "continue"],
       }, { phase: "fetch", ref: `origin/${branch}`, branch });
       if (startups.isCancellationRequested(startupId)) this.fetchDecisions.cancel(startupId);

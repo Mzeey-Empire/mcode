@@ -45,6 +45,14 @@ describe("start from origin", { timeout: 20_000 }, () => {
     expect(git(repoPath, "rev-parse", "main")).toBe(localSha);
   });
 
+  it("explains a missing origin repository with git's fatal line, not the trailing advice", async () => {
+    const { repository, repoPath } = await createOriginFixture();
+    git(repoPath, "remote", "set-url", "origin", `${repoPath}-missing-origin.git`);
+    const failure = await repository.fetchOriginTrackingBranch(repoPath, "main").catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: "network_or_auth" });
+    expect(failure).toHaveProperty("detail", expect.stringMatching(/^fatal: .*does not appear to be a git repository$/));
+  });
+
   it("rejects refspec syntax in branch names before fetching", async () => {
     const { repository, repoPath, localSha } = await createOriginFixture();
     await expect(repository.fetchOriginTrackingBranch(repoPath, "main:refs/heads/main")).rejects.toThrow();

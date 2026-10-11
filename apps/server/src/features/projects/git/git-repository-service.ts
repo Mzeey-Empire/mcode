@@ -47,11 +47,21 @@ export class OriginFetchError extends Error {
   }
 }
 
+/**
+ * Git ends many fetch failures with generic advice ("Please make sure you have the correct access rights /
+ * and the repository exists."), so the first `fatal:` or `error:` line is the one that names the cause.
+ */
+function originFetchDetail(output: string): string {
+  const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const cause = lines.find((line) => /^(fatal|error):/i.test(line)) ?? lines.at(-1) ?? "";
+  return cause.slice(0, 2000);
+}
+
 function originFetchError(error: unknown, branch: string): OriginFetchError {
   const parsed = gitCommandFailureSchema.safeParse(error);
   const failure = parsed.success ? parsed.data : {};
   const stderr = (failure.stderr ?? "").trim();
-  const detail = (stderr || failure.message || String(error)).split(/\r?\n/).slice(-1).join("").slice(0, 2000);
+  const detail = originFetchDetail(stderr || failure.message || String(error));
   if (failure.killed || failure.code === "ETIMEDOUT") {
     return new OriginFetchError("timed_out", "Fetching from origin timed out.", detail);
   }
