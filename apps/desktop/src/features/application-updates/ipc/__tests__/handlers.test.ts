@@ -31,6 +31,8 @@ function createApi(): ApplicationUpdatesIpcApi {
     getUpdateStatus: vi.fn(() => ({ state: "idle" })),
     checkForUpdatesNow: vi.fn(),
     installUpdate: vi.fn(),
+    installWhenIdle: vi.fn(),
+    cancelInstallWhenIdle: vi.fn(),
     downloadUpdate: vi.fn(),
     applyReleaseLineSwitch: vi.fn(),
   };
@@ -53,6 +55,8 @@ describe("application update IPC handlers", () => {
       "app:get-update-status",
       "app:check-for-updates",
       "app:install-update",
+      "app:install-when-idle",
+      "app:cancel-install-when-idle",
       "app:download-update",
       "app:apply-release-line",
     ]);
@@ -79,7 +83,16 @@ describe("application update IPC handlers", () => {
       checkResult,
     );
     await expect(handlers.get("app:download-update")?.({})).resolves.toBeUndefined();
+    expect(api.downloadUpdate).toHaveBeenCalledOnce();
     await expect(handlers.get("app:install-update")?.({})).resolves.toBe(true);
+  });
+
+  it("propagates a rejected download to the renderer", async () => {
+    vi.mocked(api.downloadUpdate).mockRejectedValue(new Error("disk full"));
+    const { ipc, handlers } = createIpc();
+    registerApplicationUpdateHandlers(ipc, api);
+
+    await expect(handlers.get("app:download-update")?.({})).rejects.toThrow("disk full");
   });
 
   it("validates release-line input before policy execution", async () => {
@@ -119,7 +132,19 @@ describe("application update IPC handlers", () => {
     const second = createIpc();
     registerApplicationUpdateHandlers(second.ipc, api);
 
-    expect(first.removeHandler).toHaveBeenCalledTimes(6);
-    expect(second.handlers.size).toBe(6);
+    expect(first.removeHandler).toHaveBeenCalledTimes(8);
+    expect(first.removeHandler).toHaveBeenCalledWith("app:install-when-idle");
+    expect(first.removeHandler).toHaveBeenCalledWith("app:cancel-install-when-idle");
+    expect(second.handlers.size).toBe(8);
+  });
+
+  it("delegates arm and cancel through their IPC channels", () => {
+    const { ipc, handlers } = createIpc();
+    registerApplicationUpdateHandlers(ipc, api);
+    handlers.get("app:install-when-idle")?.({});
+    handlers.get("app:cancel-install-when-idle")?.({});
+
+    expect(api.installWhenIdle).toHaveBeenCalledExactlyOnceWith();
+    expect(api.cancelInstallWhenIdle).toHaveBeenCalledExactlyOnceWith();
   });
 });

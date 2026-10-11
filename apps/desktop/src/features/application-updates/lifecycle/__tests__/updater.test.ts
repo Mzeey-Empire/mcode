@@ -67,6 +67,11 @@ function createLifecycle() {
   const installation = {
     register: vi.fn(),
     cleanup: vi.fn(),
+    createBeforeInstallHook: vi.fn(),
+    setBeforeInstallHook: vi.fn(),
+    installUpdate: vi.fn(),
+    installWhenIdle: vi.fn(),
+    cancelInstallWhenIdle: vi.fn(),
   };
   const lifecycle = createUpdaterLifecycle({
     updater,
@@ -123,6 +128,7 @@ describe("updater lifecycle", () => {
       state: "downloaded",
       version: "0.14.0",
       releaseNotes: "Bug fixes",
+      installWhenIdle: false,
     });
   });
 
@@ -153,14 +159,82 @@ describe("updater lifecycle", () => {
     expect(current.status.get()).toEqual({
       state: "error",
       message: "download failed",
+      failedOperation: "download",
+    });
+    await current.lifecycle.downloadUpdate();
+    expect(current.updater.downloadUpdate).toHaveBeenCalledTimes(2);
+    expect(current.status.get()).toEqual({ state: "downloading", percent: 0 });
+  });
+
+  it("keeps transient check failures quiet for the next scheduled check", async () => {
+    current = createLifecycle();
+    current.listeners.get("error")?.(new Error("net::ERR_TIMED_OUT"));
+    expect(current.status.get()).toEqual({ state: "idle" });
+
+    current.updater.checkForUpdates.mockRejectedValueOnce(new Error("net::ERR_INTERNET_DISCONNECTED"));
+    await expect(current.lifecycle.checkForUpdatesNow()).resolves.toEqual({ state: "idle" });
+  });
+
+  it.each([
+    { state: "downloading", percent: 42 },
+    { state: "downloaded", version: "0.14.0", installWhenIdle: true },
+  ] as const)("skips scheduled checks while $state", (status) => {
+    vi.useFakeTimers();
+    try {
+      current = createLifecycle();
+      current.status.publish(status);
+      vi.advanceTimersByTime(10_000);
+      expect(current.updater.checkForUpdates).not.toHaveBeenCalled();
+      expect(current.status.get()).toEqual(status);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    { message: "signature invalid", phase: "download-progress" },
+    { message: "net::ERR_TIMED_OUT", phase: "download-progress" },
+    { message: "net::ERR_TIMED_OUT", phase: "update-available" },
+  ] as const)("retries download-phase error events: $message after $phase", async ({ message, phase }) => {
+    current = createLifecycle();
+    if (phase === "download-progress") current.listeners.get(phase)?.({ percent: 42 });
+    else current.listeners.get(phase)?.({ version: "0.14.0" });
+    current.listeners.get("error")?.(new Error(message));
+
+    expect(current.status.get()).toEqual({ state: "error", message, failedOperation: "download" });
+    await current.lifecycle.downloadUpdate();
+    expect(current.updater.downloadUpdate).toHaveBeenCalledOnce();
+    expect(current.status.get()).toEqual({ state: "downloading", percent: 0 });
+  });
+
+  it("classifies rejected checks for retry through the check channel", async () => {
+    current = createLifecycle();
+    current.updater.checkForUpdates.mockRejectedValueOnce(new Error("check failed"));
+
+    await expect(current.lifecycle.checkForUpdatesNow()).resolves.toEqual({
+      state: "error", message: "check failed", failedOperation: "check",
+    });
+    await current.lifecycle.checkForUpdatesNow();
+    expect(current.updater.checkForUpdates).toHaveBeenCalledTimes(2);
+  });
+
+  it("publishes a newly downloaded update with idle installation disabled", () => {
+    current = createLifecycle();
+    current.listeners.get("update-downloaded")?.({ version: "0.14.0", releaseNotes: "Bug fixes" });
+
+    expect(current.status.get()).toEqual({
+      state: "downloaded", version: "0.14.0", releaseNotes: "Bug fixes", installWhenIdle: false,
     });
   });
 
-  it("returns a quiet idle status for transient network failures", () => {
+  it("does not download again from check or install errors", async () => {
     current = createLifecycle();
-    current.listeners.get("error")?.(new Error("net::ERR_TIMED_OUT"));
+    current.status.publish({ state: "error", message: "check failed", failedOperation: "check" });
+    await current.lifecycle.downloadUpdate();
+    current.status.publish({ state: "error", message: "install failed", failedOperation: "install" });
+    await current.lifecycle.downloadUpdate();
 
-    expect(current.status.get()).toEqual({ state: "idle" });
+    expect(current.updater.downloadUpdate).not.toHaveBeenCalled();
   });
 
   it("surfaces non-transient update failures", () => {
@@ -170,6 +244,7 @@ describe("updater lifecycle", () => {
     expect(current.status.get()).toEqual({
       state: "error",
       message: "signature invalid",
+      failedOperation: "check",
     });
   });
 

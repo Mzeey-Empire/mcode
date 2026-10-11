@@ -157,7 +157,7 @@ describe("Application Updates feature seam", () => {
     expect(current.timer.clearTimeout).toHaveBeenCalledOnce();
     expect(current.timer.clearInterval).toHaveBeenCalledOnce();
     expect(current.application.removeListener).toHaveBeenCalledOnce();
-    expect(current.ipc.removeHandler).toHaveBeenCalledTimes(6);
+    expect(current.ipc.removeHandler).toHaveBeenCalledTimes(8);
     expect(feature.getUpdateStatus()).toEqual({
       state: "checking",
     });
@@ -172,10 +172,10 @@ describe("Application Updates feature seam", () => {
 
     expect(first.updater.removeAllListeners).toHaveBeenCalledOnce();
     expect(first.application.removeListener).toHaveBeenCalledOnce();
-    expect(first.ipc.removeHandler).toHaveBeenCalledTimes(6);
+    expect(first.ipc.removeHandler).toHaveBeenCalledTimes(8);
     expect(second.updater.on).toHaveBeenCalledTimes(6);
     expect(second.application.on).toHaveBeenCalledOnce();
-    expect(second.ipc.handle).toHaveBeenCalledTimes(6);
+    expect(second.ipc.handle).toHaveBeenCalledTimes(8);
   });
 
   it("reinitializes the same public feature with fresh checks and status", async () => {

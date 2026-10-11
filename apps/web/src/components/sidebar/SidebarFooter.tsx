@@ -1,7 +1,7 @@
 import { Bell, Braces, ExternalLink, GitPullRequest, Settings } from "lucide-react";
 import { Button, IconButton } from "@/components/ui/button";
 import { useUiStore } from "@/stores/uiStore";
-import { UpdateIndicator } from "./UpdateIndicator";
+import { UpdateButton } from "./UpdateButton";
 
 /** Props for {@link SidebarFooter}. */
 interface SidebarFooterProps {
@@ -30,7 +30,7 @@ export function SidebarFooter({ settingsOpen, onOpenSettings }: SidebarFooterPro
         </IconButton>
       </div>
       <div data-testid="sidebar-update-slot" className="flex min-w-0 justify-end">
-        <UpdateIndicator />
+        <UpdateButton />
       </div>
     </footer>
   );
@@ -54,7 +54,7 @@ function PullRequestsButton() {
 function SettingsFileFooter() {
   return (
     <footer data-testid="sidebar-footer" className="shrink-0 space-y-1 px-3">
-      <UpdateIndicator />
+      <UpdateButton />
       {IS_DESKTOP && <Button
         variant="ghost"
         className="w-full justify-start text-muted hover:text-ink"

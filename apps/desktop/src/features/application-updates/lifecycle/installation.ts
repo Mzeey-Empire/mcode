@@ -1,6 +1,6 @@
 import type { UpdaterClient, ApplicationLifecycle, UpdateTimer } from "./updater.js";
 import type { UpdaterSettingsReader } from "../configuration/settings.js";
-import type { UpdateStatusState } from "../state/update-status.js";
+import type { UpdateStatus, UpdateStatusState } from "../state/update-status.js";
 
 /** Event shape needed to defer Electron's pending-install quit. */
 export interface BeforeQuitEvent {
@@ -17,6 +17,8 @@ export interface InstallationDependencies {
   timer: UpdateTimer;
   settings: UpdaterSettingsReader;
   status: UpdateStatusState;
+  /** Read the server's current number of running agents. */
+  getActiveAgentCount: () => Promise<number>;
 }
 
 /** Installation operations owned by one Application Updates instance. */
@@ -24,6 +26,10 @@ export interface InstallationLifecycle {
   createBeforeInstallHook(forceReplace: () => Promise<void>): BeforeInstallHook;
   setBeforeInstallHook(hook: BeforeInstallHook): void;
   installUpdate(): Promise<boolean>;
+  /** Arm installation after two consecutive idle agent counts. */
+  installWhenIdle(): void;
+  /** Cancel a scheduled idle installation. */
+  cancelInstallWhenIdle(): void;
   register(): void;
   cleanup(): void;
 }
@@ -32,12 +38,78 @@ export interface InstallationLifecycle {
 export function createInstallationLifecycle(
   dependencies: InstallationDependencies,
 ): InstallationLifecycle {
-  const { updater, application, timer, settings, status } = dependencies;
+  const { updater, application, timer, settings, status, getActiveAgentCount } = dependencies;
   let beforeInstallHook: BeforeInstallHook | null = null;
   let isCompletingStoppedServerQuit = false;
   let installerQuitObserved = false;
   let active = false;
   let generation = 0;
+  let idleInterval: unknown = null;
+  let idleGeneration = 0;
+  let idleStreak = 0;
+  let pollInFlight = false;
+  let unsubscribeStatus: (() => void) | null = null;
+  let downloadedUpdate: Extract<UpdateStatus, { state: "downloaded" }> | null = null;
+
+  const disarmIdleInstall = (): void => {
+    if (idleInterval !== null) timer.clearInterval(idleInterval);
+    idleInterval = null;
+    idleStreak = 0;
+    idleGeneration += 1;
+  };
+
+  const cancelInstallWhenIdle = (): void => {
+    disarmIdleInstall();
+    const current = status.get();
+    if (current.state === "downloaded" && current.installWhenIdle) {
+      status.publish({ ...current, installWhenIdle: false });
+    }
+  };
+
+  const observeStatus = (current: UpdateStatus): void => {
+    if (current.state === "downloaded") {
+      downloadedUpdate = current;
+      if (current.installWhenIdle) return;
+    }
+    disarmIdleInstall();
+  };
+
+  const pollForIdle = async (): Promise<void> => {
+    if (pollInFlight || idleInterval === null) return;
+    pollInFlight = true;
+    const pollGeneration = idleGeneration;
+    let count: number;
+    try {
+      count = await getActiveAgentCount();
+    } catch {
+      // An unreadable count is not evidence that it is safe to restart.
+      if (pollGeneration === idleGeneration) idleStreak = 0;
+      return;
+    } finally {
+      pollInFlight = false;
+    }
+    if (pollGeneration !== idleGeneration) return;
+    idleStreak = count === 0 ? idleStreak + 1 : 0;
+    if (idleStreak === 2) await quitAndInstallSafely();
+  };
+
+  // A failed install leaves the downloaded payload on disk, so a retry can install it again.
+  const installableUpdate = (): Extract<UpdateStatus, { state: "downloaded" }> | null => {
+    const current = status.get();
+    if (current.state === "downloaded") return current;
+    if (current.state === "error" && current.failedOperation === "install" && downloadedUpdate) {
+      return { ...downloadedUpdate, installWhenIdle: false };
+    }
+    return null;
+  };
+
+  const installWhenIdle = (): void => {
+    if (!active || !application.isPackaged || idleInterval !== null) return;
+    const update = installableUpdate();
+    if (!update) return;
+    idleInterval = timer.setInterval(() => { void pollForIdle(); }, 5_000);
+    status.publish({ ...update, installWhenIdle: true });
+  };
 
   const createBeforeInstallHook = (
     forceReplace: () => Promise<void>,
@@ -56,7 +128,7 @@ export function createInstallationLifecycle(
 
   const publishBlockedInstall = (logMessage: string, statusMessage = logMessage): void => {
     console.error(`[auto-updater] ${logMessage}`);
-    status.publish({ state: "error", message: `Update installation blocked: ${statusMessage}` });
+    status.publish({ state: "error", message: `Update installation blocked: ${statusMessage}`, failedOperation: "install" });
   };
 
   const runBeforeInstallHook = async (
@@ -94,6 +166,7 @@ export function createInstallationLifecycle(
 
   /** Stop the server and start the installer after Electron observes the quit. */
   const quitAndInstallSafely = async (): Promise<boolean> => {
+    cancelInstallWhenIdle();
     const operationGeneration = generation;
     if (!(await runBeforeInstallHook(operationGeneration, "beforeInstallHook failed, cancelling install"))) return false;
     if (!operationIsCurrent(operationGeneration)) return false;
@@ -121,6 +194,7 @@ export function createInstallationLifecycle(
     }
     if (!shouldDeferInstallOnQuit()) return;
 
+    cancelInstallWhenIdle();
     event.preventDefault();
     installerQuitObserved = false;
     isCompletingStoppedServerQuit = true;
@@ -148,17 +222,28 @@ export function createInstallationLifecycle(
   return {
     createBeforeInstallHook,
     setBeforeInstallHook,
+    installWhenIdle,
+    cancelInstallWhenIdle,
     installUpdate: async () => {
+      cancelInstallWhenIdle();
       if (!active || !application.isPackaged) return false;
-      if (status.get().state !== "downloaded") return false;
+      const update = installableUpdate();
+      if (!update) return false;
+      if (status.get().state !== "downloaded") status.publish(update);
       return quitAndInstallSafely();
     },
     register: () => {
       if (active) return;
       active = true;
+      observeStatus(status.get());
+      unsubscribeStatus = status.subscribe(observeStatus);
       application.on("before-quit", onBeforeQuitForPendingInstall);
     },
     cleanup: () => {
+      cancelInstallWhenIdle();
+      unsubscribeStatus?.();
+      unsubscribeStatus = null;
+      downloadedUpdate = null;
       if (!active) {
         beforeInstallHook = null;
         return;

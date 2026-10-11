@@ -17,6 +17,10 @@ export interface ApplicationUpdatesIpcApi {
   getUpdateStatus(): UpdateStatus;
   checkForUpdatesNow(): Promise<UpdateStatus>;
   installUpdate(): Promise<boolean>;
+  /** Arm installation once running agents finish. */
+  installWhenIdle(): void;
+  /** Cancel a scheduled idle installation. */
+  cancelInstallWhenIdle(): void;
   downloadUpdate(): Promise<void>;
   applyReleaseLineSwitch(
     releaseLine: "stable" | "nightly",
@@ -29,6 +33,8 @@ const APPLICATION_UPDATE_CHANNELS = [
   "app:get-update-status",
   "app:check-for-updates",
   "app:install-update",
+  "app:install-when-idle",
+  "app:cancel-install-when-idle",
   "app:download-update",
   "app:apply-release-line",
 ] as const;
@@ -42,6 +48,8 @@ export function registerApplicationUpdateHandlers(
   ipc.handle("app:get-update-status", () => api.getUpdateStatus());
   ipc.handle("app:check-for-updates", () => api.checkForUpdatesNow());
   ipc.handle("app:install-update", () => api.installUpdate());
+  ipc.handle("app:install-when-idle", () => api.installWhenIdle());
+  ipc.handle("app:cancel-install-when-idle", () => api.cancelInstallWhenIdle());
   ipc.handle("app:download-update", () => api.downloadUpdate());
   ipc.handle("app:apply-release-line", async (_event, payload) => {
     const releaseLine =

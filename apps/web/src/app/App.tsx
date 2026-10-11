@@ -14,8 +14,6 @@ import { SidebarResizeSeam } from "@/components/sidebar/SidebarResizeSeam";
 import { ChatView } from "@/features/conversation";
 import { openSubagentDetail, openSubagentsRoster } from "@/features/subagents";
 import { useUpdateStore } from "@/stores/updateStore";
-import { useToastStore } from "@/stores/toastStore";
-import { friendlyUpdateError } from "@/lib/update-error-message";
 import type { UpdateStatus } from "@/transport/desktop-bridge";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { ShortcutHelpDialog } from "@/components/ShortcutHelpDialog";
@@ -646,17 +644,6 @@ export function App() {
     });
 
     const listener = bridge.onUpdateStatus((status) => {
-      // Errors are rare and recoverable (a genuine update failure, not a
-      // transient gateway blip — those are filtered in the main process). A
-      // non-blocking toast states what happened without a persistent red bar.
-      if (status.state === "error") {
-        const friendly = friendlyUpdateError(status.message);
-        useToastStore.getState().show({
-          kind: "failed",
-          title: friendly.title,
-          meta: friendly.body,
-        });
-      }
       useUpdateStore.getState().setStatus(status);
     });
     return () => bridge.offUpdateStatus(listener);
