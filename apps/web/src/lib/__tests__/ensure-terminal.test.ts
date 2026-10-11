@@ -46,6 +46,25 @@ describe("createTerminalForScope", () => {
     expect(useTerminalStore.getState().terminalPanelByThread[scopeId]?.activeTerminalId).toBe("8");
   });
 
+  it("reports the attached PTY only when its tab joined a visible panel", async () => {
+    const workspace = (id: string) => ({
+      id, name: "Fixture", path: "/fixture", provider_config: {}, is_git_repo: true,
+      created_at: "2026-10-08T12:00:00.000Z", updated_at: "2026-10-08T12:00:00.000Z",
+      pinned: false, last_opened_at: null, sort_order: 0, deleted_at: null, icon_path: null,
+    });
+    useWorkspaceStore.setState({ threads: [], workspaces: [workspace("visible-ws"), workspace("hidden-ws")] });
+    useDiffStore.getState().showRightPanel("visible-ws");
+    terminalCreate.mockResolvedValueOnce({ ptyId: "p1", shell: "pwsh" }).mockResolvedValueOnce({ ptyId: "p2", shell: "pwsh" });
+    const onAttached = vi.fn();
+
+    createTerminalForScope("visible-ws", onAttached);
+    createTerminalForScope("hidden-ws", onAttached);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(onAttached.mock.calls).toEqual([["p1"]]);
+    expect(terminalKill).toHaveBeenCalledWith("p2");
+  });
+
   it("surfaces the failure and frees the scope for retry", async () => {
     terminalCreate.mockRejectedValue(new Error("PTY host is unhealthy"));
 
