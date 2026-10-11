@@ -561,6 +561,7 @@ app.whenReady().then(async () => {
       settings: () => loadUpdaterSettings(app.getVersion()),
       ipc: ipcMain as unknown as ApplicationUpdateIpc,
       forceReplace: () => serverRuntime.forceReplace(),
+      getActiveAgentCount: () => serverRuntime.getActiveAgentCount(),
     });
 
     console.log(

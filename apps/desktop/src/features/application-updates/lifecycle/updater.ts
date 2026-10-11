@@ -3,7 +3,6 @@ import {
   applyChannelConfig,
   type ReleaseLine,
 } from "../policy/release-line.js";
-import { isTransientNetworkError } from "../policy/network-errors.js";
 import {
   type UpdaterSettings,
   type UpdaterSettingsReader,
@@ -146,7 +145,7 @@ export function createUpdaterLifecycle(
           return status.get();
         }
         const message = err instanceof Error ? err.message : String(err);
-        status.publish({ state: "error", message });
+        status.publish({ state: "error", message, failedOperation: "check" });
       } finally {
         if (operationGeneration === generation) inFlightCheck = null;
       }
@@ -181,14 +180,17 @@ export function createUpdaterLifecycle(
   };
 
   const downloadUpdate = async (): Promise<void> => {
-    if (!initialized || status.get().state !== "available") return;
+    if (!initialized) return;
+    const current = status.get();
+    if (current.state !== "available" && !(current.state === "error" && current.failedOperation === "download")) return;
     const operationGeneration = generation;
+    status.publish({ state: "downloading", percent: 0 });
     try {
       await updater.downloadUpdate();
     } catch (err) {
       if (operationGeneration !== generation || !initialized) return;
       const message = err instanceof Error ? err.message : String(err);
-      status.publish({ state: "error", message });
+      status.publish({ state: "error", message, failedOperation: "download" });
     }
   };
 
@@ -254,6 +256,7 @@ export function createUpdaterLifecycle(
         state: "downloaded",
         version: update.version,
         releaseNotes,
+        installWhenIdle: false,
       });
 
       if (Notification.isSupported()) {
@@ -266,18 +269,10 @@ export function createUpdaterLifecycle(
       }
     });
     updater.on("error", (error) => {
-      const err = error as { message?: string; code?: string; statusCode?: number };
-      const message = err instanceof Error ? err.message : String(error);
-      if (isTransientNetworkError(error)) {
-        console.warn(
-          "[auto-updater] Transient network failure, will retry:",
-          message,
-        );
-        status.publish({ state: "idle" });
-        return;
-      }
-      console.error("[auto-updater] Error checking for updates:", message);
-      status.publish({ state: "error", message });
+      const message = error instanceof Error ? error.message : String(error);
+      const failedOperation = status.get().state === "downloading" ? "download" : "check";
+      console.error(`[auto-updater] Update ${failedOperation} failed:`, message);
+      status.publish({ state: "error", message, failedOperation });
     });
 
     initialCheckTimeoutId = timer.setTimeout(() => {

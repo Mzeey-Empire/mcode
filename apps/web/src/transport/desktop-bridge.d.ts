@@ -18,8 +18,8 @@ export type UpdateStatus =
   | { state: "available"; version: string; releaseNotes?: string }
   | { state: "not-available"; version: string }
   | { state: "downloading"; percent: number; bytesPerSecond?: number }
-  | { state: "downloaded"; version: string; releaseNotes?: string }
-  | { state: "error"; message: string };
+  | { state: "downloaded"; version: string; releaseNotes?: string; installWhenIdle: boolean }
+  | { state: "error"; message: string; failedOperation: "check" | "download" | "install" };
 
 /** Safe renderer crash diagnostics sent to the desktop main process. */
 export interface RendererCrashReport {
@@ -39,6 +39,10 @@ interface AppBridge {
   checkForUpdates(): Promise<UpdateStatus>;
   /** Quit and install a downloaded update. Returns false if nothing to install. */
   installUpdate(): Promise<boolean>;
+  /** Arm installation once running agents finish. */
+  installWhenIdle(): Promise<void>;
+  /** Cancel a scheduled idle installation. */
+  cancelInstallWhenIdle(): Promise<void>;
   /** Trigger download of a discovered update (when auto-download is off). */
   downloadUpdate(): Promise<void>;
   /**

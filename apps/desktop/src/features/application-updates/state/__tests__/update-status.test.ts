@@ -24,6 +24,18 @@ function createWindows() {
 }
 
 describe("update status", () => {
+  it.each([false, true])("round-trips downloaded installWhenIdle=%s", (installWhenIdle) => {
+    const { provider, window } = createWindows();
+    const state = createUpdateStatusState(provider);
+    state.publish({ state: "downloaded", version: "0.14.0", releaseNotes: "Bug fixes", installWhenIdle });
+
+    expect(state.get()).toEqual({ state: "downloaded", version: "0.14.0", releaseNotes: "Bug fixes", installWhenIdle });
+    expect(window.webContents.send).toHaveBeenCalledWith(
+      UPDATE_STATUS_CHANNEL,
+      { state: "downloaded", version: "0.14.0", releaseNotes: "Bug fixes", installWhenIdle },
+    );
+  });
+
   it("publishes the exact status payload to live windows", () => {
     const { provider, window } = createWindows();
     const state = createUpdateStatusState(provider);
