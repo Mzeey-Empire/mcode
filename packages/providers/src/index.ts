@@ -91,3 +91,4 @@ export {
 } from "./private/opencode/opencode-native-turn-diff.js";
 export { approvalChoice, approvalOutcome } from "./approval-scope.js";
 export { approvalReceipt } from "./approvals/approval-receipt.js";
+export { ProviderTurnError } from "./provider-turn-error.js";

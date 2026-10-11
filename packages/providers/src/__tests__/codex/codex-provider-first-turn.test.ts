@@ -514,6 +514,7 @@ describe("CodexProvider first turn on new session", () => {
           type: AgentEventType.Error,
           threadId: "browser-spawn-failure",
           error: "handshake failed",
+          failure: { kind: "fatal" },
           turnExecutionId: "test-execution",
         },
       },
@@ -1736,7 +1737,7 @@ describe("CodexProvider first turn on new session", () => {
     });
 
     expect(events).toEqual([
-      { event: { type: AgentEventType.Error, threadId: "preflight-failure", error: "Codex CLI unavailable", turnExecutionId: "test-execution" } },
+      { event: { type: AgentEventType.Error, threadId: "preflight-failure", error: "Codex CLI unavailable", failure: { kind: "fatal" }, turnExecutionId: "test-execution" } },
       { event: { type: AgentEventType.Ended, threadId: "preflight-failure", turnExecutionId: "test-execution" } },
     ]);
     expect(appServers).toHaveLength(0);
@@ -1814,6 +1815,7 @@ describe("CodexProvider first turn on new session", () => {
           type: AgentEventType.Error,
           threadId: "unsupported-version",
           error: "Codex CLI version 0.36.0 is not supported. Minimum required: 0.37.0. Update with: npm install -g @openai/codex",
+          failure: { kind: "fatal" },
           turnExecutionId: "test-execution",
         },
       },
@@ -2324,6 +2326,7 @@ describe("CodexProvider first turn on new session", () => {
             type: AgentEventType.Error,
             threadId: "missing-prompt",
             error: "Could not load Codex prompt /prompts:draftpr. Refresh commands and try again.",
+            failure: { kind: "fatal" },
             turnExecutionId: "test-execution",
           },
         },

@@ -1473,6 +1473,7 @@ export class ClaudeProvider
         threadId: context.threadId,
         error:
           "Message could not be delivered: session was shutting down. Please try again.",
+        failure: { kind: "fatal" },
       } satisfies AgentEvent);
       await this.runtime.stop(context.params.sessionId);
     } else {
@@ -1484,6 +1485,7 @@ export class ClaudeProvider
         type: AgentEventType.Error,
         threadId: context.threadId,
         error: errorMessage,
+        failure: { kind: "fatal" },
       } satisfies AgentEvent);
     }
     throw error;
@@ -2403,6 +2405,7 @@ export class ClaudeProvider
         error: tail
           ? `${message}\n\nClaude Code stderr (tail):\n${tail}`
           : message,
+        failure: { kind: "fatal" },
       } satisfies AgentEvent,
     );
   }

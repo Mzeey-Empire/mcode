@@ -320,7 +320,7 @@ describe("CodexProvider permission flow", () => {
             },
           },
         },
-        { event: { type: AgentEventType.Error, threadId, error: "simulated fatal" } },
+        { event: { type: AgentEventType.Error, threadId, error: "simulated fatal", failure: { kind: "fatal" } } },
       ]);
     } finally {
       start.mockRestore();

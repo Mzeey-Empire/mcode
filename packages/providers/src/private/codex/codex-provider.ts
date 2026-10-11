@@ -872,6 +872,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       type: AgentEventType.Error,
       threadId,
       error,
+      failure: { kind: "fatal" },
       ...(turnExecutionId ? { turnExecutionId } : {}),
     } satisfies AgentEvent));
     if (!turnExecutionId) return undefined;
@@ -1684,7 +1685,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       return;
     }
     // Confirmed process failure must retain the active attempt's terminal routing.
-    this.emitCodexTurnEvent(entry, { type: AgentEventType.Error, threadId, error }, executionId);
+    this.emitCodexTurnEvent(entry, { type: AgentEventType.Error, threadId, error, failure: { kind: "fatal" } }, executionId);
     this.emitCodexTurnEvent(entry, { type: AgentEventType.Ended, threadId, turnExecutionId: executionId, outcome: "errored" }, executionId);
   }
 

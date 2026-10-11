@@ -673,6 +673,7 @@ export class CursorProvider
       threadId: context.threadId,
       turnExecutionId: context.req.turnExecutionId,
       error: errorMessage,
+      failure: { kind: "fatal" },
     } satisfies AgentEvent);
     this.publishCursorEvent(context.routing, {
       type: AgentEventType.Ended,

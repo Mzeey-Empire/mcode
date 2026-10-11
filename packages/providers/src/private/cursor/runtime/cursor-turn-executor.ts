@@ -427,6 +427,7 @@ export class CursorTurnExecutor {
       type: AgentEventType.Error,
       threadId: entry.threadId,
       error: errorMessage,
+      failure: { kind: "fatal" },
     } satisfies AgentEvent);
   }
 

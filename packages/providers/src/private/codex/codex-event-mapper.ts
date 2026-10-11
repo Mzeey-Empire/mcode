@@ -685,7 +685,7 @@ export class CodexEventMapper {
     if (!childThreadId || !parentCollaborationItemId || !nativeTurnId) return [];
     const params = notification.params as { error?: { message?: unknown } };
     const error = typeof params.error?.message === "string" ? params.error.message : "Unknown child error";
-    return this.withChildEvidence([{ type: AgentEventType.Error, threadId: this.threadId, error }], { nativeThreadId: childThreadId, nativeTurnId, parentCollaborationItemId, nativeItemId: "turn-error", itemEventKey: "error", outcome: "errored" });
+    return this.withChildEvidence([{ type: AgentEventType.Error, threadId: this.threadId, error, failure: { kind: "fatal" } }], { nativeThreadId: childThreadId, nativeTurnId, parentCollaborationItemId, nativeItemId: "turn-error", itemEventKey: "error", outcome: "errored" });
   }
 
   private mapChildItemStarted(notification: CodexNotification, context: ChildNotificationContext): CodexMappedEvent[] {

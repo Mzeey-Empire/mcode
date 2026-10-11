@@ -114,7 +114,7 @@ function mapLifecycleEvent(event: SessionEvent, threadId: string, turn: CopilotT
   switch (event.type) {
     case "session.error":
       turn.settle("failed", new Error(event.data.message));
-      return [...finishAssistantText(turn, threadId), { type: "error", threadId, error: event.data.message }];
+      return [...finishAssistantText(turn, threadId), { type: "error", threadId, error: event.data.message, failure: { kind: "fatal" } }];
     case "abort":
       turn.outcome ??= "cancelled";
       return [{ type: "system", threadId, subtype: "copilot_abort" }];
