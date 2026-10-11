@@ -1,4 +1,4 @@
-import type { ThreadAttention } from "@mcode/contracts";
+import type { ThreadAttention, TurnOutcome } from "@mcode/contracts";
 
 /** Third-line label for a thread that is blocked on the user. */
 export type NeedsYouLabel =
@@ -41,26 +41,31 @@ export function isTurnSeen(turnSequence: number, seenSequence: number | null | u
  * that wrote it stops. Settled outcomes show only until the user sees them.
  */
 export function deriveThreadRowState(facts: ThreadRowFacts): ThreadRowState {
-  const waiting = facts.attention?.waiting?.kind;
-  if (waiting === "approval" || facts.setup === "awaiting-approval") return needsYou("Approval required");
+  return liveRowState(facts) ?? settledRowState(facts);
+}
+
+function liveRowState({ attention, running, setup }: ThreadRowFacts): ThreadRowState | null {
+  const waiting = attention?.waiting?.kind;
+  if (waiting === "approval" || setup === "awaiting-approval") return needsYou("Approval required");
   if (waiting === "questions") return needsYou("Answers required");
-  if (facts.running || facts.setup === "running") return { kind: "running" };
+  if (running || setup === "running") return { kind: "running" };
   if (waiting === "plan") return needsYou("Plan ready");
-  if (facts.setup === "failed") return needsYou("Setup failed");
-  const turn = facts.attention?.lastTurn;
-  if (!turn || facts.onScreen || isTurnSeen(turn.sequence, facts.attention?.seen.sequence)) {
-    return { kind: "quiet" };
-  }
-  switch (turn.outcome) {
-    case "interrupted":
-      return needsYou("Interrupted");
-    case "errored":
-      return { kind: "failed" };
-    case "completed":
-      return { kind: "finished" };
-    case "cancelled":
-      return { kind: "quiet" };
-  }
+  if (setup === "failed") return needsYou("Setup failed");
+  return null;
+}
+
+const OUTCOME_ROW_STATE: Record<TurnOutcome, ThreadRowState> = {
+  interrupted: needsYou("Interrupted"),
+  errored: { kind: "failed" },
+  completed: { kind: "finished" },
+  // The user stopped the turn themselves, so there is nothing to report back.
+  cancelled: { kind: "quiet" },
+};
+
+function settledRowState({ attention, onScreen }: ThreadRowFacts): ThreadRowState {
+  const turn = attention?.lastTurn;
+  if (!turn || onScreen || isTurnSeen(turn.sequence, attention.seen.sequence)) return { kind: "quiet" };
+  return OUTCOME_ROW_STATE[turn.outcome];
 }
 
 const ROLLUP_RANK: Record<ThreadRowState["kind"], number> = {
