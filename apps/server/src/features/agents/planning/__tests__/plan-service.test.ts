@@ -202,6 +202,27 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
     expect(plans.listByThread(threadId)).toEqual([ready, kept]);
   });
 
+  it("replays the two-window conflict and resolution sequence without a second draft", async () => {
+    const windowA = fork("# Window A");
+    const windowB = fork("# Window B");
+
+    const created = await service.saveVersion(windowA);
+    expect(created).toMatchObject({ id: windowA.versionId, version: 2, revision: 1, status: "draft", contentMd: "# Window A" });
+    await expect(service.saveVersion(windowB)).rejects.toMatchObject({ code: "plan_conflict", latestVersion: created });
+
+    const keptB = await service.saveVersion({ ...windowB, versionId: created.id, baseRevision: created.revision });
+    expect(keptB).toMatchObject({ id: created.id, version: 2, revision: 2, contentMd: "# Window B" });
+    await expect(service.saveVersion({ ...windowA, baseRevision: 1, contentMd: "# Window A again" }))
+      .rejects.toMatchObject({ code: "plan_conflict", latestVersion: keptB });
+
+    const editedA = await service.saveVersion({ ...windowA, baseRevision: keptB.revision, contentMd: "# Window B\nA adds" });
+    expect(editedA).toMatchObject({ id: created.id, version: 2, revision: 3, contentMd: "# Window B\nA adds" });
+    await expect(service.saveVersion({ ...windowB, versionId: created.id, baseRevision: 2, contentMd: "# Window B again" }))
+      .rejects.toMatchObject({ code: "plan_conflict", latestVersion: editedA });
+
+    expect(plans.listByThread(threadId)).toEqual([ready, editedA]);
+  });
+
   it("commits exactly one of two different saves with the same baseRevision", async () => {
     const input = fork();
     await service.saveVersion(input);

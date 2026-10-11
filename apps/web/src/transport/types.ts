@@ -747,6 +747,8 @@ export interface McodeTransport {
 
   /** Fetch persisted plans for a thread (hydration on page load). */
   getThreadPlans(threadId: string): Promise<import("@mcode/contracts").PlanVersion[]>;
+  /** Fork the latest plan version into a draft, or save into an existing draft at its revision. */
+  savePlanVersion(payload: import("@mcode/contracts").PlanSaveVersion): Promise<import("@mcode/contracts").PlanVersion>;
 
   // Snapshots
   /** Get a unified diff for a specific file from a turn snapshot. */
