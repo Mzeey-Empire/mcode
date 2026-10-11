@@ -25,12 +25,16 @@ export class TerminalScopeResolutionError extends Error {
   }
 }
 
-/** Resolves a validated Terminal scope to the current workspace or Thread checkout. */
+/**
+ * Resolves a validated Terminal scope to the current workspace or Thread checkout.
+ * The home scope has no checkout, so it is rejected here.
+ */
 export function resolveTerminalScope(
   scope: TerminalScope,
   deps: TerminalScopeResolverDependencies,
 ): string {
   const parsed = TerminalScopeSchema().parse(scope);
+  if (parsed.kind === "home") throw new TerminalScopeResolutionError();
   const workspace = deps.workspaces.findById(parsed.workspaceId);
   if (!workspace) throw new TerminalScopeResolutionError();
   let cwd = workspace.path;

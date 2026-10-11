@@ -157,7 +157,9 @@ export class TerminalCommandService {
 
     let resolved: Awaited<ReturnType<TerminalCommandProfileResolver["resolveLaunchProfile"]>>;
     try {
-      resolved = await this.deps.profiles.resolveLaunchProfile({ workspaceId: input.scope.workspaceId });
+      resolved = await this.deps.profiles.resolveLaunchProfile({
+        workspaceId: input.scope.kind === "home" ? undefined : input.scope.workspaceId,
+      });
     } catch (error) {
       if (error instanceof TerminalProfileNotFoundError || error instanceof TerminalProfileUnavailableError) {
         return unavailablePreparation("The current Terminal profile is unavailable", checkoutPath);
