@@ -168,4 +168,59 @@ describe("CursorTurnExecutor", () => {
     expect(replaceAfterTransientFailure).toHaveBeenCalledOnce();
     expect(published).toContainEqual(expect.objectContaining({ type: AgentEventType.Error }));
   });
+  it("settles an end_turn that closes on Cursor's usage notice as errored", async () => {
+    const published: AgentEvent[] = [];
+    const prompt = vi.fn(async () => {
+      for (const text of ["Partial answer.", "\n\nUpgrade your plan to continue"]) {
+        mapCursorAcpSessionNotification(sessionUpdate({
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text },
+        }), entry.threadId, entry.activeTurnState!).forEach((event) => published.push(event));
+      }
+      return { stopReason: "end_turn" };
+    });
+    const entry = {
+      threadId: ROUTING.threadId,
+      cwd: process.cwd(),
+      acpSessionId: "cursor-session-1",
+      activeTurnState: createCursorAcpTurnState(),
+      replayTurnState: null,
+      cursorPromptOrdinal: 0,
+      stickyHeavyInstructionsSent: false,
+      mcodeRuntimeInstructions: "",
+      mcodeRuntimeInstructionsSent: false,
+      pendingUserStopAbort: false,
+      stderrTailLines: [],
+      acpRuntime: { prompt },
+    } as unknown as CursorSessionState;
+    const executor = new CursorTurnExecutor({
+      settings: { get: () => getDefaultSettings() },
+      skills: { list: () => [] },
+      publishEvent: (_entry, event) => published.push(event),
+      bindTurnRouting: () => undefined,
+      openLogicalSession: vi.fn(async () => true),
+      applyModel: vi.fn(async () => undefined),
+      replaceAfterTransientFailure: vi.fn(async () => undefined),
+    });
+
+    await executor.run(entry, {
+      message: "continue",
+      model: "cursor-model",
+      resume: false,
+      turnId: ROUTING.turnId,
+      turnExecutionId: ROUTING.executionId,
+      deliveryAttempt: ROUTING.deliveryAttempt,
+    });
+
+    const settled = published.filter((event) => event.type !== AgentEventType.TextDelta);
+    expect(settled).toEqual([
+      expect.objectContaining({ type: AgentEventType.Message, content: "Partial answer." }),
+      expect.objectContaining({
+        type: AgentEventType.Error,
+        error: "Upgrade your plan to continue",
+        failure: { kind: "usage_limit", code: "upgrade" },
+      }),
+      expect.objectContaining({ type: AgentEventType.Ended, turnExecutionId: ROUTING.executionId }),
+    ]);
+  });
 });

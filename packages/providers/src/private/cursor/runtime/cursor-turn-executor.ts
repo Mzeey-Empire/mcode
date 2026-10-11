@@ -24,7 +24,11 @@ import {
   shouldSuppressCursorPromptError,
 } from "../acp/cursor-acp-transient-retry.js";
 import { createCursorAcpTurnState } from "../acp/cursor-acp-event-mapper.js";
-import { classifyCursorFailure } from "../acp/cursor-failure-classifier.js";
+import {
+  classifyCursorEndTurnNotice,
+  classifyCursorFailure,
+  type CursorEndTurnNotice,
+} from "../acp/cursor-failure-classifier.js";
 import { cursorSessionRecoveryErrorMessage } from "../acp/cursor-session-recovery-error.js";
 import { resolveCursorAssistantMessageContent } from "../stream-json/cursor-stream-event-mapper.js";
 import type { CursorSessionState } from "../cursor-session-state.js";
@@ -397,7 +401,15 @@ export class CursorTurnExecutor {
     turnExecutionId: string,
     emitTurnEvent: CursorTurnEventEmitter,
   ): void {
-    const text = resolveCursorAssistantMessageContent(entry.activeTurnState!.accumulator);
+    const accumulator = entry.activeTurnState!.accumulator;
+    const notice = promptResponse.stopReason === "end_turn"
+      ? classifyCursorEndTurnNotice(accumulator.assistantText)
+      : undefined;
+    if (notice) {
+      this.emitEndTurnNotice(entry, notice, turnExecutionId, emitTurnEvent);
+      return;
+    }
+    const text = resolveCursorAssistantMessageContent(accumulator);
     this.emitMessageIfPresent(entry, text, emitTurnEvent);
     const usage = promptResponse.usage;
     emitTurnEvent({
@@ -408,6 +420,32 @@ export class CursorTurnExecutor {
       tokensIn: usage?.inputTokens ?? 0,
       tokensOut: usage?.outputTokens ?? 0,
       providerId: "cursor",
+    } satisfies AgentEvent);
+    emitTurnEvent({
+      type: AgentEventType.Ended,
+      threadId: entry.threadId,
+      turnExecutionId,
+    } satisfies AgentEvent);
+  }
+
+  /** Settles an `end_turn` that closed on Cursor's account notice as errored, not completed. */
+  private emitEndTurnNotice(
+    entry: CursorSessionState,
+    notice: CursorEndTurnNotice,
+    turnExecutionId: string,
+    emitTurnEvent: CursorTurnEventEmitter,
+  ): void {
+    logger.warn("Cursor turn ended on an account notice", {
+      threadId: entry.threadId,
+      acpSessionId: entry.acpSessionId,
+      failure: notice.failure,
+    });
+    this.emitMessageIfPresent(entry, notice.reply, emitTurnEvent);
+    emitTurnEvent({
+      type: AgentEventType.Error,
+      threadId: entry.threadId,
+      error: notice.notice,
+      failure: notice.failure,
     } satisfies AgentEvent);
     emitTurnEvent({
       type: AgentEventType.Ended,
