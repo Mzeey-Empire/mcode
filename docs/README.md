@@ -37,7 +37,7 @@ Internal guides are grouped in topic subfolders. Use this index to find a guide.
 
 - [Pull request mutations](internals/review/pull-request-mutations.md)
 - [Pull request review worktrees](internals/review/pull-request-review-worktrees.md)
-- [Last turn changes](internals/review/turn-diff-review.md)
+- [Turn changes](internals/review/turn-diff-review.md)
 
 ### Renderer
 
