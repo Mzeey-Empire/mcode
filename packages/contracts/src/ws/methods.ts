@@ -101,7 +101,13 @@ import { TurnSnapshotSchema } from "../models/turn-snapshot.js";
 import { TurnRevertScopeSchema, TurnRevertPreviewSchema, TurnRevertResultSchema } from "../models/turn-revert.js";
 import { AgentStopResultSchema, TurnRuntimeSnapshotSchema } from "../models/turn-runtime.js";
 import { CanonicalSubagentStopRequestSchema, CanonicalSubagentStopResultSchema } from "../models/canonical-subagent-roster.js";
-import { RecoveryIncidentSchema, TurnRetryParamsSchema, TurnRetryResultSchema } from "../models/turn-recovery.js";
+import {
+  RecoveryIncidentSchema,
+  TurnResumeParamsSchema,
+  TurnResumeResultSchema,
+  TurnRetryParamsSchema,
+  TurnRetryResultSchema,
+} from "../models/turn-recovery.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
 import { PlanSaveVersionSchema, PlanVersionSchema, PlanActionSchema } from "../models/plan.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
@@ -1081,6 +1087,11 @@ export const WS_METHODS = lazySchema(() => ({
   "turn.retry": {
     params: TurnRetryParamsSchema(),
     result: TurnRetryResultSchema(),
+  },
+  /** Resume an interrupted attempt, natively when possible, otherwise from a seeded session. */
+  "turn.resume": {
+    params: TurnResumeParamsSchema(),
+    result: TurnResumeResultSchema(),
   },
   /** Continue one active response after the user accepts an unsaved text stream. */
   "agent.continueWithoutSaving": {

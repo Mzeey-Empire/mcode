@@ -22,6 +22,18 @@ describe("turn recovery contracts", () => {
     }).success).toBe(false);
   });
 
+  it("validates resume input and reports the continuation mode", () => {
+    const resume = WS_METHODS()["turn.resume"];
+    expect(resume.params.parse({ threadId: "thread-1", turnId: "turn-1" }))
+      .toEqual({ threadId: "thread-1", turnId: "turn-1" });
+    expect(resume.params.safeParse({ threadId: "thread-1", turnId: "turn-1", model: "m" }).success).toBe(false);
+    expect(resume.params.safeParse({ threadId: "", turnId: "turn-1" }).success).toBe(false);
+    expect(resume.result.parse({ turnId: "turn-2", mode: "native-session" }))
+      .toEqual({ turnId: "turn-2", mode: "native-session" });
+    expect(resume.result.parse({ turnId: "turn-2", mode: "seeded-session" }).mode).toBe("seeded-session");
+    expect(resume.result.safeParse({ turnId: "turn-2", mode: "fresh" }).success).toBe(false);
+  });
+
   const incident = {
     id: "00000000-0000-4000-8000-000000000015",
     createdAt: "2026-08-10T09:03:00.000Z",

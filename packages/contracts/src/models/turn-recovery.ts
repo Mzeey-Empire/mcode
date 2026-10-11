@@ -18,6 +18,31 @@ export const TurnRetryResultSchema = lazySchema(() => z.object({
 /** Identity returned after retry admission succeeds. */
 export type TurnRetryResult = z.infer<ReturnType<typeof TurnRetryResultSchema>>;
 
+/** Resume the latest interrupted attempt as a new attempt of the same turn. */
+export const TurnResumeParamsSchema = lazySchema(() => z.object({
+  threadId: z.string().min(1).max(256),
+  turnId: AgentTurnIdSchema,
+}).strict());
+/** Input for resuming an interrupted attempt. */
+export type TurnResumeParams = z.infer<ReturnType<typeof TurnResumeParamsSchema>>;
+
+/**
+ * How a resumed attempt continues. `native-session` continues the provider's
+ * saved session; `seeded-session` starts a fresh session seeded with the
+ * thread's visible conversation because the saved session was unavailable.
+ */
+export const TurnResumeModeSchema = lazySchema(() => z.enum(["native-session", "seeded-session"]));
+/** How a resumed attempt continues. */
+export type TurnResumeMode = z.infer<ReturnType<typeof TurnResumeModeSchema>>;
+
+/** Identity and continuation mode of the attempt that carries the resume. */
+export const TurnResumeResultSchema = lazySchema(() => z.object({
+  turnId: AgentTurnIdSchema,
+  mode: TurnResumeModeSchema(),
+}).strict());
+/** Identity and continuation mode returned after resume admission succeeds. */
+export type TurnResumeResult = z.infer<ReturnType<typeof TurnResumeResultSchema>>;
+
 /** Maximum recovery records returned or reconciled in one bounded operation. */
 export const MAX_TURN_RECOVERIES = 100;
 
