@@ -32,7 +32,25 @@ describe("raw revert recovery", () => {
     f = await revertFixture(); f.write("a", "before\n"); const turn = await f.turn("one", () => f.write("a", "after\n"));
     const result = await f.service((point) => { if (point === stop) throw new Error("injected failure"); }).apply(await f.request(turn.messageId));
     expect(result).toMatchObject({ status: "failed", outcome: "rolled_back", paths: [] }); expect(f.read("a")).toEqual(Buffer.from("after\n"));
-    expect(f.db.query("SELECT count(*) AS n FROM messages WHERE json_extract(system_notice, '$.kind') = 'turn-reverted'").get()).toEqual({ n: 0 });
+    expect(f.db.query("SELECT count(*) AS n FROM messages WHERE json_extract(system_notice, '$.kind') IN ('turn-reverted', 'turn-revert-undone', 'turn-revert-interrupted')").get()).toEqual({ n: 0 });
+    expect(f.published).toEqual([]);
+  }, timeout);
+
+  it("writes the interrupted receipt only when startup retries a failed runtime rollback", async () => {
+    f = await revertFixture(); f.write("a", "before\n");
+    const turn = await f.turn("one", () => f.write("a", "after\n"));
+    const request = await f.request(turn.messageId);
+    const result = await f.service((point) => {
+      if (point === "afterWrite") { f.write("a", "external\n"); throw new Error("injected failure"); }
+    }).apply(request);
+    expect(result).toMatchObject({ status: "failed", outcome: "recovery_failed", paths: ["a"] });
+    expect(f.store.byRequest(request.requestId)?.receiptMessageId).toBeNull();
+    expect(f.published).toEqual([]);
+    await f.service().recoverUnfinished();
+    await f.service().recoverUnfinished();
+    expect(f.read("a")).toEqual(Buffer.from("external\n"));
+    expect(f.store.byRequest(request.requestId)?.state).toBe("recovery_failed");
+    expect(f.db.query("SELECT count(*) AS n FROM messages WHERE json_extract(system_notice, '$.kind') = 'turn-revert-interrupted'").get()).toEqual({ n: 1 });
   }, timeout);
 
   it.each(["captureRaw", "planCheckout", "pinRecovery"] satisfies import("../turn-revert-service.js").RevertFaultPoint[])("a %s failure leaves files unchanged and no prepared row", async (stop) => {
@@ -90,6 +108,7 @@ describe("raw revert recovery", () => {
     await expect(f.service((point, n) => { if (point === "afterWrite" && n === 1) throw new TurnRevertFaultStop(); }).apply(request)).rejects.toBeInstanceOf(TurnRevertFaultStop);
     expect(f.store.byRequest(request.requestId)?.files.map((file) => file.path)).toEqual(["a.ts", "c.ts"]);
     await f.service().recoverUnfinished(); expect(f.read("c.ts")).toEqual(Buffer.from("original\n")); expect(f.exists("a.ts")).toBe(false); expect(f.exists("b.ts")).toBe(false);
+    expect(f.db.query("SELECT count(*) AS n FROM messages WHERE json_extract(system_notice, '$.kind') = 'turn-revert-interrupted'").get()).toEqual({ n: 1 });
   }, timeout);
 
   it("Undo survives gc in a linked worktree with no user.email; sweep owns only this store and retains unfinished pins", async () => {

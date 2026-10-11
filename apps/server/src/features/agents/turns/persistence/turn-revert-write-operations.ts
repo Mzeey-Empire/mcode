@@ -14,9 +14,9 @@ export const prepareTurnRevert = databaseWriteOperation("turnRevert.prepare", z.
   undoesRevertId: z.string().nullable(), context: RevertContextSchema,
   files: z.array(RevertPathSchema).max(512), recoveryRef: z.string(),
 }), z.void());
-/** Commit the state transition, receipt, and Undo link in one writer transaction. */
+/** Commit the state transition, any recovery receipt, and Undo link in one writer transaction. */
 export const settleTurnRevert = databaseWriteOperation("turnRevert.settle", z.object({
-  id: z.string(), state: z.enum(["committed", "rolled_back", "recovery_failed"]), content: z.string(),
+  id: z.string(), state: z.enum(["committed", "rolled_back", "recovery_failed"]), content: z.string().nullable(),
   failure: z.object({ paths: z.array(z.string()), detail: z.string() }).nullable(),
   failCommit: z.boolean().optional(),
 }), z.void());
@@ -35,11 +35,7 @@ export function turnRevertWriteHandlers(db: Database): ReadonlyMap<string, (inpu
       const row = orm.select().from(turnReverts).where(eq(turnReverts.id, input.id)).get();
       if (!row) throw new Error("Revert journal disappeared");
       const state = transitionRevert(row.state, input.state);
-      const notices = new MessageStore(db);
-      const kind = state === "committed" ? (row.kind === "undo" ? "turn-revert-undone" : "turn-reverted") : "turn-revert-interrupted";
-      const receiptMessageId = row.receiptMessageId ?? notices.createSystemNotice(row.threadId, input.content,
-        notices.getLatestSequenceIncludingInternal(row.threadId) + 1, { kind, presentation: "timeline", revertId: row.id }).id;
-      if (row.receiptMessageId) orm.update(messages).set({ content: input.content }).where(eq(messages.id, row.receiptMessageId)).run();
+      const receiptMessageId = writeReceipt(db, { ...row, state }, input.content);
       orm.update(turnReverts).set({ state, receiptMessageId, failure: input.failure ? JSON.stringify(input.failure) : null,
         updatedAt: new Date().toISOString() }).where(eq(turnReverts.id, row.id)).run();
       if (state === "committed" && row.undoesRevertId) orm.update(turnReverts).set({ undoneByRevertId: row.id }).where(eq(turnReverts.id, row.undoesRevertId)).run();
@@ -50,4 +46,16 @@ export function turnRevertWriteHandlers(db: Database): ReadonlyMap<string, (inpu
       if (row?.state === "committed" || row?.state === "rolled_back") orm.update(turnReverts).set({ recoveryRef: null }).where(eq(turnReverts.id, id)).run();
     })],
   ]);
+}
+
+function writeReceipt(db: Database, row: typeof turnReverts.$inferSelect, content: string | null): string | null {
+  if (content === null) return row.receiptMessageId;
+  if (row.receiptMessageId) {
+    drizzle(db).update(messages).set({ content }).where(eq(messages.id, row.receiptMessageId)).run();
+    return row.receiptMessageId;
+  }
+  const notices = new MessageStore(db);
+  const kind = row.state === "committed" ? (row.kind === "undo" ? "turn-revert-undone" : "turn-reverted") : "turn-revert-interrupted";
+  return notices.createSystemNotice(row.threadId, content, notices.getLatestSequenceIncludingInternal(row.threadId) + 1,
+    { kind, presentation: "timeline", revertId: row.id }).id;
 }

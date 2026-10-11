@@ -182,7 +182,7 @@ export class TurnRevertService {
       if (error instanceof TurnRevertFaultStop) throw error;
       // A lost writer response may follow a successful commit. Never roll that operation back.
       const durable = this.requiredRow(id);
-      if (durable.state !== "committed") await this.recover(durable, errorDetail(error));
+      if (durable.state !== "committed") await this.recover(durable, { kind: "runtime", detail: errorDetail(error) });
     }
     const result = this.deps.store.outcome(this.requiredRow(id));
     if (result.status === "reverted") this.deps.publish(result);
@@ -197,7 +197,8 @@ export class TurnRevertService {
     await this.deps.writer.execute(settleTurnRevert, { id: row.id, state: "committed", content, failure: null, failCommit });
   }
 
-  private async recover(row: StoredRevert, detail = "Revert interrupted"): Promise<void> {
+  private async recover(row: StoredRevert, failure: { kind: "runtime" | "interrupted"; detail: string } = { kind: "interrupted", detail: "Revert interrupted" }): Promise<void> {
+    let detail = failure.detail;
     const cwd = row.context.cwd;
     const failed = new Set<string>();
     const restore: RecoveryPath[] = [];
@@ -216,7 +217,7 @@ export class TurnRevertService {
     }
     const paths = [...failed];
     await this.deps.writer.execute(settleTurnRevert, { id: row.id, state: paths.length ? "recovery_failed" : "rolled_back",
-      failure: { paths, detail }, content: `Revert of ${row.context.label} was interrupted. ${paths.length ? `${paths.length} files could not be put back: ${paths.join(", ")}` : "Files were put back."}` });
+      failure: { paths, detail }, content: failure.kind === "runtime" ? null : interruptedReceipt(row, paths) });
   }
 
   private async recoveryAvailable(row: StoredRevert): Promise<boolean> {
@@ -237,6 +238,11 @@ export class TurnRevertService {
     try { return samePathState(requiredState(await this.deps.snapshots.workingTreeState(cwd, [entry.path]), entry.path), entry.pre); }
     catch { return false; }
   }
+}
+
+function interruptedReceipt(row: StoredRevert, paths: string[]): string {
+  const outcome = paths.length ? `${paths.length} files could not be put back: ${paths.join(", ")}` : "Files were put back.";
+  return `Revert of ${row.context.label} was interrupted. ${outcome}`;
 }
 
 function applyRequestKey(input: RevertApplyInput): string {
