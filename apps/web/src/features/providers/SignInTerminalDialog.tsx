@@ -12,8 +12,11 @@ export function SignInTerminalDialog() {
   return (
     <Dialog
       open={open}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen) void closeSignInTerminal();
+      // Closing kills the shell. Login TUIs use Escape, and users return from a browser login by
+      // clicking the app, so only the close button ends the session.
+      disablePointerDismissal
+      onOpenChange={(nextOpen, details) => {
+        if (!nextOpen && details.reason !== "escape-key") void closeSignInTerminal();
       }}
     >
       <DialogContent className="sm:max-w-[720px]">
