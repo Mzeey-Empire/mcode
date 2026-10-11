@@ -1,11 +1,13 @@
-import { memo, type ComponentType, type RefObject } from "react";
+import { memo, type ComponentType, type ReactElement, type RefObject } from "react";
+import { ModelSelector } from "@/components/chat/ModelSelector";
 import { PermissionRequestCard } from "@/components/chat/PermissionRequestCard";
 import { NarrativeFlow, type SubagentRosterTarget } from "@/features/conversation/narrative";
 import { NarrativeIndicator } from "@/features/conversation/narrative/NarrativeIndicator";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { TurnChangesBar } from "../../turn/TurnChangesBar";
 import { TurnMetaLine } from "../../turn/TurnMetaLine";
 import { WorkFold, workFoldLabel } from "../../turn/WorkFold";
-import { TurnEndNotice } from "../../turn-ending/TurnEndNotice";
+import { TurnEndNotice, type TurnEndActionHandlers } from "../../turn-ending/TurnEndNotice";
 import { useTurnRetry } from "../../turn-ending/useTurnRetry";
 import { MessageBubble } from "../MessageBubble";
 import { VisibleNarrativeLoader } from "../TranscriptNarrativeRow";
@@ -156,8 +158,28 @@ function TurnEndNoticeTranscriptItemRenderer({ item, threadId }: TranscriptItemR
 }
 
 function RetryableTurnEndNotice({ threadId, ending }: { threadId: string; ending: TurnEndNoticeItem }) {
-  const { retry, pending, error } = useTurnRetry(threadId, ending.turnId);
-  return <TurnEndNotice notice={ending.notice} actions={{ retry }} pending={pending} error={error} />;
+  const { retry, retryAt, cancelRetry, pending, error } = useTurnRetry(threadId, ending.turnId);
+  const thread = useWorkspaceStore((store) => store.threads.find((candidate) => candidate.id === threadId));
+  const primary = ending.notice.style === "filled" ? ending.notice.primary : undefined;
+  const actions: TurnEndActionHandlers = {
+    retry: () => retry(),
+    retry_at: primary?.action === "retry_at" ? () => retryAt(primary.at) : undefined,
+    cancel_retry: cancelRetry,
+    // A thread keeps its provider session, so the retry can only change model within it.
+    switch_model: thread
+      ? (trigger: ReactElement) => (
+        <ModelSelector
+          selectedModelId={thread.model ?? ""}
+          selectedProviderId={thread.provider}
+          onSelect={(modelId) => retry(modelId)}
+          locked={false}
+          providerLocked
+          trigger={trigger}
+        />
+      )
+      : undefined,
+  };
+  return <TurnEndNotice notice={ending.notice} actions={actions} pending={pending} error={error} />;
 }
 
 const TRANSCRIPT_ITEM_COMPONENTS: Record<ChatVirtualItem["type"], TranscriptItemComponent> = {

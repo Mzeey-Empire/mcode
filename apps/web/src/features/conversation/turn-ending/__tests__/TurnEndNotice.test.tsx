@@ -21,7 +21,7 @@ const USAGE_LIMIT: FilledNotice = {
   title: "Codex usage limit reached",
   detail: "5-hour limit · resets 14:05",
   secondary: { action: "switch_model", label: "Switch model" },
-  primary: { action: "retry_at", label: "Retry at 14:05" },
+  primary: { action: "retry_at", label: "Retry at 14:05", at: "2026-10-11T13:05:00.000Z" },
 };
 
 describe("TurnEndNotice", () => {
@@ -82,6 +82,13 @@ describe("TurnEndNotice", () => {
     expect(screen.queryByRole("button", { name: "Switch model" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Retry at 14:05" })).toBeNull();
     expect(screen.getByText("Codex usage limit reached")).toBeInTheDocument();
+  });
+
+  it("hands the Switch model button to the picker that wraps it", () => {
+    const opened = vi.fn();
+    render(<TurnEndNotice notice={USAGE_LIMIT} actions={{ switch_model: (trigger) => <span onClick={opened}>{trigger}</span> }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Switch model" }));
+    expect(opened).toHaveBeenCalledTimes(1);
   });
 
   it("shows why the last action failed", () => {

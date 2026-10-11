@@ -168,6 +168,29 @@ describe("ws-events thread.lifecycleChanged", () => {
   });
 });
 
+describe("ws-events thread.retryScheduled", () => {
+  beforeEach(() => {
+    useWorkspaceStore.setState({ threads: [makeThread({ id: "thread-1" })] });
+    startPushListeners();
+  });
+  afterEach(() => stopPushListeners());
+
+  const scheduledRetry = () => useWorkspaceStore.getState().threads[0]?.scheduled_retry;
+
+  it("shows a retry another client scheduled and clears it when cancelled", () => {
+    pushEmitter.emit("thread.retryScheduled", { threadId: "thread-1", retry: { turnId: "turn-7", at: "2026-10-11T14:05:00.000Z" } });
+    expect(scheduledRetry()).toEqual({ turnId: "turn-7", at: "2026-10-11T14:05:00.000Z" });
+
+    pushEmitter.emit("thread.retryScheduled", { threadId: "thread-1", retry: null });
+    expect(scheduledRetry()).toBeNull();
+  });
+
+  it("ignores a malformed schedule", () => {
+    pushEmitter.emit("thread.retryScheduled", { threadId: "thread-1", retry: { turnId: "turn-7", at: "soon" } });
+    expect(scheduledRetry()).toBeNull();
+  });
+});
+
 describe("ws-events thread.status", () => {
   afterEach(() => {
     stopPushListeners();

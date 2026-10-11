@@ -11,8 +11,10 @@ export interface TurnEndingInput {
   providerLabel: string;
   /** True while the provider status reports the user signed out. */
   providerSignedOut: boolean;
-  /** ISO time of a scheduled automatic retry, or null. */
+  /** ISO time of the user's scheduled retry of this turn, or null. */
   scheduledRetryAt: string | null;
+  /** Epoch ms the table reads time against; a reset already past offers plain Retry. */
+  now: number;
   /** The thread's first turn, whose pre-frame ending the startup trail owns. */
   isStartupTurn: boolean;
   /** Only the thread's latest turn can be retried. */
@@ -39,8 +41,13 @@ export interface FilledNotice {
   /** Raw provider text plus the turn line, shown behind "Details". */
   details?: string;
   secondary?: { action: "switch_model"; label: string };
-  primary?: { action: Exclude<TurnEndAction, "switch_model">; label: string };
+  primary?: NoticePrimary;
 }
+
+/** A notice's primary action; Retry at carries the reset time it schedules for. */
+export type NoticePrimary =
+  | { action: "retry_at"; label: string; at: string }
+  | { action: Exclude<TurnEndAction, "switch_model" | "retry_at">; label: string };
 
 /** The notice under a settled turn. */
 export type TurnEndNoticeView = QuietNotice | FilledNotice;
@@ -61,7 +68,7 @@ export function sameTurnEndNotice(left: TurnEndNoticeView, right: TurnEndNoticeV
 function noticeFields(notice: TurnEndNoticeView): ReadonlyArray<string | undefined> {
   if (notice.style === "quiet") return [notice.style, notice.title, notice.detail];
   const { primary, secondary } = notice;
-  return [notice.style, notice.icon, notice.title, notice.detail, notice.details, primary?.action, primary?.label, secondary?.label];
+  return [notice.style, notice.icon, notice.title, notice.detail, notice.details, primary?.action, primary?.label, primary?.action === "retry_at" ? primary.at : undefined, secondary?.label];
 }
 
 const STATUS_PHRASES: Readonly<Record<number, string>> = {
@@ -160,9 +167,9 @@ function usageLimitNotice(failure: PersistedTurnFailure, input: TurnEndingInput)
   if (input.scheduledRetryAt) {
     return { ...base, detail: `Retrying at ${clockTime(input.scheduledRetryAt)}`, primary: { action: "cancel_retry", label: "Cancel retry" } };
   }
-  if (failure.resetsAt) {
+  if (failure.resetsAt && Date.parse(failure.resetsAt) > input.now) {
     const resetsAt = clockTime(failure.resetsAt);
-    return { ...base, detail: `${limit} · resets ${resetsAt}`, primary: { action: "retry_at", label: `Retry at ${resetsAt}` } };
+    return { ...base, detail: `${limit} · resets ${resetsAt}`, primary: { action: "retry_at", label: `Retry at ${resetsAt}`, at: failure.resetsAt } };
   }
   return { ...base, detail: limit, primary: RETRY };
 }

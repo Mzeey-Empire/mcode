@@ -180,6 +180,8 @@ export const mockTransport: McodeTransport = {
   getRecoveryIncident: vi.fn().mockResolvedValue(null),
   retryTurn: vi.fn().mockResolvedValue(undefined),
   retryErroredTurn: vi.fn().mockResolvedValue({ turnId: "turn-retry" }),
+  scheduleTurnRetry: vi.fn().mockImplementation(async ({ turnId, at }: { turnId: string; at: string }) => ({ turnId, at })),
+  unscheduleTurnRetry: vi.fn().mockResolvedValue(undefined),
   retrySave: vi.fn().mockResolvedValue({ retried: false }),
   getThreadStartup: vi.fn().mockResolvedValue(null),
   listThreadStartups: vi.fn().mockResolvedValue({ records: [] }),

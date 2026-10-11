@@ -1,4 +1,5 @@
 import { useMemo, useRef } from "react";
+import type { ScheduledTurnRetry } from "@mcode/contracts";
 import type { ToolCall } from "@/transport/types";
 import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -132,7 +133,9 @@ export function useMessageListData(displayThreadId: string | undefined) {
       renderedThreadId,
     ],
   );
-  const turnEndings = useTurnEndings(renderedThreadId, canonicalAgentState);
+  const scheduledRetry = useWorkspaceStore((store) =>
+    store.threads.find((thread) => thread.id === renderedThreadId)?.scheduled_retry ?? null);
+  const turnEndings = useTurnEndings(renderedThreadId, canonicalAgentState, scheduledRetry);
   const legacyAgentDisplayState = useMemo(
     () => agentDisplayStateFromRuntimePhase(legacyRuntimePhase, legacyAgentError),
     [legacyAgentError, legacyRuntimePhase],
@@ -250,13 +253,15 @@ export function useMessageListData(displayThreadId: string | undefined) {
 function useTurnEndings(
   threadId: string | null | undefined,
   state: Parameters<typeof projectTurnEndings>[1],
+  scheduledRetry: ScheduledTurnRetry | null,
 ): TurnEndingsProjection {
   const previous = useRef<TurnEndingsProjection | undefined>(undefined);
   return useMemo(() => {
     if (!threadId) return NO_TURN_ENDINGS;
-    previous.current = reuseTurnEndings(previous.current, projectTurnEndings(threadId, state));
+    const projection = projectTurnEndings(threadId, state, { scheduledRetry, now: Date.now() });
+    previous.current = reuseTurnEndings(previous.current, projection);
     return previous.current;
-  }, [threadId, state]);
+  }, [threadId, state, scheduledRetry]);
 }
 
 function withoutHiddenMessages(messages: Message[], hidden: ReadonlySet<string>): Message[] {

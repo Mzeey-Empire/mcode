@@ -11,6 +11,8 @@ import type {
   SettleUnknownSteerParams,
   SettleUnknownSteerResult,
   TurnRetryParams,
+  TurnRetryScheduleParams,
+  ScheduledTurnRetry,
   TurnRetryResult,
   WorkspaceFileList,
   WorkspaceFileChanges,
@@ -442,6 +444,10 @@ export interface McodeTransport {
   retryTurn(executionId: string): Promise<void>;
   /** Retry the thread's latest errored turn as a new attempt in the same provider session. */
   retryErroredTurn(params: TurnRetryParams): Promise<TurnRetryResult>;
+  /** Retry the thread's latest errored turn at a future time; replaces any earlier schedule. */
+  scheduleTurnRetry(params: TurnRetryScheduleParams): Promise<ScheduledTurnRetry>;
+  /** Cancel the thread's scheduled retry; succeeds when none exists. */
+  unscheduleTurnRetry(threadId: string): Promise<void>;
   /** Read one authoritative startup lifecycle by its client-generated identity. */
   getThreadStartup(startupId: string): Promise<ThreadStartup | null>;
   /** List retained startup lifecycles for one workspace during recovery. */

@@ -1,9 +1,15 @@
 import { useCallback, useState } from "react";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { getTransport } from "@/transport";
 
 /** Retry state for one errored turn's end notice. */
 export interface TurnRetry {
-  retry: () => void;
+  /** Retry now, optionally on another model of the same provider. */
+  retry: (model?: string) => void;
+  /** Schedule a retry at `at`; a time already past retries now instead. */
+  retryAt: (at: string) => void;
+  /** Cancel the thread's scheduled retry. */
+  cancelRetry: () => void;
   pending: boolean;
   error: string | null;
 }
@@ -12,13 +18,28 @@ export interface TurnRetry {
 export function useTurnRetry(threadId: string, turnId: string): TurnRetry {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const retry = useCallback(() => {
+  const run = useCallback((request: () => Promise<unknown>) => {
     setPending(true);
     setError(null);
-    getTransport()
-      .retryErroredTurn({ threadId, turnId })
+    request()
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)))
       .finally(() => setPending(false));
-  }, [threadId, turnId]);
-  return { retry, pending, error };
+  }, []);
+  const retry = useCallback(
+    (model?: string) => run(() => getTransport().retryErroredTurn({ threadId, turnId, ...(model ? { model } : {}) })),
+    [run, threadId, turnId],
+  );
+  const retryAt = useCallback((at: string) => {
+    // The notice can outlive its reset time; the server refuses a schedule in the past.
+    if (Date.parse(at) <= Date.now()) return retry();
+    run(async () => {
+      const scheduled = await getTransport().scheduleTurnRetry({ threadId, turnId, at });
+      useWorkspaceStore.getState().applyScheduledRetry(threadId, scheduled);
+    });
+  }, [retry, run, threadId, turnId]);
+  const cancelRetry = useCallback(() => run(async () => {
+    await getTransport().unscheduleTurnRetry(threadId);
+    useWorkspaceStore.getState().applyScheduledRetry(threadId, null);
+  }), [run, threadId]);
+  return { retry, retryAt, cancelRetry, pending, error };
 }

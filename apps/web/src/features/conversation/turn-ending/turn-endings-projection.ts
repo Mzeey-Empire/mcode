@@ -1,4 +1,4 @@
-import type { AgentItem, AgentModelState, AgentTurn, Message, TurnOutcome } from "@mcode/contracts";
+import type { AgentItem, AgentModelState, AgentTurn, Message, ScheduledTurnRetry, TurnOutcome } from "@mcode/contracts";
 import { MODEL_PROVIDERS } from "@/lib/model-registry";
 import { sameTurnEndNotice, turnEndingView, type TurnEndingView } from "./turn-ending-notice";
 
@@ -21,8 +21,16 @@ interface TurnMessages {
   assistantMessageIds: string[];
 }
 
+/** Thread facts outside canonical turn state that change how an ending reads. */
+export interface TurnEndingsContext {
+  /** The thread's pending retry; only the attempt it names shows it. */
+  scheduledRetry: ScheduledTurnRetry | null;
+  /** Epoch ms used to decide whether a usage limit has already reset. */
+  now: number;
+}
+
 /** Project each logical turn as its first user message plus its latest attempt. */
-export function projectTurnEndings(threadId: string, state: AgentModelState): TurnEndingsProjection {
+export function projectTurnEndings(threadId: string, state: AgentModelState, context: TurnEndingsContext): TurnEndingsProjection {
   const turns = Object.values(state.turns).filter((turn) => turn.threadId === threadId).sort(compareTurns);
   const messagesByTurn = turnMessages(threadId, state.items);
   const logicalTurns = groupAttempts(turns);
@@ -46,7 +54,8 @@ export function projectTurnEndings(threadId: string, state: AgentModelState): Tu
         durationMs: turnDurationMs(latest),
         providerLabel,
         providerSignedOut: false,
-        scheduledRetryAt: null,
+        scheduledRetryAt: context.scheduledRetry?.turnId === latest.id ? context.scheduledRetry.at : null,
+        now: context.now,
         // The startup trail owns only the thread's first attempt; a retry of it gets an ordinary notice.
         isStartupTurn: index === 0 && latest === first,
         isLatestTurn: index === logicalTurns.length - 1,

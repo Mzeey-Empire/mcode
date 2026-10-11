@@ -37,7 +37,7 @@ import {
   releaseBrowserAutomationThreadScope,
   releaseBrowserAutomationWorkspaceScopes,
 } from "@/features/preview/automation/browserAutomationStore";
-import type { ApprovalReviewMode, ContextWindowMode, DevinMode, ReasoningLevel, InteractionMode, OrchestrationMode, TurnRuntimeSnapshot, Message } from "@mcode/contracts";
+import type { ApprovalReviewMode, ContextWindowMode, DevinMode, ReasoningLevel, InteractionMode, OrchestrationMode, ScheduledTurnRetry, TurnRuntimeSnapshot, Message } from "@mcode/contracts";
 import { isDetachedWorktree, normalizeWorktreePath, type AttachedWorktree } from "@/lib/worktree";
 import { readRememberedComposerMode } from "@/lib/composer-mode-preference";
 import { readRememberedStartFromOrigin, rememberStartFromOrigin } from "@/lib/start-from-origin-preference";
@@ -699,6 +699,8 @@ interface WorkspaceState {
   applyThreadLifecycle: (thread: Thread) => void;
   /** Remove a thread after server-authoritative automatic cleanup. */
   applyThreadDeleted: (threadId: string) => void;
+  /** Record a thread's committed retry schedule, or its removal. */
+  applyScheduledRetry: (threadId: string, retry: ScheduledTurnRetry | null) => void;
   setActiveThread: (id: string | null) => void;
   /** Enter a clean pending-thread composer, optionally selecting its workspace first. */
   beginNewThread: (workspaceId?: string | null) => void;
@@ -1713,6 +1715,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       useTerminalStore.getState().clearThread(thread.id);
       useDiffStore.getState().clearRightPanel(thread.workspace_id, thread.id);
     }
+  },
+
+  applyScheduledRetry: (threadId, retry) => {
+    set((state) => ({
+      threads: state.threads.map((thread) => thread.id === threadId ? { ...thread, scheduled_retry: retry } : thread),
+    }));
   },
 
   applyThreadDeleted: (threadId) => {

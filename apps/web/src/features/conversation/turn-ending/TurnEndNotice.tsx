@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactElement, type ReactNode } from "react";
 import { CircleAlert, Clock, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -6,7 +6,10 @@ import { cn } from "@/lib/utils";
 import type { FilledNotice, QuietNotice, TurnEndAction, TurnEndNoticeView } from "./turn-ending-notice";
 
 /** Handlers for the actions this build supports. A notice renders only actions with a handler. */
-export type TurnEndActionHandlers = Partial<Record<TurnEndAction, () => void>>;
+export type TurnEndActionHandlers = Partial<Record<Exclude<TurnEndAction, "switch_model">, () => void>> & {
+  /** Wraps the Switch model button in the picker it opens. */
+  switch_model?: (trigger: ReactElement) => ReactNode;
+};
 
 interface TurnEndNoticeProps {
   notice: TurnEndNoticeView;
@@ -66,13 +69,13 @@ function FilledTurnEndNotice({ notice, actions, pending }: { notice: FilledNotic
 
 function TurnEndActions({ notice, actions, pending }: { notice: FilledNotice; actions: TurnEndActionHandlers; pending: boolean }) {
   const { primary, secondary } = notice;
-  const onSecondary = secondary && actions[secondary.action];
+  const wrapSecondary = secondary && actions[secondary.action];
   const onPrimary = primary && actions[primary.action];
   return (
     <>
-      {secondary && onSecondary ? (
-        <Button type="button" variant="ghost" className={TEXT_BUTTON} onClick={onSecondary}>{secondary.label}</Button>
-      ) : null}
+      {secondary && wrapSecondary
+        ? wrapSecondary(<Button type="button" variant="ghost" className={TEXT_BUTTON}>{secondary.label}</Button>)
+        : null}
       {primary && onPrimary ? (
         <Button type="button" variant="subtle" shape="round" className="h-7 px-3 text-[1.3rem]/[1.8rem] font-medium" disabled={pending} onClick={onPrimary}>
           {primary.label}

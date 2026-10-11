@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type ReactElement } from "react";
 import { ChevronDown, Lock, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PICKER_PANEL_CLASS, Picker, type PickerRow, type PickerRowAction, type PickerTab } from "@/components/ui/picker";
@@ -69,6 +69,8 @@ interface ModelSelectorProps {
   locked: boolean;
   /** Provider locked: can switch models within the same provider but not change provider (thread started) */
   providerLocked?: boolean;
+  /** Replaces the selected-model button that opens the picker. */
+  trigger?: ReactElement;
 }
 
 interface SelectedModelPresentation {
@@ -465,6 +467,7 @@ export function ModelSelector({
   onSelect,
   locked,
   providerLocked,
+  trigger,
 }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ModelPickerTab>(FAVORITES_TAB);
@@ -547,7 +550,7 @@ export function ModelSelector({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
-        render={
+        render={trigger ?? (
           <Button
             variant="ghost"
             size="compact"
@@ -558,7 +561,7 @@ export function ModelSelector({
             <span className="min-w-0 whitespace-normal text-sm [overflow-wrap:anywhere]">{presentation.shortLabel}</span>
             <ChevronDown size={11} className="shrink-0" aria-hidden />
           </Button>
-        }
+        )}
       />
       <PopoverContent
         role="dialog"

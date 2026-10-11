@@ -13,6 +13,7 @@ function input(overrides: Partial<TurnEndingInput> = {}): TurnEndingInput {
     providerLabel: "Codex",
     providerSignedOut: false,
     scheduledRetryAt: null,
+    now: new Date(2026, 9, 11, 9, 0).getTime(),
     isStartupTurn: false,
     isLatestTurn: true,
     executionId: "exec1234abcd",
@@ -139,13 +140,34 @@ describe("turnEndingView: errored", () => {
       title: "Codex usage limit reached",
       detail: "5-hour limit · resets 14:05",
       secondary: { action: "switch_model", label: "Switch model" },
-      primary: { action: "retry_at", label: "Retry at 14:05" },
+      primary: { action: "retry_at", label: "Retry at 14:05", at: localIso(14, 5) },
     });
   });
 
   it("offers Cancel retry while an automatic retry is scheduled", () => {
     const view = turnEndingView(input({ scheduledRetryAt: localIso(9, 30), ending: errored({ kind: "usage_limit", resetsAt: localIso(14, 5) }) }));
     expect(view.notice).toMatchObject({ detail: "Retrying at 09:30", primary: { action: "cancel_retry", label: "Cancel retry" } });
+  });
+
+  it("falls back to plain Retry once the reset time has passed with nothing scheduled", () => {
+    const view = turnEndingView(input({
+      now: new Date(2026, 9, 11, 14, 30).getTime(),
+      ending: errored({ kind: "usage_limit", limitType: "five_hour", resetsAt: localIso(14, 5) }),
+    }));
+    expect(view.notice).toMatchObject({ detail: "5-hour limit", primary: { action: "retry", label: "Retry" } });
+  });
+
+  it("offers Cancel retry beside Switch model while a schedule waits past its reset time", () => {
+    const view = turnEndingView(input({
+      now: new Date(2026, 9, 11, 14, 6).getTime(),
+      scheduledRetryAt: localIso(14, 5),
+      ending: errored({ kind: "usage_limit", resetsAt: localIso(14, 5) }),
+    }));
+    expect(view.notice).toMatchObject({
+      detail: "Retrying at 14:05",
+      secondary: { action: "switch_model", label: "Switch model" },
+      primary: { action: "cancel_retry", label: "Cancel retry" },
+    });
   });
 
   it.each([
