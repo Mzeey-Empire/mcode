@@ -18,6 +18,7 @@ import { deriveTurnAssistantMessageId } from "../turns/turn-assistant-message-id
 import type { CanonicalAgentEventDraft } from "./canonical-agent-boundary.js";
 import { prepareParentNarrativeRecoveryEvents, retainCanonicalSubagentTarget } from "./parent-narrative-recovery-events.js";
 import { PROVIDER_FRAME_EVENT_TYPES } from "./provider-frame-events.js";
+import { withTurnEnding } from "./turn-ending.js";
 
 const MAX_ACCEPTED_OPERATION_EVENTS = 8_192;
 
@@ -156,7 +157,8 @@ function terminalEvents(
   events.push({ eventId: `${input.operation.operationId}:response-bound`, routing: input.operation.execution,
     sourceProviderId: mutation.input.providerId, sourceIdentities: mutation.input.providerIdentities,
     payload: { type: "turn.response-bound", messageId, outcome: mutation.outcome, endedAt: projection.endedAt } });
-  const payload = terminalPayload(mutation.outcome, mutation.input.error, projection.endedAt);
+  const payload = withTurnEnding(terminalPayload(mutation.outcome, mutation.input.error, projection.endedAt),
+    mutation.input.ending, mutation.input.providerId);
   events.push({ eventId: `${input.operation.execution.executionId}:${payload.type}`,
     routing: input.operation.execution, sourceProviderId: mutation.input.providerId,
     sourceIdentities: mutation.input.providerIdentities, payload });

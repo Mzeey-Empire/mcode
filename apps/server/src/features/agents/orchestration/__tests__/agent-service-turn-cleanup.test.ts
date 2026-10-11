@@ -435,7 +435,7 @@ describe("AgentService turn cleanup", () => {
       mentions: [],
       provider: "claude",
     });
-    await expect(service.stopSession(THREAD_ID)).resolves.toMatchObject({ status: "cancelled" });
+    await expect(service.stopSession(THREAD_ID, { by: "user" })).resolves.toMatchObject({ status: "cancelled" });
     await expect(first.completion).resolves.toBeUndefined();
 
     await expect(service.dispatchQueuedAutomaticTurn({
@@ -510,7 +510,7 @@ describe("AgentService turn cleanup", () => {
       attachments: [],
       provider: "claude",
     });
-    await service.stopSession(THREAD_ID);
+    await service.stopSession(THREAD_ID, { by: "user" });
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
 
     providerEmitter.emit("event", {
@@ -541,13 +541,13 @@ describe("AgentService turn cleanup", () => {
     provider.discardSession = vi.fn(() => Promise.resolve());
     provider.stopSession.mockRejectedValueOnce(new Error("stop unavailable"));
 
-    const result = await service.stopSession(THREAD_ID);
+    const result = await service.stopSession(THREAD_ID, { by: "user" });
     expect(result.status).toBe("cancelled");
     expect(result.snapshot).toMatchObject({ threadId: THREAD_ID, phase: "cancelled" });
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
     await vi.waitFor(() => expect(provider.discardSession).toHaveBeenCalledWith(`mcode-${THREAD_ID}`));
 
-    const retry = await service.stopSession(THREAD_ID);
+    const retry = await service.stopSession(THREAD_ID, { by: "user" });
     expect(retry.status).toBe("already-terminal");
   });
 
@@ -574,7 +574,7 @@ describe("AgentService turn cleanup", () => {
 
     vi.useFakeTimers();
     try {
-      const stop = service.stopSession(THREAD_ID);
+      const stop = service.stopSession(THREAD_ID, { by: "user" });
       // The RPC resolves on terminalize; provider settle continues detached.
       await expect(stop).resolves.toMatchObject({ status: "cancelled" });
       expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
@@ -708,7 +708,7 @@ describe("AgentService turn cleanup", () => {
     });
     await vi.waitFor(() => expect(service.runtimeAccess().activeThreadIds()).toContain(THREAD_ID));
 
-    const result = await service.stopSession(THREAD_ID);
+    const result = await service.stopSession(THREAD_ID, { by: "user" });
     expect(result.status).toBe("cancelled");
     expect(result.dispatchState).toBe("not-dispatched");
     expect((providerEmitter as NodeEvents.EventEmitter & { sendTurn: ReturnType<typeof vi.fn> }).sendTurn)
@@ -773,8 +773,8 @@ describe("AgentService turn cleanup", () => {
       releaseStop = resolve;
     }));
 
-    const first = service.stopSession(THREAD_ID);
-    const second = service.stopSession(THREAD_ID);
+    const first = service.stopSession(THREAD_ID, { by: "user" });
+    const second = service.stopSession(THREAD_ID, { by: "user" });
     await vi.waitFor(() => expect(provider.stopSession).toHaveBeenCalledOnce());
     releaseStop();
     const [firstResult, secondResult] = await Promise.all([first, second]);
@@ -800,15 +800,15 @@ describe("AgentService turn cleanup", () => {
     };
     provider.discardSession = vi.fn(() => Promise.resolve());
     provider.stopSession.mockRejectedValueOnce(new Error("stop unavailable"));
-    const first = service.stopSession(THREAD_ID);
-    const second = service.stopSession(THREAD_ID);
+    const first = service.stopSession(THREAD_ID, { by: "user" });
+    const second = service.stopSession(THREAD_ID, { by: "user" });
     const [firstResult, secondResult] = await Promise.all([first, second]);
     expect(firstResult.status).toBe("cancelled");
     expect(secondResult).toEqual(firstResult);
     await vi.waitFor(() => expect(provider.stopSession).toHaveBeenCalledTimes(1));
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
 
-    const retry = await service.stopSession(THREAD_ID);
+    const retry = await service.stopSession(THREAD_ID, { by: "user" });
     expect(retry.status).toBe("already-terminal");
   });
 
@@ -829,7 +829,7 @@ describe("AgentService turn cleanup", () => {
         attachments: [],
         provider: "claude",
       });
-      const result = await service.stopSession(THREAD_ID);
+      const result = await service.stopSession(THREAD_ID, { by: "user" });
       expect(result.status).toBe("cancelled");
 
       await service.sendMessage({
@@ -860,7 +860,7 @@ describe("AgentService turn cleanup", () => {
     });
     await send("first turn");
     const firstExecutionId = activeExecutionId(service);
-    expect((await service.stopSession(THREAD_ID)).status).toBe("cancelled");
+    expect((await service.stopSession(THREAD_ID, { by: "user" })).status).toBe("cancelled");
     await send("next turn");
     const nextExecutionId = activeExecutionId(service);
     expect(nextExecutionId).not.toBe(firstExecutionId);
@@ -895,7 +895,7 @@ describe("AgentService turn cleanup", () => {
       releaseStop = resolve;
     }));
 
-    const stopping = service.stopSession(THREAD_ID);
+    const stopping = service.stopSession(THREAD_ID, { by: "user" });
     await vi.waitFor(() => expect(provider.stopSession).toHaveBeenCalledOnce());
     providerEmitter.emit("event", {
       type: AgentEventType.TurnComplete,
@@ -1348,6 +1348,7 @@ describe("AgentService turn cleanup", () => {
       threadId: THREAD_ID,
       turnExecutionId: executionId,
       error: "Something went wrong",
+      failure: { kind: "fatal" },
     } satisfies AgentEvent);
     await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
@@ -1556,6 +1557,7 @@ describe("AgentService Ended finalization", () => {
             threadId: thread.id,
             turnExecutionId: executionId,
             error: "provider stopped",
+            failure: { kind: "fatal" },
           } satisfies AgentEvent);
         } else if (terminalType === "turnComplete") {
           providerEmitter.emit("event", {
@@ -1576,7 +1578,7 @@ describe("AgentService Ended finalization", () => {
         }
       });
 
-      await expect(service.stopSession(thread.id)).resolves.toMatchObject({
+      await expect(service.stopSession(thread.id, { by: "user" })).resolves.toMatchObject({
         status: "cancelled",
         turnExecutionId: executionId,
       });
@@ -1654,6 +1656,7 @@ describe("AgentService Ended finalization", () => {
         threadId: thread.id,
         turnExecutionId: executionId,
         error: "provider failed",
+        failure: { kind: "fatal" },
       } satisfies AgentEvent);
       await waitForAgentServiceIngressForTest(service, thread.id);
 
@@ -1760,7 +1763,7 @@ describe("AgentService Ended finalization", () => {
         turnExecutionId: activeExecutionId(service, thread.id),
       } satisfies AgentEvent);
     });
-    const result = await service.stopSession(thread.id);
+    const result = await service.stopSession(thread.id, { by: "user" });
 
     expect(result.status).toBe("cancelled");
     // Descendant interrupts and the provider stop run detached after the RPC.
@@ -1845,7 +1848,7 @@ describe("AgentService Ended finalization", () => {
       childThreadId: child.childThread.id,
     })).toMatchObject({ latestTurn: { status: "Running" }, nativeThreadId: null, nativeTurnId: null });
 
-    const result = await service.stopSession(thread.id);
+    const result = await service.stopSession(thread.id, { by: "user" });
 
     expect(result.status).toBe("cancelled");
     expect(providerEmitter.interruptChildTurn).not.toHaveBeenCalled();
@@ -2103,6 +2106,8 @@ describe("AgentService Ended finalization", () => {
         terminalOutcome: "interrupted",
       });
     });
+    expect(canonicalSink.loadTurnByExecution(executionId)?.ending)
+      .toEqual({ outcome: "interrupted", cause: "provider_exited" });
     // Publication saves the thread status after the checkpoint commits, without awaiting it.
     await vi.waitFor(() => {
       expect(threadRepo.findById(thread.id)?.status).toBe("interrupted");
@@ -2111,6 +2116,28 @@ describe("AgentService Ended finalization", () => {
         status: "interrupted",
       });
     }, { timeout: 5_000 });
+  });
+
+  it.each([
+    [{ by: "user" }, { by: "mcode", reason: "approval_unanswerable" }],
+    [{ by: "mcode", reason: "approval_unanswerable" }, { by: "user" }],
+  ] as const)("records the first stop cause when two stops race (%o first)", async (first, second) => {
+    const workspace = await workspaceRepo.create("Test", process.cwd());
+    const thread = await threadRepo.create(workspace.id, "Raced stop thread", "direct", "main", true, "codex");
+    await service.sendMessage({ threadId: thread.id, content: "work", permissionMode: "default", model: "gpt-5", attachments: [], provider: "codex" });
+    const executionId = activeExecutionId(service, thread.id);
+    providerEmitter.stopSession.mockImplementation(() => {
+      providerEmitter.emit("event", {
+        type: AgentEventType.Ended,
+        threadId: thread.id,
+        turnExecutionId: executionId,
+      } satisfies AgentEvent);
+    });
+
+    await Promise.all([service.stopSession(thread.id, first), service.stopSession(thread.id, second)]);
+
+    await vi.waitFor(() => expect(canonicalSink.loadTurnByExecution(executionId)?.status).toBe("Cancelled"));
+    expect(canonicalSink.loadTurnByExecution(executionId)?.ending).toEqual({ outcome: "cancelled", stop: first });
   });
 
   it("leaves a full-looking response unresolved without terminal proof", async () => {
@@ -2171,13 +2198,31 @@ describe("AgentService Ended finalization", () => {
       content: "partial answer before failure",
       tokens: null,
     } satisfies AgentEvent);
+    const acceptedNoEarlierThan = Date.now();
     providerEmitter.emit("event", {
       type: AgentEventType.Error,
       threadId: thread.id,
       turnExecutionId: executionId,
       error: "provider failed",
+      failure: { kind: "usage_limit", status: 429, retryAfterMs: 60_000, limitType: "five_hour" },
     } satisfies AgentEvent);
     await vi.waitFor(() => expect(canonicalSink.loadCheckpoint(executionId)?.terminalOutcome).toBe("errored"));
+    const acceptedNoLaterThan = Date.now();
+
+    const ending = canonicalSink.loadTurnByExecution(executionId)?.ending;
+    expect(ending).toMatchObject({
+      outcome: "errored",
+      failure: {
+        kind: "usage_limit",
+        provider: "codex",
+        message: "provider failed",
+        status: 429,
+        limitType: "five_hour",
+      },
+    });
+    const resetsAt = ending?.outcome === "errored" ? Date.parse(ending.failure.resetsAt ?? "") : Number.NaN;
+    expect(resetsAt).toBeGreaterThanOrEqual(acceptedNoEarlierThan + 60_000);
+    expect(resetsAt).toBeLessThanOrEqual(acceptedNoLaterThan + 60_000);
 
     const { messages } = messageRepo.listByThread(thread.id, 10);
     const assistant = messages.find((message) => message.role === "assistant");
@@ -2244,6 +2289,7 @@ describe("AgentService Ended finalization", () => {
       threadId: thread.id,
       turnExecutionId: executionId,
       error: "late provider failure",
+      failure: { kind: "fatal" },
     } satisfies AgentEvent);
     await waitForAgentServiceIngressForTest(service, thread.id);
     const turn = canonicalSink.loadTurnByExecution(executionId);

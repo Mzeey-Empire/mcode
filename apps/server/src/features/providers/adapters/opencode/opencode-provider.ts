@@ -673,7 +673,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       return state.lease;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      emit({ type: AgentEventType.Error, threadId, error: message } satisfies AgentEvent);
+      emit({ type: AgentEventType.Error, threadId, error: message, failure: { kind: "fatal" } } satisfies AgentEvent);
       emit({ type: AgentEventType.Ended, threadId, turnExecutionId: req.turnExecutionId, outcome: "errored" } satisfies AgentEvent);
       await this.waitForCanonicalExecution(routing.executionId);
       return null;
@@ -1203,7 +1203,7 @@ class OpenCodeTurnSettler {
   settle(outcome: "completed" | "cancelled" | "errored", error?: string): void {
     if (this.settled) return;
     this.settled = true;
-    if (error) this.emit({ type: AgentEventType.Error, threadId: this.threadId, error } satisfies AgentEvent);
+    if (error) this.emit({ type: AgentEventType.Error, threadId: this.threadId, error, failure: { kind: "fatal" } } satisfies AgentEvent);
     if (this.assistantText.trim().length > 0 && outcome !== "cancelled") {
       this.emit({ type: AgentEventType.Message, threadId: this.threadId, content: this.assistantText, tokens: null } satisfies AgentEvent);
     }

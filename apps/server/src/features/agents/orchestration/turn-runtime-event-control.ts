@@ -1,6 +1,7 @@
 import type { AgentEvent, TurnRuntimeSnapshot } from "@mcode/contracts";
 
 import type { TurnOutcome } from "../turns/turn-outcome.js";
+import type { TurnEndingCause } from "../canonical/turn-ending.js";
 
 /** Injection token for the runtime controls used by normalized provider-event application. */
 export const TURN_RUNTIME_EVENT_CONTROL = "TurnRuntimeEventControl";
@@ -32,7 +33,7 @@ export interface TurnRuntimeEventControl {
   /** Clear runtime-only resources after a terminal provider event. */
   clearTerminalState(threadId: string): void;
   /** Materialize one terminal turn through the single event pipeline. */
-  finalizeTerminalTurn(threadId: string, outcome: TurnOutcome, source: string): Promise<boolean> | null;
+  finalizeTerminalTurn(threadId: string, outcome: TurnOutcome, source: string, ending?: TurnEndingCause): Promise<boolean> | null;
   /** Return whether the pipeline already applied a deferred file effect. */
   consumeEarlyFileEffect(event: AgentEvent): boolean;
   /** Resume queued provider events after a durable checkpoint commits. */

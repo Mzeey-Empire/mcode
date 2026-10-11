@@ -62,7 +62,7 @@ describe("ApprovalService", () => {
     await vi.waitFor(() => expect(test.publishApprovalResolved.mock.calls).toEqual([[{
       requestId: "bad", threadId: "owner", outcome: { status: "cancelled", reason: "unanswerable" },
     }]]));
-    expect(test.stopSession.mock.calls).toEqual([["owner"]]);
+    expect(test.stopSession.mock.calls).toEqual([["owner", { by: "mcode", reason: "approval_unanswerable" }]]);
     expect(test.provider.pending).toEqual([]);
   });
 

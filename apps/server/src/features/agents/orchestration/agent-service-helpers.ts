@@ -5,6 +5,7 @@ import type {
   TurnRuntimeSnapshot,
 } from "@mcode/contracts";
 import type { FinalizeTurnCommand } from "../turns/turn-event-pipeline.js";
+import type { TurnEndingCause } from "../canonical/turn-ending.js";
 
 /** Select serializable tool-result fields for the narrative projection. */
 export function toolResultMetadata(event: Extract<AgentEvent, { type: "toolResult" }>): {
@@ -62,6 +63,13 @@ export function stopDispatchState(
   return reservationState === "activeTurn" || reservationState === "stopping" || reservationState === undefined
     ? "not-dispatched"
     : "unknown";
+}
+
+/** The interruption cause implied by a terminal source that has no provider event behind it. */
+export function terminalSourceEnding(source: FinalizeTurnCommand["source"]): TurnEndingCause | undefined {
+  if (source === "shutdown") return { cause: "app_closed" };
+  if (source === "checkpoint-failure") return { cause: "saving_stopped" };
+  return undefined;
 }
 
 /** Convert legacy terminal labels to the pipeline source vocabulary. */

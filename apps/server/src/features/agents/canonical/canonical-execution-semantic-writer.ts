@@ -44,6 +44,7 @@ import { CanonicalCommittedProviderProjector } from "./canonical-committed-provi
 import type { ProviderEventProjection } from "../../providers/composition/provider-event-adapter.js";
 import { CanonicalCodexSystemErrorProjection } from "./canonical-codex-system-error-projection.js";
 import { matchesCodexSystemIntents } from "./codex-system-intents.js";
+import { persistedFromAdapterFailure } from "./turn-ending.js";
 import { CanonicalContextCompactionProjection } from "./canonical-context-compaction-projection.js";
 import { CanonicalParentTurnWrite, type DataOnlyParentLiveMessageInput, type DataOnlyParentTurnFinishInput } from "./canonical-parent-turn-write.js";
 import { TaskStore as TaskRepo } from "../orchestration/persistence/task-store.js";
@@ -335,7 +336,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const current = this.loadHead(input.execution.executionId);
     if (!current || current.terminal || !sameExecutionAndLease(current, input)) throw new SemanticConflict();
     const result = this.turns.interruptLostExecution({ ...input.execution,
-      reason: input.reason, recoveryIncidentId: input.recoveryIncidentId,
+      // A lost worker means Mcode could no longer save the provider's output.
+      reason: input.reason, cause: "saving_stopped", recoveryIncidentId: input.recoveryIncidentId,
       ...(current.assignedMessageId ? { assignedMessageId: current.assignedMessageId } : {}) });
     const receipt = committed(operation, result.durableThrough);
     const sequences = this.bufferedPublication?.flatMap((batch) => batch.map((event) => event.acceptedSequence)) ?? [];
@@ -1781,11 +1783,19 @@ function validTerminalPublicationOutcome(
   const event = publications[0]?.event;
   switch (event?.type) {
     case "turnComplete": return mutation.outcome === "completed";
-    case "error": return mutation.outcome === "errored" && mutation.input.error === event.error;
+    case "error": return errorPublicationMatches(mutation, event);
     case "ended": return event.outcome === undefined
       || normalizeTerminalOutcome(event.outcome) === normalizeTerminalOutcome(mutation.outcome);
     default: return false;
   }
+}
+
+function errorPublicationMatches(
+  mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish-live-event" }>,
+  event: Extract<AgentEvent, { type: "error" }>,
+): boolean {
+  return mutation.outcome === "errored" && mutation.input.error === event.error
+    && persistedFromAdapterFailure(mutation.input.ending?.failure, event.failure);
 }
 
 function normalizeTerminalOutcome(outcome: TurnOutcome): Exclude<TurnOutcome, "cancelled"> {

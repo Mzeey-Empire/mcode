@@ -171,7 +171,7 @@ function mapSessionError(properties: Record<string, unknown>, ctx: MapperContext
       ? boundDiagnostic(JSON.stringify(err).slice(0, MAX_DIAGNOSTIC_CHARS))
       : "OpenCode session error";
   const events: AgentEvent[] = [
-    withExecution({ type: "error", threadId: ctx.threadId, error: detail } satisfies AgentEvent, ctx),
+    withExecution({ type: "error", threadId: ctx.threadId, error: detail, failure: { kind: "fatal" } } satisfies AgentEvent, ctx),
   ];
   // Authentication failures are security-sensitive: they stay visible as a
   // scoped recovery notice instead of a bare error string.
@@ -399,6 +399,7 @@ function mapNextStepFailed(properties: Record<string, unknown>, ctx: MapperConte
     events: [withExecution({
       type: "error", threadId: ctx.threadId,
       error: boundDiagnostic(typeof properties.error === "string" ? properties.error : "OpenCode step failed"),
+      failure: { kind: "fatal" },
     } satisfies AgentEvent, ctx)],
   };
 }

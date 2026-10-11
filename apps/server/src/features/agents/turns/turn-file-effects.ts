@@ -9,6 +9,7 @@ import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js
 import type { TurnFinalizer } from "./turn-finalizer.js";
 import type { TurnFileTracker } from "./turn-file-tracker.js";
 import type { TurnOutcome } from "./turn-outcome.js";
+import type { TurnEndingCause } from "../canonical/turn-ending.js";
 
 /** Injection token for the composed file-effect coordinator. */
 export const TURN_FILE_EFFECTS = "TurnFileEffects";
@@ -106,6 +107,7 @@ export class TurnFileEffects {
     executionId: string | undefined,
     source: string,
     persistence: Promise<unknown> = Promise.resolve(),
+    ending?: TurnEndingCause,
   ): Promise<boolean> {
     const existing = this.finalizationByThread.get(threadId);
     if (existing) return existing;
@@ -114,7 +116,7 @@ export class TurnFileEffects {
     const refCapture = this.refCaptureByThread.get(threadId);
     const prerequisite = Promise.all([persistence, activity ?? Promise.resolve(), refCapture ?? Promise.resolve()]);
     const finalization = Promise.allSettled([
-      prerequisite, this.finalizer.finalize(threadId, outcome, prerequisite, executionId),
+      prerequisite, this.finalizer.finalize(threadId, outcome, prerequisite, executionId, ending),
     ]).then((results) => this.settledFinalization(threadId, outcome, source, results));
     this.finalizationByThread.set(threadId, finalization);
     void finalization.finally(() => this.clearFinishedGeneration(threadId, setup, activity, refCapture, finalization));

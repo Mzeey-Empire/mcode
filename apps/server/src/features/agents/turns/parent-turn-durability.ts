@@ -1,4 +1,5 @@
 import type {
+  InterruptionCause,
   Message,
   NarrativeEntry,
   ParentNarrativeRecoveryItem,
@@ -6,6 +7,7 @@ import type {
   TurnOutcome,
 } from "@mcode/contracts";
 import type { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
+import type { TurnEndingCause } from "../canonical/turn-ending.js";
 
 /** The parent-turn records needed to begin one provider execution. */
 export interface ParentTurnStartInput {
@@ -45,6 +47,7 @@ export interface ParentTurnFinishInput {
   providerIdentities: readonly ProviderIdentity[];
   outcome: TurnOutcome;
   error?: string;
+  ending?: TurnEndingCause;
   projectTurn: () => ParentTurnProjection;
   finalizeCompatibility?: () => void;
 }
@@ -71,6 +74,7 @@ export interface ParentNarrativeRecoveryCommit {
 export interface ParentTurnInterruptionInput {
   executionId: string;
   reason: string;
+  cause: InterruptionCause;
   recoveryIncidentId?: string;
   endedAt?: string;
   stagedAssistant?: Message;

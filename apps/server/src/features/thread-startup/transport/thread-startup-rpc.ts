@@ -51,7 +51,7 @@ const threadStartupHandlers: ThreadStartupHandlerMap = {
         // Intent is committed before the stop, so a first provider frame racing it settles as cancelled,
         // and a turn stopped before dispatch commits no turn fact for the observer. Once the stop
         // resolves, the record is either already terminal (markCancelled keeps it) or cancelled.
-        await deps.agentService.stopSession(startup.threadId);
+        await deps.agentService.stopSession(startup.threadId, { by: "user" });
         return deps.threadStartupService.markCancelled(startup.startupId);
       case "thread":
       case "fetch":

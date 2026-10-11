@@ -33,6 +33,7 @@ import { ExecutionWorkerFileEvidence } from "./execution-worker-file-evidence.js
 import type { FrozenExecutionFileEvidence } from "./execution-file-evidence-coordinator.js";
 import type { CapturedToolUseObservation, FileTurnHandoff } from "../turns/turn-file-tracker.js";
 import type { SyntheticTerminalInput } from "./codex-live-event-reducer.js";
+import { adapterTurnFailure } from "../canonical/turn-ending.js";
 
 /** Data that an execution worker may receive without a server dependency container. */
 export type ExecutionWorkCommand =
@@ -607,12 +608,16 @@ function syntheticTerminalInput(
   switch (command.outcome) {
     case "cancelled": return { outcome: "cancelled" };
     case "interrupted": return { outcome: "interrupted" };
-    case "errored": return errorTerminalInput(command.input.error);
+    case "errored": return errorTerminalInput(command.input);
   }
 }
 
-function errorTerminalInput(error: unknown): Extract<SyntheticTerminalInput, { outcome: "errored" }> | undefined {
-  return typeof error === "string" && error.length > 0 ? { outcome: "errored", error } : undefined;
+function errorTerminalInput(
+  input: DataOnlyParentTurnFinishInput,
+): Extract<SyntheticTerminalInput, { outcome: "errored" }> | undefined {
+  const { error } = input;
+  return typeof error === "string" && error.length > 0
+    ? { outcome: "errored", error, failure: adapterTurnFailure(input.ending?.failure) } : undefined;
 }
 
 function validOwnedEventCommand(command: Extract<WorkerCommand, { kind: "event" }>, state: ExecutionState): boolean {

@@ -35,6 +35,7 @@ import type {
   CodexChildTurnStartInput,
   CodexChildTurnFinishInput,
 } from "../collaboration/codex-collaboration-durability.js";
+import { withTurnEnding } from "./turn-ending.js";
 import type {
   CanonicalAgentCommitInput,
   CanonicalAgentCommitResult,
@@ -1159,7 +1160,7 @@ export class CanonicalCodexCollaborationCoordinator {
       routing: { threadId: thread.id, turnId: turn.id, executionId },
       sourceProviderId: "codex",
       sourceIdentities: thread.providerIdentities,
-      payload: childTerminalPayload(outcome, error, endedAt),
+      payload: withTurnEnding(childTerminalPayload(outcome, error, endedAt), undefined, "codex"),
     };
   }
 }
@@ -1461,6 +1462,7 @@ function newChildTurn(
     startedAt: null,
     providerStartedAt: null,
     endedAt: null,
+    ending: null,
     createdAt: now,
     updatedAt: now,
   };

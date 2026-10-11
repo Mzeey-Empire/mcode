@@ -31,6 +31,18 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
 }
 
 describe("routeMessage Agent RPCs", () => {
+  it("records the user as the cause of an agent.stop", async () => {
+    const fixture = admissionFixture(async () => {});
+    const stopSession = vi.fn<AgentRouterDeps["agentService"]["stopSession"]>(async (threadId) => ({
+      threadId, turnExecutionId: null, status: "already-terminal", dispatchState: "not-dispatched",
+      snapshot: { threadId, turnExecutionId: null, phase: "idle" } }));
+    fixture.deps.agentService.stopSession = stopSession;
+
+    await routeAgentRpc("agent.stop", { threadId: "thread-one" }, fixture.deps);
+
+    expect(stopSession).toHaveBeenCalledExactlyOnceWith("thread-one", { by: "user" });
+  });
+
   it("returns the saved version only after the plan service commits", async () => {
     const fixture = admissionFixture(async () => {});
     const version: PlanVersion = { id: "00000000-0000-4000-8000-000000000002", threadId: "thread-one",

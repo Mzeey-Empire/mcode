@@ -8,6 +8,7 @@ import type {
   ProviderEventIngressEvent,
 } from "../../providers/composition/provider-event-ingress.js";
 import { ACTIVE_TURN_RECOVERY_RETAINED_LIMITS } from "./active-turn-recovery-retention-policy.js";
+import type { TurnEndingCause } from "../canonical/turn-ending.js";
 
 /** Retention limits for ingress events that wait for assistant-text durability. */
 export const TURN_EVENT_QUEUE_RETAINED_LIMITS = {
@@ -27,6 +28,8 @@ export interface FinalizeTurnCommand {
   executionId?: string;
   outcome: TurnTerminalOutcome;
   source: TurnTerminalSource;
+  /** Structured cause recorded with a non-completed outcome. */
+  ending?: TurnEndingCause;
 }
 
 /** Runtime authority retained by AgentService while the pipeline owns event ordering. */

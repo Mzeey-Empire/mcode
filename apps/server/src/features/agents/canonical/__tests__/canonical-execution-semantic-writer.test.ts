@@ -156,14 +156,16 @@ function finishLiveCommand(outcome: "completed" | "errored" | "cancelled" | "int
   const identity = { threadId: THREAD_ID, turnExecutionId: EXECUTION_ID };
   const terminal: AgentEvent = outcome === "completed"
     ? { ...identity, type: "turnComplete", reason: "end_turn", costUsd: null, tokensIn: 20, tokensOut: 5 }
-    : outcome === "errored" ? { ...identity, type: "error", error: "Provider failed" }
+    : outcome === "errored" ? { ...identity, type: "error", error: "Provider failed", failure: { kind: "auth", status: 401 } }
       : { ...identity, type: "ended", outcome: "interrupted" };
   return {
     kind: "finish-live-event", outcome,
     projection: { threadId: THREAD_ID, executionId: EXECUTION_ID, outcome, endedAt: NOW,
       assistant: { content: "Final answer", model: null, attachments: [] }, narrative: [] },
     input: { ...execution, providerId: "codex", providerIdentities: [], outcome,
-      ...(outcome === "errored" ? { error: "Provider failed" } : {}), projection: { kind: "writer-staged" } },
+      ...(outcome === "errored" ? { error: "Provider failed",
+        ending: { failure: { kind: "auth", status: 401, provider: "codex", message: "Provider failed" } } } : {}),
+      projection: { kind: "writer-staged" } },
     ...(outcome === "cancelled" ? {} : { providerEvent: {
       phase: "running", nativeCursor: null, events: [runtimeEvent(2, terminal)],
     } }),
@@ -536,6 +538,23 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       .get(EXECUTION_ID, "lease-1:2")).toBeNull();
     expect(new MessageRepo(db).listIncludingInternal(THREAD_ID).some((message) => message.role === "assistant")).toBe(false);
     expect(await writer.transact(input)).toMatchObject({ kind: "committed" });
+  });
+
+  it("rejects an errored finish whose persisted failure differs from the published Error", async () => {
+    await send(1, { kind: "start", providerId: "codex", input: startInput() });
+    const { livePublication, ...mutation } = finishLiveCommand("errored");
+    const input = { ...operation(2, mutation), livePublication };
+    const failure = { kind: "auth", status: 401, provider: "codex", message: "Provider failed" } as const;
+    const invalid = [
+      { ...input, mutation: { ...mutation, input: { ...mutation.input, ending: undefined } } },
+      { ...input, mutation: { ...mutation, input: { ...mutation.input, ending: { failure: { ...failure, kind: "fatal" as const } } } } },
+      { ...input, mutation: { ...mutation, input: { ...mutation.input, ending: { failure: { ...failure, status: 403 } } } } },
+    ];
+    for (const candidate of invalid) {
+      expect(await writer.transact(candidate)).toEqual({ kind: "conflict", operationId: "lease-1:2" });
+    }
+    expect(await writer.transact(input)).toMatchObject({ kind: "committed" });
+    expect(new CanonicalAgentBoundary(db).loadTurn(TURN_ID)?.ending).toEqual({ outcome: "errored", failure });
   });
 
   it("resumes a compound terminal operation after final receipt failure and database reopen", async () => {
@@ -1293,7 +1312,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
   it("rejects an error publication before terminal durability", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
     const error: AgentEvent = { type: AgentEventType.Error, threadId: THREAD_ID,
-      turnExecutionId: EXECUTION_ID, error: "failed" };
+      turnExecutionId: EXECUTION_ID, error: "failed", failure: { kind: "fatal" } };
     const op = { ...operation(2, { kind: "append-events", phase: "running", nativeCursor: null,
       events: [runtimeEvent(2, error)] }), livePublication: [{ after: "writer" as const, event: error }] };
     expect(await writer.transact(op)).toEqual({ kind: "conflict", operationId: "lease-1:2" });

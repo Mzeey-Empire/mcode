@@ -1,5 +1,5 @@
 import { inject, injectable } from "tsyringe";
-import type { AgentStopResult, Thread, TurnRuntimeSnapshot } from "@mcode/contracts";
+import type { AgentStopResult, Thread, TurnRuntimeSnapshot, TurnStopCause } from "@mcode/contracts";
 
 import type { WorkspaceEnvironmentAutomaticSetupDispatch } from "../../projects/environment/workspace-environment-service.js";
 import type { WorkspaceEnvironmentQueuedTurnSubmission } from "../turns/turn-admission-dispatch-coordinator.js";
@@ -31,9 +31,9 @@ export class AgentService {
     return this.runtime.dispatchQueuedAutomaticTurn(submission);
   }
 
-  /** Stop one active turn. */
-  stopSession(threadId: string): Promise<AgentStopResult> {
-    return this.runtime.stopSession(threadId);
+  /** Stop one active turn, recording who stopped it. A concurrent stop keeps the first caller's cause. */
+  stopSession(threadId: string, stop: TurnStopCause): Promise<AgentStopResult> {
+    return this.runtime.stopSession(threadId, stop);
   }
 
   /** Stop and discard the provider session for a deleted thread. */

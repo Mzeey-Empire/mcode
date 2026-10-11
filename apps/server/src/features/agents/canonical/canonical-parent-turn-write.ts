@@ -4,6 +4,7 @@ import * as NodeCrypto from "node:crypto";
 import {
   ParentNarrativeRecoveryItemSchema,
   TurnFileEffectSummarySchema,
+  type InterruptionCause,
   type ParentNarrativeRecoveryItem,
   type StoredAttachment,
   type TurnOutcome,
@@ -142,6 +143,7 @@ export interface LostParentExecutionInput {
   turnId: string;
   executionId: string;
   reason: string;
+  cause: InterruptionCause;
   recoveryIncidentId: string;
   endedAt?: string;
   assignedMessageId?: string;
@@ -202,6 +204,7 @@ export class CanonicalParentTurnWrite {
     const result = this.canonical.interruptUnfinishedExecution(
       input.executionId,
       input.reason,
+      input.cause,
       assistant ?? undefined,
       recoveredNarrative.length > 0
         ? (message, narrative) => this.persistRecoveredNarrative(message.id, narrative)
