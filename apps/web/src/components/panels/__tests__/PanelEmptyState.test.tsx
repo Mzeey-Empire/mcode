@@ -31,6 +31,19 @@ describe("PanelEmptyState — scope filter", () => {
     expect(screen.getByTestId("panel-card-tasks")).toBeInTheDocument();
     expect(screen.getByText("Plan")).toBeInTheDocument();
   });
+
+  it("offers exactly the supported tools for a thread", () => {
+    render(<PanelEmptyState scope="thread" openTabs={[]} onOpen={vi.fn()} />);
+    expect(screen.getAllByRole("button").map((button) => button.getAttribute("data-testid"))).toEqual([
+      "panel-card-preview",
+      "panel-card-terminal",
+      "panel-card-files",
+      "panel-card-changes",
+      "panel-card-environment",
+      "panel-card-tasks",
+      "panel-card-subagents",
+    ]);
+  });
 });
 
 describe("PanelEmptyState — cardinality filter", () => {

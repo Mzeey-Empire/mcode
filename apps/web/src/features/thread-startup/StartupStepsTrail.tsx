@@ -143,7 +143,7 @@ function StartupDetailLine({ startup }: { readonly startup: ThreadStartup | unde
 function TrailActions({ actions, onCancel }: { readonly actions: ReactNode; readonly onCancel?: () => void }) {
   if (!actions && !onCancel) return null;
   return (
-    <div data-testid="startup-actions" className="flex flex-wrap items-center pl-4">
+    <div data-testid="startup-actions" className="flex flex-wrap items-center gap-2 pl-4">
       {actions}
       {onCancel ? <Button type="button" variant="ghost" size="compact" className="px-2 text-caption text-ink" onClick={onCancel}>Cancel</Button> : null}
     </div>

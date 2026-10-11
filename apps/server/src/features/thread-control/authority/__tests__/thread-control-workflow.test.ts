@@ -1,4 +1,7 @@
 import "reflect-metadata";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { threads as threadTable } from "../../../../runtime/persistence/sqlite/schema.js";
 import { ApprovalService } from "../../../agents/approvals/approval-service.js";
 import { describe, expect, it, vi } from "vitest";
 import { ThreadCreateBatchResultSchema } from "@mcode/contracts";
@@ -167,7 +170,12 @@ describe("internal thread-control MCP workflow", () => {
     }
     const destinationThreadId = destinationResult.threadId;
     expect(threads.findById(destinationThreadId)).toMatchObject({ workspace_id: destinationWorkspace.id, title: "Issue 965 child" });
-    expect(threads.findDelegationLineage(destinationThreadId)).toEqual({
+    expect(drizzle(persistenceRuntime.database).select({
+      coordinatorThreadId: threadTable.delegationCoordinatorThreadId,
+      creatorTurnId: threadTable.delegationCreatorTurnId,
+      creatorToolCallId: threadTable.delegationCreatorToolCallId,
+      creationKind: threadTable.delegationCreationKind,
+    }).from(threadTable).where(eq(threadTable.id, destinationThreadId)).get()).toEqual({
       coordinatorThreadId: sourceThread.id,
       creatorTurnId: "source-turn",
       creatorToolCallId: "create-batch",
@@ -213,9 +221,13 @@ describe("internal thread-control MCP workflow", () => {
       ],
     });
 
-    const restartedThreads = new ThreadRepo(persistenceRuntime.reader, persistenceRuntime.writer);
     const restartedMessages = new MessageRepo(persistenceRuntime.reader, persistenceRuntime.writer);
-    expect(restartedThreads.findDelegationLineage(destinationThreadId)).toEqual({
+    expect(drizzle(persistenceRuntime.database).select({
+      coordinatorThreadId: threadTable.delegationCoordinatorThreadId,
+      creatorTurnId: threadTable.delegationCreatorTurnId,
+      creatorToolCallId: threadTable.delegationCreatorToolCallId,
+      creationKind: threadTable.delegationCreationKind,
+    }).from(threadTable).where(eq(threadTable.id, destinationThreadId)).get()).toEqual({
       coordinatorThreadId: sourceThread.id,
       creatorTurnId: "source-turn",
       creatorToolCallId: "create-batch",
@@ -226,7 +238,6 @@ describe("internal thread-control MCP workflow", () => {
         expect.objectContaining({ content: "Continue with the regression.", sourceThreadId: sourceThread.id, sourceProviderId: "codex" }),
       ]),
     );
-    expect(threads.listDelegationChildren(sourceThread.id).map(({ thread }) => thread.id)).toContain(destinationThreadId);
     expect(agentService.stopSession).toHaveBeenCalledWith(destinationThreadId, { by: "mcode", reason: "thread_control" });
   });
 });

@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { ThreadStartupFetchDecisions } from "../../../thread-startup/thread-startup-fetch-decisions.js";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -342,6 +343,7 @@ describe("AgentService.createAndSend defaults", () => {
     await vi.waitFor(() => expect(automaticSetup.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running"));
     await routeThreadStartupRpc("thread.startup.cancel", { startupId }, {
       threadStartupService: threadStartups, workspaceEnvironmentService: automaticSetup, agentService: service,
+      threadStartupFetchDecisions: new ThreadStartupFetchDecisions(),
     });
     await creating;
     expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", phase: "setup" });
@@ -836,6 +838,7 @@ describe("AgentService.createAndSend defaults", () => {
       workspaceId: workspace.id,
       content: "Existing dispatch",
       mode: "worktree",
+      branch: "feature/existing",
       existingWorktreePath: "/repo/.worktrees/existing",
     });
 

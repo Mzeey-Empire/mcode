@@ -6,6 +6,7 @@ import { sidePlacement } from "@/components/ui/side-placement";
 import { BranchTargetPicker } from "@/features/conversation/composer/execution/BranchTargetPicker";
 import { COMPOSER_MODE_OPTIONS, type ComposerMode } from "@/features/conversation/composer/execution/composer-mode";
 import { newThreadComposerMode, selectNewThreadMode } from "@/features/conversation/composer/execution/new-thread-mode";
+import { StartFromOriginSwitch } from "@/features/conversation/composer/execution/StartFromOriginSwitch";
 import { newThreadWorkspaceMeta, type TargetLabel } from "@/features/conversation/composer/execution/new-thread-target-copy";
 import { useNewThreadTargetSelection, type TargetPick } from "@/features/conversation/composer/execution/useComposerTargetSelection";
 import { WorkspaceModeMenuGroup } from "@/features/conversation/composer/execution/WorkspaceTargetMenu";
@@ -148,6 +149,7 @@ function BranchRow({ pick, workspaceId, testId }: { pick: TargetPick; workspaceI
           workspaceId={workspaceId}
           list={pick.list}
           value={pick.value}
+          footer={pick.origin ? <StartFromOriginSwitch origin={pick.origin} /> : undefined}
           onSelect={(picked) => {
             pick.select(picked);
             setOpen(false);

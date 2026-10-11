@@ -4,7 +4,7 @@ import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/a
 import { ThreadStore, MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS } from "./thread-store.js";
 import { threadWriteOperations } from "./thread-write-operations.js";
 import type { ThreadAttentionService } from "../attention/thread-attention-service.js";
-export type { ThreadDelegationLineageRecord, ActiveWorktreePathSet, CompletedThreadRetentionRecord, CompletedThreadDeadlineUpdate } from "./thread-store.js";
+export type { ActiveWorktreePathSet, CompletedThreadRetentionRecord, CompletedThreadDeadlineUpdate } from "./thread-store.js";
 export { MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS } from "./thread-store.js";
 
 /** Read-only queries and committed mutations for ThreadRepo. */
@@ -155,14 +155,6 @@ export class ThreadRepo {
 
   updateDelegationLineage(id: Parameters<ThreadStore["updateDelegationLineage"]>[0], lineage: Parameters<ThreadStore["updateDelegationLineage"]>[1]): Promise<ReturnType<ThreadStore["updateDelegationLineage"]>> {
     return this.writer.execute(threadWriteOperations.updateDelegationLineage, [id, lineage]);
-  }
-
-  findDelegationLineage(id: Parameters<ThreadStore["findDelegationLineage"]>[0]): ReturnType<ThreadStore["findDelegationLineage"]> {
-    return this.reader.findDelegationLineage(id);
-  }
-
-  listDelegationChildren(coordinatorThreadId: Parameters<ThreadStore["listDelegationChildren"]>[0]): ReturnType<ThreadStore["listDelegationChildren"]> {
-    return this.reader.listDelegationChildren(coordinatorThreadId);
   }
 
   updateExternalCreator(id: Parameters<ThreadStore["updateExternalCreator"]>[0], integrationId: Parameters<ThreadStore["updateExternalCreator"]>[1]): Promise<ReturnType<ThreadStore["updateExternalCreator"]>> {

@@ -5,16 +5,132 @@ let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { ThreadBranchingService, type BranchedThreadLifecycle, type CreateBranchedThreadInput } from "../../../projects/worktrees/thread-branching-service.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
-import type { ThreadService } from "../../../thread-control/index.js";
+import { ThreadService } from "../../../thread-control/index.js";
+import { AttachmentService } from "../../../attachments/storage/attachment-service.js";
+import { HandoffStorage } from "../../../handoff/index.js";
+import { ProjectWorktreeService } from "../../../projects/worktrees/project-worktree-service.js";
+import { SandboxWorktreeCleanupPolicy } from "../../../projects/worktrees/sandbox-worktree-cleanup-policy.js";
+import { WorktreeSafetyService } from "../../../projects/git/worktree-safety-service.js";
+import { createOriginFixture, git } from "../../../projects/git/__tests__/start-from-origin-fixture.js";
+import { routeThreadStartupRpc } from "../../../thread-startup/transport/thread-startup-rpc.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-startup-repo.js";
 import { ThreadStartupService } from "../../../thread-startup/thread-startup-service.js";
+import { ThreadStartupFetchDecisions } from "../../../thread-startup/thread-startup-fetch-decisions.js";
 import { ThreadCreationCoordinator } from "../thread-creation-coordinator.js";
 import type { TurnAdmissionDispatchCoordinator } from "../turn-admission-dispatch-coordinator.js";
 
 const directStartupId = "00000000-0000-4000-8000-000000000001";
 const managedStartupId = "00000000-0000-4000-8000-000000000002";
 const cancelledStartupId = "00000000-0000-4000-8000-000000000003";
+
+async function originHarness(withStartupService = true) {
+  const fixture = await createOriginFixture();
+  const { runtime, workspaces, worktrees, repository, executor, host } = fixture;
+  const threads = new ThreadRepo(runtime.reader, runtime.writer);
+  const startups = new ThreadStartupService(new ThreadStartupRepo(runtime.reader, runtime.writer), runtime.writer);
+  const fetchDecisions = new ThreadStartupFetchDecisions();
+  const projects = new ProjectWorktreeService(threads, workspaces, runtime.writer, worktrees,
+    new SandboxWorktreeCleanupPolicy(new WorktreeSafetyService(executor, host), repository, host));
+  const service = new ThreadService(threads, projects, new AttachmentService(), new HandoffStorage(), {
+    teardownThread: async () => { throw new Error("No runtime has started"); },
+    deletePersistentData: async (_ids, remove) => remove(),
+  });
+  const coordinator = new ThreadCreationCoordinator(threads, () => service, {
+    admitInitialAutomaticTurn: async () => ({ kind: "not-managed" }),
+    createAttachedExistingWorktreeThread: async () => { throw new Error("Origin starts create a new worktree"); },
+  }, repository, workspaces, fetchDecisions, undefined, undefined, () => withStartupService ? startups : undefined);
+  const deps = {
+    threadStartupService: startups, threadStartupFetchDecisions: fetchDecisions,
+    workspaceEnvironmentService: { stopAutomaticSetup: async () => { throw new Error("No setup has started"); } },
+    agentService: { stopSession: async () => { throw new Error("No agent has started"); } },
+  };
+  const command = {
+    workspaceId: fixture.workspace.id, content: "Build from origin", mode: "worktree", branch: "main",
+    startFromOrigin: true, startupId: managedStartupId,
+  } satisfies Parameters<ThreadCreationCoordinator["createInitialTurn"]>[0];
+  return { ...fixture, threads, startups, coordinator, command,
+    resolve: (action: "retry" | "continue") => routeThreadStartupRpc("thread.startup.resolve", { startupId: managedStartupId, action }, deps),
+    cancel: () => routeThreadStartupRpc("thread.startup.cancel", { startupId: managedStartupId }, deps),
+  };
+}
+
+describe("ThreadCreationCoordinator start from origin", { timeout: 20_000 }, () => {
+  it("records origin fetch and starts the worktree at its tip with the local base preserved", async () => {
+    const { coordinator, command, startups, threads, repoPath, localSha, originSha } = await originHarness();
+    const created = await coordinator.createInitialTurn(command);
+    expect(startups.get(managedStartupId)?.steps[1]).toMatchObject({ phase: "fetch", state: "completed",
+      detail: { phase: "fetch", ref: "origin/main", branch: "main" } });
+    expect(threads.findById(created.thread.id)).toMatchObject({ base_branch: "main", checkout_state: "branchless" });
+    expect(git(created.thread.worktree_path ?? "", "rev-parse", "HEAD")).toBe(originSha);
+    expect(git(repoPath, "rev-parse", "main")).toBe(localSha);
+  });
+
+  it("blocks without a thread, retries repeatedly, and fetches successfully after origin is restored", async () => {
+    const { coordinator, command, startups, threads, workspace, repoPath, origin, originSha, resolve } = await originHarness();
+    git(repoPath, "remote", "remove", "origin");
+    const creation = coordinator.createInitialTurn(command);
+    await vi.waitFor(() => expect(startups.get(managedStartupId)).toMatchObject({ state: "blocked", phase: "fetch",
+      block: { code: "start_from_origin_failed", message: "This project has no origin remote.", actions: ["retry", "continue"] } }), { timeout: 10_000 });
+    expect(threads.listByWorkspace(workspace.id)).toEqual([]);
+    const revision = startups.get(managedStartupId)?.revision ?? 0;
+    resolve("retry");
+    await vi.waitFor(() => expect(startups.get(managedStartupId)).toMatchObject({ state: "blocked", revision: revision + 2 }), { timeout: 10_000 });
+    git(repoPath, "remote", "add", "origin", origin);
+    resolve("retry");
+    const created = await creation;
+    expect(git(created.thread.worktree_path ?? "", "rev-parse", "HEAD")).toBe(originSha);
+    expect(startups.get(managedStartupId)?.steps[1].state).toBe("completed");
+    expect(() => resolve("retry")).toThrow(expect.objectContaining({ code: "STARTUP_NOT_BLOCKED_ON_FETCH" }));
+  });
+
+  it.each([
+    ["no_origin", "This project has no origin remote."],
+    ["branch_missing", 'Branch "main" does not exist on origin.'],
+    ["network_or_auth", "Could not fetch from origin. Check your connection and Git access."],
+  ])("continues from local main after %s", async (failure, message) => {
+    const { coordinator, command, startups, repoPath, origin, localSha, resolve } = await originHarness();
+    if (failure === "no_origin") git(repoPath, "remote", "remove", "origin");
+    if (failure === "branch_missing") git(origin, "update-ref", "-d", "refs/heads/main");
+    if (failure === "network_or_auth") git(repoPath, "remote", "set-url", "origin", "http://127.0.0.1:1/unreachable.git");
+    const creation = coordinator.createInitialTurn(command);
+    await vi.waitFor(() => expect(startups.get(managedStartupId)?.state).toBe("blocked"), { timeout: 10_000 });
+    expect(startups.get(managedStartupId)?.block).toMatchObject({ message, detail: expect.stringMatching(/^(fatal|error): /) });
+    resolve("continue");
+    const created = await creation;
+    expect(git(created.thread.worktree_path ?? "", "rev-parse", "HEAD")).toBe(localSha);
+    expect(created.thread.base_branch).toBe("main");
+    expect(startups.get(managedStartupId)?.steps[1]).toMatchObject({ phase: "fetch", state: "skipped" });
+  });
+
+  it("cancels while blocked and releases the pending create without creating a thread", async () => {
+    const { coordinator, command, startups, threads, workspace, repoPath, cancel, resolve } = await originHarness();
+    git(repoPath, "remote", "remove", "origin");
+    const creation = coordinator.createInitialTurn(command);
+    const rejected = expect(creation).rejects.toThrow("Thread startup was cancelled");
+    await vi.waitFor(() => expect(startups.get(managedStartupId)?.state).toBe("blocked"), { timeout: 10_000 });
+    await cancel();
+    await rejected;
+    expect(startups.get(managedStartupId)).toMatchObject({ state: "cancelled", phase: "fetch", cancellation: "requested" });
+    expect(threads.listByWorkspace(workspace.id)).toEqual([]);
+    expect(() => resolve("continue")).toThrow(expect.objectContaining({ code: "STARTUP_NOT_BLOCKED_ON_FETCH" }));
+  });
+
+  it("switch off omits fetch and uses local main even with no origin", async () => {
+    const { coordinator, command, startups, repoPath, localSha } = await originHarness();
+    git(repoPath, "remote", "remove", "origin");
+    const created = await coordinator.createInitialTurn({ ...command, startFromOrigin: false });
+    expect(startups.get(managedStartupId)?.steps.map((step) => step.phase)).toEqual(["thread", "worktree", "setup", "agent"]);
+    expect(git(created.thread.worktree_path ?? "", "rev-parse", "HEAD")).toBe(localSha);
+  });
+
+  it("throws fetch failure when no startup service is present", async () => {
+    const { coordinator, command, repoPath, threads, workspace } = await originHarness(false);
+    git(repoPath, "remote", "remove", "origin");
+    await expect(coordinator.createInitialTurn({ ...command, startupId: undefined })).rejects.toMatchObject({ code: "no_origin" });
+    expect(threads.listByWorkspace(workspace.id)).toEqual([]);
+  });
+});
 
 function requireThreadCreationOptions(options: Parameters<ThreadService["create"]>[4]) {
   if (!options) throw new Error("Expected thread creation options");
@@ -39,17 +155,20 @@ async function harness() {
       return { ...thread, worktree_path: input.existingWorktreePath };
     }),
   };
-  const gitRepository = { fetchBranch: vi.fn() };
+  const gitRepository = { fetchBranch: vi.fn(), fetchOriginTrackingBranch: vi.fn() };
+  const fetchDecisions = new ThreadStartupFetchDecisions();
   const coordinator = new ThreadCreationCoordinator(
     threads,
     () => threadService,
     admissions as never,
     gitRepository,
+    workspaces,
+    fetchDecisions,
     undefined,
     undefined,
     () => startups,
   );
-  return { db, workspace, threads, startups, threadService, admissions, gitRepository, coordinator };
+  return { db, workspace, workspaces, threads, startups, threadService, admissions, gitRepository, fetchDecisions, coordinator };
 }
 
 async function branchHarness() {
@@ -69,6 +188,7 @@ async function branchHarness() {
   );
   const makeCoordinator = (startupService = base.startups) => new ThreadCreationCoordinator(
     base.threads, () => base.threadService, base.admissions as never, base.gitRepository,
+    base.workspaces, base.fetchDecisions,
     () => branching, undefined, () => startupService,
   );
   return { ...base, parent, fork, handoffs, makeCoordinator };
@@ -78,7 +198,7 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
   it("records an attached checkout and skips setup before first dispatch", async () => {
     const { workspace, startups, coordinator } = await harness();
     const created = await coordinator.createInitialTurn({ workspaceId: workspace.id, content: "Use existing",
-      mode: "worktree", existingWorktreePath: "/project/existing", startupId: managedStartupId });
+      mode: "worktree", branch: "main", existingWorktreePath: "/project/existing", startupId: managedStartupId });
     expect(created.kind).toBe("dispatch");
     expect(startups.get(managedStartupId)).toMatchObject({ kind: "attached-worktree", phase: "agent", steps: [
       { phase: "thread", state: "completed" },
@@ -92,7 +212,7 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
     const { workspace, startups, parent, fork, makeCoordinator } = await branchHarness();
     const coordinator = makeCoordinator();
     const created = await coordinator.createInitialTurn({ workspaceId: workspace.id, content: "Branch here",
-      mode: "worktree", existingWorktreePath: "/project/existing", parentThreadId: parent.id,
+      mode: "worktree", branch: "main", existingWorktreePath: "/project/existing", parentThreadId: parent.id,
       forkedFromMessageId: fork.id, startupId: managedStartupId });
     expect(created).toMatchObject({ kind: "dispatch", command: { content: "Branch here", providerWireOverride: "Parent handoff" } });
     expect(startups.get(managedStartupId)).toMatchObject({ kind: "attached-worktree", phase: "agent", steps: [
@@ -148,7 +268,7 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
       new Error("Command failed: git -C /project worktree add /project-wt"),
       { stderr: "fatal: 'feature/x' is already checked out at '/other'\n" },
     ));
-    await expect(coordinator.createInitialTurn({ workspaceId: workspace.id, content: "Build", mode: "worktree",
+    await expect(coordinator.createInitialTurn({ workspaceId: workspace.id, content: "Build", mode: "worktree", branch: "main",
       startupId: managedStartupId })).rejects.toThrow("Command failed");
     expect(startups.get(managedStartupId)?.error?.detail).toBe("fatal: 'feature/x' is already checked out at '/other'");
   });
@@ -322,7 +442,7 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
   });
 
   it("creates one child for concurrent branch retries and replays it after reconstruction", async () => {
-    const { workspace, threads, threadService, admissions, gitRepository, startups } = await harness();
+    const { workspace, workspaces, threads, threadService, admissions, gitRepository, fetchDecisions, startups } = await harness();
     const parent = await threads.create(workspace.id, "Parent", "direct", "main", true, "claude");
     let finishBranch: (() => void) | undefined;
     const branching = { create: vi.fn(async (_input: CreateBranchedThreadInput, lifecycle?: BranchedThreadLifecycle) => {
@@ -334,6 +454,7 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
     }) };
     const makeCoordinator = (startupService = startups) => new ThreadCreationCoordinator(
       threads, () => threadService, admissions as never, gitRepository,
+      workspaces, fetchDecisions,
       () => branching as never, undefined, () => startupService,
     );
     const coordinator = makeCoordinator();
@@ -371,7 +492,7 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
   });
 
   it("skips Setup for a managed branch and rejects replay of an interrupted first turn", async () => {
-    const { workspace, threads, threadService, admissions, gitRepository, startups } = await harness();
+    const { workspace, workspaces, threads, threadService, admissions, gitRepository, fetchDecisions, startups } = await harness();
     const parent = await threads.create(workspace.id, "Parent", "direct", "main", true, "claude");
     const branching = { create: vi.fn(async (_input: CreateBranchedThreadInput, lifecycle?: BranchedThreadLifecycle) => {
       const thread = await threads.create(workspace.id, "Child", "worktree", "feature/child", true, "claude", {
@@ -383,6 +504,7 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
     }) };
     const makeCoordinator = (startupService = startups) => new ThreadCreationCoordinator(
       threads, () => threadService, admissions as never, gitRepository,
+      workspaces, fetchDecisions,
       () => branching as never, undefined, () => startupService,
     );
     const command = {
@@ -414,7 +536,7 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
   });
 
   it("replays an old record after reconstruction without admitting another first turn", async () => {
-    const { workspace, threads, threadService, admissions, gitRepository, coordinator } = await harness();
+    const { workspace, workspaces, threads, threadService, admissions, gitRepository, fetchDecisions, coordinator } = await harness();
     const command = { workspaceId: workspace.id, content: "Create once", startupId: directStartupId };
     const first = await coordinator.createInitialTurn(command);
     persistenceRuntime.database.prepare("UPDATE thread_startups SET steps_json = ? WHERE startup_id = ?").run(JSON.stringify([
@@ -425,6 +547,8 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
       () => threadService,
       admissions as never,
       gitRepository,
+      workspaces,
+      fetchDecisions,
       undefined,
       undefined,
       () => new ThreadStartupService(new ThreadStartupRepo(persistenceRuntime.reader, persistenceRuntime.writer), persistenceRuntime.writer),

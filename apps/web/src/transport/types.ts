@@ -62,6 +62,7 @@ import type {
   ApprovalRequest,
   CreateAndSendResult,
   ThreadStartup,
+  ThreadStartupResolveInput,
   ThreadStartupListResult,
   ConversationPage,
   ConversationNewerPage,
@@ -116,12 +117,6 @@ import type {
   TerminalProfileReference,
   TerminalResolvedProfile,
   TerminalProfileRecovery,
-  ThreadControlIdentity,
-  ThreadControlReadResult,
-  ThreadControlUserSendInput,
-  ThreadControlUserStopInput,
-  ThreadSendResult,
-  ThreadStopResult,
 } from "@mcode/contracts";
 
 // Re-export shared types from the contracts package (single source of truth).
@@ -429,6 +424,8 @@ export interface McodeTransport {
   listThreadStartups(workspaceId: string): Promise<ThreadStartupListResult>;
   /** Request cancellation for one startup lifecycle. */
   cancelThreadStartup(startupId: string): Promise<ThreadStartup>;
+  /** Releases a startup blocked on its origin fetch: fetch again, or start from the local branch. */
+  resolveThreadStartup(startupId: string, action: ThreadStartupResolveInput["action"]): Promise<ThreadStartup>;
   createAndSendMessage(input: CreateAndSendInput): Promise<CreateAndSendResult>;
   stopAgent(threadId: string): Promise<AgentStopResult>;
   /** Retry retained saving work without starting another provider execution. */
@@ -481,15 +478,6 @@ export interface McodeTransport {
    * any admission of that message still running on the server settles.
    */
   confirmMessage(threadId: string, messageId: string): Promise<{ admitted: boolean }>;
-  /** Read one canonical persisted coordination projection. */
-  readThreadControl(
-    identity: ThreadControlIdentity,
-    messageLimit?: number,
-  ): Promise<ThreadControlReadResult>;
-  /** Send a user-owned follow-up from a source thread to a destination thread. */
-  sendThreadControl(input: ThreadControlUserSendInput): Promise<ThreadSendResult>;
-  /** Stop a destination thread from a source thread. */
-  stopThreadControl(input: ThreadControlUserStopInput): Promise<ThreadStopResult>;
 
   // Thread mutations
   updateThreadTitle(threadId: string, title: string): Promise<boolean>;
@@ -747,6 +735,8 @@ export interface McodeTransport {
 
   /** Fetch persisted plans for a thread (hydration on page load). */
   getThreadPlans(threadId: string): Promise<import("@mcode/contracts").PlanVersion[]>;
+  /** Fork the latest plan version into a draft, or save into an existing draft at its revision. */
+  savePlanVersion(payload: import("@mcode/contracts").PlanSaveVersion): Promise<import("@mcode/contracts").PlanVersion>;
 
   // Snapshots
   /** Get a unified diff for a specific file from a turn snapshot. */

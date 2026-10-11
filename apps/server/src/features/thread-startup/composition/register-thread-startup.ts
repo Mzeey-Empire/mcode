@@ -3,9 +3,11 @@ import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/a
 import { ThreadStartupRepo } from "../persistence/thread-startup-repo.js";
 import { StartupAgentPhaseObserver } from "../startup-agent-phase-observer.js";
 import { ThreadStartupService } from "../thread-startup-service.js";
+import { ThreadStartupFetchDecisions } from "../thread-startup-fetch-decisions.js";
 
 /** Register thread startup persistence and lifecycle services. */
 export function registerThreadStartupServices(container: DependencyContainer): void {
+  container.register(ThreadStartupFetchDecisions, { useFactory: instanceCachingFactory(() => new ThreadStartupFetchDecisions()) });
   container.register(
     ThreadStartupRepo,
     { useClass: ThreadStartupRepo },

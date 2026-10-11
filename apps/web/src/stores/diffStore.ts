@@ -15,8 +15,7 @@ export type RightPanelTool =
   | "changes"
   | "environment"
   | "tasks"
-  | "subagents"
-  | "coordination";
+  | "subagents";
 
 const RIGHT_PANEL_TOOLS: ReadonlySet<string> = new Set<RightPanelTool>([
   "preview",
@@ -25,7 +24,6 @@ const RIGHT_PANEL_TOOLS: ReadonlySet<string> = new Set<RightPanelTool>([
   "environment",
   "tasks",
   "subagents",
-  "coordination",
 ]);
 
 function isRightPanelTool(value: string): value is RightPanelTool {
@@ -174,7 +172,6 @@ export function rightPanelToolInstance(type: RightPanelTool): RightPanelTabInsta
     case "environment": return { id: "singleton:environment", type };
     case "tasks": return { id: "singleton:tasks", type };
     case "subagents": return { id: "singleton:subagents", type };
-    case "coordination": return { id: "singleton:coordination", type };
   }
 }
 

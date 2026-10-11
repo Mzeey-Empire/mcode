@@ -2,20 +2,15 @@ import type { WsMethodName } from "@mcode/contracts";
 import type {
   ExternalThreadControlMcpRuntime,
   ExternalThreadControlPairingService,
-  ThreadControlService,
 } from "../index.js";
 
 type ThreadControlMethod =
-  | "thread.control.read"
-  | "thread.control.send"
-  | "thread.control.stop"
   | "threadControl.pairing.create"
   | "threadControl.pairing.revoke"
   | "threadControl.pairing.replace";
 
 /** Defines the services required to route validated Thread Control RPC calls. */
 export interface ThreadControlRouterDeps {
-  threadControlService: ThreadControlService;
   externalThreadControlPairingService?: ExternalThreadControlPairingService;
   externalThreadControlMcpRuntime?: ExternalThreadControlMcpRuntime;
 }
@@ -24,9 +19,6 @@ const threadControlHandlers: Record<
   ThreadControlMethod,
   (deps: ThreadControlRouterDeps, params: any) => Promise<unknown> | unknown
 > = {
-  "thread.control.read": (deps, params) => deps.threadControlService.threadControlRead(params),
-  "thread.control.send": (deps, params) => deps.threadControlService.threadControlSend(params),
-  "thread.control.stop": (deps, params) => deps.threadControlService.threadControlStop(params),
   "threadControl.pairing.create": async (deps, params) => {
     const pairings = requirePairings(deps);
     const pairing = await pairings.create(params);

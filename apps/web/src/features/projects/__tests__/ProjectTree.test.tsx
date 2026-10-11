@@ -4,6 +4,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
 import type { Thread } from "@/transport/types";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
+import { createMockApproval } from "@/__tests__/mocks/transport";
+import { pushEmitter } from "@/transport/ws-transport";
+import { startPushListeners, stopPushListeners } from "@/transport/ws-events";
 
 const sortableMockState = vi.hoisted(() => ({
   transform: null as {
@@ -37,7 +40,8 @@ vi.mock("@dnd-kit/sortable", async (importOriginal) => {
 // through the exported ProjectTree. Stores and the virtual viewport are mocked
 // so the list renders items in the jsdom environment.
 
-vi.mock("../state/workspaceStore", () => {
+vi.mock("../state/workspaceStore", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../state/workspaceStore")>();
   // The store state object must be built once: ProjectTree memoizes its row
   // list on slice references, so a fresh literal per selector call would loop
   // the render -> setRows -> publish cycle forever.
@@ -68,6 +72,7 @@ vi.mock("../state/workspaceStore", () => {
   return {
     useWorkspaceStore: Object.assign(
       vi.fn((selector: (s: unknown) => unknown) => selector(state)),
+      actual.useWorkspaceStore,
       { getState: () => state },
     ),
   };
@@ -117,14 +122,18 @@ function buildMockThreadStoreState() {
   };
 }
 
-vi.mock("@/stores/threadStore", async (importActual) => ({
-  // Keep pure helpers (isThreadExecuting, getThreadRecord, ...) real; only the
-  // reactive store hook is mocked.
-  ...(await importActual<typeof import("@/stores/threadStore")>()),
-  useThreadStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector(buildMockThreadStoreState()),
-  ),
-}));
+vi.mock("@/stores/threadStore", async (importActual) => {
+  const actual = await importActual<typeof import("@/stores/threadStore")>();
+  return {
+    // Keep pure helpers (isThreadExecuting, getThreadRecord, ...) real; only the
+    // reactive store hook is mocked.
+    ...actual,
+    useThreadStore: Object.assign(
+      vi.fn((selector: (s: unknown) => unknown) => selector(buildMockThreadStoreState())),
+      actual.useThreadStore,
+    ),
+  };
+});
 
 const automaticSetupTransport = vi.hoisted(() => ({ getAutomaticSetup: vi.fn() }));
 
@@ -1770,6 +1779,30 @@ describe("ProjectTree action-required indicator", () => {
     render(<ProjectTree />);
 
     expect(screen.getByRole("button", { name: "Complete My Thread" })).toBeDisabled();
+  });
+
+  it("marks only the owning sidebar row when a cross-thread send approval arrives", () => {
+    setupStoreMocks({ threads: [
+      makeThread({ id: "thread-A", title: "Thread A" }),
+      makeThread({ id: "thread-B", title: "Thread B" }),
+    ] });
+    render(<ProjectTree />);
+    expect(screen.queryByRole("img", { name: "Action required" })).not.toBeInTheDocument();
+    startPushListeners();
+    try {
+      act(() => pushEmitter.emit("approval.requested", createMockApproval({
+        requestId: "approval-send",
+        threadId: "thread-A",
+        subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "thread-B", message: "Needs approval." },
+      })));
+
+      const ownerRow = screen.getByRole("button", { name: /^Provider, Claude Thread A/ });
+      const targetRow = screen.getByRole("button", { name: /^Provider, Claude Thread B/ });
+      expect(within(ownerRow).getByRole("img", { name: "Action required" })).toHaveAttribute("data-status-mark", "attention");
+      expect(within(targetRow).queryByRole("img", { name: "Action required" })).not.toBeInTheDocument();
+    } finally {
+      stopPushListeners();
+    }
   });
 
   it("renders the ring on the right edge when the thread has a pr_number", () => {

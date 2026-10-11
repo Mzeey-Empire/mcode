@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { ChevronDown, GitBranch, GitFork } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { PICKER_PANEL_CLASS } from "@/components/ui/picker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { BranchTargetPicker } from "./BranchTargetPicker";
+import { StartFromOriginSwitch } from "./StartFromOriginSwitch";
 import type { ComposerMode } from "./composer-mode";
 import { targetLabelText } from "./new-thread-target-copy";
 import { TARGET_TRIGGER_CLASS } from "./target-trigger";
@@ -72,10 +74,10 @@ function TargetTrigger({ pick, workspaceId, threadId, testId }: TargetTriggerPro
             variant="ghost"
             size="compact"
             data-testid={testId}
-            className={TARGET_TRIGGER_CLASS}
+            className={cn(TARGET_TRIGGER_CLASS, "min-w-0 shrink")}
           >
             <Icon className="size-4" aria-hidden />
-            <span>{targetLabelText(pick.label)}</span>
+            <span className="min-w-0 text-fade">{targetLabelText(pick.label)}</span>
             <ChevronDown className="size-3" aria-hidden />
           </Button>
         }
@@ -86,6 +88,7 @@ function TargetTrigger({ pick, workspaceId, threadId, testId }: TargetTriggerPro
           threadId={threadId}
           list={pick.list}
           value={pick.value}
+          footer={pick.origin ? <StartFromOriginSwitch origin={pick.origin} /> : undefined}
           onSelect={(picked) => {
             pick.select(picked);
             setOpen(false);

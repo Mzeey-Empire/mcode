@@ -63,6 +63,7 @@ import {
   ThreadService,
 } from "../../features/thread-control";
 import { StartupAgentPhaseObserver, ThreadStartupService } from "../../features/thread-startup";
+import { ThreadStartupFetchDecisions } from "../../features/thread-startup/thread-startup-fetch-decisions.js";
 import {
   ApprovalService,
   AgentService,
@@ -344,6 +345,7 @@ workspaceEnvironmentService.setAutomaticSetupDispatcher({
 const turnRecoveryService = container.resolve(TurnRecoveryService);
 const threadControlService = container.resolve(ThreadControlService);
 const threadStartupService = container.resolve(ThreadStartupService);
+const threadStartupFetchDecisions = container.resolve(ThreadStartupFetchDecisions);
 const startupAgentPhaseObserver = container.resolve(StartupAgentPhaseObserver);
 startupAgentPhaseObserver.start();
 const externalThreadControlPairingService = container.resolve(ExternalThreadControlPairingService);
@@ -753,6 +755,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   turnRecoveryService,
   threadControlService,
   threadStartupService,
+  threadStartupFetchDecisions,
   externalThreadControlPairingService,
   externalThreadControlMcpRuntime,
   gitComparison,

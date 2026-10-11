@@ -179,6 +179,7 @@ export const mockTransport: McodeTransport = {
   getThreadStartup: vi.fn().mockResolvedValue(null),
   listThreadStartups: vi.fn().mockResolvedValue({ records: [] }),
   cancelThreadStartup: vi.fn(),
+  resolveThreadStartup: vi.fn(),
   continueWithoutSaving: vi.fn().mockResolvedValue(undefined),
   stopAgent: vi.fn().mockImplementation((threadId: string) => Promise.resolve({
     threadId,
@@ -207,21 +208,6 @@ export const mockTransport: McodeTransport = {
     authoritative: true,
     source: "unsupported",
     reason: "unsupported-provider",
-  }),
-  readThreadControl: vi.fn().mockResolvedValue({
-    status: "rejected",
-    identity: { workspaceId: "workspace-1", threadId: "thread-1" },
-    error: { code: "not_found", message: "Thread not found", retryable: false },
-  }),
-  sendThreadControl: vi.fn().mockResolvedValue({
-    status: "rejected",
-    threadId: "thread-1",
-    error: { code: "not_found", message: "Thread not found", retryable: false },
-  }),
-  stopThreadControl: vi.fn().mockResolvedValue({
-    status: "rejected",
-    threadId: "thread-1",
-    error: { code: "not_found", message: "Thread not found", retryable: false },
   }),
   getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
   loadConversationPage: vi.fn(),
@@ -359,6 +345,7 @@ export const mockTransport: McodeTransport = {
   loadTurn: vi.fn().mockResolvedValue([]),
   getThreadTasks: vi.fn().mockResolvedValue(null),
   getThreadPlans: vi.fn().mockResolvedValue([]),
+  savePlanVersion: vi.fn(),
   getSnapshotDiff: vi.fn().mockResolvedValue(""),
   getTurnDiffComparison: vi.fn().mockResolvedValue({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } }),
   listReviewTurns: vi.fn().mockResolvedValue([]),

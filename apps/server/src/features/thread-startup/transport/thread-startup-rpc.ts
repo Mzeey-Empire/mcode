@@ -2,25 +2,30 @@ import type {
   ThreadStartupCancelInput,
   ThreadStartupGetInput,
   ThreadStartupListInput,
+  ThreadStartupResolveInput,
   WsMethodName,
 } from "@mcode/contracts";
 import type { AgentService } from "../../agents/orchestration/agent-service.js";
 import type { WorkspaceEnvironmentService } from "../../projects/environment/workspace-environment-service.js";
 import type { ThreadStartupService } from "../thread-startup-service.js";
+import type { ThreadStartupFetchDecisions } from "../thread-startup-fetch-decisions.js";
 
 type ThreadStartupRpcMethod =
   | "thread.startup.get"
   | "thread.startup.list"
+  | "thread.startup.resolve"
   | "thread.startup.cancel";
 
 type ThreadStartupParamsByMethod = {
   "thread.startup.get": ThreadStartupGetInput;
   "thread.startup.list": ThreadStartupListInput;
+  "thread.startup.resolve": ThreadStartupResolveInput;
   "thread.startup.cancel": ThreadStartupCancelInput;
 };
 
 /** Dependencies required to route thread startup lifecycle RPC calls. */
 export interface ThreadStartupRouterDeps {
+  threadStartupFetchDecisions: ThreadStartupFetchDecisions;
   threadStartupService: Pick<ThreadStartupService, "get" | "list" | "cancel" | "markCancelled">;
   workspaceEnvironmentService: Pick<WorkspaceEnvironmentService, "stopAutomaticSetup">;
   agentService: Pick<AgentService, "stopSession">;
@@ -36,8 +41,12 @@ type ThreadStartupHandlerMap = {
 const threadStartupHandlers: ThreadStartupHandlerMap = {
   "thread.startup.get": (deps, params) => deps.threadStartupService.get(params.startupId),
   "thread.startup.list": (deps, params) => ({ records: deps.threadStartupService.list(params.workspaceId) }),
+  "thread.startup.resolve": (deps, params) => deps.threadStartupFetchDecisions.resolve(
+    deps.threadStartupService.get(params.startupId), params.action,
+  ),
   "thread.startup.cancel": async (deps, params) => {
     const startup = await deps.threadStartupService.cancel(params.startupId);
+    if (startup.phase === "fetch") deps.threadStartupFetchDecisions.cancel(startup.startupId);
     if (
       !startup.threadId
       || ["completed", "failed", "cancelled", "interrupted"].includes(startup.state)

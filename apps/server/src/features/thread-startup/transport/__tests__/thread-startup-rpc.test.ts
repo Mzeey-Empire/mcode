@@ -7,6 +7,7 @@ import { ThreadStartupRepo } from "../../persistence/thread-startup-repo.js";
 import { ThreadStartupService } from "../../thread-startup-service.js";
 import { StartupAgentPhaseObserver } from "../../startup-agent-phase-observer.js";
 import { routeThreadStartupRpc } from "../thread-startup-rpc.js";
+import { ThreadStartupFetchDecisions } from "../../thread-startup-fetch-decisions.js";
 
 const startup: ThreadStartup = {
   startupId: "00000000-0000-4000-8000-000000000001",
@@ -56,12 +57,13 @@ async function harness(kind: ThreadStartup["kind"], phase: ThreadStartup["phase"
   }));
   const stopAutomaticSetup = vi.fn(async () => stoppedSetup);
   const deps = {
+    threadStartupFetchDecisions: new ThreadStartupFetchDecisions(),
     threadStartupService: service,
     workspaceEnvironmentService: { stopAutomaticSetup },
     agentService: { stopSession },
   };
   const cancel = () => routeThreadStartupRpc("thread.startup.cancel", { startupId: startup.startupId }, deps);
-  return { service, thread, stopSession, stopAutomaticSetup, cancel };
+  return { service, thread, stopSession, stopAutomaticSetup, cancel, deps };
 }
 
 const intentCases = [
@@ -73,6 +75,24 @@ const intentCases = [
 const agentKinds = ["direct", "managed-worktree", "attached-worktree", "pull-request-review"] as const;
 
 describe("thread startup RPC", () => {
+  it.each(["thread", "fetch", "setup", "agent"] as const)("rejects resolution during running %s", async (phase) => {
+    const { deps } = await harness("managed-worktree", phase);
+    expect(() => routeThreadStartupRpc("thread.startup.resolve", { startupId: startup.startupId, action: "retry" }, deps))
+      .toThrow(expect.objectContaining({ code: "STARTUP_NOT_BLOCKED_ON_FETCH" }));
+  });
+
+  it("rejects setup blocks and interrupted fetches", async () => {
+    const { service, deps } = await harness("managed-worktree", "setup");
+    await service.block(startup.startupId, { code: "setup_failed", message: "Setup failed", actions: ["retry", "continue"] });
+    expect(() => routeThreadStartupRpc("thread.startup.resolve", { startupId: startup.startupId, action: "continue" }, deps))
+      .toThrow(expect.objectContaining({ code: "STARTUP_NOT_BLOCKED_ON_FETCH" }));
+    const fetch = await harness("managed-worktree", "fetch");
+    await fetch.service.block(startup.startupId, { code: "start_from_origin_failed", message: "Fetch failed", actions: ["retry", "continue"] });
+    await fetch.service.interruptNonterminalOnStartup();
+    expect(() => routeThreadStartupRpc("thread.startup.resolve", { startupId: startup.startupId, action: "retry" }, fetch.deps))
+      .toThrow(expect.objectContaining({ code: "STARTUP_NOT_BLOCKED_ON_FETCH" }));
+  });
+
   it("routes get, list, and cancellation intent through the typed WebSocket router", async () => {
     const get = vi.fn(() => startup);
     const list = vi.fn(() => [startup]);

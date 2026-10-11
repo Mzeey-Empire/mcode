@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { ThreadStartupFetchDecisions } from "../../../thread-startup/thread-startup-fetch-decisions.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { agentStorageTestWriter, registerAgentStorageTestProducer } from "../../__tests__/agent-storage-fixture.js";
 import { TurnDiffService } from "../../turns/turn-diff-service.js";
@@ -297,6 +298,8 @@ export function createAgentServiceForTest(
     () => threadService,
     admissions,
     gitRepository,
+      workspaceRepo,
+      new ThreadStartupFetchDecisions(),
     () => threadBranching,
     () => planTurns,
     () => threadStartups,

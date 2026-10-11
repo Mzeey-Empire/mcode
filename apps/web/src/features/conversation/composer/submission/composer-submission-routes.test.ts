@@ -92,7 +92,7 @@ function execution(target: ComposerExecutionTargetController["target"]): Compose
 describe("dispatchComposerTarget selected-text comments", () => {
   it("transfers a full new-thread draft to the optimistic placeholder", async () => {
     workspaceActions.createAndSendMessage.mockResolvedValue({ id: "thread-2" });
-    const target = { kind: "new-thread" as const, mode: "direct" as const, branch: "main", branchSource: "branch" as const, hasWorktree: false };
+    const target = { kind: "new-thread" as const, mode: "direct" as const, branch: "main", branchSource: "branch" as const, branchRemote: null, hasWorktree: false };
 
     await dispatchComposerTarget({
       workspaceId: "workspace-1",
@@ -159,6 +159,7 @@ describe("dispatchComposerTarget selected-text comments", () => {
       mode: "direct" as const,
       branch: "contributor/review",
       branchSource: "pr" as const,
+      branchRemote: null,
       pullRequestNumber: 42,
       hasWorktree: false,
     };
@@ -172,6 +173,28 @@ describe("dispatchComposerTarget selected-text comments", () => {
     });
 
     expect(controller.setNewThreadBranchFromPullRequest).toHaveBeenCalledWith("contributor/review", 42);
+  });
+
+  it("keeps the remote of a remote-only branch pick before dispatch", async () => {
+    workspaceActions.createAndSendMessage.mockResolvedValue({ id: "thread-2" });
+    const target = {
+      kind: "new-thread" as const,
+      mode: "worktree" as const,
+      branch: "origin/feature/x",
+      branchSource: "branch" as const,
+      branchRemote: "origin",
+      hasWorktree: false,
+    };
+    const controller = execution(target);
+
+    await dispatchComposerTarget({
+      workspaceId: "workspace-1",
+      target,
+      execution: controller,
+      submission: submission("Start from the remote branch.", []),
+    });
+
+    expect(controller.setNewThreadBranch).toHaveBeenCalledWith("origin/feature/x", "origin");
   });
 });
 

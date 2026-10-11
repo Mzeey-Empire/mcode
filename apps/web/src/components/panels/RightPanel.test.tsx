@@ -100,11 +100,6 @@ vi.mock("@/features/subagents", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/subagents")>()),
   SubagentsPanel: () => <div />,
 }));
-vi.mock("./CoordinationPanel", () => ({
-  CoordinationPanel: ({ workspaceId, threadId }: { workspaceId: string; threadId: string }) => (
-    <div data-testid="coordination-panel-integration">{workspaceId}:{threadId}</div>
-  ),
-}));
 vi.mock("./plan", async () => {
   const { PanelHeaderSlot } = await import("./shell/PanelHeader");
   return {
@@ -660,24 +655,6 @@ describe("RightPanel", () => {
     // Any translate, including translate-x-0, traps Design overlays below the
     // body-level Browser surface host that paints the hosted page.
     expect(screen.getByTestId("right-panel").className).not.toMatch(/(^|\s)-?translate-/);
-  });
-
-  it("renders coordination content for an open active thread tab", () => {
-    useWorkspaceStore.setState({ activeWorkspaceId: "workspace-1", activeThreadId: "thread-1" });
-    useDiffStore.setState({
-      rightPanelFallbackByWorkspace: {
-        "workspace-1": createRightPanelState({
-          visible: true,
-          width: 400,
-          openTabs: ["coordination"],
-          activeTab: "coordination",
-        }),
-      },
-    });
-
-    render(<RightPanel />);
-
-    expect(screen.getByTestId("coordination-panel-integration")).toHaveTextContent("workspace-1:thread-1");
   });
 
   it("keeps an idle existing Browser page behind the default panel screen", () => {

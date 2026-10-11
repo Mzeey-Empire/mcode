@@ -933,8 +933,8 @@ describe("Composer checkout confirmation", () => {
         mode: "worktree",
         branch: "feature/base",
         branchSource: "branch",
-        customBranchName: "",
-        autoPreviewBranch: "",
+        branchRemote: null,
+        startFromOrigin: false,
         selectedWorktree: null,
       },
     });

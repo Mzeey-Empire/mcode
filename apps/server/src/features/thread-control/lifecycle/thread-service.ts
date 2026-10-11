@@ -36,7 +36,7 @@ export class ThreadService {
     @inject(HandoffStorage) private readonly handoffStorage: HandoffStorage,
     // CI watcher registration follows ThreadService construction during bootstrap.
     @inject(delay(() => ThreadDeletionTeardownService))
-    private readonly threadDeletionTeardownService: ThreadDeletionTeardownService,
+    private readonly threadDeletionTeardownService: Pick<ThreadDeletionTeardownService, "teardownThread" | "deletePersistentData">,
   ) {}
 
   /**
@@ -49,7 +49,7 @@ export class ThreadService {
     title: string,
     mode: string,
     branch: string,
-    options: { branchless?: boolean; provider?: ProviderId; lifecycle?: ThreadCreateLifecycle } = {},
+    options: { branchless?: boolean; startPoint?: string; provider?: ProviderId; lifecycle?: ThreadCreateLifecycle } = {},
   ): Promise<Thread & { warnings?: string[] }> {
     validateBranchName(branch);
 

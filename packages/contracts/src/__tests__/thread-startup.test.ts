@@ -6,9 +6,30 @@ import {
   ThreadStartupStepDetailSchema,
   ThreadStartupErrorSchema,
   ThreadStartupBlockSchema,
+  ThreadStartupResolveInputSchema,
 } from "../thread-startup.js";
 
 const startupId = "00000000-0000-4000-8000-000000000001";
+
+describe("ThreadStartupResolveInputSchema", () => {
+  it.each(["retry", "continue"])("accepts %s before a thread exists", (action) => {
+    expect(ThreadStartupResolveInputSchema().parse({ startupId, action })).toEqual({ startupId, action });
+  });
+
+  it.each([
+    { startupId: "not-a-uuid", action: "retry" },
+    { startupId, action: "cancel" },
+    { startupId },
+    { startupId, action: "retry", threadId: startupId },
+  ])("rejects invalid resolution %j", (input) => {
+    expect(ThreadStartupResolveInputSchema().safeParse(input).success).toBe(false);
+  });
+
+  it("retains origin fetch details on a managed worktree", () => {
+    const input = { startupId, workspaceId: "workspace-1", kind: "managed-worktree", fetch: { ref: "origin/main", branch: "main" } };
+    expect(ThreadStartupStartInputSchema().parse(input)).toEqual(input);
+  });
+});
 
 function directStartup() {
   return {
