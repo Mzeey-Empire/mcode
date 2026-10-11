@@ -76,12 +76,19 @@ function useScrollActiveTabIntoView(
   activeId: string | null,
 ): void {
   useEffect(() => {
-    if (!activeId) return;
-    const tab = scrollerRef.current?.querySelector<HTMLElement>(
-      `[data-panel-tab="${CSS.escape(activeId)}"]`,
-    );
-    // jsdom has no scrollIntoView; real layouts keep a newly active tab visible.
-    tab?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    const scroller = scrollerRef.current;
+    if (!activeId || !scroller) return;
+    const reveal = () => {
+      const tab = scroller.querySelector<HTMLElement>(`[data-panel-tab="${CSS.escape(activeId)}"]`);
+      // jsdom has no scrollIntoView; real layouts keep a newly active tab visible.
+      tab?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    };
+    reveal();
+    if (typeof ResizeObserver === "undefined") return;
+    // Resizing the panel narrows the strip without changing the active tab.
+    const observer = new ResizeObserver(reveal);
+    observer.observe(scroller);
+    return () => observer.disconnect();
   }, [scrollerRef, activeId]);
 }
 
