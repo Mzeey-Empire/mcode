@@ -6,6 +6,7 @@ describe("provider model announcement contracts", () => {
   const status = {
     providerId: "claude",
     auth: { state: "signed_in" },
+    cli: null,
     rateLimit: null,
     checkedAt: "2026-01-01T00:00:00.000Z",
     newModels: [{ modelId: "new-model", label: "New model" }],
