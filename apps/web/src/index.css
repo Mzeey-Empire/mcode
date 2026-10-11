@@ -345,20 +345,34 @@
   }
 }
 
-/* A horizontal scroller (tab strips) whose right 24px fades while it
-   overflows. Same scroll-timeline gate as text-fade, but the content stays
-   scrollable and the scrollbar is hidden because the strip scrolls by wheel. */
+/* A horizontal scroller (tab strips) that fades 24px at each edge hiding
+   content. The owner sets data-overflow-start / data-overflow-end from its
+   scroll position, since a scroll timeline cannot tell which edge is hidden.
+   The scrollbar is hidden because the strip scrolls by wheel and chevrons. */
 @utility scroll-fade-x {
   overflow-x: auto;
   overflow-y: hidden;
   min-width: 0;
   scrollbar-width: none;
+  /* Tabs scrolled into view land clear of the fades. */
+  scroll-padding-inline: var(--spacing-text-fade);
+  --scroll-fade-start: 0px;
+  --scroll-fade-end: 0px;
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black var(--scroll-fade-start),
+    black calc(100% - var(--scroll-fade-end)),
+    transparent
+  );
   &::-webkit-scrollbar {
     display: none;
   }
-  @supports (animation-timeline: scroll()) {
-    animation: text-fade-inline linear both;
-    animation-timeline: scroll(self inline);
+  &[data-overflow-start] {
+    --scroll-fade-start: var(--spacing-text-fade);
+  }
+  &[data-overflow-end] {
+    --scroll-fade-end: var(--spacing-text-fade);
   }
 }
 

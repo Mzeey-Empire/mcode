@@ -363,7 +363,7 @@ describe("RightPanel", () => {
 
     render(<RightPanel />);
 
-    const add = within(terminalStrip().parentElement!).getByRole("button", { name: "New terminal" });
+    const add = within(screen.getByTestId("panel-header-leading")).getByRole("button", { name: "New terminal" });
     expect(add).toHaveAttribute("aria-disabled", "true");
     expect(add).toHaveAccessibleDescription(TERMINAL_CAP_REASON);
     fireEvent.click(add);
