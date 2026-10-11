@@ -980,9 +980,11 @@ _Avoid_: Treating scrollback as a client-only display setting.
 ### Review tab
 The right-panel tab that shows code changes. **Dual-scope**: its
 git-working-tree views (Unstaged, Staged, Commit, Branch) read the
-**workspace root** and need no thread; its turn views need a thread. Each
-view renders exactly one diff; there is no eager render of every turn's
-diff.
+**workspace root** and need no thread; its turn views (Turn, All turns) need
+a thread. Each view renders exactly one diff; there is no eager render of
+every turn's diff. A names-only view menu picks the view. A view that cannot
+load stays in the menu, dimmed with its reason, and the default view is
+never one of those.
 
 ### Files navigator
 The collapsible file-tree surface within Review, labelled **Files** in the UI.
@@ -1003,14 +1005,13 @@ ref on the right; the right side is the only picker), **Commit** (one commit
 chosen from a searchable list; default is the latest commit), and the turn
 **picker** (one turn's diff).
 
-### Last turn
-The most recent turn's diff — the default glance when a thread is active.
-
 ### Turn view
-One picked turn's diff — the turn comparison whose operand is a selected turn.
-Written by the change summary on a transcript turn (its "View diff" and file
-rows) or by the toolbar's turn picker, which lists the thread's turns that
-changed files and seeds the operand to the latest when none is picked.
+One turn's diff. Its operand either **follows latest**, the default, which
+moves to each newer turn as it appears, or **pins** one turn. The turn picker
+lists the thread's turns that changed files plus the latest turn; choosing
+the newest row follows latest, and choosing an older row pins it. The change
+summary on a transcript turn opens this view too: the latest turn's summary
+follows latest, and an older turn's summary pins that turn.
 
 ### Cumulative
 A thread's **net effect since it started**, committed *and* uncommitted, as
@@ -1021,7 +1022,7 @@ measured between git refs and shows committed history only. The two coincide
 only when the thread committed everything and its base has not moved.
 _Avoid_: "net diff versus base" (that phrasing collides with Branch).
 
-**All turns** is the user-facing label for this view; the toolbar switcher
+**All turns** is the user-facing label for this view; the view menu
 says _All turns_, while the code, the view id (`cumulative`), and this
 glossary keep the name _Cumulative_, mirroring the _Project_ (UI) /
 _Workspace_ (code) split.

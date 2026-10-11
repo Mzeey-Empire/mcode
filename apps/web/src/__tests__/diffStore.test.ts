@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { BranchComparison, GitBranch } from "@mcode/contracts";
 import type { RightPanelState } from "../stores/diffStore";
+import { reviewViewAvailability } from "../lib/review-views";
 import {
   useDiffStore,
   PANEL_MIN_WIDTH,
@@ -24,7 +25,8 @@ describe("diffStore", () => {
       snapshotsByThread: {},
       snapshotsLoadingByThread: {},
       reviewTurnsByThread: {},
-      viewMode: "last-turn",
+      selectedTurnByThread: {},
+      viewMode: "turn",
       reviewViewByThread: {},
       reviewViewManuallySelectedByThread: {},
       selectedCommitSha: null,
@@ -72,32 +74,34 @@ describe("diffStore", () => {
 
   describe("per-thread Review view default + sticky override", () => {
     const clean = { hasTurnChanges: false, isDirty: false } as const;
+    // Unknown probe and turn list: every view counts as available.
+    const all = reviewViewAvailability("thread", null, null);
 
     it("resolves the change-state default until the user picks a view", () => {
       const { getReviewView } = useDiffStore.getState();
-      expect(getReviewView("thread-1", { hasTurnChanges: true, isDirty: false })).toBe("last-turn");
-      expect(getReviewView("thread-1", { hasTurnChanges: false, isDirty: true })).toBe("unstaged");
-      expect(getReviewView("thread-1", clean)).toBe("branch");
+      expect(getReviewView("thread-1", { hasTurnChanges: true, isDirty: false }, all)).toBe("turn");
+      expect(getReviewView("thread-1", { hasTurnChanges: false, isDirty: true }, all)).toBe("unstaged");
+      expect(getReviewView("thread-1", clean, all)).toBe("branch");
     });
 
     it("re-evaluates live as change state changes while no pick is made", () => {
       const { getReviewView } = useDiffStore.getState();
-      expect(getReviewView("thread-1", clean)).toBe("branch");
-      expect(getReviewView("thread-1", { hasTurnChanges: true, isDirty: false })).toBe("last-turn");
+      expect(getReviewView("thread-1", clean, all)).toBe("branch");
+      expect(getReviewView("thread-1", { hasTurnChanges: true, isDirty: false }, all)).toBe("turn");
     });
 
     it("sticks to the user's pick and stops re-evaluating change state", () => {
       const { setReviewViewForThread, getReviewView } = useDiffStore.getState();
       setReviewViewForThread("thread-1", "cumulative");
       expect(useDiffStore.getState().viewMode).toBe("cumulative");
-      expect(getReviewView("thread-1", { hasTurnChanges: true, isDirty: true })).toBe("cumulative");
+      expect(getReviewView("thread-1", { hasTurnChanges: true, isDirty: true }, all)).toBe("cumulative");
     });
 
     it("keeps the override per thread — a sibling keeps its own default", () => {
       const { setReviewViewForThread, getReviewView } = useDiffStore.getState();
       setReviewViewForThread("thread-1", "staged");
-      expect(getReviewView("thread-1", { hasTurnChanges: true, isDirty: false })).toBe("staged");
-      expect(getReviewView("thread-2", { hasTurnChanges: true, isDirty: false })).toBe("last-turn");
+      expect(getReviewView("thread-1", { hasTurnChanges: true, isDirty: false }, all)).toBe("staged");
+      expect(getReviewView("thread-2", { hasTurnChanges: true, isDirty: false }, all)).toBe("turn");
     });
 
     it("drops both the picked view and the override flag on clearThread", () => {
@@ -107,7 +111,7 @@ describe("diffStore", () => {
       const state = useDiffStore.getState();
       expect(state.reviewViewByThread["thread-1"]).toBeUndefined();
       expect(state.reviewViewManuallySelectedByThread["thread-1"]).toBeUndefined();
-      expect(getReviewView("thread-1", clean)).toBe("branch");
+      expect(getReviewView("thread-1", clean, all)).toBe("branch");
     });
 
     it("clearThread leaves a sibling thread's override intact", () => {
@@ -115,7 +119,30 @@ describe("diffStore", () => {
       setReviewViewForThread("thread-1", "staged");
       setReviewViewForThread("thread-2", "branch");
       clearThread("thread-1");
-      expect(getReviewView("thread-2", { hasTurnChanges: true, isDirty: false })).toBe("branch");
+      expect(getReviewView("thread-2", { hasTurnChanges: true, isDirty: false }, all)).toBe("branch");
+    });
+  });
+
+  describe("Turn view operand", () => {
+    it("follows the latest turn while a thread has no selection", () => {
+      expect(useDiffStore.getState().selectedTurnByThread["thread-1"]).toBeUndefined();
+    });
+
+    it("stores a pinned turn and a return to following per thread", () => {
+      const { setReviewTurnForThread } = useDiffStore.getState();
+      setReviewTurnForThread("thread-1", "msg-2");
+      setReviewTurnForThread("thread-2", "latest");
+      expect(useDiffStore.getState().selectedTurnByThread).toEqual({ "thread-1": "msg-2", "thread-2": "latest" });
+      setReviewTurnForThread("thread-1", "latest");
+      expect(useDiffStore.getState().selectedTurnByThread["thread-1"]).toBe("latest");
+    });
+
+    it("drops the thread's selection on clearThread", () => {
+      const { setReviewTurnForThread, clearThread } = useDiffStore.getState();
+      setReviewTurnForThread("thread-1", "msg-2");
+      setReviewTurnForThread("thread-2", "msg-9");
+      clearThread("thread-1");
+      expect(useDiffStore.getState().selectedTurnByThread).toEqual({ "thread-2": "msg-9" });
     });
   });
 

@@ -741,7 +741,7 @@ export interface McodeTransport {
   // Snapshots
   /** Get a unified diff for a specific file from a turn snapshot. */
   getSnapshotDiff(snapshotId: string, filePath?: string, maxLines?: number): Promise<ReviewFileDiffResult>;
-  /** Read the active or settled Last turn comparison, or one picked turn when `messageId` is given. */
+  /** Read the active or settled latest turn comparison, or one picked turn when `messageId` is given. */
   getTurnDiffComparison(threadId: string, messageId?: string): Promise<ReviewComparisonResult>;
   /** Read a file from one exact native or fallback comparison. */
   getTurnDiffFile(threadId: string, comparisonId: string, filePath: string): Promise<ReviewFileDiffResult>;

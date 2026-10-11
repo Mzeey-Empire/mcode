@@ -1,174 +1,178 @@
 import { describe, it, expect } from "vitest";
+import type { ReviewState, ReviewTurn } from "@mcode/contracts";
 import {
+  REVIEW_VIEW_GROUPS,
   REVIEW_VIEWS,
-  availableReviewViews,
-  visibleReviewViews,
   defaultReviewView,
-  type ReviewView,
+  reviewViewAvailability,
+  type ReviewChangeState,
+  type ReviewViewAvailabilityMap,
 } from "../review-views";
+import type { DiffViewMode } from "@/stores/diffStore";
 
-/** Pull just the ids out of a result for terse assertions. */
-function ids(views: readonly ReviewView[]): string[] {
-  return views.map((v) => v.id);
+type GitState = Extract<ReviewState, { isGitRepo: true }>;
+
+function gitState(overrides: Partial<GitState> = {}): GitState {
+  return {
+    isGitRepo: true,
+    head: "abc123",
+    branch: "feature",
+    uncommitted: { staged: 1, unstaged: 1, untracked: 0 },
+    commitsAhead: { count: 2, base: "main" },
+    branchDefault: { compare: "feature", base: "main" },
+    ...overrides,
+  };
 }
 
-describe("REVIEW_VIEWS catalog", () => {
-  it("lists the git working-tree views then the turn views, in toolbar order", () => {
-    expect(ids(REVIEW_VIEWS)).toEqual([
-      "unstaged",
-      "staged",
-      "commit",
-      "branch",
-      "last-turn",
-      "turn",
-      "cumulative",
+const TURN: ReviewTurn = {
+  messageId: "msg-1",
+  ordinal: 1,
+  createdAt: "2026-09-20T10:00:00Z",
+  phase: "settled",
+  fileCount: 1,
+  additions: 1,
+  deletions: 0,
+  evidence: "native",
+  availability: "available",
+};
+
+function reasons(map: ReviewViewAvailabilityMap): Record<string, string | null> {
+  return Object.fromEntries(
+    Object.entries(map).map(([id, availability]) => [id, availability.available ? null : availability.reason]),
+  );
+}
+
+describe("REVIEW_VIEW_GROUPS", () => {
+  it("lists six views in three menu groups with their names", () => {
+    expect(REVIEW_VIEW_GROUPS.map((group) => group.map((view) => [view.id, view.label]))).toEqual([
+      [["turn", "Turn"], ["cumulative", "All turns"]],
+      [["unstaged", "Unstaged"], ["staged", "Staged"]],
+      [["commit", "Commit"], ["branch", "Branch"]],
     ]);
+    expect(REVIEW_VIEWS.map((view) => view.id)).toEqual(["turn", "cumulative", "unstaged", "staged", "commit", "branch"]);
   });
 
-  it("marks the git working-tree views as available in any scope and the turn views as thread-only", () => {
-    const anyScope = REVIEW_VIEWS.filter((v) => !v.threadOnly).map((v) => v.id);
-    const threadOnly = REVIEW_VIEWS.filter((v) => v.threadOnly).map((v) => v.id);
-    expect(anyScope).toEqual(["unstaged", "staged", "commit", "branch"]);
-    expect(threadOnly).toEqual(["last-turn", "turn", "cumulative"]);
-  });
-
-  it("marks every git view as git-requiring", () => {
-    expect(REVIEW_VIEWS.filter((v) => v.requires === "git").map((v) => v.id)).toEqual([
-      "unstaged",
-      "staged",
-      "commit",
-      "branch",
-    ]);
-  });
-
-  it("carries a picked operand only on the comparison views (Branch, Commit, Turn)", () => {
-    expect(REVIEW_VIEWS.filter((v) => v.operand).map((v) => [v.id, v.operand])).toEqual([
+  it("carries a picked operand only on Turn, Commit and Branch", () => {
+    expect(REVIEW_VIEWS.filter((view) => view.operand).map((view) => [view.id, view.operand])).toEqual([
+      ["turn", "turn"],
       ["commit", "commit"],
       ["branch", "branch"],
-      ["turn", "turn"],
     ]);
-    // The fixed-operand views surface no operand control.
-    const fixed = REVIEW_VIEWS.filter((v) => !v.operand).map((v) => v.id);
-    expect(fixed).toEqual(["unstaged", "staged", "last-turn", "cumulative"]);
   });
 });
 
-describe("availableReviewViews — dual-scope selection", () => {
-  it("yields just the git working-tree views when threadless", () => {
-    expect(ids(availableReviewViews("threadless"))).toEqual([
-      "unstaged",
-      "staged",
-      "commit",
-      "branch",
-    ]);
+describe("reviewViewAvailability", () => {
+  it("makes every view available in a thread with turns and a full git state", () => {
+    expect(reasons(reviewViewAvailability("thread", gitState(), [TURN]))).toEqual({
+      turn: null, cumulative: null, unstaged: null, staged: null, commit: null, branch: null,
+    });
   });
 
-  it("yields the git views plus the turn views in a thread (additive)", () => {
-    expect(ids(availableReviewViews("thread"))).toEqual([
-      "unstaged",
-      "staged",
-      "commit",
-      "branch",
-      "last-turn",
-      "turn",
-      "cumulative",
-    ]);
+  it("dims the turn views outside a thread", () => {
+    const map = reasons(reviewViewAvailability("threadless", gitState(), null));
+    expect(map.turn).toBe("Open a thread to review its turns");
+    expect(map.cumulative).toBe("Open a thread to review its turns");
   });
 
-  it("keeps every threadless view available in a thread too", () => {
-    const threadless = ids(availableReviewViews("threadless"));
-    const thread = ids(availableReviewViews("thread"));
-    expect(threadless.every((id) => thread.includes(id))).toBe(true);
-  });
-});
-
-describe("visibleReviewViews — runtime gates", () => {
-  it("drops all threadless views in a non-git workspace", () => {
-    expect(
-      ids(visibleReviewViews("threadless", { isGitRepo: false })),
-    ).toEqual([]);
+  it("dims the turn views in a thread without turns", () => {
+    const map = reasons(reviewViewAvailability("thread", gitState(), []));
+    expect(map.turn).toBe("No turns yet");
+    expect(map.cumulative).toBe("No turns yet");
   });
 
-  it("keeps the git views in a git workspace", () => {
-    expect(
-      ids(visibleReviewViews("threadless", { isGitRepo: true })),
-    ).toEqual(["unstaged", "staged", "commit", "branch"]);
+  it("dims every git view outside a git repository", () => {
+    const map = reasons(reviewViewAvailability("thread", { isGitRepo: false }, [TURN]));
+    expect(map).toEqual({
+      turn: null,
+      cumulative: null,
+      unstaged: "Not a git repository",
+      staged: "Not a git repository",
+      commit: "Not a git repository",
+      branch: "Not a git repository",
+    });
   });
 
-  it("does not expose Summary as a switcher view", () => {
-    expect(
-      ids(visibleReviewViews("thread", { isGitRepo: true })),
-    ).toEqual(["unstaged", "staged", "commit", "branch", "last-turn", "turn", "cumulative"]);
+  it("dims Staged when nothing is staged", () => {
+    const state = gitState({ uncommitted: { staged: 0, unstaged: 3, untracked: 1 } });
+    expect(reasons(reviewViewAvailability("thread", state, [TURN])).staged).toBe("Nothing staged");
   });
 
-  it("keeps Cumulative visible because Summary lives inside it as a lens", () => {
-    expect(
-      ids(visibleReviewViews("thread", { isGitRepo: true })),
-    ).toEqual([
-      "unstaged",
-      "staged",
-      "commit",
-      "branch",
-      "last-turn",
-      "turn",
-      "cumulative",
-    ]);
+  it("dims Commit with no commits ahead of the base, or with no base", () => {
+    expect(reasons(reviewViewAvailability("thread", gitState({ commitsAhead: { count: 0, base: "main" } }), null)).commit)
+      .toBe("No commits ahead of main");
+    expect(reasons(reviewViewAvailability("thread", gitState({ commitsAhead: null }), null)).commit)
+      .toBe("No branch to compare against");
   });
 
-  it("leaves the turn views unaffected by git presence (only git views drop)", () => {
-    expect(
-      ids(visibleReviewViews("thread", { isGitRepo: false })),
-    ).toEqual(["last-turn", "turn", "cumulative"]);
+  it("dims Branch on an unborn repository or without a base", () => {
+    expect(reasons(reviewViewAvailability("thread", gitState({ branchDefault: { unavailable: "unborn" } }), null)).branch)
+      .toBe("No commits yet");
+    expect(reasons(reviewViewAvailability("thread", gitState({ branchDefault: { unavailable: "no-base" } }), null)).branch)
+      .toBe("No branch to compare against");
+  });
+
+  it("treats unknown inputs as available so a slow probe never dims a view", () => {
+    expect(reasons(reviewViewAvailability("thread", null, null))).toEqual({
+      turn: null, cumulative: null, unstaged: null, staged: null, commit: null, branch: null,
+    });
   });
 });
 
-describe("defaultReviewView — 3-way change-state default (ADR-0011)", () => {
-  it("defaults threadless to the unstaged working-tree diff regardless of change state", () => {
-    expect(defaultReviewView("threadless")).toBe("unstaged");
-    expect(defaultReviewView("threadless", { hasTurnChanges: true, isDirty: false })).toBe(
-      "unstaged",
-    );
-    expect(defaultReviewView("threadless", { hasTurnChanges: false, isDirty: false })).toBe(
-      "unstaged",
-    );
+describe("defaultReviewView (ADR-0011)", () => {
+  const all = reviewViewAvailability("thread", gitState(), [TURN]);
+  const clean: ReviewChangeState = { hasTurnChanges: false, isDirty: false };
+
+  it("opens Turn in a thread with turn changes, even with a dirty checkout", () => {
+    expect(defaultReviewView("thread", { hasTurnChanges: true, isDirty: true }, all)).toBe("turn");
   });
 
-  it("defaults a thread with turn-registered changes to Last turn", () => {
-    expect(defaultReviewView("thread", { hasTurnChanges: true, isDirty: false })).toBe(
-      "last-turn",
-    );
-    // Turn changes win even when the working tree is also dirty.
-    expect(defaultReviewView("thread", { hasTurnChanges: true, isDirty: true })).toBe(
-      "last-turn",
-    );
+  it("opens Unstaged for a dirty checkout without turn changes", () => {
+    expect(defaultReviewView("thread", { hasTurnChanges: false, isDirty: true }, all)).toBe("unstaged");
   });
 
-  it("defaults a thread with only a dirty working tree (no turn) to Unstaged", () => {
-    expect(defaultReviewView("thread", { hasTurnChanges: false, isDirty: true })).toBe(
-      "unstaged",
-    );
+  it("opens Branch for a clean checkout", () => {
+    expect(defaultReviewView("thread", clean, all)).toBe("branch");
   });
 
-  it("defaults a clean thread (no turn, no dirt) to Branch", () => {
-    expect(defaultReviewView("thread", { hasTurnChanges: false, isDirty: false })).toBe("branch");
+  it("opens Unstaged when Branch cannot load", () => {
+    const noBase = reviewViewAvailability("thread", gitState({ branchDefault: { unavailable: "no-base" } }), [TURN]);
+    expect(defaultReviewView("thread", clean, noBase)).toBe("unstaged");
   });
 
-  it("defaults a thread to Branch when no change state is supplied (conservative)", () => {
-    expect(defaultReviewView("thread")).toBe("branch");
-  });
-});
-
-describe("availableReviewViews / visibleReviewViews — purity and order", () => {
-  it("returns results in catalog order regardless of scope", () => {
-    expect(ids(availableReviewViews("threadless"))).toEqual(
-      REVIEW_VIEWS.filter((v) => !v.threadOnly).map((v) => v.id),
-    );
+  it("ignores turn changes outside a thread", () => {
+    const threadless = reviewViewAvailability("threadless", gitState(), null);
+    expect(defaultReviewView("threadless", { hasTurnChanges: true, isDirty: false }, threadless)).toBe("branch");
   });
 
-  it("does not mutate the catalog", () => {
-    const before = ids(REVIEW_VIEWS);
-    visibleReviewViews("thread", { isGitRepo: true });
-    availableReviewViews("threadless");
-    expect(ids(REVIEW_VIEWS)).toEqual(before);
+  it("falls back to the turn views outside a git repository", () => {
+    const noGit = reviewViewAvailability("thread", { isGitRepo: false }, [TURN]);
+    expect(defaultReviewView("thread", { hasTurnChanges: false, isDirty: true }, noGit)).toBe("turn");
+  });
+
+  it("never returns an unavailable view when any view can load", () => {
+    const states: readonly (ReviewState | null)[] = [
+      null,
+      { isGitRepo: false },
+      gitState(),
+      gitState({ uncommitted: { staged: 0, unstaged: 0, untracked: 0 }, commitsAhead: null, branchDefault: { unavailable: "unborn" } }),
+      gitState({ commitsAhead: { count: 0, base: "main" }, branchDefault: { unavailable: "no-base" } }),
+    ];
+    const turnLists: readonly (readonly ReviewTurn[] | null)[] = [null, [], [TURN]];
+    const changeStates: readonly ReviewChangeState[] = [false, true].flatMap((hasTurnChanges) =>
+      [false, true].map((isDirty) => ({ hasTurnChanges, isDirty })));
+    const cases = (["thread", "threadless"] as const).flatMap((scope) =>
+      states.flatMap((state) => turnLists.flatMap((turns) =>
+        changeStates.map((changeState) => ({ scope, state, turns, changeState })))));
+    for (const { scope, state, turns, changeState } of cases) {
+      const availability = reviewViewAvailability(scope, state, turns);
+      const anyAvailable = REVIEW_VIEWS.some((view) => availability[view.id].available);
+      const picked: DiffViewMode = defaultReviewView(scope, changeState, availability);
+      if (anyAvailable) expect(availability[picked].available).toBe(true);
+    }
+  });
+
+  it("returns Unstaged when nothing can load", () => {
+    const nothing = reviewViewAvailability("threadless", { isGitRepo: false }, null);
+    expect(defaultReviewView("threadless", clean, nothing)).toBe("unstaged");
   });
 });

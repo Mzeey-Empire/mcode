@@ -12,13 +12,10 @@ interface GitDiffViewProps {
   id: string;
   cacheVersion: string | number;
   threadId: string;
-  immutable: boolean;
-  refreshing: boolean;
-  onRefresh: () => void;
 }
 
 /** Render the diff projection of a git comparison with files, resolved by the parent Review lifecycle. */
-export function GitDiffView({ comparison, source, id, cacheVersion, threadId, immutable, refreshing, onRefresh }: GitDiffViewProps) {
+export function GitDiffView({ comparison, source, id, cacheVersion, threadId }: GitDiffViewProps) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <FileList
@@ -27,9 +24,6 @@ export function GitDiffView({ comparison, source, id, cacheVersion, threadId, im
         id={id}
         threadId={threadId}
         cacheVersion={cacheVersion}
-        refreshable={!immutable}
-        refreshing={refreshing}
-        onRefresh={onRefresh}
         defaultFilesExpanded
       />
     </div>

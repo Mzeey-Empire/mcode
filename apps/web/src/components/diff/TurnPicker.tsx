@@ -1,18 +1,11 @@
-import { useEffect, useMemo } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { useMemo, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import type { ReviewTurn } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
+import { PICKER_PANEL_CLASS, Picker, type PickerRow } from "@/components/ui/picker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { relativeTime } from "@/lib/time";
+import { matchesAllTokens, tokenizeSearch } from "@/lib/searchTokens";
 import { useDiffStore } from "@/stores/diffStore";
 import { usePanelHeaderMenuOpen } from "@/components/panels/shell/PanelHeader";
 
@@ -22,65 +15,69 @@ function statLabel(turn: ReviewTurn): string {
   const files = `${turn.fileCount} ${turn.fileCount === 1 ? "file" : "files"}`;
   return turn.additions === null || turn.deletions === null
     ? files
-    : `${files} · +${turn.additions} −${turn.deletions}`;
-}
-
-/** The newest turn that changed files, else the newest turn, from a newest-first list. */
-function seedTurn(newestFirst: readonly ReviewTurn[]): ReviewTurn | undefined {
-  return newestFirst.find((turn) => turn.fileCount > 0) ?? newestFirst[0];
+    : `${files} +${turn.additions} -${turn.deletions}`;
 }
 
 /**
- * The Turn view's operand picker: a searchable dropdown over every turn in the
- * thread, resolving to exactly one turn's diff. Turns without file changes or
- * whose snapshots are gone stay listed so ordinals match the conversation.
- * Entering the view unpicked seeds the operand to the latest turn that changed
- * files, since an operand-less request would resolve live state. See
- * CONTEXT.md → "Turn view".
+ * The picker's rows, newest first: every turn that changed files, plus the
+ * latest turn even without changes, since following latest must stay
+ * selectable while the newest turn is still answering.
+ */
+function turnPickerRows(turns: readonly ReviewTurn[]): readonly ReviewTurn[] {
+  const newestFirst = [...turns].sort((a, b) => b.ordinal - a.ordinal);
+  return newestFirst.filter((turn, index) => index === 0 || turn.fileCount > 0);
+}
+
+function TurnPickerPlaceholder({ children }: { readonly children: string }) {
+  return (
+    <span className="font-mono text-caption uppercase tracking-[0.18em] text-muted/40">
+      {children}
+    </span>
+  );
+}
+
+/**
+ * The Turn view's operand picker. It follows the latest turn until the user
+ * pins an older one; picking the newest row returns to following. Ordinals
+ * come from the server so they match the conversation. See CONTEXT.md,
+ * "Turn view".
  */
 export function TurnPicker({ threadId }: { threadId: string }) {
   const reviewTurns = useDiffStore((s) => s.reviewTurnsByThread[threadId]);
   const reviewTurnsError = useDiffStore((s) => s.reviewTurnsErrorByThread[threadId]);
-  const selectedMessageId = useDiffStore(
-    (s) => s.selectedTurnMessageIdByThread[threadId],
-  );
+  const selection = useDiffStore((s) => s.selectedTurnByThread[threadId] ?? "latest");
   const setReviewTurnForThread = useDiffStore((s) => s.setReviewTurnForThread);
   const [open, setOpen] = usePanelHeaderMenuOpen();
+  const [query, setQuery] = useState("");
 
-  const turns = useMemo(
-    () => [...(reviewTurns ?? [])].sort((a, b) => b.ordinal - a.ordinal),
-    [reviewTurns],
-  );
-  const seed = seedTurn(turns);
-  const effectiveMessageId = selectedMessageId ?? seed?.messageId ?? null;
-
-  // Seed the operand when the view is entered unpicked: an operand-less
-  // request would resolve live state, which a picked turn view must never show.
-  useEffect(() => {
-    if (selectedMessageId === undefined && seed) {
-      setReviewTurnForThread(threadId, seed.messageId);
-    }
-  }, [threadId, selectedMessageId, seed, setReviewTurnForThread]);
+  const rows = useMemo(() => turnPickerRows(reviewTurns ?? []), [reviewTurns]);
+  const filtered = useMemo(() => {
+    const tokens = tokenizeSearch(query);
+    return rows.filter((turn) => matchesAllTokens([`Turn ${turn.ordinal}`, statLabel(turn)], tokens));
+  }, [query, rows]);
 
   if (reviewTurns === undefined) {
-    return (
-      <span className="font-mono text-caption uppercase tracking-[0.18em] text-muted/40">
-        {reviewTurnsError === undefined ? "Resolving" : "Turns unavailable"}
-      </span>
-    );
+    return <TurnPickerPlaceholder>{reviewTurnsError === undefined ? "Resolving" : "Turns unavailable"}</TurnPickerPlaceholder>;
   }
-  if (turns.length === 0) {
-    return (
-      <span className="font-mono text-caption uppercase tracking-[0.18em] text-muted/40">
-        No turns yet
-      </span>
-    );
-  }
+  const latest = rows[0];
+  if (!latest) return <TurnPickerPlaceholder>No turns yet</TurnPickerPlaceholder>;
 
-  const effectiveOrdinal = turns.find((turn) => turn.messageId === effectiveMessageId)?.ordinal;
+  const following = selection === "latest";
+  const selectedMessageId = following ? latest.messageId : selection;
+  const selectedOrdinal = reviewTurns.find((turn) => turn.messageId === selectedMessageId)?.ordinal;
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (!nextOpen) setQuery("");
+  };
+  const renderRow = (turn: ReviewTurn): PickerRow => ({
+    key: turn.messageId,
+    name: `Turn ${turn.ordinal}`,
+    tag: turn === latest ? "latest" : undefined,
+    description: statLabel(turn),
+  });
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
         render={
           <Button
@@ -88,6 +85,7 @@ export function TurnPicker({ threadId }: { threadId: string }) {
             variant="ghost"
             size="compact"
             data-testid="turn-picker"
+            data-following={following}
             aria-label="Select turn"
             aria-expanded={open}
             aria-haspopup="dialog"
@@ -96,55 +94,30 @@ export function TurnPicker({ threadId }: { threadId: string }) {
               "text-ink shadow-none hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.06]",
             )}
           >
-            <span className={cn("min-w-0 text-fade", !effectiveOrdinal && "text-muted")}>
-              {effectiveOrdinal ? `Turn ${effectiveOrdinal}` : "Pick a turn"}
+            <span className="min-w-0 text-fade">
+              {selectedOrdinal === undefined ? "Pick a turn" : `Turn ${selectedOrdinal}`}
+              {following ? <span data-testid="turn-picker-latest" className="text-muted"> latest</span> : null}
             </span>
             <ChevronDown size={11} className="shrink-0 text-muted/65" />
           </Button>
         }
       />
-      <PopoverContent align="start" sideOffset={4} className="w-72 p-0">
-        <Command>
-          <CommandInput
-            placeholder="Search turns..."
-            className="h-8 text-caption"
-            data-testid="turn-picker-filter"
-          />
-          <CommandList>
-            <CommandEmpty className="py-4 text-caption">No turns found</CommandEmpty>
-            <CommandGroup heading="Turns">
-              {turns.map((turn) => {
-                const ordinal = turn.ordinal;
-                const active = turn.messageId === effectiveMessageId;
-                return (
-                  <CommandItem
-                    key={turn.messageId}
-                    value={`turn ${ordinal} ${statLabel(turn)}`}
-                    onSelect={() => {
-                      setReviewTurnForThread(threadId, turn.messageId);
-                      setOpen(false);
-                    }}
-                    data-testid={`turn-picker-item-${turn.messageId}`}
-                    aria-current={active ? "true" : undefined}
-                    className="gap-2 px-2 py-1.5"
-                  >
-                    <span className="min-w-0 flex-1 text-fade whitespace-nowrap text-caption">
-                      Turn {ordinal}
-                      <span className="text-muted/60"> · {statLabel(turn)}</span>
-                    </span>
-                    {active ? (
-                      <Check size={11} className="shrink-0 text-muted" />
-                    ) : (
-                      <span className="shrink-0 font-mono text-caption tabular-nums text-muted/45">
-                        {relativeTime(turn.createdAt)}
-                      </span>
-                    )}
-                  </CommandItem>
-                );
-              })}
-            </CommandGroup>
-          </CommandList>
-        </Command>
+      <PopoverContent align="start" side="bottom" sideOffset={4} className={PICKER_PANEL_CLASS}>
+        <Picker
+          query={query}
+          onQueryChange={setQuery}
+          searchPlaceholder="Search turns"
+          items={filtered}
+          total={null}
+          status="ready"
+          selectedKey={selectedMessageId}
+          renderItem={renderRow}
+          onSelect={(turn) => {
+            // The newest row means "follow", so a turn that starts later replaces it.
+            setReviewTurnForThread(threadId, turn === latest ? "latest" : turn.messageId);
+            handleOpenChange(false);
+          }}
+        />
       </PopoverContent>
     </Popover>
   );

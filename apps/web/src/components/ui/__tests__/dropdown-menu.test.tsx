@@ -18,7 +18,7 @@ function ReviewMenu({ onPick }: { onPick: (name: string) => void }) {
       <DropdownMenuTrigger>Review view</DropdownMenuTrigger>
       <DropdownMenuContent>
         <DropdownMenuItem label="Rename" icon={<Pencil />} shortcut="F2" onClick={() => onPick("rename")} />
-        <DropdownMenuItem label="Last turn" checked onClick={() => onPick("last")} />
+        <DropdownMenuItem label="Turn" checked onClick={() => onPick("turn")} />
         <DropdownMenuItem label="All turns" checked={false} onClick={() => onPick("all")} />
         <DropdownMenuItem label="Commit" disabledReason={UNAVAILABLE} onClick={() => onPick("commit")} />
         <DropdownMenuSeparator />
@@ -48,7 +48,7 @@ describe("DropdownMenuItem", () => {
 
   it("marks the checked row as the current radio choice with a check, not a fill", async () => {
     await openMenu();
-    const current = screen.getByRole("menuitemradio", { name: "Last turn" });
+    const current = screen.getByRole("menuitemradio", { name: "Turn" });
     const other = screen.getByRole("menuitemradio", { name: "All turns" });
     expect(current).toHaveAttribute("aria-checked", "true");
     expect(other).toHaveAttribute("aria-checked", "false");

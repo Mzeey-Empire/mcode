@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReviewState } from "@mcode/contracts";
+import { reviewViewAvailability } from "@/lib/review-views";
 import { useDiffStore } from "@/stores/diffStore";
 import { useReviewState } from "./useReviewState";
 
@@ -21,7 +22,7 @@ describe("useReviewState", () => {
     getReviewState.mockResolvedValue({ ...clean, uncommitted: { staged: 0, unstaged: 0, untracked: 0, [kind]: 1 } });
     const { result } = renderHook(() => useReviewState("workspace", "thread"));
     await waitFor(() => expect(result.current.isDirty).toBe(true));
-    expect(useDiffStore.getState().getReviewView("thread", { hasTurnChanges: false, isDirty: result.current.isDirty })).toBe("unstaged");
+    expect(useDiffStore.getState().getReviewView("thread", { hasTurnChanges: false, isDirty: result.current.isDirty }, reviewViewAvailability("thread", result.current.state, null))).toBe("unstaged");
     expect(getReviewState).toHaveBeenCalledWith("workspace", "thread");
   });
   it("refreshes on revision bumps and menu opens", async () => {

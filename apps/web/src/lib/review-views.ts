@@ -1,127 +1,156 @@
+import type { ReviewState, ReviewTurn } from "@mcode/contracts";
 import type { PanelScope } from "@/lib/panel-tabs";
 import type { DiffViewMode } from "@/stores/diffStore";
 
 /**
- * A requirement a Review view depends on beyond its scope. `"git"` views need a
- * git repository (the four working-tree views). Views with no requirement are
- * always offered in their scope.
- */
-export type ReviewViewRequirement = "git";
-
-/**
- * The kind of picked operand a comparison view surfaces in the toolbar's
- * contextual operand slot. `"branch"` picks a base→target ref pair; `"commit"`
- * picks a single commit; `"turn"` picks one turn's snapshot. Views with no
- * operand are *fixed* comparisons (Unstaged, Staged, Last turn, Cumulative) and
- * render no operand control. See CONTEXT.md → "Comparison".
+ * The kind of picked operand a comparison view shows on the left of header
+ * row 2. `"branch"` picks a base and target ref pair, `"commit"` picks one
+ * commit, and `"turn"` follows the latest turn or pins one. Views without an
+ * operand (Unstaged, Staged, All turns) are fixed comparisons. See
+ * CONTEXT.md, "Comparison".
  */
 export type ReviewViewOperand = "branch" | "commit" | "turn";
 
-/**
- * Static metadata describing one Review-tab view for the dual-scope selection
- * model. Pure data — no store or React state. See CONTEXT.md → "Review tab".
- */
+/** Static metadata for one Review view. Pure data, with no store or React state. */
 export interface ReviewView {
   /** Stable id; maps 1:1 onto the store's {@link DiffViewMode}. */
   readonly id: DiffViewMode;
-  /** Toolbar label (e.g. "Unstaged", "Last turn"). */
+  /** The name the view menu and row 1 show. */
   readonly label: string;
-  /**
-   * Whether the view requires an active thread. The turn views (Last turn,
-   * Cumulative) describe a thread's turns and are thread-only; the git
-   * working-tree views (Unstaged/Staged/Commit/Branch) work in *both* scopes —
-   * threadless they read the workspace root, in a thread they read the thread's
-   * checkout. So the Review tab is dual-scope and additive: a thread keeps the
-   * git views and adds the turn views on top.
-   */
-  readonly threadOnly: boolean;
-  /** Optional extra gate beyond scope; see {@link ReviewViewRequirement}. */
-  readonly requires?: ReviewViewRequirement;
-  /**
-   * The picked operand this view surfaces beside the switcher, if any. Absent
-   * for fixed comparisons. The toolbar reserves its operand slot for views that
-   * carry one; the picker that fills it lands per-operand in later slices.
-   */
+  /** The picked operand row 2 shows for this view, if any. */
   readonly operand?: ReviewViewOperand;
 }
 
+const REVIEW_VIEW_BY_ID: Readonly<Record<DiffViewMode, ReviewView>> = {
+  turn: { id: "turn", label: "Turn", operand: "turn" },
+  cumulative: { id: "cumulative", label: "All turns" },
+  unstaged: { id: "unstaged", label: "Unstaged" },
+  staged: { id: "staged", label: "Staged" },
+  commit: { id: "commit", label: "Commit", operand: "commit" },
+  branch: { id: "branch", label: "Branch", operand: "branch" },
+};
+
 /**
- * The Review tab's view catalog, in toolbar order. The first four are the git
- * working-tree views (available in both scopes); the last three are the
- * thread-only turn views. Order is the single source of truth for how the
- * toolbar lays out its segmented control, so the helpers preserve it. Each view
- * renders exactly one diff — there is no eager render of every turn.
+ * The view menu's groups, in menu order, with a divider between groups (Paper
+ * board 10b). Every view stays listed in every scope; one that cannot load is
+ * dimmed with its reason from {@link reviewViewAvailability}.
  */
-export const REVIEW_VIEWS: readonly ReviewView[] = [
-  { id: "unstaged", label: "Unstaged", threadOnly: false, requires: "git" },
-  { id: "staged", label: "Staged", threadOnly: false, requires: "git" },
-  { id: "commit", label: "Commit", threadOnly: false, requires: "git", operand: "commit" },
-  { id: "branch", label: "Branch", threadOnly: false, requires: "git", operand: "branch" },
-  { id: "last-turn", label: "Last turn", threadOnly: true },
-  { id: "turn", label: "Turn", threadOnly: true, operand: "turn" },
-  { id: "cumulative", label: "All turns", threadOnly: true },
+export const REVIEW_VIEW_GROUPS: readonly (readonly ReviewView[])[] = [
+  [REVIEW_VIEW_BY_ID.turn, REVIEW_VIEW_BY_ID.cumulative],
+  [REVIEW_VIEW_BY_ID.unstaged, REVIEW_VIEW_BY_ID.staged],
+  [REVIEW_VIEW_BY_ID.commit, REVIEW_VIEW_BY_ID.branch],
 ];
 
-/**
- * The Review views available in the given scope, in catalog order. This is the
- * dual-scope selection seam: threadless yields the git working-tree views; a
- * thread yields those same git views plus the turn views (additive). Pure — it
- * ignores runtime gates (git presence, settings); apply those with
- * {@link visibleReviewViews}.
- */
-export function availableReviewViews(scope: PanelScope): readonly ReviewView[] {
-  return REVIEW_VIEWS.filter((view) => scope === "thread" || !view.threadOnly);
+/** Every Review view in menu order. Each view renders exactly one diff. */
+export const REVIEW_VIEWS: readonly ReviewView[] = REVIEW_VIEW_GROUPS.flat();
+
+/** The catalog entry for a view id. */
+export function reviewViewById(id: DiffViewMode): ReviewView {
+  return REVIEW_VIEW_BY_ID[id];
 }
 
-/** Runtime conditions that gate views beyond their scope. */
-export interface ReviewViewGates {
-  /** Whether the active workspace is a git repository (gates the git views). */
-  readonly isGitRepo: boolean;
+/** Whether one view can load now, and the tooltip reason when it cannot. */
+export type ReviewViewAvailability =
+  | { readonly available: true }
+  | { readonly available: false; readonly reason: string };
+
+/** Availability for every Review view. */
+export type ReviewViewAvailabilityMap = Readonly<Record<DiffViewMode, ReviewViewAvailability>>;
+
+const AVAILABLE: ReviewViewAvailability = { available: true };
+
+function unavailable(reason: string): ReviewViewAvailability {
+  return { available: false, reason };
 }
 
 /**
- * The Review views the user can actually pick right now: {@link availableReviewViews}
- * filtered by the runtime gates (git presence for the working-tree views).
- * Pure. Returns catalog order.
+ * Whether each Review view can load, with the reason a dimmed menu row shows.
+ * `reviewState` and `turns` are null while unknown (still probing, or the
+ * probe failed); an unknown input never dims a view, so a slow probe cannot
+ * push the user off the view they picked. The view's own body reports a
+ * failure once it loads.
  */
-export function visibleReviewViews(
+export function reviewViewAvailability(
   scope: PanelScope,
-  gates: ReviewViewGates,
-): readonly ReviewView[] {
-  return availableReviewViews(scope).filter((view) => {
-    if (view.requires === "git" && !gates.isGitRepo) return false;
-    return true;
-  });
+  reviewState: ReviewState | null,
+  turns: readonly ReviewTurn[] | null,
+): ReviewViewAvailabilityMap {
+  const turnAvailability = turnViewAvailability(scope, turns);
+  return {
+    turn: turnAvailability,
+    cumulative: turnAvailability,
+    unstaged: gitViewAvailability(reviewState, () => AVAILABLE),
+    staged: gitViewAvailability(reviewState, (state) =>
+      state.uncommitted.staged === 0 ? unavailable("Nothing staged") : AVAILABLE),
+    commit: gitViewAvailability(reviewState, commitAvailability),
+    branch: gitViewAvailability(reviewState, branchAvailability),
+  };
+}
+
+type GitReviewState = Extract<ReviewState, { isGitRepo: true }>;
+
+function turnViewAvailability(scope: PanelScope, turns: readonly ReviewTurn[] | null): ReviewViewAvailability {
+  if (scope === "threadless") return unavailable("Open a thread to review its turns");
+  if (turns !== null && turns.length === 0) return unavailable("No turns yet");
+  return AVAILABLE;
+}
+
+function gitViewAvailability(
+  reviewState: ReviewState | null,
+  forRepository: (state: GitReviewState) => ReviewViewAvailability,
+): ReviewViewAvailability {
+  if (reviewState === null) return AVAILABLE;
+  if (!reviewState.isGitRepo) return unavailable("Not a git repository");
+  return forRepository(reviewState);
+}
+
+function commitAvailability(state: GitReviewState): ReviewViewAvailability {
+  // Without a base there is no range of commits ahead to pick from, which is
+  // the same gap the Branch view reports.
+  if (state.commitsAhead === null) return unavailable("No branch to compare against");
+  if (state.commitsAhead.count === 0) return unavailable(`No commits ahead of ${state.commitsAhead.base}`);
+  return AVAILABLE;
+}
+
+function branchAvailability(state: GitReviewState): ReviewViewAvailability {
+  if ("compare" in state.branchDefault) return AVAILABLE;
+  return state.branchDefault.unavailable === "unborn"
+    ? unavailable("No commits yet")
+    : unavailable("No branch to compare against");
 }
 
 /**
  * The thread change-state inputs that pick a thread's default Review view, per
- * ADR-0011. Both are cheap, reactive signals the panel already has: turn changes
- * from the loaded turn snapshots (the same signal the header's changed-file count
- * uses) and working-tree dirtiness from the git status probe.
+ * ADR-0011: turn changes from the loaded turn snapshots and working-tree
+ * dirtiness from the review state probe.
  */
 export interface ReviewChangeState {
   /** The thread has at least one turn snapshot with changed files. */
   readonly hasTurnChanges: boolean;
-  /** The thread's working tree has uncommitted changes (manual edits). */
+  /** The checkout has uncommitted changes. */
   readonly isDirty: boolean;
 }
 
 /**
- * The default Review view for a scope. Threadless has no turns, so it always
- * defaults to the unstaged working-tree diff. A thread picks from its change
- * state (ADR-0011): turn-registered changes -> Last turn; else a dirty working
- * tree -> Unstaged (Branch's committed-only three-dot range would hide manual
- * edits); else the clean tree -> Branch. Passing no change state yields the
- * conservative Branch default for a thread. Used to seed the toolbar and to
- * recover when the active view falls out of scope.
+ * The default Review view (ADR-0011). Turn changes open Turn, which follows
+ * the latest turn. Otherwise a dirty checkout opens Unstaged, because Branch's
+ * committed-only range would hide manual edits. A clean checkout opens Branch
+ * when it can load, else Unstaged. Threadless scope has no turns, so it lands on
+ * Unstaged. An unavailable pick falls through to the first available view in
+ * menu order, and only a scope where nothing can load (no turns and no git)
+ * returns Unstaged regardless.
  */
 export function defaultReviewView(
   scope: PanelScope,
-  changeState?: ReviewChangeState,
+  changeState: ReviewChangeState,
+  availability: ReviewViewAvailabilityMap,
 ): DiffViewMode {
-  if (scope === "threadless") return "unstaged";
-  if (changeState?.hasTurnChanges) return "last-turn";
-  if (changeState?.isDirty) return "unstaged";
-  return "branch";
+  const preferred: readonly DiffViewMode[] = [
+    ...(scope === "thread" && changeState.hasTurnChanges ? (["turn"] as const) : []),
+    ...(changeState.isDirty ? (["unstaged"] as const) : []),
+    "branch",
+    "unstaged",
+    ...REVIEW_VIEWS.map((view) => view.id),
+  ];
+  return preferred.find((id) => availability[id].available) ?? "unstaged";
 }

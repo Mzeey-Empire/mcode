@@ -57,9 +57,11 @@ const ROW_ACTION_CLASS =
   "flex size-[2.4rem] shrink-0 items-center justify-center rounded-sm text-muted outline-none transition-colors hover:text-ink focus-visible:ring-1 focus-visible:ring-focus";
 
 /**
- * Opens the Changes tab on the Turn view for this turn. The turn is selected
- * even when its snapshot is gone: the comparison then says so, where
- * switching to All turns would show a different diff.
+ * Opens the Changes tab on the Turn view pinned to this turn. The bar never
+ * follows latest: its turn is the latest with changes, which can be older
+ * than the newest turn the Turn view would follow. The turn is selected even when its snapshot is gone: the
+ * comparison then says so, where switching to All turns would show a
+ * different diff.
  */
 function openTurnReview(threadId: string, messageId: string): string | null {
   const workspaceId = useWorkspaceStore.getState().threads.find((t) => t.id === threadId)?.workspace_id;
