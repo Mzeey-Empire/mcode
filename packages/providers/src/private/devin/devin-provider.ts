@@ -39,7 +39,7 @@ import type {
   AcpPermissionOutcome,
   AcpSessionUpdate,
 } from "../protocols/acp/acp-session-types.js";
-import { resolveDevinAcpCredentials } from "./devin-credentials.js";
+import { describeDevinAuth, resolveDevinAcpCredentials } from "./devin-credentials.js";
 import { DevinCanonicalEventPublisher, type DevinCanonicalEventRouting } from "./devin-canonical-event-publisher.js";
 import {
   createDevinAcpTurnState,
@@ -259,6 +259,11 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
   // ---------------------------------------------------------------------
   // Model discovery
   // ---------------------------------------------------------------------
+
+  /** Reports sign-in from the same credential lookup ACP authentication uses. */
+  async describeStatus() {
+    return describeDevinAuth(this.host.environment.snapshot(), this.host.runtime.platform);
+  }
 
   /**
    * Lists Devin's account-scoped model catalog by opening a throwaway ACP

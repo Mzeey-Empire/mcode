@@ -91,6 +91,8 @@ import {
   synthesizeCodexApprovalRequest,
 } from "./codex-permission-mapper.js";
 import { CodexPromptResolutionError, parseCodexSlashInvocation } from "./codex-prompt.js";
+import { createCliStatusRunner } from "../status/cli-status-runner.js";
+import { describeCodexAuth } from "../status/provider-auth-checks.js";
 
 export {
   hasCodexInternalThreadControlMcp,
@@ -639,6 +641,13 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   /** Returns the live Codex model catalog in provider order. */
   async listModels(): Promise<ProviderModelInfo[]> {
     return this.codexPorts.catalog.listModels();
+  }
+
+  /** Reports sign-in from `codex login status`, which honors the same CODEX_HOME sessions use. */
+  async describeStatus() {
+    const { cliPath } = await this.codexPorts.settings.get();
+    const run = createCliStatusRunner({ platform: this.host.runtime.platform, env: this.host.environment.snapshot() });
+    return describeCodexAuth(run, cliPath);
   }
 
   /** Return the latest Codex account rate-limit state pushed by the app-server. */
