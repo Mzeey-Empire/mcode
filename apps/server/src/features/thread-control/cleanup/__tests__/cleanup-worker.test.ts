@@ -1,5 +1,10 @@
 import "reflect-metadata";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as NodeFS from "node:fs";
+import * as NodeFSPromises from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { logger } from "@mcode/shared";
 import type { Database } from "bun:sqlite";
 import { createThreadPersistenceTestRuntime } from "../../testing/thread-persistence-test-runtime.js";
 let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
@@ -9,13 +14,17 @@ import {
   GitWorktreeService,
   RepositoryGitMutationLock,
   SandboxWorktreeCleanupPolicy,
+  WorkspaceEnvironmentService,
 } from "../../../projects/index.js";
+import type { WorkspaceEnvironmentTerminalCommandExecutor } from "../../../projects/environment/workspace-environment-service.js";
+import type { TerminalCommandCompletion } from "../../../terminal/commands/terminal-command-service.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import type { ClaudeProviderBoundary as ClaudeProvider } from "@mcode/providers";
 import { ThreadDeletionTeardownService } from "../../lifecycle/thread-deletion-teardown-service.js";
 import { ThreadRepo } from "../../persistence/thread-repo.js";
 import { ThreadControlMutationReservationService } from "../../index.js";
 import { CleanupWorker } from "../cleanup-worker.js";
+import { CleanupActionRunner } from "../cleanup-action-runner.js";
 import { CleanupJobRepo } from "../persistence/cleanup-job-repo.js";
 import { DatabaseWriteOutcomeUnknown } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import type { ApplicationDatabaseWriterResponse } from "../../../../runtime/persistence/sqlite/application-database-writer-protocol.js";
@@ -70,6 +79,7 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
       { removeForThread: vi.fn() } as unknown as AttachmentService,
       { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
       threadDeletion,
+      { run: vi.fn().mockResolvedValue(undefined) },
       HOST_RUNTIME,
       new ThreadControlMutationReservationService(),
     );
@@ -480,7 +490,7 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
       gitWorktrees, cleanupPolicy, mutationLock, ownedWorkspaces,
       { removeForThread: vi.fn() } as unknown as AttachmentService,
       { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
-      threadDeletion, HOST_RUNTIME, new ThreadControlMutationReservationService(),
+      threadDeletion, { run: vi.fn().mockResolvedValue(undefined) }, HOST_RUNTIME, new ThreadControlMutationReservationService(),
     );
 
     await expect(uncertainCleanup.processOneJob()).rejects.toBeInstanceOf(DatabaseWriteOutcomeUnknown);
@@ -555,5 +565,147 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
     await poll;
     await shutdown;
     expect(shutdownComplete).toBe(true);
+  });
+
+  describe("cleanup actions", () => {
+    const tempRoots: string[] = [];
+    afterEach(async () => {
+      vi.restoreAllMocks();
+      await Promise.all(tempRoots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
+    });
+
+    async function tempRoot(): Promise<string> {
+      const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-cleanup-worker-"));
+      tempRoots.push(root);
+      return root;
+    }
+
+    /** A worker whose cleanup actions run through the real runner and environment service over a fake Terminal. */
+    async function workerWithCleanupActions(
+      workspaceId: string,
+      start: (script: string) => Promise<TerminalCommandCompletion>,
+    ) {
+      const prepare = vi.fn<WorkspaceEnvironmentTerminalCommandExecutor["prepare"]>(async (input) => ({
+        kind: "ready",
+        command: {
+          snapshot: { checkoutPath: "/checkout", terminal: { executable: "sh", arguments: ["-c", input.script] } },
+          start: () => start(input.script),
+          close: async () => ({ kind: "contained" }),
+          waitForRelease: async () => undefined,
+        },
+      }));
+      const environment = new WorkspaceEnvironmentService({
+        mcodeDir: await tempRoot(),
+        platform: "linux",
+        threads,
+        terminalCommands: { prepare },
+      });
+      await environment.save({
+        workspaceId,
+        sourceRevision: null,
+        document: {
+          version: "0.1.0",
+          actions: [{ id: "stop-db", name: "Stop database", command: { default: "stop-db" }, runOnCleanup: true }],
+        },
+      });
+      const cleanupWorker = new CleanupWorker(
+        cleanupJobs,
+        threads,
+        { waitForSessionExit: vi.fn().mockResolvedValue(undefined) } as unknown as ClaudeProvider,
+        gitWorktrees,
+        cleanupPolicy,
+        mutationLock,
+        workspaces,
+        { removeForThread: vi.fn() } as unknown as AttachmentService,
+        { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
+        threadDeletion,
+        new CleanupActionRunner(environment),
+        HOST_RUNTIME,
+        new ThreadControlMutationReservationService(),
+      );
+      return { cleanupWorker, prepare };
+    }
+
+    it("runs cleanup actions before removing the worktree", async () => {
+      const workspace = await workspaces.create("Project", "/repo");
+      addThread(workspace.id, "expired", "C:\\Users\\user\\.mcode\\worktrees\\repo\\actions", "feature/actions", new Date(0).toISOString());
+      const marker = NodePath.join(await tempRoot(), "cleanup-ran");
+      const { cleanupWorker } = await workerWithCleanupActions(workspace.id, async () => {
+        await NodeFSPromises.writeFile(marker, "done");
+        return { kind: "exited", exitCode: 0, output: "", outputTruncated: false };
+      });
+      const markerSeenAtRemoval: boolean[] = [];
+      vi.mocked(gitWorktrees.removeWorktree).mockImplementation(async () => {
+        markerSeenAtRemoval.push(NodeFS.existsSync(marker));
+        return true;
+      });
+
+      await cleanupWorker.poll();
+
+      expect(markerSeenAtRemoval).toEqual([true]);
+      expect(threads.findById("expired")).toBeNull();
+    });
+
+    it("removes the worktree after a failing cleanup action and logs its id and exit code", async () => {
+      const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+      const workspace = await workspaces.create("Project", "/repo");
+      addThread(workspace.id, "expired", "C:\\Users\\user\\.mcode\\worktrees\\repo\\failing", "feature/failing", new Date(0).toISOString());
+      const { cleanupWorker } = await workerWithCleanupActions(
+        workspace.id,
+        async () => ({ kind: "exited", exitCode: 2, output: "no database", outputTruncated: false }),
+      );
+
+      await cleanupWorker.poll();
+
+      expect(warn).toHaveBeenCalledWith("Cleanup action failed", {
+        threadId: "expired",
+        actionId: "stop-db",
+        outcome: "exited",
+        exitCode: 2,
+        output: "no database",
+        outputTruncated: false,
+      });
+      expect(gitWorktrees.removeWorktree).toHaveBeenCalledExactlyOnceWith(
+        "/repo",
+        "failing",
+        expect.objectContaining({ branchName: "feature/dirty" }),
+      );
+      expect(threads.findById("expired")).toBeNull();
+    });
+
+    it("runs nothing when the worktree is retained", async () => {
+      const workspace = await workspaces.create("Project", "/repo");
+      addThread(workspace.id, "expired", "C:\\source\\shared-worktree", "feature/external", new Date(0).toISOString());
+      vi.mocked(cleanupPolicy.decide).mockResolvedValue({ action: "retain", reason: "outside-sandbox" });
+      const start = vi.fn<(script: string) => Promise<TerminalCommandCompletion>>();
+      const { cleanupWorker, prepare } = await workerWithCleanupActions(workspace.id, start);
+
+      await cleanupWorker.poll();
+
+      expect(prepare).not.toHaveBeenCalled();
+      expect(start).not.toHaveBeenCalled();
+      expect(gitWorktrees.removeWorktree).not.toHaveBeenCalled();
+      expect(threads.findById("expired")).toBeNull();
+    });
+
+    it("runs nothing for a Direct thread", async () => {
+      const workspace = await workspaces.create("Project", "/repo");
+      const now = new Date().toISOString();
+      database.prepare(
+        `INSERT INTO threads (id, workspace_id, title, branch, mode, status, created_at, updated_at)
+         VALUES ('direct', ?, 'direct', 'main', 'direct', 'active', ?, ?)`,
+      ).run(workspace.id, now, now);
+      await threads.softDelete("direct");
+      await cleanupJobs.insert({ thread_id: "direct", workspace_path: "/repo", worktree_path: null, branch: "main" });
+      const start = vi.fn<(script: string) => Promise<TerminalCommandCompletion>>();
+      const { cleanupWorker, prepare } = await workerWithCleanupActions(workspace.id, start);
+
+      await cleanupWorker.poll();
+
+      expect(prepare).not.toHaveBeenCalled();
+      expect(start).not.toHaveBeenCalled();
+      expect(gitWorktrees.removeWorktree).not.toHaveBeenCalled();
+      expect(cleanupJobs.findByThreadId("direct")).toBeNull();
+    });
   });
 });

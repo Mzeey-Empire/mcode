@@ -116,6 +116,7 @@ describe("Cleanup integration", () => {
       { removeForThread: vi.fn() } as unknown as AttachmentService,
       { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
       mockThreadDeletion,
+      { run: vi.fn().mockResolvedValue(undefined) },
       TEST_HOST_RUNTIME,
     );
 
