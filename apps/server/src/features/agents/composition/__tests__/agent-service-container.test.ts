@@ -218,7 +218,7 @@ describe("AgentService container composition", () => {
     publication.start();
     const workspace = await container.resolve(WorkspaceRepo).create("provider-turn", temporaryDirectory!);
     const thread = await container.resolve(ThreadRepo).create(workspace.id, "Provider turn", "direct", "main", true, "codex");
-    await container.resolve(AgentService).sendMessage({ threadId: thread.id, content: "start a background task", provider: "codex", permissionMode: "full" });
+    await container.resolve(AgentService).sendMessage({ threadId: thread.id, content: "start a background task", provider: "codex", model: "gpt-5.5", permissionMode: "full" });
     await waitFor(() => workerRuntime?.owner.current(thread.id) === undefined);
 
     const opening = await container.resolve(TurnRuntimeController).openProviderTurn({ threadId: thread.id, notice: "Background command finished" });
@@ -237,6 +237,7 @@ describe("AgentService container composition", () => {
     const notice = (await container.resolve(MessageRepo).listByThread(thread.id, 50)).messages.find((message) => message.content === "Background command finished");
     expect(notice).toMatchObject({ role: "user", systemNotice: { kind: "provider-turn" } });
     expect(container.resolve(TurnRuntimeController).snapshot(thread.id)).toMatchObject({ phase: "completed", turnExecutionId: adopted.turnExecutionId });
+    expect(container.resolve(ThreadRepo).findById(thread.id)?.model).toBe("gpt-5.5");
   });
 
   it("admits a provider-started turn that opens while the ended turn is still releasing", async () => {
