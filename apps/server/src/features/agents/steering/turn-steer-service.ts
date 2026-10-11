@@ -37,7 +37,8 @@ import {
 
 /**
  * How long a steer the provider took waits for its transcript save. A save stuck in retries would
- * otherwise hold the call open; past this the steer reads as uncertain and a late save still delivers it.
+ * otherwise hold the call open; past this the steer is answered as delivered and a late save still
+ * adds it to the transcript.
  */
 export const TURN_STEER_SAVE_TIMEOUT_MS = 10_000;
 
@@ -189,11 +190,11 @@ export class TurnSteerService {
       await withinSaveTimeout(this.runtime.recordDelivered({ threadId: params.threadId, turnExecutionId: params.turnExecutionId,
         messageId, content: payload.content, ...(payload.mentions ? { mentions: payload.mentions } : {}) }));
     } catch (error) {
-      // The provider holds the message but the transcript does not, so it must not read as delivered.
-      // If the save lands later it still marks the row delivered.
+      // The provider holds the message, so it is delivered even though the transcript may not have it
+      // yet. Held as uncertain, it would offer Send again and the agent could get it twice.
       logger.error("Steered message was taken but not saved", { threadId: params.threadId, messageId,
         errorType: error instanceof Error ? error.name : "unknown" });
-      return this.markUnknown(messageId);
+      if (!await this.repo.settle(messageId, { state: "delivered" })) return this.replayStored(messageId);
     }
     return { status: "delivered", messageId };
   }

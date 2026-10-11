@@ -61,10 +61,14 @@ export type TurnSteerRecord = z.infer<typeof TurnSteerRecordSchema>;
 /** Lifecycle state of a stored steer. */
 export type TurnSteerState = TurnSteerRecord["state"];
 
-/** How the adapter call settled a `pending` steer. `delivered` is written with the transcript message instead. */
+/**
+ * How the adapter call settled a `pending` steer. `delivered` is normally written with the transcript
+ * message; it is settled here only when the provider took the message but the save did not finish.
+ */
 export const TurnSteerSettlementSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("rejected"), rejection: TurnSteerRejectionSchema }).strict(),
   z.object({ state: z.literal("delivery_unknown") }).strict(),
+  z.object({ state: z.literal("delivered") }).strict(),
 ]);
 /** How the adapter call settled a `pending` steer. */
 export type TurnSteerSettlement = z.infer<typeof TurnSteerSettlementSchema>;

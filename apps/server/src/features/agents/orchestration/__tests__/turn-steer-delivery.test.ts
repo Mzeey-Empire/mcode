@@ -134,7 +134,7 @@ describe("durable Send now", () => {
     expect(service.listHeldSteers()).toEqual([]);
   });
 
-  it("reports a steer whose transcript save hangs as uncertain, and a late save still delivers it", async () => {
+  it("answers a steer whose transcript save hangs as delivered, so it is never offered again", async () => {
     const save = deferred<void>();
     runtime.saveGate = save.promise;
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -142,14 +142,18 @@ describe("durable Send now", () => {
       const result = service.steer(steerParams());
       await runtime.saveStarted.promise;
       await vi.advanceTimersByTimeAsync(TURN_STEER_SAVE_TIMEOUT_MS);
-      await expect(result).resolves.toEqual({ status: "delivery_unknown", messageId: STEER_ID });
+      await expect(result).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
     } finally {
       vi.useRealTimers();
     }
-    expect(repo.find(STEER_ID)?.state).toBe("delivery_unknown");
+    expect(repo.find(STEER_ID)?.state).toBe("delivered");
+    expect(service.listHeldSteers()).toEqual([]);
+    await expect(service.settleUnknownSteer({ messageId: STEER_ID, action: "send-again" }))
+      .resolves.toEqual({ status: "closed" });
 
     save.resolve();
-    await expect.poll(() => repo.find(STEER_ID)?.state).toBe("delivered");
+    await expect.poll(() => runtime.saved.length).toBe(1);
+    expect(repo.find(STEER_ID)?.state).toBe("delivered");
     await expect(service.steer(steerParams())).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
     expect(runtime.sent).toHaveLength(1);
   });
@@ -251,13 +255,14 @@ Roll out region by region.
       [STEER_ID, "delivery_unknown"], [other, "delivery_unknown"]]);
   });
 
-  it("holds a steer whose transcript save failed, and a late save still marks it delivered", async () => {
+  it("answers a steer whose transcript save failed as delivered, since the provider holds it", async () => {
     runtime.saveFails = true;
-    await expect(service.steer(steerParams())).resolves.toEqual({ status: "delivery_unknown", messageId: STEER_ID });
-
-    await expect(repo.markDelivered(STEER_ID)).resolves.toBe(true);
     await expect(service.steer(steerParams())).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
+
+    expect(repo.find(STEER_ID)?.state).toBe("delivered");
     expect(service.listHeldSteers()).toEqual([]);
+    await expect(service.steer(steerParams())).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
+    expect(runtime.sent).toHaveLength(1);
   });
 
   it("stores a provider refusal and rethrows it on replay, so nothing is held", async () => {

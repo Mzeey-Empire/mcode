@@ -78,7 +78,7 @@ export class TurnSteerStore {
     }).run();
   }
 
-  /** Settle a pending steer as rejected or delivery_unknown. Returns false when it was no longer pending. */
+  /** Settle a pending steer from the adapter call's outcome. Returns false when it was no longer pending. */
   settle(messageId: string, settlement: TurnSteerSettlement): boolean {
     return this.transition(messageId, ["pending"], {
       state: settlement.state,
