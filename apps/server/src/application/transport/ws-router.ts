@@ -5,6 +5,7 @@
  */
 
 import type { WebSocket } from "ws";
+import { turnRecoveryErrorCode } from "../../features/agents/recovery/turn-recovery-error.js";
 import * as NodeHTTP from "node:http";
 import type { z } from "zod";
 
@@ -474,6 +475,8 @@ function validateRpcParameters(
 }
 
 function domainRouteError(id: string, error: unknown, message: string): WebSocketResponse | null {
+  const recoveryCode = turnRecoveryErrorCode(error);
+  if (recoveryCode) return { id, error: { code: recoveryCode, message } };
   if (error instanceof ThreadStartupResolveError) return { id, error: { code: error.code, message } };
   if (error instanceof WorkspaceFileNotFoundError) return { id, error: { code: error.code, message } };
   if (error instanceof ProjectIconError) return { id, error: { code: error.code, message } };

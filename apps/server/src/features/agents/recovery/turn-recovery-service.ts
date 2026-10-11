@@ -4,13 +4,15 @@ import { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js
 import { ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-service.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
+import { ThreadStartupRepo } from "../../thread-startup/persistence/thread-startup-repo.js";
+import { TurnRecoveryError } from "./turn-recovery-error.js";
 import type { SendMessageCommand } from "../orchestration/agent-service.js";
-import type { RecoveryIncident } from "@mcode/contracts";
+import type { RecoveryIncident, TurnRetryParams, TurnRetryResult } from "@mcode/contracts";
 
 const UNPROVED_EXECUTION_REASON =
   "The provider could not prove that this execution was still active after restart.";
 
-/** Reconciles durable turn checkpoints after a server process restart. */
+/** Reconciles interrupted executions and admits explicit retries of failed attempts. */
 @injectable()
 export class TurnRecoveryService {
   private currentIncident: RecoveryIncident | null = null;
@@ -21,6 +23,7 @@ export class TurnRecoveryService {
     @inject(AttachmentService) private readonly attachmentService: AttachmentService,
     @inject(ParentAssistantTextCheckpointService)
     private readonly parentAssistantTextCheckpoints: ParentAssistantTextCheckpointService,
+    @inject(ThreadStartupRepo) private readonly startupRepo: ThreadStartupRepo,
   ) {}
 
   /** Interrupt executions for which no current provider can prove the exact live execution. */
@@ -106,8 +109,51 @@ export class TurnRecoveryService {
       throw new Error(`Recoverable thread not found: ${checkpoint.threadId}`);
     }
     const attachments = this.attachmentService.prepareRetryAttachments(thread.id, message.attachments ?? []);
-    await dispatch(this.retryCommand(thread, message, attachments, executionId));
+    await dispatch({ ...this.retryCommand(thread, message, attachments, executionId), forceFreshSession: true });
     this.consumeRecoveryIncidentEntry(executionId);
+  }
+
+  /** Admit a new attempt of the latest errored turn without replacing its provider session. */
+  async retryTurn(input: TurnRetryParams, dispatch: (command: SendMessageCommand) => Promise<void>): Promise<TurnRetryResult> {
+    const turn = this.requireRetryableTurn(input);
+    const thread = this.threadRepo.findById(input.threadId);
+    if (!thread) throw new TurnRecoveryError("TURN_RETRY_NOT_FOUND", "Retry thread not found");
+    const message = this.canonicalSink.loadUserMessage(turn.id);
+    if (!message) throw new TurnRecoveryError("TURN_RETRY_INPUT_MISSING", "Accepted retry input not found");
+    const attachments = this.attachmentService.prepareRetryAttachments(thread.id, message.attachments ?? []);
+    const turnId = NodeCrypto.randomUUID();
+    await dispatch({
+      ...this.retryCommand(thread, message, attachments, turn.executionId),
+      model: input.model ?? this.optionalValue(thread.model),
+      sourceTurnId: turnId,
+    });
+    if (!this.canonicalSink.loadTurn(turnId)) {
+      throw new TurnRecoveryError("TURN_RETRY_NOT_ADMITTED", "Retry did not admit a new attempt");
+    }
+    return { turnId };
+  }
+
+  private requireRetryableTurn(input: TurnRetryParams) {
+    const turn = this.canonicalSink.loadTurn(input.turnId);
+    if (!turn || turn.threadId !== input.threadId || !turn.executionId) {
+      throw new TurnRecoveryError("TURN_RETRY_NOT_FOUND", "Retry turn not found in this thread");
+    }
+    if (this.canonicalSink.loadCheckpoint(turn.executionId)?.phase === "retried") {
+      throw new TurnRecoveryError("TURN_RETRY_CONFLICT", "This attempt was already retried");
+    }
+    const state = this.canonicalSink.loadTurnRetryState(input.threadId, input.turnId);
+    if (state.hasLaterTurn) throw new TurnRecoveryError("TURN_RETRY_NOT_LATEST", "Only the latest attempt can be retried");
+    if (state.hasRunningTurn) throw new TurnRecoveryError("TURN_RETRY_RUNNING", "The thread has a running turn");
+    this.requireTerminalStartup(input.threadId);
+    if (turn.status !== "Errored") throw new TurnRecoveryError("TURN_RETRY_NOT_ERRORED", "Only errored turns can be retried");
+    return { ...turn, executionId: turn.executionId };
+  }
+
+  private requireTerminalStartup(threadId: string): void {
+    const startup = this.startupRepo.findByThreadId(threadId);
+    if (startup && ["pending", "running", "blocked"].includes(startup.state)) {
+      throw new TurnRecoveryError("TURN_RETRY_STARTUP_ACTIVE", "The thread has a nonterminal startup");
+    }
   }
 
   private consumeRecoveryIncidentEntry(executionId: string): void {
@@ -140,7 +186,6 @@ export class TurnRecoveryService {
       quotedText: this.optionalValue(message.quoted_text),
       mentions: this.optionalValue(message.mentions),
       previewAnnotations: this.optionalValue(message.previewAnnotations),
-      forceFreshSession: true,
       retryOfExecutionId: executionId,
     };
   }

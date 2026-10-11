@@ -62,7 +62,7 @@ function routerDeps(sendMessage: AgentRouterDeps["agentService"]["sendMessage"],
     thoughtSegmentRepo: { listByMessage: unused },
     threadControlService: { respondToApproval: unused, listPendingApprovals: unused },
     toolCallRecordRepo: { listByMessage: unused, listByParent: unused },
-    turnRecoveryService: { currentRecoveryIncident: unused, retry: unused },
+    turnRecoveryService: { currentRecoveryIncident: unused, retry: unused, retryTurn: unused },
   };
 }
 

@@ -43,6 +43,7 @@ type AgentRpcMethod =
   | "agent.settleUnknownSteer"
   | "agent.recoveryIncident"
   | "agent.retry"
+  | "turn.retry"
   | "agent.continueWithoutSaving"
   | "agent.createAndSend"
   | "agent.stop"
@@ -105,7 +106,7 @@ export interface AgentRouterDeps {
     "respondToApproval" | "listPendingApprovals"
   >;
   toolCallRecordRepo: Pick<ToolCallRecordRepo, "listByMessage" | "listByParent">;
-  turnRecoveryService: Pick<TurnRecoveryService, "currentRecoveryIncident" | "retry">;
+  turnRecoveryService: Pick<TurnRecoveryService, "currentRecoveryIncident" | "retry" | "retryTurn">;
   turnSteers?: Pick<TurnSteerService, "steer" | "listHeldSteers" | "settleUnknownSteer">;
 }
 
@@ -172,6 +173,12 @@ const agentHandlers: AgentRpcHandlerMap = {
         displayContent: command.content,
       }));
   },
+  "turn.retry": (deps, params) => deps.turnRecoveryService.retryTurn(params, (command) =>
+    sendAdmittedTurn(deps.agentService, {
+      ...command,
+      content: appendPreviewAnnotations(command.content, command.previewAnnotations),
+      displayContent: command.content,
+    })),
   "agent.continueWithoutSaving": (deps, params) => {
     if (!deps.agentContinuation) throw new Error("Agent turn continuation is unavailable");
     deps.agentContinuation.continueWithoutSaving(params.executionId);

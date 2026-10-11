@@ -7,6 +7,7 @@ import {
   messages,
 } from "../../../runtime/persistence/sqlite/schema.js";
 import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts";
+import { TurnRecoveryError } from "../recovery/turn-recovery-error.js";
 import type {
   AgentThread,
   AgentTurn,
@@ -412,6 +413,8 @@ export class CanonicalParentTurnLifecycle {
         inArray(canonicalAgentIngestCheckpoints.phase, ["interrupted", "errored"]),
         inArray(canonicalAgentIngestCheckpoints.terminalOutcome, ["interrupted", "errored"]),
       )));
-    if (consumed.changes !== 1) throw new Error(`Interrupted execution not found: ${retryOfExecutionId}`);
+    if (consumed.changes !== 1) {
+      throw new TurnRecoveryError("TURN_RETRY_CONFLICT", `Execution is no longer retryable: ${retryOfExecutionId}`);
+    }
   }
 }

@@ -18,6 +18,7 @@ import { TurnRecoveryService } from "../../../../agents/recovery/turn-recovery-s
 import { TurnSnapshotRepo } from "../../../../agents/turns/persistence/turn-snapshot-repo.js";
 import { persistTurnSnapshot } from "../../../../agents/turns/persistence/turn-finalization-write-operations.js";
 import { ThreadRepo } from "../../../../thread-control/persistence/thread-repo.js";
+import { ThreadStartupRepo } from "../../../../thread-startup/persistence/thread-startup-repo.js";
 import { AttachmentService } from "../../../../attachments/storage/attachment-service.js";
 import { RealGitExecutor } from "../../../git/execution/real-git-executor.js";
 import type { GitExecOptions, GitExecResult, GitExecutor } from "../../../git/execution/types.js";
@@ -127,6 +128,7 @@ async function openStore(dbPath: string, gitExecutor: GitExecutor = new RealGitE
       new ThreadRepo(db, writer),
       new AttachmentService(),
       new ParentAssistantTextCheckpointService(db, writer),
+      new ThreadStartupRepo(db, writer),
     ),
   };
   openStores.push(store);

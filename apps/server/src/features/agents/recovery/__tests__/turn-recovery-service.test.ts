@@ -2,6 +2,7 @@ import "reflect-metadata";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts";
@@ -24,9 +25,12 @@ import { TurnRecoveryService } from "../turn-recovery-service.js";
 import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";
 import { AttachmentService } from "../../../attachments/storage/attachment-service.js";
 import type { SendMessageCommand } from "../../orchestration/agent-service.js";
+import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-startup-repo.js";
+import { turnRecoveryErrorCode } from "../turn-recovery-error.js";
+import type { PreviewAnnotationBundle, ThreadStartup } from "@mcode/contracts";
 
 const NOW = "2026-08-10T09:00:00.000Z";
-const THREAD_ID = "thread-recovery";
+const THREAD_ID = "00000000-0000-4000-8000-000000000021";
 const TURN_ID = "turn-recovery";
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000015";
 
@@ -38,6 +42,7 @@ describe("TurnRecoveryService", () => {
   let messageRepo: MessageStore;
   let defaultCheckpoints: ParentAssistantTextCheckpointService;
   let narrativeStore: NarrativeStore;
+  let startupRepo: ThreadStartupRepo;
   let published: ReturnType<typeof vi.fn<CanonicalAgentEventPublisher>>;
 
   beforeEach(() => {
@@ -53,6 +58,7 @@ describe("TurnRecoveryService", () => {
     sink = new CanonicalAgentStore(db, published);
     runtimeSink = new CanonicalAgentBoundary(db, writer, new CanonicalAgentWriterClient(writer), published);
     threadRepo = new ThreadRepo(db, writer);
+    startupRepo = new ThreadStartupRepo(db, writer);
     messageRepo = new MessageStore(db);
     defaultCheckpoints = new ParentAssistantTextCheckpointService(db, writer);
     narrativeStore = new NarrativeStore(
@@ -81,7 +87,208 @@ describe("TurnRecoveryService", () => {
     });
   });
 
-  afterEach(async () => { await closeAgentStorageTestDatabases(); });
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await closeAgentStorageTestDatabases();
+  });
+
+  describe("retryTurn", () => {
+    let service: TurnRecoveryService;
+    let attachments: AttachmentService;
+
+    beforeEach(() => {
+      vi.stubEnv("MCODE_DATA_DIR", NodePath.dirname(db.filename));
+      attachments = new AttachmentService();
+      service = new TurnRecoveryService(runtimeSink, threadRepo, attachments, defaultCheckpoints, startupRepo);
+    });
+
+    function failTurn(turnId = TURN_ID): void {
+      const turn = sink.loadTurn(turnId);
+      if (!turn?.executionId) throw new Error("Test turn missing");
+      sink.finishParentTurn({ threadId: THREAD_ID, turnId, executionId: turn.executionId,
+        providerId: "codex", providerIdentities: [], outcome: "errored", error: "Invalid model",
+        ending: { failure: { kind: "fatal", provider: "codex", message: "Invalid model" } },
+        projectTurn: () => ({ message: null, narrative: [] }) });
+    }
+
+    async function admit(command: SendMessageCommand): Promise<void> {
+      if (!command.sourceTurnId) throw new Error("Retry must assign its returned turn identity");
+      const persisted = await attachments.persist(THREAD_ID, command.attachments ?? []);
+      await runtimeSink.startParentTurn({
+        thread: { id: THREAD_ID, workspaceId: "workspace-recovery", providerId: "codex", createdAt: NOW },
+        turnId: command.sourceTurnId, executionId: NodeCrypto.randomUUID(),
+        permissionMode: "supervised", providerIdentities: [], retryOfExecutionId: command.retryOfExecutionId,
+        userMessage: { kind: "create", content: command.content, sequence: messageRepo.listByThread(THREAD_ID, 100).messages.length + 1,
+          attachments: persisted.stored, replyToMessageId: command.replyToMessageId,
+          quotedText: command.quotedText, mentions: command.mentions, previewAnnotations: command.previewAnnotations },
+      });
+    }
+
+    const rejectDispatch = async (): Promise<void> => { throw new Error("Rejected retry dispatched a turn"); };
+
+    it.each([
+      { threadId: "other-thread", turnId: TURN_ID },
+      { threadId: THREAD_ID, turnId: "missing-turn" },
+    ])("rejects a missing or foreign turn %j", async (input) => {
+      await expect(service.retryTurn(input, rejectDispatch)).rejects.toMatchObject({ code: "TURN_RETRY_NOT_FOUND" });
+    });
+
+    it.each(["completed", "cancelled", "interrupted"] as const)("rejects a %s turn", async (outcome) => {
+      sink.finishParentTurn({ threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
+        providerId: "codex", providerIdentities: [], outcome, projectTurn: () => ({ message: null, narrative: [] }) });
+      await expect(service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
+        .rejects.toMatchObject({ code: "TURN_RETRY_NOT_ERRORED" });
+    });
+
+    it("rejects a thread with a running turn", async () => {
+      await expect(service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
+        .rejects.toMatchObject({ code: "TURN_RETRY_RUNNING" });
+    });
+
+    it("rejects a missing accepted user message without consuming the attempt", async () => {
+      failTurn();
+      db.prepare("DELETE FROM canonical_agent_items WHERE turn_id = ? AND kind = 'message'").run(TURN_ID);
+      await expect(service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
+        .rejects.toMatchObject({ code: "TURN_RETRY_INPUT_MISSING" });
+      expect(sink.loadCheckpoint(EXECUTION_ID)?.phase).toBe("errored");
+    });
+
+    it("does not return an attempt identity when dispatch was handled without admission", async () => {
+      failTurn();
+      await expect(service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, async () => {}))
+        .rejects.toMatchObject({ code: "TURN_RETRY_NOT_ADMITTED" });
+      expect(sink.loadCheckpoint(EXECUTION_ID)?.phase).toBe("errored");
+    });
+
+    async function addStartup(state: ThreadStartup["state"]): Promise<void> {
+      await startupRepo.insert({ startupId: "00000000-0000-4000-8000-000000000020",
+        workspaceId: "workspace-recovery", threadId: THREAD_ID, kind: "direct", state,
+        phase: state === "completed" ? "agent" : "thread",
+        steps: [
+          { phase: "thread", state, ...(state !== "pending" ? { startedAt: NOW } : {}),
+            ...(!["pending", "running"].includes(state) ? { endedAt: NOW } : {}) },
+          { phase: "agent", state: state === "completed" ? "completed" : "pending",
+            ...(state === "completed" ? { startedAt: NOW, endedAt: NOW } : {}) },
+        ],
+        ...(state === "blocked" ? { block: { code: "test-block", message: "Needs a decision", actions: ["retry"] } } : {}),
+        ...(state === "failed" ? { error: { code: "test-failure", message: "Startup failed", retryable: true } } : {}),
+        transcript: [], cancellation: state === "cancelled" ? "requested" : "none", revision: 1, createdAt: NOW, updatedAt: NOW });
+    }
+
+    it.each(["pending", "running", "blocked"] as const)("rejects a %s startup", async (state) => {
+      failTurn();
+      await addStartup(state);
+      await expect(service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
+        .rejects.toMatchObject({ code: "TURN_RETRY_STARTUP_ACTIVE" });
+    });
+
+    it.each(["completed", "failed", "cancelled", "interrupted"] as const)("allows a terminal %s startup", async (state) => {
+      failTurn();
+      await addStartup(state);
+      const result = await service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, admit);
+      expect(sink.loadTurn(result.turnId)).toMatchObject({ status: "Running", attemptOf: TURN_ID });
+    });
+
+    it("rejects an older attempt even after its timestamp is updated", async () => {
+      failTurn();
+      await admit({ threadId: THREAD_ID, sourceTurnId: "later-turn", content: "another request" });
+      failTurn("later-turn");
+      db.prepare("UPDATE canonical_agent_turns SET updated_at = ? WHERE id = ?")
+        .run("2099-01-01T00:00:00.000Z", TURN_ID);
+      await expect(service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
+        .rejects.toMatchObject({ code: "TURN_RETRY_NOT_LATEST" });
+    });
+
+    it.each([undefined, "replacement-model"])("preserves accepted input and session while selecting model %s", async (model) => {
+      const original = sink.loadUserMessage(TURN_ID);
+      if (!original) throw new Error("Accepted test message missing");
+      const storedDir = NodePath.join(NodePath.dirname(db.filename), "attachments", THREAD_ID);
+      NodeFS.mkdirSync(storedDir, { recursive: true });
+      NodeFS.writeFileSync(NodePath.join(storedDir, "source-file.txt"), "original bytes");
+      const annotation: PreviewAnnotationBundle = { schemaVersion: 1, annotations: [{
+        kind: "diff", id: "00000000-0000-4000-8000-000000000022", displayNumber: 1,
+        filePath: "file.ts", side: "right", line: 2, lineContent: "const value = 1;", note: "Fix this",
+      }] };
+      const mentions = [{ id: "mention-file", kind: "file", path: "file.ts", label: "file.ts", range: { start: 0, end: 7 } }];
+      db.prepare("UPDATE messages SET attachments = ?, reply_to_message_id = ?, quoted_text = ?, mentions = ?, preview_annotations = ? WHERE id = ?")
+        .run(JSON.stringify([{ id: "source-file", name: "input.txt", mimeType: "text/plain", sizeBytes: 14 }]),
+          original.id, "quoted input", JSON.stringify(mentions), JSON.stringify(annotation), original.id);
+      db.prepare("UPDATE canonical_agent_items SET payload_json = json_set(payload_json, '$.message', json(?)) WHERE turn_id = ? AND kind = 'message'")
+        .run(JSON.stringify({ ...original,
+          attachments: [{ id: "source-file", name: "input.txt", mimeType: "text/plain", sizeBytes: 14 }],
+          reply_to_message_id: original.id, quoted_text: "quoted input", mentions, previewAnnotations: annotation,
+        }), TURN_ID);
+      db.prepare("UPDATE threads SET model = ?, sdk_session_id = ? WHERE id = ?").run("original-model", "existing-session", THREAD_ID);
+      const partial = messageRepo.createAssistantIdempotent({ id: "partial-answer", threadId: THREAD_ID,
+        content: "Work before failure", sequence: 2, isInternal: true });
+      sink.finishParentTurn({ threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
+        providerId: "codex", providerIdentities: [], outcome: "errored", error: "Invalid model",
+        ending: { failure: { kind: "fatal", provider: "codex", message: "Invalid model" } },
+        projectTurn: () => ({ message: partial, narrative: [] }) });
+      const failed = sink.loadTurn(TURN_ID);
+      const accepted = sink.loadUserMessage(TURN_ID);
+      const result = await service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID, model }, async (command) => {
+        expect(command.model).toBe(model ?? "original-model");
+        expect(Object.hasOwn(command, "forceFreshSession")).toBe(false);
+        expect(command.retryOfExecutionId).toBe(EXECUTION_ID);
+        await admit(command);
+      });
+      const retryMessage = sink.loadUserMessage(result.turnId);
+      expect(retryMessage).toMatchObject({ content: "repeat only when asked", reply_to_message_id: original.id,
+        quoted_text: "quoted input", mentions, previewAnnotations: annotation });
+      expect(retryMessage?.attachments?.map(({ name, mimeType, sizeBytes }) => ({ name, mimeType, sizeBytes })))
+        .toEqual([{ name: "input.txt", mimeType: "text/plain", sizeBytes: 14 }]);
+      const retryFile = attachments.prepareRetryAttachments(THREAD_ID, retryMessage?.attachments ?? [])[0];
+      if (!retryFile) throw new Error("Retry attachment missing");
+      expect(NodeFS.readFileSync(retryFile.sourcePath, "utf8")).toBe("original bytes");
+      expect(sink.loadTurn(result.turnId)).toMatchObject({ status: "Running", attemptOf: TURN_ID });
+      const reloaded = new CanonicalAgentStore(db, published);
+      expect(reloaded.loadTurn(TURN_ID)).toEqual(failed);
+      expect(reloaded.loadUserMessage(TURN_ID)).toEqual(accepted);
+      expect(reloaded.loadTerminalProjection(TURN_ID).message).toMatchObject({ id: "partial-answer", content: "Work before failure" });
+      expect(reloaded.loadTurn(TURN_ID)?.ending).toEqual({ outcome: "errored",
+        failure: { kind: "fatal", provider: "codex", message: "Invalid model" } });
+      expect(threadRepo.findById(THREAD_ID)?.sdk_session_id).toBe("existing-session");
+    });
+
+    it("keeps retry chains flat and rejects a second retry of each consumed attempt", async () => {
+      failTurn();
+      const first = await service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, admit);
+      await expect(service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
+        .rejects.toMatchObject({ code: "TURN_RETRY_CONFLICT" });
+      failTurn(first.turnId);
+      const second = await service.retryTurn({ threadId: THREAD_ID, turnId: first.turnId }, admit);
+      expect(sink.loadTurn(second.turnId)?.attemptOf).toBe("turn-recovery");
+      expect(sink.loadTurn(first.turnId)).toMatchObject({ status: "Errored", attemptOf: "turn-recovery" });
+      expect(sink.loadTurn(TURN_ID)).toMatchObject({ status: "Errored", attemptOf: null });
+      await expect(service.retryTurn({ threadId: THREAD_ID, turnId: first.turnId }, rejectDispatch))
+        .rejects.toMatchObject({ code: "TURN_RETRY_CONFLICT" });
+    });
+
+    it("returns a conflict from the transactional consume when two retries pass the initial checks", async () => {
+      failTurn();
+      let arrivals = 0;
+      let release!: () => void;
+      const ready = new Promise<void>((resolve) => { release = resolve; });
+      const dispatch = async (command: SendMessageCommand): Promise<void> => {
+        arrivals += 1;
+        if (arrivals === 2) release();
+        await ready;
+        await admit(command);
+      };
+      const results = await Promise.allSettled([
+        service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, dispatch),
+        service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, dispatch),
+      ]);
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      const rejected = results.find((result) => result.status === "rejected");
+      if (rejected?.status !== "rejected") throw new Error("Concurrent retry did not conflict");
+      expect(turnRecoveryErrorCode(rejected.reason)).toBe("TURN_RETRY_CONFLICT");
+      expect(messageRepo.listByThread(THREAD_ID, 100).messages).toHaveLength(2);
+      expect(sink.loadTurn(TURN_ID)?.ending).toEqual({ outcome: "errored",
+        failure: { kind: "fatal", provider: "codex", message: "Invalid model" } });
+    });
+  });
 
   function startUnfinishedTurn(input: {
     workspaceId: string;
@@ -118,6 +325,7 @@ describe("TurnRecoveryService", () => {
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
+      startupRepo,
     );
 
     const result = await service.reconcileOnStartup();
@@ -186,6 +394,7 @@ describe("TurnRecoveryService", () => {
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
+      startupRepo,
     );
     await service.reconcileOnStartup();
 
@@ -234,6 +443,7 @@ describe("TurnRecoveryService", () => {
       threadRepo,
       new AttachmentService(),
       checkpoints,
+      startupRepo,
     );
 
     expect(await service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
@@ -273,6 +483,7 @@ describe("TurnRecoveryService", () => {
       threadRepo,
       new AttachmentService(),
       checkpoints,
+      startupRepo,
     );
 
     try {
@@ -353,6 +564,7 @@ describe("TurnRecoveryService", () => {
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
+      startupRepo,
     );
 
     expect(await service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
@@ -432,6 +644,7 @@ describe("TurnRecoveryService", () => {
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
+      startupRepo,
     );
 
     expect(await service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
@@ -489,6 +702,7 @@ describe("TurnRecoveryService", () => {
       threadRepo,
       new AttachmentService(),
       checkpoints,
+      startupRepo,
     );
 
     expect(await service.reconcileOnStartup()).toEqual({ interrupted: [] });
@@ -524,6 +738,7 @@ describe("TurnRecoveryService", () => {
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
+      startupRepo,
     );
 
     await service.reconcileOnStartup();
@@ -596,6 +811,7 @@ describe("TurnRecoveryService", () => {
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
+      startupRepo,
     );
     try {
       expect(await service.reconcileOnStartup()).toEqual({
@@ -634,6 +850,7 @@ describe("TurnRecoveryService", () => {
         threadRepo,
         new AttachmentService(),
         defaultCheckpoints,
+        startupRepo,
       );
       expect(await cleanRestart.reconcileOnStartup()).toEqual({ interrupted: [] });
       expect(cleanRestart.currentRecoveryIncident()).toBeNull();
@@ -648,6 +865,7 @@ describe("TurnRecoveryService", () => {
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
+      startupRepo,
     );
     await service.reconcileOnStartup();
     const dispatched: SendMessageCommand[] = [];
@@ -731,6 +949,7 @@ describe("TurnRecoveryService", () => {
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
+      startupRepo,
     );
     const dispatch = vi.fn(async () => undefined);
     await expect(service.retry(EXECUTION_ID, dispatch)).rejects.toThrow();
@@ -758,6 +977,7 @@ describe("TurnRecoveryService", () => {
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
+      startupRepo,
     );
 
     expect(await service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
@@ -828,6 +1048,7 @@ describe("TurnRecoveryService", () => {
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
+      startupRepo,
     );
 
     expect(await service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
