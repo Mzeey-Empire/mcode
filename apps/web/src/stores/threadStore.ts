@@ -1120,7 +1120,7 @@ function projectPendingTextChunks(record: ThreadRecord, chunks: readonly Pending
   let segments = record.thoughtSegments;
   let bytes = previousBytes;
   for (const chunk of chunks) {
-    if (!chunk.delta && !chunk.reasoning?.done) continue;
+    if (!chunk.delta && !chunk.reasoning) continue;
     segments = projectChunkSegments(segments, chunk);
     if (isNarrativeOnlyChunk(chunk)) continue;
     responseTextIsStreaming = chunk.isFinalResponse !== false || responseTextIsStreaming;
@@ -2205,7 +2205,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     runtime: { isActiveThread: boolean },
   ): void => {
     const delta = normalizedTextDelta(event.delta);
-    if (delta.length === 0 && event.done !== true) return;
+    if (delta.length === 0 && event.done !== true && event.reasoningItemId === undefined) return;
     if (!runtime.isActiveThread) {
       queueDeferredNarrativeEvent(event.threadId, event);
       return;

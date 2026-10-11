@@ -103,6 +103,32 @@ describe("threadStore reasoning segments", () => {
     ]);
   });
 
+  it("starts the reasoning clock at an empty start fragment, not at the first text", () => {
+    const queue = setupRaf();
+    const threadId = "thread-reasoning-start";
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    emit(reasoning(threadId, "", { reasoningItemId: "rs_1" }));
+    flush(queue);
+    now.mockReturnValue(6_000);
+    emit(reasoning(threadId, "Summary burst.", { reasoningItemId: "rs_1" }));
+    emit(reasoning(threadId, "", { reasoningItemId: "rs_1", done: true }));
+    flush(queue);
+
+    const segments = getTestThreadThoughtSegments(threadId) ?? [];
+    expect(segments.map(({ text, kind, startedAt, endedAt }) => ({ text, kind, startedAt, endedAt }))).toEqual([
+      { text: "Summary burst.", kind: "reasoning", startedAt: 1_000, endedAt: 6_000 },
+    ]);
+  });
+
+  it("ignores an empty done fragment when no reasoning block is open", () => {
+    const queue = setupRaf();
+    const threadId = "thread-reasoning-stray-done";
+    emit(reasoning(threadId, "", { reasoningItemId: "rs_9", done: true }));
+    flush(queue);
+
+    expect(segmentShape(threadId)).toEqual([]);
+  });
+
   it("closes open reasoning when final answer text starts", () => {
     const queue = setupRaf();
     const threadId = "thread-reasoning-final";

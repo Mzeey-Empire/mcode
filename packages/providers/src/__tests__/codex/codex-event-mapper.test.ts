@@ -3614,6 +3614,26 @@ describe("CodexEventMapper", () => {
     expect(events.some((event) => event.type === "textDelta")).toBe(false);
   });
 
+  it("opens a reasoning block when the item starts, before its summary text arrives", () => {
+    const notify = (method: string, params: object) => mapper.mapNotification({ jsonrpc: "2.0", method, params } as never);
+    const events = [
+      ...notify("item/started", { item: { type: "reasoning", id: "rs_1" } }),
+      ...notify("item/started", { item: { type: "reasoning", id: "rs_1" } }),
+      ...notify("item/reasoning/summaryTextDelta", { itemId: "rs_1", delta: "Weighing options" }),
+      ...notify("item/completed", { item: { type: "reasoning", id: "rs_1", summary: ["Weighing options"], content: [] } }),
+      ...notify("item/started", { item: { type: "reasoning", id: "rs_2" } }),
+      ...notify("item/completed", { item: { type: "reasoning", id: "rs_2", summary: [], content: [] } }),
+    ].map((runtimeEvent) => runtimeEvent.event);
+
+    expect(events).toEqual([
+      { type: "reasoningDelta", threadId: "test-thread", delta: "", reasoningItemId: "rs_1" },
+      { type: "reasoningDelta", threadId: "test-thread", delta: "Weighing options", reasoningItemId: "rs_1" },
+      { type: "reasoningDelta", threadId: "test-thread", delta: "", reasoningItemId: "rs_1", done: true },
+      { type: "reasoningDelta", threadId: "test-thread", delta: "", reasoningItemId: "rs_2" },
+      { type: "reasoningDelta", threadId: "test-thread", delta: "", reasoningItemId: "rs_2", done: true },
+    ]);
+  });
+
   it("emits nothing for a completed reasoning item with no text and no stream", () => {
     const events = mapper.mapNotification({
       jsonrpc: "2.0",

@@ -125,7 +125,8 @@ function newReasoningSegment(fragment: ReasoningFragment): ThoughtSegment {
 export function appendReasoningSegment(segments: ThoughtSegment[], fragment: ReasoningFragment): ThoughtSegment[] {
   const index = openReasoningIndex(segments, fragment);
   if (index < 0) {
-    return fragment.delta.length === 0 ? segments : [...closeOpenSegments(segments), newReasoningSegment(fragment)];
+    const opensBlock = fragment.delta.length > 0 || (fragment.reasoningItemId !== undefined && fragment.done !== true);
+    return opensBlock ? [...closeOpenSegments(segments), newReasoningSegment(fragment)] : segments;
   }
   const owned = segments[index];
   if (!owned || owned.endedAt !== undefined) return segments;

@@ -1962,12 +1962,20 @@ export class CodexEventMapper {
   }
 
   private mapMainToolStarted(item: CompletedItem | undefined, itemId: string | undefined, notification: CodexNotification, boundaryEvents: CodexMappedEvent[]): CodexMappedEvent[] {
-    if (item?.type === "contextCompaction" && itemId) return [...boundaryEvents, ...this.startCompaction(itemId)];
+    const lifecycleStart = this.startLifecycleItem(item?.type, itemId);
+    if (lifecycleStart) return [...boundaryEvents, ...lifecycleStart];
     if (!item || !itemId || !TOOL_LIKE_ITEM_TYPES.has(item.type) || item.type === "webSearch") return this.logMainItemStarted(notification.method, item?.type, boundaryEvents);
     const toolUse = this.buildToolUseEvent(item, itemId, notification);
     if (!toolUse) return this.logMainItemStarted(notification.method, item.type, boundaryEvents);
     this.startedToolUseSignatures.set(itemId, this.toolUseSignature(toolUse));
     return [...boundaryEvents, toolUse];
+  }
+
+  private startLifecycleItem(itemType: string | undefined, itemId: string | undefined): CodexMappedEvent[] | undefined {
+    if (!itemId) return undefined;
+    if (itemType === "contextCompaction") return this.startCompaction(itemId);
+    if (itemType === "reasoning") return this.startReasoning(itemId);
+    return undefined;
   }
 
   private startCompaction(itemId: string): CodexMappedEvent[] {
@@ -2005,6 +2013,16 @@ export class CodexEventMapper {
     const key = itemId ?? "";
     this.streamedReasoningByItem.set(key, (this.streamedReasoningByItem.get(key) ?? "") + delta);
     return [...this.drainPendingAssistantBoundary(false), this.reasoningDelta(delta, itemId)];
+  }
+
+  /**
+   * Opens the block when the model starts reasoning. Codex sends summary text in one burst
+   * seconds later, so a block opened at the first text would always read as zero duration.
+   */
+  private startReasoning(itemId: string): CodexMappedEvent[] {
+    if (this.streamedReasoningByItem.has(itemId)) return [];
+    this.streamedReasoningByItem.set(itemId, "");
+    return [this.reasoningDelta("", itemId)];
   }
 
   private reasoningDelta(delta: string, reasoningItemId: string | undefined, done?: true): CodexMappedEvent {
