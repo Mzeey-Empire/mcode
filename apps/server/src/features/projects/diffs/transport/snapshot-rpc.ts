@@ -40,9 +40,10 @@ const snapshotHandlers: SnapshotHandlerMap = {
   "snapshot.cleanup": routeSnapshotCleanup,
   "snapshot.listByThread": (deps, params) => {
     const reverted = deps.turnRevertStore?.revertedPathsBySnapshot(params.threadId);
-    return deps.turnSnapshotRanges.listSnapshots(params.threadId).map((row) => ({ ...row,
-      reverted_paths: [...(reverted?.get(row.id) ?? [])].filter((path) => attributedWorkspacePaths(row).includes(path)),
-    }));
+    return deps.turnSnapshotRanges.listSnapshots(params.threadId).map((row) => {
+      const attributed = new Set(attributedWorkspacePaths(row));
+      return { ...row, reverted_paths: [...(reverted?.get(row.id) ?? [])].filter((path) => attributed.has(path)) };
+    });
   },
   "snapshot.getCumulativeDiff": (deps, params) => {
     const range = cumulativeRange(deps, params.threadId);
