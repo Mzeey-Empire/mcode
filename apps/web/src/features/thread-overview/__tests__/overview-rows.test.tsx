@@ -2,7 +2,7 @@ import { createMockThread, createMockWorkspace, mockTransport } from "@/__tests_
 import { ThreadOverview } from "@/components/chat/ThreadOverview";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { resetThreadRecapRequestStateForTest } from "@/hooks/useThreadRecap";
-import { useDiffStore } from "@/stores/diffStore";
+import { rightPanelSingletonId, useDiffStore } from "@/stores/diffStore";
 import { useOverviewStore } from "@/stores/overviewStore";
 import { usePlanStore } from "@/stores/planStore";
 import { useTaskStore, type TaskItem } from "@/stores/taskStore";
@@ -53,6 +53,16 @@ async function flushTimers(ms: number) {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(ms);
   });
+}
+
+function planVersion(version: number): PlanVersion {
+  return {
+    id: `plan-${version}`, threadId: thread.id, messageId: `message-${version}`, version,
+    title: "Tidy thread actions menu", contentMd: "# Tidy thread actions menu",
+    status: "ready", author: "agent", providerId: "cursor", captureSource: "fence", baseVersionId: null,
+    revision: 0, acceptedAt: null, acceptedMessageId: null,
+    createdAt: "2026-07-01T00:00:00.000Z", updatedAt: "2026-07-01T00:00:00.000Z",
+  };
 }
 
 function task(id: string, status: TaskItem["status"]): TaskItem {
@@ -227,5 +237,25 @@ describe("overview Changes, Tasks and Usage rows", () => {
     useTaskStore.getState().setTasks(thread.id, [task("1", "pending"), task("2", "completed")], null);
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
     expect(screen.getByTestId("thread-overview-tasks")).toHaveTextContent("Tasks1/2");
+  });
+
+  it("shows the plan row only with a version and opens the Plan tab in place of the docked card", () => {
+    const { unmount } = render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    expect(screen.queryByTestId("thread-overview-plan")).not.toBeInTheDocument();
+    unmount();
+
+    usePlanStore.setState({ plansByThread: { [thread.id]: [planVersion(1), planVersion(2)] } });
+    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    const row = screen.getByTestId("thread-overview-plan");
+    expect(row).toHaveTextContent("Tidy thread actions menu");
+    expect(row).toHaveTextContent("v2");
+    expect(row).toHaveAccessibleName("Open plan Tidy thread actions menu, version 2");
+
+    fireEvent.click(row);
+
+    const panel = useDiffStore.getState().getRightPanel(thread.workspace_id, thread.id);
+    expect(panel.visible).toBe(true);
+    expect(panel.activeTabId).toBe(rightPanelSingletonId("tasks"));
+    expect(screen.queryByTestId("thread-overview-plan")).not.toBeInTheDocument();
   });
 });
