@@ -400,6 +400,20 @@ describe("NarrativeStore.load (read seam)", () => {
     expect(store.listApprovals("m1")[0]?.outcome).toEqual({ status: "auto_denied", reason: "unreadable" });
   });
 
+  it("reloads a background call's flag so its late end is not read as the turn's", async () => {
+    insertMessage(db, "m1", "assistant", "Started", 1);
+    const tools = new ToolCallRecordRepo(db, agentStorageTestWriter(db));
+    await tools.bulkCreate([
+      { toolCallId: "agent", messageId: "m1", toolName: "Agent", inputSummary: "survey", outputSummary: "done",
+        status: "completed", background: true, sortOrder: 0 },
+      { toolCallId: "read", messageId: "m1", toolName: "Read", inputSummary: "a", outputSummary: "ok",
+        status: "completed", sortOrder: 1 },
+    ]);
+    const records = store.load("thread-1").flatMap((entry) => entry.kind === "toolCall" ? [entry.record] : []);
+    expect(records.map((record) => [record.id, record.background])).toEqual([["agent", true], ["read", undefined]]);
+    expect(tools.listByMessage("m1").map((record) => record.background)).toEqual([true, undefined]);
+  });
+
   it("loads only Agent trees through indexed links and isolates other threads", () => {
     insertMessage(db, "m1", "assistant", "", 1);
     insertMessage(db, "m2", "assistant", "", 2);

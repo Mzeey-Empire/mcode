@@ -500,6 +500,8 @@ export const toolCallRecords = sqliteTable(
     outputArtifactPath: text("output_artifact_path"),
     exitCode: integer("exit_code"),
     status: text("status").notNull().default("running"),
+    /** The provider kept this call running after its turn ended, so its end is not the turn's. */
+    background: integer("background", { mode: "boolean" }).notNull().default(false),
     startedAt: text("started_at").notNull().default(timestampDefault),
     completedAt: text("completed_at"),
     sortOrder: integer("sort_order").notNull().default(0),

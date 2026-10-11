@@ -28,17 +28,32 @@ function validTimestamps(values: readonly (string | null)[]): number[] {
   return values.map(parseTimestamp).filter((value): value is number => value !== null);
 }
 
+/** A background call and the steps under it keep running after the turn, so their ends are not the turn's. */
+function outlivesTurnIds(tools: readonly ToolCallRecord[]): ReadonlySet<string> {
+  const ids = new Set(tools.filter((tool) => tool.background === true).map((tool) => tool.id));
+  let grew = ids.size > 0;
+  while (grew) {
+    const before = ids.size;
+    for (const tool of tools) {
+      if (tool.parent_tool_call_id != null && ids.has(tool.parent_tool_call_id)) ids.add(tool.id);
+    }
+    grew = ids.size > before;
+  }
+  return ids;
+}
+
 /**
  * Approximates turn wall time for legacy turns that have no canonical summary.
  * Narrative records only bound the work they recorded, so this can undercount.
  */
 export function persistedTurnDurationMs(records: PersistedTurnRecords): number | null {
+  const outlivesTurn = outlivesTurnIds(records.tools);
   const starts = validTimestamps([
     ...records.tools.map((tool) => tool.started_at),
     ...records.thoughts.map((thought) => thought.started_at),
   ]);
   const ends = validTimestamps([
-    ...records.tools.map((tool) => tool.completed_at),
+    ...records.tools.filter((tool) => !outlivesTurn.has(tool.id)).map((tool) => tool.completed_at),
     ...records.thoughts.map((thought) => thought.ended_at),
   ]);
   if (starts.length === 0 || ends.length === 0) return null;

@@ -732,8 +732,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     await expect.poll(() => progress.depth().pending).toBe(0);
     await send(releaseOrdinal + 1, { kind: "release" });
     const saved = new CanonicalAgentBoundary(db, () => {});
-    expect(db.prepare("SELECT status, completed_at FROM tool_call_records WHERE id = 'agent'").get())
-      .toEqual({ status: "running", completed_at: null });
+    expect(db.prepare("SELECT status, completed_at, background FROM tool_call_records WHERE id = 'agent'").get())
+      .toEqual({ status: "running", completed_at: null, background: 1 });
     expect(saved.listHeldBackgroundToolCalls())
       .toEqual([{ threadId: execution.threadId, executionId: execution.executionId, toolCallId: "agent" }]);
     const original = progress.latestAssistantMessage(execution.threadId);
@@ -748,8 +748,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       .toThrow("conflicts");
     await expect.poll(() => progress.depth().pending).toBe(0);
 
-    expect(db.prepare("SELECT message_id, status, output_summary FROM tool_call_records WHERE id = 'agent'").get())
-      .toEqual({ message_id: original.id, status: "completed", output_summary: "Found the bug" });
+    expect(db.prepare("SELECT message_id, status, output_summary, background FROM tool_call_records WHERE id = 'agent'").get())
+      .toEqual({ message_id: original.id, status: "completed", output_summary: "Found the bug", background: 1 });
     expect(saved.listHeldBackgroundToolCalls()).toEqual([]);
     const publication = frames().flatMap((frame) => frame.phase === "accepted" ? frame.events : [])
       .flatMap((event) => event.payload.type === "publication.recorded" ? [event.payload.event] : [])

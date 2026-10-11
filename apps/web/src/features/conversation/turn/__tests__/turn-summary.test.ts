@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ToolCallRecord } from "@/transport/types";
-import { persistedTurnCounts } from "../turn-summary";
+import { persistedTurnCounts, persistedTurnDurationMs } from "../turn-summary";
 
 function record(id: string, toolName: string): ToolCallRecord {
   return {
@@ -24,5 +24,16 @@ describe("persistedTurnCounts", () => {
       thoughts: [],
     });
     expect(counts).toEqual({ steps: 1, thoughts: 0, subagents: 0 });
+  });
+});
+
+describe("persistedTurnDurationMs", () => {
+  it("ends the turn at its own work, not at a background call or its steps settling later", () => {
+    const read = { ...record("read", "Read"), completed_at: "2026-08-18T12:00:05.000Z" };
+    const agent = { ...record("agent", "Agent"), background: true, completed_at: "2026-08-18T12:10:00.000Z" };
+    const step = { ...record("step", "Bash"), parent_tool_call_id: "agent", completed_at: "2026-08-18T12:09:00.000Z" };
+    const nested = { ...record("nested", "Read"), parent_tool_call_id: "step", completed_at: "2026-08-18T12:09:30.000Z" };
+
+    expect(persistedTurnDurationMs({ tools: [nested, step, agent, read], thoughts: [] })).toBe(5_000);
   });
 });

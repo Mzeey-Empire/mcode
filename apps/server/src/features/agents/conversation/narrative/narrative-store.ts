@@ -509,6 +509,7 @@ export class NarrativeStore {
           output_artifact_path: tool.outputArtifactPath,
           exit_code: tool.exitCode,
           status: tool.status,
+          ...(tool.background ? { background: true } : {}),
           started_at: tool.startedAt,
           completed_at: tool.completedAt,
           sort_order: tool.sortOrder,

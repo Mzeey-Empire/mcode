@@ -85,6 +85,7 @@ private recoveredToolCallState(item: RecoveredToolCallItem) {
     const record = item.record;
     return {
       status: record.status,
+      ...(record.background === true ? { background: true } : {}),
       startedAt: record.started_at,
       completedAt: this.optionalRecoveryValue(record.completed_at),
       sortOrder: record.sort_order,

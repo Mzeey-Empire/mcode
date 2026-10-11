@@ -15,6 +15,7 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useToastStore } from "@/stores/toastStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { SnapshotBuilder } from "@/features/conversation/hydration/snapshot-builder";
+import { persistedTurnDurationMs } from "@/features/conversation/turn/turn-summary";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -484,6 +485,30 @@ describe("handleAgentEvent branches", () => {
       expect(persistedTools()).toEqual([
         expect.objectContaining({ id: "agent-bg", status, output_summary: "Survey done", completed_at: expect.any(String) }),
       ]);
+    });
+
+    it("keeps the finished turn's duration when its background call settles minutes later", () => {
+      const read = { id: "read-1", message_id: "assistant-persisted", parent_tool_call_id: null, tool_name: "Read",
+        input_summary: "/a", output_summary: "ok", status: "completed" as const,
+        started_at: "2026-01-01T00:00:01.000Z", completed_at: "2026-01-01T00:00:05.000Z", sort_order: 0 };
+      useThreadStore.setState((state) => ({
+        records: patchThreadRecord(state.records, "thread-1", (record) => ({
+          narrativeByMessage: {
+            ...record.narrativeByMessage,
+            "assistant-persisted": { tools: [read, heldRecord], thoughts: [], approvals: [], hooks: [] },
+          },
+        })),
+      }));
+      vi.setSystemTime(new Date("2026-01-01T00:10:00.000Z"));
+
+      dispatch({ type: "toolResult", toolCallId: "agent-bg", output: "Survey done", isError: false, persistedMessageId: "assistant-persisted" });
+
+      const tools = persistedTools() ?? [];
+      expect(tools).toEqual([
+        expect.objectContaining({ id: "read-1" }),
+        expect.objectContaining({ id: "agent-bg", status: "completed", background: true, completed_at: "2026-01-01T00:10:00.000Z" }),
+      ]);
+      expect(persistedTurnDurationMs({ tools, thoughts: [] })).toBe(5_000);
     });
 
     it("never lets a late result settle a different running call, and ignores its redelivery", () => {
