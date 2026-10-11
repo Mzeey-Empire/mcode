@@ -11,6 +11,7 @@ import {
   buildToolCallHierarchy,
   createSubagentItem,
   createToolGroupItem,
+  isTurnWorkRunning,
 } from "./narrative-builder-helpers";
 import {
   filterThoughtsMatchingAssistantBody,
@@ -68,7 +69,7 @@ export function prepareLiveNarrative(
   const activeToolCalls = hierarchy.topLevel.filter(
     (toolCall) => !toolCall.isComplete && toolCall.toolName !== AGENT_TOOL_NAME,
   );
-  const hasRunningTopLevelTool = hierarchy.topLevel.some((toolCall) => !toolCall.isComplete);
+  const hasRunningTopLevelTool = hierarchy.topLevel.some(isTurnWorkRunning);
   return {
     toolCalls,
     topLevelCalls: hierarchy.topLevel,

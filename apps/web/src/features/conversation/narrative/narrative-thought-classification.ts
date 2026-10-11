@@ -1,5 +1,6 @@
 import type { ToolCall, ThoughtSegmentRecord } from "@/transport/types";
 import type { ThoughtSegment } from "./types";
+import { isTurnWorkRunning } from "./narrative-builder-helpers";
 
 /** True for the model's thinking. Reasoning never fills the answer slot, the answer tape, or the heading. */
 export function isReasoningSegment(segment: Pick<ThoughtSegment, "kind"> | undefined): boolean {
@@ -23,7 +24,7 @@ export function computeLiveStreamingText(params: {
   const thoughtSegments = narrationSegments(params.thoughtSegments);
 
   const anyToolRunning = toolCalls.some(
-    (toolCall) => toolCall.parentToolCallId == null && !toolCall.isComplete,
+    (toolCall) => toolCall.parentToolCallId == null && isTurnWorkRunning(toolCall),
   );
   if (anyToolRunning) return "";
 

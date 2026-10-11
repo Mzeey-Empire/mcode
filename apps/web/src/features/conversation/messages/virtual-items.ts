@@ -4,6 +4,7 @@ import type { ApprovalReceipt, NarrativeCounts, ThoughtSegment, TurnSummary } fr
 import { buildNarrativeItems, computeLiveStreamingText } from "../narrative/build-narrative";
 import { buildPersistedNarrativeItems } from "../narrative/build-persisted-narrative";
 import { currentActivityHeading } from "../narrative/activity-label";
+import { isTurnWorkRunning } from "../narrative/narrative-builder-helpers";
 import { deriveRunStatus, type RunHoldingSignals, type RunStatus } from "../narrative/run-status";
 import { isRoutineProviderNotice } from "../notices/provider-notices";
 import { approvalReviewNote, persistedTurnCounts, persistedTurnDurationMs } from "../turn/turn-summary";
@@ -572,7 +573,7 @@ const NO_HOLDING_SIGNALS: RunHoldingSignals = { stopPending: false, compacting: 
 function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts, answering, holdingSignals }: NarrativeIndicatorInput): ChatVirtualItem | undefined {
   if (!isAgentRunning && toolCalls.length === 0) return undefined;
   const topLevelTools = toolCalls.filter((toolCall) => toolCall.parentToolCallId == null);
-  const running = topLevelTools.filter((toolCall) => !toolCall.isComplete);
+  const running = topLevelTools.filter(isTurnWorkRunning);
   const status = deriveRunStatus({
     ...(holdingSignals ?? NO_HOLDING_SIGNALS),
     activeTool: running.filter((toolCall) => toolCall.toolName !== "Agent").at(-1),

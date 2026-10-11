@@ -793,6 +793,15 @@ describe("buildVirtualItems (combined)", () => {
     expect(status([running, makeToolCall({ id: "grep", toolName: "Grep", isComplete: false })])).toEqual({ label: "Searching the codebase", icon: "layers" });
   });
 
+  it("does not let a backgrounded Agent call hold the turn's indicator or answer", () => {
+    const background = makeToolCall({ id: "a1", toolName: "Agent", isComplete: false, background: true });
+    const answering = buildVolatileItems([background], STREAMING_AGENT, 1000, "It runs in the background.");
+    expect(answering.some(isLiveResponse)).toBe(true);
+    expect(findIndicator(answering)?.status).toEqual({ label: "Answering", icon: "layers" });
+    const thinking = buildVolatileItems([background], STREAMING_AGENT, 1000, undefined);
+    expect(findIndicator(thinking)?.status).toEqual({ label: "Thinking", icon: "layers" });
+  });
+
   it("indicator reads Answering exactly when the live response row exists", () => {
     const narration: ThoughtSegment = { text: "**Inspecting layout**", startedAt: 1, isExplicitNonFinal: true };
     const silent = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, undefined, undefined, [narration]);
