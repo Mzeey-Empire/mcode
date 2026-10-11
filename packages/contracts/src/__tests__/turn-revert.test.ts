@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { WS_METHODS, WS_CHANNELS, TurnRevertPreviewSchema, TurnRevertResultSchema, SystemNoticeMetadataSchema } from "../index.js";
+import { WS_METHODS, WS_CHANNELS, TurnRevertPreviewSchema, TurnRevertResultSchema, SystemNoticeMetadataSchema, TurnSnapshotSchema } from "../index.js";
 
 describe("turn revert wire contract", () => {
+  it("requires explicit reverted paths on every snapshot", () => {
+    const snapshot = { id: "s", message_id: "m", thread_id: "t", ref_before: "before", ref_after: "after",
+      files_changed: ["a.ts"], worktree_path: null, created_at: "2026-10-11T00:00:00Z", attempt_count: 1 };
+    expect(TurnSnapshotSchema().safeParse(snapshot).success).toBe(false);
+    expect(TurnSnapshotSchema().safeParse({ ...snapshot, reverted_paths: [1] }).success).toBe(false);
+    for (const reverted_paths of [[], ["a.ts"]]) {
+      expect(TurnSnapshotSchema().parse({ ...snapshot, reverted_paths })).toEqual({ ...snapshot, reverted_paths });
+    }
+  });
+
   it("parses turn and file-range requests, requires request identity, and rejects invalid scopes", () => {
     const preview = WS_METHODS()["turn.revert.preview"].params;
     expect(preview.parse({ threadId: "t", messageId: "m", scope: { kind: "turn" } })).toEqual({ threadId: "t", messageId: "m", scope: { kind: "turn" } });

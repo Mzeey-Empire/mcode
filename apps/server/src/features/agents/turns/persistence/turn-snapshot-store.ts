@@ -60,6 +60,7 @@ function rowToTurnSnapshot(row: TurnSnapshotRow): TurnSnapshot {
     worktree_path: row.worktreePath,
     created_at: row.createdAt,
     attempt_count: 1,
+    reverted_paths: [],
   };
 }
 
@@ -110,6 +111,7 @@ export class TurnSnapshotStore {
       worktree_path: input.worktreePath,
       created_at: now,
       attempt_count: 1,
+      reverted_paths: [],
     };
   }
 
