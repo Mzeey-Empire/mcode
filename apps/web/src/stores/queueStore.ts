@@ -15,11 +15,17 @@ import { releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-
  * A queued message's steer into a running turn, while it is unsettled. The provider may
  * already hold a `steering` or `delivery_unknown` message, so neither is ever sent again on
  * its own; a `resend` is an ordinary queued turn whose id is the server's replacement id.
+ * `settling` holds a held item while the server settles it, and remembers what to restore.
  */
 export type QueuedSteer =
   | { readonly state: "steering"; readonly steerId: string; readonly turnExecutionId: string }
   | { readonly state: "delivery_unknown"; readonly steerId: string }
-  | { readonly state: "resend"; readonly resendOfSteerId: string };
+  | { readonly state: "resend"; readonly resendOfSteerId: string }
+  | {
+    readonly state: "settling";
+    readonly steerId: string;
+    readonly previous: Extract<QueuedSteer, { state: "delivery_unknown" | "resend" }>;
+  };
 
 /** A message waiting to be sent while the thread is busy with another turn. */
 export interface QueuedMessage {
@@ -61,7 +67,8 @@ export interface QueuedMessage {
 
 /** True while the provider may hold this message, so the dispatcher must not send it. */
 export function isHeldQueuedMessage(message: QueuedMessage): boolean {
-  return message.steer?.state === "steering" || message.steer?.state === "delivery_unknown";
+  const state = message.steer?.state;
+  return state === "steering" || state === "delivery_unknown" || state === "settling";
 }
 
 /** True when Mcode cannot tell whether the provider took this message's steer. */

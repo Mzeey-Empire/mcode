@@ -3132,11 +3132,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   const ownsOptimisticRuntime = (
     record: ThreadRecord,
     isControlCommand: boolean,
-    activeSessionConflict: boolean,
+    promptDiscarded: boolean,
     responseKey: string,
     executionId: string | null,
   ): boolean => {
-    if (isControlCommand || activeSessionConflict) return false;
+    if (isControlCommand || promptDiscarded) return false;
     return record.currentTurnResponseKey === responseKey
       && record.turnExecutionId === executionId
       && record.runtimePhase === "running";
@@ -3146,22 +3146,25 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     threadId: string, error: unknown,
     isControlCommand: boolean, runningBeforeControl: Set<string> | undefined,
     responseKey: string, executionId: string | null, userMessageId: string,
+    alreadySent = false,
   ): boolean => {
     const message = String(error);
     const activeSessionConflict = !isControlCommand && message.includes("already has an active agent session");
+    // A resend another window already sent is a normal outcome. Its turn owns the thread now, so
+    // like a session conflict the optimistic prompt is dropped and the runtime is left alone.
+    const discardPrompt = activeSessionConflict || alreadySent;
     let invalidateFailedPrompt = false;
     set((state) => {
       const record = getThreadRecord(state.records, threadId);
       // RPC failures may arrive after canonical admission or a newer prompt.
       if (!isControlCommand && record.optimisticUserMessageId !== userMessageId) return {};
-      invalidateFailedPrompt = !isControlCommand && !activeSessionConflict;
-      const ownsRuntime = ownsOptimisticRuntime(record, isControlCommand, activeSessionConflict, responseKey, executionId);
+      invalidateFailedPrompt = !isControlCommand && !discardPrompt;
+      const ownsRuntime = ownsOptimisticRuntime(record, isControlCommand, discardPrompt, responseKey, executionId);
       return {
         records: patchThreadRecord(state.records, threadId, (current) => ({
-          error: message,
-          errorSource: "send",
+          ...(alreadySent ? {} : { error: message, errorSource: "send" as const }),
           ...(current.optimisticUserMessageId === userMessageId ? { optimisticUserMessageId: null } : {}),
-          ...(activeSessionConflict && state.currentThreadId === threadId ? { messages: current.messages.filter((item) => item.id !== userMessageId) } : {}),
+          ...(discardPrompt && state.currentThreadId === threadId ? { messages: current.messages.filter((item) => item.id !== userMessageId) } : {}),
           ...(ownsRuntime ? { agentStartTime: undefined, runtimePhase: "errored" as const } : {}),
         })),
       };
@@ -3669,12 +3672,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       return true;
     } catch (error) {
       // Another window already settled this resend, so the queue item is spent, not retryable.
-      if (resendOfSteerId && error instanceof RpcError && error.code === "steer_resend_closed") {
-        useQueueStore.getState().settleQueuedDispatch(threadId, userMessage.id, true);
-      }
+      const alreadySent = Boolean(resendOfSteerId) && error instanceof RpcError && error.code === "steer_resend_closed";
+      if (alreadySent) useQueueStore.getState().settleQueuedDispatch(threadId, userMessage.id, true);
       return rollbackFailedSend(
         threadId, error, isControlCommand, runningBeforeControl,
-        optimisticTurnResponseKey, optimisticTurnExecutionId, userMessage.id,
+        optimisticTurnResponseKey, optimisticTurnExecutionId, userMessage.id, alreadySent,
       );
     }
   },

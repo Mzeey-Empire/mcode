@@ -2,11 +2,11 @@ import { ArrowUp, CornerDownRight, Paperclip, Pencil, X } from "lucide-react";
 import { ProviderIdSchema } from "@mcode/contracts";
 import { Button, IconButton } from "@/components/ui/button";
 import {
-  heldSteerId,
   isSteerable,
-  removeHeldSteer,
+  releaseHeldSteer,
   sendHeldSteerAgain,
 } from "@/features/conversation/composer/queue/queued-steer";
+import { useSendNowRoute } from "@/features/conversation/composer/queue/useQueuedMessageDispatch";
 import { supportsTurnSteer } from "@/features/conversation/composer/composer-capabilities";
 import { stripPreviewAnnotationFence } from "@/features/preview/capture/preview-annotation-append";
 import { isDeliveryUnknown, useQueueStore, type QueuedMessage } from "@/stores/queueStore";
@@ -17,7 +17,6 @@ const EMPTY_QUEUE: QueuedMessage[] = [];
 
 interface ComposerQueueListProps {
   threadId: string;
-  isAgentRunning: boolean;
   /** The thread's provider; Send now shows during a turn only if it accepts a steer. */
   provider?: string;
   /** True while another composer surface must finish before anything is sent. */
@@ -34,7 +33,6 @@ interface ComposerQueueListProps {
  */
 export function ComposerQueueList({
   threadId,
-  isAgentRunning,
   provider,
   isPaused = false,
   onSendNow,
@@ -44,24 +42,17 @@ export function ComposerQueueList({
   const providerId = ProviderIdSchema.safeParse(provider);
   const canSteer = useProviderAvailabilityStore((s) =>
     providerId.success && supportsTurnSteer(s.getAvailability(providerId.data)?.capabilities ?? []));
+  const route = useSendNowRoute(threadId);
   if (queue.length === 0) return null;
 
-  const canSendNow = (message: QueuedMessage) =>
-    !isPaused && (!isAgentRunning || (canSteer && isSteerable(message)));
+  const canSendNow = (message: QueuedMessage) => !isPaused
+    && (route === "send" || (route === "steer" && canSteer && isSteerable(message)));
 
-  // A resend is held by the server, so Edit and Remove settle it there first.
-  const releaseHeld = async (message: QueuedMessage): Promise<boolean> => {
-    const steerId = heldSteerId(message);
-    if (!steerId) return true;
-    if (!(await removeHeldSteer(steerId))) return false;
-    useQueueStore.getState().setQueuedSteer(threadId, message.id, undefined);
-    return true;
-  };
   const edit = async (message: QueuedMessage) => {
-    if (await releaseHeld(message)) onLoadIntoComposer(message);
+    if (await releaseHeldSteer(threadId, message) === "plain") onLoadIntoComposer(message);
   };
   const remove = async (message: QueuedMessage) => {
-    if (await releaseHeld(message)) useQueueStore.getState().removeFromQueue(threadId, message.id);
+    if (await releaseHeldSteer(threadId, message) === "plain") useQueueStore.getState().removeFromQueue(threadId, message.id);
   };
 
   return (
@@ -73,11 +64,15 @@ export function ComposerQueueList({
           </span>
           <QueueRowText message={message} />
           {isDeliveryUnknown(message) ? (
-            <DeliveryUnknownActions threadId={threadId} message={message} onRemove={() => void remove(message)} />
+            <DeliveryUnknownActions
+              position={index + 1}
+              onSendAgain={() => void sendHeldSteerAgain(threadId, message)}
+              onRemove={() => void remove(message)}
+            />
           ) : (
             <QueueRowActions
               position={index + 1}
-              steering={message.steer?.state === "steering"}
+              pending={pendingLabel(message)}
               canSendNow={canSendNow(message)}
               onSendNow={() => onSendNow(message)}
               onEdit={() => void edit(message)}
@@ -118,47 +113,56 @@ function QueueRowText({ message }: { message: QueuedMessage }) {
   );
 }
 
+/** What a row is waiting on, if anything; nothing may change the item until it answers. */
+function pendingLabel(message: QueuedMessage): string | undefined {
+  if (message.steer?.state === "steering") return "Adding to turn";
+  if (message.steer?.state === "settling") return "Settling";
+  return undefined;
+}
+
 interface QueueRowActionsProps {
   readonly position: number;
-  /** A steer is awaiting its answer; nothing may change the item until it arrives. */
-  readonly steering: boolean;
+  readonly pending: string | undefined;
   readonly canSendNow: boolean;
   readonly onSendNow: () => void;
   readonly onEdit: () => void;
   readonly onRemove: () => void;
 }
 
-function QueueRowActions({ position, steering, canSendNow, onSendNow, onEdit, onRemove }: QueueRowActionsProps) {
+function QueueRowActions({ position, pending, canSendNow, onSendNow, onEdit, onRemove }: QueueRowActionsProps) {
+  const busy = pending !== undefined;
   return (
-    <span className="flex w-24 shrink-0 items-center justify-end">
-      {canSendNow && !steering ? (
+    <span className="flex shrink-0 items-center justify-end gap-1">
+      <span role="status" className="text-body-small text-muted">{pending}</span>
+      <span className="flex w-24 items-center justify-end">
+      {canSendNow && !busy ? (
         <IconButton aria-label={`Send queued message ${position} now`} tooltip="Send now" onClick={onSendNow}>
           <ArrowUp strokeWidth={1.5} />
         </IconButton>
       ) : null}
-      <IconButton aria-label={`Edit queued message ${position}`} tooltip="Edit" disabled={steering} onClick={onEdit}>
+      <IconButton aria-label={`Edit queued message ${position}`} tooltip="Edit" disabled={busy} onClick={onEdit}>
         <Pencil strokeWidth={1.5} />
       </IconButton>
-      <IconButton aria-label={`Remove queued message ${position}`} tooltip="Remove" disabled={steering} onClick={onRemove}>
+      <IconButton aria-label={`Remove queued message ${position}`} tooltip="Remove" disabled={busy} onClick={onRemove}>
         <X strokeWidth={1.5} />
       </IconButton>
+      </span>
     </span>
   );
 }
 
-function DeliveryUnknownActions({ threadId, message, onRemove }: {
-  threadId: string;
-  message: QueuedMessage;
+function DeliveryUnknownActions({ position, onSendAgain, onRemove }: {
+  position: number;
+  onSendAgain: () => void;
   onRemove: () => void;
 }) {
-  const steerId = heldSteerId(message);
   return (
     <span className="flex shrink-0 items-center gap-1">
       <span className="text-body-small text-muted">Delivery unknown</span>
-      <Button variant="ghost" onClick={() => { if (steerId) void sendHeldSteerAgain(threadId, steerId); }}>
+      <Button variant="ghost" aria-label={`Send queued message ${position} again`} onClick={onSendAgain}>
         Send again
       </Button>
-      <Button variant="ghost" onClick={onRemove}>Remove</Button>
+      <Button variant="ghost" aria-label={`Remove queued message ${position}`} onClick={onRemove}>Remove</Button>
     </span>
   );
 }

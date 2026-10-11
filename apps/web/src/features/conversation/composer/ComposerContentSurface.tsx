@@ -168,7 +168,6 @@ function ComposerTraySurface({
       queue={(
         <ComposerQueueList
           threadId={model.threadId}
-          isAgentRunning={model.isAgentRunning}
           provider={model.provider}
           isPaused={paused}
           onLoadIntoComposer={actions.onLoadIntoComposer}

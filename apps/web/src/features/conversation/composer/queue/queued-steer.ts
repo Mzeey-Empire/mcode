@@ -1,21 +1,31 @@
-import type { HeldSteer, TurnSteerResult } from "@mcode/contracts";
+import type { HeldSteer, SettleUnknownSteerResult, TurnSteerResult } from "@mcode/contracts";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useQueueStore, type QueuedMessage, type QueuedSteer } from "@/stores/queueStore";
-import { useThreadStore } from "@/stores/threadStore";
+import { scheduleDrainAfterEdit, useThreadStore } from "@/stores/threadStore";
 import { useToastStore } from "@/stores/toastStore";
 import { getTransport, RpcError } from "@/transport";
 
 type SteeringSteer = Extract<QueuedSteer, { state: "steering" }>;
+type SettlingSteer = Extract<QueuedSteer, { state: "settling" }>;
+
+/** Steer ids with a request on the wire, so a reconnect replay never doubles a live call. */
+const steersInFlight = new Set<string>();
 
 /**
- * A steer carries only text and mentions, so a message with attachments, preview
- * annotations or a browser capture would lose them; those wait for the next turn instead.
+ * A steer carries only text and mentions into the running turn's settings. A message with
+ * anything else (attachments, preview annotations, a browser capture, a goal, or a per-turn
+ * mode) would lose it, and one whose shown text differs from its content would be recorded
+ * as the hidden text; those wait for the next turn instead.
  */
 export function isSteerable(message: QueuedMessage): boolean {
   return !message.steer
     && message.attachments.length === 0
     && !message.previewAnnotations
-    && !message.browserCaptureSpillPaths?.length;
+    && !message.browserCaptureSpillPaths?.length
+    && !message.goalObjective
+    && !message.orchestrationMode
+    && !message.devinMode
+    && (message.displayContent === undefined || message.displayContent === message.content);
 }
 
 function findQueued(threadId: string, predicate: (message: QueuedMessage) => boolean): QueuedMessage | undefined {
@@ -32,6 +42,8 @@ function applySteerResult(threadId: string, itemId: string, steerId: string, res
 }
 
 async function callSteer(threadId: string, message: QueuedMessage, steer: SteeringSteer): Promise<void> {
+  if (steersInFlight.has(steer.steerId)) return;
+  steersInFlight.add(steer.steerId);
   try {
     const result = await getTransport().steerTurn({
       threadId,
@@ -48,6 +60,10 @@ async function callSteer(threadId: string, message: QueuedMessage, steer: Steeri
     useQueueStore.getState().setQueuedSteer(threadId, message.id, undefined);
     const detail = typeof error.data?.detail === "string" ? error.data.detail : error.message;
     useToastStore.getState().show({ kind: "failed", title: "Not added to the running turn", meta: detail });
+    // The turn may have ended while the steer was out, and that turn's drain skipped this item.
+    scheduleDrainAfterEdit(threadId);
+  } finally {
+    steersInFlight.delete(steer.steerId);
   }
 }
 
@@ -60,46 +76,67 @@ export async function steerQueuedMessage(threadId: string, messageId: string, tu
   await callSteer(threadId, { ...message, steer }, steer);
 }
 
-function showSettleFailure(error: unknown): void {
-  const meta = error instanceof Error ? error.message : String(error);
-  useToastStore.getState().show({ kind: "failed", title: "Could not settle the message", meta });
-}
-
-/** Send again: the server stores a resend under a replacement id, which this item becomes. */
-export async function sendHeldSteerAgain(threadId: string, steerId: string): Promise<void> {
-  try {
-    const result = await getTransport().settleUnknownSteer({ messageId: steerId, action: "send-again" });
-    const queue = useQueueStore.getState();
-    if (result.status === "requeued") {
-      queue.requeueAsResend(threadId, steerId, result.replacementMessageId);
-      return;
-    }
-    const held = findQueued(threadId, (item) => item.steer?.state === "delivery_unknown" && item.steer.steerId === steerId);
-    if (held) queue.removeFromQueue(threadId, held.id);
-  } catch (error) {
-    showSettleFailure(error);
-  }
-}
-
-/**
- * Settles a held steer or queued resend with `remove`, so no window or reload brings it back.
- * Returns false when the server could not be asked, leaving the item where it was.
- */
-export async function removeHeldSteer(steerId: string): Promise<boolean> {
-  try {
-    await getTransport().settleUnknownSteer({ messageId: steerId, action: "remove" });
-    return true;
-  } catch (error) {
-    showSettleFailure(error);
-    return false;
-  }
-}
-
 /** The server id of the held steer behind a queue item, if it has one. */
 export function heldSteerId(message: QueuedMessage): string | undefined {
   if (message.steer?.state === "resend") return message.steer.resendOfSteerId;
   if (message.steer?.state === "delivery_unknown") return message.steer.steerId;
   return undefined;
+}
+
+/**
+ * Settles the held steer behind a queue item. The item stays held while the server answers,
+ * so no drain sends it meanwhile, and it is restored if the server cannot be asked.
+ */
+async function settleHeld(
+  threadId: string,
+  message: QueuedMessage,
+  action: "send-again" | "remove",
+): Promise<{ readonly result: SettleUnknownSteerResult; readonly steerId: string; readonly previous: SettlingSteer["previous"] } | null> {
+  const steer = message.steer;
+  const steerId = heldSteerId(message);
+  if (!steerId || (steer?.state !== "delivery_unknown" && steer?.state !== "resend")) return null;
+  const queue = useQueueStore.getState();
+  queue.setQueuedSteer(threadId, message.id, { state: "settling", steerId, previous: steer });
+  try {
+    const result = await getTransport().settleUnknownSteer({ messageId: steerId, action });
+    return { result, steerId, previous: steer };
+  } catch (error) {
+    useQueueStore.getState().setQueuedSteer(threadId, message.id, steer);
+    const meta = error instanceof Error ? error.message : String(error);
+    useToastStore.getState().show({ kind: "failed", title: "Could not settle the message", meta });
+    return null;
+  }
+}
+
+/** Send again: the server stores a resend under a replacement id, which this item becomes. */
+export async function sendHeldSteerAgain(threadId: string, message: QueuedMessage): Promise<void> {
+  const settled = await settleHeld(threadId, message, "send-again");
+  if (!settled) return;
+  const queue = useQueueStore.getState();
+  if (settled.result.status !== "requeued") {
+    queue.removeFromQueue(threadId, message.id);
+    return;
+  }
+  queue.setQueuedSteer(threadId, message.id, settled.previous);
+  queue.requeueAsResend(threadId, settled.steerId, settled.result.replacementMessageId);
+  scheduleDrainAfterEdit(threadId);
+}
+
+/**
+ * Releases a queue item from the steer the server holds for it, before Edit or Remove.
+ * Returns `plain` when the item is now an ordinary queued message, `sent` when another
+ * window already sent or removed it, and `kept` when the server could not be asked.
+ */
+export async function releaseHeldSteer(threadId: string, message: QueuedMessage): Promise<"plain" | "sent" | "kept"> {
+  if (!heldSteerId(message)) return "plain";
+  const settled = await settleHeld(threadId, message, "remove");
+  if (!settled) return "kept";
+  if (settled.result.status === "closed") {
+    useQueueStore.getState().removeFromQueue(threadId, message.id);
+    return "sent";
+  }
+  useQueueStore.getState().setQueuedSteer(threadId, message.id, undefined);
+  return "plain";
 }
 
 function adoptedMessage(held: HeldSteer, id: string, steer: QueuedSteer): QueuedMessage {
@@ -111,7 +148,7 @@ function adoptedMessage(held: HeldSteer, id: string, steer: QueuedSteer): Queued
     attachments: [],
     // Empty inherits the thread's model at send time; the server stores only the text.
     model: thread?.model ?? "",
-    permissionMode: useThreadStore.getState().getThreadSettings(held.threadId).permissionMode,
+    permissionMode: thread?.permission_mode ?? useThreadStore.getState().getThreadSettings(held.threadId).permissionMode,
     queuedAt: Date.now(),
     steer,
   };
@@ -120,7 +157,10 @@ function adoptedMessage(held: HeldSteer, id: string, steer: QueuedSteer): Queued
 function mergeHeldSteer(held: HeldSteer): void {
   const queue = useQueueStore.getState();
   const local = findQueued(held.threadId, (item) =>
-    (item.steer?.state === "steering" || item.steer?.state === "delivery_unknown") && item.steer.steerId === held.messageId);
+    (item.steer?.state === "steering" || item.steer?.state === "delivery_unknown" || item.steer?.state === "settling")
+    && item.steer.steerId === held.messageId);
+  // This window is settling the steer right now; its answer decides the item.
+  if (local?.steer?.state === "settling") return;
   if (held.state === "delivery_unknown") {
     if (local) queue.setQueuedSteer(held.threadId, local.id, { state: "delivery_unknown", steerId: held.messageId });
     else queue.adoptHeldSteer(held.threadId, adoptedMessage(held, crypto.randomUUID(), { state: "delivery_unknown", steerId: held.messageId }));
@@ -138,6 +178,7 @@ function mergeHeldSteer(held: HeldSteer): void {
 /**
  * Runs on every connect. Unanswered steers are asked again under the same id, which the server
  * answers from its row and never resends, then every held steer is restored to the tray.
+ * Restored resends wait for Send now, since another window may be sending the same one.
  */
 export async function restoreQueuedSteers(): Promise<void> {
   const queues = useQueueStore.getState().queues;

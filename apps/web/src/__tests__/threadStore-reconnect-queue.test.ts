@@ -809,7 +809,8 @@ describe("threadStore reconnect and queued follow-ups", () => {
 
       listHeld().mockResolvedValueOnce([{ messageId: STEER, threadId: THREAD_ID, content: "held", state: "resend_queued", replacementMessageId: REPLACEMENT }]);
       (mockTransport.settleUnknownSteer as ReturnType<typeof vi.fn>).mockResolvedValue({ status: "requeued", replacementMessageId: REPLACEMENT });
-      await Promise.all([restoreQueuedSteers(), sendHeldSteerAgain(THREAD_ID, STEER)]);
+      await Promise.all([restoreQueuedSteers(), sendHeldSteerAgain(THREAD_ID, adopted)]);
+      expect(mockTransport.settleUnknownSteer).toHaveBeenCalledWith({ messageId: STEER, action: "send-again" });
 
       expect(contents()).toEqual([[REPLACEMENT, { state: "resend", resendOfSteerId: STEER }]]);
     });

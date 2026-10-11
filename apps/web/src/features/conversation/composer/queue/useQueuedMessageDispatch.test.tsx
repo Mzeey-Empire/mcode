@@ -4,7 +4,7 @@ import type { AgentEvent, AgentStopResult } from "@mcode/contracts";
 import { useQueueStore } from "@/stores/queueStore";
 import { useToastStore } from "@/stores/toastStore";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
-import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
+import { createEmptyThreadRecord, getThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { createMockThread, mockTransport } from "@/__tests__/mocks/transport";
@@ -303,5 +303,50 @@ describe("useQueuedMessageDispatch", () => {
 
     expect(queuedContents()).toEqual([]);
     expect(useQueueStore.getState().inFlightQueuedMessages[THREAD_ID]).toBeUndefined();
+    expect(getThreadRecord(useThreadStore.getState().records, THREAD_ID).error).toBeNull();
+  });
+
+  it("sends a rejected steer as the next turn when its turn ended meanwhile", async () => {
+    vi.useFakeTimers();
+    queueMessage("late follow-up");
+    runTurn();
+    let reject: (error: unknown) => void = () => undefined;
+    (mockTransport.steerTurn as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => new Promise((_, rejectSteer) => { reject = rejectSteer; }),
+    );
+    const { result } = renderHook(() => useQueuedMessageDispatch(THREAD_ID));
+    let steering: Promise<void> = Promise.resolve();
+    act(() => { steering = result.current.sendNow(queued(0)); });
+
+    useThreadStore.setState({
+      records: new Map([[THREAD_ID, { ...createEmptyThreadRecord(), runtimePhase: "idle" }]]),
+      runningThreadIds: new Set(),
+    });
+    await act(async () => {
+      reject(new RpcError("turn not running", "turn_not_running"));
+      await steering;
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    vi.useRealTimers();
+
+    expect(mockTransport.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: THREAD_ID, content: "late follow-up" }),
+    );
+  });
+
+  it("neither steers nor sends while the record still names the previous turn", async () => {
+    queueMessage("follow-up");
+    runTurn();
+    useThreadStore.setState((state) => ({
+      records: new Map([[THREAD_ID, { ...getThreadRecord(state.records, THREAD_ID), optimisticUserMessageId: "pending" }]]),
+    }));
+    const { result } = renderHook(() => useQueuedMessageDispatch(THREAD_ID));
+
+    await act(async () => {
+      await result.current.sendNow(queued(0));
+    });
+
+    expect(mockTransport.steerTurn).not.toHaveBeenCalled();
+    expect(mockTransport.sendMessage).not.toHaveBeenCalled();
   });
 });

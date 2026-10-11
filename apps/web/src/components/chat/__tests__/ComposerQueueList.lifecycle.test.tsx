@@ -1,12 +1,14 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentEvent } from "@mcode/contracts";
 import { createMockThread, mockTransport } from "@/__tests__/mocks/transport";
 import { useQueuedMessageDispatch } from "@/features/conversation/composer/queue/useQueuedMessageDispatch";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { useQueueStore } from "@/stores/queueStore";
+import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
+import { useQueueStore, type QueuedMessage } from "@/stores/queueStore";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
+import { getThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
 import { ComposerQueueList } from "../ComposerQueueList";
 
@@ -27,15 +29,30 @@ function queueMessage(content: string): void {
   });
 }
 
-function QueueControls() {
-  const isAgentRunning = useThreadStore((state) => state.runningThreadIds.has(THREAD_ID));
+function runTurn(): void {
+  useThreadStore.setState((state) => ({
+    records: new Map([[THREAD_ID, { ...getThreadRecord(state.records, THREAD_ID), runtimePhase: "running", turnExecutionId: "turn-1" }]]),
+    runningThreadIds: new Set([THREAD_ID]),
+  }));
+}
+
+function holdSteer(content: string): QueuedMessage {
+  queueMessage(content);
+  const held = useQueueStore.getState().queues[THREAD_ID]!.at(-1)!;
+  useQueueStore.getState().setQueuedSteer(THREAD_ID, held.id, { state: "delivery_unknown", steerId: "steer-1" });
+  return held;
+}
+
+function QueueControls({ provider = "cursor", onLoad = () => undefined }: {
+  provider?: string;
+  onLoad?: (message: QueuedMessage) => void;
+}) {
   const { sendNow } = useQueuedMessageDispatch(THREAD_ID);
   return (
     <ComposerQueueList
       threadId={THREAD_ID}
-      isAgentRunning={isAgentRunning}
-      provider="cursor"
-      onLoadIntoComposer={() => undefined}
+      provider={provider}
+      onLoadIntoComposer={onLoad}
       onSendNow={(message) => void sendNow(message)}
     />
   );
@@ -61,6 +78,9 @@ describe("ComposerQueueList lifecycle", () => {
     useWorkspaceStore.setState({
       activeThreadId: THREAD_ID,
       threads: [createMockThread({ id: THREAD_ID })],
+    });
+    useProviderAvailabilityStore.setState({
+      providers: [{ id: "codex", capabilities: [{ name: "turn-steer", support: "supported" }] }] as never,
     });
     (mockTransport.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(1);
   });
@@ -156,7 +176,7 @@ describe("ComposerQueueList lifecycle", () => {
 
     expect(screen.getByText("Delivery unknown")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit queued message 1" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Send again" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send queued message 1 again" }));
 
     expect(mockTransport.settleUnknownSteer).toHaveBeenCalledWith({ messageId: "steer-1", action: "send-again" });
     expect(useQueueStore.getState().queues[THREAD_ID]).toEqual([
@@ -167,6 +187,11 @@ describe("ComposerQueueList lifecycle", () => {
       }),
     ]);
     expect(screen.queryByText("Delivery unknown")).not.toBeInTheDocument();
+    await waitFor(() => expect(mockTransport.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      messageId: "replacement-1",
+      resendOfSteerId: "steer-1",
+      content: "held follow-up",
+    })));
   });
 
   it("settles a held steer with the server before removing its row", async () => {
@@ -177,13 +202,65 @@ describe("ComposerQueueList lifecycle", () => {
     settle.mockRejectedValueOnce(new Error("socket closed"));
     render(<QueueControls />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove queued message 1" }));
     expect(screen.getByText("held follow-up")).toBeInTheDocument();
 
     settle.mockResolvedValueOnce({ status: "removed" });
-    await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove queued message 1" }));
 
     expect(settle).toHaveBeenLastCalledWith({ messageId: "steer-1", action: "remove" });
     expect(screen.queryByText("held follow-up")).not.toBeInTheDocument();
+  });
+
+  it("offers Send now during a turn only for rows a steer can carry", () => {
+    queueMessage("plain follow-up");
+    holdSteer("held follow-up");
+    useQueueStore.getState().requeueAsResend(THREAD_ID, "steer-1", "replacement-1");
+    useQueueStore.getState().enqueue(THREAD_ID, {
+      content: "with a file",
+      displayContent: "with a file",
+      attachments: [{ id: "a", name: "a.png", mimeType: "image/png", sizeBytes: 1 }] as never,
+      model: "",
+      permissionMode: "full",
+    });
+    runTurn();
+    render(<QueueControls provider="codex" />);
+
+    expect(screen.getByRole("button", { name: "Send queued message 1 now" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send queued message 2 now" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send queued message 3 now" })).not.toBeInTheDocument();
+  });
+
+  it("drops a resend on Edit when another window already sent it", async () => {
+    holdSteer("held follow-up");
+    useQueueStore.getState().requeueAsResend(THREAD_ID, "steer-1", "replacement-1");
+    (mockTransport.settleUnknownSteer as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ status: "closed" });
+    const onLoad = vi.fn();
+    render(<QueueControls onLoad={onLoad} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit queued message 1" }));
+
+    expect(mockTransport.settleUnknownSteer).toHaveBeenCalledWith({ messageId: "steer-1", action: "remove" });
+    expect(onLoad).not.toHaveBeenCalled();
+    expect(useQueueStore.getState().queues[THREAD_ID]).toEqual([]);
+  });
+
+  it("keeps a resend out of the drain while its Edit is being settled", async () => {
+    holdSteer("held follow-up");
+    useQueueStore.getState().requeueAsResend(THREAD_ID, "steer-1", "replacement-1");
+    let answer: (value: unknown) => void = () => undefined;
+    (mockTransport.settleUnknownSteer as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => new Promise((resolve) => { answer = resolve; }),
+    );
+    const onLoad = vi.fn();
+    render(<QueueControls onLoad={onLoad} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit queued message 1" }));
+    expect(useQueueStore.getState().claimNextQueuedMessage(THREAD_ID)).toBeUndefined();
+    expect(screen.getByRole("status")).toHaveTextContent("Settling");
+
+    await act(async () => { answer({ status: "removed" }); });
+
+    expect(onLoad).toHaveBeenCalledWith(expect.objectContaining({ content: "held follow-up" }));
   });
 });
