@@ -62,6 +62,7 @@ import type {
   ApprovalRequest,
   CreateAndSendResult,
   ThreadStartup,
+  ThreadStartupResolveInput,
   ThreadStartupListResult,
   ConversationPage,
   ConversationNewerPage,
@@ -429,6 +430,8 @@ export interface McodeTransport {
   listThreadStartups(workspaceId: string): Promise<ThreadStartupListResult>;
   /** Request cancellation for one startup lifecycle. */
   cancelThreadStartup(startupId: string): Promise<ThreadStartup>;
+  /** Releases a startup blocked on its origin fetch: fetch again, or start from the local branch. */
+  resolveThreadStartup(startupId: string, action: ThreadStartupResolveInput["action"]): Promise<ThreadStartup>;
   createAndSendMessage(input: CreateAndSendInput): Promise<CreateAndSendResult>;
   stopAgent(threadId: string): Promise<AgentStopResult>;
   /** Retry retained saving work without starting another provider execution. */

@@ -41,6 +41,7 @@ const target = {
   mode: "direct" as const,
   branch: "main",
   branchSource: "branch" as const,
+  branchRemote: null,
   hasWorktree: false,
 };
 
@@ -173,8 +174,8 @@ describe("useComposerSubmissionController selected-text comments", () => {
         mode: "direct",
         branch: "main",
         branchSource: "branch",
-        customBranchName: "",
-        autoPreviewBranch: "",
+        branchRemote: null,
+        startFromOrigin: false,
         selectedWorktree: null,
       },
     });

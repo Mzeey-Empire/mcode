@@ -29,8 +29,8 @@ const target: ThreadDraftTarget = {
   mode: "worktree",
   branch: "main",
   branchSource: "branch",
-  customBranchName: "",
-  autoPreviewBranch: "",
+  branchRemote: null,
+  startFromOrigin: false,
   selectedWorktree: null,
 };
 
@@ -118,6 +118,34 @@ describe("threadDraftStore", () => {
     await useThreadDraftStore.persist.rehydrate();
 
     expect(useThreadDraftStore.getState().drafts[savedDraft.id]?.target).toMatchObject(target);
+  });
+
+  it("loads a draft saved before Start from origin with the switch off", async () => {
+    const savedTarget = { mode: "worktree", branch: "main", branchSource: "branch", selectedWorktree: null };
+    const savedDraft = {
+      id: "saved-before-origin",
+      workspaceId: "ws-1",
+      createdAt: 100,
+      updatedAt: 200,
+      draft: composerDraft,
+      selection,
+      target: savedTarget,
+    };
+    localStorage.setItem("mcode-thread-drafts", JSON.stringify({
+      version: 1,
+      state: { drafts: { [savedDraft.id]: savedDraft } },
+    }));
+
+    await useThreadDraftStore.persist.rehydrate();
+
+    expect(useThreadDraftStore.getState().drafts[savedDraft.id]?.target).toEqual({
+      mode: "worktree",
+      branch: "main",
+      branchSource: "branch",
+      branchRemote: null,
+      startFromOrigin: false,
+      selectedWorktree: null,
+    });
   });
 
   it("removes the entity when the draft empties and ignores fresh empty saves", () => {

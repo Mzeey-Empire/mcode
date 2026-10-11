@@ -257,7 +257,7 @@ function PickerFooter({ loaded, total, footer }: { readonly loaded: number; read
           Showing {loaded} of {total}
         </p>
       ) : null}
-      {footer ? <div className="border-t border-border px-2 pt-2 pb-1">{footer}</div> : null}
+      {footer ? <div className="border-t border-border p-2">{footer}</div> : null}
     </>
   );
 }

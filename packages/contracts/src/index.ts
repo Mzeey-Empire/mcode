@@ -1109,6 +1109,7 @@ export {
   ThreadStartupListInputSchema,
   ThreadStartupListResultSchema,
   ThreadStartupCancelInputSchema,
+  ThreadStartupResolveInputSchema,
 } from "./thread-startup.js";
 export type {
   ThreadStartupKind,
@@ -1127,6 +1128,7 @@ export type {
   ThreadStartupListInput,
   ThreadStartupListResult,
   ThreadStartupCancelInput,
+  ThreadStartupResolveInput,
 } from "./thread-startup.js";
 export type {
   PullRequestProvider,

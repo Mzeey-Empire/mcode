@@ -8,6 +8,8 @@ import { useDefaultBranchTarget } from "./targets/useBranchTargets";
  */
 export interface TargetBranch {
   readonly name: string;
+  /** Remote of a remote-only ref, such as `origin` for `origin/x`, whether picked or followed as the default. */
+  readonly remote: string | null;
   /** Why `name` is empty: the default is still loading, or there is none to follow. Null once `name` is set. */
   readonly unknown: "loading" | "missing" | null;
 }
@@ -26,11 +28,11 @@ function useIsGitWorkspace(workspaceId: string | undefined): boolean {
   );
 }
 
-function useEffectiveBranch(picked: string, context: DefaultBranchContext | null): TargetBranch {
+function useEffectiveBranch(picked: string, pickedRemote: string | null, context: DefaultBranchContext | null): TargetBranch {
   const fallback = useDefaultBranchTarget(picked === "" ? context : null);
-  if (picked !== "") return { name: picked, unknown: null };
-  if (fallback) return { name: fallback.name, unknown: null };
-  return { name: "", unknown: fallback === undefined && context !== null ? "loading" : "missing" };
+  if (picked !== "") return { name: picked, remote: pickedRemote, unknown: null };
+  if (fallback) return { name: fallback.name, remote: fallback.remote, unknown: null };
+  return { name: "", remote: null, unknown: fallback === undefined && context !== null ? "loading" : "missing" };
 }
 
 /**
@@ -39,8 +41,9 @@ function useEffectiveBranch(picked: string, context: DefaultBranchContext | null
  */
 export function useNewThreadTargetBranch(workspaceId: string | undefined): TargetBranch {
   const picked = useWorkspaceStore((state) => state.newThreadBranch);
+  const pickedRemote = useWorkspaceStore((state) => state.newThreadBranchRemote);
   const isGitRepo = useIsGitWorkspace(workspaceId);
-  return useEffectiveBranch(picked, workspaceId && isGitRepo ? { workspaceId } : null);
+  return useEffectiveBranch(picked, pickedRemote, workspaceId && isGitRepo ? { workspaceId } : null);
 }
 
 /**
@@ -51,8 +54,10 @@ export function useForkTargetBranch(parent: ForkSourceThread | undefined): Targe
   const picked = useWorkspaceStore((state) => state.branchTargetBranch);
   const isGitRepo = useIsGitWorkspace(parent?.workspace_id);
   const name = picked || parent?.branch || parent?.base_branch || "";
+  // Fork targets never start from origin, so a picked fork branch carries no remote.
   return useEffectiveBranch(
     name,
+    null,
     parent && isGitRepo ? { workspaceId: parent.workspace_id, threadId: parent.id } : null,
   );
 }

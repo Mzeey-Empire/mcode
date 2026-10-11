@@ -207,7 +207,7 @@ describe("new-thread Overview", () => {
         approvalReviewMode: "manual",
         thinking: null,
       },
-      target: { mode: "direct", branch: "release/2", branchSource: "branch", customBranchName: "", autoPreviewBranch: "", selectedWorktree: null },
+      target: { mode: "direct", branch: "release/2", branchSource: "branch", branchRemote: null, startFromOrigin: false, selectedWorktree: null },
     });
     if (!draftId) throw new Error("draft was not saved");
     renderColumn();

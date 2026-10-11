@@ -2,7 +2,13 @@ import { isDetachedWorktree, type AttachedWorktree } from "@/lib/worktree";
 
 /** What a new thread's target trigger names, per composer mode. */
 export type NewThreadTargetCopyInput =
-  | { readonly mode: "worktree"; readonly branch: string; readonly pullRequestNumber?: number }
+  | {
+    readonly mode: "worktree";
+    readonly branch: string;
+    readonly pullRequestNumber?: number;
+    /** Names the fetched `origin/<branch>` the worktree starts from. */
+    readonly fromOrigin?: boolean;
+  }
   | { readonly mode: "direct"; readonly branch: string }
   | { readonly mode: "existing-worktree"; readonly worktree: AttachedWorktree | null };
 
@@ -17,7 +23,7 @@ export interface TargetLabel {
 }
 
 /**
- * Trigger copy for a new thread's target: "From main", "From #1804", "On main", or "On {branch}" and the folder
+ * Trigger copy for a new thread's target: "From main", "From origin/main", "From #1804", "On main", or "On {branch}" and the folder
  * of a detached worktree. Null when nothing is chosen yet, so the caller says why instead of guessing a name.
  */
 export function newThreadTargetLabel(input: NewThreadTargetCopyInput): TargetLabel | null {
@@ -29,7 +35,10 @@ export function newThreadTargetLabel(input: NewThreadTargetCopyInput): TargetLab
   }
   if (input.mode === "direct") return input.branch ? { prefix: "On", name: input.branch } : null;
   if (input.pullRequestNumber !== undefined) return { prefix: "From", name: `#${input.pullRequestNumber}` };
-  return input.branch ? { prefix: "From", name: input.branch } : null;
+  if (!input.branch) return null;
+  // A remote-only row already carries its remote in the name.
+  const fromOriginRef = input.fromOrigin && !input.branch.startsWith("origin/");
+  return { prefix: "From", name: fromOriginRef ? `origin/${input.branch}` : input.branch };
 }
 
 /** A label with no relation verb, for placeholders such as "Choose branch". */

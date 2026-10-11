@@ -36,6 +36,44 @@ const gitCommandFailureSchema = z.object({
   killed: z.boolean().optional(), code: z.union([z.string(), z.number()]).nullish(),
 });
 
+/** Failure categories the origin-start flow can explain and recover from. */
+export type OriginFetchErrorCode = "no_origin" | "branch_missing" | "network_or_auth" | "timed_out";
+
+/** Git fetch failure with a readable explanation and the final stderr line. */
+export class OriginFetchError extends Error {
+  constructor(readonly code: OriginFetchErrorCode, message: string, readonly detail?: string) {
+    super(message);
+    this.name = "OriginFetchError";
+  }
+}
+
+/**
+ * Git ends many fetch failures with generic advice ("Please make sure you have the correct access rights /
+ * and the repository exists."), so the first `fatal:` or `error:` line is the one that names the cause.
+ */
+function originFetchDetail(output: string): string {
+  const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const cause = lines.find((line) => /^(fatal|error):/i.test(line)) ?? lines.at(-1) ?? "";
+  return cause.slice(0, 2000);
+}
+
+function originFetchError(error: unknown, branch: string): OriginFetchError {
+  const parsed = gitCommandFailureSchema.safeParse(error);
+  const failure = parsed.success ? parsed.data : {};
+  const stderr = (failure.stderr ?? "").trim();
+  const detail = originFetchDetail(stderr || failure.message || String(error));
+  if (failure.killed || failure.code === "ETIMEDOUT") {
+    return new OriginFetchError("timed_out", "Fetching from origin timed out.", detail);
+  }
+  if (/no such remote/i.test(stderr)) {
+    return new OriginFetchError("no_origin", "This project has no origin remote.", detail);
+  }
+  if (/couldn't find remote ref/i.test(stderr)) {
+    return new OriginFetchError("branch_missing", `Branch "${branch}" does not exist on origin.`, detail);
+  }
+  return new OriginFetchError("network_or_auth", "Could not fetch from origin. Check your connection and Git access.", detail);
+}
+
 function gitListError(error: unknown): GitListError {
   const parsed = gitCommandFailureSchema.safeParse(error);
   const failure = parsed.success ? parsed.data : {};
@@ -230,6 +268,23 @@ export class GitRepositoryService {
   /** Fetch an origin branch for a workspace and update its local tracking branch. */
   async fetchBranch(workspaceId: string, branch: string, prNumber?: number): Promise<void> {
     await this.fetchBranchAt(this.requireWorkspace(workspaceId).path, branch, prNumber);
+  }
+
+  /** Fetch only the selected remote-tracking ref, leaving every local branch untouched. */
+  async fetchOriginTrackingBranch(repoPath: string, branch: string): Promise<string> {
+    validateBranchName(branch);
+    const trackingRef = `refs/remotes/origin/${branch}`;
+    try {
+      await this.gitExecutor.exec(["-C", repoPath, "remote", "get-url", "origin"]);
+      // Ignore configured fetch mappings and tag following: neither may write other refs.
+      await this.gitExecutor.exec([
+        "-C", repoPath, "fetch", "--no-tags", "--refmap=", "origin", `+refs/heads/${branch}:${trackingRef}`,
+      ], { timeout: 60_000, env: { GIT_TERMINAL_PROMPT: "0" } });
+      const result = await this.gitExecutor.exec(["-C", repoPath, "rev-parse", "--verify", trackingRef]);
+      return result.stdout.trim();
+    } catch (error) {
+      throw originFetchError(error, branch);
+    }
   }
 
   /** Fetch an origin branch at an arbitrary repository path. */

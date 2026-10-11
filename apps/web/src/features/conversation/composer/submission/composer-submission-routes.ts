@@ -165,7 +165,7 @@ function synchronizeNewThreadTarget(
     execution.setNewThreadBranchFromPullRequest(target.branch, target.pullRequestNumber);
     return;
   }
-  execution.setNewThreadBranch(target.branch);
+  execution.setNewThreadBranch(target.branch, target.branchRemote);
 }
 
 /** Creates a child thread from the selected source message. */

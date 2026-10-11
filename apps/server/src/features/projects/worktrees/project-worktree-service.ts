@@ -28,7 +28,7 @@ export class ProjectWorktreeService {
     thread: Thread,
     workspaceId: string,
     branch: string,
-    options: { branchless?: boolean } = {},
+    options: { branchless?: boolean; startPoint?: string } = {},
   ): Promise<Thread & { warnings?: string[] }> {
     const workspace = this.workspaceRepo.findById(workspaceId);
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
@@ -38,7 +38,7 @@ export class ProjectWorktreeService {
       workspace.path,
       worktreeName,
       branch,
-      { branchless: options.branchless },
+      { branchless: options.branchless, startPoint: options.startPoint },
     );
 
     const committed = await this.persistProvisionedWorktree(thread, workspace.path, { info, name: worktreeName, ref: branch });

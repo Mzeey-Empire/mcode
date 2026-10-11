@@ -132,6 +132,12 @@ In Review comparisons, the target is shown as `HEAD` and the base remains
 the selected base branch for that worktree.
 _Avoid_: Headless worktree
 
+### Start from origin
+An option for New worktree mode that fetches the selected branch from `origin`
+and starts a branchless worktree at that remote tip. Local branches never move.
+If fetching fails, startup waits for Retry or Continue from the local branch.
+The selected branch remains the worktree's review and pull-request base.
+
 ### Thread checkout state
 The thread's current git position. A worktree thread is either on a named
 branch or in a branchless worktree with a base branch and current `HEAD`;

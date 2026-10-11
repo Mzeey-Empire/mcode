@@ -159,8 +159,8 @@ function draftPayload(input: string): ThreadDraftPayload {
       mode: "worktree",
       branch: "main",
       branchSource: "branch",
-      customBranchName: "",
-      autoPreviewBranch: "",
+      branchRemote: null,
+      startFromOrigin: false,
       selectedWorktree: null,
     },
   };

@@ -96,6 +96,7 @@ import {
   routeThreadControlRpc,
 } from "../../features/thread-control/transport/thread-control-rpc.js";
 import type { ThreadStartupService } from "../../features/thread-startup/thread-startup-service.js";
+import { ThreadStartupFetchDecisions, ThreadStartupResolveError } from "../../features/thread-startup/thread-startup-fetch-decisions.js";
 import {
   isThreadStartupRpcMethod,
   routeThreadStartupRpc,
@@ -247,6 +248,7 @@ export interface RouterDeps {
   threadControlService: ThreadControlService;
   /** Owns server-authoritative thread startup lifecycle state. */
   threadStartupService: ThreadStartupService;
+  threadStartupFetchDecisions: ThreadStartupFetchDecisions;
   gitComparison: GitComparisonService;
   gitRepository: GitRepositoryService;
   gitWorktrees: GitWorktreeService;
@@ -460,6 +462,7 @@ function validateRpcParameters(
 }
 
 function domainRouteError(id: string, error: unknown, message: string): WebSocketResponse | null {
+  if (error instanceof ThreadStartupResolveError) return { id, error: { code: error.code, message } };
   if (error instanceof WorkspaceFileNotFoundError) return { id, error: { code: error.code, message } };
   if (error instanceof ProjectIconError) return { id, error: { code: error.code, message } };
   if (error instanceof PlanServiceError) {

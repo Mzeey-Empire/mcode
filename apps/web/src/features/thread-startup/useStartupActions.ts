@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { ThreadStartup } from "@mcode/contracts";
+import type { ThreadStartup, ThreadStartupResolveInput } from "@mcode/contracts";
 import { useTerminalStore } from "@/features/terminal";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { useDiffStore } from "@/stores/diffStore";
@@ -78,6 +78,37 @@ function canOfferCancel(startup: ThreadStartup | undefined, ownRequest: StartupC
   if (startup && TERMINAL_STATES.has(startup.state)) return false;
   if (ownRequest) return ownRequest === "failed";
   return startup?.cancellation !== "requested";
+}
+
+type FetchDecision = ThreadStartupResolveInput["action"];
+
+/** Retry and Continue for a startup blocked because Start from origin could not fetch its branch. */
+export interface StartupFetchDecision {
+  /** The decision on its way to the server; both actions stay disabled until it settles. */
+  readonly pending: FetchDecision | null;
+  readonly resolve: (action: FetchDecision) => void;
+}
+
+/** Offers the fetch decision only while the startup is blocked on a failed origin fetch. */
+export function useStartupFetchDecision(startup: ThreadStartup | undefined): StartupFetchDecision | undefined {
+  const [pending, setPending] = useState<FetchDecision | null>(null);
+  const id = startup?.startupId;
+  const resolve = useCallback((action: FetchDecision) => {
+    if (!id) return;
+    setPending(action);
+    getTransport().resolveThreadStartup(id, action).then(
+      (next) => useThreadStartupStore.getState().apply(next),
+      (error: unknown) => {
+        useToastStore.getState().show({
+          kind: "failed",
+          title: action === "retry" ? "Could not retry the fetch" : "Could not continue from local",
+          meta: error instanceof Error ? error.message : undefined,
+        });
+      },
+    ).finally(() => setPending(null));
+  }, [id]);
+  const blocked = startup?.state === "blocked" && startup.phase === "fetch" && startup.block?.code === "start_from_origin_failed";
+  return blocked ? { pending, resolve } : undefined;
 }
 
 /**
