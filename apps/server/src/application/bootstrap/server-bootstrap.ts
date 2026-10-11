@@ -130,6 +130,11 @@ import { WorkspaceRepo } from "../../features/projects/persistence/workspace-rep
 import { CleanupWorker } from "../../features/thread-control/cleanup/cleanup-worker.js";
 import { ProviderAvailabilityService } from "../../features/providers/availability/provider-availability-service.js";
 import { ProviderUsageWarmupService } from "../../features/providers/availability/provider-usage-warmup-service.js";
+import {
+  ProviderRateLimitStore,
+  recordRateLimitEvents,
+} from "../../features/providers/status/provider-rate-limit-store.js";
+import { ProviderStatusService } from "../../features/providers/status/provider-status-service.js";
 import { ProviderRegistry } from "../../features/providers/composition/provider-registry.js";
 import { ProviderEventIngress } from "../../features/providers/composition/provider-event-ingress.js";
 import type { CursorProviderBoundary } from "@mcode/providers";
@@ -180,6 +185,8 @@ process.title =
 
 const PREFERRED_PORT = parseInt(process.env.MCODE_PORT ?? "19400", 10);
 const MAX_PORT_ATTEMPTS = 10;
+/** Background sign-in re-check cadence; the bell also refreshes when opened. */
+const PROVIDER_STATUS_REFRESH_MS = 6 * 60 * 60 * 1000;
 
 /** Path to the server lock file used for service discovery across instances. */
 const LOCK_FILE_PATH = NodePath.join(getMcodeDir(), "server.lock");
@@ -425,6 +432,8 @@ const enricher = container.resolve(WorkspaceEnricher);
 const filesystemBrowser = container.resolve(FilesystemBrowser);
 const modelCacheService = container.resolve(ModelCacheService);
 const providerUsageWarmup = container.resolve(ProviderUsageWarmupService);
+const providerStatus = container.resolve(ProviderStatusService);
+providerEventIngress.observeDelivered(recordRateLimitEvents(container.resolve(ProviderRateLimitStore)));
 recordStartupCheckpoint("services resolved");
 
 await seedAgentRuntimeWorkspace({
@@ -647,6 +656,8 @@ providerAvailability
     // blocking `codex --version` spawnSync.
     warmCodexVersionGate();
     providerUsageWarmup.warmEnabledProviders(true);
+    void providerStatus.refresh();
+    setInterval(() => void providerStatus.refresh(), PROVIDER_STATUS_REFRESH_MS).unref();
     const modelProviders = startupModelProviderIds(providerAvailability.listAvailability());
     void modelCacheService.refreshProviders(modelProviders).catch((err: unknown) => {
       logger.warn("Model cache startup refresh failed", {
@@ -835,6 +846,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   planService,
   providerRegistry,
   providerAvailability,
+  providerStatus,
   modelCacheService,
   prDraftService,
   ciWatcherService,

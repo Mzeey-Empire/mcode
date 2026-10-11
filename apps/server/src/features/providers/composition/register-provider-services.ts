@@ -17,6 +17,8 @@ import {
 } from "../availability/provider-availability-service.js";
 import { ProviderUsageWarmupService } from "../availability/provider-usage-warmup-service.js";
 import { ModelCacheService } from "../models/model-cache-service.js";
+import { ProviderRateLimitStore } from "../status/provider-rate-limit-store.js";
+import { ProviderStatusService } from "../status/provider-status-service.js";
 
 /** Register provider configuration before catalog and terminal services. */
 export function registerProviderConfiguration(container: DependencyContainer): void {
@@ -72,6 +74,12 @@ export function registerProviderRuntimeServices(container: DependencyContainer):
   container.register(
     ProviderUsageWarmupService,
     { useClass: ProviderUsageWarmupService },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register(ProviderRateLimitStore, { useValue: new ProviderRateLimitStore() });
+  container.register(
+    ProviderStatusService,
+    { useClass: ProviderStatusService },
     { lifecycle: Lifecycle.Singleton },
   );
   // ModelCacheService depends on the registry alias and must remain after it.
