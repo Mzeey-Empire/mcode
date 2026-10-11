@@ -9,7 +9,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { createMockThread, mockTransport } from "@/__tests__/mocks/transport";
 import { RpcError } from "@/transport";
-import { useQueuedMessageDispatch } from "./useQueuedMessageDispatch";
+import { useQueuedMessageDispatch, useSendNowRoute } from "./useQueuedMessageDispatch";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -348,5 +348,30 @@ describe("useQueuedMessageDispatch", () => {
 
     expect(mockTransport.steerTurn).not.toHaveBeenCalled();
     expect(mockTransport.sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("useSendNowRoute", () => {
+  beforeEach(() => {
+    resetThreadStoreForTests({ currentThreadId: THREAD_ID });
+    useQueueStore.setState({ inFlightQueuedMessages: {} });
+  });
+
+  it("offers nothing while a Stop is pending and a new send once the stopped turn is cancelled", () => {
+    useThreadStore.setState({
+      records: new Map([[THREAD_ID, { ...createEmptyThreadRecord(), runtimePhase: "finalizing", turnExecutionId: "exec-stop" }]]),
+      pendingStopCounts: { [THREAD_ID]: 1 },
+    });
+    const { result } = renderHook(() => useSendNowRoute(THREAD_ID));
+    expect(result.current).toBe("none");
+
+    // The turn is still finalizing, so Send now asks it to take the message rather than starting another.
+    act(() => useThreadStore.setState({ pendingStopCounts: {} }));
+    expect(result.current).toBe("steer");
+
+    act(() => useThreadStore.setState({
+      records: new Map([[THREAD_ID, { ...createEmptyThreadRecord(), runtimePhase: "cancelled" }]]),
+    }));
+    expect(result.current).toBe("send");
   });
 });
