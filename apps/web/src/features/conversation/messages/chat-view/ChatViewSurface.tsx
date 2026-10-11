@@ -24,7 +24,7 @@ import { useThreadDraftStore, type ThreadDraftPayload } from "@/stores/threadDra
 import { OverviewLayer } from "@/features/thread-overview/overview-layer";
 import { ProjectAutomaticSetupCard, useProjectAutomaticSetup } from "@/features/projects/environment";
 import { ProjectCommandApprovalDialog } from "@/features/projects/environment/ProjectCommandApprovalDialog";
-import { StartupStepsTrail, editStartupSetupScript, openStartupSetupTerminal, useFirstSendMotion, useStartingThread, useStartupFetchDecision, useThreadStartup, type StartupFetchDecision } from "@/features/thread-startup";
+import { OriginFetchActions, StartupStepsTrail, editStartupSetupScript, openStartupSetupTerminal, useFirstSendMotion, useStartingThread, useStartupFetchDecision, useThreadStartup } from "@/features/thread-startup";
 import { useThreadStartupLookup, useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { type WorkspaceThread, type ClientPreparingContext } from "@/lib/workspace-thread";
 import type { PendingStartup } from "@/features/projects/state/workspaceStore";
@@ -516,21 +516,6 @@ function SetupRecoveryActions({ automaticSetup }: { readonly automaticSetup: Ret
       <Button type="button" variant="outline" size="compact" disabled={automaticSetup.busy !== null} onClick={() => { void automaticSetup.continueWithoutSetup(); }}>
         {continuing ? <Spinner size={12} aria-hidden /> : null}
         Continue without setup
-      </Button>
-    </>
-  );
-}
-
-function OriginFetchActions({ decision }: { readonly decision: StartupFetchDecision }) {
-  return (
-    <>
-      <Button type="button" variant="outline" size="compact" disabled={decision.pending !== null} onClick={() => decision.resolve("retry")}>
-        {decision.pending === "retry" ? <Spinner size={12} aria-hidden /> : null}
-        Retry
-      </Button>
-      <Button type="button" variant="outline" size="compact" disabled={decision.pending !== null} onClick={() => decision.resolve("continue")}>
-        {decision.pending === "continue" ? <Spinner size={12} aria-hidden /> : null}
-        Continue from local
       </Button>
     </>
   );
