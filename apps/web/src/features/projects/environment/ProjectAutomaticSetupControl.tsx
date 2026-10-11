@@ -60,7 +60,7 @@ function isAutomaticSetupActive(snapshot: WorkspaceEnvironmentAutomaticSetupSnap
 // until setup settles even after every row that fetched it unmounts.
 const automaticSetupPolls = new Map<string, number>();
 const automaticSetupRequestSequence = new Map<string, number>();
-const automaticSetupAppliedSequence = new Map<string, number>();
+const automaticSetupSettledSequence = new Map<string, number>();
 
 function syncAutomaticSetupPoll(threadId: string, snapshot: WorkspaceEnvironmentAutomaticSetupSnapshot | undefined): void {
   const poll = automaticSetupPolls.get(threadId);
@@ -81,23 +81,27 @@ useProjectAutomaticSetupStore.subscribe((state, previous) => {
 
 /**
  * Fetches one Thread's automatic Setup snapshot into the shared store.
- * Drops a reply older than one already applied, or one that a user action superseded.
+ * Drops a reply or failure older than one already settled, and a reply that a user action superseded.
  * Resolves to null when the request fails.
  */
 export async function refreshAutomaticSetup(threadId: string): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot | null> {
   const sequence = (automaticSetupRequestSequence.get(threadId) ?? 0) + 1;
   automaticSetupRequestSequence.set(threadId, sequence);
   const requestEpoch = useProjectAutomaticSetupStore.getState().updateEpochByThread[threadId] ?? 0;
+  const settlesNewest = () => {
+    if (sequence <= (automaticSetupSettledSequence.get(threadId) ?? 0)) return false;
+    automaticSetupSettledSequence.set(threadId, sequence);
+    return true;
+  };
   try {
     const next = await getTransport().getAutomaticSetup(threadId);
-    setAutomaticSetupRefreshFailed(threadId, false);
-    if (sequence > (automaticSetupAppliedSequence.get(threadId) ?? 0)) {
-      automaticSetupAppliedSequence.set(threadId, sequence);
+    if (settlesNewest()) {
+      setAutomaticSetupRefreshFailed(threadId, false);
       useProjectAutomaticSetupStore.getState().hydrateSnapshot(threadId, next, requestEpoch);
     }
     return next;
   } catch {
-    setAutomaticSetupRefreshFailed(threadId, true);
+    if (settlesNewest()) setAutomaticSetupRefreshFailed(threadId, true);
     return null;
   }
 }

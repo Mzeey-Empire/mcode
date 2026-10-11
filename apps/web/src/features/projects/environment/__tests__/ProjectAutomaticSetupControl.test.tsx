@@ -5,7 +5,7 @@ import type { WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contract
 import { ThreadStatusLane } from "@/features/thread-attention/ThreadStatusLane";
 import { threadRowLook, threadRowSetup } from "@/features/thread-attention/thread-row-presentation";
 import { deriveThreadRowState } from "@/features/thread-attention/thread-row-state";
-import { ProjectAutomaticSetupCard, useProjectAutomaticSetup, useProjectAutomaticSetupStore } from "../ProjectAutomaticSetupControl";
+import { ProjectAutomaticSetupCard, refreshAutomaticSetup, useProjectAutomaticSetup, useProjectAutomaticSetupStore } from "../ProjectAutomaticSetupControl";
 
 const transport = vi.hoisted(() => ({
   getAutomaticSetup: vi.fn(),
@@ -207,6 +207,25 @@ describe("ProjectAutomaticSetupControl", () => {
     expect(screen.getByText("installing dependencies")).toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     expect(screen.getByText("running project bootstrap")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["an older refresh fails after a newer one succeeds", "reject-older", false],
+    ["an older refresh succeeds after a newer one fails", "resolve-older", true],
+  ] as const)("keeps the newest refresh outcome when %s", async (_case, older, refreshFailed) => {
+    let settleOlder!: { resolve: (snapshot: WorkspaceEnvironmentAutomaticSetupSnapshot) => void; reject: (error: Error) => void };
+    transport.getAutomaticSetup
+      .mockReturnValueOnce(new Promise((resolve, reject) => { settleOlder = { resolve, reject }; }))
+      .mockImplementationOnce(() => (refreshFailed ? Promise.reject(new Error("offline")) : Promise.resolve(failed)));
+
+    const olderRefresh = refreshAutomaticSetup("thread-1");
+    await refreshAutomaticSetup("thread-1");
+    if (older === "reject-older") settleOlder.reject(new Error("timed out"));
+    else settleOlder.resolve({ ...failed, gate: "released-by-continue" });
+    await olderRefresh;
+
+    expect(useProjectAutomaticSetupStore.getState().refreshFailedByThread["thread-1"] ?? false).toBe(refreshFailed);
+    expect(useProjectAutomaticSetupStore.getState().snapshotsByThread["thread-1"]).toEqual(refreshFailed ? undefined : failed);
   });
 
   it("says a running setup's status may be stale while its refresh fails", async () => {
