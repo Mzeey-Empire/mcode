@@ -158,7 +158,7 @@ function handleTerminalData(data: unknown): void {
  * - `branch.changed` -- refetches the workspace's branch target lists, which moves an unpicked default branch
  * - `plan.questions` -- model-proposed plan questions forwarded to threadStore wizard
  * - `plan.answered` -- server committed an answered marker; dismisses the wizard on this client
- * - `plan.versionUpserted` -- updates planStore and previews new agent versions in the active thread
+ * - `plan.versionUpserted` -- merges the version into planStore
  * - `approval.requested` -- approval awaiting a user decision
  * - `approval.resolved` -- an approval was settled
  * - `providers.availability` -- server-pushed provider availability snapshot forwarded to providerAvailabilityStore
@@ -579,9 +579,6 @@ export function startPushListeners(): void {
       const { threadId, version: plan } = WS_CHANNELS["plan.versionUpserted"].parse(data);
 
       usePlanStore.getState().addPlan(threadId, plan);
-      if (plan.author === "agent" && plan.status === "ready" && useWorkspaceStore.getState().activeThreadId === threadId) {
-        usePlanStore.getState().showLivePreview(threadId, plan);
-      }
     }),
   );
 

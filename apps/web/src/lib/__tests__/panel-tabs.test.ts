@@ -57,7 +57,7 @@ describe("PANEL_TAB_TYPES catalog", () => {
   it("uses Plan language for the legacy tasks tab id", () => {
     const plan = PANEL_TAB_TYPES.find((type) => type.id === "tasks");
     expect(plan?.label).toBe("Plan");
-    expect(plan?.blurb).toBe("Read saved plans");
+    expect(plan?.blurb).toBe("Review the plan");
     expect(plan?.icon).toBe(FileText);
   });
 

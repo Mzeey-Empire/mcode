@@ -5,6 +5,7 @@ import { ChangesEntryBlock, ChangesEntryState } from "./entries/changes";
 import { CommitOrPushEntryBlock } from "./entries/commit";
 import { CreateBranchEntryBlock } from "./entries/create-branch";
 import { LocalEntryBlock, LocalEntryState } from "./entries/local";
+import { PlanEntryBlock } from "./entries/plan";
 import { TasksEntryBlock } from "./entries/tasks";
 import { TargetBranchEntryBlock, TargetWorkspaceEntryBlock } from "./entries/new-thread-target";
 import { PullRequestEntryBlock } from "./entries/pull-request";
@@ -53,6 +54,7 @@ export const OVERVIEW_ENTRIES: readonly OverviewEntry[] = [
   { id: "changes", section: "activity", order: 20, subjects: ["thread"], Entry: ChangesEntryBlock, State: ChangesEntryState },
   { id: "repository", section: "activity", order: 30, subjects: ["thread"], Entry: RepositoryEntryBlock, State: RepositoryEntryState },
   { id: "tasks", section: "activity", order: 40, subjects: ["thread"], Entry: TasksEntryBlock },
+  { id: "plan", section: "activity", order: 45, subjects: ["thread"], Entry: PlanEntryBlock },
   { id: "local", section: "lane", order: 50, subjects: ["thread"], Entry: LocalEntryBlock, State: LocalEntryState },
   // A new thread's rows take the slots of the thread rows they become: where it runs, then the branch.
   { id: "target.workspace", section: "lane", order: 50, subjects: ["new-thread"], Entry: TargetWorkspaceEntryBlock },

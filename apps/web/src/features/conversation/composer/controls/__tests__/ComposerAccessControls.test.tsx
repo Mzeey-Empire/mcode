@@ -26,7 +26,6 @@ function renderControls(overrides: Partial<React.ComponentProps<typeof ComposerA
       isModelLocked={false}
       permissionLocked={false}
       approvalReviewSupported
-      showInlineOptions
       onSelectionChange={onSelectionChange}
       onSelectionTouched={vi.fn()}
       {...overrides}
@@ -103,8 +102,8 @@ describe("ComposerAccessControls", () => {
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
   });
 
-  it.each([["inline", true], ["menu", false]] as const)("shows only Ask me and Don't ask in the %s control when the provider does not support approval review", async (_surface, showInlineOptions) => {
-    renderControls({ approvalReviewSupported: false, showInlineOptions });
+  it("shows only Ask me and Don't ask when the provider does not support approval review", async () => {
+    renderControls({ approvalReviewSupported: false });
 
     await openPicker(/Access mode: Ask me/);
 
@@ -119,7 +118,6 @@ describe("ComposerAccessControls", () => {
         isModelLocked={false}
         permissionLocked={false}
         approvalReviewSupported
-        showInlineOptions={false}
         onSelectionChange={onSelectionChange}
         onSelectionTouched={vi.fn()}
       />,
@@ -132,7 +130,6 @@ describe("ComposerAccessControls", () => {
         isModelLocked={false}
         permissionLocked={false}
         approvalReviewSupported={false}
-        showInlineOptions={false}
         onSelectionChange={onSelectionChange}
         onSelectionTouched={vi.fn()}
       />,

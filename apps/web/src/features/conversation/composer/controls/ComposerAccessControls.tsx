@@ -1,8 +1,6 @@
 import { Eye, KeyRound, Pencil, ShieldCheck } from "lucide-react";
 import {
   AccessModeMenu,
-  InlineComposerOptions,
-  ComposerOptionsMenu,
   type AccessModeOption,
   type ComposerAccessMode,
 } from "../ComposerOptionControls";
@@ -22,7 +20,6 @@ export interface ComposerAccessControlsProps {
   isModelLocked: boolean;
   permissionLocked: boolean;
   approvalReviewSupported: boolean;
-  showInlineOptions: boolean;
   onSelectionChange(patch: Partial<ComposerAgentSelection>): void;
   onSelectionTouched(): void;
 }
@@ -61,7 +58,7 @@ function DevinAccessControls({
   onSelectionTouched,
 }: Omit<
   ComposerAccessControlsProps,
-  "workspaceId" | "permissionLocked" | "approvalReviewSupported" | "showInlineOptions" | "isModelLocked"
+  "workspaceId" | "permissionLocked" | "approvalReviewSupported" | "isModelLocked"
 >) {
   const devinMode = selection.devinMode && selection.devinMode !== "plan"
     ? selection.devinMode
@@ -95,7 +92,6 @@ function ComposerPermissionControls({
   threadId,
   selection,
   permissionLocked,
-  showInlineOptions,
   approvalReviewSupported,
   onSelectionChange,
   onSelectionTouched,
@@ -104,7 +100,6 @@ function ComposerPermissionControls({
   | "threadId"
   | "selection"
   | "permissionLocked"
-  | "showInlineOptions"
   | "approvalReviewSupported"
   | "onSelectionChange"
   | "onSelectionTouched"
@@ -124,18 +119,7 @@ function ComposerPermissionControls({
     persistPermissionMode(threadId, permissionMode);
   };
 
-  if (showInlineOptions) {
-    return <InlineComposerOptions
-      threadId={threadId}
-      accessMode={accessMode}
-      permissionLocked={permissionLocked}
-      approvalReviewSupported={approvalReviewSupported}
-      onAccessModeChange={updateAccessMode}
-    />;
-  }
-
-  return <ComposerOptionsMenu
-    threadId={threadId}
+  return <AccessModeMenu
     accessMode={accessMode}
     permissionLocked={permissionLocked}
     approvalReviewSupported={approvalReviewSupported}

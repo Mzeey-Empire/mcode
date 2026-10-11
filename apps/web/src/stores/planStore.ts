@@ -1,12 +1,43 @@
 import { create } from "zustand";
-import type { PlanVersion, PlanVersionStatus } from "@mcode/contracts";
+import { getCatalogEntry, type PlanVersion, type PlanVersionStatus } from "@mcode/contracts";
 
 const statusOrder: Record<PlanVersionStatus, number> = { draft: 0, ready: 0, superseded: 1, accepted: 2 };
 
+// Snapshots and pushes can arrive out of order, so content follows the higher
+// revision and status only moves forward.
 function mergeVersion(current: PlanVersion, incoming: PlanVersion): PlanVersion {
   const content = current.revision > incoming.revision ? current : incoming;
   const status = statusOrder[current.status] > statusOrder[incoming.status] ? current : incoming;
   return { ...content, status: status.status, acceptedAt: status.acceptedAt, acceptedMessageId: status.acceptedMessageId };
+}
+
+/**
+ * The version a thread's Plan panel shows: the picked version while it still
+ * exists, else the latest. Null when the thread has no versions.
+ */
+export function selectViewedPlanVersion(
+  versions: readonly PlanVersion[],
+  activeVersion: number | null,
+): PlanVersion | null {
+  const picked = activeVersion === null ? undefined : versions.find((v) => v.version === activeVersion);
+  return picked ?? versions.at(-1) ?? null;
+}
+
+/**
+ * The word that follows "v{N}" in the Plan panel: who or what the version is.
+ * A ready version names the provider that wrote it.
+ */
+export function planVersionWord(plan: Pick<PlanVersion, "status" | "providerId">): string {
+  switch (plan.status) {
+    case "draft":
+      return "Edited by you";
+    case "accepted":
+      return "Accepted";
+    case "superseded":
+      return "Older version";
+    case "ready":
+      return plan.providerId === null ? "Agent" : getCatalogEntry(plan.providerId).name;
+  }
 }
 
 /** Zustand state shape for per-thread plan data. */
@@ -17,32 +48,11 @@ interface PlanState {
   /** Which version is currently viewed per thread (null = latest). */
   activeVersionByThread: Record<string, number | null>;
 
-  /** Threads currently generating a new plan version. */
-  generatingThreads: Set<string>;
-
-  /** Session-local live plan preview keyed by thread ID. Hydration never writes this. */
-  livePreviewByThread: Record<string, Pick<PlanVersion, "id" | "version" | "title">>;
-
-  /** Session-local dismissed preview versions keyed by thread ID. */
-  dismissedPreviewVersionsByThread: Record<string, readonly number[]>;
-
-  /** Add or replace a plan in the thread's version list. */
+  /** Add a version, or merge it into the stored version with the same number. */
   addPlan: (threadId: string, plan: PlanVersion) => void;
 
-  /** Show a session-local preview for a live-generated plan version. */
-  showLivePreview: (threadId: string, plan: PlanVersion) => void;
-
-  /** Dismiss the current session-local preview for a specific plan version. */
-  dismissLivePreview: (threadId: string, version: number) => void;
-
-  /** Clear any visible session-local preview for a thread. */
-  clearLivePreview: (threadId: string) => void;
-
-  /** Set the actively viewed version for a thread. */
+  /** Set the actively viewed version for a thread (null = latest). */
   setActiveVersion: (threadId: string, version: number | null) => void;
-
-  /** Mark a thread as generating a plan (shows skeleton). */
-  setGenerating: (threadId: string, generating: boolean) => void;
 
   /** Clear plan state for a thread. */
   clearPlans: (threadId: string) => void;
@@ -52,9 +62,6 @@ interface PlanState {
 export const usePlanStore = create<PlanState>((set) => ({
   plansByThread: {},
   activeVersionByThread: {},
-  generatingThreads: new Set(),
-  livePreviewByThread: {},
-  dismissedPreviewVersionsByThread: {},
 
   addPlan: (threadId, plan) =>
     set((state) => {
@@ -64,48 +71,7 @@ export const usePlanStore = create<PlanState>((set) => ({
         idx >= 0
           ? existing.map((p, i) => (i === idx ? mergeVersion(p, plan) : p))
           : [...existing, plan].sort((a, b) => a.version - b.version);
-      return {
-        plansByThread: { ...state.plansByThread, [threadId]: updated },
-        // Clear generating flag when a plan arrives
-        generatingThreads: new Set(
-          [...state.generatingThreads].filter((id) => id !== threadId),
-        ),
-      };
-    }),
-
-  showLivePreview: (threadId, plan) =>
-    set((state) => {
-      const dismissed = state.dismissedPreviewVersionsByThread[threadId] ?? [];
-      if (dismissed.includes(plan.version)) return {};
-      return {
-        livePreviewByThread: {
-          ...state.livePreviewByThread,
-          [threadId]: { id: plan.id, version: plan.version, title: plan.title },
-        },
-      };
-    }),
-
-  dismissLivePreview: (threadId, version) =>
-    set((state) => {
-      const dismissed = state.dismissedPreviewVersionsByThread[threadId] ?? [];
-      const nextDismissed = dismissed.includes(version) ? dismissed : [...dismissed, version];
-      const nextPreview = { ...state.livePreviewByThread };
-      if (nextPreview[threadId]?.version === version) delete nextPreview[threadId];
-      return {
-        livePreviewByThread: nextPreview,
-        dismissedPreviewVersionsByThread: {
-          ...state.dismissedPreviewVersionsByThread,
-          [threadId]: nextDismissed,
-        },
-      };
-    }),
-
-  clearLivePreview: (threadId) =>
-    set((state) => {
-      if (!(threadId in state.livePreviewByThread)) return {};
-      const next = { ...state.livePreviewByThread };
-      delete next[threadId];
-      return { livePreviewByThread: next };
+      return { plansByThread: { ...state.plansByThread, [threadId]: updated } };
     }),
 
   setActiveVersion: (threadId, version) =>
@@ -116,29 +82,12 @@ export const usePlanStore = create<PlanState>((set) => ({
       },
     })),
 
-  setGenerating: (threadId, generating) =>
-    set((state) => {
-      const next = new Set(state.generatingThreads);
-      if (generating) next.add(threadId);
-      else next.delete(threadId);
-      return { generatingThreads: next };
-    }),
-
   clearPlans: (threadId) =>
     set((state) => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { [threadId]: _omitPlans, ...rest } = state.plansByThread;
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { [threadId]: _omitVersion, ...restVersions } = state.activeVersionByThread;
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { [threadId]: _omitPreview, ...restPreviews } = state.livePreviewByThread;
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { [threadId]: _omitDismissed, ...restDismissed } = state.dismissedPreviewVersionsByThread;
-      return {
-        plansByThread: rest,
-        activeVersionByThread: restVersions,
-        livePreviewByThread: restPreviews,
-        dismissedPreviewVersionsByThread: restDismissed,
-      };
+      return { plansByThread: rest, activeVersionByThread: restVersions };
     }),
 }));

@@ -7,7 +7,6 @@ import { ComposerBranchBar } from "@/components/chat/ComposerBranchBar";
 import { ComposerQueueList } from "@/components/chat/ComposerQueueList";
 import { ContextTracker } from "@/components/chat/ContextTracker";
 import { FileTagPopup, type useFileTagPopup } from "@/components/chat/FileTagPopup";
-import { PlanPreview } from "@/components/chat/PlanPreview";
 import { PreviewAnnotationBundleChip } from "@/components/chat/PreviewAnnotationBundleChip";
 import { providerUnavailableMessage, type ProviderUnavailableReason } from "@/components/chat/provider-unavailable";
 import { Notice } from "@/components/ui/notice";
@@ -54,8 +53,6 @@ interface ComposerContentSurfaceProps {
     readonly branchFromMessageId?: string;
     readonly branchFromMessageContent?: string;
     readonly activeThread?: Thread;
-    readonly planPreview?: ComponentProps<typeof PlanPreview>["preview"];
-    readonly planPanelOpen: boolean;
     readonly isAgentRunning: boolean;
     readonly isStopPending: boolean;
     readonly provider?: string;
@@ -157,25 +154,6 @@ interface ComposerContentSurfaceProps {
     readonly onSaveSelectedTextComment: (comment: SelectedTextComment) => void;
     readonly onSelectedTextCommentEditorChange: (editor: SelectedTextCommentEditorDraft | undefined) => void;
   };
-}
-
-function ComposerPlanPreview({ model }: Pick<ComposerContentSurfaceProps, "model">) {
-  const showPlanPreview = Boolean(
-    model.threadId && model.workspaceId && model.planPreview && !model.planPanelOpen
-      && !model.branchFromMessageId && !model.isNewThread,
-  );
-
-  if (!showPlanPreview) return null;
-
-  return (
-    <div className="mb-2">
-      <PlanPreview
-        workspaceId={model.workspaceId!}
-        threadId={model.threadId!}
-        preview={model.planPreview!}
-      />
-    </div>
-  );
 }
 
 function ComposerTraySurface({ model }: Pick<ComposerContentSurfaceProps, "model">) {
@@ -607,7 +585,7 @@ function ComposerControlBar({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center gap-1 border-t border-border/20 py-1.5",
+        "@container flex flex-wrap items-center gap-1 border-t border-border/20 py-1.5",
         model.showInlineComposerOptions ? "px-3 sm:gap-2.5" : "px-2",
       )}
     >
@@ -645,7 +623,6 @@ function ComposerControlBar({
           isProviderLocked={model.isProviderLocked}
           permissionLocked={model.agentControls.permissionLocked}
           approvalReviewSupported={model.agentControls.approvalReviewSupported}
-          showInlineOptions={model.showInlineComposerOptions}
           showModelPreferences
           onSelectionChange={actions.onSelectionChange}
           onSelectionTouched={actions.onSelectionTouched}
@@ -735,7 +712,6 @@ function DraftWriteFailureNotice() {
 export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
   return (
     <>
-      <ComposerPlanPreview {...props} />
       <ComposerQueueSurface {...props} />
       <ComposerNewThreadSurface {...props} />
       <ComposerTraySurface {...props} />

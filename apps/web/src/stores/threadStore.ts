@@ -3096,11 +3096,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   const rollbackFailedSend = (
-    threadId: string, error: unknown, planAction: import("@mcode/contracts").PlanAction | undefined,
+    threadId: string, error: unknown,
     isControlCommand: boolean, runningBeforeControl: Set<string> | undefined,
     responseKey: string, executionId: string | null, userMessageId: string,
   ): boolean => {
-    if (planAction === "revise") usePlanStore.getState().setGenerating(threadId, false);
     const message = String(error);
     const activeSessionConflict = !isControlCommand && message.includes("already has an active agent session");
     let invalidateFailedPrompt = false;
@@ -3622,7 +3621,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       return true;
     } catch (error) {
       return rollbackFailedSend(
-        threadId, error, planAction, isControlCommand, runningBeforeControl,
+        threadId, error, isControlCommand, runningBeforeControl,
         optimisticTurnResponseKey, optimisticTurnExecutionId, userMessage.id,
       );
     }
@@ -4028,7 +4027,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         agentStartTime: Date.now(),
       }),
     }));
-    usePlanStore.getState().setGenerating(threadId, true);
 
     try {
       await getTransport().answerPlanQuestions(
@@ -4040,7 +4038,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         thinking ?? undefined,
       );
     } catch (e) {
-      usePlanStore.getState().setGenerating(threadId, false);
       set((s) => ({
         records: patchThreadRecord(s.records, threadId, {
           planQuestionsStatus: "pending",
@@ -4058,9 +4055,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const model = thread?.model ?? undefined;
     const provider = thread?.provider ?? undefined;
 
-    if (action === "revise") {
-      usePlanStore.getState().setGenerating(threadId, true);
-    } else if (action === "implement") {
+    if (action === "implement") {
       // Implementation runs in build mode; leave plan mode so the composer
       // label and future sends match the execution phase. Await the
       // persistence RPC and abort the implement turn on failure so the

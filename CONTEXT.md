@@ -792,9 +792,9 @@ workspace-root view of changes and branches stays the Review tab's job.
 The Overview offers two ways to take the thread further, split by what each does
 to *this* thread. Both anchor at the thread tail (not a picked message):
 
-When a thread has a saved plan, the Overview includes a Plans section with
-the latest non-superseded plan title. The title is a one-line link into the
-Plan tab; older versions stay in the Plan tab.
+When a thread has a plan, the Overview shows a plan row with the plan title
+and the latest version number. Clicking it opens the Plan tab. Older versions
+stay in the Plan tab.
 
 For branchless worktrees, the Overview shows the checkout as `HEAD` from the
 selected base branch and makes Create branch the next git action. After Create
@@ -869,21 +869,12 @@ Each thread preserves its own tab order. The workspace-level panel used with
 no active thread preserves a separate order.
 
 ### Plan tab
-The right-panel tab that shows a thread's saved plan documents. It is
+The right-panel tab that shows a thread's plan as a read-only document. Its
+header names the viewed version, such as "v2 Codex", and lists every version.
+The latest version shows unless the user picks an older one. It is
 thread-only and contains the plan artifact itself, not the agent's live task
 list.
 _Avoid_: Scope tab
-
-### Plan preview
-The composer-adjacent preview shown after a plan is generated for the active
-thread. It shows only the plan title, ellipsized to one line, plus View plan
-and dismiss actions; opening the Plan tab or dismissing the preview closes it.
-It is transient and separate from the saved plan document. Dismissal applies
-to the visible plan version only; a newer generated plan version shows a fresh
-preview. Preview dismissal is session-local UI state; it is not persisted. The
-plan preview appears only from a live generated-plan event; saved plans loaded
-during app startup do not create previews. The plan preview replaces transcript
-plan artifact cards; generated plans stay out of assistant messages.
 
 ### Task row
 The row in the composer tray, docked on top of the composer, that shows the

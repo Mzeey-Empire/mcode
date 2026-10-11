@@ -105,7 +105,7 @@ export const PANEL_TAB_TYPES: readonly PanelTabType[] = [
     id: "tasks",
     label: "Plan",
     icon: FileText,
-    blurb: "Read saved plans",
+    blurb: "Review the plan",
     needsThread: true,
     commandId: "tasks.toggle",
   },

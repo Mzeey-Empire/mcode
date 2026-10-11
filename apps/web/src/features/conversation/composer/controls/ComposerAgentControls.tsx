@@ -29,7 +29,6 @@ export interface ComposerAgentControlsProps {
   isProviderLocked: boolean;
   permissionLocked: boolean;
   approvalReviewSupported: boolean;
-  showInlineOptions: boolean;
   showModelPreferences?: boolean;
   onSelectionChange(patch: Partial<ComposerAgentSelection>): void;
   onSelectionTouched(): void;
@@ -54,7 +53,6 @@ export function ComposerAgentControls({
   isProviderLocked,
   permissionLocked,
   approvalReviewSupported,
-  showInlineOptions,
   showModelPreferences = true,
   onSelectionChange,
   onSelectionTouched,
@@ -100,7 +98,6 @@ export function ComposerAgentControls({
         isModelLocked={isModelLocked}
         permissionLocked={permissionLocked}
         approvalReviewSupported={approvalReviewSupported}
-        showInlineOptions={showInlineOptions}
         onSelectionChange={onSelectionChange}
         onSelectionTouched={onSelectionTouched}
       />

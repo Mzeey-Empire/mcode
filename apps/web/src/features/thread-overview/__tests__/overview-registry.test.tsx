@@ -61,6 +61,7 @@ describe("overview registry", () => {
       ["changes", "activity", 20],
       ["repository", "activity", 30],
       ["tasks", "activity", 40],
+      ["plan", "activity", 45],
       ["local", "lane", 50],
       ["create-branch", "lane", 60],
       ["branch", "lane", 70],
