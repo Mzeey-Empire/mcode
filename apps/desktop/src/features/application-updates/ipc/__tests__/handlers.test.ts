@@ -83,7 +83,16 @@ describe("application update IPC handlers", () => {
       checkResult,
     );
     await expect(handlers.get("app:download-update")?.({})).resolves.toBeUndefined();
+    expect(api.downloadUpdate).toHaveBeenCalledOnce();
     await expect(handlers.get("app:install-update")?.({})).resolves.toBe(true);
+  });
+
+  it("propagates a rejected download to the renderer", async () => {
+    vi.mocked(api.downloadUpdate).mockRejectedValue(new Error("disk full"));
+    const { ipc, handlers } = createIpc();
+    registerApplicationUpdateHandlers(ipc, api);
+
+    await expect(handlers.get("app:download-update")?.({})).rejects.toThrow("disk full");
   });
 
   it("validates release-line input before policy execution", async () => {
