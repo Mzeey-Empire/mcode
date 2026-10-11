@@ -61,3 +61,15 @@ export function useThreadRowState(threadId: string, preparing = false): ThreadRo
   const setup = useProjectAutomaticSetupStore((state) => threadRowSetup(state.snapshotsByThread[threadId]));
   return deriveThreadRowState({ attention, running: executing || startupPending || preparing, setup, onScreen });
 }
+
+/** Reads a thread's row state outside React from the same facts as {@link useThreadRowState}. */
+export function readThreadRowState(threadId: string, preparing = false): ThreadRowState {
+  const { byThreadId, onScreenThreadId } = threadAttentionStore.getState();
+  const startupPending = useWorkspaceStore.getState().pendingStartupByThreadId[threadId] !== undefined;
+  return deriveThreadRowState({
+    attention: byThreadId[threadId],
+    running: isThreadExecuting(threadId, useThreadStore.getState()) || startupPending || preparing,
+    setup: threadRowSetup(useProjectAutomaticSetupStore.getState().snapshotsByThread[threadId]),
+    onScreen: onScreenThreadId === threadId,
+  });
+}
