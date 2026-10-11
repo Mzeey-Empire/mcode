@@ -22,7 +22,7 @@ import {
   type TurnEndingsProjection,
 } from "../turn-ending/turn-endings-projection";
 import type { ThoughtSegment } from "../narrative/types";
-import type { RunHoldingSignals } from "../narrative/run-status";
+import type { RunHoldingSignals, RunRetry } from "../narrative/run-status";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
 const EMPTY_TURN_MAP: Record<string, string> = {};
@@ -183,12 +183,17 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const decidedApprovals = useThreadRecord(renderedThreadId, (record) => record.approvals);
   const stopPending = useThreadStore((state) => renderedThreadId ? (state.pendingStopCounts[renderedThreadId] ?? 0) > 0 : false);
   const compacting = useThreadRecord(renderedThreadId, (record) => record.isCompacting);
-  const retry = useThreadRecord(renderedThreadId, (record): RunHoldingSignals["retry"] =>
+  // Primitive selectors: an object-returning selector yields a fresh reference per store update and loops rerenders.
+  const retryKind = useThreadRecord(renderedThreadId, (record): RunRetry["kind"] | undefined =>
     record.rateLimit ? "rate-limited" : record.apiRetry ? "retrying" : undefined);
-  const holdingSignals = useMemo<RunHoldingSignals>(
-    () => ({ stopPending, compacting, retry }),
-    [stopPending, compacting, retry],
-  );
+  const retryErrorStatus = useThreadRecord(renderedThreadId, (record) => record.apiRetry?.errorStatus);
+  const holdingSignals = useMemo<RunHoldingSignals>(() => {
+    const retry: RunRetry | undefined =
+      retryKind === "retrying" ? { kind: "retrying", errorStatus: retryErrorStatus }
+        : retryKind === "rate-limited" ? { kind: "rate-limited" }
+          : undefined;
+    return { stopPending, compacting, retry };
+  }, [stopPending, compacting, retryKind, retryErrorStatus]);
   const persistedNarrativeByMessage = useThreadRecord(renderedThreadId, (record) => record.narrativeByMessage);
   const legacyCurrentTurnMessageId = useThreadRecord(renderedThreadId, (record) => record.currentTurnMessageId);
   const legacyCurrentTurnResponseKey = useThreadRecord(renderedThreadId, (record) => record.currentTurnResponseKey);

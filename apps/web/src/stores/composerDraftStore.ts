@@ -8,6 +8,7 @@ import type {
   DraftSubmission,
   MessageMention,
   PlanCommentSelection,
+  ProviderId,
   ReasoningLevel,
   SelectedTextComment,
   SelectedTextCommentSource,
@@ -160,6 +161,9 @@ interface ComposerDraftState {
   /** Prefill text set by the empty-state prompt chips, consumed once by the Composer. */
   pendingPrefill: string | null;
 
+  /** Model chosen from a new-model announcement, consumed once by the next new-thread Composer. */
+  pendingModel: PendingComposerModel | null;
+
   /** Save a draft for a thread. Skips storage only when it has no sendable content. */
   saveDraft: (threadId: string, draft: ComposerDraft) => void;
 
@@ -186,6 +190,18 @@ interface ComposerDraftState {
 
   /** Clear the pending prefill after the Composer has consumed it. */
   clearPendingPrefill: () => void;
+
+  /** Set the model the next new-thread Composer starts on. */
+  setPendingModel: (model: PendingComposerModel) => void;
+
+  /** Clear the pending model after the Composer has applied it. */
+  clearPendingModel: () => void;
+}
+
+/** A provider model handed to the next new-thread Composer. */
+export interface PendingComposerModel {
+  provider: ProviderId;
+  modelId: string;
 }
 
 /** True when a draft carries nothing worth persisting or restoring. */
@@ -256,6 +272,7 @@ export const useComposerDraftStore = create<ComposerDraftState>()(
     (set, get) => ({
       drafts: {},
       pendingPrefill: null,
+      pendingModel: null,
 
       saveDraft: (threadId, composerDraft) => {
         const existing = get().drafts[threadId];
@@ -314,6 +331,10 @@ export const useComposerDraftStore = create<ComposerDraftState>()(
       setPendingPrefill: (text) => set({ pendingPrefill: text }),
 
       clearPendingPrefill: () => set({ pendingPrefill: null }),
+
+      setPendingModel: (model) => set({ pendingModel: model }),
+
+      clearPendingModel: () => set({ pendingModel: null }),
     }),
     {
       name: "mcode-composer-drafts",

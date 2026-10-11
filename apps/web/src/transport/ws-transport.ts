@@ -1500,6 +1500,8 @@ export function createWsTransport(
       rpc<ProviderStatus[]>("providers.listStatus", { force }),
     updateProviderCli: (providerId) =>
       rpc<ProviderStatus>("providers.updateCli", { providerId }),
+    acknowledgeProviderModels: (providerId) =>
+      rpc<void>("providers.acknowledgeModels", { providerId }),
 
     generateRecap: (threadId, messages, previousRecap) =>
       rpc<{ text: string }>("recap.generate", { threadId, messages, previousRecap }),

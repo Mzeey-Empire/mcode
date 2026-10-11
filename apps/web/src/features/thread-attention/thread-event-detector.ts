@@ -2,10 +2,11 @@ import type { ThreadAttention, ThreadWaitingKind } from "@mcode/contracts";
 import { useProjectAutomaticSetupStore } from "@/features/projects/environment";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useToastStore } from "@/stores/toastStore";
 import { useUiStore } from "@/stores/uiStore";
-import { threadAttentionStore } from "./thread-attention-store";
+import { isWindowFocused, threadAttentionStore } from "./thread-attention-store";
 import { readThreadRowState } from "./thread-row-presentation";
 import type { NeedsYouLabel, ThreadRowState } from "./thread-row-state";
 
@@ -22,7 +23,20 @@ interface ThreadEvent {
   source: "turn" | "waiting";
   key: string;
   at: string;
+  /** Files the turn changed; null when unknown or for a wait. */
+  changedFileCount: number | null;
 }
+
+/** The OS notification payload the desktop bridge accepts for one thread. */
+interface ThreadNotification {
+  tag: string;
+  title: string;
+  body: string;
+}
+
+// The desktop main process rejects longer text, so a long thread title or branch is clipped here.
+const NOTIFICATION_TITLE_MAX = 200;
+const NOTIFICATION_BODY_MAX = 300;
 
 const WAITING_LABEL: Record<ThreadWaitingKind, NeedsYouLabel> = {
   approval: "Approval required",
@@ -41,12 +55,18 @@ function eventOf(state: ThreadRowState, attention: ThreadAttention | undefined):
   const waiting = attention?.waiting;
   if ((state.kind === "finished" || state.kind === "failed") && turn) {
     const label = state.kind === "finished" ? "Finished" : "Failed";
-    return { kind: state.kind, label, source: "turn", key: `turn:${turn.sequence}`, at: turn.endedAt };
+    return {
+      kind: state.kind, label, source: "turn", key: `turn:${turn.sequence}`, at: turn.endedAt,
+      changedFileCount: turn.changedFileCount,
+    };
   }
   // A setup approval also reads "Approval required"; matching the waiting kind keeps it off.
   if (state.kind === "needs-you" && waiting && WAITING_LABEL[waiting.kind] === state.label) {
     const facts = factsOf(attention);
-    return { kind: "needs-you", label: state.label, source: "waiting", key: `waiting:${facts.waiting}`, at: waiting.since };
+    return {
+      kind: "needs-you", label: state.label, source: "waiting", key: `waiting:${facts.waiting}`, at: waiting.since,
+      changedFileCount: null,
+    };
   }
   return null;
 }
@@ -81,6 +101,31 @@ function showToast(threadId: string, thread: WorkspaceThread | undefined, event:
     meta: `${event.label} · ${clockTime(event.at)}`,
     dedupeKey: threadId,
     onOpen: () => openThread(threadId),
+  });
+}
+
+function threadLocation(thread: WorkspaceThread | undefined): string {
+  const worktreeName = thread?.worktree_path?.split(/[\\/]/).filter(Boolean).pop();
+  return worktreeName || thread?.branch || "";
+}
+
+function notificationOf(threadId: string, thread: WorkspaceThread | undefined, event: ThreadEvent): ThreadNotification {
+  const count = event.changedFileCount;
+  const changed = count === null ? "" : `Changed ${count} ${count === 1 ? "file" : "files"}`;
+  const body = [changed, threadLocation(thread)].filter(Boolean).join(" · ");
+  return {
+    tag: threadId,
+    title: `${event.label}: ${thread?.title || "Untitled thread"}`.slice(0, NOTIFICATION_TITLE_MAX),
+    body: body.slice(0, NOTIFICATION_BODY_MAX),
+  };
+}
+
+/** Raise an OS notification too when the desktop app is in the background and notifications are on. */
+function notifyDesktop(notification: ThreadNotification): void {
+  const bridge = window.desktopBridge?.notifications;
+  if (!bridge || isWindowFocused() || !useSettingsStore.getState().settings.notifications.enabled) return;
+  bridge.show(notification).catch((error: unknown) => {
+    console.error("[thread-event-detector] Failed to show the OS notification", error);
   });
 }
 
@@ -134,6 +179,7 @@ export function startThreadEventDetector(): () => void {
   const announceNews = (threadId: string, { thread, event, facts, onScreen }: Sighting): void => {
     if (!event || onScreen || !isNews(event, facts, accounted.get(threadId))) return;
     showToast(threadId, thread, event);
+    notifyDesktop(notificationOf(threadId, thread, event));
     shown.set(threadId, event.key);
   };
 
@@ -178,6 +224,8 @@ export function startThreadEventDetector(): () => void {
   const unsubscribeThread = useThreadStore.subscribe(evaluateWatched);
   const unsubscribeWorkspace = useWorkspaceStore.subscribe(evaluateWatched);
   const unsubscribeSetup = useProjectAutomaticSetupStore.subscribe(evaluateWatched);
+  const notifications = window.desktopBridge?.notifications;
+  const notificationClick = notifications?.onClick(openThread);
   evaluateAll(true);
 
   return () => {
@@ -186,6 +234,7 @@ export function startThreadEventDetector(): () => void {
     unsubscribeWorkspace();
     unsubscribeSetup();
     unsubscribeToasts();
+    if (notificationClick) notifications?.offClick(notificationClick);
     for (const threadId of shown.keys()) withdraw(threadId);
   };
 }

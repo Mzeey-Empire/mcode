@@ -21,7 +21,7 @@ export function NotificationsSection() {
       <SettingRow
         label="Notifications"
         configKey="notifications.enabled"
-        hint="Show desktop notifications for agent events."
+        hint="Notify when a thread finishes, fails or needs you while Mcode is in the background."
       >
         <Switch
           checked={enabled}

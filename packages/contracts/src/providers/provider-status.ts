@@ -57,6 +57,12 @@ export const ProviderCliStatusSchema = lazySchema(() =>
 );
 /** Public CLI facts and update state. */
 export type ProviderCliStatus = z.infer<ReturnType<typeof ProviderCliStatusSchema>>;
+/** An unacknowledged model still available in the provider's current catalog. */
+export const ProviderNewModelSchema = lazySchema(() =>
+  z.object({ modelId: z.string(), label: z.string() }).strict(),
+);
+/** One new-model announcement for the provider bell. */
+export type ProviderNewModel = z.infer<ReturnType<typeof ProviderNewModelSchema>>;
 
 /** What the bell knows about one enabled provider. Carries no usage by design. */
 export const ProviderStatusSchema = lazySchema(() =>
@@ -66,6 +72,7 @@ export const ProviderStatusSchema = lazySchema(() =>
     cli: ProviderCliStatusSchema().nullable(),
     /** Null when the provider is not rate limited. */
     rateLimit: ProviderRateLimitSchema().nullable(),
+    newModels: z.array(ProviderNewModelSchema()).max(5),
     checkedAt: z.string(),
   }).strict(),
 );

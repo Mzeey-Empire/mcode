@@ -980,6 +980,14 @@ export const providerModelCache = sqliteTable("provider_model_cache", {
   modelCount: integer("model_count").notNull().default(0),
 });
 
+/** Durable model discovery and acknowledgement history, independent of cache invalidation. */
+export const providerModelSightings = sqliteTable("provider_model_sightings", {
+  providerId: text("provider_id").notNull(),
+  modelId: text("model_id").notNull(),
+  firstSeenAt: text("first_seen_at").notNull(),
+  acknowledgedAt: text("acknowledged_at"),
+}, (table) => [primaryKey({ columns: [table.providerId, table.modelId] })]);
+
 /** Last known provider catalog snapshots, isolated by provider and realized context. */
 export const providerCatalogSnapshots = sqliteTable(
   "provider_catalog_snapshots",

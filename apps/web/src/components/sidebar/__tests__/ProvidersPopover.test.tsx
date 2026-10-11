@@ -4,7 +4,9 @@ import type { ProviderCliUpdate, ProviderStatus } from "@mcode/contracts";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { deriveProviderBellRows, type ProviderBellRow } from "@/features/providers/provider-bell-rows";
+import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useProviderStatusStore } from "@/stores/providerStatusStore";
+import { useUiStore } from "@/stores/uiStore";
 import { ProvidersBell } from "../ProvidersBell";
 
 const { signInMock } = vi.hoisted(() => ({ signInMock: vi.fn() }));
@@ -17,7 +19,7 @@ const NOW = new Date(2026, 0, 1, 15, 0);
 const FOUR_PM = new Date(2026, 0, 1, 16, 0).toISOString();
 
 function status(providerId: ProviderStatus["providerId"], overrides: Partial<ProviderStatus>): ProviderStatus {
-  return { providerId, auth: { state: "signed_in" }, cli: null, rateLimit: null, checkedAt: NOW.toISOString(), ...overrides };
+  return { providerId, auth: { state: "signed_in" }, cli: null, rateLimit: null, newModels: [], checkedAt: NOW.toISOString(), ...overrides };
 }
 
 function codexCli(update: ProviderCliUpdate): ProviderStatus {
@@ -27,6 +29,10 @@ function codexCli(update: ProviderCliUpdate): ProviderStatus {
 function summarize(row: ProviderBellRow) {
   return [row.providerId, row.kind, row.kind === "cli_update" ? row.update.state : row.detail];
 }
+
+const CLAUDE_NEW_MODEL = status("claude", {
+  newModels: [{ modelId: "claude-fable-5-1", label: "Fable 5.1" }, { modelId: "claude-opus-5-5", label: "Opus 5.5" }],
+});
 
 const DEVIN_SIGNED_OUT = status("devin", {
   auth: { state: "signed_out", signIn: { kind: "terminal", argv: ["devin", "auth", "login"] } },
@@ -54,7 +60,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   useProviderStatusStore.setState({ statuses: [] });
-  useWorkspaceStore.setState({ activeWorkspaceId: null });
+  useWorkspaceStore.setState({ activeWorkspaceId: null, pendingNewThread: false });
+  useComposerDraftStore.setState({ pendingModel: null });
 });
 
 describe("ProvidersBell", () => {
@@ -120,6 +127,26 @@ describe("ProvidersBell", () => {
     expect(within(popover).getByText("5-hour limit reached · resets 16:00")).toHaveClass("text-muted");
     expect(within(popover).getByText("Rate limited")).toBeInTheDocument();
     expect(within(popover).queryByRole("button", { name: "Sign in" })).toBeNull();
+  });
+});
+
+describe("ProvidersBell new models", () => {
+  it("announces the newest model with Try, which acknowledges it and starts a new thread on it", async () => {
+    vi.mocked(mockTransport.acknowledgeProviderModels).mockClear();
+    useUiStore.setState({ primarySurface: "pullRequests" });
+    serve([CLAUDE_NEW_MODEL]);
+    render(<ProvidersBell />);
+
+    expect(screen.getByTestId("providers-bell-dot")).toBeInTheDocument();
+    const popover = await openBell();
+    expect(within(popover).getByText("Fable 5.1 is new in the model menu")).toHaveClass("text-muted");
+    fireEvent.click(within(popover).getByRole("button", { name: "Try" }));
+
+    expect(mockTransport.acknowledgeProviderModels).toHaveBeenCalledWith("claude");
+    expect(useComposerDraftStore.getState().pendingModel).toEqual({ provider: "claude", modelId: "claude-fable-5-1" });
+    expect(useWorkspaceStore.getState().pendingNewThread).toBe(true);
+    expect(useUiStore.getState().primarySurface).toBe("chat");
+    await waitFor(() => expect(screen.queryByTestId("providers-popover")).toBeNull());
   });
 });
 
@@ -212,6 +239,20 @@ describe("deriveProviderBellRows", () => {
     ]);
   });
 
+  it("ranks a new model below sign-in and rate-limit problems, for one provider and across rows", () => {
+    const rows = deriveProviderBellRows([
+      CLAUDE_NEW_MODEL,
+      status("codex", { rateLimit: { resetsAt: FOUR_PM, limitType: null }, newModels: [{ modelId: "gpt-7", label: "GPT-7" }] }),
+      { ...DEVIN_SIGNED_OUT, newModels: [{ modelId: "devin-2", label: "Devin 2" }] },
+    ], NOW);
+
+    expect(rows.map((row) => [...summarize(row), row.kind === "new_model" ? row.tryModelId : undefined])).toEqual([
+      ["devin", "signed_out", "Signed out · threads on Devin can't start", undefined],
+      ["codex", "rate_limited", "Rate limited · resets 16:00", undefined],
+      ["claude", "new_model", "Fable 5.1 is new in the model menu", "claude-fable-5-1"],
+    ]);
+  });
+
   it("shows an unrecognised limit type as sent, and a null type as Rate limited", () => {
     const rows = deriveProviderBellRows([
       status("claude", { rateLimit: { resetsAt: FOUR_PM, limitType: "opus_weekly" } }),
@@ -223,7 +264,7 @@ describe("deriveProviderBellRows", () => {
     ]);
   });
 
-  it("sorts rows with an action first and keeps one row per provider", () => {
+  it("sorts rows by kind, puts a running update after actionable ones, and keeps one row per provider", () => {
     const rows = deriveProviderBellRows([
       status("opencode", { cli: { installed: "1.0.0", managedBy: "user", latest: "1.1.0", update: { state: "running", target: "1.1.0" } } }),
       status("claude", { rateLimit: { resetsAt: FOUR_PM, limitType: null } }),
@@ -237,10 +278,10 @@ describe("deriveProviderBellRows", () => {
 
     expect(rows.map(summarize)).toEqual([
       ["devin", "signed_out", "Signed out · threads on Devin can't start"],
-      ["codex", "cli_update", "available"],
-      ["opencode", "cli_update", "running"],
       ["claude", "rate_limited", "Rate limited · resets 16:00"],
       ["cursor", "rate_limited", "Rate limited · resets 16:00"],
+      ["codex", "cli_update", "available"],
+      ["opencode", "cli_update", "running"],
     ]);
   });
 

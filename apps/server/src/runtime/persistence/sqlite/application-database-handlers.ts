@@ -17,6 +17,7 @@ import { threadStartupWriteHandlers } from "../../../features/thread-startup/thr
 import { sqliteProfileWriteHandlers } from "./performance/sqlite-profile-write-operations.js";
 import { worktreeWriteHandlers } from "../../../features/projects/persistence/worktree-write-operations.js";
 import { modelCacheWriteHandlers } from "../../../features/providers/models/persistence/model-cache-write-operations.js";
+import { modelSightingsWriteHandlers } from "../../../features/providers/status/model-sightings-write-operations.js";
 import { providerCatalogSnapshotWriteHandlers } from "../../../features/providers/catalog/persistence/provider-catalog-snapshot-write-operations.js";
 import { workspaceTerminalPreferencesWriteHandlers } from "../../../features/terminal/preferences/workspace-terminal-preferences-write-operations.js";
 import { terminalCleanupLedgerWriteHandlers } from "../../../features/terminal/cleanup/terminal-cleanup-ledger-write-operations.js";
@@ -52,6 +53,7 @@ export function applicationDatabaseHandlers(db: Database): ReadonlyMap<string, (
     ...sqliteProfileWriteHandlers(db),
     ...worktreeWriteHandlers(db),
     ...modelCacheWriteHandlers(db),
+    ...modelSightingsWriteHandlers(db),
     ...providerCatalogSnapshotWriteHandlers(db),
     ...workspaceTerminalPreferencesWriteHandlers(db),
     ...terminalCleanupLedgerWriteHandlers(db),

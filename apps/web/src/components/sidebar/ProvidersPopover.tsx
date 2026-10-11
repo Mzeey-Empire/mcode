@@ -11,25 +11,26 @@ interface ProvidersPopoverProps {
   rows: readonly ProviderBellRow[];
   onSignIn: (argv: readonly string[]) => void;
   onUpdateCli: (providerId: ProviderId) => void;
+  onTry: (providerId: ProviderId, modelId: string) => void;
 }
 
 /** Body of the sidebar Providers popover: a header and one row per provider that needs attention. */
-export function ProvidersPopover({ rows, onSignIn, onUpdateCli }: ProvidersPopoverProps) {
+export function ProvidersPopover({ rows, ...actions }: ProvidersPopoverProps) {
   return (
     <div data-testid="providers-popover">
       <div className="flex h-9 items-center px-2.5 text-button text-ink">Providers</div>
       {rows.length > 0 && (
         <ul>
-          {rows.map((row) => (
-            <ProviderRow key={row.providerId} row={row} onSignIn={onSignIn} onUpdateCli={onUpdateCli} />
-          ))}
+          {rows.map((row) => <ProviderRow key={row.providerId} row={row} {...actions} />)}
         </ul>
       )}
     </div>
   );
 }
 
-function ProviderRow({ row, onSignIn, onUpdateCli }: { row: ProviderBellRow } & Omit<ProvidersPopoverProps, "rows">) {
+type RowProps = { row: ProviderBellRow } & Omit<ProvidersPopoverProps, "rows">;
+
+function ProviderRow({ row, ...actions }: RowProps) {
   return (
     <li className="flex items-center gap-2.5 rounded-lg pt-2 pr-1.5 pb-2 pl-2.5">
       <span className="flex h-5 w-4 shrink-0 items-center justify-center self-start">
@@ -39,14 +40,14 @@ function ProviderRow({ row, onSignIn, onUpdateCli }: { row: ProviderBellRow } & 
         <div className="text-sm font-medium text-ink">{row.name}</div>
         <RowDetail row={row} />
       </div>
-      <RowAction row={row} onSignIn={onSignIn} onUpdateCli={onUpdateCli} />
+      <RowAction row={row} {...actions} />
     </li>
   );
 }
 
 function RowDetail({ row }: { row: ProviderBellRow }) {
   if (row.kind === "cli_update") return <CliUpdateDetail installed={row.installed} update={row.update} />;
-  return <div className={cn("text-xs", row.kind === "signed_out" ? "text-primary" : "text-muted")}>{row.detail}</div>;
+  return <div className={cn("text-fade text-xs", row.kind === "signed_out" ? "text-primary" : "text-muted")}>{row.detail}</div>;
 }
 
 function CliUpdateDetail({ installed, update }: { installed: string | null; update: ProviderBellCliUpdate }) {
@@ -72,8 +73,9 @@ function Version({ value }: { value: string }) {
   return <span className="font-mono">{value}</span>;
 }
 
-function RowAction({ row, onSignIn, onUpdateCli }: { row: ProviderBellRow } & Omit<ProvidersPopoverProps, "rows">) {
+function RowAction({ row, onSignIn, onUpdateCli, onTry }: RowProps) {
   if (row.kind === "signed_out") return <ActionPill label="Sign in" onClick={() => onSignIn(row.signInArgv)} />;
+  if (row.kind === "new_model") return <ActionPill label="Try" onClick={() => onTry(row.providerId, row.tryModelId)} />;
   if (row.kind !== "cli_update") return null;
   if (row.update.state === "running") {
     return (

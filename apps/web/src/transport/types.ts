@@ -853,6 +853,8 @@ export interface McodeTransport {
   listProviderStatus(force?: boolean): Promise<ProviderStatus[]>;
   /** Update a provider's npm-installed CLI to the latest release; resolves with the refreshed status. */
   updateProviderCli(providerId: ProviderId): Promise<ProviderStatus>;
+  /** Mark a provider's new-model announcements as seen; the server pushes the updated status. */
+  acknowledgeProviderModels(providerId: ProviderId): Promise<void>;
 
   /** Generate a stateless one-line conversational recap from bounded messages. */
   generateRecap(

@@ -552,6 +552,22 @@ interface DesktopBridge {
   spellcheck: SpellcheckBridge;
   /** App version and auto-update controls. */
   app: AppBridge;
+  /**
+   * OS notifications for thread events. Optional: older desktop builds do not
+   * expose it, and the web build relies on the in-app toast lane alone.
+   */
+  notifications?: {
+    /**
+     * Raise the OS notification for `tag` (a thread id), replacing any live one
+     * with the same tag. Rejects when the main process refuses the payload
+     * (title over 200 or body over 300 characters).
+     */
+    show(input: { tag: string; title: string; body: string }): Promise<void>;
+    /** Subscribe to notification clicks with the clicked tag. Returns the listener for cleanup. */
+    onClick(callback: (tag: string) => void): (...args: unknown[]) => void;
+    /** Remove a previously registered click listener. */
+    offClick(listener: (...args: unknown[]) => void): void;
+  };
   /** IPC push transport relayed from the main process. */
   ipc: IpcBridge;
   /** Embedded site preview (desktop only). */

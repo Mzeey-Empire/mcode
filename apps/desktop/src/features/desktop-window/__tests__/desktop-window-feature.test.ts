@@ -108,6 +108,7 @@ vi.mock("electron", () => ({
   Menu: desktopWindowFeatureTest.menu,
   shell: desktopWindowFeatureTest.shell,
   ipcMain: desktopWindowFeatureTest.ipcMain,
+  Notification: class { static isSupported = () => false; },
 }));
 
 import { createDesktopWindowFeature } from "../index.js";
@@ -140,6 +141,7 @@ describe("Desktop Window feature entry point", () => {
 
     expect(desktopWindowFeatureTest.menu.setApplicationMenu).toHaveBeenCalledWith(null);
     expect(desktopWindowFeatureTest.handlers.has("window:perform")).toBe(true);
+    expect(desktopWindowFeatureTest.handlers.has("notifications:show")).toBe(true);
 
     const firstWindow = feature.createWindow();
     const popupHandler = firstWindow.webContents.setWindowOpenHandler.mock.calls[0][0] as (
@@ -149,6 +151,10 @@ describe("Desktop Window feature entry point", () => {
     expect(desktopWindowFeatureTest.shell.openExternal).toHaveBeenCalledWith(
       "https://example.com/",
     );
+
+    const notificationHandler = desktopWindowFeatureTest.handlers.get("notifications:show");
+    expect(() => notificationHandler?.({ sender: {} }, { tag: "a", title: "Finished: a", body: "" }))
+      .toThrow("Thread notifications require the main renderer");
 
     const actionHandler = desktopWindowFeatureTest.handlers.get("window:perform");
     actionHandler?.({ sender: {} }, "zoomReset");

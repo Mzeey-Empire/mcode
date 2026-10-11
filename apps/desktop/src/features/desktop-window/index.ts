@@ -11,6 +11,7 @@ import {
 import { configureApplicationMenu } from "./menu/application-menu.js";
 import { registerDesktopWindowActionHandler } from "./actions/handlers.js";
 import { installMainWindowNavigationPolicy } from "./navigation/main-window-policy.js";
+import { registerThreadNotificationHandler } from "./notifications/handler.js";
 
 /** Dependencies for the Desktop Window feature entry point. */
 export interface DesktopWindowFeatureDependencies {
@@ -48,6 +49,7 @@ export function createDesktopWindowFeature(
     getMainWindow: () => mainWindow,
   });
   registerDesktopWindowActionHandler();
+  registerThreadNotificationHandler(() => mainWindow);
 
   const create = (): BrowserWindowType => {
     const window = createWindow({

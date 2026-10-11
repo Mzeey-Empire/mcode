@@ -46,7 +46,6 @@ vi.mock("@/components/chat/SpellcheckContextMenu", () => ({ SpellcheckContextMen
 vi.mock("@/components/chat/TerminalStatusIndicator", () => ({ TerminalStatusIndicator: () => <div /> }));
 vi.mock("@/components/chat/ComposerQueueList", () => ({ ComposerQueueList: () => <div /> }));
 vi.mock("@/components/chat/ContextTracker", () => ({ ContextTracker: () => <div /> }));
-vi.mock("@/components/chat/RetryBanner", () => ({ RetryBanner: () => <div /> }));
 
 const originalResizeObserver = globalThis.ResizeObserver;
 const originalScrollIntoView = Element.prototype.scrollIntoView;

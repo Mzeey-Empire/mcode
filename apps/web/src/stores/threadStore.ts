@@ -2707,7 +2707,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
   const handleApiRetry = (event: Extract<AgentEvent, { type: "apiRetry" }>): void => {
     patchRec(event.threadId, {
-      apiRetry: { reason: event.reason, attempt: event.attempt, maxRetries: event.maxRetries, delayMs: event.delayMs },
+      apiRetry: { errorStatus: event.errorStatus },
     });
   };
 
