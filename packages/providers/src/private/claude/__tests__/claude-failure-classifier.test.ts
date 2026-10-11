@@ -36,9 +36,19 @@ describe("classifyClaudeFailure", () => {
     expect(classifyClaudeFailure({ rateLimit }, NOW)).toEqual({ kind: "usage_limit", retryAfterMs: 90_000, limitType: "five_hour" });
   });
 
-  it("reports a zero wait for a reset already past and omits the wait when no reset is known", () => {
-    expect(classifyClaudeFailure({ rateLimit: { status: "rejected", resetsAt: NOW / 1000 - 1 } }, NOW)).toEqual({ kind: "usage_limit", retryAfterMs: 0 });
+  it("omits the wait when no reset is known", () => {
     expect(classifyClaudeFailure({ rateLimit: { status: "rejected" } }, NOW)).toEqual({ kind: "usage_limit" });
+  });
+
+  it("ignores a rejection whose reset has already passed", () => {
+    expect(classifyClaudeFailure({ rateLimit: { status: "rejected", resetsAt: NOW / 1000 } }, NOW)).toEqual({ kind: "fatal" });
+    expect(classifyClaudeFailure({ rateLimit: { status: "rejected", resetsAt: NOW / 1000 - 1 }, apiErrorStatus: 502 }, NOW))
+      .toEqual({ kind: "retryable", status: 502 });
+  });
+
+  it("reports a zero wait when a rate_limit error arrives after the reset", () => {
+    expect(classifyClaudeFailure({ assistantError: "rate_limit", rateLimit: { status: "rejected", resetsAt: NOW / 1000 - 1 } }, NOW))
+      .toEqual({ kind: "usage_limit", code: "rate_limit", retryAfterMs: 0 });
   });
 
   it("caps a reset beyond the wire bound at 31 days", () => {

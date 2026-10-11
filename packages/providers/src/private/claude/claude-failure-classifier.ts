@@ -70,7 +70,7 @@ const RETRYABLE_STREAM_ERROR_CODES: ReadonlySet<string> = new Set([
  * Pure: `now` is the emission time used to turn the rate-limit reset into a relative wait.
  */
 export function classifyClaudeFailure(evidence: ClaudeFailureEvidence, now: number): TurnFailure {
-  const kind = claudeFailureKind(evidence);
+  const kind = claudeFailureKind(evidence, now);
   const usageLimit = kind === "usage_limit" ? evidence.rateLimit : undefined;
   return turnFailure(kind, {
     status: httpStatus(evidence.apiErrorStatus),
@@ -81,13 +81,19 @@ export function classifyClaudeFailure(evidence: ClaudeFailureEvidence, now: numb
   });
 }
 
-function claudeFailureKind(evidence: ClaudeFailureEvidence): TurnFailureKind {
+function claudeFailureKind(evidence: ClaudeFailureEvidence, now: number): TurnFailureKind {
   const named = lookup(KIND_BY_ASSISTANT_ERROR, evidence.assistantError) ?? lookup(KIND_BY_STARTUP_FAILURE, evidence.startupFailureReason);
   if (named) return named;
-  if (evidence.rateLimit?.status === "rejected") return "usage_limit";
+  if (stillRejected(evidence.rateLimit, now)) return "usage_limit";
   if ((httpStatus(evidence.apiErrorStatus) ?? 0) >= 500) return "retryable";
   if (evidence.streamErrorCode !== undefined && RETRYABLE_STREAM_ERROR_CODES.has(evidence.streamErrorCode)) return "retryable";
   return "fatal";
+}
+
+// The last rate-limit report outlives turns, so a rejection whose reset has passed no longer explains a failure.
+function stillRejected(rateLimit: ClaudeRateLimitEvidence | undefined, now: number): boolean {
+  if (rateLimit?.status !== "rejected") return false;
+  return rateLimit.resetsAt === undefined || rateLimit.resetsAt * 1000 > now;
 }
 
 function claudeFailureCode(evidence: ClaudeFailureEvidence): string | undefined {
