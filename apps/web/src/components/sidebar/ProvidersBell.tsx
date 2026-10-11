@@ -8,14 +8,18 @@ import { ProvidersPopover } from "./ProvidersPopover";
 /**
  * Sidebar footer bell for provider sign-in and rate-limit problems. A dot marks
  * that at least one provider needs attention. Opening it re-reads status
- * through the server's cache; it never fetches usage.
+ * through the server's cache, or re-checks while a provider reads signed out.
+ * It never fetches usage.
  */
 export function ProvidersBell() {
   const statuses = useProviderStatusStore((s) => s.statuses);
   const fetchStatus = useProviderStatusStore((s) => s.fetch);
   const rows = deriveProviderBellRows(statuses, new Date());
+  // A signed-out row bypasses the cache: users often sign in and leave the terminal open,
+  // so the terminal-exit re-check alone would keep a stale "Signed out" row for 10 minutes.
+  const hasSignedOut = rows.some((row) => row.kind === "signed_out");
   return (
-    <Popover onOpenChange={(open) => { if (open) void fetchStatus(false); }}>
+    <Popover onOpenChange={(open) => { if (open) void fetchStatus(hasSignedOut); }}>
       <PopoverTrigger render={<IconButton aria-label="Providers" />}>
         <Bell strokeWidth={1.5} aria-hidden />
         {rows.length > 0 && (

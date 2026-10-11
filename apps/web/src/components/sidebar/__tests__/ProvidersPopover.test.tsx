@@ -80,6 +80,13 @@ describe("ProvidersBell", () => {
     expect(mockTransport.getProviderUsage).not.toHaveBeenCalled();
   });
 
+  it("re-checks past the cache when opened while a provider reads signed out", async () => {
+    serve([DEVIN_SIGNED_OUT]);
+    render(<ProvidersBell />);
+    await openBell();
+    expect(mockTransport.listProviderStatus).toHaveBeenCalledWith(true);
+  });
+
   it("keeps Sign in focusable but disabled without an open project", async () => {
     useWorkspaceStore.setState({ activeWorkspaceId: null });
     serve([DEVIN_SIGNED_OUT]);
