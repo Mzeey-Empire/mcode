@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
-import { ArrowUp, Check, CircleAlert, Download, RefreshCw } from "lucide-react";
+import { Check, CircleAlert, CircleArrowDown, CircleArrowUp, RefreshCw } from "lucide-react";
 import { Button, IconButton } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger, type PopoverRootChangeEventDetails } from "@/components/ui/popover";
@@ -18,9 +18,11 @@ export const UP_TO_DATE_FLASH_MS = 3_000;
 /** Hover delay before the release notes card opens. */
 export const RELEASE_NOTES_HOVER_DELAY_MS = 300;
 
+// The slot shares the footer with fixed icons, so a narrow sidebar shrinks the label and fades its end.
+const SHRINK_CLASS = "min-w-0 max-w-full shrink";
 // A hover card or menu sets aria-expanded; the pill keeps its fill instead of the darker toggled-on fill.
-const FILLED_CLASS = "gap-1.5 px-2 text-caption aria-expanded:bg-selected";
-const GHOST_TEXT_CLASS = "gap-1.5 px-2 text-caption font-normal text-muted";
+const FILLED_CLASS = cn(SHRINK_CLASS, "gap-1.5 px-2 text-caption aria-expanded:bg-selected");
+const GHOST_TEXT_CLASS = cn(SHRINK_CLASS, "gap-1.5 px-2 text-caption font-normal text-muted");
 
 interface InstallPrompt {
   readonly version: string;
@@ -115,17 +117,19 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
       case "up-to-date":
         return (
           <span role="status" className={cn("inline-flex h-8 items-center", GHOST_TEXT_CLASS)}>
-            <Check className="size-4" strokeWidth={1.5} aria-hidden />
-            Up to date
+            <Check className="size-4 shrink-0" strokeWidth={1.5} aria-hidden />
+            <span className="text-fade">Up to date</span>
           </span>
         );
       case "download":
         return (
           <ReleaseNotesHover version={view.version} notes={view.releaseNotes} nightlyTooltip={`Download ${view.version}`}>
             <Button variant="subtle" className={FILLED_CLASS} onClick={() => void app.downloadUpdate()}>
-              <Download strokeWidth={1.5} aria-hidden />
-              Download
-              <VersionText>{view.versionLabel}</VersionText>
+              <CircleArrowDown strokeWidth={1.5} aria-hidden />
+              <span className="flex gap-1.5 text-fade">
+                Download
+                <VersionText>{view.versionLabel}</VersionText>
+              </span>
             </Button>
           </ReleaseNotesHover>
         );
@@ -137,16 +141,20 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
             className={cn("inline-flex h-8 items-center rounded-control bg-selected", FILLED_CLASS)}
           >
             <ProgressRing percent={view.percent} />
-            <VersionText>{view.progressLabel}</VersionText>
+            <span className="text-fade">
+              <VersionText>{view.progressLabel}</VersionText>
+            </span>
           </span>
         );
       case "install":
         return (
           <ReleaseNotesHover version={view.version} notes={view.releaseNotes} nightlyTooltip={`Install ${view.version}`}>
             <Button variant="subtle" className={FILLED_CLASS} onClick={() => void install(view.version)}>
-              <ArrowUp strokeWidth={1.5} aria-hidden />
-              Install
-              <VersionText>{view.versionLabel}</VersionText>
+              <CircleArrowUp strokeWidth={1.5} aria-hidden />
+              <span className="flex gap-1.5 text-fade">
+                Install
+                <VersionText>{view.versionLabel}</VersionText>
+              </span>
             </Button>
           </ReleaseNotesHover>
         );
@@ -154,8 +162,8 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
         return (
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button variant="subtle" className={FILLED_CLASS} />}>
-              <ArrowUp strokeWidth={1.5} aria-hidden />
-              Installs when idle
+              <CircleArrowUp strokeWidth={1.5} aria-hidden />
+              <span className="text-fade">Installs when idle</span>
             </DropdownMenuTrigger>
             <DropdownMenuContent side="top" align="end">
               <DropdownMenuItem label="Cancel scheduled install" onClick={() => void app.cancelInstallWhenIdle()} />
@@ -169,7 +177,7 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
           <Tooltip>
             <TooltipTrigger render={<Button variant="ghost" className={GHOST_TEXT_CLASS} onClick={() => retry(operation)} />}>
               <CircleAlert strokeWidth={1.5} aria-hidden />
-              Retry update
+              <span className="text-fade">Retry update</span>
             </TooltipTrigger>
             <TooltipContent className="flex-col items-start gap-0.5">
               <span className="font-medium">{friendly.title}</span>
@@ -205,9 +213,13 @@ interface ReleaseNotesHoverProps {
 
 function ReleaseNotesHover({ version, notes, nightlyTooltip, children }: ReleaseNotesHoverProps) {
   const [open, setOpen] = useState(false);
+  // Escape from inside the card hands focus back to the trigger; that focus must not reopen it.
+  const escaped = useRef(false);
   // The trigger's click downloads or installs; only hover and dismissals move the card.
   const onOpenChange = (next: boolean, details: PopoverRootChangeEventDetails) => {
-    if (details.reason !== "trigger-press") setOpen(next);
+    if (details.reason === "trigger-press") return;
+    escaped.current = details.reason === "escape-key";
+    setOpen(next);
   };
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -218,6 +230,15 @@ function ReleaseNotesHover({ version, notes, nightlyTooltip, children }: Release
               openOnHover
               delay={RELEASE_NOTES_HOVER_DELAY_MS}
               closeDelay={150}
+              // Focus opens the card that hover opens, so keyboard users reach it and can Tab into it.
+              // A click also focuses, but its download, dialog, or restart replaces the trigger anyway.
+              onFocus={() => {
+                if (!escaped.current) setOpen(true);
+                escaped.current = false;
+              }}
+              onBlur={() => {
+                escaped.current = false;
+              }}
               render={children}
             />
           }

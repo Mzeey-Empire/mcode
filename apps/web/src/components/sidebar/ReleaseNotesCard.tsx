@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Button } from "@/components/ui/button";
 import { parseReleaseNotes } from "@/features/updates/release-notes";
 import { releaseNotesUrl } from "@/features/updates/update-button-state";
 
@@ -33,13 +34,13 @@ export function ReleaseNotesCard({ version, notes }: ReleaseNotesCardProps) {
       ) : parsed.fallback ? (
         <p className="text-body-small text-ink">{parsed.fallback}</p>
       ) : null}
-      <button
-        type="button"
-        className="self-start text-body-small font-medium text-link hover:text-focus focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+      <Button
+        variant="link"
+        className="h-auto self-start px-0 text-body-small font-medium"
         onClick={() => void window.desktopBridge?.openExternalUrl(releaseNotesUrl(version))}
       >
         Full release notes
-      </button>
+      </Button>
     </div>
   );
 }

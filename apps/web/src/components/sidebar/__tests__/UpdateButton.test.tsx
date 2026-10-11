@@ -146,17 +146,18 @@ describe("Install", () => {
     render(<UpdateButton />);
     await userEvent.click(screen.getByRole("button", { name: /Install/ }));
     await waitFor(() => expect(app.installUpdate).toHaveBeenCalledOnce());
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Install update" })).toBeNull();
   });
 
   it("asks first with one agent running and arms install when they finish", async () => {
     getActiveAgentCount.mockResolvedValue(1);
     render(<UpdateButton />);
     await userEvent.click(screen.getByRole("button", { name: /Install/ }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("dialog", { name: "Install update" });
     expect(dialog).toHaveTextContent("Install update");
     expect(dialog).toHaveTextContent("0.10.0");
     expect(dialog).toHaveTextContent("1 agent is running. Installing restarts Mcode and stops them.");
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "When they finish" })).toHaveFocus());
     await userEvent.click(within(dialog).getByRole("button", { name: "When they finish" }));
     expect(app.installWhenIdle).toHaveBeenCalledOnce();
     expect(app.installUpdate).not.toHaveBeenCalled();
@@ -166,7 +167,7 @@ describe("Install", () => {
     getActiveAgentCount.mockResolvedValue(3);
     render(<UpdateButton />);
     await userEvent.click(screen.getByRole("button", { name: /Install/ }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("dialog", { name: "Install update" });
     expect(dialog).toHaveTextContent("3 agents are running.");
     await userEvent.click(within(dialog).getByRole("button", { name: "Restart now" }));
     expect(app.installUpdate).toHaveBeenCalledOnce();
@@ -176,7 +177,7 @@ describe("Install", () => {
     getActiveAgentCount.mockRejectedValue(new Error("socket closed"));
     render(<UpdateButton />);
     await userEvent.click(screen.getByRole("button", { name: /Install/ }));
-    expect(await screen.findByRole("dialog")).toHaveTextContent("Agents may be running.");
+    expect(await screen.findByRole("dialog", { name: "Install update" })).toHaveTextContent("Agents may be running.");
     expect(app.installUpdate).not.toHaveBeenCalled();
   });
 });
@@ -214,6 +215,30 @@ describe("ReleaseNotesCard", () => {
     await userEvent.click(download);
     expect(app.downloadUpdate).toHaveBeenCalledOnce();
     expect(screen.getByTestId("release-notes-card")).toBeInTheDocument();
+  });
+
+  it("opens on keyboard focus, closes on Escape, and downloads on Enter", async () => {
+    showStatus({ state: "available", version: "0.10.0", releaseNotes: "- Faster startup" });
+    render(<UpdateButton />);
+    await userEvent.tab();
+    expect(screen.getByRole("button", { name: /Download/ })).toHaveFocus();
+    expect(await screen.findByTestId("release-notes-card")).toHaveTextContent("Faster startup");
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByTestId("release-notes-card")).toBeNull());
+    await userEvent.keyboard("{Enter}");
+    expect(app.downloadUpdate).toHaveBeenCalledOnce();
+  });
+
+  it("stays closed when Escape from inside the card returns focus to the trigger", async () => {
+    showStatus({ state: "available", version: "0.10.0", releaseNotes: "- Faster startup" });
+    render(<UpdateButton />);
+    await userEvent.tab();
+    await screen.findByTestId("release-notes-card");
+    await userEvent.tab();
+    expect(screen.getByRole("button", { name: "Full release notes" })).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.getByRole("button", { name: /Download/ })).toHaveFocus());
+    await waitFor(() => expect(screen.queryByTestId("release-notes-card")).toBeNull());
   });
 
   it("renders script and markdown links as inert text", async () => {
