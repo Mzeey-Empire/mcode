@@ -266,8 +266,9 @@ export interface IAgentProvider {
   getUsage?(): Promise<ProviderUsageInfo>;
 
   /**
-   * Report sign-in state from local credentials only, with no network call.
-   * Adapters without it are reported as `unknown`, which the bell never shows.
+   * Report sign-in state. Return `signed_out` only when the provider positively
+   * says so; a timeout, crash, or unrecognised answer is `unknown`, which the
+   * bell never shows. Adapters without it are reported as `unknown` too.
    */
   describeStatus?(): Promise<ProviderStatusFacts>;
 
