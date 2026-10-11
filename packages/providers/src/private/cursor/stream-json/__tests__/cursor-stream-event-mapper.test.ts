@@ -294,7 +294,7 @@ describe("mapCursorStreamEvent", () => {
       expect(acc.toolStartTimes.has("tu_1")).toBe(true);
     });
 
-    it("maps exploreWorkspaceToolCall to Agent and forwards parent_call_id", () => {
+    it("keeps exploreWorkspaceToolCall as its own tool and forwards parent_call_id", () => {
       const acc = freshAcc();
       const events = mapCursorStreamEvent(
         {
@@ -311,16 +311,41 @@ describe("mapCursorStreamEvent", () => {
         "t1",
         acc,
       );
-      expect(events).toHaveLength(1);
-      expect(events[0]).toMatchObject({
-        type: "toolUse",
-        toolCallId: "deleg_1",
-        toolName: "Agent",
-        parentToolCallId: "root_9",
-      });
-      expect((events[0] as { toolInput: Record<string, unknown> }).toolInput.goal).toBe(
-        "list top-level dirs",
+      expect(events).toEqual([
+        {
+          type: "toolUse",
+          threadId: "t1",
+          toolCallId: "deleg_1",
+          toolName: "exploreWorkspaceToolCall",
+          toolInput: { goal: "list top-level dirs" },
+          parentToolCallId: "root_9",
+        },
+      ]);
+    });
+
+    it("keeps a browser tool call as its own tool", () => {
+      const acc = freshAcc();
+      const events = mapCursorStreamEvent(
+        {
+          type: "tool_call",
+          subtype: "started",
+          call_id: "browse_1",
+          tool_call: {
+            browserNavigateToolCall: { args: { url: "http://localhost:3000" } },
+          },
+        } as CursorStreamEvent,
+        "t1",
+        acc,
       );
+      expect(events).toEqual([
+        {
+          type: "toolUse",
+          threadId: "t1",
+          toolCallId: "browse_1",
+          toolName: "browserNavigateToolCall",
+          toolInput: { url: "http://localhost:3000" },
+        },
+      ]);
     });
 
     it("maps shellToolCall to a ToolUse with toolName=Bash", () => {
