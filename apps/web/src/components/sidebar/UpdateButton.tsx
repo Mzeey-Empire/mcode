@@ -18,7 +18,8 @@ export const UP_TO_DATE_FLASH_MS = 3_000;
 /** Hover delay before the release notes card opens. */
 export const RELEASE_NOTES_HOVER_DELAY_MS = 300;
 
-const FILLED_CLASS = "gap-1.5 bg-selected px-2 text-caption hover:bg-button-secondary-hover";
+// A hover card or menu sets aria-expanded; the pill keeps its fill instead of the darker toggled-on fill.
+const FILLED_CLASS = "gap-1.5 px-2 text-caption aria-expanded:bg-selected";
 const GHOST_TEXT_CLASS = "gap-1.5 px-2 text-caption font-normal text-muted";
 
 interface InstallPrompt {
@@ -121,7 +122,7 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
       case "download":
         return (
           <ReleaseNotesHover version={view.version} notes={view.releaseNotes} nightlyTooltip={`Download ${view.version}`}>
-            <Button variant="ghost" className={FILLED_CLASS} onClick={() => void app.downloadUpdate()}>
+            <Button variant="subtle" className={FILLED_CLASS} onClick={() => void app.downloadUpdate()}>
               <Download strokeWidth={1.5} aria-hidden />
               Download
               <VersionText>{view.versionLabel}</VersionText>
@@ -133,7 +134,7 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
           <span
             role="status"
             aria-label={`Downloading update, ${Math.round(view.percent)}%`}
-            className={cn("inline-flex h-8 items-center rounded-control", FILLED_CLASS, "hover:bg-selected")}
+            className={cn("inline-flex h-8 items-center rounded-control bg-selected", FILLED_CLASS)}
           >
             <ProgressRing percent={view.percent} />
             <VersionText>{view.progressLabel}</VersionText>
@@ -142,7 +143,7 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
       case "install":
         return (
           <ReleaseNotesHover version={view.version} notes={view.releaseNotes} nightlyTooltip={`Install ${view.version}`}>
-            <Button variant="ghost" className={FILLED_CLASS} onClick={() => void install(view.version)}>
+            <Button variant="subtle" className={FILLED_CLASS} onClick={() => void install(view.version)}>
               <ArrowUp strokeWidth={1.5} aria-hidden />
               Install
               <VersionText>{view.versionLabel}</VersionText>
@@ -152,7 +153,7 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
       case "armed":
         return (
           <DropdownMenu>
-            <DropdownMenuTrigger render={<Button variant="ghost" className={FILLED_CLASS} />}>
+            <DropdownMenuTrigger render={<Button variant="subtle" className={FILLED_CLASS} />}>
               <ArrowUp strokeWidth={1.5} aria-hidden />
               Installs when idle
             </DropdownMenuTrigger>
