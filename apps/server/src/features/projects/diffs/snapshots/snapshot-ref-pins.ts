@@ -65,6 +65,7 @@ const REF_ROOT = "refs/mcode";
 const REF_COMPONENT = /^[A-Za-z0-9_-]{1,128}$/;
 const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const PIN_COMMIT_MESSAGE = "mcode snapshot pin";
+const ORPHAN_PIN_GRACE_SECONDS = 3600;
 
 function requireComponent(value: string, label: string): string {
   if (!REF_COMPONENT.test(value)) throw new Error(`Snapshot pin ${label} is not a safe ref component`);
@@ -265,7 +266,7 @@ export class SnapshotRefPins {
     const prefix = `${storeRefPrefix(this.storeId)}reverts/`;
     const refs = (await this.exec(cwd, ["for-each-ref", "--format=%(refname) %(committerdate:unix)", prefix])).trim().split("\n").filter(Boolean);
     const cutoff = new Date(Date.now() - Number(process.env.SNAPSHOT_MAX_AGE_DAYS ?? "30") * 86_400_000).toISOString();
-    const orphanCutoff = Date.now() / 1000 - 3600;
+    const orphanCutoff = Date.now() / 1000 - ORPHAN_PIN_GRACE_SECONDS;
     for (const listed of refs) {
       const [ref, committedAt] = listed.trim().split(" ");
       if (!ref) continue;

@@ -19,7 +19,6 @@ export const RevertFilePlanSchema = lazySchema(() => z.object({
 export const TurnRevertUnavailableSchema = z.enum([
   "not_git", "snapshot_missing", "snapshot_pruned", "worktree_missing", "no_attributed_files", "recovery_expired",
 ]);
-/** Preview tokens bind raw worktree state, never request identity. */
 const turnRevertPreview = lazySchema(() => z.discriminatedUnion("status", [
   z.object({ status: z.literal("ready"), previewToken: z.string().max(128),
     files: z.array(RevertFilePlanSchema()).max(512),
@@ -37,7 +36,6 @@ export const TurnRevertRecordSchema = lazySchema(() => z.object({
   files: z.array(z.object({ path: z.string(), previousPath: z.string().optional(), action: z.enum(["restore", "delete", "recreate"]) })).max(512),
   receiptMessageId: z.string(), createdAt: z.string(),
 }));
-/** Apply and Undo outcomes; validation errors are RPC errors. */
 const turnRevertResult = lazySchema(() => z.discriminatedUnion("status", [
   z.object({ status: z.literal("reverted"), revert: TurnRevertRecordSchema(), receipt: MessageSchema() }),
   z.object({ status: z.literal("stale"), preview: TurnRevertPreviewSchema() }),
@@ -56,7 +54,7 @@ export type TurnRevertPreview =
   | { status: "nothing_to_revert" }
   | { status: "busy"; reason: "turn_running" | "revert_running" }
   | { status: "unavailable"; reason: z.infer<typeof TurnRevertUnavailableSchema> };
-/** Bounded public schema type keeps the WebSocket registry declaration small. */
+/** Preview tokens bind raw worktree state, never request identity. The explicit type keeps the WebSocket registry declaration small. */
 export const TurnRevertPreviewSchema: () => z.ZodType<TurnRevertPreview> = turnRevertPreview;
 /** Public operation record. */
 export type TurnRevertRecord = z.infer<ReturnType<typeof TurnRevertRecordSchema>>;
@@ -67,5 +65,5 @@ export type TurnRevertResult =
   | { status: "busy"; reason: "turn_running" | "revert_running" }
   | { status: "unavailable"; reason: z.infer<typeof TurnRevertUnavailableSchema> }
   | { status: "failed"; outcome: "unchanged" | "rolled_back" | "recovery_failed"; paths: string[]; detail: string };
-/** Bounded public schema type keeps the WebSocket registry declaration small. */
+/** Apply and Undo outcomes; validation errors are RPC errors. The explicit type keeps the WebSocket registry declaration small. */
 export const TurnRevertResultSchema: () => z.ZodType<TurnRevertResult> = turnRevertResult;
