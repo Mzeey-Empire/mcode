@@ -35,5 +35,5 @@ export function classifyRecovery(current: PathState, entry: RecoveryPath, materi
 
 /** Information needed to recover without consulting snapshots that may have expired. */
 export const RevertContextSchema = z.object({
-  request: z.string(), cwd: z.string(), snapshotIds: z.array(z.string()), label: z.string(),
+  request: z.string(), cwd: z.string(), lockCwd: z.string().optional(), snapshotIds: z.array(z.string()), label: z.string(),
 });

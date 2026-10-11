@@ -1,8 +1,13 @@
+import "reflect-metadata";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TurnRevertFaultStop } from "../turn-revert-service.js";
+import { hostRuntime } from "@mcode/shared/node/host-runtime";
+import { TurnRevertFaultStop, TurnRevertService } from "../turn-revert-service.js";
+import { RepositoryGitMutationLock } from "../../../git/repository-git-mutation-lock.js";
+import { RealGitExecutor } from "../../../git/execution/real-git-executor.js";
+import { SnapshotService } from "../../snapshots/snapshot-service.js";
 import { absentState, samePathState } from "../../snapshots/snapshot-raw-state.js";
 import { revertFixture, committed, renamed, probeSymlinks } from "./turn-revert-fixture.js";
 
@@ -157,6 +162,38 @@ describe("raw revert recovery", () => {
     await Promise.resolve(); expect(captured).toBe(false); release(); const applied = committed(await applying);
     expect(await replay).toEqual(applied); expect(f.published).toHaveLength(1);
     expect(await baseline).toBe(turn.before); expect(f.read("a")).toEqual(Buffer.from("before\n"));
+  }, timeout);
+
+  it.each(["apply", "undo"])("serializes %s and baseline capture under a symlinked cwd with POSIX lock keys", async (operation) => {
+    f = await revertFixture(); f.write("a", "before\n");
+    const turn = await f.turn("one", () => f.write("a", "after\n"));
+    const alias = `${f.cwd}-alias`;
+    NodeFS.symlinkSync(f.cwd, alias, "junction");
+    let release = () => {}, entered = () => {};
+    const pause = new Promise<void>((resolve) => { release = resolve; });
+    const prepared = new Promise<void>((resolve) => { entered = resolve; });
+    try {
+      f.db.prepare("UPDATE workspaces SET path=? WHERE id='ws'").run(alias);
+      f.db.prepare("UPDATE turn_snapshots SET worktree_path=?").run(alias);
+      const lock = new RepositoryGitMutationLock({ ...hostRuntime, platform: "linux" });
+      const snapshots = new SnapshotService(new RealGitExecutor(), lock);
+      const deps = { ...f.deps, lock, snapshots };
+      const initial = new TurnRevertService(deps);
+      const request = await f.request(turn.messageId, { kind: "turn" }, initial);
+      const forward = operation === "undo" ? committed(await initial.apply(request)) : null;
+      const service = new TurnRevertService(deps, async (point) => { if (point === "afterPrepare") { entered(); await pause; } });
+      const applying = forward
+        ? service.undo({ threadId: "thread", revertId: forward.revert.id, requestId: NodeCrypto.randomUUID() })
+        : service.apply(request);
+      await prepared;
+      expect(await service.preview(request)).toEqual({ status: "busy", reason: "revert_running" });
+      let captured = false;
+      const baseline = snapshots.captureRef(alias).then((ref) => { captured = true; return ref; });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(captured).toBe(false);
+      release(); committed(await applying);
+      expect(await baseline).toBe(operation === "apply" ? turn.before : turn.after);
+    } finally { release(); NodeFS.unlinkSync(alias); }
   }, timeout);
 
   it.skipIf(!symlinks)("restores symlink targets exactly and refuses a parent symlink escaping cwd", async () => {

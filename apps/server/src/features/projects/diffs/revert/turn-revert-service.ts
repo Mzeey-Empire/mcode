@@ -1,5 +1,4 @@
 import * as NodeCrypto from "node:crypto";
-import * as NodeFSPromises from "node:fs/promises";
 import type { TurnRevertResult, TurnRevertPreview } from "@mcode/contracts";
 import type { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { TurnRevertStore, type StoredRevert } from "../../../agents/turns/persistence/turn-revert-store.js";
@@ -36,7 +35,7 @@ export class TurnRevertService {
 
   /** Preview without changing files, refs, or journal rows. */
   async preview(input: RevertPreviewInput): Promise<TurnRevertPreview> {
-    const cwd = await this.cwd(input);
+    const cwd = this.lockLocation(input);
     if (cwd === null) return { status: "unavailable", reason: "worktree_missing" };
     if (this.inFlight.has(cwd)) return { status: "busy", reason: "revert_running" };
     return (await preparePreview(this.deps, input)).preview;
@@ -45,7 +44,7 @@ export class TurnRevertService {
   /** Apply once per request id and reject stale raw evidence under the repository lock. */
   async apply(input: RevertApplyInput): Promise<TurnRevertResult> {
     const recorded = this.deps.store.byRequest(input.requestId);
-    const cwd = recorded ? recorded.context.cwd : await this.cwd(input);
+    const cwd = recorded ? this.recordedLockLocation(recorded) : this.lockLocation(input);
     if (cwd === null) return { status: "unavailable", reason: "worktree_missing" };
     return this.run(cwd, input.requestId, async () => {
       const request = applyRequestKey(input);
@@ -57,7 +56,7 @@ export class TurnRevertService {
       if (preview.status !== "ready" || preview.previewToken !== input.previewToken || !range) return { status: "stale", preview };
       const files = preview.files.filter((file) => file.state !== "already_reverted");
       if (!files.length) return { status: "stale", preview: { status: "nothing_to_revert" } };
-      return this.prepareAndWrite({ input, cwd, request, files, refBefore: range.refBefore, snapshotIds: range.rows.map((row) => row.id) });
+      return this.prepareAndWrite({ input, cwd: evidence.cwd, lockCwd: cwd, request, files, refBefore: range.refBefore, snapshotIds: range.rows.map((row) => row.id) });
     });
   }
 
@@ -65,7 +64,7 @@ export class TurnRevertService {
   async undo(input: RevertUndoInput): Promise<TurnRevertResult> {
     const target = this.deps.store.get(input.revertId);
     if (!target || target.threadId !== input.threadId) throw new TurnRevertValidationError("Revert not found in thread");
-    return this.run(target.context.cwd, input.requestId, async () => {
+    return this.run(this.recordedLockLocation(target), input.requestId, async () => {
       const request = JSON.stringify(["undo", input.threadId, input.revertId]);
       const replay = await this.replay(input.requestId, request);
       if (replay) return replay;
@@ -91,7 +90,7 @@ export class TurnRevertService {
 
   /** Settle every unfinished journal before RPC admission. */
   async recoverUnfinished(): Promise<void> {
-    for (const row of this.deps.store.unfinished()) await this.deps.lock.run(row.context.cwd, () => this.recover(row));
+    for (const row of this.deps.store.unfinished()) await this.deps.lock.run(this.recordedLockLocation(row), () => this.recover(row));
   }
 
   private async canUndo(row: StoredRevert): Promise<boolean> {
@@ -99,13 +98,14 @@ export class TurnRevertService {
     return this.deps.snapshots.validateRef(row.context.cwd, row.recoveryRef);
   }
 
-  private async cwd(input: RevertPreviewInput): Promise<string | null> {
+  private recordedLockLocation(row: StoredRevert): string {
+    return row.context.lockCwd ?? this.deps.resolveCwd(row.threadId);
+  }
+
+  private lockLocation(input: RevertPreviewInput): string | null {
     const range = revertRange(this.deps.ranges, input);
-    let location: string;
-    try { location = this.deps.resolveCwd(input.threadId, range.status === "ready" ? range.rows[0].worktree_path : null); }
+    try { return this.deps.resolveCwd(input.threadId, range.status === "ready" ? range.rows[0].worktree_path : null); }
     catch (error) { if (error instanceof ReviewWorktreeMissingError) return null; throw error; }
-    try { return await NodeFSPromises.realpath(location); }
-    catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return location; throw error; }
   }
 
   private async run(cwd: string, requestId: string, work: () => Promise<TurnRevertResult>): Promise<TurnRevertResult> {
@@ -127,7 +127,7 @@ export class TurnRevertService {
   }
 
   private async prepareAndWrite(args: {
-    input: RevertApplyInput; cwd: string; request: string; files: Extract<TurnRevertPreview, { status: "ready" }>["files"];
+    input: RevertApplyInput; cwd: string; lockCwd: string; request: string; files: Extract<TurnRevertPreview, { status: "ready" }>["files"];
     refBefore: string; snapshotIds: string[];
   }): Promise<TurnRevertResult> {
     const { input, cwd } = args;
@@ -147,7 +147,7 @@ export class TurnRevertService {
       await this.deps.writer.execute(prepareTurnRevert, { id, requestId: input.requestId, threadId: input.threadId,
         targetMessageId: input.messageId, fromMessageId: input.scope.kind === "file" ? input.scope.fromMessageId ?? null : null,
         kind: input.scope.kind, path: input.scope.kind === "file" ? input.scope.path : null, undoesRevertId: null,
-        context: { request: args.request, cwd, snapshotIds: args.snapshotIds, label }, files, recoveryRef });
+        context: { request: args.request, cwd, lockCwd: args.lockCwd, snapshotIds: args.snapshotIds, label }, files, recoveryRef });
     } catch (error) { return unchanged(error); }
     return this.write(id);
   }
