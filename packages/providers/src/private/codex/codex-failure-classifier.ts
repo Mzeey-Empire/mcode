@@ -1,5 +1,5 @@
 import type { TurnFailure, TurnFailureKind } from "@mcode/contracts";
-import { failureCode, failureRetries, httpStatus, retryAfterMsUntil, turnFailure } from "../turn-failure-fields.js";
+import { failureCode, failureRetries, httpStatus, kindByHttpStatus, retryAfterMsUntil, turnFailure } from "../turn-failure-fields.js";
 import type { CodexHttpErrorInfoName, CodexRateLimitWindow, CodexUnitErrorInfo } from "./codex-types.js";
 
 /** The latest known Codex account rate-limit windows. */
@@ -30,6 +30,8 @@ const CODEX_ERROR_KINDS: ReadonlyArray<readonly [CodexUnitErrorInfo | CodexHttpE
   // Codex sends rateLimitExceeded for short request-rate throttling; account quota is usageLimitExceeded.
   ["rateLimitExceeded", "retryable"],
   ["serverOverloaded", "retryable"],
+  // Flex capacity is a 429 that clears on its own (codex-rs protocol/src/error.rs http_status_code_value).
+  ["flexUnavailable", "retryable"],
   ["internalServerError", "retryable"],
   ["httpConnectionFailed", "retryable"],
   ["responseStreamConnectionFailed", "retryable"],
@@ -37,6 +39,18 @@ const CODEX_ERROR_KINDS: ReadonlyArray<readonly [CodexUnitErrorInfo | CodexHttpE
   ["responseTooManyFailedAttempts", "retryable"],
 ];
 const KIND_BY_CODEX_ERROR: ReadonlyMap<string, TurnFailureKind> = new Map(CODEX_ERROR_KINDS);
+
+/**
+ * Codex wraps every HTTP status it has no special case for (a 401 after token refresh is exhausted,
+ * a 403 block, a 404 model) in these variants, so the forwarded status decides the kind. The split
+ * follows codex-rs's own retry policy (ext/guardian-reviewer/src/retry.rs).
+ */
+const HTTP_ERROR_INFO_NAMES: ReadonlySet<string> = new Set<CodexHttpErrorInfoName>([
+  "httpConnectionFailed",
+  "responseStreamConnectionFailed",
+  "responseStreamDisconnected",
+  "responseTooManyFailedAttempts",
+]);
 
 const LIMIT_TYPE_BY_WINDOW_MINUTES: ReadonlyMap<number, string> = new Map([
   [300, "five_hour"],
@@ -49,8 +63,8 @@ const LIMIT_TYPE_BY_WINDOW_MINUTES: ReadonlyMap<number, string> = new Map([
  */
 export function classifyCodexFailure(evidence: CodexFailureEvidence, now: number): TurnFailure {
   const { code, status } = readCodexErrorInfo(evidence.codexErrorInfo);
-  const kind = (code === undefined ? undefined : KIND_BY_CODEX_ERROR.get(code)) ?? "fatal";
-  const window = kind === "usage_limit" ? limitingWindow(evidence.rateLimits) : undefined;
+  const kind = codexFailureKind(code, status);
+  const window = kind === "usage_limit" ? exhaustedWindow(evidence.rateLimits, now) : undefined;
   return turnFailure(kind, {
     status,
     code,
@@ -59,6 +73,12 @@ export function classifyCodexFailure(evidence: CodexFailureEvidence, now: number
     // No willRetry notice means Codex reported no retries, so the field stays absent rather than claiming zero.
     retries: evidence.retriesMade ? failureRetries(evidence.retriesMade) : undefined,
   });
+}
+
+function codexFailureKind(code: string | undefined, status: number | undefined): TurnFailureKind {
+  if (code === undefined) return "fatal";
+  if (status !== undefined && HTTP_ERROR_INFO_NAMES.has(code)) return kindByHttpStatus(status);
+  return KIND_BY_CODEX_ERROR.get(code) ?? "fatal";
 }
 
 /** Reads the variant name and forwarded HTTP status from a native `CodexErrorInfo`. */
@@ -73,17 +93,21 @@ export function readCodexErrorInfo(value: unknown): CodexErrorInfoSummary {
   return { code: failureCode(name), status: isRecord(payload) ? httpStatus(payload.httpStatusCode) : undefined };
 }
 
-/** Picks the window that blocked the account: the fullest one, and on a tie the one that resets last. */
-function limitingWindow(windows: CodexRateLimitWindows | undefined): CodexRateLimitWindow | undefined {
-  const candidates = [windows?.primary, windows?.secondary].filter((window): window is CodexRateLimitWindow => window != null);
-  return candidates.reduce<CodexRateLimitWindow | undefined>((best, window) => (best === undefined || blocksLonger(window, best) ? window : best), undefined);
+/**
+ * Picks the window that is blocking the account: full and not yet reset, the later reset winning.
+ * usageLimitExceeded also covers API quota and plan-upgrade errors that no window explains, and the
+ * cached windows can be stale, so a window that is not full or has reset gives no wait at all.
+ */
+function exhaustedWindow(windows: CodexRateLimitWindows | undefined, now: number): CodexRateLimitWindow | undefined {
+  return [windows?.primary, windows?.secondary]
+    .filter((window): window is BlockingWindow => window != null && blocksNow(window, now))
+    .reduce<BlockingWindow | undefined>((latest, window) => (latest === undefined || window.resetsAt > latest.resetsAt ? window : latest), undefined);
 }
 
-function blocksLonger(window: CodexRateLimitWindow, other: CodexRateLimitWindow): boolean {
-  const used = window.usedPercent ?? -1;
-  const otherUsed = other.usedPercent ?? -1;
-  if (used !== otherUsed) return used > otherUsed;
-  return (window.resetsAt ?? -1) > (other.resetsAt ?? -1);
+type BlockingWindow = CodexRateLimitWindow & { resetsAt: number };
+
+function blocksNow(window: CodexRateLimitWindow, now: number): window is BlockingWindow {
+  return (window.usedPercent ?? 0) >= 100 && window.resetsAt !== undefined && window.resetsAt * 1000 > now;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

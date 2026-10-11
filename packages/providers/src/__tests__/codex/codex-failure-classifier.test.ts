@@ -13,7 +13,7 @@ describe("classifyCodexFailure", () => {
     ["internalServerError", "retryable"],
     ["contextWindowExceeded", "fatal"],
     ["sessionBudgetExceeded", "fatal"],
-    ["flexUnavailable", "fatal"],
+    ["flexUnavailable", "retryable"],
     ["badRequest", "fatal"],
     ["cyberPolicy", "fatal"],
     ["sandboxError", "fatal"],
@@ -23,11 +23,23 @@ describe("classifyCodexFailure", () => {
   });
 
   it.each(["httpConnectionFailed", "responseStreamConnectionFailed", "responseStreamDisconnected", "responseTooManyFailedAttempts"])(
-    "classifies %s as retryable with its forwarded status",
+    "classifies %s by its forwarded status",
     (name) => {
-      expect(classifyCodexFailure({ codexErrorInfo: { [name]: { httpStatusCode: 502 } } }, NOW)).toEqual({ kind: "retryable", status: 502, code: name });
+      const classify = (httpStatusCode: number | null) => classifyCodexFailure({ codexErrorInfo: { [name]: { httpStatusCode } } }, NOW).kind;
+      expect(classify(401)).toBe("auth");
+      expect(classify(403)).toBe("fatal");
+      expect(classify(404)).toBe("fatal");
+      expect(classify(408)).toBe("retryable");
+      expect(classify(429)).toBe("retryable");
+      expect(classify(502)).toBe("retryable");
+      expect(classify(null)).toBe("retryable");
     },
   );
+
+  it("sends an expired API key to sign-in rather than retry", () => {
+    expect(classifyCodexFailure({ codexErrorInfo: { httpConnectionFailed: { httpStatusCode: 401 } } }, NOW))
+      .toEqual({ kind: "auth", status: 401, code: "httpConnectionFailed" });
+  });
 
   it("treats the untagged fallback and missing info as fatal without a code", () => {
     expect(classifyCodexFailure({ codexErrorInfo: "other" }, NOW)).toEqual({ kind: "fatal" });
@@ -60,9 +72,15 @@ describe("classifyCodexFailure", () => {
       .toEqual({ kind: "usage_limit", code: "usageLimitExceeded", retryAfterMs: 600_000 });
   });
 
-  it("reports a zero wait for a past reset and no wait without windows", () => {
-    expect(classifyCodexFailure({ codexErrorInfo: "usageLimitExceeded", rateLimits: { primary: { resetsAt: NOW_SECONDS - 5 } } }, NOW))
-      .toEqual({ kind: "usage_limit", code: "usageLimitExceeded", retryAfterMs: 0 });
+  it("gives no wait when no window is full and still blocking", () => {
+    const usageLimit = { kind: "usage_limit", code: "usageLimitExceeded" };
+    expect(classifyCodexFailure({ codexErrorInfo: "usageLimitExceeded", rateLimits: { primary: { usedPercent: 100, resetsAt: NOW_SECONDS - 5 } } }, NOW))
+      .toEqual(usageLimit);
+    expect(classifyCodexFailure({ codexErrorInfo: "usageLimitExceeded", rateLimits: { primary: { usedPercent: 100, resetsAt: NOW_SECONDS } } }, NOW))
+      .toEqual(usageLimit);
+    // A quota or plan-upgrade error shares usageLimitExceeded while the plan windows are not full.
+    expect(classifyCodexFailure({ codexErrorInfo: "usageLimitExceeded", rateLimits: { primary: { usedPercent: 40, windowDurationMins: 300, resetsAt: NOW_SECONDS + 60 } } }, NOW))
+      .toEqual(usageLimit);
     expect(classifyCodexFailure({ codexErrorInfo: "usageLimitExceeded", rateLimits: { primary: null, secondary: null } }, NOW))
       .toEqual({ kind: "usage_limit", code: "usageLimitExceeded" });
   });

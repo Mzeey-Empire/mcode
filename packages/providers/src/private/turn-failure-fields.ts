@@ -1,4 +1,4 @@
-import type { TurnFailure } from "@mcode/contracts";
+import type { TurnFailure, TurnFailureKind } from "@mcode/contracts";
 
 /** Longest wait `TurnFailure.retryAfterMs` accepts on the wire. */
 const MAX_RETRY_AFTER_MS = 31 * 24 * 3_600_000;
@@ -7,6 +7,16 @@ const MAX_CODE_LENGTH = 128;
 /** Returns an HTTP status only when the provider value is a real status code. */
 export function httpStatus(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599 ? value : undefined;
+}
+
+/**
+ * Classifies a failed HTTP request by status alone: 401 needs a sign-in, timeouts, throttling and
+ * server errors clear on retry, and any other status will fail the same way again.
+ */
+export function kindByHttpStatus(status: number): TurnFailureKind {
+  if (status === 401) return "auth";
+  if (status === 408 || status === 429 || status >= 500) return "retryable";
+  return "fatal";
 }
 
 /**
