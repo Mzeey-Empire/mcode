@@ -15,6 +15,9 @@ import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../../runtime/persistence/
 import { assertActiveTurnRecoveryRetention } from "../../turns/active-turn-recovery-retention-policy.js";
 import type { ExecutionIdentity } from "../../execution/execution-mailbox-protocol.js";
 
+// These adapters attach explicit parents through Copilot SDK parentToolCallId and OpenCode child-session routing.
+const PROVIDERS_WITH_EXPLICIT_TOOL_PARENTS: ReadonlySet<ProviderId> = new Set(["copilot", "opencode"]);
+
 /** Buffered tool call with raw input preserved for deferred summarization. */
 export interface BufferedToolCall extends CreateToolCallRecordInput {
   _rawToolInput?: Record<string, unknown>;
@@ -442,12 +445,13 @@ export class NarrativeTurnState {
 
   /**
    * Get the current parent tool call ID for a thread's active Agent nesting.
-   * This is the fallback consulted by {@link bufferToolCall} when the Claude
-   * SDK omits `parent_tool_use_id` (Trap 1).
+   * This is the fallback consulted by {@link bufferToolCall} when a parent is
+   * missing (Trap 1), except for providers that always send explicit parents
+   * (Copilot, OpenCode). An omitted provider keeps the fallback enabled.
    */
   getCurrentParentToolCallId(threadId: string, providerId?: ProviderId): string | undefined {
     this.assertThread(threadId);
-    if (providerId !== "claude") return undefined;
+    if (providerId !== undefined && PROVIDERS_WITH_EXPLICIT_TOOL_PARENTS.has(providerId)) return undefined;
     return this.getStackDerivedParentFallback(threadId);
   }
 
@@ -480,9 +484,10 @@ export class NarrativeTurnState {
   /**
    * Buffer a tool call event for later persistence and return the parent tool
    * call ID attributed to it. An explicit provider parent always wins. The
-   * stack fallback applies only to Claude non-Agent calls when exactly one
-   * Agent is still running (Trap 1). Agent calls never inherit a stack-derived parent
-   * and are pushed onto the `agentCallStack` (Trap 2 push site).
+   * stack fallback applies to non-Agent calls when exactly one Agent is still
+   * running (Trap 1), except for providers that always send explicit parents
+   * (Copilot, OpenCode). Agent calls never inherit a stack-derived parent and
+   * are pushed onto the `agentCallStack` (Trap 2 push site).
    */
   bufferToolCall(threadId: string, event: BufferToolCallEvent, providerId?: ProviderId): string | undefined {
     this.assertThread(threadId);

@@ -1183,14 +1183,14 @@ describe("NarrativeStore write seam (server-side traps)", () => {
         .toBe(encodeSubagentAliasDetailTarget("native-late-agent"));
     });
 
-    it("falls back to the only running Agent when Claude omits the parent", () => {
+    it.each(["claude", "cursor", "devin", undefined] as const)("falls back to the only running Agent when %s omits the parent", (providerId) => {
       store.beginTurn(THREAD);
       store.resetTurnCounters(THREAD);
       store.bufferToolCall(THREAD, toolUse("solo", "Agent"));
 
-      // SDK omitted parentToolCallId; exactly one Agent is running → attributed.
-      expect(store.getCurrentParentToolCallId(THREAD, "claude")).toBe("solo");
-      const childParent = store.bufferToolCall(THREAD, toolUse("child", "Read"), "claude");
+      // No explicit parentToolCallId; exactly one Agent is running.
+      expect(store.getCurrentParentToolCallId(THREAD, providerId)).toBe("solo");
+      const childParent = store.bufferToolCall(THREAD, toolUse("child", "Read"), providerId);
       expect(childParent).toBe("solo");
     });
 
