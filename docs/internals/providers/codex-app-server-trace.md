@@ -8,7 +8,7 @@ Runtime trace: set `MCODE_CODEX_TRACE=1` to log each app-server notification plu
 
 ## Executive summary
 
-Across both runs, Codex split "thinking" from "answer" cleanly at the wire: anything user-facing arrived only via `item/agentMessage/delta` (and its bookending `item/started` / `item/completed` for type `agentMessage`). The `reasoning` item arrived as a single `item/started` + `item/completed` with `summary.length === 0` and no `item/reasoning/*` delta stream fired at all on low reasoning effort. So in practice, Mcode only has one verified non-final channel today, but several schema-declared ones (`item/reasoning/textDelta`, `summaryTextDelta`, `item/plan/delta`) that did not fire in these runs and remain unverified.
+Across both runs, Codex split "thinking" from "answer" cleanly at the wire: anything user-facing arrived only via `item/agentMessage/delta` (and its bookending `item/started` / `item/completed` for type `agentMessage`). The `reasoning` item arrived as a single `item/started` + `item/completed` with `summary.length === 0` and no `item/reasoning/*` delta stream fired. The cause is the missing `summary` parameter on `turn/start`, not the effort level. A later trace on `xhigh` effort with no `summary` also returned empty items, while `summary: "auto"` and `summary: "detailed"` both streamed text. Mcode now sends `summary: "auto"`.So in practice, Mcode only has one verified non-final channel today, but several schema-declared ones (`item/reasoning/textDelta`, `summaryTextDelta`, `item/plan/delta`) that did not fire in these runs and remain unverified.
 
 ## Notification inventory (observed)
 
@@ -41,7 +41,7 @@ Across both runs, Codex split "thinking" from "answer" cleanly at the wire: anyt
 |---|---|---|
 | `item/agentMessage/delta` | `TextDelta` classified by the item's phase; phase-less items remain candidates for final selection at successful native turn completion | A:13, B:17-31 stream the user-facing answer |
 | `item/reasoning/textDelta` | `ReasoningDelta` keyed by item ID | **unverified in this run** — low effort produced no deltas |
-| `item/reasoning/summaryTextDelta` | `ReasoningDelta` keyed by item ID | unverified — no deltas in either run |
+| `item/reasoning/summaryTextDelta` | `ReasoningDelta` keyed by item ID | verified with `summary: "auto"`. Text arrived in one burst 2 to 7 seconds after `item/started`, and `item/completed` followed within about 20ms |
 | `item/reasoning/summaryPartAdded` | ignore (lifecycle) | unverified |
 | `item/plan/delta` | `TextDelta` with `isFinalResponse: false` (thought, experimental) | unverified |
 | `item/completed` type `reasoning` | If `summary` or `reasoningContent` non-empty, emit the unstreamed suffix as `ReasoningDelta` with `done: true` | summary was empty on A:11; mapper's diff-vs-accumulator stays correct |
@@ -70,7 +70,7 @@ Replay: `bun run --cwd packages/providers test -- src/__tests__/codex/codex-prot
 
 Schema-declared notifications that did not fire in either initial trace scenario and remain unverified outside the golden fixture:
 
-- `item/reasoning/textDelta`, `item/reasoning/summaryTextDelta`, `item/reasoning/summaryPartAdded`
+- `item/reasoning/textDelta`, `item/reasoning/summaryPartAdded`
 - `item/plan/delta`, `turn/plan/updated`
 - `item/started` and `item/completed` for: `fileChange`, `mcpToolCall`, `dynamicToolCall`, `webSearch`, `plan`, `imageView`, `imageGeneration`, `contextCompaction`, `enteredReviewMode`, `exitedReviewMode`
 - `error`, `model/rerouted`, `deprecationNotice`, `skills/changed`, `turn/diff/updated`, `item/fileChange/outputDelta`, `item/autoApprovalReview/started|completed`, `item/mcpToolCall/progress`

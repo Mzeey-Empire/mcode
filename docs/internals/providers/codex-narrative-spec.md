@@ -43,7 +43,7 @@ Codex models come from the app-server `model/list` catalog. The model picker and
 
 ### 3.1 Events
 
-- **Reasoning stream**: `item/reasoning/textDelta` and `item/reasoning/summaryTextDelta` map to `AgentEventType.ReasoningDelta` keyed by the native item ID. `item/completed` with `type: "reasoning"` emits any unstreamed suffix with `done: true`.
+- **Reasoning stream**: `turn/start` sends `summary: "auto"`. Without it, current Codex builds return reasoning items with no text. `item/started` with `type: "reasoning"` emits an empty `AgentEventType.ReasoningDelta` that opens the block, because Codex sends the summary text in one burst seconds later. `item/reasoning/textDelta` and `item/reasoning/summaryTextDelta` map to `ReasoningDelta` keyed by the native item ID. `item/completed` with `type: "reasoning"` emits any unstreamed suffix with `done: true`.
 - **Thought stream**: Experimental `item/plan/delta`, when the app-server uses it for live planning text, maps to `AgentEventType.TextDelta` with `isFinalResponse: false`. Completed `plan` items stay silent.
 
 - **Assistant stream**: Track text by its native item ID. The `final_answer` phase selects the response bubble; `commentary` stays in narration. `item/completed` emits `AssistantMessageBoundary` to close that item's text without ending the turn. When phase is absent, the matching successful native turn completion promotes the last eligible assistant item. Distinct items remain distinct even when their text is identical.
