@@ -203,6 +203,17 @@ export type WorkspaceEnvironmentCommandResolution =
     readonly action: WorkspaceEnvironmentAction | null;
   };
 
+/** One Action's resolved command, carrying the Action it came from so callers can log by id. */
+export type WorkspaceEnvironmentActionCommandResolution = WorkspaceEnvironmentCommandResolution & {
+  readonly action: WorkspaceEnvironmentAction;
+};
+
+/** Time and output limits for one prepared Project command. */
+export interface WorkspaceEnvironmentCommandBounds {
+  readonly timeoutMs: number;
+  readonly outputMaxBytes: number;
+}
+
 function commandForTarget(
   setup: WorkspaceEnvironmentCommand | undefined,
   action: WorkspaceEnvironmentAction | null,
@@ -639,6 +650,38 @@ export class WorkspaceEnvironmentService {
     return await this.resolveCommand(this.requireSetupThread(threadId), { kind: "action", actionId });
   }
 
+  /**
+   * Prepare every `runOnCleanup` Action in document order without starting any process.
+   * Callers own each ready command: start it, or close it when they skip it.
+   */
+  async resolveCleanupCommands(
+    threadId: string,
+    bounds: WorkspaceEnvironmentCommandBounds,
+  ): Promise<readonly WorkspaceEnvironmentActionCommandResolution[]> {
+    const thread = this.requireSetupThread(threadId);
+    const environment = await this.readForThread(thread);
+    const resolutions: WorkspaceEnvironmentActionCommandResolution[] = [];
+    for (const action of environment.document.actions) {
+      if (action.runOnCleanup !== true) continue;
+      resolutions.push(await this.resolveCleanupCommand(environment.storageMode, thread, action, bounds));
+    }
+    return resolutions;
+  }
+
+  private async resolveCleanupCommand(
+    storageMode: WorkspaceEnvironmentStorageMode | undefined,
+    thread: WorkspaceEnvironmentSetupThread,
+    action: WorkspaceEnvironmentAction,
+    bounds: WorkspaceEnvironmentCommandBounds,
+  ): Promise<WorkspaceEnvironmentActionCommandResolution> {
+    const platform = this.platform();
+    const script = selectWorkspaceEnvironmentScript(action.command, platform);
+    if (!script) return { ...unavailableCommandResolution(platform, action), action };
+    const preparation = await this.prepareWorkspaceCommand(thread, script, bounds);
+    const target: WorkspaceEnvironmentCommandTarget = { kind: "action", actionId: action.id };
+    return { ...this.resolvePreparedCommand(storageMode, thread, target, platform, script, preparation, action), action };
+  }
+
   /** Read and validate the selected Project environment document for the base checkout or one Thread checkout. */
   async read(workspaceId: string, threadId?: string): Promise<WorkspaceEnvironmentReadResult> {
     if (threadId) {
@@ -799,6 +842,7 @@ export class WorkspaceEnvironmentService {
   private async prepareWorkspaceCommand(
     thread: WorkspaceEnvironmentSetupThread,
     script: string,
+    bounds: WorkspaceEnvironmentCommandBounds = this.manualCommandBounds(),
   ): Promise<TerminalCommandPreparation> {
     const terminalCommands = this.options.terminalCommands;
     if (!terminalCommands) {
@@ -810,9 +854,16 @@ export class WorkspaceEnvironmentService {
     return terminalCommands.prepare({
       scope: { kind: "thread", workspaceId: thread.workspace_id, threadId: thread.id },
       script,
+      timeoutMs: bounds.timeoutMs,
+      outputMaxBytes: bounds.outputMaxBytes,
+    });
+  }
+
+  private manualCommandBounds(): WorkspaceEnvironmentCommandBounds {
+    return {
       timeoutMs: this.options.manualSetupTimeoutMs ?? DEFAULT_MANUAL_SETUP_TIMEOUT_MS,
       outputMaxBytes: WORKSPACE_ENVIRONMENT_SETUP_OUTPUT_MAX_BYTES,
-    });
+    };
   }
 
   private async assertPreparedCommandCurrent(
