@@ -47,7 +47,12 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
       <PlanEditor
         contentMd={viewingLatest && heldText !== null ? heldText : viewed.contentMd}
         editable={draft.kind !== "conflict" && isPlanVersionEditable(viewed, latest, executing)}
-        onChange={(text) => scheduler.edit(text, latest)}
+        onChange={(text) => {
+          // Only the latest version is editable, and the first save makes a
+          // newer one, so a pinned pick must follow it or the edit vanishes.
+          if (activeVersion !== null) usePlanStore.getState().setActiveVersion(threadId, null);
+          scheduler.edit(text, latest);
+        }}
         onBlur={() => scheduler.flush()}
       />
     </div>

@@ -151,6 +151,21 @@ describe("PlanPanel", () => {
     await waitFor(() => expect(screen.getByTestId("plan-version-picker")).toHaveTextContent("v3Edited by you"));
   });
 
+  it("follows the new draft when the edited version was picked explicitly", async () => {
+    const thread = "thread-plan-picked";
+    const ready = makePlan(2, { id: "00000000-0000-4000-8000-000000000002" });
+    usePlanStore.setState({ plansByThread: { [thread]: [ready] }, activeVersionByThread: { [thread]: 2 } });
+    savePlanVersion.mockImplementation(async (payload) =>
+      makePlan(3, { id: payload.versionId, status: "draft", author: "user", revision: 1, contentMd: payload.contentMd }));
+    render(<PlanPanel threadId={thread} />);
+
+    typeAtEnd("Extra");
+
+    await waitFor(() => expect(screen.getByTestId("plan-version-picker")).toHaveTextContent("v3Edited by you"));
+    expect(editorText()).toContain("Extra");
+    expect(isEditable()).toBe(true);
+  });
+
   it("holds local text on conflict until Use saved version shows the saved text", async () => {
     const thread = "thread-plan-conflict";
     const ready = makePlan(2, { id: "00000000-0000-4000-8000-000000000002" });
