@@ -7,6 +7,7 @@ import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-reco
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { restoreQueuedSteers, sendHeldSteerAgain } from "@/features/conversation/composer/queue/queued-steer";
 import { createMockThread, mockTransport } from "./mocks/transport";
 
 vi.mock("@/transport", async () => ({
@@ -650,10 +651,6 @@ describe("threadStore reconnect and queued follow-ups", () => {
     } satisfies AgentEvent);
     await vi.advanceTimersByTimeAsync(400);
 
-    const third = useQueueStore.getState().queues[THREAD_ID]?.find(
-      (message) => message.content === "third queued follow-up",
-    );
-    useQueueStore.getState().moveMessage(THREAD_ID, third!.id, 0);
     for (let index = 4; index <= 20; index += 1) {
       queueMessage(`queued follow-up ${index}`);
     }
@@ -665,14 +662,14 @@ describe("threadStore reconnect and queued follow-ups", () => {
     expect(queue).toHaveLength(20);
     expect(queue.map((message) => message.content)).toEqual([
       "first queued follow-up",
-      "third queued follow-up",
       "second queued follow-up",
+      "third queued follow-up",
       ...Array.from({ length: 17 }, (_value, index) => `queued follow-up ${index + 4}`),
     ]);
     expect(useQueueStore.getState().inFlightQueuedMessages[THREAD_ID]).toBeUndefined();
   });
 
-  it("does not recreate the queue when a failed send races Clear all", async () => {
+  it("does not recreate the queue when a failed send races a queue clear", async () => {
     vi.useFakeTimers();
     queueMessage("first queued follow-up", ["browser-capture-spill/clear-all.json"]);
     let rejectSend!: (reason?: unknown) => void;
@@ -773,5 +770,60 @@ describe("threadStore reconnect and queued follow-ups", () => {
       expect.objectContaining({ threadId: THREAD_ID, content: "queued follow-up after reconnect" }),
     );
     expect(useQueueStore.getState().queues[THREAD_ID]).toEqual([]);
+  });
+
+  describe("held steers on reconnect", () => {
+    const STEER = "11111111-1111-4111-8111-111111111111";
+    const REPLACEMENT = "22222222-2222-4222-8222-222222222222";
+    const listHeld = () => mockTransport.listHeldSteers as ReturnType<typeof vi.fn>;
+    const contents = () => (useQueueStore.getState().queues[THREAD_ID] ?? []).map((m) => [m.id, m.steer]);
+
+    it("asks again under the same id for a steer that never got an answer", async () => {
+      queueMessage("steer me");
+      const [item] = useQueueStore.getState().queues[THREAD_ID]!;
+      useQueueStore.getState().setQueuedSteer(THREAD_ID, item.id, { state: "steering", steerId: STEER, turnExecutionId: "turn-1" });
+      (mockTransport.steerTurn as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ status: "delivered" });
+      listHeld().mockResolvedValueOnce([]);
+
+      await restoreQueuedSteers();
+
+      expect(mockTransport.steerTurn).toHaveBeenCalledWith(expect.objectContaining({ messageId: STEER, turnExecutionId: "turn-1" }));
+      expect(useQueueStore.getState().queues[THREAD_ID]).toEqual([]);
+    });
+
+    it("adopts a held steer once however many times it reconnects", async () => {
+      const held = { messageId: STEER, threadId: THREAD_ID, content: "held", state: "resend_queued", replacementMessageId: REPLACEMENT };
+      listHeld().mockResolvedValue([held]);
+
+      await restoreQueuedSteers();
+      await restoreQueuedSteers();
+
+      expect(contents()).toEqual([[REPLACEMENT, { state: "resend", resendOfSteerId: STEER }]]);
+    });
+
+    it("keeps one copy when Send again repeats after the resend was restored", async () => {
+      listHeld().mockResolvedValueOnce([{ messageId: STEER, threadId: THREAD_ID, content: "held", state: "delivery_unknown" }]);
+      await restoreQueuedSteers();
+      const [adopted] = useQueueStore.getState().queues[THREAD_ID]!;
+      expect(adopted.steer).toEqual({ state: "delivery_unknown", steerId: STEER });
+
+      listHeld().mockResolvedValueOnce([{ messageId: STEER, threadId: THREAD_ID, content: "held", state: "resend_queued", replacementMessageId: REPLACEMENT }]);
+      (mockTransport.settleUnknownSteer as ReturnType<typeof vi.fn>).mockResolvedValue({ status: "requeued", replacementMessageId: REPLACEMENT });
+      await Promise.all([restoreQueuedSteers(), sendHeldSteerAgain(THREAD_ID, STEER)]);
+
+      expect(contents()).toEqual([[REPLACEMENT, { state: "resend", resendOfSteerId: STEER }]]);
+    });
+
+    it("drops a held steer whose resend another window is already sending", () => {
+      queueMessage("held");
+      const [item] = useQueueStore.getState().queues[THREAD_ID]!;
+      useQueueStore.getState().setQueuedSteer(THREAD_ID, item.id, { state: "delivery_unknown", steerId: STEER });
+      queueMessage("other");
+      const other = useQueueStore.getState().queues[THREAD_ID]![1];
+
+      useQueueStore.getState().requeueAsResend(THREAD_ID, STEER, other.id);
+
+      expect(contents()).toEqual([[other.id, undefined]]);
+    });
   });
 });

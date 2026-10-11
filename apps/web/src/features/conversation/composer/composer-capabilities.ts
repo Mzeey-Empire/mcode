@@ -40,6 +40,13 @@ export function supportsApprovalReview(capabilities: readonly ProviderCapability
  ));
 }
 
+/** Whether queued messages can be steered into a running turn of this provider. */
+export function supportsTurnSteer(capabilities: readonly ProviderCapability[]): boolean {
+  return capabilities.some((capability) => (
+    capability.name === "turn-steer" && capability.support === "supported"
+  ));
+}
+
 const PLAN_CAPABILITY: ResolvedComposerCapability = {
   id: "plan",
   label: "Plan",

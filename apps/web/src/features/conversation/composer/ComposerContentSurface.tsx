@@ -119,7 +119,6 @@ interface ComposerContentSurfaceProps {
     readonly onBranchModeExit?: () => void;
     readonly onComposerModeChange: (mode: ComposerMode) => void;
     readonly onLoadIntoComposer: ComponentProps<typeof ComposerQueueList>["onLoadIntoComposer"];
-    readonly onResumeQueuedMessage: () => Promise<void>;
     readonly onSendQueuedMessageNow: NonNullable<ComponentProps<typeof ComposerQueueList>["onSendNow"]>;
     readonly onDragEnter: DragEventHandler<HTMLDivElement>;
     readonly onDragLeave: DragEventHandler<HTMLDivElement>;
@@ -156,35 +155,26 @@ interface ComposerContentSurfaceProps {
   };
 }
 
-function ComposerTraySurface({ model }: Pick<ComposerContentSurfaceProps, "model">) {
-  if (!model.threadId || model.branchFromMessageId || model.isNewThread) return null;
-  return <ComposerTray threadId={model.threadId} />;
-}
-
-function ComposerQueueSurface({
+function ComposerTraySurface({
   model,
   actions,
 }: Pick<ComposerContentSurfaceProps, "model" | "actions">) {
-  const canShowQueue = Boolean(
-    model.threadId && !model.branchFromMessageId && !model.isNewThread,
-  );
-
-  if (!canShowQueue) return null;
+  if (!model.threadId || model.branchFromMessageId || model.isNewThread) return null;
   // Nothing may reach agent.send while the thread is starting, queued messages included.
   const paused = model.planPending || model.startingThread;
-
   return (
-    <ComposerQueueList
-      threadId={model.threadId!}
-      isAgentRunning={model.isAgentRunning}
-      provider={model.provider}
-      isEditing={Boolean(model.editingFromQueue)}
-      isPaused={paused}
-      onLoadIntoComposer={actions.onLoadIntoComposer}
-      onResume={() => paused ? Promise.resolve() : actions.onResumeQueuedMessage()}
-      onSendNow={(message) =>
-        paused ? Promise.resolve() : actions.onSendQueuedMessageNow(message)
-      }
+    <ComposerTray
+      threadId={model.threadId}
+      queue={(
+        <ComposerQueueList
+          threadId={model.threadId}
+          isAgentRunning={model.isAgentRunning}
+          provider={model.provider}
+          isPaused={paused}
+          onLoadIntoComposer={actions.onLoadIntoComposer}
+          onSendNow={(message) => { if (!paused) void actions.onSendQueuedMessageNow(message); }}
+        />
+      )}
     />
   );
 }
@@ -712,7 +702,6 @@ function DraftWriteFailureNotice() {
 export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
   return (
     <>
-      <ComposerQueueSurface {...props} />
       <ComposerNewThreadSurface {...props} />
       <ComposerTraySurface {...props} />
       <ComposerInputSurface {...props} />

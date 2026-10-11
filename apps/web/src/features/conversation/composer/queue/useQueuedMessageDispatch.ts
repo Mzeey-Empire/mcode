@@ -1,70 +1,33 @@
 import { useCallback } from "react";
 import type { QueuedMessage } from "@/stores/queueStore";
 import { useQueueStore } from "@/stores/queueStore";
-import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
+import { getThreadRecord } from "@/stores/thread-record";
+import { isThreadExecuting, sendQueuedMessage, useThreadStore } from "@/stores/threadStore";
+import { steerQueuedMessage } from "./queued-steer";
 
-/** Dispatches queued messages while preserving queue order. */
+/** Sends a queued message now: at once when idle, by steering into the turn while one runs. */
 export function useQueuedMessageDispatch(threadId: string | undefined): {
-  resumeNext(): Promise<void>;
   sendNow(message: QueuedMessage): Promise<void>;
 } {
-  const dispatch = useCallback(
+  const sendNow = useCallback(
     async (message: QueuedMessage): Promise<void> => {
       if (!threadId) return;
-      try {
-        const sent = await useThreadStore.getState().sendMessage(
-          threadId,
-          message.content,
-          message.model,
-          message.permissionMode,
-          message.attachments.length > 0 ? message.attachments : undefined,
-          message.displayContent,
-          message.reasoningLevel,
-          message.provider,
-          message.contextWindow,
-          message.thinking,
-          message.codexFastMode,
-          undefined,
-          undefined,
-          undefined,
-          message.mentions,
-          message.previewAnnotations,
-          message.goalObjective,
-          message.orchestrationMode,
-          undefined,
-          message.approvalReviewMode,
-          message.devinMode,
-        );
-        useQueueStore.getState().settleQueuedDispatch(threadId, message.id, sent);
-      } catch {
-        useQueueStore.getState().settleQueuedDispatch(threadId, message.id, false);
+      // A turn being stopped takes neither a steer nor a new send.
+      if (useThreadStore.getState().pendingStopCounts[threadId]) return;
+      if (isThreadExecuting(threadId)) {
+        const { turnExecutionId } = getThreadRecord(useThreadStore.getState().records, threadId);
+        if (turnExecutionId) await steerQueuedMessage(threadId, message.id, turnExecutionId);
+        return;
       }
+      const queueState = useQueueStore.getState();
+      const queued = queueState.claimQueuedMessage(threadId, message.id);
+      if (!queued) return;
+      // Sending by hand after a Stop restarts the queue, so the rest follows this turn.
+      queueState.resumeAutoDrain(threadId);
+      await sendQueuedMessage(threadId, queued);
     },
     [threadId],
   );
 
-  const resumeNext = useCallback(async (): Promise<void> => {
-    if (!threadId) return;
-    if (isThreadExecuting(threadId)) return;
-    const queueState = useQueueStore.getState();
-    const next = queueState.claimNextQueuedMessage(threadId);
-    if (!next) return;
-    queueState.resumeAutoDrain(threadId);
-    await dispatch(next);
-  }, [dispatch, threadId]);
-
-  const sendNow = useCallback(
-    async (message: QueuedMessage): Promise<void> => {
-      if (!threadId) return;
-      if (isThreadExecuting(threadId)) {
-        useQueueStore.getState().moveMessage(threadId, message.id, 0);
-        return;
-      }
-      const queued = useQueueStore.getState().claimQueuedMessage(threadId, message.id);
-      if (queued) await dispatch(queued);
-    },
-    [dispatch, threadId],
-  );
-
-  return { resumeNext, sendNow };
+  return { sendNow };
 }

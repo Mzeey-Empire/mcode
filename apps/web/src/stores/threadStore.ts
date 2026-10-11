@@ -18,9 +18,9 @@ import {
   createSubagentPresentation,
   mergeSubagentPresentation,
 } from "@mcode/contracts";
-import { getTransport } from "@/transport";
+import { getTransport, RpcError } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { useQueueStore } from "./queueStore";
+import { useQueueStore, type QueuedMessage } from "./queueStore";
 import { LruCache } from "@/lib/lru-cache";
 import { useTaskStore, coerceTaskStatus } from "./taskStore";
 import { usePlanStore } from "./planStore";
@@ -442,7 +442,7 @@ interface ThreadState {
   // Message actions
   loadOlderMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
   loadNewerMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
-  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string, planAction?: import("@mcode/contracts").PlanAction, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts").ApprovalReviewMode, devinMode?: DevinMode, messageId?: string) => Promise<boolean>;
+  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string, planAction?: import("@mcode/contracts").PlanAction, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts").ApprovalReviewMode, devinMode?: DevinMode, messageId?: string, resendOfSteerId?: string) => Promise<boolean>;
   /** Remove one durably cancelled message from the resident thread transcript. */
   removePersistedMessage: (threadId: string, messageId: string) => void;
   stopAgent: (threadId: string) => Promise<void>;
@@ -757,6 +757,44 @@ function canAutoDrainQueuedMessage(threadId: string): boolean {
 }
 
 /**
+ * Sends a claimed queue item and settles its lease. A resend reuses the replacement id the
+ * server issued, so admission can claim the held steer it replaces.
+ */
+export async function sendQueuedMessage(threadId: string, message: QueuedMessage): Promise<void> {
+  const resendOfSteerId = message.steer?.state === "resend" ? message.steer.resendOfSteerId : undefined;
+  try {
+    const sent = await useThreadStore.getState().sendMessage(
+      threadId,
+      message.content,
+      message.model || undefined,
+      message.permissionMode,
+      message.attachments.length > 0 ? message.attachments : undefined,
+      message.displayContent,
+      message.reasoningLevel,
+      message.provider,
+      message.contextWindow,
+      message.thinking,
+      message.codexFastMode,
+      undefined,
+      undefined,
+      undefined,
+      message.mentions,
+      message.previewAnnotations,
+      message.goalObjective,
+      message.orchestrationMode,
+      undefined,
+      message.approvalReviewMode,
+      message.devinMode,
+      resendOfSteerId ? message.id : undefined,
+      resendOfSteerId,
+    );
+    useQueueStore.getState().settleQueuedDispatch(threadId, message.id, sent);
+  } catch {
+    useQueueStore.getState().settleQueuedDispatch(threadId, message.id, false);
+  }
+}
+
+/**
  * Resume auto-drain for a thread that was paused while the user edited a
  * queued message. Schedules the same 400ms-delayed check used when a turn
  * completes. No-op when the thread is busy or the queue is empty.
@@ -768,40 +806,8 @@ export function scheduleDrainAfterEdit(threadId: string): void {
   const timer = setTimeout(() => {
     dequeueTimers.delete(threadId);
     if (!canAutoDrainQueuedMessage(threadId)) return;
-    const queueState = useQueueStore.getState();
-    const next = queueState.claimNextQueuedMessage(threadId);
-    if (next) {
-      void (async (): Promise<void> => {
-        try {
-          const sent = await useThreadStore.getState().sendMessage(
-            threadId,
-            next.content,
-            next.model,
-            next.permissionMode,
-            next.attachments.length > 0 ? next.attachments : undefined,
-            next.displayContent,
-            next.reasoningLevel,
-            next.provider,
-            next.contextWindow,
-            next.thinking,
-            next.codexFastMode,
-            undefined,
-            undefined,
-            undefined,
-            next.mentions,
-            next.previewAnnotations,
-            next.goalObjective,
-            next.orchestrationMode,
-            undefined,
-            undefined,
-            next.devinMode,
-          );
-          useQueueStore.getState().settleQueuedDispatch(threadId, next.id, sent);
-        } catch {
-          useQueueStore.getState().settleQueuedDispatch(threadId, next.id, false);
-        }
-      })();
-    }
+    const next = useQueueStore.getState().claimNextQueuedMessage(threadId);
+    if (next) void sendQueuedMessage(threadId, next);
   }, 400);
   dequeueTimers.set(threadId, timer);
 }
@@ -3616,7 +3622,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
    * message to local state, marks the thread as running, then dispatches
    * to the transport layer. On failure, rolls back the running state.
    */
-  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText, planAction, mentions, previewAnnotations, goalObjective, orchestrationMode, selectedTextComments, approvalReviewMode, devinMode, messageId) => {
+  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText, planAction, mentions, previewAnnotations, goalObjective, orchestrationMode, selectedTextComments, approvalReviewMode, devinMode, messageId, resendOfSteerId) => {
     conversationResidency.invalidateConversation(threadId);
 
     const { isControlCommand, runningBeforeControl } = prepareOutgoingTurn(threadId, content);
@@ -3658,9 +3664,14 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         orchestrationMode,
         selectedTextComments,
         devinMode,
+        resendOfSteerId,
       });
       return true;
     } catch (error) {
+      // Another window already settled this resend, so the queue item is spent, not retryable.
+      if (resendOfSteerId && error instanceof RpcError && error.code === "steer_resend_closed") {
+        useQueueStore.getState().settleQueuedDispatch(threadId, userMessage.id, true);
+      }
       return rollbackFailedSend(
         threadId, error, isControlCommand, runningBeforeControl,
         optimisticTurnResponseKey, optimisticTurnExecutionId, userMessage.id,
