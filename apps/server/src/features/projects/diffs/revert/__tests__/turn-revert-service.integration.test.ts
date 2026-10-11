@@ -20,6 +20,7 @@ describe("turn revert server operation", () => {
     const turn = await f.turn("one", () => { f.write("a", "after\n"); f.write("added", "new\n"); f.remove("removed"); f.rename("old", "new"); f.write("binary", Buffer.from([0, 254, 2])); });
     const service = f.service(), request = await f.request(turn.messageId);
     const first = committed(await service.apply(request));
+    expect(first.receipt.content).toBe("Reverted Turn 1 · 6 files");
     expect(f.read("a")).toEqual(Buffer.from("before\n")); expect(f.exists("added")).toBe(false);
     expect(f.read("removed")).toEqual(Buffer.from("gone\n")); expect(f.read("old")).toEqual(Buffer.from("renamed\n")); expect(f.exists("new")).toBe(false);
     expect(f.read("binary")).toEqual(Buffer.from([0, 255, 1]));
@@ -147,7 +148,8 @@ describe("turn revert server operation", () => {
     const turn = await f.turn("one", () => f.write("dist/keep.js", "after\n"));
     const request = await f.request(turn.messageId);
     expect(await f.service().preview(request)).toMatchObject({ skipped: [], files: [{ path: "dist/keep.js", state: "clean", action: "restore" }] });
-    committed(await f.service().apply(request));
+    const result = committed(await f.service().apply(request));
+    expect(result.receipt.content).toBe("Reverted Turn 1 · 1 file");
     expect(f.read("dist/keep.js")).toEqual(Buffer.from("before\n"));
   }, timeout);
 
