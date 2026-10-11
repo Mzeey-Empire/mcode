@@ -939,7 +939,7 @@ export function RightPanel() {
 
   // Select raw records by reference, then project the scope in useMemo. The
   // projection removes the workspace Terminal tool only for untouched threads
-  // (ADR-0025) while preserving thread-owned records.
+  // (ADR-0026) while preserving thread-owned records.
   const ownedPanel = useDiffStore((s) =>
     activeWorkspaceId && activeThreadId
       ? s.rightPanelByThread[activeThreadId]

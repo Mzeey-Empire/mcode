@@ -602,7 +602,7 @@ function ActivityRailView({
 /**
  * Vertical activity rail on the panel's right edge: one entry per open tool
  * (hover-× close, drag or Alt+Shift+Arrow to reorder whole tools) and an add
- * control once a tool is open (ADR-0025). Panel-level controls live in the
+ * control once a tool is open (ADR-0026). Panel-level controls live in the
  * panel header, not here.
  */
 export function ActivityRail({

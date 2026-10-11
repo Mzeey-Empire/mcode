@@ -119,7 +119,7 @@ export const PANEL_TAB_TYPES: readonly PanelTabType[] = [
  * Tools displayed in the current scope, in catalog order: scope-filtered
  * (thread-only types dropped when threadless) then cardinality-filtered (open
  * tools dropped, since the rail lists each tool once and Terminal and Browser
- * add items from their own row-1 tab strip; ADR-0025). Coming-soon teasers
+ * add items from their own row-1 tab strip; ADR-0026). Coming-soon teasers
  * (Files) are kept so the empty-state grid can render them disabled. Pure.
  */
 export function shownTabTypes(

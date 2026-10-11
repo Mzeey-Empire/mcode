@@ -82,6 +82,24 @@ describe("CodexCanonicalEventPublisher", () => {
     });
   });
 
+  it("marks reasoning deltas volatile like text deltas and keeps structural events durable", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedReceipt);
+    const publisher = new CodexCanonicalEventPublisher(sink(submit));
+
+    publisher.publish(routing, providerRuntimeEvent({
+      type: AgentEventType.ReasoningDelta,
+      threadId: routing.threadId,
+      delta: "Weighing options",
+      reasoningItemId: "rs_1",
+    }));
+    publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.System, threadId: routing.threadId, subtype: "notice" }));
+    await publisher.waitForExecution(routing);
+
+    const [reasoningEvent, systemEvent] = submit.mock.calls.flatMap(([batch]) => batch.events);
+    expect(reasoningEvent?.ingestClass).toBe("volatile");
+    expect(systemEvent).not.toHaveProperty("ingestClass");
+  });
+
   it("uses a distinct sequence for a retry of the same execution", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedReceipt);
     const publisher = new CodexCanonicalEventPublisher(sink(submit));

@@ -7,7 +7,7 @@ export type { BranchComparison };
 /**
  * One right-panel tool. The rail lists each open tool once; tools that hold
  * several items (Terminal records, Browser pages) show them as row-1 tabs
- * inside the tool. See ADR-0025.
+ * inside the tool. See ADR-0026.
  */
 export type RightPanelTool =
   | "preview"
@@ -32,14 +32,9 @@ function isRightPanelTool(value: string): value is RightPanelTool {
   return RIGHT_PANEL_TOOLS.has(value);
 }
 
-/** Selected roster view within a thread's Subagents panel. */
-export type SubagentRosterTab = "active" | "finished";
-
 /** Navigation state for one thread's Subagents detail view. */
 export interface SubagentDetailSelection {
   readonly id: string;
-  /** Canonical roster tab, unresolved for selections opened from narration. */
-  readonly originTab?: SubagentRosterTab;
   readonly scrollTop: number;
 }
 
@@ -209,7 +204,7 @@ const LEGACY_TERMINAL_TYPE = /^(?:action-)?terminal$/;
  * `action-terminal:<actionId>`) into one Terminal tool at the first one's
  * position and drops unknown tool types. An active legacy terminal instance
  * becomes the active Terminal tool. Returns the inputs unchanged when they are
- * already canonical. See ADR-0025.
+ * already canonical. See ADR-0026.
  */
 export function normalizeRightPanelTabInstances(
   instances: readonly LegacyRightPanelTabInstance[],
@@ -367,7 +362,7 @@ function withoutTerminalTool(state: RightPanelState): RightPanelState {
  * Projects the raw panel records for one scope without leaking the workspace
  * Terminal tool into an untouched thread, whose terminal records differ. Thread-owned records remain
  * unchanged; inherited fallback state keeps visibility, width, and all
- * non-Terminal tab state. See ADR-0012 and ADR-0025.
+ * non-Terminal tab state. See ADR-0012 and ADR-0026.
  */
 export function projectRightPanelForScope(
   ownedPanel: RightPanelState | undefined,
@@ -474,14 +469,9 @@ interface DiffState {
    * threadless Browser/Terminal shell and seeds a not-yet-customized thread's
    * scope-neutral state (visibility, width, and non-Terminal tabs) until that
    * thread diverges into its own {@link rightPanelByThread} entry. See ADR-0012
-   * and ADR-0025.
+   * and ADR-0026.
    */
   readonly rightPanelFallbackByWorkspace: Record<string, RightPanelState>;
-  /**
-   * The remembered Subagents roster view for each thread. This inner-panel state
-   * survives right-panel unmounts but is intentionally dropped with its thread.
-   */
-  readonly subagentRosterTabByThread: Record<string, SubagentRosterTab>;
   /** Selected Subagents detail and roster return position for each thread. */
   readonly subagentDetailByThread: Record<string, SubagentDetailSelection>;
   /** Explicit Files visibility choices keyed by Review scope. Missing scopes start closed. */
@@ -633,10 +623,6 @@ interface DiffState {
   closeRightPanelTab: (workspaceId: string, threadId: string | null | undefined, tab: RightPanelTool) => void;
   /** Close every tab and hide one right-panel scope while preserving its width. */
   clearRightPanel: (workspaceId: string, threadId: string | null | undefined) => void;
-  /** Read a thread's remembered Subagents roster view, if it has one. */
-  getSubagentRosterTab: (threadId: string) => SubagentRosterTab | undefined;
-  /** Remember the selected Subagents roster view for one thread. */
-  setSubagentRosterTab: (threadId: string, tab: SubagentRosterTab) => void;
   /** Open a thread-scoped Subagents detail. */
   selectSubagentDetail: (threadId: string, selection: SubagentDetailSelection) => void;
   /** Return one thread to its Subagents roster. */
@@ -719,7 +705,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   previewUrlByThread: {},
   rightPanelByThread: {},
   rightPanelFallbackByWorkspace: {},
-  subagentRosterTabByThread: {},
   subagentDetailByThread: {},
   reviewFilesVisibleByScope: readReviewFilesVisibility(),
   viewMode: "last-turn",
@@ -870,26 +855,10 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       });
     }),
 
-  getSubagentRosterTab: (threadId) => get().subagentRosterTabByThread[threadId],
-  setSubagentRosterTab: (threadId, tab) =>
-    set((state) =>
-      state.subagentRosterTabByThread[threadId] === tab
-        ? {}
-        : { subagentRosterTabByThread: { ...state.subagentRosterTabByThread, [threadId]: tab } },
-    ),
   selectSubagentDetail: (threadId, selection) =>
-    set((state) => {
-      const subagentRosterTabByThread = { ...state.subagentRosterTabByThread };
-      if (selection.originTab === undefined) {
-        delete subagentRosterTabByThread[threadId];
-      } else {
-        subagentRosterTabByThread[threadId] = selection.originTab;
-      }
-      return {
-        subagentDetailByThread: { ...state.subagentDetailByThread, [threadId]: selection },
-        subagentRosterTabByThread,
-      };
-    }),
+    set((state) => ({
+      subagentDetailByThread: { ...state.subagentDetailByThread, [threadId]: selection },
+    })),
   clearSubagentDetail: (threadId) =>
     set((state) => {
       if (!(threadId in state.subagentDetailByThread)) return {};
@@ -1071,8 +1040,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete lineWrapByThread[threadId];
       const rightPanelByThread = { ...state.rightPanelByThread };
       delete rightPanelByThread[threadId];
-      const subagentRosterTabByThread = { ...state.subagentRosterTabByThread };
-      delete subagentRosterTabByThread[threadId];
       const subagentDetailByThread = { ...state.subagentDetailByThread };
       delete subagentDetailByThread[threadId];
       const reviewViewByThread = { ...state.reviewViewByThread };
@@ -1105,7 +1072,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         previewUrlByThread: previewUrls,
         lineWrapByThread,
         rightPanelByThread,
-        subagentRosterTabByThread,
         subagentDetailByThread,
         reviewViewByThread,
         reviewViewManuallySelectedByThread,

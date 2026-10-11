@@ -1,4 +1,4 @@
-import type { DiffStats, FileReadResult, FilesystemBrowseResult, ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn, WorkspaceCreateResult, WorkspaceFileChanges, WorkspaceFileList } from "@mcode/contracts";
+import type { DiffStats, FileReadResult, ProjectIcon, FilesystemBrowseResult, ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn, WorkspaceCreateResult, WorkspaceFileChanges, WorkspaceFileList } from "@mcode/contracts";
 import type {
   McodeTransport,
   Workspace,
@@ -1033,6 +1033,9 @@ export function createWsTransport(
     listWorkspaces: () => rpc<Workspace[]>("workspace.list", {}),
     createWorkspace: (name, path) => rpc<WorkspaceCreateResult>("workspace.create", { name, path }),
     renameWorkspace: (id, name) => rpc<Workspace>("workspace.rename", { id, name }),
+    resolveProjectIcons: async (workspaceIds) =>
+      (await rpc<{ icons: ProjectIcon[] }>("workspace.icon.resolve", { workspaceIds })).icons,
+    setProjectIcon: (workspaceId, iconPath) => rpc<ProjectIcon>("workspace.icon.set", { workspaceId, iconPath }),
     readWorkspaceEnvironment: (workspaceId, threadId) =>
       rpc<WorkspaceEnvironmentReadResult>("workspace.environment.read", { workspaceId, threadId }),
     saveWorkspaceEnvironment: (workspaceId, document, sourceRevision, threadId) =>

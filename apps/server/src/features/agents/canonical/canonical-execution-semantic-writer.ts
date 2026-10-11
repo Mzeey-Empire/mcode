@@ -1654,7 +1654,7 @@ function validLiveMessageBody(message: DataOnlyParentLiveMessageInput): boolean 
 function validNarrativeEvent(event: ExecutionLivePublicationIntent["event"]): boolean {
   return event.type === "textDelta" ? event.isFinalResponse === false
     : [
-      "assistantMessageBoundary", "toolUse", "toolResult", "hookStarted", "hookCompleted", "approvalDecided",
+      "reasoningDelta", "assistantMessageBoundary", "toolUse", "toolResult", "hookStarted", "hookCompleted", "approvalDecided",
       "modelFallback", "toolInputDelta", "toolProgress", "providerUnavailable", "hookProgress",
       "apiRetry", "rateLimited", "quotaUpdate", "goalUpdated", "goalCleared", "mcpServerStartupStatus",
     ].includes(event.type);

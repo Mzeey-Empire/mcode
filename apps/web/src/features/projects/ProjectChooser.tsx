@@ -9,6 +9,7 @@ import { FOCUS_RING_CLASS } from "@/components/ui/focus-ring";
 import { cn } from "@/lib/utils";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useWorkspaceStore } from "./state/workspaceStore";
+import { ProjectIcon } from "./icons/ProjectIcon";
 
 /** Props for {@link ProjectChooser}. */
 export interface ProjectChooserProps {
@@ -111,7 +112,7 @@ function ProjectList({ workspaces, activeWorkspaceId, query, onQueryChange, onSe
 }
 
 function projectRow(workspace: Workspace): PickerRow {
-  return { key: workspace.id, name: workspace.name };
+  return { key: workspace.id, name: workspace.name, icon: <ProjectIcon workspaceId={workspace.id} name={workspace.name} size={16} /> };
 }
 
 /** Projects whose name or folder contains the query, ignoring case, in the store's order. */

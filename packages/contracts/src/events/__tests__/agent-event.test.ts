@@ -151,3 +151,19 @@ describe("AgentEvent MCP startup status", () => {
     expect(parsed.status).toBe("failed");
   });
 });
+
+describe("AgentEvent reasoning delta", () => {
+  it("parses a reasoning block chunk and its empty-text end", () => {
+    const chunk = { type: "reasoningDelta", threadId: "t-1", delta: "Checking", reasoningItemId: "rs_1" };
+    const end = { type: "reasoningDelta", threadId: "t-1", delta: "", reasoningItemId: "rs_1", done: true };
+    expect(AgentEventSchema().parse(chunk)).toEqual(chunk);
+    expect(AgentEventSchema().parse(end)).toEqual(end);
+  });
+
+  it("rejects an oversized delta and an empty block id", () => {
+    const base = { type: "reasoningDelta", threadId: "t-1" };
+    expect(AgentEventSchema().safeParse({ ...base, delta: "x".repeat(65_537) }).success).toBe(false);
+    expect(AgentEventSchema().safeParse({ ...base, delta: "x", reasoningItemId: "" }).success).toBe(false);
+    expect(AgentEventSchema().safeParse({ ...base, delta: "x".repeat(65_536) }).success).toBe(true);
+  });
+});

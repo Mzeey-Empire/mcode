@@ -23,6 +23,7 @@ export const workspaces = sqliteTable(
     sortOrder: integer("sort_order").notNull().default(0),
     isGitRepo: integer("is_git_repo").notNull().default(1),
     deletedAt: text("deleted_at"),
+    iconPath: text("icon_path"),
   },
   (table) => [
     index("idx_workspaces_sort_order").on(asc(table.sortOrder)),
@@ -527,6 +528,8 @@ export const thoughtSegments = sqliteTable(
      * duplicating text that already appears in the assistant message body.
      */
     isFinalResponse: integer("is_final_response").notNull().default(0),
+    /** Provider reasoning is never final-response text; rows written before this column read as narration. */
+    kind: text("kind", { enum: ["narration", "reasoning"] }).notNull().default("narration"),
   },
   (table) => [
     index("idx_thought_segments_message_final_sort_order_id")

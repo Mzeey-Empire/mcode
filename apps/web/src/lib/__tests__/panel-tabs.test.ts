@@ -13,7 +13,7 @@ function ids(types: readonly { id: PanelTabTypeId }[]): PanelTabTypeId[] {
 }
 
 describe("PANEL_TAB_TYPES catalog", () => {
-  // Project Action output is a Terminal tab, so there is no separate Action tool (ADR-0025).
+  // Project Action output is a Terminal tab, so there is no separate Action tool (ADR-0026).
   it("declares the revamp tab types in prototype order", () => {
     expect(ids(PANEL_TAB_TYPES)).toEqual([
       "preview",

@@ -60,7 +60,7 @@ interface BrowserToolHeaderProps {
 
 /**
  * The Browser tool's row-1 tabs: one per open page, with a round + that opens
- * another. Closing the last page closes the Browser tool. See ADR-0025.
+ * another. Closing the last page closes the Browser tool. See ADR-0026.
  */
 export function BrowserToolHeader({ workspaceId, threadId, scopeId, tabSet }: BrowserToolHeaderProps) {
   const pages = tabSet?.tabs;

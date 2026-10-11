@@ -260,6 +260,7 @@ export class CanonicalConversationProjectionReader {
       started_at: row.createdAt,
       ended_at: row.updatedAt,
       sort_order: sortOrder,
+      kind: "reasoning",
     }));
     state.childThoughtOrderByMessage.set(childAnchor, sortOrder + 1);
   }

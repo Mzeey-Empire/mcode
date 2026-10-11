@@ -44,6 +44,8 @@ export type { TurnFailure } from "./models/turn-failure.js";
 
 export { WorkspaceSchema, WorkspaceEnrichmentSchema } from "./models/workspace.js";
 export type { Workspace, WorkspaceEnrichment } from "./models/workspace.js";
+export { PROJECT_ICON_PATH_MAX_CHARS, PROJECT_ICON_RESOLVE_MAX_IDS, ProjectIconSchema } from "./models/project-icon.js";
+export type { ProjectIcon } from "./models/project-icon.js";
 export { FILE_LIST_MAX_PATHS, FILE_VIEW_TEXT_MAX_BYTES, FILE_CHANGES_MAX_ENTRIES, WORKSPACE_IMAGE_MAX_BYTES, WorkspaceFileListSchema, WorkspaceFileChangesSchema, FileReadResultSchema } from "./models/workspace-file.js";
 export type { WorkspaceFileList, WorkspaceFileChanges, FileReadResult } from "./models/workspace-file.js";
 
@@ -481,8 +483,8 @@ export type {
   SubagentPresentation,
 } from "./models/tool-call-record.js";
 
-export { ThoughtSegmentRecordSchema } from "./models/thought-segment.js";
-export type { ThoughtSegmentRecord } from "./models/thought-segment.js";
+export { ThoughtSegmentKindSchema, ThoughtSegmentRecordSchema } from "./models/thought-segment.js";
+export type { ThoughtSegmentKind, ThoughtSegmentRecord } from "./models/thought-segment.js";
 
 export { HookExecutionRecordSchema } from "./models/hook-execution.js";
 export type { HookExecutionRecord } from "./models/hook-execution.js";

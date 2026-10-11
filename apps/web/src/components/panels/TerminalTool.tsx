@@ -96,7 +96,7 @@ interface TerminalToolProps {
  * The Terminal tool: one row-1 tab per terminal record (shells and Project
  * Action runs) with a round + capped at {@link TERMINAL_MAX_PER_SCOPE}. The body
  * stays mounted so the pooled xterm keeps its slot; an action record overlays
- * its transcript view instead. See ADR-0025.
+ * its transcript view instead. See ADR-0026.
  */
 export function TerminalTool({ active, workspaceId, threadId, scopeId }: TerminalToolProps) {
   const { terminals, activeId } = useScopeTerminals(scopeId);

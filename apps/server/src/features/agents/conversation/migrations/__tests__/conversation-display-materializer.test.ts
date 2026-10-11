@@ -422,6 +422,22 @@ describe("ConversationDisplayMaterializationStore", () => {
     ]);
   });
 
+  it("copies the reasoning kind into display rows and reads unkinded records as narration", () => {
+    insertItem(db, "assistant-item", { projection: "message", message: message("assistant-1", "assistant", 2) });
+    const reasoning = recoveryThought("assistant-1", "reasoning-1");
+    const narrative = reasoning.narrative as { record: Record<string, unknown> };
+    narrative.record = { ...narrative.record, kind: "reasoning" };
+    insertItem(db, "reasoning-item", reasoning);
+    insertItem(db, "narration-item", directThought("narration-1", "assistant-1"));
+
+    new ConversationDisplayMaterializationStore(db).materializeItems(["assistant-item", "reasoning-item", "narration-item"]);
+
+    expect(db.prepare("SELECT id, kind FROM thought_segments ORDER BY id").all()).toEqual([
+      { id: "narration-1", kind: "narration" },
+      { id: "reasoning-1", kind: "reasoning" },
+    ]);
+  });
+
   it.each(["missing", "hidden"])("rejects recovery narrative with an explicit %s message", (visibility) => {
     insertItem(db, "prompt-item", { projection: "message", message: message("prompt-1", "user", 1) });
     if (visibility === "hidden") {

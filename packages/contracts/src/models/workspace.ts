@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
+import { PROJECT_ICON_PATH_MAX_CHARS } from "./project-icon.js";
 
 /** Workspace schema matching the SQLite row shape. */
 export const WorkspaceSchema = lazySchema(() =>
@@ -19,6 +20,8 @@ export const WorkspaceSchema = lazySchema(() =>
     sort_order: z.number().int(),
     /** ISO timestamp when the workspace was soft-deleted. Null if active. */
     deleted_at: z.string().nullable(),
+    /** Workspace-relative POSIX path of the icon file the user chose. Null uses automatic detection. */
+    icon_path: z.string().max(PROJECT_ICON_PATH_MAX_CHARS).nullable(),
   }),
 );
 /** Workspace record from the database. */

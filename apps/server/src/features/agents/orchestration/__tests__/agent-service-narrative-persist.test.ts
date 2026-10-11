@@ -1399,6 +1399,31 @@ describe("AgentService narrative persistence", () => {
     expect(toolCalls[0].sortOrder).toBe(1);
   });
 
+  it("applies reasoning as its own segment, closing open narration and closed by later answer text", async () => {
+    const { service, providerEmitter, thoughtBulk } = await build();
+
+    providerEmitter.emit("event", { type: AgentEventType.TextDelta, threadId: THREAD_ID, delta: "I will check.", isFinalResponse: false });
+    providerEmitter.emit("event", { type: AgentEventType.ReasoningDelta, threadId: THREAD_ID, delta: "Weighing", reasoningItemId: "rs_1" });
+    providerEmitter.emit("event", { type: AgentEventType.ReasoningDelta, threadId: THREAD_ID, delta: " options.", reasoningItemId: "rs_1" });
+    providerEmitter.emit("event", { type: AgentEventType.TextDelta, threadId: THREAD_ID, delta: "Answer.", isFinalResponse: true });
+    providerEmitter.emit("event", { type: AgentEventType.ReasoningDelta, threadId: THREAD_ID, delta: " late", reasoningItemId: "rs_1" });
+    providerEmitter.emit("event", {
+      type: AgentEventType.TurnComplete,
+      threadId: THREAD_ID,
+      tokensIn: 0,
+      tokensOut: 0,
+      contextWindow: 0,
+    });
+
+    await waitForSavedNarrativeTurn(service);
+
+    const thoughts: CreateThoughtSegmentInput[] = thoughtBulk.mock.calls[0][0];
+    expect(thoughts.map((t) => [t.text, t.kind ?? "narration", t.sortOrder, t.isFinalResponse ?? 0])).toEqual([
+      ["I will check.", "narration", 0, 0],
+      ["Weighing options.", "reasoning", 1, 0],
+    ]);
+  });
+
   it("records a hook execution between two tool calls with didBlock round-trip", async () => {
     const { service, providerEmitter, hookBulk } = await build();
 

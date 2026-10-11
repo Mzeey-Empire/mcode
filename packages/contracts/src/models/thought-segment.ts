@@ -1,8 +1,18 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
 
-/** Persisted thought segment (a contiguous stretch of assistant text deltas
- * captured between tool calls) linked to an assistant message. */
+/**
+ * What a thought segment holds. `narration` is assistant prose between tool
+ * calls; `reasoning` is provider reasoning (thinking) shown as a collapsed
+ * Thought row.
+ */
+export const ThoughtSegmentKindSchema = lazySchema(() => z.enum(["narration", "reasoning"]));
+
+/** What a thought segment holds: narration prose or provider reasoning. */
+export type ThoughtSegmentKind = z.infer<ReturnType<typeof ThoughtSegmentKindSchema>>;
+
+/** Persisted thought segment (a contiguous stretch of assistant narration or
+ * provider reasoning captured between tool calls) linked to an assistant message. */
 export const ThoughtSegmentRecordSchema = lazySchema(() => z.object({
   id: z.string(),
   message_id: z.string(),
@@ -16,6 +26,8 @@ export const ThoughtSegmentRecordSchema = lazySchema(() => z.object({
    * duplicating text already visible in the assistant message body.
    */
   is_final_response: z.number().optional(),
+  /** Absent on rows written before reasoning had its own kind; read as `narration`. */
+  kind: ThoughtSegmentKindSchema().optional(),
 }));
 
 /** Persisted thought segment linked to an assistant message. */

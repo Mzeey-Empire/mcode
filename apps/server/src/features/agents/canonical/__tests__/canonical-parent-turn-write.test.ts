@@ -286,6 +286,21 @@ describe("CanonicalParentTurnWrite", () => {
     expect(new MessageRepo(db).findByIdInThread(THREAD_ID, message.id)?.content).toBe("Answer");
   });
 
+  it("persists reasoning equal to the answer as non-final reasoning", async () => {
+    writer.start(startInput());
+    const input = terminalProjectionInput();
+    input.narrative = [
+      { kind: "narrationSegment", record: { id: "reasoning-1", message_id: "", text: "Answer",
+        started_at: NOW, ended_at: NOW, sort_order: 1, kind: "reasoning" } },
+    ];
+    const staged = writer.stageTerminalProjection(input);
+    const message = staged.projection.message;
+    if (!message) throw new Error("Missing staged response");
+    expect((await writer.finish({ ...finishInput(message), projection: staged.projection })).outcome).toBe("committed");
+    expect(db.prepare("SELECT text, kind, is_final_response FROM thought_segments WHERE id = 'reasoning-1'").get())
+      .toEqual({ text: "Answer", kind: "reasoning", is_final_response: 0 });
+  });
+
   it("stages cloneable terminal rows once and publishes only after finish", async () => {
     writer.start(startInput());
     const input = terminalProjectionInput();

@@ -104,7 +104,8 @@ function sequencesLifecycle(
   if (isActiveThread && !startsNewInstance && !lifecycleExit) {
     context.promoteDeferredNarrativeEvents(event.threadId);
   }
-  if (event.type !== "textDelta") context.flushPendingTextDeltas();
+  // Reasoning shares the text queue, so it stays batched and ordered without a flush.
+  if (event.type !== "textDelta" && event.type !== "reasoningDelta") context.flushPendingTextDeltas();
   if (lifecycleExit) context.invalidateConversation(event.threadId);
 }
 

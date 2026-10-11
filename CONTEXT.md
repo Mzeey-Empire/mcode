@@ -83,14 +83,24 @@ workspace is the main folder the user set up first. Worktrees rooted under
 that folder may host their own threads, but those threads still belong to
 the parent workspace.
 
-Workspace-level settings do not exist yet. All user-facing settings (default
-provider, utility provider, etc.) are global (user-level) today. Providers
-are installed on the user's machine, not on the workspace.
+The only workspace-level setting is the chosen [project icon](#project-icon).
+All other user-facing settings (default provider, utility provider, etc.) are
+global (user-level) today. Providers are installed on the user's machine, not
+on the workspace.
 
 **Project** is the user-facing name for a Workspace. Every UI string ("Add
 project", "Recent Projects", "No projects yet") says _project_; the code and
 this glossary say _Workspace_. They are the same thing.
 _Avoid_: using "project" in code or schema; reserve it for user-facing copy.
+
+### Project icon
+The small image that identifies a project in the sidebar, the new-thread
+breadcrumb, and the project chooser. A file the user chose inside the project
+wins. Otherwise Mcode looks for a favicon or logo in common places, such as
+`public/favicon.svg` or the icon an `index.html` links to. With neither, the
+project shows a monogram of its name's first letter. The icon always comes from
+the workspace folder, so every worktree of a project shows the same one.
+_Avoid_: "favicon" for the general idea; a favicon is only one source.
 
 ### Worktree
 A git worktree provisioned under a workspace so a thread can run against
@@ -401,18 +411,24 @@ become part of the final response or get grouped as preamble narration.
 Classification is resolved later by the `AssistantMessageBoundary` signal.
 
 ### Reasoning block
-Structured reasoning output emitted by the provider when extended thinking
-is enabled (e.g. Claude's `thinking` content blocks). A reasoning block is
-its own distinct response object in the SDK — **not** the same as a stream
-of text deltas. Mcode does not yet surface reasoning blocks; they will
-become visible when extended thinking is wired into the UI.
+The model's own thinking, as distinct from the text it says to the user.
+Providers stream it as `reasoningDelta` events, never as text deltas. Codex
+reasoning items carry a native id, and the item's completion closes the
+block. Cursor and Devin thought chunks carry no id. The timeline shows a
+reasoning block as a collapsed **Thought** row that the user can open to
+read. Claude `thinking` content blocks are not yet surfaced.
+
+A reasoning block is never narration and never the final response. It does
+not merge with neighbouring narration and does not supply the live activity
+label. It persists as a `thought_segments` row with `kind = 'reasoning'`.
+Rows without a kind are narration.
 
 ### Narration segment
 A contiguous group of text deltas the agent emitted **before** a tool call
 within a turn — the agent's narration of what it is about to do. Distinct
 from the final response (text deltas emitted *after* all tool calls have
-resolved) and distinct from a reasoning block (only emitted when extended
-thinking is on). Classification happens at the `AssistantMessageBoundary`
+resolved) and distinct from a reasoning block (the model's thinking, which
+arrives as `reasoningDelta`). Classification happens at the `AssistantMessageBoundary`
 event: a `stop_reason` of `tool_use` closes the buffered deltas as a
 narration segment; `end_turn` / `stop_sequence` / `max_tokens` / `refusal`
 reclassifies them as final-response text instead.
@@ -424,9 +440,9 @@ The boundary signal is the same either way; only the moment of certainty
 differs.
 
 > **Codebase mismatch (rename pending).** The code currently calls this
-> concept `ThoughtSegment` (table: `thought_segments`). That name is
-> misleading — these are not SDK "thoughts." A follow-up rename to
-> `NarrationSegment` is planned.
+> concept `ThoughtSegment` (table: `thought_segments`). The same type and
+> table also hold reasoning blocks, told apart by `kind`. A follow-up
+> rename to `NarrationSegment` is planned.
 
 ### Final response
 The text the agent produces after all tool calls in a turn have resolved,
@@ -434,7 +450,7 @@ intended as the user-facing reply for that turn. Identified by the SDK's
 terminal `stop_reason` (`end_turn`, `stop_sequence`, `max_tokens`,
 `refusal`) and persisted as the assistant message's `content`. Distinct
 from narration segments (which are persisted to a separate table) and from
-reasoning blocks (not yet surfaced).
+reasoning blocks.
 
 ### Streaming checkpoint
 A server-owned durable record of user-visible output accepted during an
@@ -867,7 +883,7 @@ thread preserves a separate order.
 Terminal and Browser hold several items, shown as row-1 tabs inside the tool
 with a round + that adds one. Terminal allows eight **terminal records** per
 terminal scope, counting shells and Project Action runs alike; at that limit
-its + is disabled and says why. See ADR-0025.
+its + is disabled and says why. See ADR-0026.
 
 ### Plan tab
 The right-panel tab that shows a thread's plan as a read-only document. Its
@@ -909,6 +925,14 @@ fresh interactive shell in the same folder. The terminal identity and replay
 survive the command's exit and subsequent runs. Unlike typing the command into
 the shell, the script is not in shell history, and its working-folder and
 environment changes do not carry into the shell that follows.
+
+### Cleanup action
+A Project Action marked **Run on cleanup**. Before Mcode removes a Thread's
+worktree, it runs each cleanup action from that worktree in list order, without
+a terminal, for at most two minutes each. A failing action is logged and does
+not keep the worktree. An In repo action that was never approved is skipped.
+Retained worktrees and Direct threads run no cleanup actions.
+_Avoid_: Teardown script, cleanup hook
 
 ### Terminal scope
 The thread or workspace a shell session runs against. When a thread is

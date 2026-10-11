@@ -68,7 +68,7 @@ Internal guides are grouped in topic subfolders. Use this index to find a guide.
 ## Architecture decision records
 
 Point-in-time decisions. New ADRs take the next free number below. Numbers
-0018 and 0020 are each used twice historically; start new ADRs at 0026.
+0018 and 0020 are each used twice historically; start new ADRs at 0027.
 
 - [0001: Provider CLI discovery is per-provider; version policy is the one provider-blind seam](adr/0001-per-provider-cli-discovery-shared-version-policy.md)
 - [0002: Preview tab discard policy](adr/0002-preview-tab-discard-policy.md)
@@ -96,7 +96,8 @@ Point-in-time decisions. New ADRs take the next free number below. Numbers
 - [0022: Server-owned streaming durability and provider-native recovery](adr/0022-server-owned-streaming-durability-and-provider-native-recovery.md)
 - [0023: Durable plan versions](adr/0023-durable-plan-versions.md)
 - [0024: One browser profile per project](adr/0024-one-browser-profile-per-project.md)
-- [0025: The rail lists tools; terminals and Browser pages are row-1 tabs](adr/0025-rail-lists-tools-terminals-and-pages-are-row-1-tabs.md)
+- [0025: Reasoning keeps the narrative persistence path](adr/0025-reasoning-keeps-the-narrative-persistence-path.md)
+- [0026: The rail lists tools; terminals and Browser pages are row-1 tabs](adr/0026-rail-lists-tools-terminals-and-pages-are-row-1-tabs.md)
 
 ## Agent runbooks
 

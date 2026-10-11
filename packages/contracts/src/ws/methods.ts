@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AcknowledgeSeenResultSchema, ThreadAttentionSchema } from "../models/thread-attention.js";
 import { AgentProgressPositionSchema, AgentThreadIdSchema } from "../compat/agent-model.js";
 import { WorkspaceSchema, WorkspaceEnrichmentSchema } from "../models/workspace.js";
+import { PROJECT_ICON_PATH_MAX_CHARS, PROJECT_ICON_RESOLVE_MAX_IDS, ProjectIconSchema } from "../models/project-icon.js";
 import { WorkspaceFileListSchema, WorkspaceFileChangesSchema, FileReadResultSchema } from "../models/workspace-file.js";
 import {
   WorkspaceEnvironmentReadResultSchema,
@@ -750,6 +751,16 @@ export const WS_METHODS = lazySchema(() => ({
   "workspace.enrich": {
     params: z.object({ ids: z.array(z.string()).max(200) }),
     result: z.object({ items: z.array(WorkspaceEnrichmentSchema()) }),
+  },
+  /** Resolve the icon each project shows; unknown or deleted workspace ids are omitted. */
+  "workspace.icon.resolve": {
+    params: z.object({ workspaceIds: z.array(z.string()).max(PROJECT_ICON_RESOLVE_MAX_IDS) }),
+    result: z.object({ icons: z.array(ProjectIconSchema()) }),
+  },
+  /** Store a workspace-relative icon file, or null to return to automatic detection. */
+  "workspace.icon.set": {
+    params: z.object({ workspaceId: z.string(), iconPath: z.string().max(PROJECT_ICON_PATH_MAX_CHARS).nullable() }),
+    result: ProjectIconSchema(),
   },
   /** Browse the host filesystem starting at the given path, for the folder picker. */
   "filesystem.browse": {

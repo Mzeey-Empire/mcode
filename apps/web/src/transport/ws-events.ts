@@ -10,6 +10,7 @@ import { threadAttentionStore } from "@/features/thread-attention/thread-attenti
 import { startThreadAttentionTracking } from "@/features/thread-attention/thread-attention-tracking";
 import { pushEmitter } from "./ws-transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { useProjectIconStore } from "@/features/projects/icons/projectIconStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { refreshTurnSnapshotsAfterPersist } from "@/lib/turn-snapshot-refresh";
 import { useThreadStore } from "@/stores/threadStore";
@@ -164,6 +165,7 @@ function handleTerminalData(data: unknown): void {
  * - `providers.availability` -- server-pushed provider availability snapshot forwarded to providerAvailabilityStore
  * - `workspace.gitStatusChanged` -- workspace git status changed (e.g. non-git folder became a repo), updates is_git_repo flag
  * - `workspace.orderChanged` -- sidebar project order changed on the server; refreshes workspace list
+ * - `workspace.iconChanged` -- a project's chosen icon changed; replaces its cached icon
  * - `workspace.deleted` -- workspace hard-delete complete; removes it from local state
  * - `workspace.deleteFailed` -- workspace deletion permanently stuck; reloads workspace list
  * - `thread.handoff` -- handoff pipeline status for a child thread (generating, ready, fallback, error)
@@ -507,6 +509,14 @@ export function startPushListeners(): void {
   unsubs.push(
     pushEmitter.on("workspace.orderChanged", () => {
       void useWorkspaceStore.getState().loadWorkspaces();
+    }),
+  );
+
+  unsubs.push(
+    pushEmitter.on("workspace.iconChanged", (data) => {
+      const parsed = WS_CHANNELS["workspace.iconChanged"].safeParse(data);
+      if (!parsed.success) return;
+      useProjectIconStore.getState().applyIcon(parsed.data.icon);
     }),
   );
 

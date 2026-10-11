@@ -17,6 +17,7 @@ import {
   type ThreadStartup,
 } from "@mcode/contracts";
 import { getTransport } from "@/transport";
+import { useProjectIconStore } from "@/features/projects/icons/projectIconStore";
 import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { scheduleDrainAfterEdit, useThreadStore } from "@/stores/threadStore";
 import { deleteThreadRecord, patchThreadRecord } from "@/stores/thread-record";
@@ -1102,6 +1103,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     try {
       const workspaces = await getTransport().listWorkspaces();
       set({ workspaces, loading: false });
+      void useProjectIconStore.getState().resolve(workspaces.map((workspace) => workspace.id)).catch((error: unknown) => {
+        console.error("Project icon resolution failed", error);
+      });
       void window.desktopBridge?.preview?.profiles?.reconcile(workspaces.map((workspace) => workspace.id)).catch((error: unknown) => {
         console.error("Browser profile reconciliation failed", error);
       });

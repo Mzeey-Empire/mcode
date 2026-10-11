@@ -32,7 +32,7 @@ export interface PanelTabStripProps {
  * Row-1 tabs for a tool that holds several items (Terminal records, Browser
  * pages), followed by a round + that adds one. The strip scrolls horizontally
  * and fades its right edge while it overflows; the + stays pinned outside the
- * scroller. See ADR-0025.
+ * scroller. See ADR-0026.
  */
 export function PanelTabStrip({
   items,

@@ -1464,6 +1464,110 @@ describe("NarrativeStore write seam (server-side traps)", () => {
     });
   });
 
+  describe("Reasoning segments", () => {
+    function reasoning(delta: string, reasoningItemId?: string, done?: boolean) {
+      return {
+        type: "reasoningDelta" as const, threadId: THREAD, delta,
+        ...(reasoningItemId ? { reasoningItemId } : {}), ...(done ? { done } : {}),
+      };
+    }
+
+    it("round-trips reasoning between two tools with kind reasoning", async () => {
+      seedAssistantMessage("m1", "Done.", 1);
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.bufferToolCall(THREAD, toolUse("tc-1", "Read"));
+      store.openOrExtendReasoning(THREAD, reasoning("Weighing the ", "rs_1"));
+      store.openOrExtendReasoning(THREAD, reasoning("options.", "rs_1"));
+      store.closeOpenThought(THREAD);
+      store.bufferToolCall(THREAD, toolUse("tc-2", "Grep"));
+
+      await store.persistNarrative(THREAD, "m1", "Done.", "completed");
+
+      const thoughts = new ThoughtSegmentRepo(db, agentStorageTestWriter(db)).listByMessage("m1");
+      expect(thoughts.map((t) => [t.text, t.kind, t.sort_order, t.is_final_response])).toEqual([
+        ["Weighing the options.", "reasoning", 1, 0],
+      ]);
+      expect(store.load(THREAD).map((entry) => entry.kind === "narrationSegment"
+        ? `${entry.kind}:${entry.record.kind}` : entry.kind)).toEqual([
+        "toolCall", "narrationSegment:reasoning", "toolCall", "assistantMessage",
+      ]);
+    });
+
+    it("never marks reasoning as the final response, even when its text equals the body", async () => {
+      const body = "FULL USER-FACING REPLY";
+      seedAssistantMessage("m1", body, 1);
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.openOrExtendReasoning(THREAD, reasoning(body));
+
+      await store.persistNarrative(THREAD, "m1", body, "completed");
+
+      const thoughts = new ThoughtSegmentRepo(db, agentStorageTestWriter(db)).listByMessage("m1");
+      expect(thoughts.map((t) => [t.text, t.kind, t.is_final_response])).toEqual([[body, "reasoning", 0]]);
+    });
+
+    it("keeps reasoning out of a final boundary's promoted text", () => {
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.openOrExtendReasoning(THREAD, reasoning("Private chain"));
+
+      const settlement = store.settleAssistantTextItem(THREAD, {
+        type: "assistantMessageBoundary", threadId: THREAD, isFinalResponse: true,
+      });
+
+      expect(settlement).toEqual({ kind: "promoted", text: "" });
+      expect(store.hasBufferedNarrative(THREAD)).toBe(true);
+    });
+
+    it("splits narration and reasoning into separate segments in arrival order", async () => {
+      seedAssistantMessage("m1", "", 1);
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.openOrExtendThought(THREAD, "I will check.");
+      store.openOrExtendReasoning(THREAD, reasoning("ok"));
+      store.openOrExtendThought(THREAD, "Checked.");
+
+      await store.persistNarrative(THREAD, "m1", "", "completed");
+
+      const thoughts = new ThoughtSegmentRepo(db, agentStorageTestWriter(db)).listByMessage("m1");
+      expect(thoughts.map((t) => [t.text, t.kind, t.sort_order])).toEqual([
+        ["I will check.", "narration", 0],
+        ["ok", "reasoning", 1],
+        ["Checked.", "narration", 2],
+      ]);
+    });
+
+    it("closes a block on done and ignores the same block re-delivered afterwards", async () => {
+      seedAssistantMessage("m1", "", 1);
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.openOrExtendReasoning(THREAD, reasoning("First", "rs_1"));
+      store.openOrExtendReasoning(THREAD, reasoning("", "rs_1", true));
+      store.openOrExtendReasoning(THREAD, reasoning("First", "rs_1"));
+      store.openOrExtendReasoning(THREAD, reasoning("Second", "rs_2"));
+
+      await store.persistNarrative(THREAD, "m1", "", "completed");
+
+      const thoughts = new ThoughtSegmentRepo(db, agentStorageTestWriter(db)).listByMessage("m1");
+      expect(thoughts.map((t) => [t.text, t.kind, t.sort_order])).toEqual([
+        ["First", "reasoning", 0],
+        ["Second", "reasoning", 1],
+      ]);
+    });
+
+    it("reads a row written before the kind column as narration", () => {
+      seedAssistantMessage("m1", "", 1);
+      db.prepare(`INSERT INTO thought_segments (id, message_id, text, started_at, sort_order)
+        VALUES ('legacy', 'm1', 'Old narration', '2026-10-10T10:00:00.000Z', 0)`).run();
+
+      const [entry] = store.load(THREAD);
+
+      expect(entry.kind === "narrationSegment" && [entry.record.text, entry.record.kind])
+        .toEqual(["Old narration", "narration"]);
+    });
+  });
+
   describe("Trap 6: counting data preserved (semantics unchanged)", () => {
     it("persists each Agent's captured lifecycle timestamps through the real repository", async () => {
       seedAssistantMessage("m1", "", 1);

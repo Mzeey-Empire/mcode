@@ -35,7 +35,7 @@ create a replacement shell or resume a terminated one.
 
 Closing a Terminal tab closes its process tree, for shells and Project Action
 runs alike, as recorded in
-[ADR 0025](../../adr/0025-rail-lists-tools-terminals-and-pages-are-row-1-tabs.md).
+[ADR 0026](../../adr/0026-rail-lists-tools-terminals-and-pages-are-row-1-tabs.md).
 A shell that exits keeps its terminal record, bounded replay output, and exit
 code until the user closes it or its scope is deleted. Exited records count
 toward the eight-terminal scope limit. Switching scopes or reloading the client

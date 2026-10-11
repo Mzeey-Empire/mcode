@@ -126,6 +126,8 @@ export function summarizeAgentEventsForTrace(events: readonly AgentEvent[]): unk
           len: e.delta.length,
           preview: e.delta.length > 0 ? previewText(e.delta, 64) : "",
         };
+      case AgentEventType.ReasoningDelta:
+        return { type: "reasoningDelta", reasoningItemId: e.reasoningItemId, done: e.done === true, len: e.delta.length };
       case AgentEventType.ToolUse:
         return {
           type: "toolUse",

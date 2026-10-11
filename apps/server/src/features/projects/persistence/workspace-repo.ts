@@ -45,6 +45,10 @@ export class WorkspaceRepo {
     return this.writer.execute(workspaceWriteOperations.rename, [id, name]);
   }
 
+  setIconPath(id: Parameters<WorkspaceStore["setIconPath"]>[0], iconPath: Parameters<WorkspaceStore["setIconPath"]>[1]): Promise<ReturnType<WorkspaceStore["setIconPath"]>> {
+    return this.writer.execute(workspaceWriteOperations.setIconPath, [id, iconPath]);
+  }
+
   setPinned(id: Parameters<WorkspaceStore["setPinned"]>[0], pinned: Parameters<WorkspaceStore["setPinned"]>[1]): Promise<ReturnType<WorkspaceStore["setPinned"]>> {
     return this.writer.execute(workspaceWriteOperations.setPinned, [id, pinned]);
   }

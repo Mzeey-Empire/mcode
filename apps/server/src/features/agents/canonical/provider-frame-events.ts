@@ -18,6 +18,7 @@ import { AgentEventType } from "@mcode/contracts";
 export const PROVIDER_FRAME_EVENT_TYPES: ReadonlySet<AgentEventType> = new Set<AgentEventType>([
   AgentEventType.Message,
   AgentEventType.TextDelta,
+  AgentEventType.ReasoningDelta,
   AgentEventType.ToolUse,
   AgentEventType.ToolInputDelta,
   AgentEventType.ToolProgress,

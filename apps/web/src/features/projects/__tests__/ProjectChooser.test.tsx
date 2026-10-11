@@ -77,7 +77,10 @@ describe("ProjectChooser", () => {
       const { chooser } = await openChooser();
 
       const options = screen.getAllByRole("option");
-      expect(options.map((option) => option.textContent)).toEqual(["fixture-repo", "other-repo"]);
+      expect(options).toEqual([
+        screen.getByRole("option", { name: "fixture-repo" }),
+        screen.getByRole("option", { name: "other-repo" }),
+      ]);
       expect(options.map((option) => option.getAttribute("aria-selected"))).toEqual(["true", "false"]);
       expect(chooser).not.toHaveTextContent("No projects yet");
       expect(addProjectRow()).toBeVisible();
@@ -88,7 +91,7 @@ describe("ProjectChooser", () => {
 
       await user.type(screen.getByRole("combobox", { name: "Search projects" }), "WORK");
 
-      expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["other-repo"]);
+      expect(screen.getAllByRole("option")).toEqual([screen.getByRole("option", { name: "other-repo" })]);
     });
 
     it("switches the new thread to the chosen project and closes", async () => {

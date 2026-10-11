@@ -26,7 +26,6 @@ import {
   GitBranch,
   GitBranchMinus,
   ChevronRight,
-  Folder,
   FolderCheck,
   FolderOpen,
   Pencil,
@@ -87,6 +86,7 @@ import { useToastStore } from "@/stores/toastStore";
 import type { ChecksStatus } from "@mcode/contracts";
 import type { Workspace, Thread } from "@/transport/types";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
+import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
 import { getThreadStateMarker, ThreadStateMarker } from "@/components/sidebar/ThreadStateMarker";
 import { useProjectAutomaticSetup } from "@/features/projects/environment";
 import {
@@ -2223,7 +2223,7 @@ function SidebarThreadPreview({
           aria-label={`Project, ${workspaceName}`}
           className="flex min-w-0 items-center gap-2"
         >
-          <Folder size={13} aria-hidden className="shrink-0 opacity-75" />
+          <ProjectIcon workspaceId={thread.workspace_id} name={workspaceName} size={14} />
           <span className="text-fade text-xs">{workspaceName}</span>
         </div>
         <div
@@ -2458,7 +2458,7 @@ function ProjectWorkspaceRow({
       )}
       {...sortableListeners}
     >
-      <ProjectLifecycleToggle lifecycle={lifecycle} lifecycleView={lifecycleView} onClick={selectLifecycleView} />
+      <ProjectLifecycleToggle workspace={workspace} lifecycle={lifecycle} lifecycleView={lifecycleView} onClick={selectLifecycleView} />
       <ProjectTitle workspace={workspace} onClick={toggle} />
       <ProjectGitStatus isGitRepository={workspace.is_git_repo} />
       <WorkspaceCiRollupChip threads={threadList.visibleThreads} checksById={checksById} />
@@ -2493,10 +2493,11 @@ function projectLifecycleSummary(
 }
 
 function ProjectLifecycleToggle({
+  workspace,
   lifecycle,
   lifecycleView,
   onClick,
-}: { lifecycle: ReturnType<typeof projectLifecycleSummary>; lifecycleView: ProjectLifecycleView; onClick: (event: React.MouseEvent) => void }) {
+}: { workspace: Workspace; lifecycle: ReturnType<typeof projectLifecycleSummary>; lifecycleView: ProjectLifecycleView; onClick: (event: React.MouseEvent) => void }) {
   return (
     <Tooltip>
       <TooltipTrigger render={
@@ -2511,7 +2512,7 @@ function ProjectLifecycleToggle({
           onClick={onClick}
           className="relative -m-1.5 mr-0 size-8 shrink-0 rounded-sm text-muted shadow-none hover:bg-transparent hover:text-ink dark:hover:bg-transparent"
         >
-          <ProjectLifecycleIcons lifecycleView={lifecycleView} />
+          <ProjectLifecycleIcons workspace={workspace} lifecycleView={lifecycleView} />
         </Button>
       } />
       <TooltipContent side="right" className="text-xs">{lifecycle.label}</TooltipContent>
@@ -2519,11 +2520,15 @@ function ProjectLifecycleToggle({
   );
 }
 
-function ProjectLifecycleIcons({ lifecycleView }: { lifecycleView: ProjectLifecycleView }) {
-  if (lifecycleView === "completed") {
-    return <><FolderCheck size={14} className="transition-opacity duration-150 group-hover/ws:opacity-0 group-focus-within/ws:opacity-0 motion-reduce:transition-none" aria-hidden /><FolderOpen size={14} className="absolute opacity-0 transition-opacity duration-150 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 motion-reduce:transition-none" aria-hidden /></>;
-  }
-  return <><FolderOpen size={14} className="transition-opacity duration-150 group-hover/ws:opacity-0 group-focus-within/ws:opacity-0 motion-reduce:transition-none" aria-hidden /><FolderCheck size={14} className="absolute opacity-0 transition-opacity duration-150 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 motion-reduce:transition-none" aria-hidden /></>;
+/** Rests on the project icon; hover and focus reveal the lifecycle view a click switches to. */
+function ProjectLifecycleIcons({ workspace, lifecycleView }: { workspace: Workspace; lifecycleView: ProjectLifecycleView }) {
+  const Destination = lifecycleView === "completed" ? FolderOpen : FolderCheck;
+  return (
+    <>
+      <ProjectIcon workspaceId={workspace.id} name={workspace.name} size={16} className="transition-opacity duration-150 group-hover/ws:opacity-0 group-focus-within/ws:opacity-0 motion-reduce:transition-none" />
+      <Destination size={14} className="absolute opacity-0 transition-opacity duration-150 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 motion-reduce:transition-none" aria-hidden />
+    </>
+  );
 }
 
 function ProjectTitle({ workspace, onClick }: { workspace: Workspace; onClick: () => void }) {

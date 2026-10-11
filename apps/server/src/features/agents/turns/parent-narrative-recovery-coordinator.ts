@@ -234,6 +234,7 @@ export class ParentNarrativeRecoveryCoordinator {
 
   private requiresStructuredRecovery(event: AgentEvent): boolean {
     return event.type === AgentEventType.TextDelta
+      || event.type === AgentEventType.ReasoningDelta
       || event.type === AgentEventType.AssistantMessageBoundary
       || event.type === AgentEventType.ToolUse
       || event.type === AgentEventType.ToolResult

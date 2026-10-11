@@ -1,6 +1,7 @@
 import { memo } from "react";
 import type { NarrativeItem, SubagentRosterTarget } from "./types";
 import { ThoughtBlock } from "./ThoughtBlock";
+import { ThoughtRow } from "./ThoughtRow";
 import { ToolSummaryLine } from "./ToolSummaryLine";
 import { HookRow } from "./HookRow";
 import { ApprovalReceiptRow } from "./ApprovalReceiptRow";
@@ -45,8 +46,9 @@ function sameNarrativeItems(left: NarrativeItem, right: NarrativeItem): boolean 
   if (left.type !== right.type) return false;
 
   switch (right.type) {
-    case "thought": {
-      const leftThought = left as Extract<NarrativeItem, { type: "thought" }>;
+    case "thought":
+    case "reasoning": {
+      const leftThought = left as Extract<NarrativeItem, { type: "thought" | "reasoning" }>;
       return sameValues([
         leftThought.segment === right.segment,
         leftThought.isActive === right.isActive,
@@ -107,6 +109,8 @@ function renderItem(
   switch (item.type) {
     case "thought":
       return <ThoughtBlock segment={item.segment} isActive={item.isActive} />;
+    case "reasoning":
+      return <ThoughtRow segment={item.segment} isActive={item.isActive} />;
     case "tool-group":
       return <ToolSummaryLine group={item.group} />;
     case "hook":
