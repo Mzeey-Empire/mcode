@@ -2247,7 +2247,9 @@ export class ClaudeProvider
       rememberProviderTurnNotice(state, message);
       return true;
     }
-    if (message.type === "result") return true;
+    // A background subagent's steps are not a turn. Opening one for them would start a turn
+    // nobody prompted, and a declined one discards the reply Claude starts after the task notification.
+    if (message.type === "result" || state.mapper.isBackgroundTaskOutput(message)) return true;
     return !(await this.openProviderTurn(sessionId, state));
   }
 
@@ -2270,7 +2272,9 @@ export class ClaudeProvider
         return { kind: "declined", reason: "unavailable" };
       });
     if (opening.kind === "declined") {
-      logger.info("Claude self-started turn declined", { sessionId, reason: opening.reason });
+      logger.warn("Claude self-started turn declined; its output is dropped until its result", {
+        sessionId, reason: opening.reason,
+      });
       state.discardingProviderTurn = true;
       return false;
     }

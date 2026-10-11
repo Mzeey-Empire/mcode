@@ -55,6 +55,40 @@ function backgroundAgentQuery(notify: boolean) {
   };
 }
 
+const WAKE_REPLY = "The subagent printed 42.";
+
+/**
+ * Replays live run 4: the background subagent streams right after its launch ends,
+ * then Claude replies to the task notification in a turn it starts by itself.
+ */
+function backgroundAgentWakeQuery() {
+  return ({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+    let closeSession!: () => void;
+    const closed = new Promise<void>((resolve) => { closeSession = resolve; });
+    const stream = (async function* () {
+      await prompt[Symbol.asyncIterator]().next();
+      yield { type: "system", subtype: "init", session_id: "sdk-provider-turn" };
+      yield { type: "assistant", parent_tool_use_id: null, message: { content: [
+        { type: "tool_use", id: "AGENT_1", name: "Agent", input: { description: "Count", run_in_background: true } },
+      ] } };
+      yield { type: "user", parent_tool_use_id: null, tool_use_result: { status: "async_launched", isAsync: true, agentId: "agent-1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "AGENT_1", content: "Async agent launched successfully." }] } };
+      yield { type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "text", text: "Launched." }] } };
+      yield { type: "result", is_error: false, result: "Launched.", usage: { output_tokens: 1 } };
+      yield { type: "assistant", parent_tool_use_id: "AGENT_1", message: { content: [
+        { type: "tool_use", id: "BASH_1", name: "Bash", input: { command: "node -e \"console.log(42)\"" } },
+      ] } };
+      yield { type: "user", parent_tool_use_id: "AGENT_1", message: { content: [{ type: "tool_result", tool_use_id: "BASH_1", content: "42" }] } };
+      yield { type: "system", subtype: "task_notification", task_id: "task-agent", tool_use_id: "AGENT_1", status: "completed", summary: AGENT_SUMMARY };
+      yield { type: "system", subtype: "init", session_id: "sdk-provider-turn" };
+      yield { type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "text", text: WAKE_REPLY }] } };
+      yield { type: "result", is_error: false, result: WAKE_REPLY, usage: { output_tokens: 6 } };
+      await closed;
+    })();
+    return Object.assign(stream, { close: closeSession });
+  };
+}
+
 function sendUserTurn(provider: InstanceType<typeof ClaudeProvider>) {
   return provider.sendTurn({
     turnId: "turn-user", turnExecutionId: USER_EXECUTION_ID,
@@ -139,6 +173,29 @@ describe("ClaudeProvider background agents", () => {
       await provider.shutdown();
     }
     expect(settleBackgroundTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the wake turn at the reply, not at the subagent steps streamed after the launch ends", async () => {
+    mockQuery.mockImplementation(backgroundAgentWakeQuery());
+    const events: ProviderRuntimeEvent[] = [];
+    const open = vi.fn(async (): Promise<ProviderTurnOpening> => ({
+      kind: "opened",
+      routing: { threadId: "thread-provider", turnId: "turn-provider", executionId: PROVIDER_EXECUTION_ID, deliveryAttempt: 1 },
+    }));
+    const provider = providerWith(events, { open, settleBackgroundTool: vi.fn(async () => {}) });
+    try {
+      await sendUserTurn(provider);
+      await vi.waitFor(() => expect(events.some(({ event }) =>
+        event.type === AgentEventType.Ended && event.turnExecutionId === PROVIDER_EXECUTION_ID)).toBe(true));
+    } finally {
+      await provider.shutdown();
+    }
+
+    expect(open).toHaveBeenCalledExactlyOnceWith({ threadId: "thread-provider", notice: AGENT_SUMMARY });
+    const wake = afterUserTurn(events);
+    expect(wake.map(({ event }) => event.turnExecutionId)).toEqual(wake.map(() => PROVIDER_EXECUTION_ID));
+    expect(wake.find(({ event }) => event.type === AgentEventType.Message)?.event).toMatchObject({ content: WAKE_REPLY });
+    expect(events.filter(({ event }) => "toolCallId" in event && event.toolCallId === "BASH_1")).toEqual([]);
   });
 
   it("keeps the session busy while the call runs and stops it when the session shuts down", async () => {

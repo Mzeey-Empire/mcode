@@ -185,6 +185,15 @@ export class ClaudeEventMapper {
     this.settleBackgroundTool(toolCallId, executionId, status, stringValue(message.summary));
   }
 
+  /**
+   * True for a step of a held background call's subagent. The subagent keeps
+   * streaming after its launching turn ends, but its steps are not a turn Claude started.
+   */
+  isBackgroundTaskOutput(message: Message): boolean {
+    const parent = parentId(message);
+    return parent !== undefined && this.backgroundTools.has(parent);
+  }
+
   /** Stops every held call because the SDK process that runs them is gone. */
   settleAllBackgroundTools(): void {
     this.nativeSource = {};
