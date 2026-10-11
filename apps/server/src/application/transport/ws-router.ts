@@ -103,6 +103,8 @@ import {
 import type { FileService } from "../../features/projects/files/file-service.js";
 import { WorkspaceFileNotFoundError } from "../../features/projects/files/workspace-file-access.js";
 import { isFileRpcMethod, routeFileRpc } from "../../features/projects/files/transport/file-rpc.js";
+import { ProjectIconError, type ProjectIconService } from "../../features/projects/icons/project-icon-service.js";
+import { isProjectIconRpcMethod, routeProjectIconRpc } from "../../features/projects/icons/transport/project-icon-rpc.js";
 import { isAttachmentRpcMethod, routeAttachmentRpc } from "../../features/attachments/transport/attachment-rpc.js";
 import type { AttachmentService } from "../../features/attachments/storage/attachment-service.js";
 import { DraftImageMissingError } from "../../features/attachments/storage/draft-image-missing-error.js";
@@ -257,6 +259,8 @@ export interface RouterDeps {
   pullRequestReviews: PullRequestReviewGitService;
   githubService: GithubService;
   fileService: FileService;
+  /** Resolves and stores project icons for the sidebar, breadcrumb and picker. */
+  projectIconService: ProjectIconService;
   configService: ConfigService;
   skillService: SkillService;
   /** Owns the thread-independent Codex app-server catalog connection. */
@@ -457,6 +461,7 @@ function validateRpcParameters(
 
 function domainRouteError(id: string, error: unknown, message: string): WebSocketResponse | null {
   if (error instanceof WorkspaceFileNotFoundError) return { id, error: { code: error.code, message } };
+  if (error instanceof ProjectIconError) return { id, error: { code: error.code, message } };
   if (error instanceof PlanServiceError) {
     return { id, error: { code: error.code, message, data: { latestVersion: error.latestVersion } } };
   }
@@ -614,6 +619,7 @@ const ROUTE_FAMILIES = [
   createRouteFamily(isSnapshotRpcMethod, (method, params, deps) => routeSnapshotRpc(method, params, deps)),
   createRouteFamily(isTurnDiffRpcMethod, (method, params, deps) => routeTurnDiffRpc(method, params, deps)),
   createRouteFamily(isFileRpcMethod, (method, params, deps) => routeFileRpc(method, params, deps)),
+  createRouteFamily(isProjectIconRpcMethod, (method, params, deps) => routeProjectIconRpc(method, params, deps)),
   createRouteFamily(isAttachmentRpcMethod, (method, params, deps) => routeAttachmentRpc(method, params, deps)),
   createRouteFamily(isMemoryRpcMethod, (method, params, deps) => routeMemoryRpc(method, params, deps)),
   createRouteFamily(isApplicationRpcMethod, (method) => routeApplicationRpc(method)),

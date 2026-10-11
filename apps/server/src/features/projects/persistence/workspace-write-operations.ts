@@ -8,6 +8,7 @@ export const workspaceWriteOperations = {
   prependToSortOrder: databaseWriteOperation("workspace.prependToSortOrder", z.tuple([z.string()]), z.void()),
   reorderToIndex: databaseWriteOperation("workspace.reorderToIndex", z.tuple([z.string(), z.number().int()]), z.void()),
   rename: databaseWriteOperation("workspace.rename", z.tuple([z.string(), z.string()]), WorkspaceSchema().nullable()),
+  setIconPath: databaseWriteOperation("workspace.setIconPath", z.tuple([z.string(), z.string().nullable()]), WorkspaceSchema().nullable()),
   setPinned: databaseWriteOperation("workspace.setPinned", z.tuple([z.string(), z.boolean()]), z.void()),
   touchLastOpened: databaseWriteOperation("workspace.touchLastOpened", z.tuple([z.string()]), z.void()),
   removeRecent: databaseWriteOperation("workspace.removeRecent", z.tuple([z.string()]), z.void()),

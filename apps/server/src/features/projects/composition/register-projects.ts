@@ -23,6 +23,7 @@ import {
 } from "../index.js";
 import { ProjectActionRunRepo } from "../environment/persistence/project-action-run-repo.js";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
+import { ProjectIconService } from "../icons/project-icon-service.js";
 import { WorktreeRepo } from "../persistence/worktree-repo.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { TerminalCommandService } from "../../terminal/commands/terminal-command-service.js";
@@ -95,6 +96,12 @@ export function registerProjectServices(container: DependencyContainer): void {
         platform: c.resolve<HostRuntime>("HostRuntime").platform,
       })),
     });
+  container.register(ProjectIconService, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => new ProjectIconService({
+      workspaces: c.resolve(WorkspaceRepo),
+      platform: c.resolve<HostRuntime>("HostRuntime").platform,
+    })),
+  });
   container.register(
     ProjectWorktreeService,
     { useClass: ProjectWorktreeService },

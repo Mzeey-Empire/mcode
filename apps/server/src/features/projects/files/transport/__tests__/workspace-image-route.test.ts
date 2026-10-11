@@ -140,11 +140,13 @@ describe("workspace image HTTP route", () => {
     expect(await response.text()).toBe("Not found");
   });
 
-  it("serves SVG with sandbox headers", async () => {
+  it("serves a versioned SVG icon with nosniff, sandbox CSP and long caching", async () => {
     NodeFS.writeFileSync(NodePath.join(root, "icon.svg"), "<svg/>");
     const response = await authenticated(imageUrl("icon.svg", "icon", { v: "1" }));
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/svg+xml");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
     expect(response.headers.get("content-security-policy")).toBe("default-src 'none'; style-src 'unsafe-inline'; sandbox");
     expect(await response.text()).toBe("<svg/>");
   });
