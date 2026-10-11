@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { PICKER_PANEL_CLASS } from "@/components/ui/picker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { BranchTargetPicker } from "./BranchTargetPicker";
+import { StartFromOriginSwitch } from "./StartFromOriginSwitch";
 import type { ComposerMode } from "./composer-mode";
 import { targetLabelText } from "./new-thread-target-copy";
 import { TARGET_TRIGGER_CLASS } from "./target-trigger";
@@ -86,6 +87,7 @@ function TargetTrigger({ pick, workspaceId, threadId, testId }: TargetTriggerPro
           threadId={threadId}
           list={pick.list}
           value={pick.value}
+          footer={pick.origin ? <StartFromOriginSwitch origin={pick.origin} /> : undefined}
           onSelect={(picked) => {
             pick.select(picked);
             setOpen(false);

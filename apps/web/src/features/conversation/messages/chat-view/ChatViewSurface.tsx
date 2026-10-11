@@ -24,7 +24,7 @@ import { useThreadDraftStore, type ThreadDraftPayload } from "@/stores/threadDra
 import { OverviewLayer } from "@/features/thread-overview/overview-layer";
 import { ProjectAutomaticSetupCard, useProjectAutomaticSetup } from "@/features/projects/environment";
 import { ProjectCommandApprovalDialog } from "@/features/projects/environment/ProjectCommandApprovalDialog";
-import { StartupStepsTrail, editStartupSetupScript, openStartupSetupTerminal, useFirstSendMotion, useStartingThread, useThreadStartup } from "@/features/thread-startup";
+import { StartupStepsTrail, editStartupSetupScript, openStartupSetupTerminal, useFirstSendMotion, useStartingThread, useStartupFetchDecision, useThreadStartup, type StartupFetchDecision } from "@/features/thread-startup";
 import { useThreadStartupLookup, useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { type WorkspaceThread, type ClientPreparingContext } from "@/lib/workspace-thread";
 import type { PendingStartup } from "@/features/projects/state/workspaceStore";
@@ -521,7 +521,22 @@ function SetupRecoveryActions({ automaticSetup }: { readonly automaticSetup: Ret
   );
 }
 
-function preserveIncompleteDraft(thread: WorkspaceThread, draft: ThreadDraftPayload["draft"], autoPreviewBranch: string): string {
+function OriginFetchActions({ decision }: { readonly decision: StartupFetchDecision }) {
+  return (
+    <>
+      <Button type="button" variant="outline" size="compact" disabled={decision.pending !== null} onClick={() => decision.resolve("retry")}>
+        {decision.pending === "retry" ? <Spinner size={12} aria-hidden /> : null}
+        Retry
+      </Button>
+      <Button type="button" variant="outline" size="compact" disabled={decision.pending !== null} onClick={() => decision.resolve("continue")}>
+        {decision.pending === "continue" ? <Spinner size={12} aria-hidden /> : null}
+        Continue from local
+      </Button>
+    </>
+  );
+}
+
+function preserveIncompleteDraft(thread: WorkspaceThread, draft: ThreadDraftPayload["draft"]): string {
   const id = useThreadDraftStore.getState().saveDraft({
     workspaceId: thread.workspace_id,
     draft,
@@ -537,8 +552,8 @@ function preserveIncompleteDraft(thread: WorkspaceThread, draft: ThreadDraftPayl
       // An empty branch follows the project's current-else-default branch when the draft reopens.
       branch: thread.base_branch || thread.branch,
       branchSource: "branch",
-      customBranchName: "",
-      autoPreviewBranch,
+      branchRemote: null,
+      startFromOrigin: false,
       selectedWorktree: null,
     },
   });
@@ -563,7 +578,7 @@ function RemoveIncompleteThreadAction({ thread, pendingStartup }: {
     setRemoving(true);
     setError(null);
     try {
-      if (draft) savedDraftId = preserveIncompleteDraft(thread, draft, workspace.autoPreviewBranch);
+      if (draft) savedDraftId = preserveIncompleteDraft(thread, draft);
       await workspace.deleteThread(thread.id, true);
     } catch (failure) {
       if (savedDraftId && draft) {
@@ -594,14 +609,25 @@ function StartupAutomaticSetupActions({ automaticSetup, thread, startup, pending
   readonly startup: ReturnType<typeof useThreadStartup>;
   readonly pendingStartup: PendingStartup | undefined;
 }) {
-  if (startup?.threadId === thread.id
-    && thread.mode === "worktree" && thread.worktree_managed
-    && (startup.state === "failed" || startup.state === "interrupted")
-    && startup.phase !== "agent"
-    && automaticSetup.snapshotLoaded && !automaticSetup.snapshot.attempt) {
+  const fetchDecision = useStartupFetchDecision(startup);
+  if (fetchDecision) return <OriginFetchActions decision={fetchDecision} />;
+  if (endedBeforeSetupRan(automaticSetup, thread, startup)) {
     return <RemoveIncompleteThreadAction thread={thread} pendingStartup={pendingStartup} />;
   }
   return <StartupAutomaticSetupAction automaticSetup={automaticSetup} />;
+}
+
+/** A managed worktree startup that failed before its agent ran and never attempted setup. */
+function endedBeforeSetupRan(
+  automaticSetup: ReturnType<typeof useProjectAutomaticSetup>,
+  thread: WorkspaceThread,
+  startup: ReturnType<typeof useThreadStartup>,
+): boolean {
+  return startup?.threadId === thread.id
+    && thread.mode === "worktree" && thread.worktree_managed === true
+    && (startup.state === "failed" || startup.state === "interrupted")
+    && startup.phase !== "agent"
+    && automaticSetup.snapshotLoaded && !automaticSetup.snapshot.attempt;
 }
 
 function StartupAutomaticSetupAction({ automaticSetup }: { readonly automaticSetup: ReturnType<typeof useProjectAutomaticSetup> }) {

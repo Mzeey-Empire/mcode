@@ -175,8 +175,8 @@ function snapshotDraftTarget(state: WorkspaceStoreState): ThreadDraftTarget {
     branch: state.newThreadBranch,
     branchSource: state.newThreadBranchSource,
     pullRequestNumber: state.newThreadPullRequestNumber,
-    customBranchName: state.customBranchName,
-    autoPreviewBranch: state.autoPreviewBranch,
+    branchRemote: state.newThreadBranchRemote,
+    startFromOrigin: state.newThreadStartFromOrigin,
     selectedWorktree: state.selectedWorktree,
   };
 }
@@ -305,8 +305,8 @@ export function useComposerFormController({
       branch: state.newThreadBranch,
       branchSource: state.newThreadBranchSource,
       pullRequestNumber: state.newThreadPullRequestNumber,
-      customBranchName: state.customBranchName,
-      autoPreviewBranch: state.autoPreviewBranch,
+      branchRemote: state.newThreadBranchRemote,
+      startFromOrigin: state.newThreadStartFromOrigin,
       selectedWorktree: state.selectedWorktree,
     })),
   );

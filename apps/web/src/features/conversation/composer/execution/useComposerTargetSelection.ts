@@ -23,12 +23,22 @@ export type ComposerTargetSelectionProps =
     sourceThread: ForkSourceThread | undefined;
   };
 
+/** The "Start from origin" switch under a New worktree branch list. */
+export interface OriginSwitch {
+  readonly checked: boolean;
+  /** A remote-only origin row has no local branch to start from, so the switch stays on. */
+  readonly forced: boolean;
+  readonly set: (on: boolean) => void;
+}
+
 /** One trigger and the picker list it opens. */
 export interface TargetPick {
   readonly label: TargetLabel;
   readonly list: BranchTargetList;
   readonly value: BranchTargetValue | null;
   readonly select: (target: BranchTarget) => void;
+  /** Present only where a pick creates a new worktree from a branch. */
+  readonly origin?: OriginSwitch;
 }
 
 /** State and actions that drive a Composer execution target picker. */
@@ -48,13 +58,15 @@ function unknownBranchLabel(branch: TargetBranch): TargetLabel {
   return placeholderTargetLabel(branch.unknown === "loading" ? "Loading branches" : "Choose branch");
 }
 
-function branchPick(mode: BranchPickMode, branch: TargetBranch, select: (name: string) => void): TargetPick {
+type SelectBranch = (name: string, remote: string | null) => void;
+
+function branchPick(mode: BranchPickMode, branch: TargetBranch, select: SelectBranch): TargetPick {
   return {
     label: newThreadTargetLabel({ mode, branch: branch.name }) ?? unknownBranchLabel(branch),
     list: "branches",
     value: branch.name ? { kind: "branch", name: branch.name } : null,
     select: (target) => {
-      if (target.kind === "branch") select(target.name);
+      if (target.kind === "branch") select(target.name, target.remote);
     },
   };
 }
@@ -76,11 +88,19 @@ interface PullRequestSource {
 }
 
 /** New worktree also offers pull requests; a picked one names the trigger and the selected row by number. */
-function newWorktreePick(branch: TargetBranch, pullRequest: PullRequestSource, selectBranch: (name: string) => void): TargetPick {
+function newWorktreePick(
+  branch: TargetBranch,
+  pullRequest: PullRequestSource,
+  selectBranch: SelectBranch,
+  origin: OriginSwitch,
+): TargetPick {
   const branchTarget = branchPick("worktree", branch, selectBranch);
   const number = pullRequest.number;
+  const fromOrigin = number === undefined && origin.checked;
   return {
-    label: newThreadTargetLabel({ mode: "worktree", branch: branch.name, pullRequestNumber: number }) ?? unknownBranchLabel(branch),
+    origin,
+    label: newThreadTargetLabel({ mode: "worktree", branch: branch.name, pullRequestNumber: number, fromOrigin })
+      ?? unknownBranchLabel(branch),
     list: "branches-and-pull-requests",
     value: number === undefined ? branchTarget.value : { kind: "pull-request", number },
     select: (target) => {
@@ -96,6 +116,9 @@ export function useNewThreadTargetSelection(workspaceId: string | undefined, mod
   const branchSource = useWorkspaceStore((state) => state.newThreadBranchSource);
   const pullRequestNumber = useWorkspaceStore((state) => state.newThreadPullRequestNumber);
   const selectedWorktree = useWorkspaceStore((state) => state.selectedWorktree);
+  const branchRemote = useWorkspaceStore((state) => state.newThreadBranchRemote);
+  const startFromOrigin = useWorkspaceStore((state) => state.newThreadStartFromOrigin);
+  const setNewThreadStartFromOrigin = useWorkspaceStore((state) => state.setNewThreadStartFromOrigin);
   const setNewThreadBranch = useWorkspaceStore((state) => state.setNewThreadBranch);
   const setNewThreadBranchFromPr = useWorkspaceStore((state) => state.setNewThreadBranchFromPr);
   const setSelectedWorktree = useWorkspaceStore((state) => state.setSelectedWorktree);
@@ -113,7 +136,9 @@ export function useNewThreadTargetSelection(workspaceId: string | undefined, mod
       number: branchSource === "pr" ? pullRequestNumber : undefined,
       select: setNewThreadBranchFromPr,
     };
-    return { ...base, target: newWorktreePick(branch, pullRequest, setNewThreadBranch), baseBranch: null };
+    const forced = branchSource === "branch" && branchRemote === "origin";
+    const origin = { checked: forced || startFromOrigin, forced, set: setNewThreadStartFromOrigin };
+    return { ...base, target: newWorktreePick(branch, pullRequest, setNewThreadBranch, origin), baseBranch: null };
   }
   return { ...base, target: branchPick("direct", branch, setNewThreadBranch), baseBranch: null };
 }

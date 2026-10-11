@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const startupTransport = {
   cancelThreadStartup: vi.fn(),
+  resolveThreadStartup: vi.fn(),
 };
 
 vi.mock("@/transport", () => ({
@@ -11,7 +12,7 @@ vi.mock("@/transport", () => ({
 }));
 
 import { useThreadStartupStore } from "../state/thread-startup-store";
-import { useStartupCancel } from "../useStartupActions";
+import { useStartupCancel, useStartupFetchDecision } from "../useStartupActions";
 
 const startupId = "00000000-0000-4000-8000-000000000001";
 const T0 = "2026-09-02T12:00:00.000Z";
@@ -88,5 +89,47 @@ describe("useStartupCancel", () => {
     const { result } = renderHook(() => useStartupCancel(startup({ state: "cancelled" }), undefined));
 
     expect(result.current).toBeUndefined();
+  });
+});
+
+describe("useStartupFetchDecision", () => {
+  const fetchBlocked = startup({
+    state: "blocked",
+    phase: "fetch",
+    steps: [
+      { phase: "fetch", state: "running", startedAt: T0 },
+      { phase: "thread", state: "pending" },
+      { phase: "worktree", state: "pending" },
+      { phase: "setup", state: "pending" },
+      { phase: "agent", state: "pending" },
+    ],
+    threadId: undefined,
+    block: {
+      code: "start_from_origin_failed",
+      message: "Could not fetch origin/main",
+      actions: ["retry", "continue"],
+    },
+  });
+
+  beforeEach(() => {
+    startupTransport.resolveThreadStartup.mockReset();
+  });
+
+  it("is offered only while the origin fetch is blocked", () => {
+    expect(renderHook(() => useStartupFetchDecision(startup())).result.current).toBeUndefined();
+    expect(renderHook(() => useStartupFetchDecision(fetchBlocked)).result.current).toMatchObject({ pending: null });
+  });
+
+  it("sends the decision and disables both actions until the server answers", async () => {
+    let answer!: (next: ThreadStartup) => void;
+    startupTransport.resolveThreadStartup.mockReturnValue(new Promise<ThreadStartup>((resolve) => { answer = resolve; }));
+    const { result } = renderHook(() => useStartupFetchDecision(fetchBlocked));
+
+    act(() => result.current!.resolve("continue"));
+
+    expect(startupTransport.resolveThreadStartup).toHaveBeenCalledWith(startupId, "continue");
+    expect(result.current?.pending).toBe("continue");
+    await act(async () => answer(fetchBlocked));
+    await waitFor(() => expect(result.current?.pending).toBeNull());
   });
 });

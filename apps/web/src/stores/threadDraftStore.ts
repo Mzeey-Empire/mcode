@@ -27,8 +27,10 @@ export interface ThreadDraftTarget {
   branch: string;
   branchSource: "branch" | "pr";
   pullRequestNumber?: number;
-  customBranchName: string;
-  autoPreviewBranch: string;
+  /** Remote of a remote-only branch pick, such as `origin`; null for a local branch. */
+  branchRemote: string | null;
+  /** The "Start from origin" switch as it stood when the draft was saved. */
+  startFromOrigin: boolean;
   selectedWorktree: AttachedWorktree | null;
 }
 
@@ -102,24 +104,44 @@ function isValidStoredSelection(raw: unknown): raw is ThreadDraftSelection {
     && (s.thinking === null || typeof s.thinking === "boolean");
 }
 
-function isValidTargetBranch(t: Partial<ThreadDraftTarget>): boolean {
-  return typeof t.branch === "string"
-    && (t.branchSource === "branch" || t.branchSource === "pr")
-    && (t.pullRequestNumber === undefined || typeof t.pullRequestNumber === "number")
-    && typeof t.customBranchName === "string"
-    && typeof t.autoPreviewBranch === "string";
+/**
+ * Parses a stored target. Drafts saved before Start from origin carry neither origin field and load with the
+ * switch off; fields of retired branch naming are dropped.
+ */
+function isTargetMode(value: unknown): value is ThreadDraftTarget["mode"] {
+  return value === "direct" || value === "worktree" || value === "existing-worktree";
 }
 
-function isValidStoredTarget(raw: unknown): raw is ThreadDraftTarget {
-  if (!raw || typeof raw !== "object") return false;
-  const t = raw as Partial<ThreadDraftTarget>;
-  const validMode = t.mode === "direct" || t.mode === "worktree" || t.mode === "existing-worktree";
-  return validMode
-    && isValidTargetBranch(t)
-    && (t.selectedWorktree === null || typeof t.selectedWorktree === "object");
+function isBranchSource(value: unknown): value is ThreadDraftTarget["branchSource"] {
+  return value === "branch" || value === "pr";
 }
 
-function isValidStoredThreadDraft(raw: unknown): raw is ThreadDraft {
+function isOptionalNumber(value: unknown): value is number | undefined {
+  return value === undefined || typeof value === "number";
+}
+
+function isStoredWorktree(value: unknown): value is AttachedWorktree | null {
+  return value === null || (value !== undefined && typeof value === "object");
+}
+
+function parseStoredTarget(raw: unknown): ThreadDraftTarget | null {
+  if (!raw || typeof raw !== "object") return null;
+  const { mode, branch, branchSource, pullRequestNumber, branchRemote, startFromOrigin, selectedWorktree } =
+    raw as Partial<ThreadDraftTarget>;
+  if (!isTargetMode(mode) || typeof branch !== "string" || !isBranchSource(branchSource)) return null;
+  if (!isOptionalNumber(pullRequestNumber) || !isStoredWorktree(selectedWorktree)) return null;
+  return {
+    mode,
+    branch,
+    branchSource,
+    ...(pullRequestNumber === undefined ? {} : { pullRequestNumber }),
+    branchRemote: typeof branchRemote === "string" ? branchRemote : null,
+    startFromOrigin: startFromOrigin === true,
+    selectedWorktree,
+  };
+}
+
+function isValidStoredThreadDraft(raw: unknown): raw is Omit<ThreadDraft, "target"> & { target: unknown } {
   if (!raw || typeof raw !== "object") return false;
   const candidate = raw as Partial<ThreadDraft>;
   return typeof candidate.id === "string"
@@ -127,8 +149,7 @@ function isValidStoredThreadDraft(raw: unknown): raw is ThreadDraft {
     && typeof candidate.createdAt === "number"
     && typeof candidate.updatedAt === "number"
     && candidate.draft !== undefined
-    && isValidStoredSelection(candidate.selection)
-    && isValidStoredTarget(candidate.target);
+    && isValidStoredSelection(candidate.selection);
 }
 
 function parseStoredThreadDrafts(raw: unknown): Record<string, ThreadDraft> {
@@ -137,13 +158,15 @@ function parseStoredThreadDrafts(raw: unknown): Record<string, ThreadDraft> {
   for (const [id, value] of Object.entries(raw)) {
     if (!isValidStoredThreadDraft(value)) continue;
     const draft = parseStoredComposerDraft(value.draft);
-    if (!draft) continue;
+    const target = parseStoredTarget(value.target);
+    if (!draft || !target) continue;
     // Reconstruct the supported selection so retired fields in older drafts do not survive hydration.
     const { interactionMode, permissionMode, orchestrationMode, approvalReviewMode, thinking } = value.selection;
     drafts[id] = {
       ...value,
       id,
       draft,
+      target,
       selection: { interactionMode, permissionMode, orchestrationMode, approvalReviewMode, thinking },
     };
   }

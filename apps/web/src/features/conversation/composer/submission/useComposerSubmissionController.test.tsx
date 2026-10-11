@@ -173,8 +173,8 @@ describe("useComposerSubmissionController selected-text comments", () => {
         mode: "direct",
         branch: "main",
         branchSource: "branch",
-        customBranchName: "",
-        autoPreviewBranch: "",
+        branchRemote: null,
+        startFromOrigin: false,
         selectedWorktree: null,
       },
     });
