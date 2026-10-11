@@ -24,6 +24,11 @@ describe("Terminal v1 models", () => {
     expect(() => TerminalUuidSchema().parse(UUID.toUpperCase())).toThrow();
   });
 
+  it("validates the home scope strictly", () => {
+    expect(TerminalScopeSchema().parse({ kind: "home" })).toEqual({ kind: "home" });
+    expect(() => TerminalScopeSchema().parse({ kind: "home", workspaceId: UUID })).toThrow();
+  });
+
   it("validates workspace and thread scopes strictly", () => {
     expect(
       TerminalScopeSchema().parse({ kind: "thread", workspaceId: UUID, threadId: UUID }),
