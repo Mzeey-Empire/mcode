@@ -17,7 +17,6 @@ import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "./state/workspaceStore";
 import { useThreadDraftStore, type ThreadDraft } from "@/stores/threadDraftStore";
-import { hasRecoveryEntry, useRecoveryIncidentStore } from "@/features/recovery/state/recoveryIncidentStore";
 import { useUiStore } from "@/stores/uiStore";
 import { getExecutingThreadIds, isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
@@ -31,11 +30,12 @@ import {
   Pencil,
   Plus,
   SquarePen,
-  Circle,
   Check,
+  Laptop,
   RefreshCw,
+  Undo2,
 } from "lucide-react";
-import { MoreIcon, WarningIcon } from "@/components/ui/icon-map";
+import { MoreIcon } from "@/components/ui/icon-map";
 import {
   Tooltip,
   TooltipTrigger,
@@ -83,12 +83,21 @@ import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
 import { FILE_EXPLORER_ID } from "@/lib/resolveDefaultOpenInApp";
 import { getTransport } from "@/transport";
 import { useToastStore } from "@/stores/toastStore";
-import type { ChecksStatus } from "@mcode/contracts";
+import type { ChecksStatus, ThreadAttention, WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
 import type { Workspace, Thread } from "@/transport/types";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
-import { getThreadStateMarker, ThreadStateMarker } from "@/components/sidebar/ThreadStateMarker";
-import { useProjectAutomaticSetup } from "@/features/projects/environment";
+import { StatusMark } from "@/components/ui/status-mark";
+import { relativeTime } from "@/lib/time";
+import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
+import { ThreadStatusLane } from "@/features/thread-attention/ThreadStatusLane";
+import { threadRowLook, threadRowSetup, useThreadRowState, type ThreadRowLook } from "@/features/thread-attention/thread-row-presentation";
+import {
+  deriveThreadRowState,
+  rollUpThreadRowStates,
+  type ThreadRowState,
+} from "@/features/thread-attention/thread-row-state";
+import { useProjectAutomaticSetup, useProjectAutomaticSetupStore } from "@/features/projects/environment";
 import {
   DndContext,
   DragOverlay,
@@ -503,20 +512,6 @@ export function ProjectTree() {
   const updateThreadTitle = useWorkspaceStore((s) => s.updateThreadTitle);
   const reorderWorkspace = useWorkspaceStore((s) => s.reorderWorkspace);
   const error = useWorkspaceStore((s) => s.error);
-  // Derive pending permission thread IDs directly in the selector with useShallow
-  // so the component only re-renders when the actual set of IDs changes, not on
-  // every unrelated threadStore update that creates a new permissionsByThread ref.
-  const pendingPermissionIds = useApprovalStore(
-    useShallow((s) => {
-      const ids: string[] = [];
-      for (const request of s.approvals) if (!request.settled) ids.push(request.threadId);
-      return ids;
-    }),
-  );
-  const pendingPermissionThreadIds = useMemo(
-    () => new Set(pendingPermissionIds),
-    [pendingPermissionIds],
-  );
 
   // Pre-group threads by workspace in one pass instead of filtering all threads per workspace.
   const threadsByWorkspace = useMemo(() => {
@@ -883,6 +878,9 @@ export function ProjectTree() {
   const runningThreadIds = useMemo(() => new Set(executingThreadIds), [executingThreadIds]);
   const pendingStartupIds = useWorkspaceStore(useShallow((state) => Object.keys(state.pendingStartupByThreadId)));
   const startupThreadIds = useMemo(() => new Set(pendingStartupIds), [pendingStartupIds]);
+  const attentionByThreadId = threadAttentionStore((state) => state.byThreadId);
+  const onScreenThreadId = threadAttentionStore((state) => state.onScreenThreadId);
+  const setupSnapshotsByThreadId = useProjectAutomaticSetupStore((state) => state.snapshotsByThread);
   // Normalized set of existing worktree paths for stale detection.
   const validWorktreePaths = useMemo(() => {
     const set = new Set<string>();
@@ -946,6 +944,9 @@ export function ProjectTree() {
         activeWorkspaceId,
         runningThreadIds,
         startupThreadIds,
+        attentionByThreadId,
+        onScreenThreadId,
+        setupSnapshotsByThreadId,
       }),
     [
       workspaces,
@@ -959,6 +960,9 @@ export function ProjectTree() {
       activeWorkspaceId,
       runningThreadIds,
       startupThreadIds,
+      attentionByThreadId,
+      onScreenThreadId,
+      setupSnapshotsByThreadId,
     ],
   );
 
@@ -998,7 +1002,6 @@ export function ProjectTree() {
   const rowCtx = useMemo<ProjectTreeRowContext>(
     () => ({
       checksById,
-      pendingPermissionThreadIds,
       inlineEdit,
       worktreesLoadedFor: worktreesLoadedForWorkspace,
       validWorktreePaths,
@@ -1026,7 +1029,6 @@ export function ProjectTree() {
     }),
     [
       checksById,
-      pendingPermissionThreadIds,
       inlineEdit,
       worktreesLoadedForWorkspace,
       validWorktreePaths,
@@ -1248,7 +1250,8 @@ interface ProjectTreeRowData {
   readonly isExpanded: boolean;
   readonly isThreadListExpanded: boolean;
   readonly isActive: boolean;
-  readonly hasRunning: boolean;
+  /** Highest-priority thread state, shown only while the project is collapsed. */
+  readonly collapsedStatus: ThreadRowState;
 }
 
 interface ProjectTreeRowEntry {
@@ -1269,6 +1272,9 @@ interface ProjectTreeRowsInput {
   readonly activeWorkspaceId: string | null;
   readonly runningThreadIds: ReadonlySet<string>;
   readonly startupThreadIds: ReadonlySet<string>;
+  readonly attentionByThreadId: Readonly<Record<string, ThreadAttention>>;
+  readonly onScreenThreadId: string | null;
+  readonly setupSnapshotsByThreadId: Readonly<Record<string, WorkspaceEnvironmentAutomaticSetupSnapshot>>;
 }
 
 /** Maps workspaces to virtual rows; children live inside the group row so a
@@ -1301,13 +1307,29 @@ function buildProjectTreeRows(
         isExpanded,
         isThreadListExpanded,
         isActive: input.activeWorkspaceId === workspace.id,
-        hasRunning: wsThreads.some((thread) =>
-          input.runningThreadIds.has(thread.id)
-            || input.startupThreadIds.has(thread.id)
-            || thread.clientPreparing === true,
-        ),
+        collapsedStatus: isExpanded
+          ? QUIET_ROW_STATE
+          : rollUpThreadRowStates(wsThreads.map((thread) => collapsedThreadRowState(thread, input))),
       },
     };
+  });
+}
+
+const QUIET_ROW_STATE: ThreadRowState = { kind: "quiet" };
+
+/**
+ * Mirrors useThreadRowState from plain inputs, because a collapsed project has
+ * no mounted thread rows to call the hook. Setup reads whatever snapshot an
+ * earlier mount already cached.
+ */
+function collapsedThreadRowState(thread: WorkspaceThread, input: ProjectTreeRowsInput): ThreadRowState {
+  return deriveThreadRowState({
+    attention: input.attentionByThreadId[thread.id],
+    running: input.runningThreadIds.has(thread.id)
+      || input.startupThreadIds.has(thread.id)
+      || thread.clientPreparing === true,
+    setup: threadRowSetup(input.setupSnapshotsByThreadId[thread.id]),
+    onScreen: input.onScreenThreadId === thread.id,
   });
 }
 
@@ -1348,7 +1370,6 @@ interface ThreadRowProps {
   workspaceName: string;
   thread: WorkspaceThread;
   depth: number;
-  hasPendingPermission: boolean;
   checks?: ChecksStatus;
   isEditing: boolean;
   inlineEdit: InlineEditState | null;
@@ -1376,7 +1397,6 @@ const ThreadRow = memo(function ThreadRow({
   workspaceName,
   thread,
   depth,
-  hasPendingPermission,
   checks,
   isEditing,
   inlineEdit,
@@ -1397,29 +1417,15 @@ const ThreadRow = memo(function ThreadRow({
   const isActive = useWorkspaceStore((s) => s.activeThreadId === thread.id);
   const isRunning = useThreadStore((s) => isThreadExecuting(thread.id, s));
   const startupPending = useWorkspaceStore((s) => s.pendingStartupByThreadId[thread.id] !== undefined);
-  const automaticSetup = useProjectAutomaticSetup(
+  // Mounting fetches and caches this thread's setup snapshot, which the row state reads from the shared store.
+  useProjectAutomaticSetup(
     thread.id,
     thread.mode === "worktree" && thread.worktree_managed === true,
   );
-  const automaticSetupState = automaticSetup.snapshot.attempt?.state;
-  const isSetupRunning = automaticSetup.snapshot.gate === "blocked"
-    && (automaticSetupState === "queued" || automaticSetupState === "running");
-  const isSetupAwaitingResponse = automaticSetup.snapshot.gate === "blocked"
-    && (automaticSetupState === "failed" || automaticSetupState === "interrupted");
-  const isSetupAwaitingApproval = automaticSetup.snapshot.gate === "blocked"
-    && automaticSetupState === "awaiting-approval";
-  const isRecoveryInterrupted = useRecoveryIncidentStore((state) =>
-    hasRecoveryEntry(state, thread.workspace_id, thread.id),
-  );
+  const rowState = useThreadRowState(thread.id, thread.clientPreparing === true);
   const presentation = createThreadRowPresentation(
     thread,
-    checks,
-    isRunning,
-    isSetupRunning,
-    isSetupAwaitingResponse,
-    hasPendingPermission,
-    isRecoveryInterrupted,
-    isSetupAwaitingApproval,
+    rowState,
     worktreesLoadedFor,
     validWorktreePaths,
     availableProviders,
@@ -1429,7 +1435,7 @@ const ThreadRow = memo(function ThreadRow({
     thread,
     isEditing,
     isRunning,
-    hasPendingPermission,
+    awaitingApproval: rowState.kind === "needs-you" && rowState.label === "Approval required",
     startupPending,
     isUserCompleted: presentation.isUserCompleted,
     cleanupBlocked: presentation.cleanupBlocked,
@@ -1477,23 +1483,21 @@ const ThreadRow = memo(function ThreadRow({
 });
 
 interface ThreadRowPresentation {
-  marker: ReturnType<typeof getThreadStateMarker>;
-  isRunning: boolean;
-  showPrCi: boolean;
+  look: ThreadRowLook;
   isStaleWorktree: boolean;
   provider: string;
   unusable: boolean;
   unusableReason: string;
-  scaffoldDim: string | false | null;
+  scaffoldDim: string | false;
   isUserCompleted: boolean;
   cleanupBlocked: boolean;
-  showEndMarker: boolean;
 }
 
 interface ThreadRowLifecycleActions {
   isLifecyclePending: boolean;
   isCleanupRetryPending: boolean;
   cleanupStatusLabel: string | null;
+  cleanupRetryFailed: boolean;
   lifecycleUnavailable: boolean;
   handleLifecycleClick: (event: React.MouseEvent) => Promise<void>;
   handleCleanupRetry: (event: React.MouseEvent) => Promise<void>;
@@ -1520,54 +1524,21 @@ interface ThreadRowVisualProps {
 
 function createThreadRowPresentation(
   thread: WorkspaceThread,
-  checks: ChecksStatus | undefined,
-  isRunning: boolean,
-  isSetupRunning: boolean,
-  isSetupAwaitingResponse: boolean,
-  hasPendingPermission: boolean,
-  isRecoveryInterrupted: boolean,
-  isSetupAwaitingApproval: boolean,
+  rowState: ThreadRowState,
   worktreesLoadedFor: string | null,
   validWorktreePaths: Set<string>,
   availableProviders: ThreadRowProps["availableProviders"],
   startupPending: boolean,
 ): ThreadRowPresentation {
-  const marker = getThreadStateMarker({
-    thread,
-    checks,
-    isRunning,
-    isSetupRunning,
-    isSetupAwaitingResponse,
-    hasPendingPermission: hasPendingPermission || isSetupAwaitingApproval,
-    isRecoveryInterrupted,
-  });
-  const showPrCi = shouldShowThreadPrCi(thread, checks, marker);
   const isUserCompleted = thread.user_completed_at !== null;
   return {
-    marker,
-    isRunning,
-    showPrCi,
+    look: threadRowLook(rowState),
     isStaleWorktree: hasStaleThreadWorktree(thread, worktreesLoadedFor, validWorktreePaths),
     ...threadProviderPresentation(thread.provider, availableProviders),
     scaffoldDim: thread.clientPreparing || thread.clientError || startupPending ? "opacity-[0.72]" : false,
     isUserCompleted,
     cleanupBlocked: isUserCompleted && thread.cleanup_state === "blocked",
-    showEndMarker: marker.kind !== "time" && (!showPrCi || marker.kind !== "ci"),
   };
-}
-
-function shouldShowThreadPrCi(
-  thread: WorkspaceThread,
-  checks: ChecksStatus | undefined,
-  marker: ReturnType<typeof getThreadStateMarker>,
-): boolean {
-  return isPrable(thread)
-    && thread.pr_number !== null
-    && checks !== undefined
-    && checks.aggregate !== "no_checks"
-    && marker.kind !== "action"
-    && marker.kind !== "setup"
-    && marker.kind !== "running";
 }
 
 function hasStaleThreadWorktree(
@@ -1643,15 +1614,16 @@ function useThreadLifecycleActions({
   thread,
   isEditing,
   isRunning,
-  hasPendingPermission,
+  awaitingApproval,
   startupPending,
   isUserCompleted,
   cleanupBlocked,
   onCompleteThread,
   onReopenThread,
   onRetryThreadCleanup,
-}: Pick<ThreadRowProps, "thread" | "isEditing" | "hasPendingPermission" | "onCompleteThread" | "onReopenThread" | "onRetryThreadCleanup"> & {
+}: Pick<ThreadRowProps, "thread" | "isEditing" | "onCompleteThread" | "onReopenThread" | "onRetryThreadCleanup"> & {
   isRunning: boolean;
+  awaitingApproval: boolean;
   startupPending: boolean;
   isUserCompleted: boolean;
   cleanupBlocked: boolean;
@@ -1671,7 +1643,7 @@ function useThreadLifecycleActions({
   const lifecycleUnavailable = isLifecyclePending
     || isEditing
     || isRunning
-    || hasPendingPermission
+    || awaitingApproval
     || startupPending
     || Boolean(thread.clientPreparing || thread.clientError);
   const handleLifecycleClick = useCallback(async (event: React.MouseEvent) => {
@@ -1712,6 +1684,7 @@ function useThreadLifecycleActions({
     isLifecyclePending,
     isCleanupRetryPending,
     cleanupStatusLabel: cleanupStatusLabel(cleanupRetryError, thread.cleanup_state),
+    cleanupRetryFailed: cleanupRetryError !== null,
     lifecycleUnavailable,
     handleLifecycleClick,
     handleCleanupRetry,
@@ -1754,20 +1727,27 @@ function ThreadRowVisual({
       onSelectThread={onSelectThread}
       onThreadContextMenu={onThreadContextMenu}
     >
-      <ThreadRowLeading thread={thread} depth={depth} presentation={presentation} lifecycle={lifecycle} />
-      <ThreadRowContent
+      <ThreadStatusLane mark={presentation.look.mark} />
+      <div className={cn("flex min-w-0 flex-1 flex-col gap-1", presentation.scaffoldDim)}>
+        <ThreadRowTitleLine
+          thread={thread}
+          isEditing={isEditing}
+          inlineEdit={inlineEdit}
+          presentation={presentation}
+          onInlineEditChange={onInlineEditChange}
+          onInlineEditCommit={onInlineEditCommit}
+          onInlineEditCancel={onInlineEditCancel}
+        />
+        <ThreadRowBranchLine thread={thread} presentation={presentation} />
+        <ThreadRowThirdLine thread={thread} checks={checks} presentation={presentation} lifecycle={lifecycle} />
+      </div>
+      <ThreadRowActions
         thread={thread}
         isEditing={isEditing}
-        inlineEdit={inlineEdit}
         presentation={presentation}
-        cleanupStatusLabel={lifecycle.cleanupStatusLabel}
-        onInlineEditChange={onInlineEditChange}
-        onInlineEditCommit={onInlineEditCommit}
-        onInlineEditCancel={onInlineEditCancel}
+        lifecycle={lifecycle}
+        onThreadContextMenu={onThreadContextMenu}
       />
-      <ThreadCleanupRetry thread={thread} isEditing={isEditing} cleanupBlocked={presentation.cleanupBlocked} lifecycle={lifecycle} />
-      <ThreadPrStatus thread={thread} checks={checks} isEditing={isEditing} presentation={presentation} />
-      <ThreadEndMarker isEditing={isEditing} presentation={presentation} />
     </ThreadRowSurface>
   );
   return <ThreadRowPreview isEditing={isEditing} row={row} workspaceName={workspaceName} thread={thread} />;
@@ -1813,12 +1793,12 @@ const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(funct
         onTriggerMouseLeave?.(event);
       }}
       className={cn(
-        "group/row relative flex min-h-8 items-center gap-2 rounded-md pr-2 text-body-small cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
+        "group/row relative flex min-h-16 items-start gap-2 rounded-lg py-3 pr-2 cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
         "has-[[data-status-mark=running]]:opacity-55",
-        isActive ? "bg-selected text-ink" : "text-muted/85 hover:bg-selected/40 hover:text-ink",
+        isActive ? "bg-selected" : "hover:bg-selected/40",
         triggerClassName,
       )}
-      style={{ paddingLeft: `${46 + depth * 12}px` }}
+      style={{ paddingLeft: `${4 + depth * 12}px` }}
     >
       {children}
     </div>
@@ -1854,81 +1834,24 @@ function scheduleThreadRowPrefetch(thread: WorkspaceThread) {
   schedulePrefetch(thread.id);
 }
 
-function ThreadRowLeading({
-  thread,
-  depth,
-  presentation,
-  lifecycle,
-}: Pick<ThreadRowVisualProps, "thread" | "depth" | "presentation" | "lifecycle">) {
-  return (
-    <span className="absolute left-0.5 top-1/2 flex -translate-y-1/2 items-center justify-end gap-1" style={{ width: `${40 + depth * 12}px` }}>
-      <ThreadLifecycleButton thread={thread} isRunning={presentation.isRunning} presentation={presentation} lifecycle={lifecycle} />
-      <span
-        aria-label={`Provider, ${providerLabel(presentation.provider)}`}
-        className={cn(
-          "-mt-px flex h-4 w-4 items-center justify-center",
-          presentation.scaffoldDim,
-          presentation.isUserCompleted && "grayscale opacity-45",
-        )}
-      >
-        <ProviderIcon provider={presentation.provider} size={12} />
-      </span>
-    </span>
-  );
-}
-
-function ThreadLifecycleButton({
-  thread,
-  isRunning,
-  presentation,
-  lifecycle,
-}: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle"> & { isRunning: boolean }) {
-  const actionLabel = presentation.isUserCompleted ? `Reopen ${thread.title}` : `Complete ${thread.title}`;
-  return (
-    <Tooltip>
-      <TooltipTrigger render={
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-compact"
-          aria-label={actionLabel}
-          disabled={lifecycle.lifecycleUnavailable}
-          onPointerDown={(event) => event.stopPropagation()}
-          onKeyDown={(event) => event.stopPropagation()}
-          onClick={lifecycle.handleLifecycleClick}
-          className={cn(
-            "size-5 shrink-0 rounded-full p-0 text-muted/65 opacity-0 transition-opacity shadow-none hover:bg-transparent hover:text-ink group-hover/row:opacity-100 group-focus-visible/row:opacity-100 focus-visible:opacity-100 disabled:cursor-not-allowed",
-            isRunning && "disabled:opacity-0 group-hover/row:disabled:opacity-100 group-focus-visible/row:disabled:opacity-100",
-          )}
-        >
-          <ThreadLifecycleIcon isPending={lifecycle.isLifecyclePending} isCompleted={presentation.isUserCompleted} />
-        </Button>
-      } />
-      <TooltipContent side="right" className="text-xs">
-        {presentation.isUserCompleted ? "Undo completion" : "Complete thread"}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-function ThreadLifecycleIcon({ isPending, isCompleted }: { isPending: boolean; isCompleted: boolean }) {
-  if (isPending) return <Spinner size={12} />;
-  if (isCompleted) return <Check size={13} aria-hidden />;
-  return <Circle size={13} aria-hidden />;
-}
-
-function ThreadRowContent({
+function ThreadRowTitleLine({
   thread,
   isEditing,
   inlineEdit,
   presentation,
-  cleanupStatusLabel: statusLabel,
   onInlineEditChange,
   onInlineEditCommit,
   onInlineEditCancel,
-}: Pick<ThreadRowVisualProps, "thread" | "isEditing" | "inlineEdit" | "presentation" | "onInlineEditChange" | "onInlineEditCommit" | "onInlineEditCancel"> & { cleanupStatusLabel: string | null }) {
+}: Pick<ThreadRowVisualProps, "thread" | "isEditing" | "inlineEdit" | "presentation" | "onInlineEditChange" | "onInlineEditCommit" | "onInlineEditCancel">) {
+  // The right padding keeps the title clear of the hover actions so it never reflows on hover.
   return (
-    <div className={cn("flex min-w-0 flex-1 items-center gap-2", presentation.scaffoldDim)}>
+    <div className={cn("flex h-5 min-w-0 items-center gap-2", !isEditing && "pr-[60px]")}>
+      <div
+        aria-label={`Provider, ${providerLabel(presentation.provider)}`}
+        className={cn("flex h-5 w-4 shrink-0 items-center justify-center text-muted", presentation.isUserCompleted && "grayscale opacity-45")}
+      >
+        <ProviderIcon provider={presentation.provider} size={12} />
+      </div>
       {isEditing ? (
         <Input
           type="text"
@@ -1943,10 +1866,16 @@ function ThreadRowContent({
           className="flex-1 border-focus"
         />
       ) : (
-        <ThreadRowTitle thread={thread} presentation={presentation} />
+        <div
+          className={cn(
+            "text-fade min-w-0 flex-1 text-label text-ink",
+            presentation.isUserCompleted && "text-muted/55 line-through decoration-muted/55 decoration-1",
+          )}
+          data-testid="thread-title"
+        >
+          {thread.title}
+        </div>
       )}
-      <ThreadProviderUnavailable thread={thread} isEditing={isEditing} presentation={presentation} />
-      <ThreadCleanupStatus isEditing={isEditing} statusLabel={statusLabel} />
     </div>
   );
 }
@@ -1961,71 +1890,153 @@ function handleInlineEditKeyDown(
   event.stopPropagation();
 }
 
-function ThreadRowTitle({ thread, presentation }: Pick<ThreadRowVisualProps, "thread" | "presentation">) {
+function ThreadRowBranchLine({ thread, presentation }: Pick<ThreadRowVisualProps, "thread" | "presentation">) {
+  const checkoutLabel = resolveThreadCheckoutLabel(thread);
+  const stale = presentation.isStaleWorktree;
   return (
-    <>
-      <span
-        className={cn(
-          "text-fade flex-1",
-          presentation.isUserCompleted && "text-muted/55 line-through decoration-muted/55 decoration-1",
-          presentation.isStaleWorktree && "text-[var(--diff-remove-strong)]/85 line-through",
-        )}
-        data-testid="thread-title"
-      >
-        <StaleWorktreeWarning isStale={presentation.isStaleWorktree} />
-        {thread.title}
+    <div className="flex h-4 min-w-0 items-center gap-2 text-caption text-muted">
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+        <GitBranch size={12} aria-hidden />
       </span>
-      <ThreadWorktreeIndicator thread={thread} />
-    </>
+      <div
+        aria-label={`Branch, ${checkoutLabel}`}
+        className={cn("text-fade min-w-0 flex-1 font-mono", stale && "text-error line-through")}
+      >
+        {checkoutLabel}
+      </div>
+      <div className="flex w-[52px] shrink-0 items-center justify-end">
+        <div className="w-6 text-center tabular-nums">{relativeTime(thread.updated_at)}</div>
+        <ThreadModeIcon thread={thread} stale={stale} />
+      </div>
+    </div>
   );
 }
 
-function StaleWorktreeWarning({ isStale }: { isStale: boolean }) {
-  if (!isStale) return null;
+function ThreadModeIcon({ thread, stale }: { thread: WorkspaceThread; stale: boolean }) {
+  const isWorktree = thread.mode === "worktree";
+  const label = isWorktree ? "Worktree" : "Local";
   return (
     <Tooltip>
-      <TooltipTrigger render={<WarningIcon size={11} className="inline mr-1 align-text-bottom text-[var(--diff-remove-strong)]/80" />} />
-      <TooltipContent side="right" className="text-xs">Worktree directory no longer exists</TooltipContent>
+      <TooltipTrigger render={
+        <div
+          aria-label={`${label} mode`}
+          data-testid={isWorktree ? `thread-worktree-indicator-${thread.id}` : undefined}
+          className={cn("flex h-4 w-6 items-center justify-center", stale && "text-error")}
+        >
+          {isWorktree ? <WorktreeModeIcon size={12} aria-hidden /> : <Laptop size={12} aria-hidden />}
+        </div>
+      } />
+      <TooltipContent side="right" className="text-xs">{stale ? "Worktree directory no longer exists" : label}</TooltipContent>
     </Tooltip>
   );
 }
 
-function ThreadWorktreeIndicator({ thread }: { thread: WorkspaceThread }) {
-  if (thread.mode !== "worktree") return null;
+/** The third line: a row state label when there is one, otherwise the most urgent thread context. */
+function ThreadRowThirdLine({
+  thread,
+  checks,
+  presentation,
+  lifecycle,
+}: Pick<ThreadRowVisualProps, "thread" | "checks" | "presentation" | "lifecycle">) {
+  const label = presentation.look.label;
+  if (label) return <ThreadRowCaption className={label.className}>{label.text}</ThreadRowCaption>;
+  // A retry in flight or its failure is newer news than the standing block it retries.
+  if (lifecycle.cleanupStatusLabel) {
+    return (
+      <ThreadRowCaption role="status" className={lifecycle.cleanupRetryFailed ? "text-error" : "text-muted"}>
+        {lifecycle.cleanupRetryFailed ? null : <Spinner size={12} />}
+        <span className="text-fade min-w-0">{lifecycle.cleanupStatusLabel}</span>
+      </ThreadRowCaption>
+    );
+  }
+  if (presentation.cleanupBlocked) return <ThreadRowCaption className="text-error">Cleanup blocked</ThreadRowCaption>;
+  if (presentation.isStaleWorktree) return <ThreadRowCaption className="text-error">Worktree unavailable</ThreadRowCaption>;
+  if (presentation.unusable) {
+    return <ThreadRowCaption className="text-error" data-testid={`sidebar-unusable-${thread.id}`}>{presentation.unusableReason}</ThreadRowCaption>;
+  }
+  if (isPrable(thread) && thread.pr_number !== null) {
+    return <ThreadPrLine threadId={thread.id} prNumber={thread.pr_number} prStatus={thread.pr_status} checks={checks} dimmed={presentation.isUserCompleted} />;
+  }
+  return null;
+}
+
+function ThreadRowCaption({ className, children, ...props }: ComponentPropsWithoutRef<"div">) {
   return (
-    <Tooltip>
-      <TooltipTrigger render={<WorktreeModeIcon size={12} data-testid={`thread-worktree-indicator-${thread.id}`} aria-label="Worktree mode" className="text-muted/65" />} />
-      <TooltipContent side="right" className="text-xs">Worktree</TooltipContent>
-    </Tooltip>
+    <div {...props} className={cn("flex h-4 min-w-0 items-center gap-1.5 text-caption", className)}>
+      {children}
+    </div>
   );
 }
 
-function ThreadProviderUnavailable({
+function ThreadRowActions({
   thread,
   isEditing,
   presentation,
-}: Pick<ThreadRowVisualProps, "thread" | "isEditing" | "presentation">) {
-  if (isEditing || !presentation.unusable) return null;
+  lifecycle,
+  onThreadContextMenu,
+}: Pick<ThreadRowVisualProps, "thread" | "isEditing" | "presentation" | "lifecycle" | "onThreadContextMenu">) {
+  if (isEditing) return null;
   return (
-    <Tooltip>
-      <TooltipTrigger render={<span data-testid={`sidebar-unusable-${thread.id}`} className="ml-1 shrink-0 inline-block h-1.5 w-1.5 rounded-full bg-muted/60" aria-label={presentation.unusableReason} />} />
-      <TooltipContent side="right" className="text-xs">{presentation.unusableReason}</TooltipContent>
-    </Tooltip>
+    <div className="absolute right-2 top-3 flex h-5 items-center gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-visible/row:opacity-100 focus-within:opacity-100">
+      {presentation.cleanupBlocked ? <ThreadCleanupRetry thread={thread} lifecycle={lifecycle} /> : null}
+      <ThreadLifecycleAction thread={thread} presentation={presentation} lifecycle={lifecycle} />
+      <ThreadRowAction
+        label={`Thread options for ${thread.title}`}
+        tooltip="More"
+        onClick={(event) => onThreadContextMenu(event, thread)}
+      >
+        <MoreIcon size={14} />
+      </ThreadRowAction>
+    </div>
   );
 }
 
-function ThreadCleanupStatus({ isEditing, statusLabel }: { isEditing: boolean; statusLabel: string | null }) {
-  if (isEditing || !statusLabel) return null;
-  return <span role="status" className="shrink-0 text-fade text-xs text-muted">{statusLabel}</span>;
+function ThreadLifecycleAction({ thread, presentation, lifecycle }: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle">) {
+  const reopen = presentation.isUserCompleted;
+  return (
+    <ThreadRowAction
+      label={reopen ? `Reopen ${thread.title}` : `Complete ${thread.title}`}
+      tooltip={reopen ? "Undo completion" : "Complete thread"}
+      disabled={lifecycle.lifecycleUnavailable}
+      onClick={lifecycle.handleLifecycleClick}
+    >
+      <ThreadLifecycleIcon isPending={lifecycle.isLifecyclePending} reopen={reopen} />
+    </ThreadRowAction>
+  );
 }
 
-function ThreadCleanupRetry({
-  thread,
-  isEditing,
-  cleanupBlocked,
-  lifecycle,
-}: Pick<ThreadRowVisualProps, "thread" | "isEditing" | "lifecycle"> & { cleanupBlocked: boolean }) {
-  if (isEditing || !cleanupBlocked) return null;
+function ThreadLifecycleIcon({ isPending, reopen }: { isPending: boolean; reopen: boolean }) {
+  if (isPending) return <Spinner size={12} />;
+  if (reopen) return <Undo2 size={14} aria-hidden />;
+  return <Check size={14} aria-hidden />;
+}
+
+function ThreadCleanupRetry({ thread, lifecycle }: Pick<ThreadRowVisualProps, "thread" | "lifecycle">) {
+  return (
+    <ThreadRowAction
+      label={`Retry cleanup for ${thread.title}`}
+      tooltip="Retry cleanup"
+      disabled={lifecycle.isCleanupRetryPending}
+      onClick={lifecycle.handleCleanupRetry}
+    >
+      {lifecycle.isCleanupRetryPending ? <Spinner size={12} /> : <RefreshCw size={13} aria-hidden />}
+    </ThreadRowAction>
+  );
+}
+
+function ThreadRowAction({
+  label,
+  tooltip,
+  disabled = false,
+  onClick,
+  children,
+}: {
+  label: string;
+  tooltip: string;
+  disabled?: boolean;
+  onClick: (event: React.MouseEvent) => void;
+  children: React.ReactNode;
+}) {
   return (
     <Tooltip>
       <TooltipTrigger render={
@@ -2033,37 +2044,21 @@ function ThreadCleanupRetry({
           type="button"
           variant="ghost"
           size="icon-compact"
-          aria-label={`Retry cleanup for ${thread.title}`}
-          disabled={lifecycle.isCleanupRetryPending}
+          aria-label={label}
+          disabled={disabled}
           onPointerDown={(event) => event.stopPropagation()}
           onKeyDown={(event) => event.stopPropagation()}
-          onClick={lifecycle.handleCleanupRetry}
-          className="size-6 shrink-0 text-muted opacity-0 transition-opacity hover:bg-transparent hover:text-ink group-hover/row:opacity-100 group-focus-visible/row:opacity-100 focus-visible:opacity-100"
+          onClick={(event) => {
+            event.stopPropagation();
+            onClick(event);
+          }}
+          className="size-5 shrink-0 rounded-md p-0 text-muted shadow-none hover:bg-transparent hover:text-ink disabled:cursor-not-allowed"
         >
-          {lifecycle.isCleanupRetryPending ? <Spinner size={12} /> : <RefreshCw size={13} aria-hidden />}
+          {children}
         </Button>
       } />
-      <TooltipContent side="right" className="text-xs">Retry cleanup</TooltipContent>
+      <TooltipContent side="right" className="text-xs">{tooltip}</TooltipContent>
     </Tooltip>
-  );
-}
-
-function ThreadPrStatus({
-  thread,
-  checks,
-  isEditing,
-  presentation,
-}: Pick<ThreadRowVisualProps, "thread" | "checks" | "isEditing" | "presentation">) {
-  if (isEditing || !isPrable(thread) || thread.pr_number === null) return null;
-  return <ThreadPrIndicator threadId={thread.id} prNumber={thread.pr_number} prStatus={thread.pr_status} checks={checks} showCi={presentation.showPrCi} muted={presentation.isUserCompleted} />;
-}
-
-function ThreadEndMarker({ isEditing, presentation }: Pick<ThreadRowVisualProps, "isEditing" | "presentation">) {
-  if (isEditing || !presentation.showEndMarker) return null;
-  return (
-    <span className={cn("inline-flex shrink-0 items-center justify-center", presentation.isUserCompleted && "grayscale opacity-45")}>
-      <ThreadStateMarker marker={presentation.marker} dim={Boolean(presentation.scaffoldDim)} />
-    </span>
   );
 }
 
@@ -2238,15 +2233,6 @@ function SidebarThreadPreview({
   );
 }
 
-interface ThreadPrIndicatorProps {
-  threadId: string;
-  prNumber: number;
-  prStatus: string | null;
-  checks: ChecksStatus | undefined;
-  showCi: boolean;
-  muted?: boolean;
-}
-
 function formatLifecycleDate(iso: string): string {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
@@ -2261,60 +2247,54 @@ function threadCountLabel(
   return `${count} ${state} ${count === 1 ? "thread" : "threads"}`;
 }
 
-/** Renders an optically aligned PR glyph with its CI state attached as a status dot. */
-const ThreadPrIndicator = memo(function ThreadPrIndicator({
+const PR_CHECKS_WORD: Record<"passing" | "pending" | "failing", string> = {
+  passing: "Passing",
+  pending: "Pending",
+  failing: "Failing",
+};
+
+/** The PR word shown after the number: Merged wins over checks, which a merged PR no longer runs. */
+function threadPrStateWord(prStatus: string | null, checks: ChecksStatus | undefined): string | null {
+  if (prStatus?.toLowerCase() === "merged") return "Merged";
+  if (!checks || checks.aggregate === "no_checks") return null;
+  return PR_CHECKS_WORD[checks.aggregate];
+}
+
+/** The PR context line: number tinted by PR state, then its merge or checks word. */
+function ThreadPrLine({
   threadId,
   prNumber,
   prStatus,
   checks,
-  showCi,
-  muted = false,
-}: ThreadPrIndicatorProps) {
+  dimmed,
+}: {
+  threadId: string;
+  prNumber: number;
+  prStatus: string | null;
+  checks: ChecksStatus | undefined;
+  dimmed: boolean;
+}) {
   const { Icon: PrIcon, color: prColor } = getPrVisual(prStatus);
-  const ciVisual = threadPrCiVisual(showCi, checks);
-  const label = `PR #${prNumber}, ${prStatus ?? "open"}${ciVisual ? `. ${ciVisual.label}` : ""}`;
-
+  const word = threadPrStateWord(prStatus, checks);
+  const wordColor = checks && word !== "Merged" && checks.aggregate !== "no_checks" ? getCiVisual(checks.aggregate).color : "text-muted";
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span
-            aria-label={label}
-            data-testid={`thread-pr-indicator-${threadId}`}
-            className={cn(
-              "-mt-px flex h-4 w-4 items-center justify-center",
-              muted && "grayscale opacity-45",
-            )}
-          >
-            <span className="relative flex size-4 items-center justify-center">
-              <PrIcon
-                size={13}
-                aria-hidden
-                className={cn("shrink-0", prColor)}
-              />
-              {ciVisual ? (
-                <span
-                  data-testid={`thread-pr-ci-${threadId}`}
-                  aria-hidden
-                  className={cn(
-                    "absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-current ring-1 ring-page",
-                    ciVisual.color,
-                    checks?.aggregate === "pending" && "status-pulse",
-                  )}
-                />
-              ) : null}
-            </span>
-          </span>
-        }
-      />
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+    <div
+      aria-label={`PR #${prNumber}, ${prStatus ?? "open"}${word && word !== "Merged" ? `, checks ${word.toLowerCase()}` : ""}`}
+      data-testid={`thread-pr-indicator-${threadId}`}
+      className={cn("flex h-4 min-w-0 items-center gap-1.5 text-caption text-muted", dimmed && "grayscale opacity-45")}
+    >
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+        <PrIcon size={12} aria-hidden className={prColor} />
+      </span>
+      <span className={cn("shrink-0 underline underline-offset-2", prColor)}>PR #{prNumber}</span>
+      {word ? (
+        <>
+          <span aria-hidden className="text-muted/45">·</span>
+          <span data-testid={`thread-pr-ci-${threadId}`} className={cn("text-fade min-w-0", wordColor)}>{word}</span>
+        </>
+      ) : null}
+    </div>
   );
-});
-
-function threadPrCiVisual(showCi: boolean, checks: ChecksStatus | undefined) {
-  if (!showCi || !checks || checks.aggregate === "no_checks") return null;
-  return getCiVisual(checks.aggregate);
 }
 
 /** Thread counts and capped tree rows for one workspace's lifecycle view. */
@@ -2384,7 +2364,7 @@ interface ProjectWorkspaceRowProps {
   sortableAttributes: SortableAttributes | undefined;
   lifecycleView: ProjectLifecycleView;
   checksById: Record<string, ChecksStatus>;
-  hasRunning: boolean;
+  collapsedStatus: ThreadRowState;
   threadList: ThreadListSummary;
   onToggle: (wsId: string) => void;
   onToggleLifecycleView: (workspaceId: string) => void;
@@ -2402,7 +2382,7 @@ function ProjectWorkspaceRow({
   sortableAttributes,
   lifecycleView,
   checksById,
-  hasRunning,
+  collapsedStatus,
   threadList,
   onToggle,
   onToggleLifecycleView,
@@ -2462,7 +2442,7 @@ function ProjectWorkspaceRow({
       <ProjectTitle workspace={workspace} onClick={toggle} />
       <ProjectGitStatus isGitRepository={workspace.is_git_repo} />
       <WorkspaceCiRollupChip threads={threadList.visibleThreads} checksById={checksById} />
-      <ProjectRunningStatus hasRunning={hasRunning} />
+      <ProjectCollapsedStatus status={collapsedStatus} />
       <ProjectThreadCount workspaceId={workspace.id} count={threadList.visibleThreads.length} />
       <ProjectRowActions
         workspace={workspace}
@@ -2549,9 +2529,14 @@ function ProjectGitStatus({ isGitRepository }: { isGitRepository: boolean }) {
   return <Tooltip><TooltipTrigger render={<GitBranchMinus size={12} className="shrink-0 text-muted/45" aria-label="Not a git repository" />} /><TooltipContent side="right" className="text-xs">Not a git repository</TooltipContent></Tooltip>;
 }
 
-function ProjectRunningStatus({ hasRunning }: { hasRunning: boolean }) {
-  if (!hasRunning) return null;
-  return <Tooltip><TooltipTrigger render={<span aria-hidden="true" className="shrink-0 h-1.5 w-1.5 rounded-full bg-primary status-pulse transition-opacity duration-150 group-hover/ws:opacity-0 group-focus-within/ws:opacity-0 motion-reduce:transition-none" />} /><TooltipContent side="right" className="text-xs">Active agent in this project</TooltipContent></Tooltip>;
+function ProjectCollapsedStatus({ status }: { status: ThreadRowState }) {
+  const { mark } = threadRowLook(status);
+  if (!mark) return null;
+  return (
+    <span className="flex shrink-0 transition-opacity duration-150 group-hover/ws:opacity-0 group-focus-within/ws:opacity-0 motion-reduce:transition-none">
+      <StatusMark state={mark.state} label={mark.label} />
+    </span>
+  );
 }
 
 function ProjectThreadCount({ workspaceId, count }: { workspaceId: string; count: number }) {
@@ -2608,7 +2593,6 @@ function ProjectThreadListToggle({
  */
 interface ProjectTreeRowContext {
   readonly checksById: Record<string, ChecksStatus>;
-  readonly pendingPermissionThreadIds: ReadonlySet<string>;
   readonly inlineEdit: InlineEditState | null;
   readonly worktreesLoadedFor: string | null;
   readonly validWorktreePaths: Set<string>;
@@ -2764,7 +2748,7 @@ function WorkspaceGroup({
         lifecycleView={row.lifecycleView}
         threadList={row.threadList}
         checksById={ctx.checksById}
-        hasRunning={row.hasRunning}
+        collapsedStatus={row.collapsedStatus}
         onToggle={ctx.onToggle}
         onToggleLifecycleView={ctx.onToggleLifecycleView}
         onCreateThread={ctx.onCreateThread}
@@ -2929,9 +2913,6 @@ function WorkspaceThreadSection({
               workspaceName={workspace.name}
               thread={item.thread}
               depth={item.depth}
-              hasPendingPermission={ctx.pendingPermissionThreadIds.has(
-                item.thread.id,
-              )}
               checks={ctx.checksById[item.thread.id]}
               isEditing={ctx.inlineEdit?.threadId === item.thread.id}
               inlineEdit={
@@ -2973,4 +2954,3 @@ function WorkspaceThreadSection({
     </div>
   );
 }
-import { useApprovalStore } from "@/stores/approvalStore";

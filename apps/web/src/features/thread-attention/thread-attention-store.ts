@@ -9,6 +9,8 @@ export const ACKNOWLEDGE_SEEN_DWELL_MS = 150;
 interface ThreadAttentionState {
   byThreadId: Record<string, ThreadAttention>;
   visitBaselines: Record<string, number | null>;
+  /** The active thread while its window is visible and focused; its outcomes count as seen. */
+  onScreenThreadId: string | null;
   apply(attention: ThreadAttention): void;
   hydrate(attention: ThreadAttention[], observed: Record<string, ThreadAttention>): void;
   refreshOnScreen(activeThreadId: string | null, renderedSequence: number | null): void;
@@ -59,7 +61,7 @@ export const threadAttentionStore = create<ThreadAttentionState>((set, get) => {
   };
 
   return {
-    byThreadId: {}, visitBaselines: {},
+    byThreadId: {}, visitBaselines: {}, onScreenThreadId: null,
     apply: (attention) => {
       set((state) => ({ byThreadId: { ...state.byThreadId, [attention.threadId]: {
         ...attention, seen: laterMark(state.byThreadId[attention.threadId]?.seen, attention.seen),
@@ -91,6 +93,7 @@ export const threadAttentionStore = create<ThreadAttentionState>((set, get) => {
       }
       const visible = document.visibilityState === "visible" && document.hasFocus() ? threadId : null;
       if (onScreen === visible && rendered === sequence) return;
+      if (onScreen !== visible) set({ onScreenThreadId: visible });
       onScreen = visible;
       rendered = sequence;
       clearTimeout(timer);

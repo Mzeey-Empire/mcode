@@ -119,9 +119,13 @@ describe("on-screen thread acknowledgements", () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([]);
     expect(threadAttentionStore.getState().byThreadId.a?.seen.sequence).toBe(2);
+    expect(threadAttentionStore.getState().onScreenThreadId).toBeNull();
     focused = true; window.dispatchEvent(new Event("focus"));
+    expect(threadAttentionStore.getState().onScreenThreadId).toBe("a");
     await vi.advanceTimersByTimeAsync(150);
     expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([["a", 8]]);
+    focused = false; window.dispatchEvent(new Event("blur"));
+    expect(threadAttentionStore.getState().onScreenThreadId).toBeNull();
   });
 
   it("cancels dwell on blur and ignores hidden documents, hover loads, and fast thread switches", async () => {
