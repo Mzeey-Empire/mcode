@@ -491,6 +491,41 @@ describe("TurnRecoveryService", () => {
         await expect(resume(rejectDispatch)).rejects.toMatchObject({ code });
       });
 
+      it("retries a failed native attempt by requiring the native session again", async () => {
+        withNativeSession();
+        interruptTurn();
+        const first = await resume(async (command) => {
+          await admit(command);
+          errorAttempt(sourceTurnId(command), { kind: "fatal", provider: "codex", message: "Rate limited" });
+          command.onRuntimeReleased?.();
+        });
+        const commands: SendMessageCommand[] = [];
+        const retried = await service.retryErroredTurn({ threadId: THREAD_ID, turnId: first.turnId }, async (command) => {
+          commands.push(command);
+          await admit(command);
+          notifyCommittedCanonicalEvents([providerStarted(sourceTurnId(command))]);
+        });
+        expect(commands).toHaveLength(1);
+        expect(commands[0]).toMatchObject({ content: RESUME_CONTINUATION_PROMPT, resumeRequired: true,
+          internalUserMessage: true, retryOfExecutionId: sink.loadTurn(first.turnId)?.executionId });
+        expect(sink.loadTurn(retried.turnId)).toMatchObject({ attemptOf: TURN_ID });
+      });
+
+      it("retries a failed seeded attempt by reseeding a fresh session", async () => {
+        interruptTurn();
+        const first = await resume(admit);
+        expect(first.mode).toBe("seeded-session");
+        errorAttempt(first.turnId, { kind: "fatal", provider: "codex", message: "Rate limited" });
+        const commands: SendMessageCommand[] = [];
+        await service.retryErroredTurn({ threadId: THREAD_ID, turnId: first.turnId, model: "gpt-5.5" }, async (command) => {
+          commands.push(command);
+          await admit(command);
+        });
+        expect(commands).toHaveLength(1);
+        expect(commands[0]).toMatchObject({ forceFreshSession: true, internalUserMessage: true, model: "gpt-5.5" });
+        expect(commands[0]!.providerWireOverride).toContain("User: repeat only when asked");
+      });
+
       it("rejects a second resume of the same interrupted attempt", async () => {
         interruptTurn();
         await resume(admit);

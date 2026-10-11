@@ -110,6 +110,12 @@ export class TurnRecoveryService {
   /** Admit a new attempt of the latest errored turn without replacing its provider session. */
   async retryErroredTurn(input: TurnRetryParams, dispatch: TurnDispatch): Promise<TurnRetryResult> {
     const target = this.requireRecoverableTurn(input, "Errored");
+    if (target.message.is_internal) {
+      // A failed resume attempt resumes again, so it keeps the native-session guard or reseeds a fresh session
+      // instead of sending the bare continuation prompt to a session that may no longer exist.
+      const thread = { ...target.thread, model: input.model ?? target.thread.model };
+      return { turnId: (await this.continueTurn({ ...target, thread }, dispatch)).turnId };
+    }
     const attachments = this.attachmentService.prepareRetryAttachments(target.thread.id, target.message.attachments ?? []);
     const turnId = NodeCrypto.randomUUID();
     await this.dispatchAttempt(turnId, {
@@ -124,7 +130,10 @@ export class TurnRecoveryService {
    * be resumed; when the provider reports that session gone, a fresh session seeded with the conversation takes over.
    */
   async resumeTurn(input: TurnResumeParams, dispatch: TurnDispatch): Promise<TurnResumeResult> {
-    const target = this.requireRecoverableTurn(input, "Interrupted");
+    return this.continueTurn(this.requireRecoverableTurn(input, "Interrupted"), dispatch);
+  }
+
+  private async continueTurn(target: RecoverableTurn, dispatch: TurnDispatch): Promise<TurnResumeResult> {
     if (chooseResumePath(this.resumePathInput(target.thread)) === "native-session") {
       return this.resumeNatively(target, dispatch);
     }
@@ -283,8 +292,6 @@ export class TurnRecoveryService {
       quotedText: this.optionalValue(message.quoted_text),
       mentions: this.optionalValue(message.mentions),
       previewAnnotations: this.optionalValue(message.previewAnnotations),
-      // A retried resume attempt keeps its continuation prompt out of the transcript.
-      ...(message.is_internal ? { internalUserMessage: true } : {}),
       retryOfExecutionId: executionId,
     };
   }
