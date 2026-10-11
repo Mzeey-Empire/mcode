@@ -14,6 +14,7 @@ export const TurnSnapshotSchema = lazySchema(() => z.object({
   worktree_path: z.string().nullable(),
   created_at: z.string(),
   attempt_count: z.number().int().positive(),
+  reverted_paths: z.array(z.string()).optional(),
 }));
 
 /** Git snapshot refs for reconstructing diffs on demand. */

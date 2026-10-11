@@ -98,6 +98,7 @@ import {
 } from "../git-commit.js";
 import { PrInfoSchema, PrDraftSchema, CreatePrResultSchema, ChecksStatusSchema, PullRequestTargetsListParamsSchema, PullRequestTargetsListResultSchema } from "../github.js";
 import { TurnSnapshotSchema } from "../models/turn-snapshot.js";
+import { TurnRevertScopeSchema, TurnRevertPreviewSchema, TurnRevertResultSchema } from "../models/turn-revert.js";
 import { AgentStopResultSchema, TurnRuntimeSnapshotSchema } from "../models/turn-runtime.js";
 import { CanonicalSubagentStopRequestSchema, CanonicalSubagentStopResultSchema } from "../models/canonical-subagent-roster.js";
 import { RecoveryIncidentSchema } from "../models/turn-recovery.js";
@@ -1443,6 +1444,18 @@ export const WS_METHODS = lazySchema(() => ({
   "turnDiff.getFileDiff": {
     params: z.object({ threadId: AgentThreadIdSchema, comparisonId: z.string().min(1).max(TURN_DIFF_COMPARISON_ID_MAX_LENGTH), filePath: z.string().min(1).max(4096) }),
     result: ReviewFileDiffResultSchema(),
+  },
+  "turn.revert.preview": {
+    params: z.object({ threadId: z.string().min(1).max(256), messageId: z.string().min(1).max(256), scope: TurnRevertScopeSchema() }),
+    result: TurnRevertPreviewSchema(),
+  },
+  "turn.revert.apply": {
+    params: z.object({ threadId: z.string().min(1).max(256), messageId: z.string().min(1).max(256), scope: TurnRevertScopeSchema(), previewToken: z.string().min(1).max(128), requestId: z.string().uuid() }),
+    result: TurnRevertResultSchema(),
+  },
+  "turn.revert.undo": {
+    params: z.object({ threadId: z.string().min(1).max(256), revertId: z.string().min(1).max(64), requestId: z.string().uuid() }),
+    result: TurnRevertResultSchema(),
   },
   "snapshot.getDiff": {
     params: z.object({
