@@ -138,6 +138,18 @@ describe("turn revert server operation", () => {
     expect(f.read("a")).toEqual(Buffer.from("zero\n")); expect(f.read("ignored")).toEqual(Buffer.from("private\n"));
   }, timeout);
 
+  it("reverts a force-added tracked file under an ignored directory", async () => {
+    f = await revertFixture(); f.write(".gitignore", "dist/\n"); f.write("dist/keep.js", "before\n");
+    f.git("add", "-f", "dist/keep.js");
+    f.git("add", ".gitignore");
+    f.git("update-ref", "refs/heads/main", f.git("commit-tree", f.git("write-tree"), "-m", "tracked build output"));
+    const turn = await f.turn("one", () => f.write("dist/keep.js", "after\n"));
+    const request = await f.request(turn.messageId);
+    expect(await f.service().preview(request)).toMatchObject({ skipped: [], files: [{ path: "dist/keep.js", state: "clean", action: "restore" }] });
+    committed(await f.service().apply(request));
+    expect(f.read("dist/keep.js")).toEqual(Buffer.from("before\n"));
+  }, timeout);
+
   it.skipIf(!symlinks)("a file-to-symlink change invalidates preview", async () => {
     f = await revertFixture(); f.write("a", "zero\n"); const turn = await f.turn("one", () => f.write("a", "one\n"));
     const req = await f.request(turn.messageId); f.remove("a"); NodeFS.symlinkSync("elsewhere", NodePath.join(f.cwd, "a"));

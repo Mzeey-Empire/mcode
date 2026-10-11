@@ -363,7 +363,8 @@ export class SnapshotService {
       const present = paths.filter((name) => states.get(name)?.kind !== "absent");
       const absent = paths.filter((name) => states.get(name)?.kind === "absent");
       if (absent.length) await rawGit(cwd, ["update-index", "--force-remove", "-z", "--stdin"], `${absent.join("\0")}\0`, env);
-      for (const batch of batchPathspecGroups(present.map((name) => [name]))) await rawGit(cwd, ["add", "-A", "--", ...batch], undefined, env);
+      // Preview has excluded untracked ignored paths; tracked paths may still have ignored parents.
+      for (const batch of batchPathspecGroups(present.map((name) => [name]))) await rawGit(cwd, ["add", "-f", "-A", "--", ...batch], undefined, env);
       const tree = (await rawGit(cwd, ["write-tree"], undefined, env)).toString().trim();
       return this.blobIdsAt(cwd, tree, paths);
     });

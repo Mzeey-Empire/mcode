@@ -105,7 +105,7 @@ function sameBlob(a: SnapshotBlob | null | undefined, b: SnapshotBlob | null | u
 }
 
 async function ignoredPaths(cwd: string, paths: string[]): Promise<Set<string>> {
-  try { return new Set((await rawGit(cwd, ["check-ignore", "--no-index", "-z", "--stdin"], `${paths.join("\0")}\0`)).toString().split("\0").filter(Boolean)); }
+  try { return new Set((await rawGit(cwd, ["check-ignore", "-z", "--stdin"], `${paths.join("\0")}\0`)).toString().split("\0").filter(Boolean)); }
   catch (error) { if (error instanceof Error && "code" in error && error.code === 1) return new Set(); throw error; }
 }
 
