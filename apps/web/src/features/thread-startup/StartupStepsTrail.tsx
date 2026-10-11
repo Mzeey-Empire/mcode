@@ -260,7 +260,7 @@ function TrailActions({ startup, gate, outputOpen, onToggleOutput, actions, onCa
   // Paper indents the approval row to the label column and packs its filled button tighter.
   const approval = startupDecision(startup) === "setup-approval";
   return (
-    <div data-testid="startup-actions" className={cn("flex flex-wrap items-center", approval ? "gap-1 pl-6" : "gap-2 pl-4")}>
+    <div data-testid="startup-actions" className={cn("flex flex-wrap items-center", approval ? "gap-1 pl-6" : "pl-4")}>
       {ownDecision ? <StartupDecisionActions startup={ownDecision} gate={gate} outputOpen={outputOpen} onToggleOutput={onToggleOutput} /> : null}
       {actions}
       {onCancel ? <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} onClick={onCancel}>Cancel</Button> : null}
