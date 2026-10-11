@@ -575,6 +575,32 @@ export const hookExecutions = sqliteTable(
   ],
 );
 
+/** Durable revert journal; raw pre and planned states precede every worktree write. */
+export const turnReverts = sqliteTable("turn_reverts", {
+  id: text("id").primaryKey().notNull(),
+  requestId: text("request_id").notNull().unique(),
+  requestParams: text("request_params").notNull(),
+  threadId: text("thread_id").notNull().references(() => threads.id, { onDelete: "cascade" }),
+  targetMessageId: text("target_message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+  fromMessageId: text("from_message_id").references(() => messages.id, { onDelete: "cascade" }),
+  kind: text("kind", { enum: ["turn", "file", "undo"] }).notNull(),
+  path: text("path"),
+  undoesRevertId: text("undoes_revert_id").references((): AnySQLiteColumn => turnReverts.id, { onDelete: "set null" }),
+  undoneByRevertId: text("undone_by_revert_id"),
+  state: text("state", { enum: ["prepared", "committed", "rolled_back", "recovery_failed"] }).notNull(),
+  files: text("files").notNull(),
+  recoveryRef: text("recovery_ref"),
+  failure: text("failure"),
+  receiptMessageId: text("receipt_message_id").references(() => messages.id, { onDelete: "cascade" }),
+  agentNotifiedAt: text("agent_notified_at"),
+  createdAt: text("created_at").notNull().default(timestampDefault),
+  updatedAt: text("updated_at").notNull().default(timestampDefault),
+}, (table) => [
+  index("idx_turn_reverts_thread").on(table.threadId, table.createdAt),
+  index("idx_turn_reverts_target").on(table.targetMessageId),
+  index("idx_turn_reverts_unfinished").on(table.state).where(sql`${table.state} IN ('prepared', 'recovery_failed')`),
+]);
+
 export const turnSnapshots = sqliteTable(
   "turn_snapshots",
   {
