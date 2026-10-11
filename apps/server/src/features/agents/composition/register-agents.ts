@@ -79,6 +79,7 @@ import {
 import { TurnConversationProjectionService } from "../turns/turn-conversation-projection-service.js";
 import { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
 import { PostTerminalHookCompletionEffect } from "../turns/post-terminal-hook-completion-effect.js";
+import { BackgroundToolSettlementEffect } from "../turns/background-tool-settlement-effect.js";
 import { ThreadCreationCoordinator } from "../turns/thread-creation-coordinator.js";
 import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
 import { ThreadStartupFetchDecisions } from "../../thread-startup/thread-startup-fetch-decisions.js";
@@ -274,6 +275,7 @@ export function registerAgentServices(container: DependencyContainer): void {
   });
   container.register(TurnConversationProjectionService, { useClass: TurnConversationProjectionService }, { lifecycle: Lifecycle.Singleton });
   container.register(PostTerminalHookCompletionEffect, { useClass: PostTerminalHookCompletionEffect }, { lifecycle: Lifecycle.Singleton });
+  container.register(BackgroundToolSettlementEffect, { useClass: BackgroundToolSettlementEffect }, { lifecycle: Lifecycle.Singleton });
   container.register(ProviderSessionCursorPersistence, { useClass: ProviderSessionCursorPersistence }, { lifecycle: Lifecycle.Singleton });
   container.register(ThreadCreationCoordinator, {
     useFactory: instanceCachingFactory((c) => new ThreadCreationCoordinator(
@@ -294,7 +296,11 @@ export function registerAgentServices(container: DependencyContainer): void {
   container.register<ProviderTurnPort>(PROVIDER_TURN_PORT, {
     useFactory: (c) => {
       const turns = c.resolve(TurnRuntimeController);
-      return { open: (request) => turns.openProviderTurn(request) };
+      const backgroundTools = c.resolve(BackgroundToolSettlementEffect);
+      return {
+        open: (request) => turns.openProviderTurn(request),
+        settleBackgroundTool: async (settlement) => backgroundTools.settle(settlement),
+      };
     },
   });
   container.register(

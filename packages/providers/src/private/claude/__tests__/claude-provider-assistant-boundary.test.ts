@@ -279,7 +279,7 @@ describe("ClaudeProvider AssistantMessageBoundary from stop_reason", () => {
           }
         }),
         // The queued prompt was admitted first, so the server refuses the self-started turn.
-        turns: { open: async () => ({ kind: "declined" as const, reason: "busy" as const }) },
+        turns: { open: async () => ({ kind: "declined" as const, reason: "busy" as const }), settleBackgroundTool: async () => {} },
       },
     );
 

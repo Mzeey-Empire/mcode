@@ -113,6 +113,7 @@ import { TaskRepo } from "../../features/agents/orchestration/persistence/task-r
 import { PlanQuestionAnswersRepo } from "../../features/agents/planning/persistence/plan-question-answers-repo.js";
 import { PlanQuestionService } from "../../features/agents/planning/plan-question-service.js";
 import { PostTerminalHookCompletionEffect } from "../../features/agents/turns/post-terminal-hook-completion-effect.js";
+import { BackgroundToolSettlementEffect } from "../../features/agents/turns/background-tool-settlement-effect.js";
 import { PlanRepo } from "../../features/agents/planning/persistence/plan-repo.js";
 import { PlanService } from "../../features/agents/planning/plan-service.js";
 import { PlanFileWriter } from "../../features/agents/planning/plan-file-writer.js";
@@ -397,6 +398,7 @@ if (workerOwnedTurnRuntime.progress) {
   container.resolve(SubagentRosterService).bindAcceptedProgress(progress);
   container.resolve(ThreadService).bindAcceptedProgress(progress);
   container.resolve(PostTerminalHookCompletionEffect).bindAcceptedProgress(progress);
+  container.resolve(BackgroundToolSettlementEffect).bindAcceptedProgress(progress);
   canonicalSink.bindAcceptedSynthesizedPublications((threadId, events) =>
     progress.acceptSynthesizedPublications(threadId, events));
 }
@@ -610,6 +612,13 @@ async function recoverTurnsAtStartup(): Promise<void> {
       count: startupRecovery.interrupted.length,
     });
   }
+}
+
+/** Stops background tool calls whose provider process ended with the previous server. */
+async function settleOrphanedBackgroundToolsAtStartup(): Promise<void> {
+  if (!workerOwnedTurnRuntime.progress) return;
+  const settled = await container.resolve(BackgroundToolSettlementEffect).settleOrphansAtStartup();
+  if (settled > 0) logger.info("Stopped orphaned background tool calls during startup recovery", { count: settled });
 }
 
 /** Marks startup records interrupted because no process survives server restart. */
@@ -969,6 +978,8 @@ async function bootstrapServer(): Promise<void> {
     });
     await recoverTurnsAtStartup();
     recordStartupCheckpoint("turn recovery completed");
+    await settleOrphanedBackgroundToolsAtStartup();
+    recordStartupCheckpoint("orphaned background tools settled");
     // Interrupted attempts get their snapshot rows here; git work must not delay startup.
     snapshotRefPins.runInBackground(sweepSnapshotPins);
     await threadControlService.recoverApprovals();

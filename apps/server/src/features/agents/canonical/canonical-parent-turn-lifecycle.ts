@@ -23,7 +23,8 @@ import type {
   CanonicalAgentCheckpoint,
   CanonicalAgentCommitInput,
   CanonicalAgentCommitResult,
-  CanonicalAgentEventDraft,} from "./canonical-agent-boundary.js";
+  CanonicalAgentEventDraft,
+} from "./canonical-agent-boundary.js";
 
 /** Canonical alias for the parent-turn start durability input. */
 export type CanonicalParentTurnStartInput = ParentTurnStartInput;
@@ -373,12 +374,15 @@ export class CanonicalParentTurnLifecycle {
     messageId: string,
     endedAt: string,
   ): ParentNarrativeRecoveryItem {
+    // A background call may still finish after its parent turn is lost. Its late
+    // result settles it, or the startup sweep does when no provider survives.
+    const settles = item.record.status === "running" && item.record.background !== true;
     return {
       kind: "toolCall",
       record: {
         ...item.record,
         message_id: messageId,
-        ...(item.record.status === "running" ? { status: "failed", completed_at: endedAt } : {}),
+        ...(settles ? { status: "failed", completed_at: endedAt } : {}),
       },
     };
   }

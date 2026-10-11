@@ -48,6 +48,8 @@ export interface CreateToolCallRecordInput {
   completedAt?: string;
   sortOrder: number;
   parentToolCallId?: string;
+  /** True when the provider keeps this call running after its turn ends. */
+  background?: boolean;
 }
 
 interface ToolCallRecordInsert {

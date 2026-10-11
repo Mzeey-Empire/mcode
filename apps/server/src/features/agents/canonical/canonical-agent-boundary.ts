@@ -208,6 +208,11 @@ export class CanonicalAgentBoundary {
     return this.reader.listUnmaterializedTerminalCheckpoints(...args);
   }
 
+  /** List background tool calls still held open under a finished turn. */
+  listHeldBackgroundToolCalls(): ReturnType<CanonicalAgentStore["listHeldBackgroundToolCalls"]> {
+    return this.reader.listHeldBackgroundToolCalls();
+  }
+
   /** Load the visible entries for one restart-scoped recovery incident. */
   listRecoveryIncidentEntries(...args: Parameters<CanonicalAgentStore["listRecoveryIncidentEntries"]>): ReturnType<CanonicalAgentStore["listRecoveryIncidentEntries"]> {
     return this.reader.listRecoveryIncidentEntries(...args);

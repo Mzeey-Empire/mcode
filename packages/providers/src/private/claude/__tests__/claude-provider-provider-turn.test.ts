@@ -37,7 +37,7 @@ async function runBackgroundTask(opening: ProviderTurnOpening) {
   const open = vi.fn(async () => opening);
   const provider = new ClaudeProvider(
     stubEnvService(), stubJobObject(), undefined, undefined, undefined,
-    mockShutdownHost((event) => events.push(event), { open }),
+    mockShutdownHost((event) => events.push(event), { open, settleBackgroundTool: async () => {} }),
   );
   try {
     await provider.sendTurn({

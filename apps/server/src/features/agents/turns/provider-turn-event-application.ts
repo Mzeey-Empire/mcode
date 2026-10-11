@@ -318,6 +318,9 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       case AgentEventType.HookStarted: return this.applyHookStarted(event);
       case AgentEventType.HookCompleted: return this.applyHookCompleted(event);
       case AgentEventType.ToolResult: return this.applyToolResult(event);
+      case AgentEventType.ToolBackgrounded:
+        this.narrative.markToolCallBackground(event.threadId, event.toolCallId);
+        return true;
       default: return undefined;
     }
   }
@@ -452,7 +455,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       event.output,
       event.isError,
       event.toolInput,
-      toolResultMetadata(event),
+      { ...toolResultMetadata(event), cancelled: event.cancelled },
       event.subagentPresentation,
     );
     this.observePersistence(event.threadId, this.featureEffects.onToolResult(event.threadId, event.toolCallId, event.output, event.isError), "Task result persistence");

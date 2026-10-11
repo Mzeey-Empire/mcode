@@ -657,12 +657,13 @@ function settleToolCall(
   outcome: TurnOutcome,
   endedAt: string,
 ): ParentNarrativeRecoveryItem {
-  const status = item.record.status === "running" ? terminalToolStatus(outcome) : item.record.status;
+  // A background call outlives its turn; only its own late result settles it.
+  const settles = item.record.status === "running" && item.record.background !== true;
   return { kind: "toolCall", record: {
     ...item.record,
     message_id: messageId,
-    status,
-    completed_at: item.record.status === "running" ? endedAt : item.record.completed_at,
+    status: settles ? terminalToolStatus(outcome) : item.record.status,
+    completed_at: settles ? endedAt : item.record.completed_at,
   } };
 }
 

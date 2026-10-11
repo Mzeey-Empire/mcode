@@ -36,15 +36,20 @@ function settle(narrative: { kind: string; record: Record<string, unknown> }, in
   finalText: string, lastThought: number): Record<string, unknown> {
   const value: Record<string, unknown> = { ...narrative.record, message_id: input.messageId };
   switch (narrative.kind) {
-    case "toolCall": return value.status === "running" ? { ...value,
-      status: input.outcome === "completed" ? "completed" : input.outcome === "cancelled" ? "cancelled" : "failed",
-      completed_at: input.endedAt } : value;
+    case "toolCall": return settleToolCall(value, input);
     case "hook": return value.ended_at ? value : { ...value, ended_at: input.endedAt,
       duration_ms: typeof value.started_at === "string" ? Math.max(0, Date.parse(input.endedAt) - Date.parse(value.started_at)) : 0 };
     case "narrationSegment": return { ...value,
       is_final_response: finalThought(value, finalText, lastThought) ? 1 : value.is_final_response };
     default: return value;
   }
+}
+
+function settleToolCall(value: Record<string, unknown>, input: Parameters<typeof bindResponseItems>[1]): Record<string, unknown> {
+  // A background call outlives its turn; only its own late result settles it.
+  if (value.status !== "running" || value.background === true) return value;
+  const status = input.outcome === "completed" ? "completed" : input.outcome === "cancelled" ? "cancelled" : "failed";
+  return { ...value, status, completed_at: input.endedAt };
 }
 
 function finalThought(value: Record<string, unknown>, finalText: string, lastThought: number): boolean {

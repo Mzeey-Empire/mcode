@@ -198,6 +198,23 @@ describe("CodexLiveEventReducer", () => {
       items: [expect.objectContaining({ kind: "hook" })] });
   });
 
+  it("leaves a backgrounded call running in the terminal snapshot and settles a stopped call as cancelled", () => {
+    const reducer = new CodexLiveEventReducer(execution);
+    reduceEvent(reducer, "turnStarted");
+    reduceEvent(reducer, "toolUse", { toolCallId: "held", toolName: "Agent", toolInput: { prompt: "Long" } });
+    const marked = reduceEvent(reducer, "toolBackgrounded", { toolCallId: "held" });
+    expect(marked.writer).toContainEqual({ kind: "narrative-recovery", discardedItemIds: [],
+      items: [expect.objectContaining({ record: expect.objectContaining({ id: "held", status: "running", background: true }) })] });
+    reduceEvent(reducer, "toolUse", { toolCallId: "stopped", toolName: "Agent", toolInput: { prompt: "Short" } });
+    reduceEvent(reducer, "toolResult", { toolCallId: "stopped", output: "Stopped", isError: false, cancelled: true });
+    const terminal = reduceEvent(reducer, "turnComplete", { reason: "stop", costUsd: 0, tokensIn: 0, tokensOut: 0 });
+    const projection = terminal.writer.find((intent) => intent.kind === "terminal-projection");
+    const statuses = Object.fromEntries((projection?.narrative ?? []).flatMap((item) =>
+      item.kind === "toolCall" ? [[item.record.id, item.record.status]] : []));
+    expect(statuses.held).toBe("running");
+    expect(statuses.stopped).toBe("cancelled");
+  });
+
   it("keeps recovery output independent of buffered state and emits discard-only deltas", () => {
     const reducer = new CodexLiveEventReducer(execution);
     reduceEvent(reducer, "turnStarted");

@@ -693,6 +693,7 @@ export class NarrativeTurnState {
       outputTotalBytes?: number;
       outputArtifactPath?: string;
       exitCode?: number;
+      cancelled?: boolean;
     },
     subagentPresentation?: SubagentPresentation,
   ): void {
@@ -712,6 +713,19 @@ export class NarrativeTurnState {
       );
       this.applyAgentPresentation(toolCall, toolCall._rawToolInput ?? {}, toolCallId);
     }
+    this.recordRecoveryChange(this.toolCallRecoveryItem(toolCall));
+  }
+
+  /**
+   * Mark a running call the provider keeps alive after its turn ends. Turn
+   * settlement then leaves it running until its own late result arrives.
+   */
+  markToolCallBackground(threadId: string, toolCallId: string): void {
+    this.assertThread(threadId);
+    this.removeAgentFromStack(threadId, toolCallId);
+    const toolCall = this.mutableBufferedToolCall(threadId, toolCallId);
+    if (!toolCall || toolCall.status !== "running") return;
+    toolCall.background = true;
     this.recordRecoveryChange(this.toolCallRecoveryItem(toolCall));
   }
 
@@ -759,13 +773,14 @@ export class NarrativeTurnState {
       outputTotalBytes?: number;
       outputArtifactPath?: string;
       exitCode?: number;
+      cancelled?: boolean;
     } | undefined,
   ): void {
     const outputLimit = resolveBrowserNarrativeTool(toolCall.toolName) ? 4_000 : 500;
     toolCall.outputSummary = output.slice(0, outputLimit);
     toolCall.outputTruncated = outputMeta?.outputTruncated === true;
     this.applyOutputMetadata(toolCall, outputMeta);
-    toolCall.status = isError ? "failed" : "completed";
+    toolCall.status = outputMeta?.cancelled ? "cancelled" : isError ? "failed" : "completed";
     toolCall.completedAt = new Date().toISOString();
   }
 
@@ -954,6 +969,7 @@ export class NarrativeTurnState {
       started_at: this.requireRecoveryString(toolCall.startedAt, "tool call start time"),
       completed_at: toolCall.completedAt ?? null,
       sort_order: toolCall.sortOrder,
+      ...(toolCall.background ? { background: true } : {}),
     };
   }
 
@@ -1249,7 +1265,8 @@ export class NarrativeTurnState {
     outcome: TurnOutcome,
     settledAt: string,
   ): void {
-    if (toolCall.status !== "running") return;
+    // A background call outlives its turn; only its own late result settles it.
+    if (toolCall.status !== "running" || toolCall.background) return;
     toolCall.status = this.settledToolCallStatus(outcome);
     toolCall.completedAt = settledAt;
   }

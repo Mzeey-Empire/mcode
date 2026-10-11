@@ -54,4 +54,11 @@ describe("response narrative binding", () => {
     expect(bound.thought?.payload.record).toMatchObject({ is_final_response: 1 });
     expect(bound.older?.payload.record).toMatchObject({ is_final_response: 0 });
   });
+
+  it("binds a background call to its message but leaves it running for its late result", () => {
+    const held = item("held", "toolCall", { status: "running", completed_at: null, background: true });
+    const bound = bindResponseItems({ held }, input);
+    expect(bound.held?.payload).toMatchObject({ projection: "toolCall",
+      record: { message_id: "message", status: "running", completed_at: null, background: true } });
+  });
 });

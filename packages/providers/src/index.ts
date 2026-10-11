@@ -48,6 +48,7 @@ export type {
   ProviderTurnDeclineReason,
   ProviderTurnOpening,
   ProviderTurnPort,
+  ProviderBackgroundToolSettlement,
   ProviderTurnRouting,
 } from "./host-ports.js";
 export { providerBrowserPermissionCapability } from "./host-ports.js";
