@@ -3,13 +3,14 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type * as NodeChildProcess from "node:child_process";
-import type { ClientSideConnection } from "@agentclientprotocol/sdk";
+import { RequestError, type ClientSideConnection } from "@agentclientprotocol/sdk";
 import which from "which";
 import { getDefaultSettings, type TurnRequest } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import type { ProviderHostPorts } from "../../../host-ports.js";
 import { AcpSessionRuntime } from "../../protocols/acp/acp-session-runtime.js";
 import type { AcpPermissionOutcome, AcpPermissionRequest } from "../../protocols/acp/acp-session-types.js";
+import { ProviderTurnError } from "../../../provider-turn-error.js";
 import { DevinProvider } from "../devin-provider.js";
 
 vi.mock("which", () => ({ default: vi.fn() }));
@@ -294,7 +295,11 @@ describe("DevinProvider", () => {
     vi.mocked(host.events.submit).mockRejectedValue(error);
     starts.push(mockAcpStart([createFakeRuntime("devin-rejected", 101)]));
     createProvider(host);
-    await expect(provider!.sendTurn(turn())).rejects.toBe(error);
+    await expect(provider!.sendTurn(turn())).rejects.toMatchObject({
+      message: error.message,
+      failure: { kind: "fatal" },
+      cause: error,
+    });
   });
 
   it("resumes through session/load when resumeFrom carries an ACP session id", async () => {
@@ -971,10 +976,98 @@ describe("DevinProvider", () => {
 
     await provider!.sendTurn(turn());
 
-    expect(submittedRuntimeEvents(host)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: "turnComplete", reason: "quota_exhausted" }),
-      expect.objectContaining({ type: "ended", outcome: "interrupted" }),
+    const events = submittedRuntimeEvents(host);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "error",
+        failure: { kind: "usage_limit", code: "quota_exhausted" },
+      }),
+      expect.objectContaining({ type: "ended", outcome: "errored" }),
     ]));
+    expect(events.some((event) => event.type === "turnComplete")).toBe(false);
+  });
+
+  it.each([
+    ["auth_required", { kind: "auth", code: "auth_required" }],
+    ["content_filter", { kind: "fatal", code: "content_filter" }],
+  ])("ends the turn errored when Devin stops with %s", async (cause, failure) => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    createProvider(host);
+
+    vi.mocked(fake.runtime.prompt).mockImplementation(async () => {
+      await textChunk(fake, "devin-acp-1", "partial answer");
+      await fake.callbacks.onExtensionNotification?.("_cognition.ai/agent_stopped", { cause });
+      return { stopReason: "end_turn", usage: {} };
+    });
+
+    await provider!.sendTurn(turn());
+
+    const events = submittedRuntimeEvents(host);
+    expect(events.filter((event) => ["message", "error", "turnComplete", "ended"].includes(String(event.type))))
+      .toEqual([
+        expect.objectContaining({ type: "message", content: "partial answer" }),
+        expect.objectContaining({ type: "error", failure }),
+        expect.objectContaining({ type: "ended", outcome: "errored" }),
+      ]);
+  });
+
+  it("classifies an ACP authentication rejection of the prompt as auth", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    createProvider(host);
+
+    vi.mocked(fake.runtime.prompt).mockRejectedValue(new RequestError(-32000, "Authentication required"));
+
+    await provider!.sendTurn(turn());
+
+    expect(submittedRuntimeEvents(host)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "error",
+        error: "Authentication required",
+        failure: { kind: "auth", code: "-32000" },
+      }),
+      expect.objectContaining({ type: "ended", outcome: "errored" }),
+    ]));
+  });
+
+  it("rejects the turn with an auth failure when Devin credentials are missing", async () => {
+    const emptyHome = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "devin-no-creds-"));
+    const host = createHost();
+    vi.mocked(host.environment.snapshot).mockReturnValue({ HOME: emptyHome, XDG_DATA_HOME: emptyHome });
+    starts.push(mockAcpStart([createFakeRuntime("devin-acp-1", 101)]));
+    const p = createProvider(host);
+
+    try {
+      const sending = p.sendTurn(turn());
+      await expect(sending).rejects.toBeInstanceOf(ProviderTurnError);
+      await expect(sending).rejects.toMatchObject({
+        failure: { kind: "auth", code: "missing_credentials" },
+      });
+    } finally {
+      NodeFS.rmSync(emptyHome, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects the turn with an auth failure when Devin refuses the API key", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    // Captured from devin acp when authenticate received an invalid key.
+    const rejection = new RequestError(
+      -32603,
+      "Authentication failed: Failed to fetch team settings: Authentication required: invalid api key (trace ID: 15a67831bf3aa23eea37e22c8df04503)",
+    );
+    vi.mocked(fake.connection.authenticate).mockRejectedValue(rejection);
+    starts.push(mockAcpStart([fake]));
+    createProvider(host);
+
+    await expect(provider!.sendTurn(turn())).rejects.toMatchObject({
+      message: rejection.message,
+      failure: { kind: "auth", code: "-32603" },
+    });
+    expect(fake.runtime.prompt).not.toHaveBeenCalled();
   });
 
   it("auto-continues when agent_stopped reports output_truncated", async () => {

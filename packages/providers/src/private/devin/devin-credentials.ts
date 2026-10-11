@@ -11,6 +11,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { parse as parseToml } from "smol-toml";
 import type { ProviderStatusFacts } from "@mcode/contracts";
+import { ProviderTurnError } from "../../provider-turn-error.js";
 
 /** Resolved Devin ACP authentication material. */
 export interface DevinAcpCredentials {
@@ -34,7 +35,7 @@ export function resolveDevinAcpCredentials(
   }
   const fromFile = readDevinCredentialsFile(env, platform);
   if (fromFile) return fromFile;
-  throw new Error(MISSING_CREDENTIALS_MESSAGE);
+  throw new ProviderTurnError(MISSING_CREDENTIALS_MESSAGE, { kind: "auth", code: "missing_credentials" });
 }
 
 /**
