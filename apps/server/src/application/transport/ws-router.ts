@@ -5,7 +5,6 @@
  */
 
 import type { WebSocket } from "ws";
-import { turnRecoveryErrorCode } from "../../features/agents/recovery/turn-recovery-error.js";
 import * as NodeHTTP from "node:http";
 import type { z } from "zod";
 
@@ -35,6 +34,7 @@ import {
   isAgentRpcMethod,
   routeAgentRpc,
 } from "../../features/agents/transport/agent-rpc.js";
+import { turnRecoveryErrorCode } from "../../features/agents/recovery/turn-recovery-error.js";
 import type {
   FilesystemBrowser,
   GitComparisonService,
