@@ -92,7 +92,7 @@ describe("CodexLiveEventEffects", () => {
     const messageId = deriveTurnAssistantMessageId(execution.threadId, "user-message");
     expect(message.effects.message).toMatchObject({ precedingMessageId: "user-message", messageId, content: "Answer" });
     expect(message.publication.event).toMatchObject({ type: "message", messageId });
-    const terminal = prepare("error", { error: "Provider disconnected" });
+    const terminal = prepare("error", { error: "Provider disconnected", failure: { kind: "fatal" } });
     expect(terminal.terminal).toMatchObject({ threadId: execution.threadId, executionId: execution.executionId,
       endedAt, outcome: "errored", assistant: { messageId, content: "Answer" } });
     expect(terminal.publication.after).toBe("terminal");

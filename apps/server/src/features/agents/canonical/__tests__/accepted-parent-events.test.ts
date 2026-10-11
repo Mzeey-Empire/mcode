@@ -343,7 +343,12 @@ describe("prepareAcceptedParentEvents", () => {
     });
     expect(items.find((item) => item.id === "hook:hook")?.payload.record).toMatchObject({ duration_ms: 3000 });
     expect(items.find((item) => item.id === "narrationSegment:older")?.payload.record).toMatchObject({ is_final_response: 0 });
-    expect(result.events.at(-1)?.payload).toEqual({ type: "turn.errored", endedAt: ENDED_AT, error: "Provider failed" });
+    expect(result.events.at(-1)?.payload).toEqual({
+      type: "turn.errored",
+      endedAt: ENDED_AT,
+      error: "Provider failed",
+      failure: { kind: "fatal", provider: "codex", message: "Provider failed" },
+    });
   });
 
   it("retains complete new source records before binding and keeps raw and publication ordering", () => {
