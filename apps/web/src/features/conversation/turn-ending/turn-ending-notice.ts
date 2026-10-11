@@ -1,4 +1,4 @@
-import type { AgentTurnEnding, PersistedTurnFailure, SystemStopReason, TurnOutcome } from "@mcode/contracts";
+import type { AgentTurnEnding, InterruptionCause, PersistedTurnFailure, SystemStopReason, TurnOutcome } from "@mcode/contracts";
 import { workFoldLabel } from "../turn/WorkFold";
 
 /** Everything the end-notice table reads about one logical turn's latest attempt. */
@@ -15,13 +15,13 @@ export interface TurnEndingInput {
   scheduledRetryAt: string | null;
   /** The thread's first turn, whose pre-frame ending the startup trail owns. */
   isStartupTurn: boolean;
-  /** Only the thread's latest turn can be retried. */
+  /** Only the thread's latest turn can be retried or resumed. */
   isLatestTurn: boolean;
   executionId: string | null;
 }
 
 /** A user action a filled notice can offer. */
-export type TurnEndAction = "retry" | "retry_at" | "cancel_retry" | "switch_model" | "sign_in";
+export type TurnEndAction = "retry" | "retry_at" | "cancel_retry" | "switch_model" | "sign_in" | "resume";
 
 /** A quiet one-line ending: no fill, muted title. */
 export interface QuietNotice {
@@ -33,7 +33,7 @@ export interface QuietNotice {
 /** A filled ending with a cause, optional raw Details, and actions. */
 export interface FilledNotice {
   style: "filled";
-  icon: "failed" | "usage_limit";
+  icon: "failed" | "usage_limit" | "interrupted";
   title: string;
   detail?: string;
   /** Raw provider text plus the turn line, shown behind "Details". */
@@ -97,8 +97,7 @@ export function turnEndingView(input: TurnEndingInput): TurnEndingView {
   if (input.isStartupTurn && !providerStarted) return HIDDEN;
   const foldLabel = providerStarted ? workFoldLabel(input.status, input.durationMs) : null;
   if (input.status === "cancelled") return cancelledView(input, foldLabel);
-  // Interrupted endings and Resume arrive with S08F-06.
-  if (input.status === "interrupted") return { foldLabel, notice: null };
+  if (input.status === "interrupted") return { foldLabel, notice: interruptedNotice(input) };
   return { foldLabel, notice: erroredNotice(input) };
 }
 
@@ -111,6 +110,25 @@ function cancelledView(input: TurnEndingInput, foldLabel: string | null): TurnEn
   return input.providerStartedAt === null
     ? { foldLabel: null, notice: { style: "quiet", title: `Stopped before ${input.providerLabel} started` } }
     : { foldLabel, notice: { style: "quiet", title: "You stopped" } };
+}
+
+const INTERRUPTION_DETAILS: Readonly<Record<InterruptionCause, (provider: string) => string>> = {
+  app_closed: (provider) => `Mcode closed while ${provider} was working`,
+  provider_exited: (provider) => `${provider} stopped unexpectedly`,
+  saving_stopped: (provider) => `Mcode stopped saving ${provider}'s output`,
+  unknown: (provider) => `${provider} stopped before finishing`,
+};
+
+function interruptedNotice(input: TurnEndingInput): FilledNotice {
+  const cause = input.ending?.outcome === "interrupted" ? input.ending.cause : "unknown";
+  const notice: FilledNotice = {
+    style: "filled",
+    icon: "interrupted",
+    title: "Interrupted",
+    detail: INTERRUPTION_DETAILS[cause](input.providerLabel),
+    primary: { action: "resume", label: "Resume" },
+  };
+  return input.isLatestTurn ? notice : withoutPrimary(notice);
 }
 
 function erroredNotice(input: TurnEndingInput): FilledNotice {

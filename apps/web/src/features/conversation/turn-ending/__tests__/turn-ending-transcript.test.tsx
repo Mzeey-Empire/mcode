@@ -76,6 +76,32 @@ describe("turn endings in the reloaded transcript", () => {
     ]);
   });
 
+  it.each(["Completed", "Running"] as const)("shows a resumed turn's prompt once with only the %s attempt and no notice", (status) => {
+    const continuation = { ...message("c1", "user", 10), content: "Continue the task.", is_internal: true };
+    hydrate(
+      { t1: [message("u1", "user", 0), message("a1", "assistant", 1)], "t1-resume": [continuation, message("a2", "assistant", 11)] },
+      [
+        turn("t1", 0, { status: "Interrupted", ending: { outcome: "interrupted", cause: "app_closed" } }),
+        turn("t1-resume", 10, { status, attemptOf: "t1", ...(status === "Running" ? { endedAt: null } : {}) }),
+      ],
+    );
+
+    const { result } = renderHook(useTranscript);
+
+    expect(result.current).toEqual(["message:u1", "message:a2"]);
+  });
+
+  it("offers Resume under an interrupted turn's partial answer", () => {
+    hydrate(
+      { t1: [message("u1", "user", 0), message("a1", "assistant", 1)] },
+      [turn("t1", 0, { status: "Interrupted", ending: { outcome: "interrupted", cause: "provider_exited" } })],
+    );
+
+    const { result } = renderHook(useTranscript);
+
+    expect(result.current).toEqual(["message:u1", "message:a1", "notice:a1:Interrupted"]);
+  });
+
   it("keeps a Mcode stop's attribution after reload", () => {
     hydrate(
       { t1: [message("u1", "user", 0)] },

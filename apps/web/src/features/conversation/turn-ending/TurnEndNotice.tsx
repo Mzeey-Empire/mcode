@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CircleAlert, Clock, Square } from "lucide-react";
+import { CircleAlert, CirclePause, Clock, Square, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,12 @@ interface TurnEndNoticeProps {
 
 // A class, not the strokeWidth prop: the base-layer `.lucide` rule outranks the SVG attribute.
 const ICON_PROPS = { "aria-hidden": true, className: "size-4 shrink-0 [stroke-width:1.6]" } as const;
+// Waiting states (a usage limit, an interruption) take the primary lamp; only a failure takes the error color.
+const FILLED_ICONS: Readonly<Record<FilledNotice["icon"], { Icon: LucideIcon; tone: string }>> = {
+  failed: { Icon: CircleAlert, tone: "text-error" },
+  usage_limit: { Icon: Clock, tone: "text-primary" },
+  interrupted: { Icon: CirclePause, tone: "text-primary" },
+};
 const TEXT_BUTTON = "h-7 px-2.5 text-[1.3rem]/[1.8rem] font-medium text-muted hover:text-ink";
 
 /** The notice under a settled turn that did not complete. */
@@ -45,10 +51,10 @@ function QuietTurnEndNotice({ notice }: { notice: QuietNotice }) {
 
 function FilledTurnEndNotice({ notice, actions, pending }: { notice: FilledNotice; actions: TurnEndActionHandlers; pending: boolean }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const Icon = notice.icon === "usage_limit" ? Clock : CircleAlert;
+  const { Icon, tone } = FILLED_ICONS[notice.icon];
   return (
     <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-2.5 rounded-xl bg-panel py-2.5 pr-2.5 pl-3.5">
-      <Icon {...ICON_PROPS} className={cn(ICON_PROPS.className, notice.icon === "usage_limit" ? "text-primary" : "text-error")} />
+      <Icon {...ICON_PROPS} className={cn(ICON_PROPS.className, tone)} />
       <div className="flex min-w-0 flex-auto flex-col gap-0.5">
         <p className="text-body-small font-medium text-ink">{notice.title}</p>
         {notice.detail ? <p className="text-[1.3rem]/[1.8rem] text-muted">{notice.detail}</p> : null}
