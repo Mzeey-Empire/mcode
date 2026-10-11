@@ -108,6 +108,8 @@ function createCodexTurnStartParams(
   const params: TurnStartParams = {
     threadId,
     input: typeof input === "string" ? [{ type: "text", text: input }] : input,
+    // Without an explicit summary, current Codex builds return reasoning items with no text, so no Thought row can render.
+    summary: "auto",
   };
   if (turnOptions?.model) params.model = turnOptions.model;
   if (turnOptions?.effort) params.effort = turnOptions.effort;
