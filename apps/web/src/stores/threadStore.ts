@@ -3,7 +3,7 @@ import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode,
 import type { AgentEvent, AgentModelState, AgentTurn, CanonicalAgentEventEnvelope, CanonicalAgentProgressFrame, CanonicalAgentProgressRecovery, CanonicalAgentReconnectRecovery, ContextWindowMode, MessageMention, NarrativeDetailCursor, NarrativeEntry, ReasoningLevel, OrchestrationMode, PlanQuestion, PlanAnswer, ProviderUsageInfo, GoalLookupResult, PreviewAnnotationBundle, SelectedTextComment, TurnFileEffectSummary, TurnRuntimeSnapshot, TurnOutcome } from "@mcode/contracts";
 import type { reduceAgentEventBatch } from "@mcode/contracts";
 import type { DevinMode } from "@mcode/contracts";
-import { recoverParentNarrative } from "./parent-narrative-recovery";
+import { recoverParentNarrative, steeredUserMessages } from "./parent-narrative-recovery";
 import {
   AgentEventSchema,
   CANONICAL_AGENT_PROGRESS_BATCH_MAX,
@@ -1013,6 +1013,13 @@ export const TOOL_CALL_CACHE_SIZE = 200;
  * Enforce the sliding window cap on a messages array.
  * Returns the trimmed array and whether messages were evicted.
  */
+function steeredMessagesPatch(threadId: string, record: ThreadRecord): Partial<ThreadRecord> {
+  const steered = steeredUserMessages(threadId, record.canonicalAgent.state, record);
+  if (steered.length === 0) return {};
+  const { messages, evicted } = capMessages([...record.messages, ...steered]);
+  return { messages, ...(evicted ? { hasMoreMessages: true } : {}) };
+}
+
 function capMessages(messages: Message[]): { messages: Message[]; evicted: boolean } {
   const selected = selectConversationWindow(messages, {
     maxBytes: ACTIVE_CONVERSATION_MESSAGE_BYTES,
@@ -3312,6 +3319,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       const projected = { ...record, ...projection };
       const records = patchThreadRecord(state.records, frame.threadId, {
         ...projection,
+        ...(visibleChanged ? steeredMessagesPatch(frame.threadId, projected) : {}),
         ...reconcileSavedTurnStatuses(projected, drainedSavingEpoch(frame, previous)),
         serverMessageIds: { ...projected.serverMessageIds, ...canonicalSavedMessageIds(projected) },
       });
@@ -3338,7 +3346,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
           ? recoverParentNarrative(threadId, update.replica.state, { ...current, canonicalAgent: update.replica })
           : {}),
       });
-      const reconciled = reconcileCanonicalRuntime(records, state.runningThreadIds, threadId);
+      const withSteers = patchThreadRecord(records, threadId, steeredMessagesPatch(threadId, getThreadRecord(records, threadId)));
+      const reconciled = reconcileCanonicalRuntime(withSteers, state.runningThreadIds, threadId);
       return {
         records: reconciled.records,
         ...(reconciled.runningThreadIds === state.runningThreadIds ? {} : { runningThreadIds: reconciled.runningThreadIds }),
