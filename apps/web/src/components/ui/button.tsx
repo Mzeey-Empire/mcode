@@ -130,7 +130,8 @@ function Button({
       data-slot="button"
       className={cn(buttonVariants({ variant, size, shape, className }))}
       aria-busy={loading || undefined}
-      aria-disabled={loading || undefined}
+      // Set only while loading: an explicit undefined would erase the aria-disabled that focusableWhenDisabled adds.
+      {...(loading && { "aria-disabled": true })}
       onClick={handleClick}
       {...props}
     >
