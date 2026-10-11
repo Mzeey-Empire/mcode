@@ -1,0 +1,138 @@
+import { describe, expect, it } from "vitest";
+import { classifyClaudeFailure } from "../claude-failure-classifier.js";
+
+const NOW = 1_700_000_000_000;
+
+describe("classifyClaudeFailure", () => {
+  it.each([
+    ["authentication_failed", "auth"],
+    ["oauth_org_not_allowed", "auth"],
+    ["billing_error", "usage_limit"],
+    ["server_error", "retryable"],
+    ["overloaded", "retryable"],
+    ["invalid_request", "fatal"],
+    ["model_not_found", "fatal"],
+    ["max_output_tokens", "fatal"],
+    ["account_on_hold", "fatal"],
+    ["verification_required", "fatal"],
+    ["cloud_credential_error", "auth"],
+  ])("classifies assistant error %s as %s", (assistantError, kind) => {
+    expect(classifyClaudeFailure({ assistantError }, NOW)).toEqual({ kind, code: assistantError });
+  });
+
+  it("lets other signals decide when the assistant error is unknown", () => {
+    expect(classifyClaudeFailure({ assistantError: "unknown", apiErrorStatus: 503 }, NOW)).toEqual({ kind: "retryable", status: 503 });
+    expect(classifyClaudeFailure({ assistantError: "unknown" }, NOW)).toEqual({ kind: "fatal" });
+  });
+
+  it.each([
+    ["gateway_signin_required", "unknown", "auth"],
+    ["gateway_session_expired", "unknown", "auth"],
+    ["api_key_auth_disabled", "invalid_request", "auth"],
+    ["org_disabled_credential", "invalid_request", "auth"],
+    ["provider_credentials", "authentication_failed", "auth"],
+    ["invalid_credential_header", "authentication_failed", "auth"],
+    ["model_requires_usage_credits", "rate_limit", "usage_limit"],
+    ["long_context_credits_required", "rate_limit", "usage_limit"],
+  ])("classifies internal api_error %s (sent with %s) as %s", (apiError, assistantError, kind) => {
+    expect(classifyClaudeFailure({ apiError, assistantError }, NOW)).toEqual({ kind, code: apiError });
+  });
+
+  it("lets the assistant error decide when the api_error is unlisted", () => {
+    expect(classifyClaudeFailure({ apiError: "pdf_too_large", assistantError: "invalid_request" }, NOW)).toEqual({ kind: "fatal", code: "pdf_too_large" });
+    expect(classifyClaudeFailure({ apiError: "no_response", assistantError: "server_error" }, NOW)).toEqual({ kind: "retryable", code: "no_response" });
+  });
+
+  it("never gives a credit requirement a reset window", () => {
+    const rateLimit = { status: "rejected", resetsAt: NOW / 1000 + 90, rateLimitType: "five_hour" };
+    expect(classifyClaudeFailure({ apiError: "model_requires_usage_credits", assistantError: "rate_limit", rateLimit }, NOW))
+      .toEqual({ kind: "usage_limit", code: "model_requires_usage_credits" });
+    expect(classifyClaudeFailure({ assistantError: "billing_error", rateLimit }, NOW)).toEqual({ kind: "usage_limit", code: "billing_error" });
+  });
+
+  it("classifies a missing gateway sign-in as auth", () => {
+    expect(classifyClaudeFailure({ resultSubtype: "error_during_execution", startupFailureReason: "gateway_signin_required" }, NOW))
+      .toEqual({ kind: "auth", code: "gateway_signin_required" });
+  });
+
+  it("gives a rejected rate limit its reset window and limit type", () => {
+    const rateLimit = { status: "rejected", resetsAt: NOW / 1000 + 90, rateLimitType: "five_hour" };
+    expect(classifyClaudeFailure({ rateLimit }, NOW)).toEqual({ kind: "usage_limit", retryAfterMs: 90_000, limitType: "five_hour" });
+  });
+
+  it("omits the wait when no reset is known", () => {
+    expect(classifyClaudeFailure({ rateLimit: { status: "rejected" } }, NOW)).toEqual({ kind: "usage_limit" });
+  });
+
+  it("ignores a rejection whose reset has already passed", () => {
+    expect(classifyClaudeFailure({ rateLimit: { status: "rejected", resetsAt: NOW / 1000 } }, NOW)).toEqual({ kind: "fatal" });
+    expect(classifyClaudeFailure({ rateLimit: { status: "rejected", resetsAt: NOW / 1000 - 1 }, apiErrorStatus: 502 }, NOW))
+      .toEqual({ kind: "retryable", status: 502 });
+  });
+
+  it("treats rate_limit as a usage limit only while a subscription rejection is live", () => {
+    const rejected = { status: "rejected", resetsAt: NOW / 1000 + 90, rateLimitType: "five_hour" };
+    expect(classifyClaudeFailure({ assistantError: "rate_limit", rateLimit: rejected }, NOW))
+      .toEqual({ kind: "usage_limit", code: "rate_limit", retryAfterMs: 90_000, limitType: "five_hour" });
+    // The CLI also sends rate_limit for a plain 429 "temporary capacity issue", which clears on retry.
+    expect(classifyClaudeFailure({ assistantError: "rate_limit", apiErrorStatus: 429 }, NOW)).toEqual({ kind: "retryable", status: 429, code: "rate_limit" });
+    expect(classifyClaudeFailure({ assistantError: "rate_limit", rateLimit: { ...rejected, resetsAt: NOW / 1000 - 1 } }, NOW))
+      .toEqual({ kind: "retryable", code: "rate_limit" });
+    expect(classifyClaudeFailure({ assistantError: "rate_limit", rateLimit: { ...rejected, status: "allowed_warning" } }, NOW))
+      .toEqual({ kind: "retryable", code: "rate_limit" });
+  });
+
+  it("never gives an exhausted credit balance a reset window", () => {
+    const rateLimit = { status: "allowed_warning", resetsAt: NOW / 1000 + 90, rateLimitType: "seven_day" };
+    expect(classifyClaudeFailure({ assistantError: "billing_error", rateLimit }, NOW)).toEqual({ kind: "usage_limit", code: "billing_error" });
+    expect(classifyClaudeFailure({ assistantError: "billing_error", rateLimit: { status: "rejected", resetsAt: NOW / 1000 - 1 } }, NOW))
+      .toEqual({ kind: "usage_limit", code: "billing_error" });
+  });
+
+  it("caps a reset beyond the wire bound at 31 days", () => {
+    const rateLimit = { status: "rejected", resetsAt: NOW / 1000 + 40 * 86_400 };
+    expect(classifyClaudeFailure({ rateLimit }, NOW)).toEqual({ kind: "usage_limit", retryAfterMs: 31 * 86_400_000 });
+  });
+
+  it("keeps the reset window off failures that are not usage limits", () => {
+    const rateLimit = { status: "allowed_warning", resetsAt: NOW / 1000 + 90, rateLimitType: "five_hour" };
+    expect(classifyClaudeFailure({ assistantError: "authentication_failed", rateLimit }, NOW)).toEqual({ kind: "auth", code: "authentication_failed" });
+    expect(classifyClaudeFailure({ rateLimit }, NOW)).toEqual({ kind: "fatal" });
+  });
+
+  it("classifies an unnamed API error by its status and ignores values that are not HTTP statuses", () => {
+    expect(classifyClaudeFailure({ apiErrorStatus: 401 }, NOW)).toEqual({ kind: "auth", status: 401 });
+    expect(classifyClaudeFailure({ assistantError: "unknown", apiErrorStatus: 401 }, NOW)).toEqual({ kind: "auth", status: 401 });
+    expect(classifyClaudeFailure({ apiErrorStatus: 403 }, NOW)).toEqual({ kind: "fatal", status: 403 });
+    expect(classifyClaudeFailure({ apiErrorStatus: 408 }, NOW)).toEqual({ kind: "retryable", status: 408 });
+    expect(classifyClaudeFailure({ apiErrorStatus: 429 }, NOW)).toEqual({ kind: "retryable", status: 429 });
+    expect(classifyClaudeFailure({ apiErrorStatus: 499 }, NOW)).toEqual({ kind: "fatal", status: 499 });
+    expect(classifyClaudeFailure({ apiErrorStatus: 500 }, NOW)).toEqual({ kind: "retryable", status: 500 });
+    expect(classifyClaudeFailure({ apiErrorStatus: 599 }, NOW)).toEqual({ kind: "retryable", status: 599 });
+    expect(classifyClaudeFailure({ apiErrorStatus: 600 }, NOW)).toEqual({ kind: "fatal" });
+    expect(classifyClaudeFailure({ apiErrorStatus: null }, NOW)).toEqual({ kind: "fatal" });
+  });
+
+  it("treats a socket reset as retryable and other stream codes as fatal", () => {
+    expect(classifyClaudeFailure({ streamErrorCode: "ECONNRESET" }, NOW)).toEqual({ kind: "retryable", code: "ECONNRESET" });
+    expect(classifyClaudeFailure({ streamErrorCode: "ENOENT" }, NOW)).toEqual({ kind: "fatal", code: "ENOENT" });
+  });
+
+  it("names a budget or turn cap by its result subtype and an over-long prompt by its terminal reason", () => {
+    expect(classifyClaudeFailure({ resultSubtype: "error_max_turns", terminalReason: "max_turns" }, NOW)).toEqual({ kind: "fatal", code: "error_max_turns" });
+    expect(classifyClaudeFailure({ resultSubtype: "error_max_budget_usd" }, NOW)).toEqual({ kind: "fatal", code: "error_max_budget_usd" });
+    expect(classifyClaudeFailure({ resultSubtype: "success", terminalReason: "prompt_too_long", apiErrorStatus: 400 }, NOW))
+      .toEqual({ kind: "fatal", status: 400, code: "prompt_too_long" });
+  });
+
+  it("carries the provider's retry counters and drops invalid ones", () => {
+    expect(classifyClaudeFailure({ assistantError: "overloaded", apiRetry: { attempt: 3, maxRetries: 10 } }, NOW))
+      .toEqual({ kind: "retryable", code: "overloaded", retries: { made: 3, max: 10 } });
+    expect(classifyClaudeFailure({ apiRetry: { attempt: 0, maxRetries: 0 } }, NOW)).toEqual({ kind: "fatal", retries: { made: 0 } });
+    expect(classifyClaudeFailure({ apiRetry: { attempt: -1 } }, NOW)).toEqual({ kind: "fatal" });
+  });
+
+  it("drops a code that does not fit the wire bounds", () => {
+    expect(classifyClaudeFailure({ resultSubtype: "x".repeat(129), terminalReason: "  " }, NOW)).toEqual({ kind: "fatal" });
+  });
+});

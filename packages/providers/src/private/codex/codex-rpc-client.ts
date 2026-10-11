@@ -21,6 +21,18 @@ export class CodexRpcResponseError extends Error {
   }
 }
 
+/**
+ * The connection to the app-server dropped, closed, or timed out before an answer arrived.
+ * Unlike a {@link CodexRpcResponseError}, the server never refused the request, so trying again
+ * may succeed.
+ */
+export class CodexTransportError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CodexTransportError";
+  }
+}
+
 /** Default timeout in milliseconds for RPC requests. */
 const DEFAULT_TIMEOUT_MS = 20_000;
 
@@ -76,25 +88,25 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
 
     this.onClose = () => {
       this.disposed = true;
-      this.rejectAll(new Error("Stream closed while waiting for response"));
+      this.rejectAll(new CodexTransportError("Stream closed while waiting for response"));
     };
 
     this.onError = (err: Error) => {
       logger.error("CodexRpcClient: stdout stream error", { err });
       this.disposed = true;
-      this.rejectAll(new Error(`Stream error: ${err.message}`));
+      this.rejectAll(new CodexTransportError(`Stream error: ${err.message}`));
     };
 
     this.onStdinError = (err: Error) => {
       logger.error("CodexRpcClient: stdin stream error", { err });
       this.disposed = true;
-      this.rejectAll(new Error(`stdin error: ${err.message}`));
+      this.rejectAll(new CodexTransportError(`stdin error: ${err.message}`));
     };
 
     this.onStdinClose = () => {
       logger.warn("CodexRpcClient: stdin stream closed");
       this.disposed = true;
-      this.rejectAll(new Error("stdin closed while requests pending"));
+      this.rejectAll(new CodexTransportError("stdin closed while requests pending"));
     };
 
     this.stdout.setEncoding("utf8");
@@ -121,7 +133,7 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
     timeoutMs = DEFAULT_TIMEOUT_MS,
   ): Promise<TResult> {
     if (this.disposed) {
-      return Promise.reject(new Error("RPC client is disposed"));
+      return Promise.reject(new CodexTransportError("RPC client is disposed"));
     }
 
     const id = this.nextId++;
@@ -130,7 +142,7 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
     return new Promise<TResult>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Timed out waiting for ${method} (${timeoutMs}ms)`));
+        reject(new CodexTransportError(`Timed out waiting for ${method} (${timeoutMs}ms)`));
       }, timeoutMs);
 
       this.pending.set(id, { resolve, reject, timer });
@@ -138,7 +150,7 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
         if (err) {
           clearTimeout(timer);
           this.pending.delete(id);
-          reject(new Error(`stdin write failed for ${method}: ${err.message}`));
+          reject(new CodexTransportError(`stdin write failed for ${method}: ${err.message}`));
         }
       });
     });
@@ -170,11 +182,11 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
    */
   async sendResponse(id: number, result: unknown): Promise<void> {
     if (this.disposed) {
-      throw new Error("Codex connection is closed");
+      throw new CodexTransportError("Codex connection is closed");
     }
     const message = JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n";
     await new Promise<void>((resolve, reject) => {
-      this.stdin.write(message, (error) => error ? reject(error) : resolve());
+      this.stdin.write(message, (error) => error ? reject(new CodexTransportError(error.message)) : resolve());
     });
   }
 
@@ -193,7 +205,7 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
     this.stdin.off("error", this.onStdinError);
     this.stdin.off("close", this.onStdinClose);
 
-    this.rejectAll(new Error("RPC client disposed"));
+    this.rejectAll(new CodexTransportError("RPC client disposed"));
   }
 
   // ---------------------------------------------------------------------------

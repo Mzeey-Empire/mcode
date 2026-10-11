@@ -4,10 +4,16 @@ import {
   type ContextWindowMode,
   type ProviderBillingMode,
   type ProviderIdentity,
+  type TurnFailure,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import { clampContextWindowToMode } from "./context-window.js";
 import { parseClaudeGoalCommandResult } from "./claude-goal-command-parser.js";
+import {
+  classifyClaudeFailure,
+  type ClaudeApiRetryEvidence,
+  type ClaudeRateLimitEvidence,
+} from "./claude-failure-classifier.js";
 
 type Message = Record<string, unknown>;
 type Usage = {
@@ -102,6 +108,11 @@ export class ClaudeEventMapper {
   private reasoningMessageKey: string | undefined;
   private reasoningMessageOrdinal = 0;
   private nativeSource: Message = {};
+  private assistantError: string | undefined;
+  private apiError: string | undefined;
+  private lastApiRetry: ClaudeApiRetryEvidence | undefined;
+  // Claude reports rate-limit info only when it changes, so the last report outlives the turn that saw it.
+  private lastRateLimit: ClaudeRateLimitEvidence | undefined;
   private readonly handlers: ReadonlyMap<
     string,
     (message: Message) => ClaudeMapOutcome | Promise<ClaudeMapOutcome>
@@ -166,6 +177,24 @@ export class ClaudeEventMapper {
     this.lastAssistantText = "";
     this.lastInputTokens = undefined;
     this.nativeSource = {};
+    this.resetFailureEvidence();
+  }
+
+  /** Classifies an exception thrown by the SDK stream with the evidence the turn gathered so far. */
+  classifyStreamFailure(error: unknown, now: number): TurnFailure {
+    return classifyClaudeFailure({
+      assistantError: this.assistantError,
+      apiError: this.apiError,
+      rateLimit: this.lastRateLimit,
+      apiRetry: this.lastApiRetry,
+      streamErrorCode: nodeErrorCode(error),
+    }, now);
+  }
+
+  private resetFailureEvidence(): void {
+    this.assistantError = undefined;
+    this.apiError = undefined;
+    this.lastApiRetry = undefined;
   }
 
   private captureSessionId(message: Message, initialized: boolean): void {
@@ -188,6 +217,13 @@ export class ClaudeEventMapper {
     const assistant = message.message as
       { content?: Message[]; stop_reason?: string | null } | undefined;
     const content = assistant?.content ?? [];
+    const parentToolCallId = parentId(message);
+    // A subagent's API error ends only that subagent, not the turn. A later main-thread message
+    // without an error means the CLI recovered, so the earlier error no longer explains a failure.
+    if (!parentToolCallId) {
+      this.assistantError = stringOrUndefined(message.error);
+      this.apiError = stringOrUndefined(message.api_error);
+    }
     const text = content
       .filter((block) => block.type === "text")
       .map((block) => stringValue(block.text))
@@ -200,7 +236,6 @@ export class ClaudeEventMapper {
         isFinalResponse: finalStopReason(assistant?.stop_reason ?? null),
       });
     }
-    const parentToolCallId = parentId(message);
     for (const block of content)
       if (block.type === "tool_use") this.emitToolUse(block, parentToolCallId);
     return "none";
@@ -251,6 +286,7 @@ export class ClaudeEventMapper {
     await this.emitQuotaUpdate(snapshot);
     this.emitTurnComplete(message, usage);
     this.resetResult();
+    this.resetFailureEvidence();
     return "turn_complete";
   }
 
@@ -270,6 +306,7 @@ export class ClaudeEventMapper {
       this.invalidatePoisonedSession();
     else this.emitResultError(message);
     this.resetResult();
+    this.resetFailureEvidence();
     return "result_error";
   }
 
@@ -300,7 +337,17 @@ export class ClaudeEventMapper {
       subtype: message.subtype,
       payload: message,
     });
-    this.emit({ type: AgentEventType.Error, threadId: this.threadId, error, failure: { kind: "fatal" } });
+    const failure = classifyClaudeFailure({
+      assistantError: this.assistantError,
+      apiError: stringOrUndefined(message.api_error) ?? this.apiError,
+      resultSubtype: stringOrUndefined(message.subtype),
+      terminalReason: stringOrUndefined(message.terminal_reason),
+      startupFailureReason: stringOrUndefined(message.startup_failure_reason),
+      apiErrorStatus: numberValue(message.api_error_status),
+      rateLimit: this.lastRateLimit,
+      apiRetry: this.lastApiRetry,
+    }, Date.now());
+    this.emit({ type: AgentEventType.Error, threadId: this.threadId, error, failure });
   }
 
   private observeGoal(message: Message): void {
@@ -408,6 +455,7 @@ export class ClaudeEventMapper {
       });
   }
   private apiRetry(message: Message): void {
+    this.lastApiRetry = { attempt: numberValue(message.attempt), maxRetries: numberValue(message.max_retries) };
     this.emit({
       type: AgentEventType.ApiRetry,
       threadId: this.threadId,
@@ -636,6 +684,7 @@ export class ClaudeEventMapper {
       | undefined;
     const active = info?.status === undefined ? undefined : RATE_LIMIT_ACTIVE_BY_STATUS.get(info.status);
     if (!info || active === undefined) return "none";
+    this.lastRateLimit = { status: info.status, resetsAt: info.resetsAt, rateLimitType: info.rateLimitType };
     this.emit(active
       ? {
         type: AgentEventType.RateLimited,
@@ -698,6 +747,13 @@ function toolResultText(content: unknown): string {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+/** Node system errors carry their errno name in `code`, e.g. "ECONNRESET". */
+function nodeErrorCode(error: unknown): string | undefined {
+  return error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : undefined;
 }
 function stringOr(value: unknown, fallback: string): string {
   return typeof value === "string" && value.length > 0 ? value : fallback;

@@ -296,8 +296,9 @@ describe("CodexProvider permission flow", () => {
         exit: { code: 2, signal: null },
         stderrTail: ["crash"],
       };
-      Object.assign(result.state.server as unknown as { _lastTransportBreadcrumb: unknown }, {
+      Object.assign(result.state.server as unknown as { _lastTransportBreadcrumb: unknown; _lastFatalKind: unknown }, {
         _lastTransportBreadcrumb: breadcrumb,
+        _lastFatalKind: "retryable",
       });
 
       result.state.server.emit("fatal", "simulated fatal");
@@ -320,7 +321,7 @@ describe("CodexProvider permission flow", () => {
             },
           },
         },
-        { event: { type: AgentEventType.Error, threadId, error: "simulated fatal", failure: { kind: "fatal" } } },
+        { event: { type: AgentEventType.Error, threadId, error: "simulated fatal", failure: { kind: "retryable" } } },
       ]);
     } finally {
       start.mockRestore();

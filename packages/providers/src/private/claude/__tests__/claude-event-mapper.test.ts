@@ -209,3 +209,91 @@ describe("ClaudeEventMapper rate limits", () => {
     await expect(eventsFor(info)).resolves.toEqual([]);
   });
 });
+
+describe("ClaudeEventMapper failure classification", () => {
+  function failures(events: AgentEvent[]) {
+    return events.flatMap((event) => event.type === AgentEventType.Error ? [event.failure] : []);
+  }
+
+  it("classifies a failed result after an authentication_failed assistant message as auth", async () => {
+    const { events, mapper } = createMapper();
+    await mapper.map({ type: "assistant", parent_tool_use_id: null, error: "authentication_failed", message: { content: [] } });
+    await mapper.map({ type: "result", subtype: "success", is_error: true, result: "Not logged in", api_error_status: 401 });
+    expect(failures(events)).toEqual([{ kind: "auth", status: 401, code: "authentication_failed" }]);
+  });
+
+  it("gives a usage limit the reset window of the last rejected rate-limit event", async () => {
+    vi.useFakeTimers({ now: 1_700_000_000_000 });
+    try {
+      const { events, mapper } = createMapper();
+      await mapper.map({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: 1_700_003_600, rateLimitType: "seven_day" } });
+      await mapper.map({ type: "assistant", parent_tool_use_id: null, error: "rate_limit", message: { content: [] } });
+      await mapper.map({ type: "result", subtype: "success", is_error: true, result: "limit reached", api_error_status: 429 });
+      expect(failures(events)).toEqual([{ kind: "usage_limit", status: 429, code: "rate_limit", retryAfterMs: 3_600_000, limitType: "seven_day" }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("carries the provider's own retries into a retryable server failure", async () => {
+    const { events, mapper } = createMapper();
+    await mapper.map({ type: "system", subtype: "api_retry", attempt: 10, max_retries: 10, retry_delay_ms: 500, error_status: 529, error: "overloaded" });
+    await mapper.map({ type: "result", subtype: "success", is_error: true, result: "Overloaded", api_error_status: 529 });
+    expect(failures(events)).toEqual([{ kind: "retryable", status: 529, retries: { made: 10, max: 10 } }]);
+  });
+
+  it("ignores a subagent's API error and forgets evidence once a failed turn ends", async () => {
+    const { events, mapper } = createMapper();
+    await mapper.map({ type: "assistant", parent_tool_use_id: "AGENT_1", error: "authentication_failed", message: { content: [] } });
+    await mapper.map({ type: "result", subtype: "error_max_turns", is_error: true, errors: ["max turns"], terminal_reason: "max_turns" });
+    await mapper.map({ type: "assistant", parent_tool_use_id: null, error: "billing_error", message: { content: [] } });
+    await mapper.map({ type: "result", subtype: "error_during_execution", is_error: true, errors: ["no credit"] });
+    await mapper.map({ type: "result", subtype: "error_during_execution", is_error: true, errors: ["boom"] });
+    expect(failures(events)).toEqual([
+      { kind: "fatal", code: "error_max_turns" },
+      { kind: "usage_limit", code: "billing_error" },
+      { kind: "fatal", code: "error_during_execution" },
+    ]);
+  });
+
+  it("forgets an API error the CLI recovered from within the turn", async () => {
+    const { events, mapper } = createMapper();
+    await mapper.map({ type: "assistant", parent_tool_use_id: null, error: "max_output_tokens", message: { content: [] } });
+    await mapper.map({ type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "text", text: "continuing" }] } });
+    await mapper.map({ type: "result", subtype: "success", is_error: true, result: "Bad gateway", api_error_status: 502 });
+    expect(failures(events)).toEqual([{ kind: "retryable", status: 502 }]);
+  });
+
+  it("classifies by the internal api_error the CLI attaches to the failing message", async () => {
+    const { events, mapper } = createMapper();
+    await mapper.map({ type: "assistant", parent_tool_use_id: null, error: "unknown", api_error: "gateway_session_expired", message: { content: [] } });
+    await mapper.map({ type: "result", subtype: "success", is_error: true, result: "Session expired" });
+    await mapper.map({ type: "assistant", parent_tool_use_id: null, error: "rate_limit", message: { content: [] } });
+    await mapper.map({ type: "result", subtype: "success", is_error: true, result: "Extra usage required", api_error: "model_requires_usage_credits", api_error_status: 429 });
+    expect(failures(events)).toEqual([
+      { kind: "auth", code: "gateway_session_expired" },
+      { kind: "usage_limit", status: 429, code: "model_requires_usage_credits" },
+    ]);
+  });
+
+  it("ignores the api_error of a subagent message", async () => {
+    const { events, mapper } = createMapper();
+    await mapper.map({ type: "assistant", parent_tool_use_id: "tool-1", error: "unknown", api_error: "gateway_signin_required", message: { content: [] } });
+    await mapper.map({ type: "result", subtype: "success", is_error: true, result: "Bad gateway", api_error_status: 502 });
+    expect(failures(events)).toEqual([{ kind: "retryable", status: 502 }]);
+  });
+
+  it("does not treat a usage warning as a usage limit", async () => {
+    const { events, mapper } = createMapper();
+    await mapper.map({ type: "rate_limit_event", rate_limit_info: { status: "allowed_warning", resetsAt: 1_700_003_600, rateLimitType: "five_hour" } });
+    await mapper.map({ type: "result", subtype: "error_during_execution", is_error: true, errors: ["boom"] });
+    expect(failures(events)).toEqual([{ kind: "fatal", code: "error_during_execution" }]);
+  });
+
+  it("classifies a stream socket reset as retryable", () => {
+    const { mapper } = createMapper();
+    const reset = Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+    expect(mapper.classifyStreamFailure(reset, 0)).toEqual({ kind: "retryable", code: "ECONNRESET" });
+    expect(mapper.classifyStreamFailure(new Error("Claude Code process exited with code 1"), 0)).toEqual({ kind: "fatal" });
+  });
+});

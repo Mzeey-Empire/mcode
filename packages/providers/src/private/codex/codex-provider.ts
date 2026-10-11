@@ -12,7 +12,8 @@ import { SUBAGENT_REPORTING } from "@mcode/contracts";
 
 import * as NodeEvents from "node:events";
 import { approvalReceipt } from "../../approvals/approval-receipt.js";
-import type { ApprovalOutcome, ApprovalChoice } from "@mcode/contracts";
+import type { ApprovalOutcome, ApprovalChoice, TurnFailure } from "@mcode/contracts";
+import { classifyCodexLocalFailure } from "./codex-failure-classifier.js";
 import * as NodeCrypto from "node:crypto";
 import { logger } from "@mcode/shared";
 import { buildMcodeInstructionPlan, renderMcodeInstructions } from "@mcode/thread-orchestration";
@@ -894,6 +895,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private emitTurnFailure(
     threadId: string,
     error: string,
+    failure: TurnFailure,
     outcome?: CodexEndedOutcome,
     emitEnded = true,
     turnExecutionId?: string,
@@ -902,7 +904,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       type: AgentEventType.Error,
       threadId,
       error,
-      failure: { kind: "fatal" },
+      failure,
       ...(turnExecutionId ? { turnExecutionId } : {}),
     } satisfies AgentEvent));
     if (!turnExecutionId) return undefined;
@@ -1212,7 +1214,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     } catch (error) {
       if (!(error instanceof CodexPromptResolutionError)) throw error;
       logger.debug("Codex prompt expansion failed", { promptName: error.promptName, cause: error.cause instanceof Error ? error.cause.message : String(error.cause) });
-      this.emitTurnFailure(threadId, error.message, undefined, true, request.turnExecutionId);
+      this.emitTurnFailure(threadId, error.message, { kind: "fatal" }, undefined, true, request.turnExecutionId);
       return undefined;
     }
   }
@@ -1283,7 +1285,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const preflight = this.checkCodexCliPreflight(turn.cliPath);
     if (preflight.ok) return true;
     const error = preflight.reason === "unavailable" ? preflight.error : `Codex CLI version ${preflight.version} is not supported. Minimum required: ${CODEX_MIN_VERSION}. Update with: npm install -g @openai/codex`;
-    this.emitTurnFailure(turn.threadId, error, undefined, true, turn.request.turnExecutionId);
+    this.emitTurnFailure(turn.threadId, error, { kind: "fatal" }, undefined, true, turn.request.turnExecutionId);
     return false;
   }
 
@@ -1317,7 +1319,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       this.releaseStagedCodexTurn(request.sessionId, turn.signal);
       const message = error instanceof Error ? error.message : String(error);
       logger.error("CodexAppServer start failed", { sessionId: request.sessionId, error: message });
-      this.emitTurnFailure(threadId, message, undefined, true, request.turnExecutionId);
+      this.emitTurnFailure(threadId, message, classifyCodexLocalFailure(error), undefined, true, request.turnExecutionId);
       return undefined;
     }
   }
@@ -1371,7 +1373,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     state.turnDiffRevision = 0;
     void this.dispatchReusedCodexTurn(turn, state).catch((error: unknown) => {
       if (turn.signal.aborted) this.emitCancelledCodexRequest(turn.request);
-      else this.emitTurnFailure(turn.threadId, error instanceof Error ? error.message : String(error), "errored", true, turn.request.turnExecutionId);
+      else this.emitTurnFailure(turn.threadId, error instanceof Error ? error.message : String(error), classifyCodexLocalFailure(error), "errored", true, turn.request.turnExecutionId);
       this.releaseStagedCodexTurn(turn.request.sessionId, turn.signal);
       this.releasePendingCodexRequest(turn.request.sessionId, turn.signal);
     });
@@ -1597,7 +1599,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
           method: notification.method, errorType: error instanceof Error ? error.name : "unknown" });
       }
     });
-    server.on("fatal", (error: string) => this.handleCodexServerFatal(context, server, mapper, error));
+    server.on("fatal", (error: string) => this.handleCodexServerFatal(context, server, mapper, error, { kind: server.lastFatalKind }));
     this.attachFatalDrain(context.sessionId, server);
     server.on("exit", () => {
       // Only evict when this server is still the pooled one — a drained
@@ -1684,6 +1686,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     server: CodexAppServer,
     mapper: CodexEventMapper,
     error: string,
+    failure: TurnFailure,
   ): void {
     if (this.activeCodexServers.get(context.sessionId) !== server) return;
     logger.error("CodexAppServer fatal", { sessionId: context.sessionId, error, breadcrumb: server.lastTransportBreadcrumb });
@@ -1693,7 +1696,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       const runtimeEvent = providerRuntimeEvent(executionId ? { ...event, turnExecutionId: executionId } : event);
       this.emitRuntimeEvent(entry ? this.withCodexTurnAttempt(entry, runtimeEvent, executionId) : runtimeEvent);
     });
-    this.emitCodexTransportFailure(context.threadId, error, entry, executionId);
+    this.emitCodexTransportFailure(context.threadId, error, failure, entry, executionId);
     if (this.runtime.get(context.sessionId)?.server === server) {
       void this.runtime.stop(context.sessionId);
     }
@@ -1709,13 +1712,13 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     }
   }
 
-  private emitCodexTransportFailure(threadId: string, error: string, entry: CodexSessionState | undefined, executionId: string | undefined): void {
+  private emitCodexTransportFailure(threadId: string, error: string, failure: TurnFailure, entry: CodexSessionState | undefined, executionId: string | undefined): void {
     if (!entry || !executionId) {
-      this.emitTurnFailure(threadId, error, "errored", true, executionId);
+      this.emitTurnFailure(threadId, error, failure, "errored", true, executionId);
       return;
     }
     // Confirmed process failure must retain the active attempt's terminal routing.
-    this.emitCodexTurnEvent(entry, { type: AgentEventType.Error, threadId, error, failure: { kind: "fatal" } }, executionId);
+    this.emitCodexTurnEvent(entry, { type: AgentEventType.Error, threadId, error, failure }, executionId);
     this.emitCodexTurnEvent(entry, { type: AgentEventType.Ended, threadId, turnExecutionId: executionId, outcome: "errored" }, executionId);
   }
 
@@ -2565,7 +2568,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
         const error = err instanceof Error ? err.message : String(err);
         logger.error("Codex goal install failed", { sessionId, error });
         this.emitGoalCleared(sessionId, "rollback");
-        this.emitTurnFailure(threadId, error, "errored", true, turnExecutionId);
+        this.emitTurnFailure(threadId, error, classifyCodexLocalFailure(err), "errored", true, turnExecutionId);
         return;
       }
       if (signal.aborted) return;
@@ -2798,7 +2801,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       const message = error instanceof Error ? error.message : String(error);
       logger.error("Codex turn failed", { sessionId, error: message });
       this.emitCodexPendingAssistantBoundary(run.entry, turnExecutionId);
-      completion.deferredEnded = this.emitTurnFailure(threadId, message, completion.endedOutcome, false, turnExecutionId);
+      completion.deferredEnded = this.emitTurnFailure(threadId, message, classifyCodexLocalFailure(error), completion.endedOutcome, false, turnExecutionId);
     }
     return false;
   }

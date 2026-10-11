@@ -235,6 +235,7 @@ describe("ClaudeProvider sendMessage on closed queue (#292)", () => {
     const errorEvents = events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Error);
     expect(errorEvents.length).toBeGreaterThan(0);
     expect(errorEvents.some((runtimeEvent) => /queue full/i.test(runtimeEvent.event.error ?? ""))).toBe(true);
+    expect(errorEvents.map((runtimeEvent) => runtimeEvent.event.failure)).toEqual(errorEvents.map(() => ({ kind: "retryable" })));
     expect(errorEvents.every((runtimeEvent) => !/shutting down/i.test(runtimeEvent.event.error ?? ""))).toBe(true);
   });
 });

@@ -151,6 +151,23 @@ describe("ClaudeProvider permission mode changes", () => {
     expect(credentials.size()).toBe(0);
   });
 
+  it("asks the CLI to report startup failures as classifiable results", async () => {
+    await provider.sendTurn({
+      turnExecutionId: "test-execution",
+      sessionId: "mcode-startup-results",
+      threadId: "startup-results",
+      message: "hello",
+      cwd: process.cwd(),
+      model: "claude-sonnet-4-6",
+      permissionMode: "supervised",
+      interactionMode: "build",
+      providerOptions: {},
+    });
+
+    expect(sdkCalls[0]!.options.env).toMatchObject({ CLAUDE_CODE_STARTUP_FAILURE_RESULTS: "1" });
+    await provider.stopSession("mcode-startup-results");
+  });
+
   it("reuses the session when permissionMode is unchanged", async () => {
     await provider.sendTurn({
       turnExecutionId: "test-execution",
