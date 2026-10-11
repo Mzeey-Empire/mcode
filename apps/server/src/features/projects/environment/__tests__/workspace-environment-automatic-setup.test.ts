@@ -431,6 +431,66 @@ describe("automatic Project Setup", () => {
     expect(prepare).toHaveBeenCalledOnce();
   });
 
+  it("skips an approval-waiting shared Setup so a later approval cannot launch it", async () => {
+    const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-automatic-approval-skip-"));
+    roots.push(root);
+    const baseCheckout = NodePath.join(root, "base");
+    const worktreeCheckout = NodePath.join(root, "worktree");
+    await NodeFSPromises.mkdir(worktreeCheckout, { recursive: true });
+    const db = openOwnedDatabase();
+    db.prepare("INSERT INTO workspaces (id, name, path, provider_config) VALUES ('workspace-1', 'Project', '/project', '{}')").run();
+    db.prepare("INSERT INTO threads (id, workspace_id, title, mode, branch, worktree_managed, provider) VALUES ('thread-1', 'workspace-1', 'First Turn', 'worktree', 'main', 1, 'claude')").run();
+    const start = vi.fn(async () => await new Promise<never>(() => undefined));
+    const prepare = vi.fn(async () => ({
+      kind: "ready" as const,
+      command: {
+        snapshot: { checkoutPath: worktreeCheckout, terminal: { executable: "sh", arguments: ["-c", "bun run setup"] } },
+        start,
+        close: async () => ({ kind: "contained" as const }),
+        waitForRelease: async () => undefined,
+      },
+    }));
+    const service = new WorkspaceEnvironmentService({
+      mcodeDir: root,
+      database: databaseReader(db),
+    databaseWriter: databaseWriter(db),
+      workspaces: { findById: (id) => id === "workspace-1" ? { id, path: baseCheckout } : null },
+      threads: { findById: (id) => id === "thread-1" ? {
+        id,
+        workspace_id: "workspace-1",
+        mode: "worktree",
+        worktree_managed: true,
+        worktree_path: worktreeCheckout,
+      } : null },
+      terminalCommands: { prepare },
+      platform: "linux",
+    });
+    service.setAutomaticSetupDispatcher({ dispatch: vi.fn().mockResolvedValue({ completion: Promise.resolve() }) });
+    await service.setStorageMode({ workspaceId: "workspace-1", threadId: "thread-1", storageMode: "shared" });
+    await service.save({
+      workspaceId: "workspace-1",
+      threadId: "thread-1",
+      sourceRevision: null,
+      document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
+    });
+    await service.queueAutomaticFirstTurn(queuedInput());
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: "thread-1" }).attempt?.state).toBe("awaiting-approval"));
+    const approval = service.getAutomaticSetup({ threadId: "thread-1" }).attempt?.snapshot?.approval;
+    if (!approval) throw new Error("Expected shared Setup approval");
+
+    await expect(service.continueAutomaticSetup({ threadId: "thread-1" })).resolves.toMatchObject({
+      gate: "released-by-continue",
+      attempt: { state: "interrupted" },
+    });
+    await service.approveCommand({ threadId: "thread-1", ...approval });
+
+    expect(service.getAutomaticSetup({ threadId: "thread-1" })).toMatchObject({
+      gate: "released-by-continue",
+      attempt: { state: "interrupted" },
+    });
+    expect(start).not.toHaveBeenCalled();
+  });
+
   it("rejects the next active queued Turn at the per-Thread capacity boundary", async () => {
     const { service } = await automaticHarness();
 

@@ -421,12 +421,15 @@ export class WorkspaceEnvironmentService {
     this.requireAutomaticSetupThread(input.threadId);
     const repository = this.requireAutomaticRepository();
     const current = repository.snapshot(input.threadId);
-    if (current.attempt?.state !== "failed" && current.attempt?.state !== "interrupted") {
+    const state = current.attempt?.state;
+    if (state !== "failed" && state !== "interrupted" && state !== "awaiting-approval") {
       throw new WorkspaceEnvironmentServiceError(
         "WORKSPACE_ENVIRONMENT_SETUP_UNAVAILABLE",
-        "Automatic Setup can continue only after Setup failed or was interrupted",
+        "Automatic Setup can continue only after Setup failed, was interrupted, or is awaiting approval",
       );
     }
+    // Skipping an unapproved command retires its attempt, so a later approval cannot launch Setup under a running agent.
+    if (state === "awaiting-approval") await repository.interruptCurrentAttempt(input.threadId);
     if (!await repository.continueWithoutSetup(input.threadId)) {
       await this.settleStartupAfterDrain(input.threadId);
       return repository.snapshot(input.threadId);
