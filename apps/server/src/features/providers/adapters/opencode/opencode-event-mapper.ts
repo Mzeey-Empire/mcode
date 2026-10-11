@@ -1,4 +1,4 @@
-import { createSubagentPresentation, type AgentEvent } from "@mcode/contracts";
+import { createSubagentPresentation, type AgentEvent, type TurnFailure } from "@mcode/contracts";
 
 /**
  * SSE envelope accepted in both wrapped and flat shapes.
@@ -164,6 +164,30 @@ function mapSessionIdle(ctx: MapperContext): OpenCodeMappedOutput {
   };
 }
 
+function httpStatus(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599 ? value : undefined;
+}
+
+function classifyOpenCodeApiFailure(data: Record<string, unknown>): TurnFailure {
+  const message = boundText(data.message);
+  const status = httpStatus(data.statusCode) ?? httpStatus(Number(/failed with HTTP (\d{3})\b/.exec(message)?.[1]));
+  let kind: TurnFailure["kind"] = "fatal";
+  if (data.isRetryable === true || status === 429 || (status !== undefined && status >= 500)) kind = "retryable";
+  if (status === 429 && /quota|usage[ _-]limit|insufficient[ _-]credits/i.test(message)) kind = "usage_limit";
+  return { kind, ...(status === undefined ? {} : { status }) };
+}
+
+/** Classifies native session errors and HTTP client failures without losing their status. */
+export function classifyOpenCodeFailure(error: unknown): TurnFailure {
+  if (error instanceof Error) return classifyOpenCodeApiFailure({ message: error.message });
+  if (!isRecord(error)) return { kind: "fatal" };
+  const code = boundedString(boundText(error.name).trim(), 128);
+  const data = isRecord(error.data) ? error.data : {};
+  const failure: TurnFailure = code === "ProviderAuthError" ? { kind: "auth" }
+    : code === "APIError" ? classifyOpenCodeApiFailure(data) : { kind: "fatal" };
+  return { ...failure, ...(code === undefined ? {} : { code }) };
+}
+
 function mapSessionError(properties: Record<string, unknown>, ctx: MapperContext): OpenCodeMappedOutput {
   const err = properties.error;
   const detail = isRecord(err) && isRecord(err.data) && typeof err.data.message === "string"
@@ -172,7 +196,7 @@ function mapSessionError(properties: Record<string, unknown>, ctx: MapperContext
       ? boundDiagnostic(JSON.stringify(err).slice(0, MAX_DIAGNOSTIC_CHARS))
       : "OpenCode session error";
   const events: AgentEvent[] = [
-    withExecution({ type: "error", threadId: ctx.threadId, error: detail, failure: { kind: "fatal" } } satisfies AgentEvent, ctx),
+    withExecution({ type: "error", threadId: ctx.threadId, error: detail, failure: classifyOpenCodeFailure(err) } satisfies AgentEvent, ctx),
   ];
   // Authentication failures are security-sensitive: they stay visible as a
   // scoped recovery notice instead of a bare error string.

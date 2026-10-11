@@ -52,7 +52,7 @@ const submittedBatchSchema = z.object({ events: z.array(z.object({ payload: z.ob
 }) }) })) });
 const capturedTraceSchema = z.object({ events: z.array(z.unknown()) });
 
-async function replaySubagentFrames(frames: unknown[], parentSessionId: string) {
+async function replaySubagentFrames(frames: unknown[], parentSessionId: string, promptError?: Error) {
   const pool = new OpenCodeServerPool({
     spawn: () => ({ pid: 4242, on: () => {}, off: () => {}, kill: () => true }),
     waitForHealth: async () => {}, terminateTree: async () => {}, findFreePort: async () => 4096,
@@ -60,7 +60,8 @@ async function replaySubagentFrames(frames: unknown[], parentSessionId: string) 
   });
   const status = vi.fn(async () => ({ [parentSessionId]: { type: "idle" } }));
   const http: OpenCodeHttpClient = { ...defaultOpenCodeHttpClient,
-    createSession: async () => ({ id: parentSessionId }), promptAsync: async () => {}, abortSession: async () => {},
+    createSession: async () => ({ id: parentSessionId }),
+    promptAsync: async () => { if (promptError) throw promptError; }, abortSession: async () => {},
     listSessionMessages: async () => [], getSessionStatus: status,
     subscribeEvents: async (_endpoint, _signal, onEnvelope) => { for (const frame of frames) onEnvelope(frame); },
   };
@@ -73,6 +74,50 @@ async function replaySubagentFrames(frames: unknown[], parentSessionId: string) 
     await provider.shutdown();
   }
 }
+
+describe("OpenCode failed turns", () => {
+  it.each([
+    { name: "ProviderAuthError", data: { providerID: "anthropic", message: "Login expired" }, failure: { kind: "auth", code: "ProviderAuthError" } },
+    { name: "APIError", data: { message: "Service unavailable", statusCode: 503, isRetryable: false }, failure: { kind: "retryable", status: 503, code: "APIError" } },
+    { name: "APIError", data: { message: "Connection reset", isRetryable: true }, failure: { kind: "retryable", code: "APIError" } },
+    { name: "APIError", data: { message: "Quota exhausted", statusCode: 429, isRetryable: true }, failure: { kind: "usage_limit", status: 429, code: "APIError" } },
+    { name: "APIError", data: { message: "Too many requests", statusCode: 429, isRetryable: false }, failure: { kind: "retryable", status: 429, code: "APIError" } },
+    { name: "APIError", data: { message: "Invalid request", statusCode: 400, isRetryable: false }, failure: { kind: "fatal", status: 400, code: "APIError" } },
+    { name: "UnknownError", data: { message: "" }, failure: { kind: "fatal", code: "UnknownError" } },
+    { name: "APIError", data: { message: "Bad metadata", statusCode: "503", isRetryable: "true" }, failure: { kind: "fatal", code: "APIError" } },
+  ])("emits one classified error for $name: $data.message", async ({ name, data, failure }) => {
+    const frame = { type: "session.error", properties: { sessionID: "ses_parent", error: { name, data } } };
+    const { events } = await replaySubagentFrames([frame, frame, { type: "session.idle", properties: { sessionID: "ses_parent" } }], "ses_parent");
+    expect(events.filter((event) => event.type === "error").map((event) => ({ error: event.error, failure: event.failure })))
+      .toEqual([{ error: data.message, failure }]);
+    expect(events.filter((event) => event.type === "ended").map((event) => event.outcome)).toEqual(["errored"]);
+    expect(events.filter((event) => event.type === "turnComplete")).toEqual([]);
+  });
+
+  it("classifies the HTTP client's thrown status and keeps its message", async () => {
+    const message = "OpenCode prompt_async failed with HTTP 503";
+    const { events } = await replaySubagentFrames([], "ses_parent", new Error(message));
+    expect(events.filter((event) => event.type === "error").map((event) => ({ error: event.error, failure: event.failure })))
+      .toEqual([{ error: message, failure: { kind: "retryable", status: 503 } }]);
+    expect(events.filter((event) => event.type === "ended").map((event) => event.outcome)).toEqual(["errored"]);
+  });
+
+  it.each([{ next: 1_800_000_008_000, delayMs: 8_000 }, { next: 1_799_999_999_000, delayMs: 0 }])(
+    "forwards a retry status with delay $delayMs before a single terminal failure", async ({ next, delayMs }) => {
+      const clock = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
+      try {
+        const { events } = await replaySubagentFrames([
+          { type: "session.status", properties: { sessionID: "ses_parent", status: { type: "retry", attempt: 2, message: "Service unavailable", next } } },
+          { type: "session.error", properties: { sessionID: "ses_parent", error: { name: "APIError", data: { message: "Retries exhausted", statusCode: 503, isRetryable: true } } } },
+        ], "ses_parent");
+        expect(events.filter((event) => event.type === "apiRetry").map((event) => ({ reason: event.reason, attempt: event.attempt, delayMs: event.delayMs })))
+          .toEqual([{ reason: "Service unavailable", attempt: 2, delayMs }]);
+        expect(events.filter((event) => ["apiRetry", "error", "ended"].includes(event.type)).map((event) => event.type))
+          .toEqual(["apiRetry", "error", "ended"]);
+      } finally { clock.mockRestore(); }
+    },
+  );
+});
 
 describe("OpenCode subagent routing", () => {
   it("replays the captured child reads into one parent turn without child text", async () => {

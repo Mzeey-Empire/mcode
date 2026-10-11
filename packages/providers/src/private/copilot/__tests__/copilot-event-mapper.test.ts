@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import type { SessionEvent } from "@github/copilot-sdk";
+import { AgentEventSchema } from "@mcode/contracts";
 import { parseCopilotCapturedTrace } from "../../../conformance/copilot-trace.js";
 import { mapCopilotEvent, type CopilotTurnState } from "../copilot-event-mapper.js";
 
@@ -6,6 +8,44 @@ function turnState(): CopilotTurnState {
   return { nativeIdleObserved: false, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0,
     tools: new Map(), pendingPermissions: new Map(), completed: Promise.resolve(), settle: () => {} };
 }
+
+describe("Copilot session errors", () => {
+  it.each([
+    { errorType: "quota", failure: { kind: "usage_limit", code: "quota" } },
+    { errorType: "query", statusCode: 503, failure: { kind: "retryable", status: 503, code: "query" } },
+    { errorType: "authentication", failure: { kind: "auth", code: "authentication" } },
+    { errorType: "authorization", statusCode: 403, failure: { kind: "auth", status: 403, code: "authorization" } },
+    { errorType: "rate_limit", statusCode: 429, failure: { kind: "retryable", status: 429, code: "rate_limit" } },
+    { errorType: "context_limit", statusCode: 503, failure: { kind: "fatal", status: 503, code: "context_limit" } },
+    { errorType: "unknown", failure: { kind: "fatal", code: "unknown" } },
+  ])("classifies $errorType with status $statusCode", ({ errorType, statusCode, failure }) => {
+    const events = mapCopilotEvent({ id: "EVENT_1", parentId: null, timestamp: "2000-01-01T00:00:00.000Z",
+      type: "session.error", data: { errorType, statusCode, message: "Native failure" },
+    }, "thread", turnState());
+    expect(events).toEqual([{ type: "error", threadId: "thread", error: "Native failure", failure }]);
+    expect(AgentEventSchema().parse(events[0])).toEqual(events[0]);
+  });
+
+  it.each([undefined, null, "503", 99, 600, 503.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    "omits an invalid optional HTTP status %s without losing the native message", (statusCode) => {
+      const event: SessionEvent = { id: "EVENT_1", parentId: null, timestamp: "2000-01-01T00:00:00.000Z",
+        type: "session.error", data: { errorType: "query", message: "Native failure" } };
+      Object.assign(event.data, { statusCode });
+      expect(mapCopilotEvent(event, "thread", turnState())).toEqual([
+        { type: "error", threadId: "thread", error: "Native failure", failure: { kind: "fatal", code: "query" } },
+      ]);
+    },
+  );
+
+  it.each([undefined, null, 42, {}, " ", "x".repeat(129)])("omits a malformed native error code %s", (errorType) => {
+    const event: SessionEvent = { id: "EVENT_1", parentId: null, timestamp: "2000-01-01T00:00:00.000Z",
+      type: "session.error", data: { errorType: "query", statusCode: 503, message: "Native failure" } };
+    Object.assign(event.data, { errorType });
+    expect(mapCopilotEvent(event, "thread", turnState())).toEqual([
+      { type: "error", threadId: "thread", error: "Native failure", failure: { kind: "retryable", status: 503 } },
+    ]);
+  });
+});
 
 // Synthetic child-tool coverage derived from copilot-core.captured.json envelope shapes.
 function trace(failed = false, description = true) {
