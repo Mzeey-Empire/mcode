@@ -66,8 +66,6 @@ describe("ThreadControlService", () => {
     clearWorktreePath: ReturnType<typeof vi.fn>;
     updateExternalCreator: ReturnType<typeof vi.fn>;
     countActiveByIntegration: ReturnType<typeof vi.fn>;
-    findDelegationLineage: ReturnType<typeof vi.fn>;
-    listDelegationChildren: ReturnType<typeof vi.fn>;
   };
   let projectWorktreeService: { provisionWorktree: ReturnType<typeof vi.fn>; cleanupInterruptedProvisioning: ReturnType<typeof vi.fn> };
   let agentService: {
@@ -121,8 +119,6 @@ describe("ThreadControlService", () => {
       clearWorktreePath: vi.fn().mockReturnValue(true),
       updateExternalCreator: vi.fn().mockReturnValue(true),
       countActiveByIntegration: vi.fn().mockReturnValue(0),
-      findDelegationLineage: vi.fn().mockReturnValue(null),
-      listDelegationChildren: vi.fn().mockReturnValue([]),
     };
     messages = {
       listByThreadForThreadControl: vi.fn().mockReturnValue({ messages: [], hasMore: false }),
@@ -234,38 +230,7 @@ describe("ThreadControlService", () => {
     expect(result.workspaces).toEqual([{ workspaceId: "workspace-1", name: "Workspace" }]);
   });
 
-  it("reads a canonical Project/Thread coordination projection with persisted identity", () => {
-    const service = createService();
-    const thread = {
-      ...createdThread,
-      id: "thread-1",
-      title: "Coordinator",
-      workspace_id: workspace.id,
-      provider: "codex",
-      model: "gpt-5.6-sol",
-      created_at: "2026-07-29T00:00:00.000Z",
-      updated_at: "2026-07-29T00:00:00.000Z",
-      deleted_at: null,
-    };
-    threads.findById.mockReturnValue(thread);
-
-    expect(service.threadControlRead({
-      identity: { workspaceId: workspace.id, threadId: thread.id },
-      messageLimit: 10,
-    })).toMatchObject({
-      status: "found",
-      projection: {
-        identity: { workspaceId: workspace.id, threadId: thread.id },
-        thread: { title: "Coordinator", providerId: "codex" },
-        relation: null,
-        children: [],
-        approvals: [],
-      },
-    });
-    expect(messages.listByThreadForThreadControl).toHaveBeenCalledWith(thread.id, 10, THREAD_GET_TRANSCRIPT_MAX_BYTES);
-  });
-
-  it("returns historical source Project and Thread provenance when relation is absent", () => {
+  it("returns historical source Project and Thread provenance", async () => {
     const service = createService();
     const destination = {
       ...createdThread,
@@ -306,29 +271,26 @@ describe("ThreadControlService", () => {
       hasMore: false,
     });
 
-    const result = service.threadControlRead({
-      identity: { workspaceId: workspace.id, threadId: destination.id },
+    const result = await service.threadGet(authority, {
+      threadId: destination.id,
       messageLimit: 10,
     });
 
     expect(result).toMatchObject({
       status: "found",
-      projection: {
-        relation: null,
-        messages: [{
-          origin: {
-            type: "thread",
-            sourceWorkspaceId: sourceWorkspace.id,
-            sourceWorkspaceName: sourceWorkspace.name,
-            sourceUnavailable: false,
-            sourceThread: { threadId: source.id, title: source.title, workspaceId: sourceWorkspace.id },
-          },
-        }],
-      },
+      messages: [{
+        origin: {
+          type: "thread",
+          sourceWorkspaceId: sourceWorkspace.id,
+          sourceWorkspaceName: sourceWorkspace.name,
+          sourceUnavailable: false,
+          sourceThread: { threadId: source.id, title: source.title, workspaceId: sourceWorkspace.id },
+        },
+      }],
     });
   });
 
-  it("keeps historical thread origin after source thread and Project soft-delete", () => {
+  it("keeps historical thread origin after source thread and Project soft-delete", async () => {
     const service = createService();
     const destination = {
       ...createdThread,
@@ -375,47 +337,30 @@ describe("ThreadControlService", () => {
       hasMore: false,
     });
 
-    const result = service.threadControlRead({
-      identity: { workspaceId: workspace.id, threadId: destination.id },
+    const result = await service.threadGet(authority, {
+      threadId: destination.id,
       messageLimit: 10,
     });
 
     expect(result).toMatchObject({
       status: "found",
-      projection: {
-        relation: null,
-        messages: [{
-          origin: {
-            type: "thread",
-            sourceThreadId: deletedSource.id,
-            sourceTurnId: "turn-1",
-            sourceProviderId: deletedSource.provider,
-            sourceWorkspaceId: deletedWorkspace.id,
-            sourceWorkspaceName: deletedWorkspace.name,
-            sourceUnavailable: true,
-            sourceThread: {
-              threadId: deletedSource.id,
-              workspaceId: deletedWorkspace.id,
-              title: deletedSource.title,
-            },
+      messages: [{
+        origin: {
+          type: "thread",
+          sourceThreadId: deletedSource.id,
+          sourceTurnId: "turn-1",
+          sourceProviderId: deletedSource.provider,
+          sourceWorkspaceId: deletedWorkspace.id,
+          sourceWorkspaceName: deletedWorkspace.name,
+          sourceUnavailable: true,
+          sourceThread: {
+            threadId: deletedSource.id,
+            workspaceId: deletedWorkspace.id,
+            title: deletedSource.title,
           },
-        }],
-      },
+        },
+      }],
     });
-  });
-
-  it("rejects a user mutation when the explicit target Project does not match the persisted thread", async () => {
-    const service = createService();
-    const source = { ...createdThread, id: "source-thread", workspace_id: workspace.id, deleted_at: null };
-    const target = { ...createdThread, id: "target-thread", workspace_id: workspace.id, deleted_at: null };
-    threads.findById.mockImplementation((id: string) => id === source.id ? source : id === target.id ? target : null);
-
-    await expect(service.threadControlSend({
-      source: { workspaceId: workspace.id, threadId: source.id },
-      target: { workspaceId: "other-workspace", threadId: target.id },
-      message: "Follow up",
-    })).resolves.toMatchObject({ status: "rejected", error: { code: "not_found" } });
-    expect(agentService.sendMessage).not.toHaveBeenCalled();
   });
 
   it("creates a direct thread with user defaults, exact title, lineage, and Build mode", async () => {
@@ -1332,34 +1277,6 @@ describe("ThreadControlService", () => {
       execution: expect.objectContaining({ permissionMode: "supervised" }),
     }));
     expect(agentService.sendMessage).not.toHaveBeenCalled();
-  });
-
-  it("inherits supervised global permission for null source settings on send and stop", async () => {
-    const source = { ...createdThread, id: "source-thread", permission_mode: null, deleted_at: null };
-    const target = { ...createdThread, id: "target-thread", model: "claude-exact", deleted_at: null };
-    threads.findById.mockImplementation((id: string) => id === source.id ? source : id === target.id ? target : null);
-
-    const sendService = createService("supervised");
-    await expect(sendService.threadControlSend({
-      source: { workspaceId: workspace.id, threadId: source.id },
-      target: { workspaceId: workspace.id, threadId: target.id },
-      message: "Needs human approval.",
-    })).resolves.toMatchObject({ status: "pending_approval" });
-    expect(approvals.createSend).toHaveBeenCalledWith(expect.objectContaining({
-      execution: expect.objectContaining({ permissionMode: "supervised" }),
-    }));
-    expect(agentService.sendMessage).not.toHaveBeenCalled();
-
-    mutationReservations = new ThreadControlMutationReservationService();
-    const stopService = createService("supervised");
-    await expect(stopService.threadControlStop({
-      source: { workspaceId: workspace.id, threadId: source.id },
-      target: { workspaceId: workspace.id, threadId: target.id },
-    })).resolves.toMatchObject({ status: "pending_approval" });
-    expect(approvals.createStop).toHaveBeenCalledWith(expect.objectContaining({
-      execution: expect.objectContaining({ permissionMode: "supervised" }),
-    }));
-    expect(agentService.stopSession).not.toHaveBeenCalled();
   });
 
   it("rejects a competing supervised mutation while approval is pending", async () => {

@@ -23,7 +23,6 @@ describe("PANEL_TAB_TYPES catalog", () => {
       "environment",
       "tasks",
       "subagents",
-      "coordination",
     ]);
   });
 
@@ -32,16 +31,16 @@ describe("PANEL_TAB_TYPES catalog", () => {
     expect(comingSoon).toEqual(["files"]);
   });
 
-  it("marks coordination tools as thread-only (Review is dual-scope)", () => {
+  it("marks Plan and Subagents as thread-only (Review is dual-scope)", () => {
     const threadOnly = PANEL_TAB_TYPES.filter((t) => t.needsThread).map((t) => t.id);
-    expect(threadOnly).toEqual(["action-terminal", "tasks", "subagents", "coordination"]);
+    expect(threadOnly).toEqual(["action-terminal", "tasks", "subagents"]);
   });
 
   it("gives every shortcut-enabled type a commandId", () => {
     for (const type of PANEL_TAB_TYPES) {
       if (type.comingSoon) {
         expect(type.commandId).toBeUndefined();
-      } else if (!type.systemManaged && type.id !== "subagents" && type.id !== "coordination") {
+      } else if (!type.systemManaged && type.id !== "subagents") {
         expect(type.commandId).toBeTruthy();
       }
     }
@@ -92,7 +91,6 @@ describe("shownTabTypes — scope filter", () => {
       "environment",
       "tasks",
       "subagents",
-      "coordination",
     ]);
   });
 
@@ -114,7 +112,7 @@ describe("shownTabTypes — cardinality filter", () => {
 
   it("keeps Terminal creatable after other singleton tools are open", () => {
     expect(
-      ids(shownTabTypes("thread", ["preview", "terminal", "changes", "environment", "tasks", "subagents", "coordination"])),
+      ids(shownTabTypes("thread", ["preview", "terminal", "changes", "environment", "tasks", "subagents"])),
     ).toEqual(["terminal", "files"]);
   });
 
@@ -149,7 +147,6 @@ describe("creatableTypes — coming-soon exclusion", () => {
       "environment",
       "tasks",
       "subagents",
-      "coordination",
     ]);
   });
 
@@ -173,7 +170,7 @@ describe("creatableTypes — combined scope + cardinality", () => {
 
   it("keeps Terminal creatable when every singleton tool is open", () => {
     expect(
-      ids(creatableTypes("thread", ["preview", "terminal", "changes", "environment", "tasks", "subagents", "coordination"])),
+      ids(creatableTypes("thread", ["preview", "terminal", "changes", "environment", "tasks", "subagents"])),
     ).toEqual(["terminal"]);
   });
 
@@ -200,7 +197,6 @@ describe("creatableTypes / shownTabTypes — purity", () => {
       "changes",
       "environment",
       "subagents",
-      "coordination",
     ]);
   });
 });

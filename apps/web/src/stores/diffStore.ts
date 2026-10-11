@@ -5,7 +5,7 @@ import { defaultReviewView, type ReviewChangeState } from "@/lib/review-views";
 export type { BranchComparison };
 
 /** Active tab in the right panel. */
-export type RightPanelTab = "tasks" | "changes" | "preview" | "terminal" | "action-terminal" | "subagents" | "coordination" | "environment";
+export type RightPanelTab = "tasks" | "changes" | "preview" | "terminal" | "action-terminal" | "subagents" | "environment";
 
 /** Navigation state for one thread's Subagents detail view. */
 export interface SubagentDetailSelection {
