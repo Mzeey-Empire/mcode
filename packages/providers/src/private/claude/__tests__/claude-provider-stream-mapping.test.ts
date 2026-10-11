@@ -126,10 +126,36 @@ async function send(
   );
 }
 
+function streamEvent(event: Record<string, unknown>): Record<string, unknown> {
+  return { type: "stream_event", event };
+}
+
+/** Reasoning and answer-text events in order, without the execution id every runtime event carries. */
+function reasoningAndText(events: readonly ProviderRuntimeEvent[]) {
+  return events.flatMap(({ event }) => {
+    if (event.type !== AgentEventType.ReasoningDelta && event.type !== AgentEventType.TextDelta) return [];
+    const { turnExecutionId: _executionId, ...mapped } = event;
+    return [mapped];
+  });
+}
+
 describe("ClaudeProvider stream mapping", () => {
   let provider: ClaudeProvider | undefined;
 
   afterEach(() => provider?.shutdown());
+
+  async function playStream(sessionId: string, messages: Array<Record<string, unknown>>) {
+    mockQuery.mockImplementation(sdkStream([
+      { type: "system", subtype: "init", session_id: `sdk-${sessionId}` },
+      ...messages,
+      { type: "result", is_error: false, usage: {}, modelUsage: {} },
+    ]));
+    provider = new ClaudeProvider(stubEnvService(), stubJobObject());
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    await send(provider, sessionId, events);
+    return events;
+  }
 
   it("preserves parent_tool_use_id for assistant blocks and standalone tool messages", async () => {
     mockQuery.mockImplementation(
@@ -437,6 +463,70 @@ describe("ClaudeProvider stream mapping", () => {
     expect(outcome).toEqual({ outcome: "rejected", reason: "turn_not_running", detail: "Claude is not running this turn." });
     await provider.stopSession(sessionId);
     await ended;
+  });
+
+  it("maps a thinking block to reasoning deltas with one id and an explicit end", async () => {
+    const events = await playStream("mcode-thinking", [
+      streamEvent({ type: "message_start", message: { id: "msg_one", usage: {} } }),
+      streamEvent({ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } }),
+      streamEvent({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Read the file" } }),
+      streamEvent({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: " first." } }),
+      streamEvent({ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "sig" } }),
+      streamEvent({ type: "content_block_stop", index: 0 }),
+    ]);
+
+    expect(reasoningAndText(events)).toEqual([
+      { type: AgentEventType.ReasoningDelta, threadId: "thinking", delta: "", reasoningItemId: "msg_one:thinking:0" },
+      { type: AgentEventType.ReasoningDelta, threadId: "thinking", delta: "Read the file", reasoningItemId: "msg_one:thinking:0" },
+      { type: AgentEventType.ReasoningDelta, threadId: "thinking", delta: " first.", reasoningItemId: "msg_one:thinking:0" },
+      { type: AgentEventType.ReasoningDelta, threadId: "thinking", delta: "", reasoningItemId: "msg_one:thinking:0", done: true },
+    ]);
+  });
+
+  it("opens and closes a redacted thinking block with no text", async () => {
+    const events = await playStream("mcode-redacted", [
+      streamEvent({ type: "message_start", message: { id: "msg_redacted", usage: {} } }),
+      streamEvent({ type: "content_block_start", index: 0, content_block: { type: "redacted_thinking", data: "opaque" } }),
+      streamEvent({ type: "content_block_stop", index: 0 }),
+    ]);
+
+    expect(reasoningAndText(events)).toEqual([
+      { type: AgentEventType.ReasoningDelta, threadId: "redacted", delta: "", reasoningItemId: "msg_redacted:thinking:0" },
+      { type: AgentEventType.ReasoningDelta, threadId: "redacted", delta: "", reasoningItemId: "msg_redacted:thinking:0", done: true },
+    ]);
+  });
+
+  it("keeps reasoning out of answer text and gives each message's thinking its own id", async () => {
+    const thinkingThenText = (messageId: string, thought: string, answer: string) => [
+      streamEvent({ type: "message_start", message: { id: messageId, usage: {} } }),
+      streamEvent({ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } }),
+      streamEvent({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: thought } }),
+      streamEvent({ type: "content_block_stop", index: 0 }),
+      streamEvent({ type: "content_block_start", index: 1, content_block: { type: "text", text: "" } }),
+      streamEvent({ type: "content_block_delta", index: 1, delta: { type: "text_delta", text: answer } }),
+      streamEvent({ type: "content_block_stop", index: 1 }),
+      { type: "assistant", message: { id: messageId, content: [
+        { type: "thinking", thinking: thought, signature: "sig" },
+        { type: "text", text: answer },
+      ] } },
+    ];
+    const events = await playStream("mcode-thinking-text", [
+      ...thinkingThenText("msg_a", "Plan.", "Done."),
+      ...thinkingThenText("msg_b", "Check.", "Still done."),
+    ]);
+
+    expect(reasoningAndText(events)).toEqual([
+      { type: AgentEventType.ReasoningDelta, threadId: "thinking-text", delta: "", reasoningItemId: "msg_a:thinking:0" },
+      { type: AgentEventType.ReasoningDelta, threadId: "thinking-text", delta: "Plan.", reasoningItemId: "msg_a:thinking:0" },
+      { type: AgentEventType.ReasoningDelta, threadId: "thinking-text", delta: "", reasoningItemId: "msg_a:thinking:0", done: true },
+      { type: AgentEventType.TextDelta, threadId: "thinking-text", delta: "Done." },
+      { type: AgentEventType.ReasoningDelta, threadId: "thinking-text", delta: "", reasoningItemId: "msg_b:thinking:0" },
+      { type: AgentEventType.ReasoningDelta, threadId: "thinking-text", delta: "Check.", reasoningItemId: "msg_b:thinking:0" },
+      { type: AgentEventType.ReasoningDelta, threadId: "thinking-text", delta: "", reasoningItemId: "msg_b:thinking:0", done: true },
+      { type: AgentEventType.TextDelta, threadId: "thinking-text", delta: "Still done." },
+    ]);
+    expect(events.flatMap(({ event }) => event.type === AgentEventType.Message ? [event.content] : []))
+      .toEqual(["Still done."]);
   });
 
   it("emits synthetic TurnStarted before the No conversation resume recovery", async () => {

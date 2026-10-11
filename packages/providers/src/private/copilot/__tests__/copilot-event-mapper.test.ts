@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import type { SessionEvent } from "@github/copilot-sdk";
+import { describe, expect, it } from "vitest";
 import { AgentEventSchema } from "@mcode/contracts";
 import { parseCopilotCapturedTrace } from "../../../conformance/copilot-trace.js";
 import { mapCopilotEvent, type CopilotTurnState } from "../copilot-event-mapper.js";
@@ -105,6 +105,69 @@ describe("Copilot subagent mapping", () => {
     expect(events.filter((event) => event.type === "toolResult" && event.toolCallId === "TOOL_1")).toEqual([
       { type: "toolResult", threadId: "thread", toolCallId: "TOOL_1", output: "REDACTED_CONTENT", isError: true },
       { type: "toolResult", threadId: "thread", toolCallId: "TOOL_1", output: "REDACTED_TOOL_OUTPUT", isError: true },
+    ]);
+  });
+});
+
+describe("Copilot reasoning mapping", () => {
+  const at = (index: number) => ({ id: `EVENT_${index}`, parentId: null, timestamp: "2000-01-01T00:00:00.000Z" });
+  function map(turn: CopilotTurnState, events: SessionEvent[]) {
+    return events.flatMap((event) => mapCopilotEvent(event, "thread", turn));
+  }
+
+  it("streams reasoning deltas and closes the block with an empty done delta when the final text matches", () => {
+    expect(map(turnState(), [
+      { ...at(0), type: "assistant.reasoning_delta", ephemeral: true, data: { reasoningId: "R1", deltaContent: "Check " } },
+      { ...at(1), type: "assistant.reasoning_delta", ephemeral: true, data: { reasoningId: "R1", deltaContent: "the parser" } },
+      { ...at(2), type: "assistant.reasoning", data: { reasoningId: "R1", content: "Check the parser" } },
+    ])).toEqual([
+      { type: "reasoningDelta", threadId: "thread", delta: "Check ", reasoningItemId: "R1" },
+      { type: "reasoningDelta", threadId: "thread", delta: "the parser", reasoningItemId: "R1" },
+      { type: "reasoningDelta", threadId: "thread", delta: "", reasoningItemId: "R1", done: true },
+    ]);
+  });
+
+  it("emits the full block on a final reasoning event without prior deltas", () => {
+    expect(map(turnState(), [{ ...at(3), type: "assistant.reasoning", data: { reasoningId: "R1", content: "Check the parser" } }])).toEqual([
+      { type: "reasoningDelta", threadId: "thread", delta: "Check the parser", reasoningItemId: "R1", done: true },
+    ]);
+  });
+
+  it("maps a thinking-phase message to a closed reasoning block instead of answer text", () => {
+    const turn = turnState();
+    expect(map(turn, [{ ...at(4), type: "assistant.message", data: { messageId: "MESSAGE_1", content: "Plan the edit", phase: "thinking" } }])).toEqual([
+      { type: "reasoningDelta", threadId: "thread", delta: "Plan the edit", reasoningItemId: "MESSAGE_1", done: true },
+    ]);
+    expect(turn.pendingAssistantMessage).toBeUndefined();
+  });
+
+  it("does not repeat a thinking-phase message whose text already streamed as answer text", () => {
+    expect(map(turnState(), [
+      { ...at(5), type: "assistant.message_delta", ephemeral: true, data: { messageId: "MESSAGE_1", deltaContent: "Plan" } },
+      { ...at(6), type: "assistant.message", data: { messageId: "MESSAGE_1", content: "Plan", phase: "thinking" } },
+    ])).toEqual([{ type: "textDelta", threadId: "thread", delta: "Plan" }]);
+  });
+
+  it("keeps answer text events unchanged when reasoning interleaves with them", () => {
+    expect(map(turnState(), [
+      { ...at(7), type: "assistant.reasoning_delta", ephemeral: true, data: { reasoningId: "R1", deltaContent: "Think" } },
+      { ...at(8), type: "assistant.message_delta", ephemeral: true, data: { messageId: "MESSAGE_1", deltaContent: "Hello " } },
+      { ...at(9), type: "assistant.reasoning", data: { reasoningId: "R1", content: "Think more" } },
+      { ...at(10), type: "assistant.message_delta", ephemeral: true, data: { messageId: "MESSAGE_1", deltaContent: "world" } },
+      { ...at(11), type: "assistant.message", data: { messageId: "MESSAGE_1", content: "Hello world" } },
+    ])).toEqual([
+      { type: "reasoningDelta", threadId: "thread", delta: "Think", reasoningItemId: "R1" },
+      { type: "textDelta", threadId: "thread", delta: "Hello " },
+      { type: "reasoningDelta", threadId: "thread", delta: " more", reasoningItemId: "R1", done: true },
+      { type: "textDelta", threadId: "thread", delta: "world" },
+    ]);
+  });
+
+  it("splits reasoning longer than the contract bound across deltas", () => {
+    const content = "a".repeat(65_537);
+    expect(map(turnState(), [{ ...at(12), type: "assistant.reasoning", data: { reasoningId: "R1", content } }])).toEqual([
+      { type: "reasoningDelta", threadId: "thread", delta: "a".repeat(65_536), reasoningItemId: "R1" },
+      { type: "reasoningDelta", threadId: "thread", delta: "a", reasoningItemId: "R1", done: true },
     ]);
   });
 });
