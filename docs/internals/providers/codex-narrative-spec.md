@@ -12,7 +12,7 @@ For pipeline traps and shared behavior with Claude, see [narrative-pipeline.md](
    While a turn is running, the user sees a chronological trail of what the agent is doing, not only the final assistant message.
 
 2. **Thoughts**  
-   Model reasoning or planning-style text that is not the user-facing answer appears as **thought** rows (non-final text deltas). Final answer text appears as normal assistant streaming / the committed bubble, not duplicated as thoughts.
+   Model reasoning appears as collapsed **Thought** rows (`reasoningDelta`). Planning-style text that is not the user-facing answer appears as narration (non-final text deltas). Final answer text appears as normal assistant streaming / the committed bubble, not duplicated as thoughts.
 
 3. **Sub-agent nesting**  
    When Codex runs collaboration / spawn flows (`collabAgentToolCall`), Mcode shows an **Agent** tool row. Shell commands, file changes, MCP calls, and other tools that belong to that sub-agent appear **nested under** that row via `parentToolCallId`.
@@ -43,8 +43,8 @@ Codex models come from the app-server `model/list` catalog. The model picker and
 
 ### 3.1 Events
 
-- **Thought stream**: Any Codex notification that represents non-final model text must map to `AgentEventType.TextDelta` with `isFinalResponse: false`.
-  Known sources today: `item/reasoning/textDelta`, `item/reasoning/summaryTextDelta`, `item/completed` with `type: "reasoning"`, and experimental `item/plan/delta` when the app-server uses it for live planning text. Completed `plan` items stay silent.
+- **Reasoning stream**: `item/reasoning/textDelta` and `item/reasoning/summaryTextDelta` map to `AgentEventType.ReasoningDelta` keyed by the native item ID. `item/completed` with `type: "reasoning"` emits any unstreamed suffix with `done: true`.
+- **Thought stream**: Experimental `item/plan/delta`, when the app-server uses it for live planning text, maps to `AgentEventType.TextDelta` with `isFinalResponse: false`. Completed `plan` items stay silent.
 
 - **Assistant stream**: Track text by its native item ID. The `final_answer` phase selects the response bubble; `commentary` stays in narration. `item/completed` emits `AssistantMessageBoundary` to close that item's text without ending the turn. When phase is absent, the matching successful native turn completion promotes the last eligible assistant item. Distinct items remain distinct even when their text is identical.
 

@@ -4,7 +4,7 @@
 Its rule table is the precedence order, so add a state there rather than branching in the renderer.
 Holding states (stop pending, compacting, rate limited, retrying) outrank the narrative and use a spinner, because the agent is not making progress.
 Working states use the layers icon: waiting on a person, the active root tool, running subagents, the streaming answer, then a summary heading or `Thinking`.
-"Answering" depends on the live response row existing. An open segment that is not explicitly non-final already renders as that row, so summary headings appear only for explicitly non-final narration.
+"Answering" depends on the live response row existing. An open segment that is not explicitly non-final already renders as that row, so summary headings appear only for explicitly non-final narration. Reasoning blocks never supply a heading.
 Completed tools and closed segments cannot keep an old activity label visible. Labels carry no ellipses; overflow fades.
 Providers supply these details through the existing canonical tool and non-final text events. See [Activity labels](../providers/provider-architecture.md#activity-labels).
 
@@ -297,7 +297,9 @@ the visible message anchor and both page boundaries.
 ## Thought vs final response classification
 
 Multiple layers classify streamed text. Use this precedence when debugging
-misclassified preamble or duplicate assistant bodies:
+misclassified preamble or duplicate assistant bodies. Reasoning blocks
+(`reasoningDelta`, `kind = 'reasoning'`) sit outside this classification and
+are never promoted, tagged final, or matched against the answer:
 
 1. **`AssistantMessageBoundary`** (authoritative) — emitted from
    `claude-provider.ts` when an SDK `assistant` message carries text and a
@@ -517,7 +519,8 @@ before reporting the change done:
   B, which nests under A.
 - **Thoughts mid-tool-call:** thought rows interleave with tool calls in
   chronological order.
-- **Long thought:** clamps to 2 lines with `show more` toggle.
+- **Reasoning:** each reasoning block shows as a collapsed `Thought` row
+  between the tools around it, and opens to show its text.
 - **Streaming response:** typing cursor sits inline at the end of the last
   word — not on its own line below the last paragraph.
 - **Turn completion:** the activity folds under "Worked for <duration>" above
@@ -550,7 +553,8 @@ ship a bug:
    etc.
 5. Wall-clock snapshots use `useState` + `useEffect`, not `useMemo`.
 6. `NarrativeCounts.steps` is the count of top-level tool calls only — not
-   thought segments. Live `narrative-indicator` must use the same definition.
+   thought segments or reasoning blocks. Live `narrative-indicator` must use the same definition.
 7. Final response text renders as a provisional assistant message item;
-   preamble text renders as thought rows inside `narrative-flow`. The
+   preamble text renders as thought rows inside `narrative-flow`; reasoning
+   renders as a collapsed `Thought` row. The
    `AssistantMessageBoundary` event is the authoritative split.

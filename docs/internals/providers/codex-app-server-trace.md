@@ -40,11 +40,11 @@ Across both runs, Codex split "thinking" from "answer" cleanly at the wire: anyt
 | Method | Route in Mcode | Evidence |
 |---|---|---|
 | `item/agentMessage/delta` | `TextDelta` classified by the item's phase; phase-less items remain candidates for final selection at successful native turn completion | A:13, B:17-31 stream the user-facing answer |
-| `item/reasoning/textDelta` | `TextDelta` with `isFinalResponse: false` (thought) | **unverified in this run** — low effort produced no deltas |
-| `item/reasoning/summaryTextDelta` | `TextDelta` with `isFinalResponse: false` (thought) | unverified — no deltas in either run |
+| `item/reasoning/textDelta` | `ReasoningDelta` keyed by item ID | **unverified in this run** — low effort produced no deltas |
+| `item/reasoning/summaryTextDelta` | `ReasoningDelta` keyed by item ID | unverified — no deltas in either run |
 | `item/reasoning/summaryPartAdded` | ignore (lifecycle) | unverified |
 | `item/plan/delta` | `TextDelta` with `isFinalResponse: false` (thought, experimental) | unverified |
-| `item/completed` type `reasoning` | If `summary` or `reasoningContent` non-empty, emit `TextDelta isFinalResponse:false` as delta vs accumulator | summary was empty on A:11; mapper's diff-vs-accumulator stays correct |
+| `item/completed` type `reasoning` | If `summary` or `reasoningContent` non-empty, emit the unstreamed suffix as `ReasoningDelta` with `done: true` | summary was empty on A:11; mapper's diff-vs-accumulator stays correct |
 | `item/completed` type `agentMessage` | closes the exact assistant item immediately; `final_answer` selects its response without ending the turn | A:14, B:32 confirm final text was complete by the time completed fired |
 
 The recorded sequences distinguish item closure from turn completion. The current

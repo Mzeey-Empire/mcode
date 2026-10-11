@@ -96,6 +96,7 @@ Point-in-time decisions. New ADRs take the next free number below. Numbers
 - [0022: Server-owned streaming durability and provider-native recovery](adr/0022-server-owned-streaming-durability-and-provider-native-recovery.md)
 - [0023: Durable plan versions](adr/0023-durable-plan-versions.md)
 - [0024: One browser profile per project](adr/0024-one-browser-profile-per-project.md)
+- [0025: Reasoning keeps the narrative persistence path](adr/0025-reasoning-keeps-the-narrative-persistence-path.md)
 
 ## Agent runbooks
 
