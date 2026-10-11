@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Command } from "@/components/ui/command";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useUiStore } from "@/stores/uiStore";
+import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { createMockThread, createMockWorkspace } from "@/__tests__/mocks/transport";
 import type { RecentThread } from "@/transport/types";
 
@@ -87,6 +88,7 @@ beforeEach(() => {
     });
     useCommandPaletteStore.getState().open({ intent: "threadSearch" });
     useCommandPaletteStore.getState().setQuery("quiet-lantern");
+    threadAttentionStore.setState({ byThreadId: {}, onScreenThreadId: null });
   });
 });
 
@@ -106,6 +108,26 @@ describe("ThreadSearchView", () => {
     expect(screen.queryByText("quiet-lantern")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Provider, codex")).not.toBeInTheDocument();
     expect(screen.getByTestId("thread-search-result-thread-search")).toHaveClass("min-h-9");
+  });
+
+  it("shows the sidebar lane marker for the thread's row state", () => {
+    act(() => {
+      threadAttentionStore.setState({ byThreadId: { [thread.id]: {
+        threadId: thread.id,
+        waiting: { kind: "approval", since: "2026-10-10T10:00:00.000Z" },
+        lastTurn: { outcome: "errored", endedAt: "2026-10-10T10:00:00.000Z", sequence: 4, changedFileCount: null },
+        seen: { sequence: null, at: null },
+      } } });
+    });
+    const { rerender } = render(<Command shouldFilter={false}><ThreadSearchView /></Command>);
+    expect(screen.getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
+
+    act(() => {
+      threadAttentionStore.setState((state) => ({ byThreadId: { [thread.id]: { ...state.byThreadId[thread.id]!, waiting: null } } }));
+    });
+    rerender(<Command shouldFilter={false}><ThreadSearchView /></Command>);
+    expect(screen.getByRole("img", { name: "Failed" })).toHaveAttribute("data-status-mark", "error");
+    expect(screen.queryByText("Errored")).not.toBeInTheDocument();
   });
 
   it("opens the selected thread inside its project", () => {

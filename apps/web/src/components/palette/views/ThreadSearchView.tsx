@@ -8,7 +8,8 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { ThreadFilterDropdown } from "@/components/sidebar/ThreadFilterDropdown";
 import { ThreadSortControl } from "@/components/sidebar/ThreadSortControl";
-import { getThreadStateMarker, ThreadStateMarker } from "@/components/sidebar/ThreadStateMarker";
+import { ThreadStatusLane } from "@/features/thread-attention/ThreadStatusLane";
+import { threadRowLook, useThreadRowState } from "@/features/thread-attention/thread-row-presentation";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useRecentThreadsStore } from "@/stores/recentThreadsStore";
 import {
@@ -20,11 +21,9 @@ import {
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { PALETTE_LIST_HINTS, PaletteFooterHints } from "../PaletteFooterHints";
 import { useUiStore } from "@/stores/uiStore";
-import { useThreadStore } from "@/stores/threadStore";
-import { useShallow } from "zustand/shallow";
+import { relativeTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { ChecksStatus } from "@mcode/contracts";
 import type { RecentThread, Thread } from "@/transport/types";
 
 interface SearchRow {
@@ -77,33 +76,23 @@ export function filterAndSortRecentThreads(
 /** One compact thread record in the cross-project finder. */
 function ThreadSearchResult({
   row,
-  isRunning,
-  hasPendingPermission,
-  checks,
   onSelect,
 }: {
   row: SearchRow;
-  isRunning: boolean;
-  hasPendingPermission: boolean;
-  checks: ChecksStatus | undefined;
   onSelect: () => void;
 }) {
   const { thread } = row;
   const isUserCompleted = thread.user_completed_at !== null;
-  const marker = getThreadStateMarker({
-    thread,
-    checks,
-    isRunning,
-    hasPendingPermission,
-  });
+  const look = threadRowLook(useThreadRowState(thread.id));
 
   return (
     <CommandItem
       value={thread.id}
       onSelect={onSelect}
-      className="group min-h-9 gap-3 rounded-md px-3 py-1.5"
+      className="group min-h-9 gap-2 rounded-md py-1.5 pl-2 pr-3"
       data-testid={`thread-search-result-${thread.id}`}
     >
+      <ThreadStatusLane mark={look.mark} />
       <span
         className={cn(
           "min-w-0 flex-1 text-fade text-sm font-medium text-ink",
@@ -138,9 +127,7 @@ function ThreadSearchResult({
           />
           <TooltipContent>{thread.branch}</TooltipContent>
         </Tooltip>
-        <span className={cn(isUserCompleted && "grayscale opacity-45")}>
-          <ThreadStateMarker marker={marker} />
-        </span>
+        <span className="shrink-0 font-mono text-caption tabular-nums text-muted/45">{relativeTime(thread.updated_at)}</span>
       </div>
     </CommandItem>
   );
@@ -172,19 +159,6 @@ export function ThreadSearchView() {
   const setActiveThread = useWorkspaceStore((state) => state.setActiveThread);
   const setProjectThreadView = useUiStore(
     (state) => state.setProjectThreadView,
-  );
-  const checksById = useWorkspaceStore((state) => state.checksById);
-  const runningThreadIds = useThreadStore((state) => state.runningThreadIds);
-  const pendingPermissionIds = useApprovalStore(
-    useShallow((state) => {
-      const ids: string[] = [];
-      for (const request of state.approvals) if (!request.settled) ids.push(request.threadId);
-      return ids;
-    }),
-  );
-  const pendingPermissionThreadIds = useMemo(
-    () => new Set(pendingPermissionIds),
-    [pendingPermissionIds],
   );
 
   useEffect(() => {
@@ -266,9 +240,8 @@ export function ThreadSearchView() {
   return (
     <>
       <ThreadSearchToolbar loading={loading} resultLabel={resultLabel} providers={providers} />
-      <ThreadSearchResults loading={loading} rows={rows} searchError={searchError} hasQuery={hasQuery} renderRow={(row) => <ThreadSearchResult key={row.thread.id} row={row} isRunning={runningThreadIds.has(row.thread.id)} hasPendingPermission={pendingPermissionThreadIds.has(row.thread.id)} checks={checksById[row.thread.id]} onSelect={() => handleSelect(row.thread)} />} />
+      <ThreadSearchResults loading={loading} rows={rows} searchError={searchError} hasQuery={hasQuery} renderRow={(row) => <ThreadSearchResult key={row.thread.id} row={row} onSelect={() => handleSelect(row.thread)} />} />
       <PaletteFooterHints hints={PALETTE_LIST_HINTS} />
     </>
   );
 }
-import { useApprovalStore } from "@/stores/approvalStore";

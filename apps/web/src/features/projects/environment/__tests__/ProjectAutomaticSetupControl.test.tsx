@@ -2,7 +2,9 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
-import { getThreadStateMarker, ThreadStateMarker } from "@/components/sidebar/ThreadStateMarker";
+import { ThreadStatusLane } from "@/features/thread-attention/ThreadStatusLane";
+import { threadRowLook, threadRowSetup } from "@/features/thread-attention/thread-row-presentation";
+import { deriveThreadRowState } from "@/features/thread-attention/thread-row-state";
 import { ProjectAutomaticSetupCard, useProjectAutomaticSetup, useProjectAutomaticSetupStore } from "../ProjectAutomaticSetupControl";
 
 const transport = vi.hoisted(() => ({
@@ -149,23 +151,20 @@ describe("ProjectAutomaticSetupControl", () => {
 
     function ProjectTreeMarker() {
       const automaticSetup = useProjectAutomaticSetup("thread-1");
-      const setupState = automaticSetup.snapshot.attempt?.state;
-      const marker = getThreadStateMarker({
-        thread: { status: "completed", updated_at: "2026-08-22T12:00:00.000Z" },
-        checks: undefined,
-        isRunning: false,
-        isSetupAwaitingResponse: automaticSetup.snapshot.gate === "blocked"
-          && (setupState === "failed" || setupState === "interrupted"),
-        hasPendingPermission: false,
+      const state = deriveThreadRowState({
+        attention: undefined,
+        running: false,
+        setup: threadRowSetup(automaticSetup.snapshot),
+        onScreen: false,
       });
-      return <ThreadStateMarker marker={marker} />;
+      return <ThreadStatusLane mark={threadRowLook(state).mark} />;
     }
 
     render(<><ChatSetup /><ProjectTreeMarker /></>);
 
     await screen.findByRole("heading", { name: "Environment setup failed" });
     await waitFor(() => expect(transport.getAutomaticSetup).toHaveBeenCalledTimes(2));
-    expect(await screen.findByLabelText("Awaiting response")).toBeVisible();
+    expect(await screen.findByLabelText("Setup failed")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Continue without setup" }));
 
     await waitFor(() => expect(screen.queryByLabelText("Environment setup")).not.toBeInTheDocument());
@@ -173,7 +172,7 @@ describe("ProjectAutomaticSetupControl", () => {
       resolveStaleRead!(failed);
       await staleRead;
     });
-    expect(screen.getByLabelText("Completed")).toBeVisible();
+    expect(screen.queryByLabelText("Setup failed")).not.toBeInTheDocument();
   });
 
   it("refreshes a running setup so its terminal output stays current", async () => {
