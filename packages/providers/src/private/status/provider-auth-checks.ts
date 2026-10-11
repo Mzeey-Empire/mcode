@@ -86,23 +86,38 @@ const CLAUDE_ENV_CREDENTIALS = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CL
 const CLAUDE_THIRD_PARTY_BACKENDS = ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"] as const;
 
 /**
- * Claude: signed in when Claude Code's OAuth token or an Anthropic credential
- * variable exists. Bedrock and Vertex authenticate through their cloud, which
- * Mcode cannot see, so they are unknown.
+ * Claude: an Anthropic credential variable means signed in. Otherwise
+ * `claude auth status` answers with JSON whose `loggedIn` flag covers every
+ * login store (keychain, credentials file, apiKeyHelper). Bedrock and Vertex
+ * authenticate through their cloud, which Mcode cannot see, so they are unknown.
  */
 export async function describeClaudeAuth(
+  run: CliStatusRunner,
+  cliPath: string,
   env: Readonly<Record<string, string | undefined>>,
-  readOauthToken: () => Promise<unknown>,
 ): Promise<ProviderStatusFacts> {
   if (CLAUDE_ENV_CREDENTIALS.some((name) => env[name]?.trim())) return SIGNED_IN;
   if (CLAUDE_THIRD_PARTY_BACKENDS.some((name) => isTruthyFlag(env[name]))) return UNKNOWN;
+  const outcome = await run(cliPath, ["auth", "status"]);
+  if (outcome.kind !== "exited") return UNKNOWN;
+  const loggedIn = readLoggedInFlag(outcome.output);
+  if (loggedIn === true) return SIGNED_IN;
+  // Running `claude` with no arguments starts its own login flow.
+  if (loggedIn === false) return signedOut(["claude"]);
+  return UNKNOWN;
+}
+
+function readLoggedInFlag(output: string): boolean | null {
+  const start = output.indexOf("{");
+  const end = output.lastIndexOf("}");
+  if (start === -1 || end < start) return null;
   try {
-    if (await readOauthToken()) return SIGNED_IN;
+    const parsed: unknown = JSON.parse(output.slice(start, end + 1));
+    if (typeof parsed !== "object" || parsed === null || !("loggedIn" in parsed)) return null;
+    return typeof parsed.loggedIn === "boolean" ? parsed.loggedIn : null;
   } catch {
-    return UNKNOWN;
+    return null;
   }
-  // The sign-in command is inferred: running `claude` starts its own login flow.
-  return signedOut(["claude"]);
 }
 
 function isTruthyFlag(value: string | undefined): boolean {

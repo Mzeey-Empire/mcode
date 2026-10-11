@@ -103,19 +103,26 @@ describe("describeCopilotAuth", () => {
 });
 
 describe("describeClaudeAuth", () => {
-  const noToken = async () => null;
-
-  it("reads an OAuth token or an API key as signed in", async () => {
-    await expect(describeClaudeAuth({}, async () => ({ accessToken: "x", expiresAt: 1 }))).resolves.toEqual(SIGNED_IN);
-    await expect(describeClaudeAuth({ ANTHROPIC_API_KEY: "placeholder" }, noToken)).resolves.toEqual(SIGNED_IN);
+  it("reads loggedIn true or an API key as signed in", async () => {
+    const run = exited('{\n  "loggedIn": true,\n  "authMethod": "claude.ai"\n}\n');
+    await expect(describeClaudeAuth(run, "claude", {})).resolves.toEqual(SIGNED_IN);
+    expect(run).toHaveBeenCalledWith("claude", ["auth", "status"]);
+    await expect(describeClaudeAuth(failed, "claude", { ANTHROPIC_API_KEY: "placeholder" }))
+      .resolves.toEqual(SIGNED_IN);
   });
 
-  it("reads no token and no key as signed out", async () => {
-    await expect(describeClaudeAuth({}, noToken)).resolves.toEqual(signedOut("claude"));
+  it("reads loggedIn false with exit 1 as signed out", async () => {
+    const run = exited('{\n  "loggedIn": false,\n  "authMethod": "none"\n}\n', 1);
+    await expect(describeClaudeAuth(run, "claude", {})).resolves.toEqual(signedOut("claude"));
   });
 
-  it("treats a reader error or a cloud backend as unknown", async () => {
-    await expect(describeClaudeAuth({}, async () => { throw new Error("keychain denied"); })).resolves.toEqual(UNKNOWN);
-    await expect(describeClaudeAuth({ CLAUDE_CODE_USE_BEDROCK: "1" }, noToken)).resolves.toEqual(UNKNOWN);
+  it("treats a failed run, unparseable output, or a cloud backend as unknown", async () => {
+    await expect(describeClaudeAuth(failed, "claude", {})).resolves.toEqual(UNKNOWN);
+    await expect(describeClaudeAuth(exited("error: unknown command 'auth'", 1), "claude", {}))
+      .resolves.toEqual(UNKNOWN);
+    await expect(describeClaudeAuth(exited('{"loggedIn": "yes"}'), "claude", {})).resolves.toEqual(UNKNOWN);
+    const run = exited('{"loggedIn": false}', 1);
+    await expect(describeClaudeAuth(run, "claude", { CLAUDE_CODE_USE_BEDROCK: "1" })).resolves.toEqual(UNKNOWN);
+    expect(run).not.toHaveBeenCalled();
   });
 });

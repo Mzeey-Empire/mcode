@@ -62,6 +62,7 @@ import { listClaudeModels } from "./list-models.js";
 import { resolveSdkModelSlug } from "./resolve-slug.js";
 import { resolveAutoCompactWindow } from "./context-window.js";
 import { readAnthropicOauthToken } from "@mcode/shared/usage";
+import { createCliStatusRunner } from "../status/cli-status-runner.js";
 import { describeClaudeAuth } from "../status/provider-auth-checks.js";
 import { AnthropicOAuthUsageSource } from "./usage/oauth-usage-source.js";
 import { AnthropicHeaderUsageSource } from "./usage/header-usage-source.js";
@@ -3091,12 +3092,11 @@ export class ClaudeProvider
     });
   }
 
-  /** Reports sign-in from Claude Code's local OAuth token or Anthropic credential variables. */
+  /** Reports sign-in from Anthropic credential variables or `claude auth status`. */
   async describeStatus() {
-    return describeClaudeAuth(
-      this.host.environment.snapshot(),
-      () => readAnthropicOauthToken(this.requireHostRuntime().platform),
-    );
+    const env = this.host.environment.snapshot();
+    const run = createCliStatusRunner({ platform: this.requireHostRuntime().platform, env });
+    return describeClaudeAuth(run, this.configuration.cliPath, env);
   }
 
   /** Returns Claude plan utilization plus accumulated session stats. */
