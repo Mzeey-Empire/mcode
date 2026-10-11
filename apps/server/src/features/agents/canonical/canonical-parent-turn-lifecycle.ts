@@ -2,6 +2,8 @@ import type { Database } from "bun:sqlite";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { and, eq, inArray } from "drizzle-orm";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
+import { TurnSteerStore } from "../steering/persistence/turn-steer-store.js";
+import { TurnSteerError } from "../steering/turn-steer.js";
 import {
   canonicalAgentIngestCheckpoints,
   messages,
@@ -23,7 +25,8 @@ import type {
   CanonicalAgentCheckpoint,
   CanonicalAgentCommitInput,
   CanonicalAgentCommitResult,
-  CanonicalAgentEventDraft,} from "./canonical-agent-boundary.js";
+  CanonicalAgentEventDraft,
+} from "./canonical-agent-boundary.js";
 
 /** Canonical alias for the parent-turn start durability input. */
 export type CanonicalParentTurnStartInput = ParentTurnStartInput;
@@ -67,12 +70,14 @@ export type CanonicalParentTurnInterruptionInput = ParentTurnInterruptionInput;
 /** Coordinates start and terminal decisions for one parent execution. */
 export class CanonicalParentTurnLifecycle {
   private readonly orm: BunSQLiteDatabase;
+  private readonly steers: TurnSteerStore;
 
   constructor(
     db: Database,
     private readonly operations: CanonicalParentTurnLifecycleOperations,
   ) {
     this.orm = drizzle(db);
+    this.steers = new TurnSteerStore(db);
   }
 
   /** Starts one parent execution and atomically projects its user message. */
@@ -95,6 +100,7 @@ export class CanonicalParentTurnLifecycle {
         }
         this.consumeRetry(input.retryOfExecutionId, startedAt);
         userMessage = input.projectUserMessage();
+        this.claimSteerResend(input.resendOfSteerId, userMessage.id);
       },
       events: () => {
         if (!userMessage) throw new Error("Canonical user-message projection did not produce a row");
@@ -412,5 +418,13 @@ export class CanonicalParentTurnLifecycle {
         inArray(canonicalAgentIngestCheckpoints.terminalOutcome, ["interrupted", "errored"]),
       )));
     if (consumed.changes !== 1) throw new Error(`Interrupted execution not found: ${retryOfExecutionId}`);
+  }
+
+  /** Admit a Send again resend once; any other window's copy fails here and starts no turn. */
+  private claimSteerResend(resendOfSteerId: string | undefined, messageId: string): void {
+    if (!resendOfSteerId) return;
+    if (!this.steers.claimResend(resendOfSteerId, messageId)) {
+      throw new TurnSteerError("steer_resend_closed", "This resend was already sent or removed.");
+    }
   }
 }

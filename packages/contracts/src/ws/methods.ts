@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  ListHeldSteersResultSchema, SettleUnknownSteerParamsSchema, SettleUnknownSteerResultSchema,
+  TurnSteerParamsSchema, TurnSteerResultSchema,
+  type ListHeldSteersResult, type SettleUnknownSteerParams, type SettleUnknownSteerResult,
+  type TurnSteerParams, type TurnSteerResult,
+} from "../models/turn-steer.js";
 import { AcknowledgeSeenResultSchema, ThreadAttentionSchema } from "../models/thread-attention.js";
 import { AgentProgressPositionSchema, AgentThreadIdSchema } from "../compat/agent-model.js";
 import { WorkspaceSchema, WorkspaceEnrichmentSchema } from "../models/workspace.js";
@@ -352,6 +358,11 @@ export const SendMessageSchema = lazySchema(() => z.object({
     planAction: PlanActionSchema().optional(),
     /** Objective installed as a provider goal immediately before this turn dispatches. */
     goalObjective: GoalObjectiveSchema().optional(),
+    /**
+     * Set only when sending the resend of an uncertain steer. Admission claims the
+     * held steer once, or fails with `steer_resend_closed` and starts no turn.
+     */
+    resendOfSteerId: z.string().uuid().optional(),
 }));
 
 /** Validated command for sending a message to an existing thread. */
@@ -1045,6 +1056,21 @@ export const WS_METHODS = lazySchema(() => ({
   "agent.confirmMessage": {
     params: z.object({ threadId: z.string().min(1), messageId: z.string().uuid() }).strict(),
     result: z.object({ admitted: z.boolean() }).strict(),
+  },
+  /** Add a message to the running turn without stopping it. Replays with the same messageId never resend. */
+  "agent.steer": {
+    params: TurnSteerParamsSchema() as z.ZodType<TurnSteerParams>,
+    result: TurnSteerResultSchema() as z.ZodType<TurnSteerResult>,
+  },
+  /** Every steer held because its delivery is unknown or its resend is queued. */
+  "agent.listHeldSteers": {
+    params: z.object({}).strict(),
+    result: ListHeldSteersResultSchema() as z.ZodType<ListHeldSteersResult>,
+  },
+  /** Send again or remove one held steer. */
+  "agent.settleUnknownSteer": {
+    params: SettleUnknownSteerParamsSchema() as z.ZodType<SettleUnknownSteerParams>,
+    result: SettleUnknownSteerResultSchema() as z.ZodType<SettleUnknownSteerResult>,
   },
   /** Read the current restart-scoped recovery incident, if one exists. */
   "agent.recoveryIncident": {

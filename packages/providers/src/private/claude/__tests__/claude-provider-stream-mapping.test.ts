@@ -72,6 +72,35 @@ function failingStream(message: string) {
   };
 }
 
+const FIRST_SEGMENT = [
+  { type: "system", subtype: "init", session_id: "sdk-steer" },
+  { type: "assistant", message: { content: [{ type: "text", text: "one two" }] } },
+];
+const STEER_ID = "61c88901-8d40-407e-bdd3-984aa0cba6ab";
+
+/**
+ * Plays the first segment, then waits for the next prompt before playing `afterSteer`. The
+ * recorded result shapes come from a live SDK 0.3.291 run with `priority: "now"`.
+ */
+function steeredStream(afterSteer: Array<Record<string, unknown>>) {
+  let steerRead: (message: unknown) => void = () => undefined;
+  const steered = new Promise<unknown>((resolve) => { steerRead = resolve; });
+  let segmentPlayed: () => void = () => undefined;
+  const awaitingSteer = new Promise<void>((resolve) => { segmentPlayed = resolve; });
+  const factory = ({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+    const prompts = prompt[Symbol.asyncIterator]();
+    async function* play(): AsyncGenerator<Record<string, unknown>, void> {
+      await prompts.next();
+      yield* FIRST_SEGMENT;
+      segmentPlayed();
+      steerRead((await prompts.next()).value);
+      yield* afterSteer;
+    }
+    return Object.assign(play(), { ...queryMethodStubs(), close: vi.fn() });
+  };
+  return { factory, steered, awaitingSteer };
+}
+
 async function send(
   provider: ClaudeProvider,
   sessionId: string,
@@ -195,6 +224,56 @@ describe("ClaudeProvider stream mapping", () => {
       ).toHaveLength(1);
     },
   );
+
+  it("steers with priority now and keeps the turn open across the segment it cut short", async () => {
+    const stream = steeredStream([
+      { type: "result", subtype: "success", is_error: false, terminal_reason: "aborted_streaming",
+        user_message_uuids: ["first-prompt"], usage: {}, modelUsage: {} },
+      { type: "system", subtype: "status", user_message_uuids: [STEER_ID] },
+      { type: "assistant", message: { content: [{ type: "text", text: "PINEAPPLE" }] } },
+      { type: "result", subtype: "success", is_error: false, terminal_reason: "completed",
+        user_message_uuids: [STEER_ID], usage: {}, modelUsage: {} },
+    ]);
+    mockQuery.mockImplementation(stream.factory);
+    provider = new ClaudeProvider(stubEnvService(), stubJobObject());
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    const sessionId = "mcode-steer";
+
+    const ended = send(provider, sessionId, events);
+    await stream.awaitingSteer;
+    const outcome = await provider.steerTurn({ sessionId, threadId: "steer", turnExecutionId: "execution",
+      steerId: STEER_ID, message: "Reply with PINEAPPLE." });
+    await ended;
+
+    expect(outcome).toEqual({ outcome: "accepted" });
+    expect(await stream.steered).toEqual({
+      type: "user", message: { role: "user", content: "Reply with PINEAPPLE." }, parent_tool_use_id: null,
+      session_id: sessionId, priority: "now", uuid: STEER_ID,
+    });
+    expect(events.flatMap(({ event }) => event.type === AgentEventType.Message ? [event.content] : []))
+      .toEqual(["one two", "PINEAPPLE"]);
+    expect(events.filter(({ event }) => event.type === AgentEventType.TurnComplete)).toHaveLength(1);
+    expect(events.at(-1)?.event).toMatchObject({ type: AgentEventType.Ended, turnExecutionId: "execution" });
+  });
+
+  it("refuses a steer for an execution the stream is not running", async () => {
+    const stream = steeredStream([{ type: "result", is_error: false, usage: {}, modelUsage: {} }]);
+    mockQuery.mockImplementation(stream.factory);
+    provider = new ClaudeProvider(stubEnvService(), stubJobObject());
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    const sessionId = "mcode-steer-stale";
+
+    const ended = send(provider, sessionId, events);
+    await stream.awaitingSteer;
+    const outcome = await provider.steerTurn({ sessionId, threadId: "steer-stale", turnExecutionId: "earlier",
+      steerId: STEER_ID, message: "late" });
+
+    expect(outcome).toEqual({ outcome: "rejected", reason: "turn_not_running", detail: "Claude is not running this turn." });
+    await provider.stopSession(sessionId);
+    await ended;
+  });
 
   it("emits synthetic TurnStarted before the No conversation resume recovery", async () => {
     mockQuery

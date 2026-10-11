@@ -43,6 +43,7 @@ export const CanonicalRuntimeParentStartSchema = z.object({
   turnId: identity, executionId: identity, permissionMode: z.enum(["supervised", "full"]),
   approvalReviewMode: z.enum(["manual", "automatic"]).optional(), approvalReviewReason: z.string().optional(),
   providerIdentities: z.array(ProviderIdentitySchema), retryOfExecutionId: identity.optional(),
+  resendOfSteerId: z.string().uuid().optional(),
   reopenThread: z.boolean().optional(), answeredPlanQuestionMessageId: identity.optional(),
   userMessage: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("existing"), messageId: identity }),

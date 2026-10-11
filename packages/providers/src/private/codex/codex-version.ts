@@ -16,6 +16,21 @@ const SEMVER_RE = /\b(\d+\.\d+\.\d+)(?!\.\d)/;
 const versionCache = new Map<string, { result: ReturnType<typeof checkCodexVersion>; checkedAt: number }>();
 
 /**
+ * The CLI path most recently checked or warmed. Both run with the configured path (at
+ * startup, on a settings change, and on every send), so this tracks the CLI in use.
+ */
+let currentCliPath: string | null = null;
+
+/**
+ * The cached version of the CLI in use, or null before its check succeeds. Never spawns,
+ * so capability declarations can read it synchronously.
+ */
+export function currentCodexVersion(): string | null {
+  const cached = currentCliPath === null ? undefined : versionCache.get(currentCliPath)?.result;
+  return cached?.ok ? cached.version : null;
+}
+
+/**
  * Checks whether the Codex CLI is reachable and returns its version string.
  *
  * Runs `<cliPath> --version` synchronously with a 5-second timeout.
@@ -30,6 +45,7 @@ const versionCache = new Map<string, { result: ReturnType<typeof checkCodexVersi
 export function checkCodexVersion(
   cliPath: string,
 ): { ok: true; version: string } | { ok: false; error: string } {
+  currentCliPath = cliPath;
   if (SHELL_METACHAR_RE.test(cliPath)) {
     return { ok: false, error: `Codex CLI path contains invalid characters: "${cliPath}"` };
   }
@@ -89,6 +105,7 @@ export function checkCodexVersion(
  * check surfaces the user-facing error with fresh state).
  */
 export function warmCodexVersionCache(cliPath: string): Promise<void> {
+  currentCliPath = cliPath;
   if (SHELL_METACHAR_RE.test(cliPath) || versionCache.has(cliPath)) {
     return Promise.resolve();
   }
@@ -116,6 +133,7 @@ export function warmCodexVersionCache(cliPath: string): Promise<void> {
 /** Clears the cached version results. Exposed for testing only. */
 export function clearVersionCache(): void {
   versionCache.clear();
+  currentCliPath = null;
 }
 
 /**

@@ -236,6 +236,17 @@ export class ClaudeEventMapper {
     return "turn_complete";
   }
 
+  /**
+   * Close a segment the CLI cut short to answer a steered message. Its text and usage are kept,
+   * but the turn goes on, so no turn-complete event is emitted.
+   */
+  closeAbortedSegment(message: Message): void {
+    const usage = usageValue(message);
+    this.emitResultMessage(usage);
+    this.callbacks.updateUsage(metrics(message, usage));
+    this.resetResult();
+  }
+
   private resultError(message: Message): ClaudeMapOutcome {
     if (unrecoverableThinkingError(message.result))
       this.invalidatePoisonedSession();

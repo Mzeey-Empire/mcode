@@ -18,6 +18,7 @@ export const ProviderCapabilityNameSchema = z.enum([
   "child-cancellation",
   "turn-diff",
   "approval-review",
+  "turn-steer",
 ]);
 /** Runtime capability that a provider can declare independently of its catalog entries. */
 export type ProviderCapabilityName = z.infer<typeof ProviderCapabilityNameSchema>;

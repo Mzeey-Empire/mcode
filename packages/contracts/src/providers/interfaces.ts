@@ -142,6 +142,27 @@ export interface TurnRequest<P extends ProviderId = ProviderId> {
   providerOptions: ProviderOptionsByProvider[P];
 }
 
+/** One message to add to the running turn. `steerId` is Mcode's client id for the input. */
+export interface TurnSteerInput {
+  /** Provider session that owns the running turn, as in {@link TurnRequest.sessionId}. */
+  sessionId: string;
+  threadId: string;
+  /** The execution Mcode believes is running. Adapters refuse a mismatch before sending. */
+  turnExecutionId: string;
+  /** Mcode's operation identity, passed to providers that accept a client id for the input. */
+  steerId: string;
+  message: string;
+}
+
+/**
+ * How a provider answered a steer. `rejected` means the provider never took the
+ * input; `unknown` means the request went out and no answer came back.
+ */
+export type TurnSteerOutcome =
+  | { outcome: "accepted" }
+  | { outcome: "rejected"; reason: "turn_not_running" | "provider"; detail: string }
+  | { outcome: "unknown"; detail: string };
+
 /** A provider-owned plan file tied to one session by its own event. Never sent to clients. */
 export interface NativePlanFileRef {
   path: string;
@@ -208,6 +229,13 @@ export interface IAgentProvider {
    * `sendMessage` call.
    */
   sendTurn(req: TurnRequest): Promise<void>;
+
+  /**
+   * Add a user message to the running turn without stopping it. Present only on
+   * adapters that can declare the `turn-steer` capability; the caller still checks
+   * the declaration, because support can depend on the installed CLI version.
+   */
+  steerTurn?(input: TurnSteerInput): Promise<TurnSteerOutcome>;
 
   /** Reconcile a proven provider plan file before Implement; absence means skipped with no-file. */
   prepareImplement?(input: {
@@ -297,6 +325,17 @@ export function isChildTurnCancellable(provider: IAgentProvider): provider is IC
     && candidate.descriptor?.capabilities.some((capability) => (
       capability.name === "child-cancellation" && capability.support === "supported"
     )) === true;
+}
+
+/** A provider that declares `turn-steer` supported right now and implements it. */
+export type ITurnSteerCapable = IAgentProvider & { steerTurn: NonNullable<IAgentProvider["steerTurn"]> };
+
+/** Type guard for providers that can steer the running turn. Codex support depends on the installed CLI. */
+export function isTurnSteerCapable(provider: IAgentProvider): provider is ITurnSteerCapable {
+  return typeof provider.steerTurn === "function"
+    && provider.descriptor.capabilities.some((capability) => (
+      capability.name === "turn-steer" && capability.support === "supported"
+    ));
 }
 
 /** Narrow a provider that exposes native turn-diff updates. */

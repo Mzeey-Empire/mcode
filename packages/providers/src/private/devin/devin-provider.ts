@@ -172,6 +172,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       { name: "permissions", support: "supported" },
       { name: "session-eviction", support: "supported" },
       { name: "clean-fork", support: "supported" },
+      { name: "turn-steer", support: "unsupported" },
     ],
   };
   readonly supportsCompletion = false;

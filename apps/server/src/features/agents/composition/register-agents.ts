@@ -17,6 +17,8 @@ import { PlanQuestionService } from "../planning/plan-question-service.js";
 import { TurnSnapshotRepo } from "../turns/persistence/turn-snapshot-repo.js";
 import { TurnDiffService } from "../turns/turn-diff-service.js";
 import { TurnDiffRepo } from "../turns/persistence/turn-diff-repo.js";
+import { TurnSteerRuntimePort } from "../steering/turn-steer-runtime-port.js";
+import { TurnSteerService } from "../steering/turn-steer-service.js";
 import {
   SUBAGENT_LIFECYCLE_DURABILITY,
 } from "../collaboration/subagent-lifecycle-durability.js";
@@ -191,6 +193,8 @@ export function registerAgentServices(container: DependencyContainer): void {
   container.register(AgentEventPublicationRuntimePort, { useClass: AgentEventPublicationRuntimePort }, { lifecycle: Lifecycle.Singleton });
   container.register(AgentTurnContinuationPort, { useClass: AgentTurnContinuationPort }, { lifecycle: Lifecycle.Singleton });
   container.register(AgentReliabilityPort, { useClass: AgentReliabilityPort }, { lifecycle: Lifecycle.Singleton });
+  container.register(TurnSteerRuntimePort, { useClass: TurnSteerRuntimePort }, { lifecycle: Lifecycle.Singleton });
+  container.register(TurnSteerService, { useClass: TurnSteerService }, { lifecycle: Lifecycle.Singleton });
   container.register(AgentEventPublicationRegistry, { useClass: AgentEventPublicationRegistry }, { lifecycle: Lifecycle.Singleton });
   container.register(AGENT_TURN_COMMAND_PORT, {
     useFactory: (c) => new AgentTurnCommandPort(c.resolve(AgentRuntimeCommandPort)),

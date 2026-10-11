@@ -50,13 +50,15 @@ import type {
   ProviderFileMutationStart,
   ProviderTurnDiffUpdate,
   ProviderCapabilityName,
+  TurnSteerInput,
+  TurnSteerOutcome,
 } from "@mcode/contracts";
 import {
   AgentEventType,
   isGoalOpen,
   providerRuntimeEvent,
 } from "@mcode/contracts";
-import { checkCodexVersion, meetsMinVersion } from "./codex-version.js";
+import { checkCodexVersion, currentCodexVersion, meetsMinVersion } from "./codex-version.js";
 import { CodexAppServer, warmCodexAppServer } from "./codex-app-server.js";
 import type { CodexApprovalRequest } from "./codex-app-server.js";
 import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
@@ -103,6 +105,8 @@ const STOP_SETTLE_TIMEOUT_MS = 10_000;
 const STOP_DRAIN_REUSE_TIMEOUT_MS = 3_000;
 const USAGE_WARMUP_RETRY_MS = 60_000;
 const CODEX_MIN_VERSION = "0.37.0";
+/** First CLI whose app-server answers `turn/steer` with `expectedTurnId`; older ones declare `turn-steer` unsupported. */
+const CODEX_TURN_STEER_MIN_VERSION = "0.99.0";
 // The installed 0.153.4 app-server exposes approvalsReviewer plus the gated
 // item/autoApprovalReview lifecycle used by this adapter.
 const CODEX_AUTO_REVIEW_VALIDATED_VERSION = "0.153.4";
@@ -135,6 +139,19 @@ const CODEX_SUPPORTED_CAPABILITIES = [
   "turn-diff",
   "approval-review",
 ] as const satisfies readonly ProviderCapabilityName[];
+
+function codexDescriptor(turnSteer: "supported" | "unsupported") {
+  return Object.freeze({
+    id: "codex" as const,
+    capabilities: [
+      ...CODEX_SUPPORTED_CAPABILITIES.map((name) => ({ name, support: "supported" as const })),
+      { name: "turn-steer" as const, support: turnSteer },
+    ],
+  });
+}
+
+const CODEX_DESCRIPTOR_WITH_STEER = codexDescriptor("supported");
+const CODEX_DESCRIPTOR_WITHOUT_STEER = codexDescriptor("unsupported");
 
 const TURN_SCOPED_EVENT_TYPES = new Set<AgentEvent["type"]>([
   "turnStarted", "message", "generatedAttachment", "toolUse", "toolResult",
@@ -584,10 +601,13 @@ function completedAssistantText(item: CompletedItem | undefined): string {
 export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProvider, IApprovalReviewCapable, IGoalCapable, ISessionEvictable, ProtocolAdapter<CodexSessionState> {
   readonly id = "codex" as const;
   readonly subagentReporting = SUBAGENT_REPORTING.codex;
-  readonly descriptor = Object.freeze({
-    id: "codex" as const,
-    capabilities: CODEX_SUPPORTED_CAPABILITIES.map((name) => ({ name, support: "supported" as const })),
-  });
+  /** `turn-steer` follows the cached CLI version, so it reads unsupported until the version check succeeds. */
+  get descriptor() {
+    const version = currentCodexVersion();
+    return version !== null && meetsMinVersion(version, CODEX_TURN_STEER_MIN_VERSION)
+      ? CODEX_DESCRIPTOR_WITH_STEER
+      : CODEX_DESCRIPTOR_WITHOUT_STEER;
+  }
   /** Codex CLI is an agentic tool with no one-shot text completion mode. */
   readonly supportsCompletion = false;
   readonly sessionForkOnResume = "clean" as const;
@@ -2261,6 +2281,19 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   /** Eviction guard: a turn is in flight while sendTurn is awaiting completion. */
   isBusy(state: CodexSessionState): boolean {
     return state.pendingTurnId != null || state.abortPendingTurnWait !== undefined;
+  }
+
+  /** Add a message to the running main turn. Refused here, before any request, when that turn is not current. */
+  async steerTurn(input: TurnSteerInput): Promise<TurnSteerOutcome> {
+    const state = this.runtime.get(input.sessionId);
+    const nativeTurnId = state?.currentNativeTurnId;
+    // currentNativeTurnId outlives turn/completed; the binding phase drops to idle at completion.
+    if (!state || !nativeTurnId || state.turnBindingPhase !== "bound"
+      || state.currentTurnExecutionId !== input.turnExecutionId
+      || state.cancelledTurnExecutionId === input.turnExecutionId) {
+      return { outcome: "rejected", reason: "turn_not_running", detail: "The Codex turn is not running." };
+    }
+    return state.server.steerTurn(nativeTurnId, input.steerId, input.message);
   }
 
   /** Graceful protocol interrupt of the in-flight turn (does not kill the process). */

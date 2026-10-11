@@ -155,6 +155,7 @@ export class CursorProvider
       ...CURSOR_SUPPORTED_CAPABILITIES.map((name) => ({ name, support: "supported" as const })),
       { name: "provider-continuation" as const, support: "unsupported" as const },
       { name: "child-cancellation" as const, support: "unsupported" as const },
+      { name: "turn-steer" as const, support: "unsupported" as const },
     ],
   });
   readonly supportsCompletion = false;

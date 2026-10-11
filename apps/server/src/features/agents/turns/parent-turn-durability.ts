@@ -24,6 +24,8 @@ export interface ParentTurnStartInput {
   approvalReviewReason?: string;
   providerIdentities: readonly ProviderIdentity[];
   retryOfExecutionId?: string;
+  /** Uncertain steer whose queued resend this turn sends; consumed with the user message. */
+  resendOfSteerId?: string;
   projectUserMessage: () => Message;
 }
 

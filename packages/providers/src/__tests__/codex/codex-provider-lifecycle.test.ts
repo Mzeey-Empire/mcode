@@ -1,22 +1,23 @@
 import * as NodeEvents from "node:events";
 import * as NodeStream from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentEventType, type ProviderRuntimeEvent, type TurnRequest } from "@mcode/contracts";
+import { AgentEventType, isTurnSteerCapable, type ProviderRuntimeEvent, type TurnRequest } from "@mcode/contracts";
 import { CodexProvider, stubEnvService } from "./codex-provider-test-fixture.js";
 import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
+import { checkCodexVersion, clearVersionCache } from "../../private/codex/codex-version.js";
 
-const { spawn } = vi.hoisted(() => ({ spawn: vi.fn() }));
+const { spawn, cli } = vi.hoisted(() => ({ spawn: vi.fn(), cli: { version: "0.150.0" } }));
 vi.mock("node:child_process", async (importOriginal) => ({
   ...await importOriginal<typeof import("node:child_process")>(),
   spawn,
-  spawnSync: () => ({ status: 0, stdout: "codex-cli 0.150.0", stderr: "" }),
+  spawnSync: () => ({ status: 0, stdout: `codex-cli ${cli.version}`, stderr: "" }),
 }));
 vi.mock("which", () => ({ default: async () => "/usr/bin/codex" }));
 
 interface RpcRequest {
   id?: number;
   method: string;
-  params?: { turnId?: string };
+  params?: { turnId?: string; expectedTurnId?: string };
 }
 
 class NativeProcess extends NodeEvents.EventEmitter {
@@ -28,6 +29,8 @@ class NativeProcess extends NodeEvents.EventEmitter {
     setImmediate(() => this.emit("exit", 0, null));
     return true;
   });
+  /** When set, `turn/steer` answers with this JSON-RPC error message. */
+  steerError: string | undefined;
   private buffer = "";
   private turnCount = 0;
 
@@ -50,13 +53,23 @@ class NativeProcess extends NodeEvents.EventEmitter {
   private respond(request: RpcRequest): void {
     this.requests.push(request);
     if (request.id === undefined) return;
-    let result: object = {};
-    if (request.method === "thread/start") result = { thread: { id: "native-thread" } };
-    if (request.method === "turn/start") result = { turn: { id: `native-turn-${++this.turnCount}` } };
-    if (request.method === "account/rateLimits/read") result = { rateLimits: {} };
-    if (request.method === "config/read") result = { config: {} };
-    this.stdout.write(JSON.stringify({ id: request.id, result }) + "\n");
+    if (request.method === "turn/steer" && this.steerError) {
+      this.stdout.write(JSON.stringify({ id: request.id, error: { code: -32600, message: this.steerError } }) + "\n");
+      return;
+    }
+    this.stdout.write(JSON.stringify({ id: request.id, result: this.resultFor(request) }) + "\n");
     if (request.method === "turn/interrupt" && request.params?.turnId) this.complete(request.params.turnId, "interrupted");
+  }
+
+  private resultFor(request: RpcRequest): object {
+    switch (request.method) {
+      case "thread/start": return { thread: { id: "native-thread" } };
+      case "turn/start": return { turn: { id: `native-turn-${++this.turnCount}` } };
+      case "account/rateLimits/read": return { rateLimits: {} };
+      case "config/read": return { config: {} };
+      case "turn/steer": return { turnId: request.params?.expectedTurnId };
+      default: return {};
+    }
   }
 }
 
@@ -96,7 +109,13 @@ function createProvider() {
   return { provider, child, settings, getSettings, starts, complete, events };
 }
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.clearAllMocks();
+  cli.version = "0.150.0";
+  clearVersionCache();
+});
+
+const STEER_ID = "1d7f7a1e-58a1-4d0b-9a55-4f4b3c0f6a10";
 
 describe("Codex provider lifecycle through native transport", () => {
   it("keeps a silent turn active without model-list probes until native completion", async () => {
@@ -213,6 +232,41 @@ describe("Codex provider lifecycle through native transport", () => {
       child.emit("exit", 0, null);
       await shutdown;
     }
+  });
+
+  it("steers the running native turn by its id and maps a vanished turn to turn_not_running", async () => {
+    const { provider, child, complete } = createProvider();
+    const steer = { sessionId: request.sessionId, threadId: request.threadId, turnExecutionId: request.turnExecutionId,
+      steerId: STEER_ID, message: "also check the tests" };
+    try {
+      await provider.sendTurn(request);
+      // Steers before the native turn id is known are refused locally and send nothing.
+      await vi.waitFor(async () => expect(await provider.steerTurn(steer)).toEqual({ outcome: "accepted" }));
+      child.steerError = "expected active turn id `native-turn-1` but found `native-turn-2`";
+      const stale = await provider.steerTurn({ ...steer, steerId: "0b5f5c1e-2a3d-4c6e-8f90-a1b2c3d4e5f6" });
+
+      expect(child.requests.filter(({ method }) => method === "turn/steer").map(({ params }) => params)).toEqual([
+        { threadId: "native-thread", expectedTurnId: "native-turn-1", clientUserMessageId: STEER_ID,
+          input: [{ type: "text", text: "also check the tests" }] },
+        { threadId: "native-thread", expectedTurnId: "native-turn-1",
+          clientUserMessageId: "0b5f5c1e-2a3d-4c6e-8f90-a1b2c3d4e5f6", input: [{ type: "text", text: "also check the tests" }] },
+      ]);
+      expect(stale).toEqual({ outcome: "rejected", reason: "turn_not_running",
+        detail: "expected active turn id `native-turn-1` but found `native-turn-2`" });
+      await complete(1, request.turnExecutionId);
+      expect(await provider.steerTurn(steer)).toEqual({ outcome: "rejected", reason: "turn_not_running",
+        detail: "The Codex turn is not running." });
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
+  it.each([["0.98.9", false], ["0.99.0", true]])("declares turn-steer for Codex CLI %s: %s", (version, supported) => {
+    const { provider } = createProvider();
+    cli.version = version;
+
+    expect(checkCodexVersion("codex")).toEqual({ ok: true, version });
+    expect(isTurnSteerCapable(provider)).toBe(supported);
   });
 
   it("keeps the process after completion and starts the next turn on the same transport", async () => {

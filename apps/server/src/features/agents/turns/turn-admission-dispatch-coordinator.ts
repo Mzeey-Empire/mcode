@@ -872,6 +872,7 @@ export class TurnAdmissionDispatchCoordinator {
       approvalReviewReason: review.reason,
       providerIdentities: this.resumeIdentities(prepared),
       retryOfExecutionId: command.retryOfExecutionId,
+      ...(command.resendOfSteerId ? { resendOfSteerId: command.resendOfSteerId } : {}),
       userMessage,
       reopenThread: prepared.thread.user_completed_at !== null,
       answeredPlanQuestionMessageId: command.markPlanAnswerForMessageId,
