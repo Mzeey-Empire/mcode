@@ -76,7 +76,7 @@ vi.mock("@/components/chat/TerminalStatusIndicator", () => ({ TerminalStatusIndi
 vi.mock("@/components/chat/ComposerQueueList", () => ({ ComposerQueueList: () => <div /> }));
 vi.mock("@/components/chat/ContextTracker", () => ({ ContextTracker: () => <div /> }));
 vi.mock("@/components/chat/RetryBanner", () => ({ RetryBanner: () => <div /> }));
-vi.mock("@/components/chat/SlashCommandPopup", () => ({ SlashCommandPopup: () => <div /> }));
+vi.mock("@/components/chat/SlashCommandTray", () => ({ SlashCommandTray: () => <div /> }));
 
 const WORKSPACE_ID = "ws-1";
 // Wide enough to dock the card (OVERVIEW_DOCK_MIN_CANVAS is 896). jsdom lays nothing out, so every element reports it.

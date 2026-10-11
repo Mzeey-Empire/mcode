@@ -9,7 +9,10 @@ import { EntityIcon } from "./EntityToken";
 
 const ITEM_HEIGHT = 40;
 const VISIBLE_ITEMS = 8;
-const LIST_BOTTOM_FADE_HEIGHT = 20;
+const TRAY_SURFACE_CLASS = "px-2 py-1";
+// Docked on the composer it matches the task tray in `ComposerTray`.
+const ATTACHED_TRAY_SURFACE_CLASS = "rounded-t-[1.2rem] border-0 bg-panel";
+
 function commandDisplayLabel(command: Command): string {
   if (command.capabilityKind === "plugin") return `@${command.name}`;
   if (command.namespace === "skill") return shortenPathPrefixedName(command.name);
@@ -17,9 +20,9 @@ function commandDisplayLabel(command: Command): string {
   return `/${command.name}`;
 }
 
-/** Props for the {@link SlashCommandPopup} component. */
-interface SlashCommandPopupProps {
-  /** Typed render state from {@link useSlashCommand}; the popup switches on `state.kind`. */
+/** Props for the {@link SlashCommandTray} component. */
+interface SlashCommandTrayProps {
+  /** Typed render state from {@link useSlashCommand}; the tray switches on `state.kind`. */
   state: PopupState;
   selectedIndex: number;
   anchorRect: DOMRect | null;
@@ -35,14 +38,14 @@ interface SlashCommandPopupProps {
 }
 
 /**
- * Floating popup that lists slash command suggestions anchored to the
- * composer editor. Handles keyboard navigation via `selectedIndex`, caps the
- * visible list height, flips above/below the anchor based on available viewport
- * space, and dismisses on outside click. The render priority (error → list →
- * inline loader → empty) is encoded by the {@link PopupState} union rather than
- * a comment, so this component is an exhaustive switch on `state.kind`.
+ * Tray that lists slash command suggestions. Inside a composer layout it docks
+ * on top of the composer like the task tray; elsewhere it floats above its
+ * anchor. Handles keyboard navigation via `selectedIndex`, caps the visible
+ * list height, and dismisses on outside click. The render priority (error →
+ * list → inline loader → empty) is encoded by the {@link PopupState} union
+ * rather than a comment, so this component is an exhaustive switch on `state.kind`.
  */
-export function SlashCommandPopup({
+export function SlashCommandTray({
   state,
   selectedIndex,
   anchorRect,
@@ -52,7 +55,7 @@ export function SlashCommandPopup({
   tone = "default",
   className,
   workspacePath,
-}: SlashCommandPopupProps) {
+}: SlashCommandTrayProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // The list-bearing states carry the items; all others render no list.
@@ -71,7 +74,7 @@ export function SlashCommandPopup({
   useEffect(() => {
     if (!isOpen) return;
     const handler = (e: MouseEvent) => {
-      if (!(e.target as Element).closest("[data-slash-popup]")) {
+      if (!(e.target as Element).closest("[data-slash-tray]")) {
         onDismiss();
       }
     };
@@ -81,17 +84,19 @@ export function SlashCommandPopup({
 
   if (state.kind === "closed" || !anchorRect) return null;
 
-  const listMaxHeight = VISIBLE_ITEMS * ITEM_HEIGHT + LIST_BOTTOM_FADE_HEIGHT;
+  // A lone row is already the obvious target; the selection fill only helps choose among several.
+  const showSelectionFill = items.length > 1;
 
-  const popup = (
+  return (
     // The listbox role belongs to the scrolling options container. The error
     // branch renders its Retry control outside that semantic container.
     <ComposerOverlaySurface
-      data-slash-popup
+      data-slash-tray
       anchorRect={anchorRect}
       attached
       tone={tone}
-      className={className}
+      className={cn(TRAY_SURFACE_CLASS, className)}
+      attachedClassName={ATTACHED_TRAY_SURFACE_CLASS}
     >
       {/*
         Render priority (stale-while-revalidate) is encoded by PopupState:
@@ -100,7 +105,7 @@ export function SlashCommandPopup({
           - ready             -> list (settled, not revalidating)
           - staleRevalidating -> list (cached items shown while a fresh load
                                  is in flight; identical render, but a named
-                                 state so the stuck-popup case is testable)
+                                 state so the stuck-tray case is testable)
           - loading           -> inline "Loading commands..." (no cached items
                                  yet, e.g. a filter excludes every built-in)
           - empty             -> EmptyState (no matches, not loading, no error)
@@ -114,39 +119,27 @@ export function SlashCommandPopup({
           case "ready":
           case "staleRevalidating":
             return (
-              <>
-                <div className="relative p-1">
-                  <div
-                    ref={scrollRef}
-                    role="listbox"
-                    aria-label="Slash commands"
-                    aria-activedescendant={items[selectedIndex] ? `slash-cmd-${selectedIndex}` : undefined}
-                    className="overflow-y-auto"
-                    style={{ maxHeight: listMaxHeight, scrollbarGutter: "stable" }}
-                  >
-                    <div className="pb-5">
-                      {items.map((cmd, index) => (
-                        <CommandRow
-                          key={cmd.id}
-                          cmd={cmd}
-                          index={index}
-                          selected={index === selectedIndex}
-                          onSelect={onSelect}
-                          tone={tone}
-                          origin={duplicateSkillOriginTag(cmd, items, workspacePath)}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                  <div
-                    aria-hidden="true"
-                    className={cn(
-                      "pointer-events-none absolute inset-x-1 bottom-1 h-5 bg-gradient-to-t from-panel via-panel/90 to-transparent",
-                      tone === "dark" && "from-panel via-panel/90",
-                    )}
+              <div
+                ref={scrollRef}
+                role="listbox"
+                aria-label="Slash commands"
+                aria-activedescendant={items[selectedIndex] ? `slash-cmd-${selectedIndex}` : undefined}
+                className="overflow-y-auto"
+                style={{ maxHeight: VISIBLE_ITEMS * ITEM_HEIGHT }}
+              >
+                {items.map((cmd, index) => (
+                  <CommandRow
+                    key={cmd.id}
+                    cmd={cmd}
+                    index={index}
+                    selected={index === selectedIndex}
+                    showSelectionFill={showSelectionFill}
+                    onSelect={onSelect}
+                    tone={tone}
+                    origin={duplicateSkillOriginTag(cmd, items, workspacePath)}
                   />
-                </div>
-              </>
+                ))}
+              </div>
             );
           case "loading":
             return <LoadingInline />;
@@ -156,13 +149,13 @@ export function SlashCommandPopup({
       })()}
     </ComposerOverlaySurface>
   );
-  return popup;
 }
 
 function CommandRow({
   cmd,
   index,
   selected,
+  showSelectionFill,
   onSelect,
   tone = "default",
   origin,
@@ -170,6 +163,7 @@ function CommandRow({
   cmd: Command;
   index: number;
   selected: boolean;
+  showSelectionFill: boolean;
   onSelect: (cmd: Command) => void;
   tone?: "default" | "dark";
   origin?: "Local";
@@ -194,28 +188,16 @@ function CommandRow({
         onSelect(cmd);
       }}
       className={cn(
-        "h-10 min-w-0 w-full justify-start gap-2 overflow-hidden rounded-md px-2 py-1.5 text-left transition-colors",
-        tone === "dark"
-          ? selected
-            ? "bg-selected"
-            : "hover:bg-hover"
-          : selected
-            ? "bg-selected"
-            : "hover:bg-selected/50",
+        "h-10 w-full min-w-0 justify-start gap-2 overflow-hidden rounded-lg px-0 text-left hover:bg-hover",
+        selected && showSelectionFill && "bg-hover",
       )}
     >
-      <CommandIdentityMark command={cmd} tone={tone} />
+      <CommandIdentityMark command={cmd} />
       <span className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
-        <span className={cn(
-          "min-w-0 shrink text-fade text-sm font-medium",
-          "text-ink",
-        )}>
+        <span className="min-w-0 shrink text-fade text-label text-ink">
           {commandDisplayLabel(cmd)}
         </span>
-        <span className={cn(
-          "min-w-12 flex-1 text-fade text-xs font-normal",
-          "text-muted",
-        )}>
+        <span className="min-w-12 flex-1 text-fade text-body-small text-muted">
           {cmd.description}
         </span>
       </span>
@@ -232,34 +214,20 @@ function CommandRow({
   );
 }
 
-function CommandIdentityMark({
-  command,
-  tone,
-}: {
-  command: Command;
-  tone: "default" | "dark";
-}) {
+function commandIconKind(command: Command): "skill" | "plugin" | "mcode" | "command" {
+  if (command.capabilityKind === "skill") return "skill";
+  if (command.capabilityKind === "plugin") return "plugin";
+  if (command.capabilityKind === "mcode" || ["goal", "plan", "ultra", "compact"].includes(command.name)) {
+    return "mcode";
+  }
+  return "command";
+}
+
+function CommandIdentityMark({ command }: { command: Command }) {
   return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        "flex size-8 shrink-0 items-center justify-center rounded-md ring-1 ring-inset",
-        tone === "dark"
-          ? "bg-hover text-muted ring-border"
-          : "bg-hover/65 text-muted ring-border/60",
-      )}
-    >
+    <span aria-hidden="true" className="flex size-4 shrink-0 items-center justify-center text-ink">
       <EntityIcon
-        kind={
-          command.capabilityKind === "skill"
-            ? "skill"
-            : command.capabilityKind === "plugin"
-              ? "plugin"
-              : command.capabilityKind === "mcode" ||
-                  ["goal", "plan", "ultra", "compact"].includes(command.name)
-                ? "mcode"
-                : "command"
-        }
+        kind={commandIconKind(command)}
         commandName={command.name}
         size={14}
         className="flex items-center justify-center"
@@ -324,10 +292,7 @@ function LoadingInline() {
       className="flex items-center gap-3 px-3 py-2"
     >
       <span className="flex h-5 w-5 flex-shrink-0" />
-      <span className={cn(
-        "text-sm",
-        "text-muted",
-      )}>Loading commands...</span>
+      <span className="text-sm text-muted">Loading commands...</span>
     </div>
   );
 }
@@ -336,10 +301,7 @@ function EmptyState() {
   return (
     <div aria-live="polite" role="status" className="flex items-center gap-3 px-3 py-2">
       <span className="flex h-5 w-5 flex-shrink-0" />
-      <span className={cn(
-        "text-sm",
-        "text-muted",
-      )}>No commands match</span>
+      <span className="text-sm text-muted">No commands match</span>
     </div>
   );
 }

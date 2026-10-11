@@ -1,5 +1,4 @@
 import type { LucideIcon } from "lucide-react";
-import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -8,46 +7,40 @@ interface ComposerCapabilityChipProps {
   label: string;
   /** Icon that identifies the capability in the compact composer row. */
   icon: LucideIcon;
-  /** Accessible explanation for removing the attached capability. */
-  removeLabel: string;
-  /** Removes or clears the attached capability. */
-  onRemove: () => void;
+  /** Accessible name and tooltip for the chip, which turns the capability off. */
+  turnOffLabel: string;
+  /** Turns the attached capability off. */
+  onTurnOff: () => void;
   /** Optional stable selector for focused UI verification. */
   testId?: string;
 }
 
-/** Renders an attached composer capability as a compact removable chip. */
+/** Renders an attached composer capability as a neutral chip; clicking it turns the capability off. */
 export function ComposerCapabilityChip({
   label,
   icon: Icon,
-  removeLabel,
-  onRemove,
+  turnOffLabel,
+  onTurnOff,
   testId,
 }: ComposerCapabilityChipProps) {
   return (
-    <span
-      data-testid={testId}
-      className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-selected/70 pl-2.5 text-xs font-semibold text-ink ring-1 ring-inset ring-primary/30"
-    >
-      <Icon size={14} className="text-primary" aria-hidden />
-      <span>{label}</span>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-compact"
-              onClick={onRemove}
-              aria-label={removeLabel}
-              className="rounded-lg text-muted hover:bg-selected hover:text-ink"
-            >
-              <X size={13} aria-hidden />
-            </Button>
-          }
-        />
-        <TooltipContent>{removeLabel}</TooltipContent>
-      </Tooltip>
-    </span>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            variant="subtle"
+            data-testid={testId}
+            onClick={onTurnOff}
+            aria-label={turnOffLabel}
+            className="h-8 shrink-0 gap-1.5 rounded-control bg-selected px-2 text-body-small text-ink"
+          >
+            <Icon size={16} strokeWidth={1.5} className="text-ink" aria-hidden />
+            <span>{label}</span>
+          </Button>
+        }
+      />
+      <TooltipContent>{turnOffLabel}</TooltipContent>
+    </Tooltip>
   );
 }

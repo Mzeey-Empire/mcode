@@ -1,8 +1,8 @@
 /**
- * Tests for the CommandRow selection indicator in SlashCommandPopup.
+ * Tests for the CommandRow selection indicator in SlashCommandTray.
  *
- * The selected row should use bg-selected as its only selection indicator.
- * The previous border-l-2 left-stripe must not appear on any row.
+ * With several rows the selected one is filled with bg-hover; a lone row gets no
+ * fill. The previous border-l-2 left-stripe must not appear on any row.
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -14,7 +14,7 @@ import {
   $isTextNode,
   createEditor,
 } from "lexical";
-import { SlashCommandPopup } from "../SlashCommandPopup";
+import { SlashCommandTray } from "../SlashCommandTray";
 import type { Command } from "../useSlashCommand";
 import { MentionNode } from "../lexical/MentionNode";
 import { insertSelectedPluginMention } from "../lexical/SlashCommandPlugin";
@@ -84,9 +84,14 @@ const LONG_COMMANDS: Command[] = Array.from({ length: 25 }, (_, i) => ({
   nativeId: `skill-${i}`,
 }));
 
+/** Whole class tokens, so `hover:bg-hover` does not count as a resting fill. */
+function classTokens(element: HTMLElement): string[] {
+  return element.className.split(/\s+/);
+}
+
 function renderPopup(selectedIndex: number) {
   return render(
-    <SlashCommandPopup
+    <SlashCommandTray
       state={{ kind: "ready", items: COMMANDS }}
       selectedIndex={selectedIndex}
       anchorRect={makeAnchorRect()}
@@ -99,7 +104,7 @@ function renderPopup(selectedIndex: number) {
 
 function renderStatusPopup(state: "empty" | "loading" | "error") {
   return render(
-    <SlashCommandPopup
+    <SlashCommandTray
       state={
         state === "error"
           ? { kind: "error", error: new Error("network failed") }
@@ -116,7 +121,7 @@ function renderStatusPopup(state: "empty" | "loading" | "error") {
 
 function renderLongPopup() {
   return render(
-    <SlashCommandPopup
+    <SlashCommandTray
       state={{ kind: "ready", items: LONG_COMMANDS }}
       selectedIndex={0}
       anchorRect={makeAnchorRect()}
@@ -127,11 +132,27 @@ function renderLongPopup() {
   );
 }
 
-describe("SlashCommandPopup selection indicator", () => {
-  it("selected row has bg-selected class", () => {
+describe("SlashCommandTray selection indicator", () => {
+  it("fills only the selected row with bg-hover when several rows are listed", () => {
     renderPopup(0);
-    const selectedRow = screen.getByRole("option", { name: /foo/ });
-    expect(selectedRow.className).toContain("bg-selected");
+    expect(classTokens(screen.getByRole("option", { name: /foo/ }))).toContain("bg-hover");
+    expect(classTokens(screen.getByRole("option", { name: /bar/ }))).not.toContain("bg-hover");
+  });
+
+  it("leaves a lone selected row unfilled", () => {
+    render(
+      <SlashCommandTray
+        state={{ kind: "ready", items: COMMANDS.slice(0, 1) }}
+        selectedIndex={0}
+        anchorRect={makeAnchorRect()}
+        onSelect={() => {}}
+        onDismiss={() => {}}
+        onRetry={() => {}}
+      />,
+    );
+    const row = screen.getByRole("option", { name: /foo/ });
+    expect(row).toHaveAttribute("aria-selected", "true");
+    expect(classTokens(row)).not.toContain("bg-hover");
   });
 
   it("selected row has no border-l class", () => {
@@ -184,7 +205,7 @@ describe("SlashCommandPopup selection indicator", () => {
       mentionPath: "plugin://browser@openai-bundled",
     };
     render(
-      <SlashCommandPopup
+      <SlashCommandTray
         state={{ kind: "ready", items: [plugin] }}
         selectedIndex={0}
         anchorRect={makeAnchorRect()}
@@ -226,7 +247,7 @@ describe("SlashCommandPopup selection indicator", () => {
         ? screen.getByRole("alert")
         : screen.getByText(text).closest('[role="status"]');
     if (row === null) throw new Error(`${state} popup row not found`);
-    const popup = row.closest("[data-slash-popup]") as HTMLElement;
+    const popup = row.closest("[data-slash-tray]") as HTMLElement;
 
     const positioner = popup.parentElement as HTMLElement;
 

@@ -101,7 +101,7 @@ export function useDesignAnnotationState({
   // Capture the anchor rect when the file popup opens rather than reading it
   // on every render. The bubble can shift (advanced panel expand, scroll) after
   // open, but the popup should stay pinned to where the input was when the
-  // trigger fired, consistent with SlashCommandPopup's anchorRect behavior.
+  // trigger fired, consistent with SlashCommandTray's anchorRect behavior.
   const [filePopupAnchorRect, setFilePopupAnchorRect] = useState<DOMRect | null>(null);
   useEffect(() => {
     if (bubbleFileOpen) {

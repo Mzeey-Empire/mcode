@@ -16,6 +16,7 @@ import type { SlashCommandNamespace } from "./lexical/SlashCommandNode";
 import {
   resolveComposerCapabilities,
   type ComposerCapabilityAction,
+  type ResolvedComposerCapability,
 } from "@/features/conversation/composer/composer-capabilities";
 
 /** A slash command entry shown in the popup. */
@@ -85,6 +86,14 @@ const BUILTIN_COMMANDS: Command[] = [
 
 /** Regex: matches `/` at start of line or after whitespace, followed by non-space chars. */
 export const SLASH_TRIGGER_RE = /(^|\s)(\/\S*)$/;
+
+function capabilityCommandDescription(
+  capability: Pick<ResolvedComposerCapability, "id" | "label">,
+  planActive: boolean,
+): string {
+  if (capability.id === "plan") return planActive ? "Exit plan mode" : "Enter plan mode";
+  return `Attach ${capability.label} to the composer`;
+}
 
 /** Map an invocable provider capability into the existing command presentation. */
 function toCommand(entry: ProviderCapabilityEntry): Command | null {
@@ -184,6 +193,8 @@ interface UseSlashCommandOptions {
   includeBuiltins?: boolean;
   /** Whether this surface can persist native plugin mentions. */
   includePlugins?: boolean;
+  /** Whether Plan is on, so the `/plan` row describes what selecting it will do. */
+  planActive?: boolean;
 }
 
 /** Return value of the useSlashCommand hook. */
@@ -213,7 +224,7 @@ export interface UseSlashCommandReturn {
 }
 
 /** Routes a Lexical navigation key to an open slash-command picker. */
-export function handleSlashCommandPopupKey(
+export function handleSlashCommandTrayKey(
   key: string,
   items: readonly Command[],
   selectedIndex: number,
@@ -251,6 +262,7 @@ export function useSlashCommand({
   modelId,
   includeBuiltins = true,
   includePlugins = true,
+  planActive = false,
 }: UseSlashCommandOptions): UseSlashCommandReturn {
   const [isOpen, setIsOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -297,7 +309,7 @@ export function useSlashCommand({
             (capability): Command => ({
               id: `builtin:mcode:${capability.id}`,
               name: capability.slashCommand,
-              description: `Attach ${capability.label} to the composer`,
+              description: capabilityCommandDescription(capability, planActive),
               namespace: "mcode",
               capabilityKind: "mcode",
               nativeId: capability.id,
@@ -316,7 +328,7 @@ export function useSlashCommand({
       ...providerCommands,
     ];
     return sortCommands(commands);
-  }, [snapshot, providerId, modelId, includeBuiltins, includePlugins]);
+  }, [snapshot, providerId, modelId, includeBuiltins, includePlugins, planActive]);
 
   const reconciledOpenCommands = useMemo(
     () => openCommands === null ? allCommands : reconcileOpenCommands(openCommands, allCommands),
@@ -346,8 +358,7 @@ export function useSlashCommand({
       : null;
   }, [displayedSelectedIndex, filtered]);
 
-  // Derive the typed popup state. Order encodes the stale-while-revalidate
-  // priority that previously lived in a comment in SlashCommandPopup:
+  // Derive the typed popup state. Order encodes the stale-while-revalidate priority:
   //   error → list (ready / staleRevalidating) → loading → empty.
   // The list branch splits on isLoading so a background refresh while cached
   // items are shown is the explicit `staleRevalidating` state, the one that

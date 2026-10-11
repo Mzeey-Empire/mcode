@@ -1269,7 +1269,7 @@ plugin remain separate Skill entries.
 A short command the user types in the composer (e.g. `/something`) that
 the Mcode app expands into a richer prompt or action. Editor integration
 lives in the composer's Lexical plugin (`SlashCommandPlugin`,
-`SlashCommandNode`, `SlashCommandPopup`). Distinct from the dev-tooling
+`SlashCommandNode`, `SlashCommandTray`). Distinct from the dev-tooling
 slash commands under `.claude/commands/` etc. (which are for
 contributors).
 

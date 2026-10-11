@@ -29,9 +29,8 @@ import { usePlanStore } from "@/stores/planStore";
 import type { OverviewPresentation } from "@/stores/overviewStore";
 import { useDiffStore } from "@/stores/diffStore";
 
-import { handleSlashCommandPopupKey, useSlashCommand } from "@/components/chat/useSlashCommand";
+import { handleSlashCommandTrayKey, useSlashCommand } from "@/components/chat/useSlashCommand";
 import type { Command } from "@/components/chat/useSlashCommand";
-import { SlashCommandPopup } from "@/components/chat/SlashCommandPopup";
 import { ComposerOverlayLayout } from "@/components/chat/ComposerOverlaySurface";
 import { useQueueStore } from "@/stores/queueStore";
 import { attachmentAcceptAttribute, isGoalOpen } from "@mcode/contracts";
@@ -498,6 +497,7 @@ export function Composer({
     threadId: surfaceState.catalogThreadId,
     providerId: surfaceState.effectiveProviderId,
     modelId,
+    planActive: agentControls.attachedCapabilityIds.has("plan"),
     onMcodeCommand: (action) => {
       if (action === "attach-plan") {
         agentControls.attachCapability("plan");
@@ -604,6 +604,16 @@ export function Composer({
     }
   }, [editorRef, slashCommand]);
 
+  // Typing `/plan ` means "plan this": it only turns Plan on, and only where the
+  // provider offers Plan. Any other command stays literal text.
+  const { capabilities: agentCapabilities, enablePlan } = agentControls;
+  const handleInlineSlashCommand = useCallback((commandName: string): boolean => {
+    const planCapability = agentCapabilities.find((capability) => capability.id === "plan");
+    if (!planCapability || planCapability.slashCommand !== commandName) return false;
+    enablePlan();
+    return true;
+  }, [agentCapabilities, enablePlan]);
+
   // Unified popup keyboard handler for Lexical's KeyboardPlugin.
   // Delegates to the file tag popup or slash command popup depending on which is open.
   const handlePopupKeyDown = useCallback((key: string): boolean => {
@@ -611,7 +621,7 @@ export function Composer({
       return filePopup.handleKeyDown(createPopupKeyboardEvent(key));
     }
     if (slashCommand.isOpen) {
-      return handleSlashCommandPopupKey(
+      return handleSlashCommandTrayKey(
         key,
         slashCommand.items,
         slashCommand.selectedIndex,
@@ -672,6 +682,7 @@ export function Composer({
             filePopup,
             filePopupAnchorRect,
             slashCommand,
+            workspacePath,
             attachmentBundle: surfaceState.annotationBundleForDisplay,
             annotationScopeId: surfaceState.annotationScopeId,
             diffComments: surfaceState.diffCommentsForDisplay,
@@ -721,6 +732,8 @@ export function Composer({
             onEditorChange: handleEditorChange,
             onSubmit: handleSend,
             onPopupKeyDown: handlePopupKeyDown,
+            onInlineSlashCommand: handleInlineSlashCommand,
+            onSlashSelect: handleSlashSelect,
             onMentionSelect: handleMentionSelect,
             onPaste: handlePaste,
             onMarkRestoredPreviewAnnotationsCleared: markRestoredPreviewAnnotationsCleared,
@@ -771,15 +784,6 @@ export function Composer({
         />
 
       </ComposerOverlayLayout>
-      <SlashCommandPopup
-        state={slashCommand.state}
-        selectedIndex={slashCommand.selectedIndex}
-        anchorRect={slashCommand.anchorRect}
-        workspacePath={workspacePath}
-        onSelect={handleSlashSelect}
-        onDismiss={slashCommand.onDismiss}
-        onRetry={slashCommand.onRetry}
-      />
       <ComposerCheckoutDialog
         pending={routedPendingCheckoutConfirmation}
         confirming={routedCheckoutConfirming}

@@ -60,7 +60,10 @@ export interface ComposerAgentControlState {
   reasoningLevels: ReasoningLevel[];
   permissionLocked: boolean;
   approvalReviewSupported: boolean;
+  /** Toggles Plan, and attaches Goal or orchestration. */
   attachCapability(capabilityId: ComposerCapabilityId): void;
+  /** Turns Plan on and never off, for the inline `/plan ` conversion. */
+  enablePlan(): void;
   detachPlan(): void;
   detachGoal(): void;
   detachOrchestration(): void;
@@ -159,6 +162,9 @@ export function useComposerAgentControlState({
     }
     focusEditor();
   }, [focusEditor, onSelectionChange, onSelectionTouched, threadId]);
+  const enablePlan = useCallback(() => {
+    if (interactionMode !== INTERACTION_MODES.PLAN) attachPlan();
+  }, [attachPlan, interactionMode]);
   const attachGoal = useCallback(() => {
     if (!goalCapability || isGoalOpen(activeGoal)) return;
     onGoalPendingChange(true);
@@ -176,13 +182,14 @@ export function useComposerAgentControlState({
   }, [focusEditor, onSelectionChange, orchestrationCapability, threadId]);
   const attachCapability = useCallback((capabilityId: ComposerCapabilityId) => {
     if (capabilityId === "plan") {
-      attachPlan();
+      if (interactionMode === INTERACTION_MODES.PLAN) detachPlan();
+      else attachPlan();
     } else if (capabilityId === "goal") {
       attachGoal();
     } else {
       attachOrchestration();
     }
-  }, [attachGoal, attachOrchestration, attachPlan]);
+  }, [attachGoal, attachOrchestration, attachPlan, detachPlan, interactionMode]);
 
   useEffect(() => {
     if (!permissionLocked || permissionMode === PERMISSION_MODES.FULL) return;
@@ -229,6 +236,7 @@ export function useComposerAgentControlState({
     permissionLocked,
     approvalReviewSupported,
     attachCapability,
+    enablePlan,
     detachPlan,
     detachGoal,
     detachOrchestration,

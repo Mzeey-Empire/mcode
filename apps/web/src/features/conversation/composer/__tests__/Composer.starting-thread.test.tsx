@@ -86,7 +86,7 @@ vi.mock("@/components/chat/TerminalStatusIndicator", () => ({ TerminalStatusIndi
 vi.mock("@/components/chat/ComposerQueueList", () => ({ ComposerQueueList: () => <div /> }));
 vi.mock("@/components/chat/ContextTracker", () => ({ ContextTracker: () => <div /> }));
 vi.mock("@/components/chat/RetryBanner", () => ({ RetryBanner: () => <div /> }));
-vi.mock("@/components/chat/SlashCommandPopup", () => ({ SlashCommandPopup: () => <div /> }));
+vi.mock("@/components/chat/SlashCommandTray", () => ({ SlashCommandTray: () => <div /> }));
 
 function seedStartingThread() {
   const workspace = createMockWorkspace({ id: "ws-1", is_git_repo: true });

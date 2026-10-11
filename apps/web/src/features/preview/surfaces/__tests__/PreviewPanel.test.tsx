@@ -690,7 +690,7 @@ describe("PreviewPanel: full panel state", () => {
         disconnect() {}
       },
     );
-    // SlashCommandPopup calls scrollIntoView on focused list items; jsdom
+    // SlashCommandTray calls scrollIntoView on focused list items; jsdom
     // doesn't implement it, so we stub the prototype once per test rather than
     // per-element. The stub is a no-op; the scroll behaviour is visual only
     // and is covered by e2e tests.

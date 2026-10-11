@@ -269,8 +269,8 @@ vi.mock("@/components/chat/RetryBanner", () => ({
   RetryBanner: () => <div />,
 }));
 
-vi.mock("@/components/chat/SlashCommandPopup", () => ({
-  SlashCommandPopup: () => <div />,
+vi.mock("@/components/chat/SlashCommandTray", () => ({
+  SlashCommandTray: () => <div />,
 }));
 
 function seedComposerState(

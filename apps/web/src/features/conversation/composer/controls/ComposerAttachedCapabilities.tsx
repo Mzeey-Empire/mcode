@@ -1,4 +1,4 @@
-import { Goal, ListChecks, Network } from "lucide-react";
+import { Goal, ListTodo, Network } from "lucide-react";
 import { ComposerCapabilityChip } from "@/components/chat/ComposerCapabilityChip";
 import { ActiveGoalChip } from "../ActiveGoalChip";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
@@ -31,9 +31,9 @@ function ComposerPlanCapability({
   return (
     <ComposerCapabilityChip
       label={capability.label}
-      icon={ListChecks}
-      removeLabel={`Remove ${capability.label}`}
-      onRemove={onDetach}
+      icon={ListTodo}
+      turnOffLabel={`Turn off ${capability.label}`}
+      onTurnOff={onDetach}
       testId="composer-capability-plan"
     />
   );
@@ -53,8 +53,8 @@ function ComposerPendingGoalCapability({
     <ComposerCapabilityChip
       label={capability.label}
       icon={Goal}
-      removeLabel={`Remove ${capability.label}`}
-      onRemove={onDetach}
+      turnOffLabel={`Turn off ${capability.label}`}
+      onTurnOff={onDetach}
       testId="composer-capability-goal-pending"
     />
   );
@@ -74,8 +74,8 @@ function ComposerOrchestrationCapability({
     <ComposerCapabilityChip
       label={capability.label}
       icon={Network}
-      removeLabel={`Remove ${capability.label}`}
-      onRemove={onDetach}
+      turnOffLabel={`Turn off ${capability.label}`}
+      onTurnOff={onDetach}
       testId="composer-capability-orchestration"
     />
   );

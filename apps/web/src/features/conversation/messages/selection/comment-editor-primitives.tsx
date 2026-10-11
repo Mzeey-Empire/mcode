@@ -10,8 +10,8 @@ import {
   insertSlashCommandNode,
 } from "@/components/chat/lexical";
 import { FileTagPopup, useFileTagPopup } from "@/components/chat/FileTagPopup";
-import { SlashCommandPopup } from "@/components/chat/SlashCommandPopup";
-import { handleSlashCommandPopupKey, type Command, useSlashCommand } from "@/components/chat/useSlashCommand";
+import { SlashCommandTray } from "@/components/chat/SlashCommandTray";
+import { handleSlashCommandTrayKey, type Command, useSlashCommand } from "@/components/chat/useSlashCommand";
 import { useFileAutocomplete, type MentionSuggestion } from "@/components/chat/useFileAutocomplete";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -22,7 +22,7 @@ import {
 } from "./comment-editor-model";
 
 function isPopupTarget(target: EventTarget | null): boolean {
-  return target instanceof Element && Boolean(target.closest("[data-file-popup], [data-slash-popup]"));
+  return target instanceof Element && Boolean(target.closest("[data-file-popup], [data-slash-tray]"));
 }
 
 /**
@@ -196,7 +196,7 @@ export function CommentEditorComposer({
       } as unknown as React.KeyboardEvent);
     }
     if (slashCommand.isOpen) {
-      return handleSlashCommandPopupKey(
+      return handleSlashCommandTrayKey(
         key,
         slashCommand.items,
         slashCommand.selectedIndex,
@@ -244,7 +244,7 @@ export function CommentEditorComposer({
         anchorRect={popupAnchorRect}
         presentation="compact"
       />
-      <SlashCommandPopup
+      <SlashCommandTray
         state={slashCommand.state}
         selectedIndex={slashCommand.selectedIndex}
         anchorRect={slashCommand.anchorRect}

@@ -41,6 +41,8 @@ interface ComposerOverlaySurfaceProps
   tone?: "default" | "dark";
   /** Additional surface classes for the owning autocomplete. */
   className?: string;
+  /** Surface classes applied only when the overlay docks in a composer layout. */
+  attachedClassName?: string;
   /** Contents rendered inside the shared surface. */
   children: ReactNode;
   /** Called when Escape is pressed while a floating overlay is open. The owner decides whether to close. */
@@ -69,6 +71,7 @@ export const ComposerOverlaySurface = forwardRef<HTMLDivElement, ComposerOverlay
       attached = false,
       tone = "default",
       className,
+      attachedClassName,
       children,
       onEscapeKeyDown,
       ...props
@@ -108,6 +111,7 @@ export const ComposerOverlaySurface = forwardRef<HTMLDivElement, ComposerOverlay
             ATTACHED_RAIL_SURFACE_CLASS,
             surfaceToneClass(tone),
             className,
+            attachedClassName,
           )}
         >
           {children}
