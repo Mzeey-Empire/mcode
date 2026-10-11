@@ -757,6 +757,21 @@ describe("NarrativeStore write seam (server-side traps)", () => {
     }]);
   });
 
+  it("leaves a background call's steps running when its turn is saved", () => {
+    const state = new NarrativeTurnState(THREAD);
+    state.beginTurn(THREAD);
+    state.bufferToolCall(THREAD, { toolCallId: "agent", toolName: "Agent", toolInput: { prompt: "Look around" } });
+    state.markToolCallBackground(THREAD, "agent");
+    state.bufferToolCall(THREAD, { toolCallId: "step", toolName: "Bash", toolInput: { command: "ls" }, parentToolCallId: "agent" });
+    state.bufferToolCall(THREAD, { toolCallId: "read", toolName: "Read", toolInput: { file_path: "a.txt" } });
+    const persisted = state.prepareNarrativePersistence(THREAD, "m1", "", "completed");
+    expect(persisted.toolCalls.map((tool) => [tool.toolCallId, tool.status, tool.completedAt ?? null])).toEqual([
+      ["agent", "running", null],
+      ["step", "running", null],
+      ["read", "completed", expect.any(String)],
+    ]);
+  });
+
   it("detaches changed and terminally materialized records from a fork's accepted narrative", () => {
     const accepted = new NarrativeTurnState({ threadId: THREAD, turnId: "turn", executionId: "execution" });
     accepted.beginTurn(THREAD);

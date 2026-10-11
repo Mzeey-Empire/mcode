@@ -1,5 +1,6 @@
 import { isTaskListToolName } from "@mcode/contracts";
 import type { ThoughtSegmentRecord, ToolCallRecord } from "@/transport/types";
+import { backgroundHeldToolIds } from "../narrative/background-held-tools";
 import { collapseSubagentRecords } from "../narrative/subagent-lifecycle";
 import type { NarrativeCounts, TurnSummary } from "../narrative/types";
 
@@ -28,26 +29,14 @@ function validTimestamps(values: readonly (string | null)[]): number[] {
   return values.map(parseTimestamp).filter((value): value is number => value !== null);
 }
 
-/** A background call and the steps under it keep running after the turn, so their ends are not the turn's. */
-function outlivesTurnIds(tools: readonly ToolCallRecord[]): ReadonlySet<string> {
-  const ids = new Set(tools.filter((tool) => tool.background === true).map((tool) => tool.id));
-  let grew = ids.size > 0;
-  while (grew) {
-    const before = ids.size;
-    for (const tool of tools) {
-      if (tool.parent_tool_call_id != null && ids.has(tool.parent_tool_call_id)) ids.add(tool.id);
-    }
-    grew = ids.size > before;
-  }
-  return ids;
-}
-
 /**
  * Approximates turn wall time for legacy turns that have no canonical summary.
  * Narrative records only bound the work they recorded, so this can undercount.
  */
 export function persistedTurnDurationMs(records: PersistedTurnRecords): number | null {
-  const outlivesTurn = outlivesTurnIds(records.tools);
+  // A background call and the steps under it keep running after the turn, so their ends are not the turn's.
+  const outlivesTurn = backgroundHeldToolIds(records.tools.map((tool) => ({
+    id: tool.id, parentId: tool.parent_tool_call_id, background: tool.background === true })));
   const starts = validTimestamps([
     ...records.tools.map((tool) => tool.started_at),
     ...records.thoughts.map((thought) => thought.started_at),

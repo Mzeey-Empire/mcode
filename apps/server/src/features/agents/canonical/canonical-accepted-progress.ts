@@ -35,7 +35,7 @@ import { prepareAcceptedCollaboration } from "./accepted-collaboration-preparati
 import { AcceptedCodexCollaboration } from "./accepted-codex-collaboration.js";
 import type { SubagentStopTarget } from "../collaboration/subagent-lifecycle-durability.js";
 import type { CreateHookExecutionInput } from "../events/persistence/hook-execution-repo.js";
-import { acceptedToolRecord, lateToolResultEvents, settledLateToolRecord, type LateToolResult } from "./late-tool-result-events.js";
+import { acceptedToolRecord, lateToolResultEvents, lateToolStepEvents, settledLateToolRecord, type LateToolResult } from "./late-tool-result-events.js";
 import * as NodeUtil from "node:util";
 import { z } from "zod";
 import { prepareAcceptedFeatureObservations, prepareAcceptedThreadSystemFeatures, type AcceptedFeatureObservations, type AcceptedChildPublicationOwner } from "./accepted-feature-observations.js";
@@ -636,8 +636,12 @@ export class CanonicalAcceptedProgress {
     if (item?.threadId !== threadId || item.turnId !== turn.id) throw new Error("Late tool result requires its accepted tool call");
     const record = settledLateToolRecord(acceptedToolRecord(item), result, message.id, new Date().toISOString());
     if (!record) return;
-    const events = lateToolResultEvents({ item, record, result, execution,
-      providerId: thread.state.threads[threadId]?.providerId ?? "server", publicationId: String(thread.publicationSequence + 1) });
+    const providerId = thread.state.threads[threadId]?.providerId ?? "server";
+    const turnItems = Object.values(thread.state.items).filter((candidate) => candidate.turnId === turn.id);
+    const events = [
+      ...lateToolResultEvents({ item, record, result, execution, providerId, publicationId: String(thread.publicationSequence + 1) }),
+      ...lateToolStepEvents({ turnItems, record, execution, providerId }),
+    ];
     this.acceptAuxiliary(thread, `late-tool:${record.id}`, execution, events, "post-terminal");
     thread.publicationSequence += 1;
   }

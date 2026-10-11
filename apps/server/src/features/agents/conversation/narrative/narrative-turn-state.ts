@@ -14,6 +14,7 @@ import type { TurnOutcome } from "../../turns/turn-outcome.js";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import { assertActiveTurnRecoveryRetention } from "../../turns/active-turn-recovery-retention-policy.js";
 import type { ExecutionIdentity } from "../../execution/execution-mailbox-protocol.js";
+import { backgroundHeldToolIds } from "../../tools/background-held-tools.js";
 
 /** Buffered tool call with raw input preserved for deferred summarization. */
 export interface BufferedToolCall extends CreateToolCallRecordInput {
@@ -1251,9 +1252,13 @@ export class NarrativeTurnState {
     const toolCalls = structuredClone(this.turnToolCalls);
     this.turnToolCalls = toolCalls;
     const settledAt = new Date().toISOString();
+    for (const toolCall of toolCalls) toolCall.toolCallId ??= NodeCrypto.randomUUID();
+    // A background call and the steps under it outlive the turn; their own late settlement ends them.
+    const held = backgroundHeldToolIds(toolCalls.map((toolCall) => ({
+      id: toolCall.toolCallId ?? "", parentId: toolCall.parentToolCallId, background: toolCall.background === true,
+    })));
     for (const toolCall of toolCalls) {
-      toolCall.toolCallId ??= NodeCrypto.randomUUID();
-      this.settleRunningToolCall(toolCall, outcome, settledAt);
+      if (!held.has(toolCall.toolCallId ?? "")) this.settleRunningToolCall(toolCall, outcome, settledAt);
       toolCall.messageId = messageId;
       this.prepareToolCallInput(toolCall);
     }
@@ -1265,8 +1270,7 @@ export class NarrativeTurnState {
     outcome: TurnOutcome,
     settledAt: string,
   ): void {
-    // A background call outlives its turn; only its own late result settles it.
-    if (toolCall.status !== "running" || toolCall.background) return;
+    if (toolCall.status !== "running") return;
     toolCall.status = this.settledToolCallStatus(outcome);
     toolCall.completedAt = settledAt;
   }

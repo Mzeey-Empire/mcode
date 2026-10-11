@@ -487,6 +487,42 @@ describe("handleAgentEvent branches", () => {
       ]);
     });
 
+    it("leaves a background agent's steps running at turn end, then settles them with its late result", () => {
+      launchBackgroundAgent();
+      dispatch({ type: "toolUse", toolCallId: "step", toolName: "Bash", toolInput: { command: "ls" }, parentToolCallId: "agent-bg" });
+      dispatch({ type: "toolUse", toolCallId: "nested", toolName: "Read", toolInput: { path: "/a" }, parentToolCallId: "step" });
+
+      dispatch({ type: "turnComplete", reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 });
+      vi.runAllTimers();
+
+      expect(getTestThreadToolCalls("thread-1")).toEqual([
+        expect.objectContaining({ id: "agent-bg", isComplete: false }),
+        expect.objectContaining({ id: "step", isComplete: false }),
+        expect.objectContaining({ id: "nested", isComplete: false }),
+      ]);
+
+      const step = { ...heldRecord, id: "step", parent_tool_call_id: "agent-bg", tool_name: "Bash", background: false, sort_order: 2 };
+      useThreadStore.setState((state) => ({
+        records: patchThreadRecord(state.records, "thread-1", (record) => ({
+          narrativeByMessage: {
+            ...record.narrativeByMessage,
+            "assistant-persisted": { tools: [heldRecord, step], thoughts: [], approvals: [], hooks: [] },
+          },
+        })),
+      }));
+      dispatch({ type: "toolResult", toolCallId: "agent-bg", output: "Stopped", isError: false, cancelled: true, persistedMessageId: "assistant-persisted" });
+
+      expect(getTestThreadToolCalls("thread-1")).toEqual([
+        expect.objectContaining({ id: "agent-bg", isComplete: true, isCancelled: true, output: "Stopped" }),
+        expect.objectContaining({ id: "step", isComplete: true, isCancelled: true, output: null }),
+        expect.objectContaining({ id: "nested", isComplete: true, isCancelled: true }),
+      ]);
+      expect(persistedTools()).toEqual([
+        expect.objectContaining({ id: "agent-bg", status: "cancelled" }),
+        expect.objectContaining({ id: "step", status: "cancelled", output_summary: "", completed_at: expect.any(String) }),
+      ]);
+    });
+
     it("keeps the finished turn's duration when its background call settles minutes later", () => {
       const read = { id: "read-1", message_id: "assistant-persisted", parent_tool_call_id: null, tool_name: "Read",
         input_summary: "/a", output_summary: "ok", status: "completed" as const,

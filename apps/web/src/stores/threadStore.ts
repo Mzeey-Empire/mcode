@@ -4,6 +4,7 @@ import type { AgentEvent, AgentModelState, AgentTurn, CanonicalAgentEventEnvelop
 import type { reduceAgentEventBatch } from "@mcode/contracts";
 import type { DevinMode } from "@mcode/contracts";
 import { recoverParentNarrative } from "./parent-narrative-recovery";
+import { backgroundHeldToolIds, stepsSettledWith, type ToolCallLink } from "@/features/conversation/narrative/background-held-tools";
 import {
   AgentEventSchema,
   CANONICAL_AGENT_PROGRESS_BATCH_MAX,
@@ -2185,7 +2186,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
   /**
    * A late result belongs to a background call from an earlier, finished turn. It updates only the
-   * row with its exact id, because the first-incomplete fallback would settle an unrelated live call.
+   * row with its exact id and the steps under it, because the first-incomplete fallback would
+   * settle an unrelated live call. The steps outlived the turn with the call, and nothing else
+   * reports their end.
    */
   const settleLateToolResult = (
     record: ThreadRecord,
@@ -2193,11 +2196,26 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   ): Partial<ThreadRecord> => {
     const live = record.toolCalls.some((toolCall) => toolCall.id === event.toolCallId && !toolCall.isComplete);
     return {
-      ...(live ? { toolCalls: record.toolCalls.map((toolCall) => toolCall.id === event.toolCallId
-        ? completedToolCall(toolCall, event, {})
-        : toolCall) } : {}),
+      ...(live ? { toolCalls: settledLiveBackgroundCall(record.toolCalls, event) } : {}),
       ...settlePersistedTool(record, event),
     };
+  };
+
+  const liveToolLink = (toolCall: ToolCall): ToolCallLink => ({
+    id: toolCall.id, parentId: toolCall.parentToolCallId, background: toolCall.background === true,
+  });
+
+  const settledLiveBackgroundCall = (
+    toolCalls: ToolCall[],
+    event: Extract<AgentEvent, { type: "toolResult" }>,
+  ): ToolCall[] => {
+    const steps = stepsSettledWith(toolCalls.map(liveToolLink), event.toolCallId);
+    return toolCalls.map((toolCall) => {
+      if (toolCall.id === event.toolCallId) return completedToolCall(toolCall, event, {});
+      if (!steps.has(toolCall.id) || toolCall.isComplete) return toolCall;
+      return { ...toolCall, isComplete: true, isError: toolCall.isError || event.isError,
+        lastActivityAt: Date.now(), ...(event.cancelled ? { isCancelled: true } : {}) };
+    });
   };
 
   const settlePersistedTool = (
@@ -2210,13 +2228,15 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     // A redelivered result finds the call already settled; an unloaded message refetches the saved outcome.
     if (!messageId || !narrative || held?.status !== "running") return {};
     const status = event.cancelled ? "cancelled" : event.isError ? "failed" : "completed";
-    const settled: ToolCallRecord = { ...held, status, output_summary: event.output, completed_at: new Date().toISOString() };
-    return {
-      narrativeByMessage: {
-        ...record.narrativeByMessage,
-        [messageId]: { ...narrative, tools: narrative.tools.map((tool) => tool.id === held.id ? settled : tool) },
-      },
-    };
+    const completedAt = new Date().toISOString();
+    const steps = stepsSettledWith(narrative.tools.map((tool) => ({
+      id: tool.id, parentId: tool.parent_tool_call_id, background: tool.background === true,
+    })), held.id);
+    const tools = narrative.tools.map((tool): ToolCallRecord => {
+      if (tool.id === held.id) return { ...tool, status, output_summary: event.output, completed_at: completedAt };
+      return steps.has(tool.id) && tool.status === "running" ? { ...tool, status, completed_at: completedAt } : tool;
+    });
+    return { narrativeByMessage: { ...record.narrativeByMessage, [messageId]: { ...narrative, tools } } };
   };
 
   const handleToolBackgrounded = (event: Extract<AgentEvent, { type: "toolBackgrounded" }>): void => {
@@ -2453,8 +2473,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   const completedToolCalls = (toolCalls: ToolCall[], phase: ThreadRecord["runtimePhase"]): ToolCall[] => {
-    // A background call outlives its turn; its own late result settles it.
-    return toolCalls.map((toolCall) => toolCall.isComplete || toolCall.background ? toolCall : { ...toolCall, isComplete: true,
+    // A background call and the steps under it outlive the turn; the call's own late result settles them.
+    const held = backgroundHeldToolIds(toolCalls.map(liveToolLink));
+    return toolCalls.map((toolCall) => toolCall.isComplete || held.has(toolCall.id) ? toolCall : { ...toolCall, isComplete: true,
       isError: toolCall.isError || phase === "errored" || phase === "interrupted",
       ...(phase === "cancelled" ? { isCancelled: true } : {}),
     });

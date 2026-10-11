@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { and, eq, inArray } from "drizzle-orm";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
+import { backgroundHeldToolIds, narrativeToolCallLinks } from "../tools/background-held-tools.js";
 import {
   canonicalAgentIngestCheckpoints,
   messages,
@@ -355,15 +356,17 @@ export class CanonicalParentTurnLifecycle {
     messageId: string,
     endedAt: string,
   ): ParentNarrativeRecoveryItem[] {
-    return items.map((item) => this.reconciledNarrativeItem(item, messageId, endedAt));
+    const held = backgroundHeldToolIds(narrativeToolCallLinks(items));
+    return items.map((item) => this.reconciledNarrativeItem(item, messageId, endedAt, held));
   }
 
   private reconciledNarrativeItem(
     item: ParentNarrativeRecoveryItem,
     messageId: string,
     endedAt: string,
+    held: ReadonlySet<string>,
   ): ParentNarrativeRecoveryItem {
-    if (item.kind === "toolCall") return this.reconciledToolCall(item, messageId, endedAt);
+    if (item.kind === "toolCall") return this.reconciledToolCall(item, messageId, endedAt, held);
     if (item.kind === "hook") return this.reconciledHook(item, messageId, endedAt);
     if (item.kind === "approval") return { kind: "approval", record: { ...item.record, message_id: messageId } };
     return { kind: "narrationSegment", record: { ...item.record, message_id: messageId } };
@@ -373,10 +376,11 @@ export class CanonicalParentTurnLifecycle {
     item: Extract<ParentNarrativeRecoveryItem, { kind: "toolCall" }>,
     messageId: string,
     endedAt: string,
+    held: ReadonlySet<string>,
   ): ParentNarrativeRecoveryItem {
-    // A background call may still finish after its parent turn is lost. Its late
-    // result settles it, or the startup sweep does when no provider survives.
-    const settles = item.record.status === "running" && item.record.background !== true;
+    // A background call and the steps under it may still finish after their parent turn is
+    // lost. Its late result settles them, or the startup sweep does when no provider survives.
+    const settles = item.record.status === "running" && !held.has(item.record.id);
     return {
       kind: "toolCall",
       record: {

@@ -1,6 +1,7 @@
 import { ToolCallRecordSchema, type AgentEvent, type AgentItem, type ToolCallRecord } from "@mcode/contracts";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 import type { CanonicalAgentEventDraft } from "./canonical-agent-boundary.js";
+import { stepsSettledWith } from "../tools/background-held-tools.js";
 
 /** Matches the preview bound the live narrative applies to ordinary tool output. */
 const LATE_OUTPUT_LIMIT = 500;
@@ -14,11 +15,17 @@ export interface LateToolResult {
 
 /** Read the accepted record from either the bound or the still-recovering item shape. */
 export function acceptedToolRecord(item: AgentItem): ToolCallRecord {
+  const record = toolItemRecord(item);
+  if (!record) throw new Error("Late tool result requires an accepted tool call");
+  return record;
+}
+
+/** The accepted record of a tool item, or undefined for any other item. */
+function toolItemRecord(item: AgentItem): ToolCallRecord | undefined {
   const payload = item.payload;
   const narrative = payload.projection === "narrativeRecovery" ? payload.narrative : undefined;
   const raw = payload.projection === "toolCall" ? payload.record : toolNarrativeRecord(narrative);
-  if (raw === undefined) throw new Error("Late tool result requires an accepted tool call");
-  return ToolCallRecordSchema().parse(raw);
+  return raw === undefined ? undefined : ToolCallRecordSchema().parse(raw);
 }
 
 function toolNarrativeRecord(narrative: unknown): unknown {
@@ -56,17 +63,52 @@ export function lateToolResultEvents(input: {
 }): CanonicalAgentEventDraft[] {
   const { item, record, execution, providerId, publicationId } = input;
   const operationId = `late-tool:${record.id}`;
-  const payload = item.payload.projection === "toolCall"
-    ? { ...item.payload, record }
-    : { ...item.payload, narrative: { kind: "toolCall", record } };
-  return [{
-    eventId: `${operationId}:record`, routing: { ...execution, itemId: item.id }, sourceProviderId: providerId,
-    sourceIdentities: [], payload: { type: "item.recorded",
-      item: { ...item, payload, updatedAt: record.completed_at ?? item.updatedAt } },
-  }, {
+  return [recordedToolItem(item, record, `${operationId}:record`, execution, providerId), {
     eventId: `${operationId}:publication`, routing: execution, sourceProviderId: providerId, sourceIdentities: [],
     payload: { type: "publication.recorded", publicationId, event: lateToolResultPublication(input) },
   }];
+}
+
+/**
+ * Settle the running steps under a background call along with it. They outlived the turn
+ * with the call, and once it ends no provider reports them again. Clients settle the same
+ * steps from the call's own late result.
+ */
+export function lateToolStepEvents(input: {
+  readonly turnItems: readonly AgentItem[];
+  readonly record: ToolCallRecord;
+  readonly execution: ExecutionIdentity;
+  readonly providerId: string;
+}): CanonicalAgentEventDraft[] {
+  const { record, execution, providerId } = input;
+  const tools = input.turnItems.flatMap((item) => {
+    const tool = item.kind === "tool-call" ? toolItemRecord(item) : undefined;
+    return tool ? [{ item, tool }] : [];
+  });
+  const steps = stepsSettledWith(tools.map(({ tool }) => ({
+    id: tool.id, parentId: tool.parent_tool_call_id, background: tool.background === true })), record.id);
+  return tools
+    .filter(({ tool }) => steps.has(tool.id) && tool.status === "running")
+    .map(({ item, tool }) => recordedToolItem(item, {
+      ...tool, message_id: record.message_id, status: record.status, completed_at: record.completed_at,
+    }, `late-tool:${record.id}:step:${tool.id}`, execution, providerId));
+}
+
+function recordedToolItem(
+  item: AgentItem,
+  record: ToolCallRecord,
+  eventId: string,
+  execution: ExecutionIdentity,
+  providerId: string,
+): CanonicalAgentEventDraft {
+  const payload = item.payload.projection === "toolCall"
+    ? { ...item.payload, record }
+    : { ...item.payload, narrative: { kind: "toolCall", record } };
+  return {
+    eventId, routing: { ...execution, itemId: item.id }, sourceProviderId: providerId,
+    sourceIdentities: [], payload: { type: "item.recorded",
+      item: { ...item, payload, updatedAt: record.completed_at ?? item.updatedAt } },
+  };
 }
 
 // The publication omits turnExecutionId: clients drop results whose execution differs

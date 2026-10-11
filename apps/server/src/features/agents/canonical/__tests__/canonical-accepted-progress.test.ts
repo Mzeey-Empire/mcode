@@ -758,6 +758,33 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(publication).not.toHaveProperty("turnExecutionId");
   });
 
+  it("leaves a background call's running step for the call's late result instead of the turn end", async () => {
+    await send(1, start("claude"));
+    await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", 1, "toolUse", { toolCallId: "agent", toolName: "Agent", toolInput: { prompt: "Look around" } })] });
+    await send(3, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", 2, "toolBackgrounded", { toolCallId: "agent" })] });
+    await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("claude", 3, "toolUse",
+      { toolCallId: "agent-step", toolName: "Bash", toolInput: { command: "ls" }, parentToolCallId: "agent" })] });
+    await send(5, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", 4, "textDelta", { delta: "Started a background agent", isFinalResponse: true })] });
+    expect((await send(6, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", 5, "turnComplete")], terminalInput: { ...execution, providerId: "claude", providerIdentities: [],
+        outcome: "completed", projection: { kind: "writer-staged" } } })).result.kind).toBe("accepted");
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    await send(7, { kind: "release" });
+    const step = () => db.prepare("SELECT parent_tool_call_id, message_id, status, completed_at FROM tool_call_records WHERE id = 'agent-step'").get();
+    expect(step()).toEqual({ parent_tool_call_id: "agent", message_id: expect.any(String), status: "running", completed_at: null });
+    const original = progress.latestAssistantMessage(execution.threadId);
+    if (!original) throw new Error("Expected original accepted assistant");
+
+    progress.acceptLateToolResult(execution.threadId, execution.executionId, { toolCallId: "agent", status: "completed", output: "Found it" });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+
+    const agent = db.prepare("SELECT completed_at FROM tool_call_records WHERE id = 'agent'").get();
+    expect(step()).toEqual({ parent_tool_call_id: "agent", message_id: original.id, status: "completed", ...agent });
+  });
+
   it("assigns live plan, task and notice projections before storage and persists those same identities", async () => {
     const admission = start("codex");
     await send(1, { ...admission, parentLive: { ...admission.parentLive, precedingMessageId: `${execution.turnId}:user`, planFeature: "output" } });

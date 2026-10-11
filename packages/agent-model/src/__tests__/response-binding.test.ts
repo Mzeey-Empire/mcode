@@ -61,4 +61,15 @@ describe("response narrative binding", () => {
     expect(bound.held?.payload).toMatchObject({ projection: "toolCall",
       record: { message_id: "message", status: "running", completed_at: null, background: true } });
   });
+
+  it("leaves the steps under a background call running even when they are recorded before it", () => {
+    const step = item("step", "toolCall", { id: "step", status: "running", completed_at: null, parent_tool_call_id: "agent" });
+    const nested = item("nested", "toolCall", { id: "nested", status: "running", completed_at: null, parent_tool_call_id: "step" });
+    const agent = item("agent", "toolCall", { id: "agent", status: "running", completed_at: null, background: true });
+    const sibling = item("sibling", "toolCall", { id: "sibling", status: "running", completed_at: null });
+    const bound = bindResponseItems({ step, nested, agent, sibling }, input);
+    expect(bound.step?.payload.record).toMatchObject({ message_id: "message", status: "running", completed_at: null });
+    expect(bound.nested?.payload.record).toMatchObject({ message_id: "message", status: "running", completed_at: null });
+    expect(bound.sibling?.payload.record).toMatchObject({ status: "failed", completed_at: END });
+  });
 });
