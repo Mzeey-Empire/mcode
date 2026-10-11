@@ -162,7 +162,8 @@ jobs:
     # Skipped required checks count as passing, so run and fail instead.
     if: ${{ !cancelled() }}
     runs-on: ${{ needs.pick-runner.outputs.large || 'ubuntu-24.04' }}
-    timeout-minutes: 15
+    # Passing runs on GitHub-hosted runners take up to about 15 minutes.
+    timeout-minutes: 25
     permissions:
       contents: read
     env:
