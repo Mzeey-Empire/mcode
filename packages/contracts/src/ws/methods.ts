@@ -1554,6 +1554,11 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({ force: z.boolean().optional() }),
     result: z.array(ProviderStatusSchema()),
   },
+  /** Updates the discovered npm-owned CLI and returns its refreshed status. */
+  "providers.updateCli": {
+    params: z.object({ providerId: ProviderIdSchema }),
+    result: ProviderStatusSchema(),
+  },
   /**
    * v1 stub for regenerating a handoff document via the live AI path.
    * Live regeneration is deferred to a follow-on plan.

@@ -466,6 +466,8 @@ export const SettingsSchema = lazySchema(() =>
         channel: UpdateReleaseLineSchema.default("stable"),
         /** Whether to automatically download available updates. */
         autoDownload: z.boolean().default(true),
+        /** Ask the npm registry daily for provider CLI updates. */
+        providerCliChecks: z.boolean().default(true),
         /** Whether to automatically install updates when the app quits. */
         autoInstallOnQuit: z.boolean().default(true),
         /** How often to check for updates. */
@@ -683,6 +685,7 @@ export const PartialSettingsSchema = lazySchema(() =>
       .object({
         channel: UpdateReleaseLineSchema.optional(),
         autoDownload: z.boolean().optional(),
+        providerCliChecks: z.boolean().optional(),
         autoInstallOnQuit: z.boolean().optional(),
         checkInterval: UpdateCheckIntervalSchema.optional(),
       })

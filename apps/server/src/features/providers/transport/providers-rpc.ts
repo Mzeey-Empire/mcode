@@ -38,6 +38,7 @@ type ProviderRpcMethod = Extract<
   | "provider.getUsage"
   | "providers.listAvailability"
   | "providers.listStatus"
+  | "providers.updateCli"
 >;
 
 type ProviderIdParams = {
@@ -52,6 +53,7 @@ type ProviderRpcParamsByMethod = {
   "provider.getUsage": ProviderIdParams;
   "providers.listAvailability": Record<never, never>;
   "providers.listStatus": { force?: boolean };
+  "providers.updateCli": ProviderIdParams;
 };
 
 /** Defines the dependencies required by provider transport routes. */
@@ -71,7 +73,7 @@ export interface ProviderRouterDeps {
   >;
   modelCacheService: Pick<ModelCacheService, "listModels">;
   providerRegistry: IProviderRegistry;
-  providerStatus: Pick<ProviderStatusService, "listStatus">;
+  providerStatus: Pick<ProviderStatusService, "listStatus" | "updateCli">;
 }
 
 type ProviderRpcHandlerMap = {
@@ -95,6 +97,7 @@ const providerRpcHandlers: ProviderRpcHandlerMap = {
   "provider.getUsage": (deps, params) => routeProviderUsage(deps, params.providerId),
   "providers.listAvailability": (deps) => deps.providerAvailability.listAvailability(),
   "providers.listStatus": (deps, params) => deps.providerStatus.listStatus(params),
+  "providers.updateCli": (deps, params) => deps.providerStatus.updateCli(params.providerId),
 };
 
 /** Checks whether a method belongs to the Provider transport route family. */

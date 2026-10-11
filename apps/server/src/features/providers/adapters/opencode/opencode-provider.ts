@@ -35,6 +35,8 @@ import {
   approvalOutcome,
   approvalReceipt,
   createCliStatusRunner,
+  readCliStatusVersion,
+  resolveCliStatusBinary,
   describeOpenCodeAuth,
 } from "@mcode/providers";
 import { SettingsService } from "../../../settings/settings-service.js";
@@ -437,7 +439,13 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   async describeStatus(): Promise<ProviderStatusFacts> {
     if (this.settingsService.get().provider.opencode.serveUrl) return { auth: { state: "unknown" } };
     const run = createCliStatusRunner({ platform: this.host.runtime.platform, env: this.envService.getEnv() });
-    return describeOpenCodeAuth(run, this.cliPath());
+    const cliPath = this.cliPath();
+    return { ...await describeOpenCodeAuth(run, cliPath), cli: {
+      installed: await readCliStatusVersion(run, cliPath),
+      managedBy: "user",
+      resolvedPath: await resolveCliStatusBinary(cliPath, this.envService.getEnv()),
+      npmPackage: "opencode-ai",
+    } };
   }
 
   async listModels(): Promise<ProviderModelInfo[]> {

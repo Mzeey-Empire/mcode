@@ -62,7 +62,7 @@ import { listClaudeModels } from "./list-models.js";
 import { resolveSdkModelSlug } from "./resolve-slug.js";
 import { resolveAutoCompactWindow } from "./context-window.js";
 import { readAnthropicOauthToken } from "@mcode/shared/usage";
-import { createCliStatusRunner } from "../status/cli-status-runner.js";
+import { createCliStatusRunner, readCliStatusVersion, resolveCliStatusBinary } from "../status/cli-status-runner.js";
 import { describeClaudeAuth } from "../status/provider-auth-checks.js";
 import { AnthropicOAuthUsageSource } from "./usage/oauth-usage-source.js";
 import { AnthropicHeaderUsageSource } from "./usage/header-usage-source.js";
@@ -3100,7 +3100,17 @@ export class ClaudeProvider
   async describeStatus() {
     const env = this.host.environment.snapshot();
     const run = createCliStatusRunner({ platform: this.requireHostRuntime().platform, env });
-    return describeClaudeAuth(run, this.configuration.cliPath, env);
+    const cliPath = this.configuration.cliPath;
+    const bundled = cliPath === "claude";
+    return {
+      ...await describeClaudeAuth(run, cliPath, env),
+      cli: {
+        installed: bundled ? null : await readCliStatusVersion(run, cliPath),
+        managedBy: bundled ? "mcode" as const : "user" as const,
+        resolvedPath: bundled ? null : await resolveCliStatusBinary(cliPath, env),
+        npmPackage: bundled ? null : "@anthropic-ai/claude-code",
+      },
+    };
   }
 
   /** Returns Claude plan utilization plus accumulated session stats. */

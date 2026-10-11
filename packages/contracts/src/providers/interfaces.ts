@@ -272,6 +272,8 @@ export interface IAgentProvider {
    * bell never shows. Adapters without it are reported as `unknown` too.
    */
   describeStatus?(): Promise<ProviderStatusFacts>;
+  /** Invalidates discovery caches after the server successfully updates this provider's CLI. */
+  clearCliVersionCache?(): void;
 
   /** Resolve only after the native answer is acknowledged. */
   resolveApproval?(

@@ -19,6 +19,8 @@ import { ProviderUsageWarmupService } from "../availability/provider-usage-warmu
 import { ModelCacheService } from "../models/model-cache-service.js";
 import { ProviderRateLimitStore } from "../status/provider-rate-limit-store.js";
 import { ProviderStatusService } from "../status/provider-status-service.js";
+import { NpmReleaseFeed } from "../status/npm-release-feed.js";
+import { CliUpdateRunner } from "../status/cli-update-runner.js";
 
 /** Register provider configuration before catalog and terminal services. */
 export function registerProviderConfiguration(container: DependencyContainer): void {
@@ -77,6 +79,8 @@ export function registerProviderRuntimeServices(container: DependencyContainer):
     { lifecycle: Lifecycle.Singleton },
   );
   container.register(ProviderRateLimitStore, { useValue: new ProviderRateLimitStore() });
+  container.register(NpmReleaseFeed, { useValue: new NpmReleaseFeed() });
+  container.register(CliUpdateRunner, { useValue: new CliUpdateRunner() });
   container.register(
     ProviderStatusService,
     { useClass: ProviderStatusService },
