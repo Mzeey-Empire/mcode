@@ -8,6 +8,13 @@ describe("describeAcpError", () => {
     [new RequestError(-32603, "Internal error", "upstream reset"), "Internal error: upstream reset"],
     [new RequestError(-32602, "Invalid params", { field: "sessionId" }), "Invalid params: {\"field\":\"sessionId\"}"],
     [new RequestError(-32000, "Authentication required"), "Authentication required"],
+    [
+      // Captured from cursor-agent acp newSession while signed out.
+      new RequestError(-32000, "Authentication required", {
+        message: "Authentication required. Please run 'agent login' first, then call authenticate() with methodId 'cursor_login'.",
+      }),
+      "Authentication required: Authentication required. Please run 'agent login' first, then call authenticate() with methodId 'cursor_login'.",
+    ],
     [new RequestError(-32603, "Internal error", {}), "Internal error"],
     [new RequestError(-32603, "Internal error", "Internal error"), "Internal error"],
     [new Error("ACP connection closed"), "ACP connection closed"],

@@ -32,8 +32,10 @@ export function describeAcpError(error: unknown): string {
 function requestErrorDetail(data: unknown): string | undefined {
   if (typeof data === "string") return data;
   if (data === null || typeof data !== "object") return undefined;
-  const details: unknown = Reflect.get(data, "details");
-  if (typeof details === "string") return details;
+  for (const key of ["details", "message"]) {
+    const detail: unknown = Reflect.get(data, key);
+    if (typeof detail === "string") return detail;
+  }
   if (Object.keys(data).length === 0) return undefined;
   return JSON.stringify(data);
 }
