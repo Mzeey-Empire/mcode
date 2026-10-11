@@ -25,14 +25,13 @@ export type PreparedPreview = { preview: Extract<TurnRevertPreview, { status: "r
   | { preview: Exclude<TurnRevertPreview, { status: "ready" }>; cwd?: never; range?: never };
 
 /** Validate order using independent turn membership, then read refs only through turnSnapshotRange. */
-export function revertRange(ranges: TurnSnapshotRangeReader, input: RevertPreviewInput) {
+export function revertRange(ranges: TurnSnapshotRangeReader, input: RevertPreviewInput): TurnSnapshotRange {
   const from = input.scope.kind === "file" ? input.scope.fromMessageId : undefined;
-  if (from) {
-    const turns = ranges.listTurns(input.threadId);
-    const start = turns.findIndex((turn) => turn.messageIds.includes(from));
-    const end = turns.findIndex((turn) => turn.messageIds.includes(input.messageId));
-    if (start >= 0 && end >= 0 && start > end) throw new TurnRevertValidationError("fromMessageId is after messageId");
-  }
+  const turns = ranges.listTurns(input.threadId);
+  const end = turns.findIndex((turn) => turn.messageIds.includes(input.messageId));
+  const start = from ? turns.findIndex((turn) => turn.messageIds.includes(from)) : end;
+  if (start >= 0 && end >= 0 && start > end) throw new TurnRevertValidationError("fromMessageId is after messageId");
+  if (start < 0 || end < 0 || turns.slice(start, end + 1).some((turn) => !turn.complete)) return { status: "unavailable", reason: "snapshot-expired" };
   return ranges.turnSnapshotRange(input.threadId, input.messageId, from);
 }
 
