@@ -44,13 +44,18 @@ export function deriveThreadRowState(facts: ThreadRowFacts): ThreadRowState {
   return liveRowState(facts) ?? settledRowState(facts);
 }
 
+/** A pending startup still counts as running, but a failed setup holds it until the user decides. */
+function setupFailureHolds(setup: ThreadRowSetup, waiting: string | undefined): boolean {
+  return setup === "failed" && waiting !== "plan";
+}
+
 function liveRowState({ attention, running, setup }: ThreadRowFacts): ThreadRowState | null {
   const waiting = attention?.waiting?.kind;
   if (waiting === "approval" || setup === "awaiting-approval") return needsYou("Approval required");
   if (waiting === "questions") return needsYou("Answers required");
+  if (setupFailureHolds(setup, waiting)) return needsYou("Setup failed");
   if (running || setup === "running") return { kind: "running" };
   if (waiting === "plan") return needsYou("Plan ready");
-  if (setup === "failed") return needsYou("Setup failed");
   return null;
 }
 

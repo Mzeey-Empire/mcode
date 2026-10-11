@@ -54,6 +54,7 @@ describe("deriveThreadRowState", () => {
     ["running over plan ready", facts({ running: true, attention: attention({ waiting: "plan" }) }), RUNNING],
     ["plan ready over unseen finished", facts({ attention: attention({ waiting: "plan", outcome: "completed" }) }), plan],
     ["plan ready over setup failed", facts({ setup: "failed", attention: attention({ waiting: "plan" }) }), plan],
+    ["setup failed over a startup still marked running", facts({ running: true, setup: "failed" }), setupFailed],
     ["setup failed over unseen failed", facts({ setup: "failed", attention: attention({ outcome: "errored" }) }), setupFailed],
     ["approval stays while on screen", facts({ onScreen: true, attention: attention({ waiting: "approval" }) }), approval],
     ["running over unseen finished", facts({ running: true, attention: attention({ outcome: "completed" }) }), RUNNING],
