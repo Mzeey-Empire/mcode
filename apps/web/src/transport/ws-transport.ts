@@ -70,7 +70,7 @@ import type {
   TerminalCustomProfile,
   TerminalProfileReference,
 } from "@mcode/contracts";
-import type { PaginatedMessages, ConversationPage, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationTail, SubagentRoster, SubagentDetail, CanonicalSubagentStopResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability, GoalLookupResult } from "@mcode/contracts";
+import type { PaginatedMessages, ConversationPage, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationTail, SubagentRoster, SubagentDetail, CanonicalSubagentStopResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability, ProviderStatus, GoalLookupResult } from "@mcode/contracts";
 import {
   TERMINAL_DATA_TAG,
   decodeTerminalDataFrame,
@@ -1495,6 +1495,8 @@ export function createWsTransport(
       rpc<ProviderUsageInfo>("provider.getUsage", { providerId }),
     listProviderAvailability: () =>
       rpc<ProviderAvailability[]>("providers.listAvailability", {}),
+    listProviderStatus: (force) =>
+      rpc<ProviderStatus[]>("providers.listStatus", { force }),
 
     generateRecap: (threadId, messages, previousRecap) =>
       rpc<{ text: string }>("recap.generate", { threadId, messages, previousRecap }),

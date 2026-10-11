@@ -13,6 +13,7 @@ import type {
 import type { ContextWindowMode, ReasoningLevel } from "../models/settings.js";
 import type { ProviderModelInfo } from "./models.js";
 import type { ProviderUsageInfo } from "./usage.js";
+import type { ProviderStatusFacts } from "./provider-status.js";
 import type { SessionForker } from "./session-forker.js";
 import type { Provider } from "../compat/agent-model.js";
 
@@ -264,6 +265,13 @@ export interface IAgentProvider {
 
   /** Return current usage/quota state for this provider. */
   getUsage?(): Promise<ProviderUsageInfo>;
+
+  /**
+   * Report sign-in state. Return `signed_out` only when the provider positively
+   * says so; a timeout, crash, or unrecognised answer is `unknown`, which the
+   * bell never shows. Adapters without it are reported as `unknown` too.
+   */
+  describeStatus?(): Promise<ProviderStatusFacts>;
 
   /** Resolve only after the native answer is acknowledged. */
   resolveApproval?(

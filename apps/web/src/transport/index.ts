@@ -6,6 +6,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { scanPortRange, AUTH_TOKEN_STORAGE_KEY } from "./scan-port-range";
 import { useProviderModelsStore } from "@/stores/providerModelsStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
+import { useProviderStatusStore } from "@/stores/providerStatusStore";
 
 /** Re-exported transport and domain types for use across the web app. */
 export type { McodeTransport, Workspace, Thread, Message, ToolCall, HookExecution, GitBranch, GitRemoteUrl, WorktreeInfo, PermissionMode, InteractionMode, AttachmentMeta, StoredAttachment, ProviderCatalogRequest, ProviderCatalogSnapshot, PrInfo, PullRequestCapabilities, PullRequestCapabilityLimitation, PullRequestError, PullRequestIdentity, PullRequestRelationship, PullRequestState, PullRequestSummary, PullRequestFile, PullRequestFileChangeType, PullRequestFilePatchStatus, PullRequestPatchResult, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord, Settings, PartialSettings, PlanAnswer, TerminalProfileList, TerminalWorkspacePreference, TerminalPreferencesResult } from "./types";
@@ -200,6 +201,7 @@ export async function initTransport(): Promise<McodeTransport> {
           void useSettingsStore.getState().fetch();
           void useProviderModelsStore.getState().initialize();
           void useProviderAvailabilityStore.getState().fetch();
+          void useProviderStatusStore.getState().fetch();
         }
       },
       discoverServerUrl: async () => {

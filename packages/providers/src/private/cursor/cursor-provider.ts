@@ -52,6 +52,8 @@ import {
   CursorSideChannel,
 } from "./handoff/cursor-side-channel.js";
 import { CursorCleanForker } from "./handoff/cursor-clean-forker.js";
+import { createCliStatusRunner } from "../status/cli-status-runner.js";
+import { describeCursorAuth } from "../status/provider-auth-checks.js";
 import type {
   CursorAcpSessionEntry,
   CursorBrowserContext,
@@ -337,6 +339,12 @@ export class CursorProvider
       });
     }
     return this.sideChannel;
+  }
+
+  /** Reports sign-in from `cursor-agent status`, trying the same binaries sessions spawn. */
+  async describeStatus() {
+    const run = createCliStatusRunner({ platform: this.host.runtime.platform, env: this.host.environment.snapshot() });
+    return describeCursorAuth(run, cursorCliProbeBinaries(this.cursorPorts.settings.get()));
   }
 
   /** Lists models by running `cursor-agent models` (falls back when discovery fails). */

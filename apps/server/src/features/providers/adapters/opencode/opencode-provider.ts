@@ -5,6 +5,7 @@ import { inject, injectable } from "tsyringe";
 import { z } from "zod";
 import { logger } from "@mcode/shared";
 import type {
+  ProviderStatusFacts,
   AgentEvent,
   ApprovalReviewSupport,
   IAgentProvider,
@@ -26,7 +27,14 @@ import type {
 } from "@mcode/contracts";
 import { AgentEventType, providerRuntimeEvent } from "@mcode/contracts";
 import type { ProviderHostPorts } from "@mcode/providers";
-import { OpenCodeNativeTurnDiff, approvalChoice, approvalOutcome, approvalReceipt } from "@mcode/providers";
+import {
+  OpenCodeNativeTurnDiff,
+  approvalChoice,
+  approvalOutcome,
+  approvalReceipt,
+  createCliStatusRunner,
+  describeOpenCodeAuth,
+} from "@mcode/providers";
 import { SettingsService } from "../../../settings/settings-service.js";
 import { EnvService } from "../../../../runtime/environment/env-service.js";
 import { CleanForker } from "../../../handoff/index.js";
@@ -376,6 +384,16 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       reason: "opencode-lacks-native-approval-review",
       liveChangeScope: "none",
     };
+  }
+
+  /**
+   * Reports sign-in from `opencode auth list`. An attached serve URL may hold
+   * credentials this machine cannot see, so it reads as unknown.
+   */
+  async describeStatus(): Promise<ProviderStatusFacts> {
+    if (this.settingsService.get().provider.opencode.serveUrl) return { auth: { state: "unknown" } };
+    const run = createCliStatusRunner({ platform: this.host.runtime.platform, env: this.envService.getEnv() });
+    return describeOpenCodeAuth(run, this.cliPath());
   }
 
   async listModels(): Promise<ProviderModelInfo[]> {

@@ -174,6 +174,7 @@ export class ProviderEventIngress {
   private readonly overflowedExecutionsByTurn = new Map<string, string>();
   private readonly queueDrainedWaitersByThread = new Map<string, Array<() => void>>();
   private consumer: ProviderEventIngressConsumer | undefined;
+  private deliveryObserver: ((event: ProviderEventIngressEvent) => void) | undefined;
   private started = false;
   private stopped = false;
   private admissionClosed = false;
@@ -205,6 +206,11 @@ export class ProviderEventIngress {
       provider.on("event", (event) => this.acceptProviderRuntime(provider.id, event));
     }
     if (this.pendingEventCount > 0) this.scheduleDrain();
+  }
+
+  /** Sees every delivered event after it reaches the consumer, for side state such as rate limits. */
+  observeDelivered(observer: (event: ProviderEventIngressEvent) => void): void {
+    this.deliveryObserver = observer;
   }
 
   /** Return a content-free snapshot suitable for bounded load diagnostics. */
@@ -547,6 +553,7 @@ export class ProviderEventIngress {
   private deliverQueuedEvent(event: ProviderEventIngressEvent): void {
     if (event.sourceKind === "worker-commit") this.consumer?.handleProjectedCommitted?.(event);
     else this.consumer?.handleProviderEvent(event);
+    this.deliveryObserver?.(event);
   }
 
   private takeNextPendingEvent(): QueuedProviderEvent | undefined {

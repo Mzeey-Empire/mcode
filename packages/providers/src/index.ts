@@ -92,3 +92,18 @@ export {
 export { approvalChoice, approvalOutcome } from "./approval-scope.js";
 export { approvalReceipt } from "./approvals/approval-receipt.js";
 export { ProviderTurnError } from "./provider-turn-error.js";
+export { describeDevinAuth } from "./private/devin/devin-credentials.js";
+export {
+  createCliStatusRunner,
+  type CliStatusOutcome,
+  type CliStatusRunner,
+  type CliStatusRunnerOptions,
+} from "./private/status/cli-status-runner.js";
+export {
+  describeClaudeAuth,
+  describeCodexAuth,
+  describeCopilotAuth,
+  describeCursorAuth,
+  describeOpenCodeAuth,
+  type CopilotAuthStatus,
+} from "./private/status/provider-auth-checks.js";

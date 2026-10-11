@@ -162,6 +162,7 @@ import {
   isProviderAvailabilityError,
 } from "../../features/providers/availability/provider-availability-errors.js";
 import type { ProviderAvailabilityService } from "../../features/providers/availability/provider-availability-service.js";
+import type { ProviderStatusService } from "../../features/providers/status/provider-status-service.js";
 
 import type { ModelCacheService } from "../../features/providers/models/model-cache-service.js";
 import type { RecapService } from "../../features/agents/recap/recap-service.js";
@@ -316,6 +317,8 @@ export interface RouterDeps {
   providerRegistry: IProviderRegistry;
   /** Tracks per-provider enabled flag and CLI verification state. */
   providerAvailability: ProviderAvailabilityService;
+  /** Per-provider sign-in and rate-limit state behind the sidebar bell. */
+  providerStatus: Pick<ProviderStatusService, "listStatus">;
   /** Stale-while-revalidate cache for provider model lists, backed by SQLite. */
   modelCacheService: ModelCacheService;
   /** Generates AI-powered PR draft titles and bodies. */
