@@ -166,13 +166,29 @@ describe("updater lifecycle", () => {
     expect(current.status.get()).toEqual({ state: "downloading", percent: 0 });
   });
 
-  it("classifies transient check errors so the renderer can retry", () => {
+  it("keeps transient check failures quiet for the next scheduled check", async () => {
     current = createLifecycle();
     current.listeners.get("error")?.(new Error("net::ERR_TIMED_OUT"));
+    expect(current.status.get()).toEqual({ state: "idle" });
 
-    expect(current.status.get()).toEqual({
-      state: "error", message: "net::ERR_TIMED_OUT", failedOperation: "check",
-    });
+    current.updater.checkForUpdates.mockRejectedValueOnce(new Error("net::ERR_INTERNET_DISCONNECTED"));
+    await expect(current.lifecycle.checkForUpdatesNow()).resolves.toEqual({ state: "idle" });
+  });
+
+  it.each([
+    { state: "downloading", percent: 42 },
+    { state: "downloaded", version: "0.14.0", installWhenIdle: true },
+  ] as const)("skips scheduled checks while $state", (status) => {
+    vi.useFakeTimers();
+    try {
+      current = createLifecycle();
+      current.status.publish(status);
+      vi.advanceTimersByTime(10_000);
+      expect(current.updater.checkForUpdates).not.toHaveBeenCalled();
+      expect(current.status.get()).toEqual(status);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each(["signature invalid", "net::ERR_TIMED_OUT"])("retries download-phase error events: %s", async (message) => {

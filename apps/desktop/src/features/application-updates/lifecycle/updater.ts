@@ -3,6 +3,7 @@ import {
   applyChannelConfig,
   type ReleaseLine,
 } from "../policy/release-line.js";
+import { isTransientNetworkError } from "../policy/network-errors.js";
 import {
   type UpdaterSettings,
   type UpdaterSettingsReader,
@@ -122,6 +123,26 @@ export function createUpdaterLifecycle(
     win.focus();
   };
 
+  // A check that fails on a network blip is retried by the next scheduled check, so it stays quiet.
+  // A download that fails mid-way is surfaced either way, or the half-done download would vanish.
+  const publishFailure = (error: unknown, failedOperation: "check" | "download"): void => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (failedOperation === "check" && isTransientNetworkError(error)) {
+      console.warn("[auto-updater] Transient network failure, will retry:", message);
+      status.publish({ state: "idle" });
+      return;
+    }
+    console.error(`[auto-updater] Update ${failedOperation} failed:`, message);
+    status.publish({ state: "error", message, failedOperation });
+  };
+
+  // Scheduled checks would replace download progress or an armed install with "checking".
+  const runScheduledCheck = (): void => {
+    const current = status.get().state;
+    if (current === "downloading" || current === "downloaded") return;
+    void checkForUpdatesNow();
+  };
+
   const checkForUpdatesNow = (): Promise<UpdateStatus> => {
     if (!initialized) {
       return Promise.resolve({
@@ -144,8 +165,7 @@ export function createUpdaterLifecycle(
         if (operationGeneration !== generation || !initialized) {
           return status.get();
         }
-        const message = err instanceof Error ? err.message : String(err);
-        status.publish({ state: "error", message, failedOperation: "check" });
+        publishFailure(err, "check");
       } finally {
         if (operationGeneration === generation) inFlightCheck = null;
       }
@@ -189,8 +209,7 @@ export function createUpdaterLifecycle(
       await updater.downloadUpdate();
     } catch (err) {
       if (operationGeneration !== generation || !initialized) return;
-      const message = err instanceof Error ? err.message : String(err);
-      status.publish({ state: "error", message, failedOperation: "download" });
+      publishFailure(err, "download");
     }
   };
 
@@ -269,21 +288,14 @@ export function createUpdaterLifecycle(
       }
     });
     updater.on("error", (error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      const failedOperation = status.get().state === "downloading" ? "download" : "check";
-      console.error(`[auto-updater] Update ${failedOperation} failed:`, message);
-      status.publish({ state: "error", message, failedOperation });
+      publishFailure(error, status.get().state === "downloading" ? "download" : "check");
     });
 
-    initialCheckTimeoutId = timer.setTimeout(() => {
-      void checkForUpdatesNow();
-    }, 10_000);
+    initialCheckTimeoutId = timer.setTimeout(runScheduledCheck, 10_000);
 
     const intervalMs = intervalToMs(updaterSettings.checkInterval);
     if (isFinite(intervalMs)) {
-      checkIntervalId = timer.setInterval(() => {
-        void checkForUpdatesNow();
-      }, intervalMs);
+      checkIntervalId = timer.setInterval(runScheduledCheck, intervalMs);
     }
   };
 
