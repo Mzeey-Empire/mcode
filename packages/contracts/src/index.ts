@@ -300,8 +300,6 @@ export type { Thread, RecentThread, ThreadCheckoutState } from "./models/thread.
 
 export {
   MAX_TURN_RECOVERIES,
-  RecoveryIncidentEntrySchema,
-  RecoveryIncidentSchema,
   TurnResumeModeSchema,
   TurnResumeParamsSchema,
   TurnResumeResultSchema,
@@ -309,8 +307,6 @@ export {
   TurnRetryResultSchema,
 } from "./models/turn-recovery.js";
 export type {
-  RecoveryIncident,
-  RecoveryIncidentEntry,
   TurnResumeMode,
   TurnResumeParams,
   TurnResumeResult,

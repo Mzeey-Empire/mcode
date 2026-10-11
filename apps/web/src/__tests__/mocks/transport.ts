@@ -176,8 +176,6 @@ export const mockTransport: McodeTransport = {
   steerTurn: vi.fn(),
   listHeldSteers: vi.fn().mockResolvedValue([]),
   settleUnknownSteer: vi.fn(),
-  getRecoveryIncident: vi.fn().mockResolvedValue(null),
-  retryTurn: vi.fn().mockResolvedValue(undefined),
   retryErroredTurn: vi.fn().mockResolvedValue({ turnId: "turn-retry" }),
   resumeInterruptedTurn: vi.fn().mockResolvedValue({ turnId: "turn-resume", mode: "native-session" }),
   retrySave: vi.fn().mockResolvedValue({ retried: false }),

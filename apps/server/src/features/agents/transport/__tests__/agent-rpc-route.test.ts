@@ -26,7 +26,7 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
     thoughtSegmentRepo: { listByMessage: unused },
     threadControlService: { respondToApproval: unused, listPendingApprovals: unused },
     toolCallRecordRepo: { listByMessage: unused, listByParent: unused },
-    turnRecoveryService: { currentRecoveryIncident: unused, retry: unused, retryTurn: unused },
+    turnRecoveryService: { retryErroredTurn: unused, resumeTurn: unused },
   };
   return { deps, close: () => undefined };
 }
@@ -77,26 +77,28 @@ describe("routeMessage Agent RPCs", () => {
       baseRevision: 0, contentMd: "# Edited" }, fixture.deps)).rejects.toBe(failure);
   });
 
-  it("retries the recovered command with its raw display content", async () => {
+  it("resumes the interrupted turn by sending its continuation with raw display content", async () => {
     const sendMessage = vi.fn().mockResolvedValue(undefined);
-    const retry = vi.fn(async (_executionId, dispatch) => {
+    const resumeTurn = vi.fn(async (_params, dispatch) => {
       await dispatch({
         threadId: "thread-1",
         content: "Retry this work",
         model: "gpt-5",
       });
+      return { turnId: "turn-2", mode: "native-session" };
     });
 
     const response = await routeMessage(JSON.stringify({
-      id: "retry-1",
-      method: "agent.retry",
-      params: { executionId: "00000000-0000-4000-8000-000000000001" },
+      id: "resume-1",
+      method: "turn.resume",
+      params: { threadId: "thread-1", turnId: "turn-1" },
     }), {
       agentService: { sendMessage },
-      turnRecoveryService: { retry },
+      turnRecoveryService: { resumeTurn },
     } as unknown as RouterDeps);
 
-    expect(response).toEqual({ id: "retry-1", result: undefined });
+    expect(response).toEqual({ id: "resume-1", result: { turnId: "turn-2", mode: "native-session" } });
+    expect(resumeTurn).toHaveBeenCalledWith({ threadId: "thread-1", turnId: "turn-1" }, expect.any(Function));
     expect(sendMessage).toHaveBeenCalledWith({
       threadId: "thread-1",
       content: "Retry this work",

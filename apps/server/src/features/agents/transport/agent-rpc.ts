@@ -41,8 +41,6 @@ type AgentRpcMethod =
   | "agent.steer"
   | "agent.listHeldSteers"
   | "agent.settleUnknownSteer"
-  | "agent.recoveryIncident"
-  | "agent.retry"
   | "turn.retry"
   | "turn.resume"
   | "agent.continueWithoutSaving"
@@ -107,7 +105,7 @@ export interface AgentRouterDeps {
     "respondToApproval" | "listPendingApprovals"
   >;
   toolCallRecordRepo: Pick<ToolCallRecordRepo, "listByMessage" | "listByParent">;
-  turnRecoveryService: Pick<TurnRecoveryService, "currentRecoveryIncident" | "retry" | "retryErroredTurn" | "resumeTurn">;
+  turnRecoveryService: Pick<TurnRecoveryService, "retryErroredTurn" | "resumeTurn">;
   turnSteers?: Pick<TurnSteerService, "steer" | "listHeldSteers" | "settleUnknownSteer">;
 }
 
@@ -165,15 +163,6 @@ const agentHandlers: AgentRpcHandlerMap = {
   "agent.steer": (deps, params) => requireTurnSteers(deps).steer(params),
   "agent.listHeldSteers": (deps) => requireTurnSteers(deps).listHeldSteers(),
   "agent.settleUnknownSteer": (deps, params) => requireTurnSteers(deps).settleUnknownSteer(params),
-  "agent.recoveryIncident": (deps) => deps.turnRecoveryService.currentRecoveryIncident(),
-  "agent.retry": async (deps, params) => {
-    await deps.turnRecoveryService.retry(params.executionId, (command) =>
-      sendAdmittedTurn(deps.agentService, {
-        ...command,
-        content: appendPreviewAnnotations(command.content, command.previewAnnotations),
-        displayContent: command.content,
-      }));
-  },
   "turn.retry": (deps, params) => deps.turnRecoveryService.retryErroredTurn(params, (command) =>
     sendRecoveryAttempt(deps.agentService, command)),
   "turn.resume": (deps, params) => deps.turnRecoveryService.resumeTurn(params, (command) =>

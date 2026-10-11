@@ -102,7 +102,6 @@ import { TurnRevertScopeSchema, TurnRevertPreviewSchema, TurnRevertResultSchema 
 import { AgentStopResultSchema, TurnRuntimeSnapshotSchema } from "../models/turn-runtime.js";
 import { CanonicalSubagentStopRequestSchema, CanonicalSubagentStopResultSchema } from "../models/canonical-subagent-roster.js";
 import {
-  RecoveryIncidentSchema,
   TurnResumeParamsSchema,
   TurnResumeResultSchema,
   TurnRetryParamsSchema,
@@ -1072,16 +1071,6 @@ export const WS_METHODS = lazySchema(() => ({
   "agent.settleUnknownSteer": {
     params: SettleUnknownSteerParamsSchema() as z.ZodType<SettleUnknownSteerParams>,
     result: SettleUnknownSteerResultSchema() as z.ZodType<SettleUnknownSteerResult>,
-  },
-  /** Read the current restart-scoped recovery incident, if one exists. */
-  "agent.recoveryIncident": {
-    params: z.object({}).strict(),
-    result: RecoveryIncidentSchema().nullable(),
-  },
-  /** Retry one interrupted execution as a new execution. */
-  "agent.retry": {
-    params: z.object({ executionId: z.string().uuid() }).strict(),
-    result: z.void(),
   },
   /** Retry an errored attempt on the thread's existing provider session. */
   "turn.retry": {

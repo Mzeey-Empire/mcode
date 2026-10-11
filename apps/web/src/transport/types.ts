@@ -121,7 +121,6 @@ import type {
   SendMessageInput,
   CreateAndSendInput,
   AgentStopResult,
-  RecoveryIncident,
   TerminalBackendCapabilities,
   TerminalCustomProfile,
   TerminalPreferencesUpdate,
@@ -438,10 +437,6 @@ export interface McodeTransport {
   listHeldSteers(): Promise<ListHeldSteersResult>;
   /** Send again or remove one held steer. */
   settleUnknownSteer(params: SettleUnknownSteerParams): Promise<SettleUnknownSteerResult>;
-  /** Read the current restart-scoped recovery incident. */
-  getRecoveryIncident(): Promise<RecoveryIncident | null>;
-  /** Retry one interrupted turn as a fresh provider execution. */
-  retryTurn(executionId: string): Promise<void>;
   /** Retry the thread's latest errored turn as a new attempt in the same provider session. */
   retryErroredTurn(params: TurnRetryParams): Promise<TurnRetryResult>;
   /** Resume the thread's latest interrupted turn, continuing its provider session when the provider can. */

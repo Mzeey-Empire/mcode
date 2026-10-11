@@ -22,7 +22,6 @@ import type { SendMessageCommand } from "../orchestration/agent-service.js";
 import type {
   IProviderRegistry,
   Message,
-  RecoveryIncident,
   Thread,
   TurnResumeParams,
   TurnResumeResult,
@@ -51,8 +50,6 @@ interface RecoverableTurn {
 /** Reconciles interrupted executions and admits explicit retries and resumes of ended attempts. */
 @injectable()
 export class TurnRecoveryService {
-  private currentIncident: RecoveryIncident | null = null;
-
   constructor(
     @inject(CanonicalAgentBoundary) private readonly canonicalSink: CanonicalAgentBoundary,
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
@@ -64,25 +61,20 @@ export class TurnRecoveryService {
     @inject("IProviderRegistry") private readonly providers: IProviderRegistry,
   ) {}
 
-  /** Interrupt executions for which no current provider can prove the exact live execution. */
+  /**
+   * Interrupt executions for which no current provider can prove the exact live execution. Each one is stamped
+   * with this startup's recovery incident id as provenance; the thread's Interrupted notice offers Resume.
+   */
   async reconcileOnStartup(): Promise<{ interrupted: string[] }> {
     await this.parentAssistantTextCheckpoints.importRecoveryJournals();
     await this.reopenMaterializableTerminalCheckpoints();
     await this.parentAssistantTextCheckpoints.retireTerminalCheckpoints();
     await this.canonicalSink.interruptSavedFamilyChildren(UNPROVED_EXECUTION_REASON);
     const checkpoints = this.canonicalSink.listUnfinishedCheckpoints();
-    if (checkpoints.length === 0) {
-      this.currentIncident = null;
-      return { interrupted: [] };
-    }
+    if (checkpoints.length === 0) return { interrupted: [] };
     const incident = { id: NodeCrypto.randomUUID(), createdAt: new Date().toISOString() };
     const interrupted: string[] = [];
     for (const checkpoint of checkpoints) interrupted.push(await this.interruptUnfinishedCheckpoint(checkpoint, incident));
-    const entries = this.canonicalSink.listRecoveryIncidentEntries(incident.id).map((entry) => ({
-      ...entry,
-      durationMs: this.durationMs(entry.startedAt, entry.interruptedAt),
-    }));
-    this.currentIncident = entries.length > 0 ? { ...incident, entries } : null;
     return { interrupted };
   }
 
@@ -113,39 +105,6 @@ export class TurnRecoveryService {
       throw new Error(`Recovered assistant text checkpoint was not retired: ${checkpoint.executionId}`);
     }
     return checkpoint.executionId;
-  }
-
-  /** Read unresolved entries from the incident created by this server startup. */
-  currentRecoveryIncident(): RecoveryIncident | null {
-    return this.currentIncident;
-  }
-
-  private durationMs(startedAt: string, interruptedAt: string): number {
-    const durationMs = Date.parse(interruptedAt) - Date.parse(startedAt);
-    if (!Number.isFinite(durationMs)) {
-      throw new Error(`Recovery incident has invalid turn timestamps: ${startedAt}, ${interruptedAt}`);
-    }
-    return Math.max(0, durationMs);
-  }
-
-  /** Dispatch an interrupted turn's accepted user input as a new provider execution. */
-  async retry(executionId: string, dispatch: TurnDispatch): Promise<void> {
-    if (!this.currentIncident?.entries.some((entry) => entry.executionId === executionId)) {
-      throw new Error(`Recovery incident entry not found: ${executionId}`);
-    }
-    const checkpoint = this.canonicalSink.loadCheckpoint(executionId);
-    if (!checkpoint || checkpoint.phase !== "interrupted") {
-      throw new Error(`Recoverable execution not found: ${executionId}`);
-    }
-    const message = this.canonicalSink.loadUserMessage(checkpoint.turnId);
-    if (!message) throw new Error(`Accepted user input not found: ${executionId}`);
-    const thread = this.threadRepo.findById(checkpoint.threadId);
-    if (!thread || !["interrupted", "errored"].includes(thread.status)) {
-      throw new Error(`Recoverable thread not found: ${checkpoint.threadId}`);
-    }
-    const attachments = this.attachmentService.prepareRetryAttachments(thread.id, message.attachments ?? []);
-    await dispatch({ ...this.retryCommand(thread, message, attachments, executionId), forceFreshSession: true });
-    this.consumeRecoveryIncidentEntry(executionId);
   }
 
   /** Admit a new attempt of the latest errored turn without replacing its provider session. */
@@ -308,12 +267,6 @@ export class TurnRecoveryService {
     if (startup && ["pending", "running", "blocked"].includes(startup.state)) {
       throw new TurnRecoveryError("TURN_RECOVERY_STARTUP_ACTIVE", "The thread has a nonterminal startup");
     }
-  }
-
-  private consumeRecoveryIncidentEntry(executionId: string): void {
-    if (!this.currentIncident) return;
-    const entries = this.currentIncident.entries.filter((entry) => entry.executionId !== executionId);
-    this.currentIncident = entries.length > 0 ? { ...this.currentIncident, entries } : null;
   }
 
   private retryCommand(
