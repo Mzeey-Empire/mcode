@@ -50,13 +50,13 @@ export function SteppedSlider({
         if (typeof next === "number" && next !== value) onValueChange(next);
       }}
       className={cn(
-        "flex w-full touch-none select-none items-center [--slider-thumb-size:2rem]",
+        "group/slider flex w-full touch-none select-none items-center [--slider-thumb-size:1.6rem]",
         className,
       )}
       data-slot="slider"
     >
-      <SliderPrimitive.Control className="flex w-full cursor-pointer items-center py-0.5">
-        <SliderPrimitive.Track className="relative h-6 w-full rounded-full border border-control-border bg-panel">
+      <SliderPrimitive.Control className="flex w-full cursor-pointer items-center py-1">
+        <SliderPrimitive.Track className="relative h-1.5 w-full rounded-full bg-selected dark:bg-control-border/30">
           {/* At the first stop the fill sits wholly under the thumb, yet anti-aliasing leaves a
               sliver showing at the shared left edge, so it is hidden there instead. */}
           <SliderPrimitive.Indicator
@@ -70,8 +70,8 @@ export function SteppedSlider({
               <span
                 key={index}
                 className={cn(
-                  "absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full",
-                  index <= value ? "bg-primary-ink/60" : "bg-muted/60",
+                  "absolute top-1/2 size-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full",
+                  index <= value ? "bg-primary-ink/70" : "bg-muted",
                 )}
                 style={{ left: `${stopPercent(index, stops)}%` }}
               />
@@ -82,10 +82,17 @@ export function SteppedSlider({
             // Base UI clamps an unmatched -1 to the first stop; the controlled value keeps the real label.
             getAriaValueText={() => getStopLabel(value)}
             className={cn(
-              "size-(--slider-thumb-size) rounded-full border border-control-border bg-field outline-none has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus",
+              "size-(--slider-thumb-size) rounded-full outline-none has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus",
               SNAP_MOTION_CLASS,
             )}
-          />
+          >
+            {/* Press feedback scales this inner disc, not the Thumb: Base UI measures the Thumb's
+                box to place it, so scaling the Thumb would shift it off its stop. */}
+            <span
+              aria-hidden="true"
+              className="block size-full rounded-full bg-background ring-1 ring-control-border transition-transform duration-(--duration-fast) ease-(--ease-standard) group-hover/slider:scale-110 group-active/slider:scale-110 motion-reduce:transition-none dark:bg-ink dark:ring-0"
+            />
+          </SliderPrimitive.Thumb>
         </SliderPrimitive.Track>
       </SliderPrimitive.Control>
     </SliderPrimitive.Root>
