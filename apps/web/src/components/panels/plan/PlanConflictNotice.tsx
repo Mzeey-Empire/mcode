@@ -17,14 +17,16 @@ export function PlanConflictNotice({ canKeep, onKeepMine, onUseSaved }: PlanConf
       className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-6 py-2 text-sm"
     >
       <span className="mr-auto text-ink">This plan changed in another window.</span>
-      {canKeep && (
-        <Button type="button" variant="secondary" onClick={onKeepMine}>
-          Keep my text
+      <div className="flex gap-2">
+        {canKeep && (
+          <Button type="button" variant="secondary" size="compact" onClick={onKeepMine}>
+            Keep my text
+          </Button>
+        )}
+        <Button type="button" variant="ghost" size="compact" onClick={onUseSaved}>
+          Use saved version
         </Button>
-      )}
-      <Button type="button" variant="ghost" onClick={onUseSaved}>
-        Use saved version
-      </Button>
+      </div>
     </div>
   );
 }
