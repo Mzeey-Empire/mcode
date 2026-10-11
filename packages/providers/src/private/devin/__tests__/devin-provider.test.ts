@@ -1051,6 +1051,25 @@ describe("DevinProvider", () => {
     }
   });
 
+  it("rejects the turn with an auth failure when Devin refuses the API key", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    // Captured from devin acp when authenticate received an invalid key.
+    const rejection = new RequestError(
+      -32603,
+      "Authentication failed: Failed to fetch team settings: Authentication required: invalid api key (trace ID: 15a67831bf3aa23eea37e22c8df04503)",
+    );
+    vi.mocked(fake.connection.authenticate).mockRejectedValue(rejection);
+    starts.push(mockAcpStart([fake]));
+    createProvider(host);
+
+    await expect(provider!.sendTurn(turn())).rejects.toMatchObject({
+      message: rejection.message,
+      failure: { kind: "auth", code: "-32603" },
+    });
+    expect(fake.runtime.prompt).not.toHaveBeenCalled();
+  });
+
   it("auto-continues when agent_stopped reports output_truncated", async () => {
     const host = createHost();
     const fake = createFakeRuntime("devin-acp-1", 101);

@@ -1073,14 +1073,22 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     env: Readonly<Record<string, string | undefined>>,
   ): Promise<void> {
     const credentials = resolveDevinAcpCredentials(env, this.host.runtime.platform);
-    await runtime.state.connection.authenticate({
-      methodId: "windsurf-api-key",
-      _meta: {
-        headless: true,
-        api_key: credentials.apiKey,
-        ...(credentials.apiServerUrl ? { api_server_url: credentials.apiServerUrl } : {}),
-      },
-    });
+    try {
+      await runtime.state.connection.authenticate({
+        methodId: "windsurf-api-key",
+        _meta: {
+          headless: true,
+          api_key: credentials.apiKey,
+          ...(credentials.apiServerUrl ? { api_server_url: credentials.apiServerUrl } : {}),
+        },
+      });
+    } catch (error) {
+      // Devin rejects a bad key with a generic -32603 ("Authentication failed:
+      // ... invalid api key"), so the ACP code alone would read as fatal.
+      const code = acpRequestErrorCode(error);
+      if (code === undefined) throw error;
+      throw new ProviderTurnError(describeAcpError(error), { kind: "auth", code: String(code) }, { cause: error });
+    }
   }
 
   private async deliverSessionUpdate(
