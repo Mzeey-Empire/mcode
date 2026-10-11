@@ -99,6 +99,31 @@ describe("projectTurnEndings", () => {
     expect(ending?.view.notice).not.toHaveProperty("primary");
   });
 
+  it("shows a failed retry of the first turn even when the provider never started", () => {
+    const state = stateWith(
+      [
+        turn("t1", 0, { status: "Errored", ending: FAILED }),
+        turn("t1-retry", 10, { attemptOf: "t1", status: "Errored", ending: FAILED, providerStartedAt: null }),
+      ],
+      [messageItem("u1", "t1", "user", 0)],
+    );
+
+    expect(projectTurnEndings(THREAD_ID, state).endingsByMessageId.u1).toEqual({
+      turnId: "t1-retry",
+      view: {
+        foldLabel: null,
+        notice: {
+          style: "filled",
+          icon: "failed",
+          title: "The provider couldn't finish this turn",
+          detail: "boom",
+          details: "boom",
+          primary: { action: "retry", label: "Retry" },
+        },
+      },
+    });
+  });
+
   it("ignores running turns and other threads", () => {
     const state = stateWith(
       [turn("t1", 0, { status: "Running", endedAt: null }), turn("other", 5, { threadId: "thread-2", status: "Errored" })],

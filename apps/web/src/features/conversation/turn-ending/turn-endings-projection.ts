@@ -47,7 +47,8 @@ export function projectTurnEndings(threadId: string, state: AgentModelState): Tu
         providerLabel,
         providerSignedOut: false,
         scheduledRetryAt: null,
-        isStartupTurn: index === 0,
+        // The startup trail owns only the thread's first attempt; a retry of it gets an ordinary notice.
+        isStartupTurn: index === 0 && latest === first,
         isLatestTurn: index === logicalTurns.length - 1,
         executionId: latest.executionId ?? null,
       }),
