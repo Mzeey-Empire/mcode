@@ -22,6 +22,7 @@ type MessageListItemsInput = Pick<
   | "currentTurnResponseKey"
   | "turnExecutionId"
   | "holdingSignals"
+  | "providerRetry"
   | "hooks"
   | "isAgentRunning"
   | "latestTurnWithChanges"
@@ -113,6 +114,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
     permissions,
     persistedFilesChanged,
     persistedNarrativeByMessage,
+    providerRetry,
     renderedThreadId,
     streamingText,
     responseTextIsStreaming,
@@ -158,6 +160,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
       approvals,
       thoughtSegments,
       holdingSignals,
+      providerRetry,
       committedAssistantBody: findLastAgentMessageBody({
         renderedThreadId,
         isAgentRunning,
@@ -169,6 +172,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
       agentDisplayState,
       agentStartTime,
       holdingSignals,
+      providerRetry,
       hooks,
       approvals,
       isAgentRunning,

@@ -1085,3 +1085,15 @@ function isLiveResponse(item: ChatVirtualItem): boolean {
   return item.type === "message" && item.agentDisplayState?.phase === "streaming";
 }
 import { createMockApproval } from "./mocks/transport";
+
+describe("provider retry line", () => {
+  const providerRetry = { retry: { attempt: 2, maxRetries: 10, receivedAt: 1000 }, providerLabel: "Codex" };
+  const indicatorFor = (agent: typeof STREAMING_AGENT | typeof COMPLETED_AGENT) => buildVolatileItems(
+    [makeToolCall()], agent, 1, undefined, [], [], [], undefined, undefined, undefined, undefined, undefined, providerRetry,
+  ).find((item) => item.type === "narrative-indicator");
+
+  it("rides on the running turn's indicator and leaves once the turn ends", () => {
+    expect(indicatorFor(STREAMING_AGENT)).toMatchObject({ providerRetry });
+    expect(indicatorFor(COMPLETED_AGENT)).toMatchObject({ providerRetry: undefined });
+  });
+});

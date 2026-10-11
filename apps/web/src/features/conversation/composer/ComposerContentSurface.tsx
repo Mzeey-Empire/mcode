@@ -10,7 +10,6 @@ import { FileTagPopup, type useFileTagPopup } from "@/components/chat/FileTagPop
 import { PreviewAnnotationBundleChip } from "@/components/chat/PreviewAnnotationBundleChip";
 import { providerUnavailableMessage, type ProviderUnavailableReason } from "@/components/chat/provider-unavailable";
 import { Notice } from "@/components/ui/notice";
-import { RetryBanner } from "@/components/chat/RetryBanner";
 import { type useSlashCommand } from "@/components/chat/useSlashCommand";
 import { SlashCommandTray } from "@/components/chat/SlashCommandTray";
 import { SpellcheckContextMenu } from "@/components/chat/SpellcheckContextMenu";
@@ -83,7 +82,6 @@ interface ComposerContentSurfaceProps {
     readonly selectedTextComments: readonly SelectedTextComment[];
     readonly selectedTextCommentEditor?: SelectedTextCommentEditorDraft;
     readonly unavailableSelectedTextCommentIds: readonly string[];
-    readonly hasRetryState: boolean;
     readonly startingThread: boolean;
     readonly hasContent: boolean;
     readonly showInlineComposerOptions: boolean;
@@ -350,9 +348,6 @@ function ComposerAttachmentSurface({
     <>
       <AnnotationAttachmentRow model={model} actions={actions} />
       <AttachmentPreview attachments={model.attachments} onRemove={actions.onRemoveAttachment} />
-      {model.hasRetryState && model.threadId && (
-        <RetryBanner threadId={model.threadId} />
-      )}
       {model.isDragOver && (
         <div className="absolute inset-0 z-(--layer-sticky) flex items-center justify-center rounded-xl bg-primary/10 backdrop-blur-sm">
           <span className="text-sm font-medium text-primary">Drop files here</span>

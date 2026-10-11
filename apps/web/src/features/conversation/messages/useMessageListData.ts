@@ -2,6 +2,8 @@ import { useMemo } from "react";
 import type { ToolCall } from "@/transport/types";
 import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { useWorkspaceThread } from "@/features/projects/state/workspace-selectors";
+import { providerDisplayName, type ProviderRetryNotice } from "../turn-ending/provider-retry";
 import { useThreadStore } from "@/stores/threadStore";
 import { getCanonicalLifecycleTurn, getThreadRuntimePhase } from "@/stores/thread-lifecycle";
 import { getHandoffStatus, getThreadRecord, useThreadRecord } from "../state";
@@ -178,6 +180,12 @@ export function useMessageListData(displayThreadId: string | undefined) {
     () => ({ stopPending, compacting, retry }),
     [stopPending, compacting, retry],
   );
+  const apiRetry = useThreadRecord(renderedThreadId, (record) => record.apiRetry);
+  const providerId = useWorkspaceThread(renderedThreadId, (thread) => thread?.provider);
+  const providerRetry = useMemo<ProviderRetryNotice | undefined>(
+    () => apiRetry && { retry: apiRetry, providerLabel: providerDisplayName(providerId) },
+    [apiRetry, providerId],
+  );
   const persistedNarrativeByMessage = useThreadRecord(renderedThreadId, (record) => record.narrativeByMessage);
   const legacyCurrentTurnMessageId = useThreadRecord(renderedThreadId, (record) => record.currentTurnMessageId);
   const legacyCurrentTurnResponseKey = useThreadRecord(renderedThreadId, (record) => record.currentTurnResponseKey);
@@ -220,6 +228,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
     hooks,
     approvals: decidedApprovals,
     holdingSignals,
+    providerRetry,
     persistedNarrativeByMessage,
     currentTurnMessageId: canonicalTurnIdentity.currentTurnMessageId,
     turnExecutionId,

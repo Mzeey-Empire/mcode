@@ -2,6 +2,7 @@ import { memo, type ComponentType, type RefObject } from "react";
 import { PermissionRequestCard } from "@/components/chat/PermissionRequestCard";
 import { NarrativeFlow, type SubagentRosterTarget } from "@/features/conversation/narrative";
 import { NarrativeIndicator } from "@/features/conversation/narrative/NarrativeIndicator";
+import { ProviderRetryLine } from "@/features/conversation/turn-ending/ProviderRetryLine";
 import { TurnChangesBar } from "../../turn/TurnChangesBar";
 import { TurnMetaLine } from "../../turn/TurnMetaLine";
 import { WorkFold, workFoldLabel } from "../../turn/WorkFold";
@@ -134,12 +135,17 @@ function TurnMetaLineTranscriptItemRenderer({ item }: TranscriptItemRendererProp
 function NarrativeIndicatorTranscriptItemRenderer({ item }: TranscriptItemRendererProps) {
   const indicator = item as Extract<ChatVirtualItem, { type: "narrative-indicator" }>;
   return (
-    <NarrativeIndicator
-      stepCount={indicator.stepCount}
-      status={indicator.status}
-      startTime={indicator.startTime}
-      isAgentRunning={indicator.isAgentRunning}
-    />
+    <>
+      {indicator.providerRetry && (
+        <ProviderRetryLine retry={indicator.providerRetry.retry} providerLabel={indicator.providerRetry.providerLabel} />
+      )}
+      <NarrativeIndicator
+        stepCount={indicator.stepCount}
+        status={indicator.status}
+        startTime={indicator.startTime}
+        isAgentRunning={indicator.isAgentRunning}
+      />
+    </>
   );
 }
 
