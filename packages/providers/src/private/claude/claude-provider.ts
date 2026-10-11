@@ -356,21 +356,63 @@ async function settlesWithin(promise: Promise<void>, timeoutMs: number): Promise
   }
 }
 
+const CLAUDE_STEER_UNCONFIRMED: TurnSteerOutcome = {
+  outcome: "unknown", detail: "Claude read the message but the turn ended before it answered.",
+};
+
+/** Settles every steer Claude never confirmed. Each was read, so it may still have reached the model. */
+function releaseUnconfirmedSteers(state: ClaudeStreamLoopState): void {
+  for (const settle of state.steersAwaitingTurn.values()) settle(false);
+  state.steersAwaitingTurn.clear();
+}
+
+/** Confirms the steers a frame says it answers. Older CLIs name only one, in `user_message_uuid`. */
+function confirmAnsweredSteers(state: ClaudeStreamLoopState, message: Record<string, unknown>): void {
+  const answered = Array.isArray(message.user_message_uuids) ? message.user_message_uuids : [message.user_message_uuid];
+  for (const uuid of answered) {
+    if (typeof uuid !== "string") continue;
+    state.steersAwaitingTurn.get(uuid)?.(true);
+    state.steersAwaitingTurn.delete(uuid);
+  }
+}
+
 /**
  * Tracks steered messages through the stream and reports whether `message` is a result that ends
- * an SDK turn but not the Mcode turn. A steer is answered once a frame names it in
- * `user_message_uuids`; while one is still unanswered at a result, the CLI starts answering it
- * right after, in the same query, so ending the Mcode turn there would orphan that answer.
+ * an SDK turn but not the Mcode turn. While a read steer is still unanswered at a result, the CLI
+ * starts answering it right after, in the same query, so ending the Mcode turn there would orphan
+ * that answer.
  */
 function absorbsSteeredSegmentEnd(state: ClaudeStreamLoopState, message: Record<string, unknown>): boolean {
   if (state.steersAwaitingTurn.size === 0) return false;
-  const answered = message.user_message_uuids;
-  if (Array.isArray(answered)) {
-    for (const uuid of answered) if (typeof uuid === "string") state.steersAwaitingTurn.delete(uuid);
-  }
-  return message.type === "result"
+  confirmAnsweredSteers(state, message);
+  const absorbs = message.type === "result"
     && CLAUDE_STEER_SEGMENT_END_REASONS.has(message.terminal_reason)
     && state.steersAwaitingTurn.size > 0;
+  if (absorbs) state.absorbedSteeredSegmentEnd = true;
+  return absorbs;
+}
+
+/** Waits for Claude to read a queued steer, then for the frame that answers it or the turn's end. */
+async function awaitSteerAnswer(queued: QueuedRead, answered: Promise<boolean>): Promise<TurnSteerOutcome> {
+  // Taken back before the SDK read it, Claude never saw it. Left queued, a later read would
+  // deliver a message the user was told was refused or might resend.
+  if (!await settlesWithin(queued.read, CLAUDE_STEER_READ_TIMEOUT_MS) && queued.withdraw()) {
+    return { outcome: "rejected", reason: "provider", detail: "Claude did not read the message in time." };
+  }
+  // The turn's end bounds this wait, so a read steer cannot hold the call open past it.
+  return await answered ? { outcome: "accepted" } : CLAUDE_STEER_UNCONFIRMED;
+}
+
+/**
+ * True when Claude went idle after a result kept the turn open for a steer it never answered.
+ * Without this the Mcode turn would run until the user stopped it.
+ */
+function idlesWithUnansweredSteer(state: ClaudeStreamLoopState, message: Record<string, unknown>): boolean {
+  return state.absorbedSteeredSegmentEnd
+    && state.steersAwaitingTurn.size > 0
+    && message.type === "system"
+    && message.subtype === "session_state_changed"
+    && message.state === "idle";
 }
 
 /** Convert a plain string message into an SDKUserMessage. */
@@ -555,8 +597,10 @@ interface ClaudeStreamLoopState {
   providerTurnNotice?: string;
   /** Drops a declined self-started turn's output until its SDK result. */
   discardingProviderTurn: boolean;
-  /** Steered message uuids the SDK has read but not yet started answering. */
-  steersAwaitingTurn: Set<string>;
+  /** Settles each steer Claude has not answered yet: true once a frame names it, false when the turn ends first. */
+  steersAwaitingTurn: Map<string, (answered: boolean) => void>;
+  /** A result was kept from ending the turn because a steer was still unanswered. */
+  absorbedSteeredSegmentEnd: boolean;
   mapper: ClaudeEventMapper;
 }
 
@@ -2188,7 +2232,8 @@ export class ClaudeProvider
       resumedTurnStarted: false,
       suppressEnded: false,
       discardingProviderTurn: false,
-      steersAwaitingTurn: new Set<string>(),
+      steersAwaitingTurn: new Map(),
+      absorbedSteeredSegmentEnd: false,
     };
     return Object.assign(state, { mapper: new ClaudeEventMapper(
       sessionId,
@@ -2269,6 +2314,10 @@ export class ClaudeProvider
       this.handleFailedClaudeResume(sessionId, state);
       return false;
     }
+    if (idlesWithUnansweredSteer(state, message)) {
+      await this.endClaudeTurn(sessionId, state);
+      return true;
+    }
     if (absorbsSteeredSegmentEnd(state, message)) {
       state.mapper.closeAbortedSegment(message);
       return true;
@@ -2290,7 +2339,8 @@ export class ClaudeProvider
       turnExecutionId: state.currentTurnExecutionId,
     } satisfies AgentEvent);
     state.endedTurnExecutionId = state.currentTurnExecutionId;
-    state.steersAwaitingTurn.clear();
+    releaseUnconfirmedSteers(state);
+    state.absorbedSteeredSegmentEnd = false;
     await this.waitForCanonicalExecution(state.currentRouting);
     state.awaitingResume = true;
     state.resumedTurnStarted = false;
@@ -2530,6 +2580,7 @@ export class ClaudeProvider
     state: ClaudeStreamLoopState,
   ): Promise<void> {
     this.recentStderr.delete(sessionId);
+    releaseUnconfirmedSteers(state);
     const suppressedQuery = this.suppressEndedQueries.delete(q);
     const current = this.runtime.get(sessionId);
     const superseded = this.isSupersededClaudeStream(current, q);
@@ -2929,7 +2980,8 @@ export class ClaudeProvider
    * Add a message to the running turn. `priority: "now"` makes Claude cut the current model
    * stream or tool round short and answer the message inside the same SDK query; the cut-short
    * segment's result is absorbed by {@link absorbsSteeredSegmentEnd} so the Mcode turn goes on.
-   * Accepted means the SDK read the message from the prompt queue.
+   * Accepted means Claude named the message in a frame it streamed, so the model is answering it.
+   * A read message the turn ends without answering is unknown: it may have reached the model.
    */
   async steerTurn(input: TurnSteerInput): Promise<TurnSteerOutcome> {
     const session = this.runtime.get(input.sessionId);
@@ -2939,7 +2991,7 @@ export class ClaudeProvider
     if (refusal) return refusal;
     const steerId = input.steerId;
     if (!isSdkMessageUuid(steerId)) return { outcome: "rejected", reason: "provider", detail: "Steer id is not a UUID." };
-    stream.steersAwaitingTurn.add(steerId);
+    const answered = new Promise<boolean>((settle) => stream.steersAwaitingTurn.set(steerId, settle));
     let queued: QueuedRead;
     try {
       queued = session.pushAndAwaitRead({ ...toUserMessage(input.message, input.sessionId), priority: "now", uuid: steerId });
@@ -2947,12 +2999,9 @@ export class ClaudeProvider
       stream.steersAwaitingTurn.delete(steerId);
       return { outcome: "rejected", reason: "provider", detail: error instanceof Error ? error.message : String(error) };
     }
-    if (await settlesWithin(queued.read, CLAUDE_STEER_READ_TIMEOUT_MS)) return { outcome: "accepted" };
-    // Taken back before the SDK read it, Claude never saw it. Left queued, a later read would
-    // deliver a message the user was told was refused or might resend.
-    if (!queued.withdraw()) return { outcome: "accepted" };
-    stream.steersAwaitingTurn.delete(steerId);
-    return { outcome: "rejected", reason: "provider", detail: "Claude did not read the message in time." };
+    const outcome = await awaitSteerAnswer(queued, answered);
+    if (outcome.outcome === "rejected") stream.steersAwaitingTurn.delete(steerId);
+    return outcome;
   }
 
   /** Abort a running session, or record a pending stop if the session hasn't been created yet. */
