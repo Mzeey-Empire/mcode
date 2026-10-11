@@ -17,7 +17,7 @@ const NOW = new Date(2026, 0, 1, 15, 0);
 const FOUR_PM = new Date(2026, 0, 1, 16, 0).toISOString();
 
 function status(providerId: ProviderStatus["providerId"], overrides: Partial<ProviderStatus>): ProviderStatus {
-  return { providerId, auth: { state: "signed_in" }, rateLimit: null, checkedAt: NOW.toISOString(), ...overrides };
+  return { providerId, auth: { state: "signed_in" }, rateLimit: null, newModels: [], checkedAt: NOW.toISOString(), ...overrides };
 }
 
 const DEVIN_SIGNED_OUT = status("devin", {

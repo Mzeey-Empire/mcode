@@ -319,7 +319,7 @@ export interface RouterDeps {
   /** Tracks per-provider enabled flag and CLI verification state. */
   providerAvailability: ProviderAvailabilityService;
   /** Per-provider sign-in and rate-limit state behind the sidebar bell. */
-  providerStatus: Pick<ProviderStatusService, "listStatus">;
+  providerStatus: Pick<ProviderStatusService, "listStatus" | "acknowledgeModels">;
   /** Stale-while-revalidate cache for provider model lists, backed by SQLite. */
   modelCacheService: ModelCacheService;
   /** Generates AI-powered PR draft titles and bodies. */
