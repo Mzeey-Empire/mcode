@@ -3,12 +3,15 @@ import type {
   IAgentProvider,
   ProviderAuth,
   ProviderId,
+  ProviderNewModel,
   ProviderStatus,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import { broadcast } from "../../../application/transport/push.js";
 import { SettingsService } from "../../settings/settings-service.js";
 import { ProviderRateLimitStore } from "./provider-rate-limit-store.js";
+import { ModelSightingsRepo } from "./model-sightings-repo.js";
+import { ModelCacheService } from "../models/model-cache-service.js";
 
 const LIST_CACHE_MS = 10 * 60 * 1000;
 // Generous enough for a cold SDK start; a check past it would otherwise hold every caller of refresh().
@@ -23,7 +26,7 @@ export interface StatusSourceRegistry {
 }
 
 /**
- * Sign-in and rate-limit state for each enabled provider, pushed to clients on
+ * Sign-in, rate-limit and new-model state for each enabled provider, pushed to clients on
  * `providers.statusChanged` whenever a provider's state actually changes.
  */
 @injectable()
@@ -36,8 +39,17 @@ export class ProviderStatusService {
     @inject(SettingsService) private readonly settings: Pick<SettingsService, "get">,
     @inject("IProviderRegistry") private readonly registry: StatusSourceRegistry,
     @inject(ProviderRateLimitStore) private readonly rateLimits: ProviderRateLimitStore,
+    @inject(ModelSightingsRepo) private readonly sightings: ModelSightingsRepo,
+    @inject(ModelCacheService) private readonly modelCache: ModelCacheService,
   ) {
-    this.rateLimits.onChange((providerId) => this.applyRateLimit(providerId));
+    this.rateLimits.onChange((providerId) => this.applyState(providerId));
+    this.sightings.onChange((providerId) => this.applyState(providerId));
+    this.modelCache.onChange((providerId) => this.applyState(providerId));
+  }
+
+  /** Acknowledges the provider's announcements and publishes the committed state through the repo listener. */
+  acknowledgeModels(providerId: ProviderId): Promise<void> {
+    return this.sightings.acknowledge(providerId, new Date().toISOString());
   }
 
   /** Returns the cached statuses, refreshing first when they are older than 10 minutes or `force` is set. */
@@ -67,6 +79,7 @@ export class ProviderStatusService {
         providerId: provider.id,
         auth,
         rateLimit: this.rateLimits.get(provider.id),
+        newModels: this.newModels(provider.id),
         checkedAt: new Date().toISOString(),
       });
     }));
@@ -87,15 +100,25 @@ export class ProviderStatusService {
     }
   }
 
-  private applyRateLimit(providerId: ProviderId): void {
+  private applyState(providerId: ProviderId): void {
     if (!this.settings.get().provider.enabled[providerId]) return;
     const previous = this.statuses.get(providerId);
     this.publish({
       providerId,
       auth: previous?.auth ?? UNKNOWN_AUTH,
       rateLimit: this.rateLimits.get(providerId),
+      newModels: this.newModels(providerId),
       checkedAt: previous?.checkedAt ?? new Date().toISOString(),
     });
+  }
+
+  private newModels(providerId: ProviderId): ProviderNewModel[] {
+    if (providerId === "opencode") return [];
+    const models = new Map(this.modelCache.getCached(providerId)?.map((model) => [model.id, model]));
+    return this.sightings.listOpen(providerId)
+      .filter((sighting) => models.has(sighting.modelId))
+      .slice(0, 5)
+      .map(({ modelId }) => ({ modelId, label: models.get(modelId)?.name || modelId }));
   }
 
   private publish(next: ProviderStatus): void {
@@ -129,5 +152,5 @@ async function withTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise
 
 // `checkedAt` moves on every refresh, so it is left out or every refresh would push.
 function sameState(a: ProviderStatus, b: ProviderStatus): boolean {
-  return JSON.stringify([a.auth, a.rateLimit]) === JSON.stringify([b.auth, b.rateLimit]);
+  return JSON.stringify([a.auth, a.rateLimit, a.newModels]) === JSON.stringify([b.auth, b.rateLimit, b.newModels]);
 }

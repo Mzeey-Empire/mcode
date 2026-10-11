@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a6bb3ee0-fdd6-48a6-a677-4c9858483810",
+  "id": "89c6510b-73e3-43ed-80a7-be61e0808632",
   "prevId": "7be6a1ed-8145-4938-a46a-d0a83a310bee",
   "tables": {
     "approval_receipts": {
@@ -2937,6 +2937,52 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "provider_model_sightings": {
+      "name": "provider_model_sightings",
+      "columns": {
+        "provider_id": {
+          "name": "provider_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "model_id": {
+          "name": "model_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "first_seen_at": {
+          "name": "first_seen_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "acknowledged_at": {
+          "name": "acknowledged_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "provider_model_sightings_provider_id_model_id_pk": {
+          "columns": [
+            "provider_id",
+            "model_id"
+          ],
+          "name": "provider_model_sightings_provider_id_model_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "pull_request_review_links": {
       "name": "pull_request_review_links",
       "columns": {
@@ -4427,14 +4473,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'running'"
-        },
-        "background": {
-          "name": "background",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
         },
         "started_at": {
           "name": "started_at",

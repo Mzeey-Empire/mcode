@@ -14,6 +14,7 @@ vi.mock("../../../../application/transport/push.js", () => ({
 import type { Database } from "bun:sqlite";
 import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../../projects/testing/owned-test-database.js";
 import { ModelCacheRepo } from "../persistence/model-cache-repo.js";
+import { ModelSightingsRepo } from "../../status/model-sightings-repo.js";
 import { ModelCacheService, startupModelProviderIds } from "../model-cache-service.js";
 import type { ProviderAvailability, ProviderId, ProviderModelInfo, IProviderRegistry } from "@mcode/contracts";
 
@@ -24,7 +25,7 @@ function availableProvider(id: ProviderId, enabled: boolean): ProviderAvailabili
   };
 }
 
-function makeProvider(models: ProviderModelInfo[], id = "test-provider") {
+function makeProvider(models: ProviderModelInfo[], id = "claude") {
   return {
     id,
     listModels: vi.fn().mockResolvedValue(models),
@@ -54,7 +55,7 @@ describe("ModelCacheService", () => {
   let owned: OwnedTestDatabase;
   const services: ModelCacheService[] = [];
   function createService(registry: IProviderRegistry): ModelCacheService {
-    const service = new ModelCacheService(repo, registry);
+    const service = new ModelCacheService(repo, registry, new ModelSightingsRepo(db, owned.writer));
     services.push(service);
     return service;
   }

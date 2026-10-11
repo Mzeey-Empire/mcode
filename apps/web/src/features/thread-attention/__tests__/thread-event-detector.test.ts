@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ThreadAttention, TurnOutcome } from "@mcode/contracts";
+import { getDefaultSettings, type ThreadAttention, type TurnOutcome } from "@mcode/contracts";
 import { mockTransport, createMockThread } from "@/__tests__/mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useToastStore } from "@/stores/toastStore";
 import { useUiStore } from "@/stores/uiStore";
@@ -49,6 +50,8 @@ beforeEach(() => {
 
 afterEach(() => {
   stop?.(); stop = undefined;
+  Reflect.deleteProperty(window, "desktopBridge");
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -169,5 +172,91 @@ describe("thread event toasts", () => {
     const { activeWorkspaceId, activeThreadId } = useWorkspaceStore.getState();
     expect({ activeWorkspaceId, activeThreadId, surface: useUiStore.getState().primarySurface })
       .toEqual({ activeWorkspaceId: "w1", activeThreadId: "a", surface: "chat" });
+  });
+});
+
+describe("OS notifications for thread events", () => {
+  type Notifications = NonNullable<NonNullable<typeof window.desktopBridge>["notifications"]>;
+
+  function installBridge({ focused, enabled }: { focused: boolean; enabled: boolean }) {
+    let clicked: ((tag: string) => void) | undefined;
+    const listener = vi.fn();
+    const notifications = {
+      show: vi.fn<Notifications["show"]>().mockResolvedValue(undefined),
+      onClick: vi.fn<Notifications["onClick"]>((callback) => {
+        clicked = callback;
+        return listener;
+      }),
+      offClick: vi.fn<Notifications["offClick"]>(),
+    } satisfies Notifications;
+    Object.defineProperty(window, "desktopBridge", { configurable: true, writable: true, value: { notifications } });
+    vi.spyOn(document, "hasFocus").mockReturnValue(focused);
+    useSettingsStore.setState({ settings: { ...getDefaultSettings(), notifications: { enabled } } });
+    return { notifications, listener, click: (tag: string) => clicked?.(tag) };
+  }
+
+  const turnWithFiles = (threadId: string, sequence: number, changedFileCount: number): ThreadAttention => {
+    const attention = turn(threadId, sequence);
+    return { ...attention, lastTurn: attention.lastTurn && { ...attention.lastTurn, changedFileCount } };
+  };
+
+  it("raises an OS notification with the toast while the window is unfocused", () => {
+    const { notifications } = installBridge({ focused: false, enabled: true });
+    useWorkspaceStore.setState((state) => ({ threads: state.threads.map((thread) =>
+      thread.id === "a" ? { ...thread, worktree_path: "C:\\repo\\.worktrees\\feature-auth" } : thread) }));
+    stop = startThreadEventDetector();
+    push(turnWithFiles("a", 4, 3));
+    expect(toasts()).toEqual([finishedA]);
+    expect(notifications.show.mock.calls).toEqual([
+      [{ tag: "a", title: "Finished: Refactor auth", body: "Changed 3 files · feature-auth" }],
+    ]);
+  });
+
+  it("names one changed file in the singular", () => {
+    const { notifications } = installBridge({ focused: false, enabled: true });
+    stop = startThreadEventDetector();
+    push(turnWithFiles("a", 4, 1));
+    expect(notifications.show.mock.calls).toEqual([
+      [{ tag: "a", title: "Finished: Refactor auth", body: "Changed 1 file · main" }],
+    ]);
+  });
+
+  it("omits the file count when it is unknown or the thread is waiting", () => {
+    const { notifications } = installBridge({ focused: false, enabled: true });
+    stop = startThreadEventDetector();
+    push(turn("a", 4));
+    push({ ...turn("a", 4), waiting: { kind: "approval", since: ASKED } });
+    expect(notifications.show.mock.calls).toEqual([
+      [{ tag: "a", title: "Finished: Refactor auth", body: "main" }],
+      [{ tag: "a", title: "Approval required: Refactor auth", body: "main" }],
+    ]);
+  });
+
+  it("only toasts while the window is focused", () => {
+    const { notifications } = installBridge({ focused: true, enabled: true });
+    stop = startThreadEventDetector();
+    push(turn("a", 4));
+    expect(toasts()).toEqual([finishedA]);
+    expect(notifications.show).not.toHaveBeenCalled();
+  });
+
+  it("raises no OS notification when notifications are turned off", () => {
+    const { notifications } = installBridge({ focused: false, enabled: false });
+    stop = startThreadEventDetector();
+    push(turn("a", 4));
+    expect(toasts()).toEqual([finishedA]);
+    expect(notifications.show).not.toHaveBeenCalled();
+  });
+
+  it("opens the thread when its notification is clicked and stops listening on cleanup", () => {
+    const { notifications, listener, click } = installBridge({ focused: false, enabled: true });
+    stop = startThreadEventDetector();
+    push(turn("a", 4));
+    click("a");
+    const { activeWorkspaceId, activeThreadId } = useWorkspaceStore.getState();
+    expect({ activeWorkspaceId, activeThreadId, surface: useUiStore.getState().primarySurface })
+      .toEqual({ activeWorkspaceId: "w1", activeThreadId: "a", surface: "chat" });
+    stop(); stop = undefined;
+    expect(notifications.offClick).toHaveBeenCalledWith(listener);
   });
 });

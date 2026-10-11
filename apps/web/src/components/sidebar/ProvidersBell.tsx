@@ -4,11 +4,12 @@ import { IconButton } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { deriveProviderBellRows } from "@/features/providers/provider-bell-rows";
 import { signInToProvider } from "@/features/providers/sign-in";
+import { tryNewModel } from "@/features/providers/try-new-model";
 import { useProviderStatusStore } from "@/stores/providerStatusStore";
 import { ProvidersPopover } from "./ProvidersPopover";
 
 /**
- * Sidebar footer bell for provider sign-in and rate-limit problems. A dot marks
+ * Sidebar footer bell for provider sign-in and rate-limit problems and new models. A dot marks
  * that at least one provider needs attention. Opening it re-reads status
  * through the server's cache, or re-checks while a provider reads signed out.
  * It never fetches usage.
@@ -45,6 +46,10 @@ export function ProvidersBell() {
           onSignIn={(argv) => {
             setOpen(false);
             signInToProvider(argv);
+          }}
+          onTry={(providerId, modelId) => {
+            setOpen(false);
+            tryNewModel(providerId, modelId);
           }}
         />
       </PopoverContent>

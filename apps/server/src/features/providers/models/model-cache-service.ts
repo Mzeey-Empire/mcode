@@ -13,6 +13,7 @@ import { logger } from "@mcode/shared";
 import type { ProviderAvailability, ProviderId, ProviderModelInfo, IProviderRegistry } from "@mcode/contracts";
 import { broadcast } from "../../../application/transport/push.js";
 import { ModelCacheRepo } from "./persistence/model-cache-repo.js";
+import { ModelSightingsRepo } from "../status/model-sightings-repo.js";
 
 /** How long a cached entry is considered "fresh" (no background refresh). */
 const CACHE_FRESH_MS = 60 * 60 * 1000; // 1 hour
@@ -61,10 +62,12 @@ export class ModelCacheService {
    * repopulate SQLite or memory after the cache was cleared.
    */
   private generation = new Map<string, number>();
+  private readonly listeners = new Set<(providerId: ProviderId) => void>();
 
   constructor(
     @inject(ModelCacheRepo) private repo: ModelCacheRepo,
     @inject("IProviderRegistry") private registry: IProviderRegistry,
+    @inject(ModelSightingsRepo) private readonly sightings: ModelSightingsRepo,
   ) {
     // Wrap in try/catch: a single corrupt JSON row in `provider_model_cache`
     // would otherwise crash the DI container at boot. We prefer an empty
@@ -124,6 +127,12 @@ export class ModelCacheService {
   /** Read-only access to the in-memory cache. Returns undefined if not cached. */
   getCached(providerId: string): ProviderModelInfo[] | undefined {
     return this.memoryCache.get(providerId);
+  }
+
+  /** Subscribes to refreshed catalogs, including label changes and removed models. */
+  onChange(listener: (providerId: ProviderId) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   /** Stop new provider fetches and await every existing fetch and its committed save. */
@@ -213,7 +222,22 @@ export class ModelCacheService {
       });
     }
 
+    await this.recordSightings(provider.id, models, now);
+    if ((this.generation.get(providerId) ?? 0) === genAtStart && changed) {
+      this.listeners.forEach((listener) => listener(provider.id));
+    }
     return models;
   }
 
+  private async recordSightings(providerId: ProviderId, models: ProviderModelInfo[], now: number): Promise<void> {
+    if (providerId === "opencode") return;
+    try {
+      await this.sightings.record(providerId, models.map((model) => model.id), new Date(now).toISOString());
+    } catch (error) {
+      logger.warn("Failed to record provider model sightings", {
+        providerId,
+        error: error instanceof Error ? error.name : typeof error,
+      });
+    }
+  }
 }

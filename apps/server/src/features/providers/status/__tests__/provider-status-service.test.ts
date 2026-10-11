@@ -13,11 +13,19 @@ import {
 import { describeDevinAuth } from "@mcode/providers";
 import { ProviderRateLimitStore } from "../provider-rate-limit-store.js";
 import { ProviderStatusService, type StatusSourceRegistry } from "../provider-status-service.js";
+import { ModelSightingsRepo } from "../model-sightings-repo.js";
+import { ModelCacheService } from "../../models/model-cache-service.js";
+import { ModelCacheRepo } from "../../models/persistence/model-cache-repo.js";
+import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../../projects/testing/owned-test-database.js";
 
 const { broadcastMock } = vi.hoisted(() => ({ broadcastMock: vi.fn() }));
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: broadcastMock }));
 
 const SIGNED_IN: ProviderStatusFacts = { auth: { state: "signed_in" } };
+let owned: OwnedTestDatabase;
+let sightings: ModelSightingsRepo;
+let cacheRepo: ModelCacheRepo;
+const caches: ModelCacheService[] = [];
 
 function makeSettings(enabled: Partial<Settings["provider"]["enabled"]>): Settings {
   const settings = SettingsSchema().parse({});
@@ -32,7 +40,13 @@ function makeService(
 ): ProviderStatusService {
   const settings = makeSettings(enabled);
   const registry: StatusSourceRegistry = { resolveAll: () => sources };
-  return new ProviderStatusService({ get: () => settings }, registry, rateLimits);
+  const cache = new ModelCacheService(cacheRepo, {
+    resolve: () => { throw new Error("No model fetch expected"); },
+    resolveAll: () => [],
+    shutdown: async () => {},
+  }, sightings);
+  caches.push(cache);
+  return new ProviderStatusService({ get: () => settings }, registry, rateLimits, sightings, cache);
 }
 
 function pushedStatuses(): unknown[] {
@@ -44,10 +58,15 @@ function pushedStatuses(): unknown[] {
 
 beforeEach(() => {
   broadcastMock.mockReset();
+  owned = createOwnedTestDatabase();
+  sightings = new ModelSightingsRepo(owned.db, owned.writer);
+  cacheRepo = new ModelCacheRepo(owned.db, owned.writer);
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers();
+  for (const cache of caches.splice(0)) await cache.close();
+  await owned.close();
 });
 
 describe("ProviderStatusService with the real Devin check", () => {
@@ -184,5 +203,45 @@ describe("ProviderStatusService rate limits", () => {
     makeService({ claude: false }, [], rateLimits);
     rateLimits.record("claude", { active: true, retryAfterMs: 60_000 });
     expect(broadcastMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("ProviderStatusService model announcements", () => {
+  it("filters missing models, limits to five newest sightings and falls back to the model id", async () => {
+    await sightings.record("claude", ["baseline"], "2026-01-01T00:00:00.000Z");
+    await sightings.record("claude", ["a", "b", "c", "d", "e"], "2026-01-02T00:00:00.000Z");
+    await sightings.record("claude", ["f", "missing"], "2026-01-03T00:00:00.000Z");
+    await cacheRepo.upsert("claude", [
+      { id: "a", name: "A" }, { id: "b", name: "B" }, { id: "c", name: "C" },
+      { id: "d", name: "D" }, { id: "e", name: "E" }, { id: "f", name: "" },
+    ]);
+    const service = makeService({ claude: true }, [{ id: "claude" }]);
+    expect((await service.listStatus())[0]?.newModels).toEqual([
+      { modelId: "f", label: "f" }, { modelId: "a", label: "A" },
+      { modelId: "b", label: "B" }, { modelId: "c", label: "C" }, { modelId: "d", label: "D" },
+    ]);
+    broadcastMock.mockClear();
+    await service.refresh();
+    expect(pushedStatuses()).toEqual([]);
+    await service.acknowledgeModels("claude");
+    expect(pushedStatuses()).toEqual([expect.objectContaining({ providerId: "claude", newModels: [] })]);
+    await service.acknowledgeModels("claude");
+    expect(pushedStatuses()).toHaveLength(1);
+  });
+
+  it("never publishes announcements for OpenCode or a disabled provider", async () => {
+    for (const providerId of ["opencode", "claude"] as const) {
+      await sightings.record(providerId, ["baseline"], "2026-01-01T00:00:00.000Z");
+      await cacheRepo.upsert(providerId, [{ id: "new", name: "New" }]);
+    }
+    const service = makeService({ claude: false, opencode: true }, [{ id: "claude" }, { id: "opencode" }]);
+    await service.refresh();
+    broadcastMock.mockClear();
+    for (const providerId of ["opencode", "claude"] as const) {
+      await sightings.record(providerId, ["new"], "2026-01-02T00:00:00.000Z");
+    }
+    expect(pushedStatuses()).toEqual([]);
+    expect((await service.listStatus()).map(({ providerId, newModels }) => ({ providerId, newModels })))
+      .toEqual([{ providerId: "opencode", newModels: [] }]);
   });
 });
