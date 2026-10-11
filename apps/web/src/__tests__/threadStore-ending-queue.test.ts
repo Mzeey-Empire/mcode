@@ -84,6 +84,33 @@ describe("queued follow-ups after a turn ends", () => {
     expect(useQueueStore.getState().autoDrainSuppressedThreadIds.has(THREAD_ID)).toBe(true);
   });
 
+  it("holds the queue when a persisted Mcode stop settles the turn before any terminal event", async () => {
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: THREAD_ID,
+      messageId: null,
+      settledMessage: null,
+      executionId: EXECUTION_ID,
+      outcome: "cancelled",
+      toolCallCount: 0,
+      filesChanged: [],
+    });
+    useThreadStore.getState().handleAgentEvent(ended("cancelled", "approval_unanswerable"));
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(mockTransport.sendMessage).not.toHaveBeenCalled();
+    expect(queued()).toEqual(["first", "second"]);
+    expect(useQueueStore.getState().autoDrainSuppressedThreadIds.has(THREAD_ID)).toBe(true);
+  });
+
+  it("holds the queue when the provider is lost", async () => {
+    useThreadStore.getState().handleAgentEvent({ type: "ended", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, reason: "provider_lost" });
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(useThreadStore.getState().records.get(THREAD_ID)?.runtimePhase).toBe("idle");
+    expect(mockTransport.sendMessage).not.toHaveBeenCalled();
+    expect(useQueueStore.getState().autoDrainSuppressedThreadIds.has(THREAD_ID)).toBe(true);
+  });
+
   it("drains the first follow-up after a completion", async () => {
     useThreadStore.getState().handleAgentEvent(ended("completed"));
     await vi.advanceTimersByTimeAsync(1_000);

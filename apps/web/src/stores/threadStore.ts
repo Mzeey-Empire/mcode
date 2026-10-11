@@ -2565,10 +2565,17 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     }));
   };
 
+  /** Only a completion drains the queue. Any other ending holds it until the user sends explicitly. */
+  const holdQueueAfterEnding = (threadId: string): void => {
+    clearDequeueTimer(threadId);
+    useQueueStore.getState().suppressAutoDrain(threadId);
+  };
+
   const cleanupTerminalRuntime = (
     threadId: string,
     phase: ThreadRecord["runtimePhase"],
   ): void => {
+    if (phase !== "completed") holdQueueAfterEnding(threadId);
     useApprovalStore.getState().clearThread(threadId);
     clearStreamingTextUsage(threadId);
     useTaskStore.getState().clearTaskBubbleIfAwaitingReplacement(threadId);
@@ -2576,6 +2583,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   const releaseProviderLostRuntime = (threadId: string): void => {
+    holdQueueAfterEnding(threadId);
     clearStreamingTextUsage(threadId);
     patchRec(threadId, {
       agentStartTime: undefined,
@@ -2637,14 +2645,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     conversationResidency.retainInactiveConversation(event.threadId);
     if (event.type === "turnComplete") updateTurnContext(event);
     cleanupTerminalRuntime(event.threadId, phase);
-    if (phase !== "completed") holdQueueAfterEnding(event.threadId);
-    else if (!guardrail) scheduleDrainAfterEdit(event.threadId);
-  };
-
-  /** Only a completion drains the queue. Any other ending holds it until the user sends explicitly. */
-  const holdQueueAfterEnding = (threadId: string): void => {
-    clearDequeueTimer(threadId);
-    useQueueStore.getState().suppressAutoDrain(threadId);
+    if (phase === "completed" && !guardrail) scheduleDrainAfterEdit(event.threadId);
   };
 
   const releaseProviderLostTerminal = (
