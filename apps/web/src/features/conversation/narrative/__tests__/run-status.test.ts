@@ -9,8 +9,10 @@ describe("deriveRunStatus", () => {
   it.each<[string, Partial<RunStatusInput>, { label: string; icon: "layers" | "spinner" }]>([
     ["stop in flight", { stopPending: true }, { label: "Stopping", icon: "spinner" }],
     ["compacting", { compacting: true }, { label: "Compacting context", icon: "spinner" }],
-    ["rate limited", { retry: "rate-limited" }, { label: "Rate limited", icon: "spinner" }],
-    ["retrying", { retry: "retrying" }, { label: "Retrying", icon: "spinner" }],
+    ["rate limited", { retry: { kind: "rate-limited" } }, { label: "Rate limited", icon: "spinner" }],
+    ["retrying without a status", { retry: { kind: "retrying" } }, { label: "Retrying", icon: "spinner" }],
+    ["retrying after a known status", { retry: { kind: "retrying", errorStatus: 502 } }, { label: "Retrying after 502 Bad Gateway", icon: "spinner" }],
+    ["retrying after an unlisted status", { retry: { kind: "retrying", errorStatus: 520 } }, { label: "Retrying after HTTP 520", icon: "spinner" }],
     ["pending approval", { waitingFor: "approval" }, { label: "Waiting for approval", icon: "layers" }],
     ["plan questions", { waitingFor: "answers" }, { label: "Waiting for your answers", icon: "layers" }],
     ["tool running", { activeTool: lint }, { label: "Running bun run lint", icon: "layers" }],
@@ -24,7 +26,7 @@ describe("deriveRunStatus", () => {
 
   it("lets a higher row win when several states hold", () => {
     const everything: RunStatusInput = {
-      stopPending: true, compacting: true, retry: "retrying", waitingFor: "approval",
+      stopPending: true, compacting: true, retry: { kind: "retrying", errorStatus: 502 }, waitingFor: "approval",
       activeTool: lint, subagentsRunning: true, answering: true, summaryHeading: "Inspecting layout",
     };
     expect(deriveRunStatus(everything)).toEqual({ label: "Stopping", icon: "spinner" });

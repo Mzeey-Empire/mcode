@@ -2,8 +2,6 @@ import { useMemo } from "react";
 import type { ToolCall } from "@/transport/types";
 import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { useWorkspaceThread } from "@/features/projects/state/workspace-selectors";
-import { providerDisplayName, type ProviderRetryNotice } from "../turn-ending/provider-retry";
 import { useThreadStore } from "@/stores/threadStore";
 import { getCanonicalLifecycleTurn, getThreadRuntimePhase } from "@/stores/thread-lifecycle";
 import { getHandoffStatus, getThreadRecord, useThreadRecord } from "../state";
@@ -19,7 +17,7 @@ import {
 } from "./virtual-items";
 import type { Message } from "@/transport/types";
 import type { ThoughtSegment } from "../narrative/types";
-import type { RunHoldingSignals } from "../narrative/run-status";
+import type { RunHoldingSignals, RunRetry } from "../narrative/run-status";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
 const EMPTY_TURN_MAP: Record<string, string> = {};
@@ -174,18 +172,17 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const decidedApprovals = useThreadRecord(renderedThreadId, (record) => record.approvals);
   const stopPending = useThreadStore((state) => renderedThreadId ? (state.pendingStopCounts[renderedThreadId] ?? 0) > 0 : false);
   const compacting = useThreadRecord(renderedThreadId, (record) => record.isCompacting);
-  const retry = useThreadRecord(renderedThreadId, (record): RunHoldingSignals["retry"] =>
+  // Primitive selectors: an object-returning selector yields a fresh reference per store update and loops rerenders.
+  const retryKind = useThreadRecord(renderedThreadId, (record): RunRetry["kind"] | undefined =>
     record.rateLimit ? "rate-limited" : record.apiRetry ? "retrying" : undefined);
-  const holdingSignals = useMemo<RunHoldingSignals>(
-    () => ({ stopPending, compacting, retry }),
-    [stopPending, compacting, retry],
-  );
-  const apiRetry = useThreadRecord(renderedThreadId, (record) => record.apiRetry);
-  const providerId = useWorkspaceThread(renderedThreadId, (thread) => thread?.provider);
-  const providerRetry = useMemo<ProviderRetryNotice | undefined>(
-    () => apiRetry && { retry: apiRetry, providerLabel: providerDisplayName(providerId) },
-    [apiRetry, providerId],
-  );
+  const retryErrorStatus = useThreadRecord(renderedThreadId, (record) => record.apiRetry?.errorStatus);
+  const holdingSignals = useMemo<RunHoldingSignals>(() => {
+    const retry: RunRetry | undefined =
+      retryKind === "retrying" ? { kind: "retrying", errorStatus: retryErrorStatus }
+        : retryKind === "rate-limited" ? { kind: "rate-limited" }
+          : undefined;
+    return { stopPending, compacting, retry };
+  }, [stopPending, compacting, retryKind, retryErrorStatus]);
   const persistedNarrativeByMessage = useThreadRecord(renderedThreadId, (record) => record.narrativeByMessage);
   const legacyCurrentTurnMessageId = useThreadRecord(renderedThreadId, (record) => record.currentTurnMessageId);
   const legacyCurrentTurnResponseKey = useThreadRecord(renderedThreadId, (record) => record.currentTurnResponseKey);
@@ -228,7 +225,6 @@ export function useMessageListData(displayThreadId: string | undefined) {
     hooks,
     approvals: decidedApprovals,
     holdingSignals,
-    providerRetry,
     persistedNarrativeByMessage,
     currentTurnMessageId: canonicalTurnIdentity.currentTurnMessageId,
     turnExecutionId,

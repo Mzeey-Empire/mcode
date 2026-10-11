@@ -5,7 +5,6 @@ import { buildNarrativeItems, computeLiveStreamingText } from "../narrative/buil
 import { buildPersistedNarrativeItems } from "../narrative/build-persisted-narrative";
 import { currentActivityHeading } from "../narrative/activity-label";
 import { deriveRunStatus, type RunHoldingSignals, type RunStatus } from "../narrative/run-status";
-import type { ProviderRetryNotice } from "../turn-ending/provider-retry";
 import { isRoutineProviderNotice } from "../notices/provider-notices";
 import { approvalReviewNote, persistedTurnCounts, persistedTurnDurationMs } from "../turn/turn-summary";
 
@@ -158,8 +157,6 @@ export interface TranscriptProjectionInput {
   committedAssistantBody?: string;
   /** Stop, compaction and retry states that hold the status line regardless of narrative activity. */
   holdingSignals?: RunHoldingSignals;
-  /** The provider's automatic retry, shown under the running turn's work until the next event. */
-  providerRetry?: ProviderRetryNotice;
 }
 
 function messageOutcome(message: Message): TurnOutcome | null | undefined {
@@ -248,7 +245,6 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       input.responseTextIsStreaming,
       input.holdingSignals,
       input.approvals,
-      input.providerRetry,
     );
     const responseMessageId = input.messages.find((message) => message.role === "assistant" && isCurrentResponse(message, stableInput))?.id;
     return buildVirtual(stableItems, volatileItems, hasLiveNarrative(input), responseMessageId);
@@ -370,7 +366,6 @@ export type ChatVirtualItem =
       startTime: number | undefined;
       /** False once the turn ended — tells the component to play its exit. */
       isAgentRunning: boolean;
-      providerRetry?: ProviderRetryNotice;
     };
 
 /**
@@ -532,7 +527,6 @@ export function buildVolatileItems(
   responseTextIsStreaming?: boolean,
   holdingSignals?: RunHoldingSignals,
   approvals?: readonly ApprovalReceipt[],
-  providerRetry?: ProviderRetryNotice,
 ): ChatVirtualItem[] {
   const isAgentRunning = isAgentDisplayActive(agentDisplayState);
   const resolvedHooks = hooks ?? EMPTY_HOOKS;
@@ -548,7 +542,7 @@ export function buildVolatileItems(
   return [
     narrativeFlowItem(toolCalls, resolvedHooks, approvals ?? EMPTY_APPROVALS, resolvedThoughtSegments, resolvedStreamingText, liveText, isAgentRunning, agentStartTime, committedAssistantBody),
     liveResponseItem(liveText, currentTurn, agentDisplayState, responseTextIsStreaming),
-    narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime: agentStartTime, thoughts: resolvedThoughtSegments, answering: liveText.length > 0, holdingSignals, providerRetry }),
+    narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime: agentStartTime, thoughts: resolvedThoughtSegments, answering: liveText.length > 0, holdingSignals }),
     ...permissionRequestItems(permissions),
   ].filter((item): item is ChatVirtualItem => item !== undefined);
 }
@@ -571,12 +565,11 @@ interface NarrativeIndicatorInput {
   thoughts: readonly ThoughtSegment[];
   answering: boolean;
   holdingSignals: RunHoldingSignals | undefined;
-  providerRetry: ProviderRetryNotice | undefined;
 }
 
 const NO_HOLDING_SIGNALS: RunHoldingSignals = { stopPending: false, compacting: false };
 
-function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts, answering, holdingSignals, providerRetry }: NarrativeIndicatorInput): ChatVirtualItem | undefined {
+function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts, answering, holdingSignals }: NarrativeIndicatorInput): ChatVirtualItem | undefined {
   if (!isAgentRunning && toolCalls.length === 0) return undefined;
   const topLevelTools = toolCalls.filter((toolCall) => toolCall.parentToolCallId == null);
   const running = topLevelTools.filter((toolCall) => !toolCall.isComplete);
@@ -587,7 +580,7 @@ function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts
     answering,
     summaryHeading: currentActivityHeading(thoughts),
   });
-  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: topLevelTools.length, status, startTime, isAgentRunning, providerRetry: isAgentRunning ? providerRetry : undefined };
+  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: topLevelTools.length, status, startTime, isAgentRunning };
 }
 
 function permissionRequestItems(permissions: Parameters<typeof buildVolatileItems>[4]): ChatVirtualItem[] {
@@ -652,7 +645,7 @@ function sameTurnMetaLineItem(left: ChatVirtualItem, right: ChatVirtualItem): bo
 }
 
 function sameNarrativeIndicatorItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "narrative-indicator" && right.type === "narrative-indicator" && [left.status.label === right.status.label, left.status.icon === right.status.icon, left.stepCount === right.stepCount, left.startTime === right.startTime, left.isAgentRunning === right.isAgentRunning, left.providerRetry?.retry === right.providerRetry?.retry, left.providerRetry?.providerLabel === right.providerRetry?.providerLabel].every(Boolean);
+  return left.type === "narrative-indicator" && right.type === "narrative-indicator" && [left.status.label === right.status.label, left.status.icon === right.status.icon, left.stepCount === right.stepCount, left.startTime === right.startTime, left.isAgentRunning === right.isAgentRunning].every(Boolean);
 }
 
 const VIRTUAL_ITEM_EQUALITY: Record<ChatVirtualItem["type"], (left: ChatVirtualItem, right: ChatVirtualItem) => boolean> = {

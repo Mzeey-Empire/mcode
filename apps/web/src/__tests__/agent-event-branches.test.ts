@@ -63,7 +63,7 @@ describe("handleAgentEvent branches", () => {
     const retryState = () => readThreadField("thread-1", (record) => ({ rateLimit: record.rateLimit, apiRetry: record.apiRetry }));
     handle({ type: "rateLimited", threadId: "thread-1", active: true, retryAfterMs: 30000 } as AgentEvent);
     handle({ type: "apiRetry", threadId: "thread-1", reason: "rate_limit", attempt: 1 } as AgentEvent);
-    expect(retryState()).toEqual({ rateLimit: { retryAfterMs: 30000 }, apiRetry: { attempt: 1, receivedAt: expect.any(Number) } });
+    expect(retryState()).toEqual({ rateLimit: { retryAfterMs: 30000 }, apiRetry: {} });
 
     handle({ type: "rateLimited", threadId: "thread-1", active: true, retryAfterMs: 20000 } as AgentEvent);
     expect(retryState()).toEqual({ rateLimit: { retryAfterMs: 20000 }, apiRetry: undefined });

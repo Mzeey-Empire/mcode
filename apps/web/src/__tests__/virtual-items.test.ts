@@ -808,7 +808,7 @@ describe("buildVirtualItems (combined)", () => {
     const items = buildVolatileItems(
       [makeToolCall({ id: "grep", toolName: "Grep", isComplete: false })],
       STREAMING_AGENT, 1000, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
-      { stopPending: false, compacting: false, retry: "rate-limited" },
+      { stopPending: false, compacting: false, retry: { kind: "rate-limited" } },
     );
     expect(findIndicator(items)?.status).toEqual({ label: "Rate limited", icon: "spinner" });
   });
@@ -820,7 +820,7 @@ describe("buildVirtualItems (combined)", () => {
     expect(findIndicator(build([{ ...grep }], STREAMING_AGENT, 1000, undefined))).toBe(first);
     const retrying = findIndicator(build(
       [grep], STREAMING_AGENT, 1000, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
-      { stopPending: false, compacting: false, retry: "retrying" },
+      { stopPending: false, compacting: false, retry: { kind: "retrying" } },
     ));
     expect(retrying).not.toBe(first);
     expect(retrying?.status).toEqual({ label: "Retrying", icon: "spinner" });
@@ -1086,14 +1086,12 @@ function isLiveResponse(item: ChatVirtualItem): boolean {
 }
 import { createMockApproval } from "./mocks/transport";
 
-describe("provider retry line", () => {
-  const providerRetry = { retry: { attempt: 2, maxRetries: 10, receivedAt: 1000 }, providerLabel: "Codex" };
-  const indicatorFor = (agent: typeof STREAMING_AGENT | typeof COMPLETED_AGENT) => buildVolatileItems(
-    [makeToolCall()], agent, 1, undefined, [], [], [], undefined, undefined, undefined, undefined, undefined, providerRetry,
-  ).find((item) => item.type === "narrative-indicator");
-
-  it("rides on the running turn's indicator and leaves once the turn ends", () => {
-    expect(indicatorFor(STREAMING_AGENT)).toMatchObject({ providerRetry });
-    expect(indicatorFor(COMPLETED_AGENT)).toMatchObject({ providerRetry: undefined });
+describe("provider retry status", () => {
+  it("names the HTTP status in the running turn's status row", () => {
+    const items = buildVolatileItems(
+      [makeToolCall()], STREAMING_AGENT, 1, undefined, [], [], [], undefined, undefined, undefined,
+      { stopPending: false, compacting: false, retry: { kind: "retrying", errorStatus: 502 } },
+    );
+    expect(findIndicator(items)?.status.label).toBe("Retrying after 502 Bad Gateway");
   });
 });
