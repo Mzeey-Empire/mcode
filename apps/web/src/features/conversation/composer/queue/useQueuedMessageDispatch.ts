@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import type { QueuedMessage } from "@/stores/queueStore";
 import { useQueueStore } from "@/stores/queueStore";
+import { getThreadRuntimePhase } from "@/stores/thread-lifecycle";
 import { getThreadRecord } from "@/stores/thread-record";
 import { isThreadExecuting, sendQueuedMessage, useThreadStore } from "@/stores/threadStore";
 import { steerQueuedMessage } from "./queued-steer";
@@ -21,6 +22,8 @@ function sendNowRoute(threadId: string, threadState: ThreadState, leased: boolea
   if (threadState.pendingStopCounts[threadId]) return NO_ROUTE;
   if (!isThreadExecuting(threadId, threadState)) return leased ? NO_ROUTE : SEND_ROUTE;
   const record = getThreadRecord(threadState.records, threadId);
+  // The server takes a steer only while the turn runs, and a finalizing turn cannot start another.
+  if (getThreadRuntimePhase(threadId, record) === "finalizing") return NO_ROUTE;
   // Until the server admits the new turn, the record still names the previous one.
   if (record.optimisticUserMessageId || !record.turnExecutionId) return NO_ROUTE;
   return { kind: "steer", turnExecutionId: record.turnExecutionId };

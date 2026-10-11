@@ -349,6 +349,22 @@ describe("useQueuedMessageDispatch", () => {
     expect(mockTransport.steerTurn).not.toHaveBeenCalled();
     expect(mockTransport.sendMessage).not.toHaveBeenCalled();
   });
+
+  it("neither steers nor sends while the turn is finalizing", async () => {
+    queueMessage("follow-up");
+    runTurn();
+    useThreadStore.setState((state) => ({
+      records: new Map([[THREAD_ID, { ...getThreadRecord(state.records, THREAD_ID), runtimePhase: "finalizing" }]]),
+    }));
+    const { result } = renderHook(() => useQueuedMessageDispatch(THREAD_ID));
+
+    await act(async () => {
+      await result.current.sendNow(queued(0));
+    });
+
+    expect(mockTransport.steerTurn).not.toHaveBeenCalled();
+    expect(mockTransport.sendMessage).not.toHaveBeenCalled();
+  });
 });
 
 describe("useSendNowRoute", () => {
@@ -357,7 +373,7 @@ describe("useSendNowRoute", () => {
     useQueueStore.setState({ inFlightQueuedMessages: {} });
   });
 
-  it("offers nothing while a Stop is pending and a new send once the stopped turn is cancelled", () => {
+  it("offers nothing until a stopped turn has finished, then a new send", () => {
     useThreadStore.setState({
       records: new Map([[THREAD_ID, { ...createEmptyThreadRecord(), runtimePhase: "finalizing", turnExecutionId: "exec-stop" }]]),
       pendingStopCounts: { [THREAD_ID]: 1 },
@@ -365,9 +381,8 @@ describe("useSendNowRoute", () => {
     const { result } = renderHook(() => useSendNowRoute(THREAD_ID));
     expect(result.current).toBe("none");
 
-    // The turn is still finalizing, so Send now asks it to take the message rather than starting another.
     act(() => useThreadStore.setState({ pendingStopCounts: {} }));
-    expect(result.current).toBe("steer");
+    expect(result.current).toBe("none");
 
     act(() => useThreadStore.setState({
       records: new Map([[THREAD_ID, { ...createEmptyThreadRecord(), runtimePhase: "cancelled" }]]),

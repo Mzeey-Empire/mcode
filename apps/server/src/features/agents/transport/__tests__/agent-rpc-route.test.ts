@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { routeMessage, type RouterDeps } from "../../../../application/transport/ws-router.js";
 import { routeAgentRpc, type AgentRouterDeps } from "../agent-rpc.js";
 import { PlanServiceError } from "../../planning/plan-service.js";
-import { TurnSteerConflictError, TurnSteerError } from "../../steering/turn-steer.js";
+import { TurnSteerConflictError, TurnSteerError, TurnSteerMentionError } from "../../steering/turn-steer.js";
 import type { PlanVersion } from "@mcode/contracts";
 import type { SendMessageCommand } from "../../turns/turn-admission-dispatch-coordinator.js";
 
@@ -220,6 +220,8 @@ describe("routeMessage steer RPCs", () => {
       { code: "steer_rejected", message: "The provider refused the message.", data: { detail: "input too large" } }],
     ["an id conflict", new TurnSteerConflictError(),
       { code: "INVALID_PARAMS", message: "This steer id was already used with different inputs." }],
+    ["a refused mention", new TurnSteerMentionError(new Error("Mention path is outside the workspace.")),
+      { code: "INVALID_PARAMS", message: "Mention path is outside the workspace." }],
   ])("maps %s to its wire error", async (_case, failure, error) => {
     const response = await routeMessage(steerRequest(steerParams), steerDeps(async () => { throw failure; }));
     expect(response).toEqual({ id: "steer-1", error });
