@@ -6,6 +6,7 @@ import {
   type ProviderIdentity,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
+import type { ProviderBackgroundToolSettlement } from "../../host-ports.js";
 import { clampContextWindowToMode } from "./context-window.js";
 import { parseClaudeGoalCommandResult } from "./claude-goal-command-parser.js";
 
@@ -37,6 +38,12 @@ const CLAUDE_USER_INTERRUPT_RESULTS: ReadonlySet<string> = new Set([
 ]);
 // A warning reports usage while requests still succeed, so only a rejection is a block.
 const RATE_LIMIT_ACTIVE_BY_STATUS: ReadonlyMap<string, boolean> = new Map([["allowed", false], ["allowed_warning", false], ["rejected", true]]);
+// A stopped task was ended on purpose, so it reads as cancelled rather than failed.
+const BACKGROUND_TASK_STATUS: ReadonlyMap<string, BackgroundToolStatus> = new Map([
+  ["completed", "completed"], ["failed", "failed"], ["stopped", "cancelled"],
+]);
+const SESSION_ENDED_OUTPUT = "Stopped when the Claude session ended.";
+type BackgroundToolStatus = ProviderBackgroundToolSettlement["status"];
 
 /** State read by the Claude SDK event mapper. */
 export interface ClaudeMappedSession {
@@ -66,6 +73,10 @@ export interface ClaudeEventMapperCallbacks {
   resolveBillingMode(): Promise<ProviderBillingMode>;
   isSessionStartHookSuppressed(): boolean;
   clearSessionStartHookSuppression(): void;
+  /** Execution whose turn is open now; undefined between turns. */
+  liveExecutionId(): string | undefined;
+  /** Settles a background call whose launching turn has already ended. */
+  settleBackgroundTool(settlement: Omit<ProviderBackgroundToolSettlement, "threadId">): void;
 }
 
 /** Usage metrics read from a successful Claude result message. */
@@ -107,6 +118,8 @@ export class ClaudeEventMapper {
     private readonly sessionId: string,
     private readonly threadId: string,
     private readonly callbacks: ClaudeEventMapperCallbacks,
+    /** Background calls the SDK process still runs, keyed to the execution that launched them. */
+    private readonly backgroundTools: Map<string, string> = new Map(),
   ) {
     this.handlers = new Map<
       string,
@@ -156,6 +169,44 @@ export class ClaudeEventMapper {
     this.lastAssistantText = "";
     this.lastInputTokens = undefined;
     this.nativeSource = {};
+  }
+
+  /**
+   * Settles a held background call from its SDK task notification. Runs before
+   * turn ownership is checked because the notification usually arrives between turns.
+   */
+  settleBackgroundTask(message: Message): void {
+    if (message.type !== "system" || message.subtype !== "task_notification") return;
+    const toolCallId = validIdentity(message.tool_use_id);
+    const executionId = toolCallId && this.backgroundTools.get(toolCallId);
+    const status = BACKGROUND_TASK_STATUS.get(stringValue(message.status));
+    if (!toolCallId || !executionId || !status) return;
+    this.backgroundTools.delete(toolCallId);
+    this.settleBackgroundTool(toolCallId, executionId, status, stringValue(message.summary));
+  }
+
+  /** Stops every held call because the SDK process that runs them is gone. */
+  settleAllBackgroundTools(): void {
+    this.nativeSource = {};
+    for (const [toolCallId, executionId] of this.backgroundTools) {
+      this.backgroundTools.delete(toolCallId);
+      this.settleBackgroundTool(toolCallId, executionId, "cancelled", SESSION_ENDED_OUTPUT);
+    }
+  }
+
+  private settleBackgroundTool(toolCallId: string, executionId: string, status: BackgroundToolStatus, output: string): void {
+    if (executionId !== this.callbacks.liveExecutionId()) {
+      this.callbacks.settleBackgroundTool({ executionId, toolCallId, status, output });
+      return;
+    }
+    this.emit({
+      type: AgentEventType.ToolResult,
+      threadId: this.threadId,
+      toolCallId,
+      output,
+      isError: status === "failed",
+      ...(status === "cancelled" && { cancelled: true }),
+    });
   }
 
   private captureSessionId(message: Message, initialized: boolean): void {
@@ -493,13 +544,21 @@ export class ClaudeEventMapper {
   }
   private user(message: Message): ClaudeMapOutcome {
     const user = objectValue(message.message);
-    if (Array.isArray(user.content)) {
-      for (const raw of user.content) {
-        const block = objectValue(raw);
-        if (block.type === "tool_result") this.toolResult(block);
-      }
-    }
+    const results = Array.isArray(user.content)
+      ? user.content.map(objectValue).filter((block) => block.type === "tool_result") : [];
+    const launched = asyncLaunchId(message, results);
+    const executionId = this.callbacks.liveExecutionId();
+    if (launched && executionId) this.holdBackgroundTool(launched, executionId);
+    else for (const block of results) this.toolResult(block);
     return "none";
+  }
+  /** An async launch result only acknowledges the start; the call runs on until its task notification. */
+  private holdBackgroundTool(toolCallId: string, executionId: string): void {
+    this.callbacks.getSession()?.pendingToolUses.delete(toolCallId);
+    if (!this.backgroundTools.has(toolCallId) && this.backgroundTools.size >= MAX_TRACKED_TOOLS)
+      throw new Error("Claude background tool bound exceeded");
+    this.backgroundTools.set(toolCallId, executionId);
+    this.emit({ type: AgentEventType.ToolBackgrounded, threadId: this.threadId, toolCallId });
   }
   private streamEvent(message: Message): ClaudeMapOutcome {
     const event = objectValue(message.event);
@@ -613,6 +672,11 @@ export class ClaudeEventMapper {
   }
 }
 
+/** The SDK reports an async launch on the message, so it only names a call when the message carries one result. */
+function asyncLaunchId(message: Message, results: readonly Message[]): string | undefined {
+  if (objectValue(message.tool_use_result).status !== "async_launched" || results.length !== 1) return undefined;
+  return validIdentity(results[0]?.tool_use_id);
+}
 function validIdentity(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 && value.length <= 512 ? value : undefined;
 }

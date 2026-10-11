@@ -31,20 +31,52 @@ function backgroundTaskQuery() {
   };
 }
 
+const AGENT_SUMMARY = "Survey finished: auth.ts owns the bug";
+
+/** Replays an Agent launched with run_in_background whose task notification lands after its turn ends. */
+function backgroundAgentQuery(notify: boolean) {
+  return ({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+    let closeSession!: () => void;
+    const closed = new Promise<void>((resolve) => { closeSession = resolve; });
+    const stream = (async function* () {
+      await prompt[Symbol.asyncIterator]().next();
+      yield { type: "system", subtype: "init", session_id: "sdk-provider-turn" };
+      yield { type: "assistant", parent_tool_use_id: null, message: { content: [
+        { type: "tool_use", id: "AGENT_1", name: "Agent", input: { description: "Survey", run_in_background: true } },
+      ] } };
+      yield { type: "system", subtype: "task_started", task_id: "task-agent", tool_use_id: "AGENT_1", is_backgrounded: true, task_type: "local_agent" };
+      yield { type: "user", parent_tool_use_id: null, tool_use_result: { status: "async_launched", isAsync: true, agentId: "agent-1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "AGENT_1", content: "Async agent launched successfully." }] } };
+      yield { type: "result", is_error: false, result: "launched", usage: { output_tokens: 1 } };
+      if (notify) yield { type: "system", subtype: "task_notification", task_id: "task-agent", tool_use_id: "AGENT_1", status: "completed", summary: AGENT_SUMMARY };
+      await closed;
+    })();
+    return Object.assign(stream, { close: closeSession });
+  };
+}
+
+function sendUserTurn(provider: InstanceType<typeof ClaudeProvider>) {
+  return provider.sendTurn({
+    turnId: "turn-user", turnExecutionId: USER_EXECUTION_ID,
+    sessionId: "mcode-thread-provider", threadId: "thread-provider", workspaceId: "workspace-provider", message: "hi", cwd: "/tmp",
+    model: "claude-sonnet-4-6", permissionMode: "supervised", approvalReviewMode: "manual", interactionMode: "build", providerOptions: {},
+  });
+}
+
+function providerWith(events: ProviderRuntimeEvent[], turns: Parameters<typeof mockShutdownHost>[1]) {
+  return new ClaudeProvider(
+    stubEnvService(), stubJobObject(), undefined, undefined, undefined,
+    mockShutdownHost((event) => events.push(event), turns),
+  );
+}
+
 async function runBackgroundTask(opening: ProviderTurnOpening) {
   mockQuery.mockImplementation(backgroundTaskQuery());
   const events: ProviderRuntimeEvent[] = [];
   const open = vi.fn(async () => opening);
-  const provider = new ClaudeProvider(
-    stubEnvService(), stubJobObject(), undefined, undefined, undefined,
-    mockShutdownHost((event) => events.push(event), { open, settleBackgroundTool: async () => {} }),
-  );
+  const provider = providerWith(events, { open, settleBackgroundTool: async () => {} });
   try {
-    await provider.sendTurn({
-      turnId: "turn-user", turnExecutionId: USER_EXECUTION_ID,
-      sessionId: "mcode-thread-provider", threadId: "thread-provider", workspaceId: "workspace-provider", message: "hi", cwd: "/tmp",
-      model: "claude-sonnet-4-6", permissionMode: "supervised", approvalReviewMode: "manual", interactionMode: "build", providerOptions: {},
-    });
+    await sendUserTurn(provider);
     await vi.waitFor(() => expect(open).toHaveBeenCalled());
     await new Promise((resolve) => setTimeout(resolve, 50));
     return { events: [...events], open };
@@ -81,5 +113,49 @@ describe("ClaudeProvider provider-started turns", () => {
 
     expect(open).toHaveBeenCalledTimes(1);
     expect(afterUserTurn(events)).toEqual([]);
+  });
+});
+
+describe("ClaudeProvider background agents", () => {
+  const userEnded = (events: ProviderRuntimeEvent[]) =>
+    events.some(({ event }) => event.type === AgentEventType.Ended && event.turnExecutionId === USER_EXECUTION_ID);
+  const agentResults = (events: ProviderRuntimeEvent[]) =>
+    events.filter(({ event }) => event.type === AgentEventType.ToolResult && event.toolCallId === "AGENT_1");
+
+  it("holds the launch open and hands its later result to the launching turn", async () => {
+    mockQuery.mockImplementation(backgroundAgentQuery(true));
+    const events: ProviderRuntimeEvent[] = [];
+    const settleBackgroundTool = vi.fn(async () => {});
+    const provider = providerWith(events, { open: vi.fn(async (): Promise<ProviderTurnOpening> => ({ kind: "declined", reason: "busy" })), settleBackgroundTool });
+    try {
+      await sendUserTurn(provider);
+      await vi.waitFor(() => expect(settleBackgroundTool).toHaveBeenCalled());
+      expect(settleBackgroundTool).toHaveBeenCalledExactlyOnceWith({ threadId: "thread-provider", executionId: USER_EXECUTION_ID,
+        toolCallId: "AGENT_1", status: "completed", output: AGENT_SUMMARY });
+      expect(events.find(({ event }) => event.type === AgentEventType.ToolBackgrounded)?.event)
+        .toMatchObject({ toolCallId: "AGENT_1", turnExecutionId: USER_EXECUTION_ID });
+      expect(agentResults(events)).toEqual([]);
+    } finally {
+      await provider.shutdown();
+    }
+    expect(settleBackgroundTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the session busy while the call runs and stops it when the session shuts down", async () => {
+    mockQuery.mockImplementation(backgroundAgentQuery(false));
+    const events: ProviderRuntimeEvent[] = [];
+    const settleBackgroundTool = vi.fn(async () => {});
+    const provider = providerWith(events, { open: vi.fn(async (): Promise<ProviderTurnOpening> => ({ kind: "declined", reason: "busy" })), settleBackgroundTool });
+    const spawn = vi.spyOn(provider, "spawn");
+    await sendUserTurn(provider);
+    await vi.waitFor(() => expect(userEnded(events)).toBe(true));
+    const spawned = spawn.mock.results[0];
+    if (spawned?.type !== "return") throw new Error("Expected the turn to spawn a session");
+    expect(provider.isBusy((await spawned.value).state)).toBe(true);
+    await provider.shutdown();
+    await vi.waitFor(() => expect(settleBackgroundTool).toHaveBeenCalled());
+    expect(settleBackgroundTool).toHaveBeenCalledExactlyOnceWith({ threadId: "thread-provider", executionId: USER_EXECUTION_ID,
+      toolCallId: "AGENT_1", status: "cancelled", output: "Stopped when the Claude session ended." });
+    expect(agentResults(events)).toEqual([]);
   });
 });
