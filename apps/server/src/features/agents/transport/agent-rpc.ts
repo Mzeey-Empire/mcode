@@ -177,7 +177,7 @@ const agentHandlers: AgentRpcHandlerMap = {
     watchReturnedThreadWorktree(deps, thread);
     return thread;
   },
-  "agent.stop": (deps, params) => deps.agentService.stopSession(params.threadId),
+  "agent.stop": (deps, params) => deps.agentService.stopSession(params.threadId, { by: "user" }),
   "agent.retrySave": (deps, params) => ({ retried: deps.canonicalProgress?.retry(params.threadId) ?? false }),
   "agent.activeCount": (deps) => deps.agentService.runtimeAccess().activeCount(),
   // The runtime registry is the reconnect snapshot authority: startup recovery

@@ -26,6 +26,7 @@ import type { SessionEvent } from "../../../../../../../packages/providers/node_
 import { ThoughtSegmentStore } from "../../conversation/narrative/persistence/thought-segment-store.js";
 import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";
 import { ProgressAdmissionError } from "../../execution/execution-writer-failure.js";
+import { persistTurnFailure } from "../turn-ending.js";
 
 const copilotSdk = vi.hoisted(() => ({ session: undefined as CopilotPersistenceSession | undefined }));
 vi.mock("../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js", () => ({
@@ -201,6 +202,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
         const outcome = copilotTerminalOutcome(event);
         const reply = await send(++ordinal, { kind: "event", phase: batch.phase, nativeCursor: batch.nativeCursor ?? null,
           events: [value], ...(outcome ? { terminalInput: { ...execution, providerId: "copilot", providerIdentities: [], outcome,
+            ...(event.type === "error" ? { ending: { failure: persistTurnFailure({ failure: event.failure, provider: "copilot",
+              message: event.error, acceptedAt: Date.now() }) } } : {}),
             projection: { kind: "writer-staged" } } } : {}) });
         if (reply.result.kind !== "accepted") throw new Error(`Provider progress was not accepted: ${JSON.stringify(reply.result)}`);
         accepted = reply.result;

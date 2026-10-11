@@ -6,6 +6,7 @@ import { StoredAttachmentSchema } from "../models/attachment.js";
 import { GoalStateSchema } from "../models/goal.js";
 import { SubagentPresentationSchema } from "../models/tool-call-record.js";
 import { TurnOutcomeSchema } from "../models/turn-outcome.js";
+import { TurnFailureSchema } from "../models/turn-failure.js";
 import { ApprovalDecidedPayloadSchema } from "../models/approval-receipt.js";
 
 
@@ -133,6 +134,7 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       type: z.literal(AgentEventType.Error),
       threadId: z.string(),
       error: z.string(),
+      failure: TurnFailureSchema(),
     }),
     z.object({
       type: z.literal(AgentEventType.Ended),

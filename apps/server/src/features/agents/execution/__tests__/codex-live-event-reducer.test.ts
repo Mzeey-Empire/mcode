@@ -74,7 +74,7 @@ describe("CodexLiveEventReducer", () => {
   it.each(["cancelled", "interrupted", "errored"] as const)("does not report a missing plan for %s", (outcome) => {
     const reducer = new CodexLiveEventReducer(execution, "output");
     reduceEvent(reducer, "turnStarted");
-    const result = reducer.finishFromState(outcome === "errored" ? { outcome, error: "failed" } : { outcome });
+    const result = reducer.finishFromState(outcome === "errored" ? { outcome, error: "failed", failure: { kind: "fatal" } } : { outcome });
     if (result.kind !== "reduced") throw new Error(result.reason);
     expect(result.writer.filter((intent) => intent.kind === "plan-capture-outcome")).toEqual([]);
   });

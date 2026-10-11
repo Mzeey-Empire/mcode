@@ -270,7 +270,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
   private publishTurnError(state: CopilotSessionState, turn: CopilotTurnState, message: string): void {
     this.publishAssistantTextBoundary(state, turn);
     this.cancelPermissions(state, "turn_ended");
-    this.publish(state, { type: "error", threadId: state.request.threadId, error: message });
+    this.publish(state, { type: "error", threadId: state.request.threadId, error: message, failure: { kind: "fatal" } });
   }
 
   private publishCompletedAssistantMessage(state: CopilotSessionState, turn: CopilotTurnState): void {

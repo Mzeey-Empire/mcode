@@ -6,6 +6,7 @@ import {
   type ProviderId,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
+import { persistTurnFailure, type TurnEndingCause } from "../canonical/turn-ending.js";
 
 import { broadcast } from "../../../application/transport/push.js";
 import { BrowserNarrativeEventSanitizer } from "../../browser-automation/index.js";
@@ -154,7 +155,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     const pending = [...this.persistenceByThread.get(command.threadId) ?? []];
     const finalization = this.fileEffects.finalize(
       command.threadId, command.outcome, executionId ?? undefined, command.source,
-      Promise.all(pending),
+      Promise.all(pending), command.ending,
     );
     void finalization.then((persisted) => {
       if (persisted) this.clearFinalizedEventState(command.threadId, executionId);
@@ -315,7 +316,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       case AgentEventType.ContextEstimate:
         if (event.totalProcessedTokens !== undefined) this.recordContextUsage(event, this.compactionInProgressByThread.has(event.threadId));
         return true;
-      case AgentEventType.Error: return this.applyError(event);
+      case AgentEventType.Error: return this.applyError(providerId, event);
       case AgentEventType.Compacting: return this.applyCompacting(event);
       case AgentEventType.CompactSummary: return this.applyCompactSummary(event);
       case AgentEventType.System: return this.applySystem(providerId, event);
@@ -500,14 +501,15 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     if (held.publish) this.publishAfterDurability(held.event, true);
   }
 
-  private applyError(event: Extract<AgentEvent, { type: "error" }>): boolean {
+  private applyError(providerId: ProviderId, event: Extract<AgentEvent, { type: "error" }>): boolean {
     if (this.runtime.shouldSuppressStoppingTerminal(event.threadId, event.turnExecutionId)) return false;
     if (this.runtime.suppressTransientError(event)) return false;
     if (!this.runtime.failProviderTurn(event)) {
       this.warnRejectedTerminal(event.threadId, event.type, event.turnExecutionId);
       return false;
     }
-    this.beginTerminalProjection(event.threadId, "errored", "error");
+    this.beginTerminalProjection(event.threadId, "errored", "error", { failure: persistTurnFailure({
+      failure: event.failure, provider: providerId, message: event.error, acceptedAt: Date.now() }) });
     this.runtime.clearTerminalState(event.threadId);
     return true;
   }
@@ -571,7 +573,9 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     }
     if (event.outcome === undefined) return true;
     const outcome = event.outcome === "cancelled" ? "interrupted" : event.outcome;
-    this.beginTerminalProjection(event.threadId, outcome, "ended");
+    // A user stop suppresses the provider's own terminal, so a provider-reported interruption has no user cause.
+    this.beginTerminalProjection(event.threadId, outcome, "ended",
+      outcome === "interrupted" ? this.runtime.providerInterruptionEnding() : undefined);
     this.runtime.clearTerminalState(event.threadId);
     return true;
   }
@@ -629,8 +633,9 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     threadId: string,
     outcome: "completed" | "errored" | "interrupted" | "cancelled",
     source: string,
+    ending?: TurnEndingCause,
   ): void {
-    const projection = this.runtime.finalizeTerminalTurn(threadId, outcome, source);
+    const projection = this.runtime.finalizeTerminalTurn(threadId, outcome, source, ending);
     if (!projection) return;
     this.terminalProjectionByThread.set(threadId, projection);
     void projection.then(

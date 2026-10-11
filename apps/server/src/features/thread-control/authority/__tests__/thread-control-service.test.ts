@@ -1433,7 +1433,7 @@ describe("ThreadControlService", () => {
     const fullAuthority = { ...authority, permissionMode: "full" as const };
 
     await expect(service.threadStop(fullAuthority, { threadId: target.id })).resolves.toEqual({ status: "accepted", workspaceId: workspace.id, threadId: target.id, state: { status: "stopped" } });
-    expect(agentService.stopSession).toHaveBeenCalledWith(target.id);
+    expect(agentService.stopSession).toHaveBeenCalledWith(target.id, { by: "mcode", reason: "thread_control" });
     expect(threads.updateStatus).toHaveBeenCalledWith(target.id, "interrupted");
   });
 

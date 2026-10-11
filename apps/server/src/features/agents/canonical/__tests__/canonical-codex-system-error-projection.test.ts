@@ -150,7 +150,7 @@ describe("CanonicalCodexSystemErrorProjection", () => {
     expect(reducer.reduce({ type: "turnStarted", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID }).kind).toBe("reduced");
     expect(reducer.reduce({ type: "textDelta", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID,
       delta: "Partial answer", isFinalResponse: true }).kind).toBe("reduced");
-    const reduction = reducer.reduce({ type: "error", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, error: "Provider failed" });
+    const reduction = reducer.reduce({ type: "error", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, error: "Provider failed", failure: { kind: "fatal" } });
     expect(() => projection.project(reduction)).toThrow("end time");
     const result = projection.project(reduction, NOW);
     expect(result).toMatchObject({ kind: "error-terminal", event: { error: "Provider failed" }, after: "terminal",

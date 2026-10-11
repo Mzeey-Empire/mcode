@@ -105,6 +105,33 @@ describe("AgentEvent ended outcome", () => {
   });
 });
 
+describe("AgentEvent error failure", () => {
+  it("parses an Error with a classified failure", () => {
+    const parsed = AgentEventSchema().parse({
+      type: "error",
+      threadId: "t-1",
+      error: "529 Overloaded",
+      failure: { kind: "retryable", status: 529, retryAfterMs: 8_000, retries: { made: 3, max: 10 } },
+    });
+
+    if (parsed.type !== AgentEventType.Error) throw new Error("unreachable");
+    expect(parsed.failure).toEqual({ kind: "retryable", status: 529, retryAfterMs: 8_000, retries: { made: 3, max: 10 } });
+  });
+
+  it("rejects an Error without failure", () => {
+    const result = AgentEventSchema().safeParse({ type: "error", threadId: "t-1", error: "boom" });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an unknown failure kind and an out-of-range status", () => {
+    const base = { type: "error", threadId: "t-1", error: "boom" };
+
+    expect(AgentEventSchema().safeParse({ ...base, failure: { kind: "transient" } }).success).toBe(false);
+    expect(AgentEventSchema().safeParse({ ...base, failure: { kind: "fatal", status: 600 } }).success).toBe(false);
+  });
+});
+
 describe("AgentEvent MCP startup status", () => {
   it("parses Codex MCP startup status payloads", () => {
     const parsed = AgentEventSchema().parse({

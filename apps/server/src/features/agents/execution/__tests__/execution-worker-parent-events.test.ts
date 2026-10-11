@@ -128,7 +128,7 @@ describe("execution worker parent event ownership", () => {
     const use = eventDraft(2, "toolUse", { toolCallId: "edit", toolName: "Edit", toolInput });
     expect((await send(4, { ...command(use), capturedFileObservation: captured })).result.kind).toBe("committed");
     expect((await send(5, command(eventDraft(3, "toolResult", { toolCallId: "edit", output: "Done", isError: false })))).result.kind).toBe("committed");
-    const terminal = eventDraft(4, "error", { error: "Disconnected" });
+    const terminal = eventDraft(4, "error", { error: "Disconnected", failure: { kind: "fatal" } });
     const reply = await send(6, { ...command(terminal),
       terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "errored", projection: { kind: "writer-staged" } },
       frozenFileEvidence: { handoff, turnId: execution.turnId, deliveryAttempt: 1, outcome: "errored", nativeDiff: null } });
@@ -148,7 +148,7 @@ describe("execution worker parent event ownership", () => {
     const started = { kind: "event", phase: "running", nativeCursor: null, events: [eventDraft(1, "turnStarted")] } satisfies ExecutionWorkCommand;
     expect((await send(3, { ...started, deliveryAttempt: 2 })).result).toMatchObject({ kind: "dropped", reason: "invalid-event-routing" });
     expect((await send(4, { ...started, deliveryAttempt: 1 })).result.kind).toBe("committed");
-    const terminal = { ...started, events: [eventDraft(2, "error", { error: "Disconnected" })], deliveryAttempt: 1,
+    const terminal = { ...started, events: [eventDraft(2, "error", { error: "Disconnected", failure: { kind: "fatal" } })], deliveryAttempt: 1,
       terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "errored", projection: { kind: "writer-staged" } },
     } satisfies ExecutionWorkCommand;
     expect((await send(5, terminal)).result.kind).toBe("committed");
@@ -174,7 +174,7 @@ describe("execution worker parent event ownership", () => {
       runtime: expect.arrayContaining([{ kind: "assistant-message-feature", providerId,
         event: expect.objectContaining({ type: "message", content: "Answer" }) }]),
     } });
-    const terminal = draft(4, "error", { error: "Disconnected" });
+    const terminal = draft(4, "error", { error: "Disconnected", failure: { kind: "fatal" } });
     const reply = await send(5, { kind: "event", phase: "running", nativeCursor: null, events: [terminal],
       terminalInput: { ...execution, providerId, providerIdentities: [], outcome: "errored", projection: { kind: "writer-staged" } } });
     expect(reply.result.kind).toBe("committed");
@@ -299,7 +299,7 @@ describe("execution worker parent event ownership", () => {
     await send(1, start());
     await event(2, eventDraft(1, "turnStarted"));
     await event(3, eventDraft(2, "textDelta", { delta: "Partial answer", isFinalResponse: true }));
-    const terminal = eventDraft(3, "error", { error: "Disconnected" });
+    const terminal = eventDraft(3, "error", { error: "Disconnected", failure: { kind: "fatal" } });
     expect((await event(4, terminal)).result).toMatchObject({ kind: "rejected", reason: "invalid-event-routing" });
     expect(writer.operations).toHaveLength(3);
     const reply = await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [terminal],

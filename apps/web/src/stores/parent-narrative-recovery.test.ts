@@ -22,7 +22,7 @@ function turnState(status: AgentTurn["status"]): AgentModelState {
   state.turns.parent = {
     id: "parent", threadId: THREAD, executionId: EXECUTION, status, trigger: { kind: "user" },
     permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested", attemptOf: null,
-    providerIdentities: [], startedAt: NOW, providerStartedAt: null, endedAt: status === "Running" ? null : NOW, createdAt: NOW, updatedAt: NOW,
+    providerIdentities: [], startedAt: NOW, providerStartedAt: null, ending: null, endedAt: status === "Running" ? null : NOW, createdAt: NOW, updatedAt: NOW,
   };
   state.items.tool = {
     id: "tool", threadId: THREAD, turnId: "parent", kind: "tool-call", providerIdentities: [], createdAt: NOW, updatedAt: NOW,

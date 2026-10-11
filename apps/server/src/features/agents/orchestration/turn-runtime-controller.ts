@@ -10,6 +10,7 @@ import { injectable, inject, delay } from "tsyringe";
 import { logger } from "@mcode/shared";
 import { AgentEventType, ProviderRuntimeEventSchema, isSessionEvictable } from "@mcode/contracts";
 import type { ClaudeCanonicalEventRouting, ClaudeProviderBoundary, CodexProviderBoundary, CopilotProviderBoundary, ProviderTurnOpening } from "@mcode/providers";
+import { ProviderTurnError } from "@mcode/providers";
 import type {
   Thread,
   IProviderRegistry,
@@ -20,6 +21,8 @@ import type {
   TurnRuntimeSnapshot,
   AgentStopResult,
   ProviderRuntimeEvent,
+  TurnFailure,
+  TurnStopCause,
 } from "@mcode/contracts";
 import { TURN_FILE_EFFECTS, TurnFileEffects } from "../turns/turn-file-effects.js";
 import type { WorkspaceEnvironmentAutomaticSetupDispatch } from "../../projects/environment/workspace-environment-service.js";
@@ -43,6 +46,7 @@ import type { WorkerOwnedProviderEventBatch } from "../../providers/composition/
 import { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
 import { SnapshotRefPins } from "../../projects/diffs/snapshots/snapshot-ref-pins.js";
 import type { DataOnlyParentTurnFinishInput } from "../canonical/canonical-parent-turn-write.js";
+import { observedProviderRetries, persistTurnFailure, type ObservedProviderRetries, type TurnEndingCause } from "../canonical/turn-ending.js";
 import {
   TurnEventPipeline,
   type FinalizeTurnCommand,
@@ -83,6 +87,7 @@ import {
   ownsStoppedExecution,
   pipelineTerminalSource,
   stopDispatchState,
+  terminalSourceEnding,
 } from "./agent-service-helpers.js";
 import type { TurnRuntimeEventControl } from "./turn-runtime-event-control.js";
 
@@ -105,7 +110,10 @@ type PreparedStop = {
   reservationToken?: string;
   dispatchState: AgentStopResult["dispatchState"];
   runtime: TurnRuntimeSnapshot;
+  stop: TurnStopCause;
 };
+
+type UnsentWorkerTerminal = { outcome: "errored" } | { outcome: "cancelled"; stop: TurnStopCause };
 
 interface WorkerOwnedTurn {
   readonly execution: ExecutionIdentity;
@@ -120,6 +128,7 @@ interface WorkerOwnedTurn {
   deliveryFailureHandling?: Promise<void>;
   stopInProgress?: boolean;
   stopRequested?: boolean;
+  lastRetries?: ObservedProviderRetries;
 }
 
 /** Read-only runtime state available to server-owned diagnostics and recovery infrastructure. */
@@ -143,6 +152,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private readonly turnDiffs: TurnDiffService;
   private readonly activeSessionIds = new Set<string>();
   private initialized = false;
+  /** Set once graceful shutdown begins; the process exits afterward, so it never resets. */
+  private shuttingDown = false;
   /**
    * Classifies a failed send as transient or fatal and caps the automatic
    * retry, so a brief flake doesn't cost the user a manual re-send while a
@@ -368,6 +379,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     return this.turnRuntime.terminalize(event.threadId, runtime.turnExecutionId, outcome);
   }
 
+  /** The cause of a provider-reported interruption: Mcode's own shutdown stops providers, which report it as their own. */
+  providerInterruptionEnding(): TurnEndingCause {
+    return { cause: this.shuttingDown ? "app_closed" : "provider_exited" };
+  }
+
   /** Clear runtime-only resources after terminal event ownership is settled. */
   clearTerminalState(threadId: string): void {
     const executionId = this.turnRuntime.snapshot(threadId)?.turnExecutionId;
@@ -377,12 +393,20 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   }
 
   /** Materialize one terminal outcome through the pipeline's ordering fence. */
-  finalizeTerminalTurn(threadId: string, outcome: TurnOutcome, source: string): Promise<boolean> | null {
+  finalizeTerminalTurn(
+    threadId: string,
+    outcome: TurnOutcome,
+    source: string,
+    ending?: TurnEndingCause,
+  ): Promise<boolean> | null {
+    const terminalSource = pipelineTerminalSource(source);
+    const resolvedEnding = ending ?? terminalSourceEnding(terminalSource);
     return this.turnEventPipeline.finalizeTurn({
       threadId,
       executionId: this.turnRuntime.snapshot(threadId)?.turnExecutionId ?? undefined,
       outcome,
-      source: pipelineTerminalSource(source),
+      source: terminalSource,
+      ...(resolvedEnding ? { ending: resolvedEnding } : {}),
     });
   }
 
@@ -678,8 +702,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const event = this.parentRuntimeEvent(batch);
     const fileObservation = event?.type === "toolUse"
       ? this.takeOptionalFileObservation(event, batch.deliveryAttempt) : null;
-    const outcome = event ? workerTerminalOutcome(event) : null;
-    const terminal = outcome ? this.prepareWorkerTerminal(active, outcome) : null;
+    observeWorkerRetries(active, event);
+    const terminal = event ? this.prepareTerminalWorkerEvent(active, event) : null;
     return {
       kind: "event", phase: batch.phase, nativeCursor: batch.nativeCursor ?? null,
       events: batch.events, deliveryAttempt: batch.deliveryAttempt,
@@ -724,10 +748,16 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     return event;
   }
 
-  private prepareWorkerTerminal(active: WorkerOwnedTurn, outcome: TurnOutcome): {
+  private prepareTerminalWorkerEvent(active: WorkerOwnedTurn, event: AgentEvent) {
+    const outcome = workerTerminalOutcome(event);
+    return outcome ? this.prepareWorkerTerminal(active, outcome, event) : null;
+  }
+
+  private prepareWorkerTerminal(active: WorkerOwnedTurn, outcome: TurnOutcome, event: AgentEvent): {
     input: DataOnlyParentTurnFinishInput;
     files: ReturnType<ExecutionFileEvidenceCoordinator["seal"]>;
   } {
+    const ending = workerProviderEnding(active, outcome, event, this.providerInterruptionEnding());
     const files = this.sealOptionalFileEvidence(active, outcome);
     if (!files) logger.warn("Provider terminal file evidence unavailable", { threadId: active.execution.threadId,
       executionId: active.execution.executionId, deliveryAttempt: active.deliveryAttempt });
@@ -740,6 +770,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
         outcome,
         deliveryAttempt: active.deliveryAttempt,
         projection: { kind: "writer-staged" },
+        ...(ending ? { ending } : {}),
       },
     };
   }
@@ -1061,11 +1092,14 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (active.terminalCommitted) return this.releaseWorkerTurn(active);
     const frozen = this.requireWorkerFiles().seal({ ...execution, deliveryAttempt, outcome: "errored" });
     if (!frozen) throw new Error("Failed worker dispatch lost its file evidence generation");
+    const message = error instanceof Error ? error.message : String(error);
+    const failure = persistTurnFailure({ failure: dispatchFailure(error), provider: active.prepared.providerId,
+      message, acceptedAt: Date.now(), ...(active.lastRetries ? { lastRetries: active.lastRetries } : {}) });
     const result = await this.requireWorkerRuntime().owner.submit(execution, {
       kind: "finish-from-state", outcome: "errored", frozenFileEvidence: frozen,
       input: { ...execution, providerId: active.prepared.providerId,
         providerIdentities: active.prepared.parentStartInput.providerIdentities,
-        outcome: "errored", error: error instanceof Error ? error.message : String(error),
+        outcome: "errored", error: message, ending: { failure },
         deliveryAttempt, projection: { kind: "writer-staged" } },
     });
     if (result.kind !== "committed" && result.kind !== "accepted") throw new Error("Failed worker dispatch terminal did not commit");
@@ -1140,13 +1174,17 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   }
 
   /** Finish a committed parent start that never reached provider dispatch. */
-  private async finishUnsentWorkerTurn(threadId: string, executionId: string, outcome: "errored" | "cancelled" = "errored"): Promise<boolean> {
+  private async finishUnsentWorkerTurn(
+    threadId: string,
+    executionId: string,
+    terminal: UnsentWorkerTerminal = { outcome: "errored" },
+  ): Promise<boolean> {
     const worker = this.workerRuntime;
     const owned = worker?.owner.current(threadId);
     if (!worker || !owned?.started || owned.execution.executionId !== executionId) return false;
     const active = this.workerTurns.get(threadId);
     const execution = owned.execution;
-    const result = await this.submitUnsentWorkerFinish(worker, execution, active, outcome);
+    const result = await this.submitUnsentWorkerFinish(worker, execution, active, terminal);
     if (!result) return true;
     if (!isAcceptedWorkerResult(result)) throw new Error("Unsent worker turn did not reach terminal acceptance");
     this.publishWorkerPersistence(active, result);
@@ -1161,10 +1199,10 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     worker: WorkerOwnedTurnRuntime,
     execution: ExecutionIdentity,
     active: WorkerOwnedTurn | undefined,
-    outcome: "errored" | "cancelled",
+    terminal: UnsentWorkerTerminal,
   ): Promise<ExecutionWorkerResult | null> {
     try {
-      return await worker.owner.submit(execution, this.unsentFinishCommand(execution, active, outcome));
+      return await worker.owner.submit(execution, this.unsentFinishCommand(execution, active, terminal));
     } catch (error) {
       await worker.recoverRejected(execution);
       logger.error("Unsent worker turn recovered after rejected finish", { threadId: execution.threadId,
@@ -1176,8 +1214,9 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private unsentFinishCommand(
     execution: ExecutionIdentity,
     active: WorkerOwnedTurn | undefined,
-    outcome: "errored" | "cancelled",
+    terminal: UnsentWorkerTerminal,
   ): Extract<ExecutionWorkCommand, { kind: "finish-from-state" }> {
+    const { outcome } = terminal;
     const frozen = this.unsentFileEvidence(execution, active, outcome);
     const providerId = active?.prepared.providerId
       ?? this.runtimePersistence.load(execution.threadId)?.provider ?? "codex";
@@ -1186,7 +1225,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       input: { ...execution, providerId,
       providerIdentities: active?.prepared.parentStartInput.providerIdentities ?? [],
       outcome, projection: { kind: "writer-staged" },
-      ...(outcome === "errored" ? { error: "Provider turn failed before dispatch" } : {}),
+      ...unsentTerminalFields(terminal, providerId),
       ...(active ? { deliveryAttempt: active.deliveryAttempt } : {}) },
       ...(frozen ? { frozenFileEvidence: frozen } : {}),
     };
@@ -1245,8 +1284,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
    * provider cannot hold the RPC; `stopProviderBounded` still bounds the settle
    * and evicts the pooled session in the background.
    */
-  private async stopSessionInternal(threadId: string): Promise<AgentStopResult> {
-    const prepared = this.prepareStop(threadId);
+  private async stopSessionInternal(threadId: string, stop: TurnStopCause): Promise<AgentStopResult> {
+    const prepared = this.prepareStop(threadId, stop);
     const owned = this.workerRuntime?.owner.current(threadId);
     if (owned?.started && owned.execution.executionId === prepared.runtime.turnExecutionId) {
       return this.stopWorkerSession(prepared);
@@ -1267,7 +1306,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const executionId = prepared.runtime.turnExecutionId!;
     const active = this.workerTurns.get(prepared.threadId);
     if (!active || !this.turnRetryDispatchByThread.get(prepared.threadId)?.dispatchStarted) {
-      await this.finishUnsentWorkerTurn(prepared.threadId, executionId, "cancelled");
+      await this.finishUnsentWorkerTurn(prepared.threadId, executionId, { outcome: "cancelled", stop: prepared.stop });
       this.turnRuntime.terminalize(prepared.threadId, executionId, "cancelled");
       this.trackSessionEnded(prepared.threadId, executionId);
       this.disarmTurnRetryWindow(prepared.threadId);
@@ -1315,19 +1354,20 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const frozen = this.requireWorkerFiles().seal({ ...active.execution,
       deliveryAttempt: active.deliveryAttempt, outcome: "cancelled" });
     if (!frozen) throw new Error("Worker stop lost its file evidence generation");
-    await this.finishWorkerStop(active, frozen);
+    await this.finishWorkerStop(active, frozen, prepared.stop);
     return this.cancelledWorkerStop(prepared);
   }
 
   private async finishWorkerStop(
     active: WorkerOwnedTurn,
     frozen: NonNullable<ReturnType<ExecutionFileEvidenceCoordinator["seal"]>>,
+    stop: TurnStopCause,
   ): Promise<void> {
     const result = await this.requireWorkerRuntime().owner.submit(active.execution, {
       kind: "finish-from-state", outcome: "cancelled", frozenFileEvidence: frozen,
       input: { ...active.execution, providerId: active.prepared.providerId,
         providerIdentities: active.prepared.parentStartInput.providerIdentities,
-        outcome: "cancelled", deliveryAttempt: active.deliveryAttempt,
+        outcome: "cancelled", ending: { stop }, deliveryAttempt: active.deliveryAttempt,
         projection: { kind: "writer-staged" } },
     });
     if (result.kind !== "committed" && result.kind !== "accepted") throw new Error("Worker stop terminal did not commit");
@@ -1367,7 +1407,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
   }
 
-  private prepareStop(threadId: string): PreparedStop {
+  private prepareStop(threadId: string, stop: TurnStopCause): PreparedStop {
     const reservationToken = this.activeMutationReservations.get(threadId);
     const runtime = this.turnRuntime.snapshot(threadId) ?? idleRuntime(threadId);
     const dispatch = this.turnRetryDispatchByThread.get(threadId);
@@ -1381,6 +1421,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       reservationToken,
       dispatchState,
       runtime,
+      stop,
     };
   }
 
@@ -1481,7 +1522,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     // Durable finalize (narrative, git snapshot) runs detached so it cannot hold
     // the stop RPC; the per-thread finalize chain still orders it before any
     // later turn's finalization.
-    void this.finalizeTerminalTurn(prepared.threadId, "cancelled", "user stop")
+    void this.finalizeTerminalTurn(prepared.threadId, "cancelled", "user stop", { stop: prepared.stop })
       ?.catch((error: unknown) => {
         logger.warn("Detached user-stop finalize failed", {
           threadId: prepared.threadId,
@@ -1924,6 +1965,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
         threadId,
         turnExecutionId,
         error: rawMessage,
+        failure: dispatchFailure(err),
       } satisfies AgentEvent);
       this.emitProviderEvent(resolvedProvider, {
         type: "ended",
@@ -2157,11 +2199,14 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     return { completion };
   }
 
-  /** Stop exact active turn, sharing one in-flight operation per thread. */
-  async stopSession(threadId: string): Promise<AgentStopResult> {
+  /**
+   * Stop exact active turn, sharing one in-flight operation per thread.
+   * A concurrent caller joins the in-flight operation, so the first caller's stop cause is the one recorded.
+   */
+  async stopSession(threadId: string, stop: TurnStopCause): Promise<AgentStopResult> {
     const existing = this.stopOperationsByThread.get(threadId);
     if (existing) return existing;
-    const operation = this.stopSessionInternal(threadId);
+    const operation = this.stopSessionInternal(threadId, stop);
     this.stopOperationsByThread.set(threadId, operation);
     try {
       return await operation;
@@ -2180,7 +2225,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const wasActive = this.activeSessionIds.has(threadId);
 
     if (wasActive) {
-      await this.stopSession(threadId);
+      await this.stopSession(threadId, { by: "mcode", reason: "thread_deleted" });
     }
 
     if (!providerId) return;
@@ -2216,6 +2261,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Stop all active agent sessions (for graceful shutdown). */
   async stopAll(): Promise<void> {
+    this.shuttingDown = true;
     const ids = [...this.activeSessionIds];
     await Promise.all(
       ids.map(async (threadId) => {
@@ -2250,6 +2296,37 @@ function isAcceptedWorkerResult(result: ExecutionWorkerResult): result is Extrac
 function hasClaudeCanonicalDelivery(provider: IAgentProvider): provider is IAgentProvider & Pick<ClaudeProviderBoundary, "setCanonicalTurnDeliveryFailureHandler"> {
   return provider.id === "claude" && "setCanonicalTurnDeliveryFailureHandler" in provider
     && typeof provider.setCanonicalTurnDeliveryFailureHandler === "function";
+}
+
+/** A plain thrown error carries no classification, so it is fatal. */
+function dispatchFailure(error: unknown): TurnFailure {
+  return error instanceof ProviderTurnError ? error.failure : { kind: "fatal" };
+}
+
+/** The cause a provider terminal event records, enriched once where the execution accepts it. */
+function observeWorkerRetries(active: WorkerOwnedTurn, event: AgentEvent | null): void {
+  if (event?.type === "apiRetry") active.lastRetries = observedProviderRetries(event) ?? active.lastRetries;
+}
+
+function workerProviderEnding(
+  active: WorkerOwnedTurn,
+  outcome: TurnOutcome,
+  event: AgentEvent,
+  interruption: TurnEndingCause,
+): TurnEndingCause | undefined {
+  if (event.type === "error") {
+    return { failure: persistTurnFailure({ failure: event.failure, provider: active.prepared.providerId,
+      message: event.error, acceptedAt: Date.now(), ...(active.lastRetries ? { lastRetries: active.lastRetries } : {}) }) };
+  }
+  // A user stop fences provider delivery first, so a provider-reported interruption has no user cause.
+  return event.type === "ended" && outcome === "interrupted" ? interruption : undefined;
+}
+
+function unsentTerminalFields(terminal: UnsentWorkerTerminal, providerId: string): Pick<DataOnlyParentTurnFinishInput, "error" | "ending"> {
+  if (terminal.outcome === "cancelled") return { ending: { stop: terminal.stop } };
+  const error = "Provider turn failed before dispatch";
+  return { error, ending: { failure: persistTurnFailure({ failure: { kind: "fatal" }, provider: providerId,
+    message: error, acceptedAt: Date.now() }) } };
 }
 
 function workerTerminalOutcome(event: AgentEvent): TurnOutcome | null {

@@ -53,7 +53,7 @@ describe("on-screen thread acknowledgements", () => {
       messages: [createMockMessage({ id: "prompt-1", thread_id: "a", role: "user", sequence: 4 })],
     }]]) });
     stop = startThreadAttentionTracking();
-    useThreadStore.getState().handleAgentEvent({ type: "error", threadId: "a", turnExecutionId: "execution-1", error: "Provider failed" });
+    useThreadStore.getState().handleAgentEvent({ type: "error", threadId: "a", turnExecutionId: "execution-1", error: "Provider failed", failure: { kind: "fatal" } });
     expect(useThreadStore.getState().records.get("a")?.messages.map(({ role, sequence }) => ({ role, sequence })))
       .toEqual([{ role: "user", sequence: 4 }, { role: "system", sequence: 5 }]);
     threadAttentionStore.getState().apply({ ...attention, lastTurn: { outcome: "errored", endedAt: NOW, sequence: 3, changedFileCount: null } });

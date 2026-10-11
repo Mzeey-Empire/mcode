@@ -1,0 +1,1 @@
+ALTER TABLE `canonical_agent_turns` ADD `ending_json` text;

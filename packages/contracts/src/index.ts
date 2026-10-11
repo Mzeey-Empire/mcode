@@ -39,6 +39,8 @@ export type { AttachmentMeta, StoredAttachment } from "./models/attachment.js";
 
 export { TurnOutcomeSchema } from "./models/turn-outcome.js";
 export type { TurnOutcome } from "./models/turn-outcome.js";
+export { TurnFailureSchema } from "./models/turn-failure.js";
+export type { TurnFailure } from "./models/turn-failure.js";
 
 export { WorkspaceSchema, WorkspaceEnrichmentSchema } from "./models/workspace.js";
 export type { Workspace, WorkspaceEnrichment } from "./models/workspace.js";
@@ -824,13 +826,19 @@ export {
   CollaborationObservationChangeSchema,
   CollaborationSourceSchema,
   CollaborationTargetSchema,
+  AgentTurnEndingSchema,
   IdentityProvenanceSchema,
+  InterruptionCauseSchema,
+  PersistedTurnFailureSchema,
   ProviderCapabilityNameSchema,
   ProviderCapabilitySchema,
   ProviderCapabilitySupportSchema,
   ProviderIdentitySchema,
   ProviderIdentityScopeSchema,
   ProviderSchema,
+  SystemStopReasonSchema,
+  TurnFailureKindSchema,
+  TurnStopCauseSchema,
   createAgentModelState,
   reduceAgentEvent,
   reduceAgentEventBatch,
@@ -849,6 +857,7 @@ export type {
   AgentThreadActivityState,
   AgentThreadId,
   AgentTurn,
+  AgentTurnEnding,
   AgentTurnExecutionId,
   AgentTurnId,
   AgentTurnStatus,
@@ -863,12 +872,17 @@ export type {
   CollaborationSource,
   CollaborationTarget,
   IdentityProvenance,
+  InterruptionCause,
+  PersistedTurnFailure,
   Provider,
   ProviderCapability,
   ProviderCapabilityName,
   ProviderCapabilitySupport,
   ProviderIdentity,
   ProviderIdentityScope,
+  SystemStopReason,
+  TurnFailureKind,
+  TurnStopCause,
 } from "./compat/agent-model.js";
 
 // Plan questions

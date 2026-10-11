@@ -550,7 +550,7 @@ export class CanonicalAcceptedProgress {
         endedAt: new Date().toISOString(), assistant: { content: head.assistant.content, model: head.assistant.model ?? null,
           attachments: head.assistant.attachments ?? [], messageId: head.assistant.id }, narrative: acceptedNarrative(thread.state, input.execution) },
         input: { ...input.execution, providerId: head.providerId, providerIdentities: [], outcome: "interrupted",
-          projection: { kind: "writer-staged", messageId: head.assistant.id } } } };
+          ending: { cause: "saving_stopped" }, projection: { kind: "writer-staged", messageId: head.assistant.id } } } };
     return this.accept(operation);
   }
 

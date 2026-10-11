@@ -58,7 +58,7 @@ const RUNNING_TURN = [
     createdAt: NOW, updatedAt: NOW } }),
   durableEnvelope(2, { type: "turn.created", turn: { id: TURN_ID, threadId: THREAD_ID, status: "Pending", trigger: { kind: "user" },
     permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested", attemptOf: null, providerIdentities: [],
-    startedAt: null, providerStartedAt: null, endedAt: null, createdAt: NOW, updatedAt: NOW } }),
+    startedAt: null, providerStartedAt: null, ending: null, endedAt: null, createdAt: NOW, updatedAt: NOW } }),
   durableEnvelope(3, { type: "turn.started", startedAt: NOW }),
 ];
 

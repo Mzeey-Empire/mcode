@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { AgentEventSchema } from "@mcode/contracts";
+import { AgentEventSchema, ProviderRuntimeEventSchema } from "@mcode/contracts";
 
 vi.mock("@mcode/shared", () => ({
   getMcodeDir: () => process.env.MCODE_DATA_DIR ?? ".",
@@ -3428,24 +3428,20 @@ describe("CodexEventMapper", () => {
     expect(events.some((e) => e.event.type === "message")).toBe(false);
   });
 
-  it("emits error event for turn/completed with status failed", () => {
+  it("carries a failed turn's raw Codex message in a schema-valid Error", () => {
+    const message = "The 'x' model is not supported when using Codex with a ChatGPT account.";
     const events = mapper.mapNotification({
       jsonrpc: "2.0",
       method: "turn/completed",
-      params: {
-        threadId: "test-thread",
-        turn: {
-          status: "failed",
-          error: { message: "You've hit your usage limit", codexErrorInfo: "usageLimitExceeded" },
-        },
-      },
+      params: { turn: { status: "failed", error: { message, codexErrorInfo: "usageLimitExceeded" } } },
     });
 
     expect(events).toHaveLength(1);
-    expect(events[0]!.event).toEqual({
+    expect(ProviderRuntimeEventSchema().parse(events[0]).event).toEqual({
       type: "error",
       threadId: "test-thread",
-      error: "You've hit your usage limit",
+      error: message,
+      failure: { kind: "fatal" },
     });
   });
 

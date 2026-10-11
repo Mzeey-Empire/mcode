@@ -66,7 +66,7 @@ export class TurnRecoveryService {
     const chunkCount = this.parentAssistantTextCheckpoints.restoreChunks(checkpoint.executionId).length;
     await this.canonicalSink.interruptUnfinishedExecution({
       threadId: checkpoint.threadId, turnId: checkpoint.turnId, executionId: checkpoint.executionId,
-      reason: UNPROVED_EXECUTION_REASON, recoveryIncidentId: incident.id, endedAt: incident.createdAt,
+      reason: UNPROVED_EXECUTION_REASON, cause: "app_closed", recoveryIncidentId: incident.id, endedAt: incident.createdAt,
     });
     if (chunkCount > 0 && !await this.parentAssistantTextCheckpoints.retire(checkpoint.executionId)) {
       throw new Error(`Recovered assistant text checkpoint was not retired: ${checkpoint.executionId}`);

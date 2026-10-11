@@ -227,6 +227,6 @@ describe("internal thread-control MCP workflow", () => {
       ]),
     );
     expect(threads.listDelegationChildren(sourceThread.id).map(({ thread }) => thread.id)).toContain(destinationThreadId);
-    expect(agentService.stopSession).toHaveBeenCalledWith(destinationThreadId);
+    expect(agentService.stopSession).toHaveBeenCalledWith(destinationThreadId, { by: "mcode", reason: "thread_control" });
   });
 });

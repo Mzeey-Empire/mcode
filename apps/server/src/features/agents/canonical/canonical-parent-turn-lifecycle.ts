@@ -247,7 +247,7 @@ export class CanonicalParentTurnLifecycle {
           this.operations.stampRecoveryIncident(input.executionId, input.recoveryIncidentId);
         }
       },
-      events: () => this.interruptionEvents(input.reason, context, assistant, endedAt),
+      events: () => this.interruptionEvents(input, context, assistant, endedAt),
     };
   }
 
@@ -267,7 +267,7 @@ export class CanonicalParentTurnLifecycle {
   }
 
   private interruptionEvents(
-    reason: string,
+    input: Pick<CanonicalParentTurnInterruptionInput, "reason" | "cause">,
     context: { checkpoint: CanonicalAgentCheckpoint; thread: AgentThread },
     assistant: Message | null,
     endedAt: string,
@@ -276,7 +276,7 @@ export class CanonicalParentTurnLifecycle {
     return [
       this.idleEvent(checkpoint, thread, endedAt),
       ...this.assistantEvent(checkpoint, thread, assistant, endedAt),
-      this.interruptedEvent(checkpoint, thread, reason, endedAt),
+      this.interruptedEvent(checkpoint, thread, input, endedAt),
     ];
   }
 
@@ -333,7 +333,7 @@ export class CanonicalParentTurnLifecycle {
   private interruptedEvent(
     checkpoint: CanonicalAgentCheckpoint,
     thread: AgentThread,
-    reason: string,
+    { reason, cause }: Pick<CanonicalParentTurnInterruptionInput, "reason" | "cause">,
     endedAt: string,
   ): CanonicalAgentEventDraft {
     return {
@@ -345,7 +345,7 @@ export class CanonicalParentTurnLifecycle {
       },
       sourceProviderId: thread.providerId,
       sourceIdentities: thread.providerIdentities,
-      payload: { type: "turn.interrupted", endedAt, reason },
+      payload: { type: "turn.interrupted", endedAt, reason, cause },
     };
   }
 

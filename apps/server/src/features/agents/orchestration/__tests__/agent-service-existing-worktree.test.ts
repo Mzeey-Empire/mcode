@@ -290,7 +290,7 @@ describe("AgentService.createAndSend defaults", () => {
     expect(threadStartups.get(startupId)).toMatchObject({ state: "running", phase: "agent" });
 
     // Ending the first session releases the drain loop so it claims the second queued Turn.
-    await service.stopSession(managed.id);
+    await service.stopSession(managed.id, { by: "user" });
 
     await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledTimes(2));
     expect(environment.getAutomaticSetup({ threadId: managed.id }).queuedTurns).toEqual([

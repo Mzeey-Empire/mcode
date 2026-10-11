@@ -15,6 +15,7 @@ import {
   ToolCallRecordSchema,
   AgentEventType,
   AcceptedCanonicalAgentEventEnvelopeSchema,
+  CanonicalAgentReconnectRecoverySchema,
   createAgentModelState,
   reduceAgentEventBatch,
   type ParentNarrativeRecoveryItem,
@@ -452,6 +453,31 @@ describe("CanonicalAgentBoundary", () => {
     expect(new CanonicalAgentBoundary(db, published).loadTurn(TURN_ID)?.providerStartedAt).toBe(NOW);
   });
 
+  it("round-trips an 8,000-character errored ending across a reopen and reconnect recovery", () => {
+    startCanonicalParent(sink, db);
+    const failure = {
+      kind: "usage_limit", provider: "codex", message: "x".repeat(8_000), status: 429,
+      resetsAt: "2026-08-09T21:00:00.000Z", limitType: "five_hour", retries: { made: 2, max: 3 },
+    } as const;
+    sink.finishParentTurn({
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, providerId: "codex",
+      providerIdentities: [], outcome: "errored", error: failure.message, ending: { failure },
+      projectTurn: () => ({ message: null, narrative: [] }),
+    });
+    const expected = { outcome: "errored", failure };
+
+    const reopened = new CanonicalAgentBoundary(db, published);
+    expect(reopened.loadTurn(TURN_ID)?.ending).toEqual(expected);
+    const wire = CanonicalAgentReconnectRecoverySchema().parse(JSON.parse(JSON.stringify(
+      reopened.recoverThread(THREAD_ID, { conversationRevision: 0, rosterRevision: 0 }))));
+    const state = wire.mode === "snapshot" ? wire.snapshot.state : (() => {
+      const reduced = reduceAgentEventBatch(createAgentModelState(), wire.events);
+      if (reduced.outcome !== "applied") throw new Error("Recovery delta did not apply");
+      return reduced.state;
+    })();
+    expect(state.turns[TURN_ID]?.ending).toEqual(expected);
+  });
+
   it("reports deferred canonical delivery without undoing the durable commit", () => {
     const failingPublisher = vi.fn(() => { throw new Error("canonical delivery failed"); });
     const deferredSink = new CanonicalAgentBoundary(db, failingPublisher);
@@ -699,6 +725,7 @@ describe("CanonicalAgentBoundary", () => {
     const result = sink.interruptUnfinishedExecution(
       EXECUTION_ID,
       "The provider could not prove that this execution was still active after restart.",
+      "app_closed",
     );
 
     expect(result.outcome).toBe("committed");
@@ -745,6 +772,7 @@ describe("CanonicalAgentBoundary", () => {
     sink.interruptUnfinishedExecution(
       EXECUTION_ID,
       "The provider could not prove that this execution was still active after restart.",
+      "app_closed",
       staged,
     );
 

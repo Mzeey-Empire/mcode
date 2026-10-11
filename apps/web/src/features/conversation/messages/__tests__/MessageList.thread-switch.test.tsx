@@ -109,7 +109,7 @@ function canonicalChildState(content: string, status: "Running" | "Completed") {
     approvalReviewMode: "manual",
     approvalReviewReason: "manual-requested", attemptOf: null,
     providerIdentities: [],
-    startedAt: timestamp, providerStartedAt: null,
+    startedAt: timestamp, providerStartedAt: null, ending: null,
     endedAt: status === "Completed" ? timestamp : null,
     createdAt: timestamp,
     updatedAt: timestamp,

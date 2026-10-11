@@ -32,6 +32,7 @@ import {
   type CanonicalAgentReconnectRecovery,
   type CanonicalAgentRevision,
   type CollaborationAction,
+  type InterruptionCause,
   type Message,
   type NarrativeEntry,
   ParentNarrativeRecoveryItemSchema,
@@ -108,6 +109,7 @@ import { AcceptedCodexCollaboration } from "./accepted-codex-collaboration.js";
 import { ConversationDisplayMaterializationStore as ConversationDisplayMaterializer } from "../conversation/migrations/conversation-display-materialization-store.js";
 import { syntheticThreadExecutionId } from "./canonical-thread-execution.js";
 import { notifyCommittedCanonicalEvents } from "./committed-canonical-events.js";
+import { withTurnEnding, type TurnEndingCause } from "./turn-ending.js";
 
 /** Capacity held back so volatile input cannot consume every semantic batch slot. */
 export const CANONICAL_AGENT_CONTROL_EVENT_RESERVE = 16;
@@ -269,6 +271,7 @@ type CanonicalParentTerminalEventInput = {
   providerIdentities: readonly ProviderIdentity[];
   outcome: TurnOutcome;
   error?: string;
+  ending?: TurnEndingCause;
 };
 
 interface SubagentRosterActivity {
@@ -2090,6 +2093,7 @@ export class CanonicalAgentStore {
   interruptUnfinishedExecution(
     executionId: string,
     reason: string,
+    cause: InterruptionCause,
     stagedAssistant?: Message,
     finalizeCompatibility?: (
       assistant: Message,
@@ -2102,6 +2106,7 @@ export class CanonicalAgentStore {
     return this.parentLifecycle.interrupt({
       executionId,
       reason,
+      cause,
       stagedAssistant,
       finalizeCompatibility,
       recoveredNarrative,
@@ -2630,6 +2635,7 @@ export class CanonicalAgentStore {
             startedAt: null,
             providerStartedAt: null,
             endedAt: null,
+            ending: null,
             createdAt: startedAt,
             updatedAt: startedAt,
           },
@@ -2749,7 +2755,7 @@ export class CanonicalAgentStore {
     sourceIdentities: ProviderIdentity[],
     endedAt: string,
   ): CanonicalAgentEventDraft {
-    const payload = parentTerminalPayload(input.outcome, input.error, endedAt);
+    const payload = withTurnEnding(parentTerminalPayload(input.outcome, input.error, endedAt), input.ending, input.providerId);
     return {
       eventId: `${input.executionId}:${payload.type}`,
       routing: { threadId: input.threadId, turnId: input.turnId, executionId: input.executionId },
@@ -3566,6 +3572,7 @@ export class CanonicalAgentStore {
       startedAt: placeholder("startedAt"),
       providerStartedAt: placeholder("providerStartedAt"),
       endedAt: placeholder("endedAt"),
+      endingJson: placeholder("endingJson"),
       createdAt: placeholder("createdAt"),
       updatedAt: placeholder("updatedAt"),
     }).onConflictDoUpdate({
@@ -3579,6 +3586,7 @@ export class CanonicalAgentStore {
         startedAt: sql`excluded.started_at`,
         providerStartedAt: sql`excluded.provider_started_at`,
         endedAt: sql`excluded.ended_at`,
+        endingJson: sql`excluded.ending_json`,
         updatedAt: sql`excluded.updated_at`,
       },
     }).prepare();
@@ -3600,6 +3608,7 @@ export class CanonicalAgentStore {
       startedAt: parsed.startedAt,
       providerStartedAt: parsed.providerStartedAt,
       endedAt: parsed.endedAt,
+      endingJson: parsed.ending === null ? null : JSON.stringify(parsed.ending),
       createdAt: parsed.createdAt,
       updatedAt: parsed.updatedAt,
     });
@@ -3854,6 +3863,7 @@ export class CanonicalAgentStore {
       providerStartedAt: row.providerStartedAt,
       attemptOf: row.attemptOf,
       endedAt: row.endedAt,
+      ending: row.endingJson == null ? null : JSON.parse(String(row.endingJson)),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     });

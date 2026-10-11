@@ -332,7 +332,7 @@ describe("AgentService container composition", () => {
     const service = container.resolve(AgentService);
 
     await service.sendMessage({ threadId: thread.id, content: "hello", permissionMode: "default" });
-    const stopped = await service.stopSession(thread.id);
+    const stopped = await service.stopSession(thread.id, { by: "user" });
 
     expect(stopped.status).toBe("cancelled");
     expect(stopProvider).toHaveBeenCalledWith(`mcode-${thread.id}`);
@@ -349,7 +349,7 @@ describe("AgentService container composition", () => {
     const service = container.resolve(AgentService);
 
     await service.sendMessage({ threadId: thread.id, content: "hello", permissionMode: "default" });
-    const stopped = await service.stopSession(thread.id);
+    const stopped = await service.stopSession(thread.id, { by: "user" });
 
     expect(stopped.status).toBe("cancelled");
     expect(container.resolve(MessageRepo).listByThread(thread.id, 10).messages.map((message) => message.role))
@@ -377,6 +377,29 @@ describe("AgentService container composition", () => {
     expect(published.map((event) => event.type)).toContain("turnStarted");
     expect(container.resolve(TurnRuntimeController).snapshot(thread.id)?.phase).toBe("interrupted");
     await waitFor(() => canonicalPayloadTypes(thread.id).includes("turn.interrupted"));
+  }, 15_000);
+
+  it("records a provider interruption during graceful stopAll as app_closed", async () => {
+    let running: TurnRequest | undefined;
+    registerFakeCodex(fakeCodexProvider(async (request) => {
+      running = request;
+    }, async () => {
+      const request = requireValue(running, "Expected a running Codex turn");
+      await submitCodexEvent(workerRuntime!, request, 1, { type: "ended",
+        threadId: request.threadId, turnExecutionId: request.turnExecutionId, outcome: "cancelled" });
+    }));
+    const registry = container.resolve(AgentEventPublicationRegistry);
+    registry.bind(() => undefined);
+    registry.start();
+    const workspace = await container.resolve(WorkspaceRepo).create("worker-shutdown", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Worker shutdown", "direct", "main", true, "codex");
+    const service = container.resolve(AgentService);
+
+    await service.sendMessage({ threadId: thread.id, content: "hello", permissionMode: "default" });
+    await service.stopAll();
+
+    await waitFor(() => canonicalPayloadTypes(thread.id).includes("turn.interrupted"));
+    expect(canonicalTurnEndings(thread.id)).toEqual([{ outcome: "interrupted", cause: "app_closed" }]);
   }, 15_000);
 
   it("finishes the exact owned turn when canonical delivery fails after provider send", async () => {
@@ -448,7 +471,7 @@ describe("AgentService container composition", () => {
       }
       return frozen;
     });
-    const result = await service.stopSession(thread.id);
+    const result = await service.stopSession(thread.id, { by: "user" });
     await requireValue(lateFailure, "Expected post-fence delivery rejection");
     expect(result).toMatchObject({ status: "cancelled", snapshot: {
       threadId: thread.id, turnExecutionId: request.turnExecutionId, phase: "cancelled" } });
@@ -462,7 +485,7 @@ describe("AgentService container composition", () => {
     await service.sendMessage({ threadId: thread.id, content: "follow-up", permissionMode: "full", provider: "copilot", model: "gpt-4.1" });
     expect(runtime.owner.current(thread.id)?.execution.executionId).not.toBe(request.turnExecutionId);
     expect(service.runtimeAccess().activeCount()).toBe(1);
-    expect((await service.stopSession(thread.id)).status).toBe("cancelled");
+    expect((await service.stopSession(thread.id, { by: "user" })).status).toBe("cancelled");
     expect(recover).not.toHaveBeenCalled();
   });
 
@@ -494,7 +517,7 @@ describe("AgentService container composition", () => {
     const sealing = vi.spyOn(files, "seal");
     const failed = failure({ threadId: request.threadId, turnId: request.turnId,
       executionId: request.turnExecutionId, deliveryAttempt: 1 }, new Error("Canonical event execution is no longer admitted"));
-    const stopped = service.stopSession(thread.id);
+    const stopped = service.stopSession(thread.id, { by: "user" });
     release();
     await failed;
     const result = await stopped;
@@ -588,7 +611,7 @@ describe("AgentService container composition", () => {
       try {
         // A mandatory terminal with unclassified text is rejected after its mailbox ordinal is admitted.
         await submitCodexEvent(runtime, request, 2, { type: "error", threadId: request.threadId,
-          turnExecutionId: request.turnExecutionId, error: "Native provider failure" });
+          turnExecutionId: request.turnExecutionId, error: "Native provider failure", failure: { kind: "fatal" } });
       } catch (error) {
         if (!reportFailure || !(error instanceof Error)) throw error;
         rejected = error;
@@ -653,7 +676,7 @@ describe("AgentService container composition", () => {
 
     expect(container.resolve(TurnRuntimeController).snapshot(lost.id)?.phase).toBe("interrupted");
     expect(workerRuntime?.owner.current(peer.id)?.execution.executionId).toBe(peerAssignment.execution.executionId);
-    expect((await service.stopSession(peer.id)).status).toBe("cancelled");
+    expect((await service.stopSession(peer.id, { by: "user" })).status).toBe("cancelled");
   });
 
   function registerFakeCodex(provider: IAgentProvider): void {
@@ -719,6 +742,12 @@ function canonicalProviderEvents(threadId: string): AgentEvent[] {
     const event = item?.payload?.projection === "providerRuntimeEvent" ? item.payload.runtimeEvent?.event : undefined;
     return event ? [event as AgentEvent] : [];
   });
+}
+
+function canonicalTurnEndings(threadId: string): unknown[] {
+  return (container.resolve<Database>("Database").query("SELECT ending_json FROM canonical_agent_turns WHERE thread_id=?")
+    .all(threadId) as Array<{ ending_json: string | null }>)
+    .map((row) => row.ending_json === null ? null : JSON.parse(row.ending_json));
 }
 
 function canonicalPayloadTypes(threadId: string): string[] {

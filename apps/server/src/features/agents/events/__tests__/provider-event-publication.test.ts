@@ -72,6 +72,7 @@ describe("provider event publication ownership", () => {
       type: AgentEventType.Error,
       threadId: "parent-thread",
       error: "parent provider disconnected",
+      failure: { kind: "fatal" },
     };
 
     expect(publishParentProviderEvent(parentEvent, deps)).toBe(true);

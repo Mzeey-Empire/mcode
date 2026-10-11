@@ -939,7 +939,7 @@ async function bootstrapServer(): Promise<void> {
     // Provider work must start only after every client-visible history route has
     // one durable display representation.
     approvalService.start({
-      stopSession: (threadId) => agentService.stopSession(threadId),
+      stopSession: (threadId, stop) => agentService.stopSession(threadId, stop),
       publishApprovalRequest: (request) => {
         broadcast("approval.requested", request);
         threadAttentionService.invalidate(request.threadId);

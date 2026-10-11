@@ -8,6 +8,7 @@ import type {
   ProviderEventIngressEvent,
 } from "../../providers/composition/provider-event-ingress.js";
 import { ACTIVE_TURN_RECOVERY_RETAINED_LIMITS } from "./active-turn-recovery-retention-policy.js";
+import type { TurnEndingCause } from "../canonical/turn-ending.js";
 
 /** Retention limits for ingress events that wait for assistant-text durability. */
 export const TURN_EVENT_QUEUE_RETAINED_LIMITS = {
@@ -16,7 +17,7 @@ export const TURN_EVENT_QUEUE_RETAINED_LIMITS = {
 } as const;
 
 /** The terminal sources that must pass through the per-turn finalization fence. */
-export type TurnTerminalSource = "provider" | "user-stop" | "checkpoint-failure" | "shutdown";
+export type TurnTerminalSource = "provider" | "user-stop" | "checkpoint-failure";
 
 /** The terminal outcome that the pipeline can materialize. */
 export type TurnTerminalOutcome = "completed" | "errored" | "interrupted" | "cancelled";
@@ -27,6 +28,8 @@ export interface FinalizeTurnCommand {
   executionId?: string;
   outcome: TurnTerminalOutcome;
   source: TurnTerminalSource;
+  /** Structured cause recorded with a non-completed outcome. */
+  ending?: TurnEndingCause;
 }
 
 /** Runtime authority retained by AgentService while the pipeline owns event ordering. */
@@ -451,5 +454,5 @@ function compactToolResultForQueue(event: AgentEvent, maximumBytes: number): Age
 }
 
 function cancelsDeferredWork(source: TurnTerminalSource): boolean {
-  return source === "user-stop" || source === "checkpoint-failure" || source === "shutdown";
+  return source === "user-stop" || source === "checkpoint-failure";
 }

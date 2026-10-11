@@ -164,7 +164,7 @@ describe("thread startup RPC", () => {
     await observer.stop();
     expect(service.get(startup.startupId)).toEqual(settled);
     expect(await cancel()).toEqual(settled);
-    expect(stopSession).toHaveBeenCalledExactlyOnceWith(thread.id);
+    expect(stopSession).toHaveBeenCalledExactlyOnceWith(thread.id, { by: "user" });
     expect(stopAutomaticSetup).not.toHaveBeenCalled();
   });
 
@@ -177,7 +177,7 @@ describe("thread startup RPC", () => {
     const result = await cancel();
     expect(result).toMatchObject({ state: "cancelled", phase: "agent", cancellation: "requested" });
     expect(await cancel()).toEqual(result);
-    expect(stopSession).toHaveBeenCalledExactlyOnceWith(thread.id);
+    expect(stopSession).toHaveBeenCalledExactlyOnceWith(thread.id, { by: "user" });
     expect(stopAutomaticSetup).not.toHaveBeenCalled();
   });
 

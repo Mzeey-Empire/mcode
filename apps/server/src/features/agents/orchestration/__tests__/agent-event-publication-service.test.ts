@@ -29,7 +29,7 @@ describe("provider publication status persistence", () => {
     const peer = new Database(state.database.db.filename, { strict: true });
     try {
       peer.run("BEGIN IMMEDIATE");
-      state.publication.publish({ type: "error", threadId: state.thread.id, error: "Provider failed" });
+      state.publication.publish({ type: "error", threadId: state.thread.id, error: "Provider failed", failure: { kind: "fatal" } });
       expect(state.published).toEqual(["errored"]);
       let drained = false;
       const closing = state.publication.drain().then(() => { drained = true; });
@@ -49,7 +49,7 @@ describe("provider publication status persistence", () => {
     const state = await fixture();
     try {
       await state.database.writer.setQueryOnlyForReliability(true);
-      state.publication.publish({ type: "error", threadId: state.thread.id, error: "First failure" });
+      state.publication.publish({ type: "error", threadId: state.thread.id, error: "First failure", failure: { kind: "fatal" } });
       await expect(state.publication.drain()).rejects.toThrow("Agent publication status saves failed");
       expect(state.published).toEqual(["errored"]);
       await state.database.writer.setQueryOnlyForReliability(false);

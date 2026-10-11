@@ -290,7 +290,7 @@ describe("Claude canonical delivery failure ownership", () => {
     const fixture = buildService();
     await sendClaudeTurn(fixture);
     const { handler, routing } = canonicalFailureFor(fixture);
-    const stopped = await fixture.service.stopSession(THREAD_ID);
+    const stopped = await fixture.service.stopSession(THREAD_ID, { by: "user" });
     await handler(routing, new Error("late sink failure"));
     expect(stopped).toMatchObject({ status: "cancelled", threadId: THREAD_ID, turnExecutionId: routing.executionId });
     expect(fixture.service.runtimeAccess().runtimeSnapshots().find(snapshot => snapshot.threadId === THREAD_ID)?.phase).toBe("cancelled");
@@ -428,6 +428,7 @@ describe("AgentService transient-failure auto-retry", () => {
           threadId: THREAD_ID,
           turnExecutionId: request.turnExecutionId,
           error: "read ECONNRESET",
+          failure: { kind: "fatal" },
         });
         providerEmitter.emit("event", {
           type: "ended",
@@ -623,6 +624,7 @@ describe("AgentService transient-failure auto-retry", () => {
         threadId: THREAD_ID,
         turnExecutionId: request.turnExecutionId,
         error: "stream failed",
+        failure: { kind: "fatal" },
       });
       return Promise.resolve();
     });
@@ -655,7 +657,7 @@ describe("AgentService transient-failure auto-retry", () => {
       provider: "claude",
     });
     const executionId = service.runtimeAccess().runtimeSnapshots().find((snapshot) => snapshot.threadId === THREAD_ID)?.turnExecutionId;
-    await service.stopSession(THREAD_ID);
+    await service.stopSession(THREAD_ID, { by: "user" });
 
     providerEmitter.emit("event", {
       type: "ended",
@@ -884,6 +886,7 @@ describe("AgentService transient-failure auto-retry", () => {
       threadId: THREAD_ID,
       turnExecutionId: executionId,
       error: "read ECONNRESET",
+      failure: { kind: "fatal" },
     });
     providerEmitter.emit("event", {
       type: "ended",
@@ -940,10 +943,11 @@ describe("AgentService transient-failure auto-retry", () => {
       threadId: THREAD_ID,
       turnExecutionId: initialTurnExecutionId,
       error: "read ECONNRESET",
+      failure: { kind: "fatal" },
     });
     await evictionReady;
 
-    await service.stopSession(THREAD_ID);
+    await service.stopSession(THREAD_ID, { by: "user" });
     await service.sendMessage({
       threadId: THREAD_ID,
       content: "replacement",
@@ -987,6 +991,7 @@ describe("AgentService transient-failure auto-retry", () => {
       threadId: THREAD_ID,
       turnExecutionId: (sendTurn.mock.calls[0][0] as TurnRequest).turnExecutionId,
       error: "read ECONNRESET",
+      failure: { kind: "fatal" },
     });
     await new Promise((r) => setTimeout(r, 0));
 
@@ -1021,6 +1026,7 @@ describe("AgentService transient-failure auto-retry", () => {
       threadId: THREAD_ID,
       turnExecutionId: firstAttempt.turnExecutionId,
       error: "read ECONNRESET",
+      failure: { kind: "fatal" },
     });
     await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -1051,6 +1057,7 @@ describe("AgentService transient-failure auto-retry", () => {
       type: "error",
       threadId: THREAD_ID,
       error: "stream disconnected before completion: error sending request for url (http://127.0.0.1:3845/mcp)",
+      failure: { kind: "fatal" },
       turnExecutionId,
     });
     providerEmitter.emit("event", {
@@ -1088,6 +1095,7 @@ describe("AgentService transient-failure auto-retry", () => {
           threadId: THREAD_ID,
           turnExecutionId: request.turnExecutionId,
           error: "read ECONNRESET",
+          failure: { kind: "fatal" },
         });
         providerEmitter.emit("event", {
           type: "turnComplete",

@@ -286,6 +286,7 @@ describe("canonical agent model", () => {
     const parsed = AgentModelStateSchema.parse({ ...createAgentModelState(), turns: { "turn-1": savedTurn } });
 
     expect(parsed.turns["turn-1"]?.providerStartedAt).toBeNull();
+    expect(parsed.turns["turn-1"]?.ending).toBeNull();
   });
 
   it("reduces an explicit cancellation to the Cancelled terminal status", () => {
@@ -372,6 +373,91 @@ describe("canonical agent model", () => {
     expect(result.outcome).toBe("applied");
     expect(result.state.turns["turn-1"]?.status).toBe("Interrupted");
     expect(result.state.threads["thread-1"]?.activityState).toBe("Idle");
+    expect(result.state.turns["turn-1"]?.ending).toEqual({ outcome: "interrupted", cause: "saving_stopped" });
+  });
+
+  describe("turn endings", () => {
+    const envelope = AgentEventEnvelopeSchema(CanonicalAgentEventSchema);
+    const createdTurn = () => envelope.parse({
+      ...threadRecordedEvent("event-1", 1),
+      eventId: "event-2",
+      acceptedSequence: 2,
+      routing: { threadId: "thread-1", turnId: "turn-1", executionId },
+      payload: {
+        type: "turn.created",
+        turn: {
+          id: "turn-1", threadId: "thread-1", status: "Pending", trigger: { kind: "user" },
+          permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested",
+          providerIdentities: [], startedAt: null, endedAt: null, ...timestamps,
+        },
+      },
+    });
+    const endTurn = (payload: Record<string, unknown>) => {
+      const created = createdTurn();
+      const terminal = envelope.parse({ ...created, eventId: "event-3", acceptedSequence: 3, payload });
+      return reduceAgentEventBatch(createAgentModelState(), [threadRecordedEvent("event-1", 1), created, terminal]);
+    };
+
+    it("replays a turn.cancelled written before stop causes as a user stop", () => {
+      const result = endTurn({ type: "turn.cancelled", endedAt: timestamps.updatedAt, reason: "Turn cancelled" });
+
+      expect(result.state.turns["turn-1"]?.ending).toEqual({ outcome: "cancelled", stop: { by: "user" } });
+    });
+
+    it("keeps a Mcode stop cause from a new turn.cancelled", () => {
+      const result = endTurn({
+        type: "turn.cancelled", endedAt: timestamps.updatedAt, reason: "Turn cancelled",
+        stop: { by: "mcode", reason: "approval_unanswerable" },
+      });
+
+      expect(result.state.turns["turn-1"]?.ending).toEqual({
+        outcome: "cancelled", stop: { by: "mcode", reason: "approval_unanswerable" },
+      });
+    });
+
+    it("replays a turn.errored written before failures as fatal with its message and the turn provider", () => {
+      const result = endTurn({ type: "turn.errored", endedAt: timestamps.updatedAt, error: "model not found" });
+
+      expect(result.state.turns["turn-1"]?.ending).toEqual({
+        outcome: "errored",
+        failure: { kind: "fatal", provider: "codex", message: "model not found" },
+      });
+    });
+
+    it("keeps a persisted failure from a new turn.errored", () => {
+      const failure = {
+        kind: "usage_limit", provider: "claude", message: "Usage limit reached", status: 429,
+        resetsAt: "2026-08-09T16:00:00.000Z", limitType: "five_hour", retries: { made: 2, max: 10 },
+      };
+
+      const result = endTurn({ type: "turn.errored", endedAt: timestamps.updatedAt, error: "Usage limit reached", failure });
+
+      expect(result.state.turns["turn-1"]?.ending).toEqual({ outcome: "errored", failure });
+    });
+
+    it("replays a turn.interrupted written before causes with cause unknown", () => {
+      const legacy = endTurn({ type: "turn.interrupted", endedAt: timestamps.updatedAt, reason: "restart" });
+      const current = endTurn({ type: "turn.interrupted", endedAt: timestamps.updatedAt, reason: "restart", cause: "app_closed" });
+
+      expect(legacy.state.turns["turn-1"]?.ending).toEqual({ outcome: "interrupted", cause: "unknown" });
+      expect(current.state.turns["turn-1"]?.ending).toEqual({ outcome: "interrupted", cause: "app_closed" });
+    });
+
+    it("leaves a completed turn without an ending", () => {
+      const result = endTurn({ type: "turn.completed", endedAt: timestamps.updatedAt });
+
+      expect(result.state.turns["turn-1"]?.status).toBe("Completed");
+      expect(result.state.turns["turn-1"]?.ending).toBeNull();
+    });
+
+    it("rejects a persisted failure message over 8,000 characters", () => {
+      const parsed = CanonicalAgentEventSchema.safeParse({
+        type: "turn.errored", endedAt: timestamps.updatedAt, error: "x",
+        failure: { kind: "fatal", provider: "codex", message: "x".repeat(8_001) },
+      });
+
+      expect(parsed.success).toBe(false);
+    });
   });
 
   it("rejects a batch atomically when canonical routing conflicts", () => {

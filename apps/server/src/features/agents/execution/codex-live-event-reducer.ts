@@ -1,4 +1,4 @@
-import type { AgentEvent, ParentNarrativeRecoveryItem, PlanQuestion, ProviderRuntimeEvent, StoredAttachment, TurnOutcome } from "@mcode/contracts";
+import type { AgentEvent, ParentNarrativeRecoveryItem, PlanQuestion, ProviderRuntimeEvent, StoredAttachment, TurnFailure, TurnOutcome } from "@mcode/contracts";
 import { NarrativeTurnState, type NarrativeTurnStateEffect } from "../conversation/narrative/narrative-turn-state.js";
 import { AssistantExecutionState, type AssistantMaterializationInput } from "../turns/assistant-execution-state.js";
 import { NarrativeRecoveryDelta, type PreparedNarrativeRecoveryDelta } from "../turns/narrative-recovery-delta.js";
@@ -18,7 +18,7 @@ export type CodexPlanFeature = "none" | "questions" | "output";
 
 /** A runtime termination carries its actual failure or cancellation outcome. */
 export type SyntheticTerminalInput =
-  | { readonly outcome: "errored"; readonly error: string }
+  | { readonly outcome: "errored"; readonly error: string; readonly failure: TurnFailure }
   | { readonly outcome: "cancelled" | "interrupted" };
 
 const BEFORE_START_EVENTS = new Set<AgentEvent["type"]>([
@@ -178,7 +178,7 @@ export class CodexLiveEventReducer {
   /** Preserve partial text and narrative when the runtime must finish without a provider terminal event. */
   finishFromState(input: SyntheticTerminalInput): CodexLiveReduction {
     const event: AgentEvent = input.outcome === "errored"
-      ? { type: "error", threadId: this.execution.threadId, turnExecutionId: this.execution.executionId, error: input.error }
+      ? { type: "error", threadId: this.execution.threadId, turnExecutionId: this.execution.executionId, error: input.error, failure: input.failure }
       : { type: "ended", threadId: this.execution.threadId, turnExecutionId: this.execution.executionId, outcome: "interrupted" };
     if (this.phase === "completed" || this.phase === "ended") return this.unsupported(event, "execution already terminal");
     this.phase = "completed";

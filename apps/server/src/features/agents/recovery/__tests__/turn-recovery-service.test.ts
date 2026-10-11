@@ -112,7 +112,7 @@ describe("TurnRecoveryService", () => {
     });
   }
 
-  it("interrupts every execution that lacks exact provider proof at startup", async () => {
+  it("interrupts every execution that lacks exact provider proof at startup as app_closed", async () => {
     const service = new TurnRecoveryService(
       runtimeSink,
       threadRepo,
@@ -124,6 +124,7 @@ describe("TurnRecoveryService", () => {
 
     expect(result).toEqual({ interrupted: [EXECUTION_ID] });
     expect(sink.loadTurn(TURN_ID)?.status).toBe("Interrupted");
+    expect(sink.loadTurn(TURN_ID)?.ending).toEqual({ outcome: "interrupted", cause: "app_closed" });
     expect(sink.loadCheckpoint(EXECUTION_ID)).toMatchObject({
       phase: "interrupted",
       terminalOutcome: "interrupted",

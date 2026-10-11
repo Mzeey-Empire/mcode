@@ -271,7 +271,7 @@ export class ClaudeEventMapper {
       subtype: message.subtype,
       payload: message,
     });
-    this.emit({ type: AgentEventType.Error, threadId: this.threadId, error });
+    this.emit({ type: AgentEventType.Error, threadId: this.threadId, error, failure: { kind: "fatal" } });
   }
 
   private observeGoal(message: Message): void {

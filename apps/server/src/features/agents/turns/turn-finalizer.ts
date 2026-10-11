@@ -29,6 +29,7 @@ import type { TurnSnapshotRepo } from "./persistence/turn-snapshot-repo.js";
 import type { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
 import type { NarrativeStore } from "../conversation/narrative/narrative-store.js";
 import type { TurnOutcome } from "./turn-outcome.js";
+import type { TurnEndingCause } from "../canonical/turn-ending.js";
 import type { TurnFileTracker } from "./turn-file-tracker.js";
 import type { TurnFileEffectSummary } from "@mcode/contracts";
 import type { ParentTurnDurability } from "./parent-turn-durability.js";
@@ -222,6 +223,7 @@ export class TurnFinalizer {
     outcome: TurnOutcome,
     prerequisite: Promise<unknown> = Promise.resolve(),
     executionId?: string,
+    ending?: TurnEndingCause,
   ): Promise<void> {
     const turnRef = this.turnRefBefore.get(threadId);
     const anchor = executionId
@@ -231,7 +233,7 @@ export class TurnFinalizer {
     const tail = this.finalizeChainByThread.get(threadId) ?? Promise.resolve();
     const finalizeNext = async () => {
       await prerequisite;
-      await this.runFinalizeOnce(threadId, executionId, outcome, turnRef, settleDiff, anchor);
+      await this.runFinalizeOnce(threadId, executionId, outcome, turnRef, settleDiff, anchor, ending);
       if (this.pendingDiffSettlement.get(threadId)?.settle === settleDiff) this.pendingDiffSettlement.delete(threadId);
     };
     const next = tail.then(finalizeNext, finalizeNext);
@@ -266,13 +268,14 @@ export class TurnFinalizer {
     turnRef: TurnRef | undefined,
     settleDiff: SettleTurnDiff | undefined,
     anchor: AssistantMaterializationAnchor,
+    ending: TurnEndingCause | undefined,
   ): Promise<void> {
     if (this.persistingThreads.has(threadId)) return;
     this.persistingThreads.add(threadId);
     try {
       const canonicalTurnId = this.canonicalTurnId(executionId);
       if (canonicalTurnId && executionId) {
-        await this.runCanonicalFinalize(threadId, executionId, canonicalTurnId, outcome, turnRef, settleDiff, anchor);
+        await this.runCanonicalFinalize(threadId, executionId, canonicalTurnId, outcome, turnRef, settleDiff, anchor, ending);
         return;
       }
       await this.runCompatibilityFinalize(threadId, executionId, outcome, turnRef, settleDiff, anchor);
@@ -374,6 +377,7 @@ export class TurnFinalizer {
     turnRef: TurnRef | undefined,
     settleDiff: SettleTurnDiff | undefined,
     anchor: AssistantMaterializationAnchor,
+    ending: TurnEndingCause | undefined,
   ): Promise<void> {
     const canonical = this.requireCanonicalThread(threadId, executionId);
     const projection = await this.createCanonicalProjection(threadId, executionId, outcome, anchor);
@@ -385,6 +389,7 @@ export class TurnFinalizer {
       providerIdentities: this.providerIdentities(threadId, canonical.thread),
       outcome,
       projection: this.projectCanonicalTurn(threadId, executionId, outcome, projection),
+      ...(ending ? { ending } : {}),
     });
 
     const verifiedTerminal = canonical.sink.loadCheckpoint(executionId);

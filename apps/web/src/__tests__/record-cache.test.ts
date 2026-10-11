@@ -456,7 +456,7 @@ describe("selective cache updates in handleAgentEvent", () => {
     cacheRecord(THREAD_ID, makeRecord(THREAD_ID));
     expect(getCachedRecord(THREAD_ID)).toBeDefined();
 
-    useThreadStore.getState().handleAgentEvent({ type: "error", threadId: THREAD_ID, error: "Something broke" } satisfies AgentEvent);
+    useThreadStore.getState().handleAgentEvent({ type: "error", threadId: THREAD_ID, error: "Something broke", failure: { kind: "fatal" } } satisfies AgentEvent);
 
     expect(getCachedRecord(THREAD_ID)).toBeUndefined();
   });

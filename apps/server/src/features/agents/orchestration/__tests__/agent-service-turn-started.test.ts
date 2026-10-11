@@ -247,7 +247,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       expect(isThreadProtected("unrelated-idle-thread")).toBe(false);
       releaseAttachments();
       await sending;
-      await svc.stopSession(thread.id);
+      await svc.stopSession(thread.id, { by: "user" });
       expect(isThreadProtected(thread.id)).toBe(false);
       pressureListener?.(pressure);
       expect(shedMemoryPressure).toHaveBeenCalledTimes(2);

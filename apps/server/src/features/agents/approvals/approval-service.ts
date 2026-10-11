@@ -1,7 +1,7 @@
 import {
   ApprovalRequestBodySchema, ApprovalRequestSchema, ApprovalResponseSchema,
   type ApprovalOutcome, type ApprovalRequest, type ApprovalRequestEnvelope,
-  type ApprovalRespondResult, type ApprovalResponse, type IAgentProvider, type ProviderId,
+  type ApprovalRespondResult, type ApprovalResponse, type IAgentProvider, type ProviderId, type TurnStopCause,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import { inject, injectable } from "tsyringe";
@@ -18,7 +18,7 @@ type ThreadApprovalSource = {
 export interface ApprovalPublication {
   publishApprovalRequest(request: ApprovalRequest): void;
   publishApprovalResolved(payload: Resolution): void;
-  stopSession(threadId: string): Promise<unknown>;
+  stopSession(threadId: string, stop: TurnStopCause): Promise<unknown>;
 }
 
 /** Validates all approval ingress, routes answers, and stops unanswerable turns. */
@@ -152,7 +152,7 @@ export class ApprovalService {
       logger.error("Provider could not deny unreadable approval", { providerId: owner.id, requestId: envelope.requestId });
     }
     try {
-      await this.effects().stopSession(envelope.threadId);
+      await this.effects().stopSession(envelope.threadId, { by: "mcode", reason: "approval_unanswerable" });
     } catch {
       logger.error("Could not stop unanswerable approval turn", { providerId: owner.id, requestId: envelope.requestId, threadId: envelope.threadId });
     } finally {

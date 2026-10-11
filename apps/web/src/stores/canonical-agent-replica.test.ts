@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CanonicalAgentReconnectRecoverySchema,
   reduceAgentEventBatch,
   type CanonicalAgentEventEnvelope,
   type AcceptedCanonicalAgentEventEnvelope,
@@ -67,7 +68,7 @@ function initialEvents(): CanonicalAgentEventEnvelope[] {
         approvalReviewMode: "manual",
         approvalReviewReason: "manual-requested", attemptOf: null,
         providerIdentities: [],
-        startedAt: null, providerStartedAt: null,
+        startedAt: null, providerStartedAt: null, ending: null,
         endedAt: null,
         createdAt: NOW,
         updatedAt: NOW,
@@ -75,6 +76,12 @@ function initialEvents(): CanonicalAgentEventEnvelope[] {
     }),
     envelope("turn-started", 3, 1, { type: "turn.started", startedAt: NOW }),
   ];
+}
+
+function reduceInitialState() {
+  const reduced = reduceAgentEventBatch(createCanonicalAgentReplica().state, initialEvents());
+  if (reduced.outcome !== "applied") throw new Error("initial fixture rejected");
+  return reduced.state;
 }
 
 describe("canonical agent renderer replica", () => {
@@ -101,6 +108,31 @@ describe("canonical agent renderer replica", () => {
     expect(update.outcome).toBe("applied");
     expect(update.replica.revision.conversationRevision).toBe(2);
     expect(update.replica.state.turns[TURN_ID]?.status).toBe("Completed");
+  });
+
+  it("carries an 8,000-character errored ending through a wire snapshot and a live push", () => {
+    const failure = { kind: "fatal", provider: "codex", message: "x".repeat(8_000) } as const;
+    const errored = envelope("turn-errored", 4, 2, { type: "turn.errored", endedAt: NOW, error: failure.message, failure });
+    const reduced = reduceAgentEventBatch(createCanonicalAgentReplica().state, [...initialEvents(), errored]);
+    if (reduced.outcome !== "applied") throw new Error("errored fixture rejected");
+    const wire = CanonicalAgentReconnectRecoverySchema().parse(JSON.parse(JSON.stringify({
+      mode: "snapshot",
+      threadId: THREAD_ID,
+      snapshot: { revision: { conversationRevision: 2, rosterRevision: 0 }, state: reduced.state },
+    })));
+    const installed = applyCanonicalReconnectRecovery(createCanonicalAgentReplica(), wire);
+    const live = applyCanonicalPushEvents(
+      applyCanonicalReconnectRecovery(createCanonicalAgentReplica(), {
+        mode: "snapshot",
+        threadId: THREAD_ID,
+        snapshot: { revision: { conversationRevision: 1, rosterRevision: 0 }, state: reduceInitialState() },
+      }).replica,
+      THREAD_ID,
+      [errored],
+    );
+
+    expect(installed.replica.state.turns[TURN_ID]?.ending).toEqual({ outcome: "errored", failure });
+    expect(live.replica.state.turns[TURN_ID]?.ending).toEqual({ outcome: "errored", failure });
   });
 
   it("requests recovery instead of applying a non-contiguous revision", () => {

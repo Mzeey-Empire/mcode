@@ -1750,7 +1750,7 @@ export class ThreadControlService {
   }
 
   private async stopTarget(threadId: string): Promise<void> {
-    await this.agentService.stopSession(threadId);
+    await this.agentService.stopSession(threadId, { by: "mcode", reason: "thread_control" });
     (await this.threads.updateStatus(threadId, "interrupted"));
     broadcast("thread.status", { threadId, status: "interrupted" });
   }

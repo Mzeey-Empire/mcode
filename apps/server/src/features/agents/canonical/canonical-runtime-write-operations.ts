@@ -5,6 +5,7 @@ import {
   PreviewAnnotationBundleSchema, ProviderIdentitySchema, SelectedTextCommentsSchema,
   StoredAttachmentSchema, SystemNoticeMetadataSchema, TurnOutcomeSchema,
   MessageSchema, NarrativeEntrySchema, TurnFileEffectSummarySchema,
+  InterruptionCauseSchema, PersistedTurnFailureSchema, TurnStopCauseSchema,
 } from "@mcode/contracts";
 import { databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 
@@ -70,6 +71,8 @@ const fileEvidence = z.object({ threadId: identity, turnId: identity, executionI
 export const CanonicalRuntimeParentFinishSchema = z.object({ threadId: identity, turnId: identity,
   executionId: identity, providerId: identity, providerIdentities: z.array(ProviderIdentitySchema),
   outcome: TurnOutcomeSchema, error: z.string().optional(), deliveryAttempt: z.number().int().positive().optional(),
+  ending: z.object({ stop: TurnStopCauseSchema.optional(), cause: InterruptionCauseSchema.optional(),
+    failure: PersistedTurnFailureSchema.optional() }).strict().optional(),
   selectedTurnDiff: selectedDiff.optional(), fileEvidence: fileEvidence.optional(),
   projection: z.union([z.object({ kind: z.literal("writer-staged"), messageId: identity.optional() }),
     z.object({ message: MessageSchema().nullable(), narrative: z.array(NarrativeEntrySchema()) })]) });
@@ -86,7 +89,7 @@ export const canonicalRuntimeWriteOperations = {
     cursor: z.number().int().nonnegative(), completed: z.boolean(), result: batchedCommit })),
   parentStart: runtimeOperation("canonical.parentStart", CanonicalRuntimeParentStartSchema, CanonicalRuntimeCommitResultSchema),
   interruptLostExecution: runtimeOperation("canonical.interruptLostExecution", z.object({
-    threadId: identity, turnId: identity, executionId: identity, reason: z.string(),
+    threadId: identity, turnId: identity, executionId: identity, reason: z.string(), cause: InterruptionCauseSchema,
     recoveryIncidentId: identity, assignedMessageId: identity.optional(), endedAt: z.string().datetime().optional(),
   }), CanonicalRuntimeCommitResultSchema),
   reopenUnmaterializedTerminalCheckpoint: runtimeOperation("canonical.reopenUnmaterializedTerminalCheckpoint", z.tuple([identity]), z.boolean()),

@@ -2376,7 +2376,7 @@ describe("AgentService narrative persistence", () => {
       { type: AgentEventType.TextDelta, threadId: THREAD_ID, delta: "child reasoning", isFinalResponse: false },
       { type: AgentEventType.ToolUse, threadId: THREAD_ID, toolCallId: "child-boundary-tool", toolName: "Read", toolInput: {} },
       { type: AgentEventType.ToolResult, threadId: THREAD_ID, toolCallId: "child-boundary-tool", output: "child result", isError: false },
-      { type: AgentEventType.Error, threadId: THREAD_ID, error: "child error" },
+      { type: AgentEventType.Error, threadId: THREAD_ID, error: "child error", failure: { kind: "fatal" } },
       { type: AgentEventType.TurnComplete, threadId: THREAD_ID, reason: "completed", costUsd: null, tokensIn: 0, tokensOut: 0 },
     ];
     for (let index = 0; index < events.length; index += 1) {

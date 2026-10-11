@@ -685,7 +685,7 @@ export class CodexEventMapper {
     if (!childThreadId || !parentCollaborationItemId || !nativeTurnId) return [];
     const params = notification.params as { error?: { message?: unknown } };
     const error = typeof params.error?.message === "string" ? params.error.message : "Unknown child error";
-    return this.withChildEvidence([{ type: AgentEventType.Error, threadId: this.threadId, error }], { nativeThreadId: childThreadId, nativeTurnId, parentCollaborationItemId, nativeItemId: "turn-error", itemEventKey: "error", outcome: "errored" });
+    return this.withChildEvidence([{ type: AgentEventType.Error, threadId: this.threadId, error, failure: { kind: "fatal" } }], { nativeThreadId: childThreadId, nativeTurnId, parentCollaborationItemId, nativeItemId: "turn-error", itemEventKey: "error", outcome: "errored" });
   }
 
   private mapChildItemStarted(notification: CodexNotification, context: ChildNotificationContext): CodexMappedEvent[] {
@@ -2058,7 +2058,8 @@ export class CodexEventMapper {
   private mapFailedMainTurn(turn: { error?: { message?: string; codexErrorInfo?: unknown } }): CodexMappedEvent[] {
     const error = turn.error?.message ?? "Codex turn failed";
     logger.error("Codex turn failed", { error, codexErrorInfo: turn.error?.codexErrorInfo });
-    const events = [...this.drainPendingAssistantBoundary(false), ...this.finishActiveApprovalReviews("Review failed"), { type: AgentEventType.Error, threadId: this.threadId, error } as CodexMappedEvent];
+    const errorEvent: CodexMappedEvent = { type: AgentEventType.Error, threadId: this.threadId, error, failure: { kind: "fatal" } };
+    const events = [...this.drainPendingAssistantBoundary(false), ...this.finishActiveApprovalReviews("Review failed"), errorEvent];
     this.completeMainTurnState();
     return events;
   }

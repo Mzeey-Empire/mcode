@@ -686,6 +686,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
         type: AgentEventType.Error,
         threadId: entry.threadId,
         error: errorMessage,
+        failure: { kind: "fatal" },
       });
     }
     this.publishEntryEvent(entry, routing, {

@@ -71,7 +71,7 @@ function turnEvents(executionId: string, terminal?: "completed" | "interrupted")
         approvalReviewMode: "manual",
         approvalReviewReason: "manual-requested", attemptOf: null,
         providerIdentities: [],
-        startedAt: null, providerStartedAt: null,
+        startedAt: null, providerStartedAt: null, ending: null,
         endedAt: null,
         createdAt: NOW,
         updatedAt: NOW,
@@ -398,7 +398,7 @@ describe("canonical runtime reconciliation", () => {
     useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, [
       second("p1", 5, { type: "turn.created", turn: { id: "turn-2", threadId: THREAD_ID, status: "Pending", trigger: { kind: "user" },
         permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested", attemptOf: null, providerIdentities: [],
-        startedAt: null, providerStartedAt: null, endedAt: null, createdAt: NOW, updatedAt: NOW } }),
+        startedAt: null, providerStartedAt: null, ending: null, endedAt: null, createdAt: NOW, updatedAt: NOW } }),
       second("p2", 6, { type: "turn.started", startedAt: NOW }),
     ]);
     expect(readThreadField(THREAD_ID, (r) => [r.runtimePhase, r.turnExecutionId])).toEqual(["running", OTHER_EXECUTION_ID]);
