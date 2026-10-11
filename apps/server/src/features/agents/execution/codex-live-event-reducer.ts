@@ -48,7 +48,7 @@ const UNSUPPORTED_FEATURE_REASON = {
   compactSummary: null,
   modelFallback: null,
   textDelta: null,
-  reasoningDelta: "reasoning is not yet applied to the execution narrative",
+  reasoningDelta: null,
   toolInputDelta: null,
   toolProgress: null,
   contextEstimate: null,
@@ -258,14 +258,27 @@ export class CodexLiveEventReducer {
   }
 
   private applyNarrative(event: AgentEvent, capture?: ProviderRuntimeEvent["planCapture"]): CodexLiveWriterIntent[] | undefined {
+    return this.applyAssistantOutput(event, capture) ?? this.applyNarrativeStructure(event);
+  }
+
+  private applyAssistantOutput(event: AgentEvent, capture?: ProviderRuntimeEvent["planCapture"]): CodexLiveWriterIntent[] | undefined {
+    switch (event.type) {
+      case "textDelta": return this.textDelta(event);
+      case "reasoningDelta":
+        this.narrative.openOrExtendReasoning(event.threadId, event);
+        return [this.recovery()];
+      case "assistantMessageBoundary": return this.boundary(event);
+      case "message": return this.message(event, capture);
+      case "generatedAttachment": return this.attachment(event);
+      default: return undefined;
+    }
+  }
+
+  private applyNarrativeStructure(event: AgentEvent): CodexLiveWriterIntent[] | undefined {
     switch (event.type) {
       case "approvalDecided":
         this.narrative.recordApproval(event);
         return [this.recoveryIntent(this.narrativeDelta.prepareChanges(this.narrative.takeRecoveryChanges(event.threadId)))];
-      case "textDelta": return this.textDelta(event);
-      case "assistantMessageBoundary": return this.boundary(event);
-      case "message": return this.message(event, capture);
-      case "generatedAttachment": return this.attachment(event);
       case "toolUse": return this.toolUse(event);
       case "toolResult": return this.toolResult(event);
       case "hookStarted": return this.hookStarted(event);
@@ -316,6 +329,7 @@ export class CodexLiveEventReducer {
       this.narrative.openOrExtendThought(event.threadId, event.delta, event.textItemId);
       writer.push(this.recovery());
     } else {
+      if (this.narrative.closeOpenReasoning(event.threadId)) writer.push(this.recovery());
       this.assistant.appendStreamingText(event.delta);
       if (event.isFinalResponse === undefined) this.unknownText += event.delta;
       else this.knownFinalText = true;

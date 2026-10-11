@@ -217,6 +217,25 @@ describe("CodexLiveEventReducer", () => {
     expect(repeated.writer).toContainEqual({ kind: "narrative-recovery", items: [], discardedItemIds: [] });
   });
 
+  it("keeps reasoning out of the answer and closes it when final text starts", () => {
+    const reducer = new CodexLiveEventReducer(execution);
+    reduceEvent(reducer, "turnStarted");
+    const opened = reduceEvent(reducer, "reasoningDelta", { delta: "Weighing", reasoningItemId: "rs_1" });
+    expect(opened.writer).toEqual([{ kind: "narrative-recovery", discardedItemIds: [], items: [
+      expect.objectContaining({ kind: "narrationSegment", record: expect.objectContaining({ text: "Weighing", kind: "reasoning", ended_at: null }) }),
+    ] }]);
+    const answer = reduceEvent(reducer, "textDelta", { delta: "Answer", isFinalResponse: true });
+    expect(answer.writer).toContainEqual({ kind: "narrative-recovery", discardedItemIds: [], items: [
+      expect.objectContaining({ record: expect.objectContaining({ text: "Weighing", kind: "reasoning", is_final_response: 0 }) }),
+    ] });
+    const boundary = reduceEvent(reducer, "assistantMessageBoundary", { isFinalResponse: true });
+    expect(boundary.writer.some((intent) => intent.kind === "assistant-text-promote")).toBe(false);
+    reduceEvent(reducer, "message", { content: "Answer", tokens: null });
+    const terminal = reduceEvent(reducer, "turnComplete", { reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 });
+    const narrative = terminal.writer.find((intent) => intent.kind === "terminal-projection")?.narrative;
+    expect(narrative).toMatchObject([{ kind: "narrationSegment", record: { text: "Weighing", kind: "reasoning", is_final_response: 0 } }]);
+  });
+
   it("promotes only the selected closed item when different items have identical text", () => {
     const reducer = new CodexLiveEventReducer(execution);
     const firstId = `assistant-text:${"1".repeat(64)}`;

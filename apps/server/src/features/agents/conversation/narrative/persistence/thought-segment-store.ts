@@ -8,7 +8,7 @@ import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { asc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import type { ThoughtSegmentRecord } from "@mcode/contracts";
+import type { ThoughtSegmentKind, ThoughtSegmentRecord } from "@mcode/contracts";
 import {
   type WriteBatchLimits,
   type WriteBatchResult,
@@ -29,6 +29,8 @@ export interface CreateThoughtSegmentInput {
   sortOrder: number;
   /** Non-zero when this segment is the assistant's final user-facing response. */
   isFinalResponse?: number;
+  /** Defaults to `narration`; provider reasoning is stored as `reasoning`. */
+  kind?: ThoughtSegmentKind;
 }
 
 function rowToRecord(row: ThoughtSegmentRow): ThoughtSegmentRecord {
@@ -40,6 +42,7 @@ function rowToRecord(row: ThoughtSegmentRow): ThoughtSegmentRecord {
     ended_at: row.endedAt,
     sort_order: row.sortOrder,
     is_final_response: row.isFinalResponse,
+    kind: row.kind,
   };
 }
 
@@ -55,6 +58,7 @@ export class ThoughtSegmentStore {
   create(input: CreateThoughtSegmentInput): ThoughtSegmentRecord {
     const id = input.id ?? NodeCrypto.randomUUID();
     const isFinalResponse = input.isFinalResponse ?? 0;
+    const kind = input.kind ?? "narration";
     this.orm
       .insert(thoughtSegments)
       .values({
@@ -65,6 +69,7 @@ export class ThoughtSegmentStore {
         endedAt: input.endedAt,
         sortOrder: input.sortOrder,
         isFinalResponse,
+        kind,
       })
       .onConflictDoNothing()
       .run();
@@ -76,6 +81,7 @@ export class ThoughtSegmentStore {
       ended_at: input.endedAt,
       sort_order: input.sortOrder,
       is_final_response: isFinalResponse,
+      kind,
     };
   }
 
@@ -92,6 +98,7 @@ export class ThoughtSegmentStore {
           endedAt: item.endedAt,
           sortOrder: item.sortOrder,
           isFinalResponse: item.isFinalResponse ?? 0,
+          kind: item.kind ?? "narration",
         };
         const write = tx.insert(thoughtSegments).values({ id, ...rest });
         if (replaceExisting) write.onConflictDoUpdate({ target: thoughtSegments.id, set: rest }).run();

@@ -554,6 +554,13 @@
       "when": 1791675768256,
       "tag": "0077_empty_iron_fist",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "6",
+      "when": 1791683996487,
+      "tag": "0078_glossy_ironclad",
+      "breakpoints": true
     }
   ]
 }

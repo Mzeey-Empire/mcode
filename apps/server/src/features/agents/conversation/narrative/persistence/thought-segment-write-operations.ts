@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ThoughtSegmentRecordSchema } from "@mcode/contracts";
+import { ThoughtSegmentKindSchema, ThoughtSegmentRecordSchema } from "@mcode/contracts";
 import { databaseWriteOperation } from "../../../../../runtime/persistence/sqlite/database-write-operation.js";
 import { narrativeWriteBatchLimitsSchema, narrativeWriteBatchResultSchema } from "./narrative-write-batches.js";
 
@@ -7,6 +7,7 @@ import { narrativeWriteBatchLimitsSchema, narrativeWriteBatchResultSchema } from
 export const createThoughtSegmentInputSchema = z.object({
   id: z.string().optional(), messageId: z.string(), text: z.string(), startedAt: z.string(), endedAt: z.string().nullable(),
   sortOrder: z.number().int(), isFinalResponse: z.number().int().optional(),
+  kind: ThoughtSegmentKindSchema().optional(),
 }).strict();
 
 /** Thought mutations admitted to the shared database owner. */

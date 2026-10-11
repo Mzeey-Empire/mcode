@@ -9,7 +9,7 @@ import type {
 const TURN_SCOPED_EVENT_TYPES = new Set<AgentEventType>([
   "turnStarted", "message", "generatedAttachment", "toolUse", "toolResult",
   "turnComplete", "error", "ended", "compacting", "compactSummary",
-  "modelFallback", "textDelta", "toolInputDelta", "toolProgress", "contextEstimate",
+  "modelFallback", "textDelta", "reasoningDelta", "toolInputDelta", "toolProgress", "contextEstimate",
   "assistantMessageBoundary",
 ]);
 

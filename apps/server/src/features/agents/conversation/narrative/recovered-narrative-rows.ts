@@ -107,6 +107,7 @@ private recoveredThought(
       endedAt: item.record.ended_at,
       sortOrder: item.record.sort_order,
       ...(item.record.is_final_response ? { isFinalResponse: item.record.is_final_response } : {}),
+      ...(item.record.kind ? { kind: item.record.kind } : {}),
     };
   }
 
