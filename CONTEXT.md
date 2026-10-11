@@ -908,6 +908,14 @@ survive the command's exit and subsequent runs. Unlike typing the command into
 the shell, the script is not in shell history, and its working-folder and
 environment changes do not carry into the shell that follows.
 
+### Cleanup action
+A Project Action marked **Run on cleanup**. Before Mcode removes a Thread's
+worktree, it runs each cleanup action from that worktree in list order, without
+a terminal, for at most two minutes each. A failing action is logged and does
+not keep the worktree. An In repo action that was never approved is skipped.
+Retained worktrees and Direct threads run no cleanup actions.
+_Avoid_: Teardown script, cleanup hook
+
 ### Terminal scope
 The thread or workspace a shell session runs against. When a thread is
 active, shells open in that thread's working directory (worktree or
