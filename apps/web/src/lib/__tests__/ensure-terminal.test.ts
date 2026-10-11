@@ -29,7 +29,7 @@ describe("createTerminalForScope", () => {
     useWorkspaceStore.setState({ threads: [], workspaces: [{
       id: scopeId, name: "Fixture", path: "/fixture", provider_config: {}, is_git_repo: true,
       created_at: "2026-10-08T12:00:00.000Z", updated_at: "2026-10-08T12:00:00.000Z",
-      pinned: false, last_opened_at: null, sort_order: 0, deleted_at: null,
+      pinned: false, last_opened_at: null, sort_order: 0, deleted_at: null, icon_path: null,
     }] });
     useDiffStore.getState().showRightPanel(scopeId);
     terminalCreate.mockImplementation(async () => {

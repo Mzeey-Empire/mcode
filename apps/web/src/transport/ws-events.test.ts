@@ -26,6 +26,7 @@ import { useThreadStartupStore } from "@/features/thread-startup";
 import { buildVolatileItems } from "@/features/conversation/messages/virtual-items";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 import { createMockWorkspace } from "@/__tests__/mocks/transport";
+import { useProjectIconStore } from "@/features/projects/icons/projectIconStore";
 
 describe("workspace deletion Browser profiles", () => {
   const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -55,6 +56,32 @@ describe("workspace deletion Browser profiles", () => {
     pushEmitter.emit("workspace.deleted", { workspaceId });
     expect(useWorkspaceStore.getState().workspaces).toEqual([]);
     expect(remove).not.toHaveBeenCalled();
+  });
+});
+
+describe("workspace.iconChanged", () => {
+  beforeEach(() => {
+    useProjectIconStore.setState({ iconsByWorkspaceId: {} });
+    startPushListeners();
+  });
+  afterEach(() => stopPushListeners());
+
+  it("replaces the cached icon when any client chooses a new one", () => {
+    const icon = {
+      workspaceId: "ws-1",
+      source: "chosen",
+      chosenMissing: false,
+      path: "brand.svg",
+      version: "0123456789abcdef",
+      url: "/workspace-images/ws-1?path=brand.svg&use=icon&v=0123456789abcdef",
+    } as const;
+    pushEmitter.emit("workspace.iconChanged", { workspaceId: "ws-1", icon });
+    expect(useProjectIconStore.getState().iconsByWorkspaceId).toEqual({ "ws-1": icon });
+  });
+
+  it("ignores a payload that does not match the channel schema", () => {
+    pushEmitter.emit("workspace.iconChanged", { workspaceId: "ws-1", icon: { workspaceId: "ws-1", source: "remote" } });
+    expect(useProjectIconStore.getState().iconsByWorkspaceId).toEqual({});
   });
 });
 

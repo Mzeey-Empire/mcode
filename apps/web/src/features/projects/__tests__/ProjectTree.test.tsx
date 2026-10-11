@@ -560,8 +560,9 @@ describe("ProjectTree thread interactions", () => {
     });
     expect(viewSwitch).toHaveAttribute("aria-pressed", "false");
     expect(viewSwitch).toHaveAttribute("data-view", "active");
-    expect(viewSwitch.querySelector(".lucide-folder-open")).not.toBeNull();
+    expect(within(viewSwitch).getByTestId("project-monogram")).toHaveTextContent("T");
     expect(viewSwitch.querySelector(".lucide-folder-check")).not.toBeNull();
+    expect(viewSwitch.querySelector(".lucide-folder-open")).toBeNull();
     viewSwitch.focus();
     expect(viewSwitch).toHaveFocus();
     fireEvent.click(viewSwitch);
@@ -576,8 +577,9 @@ describe("ProjectTree thread interactions", () => {
       name: "View 0 active threads for Test Project",
     });
     expect(activeViewSwitch).toBeVisible();
-    expect(activeViewSwitch.querySelector(".lucide-folder-check")).not.toBeNull();
+    expect(within(activeViewSwitch).getByTestId("project-monogram")).toHaveTextContent("T");
     expect(activeViewSwitch.querySelector(".lucide-folder-open")).not.toBeNull();
+    expect(activeViewSwitch.querySelector(".lucide-folder-check")).toBeNull();
   });
 
   it("shows one lifecycle set at a time and remembers the Project view across remounts", () => {
