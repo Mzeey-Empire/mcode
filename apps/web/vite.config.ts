@@ -132,7 +132,14 @@ export default defineConfig({
     pool: "threads",
     minWorkers: 1,
     maxWorkers: 4,
-    exclude: ["e2e/**", "node_modules/**", "../../.dev/**"],
+    // Wall-clock budgets only hold on a quiet machine, so the default parallel
+    // run skips them and `perf:pull-requests` runs them alone.
+    exclude: [
+      "e2e/**",
+      "node_modules/**",
+      "../../.dev/**",
+      ...(process.env.MCODE_PERF_GATE === "1" ? [] : ["**/*.perf.test.ts"]),
+    ],
     env: {
       NODE_ENV: "test",
     },
