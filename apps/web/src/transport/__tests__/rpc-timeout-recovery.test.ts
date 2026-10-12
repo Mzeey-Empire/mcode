@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { createMockApproval } from "@/__tests__/mocks/transport";
+import { useApprovalStore } from "@/stores/approvalStore";
 import * as transportRegistry from "@/transport";
 import {
   createWsTransport,
@@ -167,6 +169,27 @@ describe("interactive RPC timeout recovery", () => {
     await vi.waitFor(() => expect(useTerminalStore.getState().ptyToThread).toEqual({ second: "thread" }));
     expect(useTerminalStore.getState().terminals.thread.map(({ id, state, exitCode }) => [id, state, exitCode])).toEqual([["second", "exited", 2]]);
     expect(useTerminalStore.getState().terminals.workspace).toBeUndefined();
+  });
+
+  it("hydrates app-wide pending approvals on the first connection and after reconnect", async () => {
+    useApprovalStore.setState({ approvals: [] });
+    const pendingStates = () => useApprovalStore.getState().approvals
+      .map((item) => [item.requestId, item.threadId, item.settled]);
+    const initial = latestRequest(socket, "approval.listPending");
+    expect(initial.params).toEqual({});
+    socket.respond(initial, [createMockApproval({ requestId: "req-b", threadId: "thread-b" })]);
+    await vi.waitFor(() => expect(pendingStates()).toEqual([["req-b", "thread-b", false]]));
+
+    socket.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const reconnected = TimeoutSocket.instances[1];
+    if (!reconnected) throw new Error("Expected reconnect socket");
+    reconnected.open();
+    await vi.advanceTimersByTimeAsync(0);
+    const refreshed = latestRequest(reconnected, "approval.listPending");
+    expect(refreshed.params).toEqual({});
+    reconnected.respond(refreshed, [createMockApproval({ requestId: "req-c", threadId: "thread-c" })]);
+    await vi.waitFor(() => expect(pendingStates()).toEqual([["req-c", "thread-c", false]]));
   });
 
   it("checks every five seconds and reconnects after three missed reply checks", async () => {

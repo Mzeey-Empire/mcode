@@ -1215,7 +1215,7 @@ export const WS_METHODS = lazySchema(() => ({
     }),
     result: ApprovalRespondResultSchema(),
   },
-  /** Returns pending permission requests for a thread; used to re-hydrate the frontend after a WebSocket reconnect. */
+  /** Lists pending approvals app-wide, or for one thread; the client hydrates from it on connect and reconnect. */
   "approval.listPending": {
     params: z.object({ threadId: z.string().optional() }),
     result: z.array(ApprovalRequestSchema()).max(500),

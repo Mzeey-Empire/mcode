@@ -1,4 +1,3 @@
-import { useApprovalStore } from "@/stores/approvalStore";
 import { cacheRecord, getCachedRecord } from "./record-cache";
 import {
   getThreadRecord,
@@ -46,36 +45,12 @@ export interface AuxiliaryHydratorDeps {
 }
 
 /**
- * Fan-out hydrator for permissions, tasks, plans, and file-change snapshots.
+ * Fan-out hydrator for tasks, plans, and file-change snapshots. Pending
+ * approvals are app-wide and hydrate on socket connect, not per thread.
  * Owns the freshness TTL gate and diff-before-set discipline.
  */
 export class AuxiliaryHydrator {
-  private readonly permissionSnapshotGenerations = new Map<string, number>();
-  private readonly pendingPermissionHydrations = new Map<string, number>();
-  private readonly permissionGenerationDisposals = new Set<string>();
-
   constructor(private readonly deps: AuxiliaryHydratorDeps) {}
-
-  /** Invalidate pending permission snapshots for one thread instance. */
-  invalidatePermissions(threadId: string): void {
-    this.permissionSnapshotGenerations.set(
-      threadId,
-      (this.permissionSnapshotGenerations.get(threadId) ?? 0) + 1,
-    );
-  }
-
-  /**
-   * Release generation state after thread deletion without allowing an in-flight
-   * permission snapshot to commit into a newly-created thread with the same ID.
-   */
-  forgetThread(threadId: string): void {
-    this.invalidatePermissions(threadId);
-    if ((this.pendingPermissionHydrations.get(threadId) ?? 0) === 0) {
-      this.permissionSnapshotGenerations.delete(threadId);
-      return;
-    }
-    this.permissionGenerationDisposals.add(threadId);
-  }
 
   /**
    * Run the auxiliary fanout for a thread when the TTL gate allows (or force is set).
@@ -93,7 +68,6 @@ export class AuxiliaryHydrator {
       records: patchThreadRecord(s.records, threadId, { lastHydratedAt: Date.now() }),
     }));
 
-    this.hydratePermissions(threadId);
     this.hydrateTasks(threadId);
     this.hydratePlans(threadId);
     if (!opts.skipFileChangeSnapshots) {
@@ -107,23 +81,6 @@ export class AuxiliaryHydrator {
 
   private transport(): ThreadHydratorTransport {
     return this.deps.getTransport();
-  }
-
-  private hydratePermissions(threadId: string): void {
-    const revision = useApprovalStore.getState().revision;
-    const generation = this.permissionSnapshotGenerations.get(threadId) ?? 0;
-    this.pendingPermissionHydrations.set(threadId, (this.pendingPermissionHydrations.get(threadId) ?? 0) + 1);
-    void this.transport().listPendingApprovals(threadId).then((pending) => {
-      if ((this.permissionSnapshotGenerations.get(threadId) ?? 0) !== generation) return;
-      useApprovalStore.getState().replaceThread(threadId, pending, revision);
-    }).catch((error: unknown) => {
-      console.debug("[approvalHydration] Failed to load pending approvals:", error);
-    }).finally(() => {
-      const remaining = (this.pendingPermissionHydrations.get(threadId) ?? 1) - 1;
-      if (remaining > 0) this.pendingPermissionHydrations.set(threadId, remaining);
-      else this.pendingPermissionHydrations.delete(threadId);
-      if (this.permissionGenerationDisposals.delete(threadId)) this.permissionSnapshotGenerations.delete(threadId);
-    });
   }
 
   private hydrateTasks(threadId: string): void {
