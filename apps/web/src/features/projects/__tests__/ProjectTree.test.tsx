@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { render, screen, act, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import type { ThreadAttention, ThreadWaitingKind, TurnOutcome, WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
+import type { ThreadAttention, ThreadStartup, ThreadWaitingKind, TurnOutcome } from "@mcode/contracts";
 import type { Thread } from "@/transport/types";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { pushEmitter } from "@/transport/ws-transport";
@@ -134,11 +134,36 @@ vi.mock("@/stores/threadStore", async (importActual) => {
   };
 });
 
-const automaticSetupTransport = vi.hoisted(() => ({ getAutomaticSetup: vi.fn() }));
+const startupTransport = vi.hoisted(() => ({ listThreadStartups: vi.fn(), getThreadStartup: vi.fn() }));
 
 vi.mock("@/transport", () => ({
-  getTransport: () => automaticSetupTransport,
+  getTransport: () => startupTransport,
 }));
+
+function setupStartup(threadId: string, setup: ThreadStartup["steps"][number]["state"], block?: ThreadStartup["block"]): ThreadStartup {
+  return {
+    startupId: `startup-${threadId}`,
+    workspaceId: "ws-1",
+    threadId,
+    kind: "managed-worktree",
+    state: setup === "running" ? "running" : "blocked",
+    phase: "setup",
+    steps: [
+      { phase: "thread", state: "completed" },
+      { phase: "worktree", state: "completed" },
+      { phase: "setup", state: setup },
+      { phase: "agent", state: "pending" },
+    ],
+    transcript: [],
+    cancellation: "none",
+    revision: setup === "running" ? 1 : 2,
+    createdAt: "",
+    updatedAt: "",
+    ...(block ? { block } : {}),
+  };
+}
+
+const SETUP_FAILED_BLOCK = { code: "SETUP_FAILED", message: "Setup failed", actions: ["retry", "continue"] } satisfies ThreadStartup["block"];
 
 // The virtual viewport requires a real scrollable element with measured sizes
 // (ResizeObserver, clientHeight). In jsdom none of that works, so we replace it
@@ -224,7 +249,8 @@ import { useUiStore } from "@/stores/uiStore";
 import { prefetchOnPointerDown } from "@/features/conversation";
 import { ProjectTree } from "../ProjectTree";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
-import { useProjectAutomaticSetupStore } from "@/features/projects/environment";
+import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
+import { useConnectionStore } from "@/stores/connectionStore";
 
 /** Build a minimal Thread fixture. */
 type TestWorkspaceThread = Thread & { clientPreparing?: boolean };
@@ -1503,16 +1529,13 @@ describe("ProjectTree action-required indicator", () => {
     threadStoreOverrides.runningThreadIds = undefined;
     threadStoreOverrides.pendingStopCounts = undefined;
     threadStoreOverrides.runtimeByThread = undefined;
-    automaticSetupTransport.getAutomaticSetup.mockReset();
-    automaticSetupTransport.getAutomaticSetup.mockResolvedValue({
-      gate: "not-required",
-      attempt: null,
-      queuedTurns: [],
-    } satisfies WorkspaceEnvironmentAutomaticSetupSnapshot);
+    startupTransport.listThreadStartups.mockReset();
+    startupTransport.listThreadStartups.mockResolvedValue({ records: [] });
     currentThread = makeThread({ id: "thread-pending", status: "active" });
     currentChecks = {};
     currentPendingStartup = {};
-    useProjectAutomaticSetupStore.setState({ snapshotsByThread: {}, updateEpochByThread: {}, refreshFailedByThread: {} });
+    useThreadStartupStore.setState({ recordsByStartupId: {}, startupIdByThreadId: {}, dismissedStartupIds: new Set() });
+    useConnectionStore.setState({ status: "connected" });
     installWorkspaceMock();
     // Pre-expand the workspace so its threads render.
     window.localStorage.setItem(
@@ -1610,13 +1633,9 @@ describe("ProjectTree action-required indicator", () => {
     expect(screen.getByRole("button", { name: "Complete My Thread" })).toBeDisabled();
   });
 
-  it("shows a running blocking setup as running", async () => {
+  it("shows a running setup as running", async () => {
     currentThread = makeThread({ id: "thread-pending", mode: "worktree", worktree_managed: true });
-    automaticSetupTransport.getAutomaticSetup.mockResolvedValue({
-      gate: "blocked",
-      attempt: { id: "attempt-1", state: "running", reason: null, snapshot: null, outcome: null, createdAt: "", startedAt: "", finishedAt: null, exitCode: null, output: "installing", outputTruncated: false },
-      queuedTurns: [],
-    } satisfies WorkspaceEnvironmentAutomaticSetupSnapshot);
+    startupTransport.listThreadStartups.mockResolvedValue({ records: [setupStartup("thread-pending", "running")] });
     installWorkspaceMock();
 
     render(<ProjectTree />);
@@ -1624,13 +1643,9 @@ describe("ProjectTree action-required indicator", () => {
     expect(await screen.findByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
   });
 
-  it("shows Setup failed for a failed blocking setup", async () => {
+  it("shows Setup failed for a startup stopped on setup, loaded when the sidebar connects", async () => {
     currentThread = makeThread({ id: "thread-pending", mode: "worktree", worktree_managed: true });
-    automaticSetupTransport.getAutomaticSetup.mockResolvedValue({
-      gate: "blocked",
-      attempt: { id: "attempt-1", state: "failed", reason: "setup_failed", snapshot: null, outcome: "command_failure", createdAt: "", startedAt: "", finishedAt: "", exitCode: 1, output: "failed", outputTruncated: false },
-      queuedTurns: [],
-    } satisfies WorkspaceEnvironmentAutomaticSetupSnapshot);
+    startupTransport.listThreadStartups.mockResolvedValue({ records: [setupStartup("thread-pending", "failed", SETUP_FAILED_BLOCK)] });
     installWorkspaceMock();
 
     render(<ProjectTree />);
@@ -1798,34 +1813,27 @@ describe("ProjectTree action-required indicator", () => {
       expect(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Running" })).toBeVisible();
     });
 
-    it("rolls up a failed blocking setup cached by an earlier mount", () => {
+    it("rolls up a startup stopped on setup in a collapsed project", async () => {
       currentThread = makeThread({ id: "thread-pending", mode: "worktree", worktree_managed: true });
+      startupTransport.listThreadStartups.mockResolvedValue({ records: [setupStartup("thread-pending", "failed", SETUP_FAILED_BLOCK)] });
       installWorkspaceMock();
-      useProjectAutomaticSetupStore.getState().applySnapshot("thread-pending", {
-        gate: "blocked",
-        attempt: { id: "attempt-1", state: "failed", reason: "setup_failed", snapshot: null, outcome: "command_failure", createdAt: "", startedAt: "", finishedAt: "", exitCode: 1, output: "failed", outputTruncated: false },
-        queuedTurns: [],
-      });
       render(<ProjectTree />);
 
-      expect(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
+      expect(await within(screen.getByTestId("project-row-ws-1")).findByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
     });
 
     it("keeps a setup that settles after its project collapses current", async () => {
       window.localStorage.setItem("mcode-expanded-projects", JSON.stringify({ "ws-1": true }));
       currentThread = makeThread({ id: "thread-pending", mode: "worktree", worktree_managed: true });
+      startupTransport.listThreadStartups.mockResolvedValue({ records: [setupStartup("thread-pending", "running")] });
       installWorkspaceMock();
-      const setupAttempt = { id: "attempt-1", reason: null, snapshot: null, createdAt: "", startedAt: "", outputTruncated: false } as const;
-      automaticSetupTransport.getAutomaticSetup
-        .mockResolvedValueOnce({ gate: "blocked", attempt: { ...setupAttempt, state: "running", outcome: null, finishedAt: null, exitCode: null, output: "installing" }, queuedTurns: [] })
-        .mockResolvedValue({ gate: "blocked", attempt: { ...setupAttempt, state: "failed", reason: "setup_failed", outcome: "command_failure", finishedAt: "", exitCode: 1, output: "failed" }, queuedTurns: [] });
       render(<ProjectTree />);
       expect(await within(screen.getByTestId("thread-status-lane")).findByRole("img", { name: "Running" })).toBeVisible();
 
       fireEvent.click(screen.getByRole("button", { name: "Toggle threads for Test" }));
+      act(() => useThreadStartupStore.getState().apply(setupStartup("thread-pending", "failed", SETUP_FAILED_BLOCK)));
 
-      const projectRow = screen.getByTestId("project-row-ws-1");
-      expect(await within(projectRow).findByRole("img", { name: "Setup failed" }, { timeout: 3_000 })).toHaveAttribute("data-status-mark", "attention");
+      expect(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
     });
 
     it("leaves the mark to the rows once expanded", () => {

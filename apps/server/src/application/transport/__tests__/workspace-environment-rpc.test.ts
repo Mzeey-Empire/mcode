@@ -323,7 +323,7 @@ describe("workspace environment RPC", () => {
     }), deps);
     expect(continued.error).toMatchObject({
       code: "WORKSPACE_ENVIRONMENT_SETUP_UNAVAILABLE",
-      message: "Automatic Setup can continue only after Setup failed or was interrupted",
+      message: "Automatic Setup can continue only after Setup failed, was interrupted, or is awaiting approval",
     });
     expect(continued.result).toBeUndefined();
     expect(workspaceEnvironmentService.getAutomaticSetup({ threadId: "thread-1" })).toEqual({

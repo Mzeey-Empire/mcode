@@ -1497,6 +1497,63 @@ describe("Workspace Behavior", () => {
         .toEqual({ phase: "running", turnExecutionId: executionId });
     });
 
+    it("adopts the durable thread a cancelled startup made in place of its failed placeholder", async () => {
+      const ws = createMockWorkspace({ id: "ws-keep-cancelled" });
+      const durable = createMockThread({ id: "durable-keep-cancelled", workspace_id: ws.id });
+      (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("Thread startup was cancelled"));
+      useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id });
+
+      await expect(useWorkspaceStore.getState().createAndSendMessage("Hello", "claude-opus-5-5")).rejects.toThrow("Thread startup was cancelled");
+      const placeholderId = useWorkspaceStore.getState().activeThreadId!;
+      expect(useWorkspaceStore.getState().threads.find((thread) => thread.id === placeholderId)?.clientError).toBe("Error: Thread startup was cancelled");
+      (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        startupId: placeholderId,
+        workspaceId: ws.id,
+        kind: "direct",
+        state: "cancelled",
+        phase: "agent",
+        steps: [{ phase: "thread", state: "completed" }, { phase: "agent", state: "cancelled" }],
+        transcript: [],
+        cancellation: "requested",
+        revision: 2,
+        threadId: durable.id,
+        createdAt: "2026-10-11T12:00:00.000Z",
+        updatedAt: "2026-10-11T12:00:00.000Z",
+      });
+      (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
+      (mockTransport.listRunning as ReturnType<typeof vi.fn>).mockResolvedValueOnce([]);
+
+      await expect(useWorkspaceStore.getState().adoptPreparingThread(placeholderId)).resolves.toMatchObject({ id: durable.id });
+
+      expect(useWorkspaceStore.getState().activeThreadId).toBe(durable.id);
+      expect(useWorkspaceStore.getState().threads.map((thread) => thread.id)).toEqual([durable.id]);
+    });
+
+    it("refuses to adopt a placeholder whose startup made no thread", async () => {
+      const ws = createMockWorkspace({ id: "ws-keep-unbound" });
+      (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("Thread startup was cancelled"));
+      useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id });
+
+      await expect(useWorkspaceStore.getState().createAndSendMessage("Hello", "claude-opus-5-5")).rejects.toThrow();
+      const placeholderId = useWorkspaceStore.getState().activeThreadId!;
+      (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        startupId: placeholderId,
+        workspaceId: ws.id,
+        kind: "direct",
+        state: "cancelled",
+        phase: "thread",
+        steps: [{ phase: "thread", state: "cancelled" }, { phase: "agent", state: "pending" }],
+        transcript: [],
+        cancellation: "requested",
+        revision: 2,
+        createdAt: "2026-10-11T12:00:00.000Z",
+        updatedAt: "2026-10-11T12:00:00.000Z",
+      });
+
+      await expect(useWorkspaceStore.getState().adoptPreparingThread(placeholderId)).rejects.toThrow("The server has no thread for this startup yet");
+      expect(useWorkspaceStore.getState().threads.map((thread) => thread.id)).toEqual([placeholderId]);
+    });
+
     it("uses a binding push when an in-flight lookup returns an older unbound startup", async () => {
       const ws = createMockWorkspace({ id: "ws-late-binding-push" });
       const durable = createMockThread({ id: "durable-late-binding", workspace_id: ws.id });

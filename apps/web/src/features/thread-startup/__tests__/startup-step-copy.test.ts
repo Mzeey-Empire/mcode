@@ -4,6 +4,7 @@ import {
   formatStartupDuration,
   placeholderTrailRows,
   setupCommandLine,
+  startupDecision,
   startupTrailRows,
   startupTrailSummary,
 } from "../startup-step-copy";
@@ -57,11 +58,19 @@ describe("startupTrailRows", () => {
     expect(setup).toMatchObject({ tone: "failed", label: "Setup failed", meta: ["exit 1 · 0:14"] });
   });
 
-  it("reads a setup step the server blocked on a failed command as failed, with its exit code and open output", () => {
+  it("reads a setup step the server blocked on a failed command as failed, with its exit code", () => {
     const [setup] = startupTrailRows(managed([
       { phase: "setup", state: "blocked", startedAt: at(0), endedAt: at(14), detail: { phase: "setup", exitCode: 1 } },
     ]), { now: 0, setupCommand: "bun install" });
-    expect(setup).toEqual({ phase: "setup", tone: "failed", label: "Setup failed", meta: ["exit 1 · 0:14"], title: undefined, expandable: true });
+    expect(setup).toEqual({ phase: "setup", tone: "failed", label: "Setup failed", meta: ["exit 1 · 0:14"], title: undefined, expandable: false });
+  });
+
+  it("reads a setup step waiting on approval as a quiet decision row without meta", () => {
+    const [setup] = startupTrailRows({
+      ...managed([{ phase: "setup", state: "blocked", startedAt: at(0) }]),
+      block: { code: "SETUP_APPROVAL_REQUIRED", message: "Setup needs approval", actions: ["retry", "continue"] },
+    }, { now: 0, setupCommand: "bun install" });
+    expect(setup).toEqual({ phase: "setup", tone: "approval", label: "Setup needs approval", meta: [], expandable: false });
   });
 
   it("labels blocked, interrupted, cancelled and skipped steps", () => {
@@ -138,5 +147,36 @@ describe("startupTrailSummary", () => {
       steps: [{ phase: "setup", state: "skipped" }],
     }, "bun install");
     expect(summary).toEqual({ duration: "0:05", parts: [] });
+  });
+});
+
+describe("startupDecision", () => {
+  const record = (overrides: Partial<ThreadStartup>): ThreadStartup => ({
+    startupId: "startup-1",
+    workspaceId: "workspace-1",
+    kind: "managed-worktree",
+    state: "blocked",
+    phase: "setup",
+    steps: [],
+    transcript: [],
+    cancellation: "none",
+    revision: 1,
+    createdAt: T0,
+    updatedAt: T0,
+    ...overrides,
+  });
+
+  it.each([
+    ["a live startup", record({ state: "running" }), null],
+    ["a completed startup", record({ state: "completed", phase: "agent" }), null],
+    ["setup waiting on approval", record({ block: { code: "SETUP_APPROVAL_REQUIRED", message: "", actions: ["retry", "continue"] } }), "setup-approval"],
+    ["setup that failed", record({ block: { code: "SETUP_FAILED", message: "", actions: ["retry", "continue"] } }), "setup-failed"],
+    ["setup a restart interrupted", record({ state: "interrupted" }), "setup-failed"],
+    ["a failed origin fetch", record({ phase: "fetch", block: { code: "start_from_origin_failed", message: "", actions: ["retry", "continue"] } }), "fetch-failed"],
+    ["a worktree that failed to create", record({ state: "failed", phase: "worktree" }), "creation-failed"],
+    ["an agent that failed to start", record({ state: "failed", phase: "agent" }), "agent-failed"],
+    ["a cancelled startup", record({ state: "cancelled", phase: "agent" }), "cancelled"],
+  ] as const)("asks %s for %s", (_name, startup, expected) => {
+    expect(startupDecision(startup) ?? null).toBe(expected);
   });
 });
