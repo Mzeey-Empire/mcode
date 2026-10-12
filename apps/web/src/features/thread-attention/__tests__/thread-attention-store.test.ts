@@ -6,7 +6,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { snapshotBuilder } from "@/features/conversation/hydration/snapshot-builder";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { threadAttentionStore } from "../thread-attention-store";
+import { sinceLookedBaseline, threadAttentionStore } from "../thread-attention-store";
 import { startThreadAttentionTracking } from "../thread-attention-tracking";
 
 vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
@@ -165,6 +165,22 @@ describe("on-screen thread acknowledgements", () => {
     renderSettled(10); await vi.advanceTimersByTimeAsync(150);
     expect(threadAttentionStore.getState().visitBaselines).toEqual({ a: 2 });
     expect(threadAttentionStore.getState().byThreadId.a?.seen.sequence).toBe(10);
+  });
+
+  it("gives Since you looked no baseline when the server reports the mark already there", async () => {
+    vi.mocked(mockTransport.acknowledgeSeen).mockResolvedValueOnce({ previous: { sequence: 8, at: BEFORE }, current: { sequence: 8, at: BEFORE } });
+    renderSettled(8); stop = startThreadAttentionTracking();
+    await vi.advanceTimersByTimeAsync(150);
+    expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([["a", 8]]);
+    expect(sinceLookedBaseline(threadAttentionStore.getState(), "a")).toBeNull();
+  });
+
+  it("counts a first-ever acknowledgement as a baseline of 0 for Since you looked", async () => {
+    vi.mocked(mockTransport.acknowledgeSeen).mockResolvedValueOnce({ previous: { sequence: null, at: null }, current: { sequence: 8, at: NOW } });
+    renderSettled(8); stop = startThreadAttentionTracking();
+    await vi.advanceTimersByTimeAsync(150);
+    expect(sinceLookedBaseline(threadAttentionStore.getState(), "a")).toBe(0);
+    expect(sinceLookedBaseline(threadAttentionStore.getState(), "b")).toBeNull();
   });
 
   it.each(["offline", "sequence_ahead"])("keeps an optimistic mark and does not retry %s", async (code) => {

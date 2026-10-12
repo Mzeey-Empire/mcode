@@ -44,6 +44,18 @@ function pauseIfSeenCompleted(attention: ThreadAttention): void {
   }
 }
 
+/**
+ * This visit's Since you looked baseline for a thread: null when the visit has none yet, and a
+ * null seen sequence (nothing seen before) counts as 0 so every settled turn is after it.
+ */
+export function sinceLookedBaseline(
+  state: { readonly visitBaselines: Readonly<Record<string, number | null>> },
+  threadId: string | null,
+): number | null {
+  if (threadId === null || !(threadId in state.visitBaselines)) return null;
+  return state.visitBaselines[threadId] ?? 0;
+}
+
 /** Attention facts, optimistic acknowledgements, and the baseline for the current visit. */
 export const threadAttentionStore = create<ThreadAttentionState>((set, get) => {
   let activeThread: string | null = null;

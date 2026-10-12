@@ -1430,10 +1430,10 @@ export function createWsTransport(
     listSnapshots: (threadId) =>
       rpc<TurnSnapshot[]>("snapshot.listByThread", { threadId }),
     listReviewTurns: (threadId) => rpc<ReviewTurn[]>("turnDiff.listTurns", { threadId }),
-    getCumulativeDiff: (threadId, filePath?, maxLines?) =>
-      rpc<ReviewFileDiffResult>("snapshot.getCumulativeDiff", { threadId, filePath, maxLines }),
-    getCumulativeDiffStats: (threadId) =>
-      rpc("snapshot.getCumulativeDiffStats", { threadId }),
+    getCumulativeDiff: (threadId, filePath?, maxLines?, afterSequence?) =>
+      rpc<ReviewFileDiffResult>("snapshot.getCumulativeDiff", { threadId, filePath, maxLines, afterSequence }),
+    getCumulativeDiffStats: (threadId, afterSequence?) =>
+      rpc("snapshot.getCumulativeDiffStats", { threadId, afterSequence }),
     getGitLog: (workspaceId, branch?, limit?, baseBranch?, threadId?, options?) =>
       rpc<GitCommit[]>("git.log", {
         workspaceId,
