@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createAgentModelState, reduceAgentEventBatch, type CanonicalAgentEventEnvelope, type Message, type TurnSavingStatus } from "@mcode/contracts";
 import { useThreadStore } from "@/stores/threadStore";

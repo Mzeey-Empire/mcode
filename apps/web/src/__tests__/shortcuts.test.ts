@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { initShortcuts, getKeybindings, loadKeybindings } from "@/lib/shortcuts";
 import { registerCommand, clearCommands } from "@/lib/command-registry";

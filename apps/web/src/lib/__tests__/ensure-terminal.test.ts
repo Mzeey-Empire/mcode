@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useToastStore } from "@/stores/toastStore";
 import { useTerminalStore } from "@/features/terminal";

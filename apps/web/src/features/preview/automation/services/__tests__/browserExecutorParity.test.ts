@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import { describe, expect, it, vi } from "vitest";

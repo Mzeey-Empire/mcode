@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { useApprovalStore } from "@/stores/approvalStore";
 import { createMockApproval } from "./mocks/transport";
 import type { AgentEvent } from "@mcode/contracts";

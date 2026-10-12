@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import {
   resetThreadStoreForTests,
   getTestThreadError,
@@ -404,20 +405,21 @@ describe("Workspace Behavior", () => {
 
     useWorkspaceStore.setState({ workspaces: [ws1, ws2] });
 
-    // Make listThreads slow for ws-1 and fast for ws-2
+    // ws-1's listThreads settles only after ws-2's has finished.
+    let resolveSlowList!: (threads: typeof threads1) => void;
     (mockTransport.listThreads as ReturnType<typeof vi.fn>)
       .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => setTimeout(() => resolve(threads1), 100)),
+        () => new Promise((resolve) => {
+          resolveSlowList = resolve;
+        }),
       )
       .mockImplementationOnce(() => Promise.resolve(threads2));
 
     // Load threads for both workspaces (simulates expanding both folders)
-    useWorkspaceStore.getState().loadThreads("ws-1");
-    useWorkspaceStore.getState().loadThreads("ws-2");
-
-    // Wait for both to resolve
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    const slowLoad = useWorkspaceStore.getState().loadThreads("ws-1");
+    await useWorkspaceStore.getState().loadThreads("ws-2");
+    resolveSlowList(threads1);
+    await slowLoad;
 
     const state = useWorkspaceStore.getState();
     // Both workspaces' threads should be present (merged, not replaced)

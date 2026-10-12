@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
 import { CanonicalAgentProgressFrameSchema, MessageSchema, createAgentModelState, reduceAgentEventBatch, type CanonicalAgentProgressFrame } from "@mcode/contracts";
 import { useThreadStore } from "@/stores/threadStore";

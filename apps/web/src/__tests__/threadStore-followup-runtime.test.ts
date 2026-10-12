@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TurnRuntimeSnapshot, TurnSavingStatus } from "@mcode/contracts";
 import { createEmptyThreadRecord } from "@/stores/thread-record";

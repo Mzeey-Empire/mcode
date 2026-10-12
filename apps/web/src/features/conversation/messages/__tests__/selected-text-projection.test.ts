@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import { MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS } from "@mcode/contracts";
 import {

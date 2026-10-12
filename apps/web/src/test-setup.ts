@@ -1,4 +1,5 @@
-import "@testing-library/jest-dom/vitest";
+// Type-only so node-environment files skip loading the DOM matchers at runtime.
+import type {} from "@testing-library/jest-dom/vitest";
 
 function createTestStorage(): Storage {
   const values = new Map<string, string>();
@@ -26,6 +27,7 @@ function createTestStorage(): Storage {
 
 // Polyfill window.matchMedia for jsdom (skip in node environment)
 if (typeof window !== "undefined") {
+  await import("@testing-library/jest-dom/vitest");
   // Node 26 exposes a localStorage getter that returns undefined without a
   // persistence flag, which prevents Vitest's jsdom environment from installing storage.
   Object.defineProperty(globalThis, "localStorage", {

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import type { AgentEvent } from "@mcode/contracts";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { describe, it, expect, beforeEach, vi } from "vitest";

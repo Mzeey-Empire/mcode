@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { scanPortRange, AUTH_TOKEN_STORAGE_KEY } from "../transport/scan-port-range";
 
