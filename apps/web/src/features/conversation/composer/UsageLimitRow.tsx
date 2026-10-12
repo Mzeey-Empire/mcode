@@ -75,7 +75,7 @@ function LimitContent({ threadId, state, actions, now }: LimitContentProps) {
           selectedProviderId={thread.provider}
           onSelect={(modelId) => actions.resume(modelId)}
           locked={false}
-          // A resumed turn keeps its provider session, so only the model can change.
+          // A resume continues on the thread's provider, so only the model can change.
           providerLocked
           trigger={(
             <Button variant="ghost" aria-label="Switch model" disabled={actions.pending} className={GHOST_CLASS}>
