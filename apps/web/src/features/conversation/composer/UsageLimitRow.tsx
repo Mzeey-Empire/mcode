@@ -39,7 +39,7 @@ export function UsageLimitRow({ threadId, state }: { threadId: string; state: No
   return (
     <div
       data-testid="usage-limit-row"
-      className="@container -mx-2 -mt-1 rounded-t-[1.2rem] bg-warning/8 px-2 inset-ring inset-ring-warning/18"
+      className="@container -mx-2 -mt-1 last:-mb-1 rounded-t-[1.2rem] bg-warning/8 px-2 inset-ring inset-ring-warning/18"
     >
       <div className="flex h-10 items-center gap-2">
         {state.kind === "limit"
