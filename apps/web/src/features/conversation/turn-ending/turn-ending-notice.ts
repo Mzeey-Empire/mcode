@@ -25,6 +25,8 @@ export type TurnEndAction = "retry" | "sign_in" | "resume";
 /** A quiet one-line ending: no fill, muted title. */
 export interface QuietNotice {
   style: "quiet";
+  /** A stop is the default; a paused ending is one the composer tray can still resume. */
+  icon?: "paused";
   title: string;
   detail?: string;
 }
@@ -57,7 +59,7 @@ export function sameTurnEndNotice(left: TurnEndNoticeView, right: TurnEndNoticeV
 }
 
 function noticeFields(notice: TurnEndNoticeView): ReadonlyArray<string | undefined> {
-  if (notice.style === "quiet") return [notice.style, notice.title, notice.detail];
+  if (notice.style === "quiet") return [notice.style, notice.icon, notice.title, notice.detail];
   return [notice.style, notice.icon, notice.title, notice.detail, notice.details, notice.primary?.action, notice.primary?.label];
 }
 
@@ -114,7 +116,7 @@ const INTERRUPTION_DETAILS: Readonly<Record<Exclude<InterruptionCause, "usage_li
 function interruptedNotice(input: TurnEndingInput): TurnEndNoticeView {
   const cause = input.ending?.outcome === "interrupted" ? input.ending.cause : "unknown";
   // The composer tray owns a usage limit's Resume and Switch model, so the transcript only records the stop.
-  if (cause === "usage_limit") return { style: "quiet", title: "Interrupted", detail: `${input.providerLabel} usage limit` };
+  if (cause === "usage_limit") return { style: "quiet", icon: "paused", title: `Interrupted · ${input.providerLabel} usage limit` };
   const notice: FilledNotice = {
     style: "filled",
     icon: "interrupted",

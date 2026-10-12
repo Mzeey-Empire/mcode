@@ -87,7 +87,7 @@ describe("turnEndingView: interrupted", () => {
     const ending: AgentTurnEnding = { outcome: "interrupted", cause: "usage_limit", usageLimit: { resetsAt: localIso(14, 5), limitType: "five_hour" } };
     expect(turnEndingView(input({ status: "interrupted", isLatestTurn, ending }))).toEqual({
       foldLabel: "Interrupted after 42s",
-      notice: { style: "quiet", title: "Interrupted", detail: "Codex usage limit" },
+      notice: { style: "quiet", icon: "paused", title: "Interrupted · Codex usage limit" },
     });
   });
 
