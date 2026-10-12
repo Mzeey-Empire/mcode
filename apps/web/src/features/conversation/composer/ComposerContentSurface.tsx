@@ -717,6 +717,7 @@ export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
       <ApprovalAnnouncer requests={approvals} />
       {docked && (
         <ApprovalDock
+          key={model.threadId}
           requests={approvals}
           composerContainerRef={model.composerContainerRef}
           isAgentRunning={model.isAgentRunning}

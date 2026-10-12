@@ -3,7 +3,7 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useApprovalStore } from "@/stores/approvalStore";
 import type { McodeTransport } from "@/transport/types";
 import type { ApprovalRequest } from "@mcode/contracts";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,7 +17,12 @@ vi.mock("@/transport", () => ({
   getTransport: () => ({ respondToApproval }),
 }));
 
-function DockHarness({ threadId = "thread-1" }: { readonly threadId?: string }) {
+interface DockHarnessProps {
+  readonly threadId?: string;
+  readonly onStop?: () => void;
+}
+
+function DockHarness({ threadId = "thread-1", onStop }: DockHarnessProps) {
   const composerRef = useRef<HTMLDivElement>(null);
   const requests = useDockApprovals(threadId);
   return (
@@ -28,9 +33,9 @@ function DockHarness({ threadId = "thread-1" }: { readonly threadId?: string }) 
         <ApprovalDock
           requests={requests}
           composerContainerRef={composerRef}
-          isAgentRunning={false}
+          isAgentRunning={onStop !== undefined}
           isStopPending={false}
-          onStop={() => {}}
+          onStop={onStop ?? (() => {})}
           onFocusComposer={() => composerRef.current?.querySelector("textarea")?.focus()}
         />
       )}
@@ -85,6 +90,21 @@ describe("ApprovalDock keys", () => {
     expect(respondToApproval).not.toHaveBeenCalled();
   });
 
+  it("ignores a click until 600ms after the dock appears", async () => {
+    vi.useFakeTimers();
+    addApproval();
+    render(<DockHarness />);
+    const allow = screen.getByRole("button", { name: /Allow once/ });
+
+    await act(() => vi.advanceTimersByTimeAsync(599));
+    fireEvent.click(allow);
+    expect(respondToApproval).not.toHaveBeenCalled();
+
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    fireEvent.click(allow);
+    expect(respondToApproval).toHaveBeenCalledWith("req-1", { choiceId: "allow" });
+  });
+
   it("re-arms the guard when the user was typing", async () => {
     const user = setupUser();
     addApproval();
@@ -109,6 +129,20 @@ describe("ApprovalDock keys", () => {
     await user.keyboard("{ArrowDown}{Enter}");
 
     expect(respondToApproval).toHaveBeenCalledWith("req-1", { choiceId: "deny" });
+  });
+
+  it("lets Enter on the stop button stop the agent instead of answering", async () => {
+    const onStop = vi.fn();
+    const user = setupUser();
+    addApproval();
+    render(<DockHarness onStop={onStop} />);
+    await elapseGuard();
+
+    act(() => screen.getByRole("button", { name: "Stop agent" }).focus());
+    await user.keyboard("{Enter}");
+
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(respondToApproval).not.toHaveBeenCalled();
   });
 
   it("sends each deny row's own choice id", async () => {
@@ -164,7 +198,7 @@ describe("ApprovalDock queue", () => {
     await user.keyboard("1");
 
     expect(screen.getByText("Allowing once…")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Deny/ })).toHaveClass("opacity-45");
+    expect(screen.getByRole("button", { name: /Deny/ })).toHaveAttribute("aria-disabled", "true");
     await user.keyboard("2");
     expect(respondToApproval).toHaveBeenCalledTimes(1);
   });
@@ -182,6 +216,38 @@ describe("ApprovalDock queue", () => {
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(respondToApproval.mock.calls).toEqual([["req-1", { choiceId: "deny" }], ["req-1", { choiceId: "deny" }]]);
     expect(screen.queryByTestId("approval-dock")).not.toBeInTheDocument();
+  });
+
+  it("retries the failed choice, not the focused row, when Enter is pressed on Try again", async () => {
+    respondToApproval.mockResolvedValueOnce({ status: "failed", message: "offline" });
+    const user = setupUser();
+    addApproval();
+    render(<DockHarness />);
+    await elapseGuard();
+    await user.keyboard("2");
+    await screen.findByRole("alert");
+
+    act(() => screen.getByRole("button", { name: "Try again" }).focus());
+    await user.keyboard("{Enter}");
+
+    expect(respondToApproval.mock.calls).toEqual([["req-1", { choiceId: "deny" }], ["req-1", { choiceId: "deny" }]]);
+  });
+
+  it("stays on the shown request when an earlier one is answered elsewhere", async () => {
+    const user = setupUser();
+    for (const [requestId, second] of [["a", 1], ["b", 2], ["c", 3], ["d", 4]] as const) {
+      addApproval({ requestId, requestedAt: `2026-10-10T10:00:0${second}Z`, subject: { kind: "command", command: `echo ${requestId}` } });
+    }
+    render(<DockHarness />);
+    await elapseGuard();
+    await user.keyboard("]");
+    await user.keyboard("1");
+    expect(await screen.findByText("echo c")).toBeInTheDocument();
+
+    act(() => useApprovalStore.getState().resolve("a"));
+
+    expect(screen.getByText("echo c")).toBeInTheDocument();
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
   });
 
   it("forgets a failed answer when a reconnect drops the request", async () => {

@@ -1152,4 +1152,18 @@ describe("provider retry status", () => {
     );
     expect(findIndicator(items)?.status.label).toBe("Retrying after 502 Bad Gateway");
   });
+
+  it("says the thread waits when an integration asks for approval on an idle thread", () => {
+    const items = buildVolatileItems(
+      [], undefined, undefined, undefined, [], [], [], undefined, undefined, undefined,
+      { stopPending: false, compacting: false, waitingFor: "approval" },
+    );
+    expect(findIndicator(items)?.status.label).toBe("Waiting for approval");
+    expect(findIndicator(items)?.isAgentRunning).toBe(true);
+  });
+
+  it("shows no status line on an idle thread with nothing waiting", () => {
+    const items = buildVolatileItems([], undefined, undefined, undefined, [], [], [], undefined, undefined, undefined, { stopPending: false, compacting: false });
+    expect(findIndicator(items)).toBeUndefined();
+  });
 });

@@ -17,7 +17,7 @@ function RowSpinner() {
 }
 
 function rowClass(focused: boolean, submitting: boolean, dimmed: boolean): string {
-  return cn(ROW_CLASS, "outline-none", focused && "bg-hover", dimmed && "opacity-45", submitting || dimmed ? "cursor-default" : "cursor-pointer");
+  return cn(ROW_CLASS, "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-focus", focused && "bg-hover", dimmed && "opacity-45", submitting || dimmed ? "cursor-default" : "cursor-pointer");
 }
 
 /** Props for {@link ApprovalChoiceRow}. */

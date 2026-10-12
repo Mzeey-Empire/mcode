@@ -30,18 +30,20 @@ export function useDockApprovals(threadId: string | undefined): StoredApproval[]
 }
 
 /**
- * Keeps the user on the same request while others arrive. When the shown request
- * leaves, the one that slid into its slot shows next, so deciding advances.
+ * Keeps the user on the same request while others arrive or leave. When the shown
+ * request leaves, the one that slid into its slot shows next, so deciding advances.
  */
 function useActiveRequest(requests: readonly StoredApproval[]) {
-  const [activeId, setActiveId] = useState<string>();
-  const lastIndexRef = useRef(0);
-  const found = requests.findIndex((request) => request.requestId === activeId);
-  const index = found >= 0 ? found : Math.min(lastIndexRef.current, requests.length - 1);
-  lastIndexRef.current = index;
+  const [pagedId, setPagedId] = useState<string>();
+  // The shown request is remembered by id, so an earlier request leaving does not shift the user onto another.
+  const shownRef = useRef<{ requestId?: string; index: number }>({ index: 0 });
+  const indexOf = (requestId: string | undefined) => requests.findIndex((request) => request.requestId === requestId);
+  const index = [indexOf(pagedId), indexOf(shownRef.current.requestId)].find((found) => found >= 0)
+    ?? Math.min(shownRef.current.index, requests.length - 1);
+  shownRef.current = { requestId: requests[index]!.requestId, index };
   const page = (delta: number): string | undefined => {
     const target = requests[index + delta];
-    if (target) setActiveId(target.requestId);
+    if (target) setPagedId(target.requestId);
     return target?.requestId;
   };
   return { active: requests[index]!, index, page };
@@ -53,23 +55,26 @@ function useFocusedRow(requestId: string) {
   return [focus.requestId === requestId ? focus.row : 0, (row: number) => setFocus({ requestId, row })] as const;
 }
 
-type DockKeyAction = { readonly kind: "page" | "move" | "enter" | "digit" | "arm"; readonly value: number };
+type DockKeyAction = { readonly kind: "page" | "move" | "digit" | "arm"; readonly value: number };
 
 const NAMED_KEYS: Readonly<Record<string, DockKeyAction>> = {
   "[": { kind: "page", value: -1 },
   "]": { kind: "page", value: 1 },
   ArrowUp: { kind: "move", value: -1 },
   ArrowDown: { kind: "move", value: 1 },
-  Enter: { kind: "enter", value: 0 },
 };
 
-/** Any other printable key means the user is typing, so it re-arms the misclick guard. */
+/**
+ * Any other printable key means the user is typing, so it re-arms the misclick guard.
+ * Enter and Space stay native: they click whichever button has focus, so a choice row
+ * answers through its guarded click and Try again or Stop do their own job.
+ */
 function dockKeyAction(event: KeyboardEvent): DockKeyAction | undefined {
   if (event.ctrlKey || event.metaKey || event.altKey) return undefined;
   const named = NAMED_KEYS[event.key];
   if (named) return named;
   if (/^[1-9]$/.test(event.key)) return { kind: "digit", value: Number(event.key) - 1 };
-  return event.key.length === 1 ? { kind: "arm", value: 0 } : undefined;
+  return event.key.length === 1 && event.key !== " " ? { kind: "arm", value: 0 } : undefined;
 }
 
 /**
@@ -157,7 +162,6 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
   const runKey: Record<DockKeyAction["kind"], (value: number) => void> = {
     page: goTo,
     move: (delta) => moveFocus(focusedRow + delta),
-    enter: () => chooseRow(focusedRow),
     // A digit pressed too soon counts as typing, so the guard extends rather than the answer landing later.
     digit: (row) => (Date.now() < guardUntilRef.current ? arm() : chooseRow(row)),
     arm,
@@ -188,7 +192,7 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
         <h2 className="min-w-0 text-sm font-medium text-ink">{title}</h2>
         {active.origin.kind === "subagent" && active.providerId && (
           <span className="flex min-w-0 items-center gap-1.5 pl-1">
-            <span className="flex h-5 w-4 shrink-0 items-center justify-center"><ProviderIcon provider={active.providerId} size={12} /></span>
+            <span className="flex h-5 w-4 shrink-0 items-center justify-center"><ProviderIcon provider={active.providerId} size={16} /></span>
             <span className="text-xs text-muted text-fade">{active.origin.label}</span>
           </span>
         )}
@@ -215,7 +219,7 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
       </div>
       {submission?.state === "failed" && (
         <div role="alert" className="flex items-center gap-2 text-sm">
-          <CircleAlert size={14} className="shrink-0 text-error" aria-hidden />
+          <CircleAlert size={14} strokeWidth={1.5} className="shrink-0 text-error" aria-hidden />
           <span className="min-w-0 text-error">Your answer didn&apos;t reach {approvalActorName(active)}.</span>
           <span className="flex-1" />
           <button type="button" className="shrink-0 cursor-pointer font-medium text-ink" onClick={retry}>Try again</button>

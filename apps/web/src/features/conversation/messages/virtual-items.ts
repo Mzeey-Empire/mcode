@@ -602,7 +602,9 @@ interface NarrativeIndicatorInput {
 const NO_HOLDING_SIGNALS: RunHoldingSignals = { stopPending: false, compacting: false };
 
 function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts, answering, holdingSignals }: NarrativeIndicatorInput): ChatVirtualItem | undefined {
-  if (!isAgentRunning && toolCalls.length === 0) return undefined;
+  // An integration can ask for approval on an idle thread; the status line still has to say the thread waits.
+  const live = isAgentRunning || holdingSignals?.waitingFor === "approval";
+  if (!live && toolCalls.length === 0) return undefined;
   const topLevelTools = toolCalls.filter((toolCall) => toolCall.parentToolCallId == null);
   const running = topLevelTools.filter(isTurnWorkRunning);
   const status = deriveRunStatus({
@@ -612,7 +614,7 @@ function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts
     answering,
     summaryHeading: currentActivityHeading(thoughts),
   });
-  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: topLevelTools.length, status, startTime, isAgentRunning };
+  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: topLevelTools.length, status, startTime, isAgentRunning: live };
 }
 
 function permissionRequestItems(permissions: Parameters<typeof buildVolatileItems>[4]): ChatVirtualItem[] {
