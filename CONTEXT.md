@@ -498,7 +498,8 @@ user sees the same final result; only the cost during streaming differs.
 How a turn ended, as one of four mutually-exclusive states:
 **completed** (the agent finished its work normally), **cancelled** (the user,
 or Mcode itself, explicitly stopped the turn), **interrupted** (infrastructure
-or a process disappeared before a terminal outcome), or **errored** (a known
+or a process disappeared before a terminal outcome, or a provider usage limit
+paused work the user can resume once it resets), or **errored** (a known
 terminal provider or turn failure). Users see these as Stopped, Interrupted
 and Failed; a cancelled turn records whether the user or Mcode stopped it.
 
