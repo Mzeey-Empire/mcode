@@ -81,7 +81,7 @@ export const AgentTurnTriggerSchema = z.discriminatedUnion("kind", [
 export type AgentTurnTrigger = z.infer<typeof AgentTurnTriggerSchema>;
 
 /** Why an interrupted turn stopped. "unknown" covers rows written before causes existed. */
-export const InterruptionCauseSchema = z.enum(["app_closed", "provider_exited", "saving_stopped", "unknown"]);
+export const InterruptionCauseSchema = z.enum(["app_closed", "provider_exited", "saving_stopped", "usage_limit", "unknown"]);
 /** Why an interrupted turn stopped. "unknown" covers rows written before causes existed. */
 export type InterruptionCause = z.infer<typeof InterruptionCauseSchema>;
 
@@ -129,10 +129,27 @@ export const TurnStopCauseSchema = z.discriminatedUnion("by", [
 /** Who stopped a cancelled turn. Rows written before stop causes existed read as "user". */
 export type TurnStopCause = z.infer<typeof TurnStopCauseSchema>;
 
-/** Cause of a non-completed ending; null for completed and running turns. */
+/** When a provider usage limit resets and which window it was, as the provider reported them. */
+export const TurnUsageLimitSchema = z
+  .object({
+    resetsAt: CanonicalTimestampSchema.optional(),
+    limitType: z.string().trim().min(1).max(64).optional(),
+  })
+  .strict();
+/** When a provider usage limit resets and which window it was, as the provider reported them. */
+export type TurnUsageLimit = z.infer<typeof TurnUsageLimitSchema>;
+
+/**
+ * Cause of a non-completed ending; null for completed and running turns. `usageLimit` belongs only to the
+ * "usage_limit" cause; writers enforce that pairing because a Zod 3 discriminated union cannot nest a second one.
+ */
 export const AgentTurnEndingSchema = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("cancelled"), stop: TurnStopCauseSchema }).strict(),
-  z.object({ outcome: z.literal("interrupted"), cause: InterruptionCauseSchema }).strict(),
+  z.object({
+    outcome: z.literal("interrupted"),
+    cause: InterruptionCauseSchema,
+    usageLimit: TurnUsageLimitSchema.optional(),
+  }).strict(),
   z.object({ outcome: z.literal("errored"), failure: PersistedTurnFailureSchema }).strict(),
 ]);
 /** Cause of a non-completed ending; null for completed and running turns. */

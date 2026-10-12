@@ -108,7 +108,7 @@ import { AcceptedCodexCollaboration } from "./accepted-codex-collaboration.js";
 import { ConversationDisplayMaterializationStore as ConversationDisplayMaterializer } from "../conversation/migrations/conversation-display-materialization-store.js";
 import { syntheticThreadExecutionId } from "./canonical-thread-execution.js";
 import { notifyCommittedCanonicalEvents } from "./committed-canonical-events.js";
-import { withTurnEnding, type TurnEndingCause } from "./turn-ending.js";
+import { interruptionReason, withTurnEnding, type TurnEndingCause } from "./turn-ending.js";
 
 /** Capacity held back so volatile input cannot consume every semantic batch slot. */
 export const CANONICAL_AGENT_CONTROL_EVENT_RESERVE = 16;
@@ -347,7 +347,7 @@ function parentTerminalPayload(
     case "cancelled":
       return { type: "turn.cancelled", endedAt, reason: error ?? "Turn cancelled" };
     case "interrupted":
-      return { type: "turn.interrupted", endedAt, reason: error ?? "Turn interrupted" };
+      return { type: "turn.interrupted", endedAt, reason: interruptionReason(error) };
     case "errored":
       return { type: "turn.errored", endedAt, error: error ?? "Provider turn failed" };
   }

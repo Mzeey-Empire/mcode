@@ -59,6 +59,7 @@ export {
   SystemStopReasonSchema,
   TurnFailureKindSchema,
   TurnStopCauseSchema,
+  TurnUsageLimitSchema,
 } from "./records.js";
 export type {
   AgentItem,
@@ -79,6 +80,7 @@ export type {
   SystemStopReason,
   TurnFailureKind,
   TurnStopCause,
+  TurnUsageLimit,
 } from "./records.js";
 
 export {

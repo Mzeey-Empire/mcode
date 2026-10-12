@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AgentEventEnvelopeSchema,
+  AgentTurnEndingSchema,
   AgentModelStateSchema,
   AgentThreadSchema,
   CanonicalAgentEventSchema,
@@ -441,6 +442,32 @@ describe("canonical agent model", () => {
 
       expect(legacy.state.turns["turn-1"]?.ending).toEqual({ outcome: "interrupted", cause: "unknown" });
       expect(current.state.turns["turn-1"]?.ending).toEqual({ outcome: "interrupted", cause: "app_closed" });
+    });
+
+    it("keeps the usage limit on an interruption caused by one", () => {
+      const usageLimit = { resetsAt: "2026-08-09T16:00:00.000Z", limitType: "five_hour" };
+
+      const result = endTurn({ type: "turn.interrupted", endedAt: timestamps.updatedAt, reason: "limit", cause: "usage_limit", usageLimit });
+
+      expect(result.state.turns["turn-1"]?.status).toBe("Interrupted");
+      expect(result.state.turns["turn-1"]?.ending).toEqual({ outcome: "interrupted", cause: "usage_limit", usageLimit });
+    });
+
+    it("drops a usage limit attached to another interruption cause", () => {
+      const result = endTurn({
+        type: "turn.interrupted", endedAt: timestamps.updatedAt, reason: "closed", cause: "app_closed",
+        usageLimit: { resetsAt: "2026-08-09T16:00:00.000Z" },
+      });
+
+      expect(result.state.turns["turn-1"]?.ending).toEqual({ outcome: "interrupted", cause: "app_closed" });
+    });
+
+    it("rejects an interrupted ending with unknown usage-limit fields", () => {
+      const parsed = AgentTurnEndingSchema.safeParse({
+        outcome: "interrupted", cause: "usage_limit", usageLimit: { resetsAt: "2026-08-09T16:00:00.000Z", retryAt: "x" },
+      });
+
+      expect(parsed.success).toBe(false);
     });
 
     it("leaves a completed turn without an ending", () => {

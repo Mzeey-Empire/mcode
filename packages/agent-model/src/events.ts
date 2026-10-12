@@ -16,6 +16,7 @@ import {
   InterruptionCauseSchema,
   PersistedTurnFailureSchema,
   TurnStopCauseSchema,
+  TurnUsageLimitSchema,
 } from "./records.js";
 
 const PendingAgentTurnSchema = AgentTurnSchema.refine(
@@ -69,6 +70,8 @@ export const CanonicalAgentEventSchema = z.discriminatedUnion("type", [
       reason: z.string().trim().min(1).max(2_000),
       // Optional only so envelopes written before endings existed still parse.
       cause: InterruptionCauseSchema.optional(),
+      // Only meaningful with cause "usage_limit"; the reducer drops it for any other cause.
+      usageLimit: TurnUsageLimitSchema.optional(),
     })
     .strict(),
   z

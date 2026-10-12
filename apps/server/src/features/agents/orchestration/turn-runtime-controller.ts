@@ -8,7 +8,7 @@
 import * as NodeCrypto from "node:crypto";
 import { injectable, inject, delay } from "tsyringe";
 import { logger } from "@mcode/shared";
-import { AgentEventType, ProviderRuntimeEventSchema, isSessionEvictable, isTurnSteerCapable } from "@mcode/contracts";
+import { AgentEventType, ProviderRuntimeEventSchema, isSessionEvictable, isTurnSteerCapable, providerFailureOutcome } from "@mcode/contracts";
 import type { ClaudeCanonicalEventRouting, ClaudeProviderBoundary, CodexProviderBoundary, CopilotProviderBoundary, ProviderTurnOpening } from "@mcode/providers";
 import { ProviderTurnError } from "@mcode/providers";
 import type {
@@ -46,7 +46,14 @@ import type { WorkerOwnedProviderEventBatch } from "../../providers/composition/
 import { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
 import { SnapshotRefPins } from "../../projects/diffs/snapshots/snapshot-ref-pins.js";
 import type { DataOnlyParentTurnFinishInput } from "../canonical/canonical-parent-turn-write.js";
-import { observedProviderRetries, persistTurnFailure, type ObservedProviderRetries, type TurnEndingCause } from "../canonical/turn-ending.js";
+import {
+  observedProviderRetries,
+  persistTurnFailure,
+  providerFailureTerminal,
+  type ObservedProviderRetries,
+  type ProviderFailureTerminal,
+  type TurnEndingCause,
+} from "../canonical/turn-ending.js";
 import {
   TurnEventPipeline,
   type FinalizeTurnCommand,
@@ -390,9 +397,9 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     return true;
   }
 
-  /** Terminalize a provider failure before its event application finalizes it. */
-  failProviderTurn(event: Extract<AgentEvent, { type: "error" }>): boolean {
-    return this.turnRuntime.terminalize(event.threadId, event.turnExecutionId!, "errored");
+  /** Terminalize a provider failure before its event application finalizes it with the same outcome. */
+  failProviderTurn(event: Extract<AgentEvent, { type: "error" }>, outcome: ProviderFailureTerminal["outcome"]): boolean {
+    return this.turnRuntime.terminalize(event.threadId, event.turnExecutionId!, outcome);
   }
 
   /** Release a lost provider stream or terminalize its reported outcome. */
@@ -1139,23 +1146,24 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       await this.fenceWorkerProvider(provider, execution, deliveryAttempt);
     }
     if (active.terminalCommitted) return this.releaseWorkerTurn(active);
-    const frozen = this.requireWorkerFiles().seal({ ...execution, deliveryAttempt, outcome: "errored" });
-    if (!frozen) throw new Error("Failed worker dispatch lost its file evidence generation");
     const message = error instanceof Error ? error.message : String(error);
-    const failure = persistTurnFailure({ failure: dispatchFailure(error), provider: active.prepared.providerId,
-      message, acceptedAt: Date.now(), ...(active.lastRetries ? { lastRetries: active.lastRetries } : {}) });
+    const { outcome, ending } = providerFailureTerminal(persistTurnFailure({ failure: dispatchFailure(error),
+      provider: active.prepared.providerId, message, acceptedAt: Date.now(),
+      ...(active.lastRetries ? { lastRetries: active.lastRetries } : {}) }));
+    const frozen = this.requireWorkerFiles().seal({ ...execution, deliveryAttempt, outcome });
+    if (!frozen) throw new Error("Failed worker dispatch lost its file evidence generation");
     const result = await this.requireWorkerRuntime().owner.submit(execution, {
-      kind: "finish-from-state", outcome: "errored", frozenFileEvidence: frozen,
+      kind: "finish-from-state", outcome, frozenFileEvidence: frozen,
       input: { ...execution, providerId: active.prepared.providerId,
         providerIdentities: active.prepared.parentStartInput.providerIdentities,
-        outcome: "errored", error: message, ending: { failure },
+        outcome, error: message, ending,
         deliveryAttempt, projection: { kind: "writer-staged" } },
     });
     if (result.kind !== "committed" && result.kind !== "accepted") throw new Error("Failed worker dispatch terminal did not commit");
     this.publishWorkerPersistence(active, result);
     active.terminalCommitted = true;
-    active.terminalOutcome = "errored";
-    this.turnRuntime.terminalize(execution.threadId, execution.executionId, "errored");
+    active.terminalOutcome = outcome;
+    this.turnRuntime.terminalize(execution.threadId, execution.executionId, outcome);
     await this.releaseWorkerTurn(active);
   }
 
@@ -2376,8 +2384,8 @@ function workerProviderEnding(
   interruption: TurnEndingCause,
 ): TurnEndingCause | undefined {
   if (event.type === "error") {
-    return { failure: persistTurnFailure({ failure: event.failure, provider: active.prepared.providerId,
-      message: event.error, acceptedAt: Date.now(), ...(active.lastRetries ? { lastRetries: active.lastRetries } : {}) }) };
+    return providerFailureTerminal(persistTurnFailure({ failure: event.failure, provider: active.prepared.providerId,
+      message: event.error, acceptedAt: Date.now(), ...(active.lastRetries ? { lastRetries: active.lastRetries } : {}) })).ending;
   }
   // A user stop fences provider delivery first, so a provider-reported interruption has no user cause.
   return event.type === "ended" && outcome === "interrupted" ? interruption : undefined;
@@ -2392,7 +2400,7 @@ function unsentTerminalFields(terminal: UnsentWorkerTerminal, providerId: string
 
 function workerTerminalOutcome(event: AgentEvent): TurnOutcome | null {
   if (event.type === "turnComplete") return "completed";
-  if (event.type === "error") return "errored";
+  if (event.type === "error") return providerFailureOutcome(event.failure);
   if (event.type !== "ended" || event.outcome === undefined) return null;
   return event.outcome === "cancelled" ? "interrupted" : event.outcome;
 }

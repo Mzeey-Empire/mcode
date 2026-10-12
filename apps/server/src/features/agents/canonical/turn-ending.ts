@@ -5,17 +5,48 @@ import type {
   PersistedTurnFailure,
   TurnFailure,
   TurnStopCause,
+  TurnUsageLimit,
 } from "@mcode/contracts";
 
 const PERSISTED_FAILURE_MESSAGE_MAX = 8_000;
 const FALLBACK_FAILURE_MESSAGE = "Provider turn failed";
+const INTERRUPTION_REASON_MAX = 2_000;
 
-/** Structured cause a terminal write records with a non-completed outcome. */
-export interface TurnEndingCause {
-  readonly stop?: TurnStopCause;
-  readonly cause?: InterruptionCause;
-  readonly failure?: PersistedTurnFailure;
+/** A provider usage limit that interrupted the turn, with the reset the provider reported. */
+export interface UsageLimitEnding {
+  readonly cause: "usage_limit";
+  readonly usageLimit: TurnUsageLimit;
+  readonly stop?: never;
+  readonly failure?: never;
 }
+
+/** A classified provider failure that errored the turn. */
+export interface FailureEnding {
+  readonly failure: PersistedTurnFailure;
+  readonly stop?: never;
+  readonly cause?: never;
+  readonly usageLimit?: never;
+}
+
+/**
+ * Structured cause a terminal write records with a non-completed outcome. Each member names one cause, so a
+ * usage limit can only be recorded with its "usage_limit" interruption cause.
+ */
+export type TurnEndingCause =
+  | { readonly stop: TurnStopCause; readonly cause?: never; readonly usageLimit?: never; readonly failure?: never }
+  | {
+    readonly cause: Exclude<InterruptionCause, "usage_limit">;
+    readonly stop?: never;
+    readonly usageLimit?: never;
+    readonly failure?: never;
+  }
+  | UsageLimitEnding
+  | FailureEnding;
+
+/** Terminal outcome and ending recorded for a provider Error. */
+export type ProviderFailureTerminal =
+  | { readonly outcome: "interrupted"; readonly ending: UsageLimitEnding }
+  | { readonly outcome: "errored"; readonly ending: FailureEnding };
 
 /** Provider retry progress last reported by an ApiRetry event. */
 export interface ObservedProviderRetries {
@@ -60,8 +91,26 @@ export function persistTurnFailure(input: {
   };
 }
 
-/** Rebuild the adapter classification a persisted failure came from, for a synthesized Error event. */
-export function adapterTurnFailure(failure: PersistedTurnFailure | undefined): TurnFailure {
+/**
+ * A usage limit pauses the turn until the limit resets, so it ends interrupted with the reset kept for Resume;
+ * every other classified failure ends errored with the failure kept for Retry and Details.
+ */
+export function providerFailureTerminal(failure: PersistedTurnFailure): ProviderFailureTerminal {
+  if (failure.kind !== "usage_limit") return { outcome: "errored", ending: { failure } };
+  const usageLimit: TurnUsageLimit = {
+    ...(failure.resetsAt !== undefined ? { resetsAt: failure.resetsAt } : {}),
+    ...(failure.limitType !== undefined ? { limitType: failure.limitType } : {}),
+  };
+  return { outcome: "interrupted", ending: { cause: "usage_limit", usageLimit } };
+}
+
+/** Rebuild the adapter classification an ending came from, for a synthesized Error event. */
+export function adapterTurnFailure(ending: TurnEndingCause | undefined): TurnFailure {
+  if (ending?.cause === "usage_limit") {
+    const { limitType } = ending.usageLimit;
+    return { kind: "usage_limit", ...(limitType !== undefined ? { limitType } : {}) };
+  }
+  const failure = ending?.failure;
   if (!failure) return { kind: "fatal" };
   return {
     kind: failure.kind,
@@ -71,11 +120,12 @@ export function adapterTurnFailure(failure: PersistedTurnFailure | undefined): T
   };
 }
 
-/** Return whether a persisted failure was classified from this adapter failure. */
-export function persistedFromAdapterFailure(
-  persisted: PersistedTurnFailure | undefined,
-  adapter: TurnFailure,
-): boolean {
+/** Return whether an ending was classified from this adapter failure. */
+export function endingFromAdapterFailure(ending: TurnEndingCause | undefined, adapter: TurnFailure): boolean {
+  if (ending?.cause === "usage_limit") {
+    return adapter.kind === "usage_limit" && ending.usageLimit.limitType === adapter.limitType;
+  }
+  const persisted = ending?.failure;
   return persisted !== undefined && persisted.kind === adapter.kind && persisted.status === adapter.status
     && persisted.code === adapter.code && persisted.limitType === adapter.limitType
     && (adapter.retries === undefined
@@ -93,11 +143,22 @@ export function withTurnEnding(
 ): CanonicalAgentEvent {
   switch (payload.type) {
     case "turn.cancelled": return { ...payload, stop: ending?.stop ?? { by: "user" } };
-    case "turn.interrupted": return { ...payload, cause: ending?.cause ?? "unknown" };
+    case "turn.interrupted": return ending?.cause === "usage_limit"
+      ? { ...payload, cause: ending.cause, usageLimit: ending.usageLimit }
+      : { ...payload, cause: ending?.cause ?? "unknown" };
     case "turn.errored": return { ...payload,
       failure: ending?.failure ?? { kind: "fatal", provider: providerId, message: boundedFailureMessage(payload.error) } };
     default: return payload;
   }
+}
+
+/**
+ * Reason text for an interrupted turn. A usage limit carries the provider's own message, which can exceed the
+ * interruption reason bound that failure messages do not share.
+ */
+export function interruptionReason(error: string | undefined): string {
+  const trimmed = error?.trim() ?? "";
+  return trimmed.length === 0 ? "Turn interrupted" : trimmed.slice(0, INTERRUPTION_REASON_MAX);
 }
 
 function boundedFailureMessage(message: string): string {

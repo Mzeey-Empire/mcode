@@ -9,6 +9,7 @@ import {
   PlanQuestionBatchSchema,
   ProviderIdSchema,
   ProviderIdentitySchema,
+  providerFailureOutcome,
   TurnOutcomeSchema,
   type AgentEvent,
   type CanonicalAgentEventEnvelope,
@@ -44,7 +45,7 @@ import { CanonicalCommittedProviderProjector } from "./canonical-committed-provi
 import type { ProviderEventProjection } from "../../providers/composition/provider-event-adapter.js";
 import { CanonicalCodexSystemErrorProjection } from "./canonical-codex-system-error-projection.js";
 import { matchesCodexSystemIntents } from "./codex-system-intents.js";
-import { persistedFromAdapterFailure } from "./turn-ending.js";
+import { endingFromAdapterFailure } from "./turn-ending.js";
 import { CanonicalContextCompactionProjection } from "./canonical-context-compaction-projection.js";
 import { CanonicalParentTurnWrite, type DataOnlyParentLiveMessageInput, type DataOnlyParentTurnFinishInput } from "./canonical-parent-turn-write.js";
 import { TaskStore as TaskRepo } from "../orchestration/persistence/task-store.js";
@@ -1794,8 +1795,8 @@ function errorPublicationMatches(
   mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish-live-event" }>,
   event: Extract<AgentEvent, { type: "error" }>,
 ): boolean {
-  return mutation.outcome === "errored" && mutation.input.error === event.error
-    && persistedFromAdapterFailure(mutation.input.ending?.failure, event.failure);
+  return mutation.outcome === providerFailureOutcome(event.failure) && mutation.input.error === event.error
+    && endingFromAdapterFailure(mutation.input.ending, event.failure);
 }
 
 function normalizeTerminalOutcome(outcome: TurnOutcome): Exclude<TurnOutcome, "cancelled"> {

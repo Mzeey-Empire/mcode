@@ -18,7 +18,7 @@ import { deriveTurnAssistantMessageId } from "../turns/turn-assistant-message-id
 import type { CanonicalAgentEventDraft } from "./canonical-agent-boundary.js";
 import { prepareParentNarrativeRecoveryEvents, retainCanonicalSubagentTarget } from "./parent-narrative-recovery-events.js";
 import { PROVIDER_FRAME_EVENT_TYPES } from "./provider-frame-events.js";
-import { withTurnEnding } from "./turn-ending.js";
+import { interruptionReason, withTurnEnding } from "./turn-ending.js";
 
 const MAX_ACCEPTED_OPERATION_EVENTS = 8_192;
 
@@ -325,7 +325,7 @@ function terminalPayload(outcome: TurnOutcome, error: string | undefined, endedA
   switch (outcome) {
     case "completed": return { type: "turn.completed", endedAt };
     case "cancelled": return { type: "turn.cancelled", endedAt, reason: error ?? "Turn cancelled" };
-    case "interrupted": return { type: "turn.interrupted", endedAt, reason: error ?? "Turn interrupted" };
+    case "interrupted": return { type: "turn.interrupted", endedAt, reason: interruptionReason(error) };
     case "errored": return { type: "turn.errored", endedAt, error: error ?? "Provider turn failed" };
   }
 }

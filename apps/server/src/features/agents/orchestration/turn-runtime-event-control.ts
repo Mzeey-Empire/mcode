@@ -1,7 +1,7 @@
 import type { AgentEvent, TurnRuntimeSnapshot } from "@mcode/contracts";
 
 import type { TurnOutcome } from "../turns/turn-outcome.js";
-import type { TurnEndingCause } from "../canonical/turn-ending.js";
+import type { ProviderFailureTerminal, TurnEndingCause } from "../canonical/turn-ending.js";
 
 /** Injection token for the runtime controls used by normalized provider-event application. */
 export const TURN_RUNTIME_EVENT_CONTROL = "TurnRuntimeEventControl";
@@ -16,8 +16,8 @@ export interface TurnRuntimeEventControl {
   snapshot(threadId: string): TurnRuntimeSnapshot | undefined;
   /** Apply a completed provider turn and release its runtime resources. */
   completeProviderTurn(event: Extract<AgentEvent, { type: "turnComplete" }>): boolean;
-  /** Apply a provider failure and release its runtime resources. */
-  failProviderTurn(event: Extract<AgentEvent, { type: "error" }>): boolean;
+  /** Apply a provider failure with its classified outcome and release its runtime resources. */
+  failProviderTurn(event: Extract<AgentEvent, { type: "error" }>, outcome: ProviderFailureTerminal["outcome"]): boolean;
   /** Apply a provider stream end and release its runtime resources. */
   endProviderTurn(event: Extract<AgentEvent, { type: "ended" }>): boolean;
   /** Return whether a terminal event belongs to a stopping execution. */

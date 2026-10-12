@@ -1,4 +1,4 @@
-import type { AgentEvent, ParentNarrativeRecoveryItem, PlanQuestion, ProviderRuntimeEvent, StoredAttachment, TurnFailure, TurnOutcome } from "@mcode/contracts";
+import { providerFailureOutcome, type AgentEvent, type ParentNarrativeRecoveryItem, type PlanQuestion, type ProviderRuntimeEvent, type StoredAttachment, type TurnFailure, type TurnOutcome } from "@mcode/contracts";
 import { NarrativeTurnState, type NarrativeTurnStateEffect } from "../conversation/narrative/narrative-turn-state.js";
 import { AssistantExecutionState, type AssistantMaterializationInput } from "../turns/assistant-execution-state.js";
 import { NarrativeRecoveryDelta, type PreparedNarrativeRecoveryDelta } from "../turns/narrative-recovery-delta.js";
@@ -467,7 +467,7 @@ export class CodexLiveEventReducer {
     this.phase = "completed";
     return [
       { kind: "turn-error", error: event.error },
-      { kind: "terminal-projection", source: "error", outcome: "errored",
+      { kind: "terminal-projection", source: "error", outcome: providerFailureOutcome(event.failure),
         assistant: this.assistant.materializationInput(null), narrative: this.narrative.terminalSnapshot(event.threadId) },
     ];
   }

@@ -24,3 +24,11 @@ export const TurnFailureSchema = lazySchema(() =>
 
 /** Adapter-classified failure carried by every provider Error event. */
 export type TurnFailure = z.infer<ReturnType<typeof TurnFailureSchema>>;
+
+/**
+ * Terminal outcome for a turn ended by a provider Error. A usage limit pauses work the user can resume once the
+ * limit resets, so it ends the turn interrupted; every other failure ends it errored.
+ */
+export function providerFailureOutcome(failure: Pick<TurnFailure, "kind">): "interrupted" | "errored" {
+  return failure.kind === "usage_limit" ? "interrupted" : "errored";
+}
