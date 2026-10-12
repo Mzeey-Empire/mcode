@@ -30,7 +30,9 @@ import type {
 import type { Thread } from "@/transport";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { cn } from "@/lib/utils";
-import { ComposerAgentControls } from "./controls/ComposerAgentControls";
+import { ComposerAccessControls } from "./controls/ComposerAccessControls";
+import { ComposerAttachedCapabilities } from "./controls/ComposerAttachedCapabilities";
+import { ComposerModelControl } from "./controls/ComposerModelControl";
 import type { ComposerMode } from "./execution/composer-mode";
 import { NewThreadTargetRail } from "./execution/NewThreadTargetRail";
 import { ComposerTray } from "./ComposerTray";
@@ -42,7 +44,9 @@ type FileAutocomplete = ReturnType<typeof useFileAutocomplete>;
 type FilePopup = ReturnType<typeof useFileTagPopup>;
 type SlashCommand = ReturnType<typeof useSlashCommand>;
 type ComposerEditorProps = ComponentProps<typeof ComposerEditor>;
-type ComposerAgentControlsProps = ComponentProps<typeof ComposerAgentControls>;
+type ComposerAccessControlsProps = ComponentProps<typeof ComposerAccessControls>;
+type ComposerAttachedCapabilitiesProps = ComponentProps<typeof ComposerAttachedCapabilities>;
+type ComposerModelControlProps = ComponentProps<typeof ComposerModelControl>;
 
 interface ComposerContentSurfaceProps {
   readonly model: {
@@ -84,27 +88,26 @@ interface ComposerContentSurfaceProps {
     readonly unavailableSelectedTextCommentIds: readonly string[];
     readonly startingThread: boolean;
     readonly hasContent: boolean;
-    readonly showInlineComposerOptions: boolean;
     readonly attachmentInputRef: RefObject<HTMLInputElement | null>;
     readonly attachmentInputAccept: string;
     readonly composerContainerRef: RefObject<HTMLDivElement | null>;
     readonly editorContainerRef: RefObject<HTMLDivElement | null>;
     readonly editorRef: ComposerEditorProps["editorRef"];
-    readonly selection: ComposerAgentControlsProps["selection"];
-    readonly defaults: ComposerAgentControlsProps["defaults"];
+    readonly selection: ComposerModelControlProps["selection"];
+    readonly defaults: ComposerModelControlProps["defaults"];
     readonly agentControls: {
-      readonly reasoningLevels: ComposerAgentControlsProps["reasoningLevels"];
-      readonly capabilities: ComposerAgentControlsProps["capabilities"];
+      readonly reasoningLevels: ComposerModelControlProps["reasoningLevels"];
+      readonly capabilities: ComposerAttachedCapabilitiesProps["capabilities"];
       readonly attachedCapabilityIds: ComponentProps<typeof ComposerAddMenu>["attachedCapabilityIds"];
-      readonly permissionLocked: ComposerAgentControlsProps["permissionLocked"];
-      readonly approvalReviewSupported: ComposerAgentControlsProps["approvalReviewSupported"];
+      readonly permissionLocked: ComposerAccessControlsProps["permissionLocked"];
+      readonly approvalReviewSupported: ComposerAccessControlsProps["approvalReviewSupported"];
     };
-    readonly activeGoal: ComposerAgentControlsProps["activeGoal"];
+    readonly activeGoal: ComposerAttachedCapabilitiesProps["activeGoal"];
     readonly isModelFullyLocked: boolean;
     readonly isProviderLocked: boolean;
     readonly contextWindow: ContextWindowMode | null;
     readonly settingsDefaultContextWindow: ContextWindowMode | undefined;
-    readonly modelId: ComposerAgentControlsProps["selection"]["modelId"];
+    readonly modelId: ComposerModelControlProps["selection"]["modelId"];
     readonly contextEntry?: {
       readonly lastTokensIn?: number;
       readonly contextWindow?: number;
@@ -135,11 +138,11 @@ interface ComposerContentSurfaceProps {
     readonly onAttachmentInputChange: ComponentProps<"input">["onChange"];
     readonly onAttachPick: () => void;
     readonly onAttachCapability: ComponentProps<typeof ComposerAddMenu>["onAttachCapability"];
-    readonly onSelectionChange: ComposerAgentControlsProps["onSelectionChange"];
-    readonly onSelectionTouched: ComposerAgentControlsProps["onSelectionTouched"];
-    readonly onDetachPlan: ComposerAgentControlsProps["onDetachPlan"];
-    readonly onDetachGoal: ComposerAgentControlsProps["onDetachGoal"];
-    readonly onDetachOrchestration: ComposerAgentControlsProps["onDetachOrchestration"];
+    readonly onSelectionChange: ComposerModelControlProps["onSelectionChange"];
+    readonly onSelectionTouched: ComposerAccessControlsProps["onSelectionTouched"];
+    readonly onDetachPlan: ComposerAttachedCapabilitiesProps["onDetachPlan"];
+    readonly onDetachGoal: ComposerAttachedCapabilitiesProps["onDetachGoal"];
+    readonly onDetachOrchestration: ComposerAttachedCapabilitiesProps["onDetachOrchestration"];
     readonly onStop: () => void;
     /** Cancels the thread's startup; absent once cancellation is requested. */
     readonly onCancelStartup?: () => void;
@@ -255,8 +258,8 @@ function getEditorPlaceholder(model: ComposerContentSurfaceProps["model"]) {
   if (model.goalPending) return "Describe the goal...";
   if (model.branchFromMessageId) return "What should the branch work on?";
   if (model.editingFromQueue) return "Edit the queued message - send to save.";
-  if (model.isAgentRunning) return "Queue a follow-up...";
-  return model.isNewThread ? "Do anything" : "Message Mcode...";
+  if (model.isAgentRunning) return "Queue a follow-up";
+  return "Do anything";
 }
 
 function ComposerEditorSurface({
@@ -266,7 +269,7 @@ function ComposerEditorSurface({
   const disabled = model.startingThread || model.planPending || model.isStaleWorktree || Boolean(model.providerReason);
 
   return (
-    <div className={cn("relative", model.startingThread && "opacity-50")} ref={model.editorContainerRef} onPaste={actions.onPaste}>
+    <div className={cn("relative px-4 pt-4", model.startingThread && "opacity-50")} ref={model.editorContainerRef} onPaste={actions.onPaste}>
       <ComposerEditor
         onChange={actions.onEditorChange}
         onSubmit={actions.onSubmit}
@@ -349,7 +352,7 @@ function ComposerAttachmentSurface({
       <AnnotationAttachmentRow model={model} actions={actions} />
       <AttachmentPreview attachments={model.attachments} onRemove={actions.onRemoveAttachment} />
       {model.isDragOver && (
-        <div className="absolute inset-0 z-(--layer-sticky) flex items-center justify-center rounded-xl bg-primary/10 backdrop-blur-sm">
+        <div className="absolute inset-0 z-(--layer-sticky) flex items-center justify-center rounded-composer bg-primary/10 backdrop-blur-sm">
           <span className="text-sm font-medium text-primary">Drop files here</span>
         </div>
       )}
@@ -397,7 +400,7 @@ function ComposerInlineStopButton({
 }
 
 function getTrackerContextWindow(
-  modelId: ComposerAgentControlsProps["selection"]["modelId"],
+  modelId: ComposerModelControlProps["selection"]["modelId"],
   contextWindow: ContextWindowMode | null,
   settingsDefaultContextWindow: ContextWindowMode | undefined,
   contextEntry: ComposerContentSurfaceProps["model"]["contextEntry"],
@@ -536,6 +539,8 @@ function ComposerSendButton({
       variant={SEND_BUTTON_VARIANT[visualState]}
       shape="round"
       size="icon-default"
+      // Empty Send recedes to a panel circle so the amber fill only appears once there is something to send.
+      className={cn(visualState === "empty" && "bg-panel text-muted")}
       onClick={onClick}
       disabled={disabled}
       aria-label={SEND_BUTTON_COPY[copy]}
@@ -567,12 +572,7 @@ function ComposerControlBar({
   const disabled = model.planPending || model.isStaleWorktree || Boolean(model.providerReason);
 
   return (
-    <div
-      className={cn(
-        "@container flex flex-wrap items-center gap-1 border-t border-border/20 py-1.5",
-        model.showInlineComposerOptions ? "px-3 sm:gap-2.5" : "px-2",
-      )}
-    >
+    <div className="@container flex min-w-0 flex-wrap items-center justify-between gap-2 p-4">
       <input
         ref={model.attachmentInputRef}
         type="file"
@@ -583,7 +583,7 @@ function ComposerControlBar({
         data-testid="composer-attachment-input"
         onChange={actions.onAttachmentInputChange}
       />
-      <div className={cn("flex max-w-full flex-wrap items-center gap-1", !model.showInlineComposerOptions && "basis-full")}>
+      <div className="flex min-w-0 flex-wrap items-center gap-1">
         <ComposerAddMenu
           disabled={disabled}
           onAttachFiles={actions.onAttachPick}
@@ -592,34 +592,44 @@ function ComposerControlBar({
           onAttachCapability={actions.onAttachCapability}
           getComposerRect={() => model.composerContainerRef.current?.getBoundingClientRect() ?? null}
         />
-        <ComposerAgentControls
+        <ComposerAccessControls
           threadId={model.threadId}
           workspaceId={model.workspaceId}
           branchFromMessageId={model.branchFromMessageId}
+          selection={model.selection}
+          isModelLocked={model.isModelFullyLocked}
+          permissionLocked={model.agentControls.permissionLocked}
+          approvalReviewSupported={model.agentControls.approvalReviewSupported}
+          onSelectionChange={actions.onSelectionChange}
+          onSelectionTouched={actions.onSelectionTouched}
+        />
+        <ComposerAttachedCapabilities
+          threadId={model.threadId}
           isNewThread={model.isNewThread}
           selection={model.selection}
-          defaults={model.defaults}
-          reasoningLevels={model.agentControls.reasoningLevels}
           capabilities={model.agentControls.capabilities}
           activeGoal={model.activeGoal}
           goalPending={model.goalPending}
-          isModelLocked={model.isModelFullyLocked}
-          isProviderLocked={model.isProviderLocked}
-          permissionLocked={model.agentControls.permissionLocked}
-          approvalReviewSupported={model.agentControls.approvalReviewSupported}
-          showModelPreferences
-          onSelectionChange={actions.onSelectionChange}
-          onSelectionTouched={actions.onSelectionTouched}
           onDetachPlan={actions.onDetachPlan}
           onDetachGoal={actions.onDetachGoal}
           onDetachOrchestration={actions.onDetachOrchestration}
         />
         {model.providerNoticeTrigger}
       </div>
-      <div className={cn("ml-auto flex max-w-full flex-wrap items-center justify-end gap-1", !model.showInlineComposerOptions && "basis-full")}>
+      <div className="ml-auto flex min-w-0 items-center justify-end gap-1">
         <ComposerStartingSpinner startingThread={model.startingThread} />
         <ComposerInlineStopButton model={model} actions={actions} />
         <ComposerContextWindowTracker model={model} />
+        <ComposerModelControl
+          threadId={model.threadId}
+          branchFromMessageId={model.branchFromMessageId}
+          selection={model.selection}
+          defaults={model.defaults}
+          reasoningLevels={model.agentControls.reasoningLevels}
+          isModelLocked={model.isModelFullyLocked}
+          isProviderLocked={model.isProviderLocked}
+          onSelectionChange={actions.onSelectionChange}
+        />
         <ComposerSendButton
           model={model}
           actions={actions}
@@ -639,10 +649,8 @@ function ComposerInputSurface({
       ref={model.composerContainerRef}
       data-testid="composer-surface"
       className={cn(
-        "relative z-(--layer-sticky) bg-transparent ring-1 ring-inset ring-border/60 focus-within:ring-2 focus-within:ring-primary/70",
-        model.isNewThread
-          ? "-mt-px rounded-xl shadow-none"
-          : "rounded-xl",
+        "relative z-(--layer-sticky) rounded-composer border border-border bg-selected",
+        model.isNewThread && "-mt-px",
         model.isDragOver && "ring-2 ring-primary",
       )}
       onDragEnter={actions.onDragEnter}

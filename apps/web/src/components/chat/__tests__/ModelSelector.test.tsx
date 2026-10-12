@@ -289,4 +289,25 @@ describe("ModelSelector", () => {
     expect(screen.queryByTestId("model-selector-trigger")).toBeNull();
     expect(screen.getByRole("img", { name: "Sonnet 4.6" })).toBeInTheDocument();
   });
+
+  it("shows the model's settings summary on the trigger and its settings under the catalog", async () => {
+    render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
+      onSelect={vi.fn()} locked={false} detail="High" settings={<button type="button">Reasoning high</button>} />);
+
+    expect(screen.getByTestId("model-selector-trigger")).toHaveTextContent("Sonnet 4.6High");
+    const dialog = await openPicker();
+    expect(within(dialog).getByRole("button", { name: "Reasoning high" })).toBeInTheDocument();
+    expect(within(dialog).getAllByRole("option").length).toBeGreaterThan(0);
+  });
+
+  it("keeps the settings editable without the catalog while the agent runs", async () => {
+    render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
+      onSelect={vi.fn()} locked detail="High" settings={<button type="button">Reasoning high</button>} />);
+
+    await userEvent.click(screen.getByTestId("model-selector-trigger"));
+    const dialog = screen.getByRole("dialog", { name: "Model settings" });
+    expect(within(dialog).getByRole("button", { name: "Reasoning high" })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("option")).toBeNull();
+    expect(screen.getByLabelText("Model locked while the agent runs")).toBeInTheDocument();
+  });
 });
