@@ -225,7 +225,7 @@ function ReviewViewMenu({ selection }: { readonly selection: ReviewViewSelection
       <DropdownMenuTrigger
         data-testid="review-view-switcher"
         aria-label="Select review view"
-        className="flex h-6 min-w-0 items-center gap-1 rounded px-1.5 py-0.5 text-caption font-medium tracking-tight text-ink hover:bg-selected"
+        className="flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-0.5 text-caption font-medium tracking-tight text-ink hover:bg-selected"
       >
         {reviewViewById(viewMode).label}
         <ChevronDown size={11} className="text-muted/60" />
@@ -281,7 +281,7 @@ function ReviewStatSummary({ comparison }: { readonly comparison: ReviewComparis
   return (
     <span
       data-testid="review-stat-summary"
-      className="flex shrink-0 items-center gap-1.5 font-mono text-caption tabular-nums text-muted"
+      className="text-fade flex items-center gap-1.5 font-mono text-caption tabular-nums text-muted"
     >
       {fileCount} {fileCount === 1 ? "file" : "files"}
       <DiffStat additions={comparison.additions} deletions={comparison.deletions} />
