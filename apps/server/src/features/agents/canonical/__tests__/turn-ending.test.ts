@@ -91,6 +91,17 @@ describe("adapter failure round trip", () => {
     expect(endingFromAdapterFailure(ending, { kind: "usage_limit", limitType: "five_hour" })).toBe(false);
     expect(endingFromAdapterFailure(ending, { kind: "fatal" })).toBe(false);
   });
+
+  it("matches an errored ending's classification and the retries the adapter reported", () => {
+    const ending = { failure: { kind: "retryable", status: 529, provider: "claude", message: "Overloaded",
+      retries: { made: 3, max: 5 } } } as const;
+
+    expect(endingFromAdapterFailure(ending, { kind: "retryable", status: 529 })).toBe(true);
+    expect(endingFromAdapterFailure(ending, { kind: "retryable", status: 529, retries: { made: 3, max: 5 } })).toBe(true);
+    expect(endingFromAdapterFailure(ending, { kind: "retryable", status: 529, retries: { made: 2, max: 5 } })).toBe(false);
+    expect(endingFromAdapterFailure(ending, { kind: "retryable", status: 500 })).toBe(false);
+    expect(endingFromAdapterFailure(undefined, { kind: "fatal" })).toBe(false);
+  });
 });
 
 describe("interruptionReason", () => {

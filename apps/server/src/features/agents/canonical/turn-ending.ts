@@ -126,10 +126,16 @@ export function endingFromAdapterFailure(ending: TurnEndingCause | undefined, ad
     return adapter.kind === "usage_limit" && ending.usageLimit.limitType === adapter.limitType;
   }
   const persisted = ending?.failure;
-  return persisted !== undefined && persisted.kind === adapter.kind && persisted.status === adapter.status
-    && persisted.code === adapter.code && persisted.limitType === adapter.limitType
-    && (adapter.retries === undefined
-      || (persisted.retries?.made === adapter.retries.made && persisted.retries.max === adapter.retries.max));
+  return persisted !== undefined && sameClassification(persisted, adapter) && sameRetries(persisted.retries, adapter.retries);
+}
+
+function sameClassification(persisted: PersistedTurnFailure, adapter: TurnFailure): boolean {
+  return persisted.kind === adapter.kind && persisted.status === adapter.status
+    && persisted.code === adapter.code && persisted.limitType === adapter.limitType;
+}
+
+function sameRetries(persisted: PersistedTurnFailure["retries"], adapter: TurnFailure["retries"]): boolean {
+  return adapter === undefined || (persisted?.made === adapter.made && persisted.max === adapter.max);
 }
 
 /**
@@ -143,13 +149,20 @@ export function withTurnEnding(
 ): CanonicalAgentEvent {
   switch (payload.type) {
     case "turn.cancelled": return { ...payload, stop: ending?.stop ?? { by: "user" } };
-    case "turn.interrupted": return ending?.cause === "usage_limit"
-      ? { ...payload, cause: ending.cause, usageLimit: ending.usageLimit }
-      : { ...payload, cause: ending?.cause ?? "unknown" };
+    case "turn.interrupted": return withInterruptionCause(payload, ending);
     case "turn.errored": return { ...payload,
       failure: ending?.failure ?? { kind: "fatal", provider: providerId, message: boundedFailureMessage(payload.error) } };
     default: return payload;
   }
+}
+
+function withInterruptionCause(
+  payload: Extract<CanonicalAgentEvent, { type: "turn.interrupted" }>,
+  ending: TurnEndingCause | undefined,
+): CanonicalAgentEvent {
+  return ending?.cause === "usage_limit"
+    ? { ...payload, cause: ending.cause, usageLimit: ending.usageLimit }
+    : { ...payload, cause: ending?.cause ?? "unknown" };
 }
 
 /**
