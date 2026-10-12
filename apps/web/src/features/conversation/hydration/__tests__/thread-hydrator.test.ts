@@ -15,7 +15,7 @@ import {
  * Behavioural tests for ThreadHydrator — the test surface defined in #522.
  * Asserts on store state after hydrate(), not internal sub-module calls.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, onTestFinished, vi } from "vitest";
 import { useThreadStore, extractPendingPlanQuestions, HISTORY_PAGE_SIZE } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useTaskStore } from "@/stores/taskStore";
@@ -192,6 +192,14 @@ function resetStores() {
     currentThreadId: null,
     runningThreadIds: new Set<string>(),
     recentlyAnsweredPlanMessageIds: new Set<string>(),
+  });
+}
+
+/** Fakes only timeouts, so `Date.now()` freshness checks keep real time. */
+function fakeTimeouts() {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+  onTestFinished(() => {
+    vi.useRealTimers();
   });
 }
 
@@ -1272,6 +1280,7 @@ describe("ThreadHydrator", () => {
   });
 
   it("uses auxiliary TTL by default and when force is false for resident hydration", async () => {
+    fakeTimeouts();
     resetThreadStoreForTests({
       currentThreadId: THREAD_B,
       runningThreadIds: new Set([THREAD_A]),
@@ -1282,12 +1291,12 @@ describe("ThreadHydrator", () => {
     });
 
     await hydrator.hydrate(THREAD_A, "active");
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    await vi.advanceTimersByTimeAsync(120);
     expect(mockTransport.listPendingApprovals).not.toHaveBeenCalled();
 
     vi.clearAllMocks();
     await hydrator.hydrate(THREAD_A, "active", { force: false });
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    await vi.advanceTimersByTimeAsync(120);
     expect(mockTransport.listPendingApprovals).not.toHaveBeenCalled();
 
     vi.clearAllMocks();
@@ -2511,6 +2520,7 @@ describe("ThreadHydrator", () => {
   });
 
   it("defers background hydration while active hydration is in flight", async () => {
+    fakeTimeouts();
     let resolveActive!: (value: {
       messages: typeof msgA[];
       hasMore: boolean;
@@ -2529,7 +2539,7 @@ describe("ThreadHydrator", () => {
       expect(hydrator.isActiveHydrationInFlight()).toBe(true);
     });
     const background = hydrator.hydrate(THREAD_B, "background");
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    await vi.advanceTimersByTimeAsync(120);
     expect(mockTransport.loadConversationPage).toHaveBeenCalledTimes(1);
 
     resolveActive({ messages: [msgA], hasMore: false, narrativeByMessage: {} });
