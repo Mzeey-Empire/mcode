@@ -37,13 +37,14 @@ export interface SubagentDetailSelection {
 }
 
 /**
- * View mode within the Review (Changes) tab. The two turn views need a thread;
+ * View mode within the Review (Changes) tab. The three turn views need a thread;
  * the four git views read the thread's checkout, or the workspace root without
  * a thread. Each renders exactly one diff. See
  * {@link import("@/lib/review-views").REVIEW_VIEW_GROUPS} for the menu.
  */
 export type DiffViewMode =
   | "turn"
+  | "since-looked"
   | "cumulative"
   | "unstaged"
   | "staged"
@@ -132,7 +133,7 @@ export function maxPanelWidthInSplit(
 }
 
 /** Review comparison source that decides how a file's diff is fetched and cached. */
-export type DiffSource = "snapshot" | "turn-diff" | "cumulative" | "commit" | "unstaged" | "staged" | "branch";
+export type DiffSource = "snapshot" | "turn-diff" | "cumulative" | "since-looked" | "commit" | "unstaged" | "staged" | "branch";
 
 /**
  * Right panel container state (visibility, width, open tabs, active tab). Stored

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ReviewComparison, ReviewFileChange, ReviewTurn } from "@mcode/contracts";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { sinceLookedBaseline, threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { useWorkspaceFileRefresh } from "@/features/projects/files/useWorkspaceFileRefresh";
 import { useDiffStore, type ReviewTurnSelection } from "@/stores/diffStore";
 import { getTransport } from "@/transport";
@@ -41,6 +42,8 @@ interface SettledComparison {
   readonly cacheVersion: string | number;
   /** The turn a Turn view comparison resolved to, which names its jump key and ordinal. */
   readonly turnMessageId: string | null;
+  /** The seen baseline a Since you looked comparison loaded after, which names its patches. */
+  readonly afterSequence?: number;
 }
 
 interface ComparisonLoadInput {
@@ -55,6 +58,8 @@ interface ComparisonLoadInput {
   /** Whether the Turn view's list has ever loaded; other views ignore the list. */
   readonly reviewTurnsLoaded: boolean;
   readonly reviewTurnsError: string | null;
+  /** This visit's seen baseline for Since you looked, or null when there is none. */
+  readonly sinceLookedBaseline: number | null;
   readonly snapshotVersion: string;
   readonly snapshots: readonly Snapshot[] | undefined;
   readonly viewMode: DiffViewMode;
@@ -122,6 +127,7 @@ function isUnavailableBranchComparison(input: ComparisonLoadInput): boolean {
 async function loadComparison(input: ComparisonLoadInput): Promise<LoadedComparison> {
   if (isGitView(input.viewMode)) return loadGitComparison({ ...input, viewMode: input.viewMode });
   if (input.viewMode === "cumulative") return loadCumulativeComparison(input);
+  if (input.viewMode === "since-looked") return loadSinceLookedComparison(input);
   return loadTurnDiffComparison(input);
 }
 
@@ -185,6 +191,26 @@ async function loadCumulativeComparison(input: ComparisonLoadInput): Promise<Loa
     git: null,
     cacheVersion: input.snapshotVersion,
     turnMessageId: null,
+  };
+}
+
+async function loadSinceLookedComparison(input: ComparisonLoadInput): Promise<LoadedComparison> {
+  const baseline = input.sinceLookedBaseline;
+  if (baseline === null) {
+    return { outcome: { status: "unselected" }, git: null, cacheVersion: input.snapshotVersion, turnMessageId: null };
+  }
+  const result = await getTransport().getCumulativeDiffStats(input.activeThreadId!, baseline);
+  // A turn whose earlier attempt settled before the baseline still gets its
+  // paths and counts from the server, but its change type falls back to "modified".
+  const snapshots = (input.snapshots ?? []).filter((snapshot) => snapshot.message_sequence > baseline);
+  return {
+    outcome: result.status === "ready"
+      ? { status: "ready", comparison: withSnapshotFileFacts(result.comparison, snapshots) }
+      : result,
+    git: null,
+    cacheVersion: input.snapshotVersion,
+    turnMessageId: null,
+    afterSequence: baseline,
   };
 }
 
@@ -256,6 +282,7 @@ interface DiffPanelStore {
   readonly setSnapshotsLoading: DiffStoreState["setSnapshotsLoading"];
   readonly snapshots: DiffStoreState["snapshotsByThread"][string] | undefined;
   readonly snapshotsLoading: boolean;
+  readonly sinceLookedBaseline: number | null;
   readonly viewMode: DiffViewMode;
 }
 
@@ -313,6 +340,7 @@ function useDiffPanelStore(): DiffPanelStore {
     setSnapshotsLoading: useDiffStore((state) => state.setSnapshotsLoading),
     snapshots,
     snapshotsLoading,
+    sinceLookedBaseline: threadAttentionStore((state) => sinceLookedBaseline(state, activeThreadId)),
     viewMode,
   };
 }
@@ -409,6 +437,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     store.selectedCommitSha,
     branchRange,
     store.turnSelection,
+    store.sinceLookedBaseline,
   );
   const snapshotVersion = getSnapshotVersion(store.snapshots);
   const comparisonLoadInput = useMemo<ComparisonLoadInput>(() => ({
@@ -421,6 +450,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     turnMessageId,
     reviewTurnsLoaded,
     reviewTurnsError,
+    sinceLookedBaseline: store.sinceLookedBaseline,
     snapshotVersion,
     snapshots: store.snapshots,
     viewMode: store.viewMode,
@@ -435,6 +465,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     store.activeWorkspaceId,
     store.branchComparison,
     store.selectedCommitSha,
+    store.sinceLookedBaseline,
     store.snapshots,
     store.viewMode,
     turnMessageId,
@@ -601,8 +632,10 @@ function getComparisonIdentity(
   selectedCommitSha: string | null,
   branchRange: { readonly base: string; readonly target: string } | null,
   turnSelection: ReviewTurnSelection,
+  sinceLookedBaseline: number | null,
 ): string {
-  return `${diffScopeId ?? "none"}:${viewMode}:${comparisonOperand(viewMode, selectedCommitSha, branchRange, turnSelection)}`;
+  const operand = comparisonOperand(viewMode, selectedCommitSha, branchRange, turnSelection, sinceLookedBaseline);
+  return `${diffScopeId ?? "none"}:${viewMode}:${operand}`;
 }
 
 function comparisonOperand(
@@ -610,10 +643,12 @@ function comparisonOperand(
   selectedCommitSha: string | null,
   branchRange: { readonly base: string; readonly target: string } | null,
   turnSelection: ReviewTurnSelection,
+  sinceLookedBaseline: number | null,
 ): string {
   if (viewMode === "commit") return selectedCommitSha ?? "";
   if (viewMode === "branch" && branchRange) return `${branchRange.base}...${branchRange.target}`;
   if (viewMode === "turn") return turnSelection;
+  if (viewMode === "since-looked") return String(sinceLookedBaseline ?? "");
   return "";
 }
 
@@ -772,7 +807,7 @@ export function DiffPanel() {
           comparison={comparison.visibleComparison}
           refreshing={comparison.comparisonLoading}
           onRefresh={comparison.onRefreshComparison}
-          defaultFilesExpanded={viewMode !== "cumulative"}
+          defaultFilesExpanded={viewMode !== "cumulative" && viewMode !== "since-looked"}
         />
       }
     >
@@ -894,8 +929,15 @@ function ReadyComparisonView({
       />
     );
   }
-  if (viewMode === "cumulative") {
-    return <CumulativeView threadId={scopeId} comparison={comparison} cacheVersion={settled.cacheVersion} />;
+  if (viewMode === "cumulative" || viewMode === "since-looked") {
+    return (
+      <CumulativeView
+        threadId={scopeId}
+        comparison={comparison}
+        cacheVersion={settled.cacheVersion}
+        afterSequence={settled.afterSequence}
+      />
+    );
   }
   // A ready turn comparison always carries its turn-diff id; without one there are no patches to read.
   const turnDiffId = comparison.turnDiff?.id;

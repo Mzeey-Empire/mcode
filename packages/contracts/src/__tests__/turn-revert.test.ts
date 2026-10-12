@@ -4,7 +4,7 @@ import { WS_METHODS, WS_CHANNELS, TurnRevertPreviewSchema, TurnRevertResultSchem
 describe("turn revert wire contract", () => {
   it("requires explicit reverted paths on every snapshot", () => {
     const snapshot = { id: "s", message_id: "m", thread_id: "t", ref_before: "before", ref_after: "after",
-      files_changed: ["a.ts"], worktree_path: null, created_at: "2026-10-11T00:00:00Z", attempt_count: 1 };
+      files_changed: ["a.ts"], worktree_path: null, created_at: "2026-10-11T00:00:00Z", attempt_count: 1, message_sequence: 4 };
     expect(TurnSnapshotSchema().safeParse(snapshot).success).toBe(false);
     expect(TurnSnapshotSchema().safeParse({ ...snapshot, reverted_paths: [1] }).success).toBe(false);
     for (const reverted_paths of [[], ["a.ts"]]) {

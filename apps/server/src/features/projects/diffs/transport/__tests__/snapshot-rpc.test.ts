@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TurnSnapshotSchema } from "@mcode/contracts";
+import { ReviewComparisonResultSchema, TurnSnapshotSchema } from "@mcode/contracts";
 import { routeSnapshotRpc } from "../snapshot-rpc.js";
 import { createSnapshotRangeFixture } from "../../snapshots/__tests__/turn-snapshot-range-fixture.js";
 import { SnapshotService } from "../../snapshots/snapshot-service.js";
@@ -67,5 +67,47 @@ describe("snapshot RPC whole-turn evidence", { timeout: 30_000 }, () => {
     expect(await routeSnapshotRpc("snapshot.listByThread", { threadId: "thread" }, fixture.deps)).toEqual([]);
     expect(await routeSnapshotRpc("snapshot.getCumulativeDiffStats", { threadId: "thread" }, fixture.deps))
       .toEqual({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } });
+  });
+
+  async function filesAfter(afterSequence: number) {
+    const result = ReviewComparisonResultSchema().parse(
+      await routeSnapshotRpc("snapshot.getCumulativeDiffStats", { threadId: "thread", afterSequence }, fixture.deps));
+    if (result.status !== "ready") throw new Error(JSON.stringify(result));
+    return result.comparison.files.map((file) => [file.path, file.changeType, file.additions, file.deletions]);
+  }
+
+  it("starts since-looked stats at the first later turn's baseline and covers only later turns' paths", async () => {
+    await fixture.attempt({ id: "one", edits: { "a.ts": "a\n" } });
+    await fixture.attempt({ id: "two", edits: { "a.ts": "a\nb\n", "b.ts": "b\n" } });
+    await fixture.attempt({ id: "three", edits: { "c.ts": "c\n" } });
+    expect(await filesAfter(2)).toEqual([["a.ts", "modified", 1, 0], ["b.ts", "added", 1, 0], ["c.ts", "added", 1, 0]]);
+    expect(await filesAfter(4)).toEqual([["c.ts", "added", 1, 0]]);
+  });
+
+  it("keeps a retried turn whole when the baseline sits between its attempts", async () => {
+    await fixture.attempt({ id: "one", status: "Errored", edits: { "a.ts": "a\n" } });
+    await fixture.attempt({ id: "two", attemptOf: "one", edits: { "b.ts": "b\n" } });
+    const rows = TurnSnapshotSchema().array().parse(await routeSnapshotRpc("snapshot.listByThread", { threadId: "thread" }, fixture.deps));
+    expect(rows.map((row) => [row.message_id, row.message_sequence])).toEqual([["message-one", 2], ["message-two", 4]]);
+    expect(await filesAfter(2)).toEqual([["a.ts", "added", 1, 0], ["b.ts", "added", 1, 0]]);
+    const patch = await routeSnapshotRpc("snapshot.getCumulativeDiff", { threadId: "thread", afterSequence: 2 }, fixture.deps);
+    expect(patch).toContain("+++ b/a.ts");
+    expect(patch).toContain("+++ b/b.ts");
+    expect(await routeSnapshotRpc("snapshot.getCumulativeDiff", { threadId: "thread", filePath: "a.ts", afterSequence: 2 }, fixture.deps)).toContain("+a");
+  });
+
+  it("keeps a failed attempt's files when its replacement after the baseline edits nothing", async () => {
+    await fixture.attempt({ id: "one", status: "Errored", edits: { "a.ts": "a\n" } });
+    await fixture.attempt({ id: "two", attemptOf: "one" });
+    expect(await filesAfter(2)).toEqual([["a.ts", "added", 1, 0]]);
+  });
+
+  it("is ready with no files when no turn settled after the baseline, including a live retry", async () => {
+    await fixture.attempt({ id: "one", edits: { "a.ts": "a\n" } });
+    await fixture.attempt({ id: "two", status: "Errored", edits: { "b.ts": "b\n" } });
+    await fixture.attempt({ id: "three", attemptOf: "two", status: "Running", missing: true });
+    expect(await filesAfter(2)).toEqual([]);
+    expect(await routeSnapshotRpc("snapshot.getCumulativeDiff", { threadId: "thread", afterSequence: 2 }, fixture.deps)).toBe("");
+    expect(await filesAfter(0)).toEqual([["a.ts", "added", 1, 0]]);
   });
 });

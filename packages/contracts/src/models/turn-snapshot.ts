@@ -15,6 +15,8 @@ export const TurnSnapshotSchema = lazySchema(() => z.object({
   created_at: z.string(),
   attempt_count: z.number().int().positive(),
   reverted_paths: z.array(z.string()),
+  /** Sequence of this row's own assistant message; compared against a seen baseline. */
+  message_sequence: z.number().int().nonnegative(),
 }));
 
 /** Git snapshot refs for reconstructing diffs on demand. */

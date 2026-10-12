@@ -229,7 +229,7 @@ describe("overview registry", () => {
       } else {
         useDiffStore.getState().setSnapshots(thread.id, [{
           id: "new-snapshot", thread_id: thread.id, message_id: "message",
-          ref_before: "before", ref_after: "after", attempt_count: 1, reverted_paths: [], files_changed: ["src/example.ts"],
+          ref_before: "before", ref_after: "after", attempt_count: 1, reverted_paths: [], message_sequence: 0, files_changed: ["src/example.ts"],
           worktree_path: null, created_at: "2026-10-08T12:00:00Z",
         }]);
       }

@@ -5,7 +5,7 @@
 
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { asc, eq, lt, sql } from "drizzle-orm";
+import { asc, eq, lt, sql, type SQL } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import {
   TurnFileEffectSummarySchema,
@@ -13,7 +13,7 @@ import {
   type TurnSnapshot,
 } from "@mcode/contracts";
 import { runChanges } from "../../../../runtime/persistence/sqlite/drizzle-changes.js";
-import { turnSnapshots } from "../../../../runtime/persistence/sqlite/schema.js";
+import { messages, turnSnapshots } from "../../../../runtime/persistence/sqlite/schema.js";
 
 /** Row shape returned by drizzle for the turn_snapshots table. */
 type TurnSnapshotRow = typeof turnSnapshots.$inferSelect;
@@ -48,7 +48,7 @@ function safeParseFileEffects(json: string): TurnFileEffectSummary {
   return { revision: 0, fileCount: 0, additions: 0, deletions: 0, effects: [] };
 }
 
-function rowToTurnSnapshot(row: TurnSnapshotRow): TurnSnapshot {
+function rowToTurnSnapshot({ row, messageSequence }: { row: TurnSnapshotRow; messageSequence: number }): TurnSnapshot {
   return {
     id: row.id,
     message_id: row.messageId,
@@ -61,6 +61,7 @@ function rowToTurnSnapshot(row: TurnSnapshotRow): TurnSnapshot {
     created_at: row.createdAt,
     attempt_count: 1,
     reverted_paths: [],
+    message_sequence: messageSequence,
   };
 }
 
@@ -112,36 +113,35 @@ export class TurnSnapshotStore {
       created_at: now,
       attempt_count: 1,
       reverted_paths: [],
+      message_sequence: this.selectWithSequence(eq(turnSnapshots.id, id)).get()?.messageSequence ?? 0,
     };
+  }
+
+  /** A missing message reads as sequence 0 so it never counts as settled after a seen baseline. */
+  private selectWithSequence(where: SQL) {
+    return this.orm
+      .select({ row: turnSnapshots, messageSequence: sql<number>`coalesce(${messages.sequence}, 0)` })
+      .from(turnSnapshots)
+      .leftJoin(messages, eq(messages.id, turnSnapshots.messageId))
+      .where(where);
   }
 
   /** Find a turn snapshot by its primary key. Returns null if not found. */
   getById(id: string): TurnSnapshot | null {
-    const row = this.orm
-      .select()
-      .from(turnSnapshots)
-      .where(eq(turnSnapshots.id, id))
-      .get();
+    const row = this.selectWithSequence(eq(turnSnapshots.id, id)).get();
     return row ? rowToTurnSnapshot(row) : null;
   }
 
   /** Find a turn snapshot by its associated message ID. Returns null if not found. */
   getByMessage(messageId: string): TurnSnapshot | null {
-    const row = this.orm
-      .select()
-      .from(turnSnapshots)
-      .where(eq(turnSnapshots.messageId, messageId))
-      .get();
+    const row = this.selectWithSequence(eq(turnSnapshots.messageId, messageId)).get();
     return row ? rowToTurnSnapshot(row) : null;
   }
 
   /** List all turn snapshots for a thread, ordered by created_at ascending. */
   listByThread(threadId: string): TurnSnapshot[] {
-    const rows = this.orm
-      .select()
-      .from(turnSnapshots)
-      .where(eq(turnSnapshots.threadId, threadId))
-      .orderBy(asc(turnSnapshots.createdAt), asc(sql`rowid`))
+    const rows = this.selectWithSequence(eq(turnSnapshots.threadId, threadId))
+      .orderBy(asc(turnSnapshots.createdAt), asc(sql`${turnSnapshots}.rowid`))
       .all();
     return rows.map(rowToTurnSnapshot);
   }

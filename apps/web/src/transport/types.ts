@@ -784,9 +784,13 @@ export interface McodeTransport {
   listSnapshots(threadId: string): Promise<TurnSnapshot[]>;
   /** Get cumulative diff across all turns for a thread. Implemented in Phase 3. */
   listReviewTurns(threadId: string): Promise<ReviewTurn[]>;
-  getCumulativeDiff(threadId: string, filePath?: string, maxLines?: number): Promise<ReviewFileDiffResult>;
-  /** Return authoritative net file stats from the first turn ref to the final turn ref. */
-  getCumulativeDiffStats(threadId: string): Promise<ReviewComparisonResult>;
+  /** With `afterSequence`, reads only whole turns that settled after that message sequence. */
+  getCumulativeDiff(threadId: string, filePath?: string, maxLines?: number, afterSequence?: number): Promise<ReviewFileDiffResult>;
+  /**
+   * Return authoritative net file stats from the first turn ref to the final turn ref. With
+   * `afterSequence`, only whole turns that settled after that message sequence count.
+   */
+  getCumulativeDiffStats(threadId: string, afterSequence?: number): Promise<ReviewComparisonResult>;
   /** Get commit log for a workspace branch. Pass threadId so the server runs git from the thread's worktree path. */
   getGitLog(
     workspaceId: string,
