@@ -78,8 +78,6 @@ jobs:
       # on 504s.
       SKIP_ELECTRON_REBUILD: "1"
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-      TURBO_TEAM: ${{ vars.TURBO_TEAM }}
     steps:
       - name: Require a runner choice
         if: needs.pick-runner.result != 'success'
@@ -166,10 +164,6 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
-    env:
-      # Server tests launch Electron to load its runtime and native SQLite binding.
-      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-      TURBO_TEAM: ${{ vars.TURBO_TEAM }}
     steps:
       - name: Require a runner choice
         if: needs.pick-runner.result != 'success'
@@ -217,9 +211,6 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ${{ needs.pick-runner.outputs.small || 'ubuntu-24.04' }}
     timeout-minutes: 20
-    env:
-      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-      TURBO_TEAM: ${{ vars.TURBO_TEAM }}
     steps:
       - name: Require a runner choice
         if: needs.pick-runner.result != 'success'
