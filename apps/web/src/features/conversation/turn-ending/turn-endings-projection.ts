@@ -1,4 +1,4 @@
-import { ProviderIdSchema, type AgentItem, type AgentModelState, type AgentTurn, type Message, type ProviderId, type ScheduledTurnResume, type TurnOutcome } from "@mcode/contracts";
+import { ProviderIdSchema, type AgentItem, type AgentModelState, type AgentTurn, type Message, type ProviderId, type TurnOutcome } from "@mcode/contracts";
 import { MODEL_PROVIDERS } from "@/lib/model-registry";
 import { sameTurnEndNotice, turnEndingView, type TurnEndingView } from "./turn-ending-notice";
 
@@ -23,18 +23,11 @@ interface TurnMessages {
   assistantMessageIds: string[];
 }
 
-/** Thread facts outside canonical turn state that change how an ending reads. */
-export interface TurnEndingsContext {
-  /** The thread provider's live sign-in condition, which picks an auth failure's primary action. */
-  providerSignedOut: boolean;
-  /** The thread's pending retry; only the attempt it names shows it. */
-  scheduledResume: ScheduledTurnResume | null;
-  /** Epoch ms used to decide whether a usage limit has already reset. */
-  now: number;
-}
-
-/** Project each logical turn as its first user message plus its latest attempt. */
-export function projectTurnEndings(threadId: string, state: AgentModelState, context: TurnEndingsContext): TurnEndingsProjection {
+/**
+ * Project each logical turn as its first user message plus its latest attempt.
+ * `providerSignedOut` is the thread provider's live sign-in condition, which picks an auth failure's primary action.
+ */
+export function projectTurnEndings(threadId: string, state: AgentModelState, providerSignedOut: boolean): TurnEndingsProjection {
   const turns = Object.values(state.turns).filter((turn) => turn.threadId === threadId).sort(compareTurns);
   const messagesByTurn = turnMessages(threadId, state.items);
   const logicalTurns = groupAttempts(turns);
@@ -59,9 +52,7 @@ export function projectTurnEndings(threadId: string, state: AgentModelState, con
         providerStartedAt: latest.providerStartedAt,
         durationMs: turnDurationMs(latest),
         providerLabel,
-        providerSignedOut: context.providerSignedOut,
-        scheduledResumeAt: context.scheduledResume?.turnId === latest.id ? context.scheduledResume.at : null,
-        now: context.now,
+        providerSignedOut,
         // The startup trail owns only the thread's first attempt; a retry of it gets an ordinary notice.
         isStartupTurn: index === 0 && latest === first,
         isLatestTurn: index === logicalTurns.length - 1,
@@ -70,18 +61,6 @@ export function projectTurnEndings(threadId: string, state: AgentModelState, con
     };
   });
   return { endingsByMessageId, hiddenMessageIds };
-}
-
-/** Epoch ms when the earliest "Retry at" offer lapses into plain Retry, or null when none is showing. */
-export function nextRetryAtLapse(projection: TurnEndingsProjection): number | null {
-  let next: number | null = null;
-  for (const { view } of Object.values(projection.endingsByMessageId)) {
-    const primary = view.notice?.style === "filled" ? view.notice.primary : undefined;
-    if (primary?.action !== "retry_at") continue;
-    const at = Date.parse(primary.at);
-    if (next === null || at < next) next = at;
-  }
-  return next;
 }
 
 /**

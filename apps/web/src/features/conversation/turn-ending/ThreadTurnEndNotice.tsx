@@ -1,7 +1,4 @@
-import type { ReactElement } from "react";
 import type { ProviderId } from "@mcode/contracts";
-import { ModelSelector } from "@/components/chat/ModelSelector";
-import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { signInToSignedOutProvider } from "@/features/providers/sign-in";
 import { TurnEndNotice, type TurnEndActionHandlers } from "./TurnEndNotice";
 import type { TurnEndNoticeView } from "./turn-ending-notice";
@@ -18,41 +15,19 @@ export interface ThreadTurnEndNoticeProps {
   notice: TurnEndNoticeView;
 }
 
-/**
- * A thread's turn end notice with Retry, Retry at, Cancel retry, Switch model, Resume, and Sign in
- * wired to the server and the provider status store.
- */
+/** A thread's turn end notice with Retry, Resume, and Sign in wired to the server and the provider status store. */
 export function ThreadTurnEndNotice({ threadId, turnId, providerId, notice }: ThreadTurnEndNoticeProps) {
-  const { retry, retryAt, cancelRetry, ...retryRequest } = useTurnRetry(threadId, turnId);
+  const retry = useTurnRetry(threadId, turnId);
   const resume = useTurnResume(threadId, turnId);
-  const thread = useWorkspaceStore((store) => store.threads.find((candidate) => candidate.id === threadId));
-  const primary = notice.style === "filled" ? notice.primary : undefined;
-  const actions: TurnEndActionHandlers = {
-    retry: () => retry(),
-    retry_at: primary?.action === "retry_at" ? () => retryAt(primary.at) : undefined,
-    cancel_retry: cancelRetry,
-    resume: resume.resume,
-    // A thread keeps its provider session, so the retry can only change model within it.
-    switch_model: thread
-      ? (trigger: ReactElement) => (
-        <ModelSelector
-          selectedModelId={thread.model ?? ""}
-          selectedProviderId={thread.provider}
-          onSelect={(modelId) => retry(modelId)}
-          locked={false}
-          providerLocked
-          trigger={trigger}
-        />
-      )
-      : undefined,
-  };
+  // Resume takes an optional model, so the click event must not reach it.
+  const actions: TurnEndActionHandlers = { retry: retry.retry, resume: () => resume.resume() };
   if (providerId) actions.sign_in = () => signInToSignedOutProvider(providerId);
   return (
     <TurnEndNotice
       notice={notice}
       actions={actions}
-      pending={retryRequest.pending || resume.pending}
-      error={retryRequest.error ?? resume.error}
+      pending={retry.pending || resume.pending}
+      error={retry.error ?? resume.error}
     />
   );
 }

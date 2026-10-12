@@ -1,15 +1,12 @@
-import { useState, type ReactElement, type ReactNode } from "react";
-import { CircleAlert, CirclePause, Clock, Square, type LucideIcon } from "lucide-react";
+import { useState } from "react";
+import { CircleAlert, CirclePause, Square, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { cn } from "@/lib/utils";
 import type { FilledNotice, QuietNotice, TurnEndAction, TurnEndNoticeView } from "./turn-ending-notice";
 
 /** Handlers for the actions this build supports. A notice renders only actions with a handler. */
-export type TurnEndActionHandlers = Partial<Record<Exclude<TurnEndAction, "switch_model">, () => void>> & {
-  /** Wraps the Switch model button in the picker it opens. */
-  switch_model?: (trigger: ReactElement) => ReactNode;
-};
+export type TurnEndActionHandlers = Partial<Record<TurnEndAction, () => void>>;
 
 interface TurnEndNoticeProps {
   notice: TurnEndNoticeView;
@@ -22,10 +19,9 @@ interface TurnEndNoticeProps {
 
 // A class, not the strokeWidth prop: the base-layer `.lucide` rule outranks the SVG attribute.
 const ICON_PROPS = { "aria-hidden": true, className: "size-4 shrink-0 [stroke-width:1.6]" } as const;
-// Waiting states (a usage limit, an interruption) take the primary lamp; only a failure takes the error color.
+// An interruption is a waiting state and takes the primary lamp; only a failure takes the error color.
 const FILLED_ICONS: Readonly<Record<FilledNotice["icon"], { Icon: LucideIcon; tone: string }>> = {
   failed: { Icon: CircleAlert, tone: "text-error" },
-  usage_limit: { Icon: Clock, tone: "text-primary" },
   interrupted: { Icon: CirclePause, tone: "text-primary" },
 };
 const TEXT_BUTTON = "h-7 px-2.5 text-[1.3rem]/[1.8rem] font-medium text-muted hover:text-ink";
@@ -67,28 +63,20 @@ function FilledTurnEndNotice({ notice, actions, pending }: { notice: FilledNotic
           {detailsOpen ? "Hide details" : "Details"}
         </Button>
       ) : null}
-      <TurnEndActions notice={notice} actions={actions} pending={pending} />
+      <TurnEndPrimaryAction notice={notice} actions={actions} pending={pending} />
       {notice.details && detailsOpen ? <TurnEndDetails text={notice.details} /> : null}
     </div>
   );
 }
 
-function TurnEndActions({ notice, actions, pending }: { notice: FilledNotice; actions: TurnEndActionHandlers; pending: boolean }) {
-  const { primary, secondary } = notice;
-  const wrapSecondary = secondary && actions[secondary.action];
+function TurnEndPrimaryAction({ notice, actions, pending }: { notice: FilledNotice; actions: TurnEndActionHandlers; pending: boolean }) {
+  const { primary } = notice;
   const onPrimary = primary && actions[primary.action];
-  return (
-    <>
-      {secondary && wrapSecondary
-        ? wrapSecondary(<Button type="button" variant="ghost" className={TEXT_BUTTON} disabled={pending}>{secondary.label}</Button>)
-        : null}
-      {primary && onPrimary ? (
-        <Button type="button" variant="subtle" shape="round" className="h-7 px-3 text-[1.3rem]/[1.8rem] font-medium" disabled={pending} onClick={onPrimary}>
-          {primary.label}
-        </Button>
-      ) : null}
-    </>
-  );
+  return primary && onPrimary ? (
+    <Button type="button" variant="subtle" shape="round" className="h-7 px-3 text-[1.3rem]/[1.8rem] font-medium" disabled={pending} onClick={onPrimary}>
+      {primary.label}
+    </Button>
+  ) : null;
 }
 
 function TurnEndDetails({ text }: { text: string }) {

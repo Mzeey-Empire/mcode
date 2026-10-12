@@ -33,7 +33,7 @@ function status(providerId: ProviderStatus["providerId"], auth: ProviderAuth): P
 }
 
 function primaryLabel(state: AgentModelState) {
-  const { result } = renderHook(() => useTurnEndings(THREAD, state, null));
+  const { result } = renderHook(() => useTurnEndings(THREAD, state));
   const notice = () => result.current.endingsByMessageId.u1?.view.notice;
   return () => {
     const current = notice();
@@ -68,7 +68,7 @@ describe("useTurnEndings", () => {
   });
 
   it("returns no endings without a thread", () => {
-    const { result } = renderHook(() => useTurnEndings(null, authFailedClaudeThread(), null));
+    const { result } = renderHook(() => useTurnEndings(null, authFailedClaudeThread()));
 
     expect(result.current).toEqual({ endingsByMessageId: {}, hiddenMessageIds: new Set() });
   });

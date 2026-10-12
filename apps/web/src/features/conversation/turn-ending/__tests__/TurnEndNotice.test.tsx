@@ -25,15 +25,6 @@ const FAILED: FilledNotice = {
   primary: { action: "retry", label: "Retry" },
 };
 
-const USAGE_LIMIT: FilledNotice = {
-  style: "filled",
-  icon: "usage_limit",
-  title: "Codex usage limit reached",
-  detail: "5-hour limit · resets 14:05",
-  secondary: { action: "switch_model", label: "Switch model" },
-  primary: { action: "retry_at", label: "Retry at 14:05", at: "2026-10-11T13:05:00.000Z" },
-};
-
 const INTERRUPTED: FilledNotice = {
   style: "filled",
   icon: "interrupted",
@@ -96,22 +87,9 @@ describe("TurnEndNotice", () => {
   });
 
   it("renders only the actions that have handlers", () => {
-    render(<TurnEndNotice notice={USAGE_LIMIT} actions={{ retry: vi.fn() }} />);
-    expect(screen.queryByRole("button", { name: "Switch model" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Retry at 14:05" })).toBeNull();
-    expect(screen.getByText("Codex usage limit reached")).toBeInTheDocument();
-  });
-
-  it("hands the Switch model button to the picker that wraps it", () => {
-    const opened = vi.fn();
-    render(<TurnEndNotice notice={USAGE_LIMIT} actions={{ switch_model: (trigger) => <span onClick={opened}>{trigger}</span> }} />);
-    fireEvent.click(screen.getByRole("button", { name: "Switch model" }));
-    expect(opened).toHaveBeenCalledTimes(1);
-  });
-
-  it("disables Switch model while a request is pending", () => {
-    render(<TurnEndNotice notice={USAGE_LIMIT} actions={{ switch_model: (trigger) => trigger }} pending />);
-    expect(screen.getByRole("button", { name: "Switch model" })).toBeDisabled();
+    render(<TurnEndNotice notice={INTERRUPTED} actions={{ retry: vi.fn() }} />);
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByText("Interrupted")).toBeInTheDocument();
   });
 
   it("calls the Resume handler on an interrupted notice", () => {
@@ -166,5 +144,14 @@ describe("ThreadTurnEndNotice", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(mockTransport.retryErroredTurn).toHaveBeenCalledWith({ threadId: "thread-1", turnId: "turn-1" });
+  });
+
+  it("resumes the notice's turn on its own model", () => {
+    vi.mocked(mockTransport.resumeInterruptedTurn).mockClear();
+    render(<ThreadTurnEndNotice threadId="thread-1" turnId="turn-1" providerId="codex" notice={INTERRUPTED} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+
+    expect(mockTransport.resumeInterruptedTurn).toHaveBeenCalledWith({ threadId: "thread-1", turnId: "turn-1" });
   });
 });

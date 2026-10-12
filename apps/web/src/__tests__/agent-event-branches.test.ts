@@ -52,11 +52,23 @@ describe("handleAgentEvent branches", () => {
   });
 
   it("session.error clears thread running state and sets error", () => {
-    useThreadStore.getState().handleAgentEvent({ type: "error", threadId: "thread-1", error: "Out of tokens" } as AgentEvent);
+    useThreadStore.getState().handleAgentEvent({ type: "error", threadId: "thread-1", error: "Out of tokens", failure: { kind: "fatal" } });
 
     const state = useThreadStore.getState();
     expect(state.runningThreadIds.has("thread-1")).toBe(false);
     expect(getTestThreadError("thread-1")).toBe("Out of tokens");
+    expect(readThreadField("thread-1", (record) => record.runtimePhase)).toBe("errored");
+    expect(useWorkspaceStore.getState().threads[0]?.status).toBe("errored");
+  });
+
+  it("interrupts the thread without an error when a usage limit stops the turn", () => {
+    useThreadStore.getState().handleAgentEvent({ type: "error", threadId: "thread-1", error: "Usage limit reached",
+      failure: { kind: "usage_limit", limitType: "five_hour" } });
+
+    expect(useThreadStore.getState().runningThreadIds.has("thread-1")).toBe(false);
+    expect(getTestThreadError("thread-1")).toBeUndefined();
+    expect(readThreadField("thread-1", (record) => record.runtimePhase)).toBe("interrupted");
+    expect(useWorkspaceStore.getState().threads[0]?.status).toBe("interrupted");
   });
 
   it("keeps retry state through retry events and clears it on the next provider event", () => {
