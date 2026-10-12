@@ -144,7 +144,7 @@ describe("PlanSaveScheduler", () => {
     );
   });
 
-  it("retries a busy save later with the current text and the same base", async () => {
+  it("retries a busy save later with the identical payload, then sends newer text after the ack", async () => {
     const { scheduler, saves, payloads } = setup();
     scheduler.edit("first", ready);
     await vi.advanceTimersByTimeAsync(500);
@@ -153,11 +153,38 @@ describe("PlanSaveScheduler", () => {
     await settle();
     scheduler.edit("first edited", ready);
     await vi.advanceTimersByTimeAsync(1_000);
+    saves[1].resolve(draft(MINTED_ID, 1, "first"));
+    await settle();
 
     expect(payloads()).toEqual([
       { threadId: THREAD, versionId: MINTED_ID, baseVersionId: READY_ID, baseRevision: 0, contentMd: "first" },
-      { threadId: THREAD, versionId: MINTED_ID, baseVersionId: READY_ID, baseRevision: 0, contentMd: "first edited" },
+      { threadId: THREAD, versionId: MINTED_ID, baseVersionId: READY_ID, baseRevision: 0, contentMd: "first" },
+      { threadId: THREAD, versionId: MINTED_ID, baseVersionId: READY_ID, baseRevision: 1, contentMd: "first edited" },
     ]);
+  });
+
+  it("resends the identical payload when a retry of a lost save is busy, so the user's own write does not conflict", async () => {
+    const { scheduler, saves, payloads } = setup();
+    const p1 = { threadId: THREAD, versionId: MINTED_ID, baseVersionId: READY_ID, baseRevision: 1, contentMd: "a" };
+    scheduler.edit("a", draft(MINTED_ID, 1, ""));
+    await vi.advanceTimersByTimeAsync(500);
+
+    saves[0].reject(new RpcTimeoutError("plan.saveVersion"));
+    await settle();
+    await vi.advanceTimersByTimeAsync(1_000);
+    saves[1].reject(new RpcError("Busy", "plan_busy", { latestVersion: draft(MINTED_ID, 2, "a") }));
+    await settle();
+    scheduler.edit("ab", draft(MINTED_ID, 2, "a"));
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(payloads()).toEqual([p1, p1, p1]);
+    saves[2].resolve(draft(MINTED_ID, 2, "a"));
+    await settle();
+
+    expect(scheduler.getSnapshot()).toMatchObject({ kind: "editing", text: "ab" });
+    expect(payloads()[3]).toEqual(
+      { threadId: THREAD, versionId: MINTED_ID, baseVersionId: READY_ID, baseRevision: 2, contentMd: "ab" },
+    );
   });
 
   it("holds the local text on conflict and stops saving", async () => {

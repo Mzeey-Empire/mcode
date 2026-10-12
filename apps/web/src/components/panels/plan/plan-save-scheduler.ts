@@ -75,8 +75,8 @@ const IDLE: PlanDraftState = { kind: "idle" };
 
 /**
  * Autosaves one thread's plan edits through `plan.saveVersion`: debounced,
- * one save in flight, newer text coalesced into the next save, and a lost
- * response resent as the identical payload. A conflict holds the local text
+ * one save in flight, newer text coalesced into the next save, and a lost or
+ * busy response resent as the identical payload. A conflict holds the local text
  * until the user calls {@link keepMine} or {@link useSaved}.
  */
 export class PlanSaveScheduler {
@@ -213,13 +213,12 @@ export class PlanSaveScheduler {
     if (!state) return;
     switch (failure.kind) {
       case "lost":
-        // The server may have written it, so only the identical payload is
-        // safe: it replays as a no-op, while newer text would conflict.
-        this.#scheduleRetry(() => this.#transmit(payload));
-        return;
       case "busy":
-        this.#set({ ...state, inFlight: null });
-        this.#scheduleRetry(() => this.#sendIfDue());
+        // A lost attempt of this payload may have been written, and busy
+        // writes nothing, so only the identical payload is safe: it saves or
+        // replays as a no-op, while newer text at this base would conflict.
+        // Newer text follows from #onSaved once this one is acknowledged.
+        this.#scheduleRetry(() => this.#transmit(payload));
         return;
       case "conflict":
         this.#enterConflict(state.text, failure.latest);
