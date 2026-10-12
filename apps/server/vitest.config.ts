@@ -1,6 +1,7 @@
 import { defineConfig } from "vitest/config";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
+import { DurationSequencer } from "./scripts/test-duration-sequencer";
 import { createTestDataDir } from "../../scripts/vitest-test-dir";
 
 const testDataDir = createTestDataDir();
@@ -18,9 +19,12 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
     pool: "forks",
     maxWorkers: serverTestWorkers(),
+    // CI runs this suite in `--shard` jobs. Refresh test-durations.json with
+    // `bun run test:durations` when files are added or their cost changes a lot.
+    sequence: { sequencer: DurationSequencer },
     env: {
       MCODE_DATA_DIR: testDataDir,
       MCODE_DRIZZLE_MIGRATIONS_DIR: NodePath.resolve(serverPackageRoot, "drizzle"),

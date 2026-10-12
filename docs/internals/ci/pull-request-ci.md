@@ -32,7 +32,7 @@ Server and web tests take nearly all of the test time, so `Test packages`, two `
 
 Each Vitest run sizes its worker pool to the machine's cores. When Turbo ran package test tasks in parallel on one runner, several pools competed for 4 vCPUs. Timing-sensitive tests, such as the pull-request performance budgets and `vi.waitFor` deadlines, then failed on GitHub-hosted runners ([#2020](https://github.com/Mzeey-Empire/mcode/issues/2020)). Keep one suite per runner, keep `--concurrency=1` for the package tests, and do not loosen a timing budget to make a shared runner pass.
 
-Vitest shards split a suite by file count, not by duration. If one shard of a suite runs much longer than the other, add a shard or move slow files rather than adding cores.
+Vitest's default shards split a suite by file count, so one server shard drew most of the slow files and ran about 90 s longer than the other. The server suite now splits by the per-file durations in `apps/server/test-durations.json` ([sequencer](../../../apps/server/scripts/test-duration-sequencer.ts)). Run `bun run test:durations` in `apps/server` to refresh them when the shards drift apart. A file with no recorded duration counts as a median file, so new files do not break the split. Web shards still split by file count because they were already balanced. If shards stay uneven after a refresh, add a shard rather than adding cores.
 
 ## Cached results prove nothing
 
