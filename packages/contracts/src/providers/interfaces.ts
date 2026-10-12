@@ -140,6 +140,12 @@ export interface TurnRequest<P extends ProviderId = ProviderId> {
    * `setSdkSessionId(...)` + `resume: true` two-step dance.
    */
   resumeFrom?: string;
+  /**
+   * The turn must continue the session named by `resumeFrom`. When that session
+   * cannot be resumed the adapter fails the turn with `session_resume_unavailable`
+   * instead of starting a fresh session, so the caller decides how to recover.
+   */
+  resumeRequired?: boolean;
   /** Provider-specific knobs, walled off by `P`. Required; empty-knob Providers pass `{}`. */
   providerOptions: ProviderOptionsByProvider[P];
 }

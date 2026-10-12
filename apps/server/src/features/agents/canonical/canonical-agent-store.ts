@@ -50,7 +50,6 @@ import {
   canonicalAgentTurns,
   canonicalCollaborationActions,
   threads,
-  workspaces,
 } from "../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
 import {
@@ -169,17 +168,6 @@ export interface CanonicalAgentCommitInput {
 export type CanonicalAcceptedCommitInput = Omit<CanonicalAgentCommitInput, "events" | "projectCompatibility" | "onOverflow" | "replayGuard"> & {
   readonly events: readonly AcceptedCanonicalAgentEventEnvelope[];
 };
-
-/** One visible entry in a restart-scoped recovery incident. */
-export interface CanonicalRecoveryIncidentEntry {
-  workspaceId: string;
-  workspaceName: string;
-  threadId: string;
-  threadTitle: string;
-  executionId: string;
-  startedAt: string;
-  interruptedAt: string;
-}
 
 /** A background tool call still running under the finished turn that launched it. */
 export interface CanonicalHeldBackgroundToolCall {
@@ -973,47 +961,6 @@ export class CanonicalAgentStore {
       }
       return true;
     })();
-  }
-
-  /** Load the visible entries for one restart-scoped recovery incident. */
-  listRecoveryIncidentEntries(recoveryIncidentId: string): CanonicalRecoveryIncidentEntry[] {
-    const rows = this.orm.select({
-      workspaceId: workspaces.id,
-      workspaceName: workspaces.name,
-      threadId: threads.id,
-      threadTitle: threads.title,
-      executionId: canonicalAgentIngestCheckpoints.executionId,
-      startedAt: canonicalAgentTurns.startedAt,
-      endedAt: canonicalAgentTurns.endedAt,
-    })
-      .from(canonicalAgentIngestCheckpoints)
-      .innerJoin(canonicalAgentTurns, eq(canonicalAgentTurns.id, canonicalAgentIngestCheckpoints.turnId))
-      .innerJoin(threads, eq(threads.id, canonicalAgentIngestCheckpoints.threadId))
-      .innerJoin(workspaces, eq(workspaces.id, threads.workspaceId))
-      .where(and(
-        eq(canonicalAgentIngestCheckpoints.recoveryIncidentId, recoveryIncidentId),
-        eq(canonicalAgentIngestCheckpoints.terminalOutcome, "interrupted"),
-        eq(canonicalAgentIngestCheckpoints.phase, "interrupted"),
-        eq(canonicalAgentTurns.status, "Interrupted"),
-        isNull(threads.userCompletedAt),
-        isNotNull(canonicalAgentTurns.startedAt),
-        isNotNull(canonicalAgentTurns.endedAt),
-      ))
-      .orderBy(asc(canonicalAgentTurns.endedAt), asc(canonicalAgentIngestCheckpoints.executionId))
-      .limit(MAX_TURN_RECOVERIES + 1)
-      .all();
-    if (rows.length > MAX_TURN_RECOVERIES) {
-      throw new Error(`Recovery incident exceeds ${MAX_TURN_RECOVERIES} entries`);
-    }
-    return rows.map((row) => ({
-      workspaceId: row.workspaceId,
-      workspaceName: row.workspaceName,
-      threadId: row.threadId,
-      threadTitle: row.threadTitle,
-      executionId: row.executionId,
-      startedAt: row.startedAt!,
-      interruptedAt: row.endedAt!,
-    }));
   }
 
   /** Load interrupted checkpoints that permit an explicit recovery action. */

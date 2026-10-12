@@ -18,9 +18,6 @@ import type { UpdateStatus } from "@/transport/desktop-bridge";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { ShortcutHelpDialog } from "@/components/ShortcutHelpDialog";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { useConnectionStore } from "@/stores/connectionStore";
-import { useRecoveryIncidentStore } from "@/features/recovery/state/recoveryIncidentStore";
-import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { threadOverviewKey, useOverviewStore } from "@/stores/overviewStore";
 import { COMPOSER_MIN_WIDTH, useDiffStore } from "@/stores/diffStore";
@@ -457,8 +454,6 @@ export function App() {
   const sidebarFloating = useUiStore((s) => s.sidebarFloating);
   const rightPanelMaximized = useUiStore((s) => s.rightPanelMaximized);
   const primarySurface = useUiStore((s) => s.primarySurface);
-  const connectionStatus = useConnectionStore((s) => s.status);
-  const setRecoveryIncident = useRecoveryIncidentStore((s) => s.setIncident);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
   const activePullRequestKey = usePullRequestDetailStore((s) => s.activeKey);
@@ -486,19 +481,6 @@ export function App() {
     floatingSidebarRef,
   );
   useIdleReclamation();
-
-  useEffect(() => {
-    if (connectionStatus !== "connected") return;
-    let cancelled = false;
-    void getTransport().getRecoveryIncident().then((incident) => {
-      if (!cancelled) setRecoveryIncident(incident);
-    }).catch((error: unknown) => {
-      console.error("Failed to load recovery incident", error);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [connectionStatus, setRecoveryIncident]);
 
   useComposerLayoutGuard(outerRowRef, contentRowRef, {
     settingsOpen,

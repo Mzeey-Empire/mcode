@@ -36,8 +36,6 @@ const {
       subscribeThread: vi.fn(),
       unsubscribeThread: vi.fn(),
       setThreadSubscriptions: vi.fn(),
-      getRecoveryIncident: vi.fn(),
-      retryTurn: vi.fn(),
       continueWithoutSaving: vi.fn(),
       stopAgent: vi.fn(),
       getAutomaticSetup: vi.fn(),
@@ -206,7 +204,6 @@ vi.mock("@/components/chat/cli-error", () => ({
 }));
 
 import { useWorkspaceStore, type QueuedMessageParts } from "@/features/projects/state/workspaceStore";
-import { useRecoveryIncidentStore } from "@/features/recovery/state/recoveryIncidentStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { createMockMessage } from "@/__tests__/mocks/transport";
 import { useThreadStartupStore } from "@/features/thread-startup";
@@ -271,29 +268,6 @@ const WORKSPACE = {
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
 };
-
-function recoveryIncident(
-  id: string,
-  executionId: string,
-  workspaceName: string,
-  threadTitle: string,
-  durationMs: number,
-) {
-  return {
-    id,
-    createdAt: "2026-09-01T12:00:00.000Z",
-    entries: [{
-      workspaceId: "ws-1",
-      workspaceName,
-      threadId: "thread-1",
-      threadTitle,
-      executionId,
-      startedAt: "2026-09-01T11:59:00.000Z",
-      interruptedAt: "2026-09-01T12:00:00.000Z",
-      durationMs,
-    }],
-  };
-}
 
 /** Produces a default workspace store state with an active thread. */
 function defaultWorkspaceState(overrides: Partial<{
@@ -418,12 +392,8 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     chatViewConnectionStatusRef.current = "connected";
     chatViewTransportMock.subscribeThread.mockResolvedValue(undefined);
     chatViewTransportMock.unsubscribeThread.mockResolvedValue(undefined);
-    chatViewTransportMock.getRecoveryIncident.mockResolvedValue(null);
-    chatViewTransportMock.retryTurn.mockResolvedValue(undefined);
     chatViewTransportMock.subscribeThread.mockClear();
     chatViewTransportMock.unsubscribeThread.mockClear();
-    chatViewTransportMock.getRecoveryIncident.mockClear();
-    chatViewTransportMock.retryTurn.mockClear();
     chatViewTransportMock.continueWithoutSaving.mockClear();
     chatViewTransportMock.retryAutomaticSetup.mockReset();
     chatViewTransportMock.getThreadStartup.mockReset();
@@ -433,11 +403,6 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     chatViewTransportMock.listThreadStartups.mockResolvedValue({ records: [] });
     chatViewTransportMock.cancelThreadStartup.mockResolvedValue(undefined);
     chatViewStopAgentMock.mockClear();
-    useRecoveryIncidentStore.setState({
-      incident: null,
-      dismissedIncidentIds: new Set<string>(),
-      retriedExecutionIds: new Set<string>(),
-    });
     chatViewGetTransportMock.mockReset();
     chatViewGetTransportMock.mockReturnValue(chatViewTransportMock);
     chatViewGetDraftMock.mockReset();
@@ -472,92 +437,6 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.getByTestId("composer")).toBeInTheDocument();
     expect(screen.queryByText("no messages yet")).not.toBeInTheDocument();
     expect(screen.queryByText("Start agent in new worktree")).not.toBeInTheDocument();
-  });
-
-  it("keeps a dismissed incident hidden after remount and shows a new incident", async () => {
-    const incidentA = recoveryIncident(
-      "00000000-0000-4000-8000-000000000015",
-      "00000000-0000-4000-8000-000000000016",
-      "Project A",
-      "Thread A",
-      4_200,
-    );
-    const incidentB = recoveryIncident(
-      "00000000-0000-4000-8000-000000000017",
-      "00000000-0000-4000-8000-000000000018",
-      "Project B",
-      "Thread B",
-      65_000,
-    );
-    const user = userEvent.setup();
-    useRecoveryIncidentStore.getState().setIncident(incidentA);
-
-    const first = render(<ChatView />);
-    expect(await screen.findByTestId("recovery-incident-banner")).toHaveTextContent("Project A · Thread A · 4.2s");
-    await user.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(screen.queryByTestId("recovery-incident-banner")).toBeNull();
-    first.unmount();
-
-    render(<ChatView />);
-    expect(screen.queryByTestId("recovery-incident-banner")).toBeNull();
-
-    act(() => useRecoveryIncidentStore.getState().setIncident(incidentB));
-    expect(await screen.findByTestId("recovery-incident-banner")).toHaveTextContent("Project B · Thread B · 1m 5s");
-  });
-
-  it("retries the visible incident and hides completed retries", async () => {
-    const incident = recoveryIncident(
-      "00000000-0000-4000-8000-000000000015",
-      "00000000-0000-4000-8000-000000000016",
-      "Project A",
-      "Thread A",
-      4_200,
-    );
-    const user = userEvent.setup();
-    useRecoveryIncidentStore.getState().setIncident(incident);
-
-    render(<ChatView />);
-    await user.click(await screen.findByRole("button", { name: "Retry all" }));
-
-    await waitFor(() => {
-      expect(chatViewTransportMock.retryTurn).toHaveBeenCalledWith(incident.entries[0]!.executionId);
-      expect(screen.queryByTestId("recovery-incident-banner")).toBeNull();
-    });
-  });
-
-  it("keeps failed retries in the banner", async () => {
-    const failed = recoveryIncident(
-      "00000000-0000-4000-8000-000000000019",
-      "00000000-0000-4000-8000-000000000020",
-      "Project A",
-      "Thread A",
-      4_200,
-    );
-    const completed = recoveryIncident(
-      failed.id,
-      "00000000-0000-4000-8000-000000000021",
-      "Project B",
-      "Thread B",
-      65_000,
-    );
-    const incident = { ...failed, entries: [failed.entries[0]!, completed.entries[0]!] };
-    const user = userEvent.setup();
-    const logError = vi.spyOn(console, "error").mockImplementation(() => {});
-    useRecoveryIncidentStore.getState().setIncident(incident);
-    chatViewTransportMock.retryTurn.mockImplementation(async (executionId) => {
-      if (executionId === failed.entries[0]!.executionId) throw new Error("retry failed");
-    });
-
-    render(<ChatView />);
-    await user.click(await screen.findByRole("button", { name: "Retry all" }));
-
-    await waitFor(() => {
-      expect(chatViewTransportMock.retryTurn).toHaveBeenNthCalledWith(1, failed.entries[0]!.executionId);
-      expect(chatViewTransportMock.retryTurn).toHaveBeenNthCalledWith(2, completed.entries[0]!.executionId);
-      expect(screen.getByTestId("recovery-incident-banner")).toHaveTextContent("Project A · Thread A · 4.2s");
-      expect(screen.getByTestId("recovery-incident-banner")).not.toHaveTextContent("Project B · Thread B · 1m 5s");
-    });
-    logError.mockRestore();
   });
 
   it("requires the user to choose before it continues without saving", async () => {

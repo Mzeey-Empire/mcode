@@ -12,6 +12,8 @@ import type {
   SettleUnknownSteerResult,
   TurnRetryParams,
   TurnRetryResult,
+  TurnResumeParams,
+  TurnResumeResult,
   WorkspaceFileList,
   WorkspaceFileChanges,
   FileReadResult,
@@ -119,7 +121,6 @@ import type {
   SendMessageInput,
   CreateAndSendInput,
   AgentStopResult,
-  RecoveryIncident,
   TerminalBackendCapabilities,
   TerminalCustomProfile,
   TerminalPreferencesUpdate,
@@ -436,12 +437,10 @@ export interface McodeTransport {
   listHeldSteers(): Promise<ListHeldSteersResult>;
   /** Send again or remove one held steer. */
   settleUnknownSteer(params: SettleUnknownSteerParams): Promise<SettleUnknownSteerResult>;
-  /** Read the current restart-scoped recovery incident. */
-  getRecoveryIncident(): Promise<RecoveryIncident | null>;
-  /** Retry one interrupted turn as a fresh provider execution. */
-  retryTurn(executionId: string): Promise<void>;
   /** Retry the thread's latest errored turn as a new attempt in the same provider session. */
   retryErroredTurn(params: TurnRetryParams): Promise<TurnRetryResult>;
+  /** Resume the thread's latest interrupted turn, continuing its provider session when the provider can. */
+  resumeInterruptedTurn(params: TurnResumeParams): Promise<TurnResumeResult>;
   /** Read one authoritative startup lifecycle by its client-generated identity. */
   getThreadStartup(startupId: string): Promise<ThreadStartup | null>;
   /** List retained startup lifecycles for one workspace during recovery. */

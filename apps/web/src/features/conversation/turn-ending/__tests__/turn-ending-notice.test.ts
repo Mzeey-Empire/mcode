@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentTurnEnding, PersistedTurnFailure } from "@mcode/contracts";
+import type { AgentTurnEnding, InterruptionCause, PersistedTurnFailure } from "@mcode/contracts";
 import { turnEndingView, type TurnEndingInput } from "../turn-ending-notice";
 
 const STARTED = "2026-10-11T10:00:00.000Z";
@@ -58,9 +58,36 @@ describe("turnEndingView: cancelled", () => {
     const view = turnEndingView(input({ status: "cancelled", ending: { outcome: "cancelled", stop: { by: "mcode", reason } } }));
     expect(view.notice).toEqual(notice);
   });
+});
 
-  it("shows no notice for an interrupted turn yet", () => {
-    expect(turnEndingView(input({ status: "interrupted" }))).toEqual({ foldLabel: "Interrupted after 42s", notice: null });
+describe("turnEndingView: interrupted", () => {
+  const interrupted = (cause: InterruptionCause): AgentTurnEnding => ({ outcome: "interrupted", cause });
+
+  it.each([
+    ["app_closed", "Mcode closed while Codex was working"],
+    ["provider_exited", "Codex stopped unexpectedly"],
+    ["saving_stopped", "Mcode stopped saving Codex's output"],
+    ["unknown", "Codex stopped before finishing"],
+  ] as const)("names the %s cause and offers Resume", (cause, detail) => {
+    expect(turnEndingView(input({ status: "interrupted", ending: interrupted(cause) }))).toEqual({
+      foldLabel: "Interrupted after 42s",
+      notice: { style: "filled", icon: "interrupted", title: "Interrupted", detail, primary: { action: "resume", label: "Resume" } },
+    });
+  });
+
+  it("reads a row written before causes existed as unknown", () => {
+    expect(turnEndingView(input({ status: "interrupted" })).notice).toMatchObject({ detail: "Codex stopped before finishing" });
+  });
+
+  it("offers Resume only on the thread's latest turn", () => {
+    const notice = turnEndingView(input({ status: "interrupted", isLatestTurn: false, ending: interrupted("app_closed") })).notice;
+    expect(notice).toEqual({ style: "filled", icon: "interrupted", title: "Interrupted", detail: "Mcode closed while Codex was working" });
+  });
+
+  it("drops the fold when the provider never started, and defers the startup turn to its trail", () => {
+    const ending = interrupted("app_closed");
+    expect(turnEndingView(input({ status: "interrupted", ending, providerStartedAt: null })).foldLabel).toBeNull();
+    expect(turnEndingView(input({ status: "interrupted", ending, providerStartedAt: null, isStartupTurn: true }))).toEqual({ foldLabel: null, notice: null });
   });
 });
 

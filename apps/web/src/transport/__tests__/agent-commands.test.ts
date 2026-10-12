@@ -69,7 +69,7 @@ describe("agent command transport", () => {
     expect(request.params).toEqual({ threadId: "thread-with-failed-save" });
     expect(requests.filter((candidate) => candidate.method === "agent.retrySave")).toHaveLength(1);
     expect(requests.map((candidate) => candidate.method)).not.toContain("agent.send");
-    expect(requests.map((candidate) => candidate.method)).not.toContain("agent.retry");
+    expect(requests.map((candidate) => candidate.method)).not.toContain("turn.retry");
     mockWs.respond(request.id, { retried });
     await expect(response).resolves.toEqual({ retried });
     transport.close();

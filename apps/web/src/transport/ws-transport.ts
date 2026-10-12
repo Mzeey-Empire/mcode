@@ -1182,10 +1182,8 @@ export function createWsTransport(
     listHeldSteers: () => rpc<import("@mcode/contracts").ListHeldSteersResult>("agent.listHeldSteers", {}),
     settleUnknownSteer: (params) =>
       rpc<import("@mcode/contracts").SettleUnknownSteerResult>("agent.settleUnknownSteer", params),
-    getRecoveryIncident: () =>
-      rpc<import("@mcode/contracts").RecoveryIncident | null>("agent.recoveryIncident", {}),
-    retryTurn: (executionId) => rpc<void>("agent.retry", { executionId }),
     retryErroredTurn: async (params) => WS_METHODS()["turn.retry"].result.parse(await rpc<unknown>("turn.retry", params)),
+    resumeInterruptedTurn: async (params) => WS_METHODS()["turn.resume"].result.parse(await rpc<unknown>("turn.resume", params)),
     getThreadStartup: (startupId) =>
       rpc<ThreadStartup | null>("thread.startup.get", { startupId }),
     listThreadStartups: (workspaceId) =>

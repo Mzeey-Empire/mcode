@@ -170,7 +170,7 @@ describe("turn saving notice", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getAllByRole("button", { name: "Retry save" })).toHaveLength(1);
     expect(mockTransport.sendMessage).not.toHaveBeenCalled();
-    expect(mockTransport.retryTurn).not.toHaveBeenCalled();
+    expect(mockTransport.retryErroredTurn).not.toHaveBeenCalled();
   });
 
   it("waits for saving-status pushes after a retry response and preserves the completed lifecycle", async () => {
@@ -186,7 +186,7 @@ describe("turn saving notice", () => {
     expect(useThreadStore.getState().records.get(pending.threadId)?.runtimePhase).toBe("completed");
     expect(useThreadStore.getState().runningThreadIds.has(pending.threadId)).toBe(false);
     expect(mockTransport.sendMessage).not.toHaveBeenCalled();
-    expect(mockTransport.retryTurn).not.toHaveBeenCalled();
+    expect(mockTransport.retryErroredTurn).not.toHaveBeenCalled();
   });
 
   it("allows another retry after an RPC error without exposing storage diagnostics", async () => {

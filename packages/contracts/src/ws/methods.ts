@@ -101,7 +101,12 @@ import { TurnSnapshotSchema } from "../models/turn-snapshot.js";
 import { TurnRevertScopeSchema, TurnRevertPreviewSchema, TurnRevertResultSchema } from "../models/turn-revert.js";
 import { AgentStopResultSchema, TurnRuntimeSnapshotSchema } from "../models/turn-runtime.js";
 import { CanonicalSubagentStopRequestSchema, CanonicalSubagentStopResultSchema } from "../models/canonical-subagent-roster.js";
-import { RecoveryIncidentSchema, TurnRetryParamsSchema, TurnRetryResultSchema } from "../models/turn-recovery.js";
+import {
+  TurnResumeParamsSchema,
+  TurnResumeResultSchema,
+  TurnRetryParamsSchema,
+  TurnRetryResultSchema,
+} from "../models/turn-recovery.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
 import { PlanSaveVersionSchema, PlanVersionSchema, PlanActionSchema } from "../models/plan.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
@@ -1067,20 +1072,15 @@ export const WS_METHODS = lazySchema(() => ({
     params: SettleUnknownSteerParamsSchema() as z.ZodType<SettleUnknownSteerParams>,
     result: SettleUnknownSteerResultSchema() as z.ZodType<SettleUnknownSteerResult>,
   },
-  /** Read the current restart-scoped recovery incident, if one exists. */
-  "agent.recoveryIncident": {
-    params: z.object({}).strict(),
-    result: RecoveryIncidentSchema().nullable(),
-  },
-  /** Retry one interrupted execution as a new execution. */
-  "agent.retry": {
-    params: z.object({ executionId: z.string().uuid() }).strict(),
-    result: z.void(),
-  },
   /** Retry an errored attempt on the thread's existing provider session. */
   "turn.retry": {
     params: TurnRetryParamsSchema(),
     result: TurnRetryResultSchema(),
+  },
+  /** Resume an interrupted attempt, natively when possible, otherwise from a seeded session. */
+  "turn.resume": {
+    params: TurnResumeParamsSchema(),
+    result: TurnResumeResultSchema(),
   },
   /** Continue one active response after the user accepts an unsaved text stream. */
   "agent.continueWithoutSaving": {
