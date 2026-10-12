@@ -1,15 +1,12 @@
-import { memo, type ComponentType, type ReactElement, type RefObject } from "react";
-import { ModelSelector } from "@/components/chat/ModelSelector";
+import { memo, type ComponentType, type RefObject } from "react";
 import { PermissionRequestCard } from "@/components/chat/PermissionRequestCard";
 import { NarrativeFlow, type SubagentRosterTarget } from "@/features/conversation/narrative";
 import { NarrativeIndicator } from "@/features/conversation/narrative/NarrativeIndicator";
-import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { TurnChangesBar } from "../../turn/TurnChangesBar";
 import { TurnMetaLine } from "../../turn/TurnMetaLine";
 import { WorkFold, workFoldLabel } from "../../turn/WorkFold";
-import { TurnEndNotice, type TurnEndActionHandlers } from "../../turn-ending/TurnEndNotice";
-import { useTurnResume } from "../../turn-ending/useTurnResume";
-import { useTurnRetry } from "../../turn-ending/useTurnRetry";
+import { TurnEndNotice } from "../../turn-ending/TurnEndNotice";
+import { ThreadTurnEndNotice } from "../../turn-ending/ThreadTurnEndNotice";
 import { MessageBubble } from "../MessageBubble";
 import { VisibleNarrativeLoader } from "../TranscriptNarrativeRow";
 import type { ChatVirtualItem } from "../virtual-items";
@@ -154,42 +151,8 @@ type TurnEndNoticeItem = Extract<ChatVirtualItem, { type: "turn-end-notice" }>;
 function TurnEndNoticeTranscriptItemRenderer({ item, threadId }: TranscriptItemRendererProps) {
   const ending = item as TurnEndNoticeItem;
   return threadId
-    ? <ActionableTurnEndNotice threadId={threadId} ending={ending} />
+    ? <ThreadTurnEndNotice threadId={threadId} turnId={ending.turnId} providerId={ending.providerId} notice={ending.notice} />
     : <TurnEndNotice notice={ending.notice} />;
-}
-
-function ActionableTurnEndNotice({ threadId, ending }: { threadId: string; ending: TurnEndNoticeItem }) {
-  const { retry, retryAt, cancelRetry, ...retryRequest } = useTurnRetry(threadId, ending.turnId);
-  const resume = useTurnResume(threadId, ending.turnId);
-  const thread = useWorkspaceStore((store) => store.threads.find((candidate) => candidate.id === threadId));
-  const primary = ending.notice.style === "filled" ? ending.notice.primary : undefined;
-  const actions: TurnEndActionHandlers = {
-    retry: () => retry(),
-    retry_at: primary?.action === "retry_at" ? () => retryAt(primary.at) : undefined,
-    cancel_retry: cancelRetry,
-    resume: resume.resume,
-    // A thread keeps its provider session, so the retry can only change model within it.
-    switch_model: thread
-      ? (trigger: ReactElement) => (
-        <ModelSelector
-          selectedModelId={thread.model ?? ""}
-          selectedProviderId={thread.provider}
-          onSelect={(modelId) => retry(modelId)}
-          locked={false}
-          providerLocked
-          trigger={trigger}
-        />
-      )
-      : undefined,
-  };
-  return (
-    <TurnEndNotice
-      notice={ending.notice}
-      actions={actions}
-      pending={retryRequest.pending || resume.pending}
-      error={retryRequest.error ?? resume.error}
-    />
-  );
 }
 
 const TRANSCRIPT_ITEM_COMPONENTS: Record<ChatVirtualItem["type"], TranscriptItemComponent> = {

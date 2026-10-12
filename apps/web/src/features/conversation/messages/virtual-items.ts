@@ -1,4 +1,4 @@
-import type { AgentTurnStatus, ApprovalReceiptRecord, TurnOutcome, TurnRuntimePhase } from "@mcode/contracts";
+import type { AgentTurnStatus, ApprovalReceiptRecord, ProviderId, TurnOutcome, TurnRuntimePhase } from "@mcode/contracts";
 import type { Message, ToolCall, HookExecution, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport/types";
 import type { ApprovalReceipt, NarrativeCounts, ThoughtSegment, TurnSummary } from "../narrative/types";
 import { buildNarrativeItems, computeLiveStreamingText } from "../narrative/build-narrative";
@@ -380,6 +380,8 @@ export type ChatVirtualItem =
       messageId: string;
       /** Latest attempt's turn id, which Retry targets. */
       turnId: string;
+      /** The thread's provider, which Sign in targets; null when unknown. */
+      providerId: ProviderId | null;
       notice: TurnEndNoticeView;
     };
 
@@ -515,7 +517,7 @@ function turnChangesItem(message: Message, input: StableItemInput): ChatVirtualI
 
 function turnEndNoticeItem(message: Message, ending: TurnEnding | undefined): ChatVirtualItem | undefined {
   return ending?.view.notice
-    ? { key: `turn-end-notice:${message.id}`, type: "turn-end-notice", messageId: message.id, turnId: ending.turnId, notice: ending.view.notice }
+    ? { key: `turn-end-notice:${message.id}`, type: "turn-end-notice", messageId: message.id, turnId: ending.turnId, providerId: ending.providerId, notice: ending.view.notice }
     : undefined;
 }
 
@@ -675,7 +677,7 @@ function sameTurnMetaLineItem(left: ChatVirtualItem, right: ChatVirtualItem): bo
 }
 
 function sameTurnEndNoticeItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "turn-end-notice" && right.type === "turn-end-notice" && left.turnId === right.turnId && sameTurnEndNotice(left.notice, right.notice);
+  return left.type === "turn-end-notice" && right.type === "turn-end-notice" && left.turnId === right.turnId && left.providerId === right.providerId && sameTurnEndNotice(left.notice, right.notice);
 }
 
 function sameNarrativeIndicatorItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {

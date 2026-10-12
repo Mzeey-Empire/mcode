@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ProviderAuth } from "@mcode/contracts";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useTerminalStore } from "@/features/terminal";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useToastStore } from "@/stores/toastStore";
-import { closeSignInTerminal, signInToProvider } from "../sign-in";
+import { useProviderStatusStore } from "@/stores/providerStatusStore";
+import { closeSignInTerminal, signInToProvider, signInToSignedOutProvider } from "../sign-in";
 
 vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
 
@@ -25,6 +27,39 @@ beforeEach(() => {
 
 afterEach(() => {
   useTerminalStore.setState({ terminals: {}, ptyToThread: {}, terminalPanelByThread: {} });
+});
+
+describe("signInToSignedOutProvider", () => {
+  afterEach(() => {
+    useProviderStatusStore.setState({ statuses: [] });
+  });
+
+  function seedClaude(auth: ProviderAuth) {
+    useProviderStatusStore.setState({ statuses: [{
+      providerId: "claude", auth, cli: null, rateLimit: null, newModels: [], checkedAt: "2026-10-11T12:00:00.000Z",
+    }] });
+  }
+
+  it("types the signed-out provider's own sign-in command", async () => {
+    seedClaude({ state: "signed_out", signIn: { kind: "terminal", argv: ["claude", "/login"] } });
+    useTerminalStore.getState().addTerminal("home", "pty-home-live", "pwsh", { state: "running" });
+
+    signInToSignedOutProvider("claude");
+    await settle();
+
+    expect(mockTransport.terminalWrite).toHaveBeenCalledWith("pty-home-live", "claude /login\r");
+  });
+
+  it("does nothing once the provider is no longer signed out", async () => {
+    seedClaude({ state: "signed_in" });
+
+    signInToSignedOutProvider("claude");
+    signInToSignedOutProvider("codex");
+    await settle();
+
+    expect(mockTransport.terminalCreate).not.toHaveBeenCalled();
+    expect(mockTransport.terminalWrite).not.toHaveBeenCalled();
+  });
 });
 
 describe("signInToProvider", () => {

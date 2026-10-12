@@ -13,7 +13,7 @@ import {
 } from "@mcode/contracts";
 import { describeDevinAuth } from "@mcode/providers";
 import { ProviderRateLimitStore } from "../provider-rate-limit-store.js";
-import { ProviderStatusService, type StatusSourceRegistry } from "../provider-status-service.js";
+import { ProviderStatusService, recheckAfterAuthFailure, type StatusSourceRegistry } from "../provider-status-service.js";
 import { NpmReleaseFeed } from "../npm-release-feed.js";
 import { CliUpdateRunner, type CliUpdateProcessHost } from "../cli-update-runner.js";
 import { ModelSightingsRepo } from "../model-sightings-repo.js";
@@ -343,6 +343,61 @@ describe("ProviderStatusService refresh", () => {
     vi.advanceTimersByTime(10 * 60 * 1000);
     await service.listStatus();
     expect(describeStatus).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("ProviderStatusService recheck", () => {
+  const CLAUDE_SIGNED_OUT: ProviderStatusFacts = {
+    auth: { state: "signed_out", signIn: { kind: "terminal", argv: ["claude", "/login"] } },
+  };
+
+  it("re-describes only that provider and publishes its new auth state", async () => {
+    let claudeFacts: ProviderStatusFacts = SIGNED_IN;
+    const describeClaude = vi.fn(async () => claudeFacts);
+    const describeCodex = vi.fn(async () => SIGNED_IN);
+    const service = makeService({ claude: true, codex: true }, [
+      { id: "claude", describeStatus: describeClaude },
+      { id: "codex", describeStatus: describeCodex },
+    ]);
+    await service.refresh();
+    broadcastMock.mockReset();
+    claudeFacts = CLAUDE_SIGNED_OUT;
+
+    await Promise.all([service.recheck("claude"), service.recheck("claude")]);
+
+    expect(describeClaude).toHaveBeenCalledTimes(2);
+    expect(describeCodex).toHaveBeenCalledTimes(1);
+    expect(pushedStatuses()).toEqual([
+      expect.objectContaining({
+        providerId: "claude",
+        auth: { state: "signed_out", signIn: { kind: "terminal", argv: ["claude", "/login"] } },
+      }),
+    ]);
+  });
+
+  it("does nothing for a disabled provider", async () => {
+    const describeStatus = vi.fn(async () => SIGNED_IN);
+    const service = makeService({ claude: false }, [{ id: "claude", describeStatus }]);
+
+    await service.recheck("claude");
+
+    expect(describeStatus).not.toHaveBeenCalled();
+    expect(broadcastMock).not.toHaveBeenCalled();
+  });
+
+  it("observes auth Error events only", () => {
+    const recheck = vi.fn(async (_providerId: ProviderId) => {});
+    const observe = recheckAfterAuthFailure({ recheck });
+    const failed = (kind: "auth" | "fatal") => ({
+      type: AgentEventType.Error, threadId: "t1", error: "failed", failure: { kind },
+    } as const);
+
+    observe({ providerId: "codex", sourceKind: "provider-runtime", event: failed("fatal") });
+    observe({ providerId: "codex", sourceKind: "provider-runtime", event: { type: AgentEventType.RateLimited, threadId: "t1", active: true } });
+    expect(recheck).not.toHaveBeenCalled();
+
+    observe({ providerId: "codex", sourceKind: "provider-runtime", event: failed("auth") });
+    expect(recheck.mock.calls).toEqual([["codex"]]);
   });
 });
 

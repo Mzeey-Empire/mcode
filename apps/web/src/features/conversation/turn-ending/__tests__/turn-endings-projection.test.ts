@@ -1,4 +1,4 @@
-import { createAgentModelState, type AgentItem, type AgentModelState, type AgentTurn } from "@mcode/contracts";
+import { createAgentModelState, type AgentItem, type AgentModelState, type AgentThread, type AgentTurn } from "@mcode/contracts";
 import { describe, expect, it } from "vitest";
 import { nextRetryAtLapse, projectTurnEndings, reuseTurnEndings } from "../turn-endings-projection";
 
@@ -47,8 +47,15 @@ function stateWith(turns: AgentTurn[], items: AgentItem[]): AgentModelState {
   return state;
 }
 
+function claudeThread(): AgentThread {
+  return {
+    id: THREAD_ID, workspaceId: "workspace-1", rootThreadId: THREAD_ID, providerId: "claude", providerIdentities: [],
+    activityState: "Idle", conversationRevision: 1, rosterRevision: 0, createdAt: at(0), updatedAt: at(0),
+  };
+}
+
 const FAILED = { outcome: "errored", failure: { kind: "fatal", provider: "codex", message: "boom" } } as const;
-const NO_SCHEDULE = { scheduledRetry: null, now: new Date(2026, 9, 11, 9, 0).getTime() };
+const NO_SCHEDULE = { providerSignedOut: false, scheduledRetry: null, now: new Date(2026, 9, 11, 9, 0).getTime() };
 
 describe("projectTurnEndings", () => {
   it("shows a retried turn as its first prompt plus the latest attempt's work", () => {
@@ -74,6 +81,7 @@ describe("projectTurnEndings", () => {
     expect(Object.keys(projection.endingsByMessageId).sort()).toEqual(["a1", "a2-retry"]);
     expect(projection.endingsByMessageId["a2-retry"]).toEqual({
       turnId: "t2-retry",
+      providerId: null,
       view: {
         foldLabel: "Failed after 5s",
         notice: {
@@ -111,6 +119,7 @@ describe("projectTurnEndings", () => {
 
     expect(projectTurnEndings(THREAD_ID, state, NO_SCHEDULE).endingsByMessageId.u1).toEqual({
       turnId: "t1-retry",
+      providerId: null,
       view: {
         foldLabel: null,
         notice: {
@@ -123,6 +132,21 @@ describe("projectTurnEndings", () => {
         },
       },
     });
+  });
+
+  it("offers Sign in for an auth failure only while the thread's provider is signed out", () => {
+    const state = stateWith(
+      [turn("t1", 0, { status: "Errored", ending: { outcome: "errored", failure: { kind: "auth", provider: "claude", message: "401" } } })],
+      [messageItem("u1", "t1", "user", 0)],
+    );
+    state.threads[THREAD_ID] = claudeThread();
+
+    const signedOut = projectTurnEndings(THREAD_ID, state, { ...NO_SCHEDULE, providerSignedOut: true }).endingsByMessageId.u1;
+    const signedIn = projectTurnEndings(THREAD_ID, state, NO_SCHEDULE).endingsByMessageId.u1;
+
+    expect(signedOut?.providerId).toBe("claude");
+    expect(signedOut?.view.notice).toMatchObject({ title: "Claude is signed out", primary: { action: "sign_in", label: "Sign in" } });
+    expect(signedIn?.view.notice).toMatchObject({ title: "Claude is signed out", primary: { action: "retry", label: "Retry" } });
   });
 
   it("ignores running turns and other threads", () => {

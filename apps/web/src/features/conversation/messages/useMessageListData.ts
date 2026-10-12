@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ScheduledTurnRetry } from "@mcode/contracts";
+import { useMemo } from "react";
 import type { ToolCall } from "@/transport/types";
 import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -17,19 +16,13 @@ import {
   type AgentDisplayState,
 } from "./virtual-items";
 import type { Message } from "@/transport/types";
-import {
-  projectTurnEndings,
-  nextRetryAtLapse,
-  reuseTurnEndings,
-  type TurnEndingsProjection,
-} from "../turn-ending/turn-endings-projection";
+import { useTurnEndings } from "../turn-ending/useTurnEndings";
 import type { ThoughtSegment } from "../narrative/types";
 import type { RunHoldingSignals, RunRetry } from "../narrative/run-status";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
 const EMPTY_TURN_MAP: Record<string, string> = {};
 const EMPTY_FILES_CHANGED: Record<string, string[]> = {};
-const NO_TURN_ENDINGS: TurnEndingsProjection = { endingsByMessageId: {}, hiddenMessageIds: new Set() };
 
 function resolveDisplayedThreadId(displayThreadId: string | undefined, activeThreadId: string | null | undefined) {
   return displayThreadId ?? activeThreadId;
@@ -250,33 +243,6 @@ export function useMessageListData(displayThreadId: string | undefined) {
     turnEndingsByMessageId: turnEndings.endingsByMessageId,
   };
 }
-
-function useTurnEndings(
-  threadId: string | null | undefined,
-  state: Parameters<typeof projectTurnEndings>[1],
-  scheduledRetry: ScheduledTurnRetry | null,
-): TurnEndingsProjection {
-  const previous = useRef<TurnEndingsProjection | undefined>(undefined);
-  // A reset time passing on an idle thread changes no store state, so a timer records the wake.
-  const [wokeAt, setWokeAt] = useState(0);
-  const projection = useMemo(() => {
-    if (!threadId) return NO_TURN_ENDINGS;
-    const next = projectTurnEndings(threadId, state, { scheduledRetry, now: Math.max(wokeAt, Date.now()) });
-    previous.current = reuseTurnEndings(previous.current, next);
-    return previous.current;
-  }, [threadId, state, scheduledRetry, wokeAt]);
-  const lapseAt = nextRetryAtLapse(projection);
-  useEffect(() => {
-    if (lapseAt === null) return;
-    // Longer delays overflow setTimeout and fire at once; an early wake just re-arms.
-    const delay = Math.min(Math.max(lapseAt - Date.now(), 0), MAX_TIMEOUT_MS);
-    const timer = setTimeout(() => setWokeAt(Date.now()), delay);
-    return () => clearTimeout(timer);
-  }, [lapseAt, wokeAt]);
-  return projection;
-}
-
-const MAX_TIMEOUT_MS = 2_147_483_647;
 
 function withoutHiddenMessages(messages: Message[], hidden: ReadonlySet<string>): Message[] {
   return hidden.size > 0 && messages.some((message) => hidden.has(message.id))

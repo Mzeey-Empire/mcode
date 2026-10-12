@@ -242,7 +242,7 @@ describe("buildStableItems", () => {
     } as const;
     const failed = { style: "filled", icon: "failed", title: "Codex couldn't finish this turn", primary: { action: "retry", label: "Retry" } } as const;
     const endingsFor = (messageId: string, foldLabel: string | null) => ({
-      [messageId]: { turnId: "turn-1", view: { foldLabel, notice: failed } },
+      [messageId]: { turnId: "turn-1", providerId: "codex" as const, view: { foldLabel, notice: failed } },
     });
     const build = (messages: Message[], endings: ReturnType<typeof endingsFor>) =>
       buildStableItems(messages, undefined, undefined, undefined, undefined, summary, undefined, undefined, undefined, endings);
@@ -254,7 +254,7 @@ describe("buildStableItems", () => {
       );
 
       expect(items.map((item) => item.key)).toEqual(["u1", "work-fold:a1", "a1", "turn-meta-line:a1", "turn-end-notice:a1"]);
-      expect(items.at(-1)).toEqual({ key: "turn-end-notice:a1", type: "turn-end-notice", messageId: "a1", turnId: "turn-1", notice: failed });
+      expect(items.at(-1)).toEqual({ key: "turn-end-notice:a1", type: "turn-end-notice", messageId: "a1", turnId: "turn-1", providerId: "codex", notice: failed });
     });
 
     it("hides the fold when the provider never started", () => {
