@@ -1,8 +1,7 @@
-import type { ReactNode } from "react";
-import { Zap } from "lucide-react";
-import { SegmentedControl, type SegmentedOption } from "@/components/ui/segmented-control";
+import { Brain, Maximize2, Zap, type LucideIcon } from "lucide-react";
+import { FOCUS_RING_CLASS } from "@/components/ui/focus-ring";
 import { SteppedSlider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
 import { supports1MContextWindow, supportsThinkingToggle } from "@/lib/model-registry";
 import { useThreadStore, type ThreadSettings } from "@/stores/threadStore";
@@ -214,90 +213,90 @@ function ComposerReasoningSlider({
   );
 }
 
-function ComposerPreferenceRow({ label, children }: { label: string; children: ReactNode }) {
+/**
+ * An on/off option as a pill: the icon takes the accent when on, so a glance at the row shows
+ * which options are active without reading a switch per line.
+ */
+function ComposerOptionChip({
+  icon: Icon,
+  label,
+  pressed,
+  onPressedChange,
+}: {
+  icon: LucideIcon;
+  label: string;
+  pressed: boolean;
+  onPressedChange(pressed: boolean): void;
+}) {
   return (
-    <div className="flex items-center justify-between gap-4">
-      <span className="text-body-small text-muted">{label}</span>
-      {children}
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={() => onPressedChange(!pressed)}
+      className={cn(
+        "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-body-small ring-1 ring-inset transition-colors duration-(--duration-fast) ease-(--ease-standard) motion-reduce:transition-none",
+        pressed
+          ? "bg-selected text-ink ring-transparent"
+          : "text-muted ring-control-border hover:bg-hover hover:text-ink",
+        FOCUS_RING_CLASS,
+      )}
+    >
+      <Icon
+        aria-hidden="true"
+        className={cn("size-3.5 shrink-0", pressed && "text-primary")}
+      />
+      {label}
+    </button>
+  );
+}
+
+function ComposerOptionChips({
+  state,
+  actionProps,
+}: {
+  state: ModelPreferenceState;
+  actionProps: ModelPreferenceActionProps;
+}) {
+  if (!state.hasCodexFast && !state.has1M && !state.hasThinking) return null;
+
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {state.hasCodexFast && (
+        <ComposerOptionChip
+          icon={Zap}
+          label="Fast"
+          pressed={state.codexFastMode}
+          onPressedChange={(checked) => {
+            const codexFastMode = checked === actionProps.defaults.globalCodexFast ? null : checked;
+            actionProps.onSelectionChange({ codexFastMode });
+            persistThreadSetting(actionProps, { codexFastMode }, { skipForks: true });
+          }}
+        />
+      )}
+      {state.has1M && (
+        <ComposerOptionChip
+          icon={Maximize2}
+          label="1M context"
+          pressed={state.contextWindow === "1m"}
+          onPressedChange={(on) => {
+            const contextWindow: ContextWindowMode = on ? "1m" : "200k";
+            actionProps.onSelectionChange({ contextWindow });
+            persistThreadSetting(actionProps, { contextWindow }, { skipForks: true });
+          }}
+        />
+      )}
+      {state.hasThinking && (
+        <ComposerOptionChip
+          icon={Brain}
+          label="Thinking"
+          pressed={state.thinking}
+          onPressedChange={(thinking) => {
+            actionProps.onSelectionChange({ thinking });
+            persistThreadSetting(actionProps, { thinking }, { skipForks: true });
+          }}
+        />
+      )}
     </div>
-  );
-}
-
-const CONTEXT_WINDOW_OPTIONS = [
-  { value: "200k", label: "200K" },
-  { value: "1m", label: "1M" },
-] as const satisfies readonly SegmentedOption[];
-
-function ComposerContextWindowOptions({
-  state,
-  actionProps,
-}: {
-  state: ModelPreferenceState;
-  actionProps: ModelPreferenceActionProps;
-}) {
-  if (!state.has1M) return null;
-
-  return (
-    <ComposerPreferenceRow label="Context">
-      <SegmentedControl
-        size="compact"
-        aria-label="Context window"
-        options={CONTEXT_WINDOW_OPTIONS}
-        value={state.contextWindow}
-        onChange={(value) => {
-          const contextWindow: ContextWindowMode = value === "1m" ? "1m" : "200k";
-          actionProps.onSelectionChange({ contextWindow });
-          persistThreadSetting(actionProps, { contextWindow }, { skipForks: true });
-        }}
-      />
-    </ComposerPreferenceRow>
-  );
-}
-
-function ComposerThinkingOptions({
-  state,
-  actionProps,
-}: {
-  state: ModelPreferenceState;
-  actionProps: ModelPreferenceActionProps;
-}) {
-  if (!state.hasThinking) return null;
-
-  return (
-    <ComposerPreferenceRow label="Thinking">
-      <Switch
-        aria-label="Thinking"
-        checked={state.thinking}
-        onCheckedChange={(thinking) => {
-          actionProps.onSelectionChange({ thinking });
-          persistThreadSetting(actionProps, { thinking }, { skipForks: true });
-        }}
-      />
-    </ComposerPreferenceRow>
-  );
-}
-
-function ComposerFastModeOptions({
-  state,
-  actionProps,
-}: {
-  state: ModelPreferenceState;
-  actionProps: ModelPreferenceActionProps;
-}) {
-  if (!state.hasCodexFast) return null;
-
-  return (
-    <ComposerPreferenceRow label="Fast">
-      <Switch
-        aria-label="Fast mode"
-        checked={state.codexFastMode}
-        onCheckedChange={(checked) => {
-          const codexFastMode = checked === actionProps.defaults.globalCodexFast ? null : checked;
-          actionProps.onSelectionChange({ codexFastMode });
-          persistThreadSetting(actionProps, { codexFastMode }, { skipForks: true });
-        }}
-      />
-    </ComposerPreferenceRow>
   );
 }
 
@@ -326,11 +325,9 @@ export function ComposerModelPreferenceSettings({
   const actionProps = { threadId, branchFromMessageId, selection, defaults, onSelectionChange };
 
   return (
-    <div role="group" aria-label={state.preferenceTooltip} className="flex w-full flex-col gap-2.5 px-1.5 py-1">
+    <div role="group" aria-label={state.preferenceTooltip} className="flex w-full flex-col gap-3 px-1.5 py-1">
       <ComposerReasoningSlider state={state} actionProps={actionProps} />
-      <ComposerContextWindowOptions state={state} actionProps={actionProps} />
-      <ComposerThinkingOptions state={state} actionProps={actionProps} />
-      <ComposerFastModeOptions state={state} actionProps={actionProps} />
+      <ComposerOptionChips state={state} actionProps={actionProps} />
     </div>
   );
 }

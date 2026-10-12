@@ -69,7 +69,7 @@ describe("ComposerModelControl", () => {
     const onSelectionChange = renderLockedControl("message-1");
 
     await userEvent.click(screen.getByTestId("model-selector-trigger"));
-    await userEvent.click(await screen.findByRole("switch", { name: "Fast mode" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Fast" }));
 
     expect(onSelectionChange).toHaveBeenCalledWith({ codexFastMode: true });
     expect(setThreadSettings).not.toHaveBeenCalled();
