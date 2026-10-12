@@ -1,6 +1,8 @@
-import { Brain, Maximize2, Zap, type LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
+import { Brain, Zap } from "lucide-react";
 import { FOCUS_RING_CLASS } from "@/components/ui/focus-ring";
 import { SteppedSlider } from "@/components/ui/slider";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
 import { supports1MContextWindow, supportsThinkingToggle } from "@/lib/model-registry";
@@ -182,88 +184,74 @@ function ComposerReasoningSlider({
   state: ModelPreferenceState;
   actionProps: ModelPreferenceActionProps;
 }) {
-  if (state.reasoningLevels.length === 0) return null;
+  // One level leaves nothing to choose, and the header already names it.
+  if (state.reasoningLevels.length < 2) return null;
   const { reasoning } = actionProps.selection;
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between gap-4">
-        <span className="text-body-small text-muted">Reasoning</span>
-        <span data-testid="composer-settings-label" className="text-fade text-body-small font-medium text-ink">
-          {reasoningLabel(reasoning)}
-        </span>
-      </div>
-      {/* One level leaves nothing to choose, and the header already names it. */}
-      {state.reasoningLevels.length > 1 && (
-        <SteppedSlider
-          // An off-ladder level selects no stop, so choosing any stop, including the first, commits it.
-          value={state.reasoningLevels.indexOf(reasoning)}
-          stops={state.reasoningLevels.length}
-          aria-label="Reasoning effort"
-          getStopLabel={(stop) => reasoningLabel(state.reasoningLevels[stop] ?? reasoning)}
-          onValueChange={(stop) => {
-            const reasoning = state.reasoningLevels[stop];
-            if (!reasoning) return;
-            actionProps.onSelectionChange({ reasoning });
-            persistThreadSetting(actionProps, { reasoningLevel: reasoning }, { skipForks: false });
-          }}
-        />
-      )}
-    </div>
+    <SteppedSlider
+      // An off-ladder level selects no stop, so choosing any stop, including the first, commits it.
+      value={state.reasoningLevels.indexOf(reasoning)}
+      stops={state.reasoningLevels.length}
+      aria-label="Reasoning effort"
+      getStopLabel={(stop) => reasoningLabel(state.reasoningLevels[stop] ?? reasoning)}
+      onValueChange={(stop) => {
+        const reasoning = state.reasoningLevels[stop];
+        if (!reasoning) return;
+        actionProps.onSelectionChange({ reasoning });
+        persistThreadSetting(actionProps, { reasoningLevel: reasoning }, { skipForks: false });
+      }}
+    />
   );
 }
 
-/**
- * An on/off option as a pill: the icon takes the accent when on, so a glance at the row shows
- * which options are active without reading a switch per line.
- */
-function ComposerOptionChip({
-  icon: Icon,
+/** An on/off model option as a small icon button; the tooltip carries the name the icon leaves out. */
+function ComposerOptionToggle({
   label,
   pressed,
   onPressedChange,
+  children,
 }: {
-  icon: LucideIcon;
   label: string;
   pressed: boolean;
   onPressedChange(pressed: boolean): void;
+  children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      onClick={() => onPressedChange(!pressed)}
-      className={cn(
-        "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-body-small ring-1 ring-inset transition-colors duration-(--duration-fast) ease-(--ease-standard) motion-reduce:transition-none",
-        pressed
-          ? "bg-selected text-ink ring-transparent"
-          : "text-muted ring-control-border hover:bg-hover hover:text-ink",
-        FOCUS_RING_CLASS,
-      )}
-    >
-      <Icon
-        aria-hidden="true"
-        className={cn("size-3.5 shrink-0", pressed && "text-primary")}
-      />
-      {label}
-    </button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={label}
+            aria-pressed={pressed}
+            onClick={() => onPressedChange(!pressed)}
+            className={cn(
+              "inline-flex h-6.5 min-w-6.5 cursor-pointer items-center justify-center rounded-md px-1.5 text-caption font-semibold transition-colors duration-(--duration-fast) ease-(--ease-standard) motion-reduce:transition-none",
+              pressed ? "bg-selected text-primary" : "text-muted hover:bg-hover hover:text-ink",
+              FOCUS_RING_CLASS,
+            )}
+          />
+        }
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipContent side="top">{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
-function ComposerOptionChips({
+function ComposerOptionToggles({
   state,
   actionProps,
 }: {
   state: ModelPreferenceState;
   actionProps: ModelPreferenceActionProps;
 }) {
-  if (!state.hasCodexFast && !state.has1M && !state.hasThinking) return null;
-
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="flex shrink-0 items-center gap-0.5">
       {state.hasCodexFast && (
-        <ComposerOptionChip
-          icon={Zap}
+        <ComposerOptionToggle
           label="Fast"
           pressed={state.codexFastMode}
           onPressedChange={(checked) => {
@@ -271,11 +259,12 @@ function ComposerOptionChips({
             actionProps.onSelectionChange({ codexFastMode });
             persistThreadSetting(actionProps, { codexFastMode }, { skipForks: true });
           }}
-        />
+        >
+          <Zap aria-hidden="true" className={cn("size-3.5", state.codexFastMode && "fill-current")} />
+        </ComposerOptionToggle>
       )}
       {state.has1M && (
-        <ComposerOptionChip
-          icon={Maximize2}
+        <ComposerOptionToggle
           label="1M context"
           pressed={state.contextWindow === "1m"}
           onPressedChange={(on) => {
@@ -283,19 +272,46 @@ function ComposerOptionChips({
             actionProps.onSelectionChange({ contextWindow });
             persistThreadSetting(actionProps, { contextWindow }, { skipForks: true });
           }}
-        />
+        >
+          1M
+        </ComposerOptionToggle>
       )}
       {state.hasThinking && (
-        <ComposerOptionChip
-          icon={Brain}
+        <ComposerOptionToggle
           label="Thinking"
           pressed={state.thinking}
           onPressedChange={(thinking) => {
             actionProps.onSelectionChange({ thinking });
             persistThreadSetting(actionProps, { thinking }, { skipForks: true });
           }}
-        />
+        >
+          <Brain aria-hidden="true" className="size-3.5" />
+        </ComposerOptionToggle>
       )}
+    </div>
+  );
+}
+
+function ComposerSettingsHeader({
+  state,
+  actionProps,
+}: {
+  state: ModelPreferenceState;
+  actionProps: ModelPreferenceActionProps;
+}) {
+  return (
+    <div className="flex min-h-6.5 items-center justify-between gap-4">
+      {state.reasoningLevels.length > 0 ? (
+        <span className="flex min-w-0 items-baseline gap-2 text-body-small">
+          <span className="text-muted">Reasoning</span>
+          <span data-testid="composer-settings-label" className="text-fade font-medium text-ink">
+            {reasoningLabel(actionProps.selection.reasoning)}
+          </span>
+        </span>
+      ) : (
+        <span className="text-body-small text-muted">Options</span>
+      )}
+      <ComposerOptionToggles state={state} actionProps={actionProps} />
     </div>
   );
 }
@@ -325,9 +341,9 @@ export function ComposerModelPreferenceSettings({
   const actionProps = { threadId, branchFromMessageId, selection, defaults, onSelectionChange };
 
   return (
-    <div role="group" aria-label={state.preferenceTooltip} className="flex w-full flex-col gap-3 px-1.5 py-1">
+    <div role="group" aria-label={state.preferenceTooltip} className="flex w-full flex-col gap-2 px-1.5 py-1">
+      <ComposerSettingsHeader state={state} actionProps={actionProps} />
       <ComposerReasoningSlider state={state} actionProps={actionProps} />
-      <ComposerOptionChips state={state} actionProps={actionProps} />
     </div>
   );
 }
