@@ -79,8 +79,13 @@ async function prepareSnapshot(
   snapshots: SnapshotService,
 ): Promise<{ snapshot: ExecutionTurnSnapshot | null; filesChanged: string[] }> {
   const refAfter = refBefore ? await snapshots.captureRef(handoff.cwd) : null;
-  const filesChanged = fileEffects.effects.filter((effect) => effect.scope === "workspace")
+  const trackedPaths = fileEffects.effects.filter((effect) => effect.scope === "workspace")
     .map((effect) => effect.path);
+  // Only Codex reports file tools before they run, and no provider reports shell edits, so an
+  // empty tracked list falls back to the attributed Git comparison between the turn's refs.
+  const filesChanged = trackedPaths.length > 0 || !refBefore || !refAfter
+    ? trackedPaths
+    : await snapshots.getFilesChanged(handoff.cwd, refBefore, refAfter);
   if (fileEffects.fileCount === 0 && !(refBefore && refAfter)) return { snapshot: null, filesChanged };
   return { filesChanged, snapshot: {
     threadId: handoff.threadId,

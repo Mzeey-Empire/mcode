@@ -187,6 +187,25 @@ describe("TurnFileTracker", () => {
     expect(() => structuredClone(prepared)).not.toThrow();
   });
 
+  it("falls back to the Git comparison when no file tool was tracked", async () => {
+    const root = await tempDir("mcode-file-git-fallback-");
+    const git = new RealGitExecutor();
+    await git.exec(["-C", root, "init", "-q"]);
+    await NodeFSPromises.writeFile(NodePath.join(root, "seed.txt"), "seed\n");
+    const snapshots = new SnapshotService(git);
+    const tracker = trackerWithBaseline({}, []);
+    const handoff = tracker.beginExecutionTurn({
+      threadId: "t", executionId: "execution-1", cwd: root, baselineRef: await snapshots.captureRef(root),
+    });
+    await NodeFSPromises.writeFile(NodePath.join(root, "shell.txt"), "written by a shell\n");
+    const prepared = await prepareExecutionFileEvidence({
+      handoff, turnId: "turn-1", deliveryAttempt: 1, outcome: "completed", nativeDiff: null, tracker, snapshots,
+    });
+    expect(prepared.fileEffects.fileCount).toBe(0);
+    expect(prepared.filesChanged).toEqual(["shell.txt"]);
+    expect(prepared.snapshot?.filesChanged).toEqual(["shell.txt"]);
+  });
+
   it("rejects a handoff or capture for another execution or root", async () => {
     const root = await tempDir("mcode-transferred-file-stale-");
     const otherRoot = await tempDir("mcode-transferred-file-other-root-");

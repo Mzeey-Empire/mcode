@@ -574,7 +574,7 @@ export class TurnFinalizer {
     initialFilesChanged: string[],
   ): Promise<string[]> {
     const refAfter = await this.captureRefAfter(threadId, refData);
-    const filesChanged = await this.snapshotFilesChanged(refData, fileEffects, refAfter, initialFilesChanged);
+    const filesChanged = await this.snapshotFilesChanged(refData, refAfter, initialFilesChanged);
     if (this.shouldSkipSnapshot(fileEffects, refData.ref, refAfter)) {
       await this.settleBaselinePin(refData, null);
       return filesChanged;
@@ -609,11 +609,10 @@ export class TurnFinalizer {
 
   private async snapshotFilesChanged(
     refData: TurnRef,
-    fileEffects: TurnFileEffectSummary | undefined,
     refAfter: string | null,
     initialFilesChanged: string[],
   ): Promise<string[]> {
-    if (fileEffects || !refData.ref || !refAfter) return initialFilesChanged;
+    if (initialFilesChanged.length > 0 || !refData.ref || !refAfter) return initialFilesChanged;
     return this.snapshotService.getFilesChanged(refData.cwd, refData.ref, refAfter);
   }
 

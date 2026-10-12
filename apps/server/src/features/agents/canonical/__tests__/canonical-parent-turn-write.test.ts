@@ -443,6 +443,34 @@ describe("CanonicalParentTurnWrite", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM turn_diff_snapshots").get()).toEqual({ count: 1 });
   });
 
+  it("commits Git-compared files when no file effect was tracked, but only between real refs", async () => {
+    writer.start(startInput());
+    const messageId = deriveTurnAssistantMessageId(THREAD_ID, "user-1");
+    const input = terminalProjectionInput();
+    input.assistant.messageId = messageId;
+    writer.stageTerminalProjection(input);
+    const fileEffects = { revision: 0, fileCount: 0, additions: 0, deletions: 0, effects: [] };
+    const snapshot = {
+      threadId: THREAD_ID, executionId: EXECUTION_ID, refBefore: "a".repeat(40),
+      refAfter: "b".repeat(40), filesChanged: ["shell.txt"], fileEffects, worktreePath: null,
+    };
+    const fileEvidence: PreparedExecutionFileEvidence = {
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, deliveryAttempt: 2,
+      fileEffects, filesChanged: ["shell.txt"], snapshot, selectedTurnDiff: null,
+    };
+    const finish: DataOnlyParentTurnFinishInput = {
+      ...finishInput(new MessageRepo(db).findByIdInThreadIncludingInternal(THREAD_ID, messageId)!),
+      projection: { kind: "writer-staged", messageId }, deliveryAttempt: 2, fileEvidence,
+    };
+    await expect(writer.finish({ ...finish, fileEvidence: { ...fileEvidence, snapshot: { ...snapshot, refBefore: "" } } }))
+      .rejects.toThrow("Invalid execution file evidence");
+    expect((await writer.finish(finish)).outcome).toBe("committed");
+    expect(db.prepare("SELECT files_changed FROM turn_snapshots WHERE message_id = ?").get(messageId))
+      .toEqual({ files_changed: '["shell.txt"]' });
+    expect(db.prepare("SELECT has_file_changes FROM threads WHERE id = ?").get(THREAD_ID))
+      .toEqual({ has_file_changes: 1 });
+  });
+
   it("refuses to reuse a public assistant row as a staged turn projection", () => {
     writer.start(startInput());
     const input = terminalProjectionInput();

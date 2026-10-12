@@ -832,6 +832,19 @@ describe("TurnFinalizer.finalize — git snapshot write", () => {
     });
   });
 
+  it("uses the Git comparison when the tracker saw no workspace file tool", async () => {
+    const emptySummary = { revision: 0, fileCount: 0, additions: 0, deletions: 0, effects: [] };
+    const fileTracker = { finalizeTurn: vi.fn(async () => emptySummary), clearTurn: vi.fn(),
+      reconstructionPatch: vi.fn(async () => undefined) } as unknown as TurnFileTracker;
+    const { finalizer, turnSnapshotRepo, threadRepo } = await build(["shell.txt"], { fileTracker });
+    finalizer.recordTurnRef(THREAD, "abc111", "/workspace", 1);
+    await finalizer.finalize(THREAD, "completed");
+    expect(turnSnapshotRepo.getByMessage("msg-1")).toMatchObject({
+      ref_before: "abc111", ref_after: "def222", files_changed: ["shell.txt"], file_effects: emptySummary,
+    });
+    expect(threadRepo.findById(THREAD)?.has_file_changes).toBe(true);
+  });
+
   it("persists external effects when Git refs are unavailable", async () => {
     const fileEffects = { revision: 1, fileCount: 1, additions: 0, deletions: 0, effects: [{
       path: "C:/outside.txt", kind: "edited" as const, scope: "external" as const,
