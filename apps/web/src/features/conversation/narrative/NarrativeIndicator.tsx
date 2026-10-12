@@ -4,12 +4,7 @@ import { formatClock } from "@/lib/time";
 import { Spinner } from "@/components/ui/spinner";
 import { StackedLayersIcon, stackedLayersIconClassName } from "@/components/ui/StackedLayersIcon";
 import type { RunStatus } from "./run-status";
-
-/**
- * How long the exit animation plays before the component stops rendering.
- * Matches the `narrative-indicator-out` keyframes duration in index.css.
- */
-const EXIT_DURATION_MS = 240;
+import { STATUS_LINE_EXIT_MS } from "./status-line-exit";
 
 /** Lifecycle of the indicator: live → animating out → unrendered. */
 type IndicatorPhase = "running" | "exiting" | "done";
@@ -60,7 +55,7 @@ function useNarrativeIndicatorLifecycle(
 
   useEffect(() => {
     if (phase !== "exiting") return;
-    const timer = setTimeout(() => setCompletedExitEpoch(runningEpoch), EXIT_DURATION_MS);
+    const timer = setTimeout(() => setCompletedExitEpoch(runningEpoch), STATUS_LINE_EXIT_MS);
     return () => clearTimeout(timer);
   }, [phase, runningEpoch]);
 
@@ -128,7 +123,7 @@ function RunStatusIcon({ icon, running }: { icon: RunStatus["icon"]; running: bo
  *   Stopping 1:04
  *
  * When the turn ends the bar collapses and fades out over
- * {@link EXIT_DURATION_MS} with its last running label instead of vanishing in
+ * {@link STATUS_LINE_EXIT_MS} with its last running label instead of vanishing in
  * a single frame, then renders nothing. Mounting with the agent already
  * stopped (e.g. revisiting a thread whose turn finished) skips straight to
  * rendering nothing.

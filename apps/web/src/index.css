@@ -1109,7 +1109,7 @@ input[type="range"].settings-range::-moz-range-thumb {
 /* Turn-end exit for the live narrative step indicator: fade while collapsing
    the row (max-height covers the bar's content + padding; margin-top folds
    away with it) so the rows below glide up instead of snapping. Duration must
-   match EXIT_DURATION_MS in NarrativeIndicator.tsx. */
+   match STATUS_LINE_EXIT_MS in narrative/status-line-exit.ts. */
 @keyframes narrative-indicator-out {
   from { opacity: 1; max-height: 48px; margin-top: 6px; }
   to   { opacity: 0; max-height: 0;    margin-top: 0; }

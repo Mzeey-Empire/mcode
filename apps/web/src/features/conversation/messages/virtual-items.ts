@@ -604,7 +604,7 @@ const NO_HOLDING_SIGNALS: RunHoldingSignals = { stopPending: false, compacting: 
 function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts, answering, holdingSignals }: NarrativeIndicatorInput): ChatVirtualItem | undefined {
   // An integration can ask for approval on an idle thread; the status line still has to say the thread waits.
   const live = isAgentRunning || holdingSignals?.waitingFor === "approval";
-  if (!live && toolCalls.length === 0) return undefined;
+  if (!live && toolCalls.length === 0 && !holdingSignals?.exiting) return undefined;
   const topLevelTools = toolCalls.filter((toolCall) => toolCall.parentToolCallId == null);
   const running = topLevelTools.filter(isTurnWorkRunning);
   const status = deriveRunStatus({

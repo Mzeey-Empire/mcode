@@ -1162,6 +1162,11 @@ describe("provider retry status", () => {
     expect(findIndicator(items)?.isAgentRunning).toBe(true);
   });
 
+  it("keeps the status line row, no longer live, while it fades after the last approval is answered", () => {
+    const items = buildVolatileItems([], undefined, undefined, undefined, [], [], [], undefined, undefined, undefined, { stopPending: false, compacting: false, exiting: true });
+    expect(findIndicator(items)?.isAgentRunning).toBe(false);
+  });
+
   it("shows no status line on an idle thread with nothing waiting", () => {
     const items = buildVolatileItems([], undefined, undefined, undefined, [], [], [], undefined, undefined, undefined, { stopPending: false, compacting: false });
     expect(findIndicator(items)).toBeUndefined();

@@ -14,6 +14,8 @@ export interface RunHoldingSignals {
   compacting: boolean;
   retry?: RunRetry;
   waitingFor?: "approval" | "answers";
+  /** The status line just went off and keeps its row while the exit fade plays. */
+  exiting?: boolean;
 }
 
 /** Everything the status line needs to pick one label for a running turn. */
