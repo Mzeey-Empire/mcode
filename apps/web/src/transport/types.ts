@@ -449,6 +449,8 @@ export interface McodeTransport {
   cancelThreadStartup(startupId: string): Promise<ThreadStartup>;
   /** Releases a startup blocked on its origin fetch: fetch again, or start from the local branch. */
   resolveThreadStartup(startupId: string, action: ThreadStartupResolveInput["action"]): Promise<ThreadStartup>;
+  /** Sends a startup's saved first message again after its agent failed before taking it; setup does not rerun. */
+  retryThreadStartupAgent(startupId: string): Promise<ThreadStartup>;
   createAndSendMessage(input: CreateAndSendInput): Promise<CreateAndSendResult>;
   stopAgent(threadId: string): Promise<AgentStopResult>;
   /** Retry retained saving work without starting another provider execution. */

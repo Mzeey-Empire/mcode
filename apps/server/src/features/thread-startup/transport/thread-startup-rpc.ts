@@ -3,6 +3,7 @@ import type {
   ThreadStartupGetInput,
   ThreadStartupListInput,
   ThreadStartupResolveInput,
+  ThreadStartupRetryAgentInput,
   WsMethodName,
 } from "@mcode/contracts";
 import type { AgentService } from "../../agents/orchestration/agent-service.js";
@@ -14,20 +15,22 @@ type ThreadStartupRpcMethod =
   | "thread.startup.get"
   | "thread.startup.list"
   | "thread.startup.resolve"
-  | "thread.startup.cancel";
+  | "thread.startup.cancel"
+  | "thread.startup.retryAgent";
 
 type ThreadStartupParamsByMethod = {
   "thread.startup.get": ThreadStartupGetInput;
   "thread.startup.list": ThreadStartupListInput;
   "thread.startup.resolve": ThreadStartupResolveInput;
   "thread.startup.cancel": ThreadStartupCancelInput;
+  "thread.startup.retryAgent": ThreadStartupRetryAgentInput;
 };
 
 /** Dependencies required to route thread startup lifecycle RPC calls. */
 export interface ThreadStartupRouterDeps {
   threadStartupFetchDecisions: ThreadStartupFetchDecisions;
   threadStartupService: Pick<ThreadStartupService, "get" | "list" | "cancel" | "markCancelled">;
-  workspaceEnvironmentService: Pick<WorkspaceEnvironmentService, "stopAutomaticSetup">;
+  workspaceEnvironmentService: Pick<WorkspaceEnvironmentService, "retryAutomaticAgentStart" | "stopAutomaticSetup">;
   agentService: Pick<AgentService, "stopSession">;
 }
 
@@ -67,6 +70,12 @@ const threadStartupHandlers: ThreadStartupHandlerMap = {
       case "worktree":
         return startup;
     }
+  },
+  "thread.startup.retryAgent": async (deps, params) => {
+    const startup = deps.threadStartupService.get(params.startupId);
+    if (!startup?.threadId) throw new Error("This startup has no thread to retry");
+    await deps.workspaceEnvironmentService.retryAutomaticAgentStart({ threadId: startup.threadId });
+    return deps.threadStartupService.get(params.startupId);
   },
 };
 

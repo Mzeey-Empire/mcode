@@ -155,7 +155,7 @@ export interface WorkspaceEnvironmentServiceOptions {
   readonly attachmentStorage?: WorkspaceEnvironmentAttachmentStorage;
   readonly threadStartups?: Pick<
     ThreadStartupService,
-    "appendOutput" | "block" | "complete" | "findByThreadId" | "listInterrupted" | "markCancelled" | "resume" | "skip"
+    "appendOutput" | "block" | "complete" | "fail" | "findByThreadId" | "listInterrupted" | "markCancelled" | "resume" | "retryAgent" | "skip"
   >;
   readonly platform?: WorkspaceEnvironmentPlatform;
   readonly manualSetupTimeoutMs?: number;
@@ -537,6 +537,33 @@ export class WorkspaceEnvironmentService {
         this.requireAutomaticSetupThread(input.threadId);
       }
       return this.requireAutomaticRepository().snapshot(input.threadId);
+    });
+  }
+
+  /**
+   * Send a startup's saved first message again after its agent failed before the runtime took it.
+   * Setup does not run again: its gate is already released, and the claim keeps the persisted message.
+   */
+  async retryAutomaticAgentStart(input: { readonly threadId: string }): Promise<void> {
+    await this.runAutomaticRecoveryOperation(input.threadId, async () => {
+      this.requireAutomaticSetupThread(input.threadId);
+      const repository = this.requireAutomaticRepository();
+      const startups = this.options.threadStartups;
+      const startup = startups?.findByThreadId(input.threadId);
+      const unsent = repository.snapshot(input.threadId).queuedTurns.some((turn) => turn.state === "dispatching");
+      if (!startups || startup?.state !== "failed" || startup.phase !== "agent" || !startup.error || !unsent) {
+        throw new WorkspaceEnvironmentServiceError(
+          "WORKSPACE_ENVIRONMENT_SETUP_UNAVAILABLE",
+          "This thread has no unsent first message to retry",
+        );
+      }
+      // The startup must be running before the claim is released: a released claim under a terminal startup drains as an ordinary send.
+      if ((await startups.retryAgent(startup.startupId)).state !== "running") return;
+      if (!await repository.releaseUnsentClaim(input.threadId)) {
+        await startups.fail(startup.startupId, startup.error);
+        return;
+      }
+      await this.drainReleasedAutomaticTurn(input.threadId);
     });
   }
 

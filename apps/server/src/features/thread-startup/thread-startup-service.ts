@@ -106,6 +106,11 @@ export class ThreadStartupService {
     return this.commit(threadStartupStateWriteOperations.fail, [[startupId, error, detail], this.timestamp()]);
   }
 
+  /** Run a failed agent phase again before its saved first message is resent. */
+  retryAgent(...input: Parameters<ThreadStartupStateStore["retryAgent"]>): Promise<ThreadStartup> {
+    return this.commit(threadStartupStateWriteOperations.retryAgent, [input, this.timestamp()]);
+  }
+
   /** Persist cancellation intent before the owning flow stops its work. */
   cancel(...input: Parameters<ThreadStartupStateStore["cancel"]>): Promise<ThreadStartup> {
     return this.commit(threadStartupStateWriteOperations.cancel, [input, this.timestamp()]);

@@ -238,6 +238,26 @@ describe("ThreadStartupStateStore", () => {
     db.close();
   });
 
+  it("reruns only a failed agent phase and leaves other failures alone", () => {
+    const { db, service } = createHarness();
+    service.start(input());
+    service.advance(firstStartupId, "thread");
+    service.advance(firstStartupId, "agent");
+    service.fail(firstStartupId, { code: "AGENT_START_FAILED", message: "Agent failed", retryable: true });
+    const retried = service.retryAgent(firstStartupId);
+
+    expect(retried).toMatchObject({ state: "running", phase: "agent" });
+    expect(retried).not.toHaveProperty("error");
+    expect(retried.steps.at(-1)).toMatchObject({ phase: "agent", state: "running" });
+    expect(retried.steps.at(-1)).not.toHaveProperty("endedAt");
+
+    service.start(input(secondStartupId));
+    service.advance(secondStartupId, "thread");
+    const threadFailure = service.fail(secondStartupId, { code: "worktree_unavailable", message: "No worktree", retryable: true });
+    expect(service.retryAgent(secondStartupId)).toEqual(threadFailure);
+    db.close();
+  });
+
   it("binds a created thread and preserves structured failure detail", () => {
     const { db, service } = createHarness();
     db.prepare(

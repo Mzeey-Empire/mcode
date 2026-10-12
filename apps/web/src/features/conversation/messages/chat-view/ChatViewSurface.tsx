@@ -20,7 +20,7 @@ import { useToastStore } from "@/stores/toastStore";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
 import { OverviewLayer } from "@/features/thread-overview/overview-layer";
-import { StartupStepsTrail, editStartupMessage, editStartupSetupScript, openStartupSetupTerminal, startupDecision, useFirstSendMotion, useStartingThread, useStartupTurnRetry, useThreadStartup } from "@/features/thread-startup";
+import { StartupStepsTrail, editStartupMessage, editStartupSetupScript, openStartupSetupTerminal, startupDecision, useFirstSendMotion, useStartingThread, useStartupAgentRetry, useThreadStartup } from "@/features/thread-startup";
 import { useThreadStartupLookup, useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { type WorkspaceThread, type ClientPreparingContext } from "@/lib/workspace-thread";
 import type { PendingStartup } from "@/features/projects/state/workspaceStore";
@@ -154,10 +154,10 @@ function KeepThreadAction({ thread, startup }: { readonly thread: WorkspaceThrea
   return <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} loading={keeping} onClick={keep}>Keep thread</Button>;
 }
 
-function AgentRetryAction({ threadId }: { readonly threadId: string }) {
-  const turnRetry = useStartupTurnRetry(threadId);
-  if (!turnRetry) return null;
-  return <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} loading={turnRetry.pending} onClick={turnRetry.retry}>Retry</Button>;
+function AgentRetryAction({ threadId, startup }: { readonly threadId: string; readonly startup: ThreadStartup }) {
+  const agentRetry = useStartupAgentRetry(startup, threadId);
+  if (!agentRetry) return null;
+  return <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} loading={agentRetry.pending} onClick={agentRetry.retry}>Retry</Button>;
 }
 
 /** Thread-scoped actions for a stopped startup; the trail renders the setup and fetch decisions itself. */
@@ -184,7 +184,7 @@ function ThreadStartupActions({ thread, startup, pendingStartup }: {
         </>
       );
     case "agent-failed":
-      return <AgentRetryAction threadId={thread.id} />;
+      return <AgentRetryAction threadId={thread.id} startup={startup} />;
     default:
       return null;
   }

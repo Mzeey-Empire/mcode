@@ -1219,6 +1219,67 @@ describe("automatic Project Setup", () => {
     expect(startups.findByThreadId(threadId)?.steps[2].detail).toEqual({ phase: "setup", skipReason: "user-skipped" });
   });
 
+  async function failedAgentStartup() {
+    let startups!: ThreadStartupService;
+    const startupId = "00000000-0000-4000-8000-0000000000bb";
+    const threadId = "00000000-0000-4000-8000-0000000000b1";
+    const harness = await automaticHarness({
+      setup: false,
+      threadIds: [threadId],
+      threadStartups: (database, writer) => {
+        startups = new ThreadStartupService(new ThreadStartupRepo(database, writer), writer, () => new Date());
+        return startups;
+      },
+    });
+    await startups.start({ startupId, workspaceId: "workspace-1", kind: "managed-worktree" });
+    await startups.advance(startupId, "thread");
+    await startups.bindThread(startupId, threadId);
+    await startups.advance(startupId, "worktree");
+    await startups.advance(startupId, "setup");
+    const dispatch = vi.fn(async () => {
+      await startups.advance(startupId, "agent");
+      await startups.fail(startupId, { code: "AGENT_START_FAILED", message: "Agent startup failed", retryable: true });
+      throw new Error("provider unavailable");
+    });
+    harness.service.setAutomaticSetupDispatcher({ dispatch });
+    await harness.service.queueAutomaticFirstTurn(queuedInput(1, threadId));
+    await eventually(() => expect(startups.findByThreadId(threadId)?.state).toBe("failed"));
+    return { ...harness, startups, threadId, dispatch };
+  }
+
+  it("sends the unsent first message again when the agent failed before taking it", async () => {
+    const { service, startups, threadId, dispatch } = await failedAgentStartup();
+    expect(service.getAutomaticSetup({ threadId }).queuedTurns[0]).toMatchObject({ state: "dispatching" });
+    dispatch.mockImplementationOnce(async () => ({ completion: Promise.resolve() }));
+
+    await service.retryAutomaticAgentStart({ threadId });
+
+    expect(dispatch).toHaveBeenCalledTimes(2);
+    expect(dispatch.mock.calls[1]).toEqual(dispatch.mock.calls[0]);
+    expect(service.getAutomaticSetup({ threadId }).queuedTurns).toMatchObject([{ messageId: "message-1", state: "dispatched" }]);
+    expect(startups.findByThreadId(threadId)).toMatchObject({ state: "running", phase: "agent" });
+    expect(startups.findByThreadId(threadId)).not.toHaveProperty("error");
+  });
+
+  it("fails the agent again when the resent first message cannot be dispatched", async () => {
+    const { service, startups, threadId, dispatch } = await failedAgentStartup();
+
+    await service.retryAutomaticAgentStart({ threadId });
+
+    expect(dispatch).toHaveBeenCalledTimes(2);
+    expect(service.getAutomaticSetup({ threadId }).queuedTurns[0]).toMatchObject({ state: "dispatching" });
+    expect(startups.findByThreadId(threadId)).toMatchObject({ state: "failed", phase: "agent", error: { code: "AGENT_START_FAILED" } });
+  });
+
+  it("refuses to resend once the first message reached the runtime", async () => {
+    const { service, repository, startups, threadId } = await failedAgentStartup();
+    const [claim] = service.getAutomaticSetup({ threadId }).queuedTurns;
+    await repository.markDispatched(claim!.id);
+
+    await expect(service.retryAutomaticAgentStart({ threadId })).rejects.toThrow("This thread has no unsent first message to retry");
+    expect(startups.findByThreadId(threadId)).toMatchObject({ state: "failed", phase: "agent" });
+  });
+
   it("settles an interrupted startup whose gate can no longer offer recovery", async () => {
     let startups!: ThreadStartupService;
     const startupId = "00000000-0000-4000-8000-0000000000cc";
