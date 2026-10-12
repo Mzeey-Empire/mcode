@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AgentModelState, ThreadStartup, ThreadStartupResolveInput, WorkspaceEnvironmentCommandApproval } from "@mcode/contracts";
 import { useTerminalStore } from "@/features/terminal";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
@@ -127,35 +127,57 @@ export function useStartupSetupDecision(threadId: string, approval: WorkspaceEnv
   return { pending, run };
 }
 
-/** The thread's first turn while it is the only one and errored, which is the turn Thread didn't start retries. */
-function soleErroredTurnId(state: AgentModelState, threadId: string): string | undefined {
+type ThreadTurnShape = { readonly kind: "none" } | { readonly kind: "sole-errored"; readonly turnId: string } | { readonly kind: "other" };
+
+function threadTurnShape(state: AgentModelState, threadId: string): ThreadTurnShape {
   const turns = Object.values(state.turns).filter((turn) => turn.threadId === threadId);
-  return turns.length === 1 && turns[0]!.status === "Errored" ? turns[0]!.id : undefined;
+  if (turns.length === 0) return { kind: "none" };
+  return turns.length === 1 && turns[0]!.status === "Errored" ? { kind: "sole-errored", turnId: turns[0]!.id } : { kind: "other" };
+}
+
+type AgentRetryTarget = { readonly kind: "turn"; readonly turnId: string } | { readonly kind: "unsent"; readonly startupId: string };
+
+/**
+ * An errored first turn retries through the turn path. With no turn at all, only a managed worktree
+ * start kept its first message in the setup queue, so only it has something the server can resend.
+ */
+function agentRetryTarget(startup: Pick<ThreadStartup, "kind" | "startupId">, shape: ThreadTurnShape): AgentRetryTarget | undefined {
+  if (shape.kind === "sole-errored") return { kind: "turn", turnId: shape.turnId };
+  if (shape.kind === "none" && startup.kind === "managed-worktree") return { kind: "unsent", startupId: startup.startupId };
+  return undefined;
+}
+
+function sendAgentRetry(threadId: string, target: AgentRetryTarget): Promise<unknown> {
+  if (target.kind === "turn") return getTransport().retryErroredTurn({ threadId, turnId: target.turnId });
+  return getTransport().retryThreadStartupAgent(target.startupId).then((next) => useThreadStartupStore.getState().apply(next));
 }
 
 /** Retry for a startup whose agent failed before it answered. */
-export interface StartupTurnRetry {
+export interface StartupAgentRetry {
   readonly pending: boolean;
   readonly retry: () => void;
 }
 
 /**
- * Retries the thread's first turn through the same server path as a turn ending's Retry.
+ * Retries a startup whose agent failed. An errored first turn goes through the same server path
+ * as a turn ending's Retry. A managed worktree start that failed before any turn existed asks the
+ * server to resend the first message it saved during setup.
  *
- * The server retries only an errored latest attempt, so an agent phase that ended any other way,
- * or a turn already retried, offers nothing.
+ * A turn already retried, or an agent phase that ended any other way, offers nothing.
  */
-export function useStartupTurnRetry(threadId: string): StartupTurnRetry | undefined {
-  const turnId = useThreadRecord(threadId, (record) => soleErroredTurnId(record.canonicalAgent.state, threadId));
+export function useStartupAgentRetry(startup: ThreadStartup, threadId: string): StartupAgentRetry | undefined {
+  const shape = useThreadRecord(threadId, (record) => threadTurnShape(record.canonicalAgent.state, threadId));
+  const { kind, startupId } = startup;
+  const target = useMemo(() => agentRetryTarget({ kind, startupId }, shape), [kind, startupId, shape]);
   const [pending, setPending] = useState(false);
   const retry = useCallback(() => {
-    if (!turnId) return;
+    if (!target) return;
     setPending(true);
-    getTransport().retryErroredTurn({ threadId, turnId })
+    sendAgentRetry(threadId, target)
       .catch((error: unknown) => showFailure("Could not retry the thread", error))
       .finally(() => setPending(false));
-  }, [threadId, turnId]);
-  return turnId ? { pending, retry } : undefined;
+  }, [threadId, target]);
+  return target ? { pending, retry } : undefined;
 }
 
 /**

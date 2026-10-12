@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { Thread } from "@/transport/types";
 import type { ReactNode } from "react";
-import type { WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
+import type { ThreadStartup, WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
 
 // Store mocks must be declared before importing the component under test.
 
@@ -44,6 +44,7 @@ const {
       getThreadStartup: vi.fn(),
       listThreadStartups: vi.fn(),
       cancelThreadStartup: vi.fn(),
+      retryThreadStartupAgent: vi.fn(),
     },
     chatViewStopAgentMock: vi.fn(),
     chatViewThreadStoreSetStateMock: vi.fn(),
@@ -1235,17 +1236,17 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     revokePreview.mockRestore();
   });
 
-  it("offers no Edit message or Retry when agent startup fails without an errored turn", async () => {
+  function renderAgentFailedWithoutTurn(kind: "managed-worktree" | "attached-worktree") {
     const thread = makeThread({
       id: "thread-agent-failed",
       mode: "worktree",
-      worktree_managed: true,
+      worktree_managed: kind === "managed-worktree",
       worktree_path: "/repo/valid-checkout",
     });
-    useThreadStartupStore.getState().apply({
+    const startup = {
       startupId: "00000000-0000-4000-8000-000000000028",
       workspaceId: thread.workspace_id,
-      kind: "managed-worktree",
+      kind,
       state: "failed",
       phase: "agent",
       steps: [
@@ -1258,15 +1259,31 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       cancellation: "none",
       revision: 1,
       threadId: thread.id,
+      error: { code: "AGENT_START_FAILED", message: "Agent failed", retryable: true },
       createdAt: "2026-09-02T12:00:00.000Z",
       updatedAt: "2026-09-02T12:00:00.000Z",
-    });
+    } satisfies ThreadStartup;
+    useThreadStartupStore.getState().apply(startup);
     setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: thread.id, threads: [thread] }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
-
     render(<ChatView />);
     expect(screen.getByTestId("startup-step-agent")).toHaveTextContent("Thread didn't start");
     expect(screen.queryByRole("button", { name: "Edit message" })).toBeNull();
+    return startup;
+  }
+
+  it("resends a managed worktree's saved first message when its agent failed before any turn", async () => {
+    const startup = renderAgentFailedWithoutTurn("managed-worktree");
+    chatViewTransportMock.retryThreadStartupAgent.mockResolvedValue({ ...startup, state: "running", error: undefined, revision: 2 });
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(chatViewTransportMock.retryThreadStartupAgent).toHaveBeenCalledExactlyOnceWith(startup.startupId);
+    await vi.waitFor(() => expect(useThreadStartupStore.getState().recordsByStartupId[startup.startupId]).toMatchObject({ state: "running", revision: 2 }));
+  });
+
+  it("offers no Retry when an existing worktree's agent fails without an errored turn", () => {
+    renderAgentFailedWithoutTurn("attached-worktree");
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 

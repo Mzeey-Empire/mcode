@@ -3,7 +3,7 @@ export { StartupStepsTrail, type StartupStepsTrailProps } from "./StartupStepsTr
 /** Setup recovery shortcuts shared by the trail's hosts. */
 export { editStartupSetupScript, openStartupSetupTerminal } from "./useStartupActions";
 /** Composer starting state and the Retry for a startup whose agent failed. */
-export { useStartingThread, useStartupTurnRetry } from "./useStartupActions";
+export { useStartingThread, useStartupAgentRetry } from "./useStartupActions";
 /** The Paper 04f decision a stopped startup asks for. */
 export { startupDecision, type StartupDecision } from "./startup-step-copy";
 /** Edit message for a startup that never produced a working thread. */
