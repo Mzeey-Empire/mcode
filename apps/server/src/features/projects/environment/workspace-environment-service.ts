@@ -1280,12 +1280,17 @@ export class WorkspaceEnvironmentService {
     return siblings.some((sibling) => {
       if (sibling.id === thread.id || sibling.deleted_at != null || !sibling.worktree_path) return false;
       if (this.automaticWorktreePath(sibling.worktree_path) !== path) return false;
-      const phase = this.options.runtimePhase?.(sibling.id);
-      if (phase === "running" || phase === "finalizing") return true;
-      if (!this.hasNonterminalStartup(sibling.id)) return false;
-      // Undecided siblings serialize behind this start and must not make both starts skip.
-      return this.requireAutomaticRepository().snapshot(sibling.id).attempt?.state !== "queued";
+      return this.isWorktreeSiblingActive(sibling.id);
     });
+  }
+
+  private isWorktreeSiblingActive(threadId: string): boolean {
+    const phase = this.options.runtimePhase?.(threadId);
+    if (phase === "running" || phase === "finalizing") return true;
+    if (this.requireAutomaticRepository().snapshot(threadId).attempt?.state === "running") return true;
+    // Undecided siblings serialize behind this start and must not make both starts skip.
+    return this.options.threadStartups?.findByThreadId(threadId)?.phase === "agent"
+      && this.hasNonterminalStartup(threadId);
   }
 
   private launchAutomaticSetup(thread: WorkspaceEnvironmentSetupThread): void {

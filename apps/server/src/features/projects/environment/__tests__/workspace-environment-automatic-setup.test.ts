@@ -184,11 +184,14 @@ describe("automatic Project Setup", () => {
     expect(dispatched).toEqual(["Build the feature"]);
   });
 
-  it.each(["running", "finalizing", "starting"] as const)("skips Setup for a %s sibling in the same worktree", async (phase) => {
+  it.each(["running", "finalizing", "starting-agent"] as const)("skips Setup for a %s sibling in the same worktree", async (phase) => {
     const { service, threads, startups, runtimes, prepare } = await automaticHarness({ managed: false, threadIds: [attachedThreadId, siblingThreadId] });
     await threads.updateWorktreePath(siblingThreadId, `\\project\\.worktrees\\${attachedThreadId}\\`);
     await startAttached(startups, attachedThreadId);
-    if (phase === "starting") await startAttached(startups, siblingThreadId, "00000000-0000-4000-8000-000000000002");
+    if (phase === "starting-agent") {
+      const startupId = await startAttached(startups, siblingThreadId, "00000000-0000-4000-8000-000000000002");
+      await startups.advance(startupId, "agent");
+    }
     else runtimes.hydrate([{ threadId: siblingThreadId, turnExecutionId: "execution", phase }]);
     await service.queueAutomaticFirstTurn(queuedInput(1, attachedThreadId));
     await eventually(() => expect(service.getAutomaticSetup({ threadId: attachedThreadId })).toMatchObject({
@@ -231,6 +234,20 @@ describe("automatic Project Setup", () => {
     ]);
     await eventually(() => expect(service.getAutomaticSetup({ threadId: siblingThreadId }).gate).toBe("not-required"));
     expect(service.getAutomaticSetup({ threadId: attachedThreadId })).toMatchObject({ gate: "blocked", attempt: { state: "running" } });
+    expect(startups.findByThreadId(siblingThreadId)?.steps[2].detail).toEqual({ phase: "setup", skipReason: "thread-running-here" });
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it("runs Setup for the first start when a sibling startup has not reached admission", async () => {
+    const { service, threads, startups, prepare, start } = await automaticHarness({ managed: false, threadIds: [attachedThreadId, siblingThreadId] });
+    await threads.updateWorktreePath(siblingThreadId, `/project/.worktrees/${attachedThreadId}`);
+    await startAttached(startups, attachedThreadId);
+    await startAttached(startups, siblingThreadId, "00000000-0000-4000-8000-000000000002");
+    await service.queueAutomaticFirstTurn(queuedInput(1, attachedThreadId));
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: attachedThreadId })).toMatchObject({ gate: "blocked", attempt: { state: "running" } }));
+    await service.queueAutomaticFirstTurn(queuedInput(2, siblingThreadId));
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: siblingThreadId }).gate).toBe("not-required"));
     expect(startups.findByThreadId(siblingThreadId)?.steps[2].detail).toEqual({ phase: "setup", skipReason: "thread-running-here" });
     expect(prepare).toHaveBeenCalledOnce();
     expect(start).toHaveBeenCalledOnce();
