@@ -373,7 +373,7 @@ export class WorkspaceEnvironmentService {
     this.automaticDispatcher = dispatcher;
   }
 
-  /** Queue one Turn for a managed New worktree and launch Setup after persistence commits. */
+  /** Queue one Turn for a worktree thread and launch Setup after persistence commits. */
   async queueAutomaticFirstTurn(input: {
     readonly threadId: string;
     readonly messageId: string;
@@ -1287,10 +1287,12 @@ export class WorkspaceEnvironmentService {
   private isWorktreeSiblingActive(threadId: string): boolean {
     const phase = this.options.runtimePhase?.(threadId);
     if (phase === "running" || phase === "finalizing") return true;
-    if (this.requireAutomaticRepository().snapshot(threadId).attempt?.state === "running") return true;
+    const attempt = this.requireAutomaticRepository().snapshot(threadId).attempt?.state;
+    if (attempt === "running") return true;
+    if (!this.hasNonterminalStartup(threadId)) return false;
+    // A passed sibling stays in the setup phase until its first turn claims the agent, so it is still live.
     // Undecided siblings serialize behind this start and must not make both starts skip.
-    return this.options.threadStartups?.findByThreadId(threadId)?.phase === "agent"
-      && this.hasNonterminalStartup(threadId);
+    return attempt === "passed" || this.options.threadStartups?.findByThreadId(threadId)?.phase === "agent";
   }
 
   private launchAutomaticSetup(thread: WorkspaceEnvironmentSetupThread): void {

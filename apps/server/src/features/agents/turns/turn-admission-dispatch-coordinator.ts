@@ -378,7 +378,7 @@ export class TurnAdmissionDispatchCoordinator {
     return { ...thread, worktree_path: matched.path };
   }
 
-  /** Persist and gate a managed worktree's first turn before runtime admission starts. */
+  /** Persist and gate a worktree thread's first turn before runtime admission starts. */
   async admitInitialAutomaticTurn(command: SendMessageCommand): Promise<
     | { readonly kind: "not-managed" }
     | { readonly kind: "queued" }

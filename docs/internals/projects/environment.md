@@ -42,19 +42,23 @@ return renewed approval work when that mismatch requires another review.
 Automatic Setup holds the first prompt for any worktree thread, managed or attached, before the
 provider starts. The [automatic Setup store](../../../apps/server/src/features/projects/environment/workspace-environment-automatic-store.ts#L115)
 atomically saves the visible user message, the queued submission, and a blocked
-gate. The [environment service](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts#L368)
+gate. The [environment service](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts#L377)
 starts Setup only after that admission commits.
 
 Branched starts continue another thread and skip Setup before admission, so
 their first turn dispatches without entering the gate. Other starts check for
 a non-deleted sibling at the same normalized worktree path. A sibling with a
 running or finalizing turn, a running Setup attempt, or a nonterminal startup
-in the agent phase makes Setup skip with `thread-running-here` and releases
-the gate as not required. The environment
+whose Setup passed or that reached the agent phase makes Setup skip with
+`thread-running-here` and releases the gate as not required. A passed sibling
+counts because its startup stays in the setup phase until its first turn claims
+the agent. The environment
 service serializes this check and command launch per path so simultaneous
 starts cannot both launch Setup. A sibling still at or before Setup with no
 automatic attempt or a queued attempt waits for its own decision and does not
-make the first start skip.
+make the first start skip. A sibling blocked on a failed or interrupted Setup
+does not count either, so the new start runs Setup instead of trusting a
+checkout that never finished setting up.
 Path comparison normalizes separators and trailing slashes, and ignores case
 on Windows.
 
@@ -93,7 +97,7 @@ does not automatically rerun the interrupted Setup command.
 Manual Setup remains available in Direct mode and attached worktrees after
 startup. It cannot bypass an active automatic gate or startup. Its latest
 attempt is transient server state, and it does not start a provider turn. The
-[manual admission guard](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts#L1916)
+[manual admission guard](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts#L2046)
 keeps managed worktrees on the automatic gate path.
 
 ## Cancellation must settle owned commands

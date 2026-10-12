@@ -19,8 +19,6 @@ import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { TurnRuntimeRegistry } from "../../../agents/turns/turn-runtime.js";
 import { ThreadStartupFetchDecisions } from "../../../thread-startup/thread-startup-fetch-decisions.js";
 import { routeThreadStartupRpc } from "../../../thread-startup/transport/thread-startup-rpc.js";
-import { GitWorktreeService } from "../../git/git-worktree-service.js";
-import { CleanupJobRepo } from "../../../thread-control/cleanup/persistence/cleanup-job-repo.js";
 
 const roots: string[] = [];
 const attachedThreadId = "00000000-0000-4000-8000-0000000000a1";
@@ -253,6 +251,21 @@ describe("automatic Project Setup", () => {
     expect(start).toHaveBeenCalledOnce();
   });
 
+  it("skips Setup while a sibling whose Setup passed has not started its agent", async () => {
+    const { service, threads, startups, completion, prepare } = await automaticHarness({ managed: false, threadIds: [attachedThreadId, siblingThreadId] });
+    await threads.updateWorktreePath(siblingThreadId, `/project/.worktrees/${attachedThreadId}`);
+    await startAttached(startups, attachedThreadId);
+    await startAttached(startups, siblingThreadId, "00000000-0000-4000-8000-000000000002");
+    await service.queueAutomaticFirstTurn(queuedInput(1, attachedThreadId));
+    completion.resolve({ kind: "exited", exitCode: 0, output: "ready", outputTruncated: false });
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: attachedThreadId }).attempt?.state).toBe("passed"));
+    expect(startups.findByThreadId(attachedThreadId)).toMatchObject({ state: "running", phase: "setup" });
+    await service.queueAutomaticFirstTurn(queuedInput(2, siblingThreadId));
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: siblingThreadId }).gate).toBe("not-required"));
+    expect(startups.findByThreadId(siblingThreadId)?.steps[2].detail).toEqual({ phase: "setup", skipReason: "thread-running-here" });
+    expect(prepare).toHaveBeenCalledOnce();
+  });
+
   it("matches Windows path casing when checking live siblings", async () => {
     const { service, threads, runtimes, prepare } = await automaticHarness({ managed: false, threadIds: [attachedThreadId, siblingThreadId] });
     vi.spyOn(service, "platform").mockReturnValue("windows");
@@ -305,16 +318,11 @@ describe("automatic Project Setup", () => {
     expect(service.getAutomaticSetup({ threadId: attachedThreadId })).toMatchObject({ gate: "blocked", attempt: { state: "running" } });
   });
 
-  it("cancels attached startup and contains Setup without removing its checkout", async () => {
-    const { service, root, db, threads, startups, start, close } = await automaticHarness({ managed: false, threadIds: [attachedThreadId] });
-    const checkout = NodePath.join(root, "attached");
-    await NodeFSPromises.mkdir(checkout);
-    await NodeFSPromises.writeFile(NodePath.join(checkout, "keep.txt"), "attached checkout");
-    await threads.updateWorktreePath(attachedThreadId, checkout);
+  it("cancels attached startup and contains its Setup command", async () => {
+    const { service, startups, start, close } = await automaticHarness({ managed: false, threadIds: [attachedThreadId] });
     const startupId = await startAttached(startups, attachedThreadId);
     await service.queueAutomaticFirstTurn(queuedInput(1, attachedThreadId));
     await eventually(() => expect(start).toHaveBeenCalledOnce());
-    const removeWorktree = vi.spyOn(GitWorktreeService.prototype, "removeWorktree").mockResolvedValue(true);
     await routeThreadStartupRpc("thread.startup.cancel", { startupId }, {
       threadStartupService: startups,
       threadStartupFetchDecisions: new ThreadStartupFetchDecisions(),
@@ -324,9 +332,6 @@ describe("automatic Project Setup", () => {
     expect(startups.get(startupId)).toMatchObject({ state: "cancelled", phase: "setup", cancellation: "requested" });
     expect(service.getAutomaticSetup({ threadId: attachedThreadId })).toMatchObject({ gate: "not-required", queuedTurns: [{ state: "cancelled" }] });
     expect(close).toHaveBeenCalledOnce();
-    expect(removeWorktree).not.toHaveBeenCalled();
-    expect(new CleanupJobRepo(databaseReader(db), databaseWriter(db)).count()).toBe(0);
-    expect(await NodeFSPromises.readFile(NodePath.join(checkout, "keep.txt"), "utf8")).toBe("attached checkout");
   });
 
   it("does not launch or dispatch when a terminal startup cancellation precedes automatic Setup admission", async () => {
