@@ -346,9 +346,6 @@ export class ThreadCreationCoordinator {
   private async startManagedSetup(startupId: string | undefined, kind: string | undefined): Promise<void> {
     if (!startupId || (kind !== "managed-worktree" && kind !== "attached-worktree")) return;
     await this.startups()?.advance(startupId, "setup");
-    if (kind === "attached-worktree") {
-      await this.startups()?.skip(startupId, "setup", { phase: "setup", skipReason: "not-configured" });
-    }
   }
 
   private async fetchInitialBranch(params: BranchedInitialTurnParams, startupId?: string): Promise<void> {
@@ -773,7 +770,6 @@ export class ThreadCreationCoordinator {
       await this.startups()?.advance(startup.startupId, "setup");
       await this.startups()?.skip(startup.startupId, "setup", {
         phase: "setup",
-        ...(startup.kind === "attached-worktree" ? { skipReason: "not-configured" } : {}),
       });
     }
     await this.cancelIfRequested(startup.startupId);

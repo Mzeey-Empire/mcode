@@ -15,8 +15,14 @@ import type { Database } from "bun:sqlite";
 import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-startup-repo.js";
 import { ThreadStartupService } from "../../../thread-startup/thread-startup-service.js";
 import type { ThreadStartup } from "@mcode/contracts";
+import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
+import { TurnRuntimeRegistry } from "../../../agents/turns/turn-runtime.js";
+import { ThreadStartupFetchDecisions } from "../../../thread-startup/thread-startup-fetch-decisions.js";
+import { routeThreadStartupRpc } from "../../../thread-startup/transport/thread-startup-rpc.js";
 
 const roots: string[] = [];
+const attachedThreadId = "00000000-0000-4000-8000-0000000000a1";
+const siblingThreadId = "00000000-0000-4000-8000-0000000000a2";
 const ownedDatabases = new Map<Database, OwnedTestDatabase>();
 const readers = new Map<Database, Database>();
 function openOwnedDatabase(): Database { const owned = createOwnedTestDatabase(); ownedDatabases.set(owned.db, owned); return owned.db; }
@@ -63,7 +69,7 @@ async function automaticHarness({ setup = true, prepareFailure = false, attachme
   let milliseconds = Date.parse("2026-08-24T12:00:00.000Z");
   db.prepare("INSERT INTO workspaces (id, name, path, provider_config) VALUES ('workspace-1', 'Project', '/project', '{}')").run();
   for (const threadId of threadIds) {
-    db.prepare("INSERT INTO threads (id, workspace_id, title, mode, branch, worktree_managed, provider) VALUES (?, 'workspace-1', 'First Turn', 'worktree', 'main', 1, 'claude')").run(threadId);
+    db.prepare("INSERT INTO threads (id, workspace_id, title, mode, branch, worktree_managed, worktree_path, provider) VALUES (?, 'workspace-1', 'First Turn', 'worktree', 'main', ?, ?, 'claude')").run(threadId, Number(managed), `/project/.worktrees/${threadId}`);
   }
   const completion = deferred<TerminalCommandCompletion>();
   const start = vi.fn(() => completion.promise);
@@ -84,15 +90,19 @@ async function automaticHarness({ setup = true, prepareFailure = false, attachme
     prepare,
   };
   const terminalRecovery = { create: vi.fn(() => ({ ptyId: "recovery-pty", shell: "sh" })) };
+  const threads = new ThreadRepo(databaseReader(db), databaseWriter(db));
+  const runtimes = new TurnRuntimeRegistry();
+  const startups = new ThreadStartupService(new ThreadStartupRepo(databaseReader(db), databaseWriter(db)), databaseWriter(db));
   const service = new WorkspaceEnvironmentService({
     mcodeDir: root,
     database: databaseReader(db),
     databaseWriter: databaseWriter(db),
-    threads: { findById: (id) => threadIds.includes(id) ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: managed } : null },
+    threads,
+    runtimePhase: (id) => runtimes.snapshot(id)?.phase,
     terminalCommands,
     terminalRecovery,
     attachmentStorage,
-    threadStartups: typeof threadStartups === "function" ? threadStartups(databaseReader(db), databaseWriter(db)) : threadStartups,
+    threadStartups: typeof threadStartups === "function" ? threadStartups(databaseReader(db), databaseWriter(db)) : threadStartups ?? startups,
     platform: "linux",
     now: () => new Date(milliseconds++),
   });
@@ -100,11 +110,20 @@ async function automaticHarness({ setup = true, prepareFailure = false, attachme
     await service.save({
       workspaceId: "workspace-1",
       sourceRevision: null,
-      document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
+      document: { version: "0.0.1", setup: { default: "bun run setup" }, actions: [] },
     });
   }
   const repository = new WorkspaceEnvironmentAutomaticRepository(databaseReader(db), () => new Date(milliseconds++).toISOString(), databaseWriter(db));
-  return { root, db, service, repository, completion, start, close, prepare, terminalCommands, terminalRecovery };
+  return { root, db, service, repository, completion, start, close, prepare, terminalCommands, terminalRecovery, threads, startups, runtimes };
+}
+
+async function startAttached(startups: ThreadStartupService, threadId = "thread-1", startupId = "00000000-0000-4000-8000-000000000001") {
+  await startups.start({ startupId, workspaceId: "workspace-1", kind: "attached-worktree" });
+  await startups.advance(startupId, "thread");
+  await startups.bindThread(startupId, threadId);
+  await startups.advance(startupId, "worktree");
+  await startups.advance(startupId, "setup");
+  return startupId;
 }
 
 function queuedInput(index = 1, threadId = "thread-1") {
@@ -132,16 +151,187 @@ function queuedInput(index = 1, threadId = "thread-1") {
 }
 
 describe("automatic Project Setup", () => {
-  it("allows stopping attached worktree setup without enabling automatic admission", async () => {
+  it("allows stopping an attached worktree before automatic admission", async () => {
     const { service, start, close } = await automaticHarness({ managed: false });
     expect(await service.stopAutomaticSetup({ threadId: "thread-1" })).toEqual({
       gate: "not-required", attempt: null, queuedTurns: [],
     });
-    await expect(service.queueAutomaticFirstTurn(queuedInput())).rejects.toMatchObject({
-      code: "WORKSPACE_ENVIRONMENT_SETUP_UNAVAILABLE",
-    });
     expect(start).not.toHaveBeenCalled();
     expect(close).not.toHaveBeenCalled();
+  });
+
+  it("queues an attached first prompt until Setup passes", async () => {
+    const { service, startups, completion, start } = await automaticHarness({ managed: false, threadIds: [attachedThreadId] });
+    await startAttached(startups, attachedThreadId);
+    const dispatched: string[] = [];
+    service.setAutomaticSetupDispatcher({ dispatch: async (submission) => {
+      dispatched.push(submission.content);
+      return { completion: Promise.resolve() };
+    } });
+    expect(await service.queueAutomaticFirstTurn(queuedInput(1, attachedThreadId))).toMatchObject({
+      gate: "blocked", queuedTurns: [{ state: "queued", messageId: "message-1" }],
+    });
+    await eventually(() => expect(start).toHaveBeenCalledOnce());
+    expect(dispatched).toEqual([]);
+    expect(startups.findByThreadId(attachedThreadId)).toMatchObject({ state: "running", phase: "setup" });
+    await expect(service.startSetup({ threadId: attachedThreadId })).rejects.toMatchObject({ code: "WORKSPACE_ENVIRONMENT_SETUP_UNAVAILABLE" });
+    completion.resolve({ kind: "exited", exitCode: 0, output: "ready", outputTruncated: false });
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: attachedThreadId })).toMatchObject({
+      gate: "released-by-pass", queuedTurns: [{ state: "dispatched" }],
+    }));
+    expect(dispatched).toEqual(["Build the feature"]);
+  });
+
+  it.each(["running", "finalizing", "starting-agent"] as const)("skips Setup for a %s sibling in the same worktree", async (phase) => {
+    const { service, threads, startups, runtimes, prepare } = await automaticHarness({ managed: false, threadIds: [attachedThreadId, siblingThreadId] });
+    await threads.updateWorktreePath(siblingThreadId, `\\project\\.worktrees\\${attachedThreadId}\\`);
+    await startAttached(startups, attachedThreadId);
+    if (phase === "starting-agent") {
+      const startupId = await startAttached(startups, siblingThreadId, "00000000-0000-4000-8000-000000000002");
+      await startups.advance(startupId, "agent");
+    }
+    else runtimes.hydrate([{ threadId: siblingThreadId, turnExecutionId: "execution", phase }]);
+    await service.queueAutomaticFirstTurn(queuedInput(1, attachedThreadId));
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: attachedThreadId })).toMatchObject({
+      gate: "not-required", queuedTurns: [{ state: "released" }],
+    }));
+    expect(startups.findByThreadId(attachedThreadId)?.steps[2]).toMatchObject({
+      state: "skipped", detail: { phase: "setup", skipReason: "thread-running-here" },
+    });
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it("serializes starts in one worktree through command preparation", async () => {
+    const { service, threads, startups, prepare, start } = await automaticHarness({ managed: false, threadIds: [attachedThreadId, siblingThreadId] });
+    await threads.updateWorktreePath(siblingThreadId, `/project/.worktrees/${attachedThreadId}/`);
+    await startAttached(startups, attachedThreadId);
+    const preparation = deferred<void>();
+    const executor = prepare.getMockImplementation();
+    if (!executor) throw new Error("Missing terminal executor");
+    prepare.mockImplementation(async () => { await preparation.promise; return executor(); });
+    await service.queueAutomaticFirstTurn(queuedInput(1, attachedThreadId));
+    await eventually(() => expect(prepare).toHaveBeenCalledOnce());
+    await startAttached(startups, siblingThreadId, "00000000-0000-4000-8000-000000000002");
+    await service.queueAutomaticFirstTurn(queuedInput(2, siblingThreadId));
+    preparation.resolve();
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: siblingThreadId }).gate).toBe("not-required"));
+    expect(service.getAutomaticSetup({ threadId: attachedThreadId })).toMatchObject({ gate: "blocked", attempt: { state: "running" } });
+    expect(startups.findByThreadId(siblingThreadId)?.steps[2].detail).toEqual({ phase: "setup", skipReason: "thread-running-here" });
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it("runs Setup once when two starts reach Setup before either is admitted", async () => {
+    const { service, threads, startups, prepare, start } = await automaticHarness({ managed: false, threadIds: [attachedThreadId, siblingThreadId] });
+    await threads.updateWorktreePath(siblingThreadId, `/project/.worktrees/${attachedThreadId}`);
+    await startAttached(startups, attachedThreadId);
+    await startAttached(startups, siblingThreadId, "00000000-0000-4000-8000-000000000002");
+    await Promise.all([
+      service.queueAutomaticFirstTurn(queuedInput(1, attachedThreadId)),
+      service.queueAutomaticFirstTurn(queuedInput(2, siblingThreadId)),
+    ]);
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: siblingThreadId }).gate).toBe("not-required"));
+    expect(service.getAutomaticSetup({ threadId: attachedThreadId })).toMatchObject({ gate: "blocked", attempt: { state: "running" } });
+    expect(startups.findByThreadId(siblingThreadId)?.steps[2].detail).toEqual({ phase: "setup", skipReason: "thread-running-here" });
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it("runs Setup for the first start when a sibling startup has not reached admission", async () => {
+    const { service, threads, startups, prepare, start } = await automaticHarness({ managed: false, threadIds: [attachedThreadId, siblingThreadId] });
+    await threads.updateWorktreePath(siblingThreadId, `/project/.worktrees/${attachedThreadId}`);
+    await startAttached(startups, attachedThreadId);
+    await startAttached(startups, siblingThreadId, "00000000-0000-4000-8000-000000000002");
+    await service.queueAutomaticFirstTurn(queuedInput(1, attachedThreadId));
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: attachedThreadId })).toMatchObject({ gate: "blocked", attempt: { state: "running" } }));
+    await service.queueAutomaticFirstTurn(queuedInput(2, siblingThreadId));
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: siblingThreadId }).gate).toBe("not-required"));
+    expect(startups.findByThreadId(siblingThreadId)?.steps[2].detail).toEqual({ phase: "setup", skipReason: "thread-running-here" });
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it("skips Setup while a sibling whose Setup passed has not started its agent", async () => {
+    const { service, threads, startups, completion, prepare } = await automaticHarness({ managed: false, threadIds: [attachedThreadId, siblingThreadId] });
+    await threads.updateWorktreePath(siblingThreadId, `/project/.worktrees/${attachedThreadId}`);
+    await startAttached(startups, attachedThreadId);
+    await startAttached(startups, siblingThreadId, "00000000-0000-4000-8000-000000000002");
+    await service.queueAutomaticFirstTurn(queuedInput(1, attachedThreadId));
+    completion.resolve({ kind: "exited", exitCode: 0, output: "ready", outputTruncated: false });
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: attachedThreadId }).attempt?.state).toBe("passed"));
+    expect(startups.findByThreadId(attachedThreadId)).toMatchObject({ state: "running", phase: "setup" });
+    await service.queueAutomaticFirstTurn(queuedInput(2, siblingThreadId));
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: siblingThreadId }).gate).toBe("not-required"));
+    expect(startups.findByThreadId(siblingThreadId)?.steps[2].detail).toEqual({ phase: "setup", skipReason: "thread-running-here" });
+    expect(prepare).toHaveBeenCalledOnce();
+  });
+
+  it("matches Windows path casing when checking live siblings", async () => {
+    const { service, threads, runtimes, prepare } = await automaticHarness({ managed: false, threadIds: [attachedThreadId, siblingThreadId] });
+    vi.spyOn(service, "platform").mockReturnValue("windows");
+    await threads.updateWorktreePath(attachedThreadId, "C:\\Project\\Worktree");
+    await threads.updateWorktreePath(siblingThreadId, "c:/project/worktree/");
+    runtimes.start(siblingThreadId);
+    await service.queueAutomaticFirstTurn(queuedInput(1, attachedThreadId));
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: attachedThreadId })).toMatchObject({ gate: "not-required", queuedTurns: [{ state: "released" }] }));
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it("releases the worktree lock after a failed sibling lookup", async () => {
+    const { service, threads, startups, start } = await automaticHarness({ managed: false, threadIds: [attachedThreadId, siblingThreadId] });
+    await threads.updateWorktreePath(siblingThreadId, `/project/.worktrees/${attachedThreadId}`);
+    const firstStartupId = await startAttached(startups, attachedThreadId);
+    vi.spyOn(threads, "listAllByWorkspace").mockImplementationOnce(() => { throw new Error("Database read unavailable"); });
+    await service.queueAutomaticFirstTurn(queuedInput(1, attachedThreadId));
+    await eventually(() => expect(startups.get(firstStartupId)).toMatchObject({ state: "blocked", block: { code: "SETUP_PERSISTENCE_FAILED" } }));
+    expect(start).not.toHaveBeenCalled();
+    await startups.markCancelled(firstStartupId);
+    await startAttached(startups, siblingThreadId, "00000000-0000-4000-8000-000000000002");
+    await service.queueAutomaticFirstTurn(queuedInput(2, siblingThreadId));
+    await eventually(() => expect(start).toHaveBeenCalledOnce());
+    expect(service.getAutomaticSetup({ threadId: siblingThreadId })).toMatchObject({ gate: "blocked", attempt: { state: "running" } });
+  });
+
+  it("permits manual attached Setup after a startup with no configured script completes", async () => {
+    const { service, startups, prepare } = await automaticHarness({ setup: false, managed: false, threadIds: [attachedThreadId] });
+    const startupId = await startAttached(startups, attachedThreadId);
+    await service.queueAutomaticFirstTurn(queuedInput(1, attachedThreadId));
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: attachedThreadId }).gate).toBe("not-required"));
+    await startups.advance(startupId, "agent");
+    await startups.complete(startupId);
+    expect(await service.startSetup({ threadId: attachedThreadId })).toMatchObject({ status: "unavailable", outcome: "unavailable" });
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it.each(["deleted", "idle", "finished-startup", "different-path"])("runs Setup when the sibling is %s", async (state) => {
+    const { service, db, threads, startups, runtimes, start } = await automaticHarness({ managed: false, threadIds: [attachedThreadId, siblingThreadId] });
+    if (state !== "different-path") await threads.updateWorktreePath(siblingThreadId, `/project/.worktrees/${attachedThreadId}`);
+    if (state === "deleted") db.prepare("UPDATE threads SET deleted_at = ? WHERE id = ?").run(new Date().toISOString(), siblingThreadId);
+    if (state === "deleted" || state === "different-path") runtimes.start(siblingThreadId);
+    if (state === "finished-startup") {
+      const startupId = await startAttached(startups, siblingThreadId);
+      await startups.advance(startupId, "agent");
+      await startups.complete(startupId);
+    }
+    await service.queueAutomaticFirstTurn(queuedInput(1, attachedThreadId));
+    await eventually(() => expect(start).toHaveBeenCalledOnce());
+    expect(service.getAutomaticSetup({ threadId: attachedThreadId })).toMatchObject({ gate: "blocked", attempt: { state: "running" } });
+  });
+
+  it("cancels attached startup and contains its Setup command", async () => {
+    const { service, startups, start, close } = await automaticHarness({ managed: false, threadIds: [attachedThreadId] });
+    const startupId = await startAttached(startups, attachedThreadId);
+    await service.queueAutomaticFirstTurn(queuedInput(1, attachedThreadId));
+    await eventually(() => expect(start).toHaveBeenCalledOnce());
+    await routeThreadStartupRpc("thread.startup.cancel", { startupId }, {
+      threadStartupService: startups,
+      threadStartupFetchDecisions: new ThreadStartupFetchDecisions(),
+      workspaceEnvironmentService: service,
+      agentService: { stopSession: async () => { throw new Error("Provider must not have started"); } },
+    });
+    expect(startups.get(startupId)).toMatchObject({ state: "cancelled", phase: "setup", cancellation: "requested" });
+    expect(service.getAutomaticSetup({ threadId: attachedThreadId })).toMatchObject({ gate: "not-required", queuedTurns: [{ state: "cancelled" }] });
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it("does not launch or dispatch when a terminal startup cancellation precedes automatic Setup admission", async () => {
@@ -799,7 +989,7 @@ describe("automatic Project Setup", () => {
       mcodeDir: root,
       database: databaseReader(db),
     databaseWriter: databaseWriter(db),
-      threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true } : null },
+      threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true, worktree_path: "/project/.worktrees/first" } : null },
       terminalCommands,
       platform: "linux",
     });
@@ -840,7 +1030,7 @@ describe("automatic Project Setup", () => {
       mcodeDir: root,
       database: databaseReader(db),
     databaseWriter: databaseWriter(db),
-      threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true } : null },
+      threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true, worktree_path: "/project/.worktrees/first" } : null },
       terminalCommands,
       platform: "linux",
     });
@@ -851,7 +1041,7 @@ describe("automatic Project Setup", () => {
       mcodeDir: root,
       database: databaseReader(db),
     databaseWriter: databaseWriter(db),
-      threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true } : null },
+      threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true, worktree_path: "/project/.worktrees/first" } : null },
       terminalCommands,
       platform: "linux",
     });
@@ -1144,7 +1334,7 @@ describe("automatic Project Setup", () => {
       mcodeDir: root,
       database: databaseReader(db),
     databaseWriter: databaseWriter(db),
-      threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true } : null },
+      threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true, worktree_path: "/project/.worktrees/first" } : null },
       terminalCommands,
       platform: "linux",
     });
@@ -1169,7 +1359,7 @@ describe("automatic Project Setup", () => {
       mcodeDir: root,
       database: databaseReader(db),
     databaseWriter: databaseWriter(db),
-      threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true } : null },
+      threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true, worktree_path: "/project/.worktrees/first" } : null },
       terminalCommands,
       platform: "linux",
     });

@@ -459,7 +459,7 @@ describe("WorkspaceEnvironmentService", () => {
     const prepare = vi.fn();
     const instance = new WorkspaceEnvironmentService({
       mcodeDir: root,
-      threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: workspaceId, mode: "worktree", worktree_managed: false } : null },
+      threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: workspaceId, mode: "worktree", worktree_managed: false, worktree_path: "/project/existing" } : null },
       terminalCommands: { prepare },
       platform: "windows",
       createAttemptId: () => "attempt-2",
@@ -484,7 +484,7 @@ describe("WorkspaceEnvironmentService", () => {
     roots.push(root);
     const threads = new Map([
       ["direct", { id: "direct", workspace_id: workspaceId, mode: "direct", worktree_managed: true }],
-      ["existing", { id: "existing", workspace_id: workspaceId, mode: "worktree", worktree_managed: false }],
+      ["existing", { id: "existing", workspace_id: workspaceId, mode: "worktree", worktree_managed: false, worktree_path: "/project/existing" }],
       ["managed", { id: "managed", workspace_id: workspaceId, mode: "worktree", worktree_managed: true }],
       ["deleting", { id: "deleting", workspace_id: workspaceId, mode: "direct", worktree_managed: true, cleanup_state: "running" }],
       ["deleted", { id: "deleted", workspace_id: workspaceId, mode: "direct", worktree_managed: true, deleted_at: "2026-08-22T12:00:00.000Z" }],

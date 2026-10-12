@@ -300,7 +300,7 @@ describe("workspace environment RPC", () => {
       mcodeDir: root,
       database: persistence.reader,
       databaseWriter: persistence.writer,
-      threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true } : null },
+      threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true, worktree_path: "/project/.worktrees/first" } : null },
       terminalRecovery: { create: () => ({ ptyId: "recovery-pty", shell: "pwsh" }) },
       platform: "linux",
     });

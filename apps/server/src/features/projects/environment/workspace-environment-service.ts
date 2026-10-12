@@ -34,6 +34,7 @@ import {
   type WorkspaceEnvironmentAutomaticSetupTerminal,
   type StoredAttachment,
   type ThreadStartup,
+  type TurnRuntimePhase,
   type MessageMention,
   type PreviewAnnotationBundle,
   type WorkspaceEnvironmentValidationIssue,
@@ -43,6 +44,7 @@ import { getMcodeDir, logger } from "@mcode/shared";
 import { ZodError } from "zod";
 import type { Database } from "bun:sqlite";
 import type { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
+import { normalizeWorktreePath } from "../git/worktree-path.js";
 import type {
   TerminalCommandCompletion,
   TerminalCommandPreparation,
@@ -87,7 +89,7 @@ interface AutomaticSetupConfiguration {
   readonly storageMode: WorkspaceEnvironmentStorageMode;
 }
 
-/** Thread fields used to determine whether manual Setup can start. */
+/** Thread fields used by Setup eligibility and checkout occupancy. */
 export interface WorkspaceEnvironmentSetupThread {
   readonly id: string;
   readonly workspace_id: string;
@@ -96,6 +98,11 @@ export interface WorkspaceEnvironmentSetupThread {
   readonly worktree_path?: string | null;
   readonly deleted_at?: string | null;
   readonly cleanup_state?: string | null;
+}
+
+/** Setup eligibility follows the checkout; removal ownership is independent. */
+export function isAutomaticSetupThread(thread: WorkspaceEnvironmentSetupThread): thread is WorkspaceEnvironmentSetupThread & { worktree_path: string } {
+  return thread.mode === "worktree" && thread.worktree_path != null;
 }
 
 /** Workspace fields used to resolve the base checkout for shared Project configuration. */
@@ -146,7 +153,9 @@ export interface WorkspaceEnvironmentServiceOptions {
   readonly mcodeDir?: string;
   readonly threads?: {
     findById(id: string): WorkspaceEnvironmentSetupThread | null;
+    listAllByWorkspace?(workspaceId: string): readonly WorkspaceEnvironmentSetupThread[];
   };
+  readonly runtimePhase?: (threadId: string) => TurnRuntimePhase | undefined;
   readonly workspaces?: {
     findById(id: string): WorkspaceEnvironmentWorkspace | null;
   };
@@ -335,6 +344,7 @@ export class WorkspaceEnvironmentService {
   private readonly automaticRepository: WorkspaceEnvironmentAutomaticRepository | null;
   private readonly activeAutomaticSetupResources = new Map<string, ActiveAutomaticSetupResource>();
   private readonly startingAutomaticSetupPromises = new Map<string, Promise<void>>();
+  private readonly automaticWorktreeTails = new Map<string, Promise<void>>();
   private readonly automaticStopPromises = new Map<string, Promise<void>>();
   private readonly automaticRecoveryOperationTails = new Map<string, Promise<void>>();
   private readonly automaticStopGenerations = new Map<string, number>();
@@ -363,7 +373,7 @@ export class WorkspaceEnvironmentService {
     this.automaticDispatcher = dispatcher;
   }
 
-  /** Queue one Turn for a managed New worktree and launch Setup after persistence commits. */
+  /** Queue one Turn for a worktree thread and launch Setup after persistence commits. */
   async queueAutomaticFirstTurn(input: {
     readonly threadId: string;
     readonly messageId: string;
@@ -443,7 +453,7 @@ export class WorkspaceEnvironmentService {
 
   /** Contain automatic Setup, then discard pending Turns when startup cancellation was requested. */
   async stopAutomaticSetup(input: WorkspaceEnvironmentAutomaticSetupStopInput): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot> {
-    this.requireAutomaticSetupThread(input.threadId, true);
+    this.requireAutomaticSetupThread(input.threadId);
     this.invalidateAutomaticRetry(input.threadId);
     const stopping = this.automaticStopPromises.get(input.threadId);
     if (stopping) return this.snapshotAfterAutomaticStop(input.threadId, stopping);
@@ -1227,12 +1237,11 @@ export class WorkspaceEnvironmentService {
     throw new Error("Automatic Project Setup requires SQLite lifecycle storage");
   }
 
-  private requireAutomaticSetupThread(threadId: string, allowAttached = false): WorkspaceEnvironmentSetupThread {
+  private requireAutomaticSetupThread(threadId: string): WorkspaceEnvironmentSetupThread & { worktree_path: string } {
     const thread = this.requireSetupThread(threadId);
     if (
       this.disposed ||
-      thread.mode !== "worktree" ||
-      (!allowAttached && thread.worktree_managed !== true) ||
+      !isAutomaticSetupThread(thread) ||
       thread.deleted_at != null ||
       thread.cleanup_state != null ||
       this.deletingThreadCounts.has(thread.id) ||
@@ -1254,7 +1263,7 @@ export class WorkspaceEnvironmentService {
       await this.requireAutomaticRepository().cancelStartupTurns(thread.id);
       return Promise.resolve();
     }
-    const starting = this.startAutomaticSetupAttempt(thread);
+    const starting = this.serializeAutomaticWorktreeSetup(thread);
     this.startingAutomaticSetupPromises.set(thread.id, starting);
     void starting.then(
       () => {
@@ -1271,6 +1280,48 @@ export class WorkspaceEnvironmentService {
     return starting;
   }
 
+  private async serializeAutomaticWorktreeSetup(thread: WorkspaceEnvironmentSetupThread): Promise<void> {
+    if (!isAutomaticSetupThread(thread)) throw this.setupUnavailableError();
+    const path = this.automaticWorktreePath(thread.worktree_path);
+    const previous = this.automaticWorktreeTails.get(path);
+    let release!: () => void;
+    const tail = new Promise<void>((resolve) => { release = resolve; });
+    this.automaticWorktreeTails.set(path, tail);
+    try {
+      await previous;
+      await this.startAutomaticSetupAttempt(thread);
+    } finally {
+      release();
+      if (this.automaticWorktreeTails.get(path) === tail) this.automaticWorktreeTails.delete(path);
+    }
+  }
+
+  private automaticWorktreePath(path: string): string {
+    return normalizeWorktreePath(path, this.platform() === "windows" ? "win32" : "linux");
+  }
+
+  private hasLiveWorktreeSibling(thread: WorkspaceEnvironmentSetupThread): boolean {
+    if (!isAutomaticSetupThread(thread)) return false;
+    const path = this.automaticWorktreePath(thread.worktree_path);
+    const siblings = this.options.threads?.listAllByWorkspace?.(thread.workspace_id) ?? [];
+    return siblings.some((sibling) => {
+      if (sibling.id === thread.id || sibling.deleted_at != null || !sibling.worktree_path) return false;
+      if (this.automaticWorktreePath(sibling.worktree_path) !== path) return false;
+      return this.isWorktreeSiblingActive(sibling.id);
+    });
+  }
+
+  private isWorktreeSiblingActive(threadId: string): boolean {
+    const phase = this.options.runtimePhase?.(threadId);
+    if (phase === "running" || phase === "finalizing") return true;
+    const attempt = this.requireAutomaticRepository().snapshot(threadId).attempt?.state;
+    if (attempt === "running") return true;
+    if (!this.hasNonterminalStartup(threadId)) return false;
+    // A passed sibling stays in the setup phase until its first turn claims the agent, so it is still live.
+    // Undecided siblings serialize behind this start and must not make both starts skip.
+    return attempt === "passed" || this.options.threadStartups?.findByThreadId(threadId)?.phase === "agent";
+  }
+
   private launchAutomaticSetup(thread: WorkspaceEnvironmentSetupThread): void {
     void this.startAutomaticSetup(thread).catch(async (error: unknown) => {
       logger.error("Automatic Project Setup could not persist its transition", { threadId: thread.id, error: error instanceof Error ? error.message : String(error) });
@@ -1285,6 +1336,11 @@ export class WorkspaceEnvironmentService {
     const snapshot = repository.snapshot(thread.id);
     const queuedAttemptId = queuedAutomaticAttemptId(snapshot);
     if (!queuedAttemptId) return;
+    if (!this.isAutomaticAttemptReadyToStart(repository, thread.id, queuedAttemptId)) return;
+    if (this.hasLiveWorktreeSibling(thread)) {
+      await this.releaseAutomaticSetupWithoutCommand(repository, thread.id, queuedAttemptId, "thread-running-here");
+      return;
+    }
     const configuration = await this.resolveAutomaticSetupConfiguration(repository, thread, queuedAttemptId);
     if (!configuration) return;
     if (!this.isAutomaticAttemptReadyToStart(repository, thread.id, queuedAttemptId)) return;
@@ -1364,8 +1420,9 @@ export class WorkspaceEnvironmentService {
     repository: WorkspaceEnvironmentAutomaticRepository,
     threadId: string,
     attemptId: string,
+    skipReason: "not-configured" | "thread-running-here" = "not-configured",
   ): Promise<void> {
-    await this.skipStartupSetup(threadId, "not-configured");
+    await this.skipStartupSetup(threadId, skipReason);
     await repository.releaseWithoutSetup(threadId, attemptId);
     await this.drainReleasedAutomaticTurn(threadId);
   }
@@ -1592,7 +1649,7 @@ export class WorkspaceEnvironmentService {
     await this.options.threadStartups?.resume(startup.startupId);
   }
 
-  private async skipStartupSetup(threadId: string, skipReason: "not-configured" | "user-skipped"): Promise<void> {
+  private async skipStartupSetup(threadId: string, skipReason: "not-configured" | "user-skipped" | "thread-running-here"): Promise<void> {
     const startup = this.options.threadStartups?.findByThreadId(threadId);
     if (!startup || startup.phase !== "setup") return;
     if (startup.state !== "running" && startup.state !== "blocked" && startup.state !== "interrupted") return;
@@ -2015,17 +2072,24 @@ export class WorkspaceEnvironmentService {
 
   private assertSetupStartAllowed(thread: WorkspaceEnvironmentSetupThread): void {
     const eligible = thread.mode === "direct" || (
-      thread.mode === "worktree" && thread.worktree_managed === false
+      isAutomaticSetupThread(thread) && thread.worktree_managed === false
     );
     if (
       !eligible ||
-      thread.deleted_at !== null && thread.deleted_at !== undefined ||
-      thread.cleanup_state !== null && thread.cleanup_state !== undefined ||
+      this.hasAutomaticSetupForThread(thread.id) ||
+      this.hasNonterminalStartup(thread.id) ||
+      thread.deleted_at != null ||
+      thread.cleanup_state != null ||
       this.deletingThreadCounts.has(thread.id) ||
       this.deletingWorkspaceCounts.has(thread.workspace_id)
     ) {
       throw this.setupUnavailableError();
     }
+  }
+
+  private hasNonterminalStartup(threadId: string): boolean {
+    const startup = this.options.threadStartups?.findByThreadId(threadId);
+    return startup?.state === "pending" || startup?.state === "running" || startup?.state === "blocked";
   }
 
   private setupUnavailableError(): WorkspaceEnvironmentServiceError {

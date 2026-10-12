@@ -160,6 +160,8 @@ describe("AgentService.createAndSend defaults", () => {
     const { threadRepo, workspaceRepo, threadService, service, provider } = createAgentServiceHarness(automaticSetup);
     const workspace = (await workspaceRepo.create("Repo", "/repo"));
     const managed = (await threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude"));
+    await threadRepo.updateWorktreePath(managed.id, "/repo/.worktrees/managed");
+    managed.worktree_path = "/repo/.worktrees/managed";
     vi.mocked(threadService.create).mockResolvedValue(managed);
 
     const result = await service.createAndSend({
@@ -195,6 +197,8 @@ describe("AgentService.createAndSend defaults", () => {
     );
     const workspace = (await workspaceRepo.create("Repo", "/repo"));
     const managed = (await threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude"));
+    await threadRepo.updateWorktreePath(managed.id, "/repo/.worktrees/managed");
+    managed.worktree_path = "/repo/.worktrees/managed";
     vi.mocked(threadService.create).mockImplementation(async (_workspaceId, _title, _mode, _branch, options) => {
       (await requireThreadCreationOptions(options).lifecycle?.onThreadPersisted(managed));
       return managed;
@@ -260,6 +264,8 @@ describe("AgentService.createAndSend defaults", () => {
     );
     const workspace = (await workspaceRepo.create("Repo", "/repo"));
     const managed = (await threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude"));
+    await threadRepo.updateWorktreePath(managed.id, "/repo/.worktrees/managed");
+    managed.worktree_path = "/repo/.worktrees/managed";
     vi.mocked(threadService.create).mockImplementation(async (_workspaceId, _title, _mode, _branch, options) => {
       (await requireThreadCreationOptions(options).lifecycle?.onThreadPersisted(managed));
       return managed;
@@ -331,6 +337,8 @@ describe("AgentService.createAndSend defaults", () => {
     automaticSetup.setAutomaticSetupDispatcher({ dispatch: (submission) => service.dispatchQueuedAutomaticTurn(submission) });
     const workspace = await workspaceRepo.create("Repo", "/repo");
     const managed = await threadRepo.create(workspace.id, "Kept thread", "worktree", "feature/managed", true, "claude");
+    await threadRepo.updateWorktreePath(managed.id, "/repo/.worktrees/managed");
+    managed.worktree_path = "/repo/.worktrees/managed";
     vi.mocked(threadService.create).mockImplementation(async (_workspaceId, _title, _mode, _branch, options) => {
       await requireThreadCreationOptions(options).lifecycle?.onThreadPersisted(managed);
       return managed;
@@ -381,6 +389,8 @@ describe("AgentService.createAndSend defaults", () => {
     );
     const workspace = (await workspaceRepo.create("Repo", "/repo"));
     const managed = (await threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude"));
+    await threadRepo.updateWorktreePath(managed.id, "/repo/.worktrees/managed");
+    managed.worktree_path = "/repo/.worktrees/managed";
     vi.mocked(threadService.create).mockImplementation(async (_workspaceId, _title, _mode, _branch, options) => {
       (await requireThreadCreationOptions(options).lifecycle?.onThreadPersisted(managed));
       return managed;
@@ -418,6 +428,8 @@ describe("AgentService.createAndSend defaults", () => {
     const { threadRepo, workspaceRepo, threadService, service, provider, attachmentService, threadStartups } = createAgentServiceHarness(automaticSetup);
     const workspace = (await workspaceRepo.create("Repo", "/repo"));
     const managed = (await threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude"));
+    await threadRepo.updateWorktreePath(managed.id, "/repo/.worktrees/managed");
+    managed.worktree_path = "/repo/.worktrees/managed";
     vi.mocked(threadService.create).mockImplementation(async (_workspaceId, _title, _mode, _branch, options) => {
       (await requireThreadCreationOptions(options).lifecycle?.onThreadPersisted(managed));
       return managed;
@@ -464,6 +476,8 @@ describe("AgentService.createAndSend defaults", () => {
     true);
     const workspace = (await workspaceRepo.create("Repo", "/repo"));
     const managed = (await threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude"));
+    await threadRepo.updateWorktreePath(managed.id, "/repo/.worktrees/managed");
+    managed.worktree_path = "/repo/.worktrees/managed";
     vi.mocked(threadService.create).mockImplementation(async (_workspaceId, _title, _mode, _branch, options) => {
       (await requireThreadCreationOptions(options).lifecycle?.onThreadPersisted(managed));
       return managed;
@@ -518,6 +532,8 @@ describe("AgentService.createAndSend defaults", () => {
     );
     const workspace = (await workspaceRepo.create("Repo", "/repo"));
     const managed = (await threadRepo.create(workspace.id, "Managed", "worktree", "feature/managed", true, "claude"));
+    await threadRepo.updateWorktreePath(managed.id, "/repo/.worktrees/managed");
+    managed.worktree_path = "/repo/.worktrees/managed";
     const environment = automaticSetup as WorkspaceEnvironmentService;
     await environment.save({
       workspaceId: workspace.id,
@@ -572,6 +588,8 @@ describe("AgentService.createAndSend defaults", () => {
     );
     const workspace = (await workspaceRepo.create("Repo", "/repo"));
     const managed = (await threadRepo.create(workspace.id, "Managed", "worktree", "feature/managed", true, "claude"));
+    await threadRepo.updateWorktreePath(managed.id, "/repo/.worktrees/managed");
+    managed.worktree_path = "/repo/.worktrees/managed";
     const environment = automaticSetup as WorkspaceEnvironmentService;
     await environment.save({
       workspaceId: workspace.id,
@@ -623,6 +641,8 @@ describe("AgentService.createAndSend defaults", () => {
     );
     const workspace = (await workspaceRepo.create("Repo", "/repo"));
     const managed = (await threadRepo.create(workspace.id, "Managed", "worktree", "feature/managed", true, "claude"));
+    await threadRepo.updateWorktreePath(managed.id, "/repo/.worktrees/managed");
+    managed.worktree_path = "/repo/.worktrees/managed";
     const environment = automaticSetup as WorkspaceEnvironmentService;
     await environment.save({
       workspaceId: workspace.id,
@@ -680,6 +700,8 @@ describe("AgentService.createAndSend defaults", () => {
     );
     const workspace = (await workspaceRepo.create("Repo", "/repo"));
     const managed = (await threadRepo.create(workspace.id, "Managed", "worktree", "feature/managed", true, "claude"));
+    await threadRepo.updateWorktreePath(managed.id, "/repo/.worktrees/managed");
+    managed.worktree_path = "/repo/.worktrees/managed";
     const environment = automaticSetup as WorkspaceEnvironmentService;
     await environment.save({
       workspaceId: workspace.id,
@@ -737,6 +759,8 @@ describe("AgentService.createAndSend defaults", () => {
     );
     const workspace = (await workspaceRepo.create("Repo", "/repo"));
     const managed = (await threadRepo.create(workspace.id, "Managed", "worktree", "feature/managed", true, "claude"));
+    await threadRepo.updateWorktreePath(managed.id, "/repo/.worktrees/managed");
+    managed.worktree_path = "/repo/.worktrees/managed";
     const environment = automaticSetup as WorkspaceEnvironmentService;
     await environment.save({
       workspaceId: workspace.id,
@@ -798,6 +822,8 @@ describe("AgentService.createAndSend defaults", () => {
     );
     const workspace = (await workspaceRepo.create("Repo", "/repo"));
     const managed = (await threadRepo.create(workspace.id, "Managed", "worktree", "feature/managed", true, "claude"));
+    await threadRepo.updateWorktreePath(managed.id, "/repo/.worktrees/managed");
+    managed.worktree_path = "/repo/.worktrees/managed";
     const replyTarget = (await messageRepo.create(managed.id, "assistant", "Prior answer", 1));
     const environment = automaticSetup as WorkspaceEnvironmentService;
     await environment.save({
@@ -876,7 +902,7 @@ describe("AgentService.createAndSend defaults", () => {
 
   });
 
-  it("keeps Direct and Existing worktree first Turns on immediate dispatch", async () => {
+  it("dispatches Direct first turns and queues attached worktree first turns", async () => {
     const automaticSetup = { queueAutomaticFirstTurn: vi.fn(), admitAutomaticTurn: vi.fn(() => ({ queued: true })) };
     const { workspaceRepo, gitService, service, provider } = createAgentServiceHarness(automaticSetup);
     const workspace = (await workspaceRepo.create("Repo", "/repo"));
@@ -884,8 +910,8 @@ describe("AgentService.createAndSend defaults", () => {
       { name: "existing", path: "/repo/.worktrees/existing", branch: "feature/existing", managed: true },
     ]);
 
-    await service.createAndSend({ workspaceId: workspace.id, content: "Direct dispatch" });
-    await service.createAndSend({
+    const direct = await service.createAndSend({ workspaceId: workspace.id, content: "Direct dispatch" });
+    const attached = await service.createAndSend({
       workspaceId: workspace.id,
       content: "Existing dispatch",
       mode: "worktree",
@@ -894,7 +920,10 @@ describe("AgentService.createAndSend defaults", () => {
     });
 
     expect(automaticSetup.queueAutomaticFirstTurn).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledTimes(2));
+    expect(direct.runtimeSnapshot.phase).toBe("running");
+    expect(attached.runtimeSnapshot).toEqual({ threadId: attached.id, turnExecutionId: null, phase: "idle" });
+    expect(automaticSetup.admitAutomaticTurn).toHaveBeenCalledWith(expect.objectContaining({ threadId: attached.id, content: "Existing dispatch" }));
+    expect(provider.sendTurn).toHaveBeenCalledOnce();
   });
 
   it("returns the authoritative running runtime snapshot after startup", async () => {
