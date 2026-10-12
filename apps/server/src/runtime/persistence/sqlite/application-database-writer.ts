@@ -40,9 +40,17 @@ export interface DatabaseWriterInitialization {
   readonly bootstrap: boolean;
 }
 
+/** The part of a worker thread the writer drives, so tests can supply one that outlives a writer. */
+export interface DatabaseWriterWorker extends EventTarget {
+  onmessage: ((event: MessageEvent<ApplicationDatabaseWriterResponse>) => void) | null;
+  onerror: ((event: ErrorEvent) => void) | null;
+  postMessage(message: ApplicationDatabaseWriterRequest): void;
+  terminate(): void;
+}
+
 /** Owns one bounded FIFO and the application's only writable runtime connection. */
 export class ApplicationDatabaseWriter {
-  private worker: Worker | undefined;
+  private worker: DatabaseWriterWorker | undefined;
   private readonly queue: PendingWrite[] = [];
   private retainedBytes = 0;
   private dispatched: PendingWrite | undefined;
@@ -56,7 +64,7 @@ export class ApplicationDatabaseWriter {
 
   constructor(
     private readonly dbPath: string,
-    private readonly createWorker: () => Worker = defaultCreateWorker,
+    private readonly createWorker: () => DatabaseWriterWorker = createDatabaseWriterWorker,
     private readonly initialization: DatabaseWriterInitialization = { bootstrap: false },
   ) {
     if (!NodePath.isAbsolute(dbPath)) throw new Error("Database writer path must be absolute");
@@ -233,7 +241,7 @@ export class ApplicationDatabaseWriter {
     pending.publishedCount = Math.max(pending.publishedCount, pending.attemptPublicationCount);
   }
 
-  private workerLost(worker: Worker, generation: number, terminated: boolean): void {
+  private workerLost(worker: DatabaseWriterWorker, generation: number, terminated: boolean): void {
     if (this.generation !== generation || this.worker !== worker) return;
     this.worker = undefined;
     const failure = new Error("Canonical writer worker closed");
@@ -312,14 +320,15 @@ function isControlRequest(request: ApplicationDatabaseWriterRequest): boolean {
 
 function asError(error: unknown): Error { return error instanceof Error ? error : new Error(String(error)); }
 
-function terminateWorker(worker: Worker): Promise<void> {
+function terminateWorker(worker: DatabaseWriterWorker): Promise<void> {
   return new Promise((resolve) => {
     worker.addEventListener("close", () => resolve(), { once: true });
     worker.terminate();
   });
 }
 
-function defaultCreateWorker(): Worker {
+/** Start the production writer worker thread. */
+export function createDatabaseWriterWorker(): Worker {
   const filename = import.meta.url.endsWith(".cjs")
     ? "./canonical-agent-writer.worker.cjs"
     : "../../../features/agents/canonical/canonical-agent-writer.worker.ts";

@@ -7,9 +7,10 @@ import { AgentEventSchema, CanonicalAgentProgressFrameSchema, ProviderRuntimeExt
   type AcceptedCanonicalAgentEventEnvelope,
   type ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openMigratedTestDatabase } from "../../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
 import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { leaseWriterWorker } from "../../../../runtime/persistence/sqlite/testing/reusable-writer-worker.js";
 import { ExecutionWorkerHandler, type ExecutionWorkCommand, type ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
 import { CanonicalAgentStore as CanonicalAgentBoundary } from "../canonical-agent-store.js";
 import { syntheticThreadExecutionId } from "../canonical-thread-execution.js";
@@ -145,11 +146,11 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     pushes.turns.length = 0;
     directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-live-progress-"));
     const dbPath = NodePath.join(directory, "app.sqlite");
-    db = openDatabase({ dbPath });
+    db = openMigratedTestDatabase(dbPath);
     db.prepare("INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
       .run("workspace", "Workspace", directory, NOW, NOW);
     insertThread(execution.threadId);
-    databaseWriter = new ApplicationDatabaseWriter(dbPath);
+    databaseWriter = new ApplicationDatabaseWriter(dbPath, leaseWriterWorker);
     writer = new CanonicalAgentWriterClient(databaseWriter);
     reader = openReadOnlyDatabase(dbPath);
     progress = new CanonicalAcceptedProgress(new MainCanonicalAgentBoundary(reader, databaseWriter, writer, () => {}), writer);

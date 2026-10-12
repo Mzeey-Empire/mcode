@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AcceptedCanonicalAgentEventEnvelopeSchema, AgentEventType, type ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openMigratedTestDatabase } from "../../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
 import type { CanonicalAgentEventDraft } from "../canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient as SharedCanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
@@ -208,7 +209,7 @@ describe("canonical SQLite writer", () => {
   beforeEach(async () => {
     tempDir = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-canonical-writer-"));
     dbPath = NodePath.join(tempDir, "app.sqlite");
-    db = openDatabase({ dbPath });
+    db = openMigratedTestDatabase(dbPath);
     db.prepare("INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
       .run("writer-workspace", "Writer test", tempDir, NOW, NOW);
     db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")

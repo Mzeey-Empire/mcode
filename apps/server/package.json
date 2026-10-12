@@ -7,6 +7,7 @@
   "scripts": {
     "start": "bun ../../scripts/dev-web.mjs --server-only",
     "test": "bun --bun ./node_modules/vitest/vitest.mjs run",
+    "test:durations": "bun --bun ./node_modules/vitest/vitest.mjs run --reporter=dot --reporter=./scripts/test-duration-reporter.ts",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

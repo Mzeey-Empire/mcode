@@ -4,6 +4,7 @@ import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
 import { openMigratedTestDatabase } from "../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
+import { leaseWriterWorker } from "../../../runtime/persistence/sqlite/testing/reusable-writer-worker.js";
 
 const fixtures = new Map<Database, { writer: ApplicationDatabaseWriter; directory: string; producers: Set<() => Promise<void>> }>();
 
@@ -12,7 +13,7 @@ export function openAgentStorageTestDatabase(): Database {
   const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-agent-service-"));
   const dbPath = NodePath.join(directory, "app.sqlite");
   const db = openMigratedTestDatabase(dbPath);
-  fixtures.set(db, { writer: new ApplicationDatabaseWriter(dbPath), directory, producers: new Set() });
+  fixtures.set(db, { writer: new ApplicationDatabaseWriter(dbPath, leaseWriterWorker), directory, producers: new Set() });
   return db;
 }
 
