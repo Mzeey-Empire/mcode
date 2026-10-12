@@ -1,9 +1,10 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReviewState } from "@mcode/contracts";
+import type { ReviewState, ReviewTurn, TurnSnapshot } from "@mcode/contracts";
 import { createMockWorkspace } from "@/__tests__/mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { useDiffStore } from "@/stores/diffStore";
 import { OverlayGateContext } from "@/components/ui/overlay-gate";
 import { ReviewHeader } from "../ReviewHeader";
@@ -40,7 +41,7 @@ describe("ReviewHeader view menu", () => {
 
     const menu = await screen.findByRole("menu");
     expect(within(menu).getAllByRole("menuitemradio").map((item) => item.dataset.testid)).toEqual([
-      "review-view-turn", "review-view-cumulative", "review-view-unstaged",
+      "review-view-turn", "review-view-since-looked", "review-view-cumulative", "review-view-unstaged",
       "review-view-staged", "review-view-commit", "review-view-branch",
     ]);
     expect(screen.getByTestId("review-view-cumulative")).toHaveTextContent(/^All turns/);
@@ -79,5 +80,43 @@ describe("ReviewHeader view menu", () => {
 
     rerender(gated(true));
     expect(screen.queryByTestId("review-view-commit")).not.toBeInTheDocument();
+  });
+});
+
+describe("ReviewHeader Since you looked", () => {
+  const turn = (ordinal: number): ReviewTurn => ({
+    messageId: `msg-${ordinal}`, ordinal, createdAt: "2026-10-10T10:00:00Z", phase: "settled",
+    fileCount: 1, additions: 1, deletions: 0, evidence: "native", availability: "available",
+  });
+  const snapshot = (ordinal: number, sequence: number): TurnSnapshot => ({
+    id: `snap-${ordinal}`, message_id: `msg-${ordinal}`, thread_id: "thread", ref_before: "a", ref_after: "b",
+    files_changed: ["a.ts"], worktree_path: null, created_at: "2026-10-10T10:00:00Z", attempt_count: 1,
+    reverted_paths: [], message_sequence: sequence,
+  });
+
+  beforeEach(() => {
+    getReviewState.mockReset().mockResolvedValue(NOTHING_AHEAD);
+    useWorkspaceStore.setState({
+      activeWorkspaceId: "workspace", activeThreadId: "thread", threads: [],
+      workspaces: [createMockWorkspace({ id: "workspace" })],
+    });
+    useDiffStore.setState({
+      diffRevisionByScope: {}, reviewViewMenuOpen: false,
+      reviewTurnsByThread: { thread: [turn(2), turn(3), turn(4)] },
+      snapshotsByThread: { thread: [snapshot(2, 4), snapshot(3, 6), snapshot(4, 8)] },
+    });
+    useDiffStore.getState().setReviewViewForThread("thread", "since-looked");
+  });
+
+  it("names the turns settled after the baseline as plain text in row 2", async () => {
+    threadAttentionStore.setState({ visitBaselines: { thread: 4 } });
+    render(header());
+    expect(await screen.findByTestId("review-operand-slot")).toHaveTextContent(/^Turns 3–4$/);
+  });
+
+  it("leaves Since you looked when the visit has no baseline", async () => {
+    threadAttentionStore.setState({ visitBaselines: {} });
+    render(header());
+    await waitFor(() => expect(useDiffStore.getState().viewMode).not.toBe("since-looked"));
   });
 });

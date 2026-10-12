@@ -23,6 +23,7 @@ describe("reviewBody", () => {
     [context({ view: "turn", turnOrdinal: 4 }), "No file changes in Turn 4"],
     [context({ view: "turn" }), "No file changes in this turn"],
     [context({ view: "cumulative" }), "No file changes in this thread yet"],
+    [context({ view: "since-looked" }), "Nothing new since you looked"],
     [context({ view: "unstaged" }), "No unstaged changes"],
     [context({ view: "staged" }), "Nothing staged"],
     [context({ view: "commit" }), "No file changes in this commit"],
@@ -52,6 +53,7 @@ describe("reviewBody", () => {
     [context({ turnOrdinal: 2 }), "snapshot-expired", "Turn 2's changes are gone", "Snapshots older than 30 days are cleared"],
     [context(), "snapshot-pruned", "This turn's changes are gone", "Git removed this turn's snapshot"],
     [context({ view: "cumulative" }), "snapshot-expired", "This thread's changes are gone", "Snapshots older than 30 days are cleared"],
+    [context({ view: "since-looked" }), "snapshot-pruned", "These turns' changes are gone", "Git removed this turn's snapshot"],
   ])("names gone changes for %o (%s)", (ctx, reason, title, detail) => {
     expect(reviewBody({ status: "unavailable", reason }, ctx)).toEqual({ kind: "gone", title, detail });
   });
@@ -66,5 +68,7 @@ describe("reviewBody", () => {
   it("names the missing operand for an unselected view", () => {
     expect(reviewBody({ status: "unselected" }, context({ view: "commit" }))).toEqual({ kind: "empty", title: "No commit selected" });
     expect(reviewBody({ status: "unselected" }, context({ view: "turn" }))).toEqual({ kind: "empty", title: "No turns yet" });
+    expect(reviewBody({ status: "unselected" }, context({ view: "since-looked" })))
+      .toEqual({ kind: "empty", title: "Nothing new since you looked" });
   });
 });

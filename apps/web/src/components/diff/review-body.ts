@@ -28,6 +28,8 @@ export interface ReviewBodyContext {
   readonly branchRange: { readonly base: string; readonly target: string } | null;
 }
 
+const NOTHING_NEW_TITLE = "Nothing new since you looked";
+
 /** Map one outcome to the body the panel shows, so a failure never reads as empty. */
 export function reviewBody(outcome: ReviewOutcome, context: ReviewBodyContext): ReviewBody {
   switch (outcome.status) {
@@ -44,8 +46,13 @@ export function reviewBody(outcome: ReviewOutcome, context: ReviewBodyContext): 
     case "unavailable":
       return unavailableBody(outcome.reason, context);
     case "unselected":
-      return { kind: "empty", title: context.view === "commit" ? "No commit selected" : "No turns yet" };
+      return { kind: "empty", title: unselectedTitle(context.view) };
   }
+}
+
+function unselectedTitle(view: DiffViewMode): string {
+  if (view === "commit") return "No commit selected";
+  return view === "since-looked" ? NOTHING_NEW_TITLE : "No turns yet";
 }
 
 /**
@@ -72,6 +79,8 @@ function emptyBody(context: ReviewBodyContext): ReviewBody {
       return context.turnOrdinal === null
         ? { kind: "empty", title: "No file changes in this turn", detail: "The agent answered without editing files" }
         : { kind: "empty", title: `No file changes in Turn ${context.turnOrdinal}`, detail: "The agent answered without editing files" };
+    case "since-looked":
+      return { kind: "empty", title: NOTHING_NEW_TITLE };
     case "cumulative":
       return { kind: "empty", title: "No file changes in this thread yet" };
     case "unstaged":
@@ -105,6 +114,7 @@ function unavailableBody(
 
 function goneTitle(context: ReviewBodyContext): string {
   if (context.view === "cumulative") return "This thread's changes are gone";
+  if (context.view === "since-looked") return "These turns' changes are gone";
   return context.turnOrdinal === null
     ? "This turn's changes are gone"
     : `Turn ${context.turnOrdinal}'s changes are gone`;

@@ -23,6 +23,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { OverlayGateContext } from "@/components/ui/overlay-gate";
 import { PanelHeaderSlot, usePanelHeaderMenuOpen } from "@/components/panels/shell/PanelHeader";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { sinceLookedBaseline, threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { useReviewState } from "@/hooks/useReviewState";
 import type { PanelScope } from "@/lib/panel-tabs";
 import {
@@ -30,6 +31,8 @@ import {
   defaultReviewView,
   reviewViewAvailability,
   reviewViewById,
+  sinceLookedMessageIds,
+  sinceLookedTurnsLabel,
   type ReviewChangeState,
   type ReviewView,
   type ReviewViewAvailabilityMap,
@@ -102,6 +105,8 @@ function useReviewViewSelection(): ReviewViewSelection {
     s.workspaces.find((w) => w.id === s.activeWorkspaceId)?.is_git_repo ?? false,
   );
   const turns = useDiffStore((s) => (activeThreadId ? s.reviewTurnsByThread[activeThreadId] ?? null : null));
+  const snapshots = useDiffStore((s) => (activeThreadId ? s.snapshotsByThread[activeThreadId] : undefined));
+  const baseline = threadAttentionStore((s) => sinceLookedBaseline(s, activeThreadId));
   const hasTurnChanges = useDiffStore((s) =>
     activeThreadId ? (s.snapshotsByThread[activeThreadId] ?? []).some((snap) => snap.files_changed.length > 0) : false,
   );
@@ -109,8 +114,8 @@ function useReviewViewSelection(): ReviewViewSelection {
   const scope: PanelScope = activeThreadId ? "thread" : "threadless";
   const reviewState = isGitRepo ? probe.state : NOT_A_GIT_REPOSITORY;
   const availability = useMemo(
-    () => reviewViewAvailability(scope, reviewState, turns),
-    [scope, reviewState, turns],
+    () => reviewViewAvailability(scope, reviewState, turns, { baseline, snapshots }),
+    [scope, reviewState, turns, baseline, snapshots],
   );
   // A probe in flight reads as clean, which would flip a dirty thread's
   // default to Branch until it answers; wait for the answer instead.
@@ -304,7 +309,7 @@ function ReviewControlsRow({
 }: ReviewHeaderProps & { readonly view: ReviewView }) {
   return (
     <div data-testid="review-controls-row" className="flex h-10 min-w-0 flex-1 items-center gap-2">
-      <ReviewOperand operand={view.operand} />
+      {view.id === "since-looked" ? <SinceLookedTurns /> : <ReviewOperand operand={view.operand} />}
       <div className="ml-auto flex shrink-0 items-center gap-1">
         <RefreshButton refreshing={refreshing} onRefresh={onRefresh} />
         <RenderModePill />
@@ -331,6 +336,23 @@ function ReviewOperand({ operand }: { readonly operand: ReviewView["operand"] })
     <div className="flex min-w-0 items-center" data-testid="review-operand-slot" data-operand={operand}>
       {picker}
     </div>
+  );
+}
+
+/** Since you looked has no picker; row 2 names the turns it covers as plain text. */
+function SinceLookedTurns() {
+  const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
+  const baseline = threadAttentionStore((s) => sinceLookedBaseline(s, activeThreadId));
+  const snapshots = useDiffStore((s) => (activeThreadId ? s.snapshotsByThread[activeThreadId] : undefined));
+  const turns = useDiffStore((s) => (activeThreadId ? s.reviewTurnsByThread[activeThreadId] : undefined));
+  const label = baseline === null || !snapshots || !turns
+    ? null
+    : sinceLookedTurnsLabel(turns, sinceLookedMessageIds(snapshots, baseline));
+  if (!label) return null;
+  return (
+    <span className="shrink-0 whitespace-nowrap text-caption text-muted" data-testid="review-operand-slot" data-operand="since-looked">
+      {label}
+    </span>
   );
 }
 

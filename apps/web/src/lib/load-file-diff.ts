@@ -37,6 +37,23 @@ export class ReviewFileDiffUnavailableError extends Error {
   }
 }
 
+/**
+ * The sources that need a thread, read as empty without one: `id` is the
+ * turn-diff id, or the seen baseline for Since you looked.
+ */
+async function loadThreadFileDiff(
+  transport: McodeTransport,
+  source: "turn-diff" | "since-looked",
+  id: string,
+  filePath: string,
+  threadId: string | undefined,
+): Promise<string> {
+  if (!threadId) return "";
+  return patchOrThrow(source === "turn-diff"
+    ? await transport.getTurnDiffFile(threadId, id, filePath)
+    : await transport.getCumulativeDiff(threadId, filePath, undefined, Number(id)));
+}
+
 function patchOrThrow(result: ReviewFileDiffResult): string {
   if (typeof result === "string") return result;
   throw new ReviewFileDiffUnavailableError(result);
@@ -45,7 +62,8 @@ function patchOrThrow(result: ReviewFileDiffResult): string {
 /**
  * Fetch the unified diff for a single file in a Review view. Centralizes the
  * per-source routing for Review file content. The `id` resolves the diff
- * for each {@link DiffSource}: snapshot or turn-diff ID, thread ID, commit SHA, the
+ * for each {@link DiffSource}: snapshot or turn-diff ID, thread ID, the seen baseline
+ * sequence for `"since-looked"`, commit SHA, the
  * `base...target` comparison range for `"branch"`, or the workspace ID for the
  * working-tree views. For the git views `threadId` (when a real thread) makes
  * the diff read the thread's worktree rather than the workspace root; the server
@@ -63,7 +81,8 @@ export async function loadFileDiff(
 ): Promise<string> {
   switch (source) {
     case "turn-diff":
-      return threadId ? patchOrThrow(await transport.getTurnDiffFile(threadId, id, filePath)) : "";
+    case "since-looked":
+      return loadThreadFileDiff(transport, source, id, filePath, threadId);
     case "snapshot":
       return patchOrThrow(await transport.getSnapshotDiff(id, filePath));
     case "cumulative":

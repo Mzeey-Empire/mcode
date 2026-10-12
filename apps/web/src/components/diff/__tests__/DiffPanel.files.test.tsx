@@ -5,6 +5,7 @@ import type { ReviewComparison, ReviewComparisonResult, ReviewTurn, TurnSnapshot
 import { createMockWorkspace } from "@/__tests__/mocks/transport";
 import { useDiffStore, type DiffViewMode } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { DiffPanel } from "../DiffPanel";
 
 let measuredWidth = 900;
@@ -460,6 +461,24 @@ describe("DiffPanel", () => {
 
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("a.ts"));
     expect(screen.getByTestId("review-toggle-all")).toHaveAccessibleName("Expand all");
+  });
+
+  it("loads Since you looked after this visit's baseline, collapsed, and reloads when the baseline moves", async () => {
+    pickThreadView("since-looked");
+    threadAttentionStore.setState({ visitBaselines: { "thread-1": 4 } });
+    transport.getCumulativeDiffStats.mockResolvedValue(stats("a.ts"));
+    render(<DiffPanel />);
+
+    await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("a.ts"));
+    expect(screen.getByTestId("diff-files")).toHaveAttribute("data-source", "since-looked");
+    expect(screen.getByTestId("diff-files")).toHaveAttribute("data-id", "4");
+    expect(transport.getCumulativeDiffStats).toHaveBeenLastCalledWith("thread-1", 4);
+    expect(screen.getByTestId("review-toggle-all")).toHaveAccessibleName("Expand all");
+
+    transport.getCumulativeDiffStats.mockResolvedValue(stats("b.ts"));
+    act(() => threadAttentionStore.setState({ visitBaselines: { "thread-1": 8 } }));
+    await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("b.ts"));
+    expect(screen.getByTestId("diff-files")).toHaveAttribute("data-id", "8");
   });
 
   it("reports a turn list that never loaded and retries the list", async () => {
