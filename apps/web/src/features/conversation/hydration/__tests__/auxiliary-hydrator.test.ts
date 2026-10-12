@@ -1,5 +1,3 @@
-import { useApprovalStore } from "@/stores/approvalStore";
-import { createMockApproval } from "@/__tests__/mocks/transport";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { HYDRATION_TTL_MS } from "..";
 import { AuxiliaryHydrator } from "../auxiliary-hydrator";
@@ -46,9 +44,6 @@ describe("AuxiliaryHydrator", () => {
     records = new Map<string, ThreadRecord>();
     currentThreadId = THREAD_ID;
 
-    (mockTransport.listPendingApprovals as ReturnType<typeof vi.fn>).mockResolvedValue([
-      { requestId: "r1", toolName: "bash", input: {}, threadId: THREAD_ID },
-    ]);
     (mockTransport.getThreadTasks as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     (mockTransport.getThreadPlans as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValue([]);
@@ -106,71 +101,38 @@ describe("AuxiliaryHydrator", () => {
     const aux = createAux();
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: false });
     await vi.waitFor(() => {
-      expect(mockTransport.listPendingApprovals).toHaveBeenCalledTimes(1);
+      expect(mockTransport.getThreadTasks).toHaveBeenCalledTimes(1);
     });
 
     vi.clearAllMocks();
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: false });
     await new Promise((r) => setTimeout(r, 20));
 
-    expect(mockTransport.listPendingApprovals).not.toHaveBeenCalled();
+    expect(mockTransport.getThreadTasks).not.toHaveBeenCalled();
   });
 
   it("ran fanout again when force bypassed the TTL gate", async () => {
     const aux = createAux();
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS });
     await vi.waitFor(() => {
-      expect(mockTransport.listPendingApprovals).toHaveBeenCalledTimes(1);
+      expect(mockTransport.getThreadTasks).toHaveBeenCalledTimes(1);
     });
 
     vi.clearAllMocks();
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
     await vi.waitFor(() => {
-      expect(mockTransport.listPendingApprovals).toHaveBeenCalledTimes(1);
+      expect(mockTransport.getThreadTasks).toHaveBeenCalledTimes(1);
     });
-  });
-
-  it("pruned permission generation after deleted thread snapshot settled", async () => {
-    let resolveApprovals!: (value: readonly unknown[]) => void;
-    (mockTransport.listPendingApprovals as ReturnType<typeof vi.fn>).mockImplementationOnce(
-      () => new Promise<readonly unknown[]>((resolve) => {
-        resolveApprovals = resolve;
-      }),
-    );
-    const aux = createAux();
-    aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
-    aux.forgetThread(THREAD_ID);
-
-    resolveApprovals([]);
-    await vi.waitFor(() => {
-      const generations = (aux as unknown as {
-        permissionSnapshotGenerations: Map<string, number>;
-      }).permissionSnapshotGenerations;
-      expect(generations.has(THREAD_ID)).toBe(false);
-    });
-  });
-
-  it("keeps the approval state reference when the snapshot is unchanged", async () => {
-    const request = createMockApproval({ requestId: "r1", threadId: THREAD_ID });
-    useApprovalStore.getState().add(request);
-    const before = useApprovalStore.getState().approvals;
-    vi.mocked(mockTransport.listPendingApprovals).mockResolvedValueOnce([request]);
-    const aux = createAux();
-    aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
-    await vi.waitFor(() => expect(mockTransport.listPendingApprovals).toHaveBeenCalledWith(THREAD_ID));
-    await Promise.resolve();
-    expect(useApprovalStore.getState().approvals).toBe(before);
   });
 
   it("continued other fanouts when one RPC failed", async () => {
-    (mockTransport.listPendingApprovals as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new Error("permissions down"),
+    (mockTransport.getThreadTasks as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("tasks down"),
     );
     const aux = createAux();
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
 
     await vi.waitFor(() => {
-      expect(mockTransport.getThreadTasks).toHaveBeenCalledWith(THREAD_ID);
       expect(mockTransport.getThreadPlans).toHaveBeenCalledWith(THREAD_ID);
     });
   });

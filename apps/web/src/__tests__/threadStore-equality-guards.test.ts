@@ -1,15 +1,11 @@
-import { useApprovalStore } from "@/stores/approvalStore";
-import { createMockApproval } from "./mocks/transport";
 import {
   activateTestConversation,
   resetThreadStoreForTests,
-  getTestThreadPermissions,
 } from "@/stores/thread-store-test-utils";
-import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 /**
  * Tests for the equality guards added to loadMessages() that prevent
- * redundant set() calls when listPendingApprovals and getThreadTasks
- * resolve with data identical to what is already in the store.
+ * redundant set() calls when getThreadTasks
+ * resolves with data identical to what is already in the store.
  *
  * Both the cache-hit path (side-effect refresh) and the cache-miss path
  * (post-getMessages hydration) are exercised.
@@ -35,8 +31,6 @@ const fakeMessages = [
   createMockMessage({ id: "m1", thread_id: THREAD_ID, content: "hello", sequence: 1 }),
 ];
 
-const fakePermission = createMockApproval({ requestId: "req-1", threadId: THREAD_ID });
-
 /** Reset all relevant stores and mocks to a clean baseline. */
 function resetState() {
   clearRecordCache();
@@ -47,7 +41,6 @@ function resetState() {
     hasMore: false,
   });
   (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-  (mockTransport.listPendingApprovals as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   (mockTransport.getThreadTasks as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
   resetThreadStoreForTests();
@@ -115,75 +108,6 @@ function ageCachedHydration(): void {
 // Cache-miss path: guards on the post-getMessages hydration handlers
 // ---------------------------------------------------------------------------
 
-describe("loadMessages (cache-miss) - listPendingApprovals equality guard", () => {
-  beforeEach(() => {
-    resetState();
-  });
-
-  it("does NOT update permissionsByThread when resolved permissions match existing store values", async () => {
-    // Pre-populate store with the same permission that the RPC will return.
-
-    resetThreadStoreForTests({
-      records: new Map<string, ThreadRecord>([
-        [THREAD_ID, createEmptyThreadRecord()],
-      ]),
-    });
-
-    (mockTransport.listPendingApprovals as ReturnType<typeof vi.fn>).mockResolvedValue([
-      fakePermission,
-    ]);
-
-    // Capture reference before load.
-    useApprovalStore.getState().add(fakePermission);
-    const refBefore = useApprovalStore.getState().approvals;
-
-await activateTestConversation(THREAD_ID);
-
-    // Wait for async permission hydration to complete.
-    await vi.waitFor(() => {
-      expect(mockTransport.listPendingApprovals).toHaveBeenCalledWith(THREAD_ID);
-    });
-
-    // Allow the then() callback to flush.
-    await Promise.resolve();
-
-    const refAfter = useApprovalStore.getState().approvals;
-
-    // Same reference means set() was NOT called with a new array.
-    expect(refAfter).toBe(refBefore);
-  });
-
-  it("DOES update permissionsByThread when resolved permissions differ from existing store values", async () => {
-    // The returned request replaces a different pending identity.
-    resetThreadStoreForTests({
-      records: new Map<string, ThreadRecord>([
-        [THREAD_ID, {
-          ...createEmptyThreadRecord(),
-
-        }],
-      ]),
-    });
-    useApprovalStore.getState().add(createMockApproval({ requestId: "old-req", threadId: THREAD_ID }));
-
-    (mockTransport.listPendingApprovals as ReturnType<typeof vi.fn>).mockResolvedValue([
-      fakePermission,
-    ]);
-
-    await activateTestConversation(THREAD_ID);
-
-    await vi.waitFor(() => {
-      expect(mockTransport.listPendingApprovals).toHaveBeenCalledWith(THREAD_ID);
-    });
-
-    await Promise.resolve();
-
-    const permsAfter = getTestThreadPermissions(THREAD_ID);
-
-    expect(permsAfter).toHaveLength(1);
-    expect(permsAfter![0].requestId).toBe("req-1");
-  });
-});
-
 describe("loadMessages (cache-miss) - getThreadTasks equality guard", () => {
   beforeEach(() => {
     resetState();
@@ -246,7 +170,7 @@ describe("loadMessages (cache-miss) - getThreadTasks equality guard", () => {
 // Cache-hit path: guards on the side-effect refresh after restoring from cache
 // ---------------------------------------------------------------------------
 
-describe("loadMessages (cache-hit) - listPendingApprovals equality guard", () => {
+describe("loadMessages (cache-hit) - getThreadTasks equality guard", () => {
   beforeEach(() => {
     resetState();
   });
@@ -260,91 +184,6 @@ describe("loadMessages (cache-hit) - listPendingApprovals equality guard", () =>
    * so loadMessages takes the synchronous cacheRecord path, guaranteeing
    * the cache is populated before we switch threads.
    */
-  async function warmCache() {
-    // First load populates cache for THREAD_ID.
-    await activateTestConversation(THREAD_ID);
-    // Wait until the cache entry is actually written.
-    await vi.waitFor(() => {
-      expect(getCachedRecord(THREAD_ID)).toBeDefined();
-    });
-    // Switch away so that the next call to loadMessages(THREAD_ID) hits the cache.
-    resetThreadStoreForTests({ currentThreadId: "other-thread" });
-    ageCachedHydration();
-    vi.clearAllMocks();
-    // Re-set mock defaults so the cache-hit refresh calls are controlled.
-    (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-  }
-
-  it("does NOT update permissionsByThread when cache-hit refresh returns same data", async () => {
-    await warmCache();
-
-    // Pre-populate store with matching permissions.
-
-    resetThreadStoreForTests({
-      records: new Map<string, ThreadRecord>([
-        [THREAD_ID, createEmptyThreadRecord()],
-      ]),
-    });
-
-    (mockTransport.listPendingApprovals as ReturnType<typeof vi.fn>).mockResolvedValue([
-      fakePermission,
-    ]);
-
-    useApprovalStore.getState().add(fakePermission);
-    const refBefore = useApprovalStore.getState().approvals;
-
-    // This load should be a cache-hit (getMessages NOT called).
-    await activateTestConversation(THREAD_ID);
-
-    await vi.waitFor(() => {
-      expect(mockTransport.listPendingApprovals).toHaveBeenCalledWith(THREAD_ID);
-    });
-
-    await Promise.resolve();
-
-    expect(mockTransport.getMessages).not.toHaveBeenCalled();
-
-    const refAfter = useApprovalStore.getState().approvals;
-    expect(refAfter).toBe(refBefore);
-  });
-
-  it("DOES update permissionsByThread on cache-hit when data has changed", async () => {
-    await warmCache();
-
-    resetThreadStoreForTests({
-      records: new Map<string, ThreadRecord>([
-        [THREAD_ID, {
-          ...createEmptyThreadRecord(),
-
-        }],
-      ]),
-    });
-    useApprovalStore.getState().add(createMockApproval({ requestId: "old-req", threadId: THREAD_ID }));
-
-    (mockTransport.listPendingApprovals as ReturnType<typeof vi.fn>).mockResolvedValue([
-      fakePermission,
-    ]);
-
-    await activateTestConversation(THREAD_ID);
-
-    await vi.waitFor(() => {
-      expect(mockTransport.listPendingApprovals).toHaveBeenCalledWith(THREAD_ID);
-    });
-
-    await Promise.resolve();
-
-    const permsAfter = getTestThreadPermissions(THREAD_ID);
-    expect(permsAfter).toHaveLength(1);
-    expect(permsAfter![0].requestId).toBe("req-1");
-  });
-});
-
-describe("loadMessages (cache-hit) - getThreadTasks equality guard", () => {
-  beforeEach(() => {
-    resetState();
-  });
-
-  /** @see warmCache in the listPendingApprovals describe block for rationale. */
   async function warmCache() {
     await activateTestConversation(THREAD_ID);
     await vi.waitFor(() => {

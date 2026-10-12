@@ -59,7 +59,7 @@ function setupUser() {
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   respondToApproval.mockReset().mockResolvedValue({ status: "resolved" });
-  useApprovalStore.setState({ approvals: [], submissions: {}, revision: 0 });
+  useApprovalStore.setState({ approvals: [], submissions: {} });
   useWorkspaceStore.setState({ threads: [] });
 });
 
@@ -259,7 +259,7 @@ describe("ApprovalDock queue", () => {
     await user.keyboard("2");
     expect(await screen.findByRole("alert")).toBeInTheDocument();
 
-    act(() => useApprovalStore.getState().replaceThread("thread-1", [], useApprovalStore.getState().revision));
+    act(() => useApprovalStore.getState().hydrate([]));
     addApproval();
 
     expect(screen.getByTestId("approval-dock")).toBeInTheDocument();

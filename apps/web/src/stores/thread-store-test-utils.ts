@@ -45,7 +45,7 @@ export function resetThreadStoreForTests(opts?: {
   recentlyAnsweredPlanMessageIds?: Set<string>;
 }) {
   stableAgentEventPublications.reset();
-  useApprovalStore.setState({ approvals: [], revision: 0 });
+  useApprovalStore.setState({ approvals: [] });
   const baseline = createEmptyThreadStoreState();
   useThreadStore.setState({
     ...baseline,
@@ -119,10 +119,6 @@ export function getTestThreadThoughtSegments(threadId: string): ThoughtSegment[]
 
 export function getTestThreadError(threadId: string): string | undefined {
   return readExistingThreadField(threadId, (r) => r.error ?? undefined);
-}
-
-export function getTestThreadPermissions(threadId: string): StoredApproval[] {
-  return useApprovalStore.getState().approvals.filter((request) => request.threadId === threadId);
 }
 
 export function getTestThreadAgentStartTime(threadId: string): number | undefined {
@@ -215,4 +211,4 @@ export function getTestActiveLoading(): boolean {
 export function getTestActiveLatestTurnWithChanges(): string | null {
   return readActiveThreadField((r) => r.latestTurnWithChanges) ?? null;
 }
-import { useApprovalStore, type StoredApproval } from "./approvalStore";
+import { useApprovalStore } from "./approvalStore";

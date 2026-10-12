@@ -579,6 +579,10 @@ export function createWsTransport(
           .then((attention) => threadAttentionStore.getState().hydrate(attention, observedAttention));
       })
         .catch((error: unknown) => console.warn("[thread-attention] hydration failed", error));
+      void import("@/stores/approvalStore")
+        .then(({ useApprovalStore }) => rpc<ApprovalRequest[]>("approval.listPending", {})
+          .then((requests) => useApprovalStore.getState().hydrate(requests)))
+        .catch((error: unknown) => console.warn("[approvals] hydration failed", error));
       // A steer sent before the drop may have no answer yet, and another window may hold steers.
       void import("@/features/conversation/composer/queue/queued-steer")
         .then(({ restoreQueuedSteers }) => restoreQueuedSteers())

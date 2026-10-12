@@ -31,7 +31,6 @@ export interface AgentEventPreflightContext {
   getRunningThreadIds: () => ReadonlySet<string>;
   invalidateConversation: (threadId: string) => void;
   invalidateDeferredNarrativeEvents: (threadId: string) => void;
-  invalidatePermissionSnapshots: (threadId: string) => void;
   isDisplayConversationLeased: (threadId: string) => boolean;
   promoteDeferredNarrativeEvents: (threadId: string) => void;
   scheduleDeferredNarrativeCleanup: (threadId: string) => void;
@@ -100,7 +99,6 @@ function sequencesLifecycle(
   const lifecycleExit = isLifecycleExit(event);
   const startsNewInstance = event.type === "turnStarted";
   sequenceLifecycleBoundary(context, event, isActiveThread, lifecycleExit, startsNewInstance);
-  if (startsNewInstance) context.invalidatePermissionSnapshots(event.threadId);
   if (isActiveThread && !startsNewInstance && !lifecycleExit) {
     context.promoteDeferredNarrativeEvents(event.threadId);
   }

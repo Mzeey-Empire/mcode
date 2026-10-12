@@ -17,12 +17,11 @@ export interface ApprovalSubmission {
 interface ApprovalState {
   approvals: StoredApproval[];
   submissions: Readonly<Record<string, ApprovalSubmission>>;
-  revision: number;
   add(request: ApprovalRequest): void;
   resolve(requestId: string): void;
   remove(requestId: string): void;
   clearThread(threadId: string): void;
-  replaceThread(threadId: string, requests: ApprovalRequest[], expectedRevision: number): void;
+  hydrate(requests: ApprovalRequest[]): void;
   setSubmission(requestId: string, submission: ApprovalSubmission): void;
 }
 
@@ -38,16 +37,16 @@ function pendingSubmissions(
 }
 
 function withApprovals(state: ApprovalState, approvals: StoredApproval[]): Partial<ApprovalState> {
-  return { revision: state.revision + 1, approvals, submissions: pendingSubmissions(state.submissions, approvals) };
+  return { approvals, submissions: pendingSubmissions(state.submissions, approvals) };
 }
 
-/** Live approvals shared by the approval dock, transcript question cards, and sidebar attention selectors. */
+/** Pending approvals for every thread, hydrated on socket connect and patched by live pushes. */
 export const useApprovalStore = create<ApprovalState>((set) => ({
-  approvals: [], submissions: {}, revision: 0,
+  approvals: [], submissions: {},
   add: (request) => set((state) => {
     const existing = state.approvals.find((item) => item.requestId === request.requestId);
     if (existing?.settled) return state;
-    return { revision: state.revision + 1, approvals: existing
+    return { approvals: existing
       ? state.approvals.map((item) => item.requestId === request.requestId ? { ...request, settled: false } : item)
       : [...state.approvals, { ...request, settled: false }] };
   }),
@@ -55,11 +54,15 @@ export const useApprovalStore = create<ApprovalState>((set) => ({
     state.approvals.map((item) => item.requestId === requestId ? { ...item, settled: true } : item))),
   remove: (requestId) => set((state) => withApprovals(state, state.approvals.filter((item) => item.requestId !== requestId))),
   clearThread: (threadId) => set((state) => withApprovals(state, state.approvals.filter((item) => item.threadId !== threadId))),
-  replaceThread: (threadId, requests, expectedRevision) => set((state) => {
-    const current = state.approvals.filter((item) => item.threadId === threadId && !item.settled).map(({ settled: _settled, ...request }) => request);
-    if (state.revision !== expectedRevision || JSON.stringify(current) === JSON.stringify(requests)) return state;
-    return withApprovals(state, [...state.approvals.filter((item) => item.threadId !== threadId || item.settled),
-      ...requests.filter((request) => !state.approvals.some((item) => item.requestId === request.requestId && item.settled)).map((request) => ({ ...request, settled: false }))]);
+  // The server builds this app-wide snapshot synchronously and answers on the
+  // same ordered socket as approval pushes, so it already reflects every push
+  // applied before it and needs no revision guard against them.
+  hydrate: (requests) => set((state) => {
+    const tombstones = state.approvals.filter((item) => item.settled);
+    const tombstoned = new Set(tombstones.map((item) => item.requestId));
+    return withApprovals(state, [...tombstones, ...requests
+      .filter((request) => !tombstoned.has(request.requestId))
+      .map((request) => ({ ...request, settled: false }))]);
   }),
   setSubmission: (requestId, submission) => set((state) => (
     // A response can land after the request was resolved or removed; recording it then would leak an entry.
