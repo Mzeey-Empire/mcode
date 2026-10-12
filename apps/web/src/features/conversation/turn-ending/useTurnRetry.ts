@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { getTransport } from "@/transport";
 import { useTurnActionRequest } from "./useTurnActionRequest";
 
@@ -8,10 +9,9 @@ export interface TurnRetry {
   error: string | null;
 }
 
-const retryErroredTurn = (params: { threadId: string; turnId: string }) => getTransport().retryErroredTurn(params);
-
 /** Retries a thread's latest errored turn in the same provider session, keeping the server's refusal visible. */
 export function useTurnRetry(threadId: string, turnId: string): TurnRetry {
-  const { run, pending, error } = useTurnActionRequest(threadId, turnId, retryErroredTurn);
-  return { retry: run, pending, error };
+  const { run, pending, error } = useTurnActionRequest();
+  const retry = useCallback(() => run(() => getTransport().retryErroredTurn({ threadId, turnId })), [run, threadId, turnId]);
+  return { retry, pending, error };
 }

@@ -1,4 +1,4 @@
-import type { AgentEvent, TurnOutcome } from "@mcode/contracts";
+import { providerFailureOutcome, type AgentEvent, type TurnOutcome } from "@mcode/contracts";
 
 /** Dependencies used to publish one normalized provider event to the parent UI. */
 export interface ParentProviderEventPublicationDeps {
@@ -19,8 +19,9 @@ export function publishParentProviderEvent(
     deps.recordTurnOutcome(event.threadId, "completed");
     deps.publishThreadStatus({ threadId: event.threadId, status: "completed" });
   } else if (event.type === "error") {
-    deps.recordTurnOutcome(event.threadId, "errored");
-    deps.publishThreadStatus({ threadId: event.threadId, status: "errored" });
+    const outcome = providerFailureOutcome(event.failure);
+    deps.recordTurnOutcome(event.threadId, outcome);
+    deps.publishThreadStatus({ threadId: event.threadId, status: outcome });
   } else if (event.type === "ended" && event.outcome !== undefined) {
     const status = event.outcome === "completed"
       ? "completed"

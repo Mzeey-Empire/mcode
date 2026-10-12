@@ -526,6 +526,71 @@ describe("TurnRecoveryService", () => {
         expect(commands[0]!.providerWireOverride).toContain("User: repeat only when asked");
       });
 
+      function limitTurn(output: "none" | "partial-answer"): void {
+        const message = output === "none" ? null : messageRepo.createAssistantIdempotent({
+          id: "limited-answer", threadId: THREAD_ID, content: "Partial answer", sequence: 2 });
+        sink.finishParentTurn({ threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
+          providerId: "codex", providerIdentities: [], outcome: "interrupted", error: "Usage limit reached",
+          ending: { cause: "usage_limit", usageLimit: { resetsAt: "2026-08-10T14:00:00.000Z", limitType: "five_hour" } },
+          projectTurn: () => ({ message, narrative: [] }) });
+      }
+
+      it("resumes on the requested model", async () => {
+        interruptTurn();
+        const commands: SendMessageCommand[] = [];
+        const result = await service.resumeTurn({ threadId: THREAD_ID, turnId: TURN_ID, model: "gpt-5.5" }, async (command) => {
+          commands.push(command);
+          await admit(command);
+        });
+        expect(result.mode).toBe("seeded-session");
+        expect(commands[0]).toMatchObject({ model: "gpt-5.5", content: RESUME_CONTINUATION_PROMPT });
+      });
+
+      it("re-sends the original prompt when a usage limit stopped the turn before any output", async () => {
+        withNativeSession();
+        limitTurn("none");
+        const commands: SendMessageCommand[] = [];
+        const result = await service.resumeTurn({ threadId: THREAD_ID, turnId: TURN_ID, model: "gpt-5.5" }, async (command) => {
+          commands.push(command);
+          await admit(command);
+          notifyCommittedCanonicalEvents([providerStarted(sourceTurnId(command))]);
+        });
+        expect(result.mode).toBe("native-session");
+        expect(commands).toHaveLength(1);
+        expect(commands[0]).toMatchObject({ content: "repeat only when asked", resumeRequired: true, model: "gpt-5.5",
+          retryOfExecutionId: EXECUTION_ID });
+        expect(commands[0]!.internalUserMessage).toBeUndefined();
+        expect(sink.loadTurn(result.turnId)).toMatchObject({ attemptOf: TURN_ID });
+      });
+
+      it("continues a usage-limited turn that already answered with the hidden continuation", async () => {
+        withNativeSession();
+        limitTurn("partial-answer");
+        const commands: SendMessageCommand[] = [];
+        await resume(async (command) => {
+          commands.push(command);
+          await admit(command);
+          notifyCommittedCanonicalEvents([providerStarted(sourceTurnId(command))]);
+        });
+        expect(commands[0]).toMatchObject({ content: RESUME_CONTINUATION_PROMPT, internalUserMessage: true, resumeRequired: true });
+      });
+
+      it("accepts only a usage-limited interruption as a scheduled resume target", () => {
+        const input = { threadId: THREAD_ID, turnId: TURN_ID };
+        limitTurn("none");
+        expect(service.requireResumableUsageLimitTurn(input)).toMatchObject({ turnId: TURN_ID, executionId: EXECUTION_ID,
+          ending: { outcome: "interrupted", cause: "usage_limit" } });
+      });
+
+      it.each([
+        { name: "an interruption with another cause", prepare: () => interruptTurn(), code: "TURN_RECOVERY_NOT_USAGE_LIMITED" },
+        { name: "an errored turn", prepare: () => failTurn(), code: "TURN_RECOVERY_NOT_INTERRUPTED" },
+      ])("refuses $name as a scheduled resume target", ({ prepare, code }) => {
+        prepare();
+        expect(() => service.requireResumableUsageLimitTurn({ threadId: THREAD_ID, turnId: TURN_ID }))
+          .toThrow(expect.objectContaining({ code }));
+      });
+
       it("rejects a second resume of the same interrupted attempt", async () => {
         interruptTurn();
         await resume(admit);

@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { ProviderIdSchema, type AgentEvent, type ProviderId } from "@mcode/contracts";
+import { ProviderIdSchema, providerFailureOutcome, type AgentEvent, type ProviderId } from "@mcode/contracts";
 
 import { ThreadStore as ThreadRepo } from "../../thread-control/persistence/thread-store.js";
 import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";
@@ -18,7 +18,8 @@ function errorTerminalIntent(reduction: Reduced, event: Extract<AgentEvent, { ty
   const error = reduction.writer.find((intent) => intent.kind === "turn-error");
   const terminal = reduction.writer.find((intent) => intent.kind === "terminal-projection");
   if (error?.kind !== "turn-error" || error.error !== event.error
-    || terminal?.kind !== "terminal-projection" || terminal.source !== "error" || terminal.outcome !== "errored") {
+    || terminal?.kind !== "terminal-projection" || terminal.source !== "error"
+    || terminal.outcome !== providerFailureOutcome(event.failure)) {
     throw new Error("Codex error needs an errored terminal projection and end time");
   }
   return terminal;
@@ -130,7 +131,7 @@ export class CanonicalCodexSystemErrorProjection {
       input: {
         threadId: reduction.execution.threadId,
         executionId: reduction.execution.executionId,
-        outcome: "errored",
+        outcome: providerFailureOutcome(event.failure),
         endedAt,
         assistant: terminal.assistant,
         narrative: terminal.narrative,

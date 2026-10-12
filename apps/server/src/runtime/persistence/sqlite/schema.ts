@@ -153,6 +153,15 @@ export const threads = sqliteTable(
   ],
 );
 
+/** One user-authorized resume deadline per thread. */
+export const turnResumeSchedules = sqliteTable("turn_resume_schedules", {
+  threadId: text("thread_id").primaryKey().notNull().references(() => threads.id, { onDelete: "cascade" }),
+  turnId: text("turn_id").notNull(),
+  executionId: text("execution_id").notNull(),
+  runAt: text("run_at").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
 /** Server-owned startup lifecycle records that can exist before their thread. */
 export const threadStartups = sqliteTable(
   "thread_startups",

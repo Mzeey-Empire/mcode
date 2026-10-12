@@ -617,7 +617,7 @@ function errorTerminalInput(
 ): Extract<SyntheticTerminalInput, { outcome: "errored" }> | undefined {
   const { error } = input;
   return typeof error === "string" && error.length > 0
-    ? { outcome: "errored", error, failure: adapterTurnFailure(input.ending?.failure) } : undefined;
+    ? { outcome: "errored", error, failure: adapterTurnFailure(input.ending) } : undefined;
 }
 
 function validOwnedEventCommand(command: Extract<WorkerCommand, { kind: "event" }>, state: ExecutionState): boolean {

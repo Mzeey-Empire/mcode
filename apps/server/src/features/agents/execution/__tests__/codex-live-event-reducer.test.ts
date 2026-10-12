@@ -542,6 +542,19 @@ describe("CodexLiveEventReducer", () => {
     expect(structuredClone(terminal)).toEqual(terminal);
   });
 
+  it("projects a usage-limit failure as an interrupted terminal", () => {
+    const reducer = new CodexLiveEventReducer(execution);
+    expect(reducer.reduce(event("turnStarted")).kind).toBe("reduced");
+
+    expect(reducer.reduce(event("error", { error: "You've hit your usage limit",
+      failure: { kind: "usage_limit", limitType: "five_hour" } }))).toMatchObject({
+      kind: "reduced",
+      writer: [{ kind: "turn-error", error: "You've hit your usage limit" },
+        { kind: "terminal-projection", source: "error", outcome: "interrupted" }],
+      publication: { after: "terminal" },
+    });
+  });
+
   it("keeps post-turn goal and status publications while rejecting unowned goal receipts", () => {
     const mapper = new CodexEventMapper(execution.threadId, "native-main");
     const reducer = new CodexLiveEventReducer(execution);

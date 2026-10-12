@@ -40,7 +40,7 @@ export type { AttachmentMeta, StoredAttachment } from "./models/attachment.js";
 
 export { TurnOutcomeSchema } from "./models/turn-outcome.js";
 export type { TurnOutcome } from "./models/turn-outcome.js";
-export { TurnFailureSchema } from "./models/turn-failure.js";
+export { providerFailureOutcome, TurnFailureSchema } from "./models/turn-failure.js";
 export type { TurnFailure } from "./models/turn-failure.js";
 
 export { WorkspaceSchema, WorkspaceEnrichmentSchema } from "./models/workspace.js";
@@ -305,6 +305,10 @@ export {
   TurnResumeResultSchema,
   TurnRetryParamsSchema,
   TurnRetryResultSchema,
+  ScheduledTurnResumeSchema,
+  TurnResumeScheduleParamsSchema,
+  TurnResumeUnscheduleParamsSchema,
+  ThreadResumeScheduledSchema,
 } from "./models/turn-recovery.js";
 export type {
   TurnResumeMode,
@@ -312,6 +316,8 @@ export type {
   TurnResumeResult,
   TurnRetryParams,
   TurnRetryResult,
+  ScheduledTurnResume,
+  TurnResumeScheduleParams,
 } from "./models/turn-recovery.js";
 
 export {
@@ -834,6 +840,7 @@ export {
   SystemStopReasonSchema,
   TurnFailureKindSchema,
   TurnStopCauseSchema,
+  TurnUsageLimitSchema,
   createAgentModelState,
   reduceAgentEvent,
   reduceAgentEventBatch,
@@ -878,6 +885,7 @@ export type {
   SystemStopReason,
   TurnFailureKind,
   TurnStopCause,
+  TurnUsageLimit,
 } from "./compat/agent-model.js";
 
 // Plan questions

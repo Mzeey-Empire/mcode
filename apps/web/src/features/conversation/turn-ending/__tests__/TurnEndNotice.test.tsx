@@ -25,15 +25,6 @@ const FAILED: FilledNotice = {
   primary: { action: "retry", label: "Retry" },
 };
 
-const USAGE_LIMIT: FilledNotice = {
-  style: "filled",
-  icon: "usage_limit",
-  title: "Codex usage limit reached",
-  detail: "5-hour limit · resets 14:05",
-  secondary: { action: "switch_model", label: "Switch model" },
-  primary: { action: "retry_at", label: "Retry at 14:05" },
-};
-
 const INTERRUPTED: FilledNotice = {
   style: "filled",
   icon: "interrupted",
@@ -96,10 +87,9 @@ describe("TurnEndNotice", () => {
   });
 
   it("renders only the actions that have handlers", () => {
-    render(<TurnEndNotice notice={USAGE_LIMIT} actions={{ retry: vi.fn() }} />);
-    expect(screen.queryByRole("button", { name: "Switch model" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Retry at 14:05" })).toBeNull();
-    expect(screen.getByText("Codex usage limit reached")).toBeInTheDocument();
+    render(<TurnEndNotice notice={INTERRUPTED} actions={{ retry: vi.fn() }} />);
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByText("Interrupted")).toBeInTheDocument();
   });
 
   it("calls the Resume handler on an interrupted notice", () => {
@@ -154,5 +144,14 @@ describe("ThreadTurnEndNotice", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(mockTransport.retryErroredTurn).toHaveBeenCalledWith({ threadId: "thread-1", turnId: "turn-1" });
+  });
+
+  it("resumes the notice's turn on its own model", () => {
+    vi.mocked(mockTransport.resumeInterruptedTurn).mockClear();
+    render(<ThreadTurnEndNotice threadId="thread-1" turnId="turn-1" providerId="codex" notice={INTERRUPTED} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+
+    expect(mockTransport.resumeInterruptedTurn).toHaveBeenCalledWith({ threadId: "thread-1", turnId: "turn-1" });
   });
 });

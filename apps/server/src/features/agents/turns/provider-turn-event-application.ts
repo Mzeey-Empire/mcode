@@ -6,7 +6,7 @@ import {
   type ProviderId,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
-import { persistTurnFailure, type TurnEndingCause } from "../canonical/turn-ending.js";
+import { persistTurnFailure, providerFailureTerminal, type TurnEndingCause } from "../canonical/turn-ending.js";
 
 import { broadcast } from "../../../application/transport/push.js";
 import { BrowserNarrativeEventSanitizer } from "../../browser-automation/index.js";
@@ -521,12 +521,13 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   private applyError(providerId: ProviderId, event: Extract<AgentEvent, { type: "error" }>): boolean {
     if (this.runtime.shouldSuppressStoppingTerminal(event.threadId, event.turnExecutionId)) return false;
     if (this.runtime.suppressTransientError(event)) return false;
-    if (!this.runtime.failProviderTurn(event)) {
+    const { outcome, ending } = providerFailureTerminal(persistTurnFailure({
+      failure: event.failure, provider: providerId, message: event.error, acceptedAt: Date.now() }));
+    if (!this.runtime.failProviderTurn(event, outcome)) {
       this.warnRejectedTerminal(event.threadId, event.type, event.turnExecutionId);
       return false;
     }
-    this.beginTerminalProjection(event.threadId, "errored", "error", { failure: persistTurnFailure({
-      failure: event.failure, provider: providerId, message: event.error, acceptedAt: Date.now() }) });
+    this.beginTerminalProjection(event.threadId, outcome, "error", ending);
     this.runtime.clearTerminalState(event.threadId);
     return true;
   }

@@ -13,6 +13,7 @@ import { AttachmentService } from "../../attachments/storage/attachment-service.
 import { HandoffStorage } from "../../handoff/index.js";
 import { ThreadDeletionTeardownService } from "./thread-deletion-teardown-service.js";
 import { DatabaseWriteOutcomeUnknown } from "../../../runtime/persistence/sqlite/application-database-writer.js";
+import { TurnResumeScheduler } from "../../agents/recovery/turn-resume-scheduler.js";
 
 /** Receives the durable thread record before managed checkout mutation begins. */
 export interface ThreadCreateLifecycle {
@@ -37,6 +38,7 @@ export class ThreadService {
     // CI watcher registration follows ThreadService construction during bootstrap.
     @inject(delay(() => ThreadDeletionTeardownService))
     private readonly threadDeletionTeardownService: Pick<ThreadDeletionTeardownService, "teardownThread" | "deletePersistentData">,
+    @inject(TurnResumeScheduler, { isOptional: true }) private readonly resumeScheduler?: Pick<TurnResumeScheduler, "unschedule">,
   ) {}
 
   /**
@@ -122,7 +124,13 @@ export class ThreadService {
     this.acceptedProgress?.assertThreadDeletionSupported(threadId);
 
     if (cleanupWorktree && thread.worktree_path) {
-      if (await this.projectWorktreeService.scheduleCleanup(threadId)) return true;
+      // Stop the scheduled resume before asynchronous cleanup safety checks can admit it.
+      await this.resumeScheduler?.unschedule(threadId);
+      if (await this.projectWorktreeService.scheduleCleanup(threadId)) {
+        // Disarm any resume scheduled while cleanup safety checks were pending.
+        await this.resumeScheduler?.unschedule(threadId);
+        return true;
+      }
       logger.info("Worktree checkout kept because removal safety could not be proven", {
         threadId,
         worktreePath: thread.worktree_path,
@@ -130,11 +138,14 @@ export class ThreadService {
     }
 
     await this.threadDeletionTeardownService.teardownThread(threadId);
-    return this.threadDeletionTeardownService.deletePersistentData([threadId], async () => {
+    const deleted = await this.threadDeletionTeardownService.deletePersistentData([threadId], async () => {
       this.attachmentService.removeForThread(threadId);
       await this.handoffStorage.deleteThreadFiles(threadId);
       return this.threadRepo.hardDelete(threadId, { preserveActiveDescendants: true });
     });
+    // Disarm any resume scheduled during teardown or persistent deletion.
+    await this.resumeScheduler?.unschedule(threadId);
+    return deleted;
   }
 
   /** Update a thread's display title. */

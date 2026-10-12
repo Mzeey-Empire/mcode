@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo, type ComponentProps, type ReactNode } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import { ChevronDown, Lock, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PICKER_PANEL_CLASS, Picker, type PickerRow, type PickerRowAction, type PickerTab } from "@/components/ui/picker";
@@ -74,6 +74,8 @@ interface ModelSelectorProps {
   detail?: ReactNode;
   /** Settings for the selected model, shown under the catalog and alone while the model is locked. */
   settings?: ReactNode;
+  /** Replaces the selected-model button that opens the picker. */
+  trigger?: ReactElement;
 }
 
 interface SelectedModelPresentation {
@@ -500,6 +502,7 @@ export function ModelSelector({
   providerLocked,
   detail,
   settings,
+  trigger: customTrigger,
 }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ModelPickerTab>(FAVORITES_TAB);
@@ -581,7 +584,7 @@ export function ModelSelector({
   const trigger = (
     <PopoverTrigger
       render={
-        <ModelSelectorTrigger iconProviderId={presentation.iconProviderId} shortLabel={presentation.shortLabel} detail={detail} locked={locked} />
+        customTrigger ?? <ModelSelectorTrigger iconProviderId={presentation.iconProviderId} shortLabel={presentation.shortLabel} detail={detail} locked={locked} />
       }
     />
   );

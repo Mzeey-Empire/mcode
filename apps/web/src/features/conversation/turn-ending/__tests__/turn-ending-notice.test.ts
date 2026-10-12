@@ -12,7 +12,6 @@ function input(overrides: Partial<TurnEndingInput> = {}): TurnEndingInput {
     durationMs: 42_000,
     providerLabel: "Codex",
     providerSignedOut: false,
-    scheduledRetryAt: null,
     isStartupTurn: false,
     isLatestTurn: true,
     executionId: "exec1234abcd",
@@ -82,6 +81,14 @@ describe("turnEndingView: interrupted", () => {
   it("offers Resume only on the thread's latest turn", () => {
     const notice = turnEndingView(input({ status: "interrupted", isLatestTurn: false, ending: interrupted("app_closed") })).notice;
     expect(notice).toEqual({ style: "filled", icon: "interrupted", title: "Interrupted", detail: "Mcode closed while Codex was working" });
+  });
+
+  it.each([true, false])("records a usage limit as a quiet stop whose actions live in the composer (latest: %s)", (isLatestTurn) => {
+    const ending: AgentTurnEnding = { outcome: "interrupted", cause: "usage_limit", usageLimit: { resetsAt: localIso(14, 5), limitType: "five_hour" } };
+    expect(turnEndingView(input({ status: "interrupted", isLatestTurn, ending }))).toEqual({
+      foldLabel: "Interrupted after 42s",
+      notice: { style: "quiet", icon: "paused", title: "Interrupted · Codex usage limit" },
+    });
   });
 
   it("drops the fold when the provider never started, and defers the startup turn to its trail", () => {
@@ -158,31 +165,25 @@ describe("turnEndingView: errored", () => {
     });
   });
 
-  it("offers Retry at the reset time for a usage limit", () => {
+  it("keeps plain Retry for a usage-limit failure written before usage limits became interruptions", () => {
     const view = turnEndingView(input({ ending: errored({ kind: "usage_limit", limitType: "five_hour", resetsAt: localIso(14, 5) }) }));
     expect(view.notice).toEqual({
       style: "filled",
-      icon: "usage_limit",
+      icon: "failed",
       title: "Codex usage limit reached",
-      detail: "5-hour limit · resets 14:05",
-      secondary: { action: "switch_model", label: "Switch model" },
-      primary: { action: "retry_at", label: "Retry at 14:05" },
+      detail: "5-hour limit",
+      details: "upstream said no\nstack line\nturn exec1234",
+      primary: { action: "retry", label: "Retry" },
     });
-  });
-
-  it("offers Cancel retry while an automatic retry is scheduled", () => {
-    const view = turnEndingView(input({ scheduledRetryAt: localIso(9, 30), ending: errored({ kind: "usage_limit", resetsAt: localIso(14, 5) }) }));
-    expect(view.notice).toMatchObject({ detail: "Retrying at 09:30", primary: { action: "cancel_retry", label: "Cancel retry" } });
   });
 
   it.each([
-    [{}, "Usage limit"],
+    [{}, undefined],
     [{ limitType: "seven_day" }, "Weekly limit"],
     [{ limitType: "monthly" }, "monthly"],
-  ])("offers plain Retry for a usage limit without a reset time %o", (fields, detail) => {
-    expect(turnEndingView(input({ ending: errored({ kind: "usage_limit", ...fields }) })).notice).toMatchObject({
-      detail,
-      primary: { action: "retry", label: "Retry" },
-    });
+  ])("names the usage-limit window %o on an old failure", (fields, detail) => {
+    const notice = turnEndingView(input({ ending: errored({ kind: "usage_limit", ...fields }) })).notice;
+    expect(notice).toMatchObject({ primary: { action: "retry", label: "Retry" } });
+    expect(notice?.detail).toBe(detail);
   });
 });

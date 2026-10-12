@@ -1,5 +1,6 @@
 import type { AgentTurnEnding, InterruptionCause, PersistedTurnFailure, SystemStopReason, TurnOutcome } from "@mcode/contracts";
 import { workFoldLabel } from "../turn/WorkFold";
+import { usageLimitLabel } from "./usage-limit";
 
 /** Everything the end-notice table reads about one logical turn's latest attempt. */
 export interface TurnEndingInput {
@@ -11,8 +12,6 @@ export interface TurnEndingInput {
   providerLabel: string;
   /** True while the provider status reports the user signed out. */
   providerSignedOut: boolean;
-  /** ISO time of a scheduled automatic retry, or null. */
-  scheduledRetryAt: string | null;
   /** The thread's first turn, whose pre-frame ending the startup trail owns. */
   isStartupTurn: boolean;
   /** Only the thread's latest turn can be retried or resumed. */
@@ -21,11 +20,13 @@ export interface TurnEndingInput {
 }
 
 /** A user action a filled notice can offer. */
-export type TurnEndAction = "retry" | "retry_at" | "cancel_retry" | "switch_model" | "sign_in" | "resume";
+export type TurnEndAction = "retry" | "sign_in" | "resume";
 
 /** A quiet one-line ending: no fill, muted title. */
 export interface QuietNotice {
   style: "quiet";
+  /** A stop is the default; a paused ending is one the composer tray can still resume. */
+  icon?: "paused";
   title: string;
   detail?: string;
 }
@@ -33,13 +34,12 @@ export interface QuietNotice {
 /** A filled ending with a cause, optional raw Details, and actions. */
 export interface FilledNotice {
   style: "filled";
-  icon: "failed" | "usage_limit" | "interrupted";
+  icon: "failed" | "interrupted";
   title: string;
   detail?: string;
   /** Raw provider text plus the turn line, shown behind "Details". */
   details?: string;
-  secondary?: { action: "switch_model"; label: string };
-  primary?: { action: Exclude<TurnEndAction, "switch_model">; label: string };
+  primary?: { action: TurnEndAction; label: string };
 }
 
 /** The notice under a settled turn. */
@@ -59,9 +59,8 @@ export function sameTurnEndNotice(left: TurnEndNoticeView, right: TurnEndNoticeV
 }
 
 function noticeFields(notice: TurnEndNoticeView): ReadonlyArray<string | undefined> {
-  if (notice.style === "quiet") return [notice.style, notice.title, notice.detail];
-  const { primary, secondary } = notice;
-  return [notice.style, notice.icon, notice.title, notice.detail, notice.details, primary?.action, primary?.label, secondary?.label];
+  if (notice.style === "quiet") return [notice.style, notice.icon, notice.title, notice.detail];
+  return [notice.style, notice.icon, notice.title, notice.detail, notice.details, notice.primary?.action, notice.primary?.label];
 }
 
 const STATUS_PHRASES: Readonly<Record<number, string>> = {
@@ -76,11 +75,6 @@ const STATUS_PHRASES: Readonly<Record<number, string>> = {
   503: "Service Unavailable",
   504: "Gateway Timeout",
   529: "Overloaded",
-};
-
-const LIMIT_LABELS: Readonly<Record<string, string>> = {
-  five_hour: "5-hour limit",
-  seven_day: "Weekly limit",
 };
 
 const MCODE_STOP_NOTICES: Readonly<Record<Exclude<SystemStopReason, "thread_deleted">, QuietNotice>> = {
@@ -112,15 +106,17 @@ function cancelledView(input: TurnEndingInput, foldLabel: string | null): TurnEn
     : { foldLabel, notice: { style: "quiet", title: "You stopped" } };
 }
 
-const INTERRUPTION_DETAILS: Readonly<Record<InterruptionCause, (provider: string) => string>> = {
+const INTERRUPTION_DETAILS: Readonly<Record<Exclude<InterruptionCause, "usage_limit">, (provider: string) => string>> = {
   app_closed: (provider) => `Mcode closed while ${provider} was working`,
   provider_exited: (provider) => `${provider} stopped unexpectedly`,
   saving_stopped: (provider) => `Mcode stopped saving ${provider}'s output`,
   unknown: (provider) => `${provider} stopped before finishing`,
 };
 
-function interruptedNotice(input: TurnEndingInput): FilledNotice {
+function interruptedNotice(input: TurnEndingInput): TurnEndNoticeView {
   const cause = input.ending?.outcome === "interrupted" ? input.ending.cause : "unknown";
+  // The composer tray owns a usage limit's Resume and Switch model, so the transcript only records the stop.
+  if (cause === "usage_limit") return { style: "quiet", icon: "paused", title: `Interrupted · ${input.providerLabel} usage limit` };
   const notice: FilledNotice = {
     style: "filled",
     icon: "interrupted",
@@ -128,16 +124,17 @@ function interruptedNotice(input: TurnEndingInput): FilledNotice {
     detail: INTERRUPTION_DETAILS[cause](input.providerLabel),
     primary: { action: "resume", label: "Resume" },
   };
-  return input.isLatestTurn ? notice : withoutPrimary(notice);
+  return input.isLatestTurn ? notice : withoutActions(notice);
 }
 
 function erroredNotice(input: TurnEndingInput): FilledNotice {
   const failure = input.ending?.outcome === "errored" ? input.ending.failure : null;
   const notice = failure ? failureNotice(failure, input) : unclassifiedNotice(input);
-  return input.isLatestTurn ? notice : withoutPrimary(notice);
+  return input.isLatestTurn ? notice : withoutActions(notice);
 }
 
-function withoutPrimary({ primary: _primary, ...notice }: FilledNotice): FilledNotice {
+// Every action retries or resumes the turn, which the server refuses once a newer turn exists.
+function withoutActions({ primary: _primary, ...notice }: FilledNotice): FilledNotice {
   return notice;
 }
 
@@ -155,7 +152,8 @@ function failureNotice(failure: PersistedTurnFailure, input: TurnEndingInput): F
     case "fatal":
       return { style: "filled", icon: "failed", title: `${input.providerLabel} couldn't finish this turn`, detail: firstLine(failure.message), details, primary: RETRY };
     case "usage_limit":
-      return usageLimitNotice(failure, input);
+      // Rows written before usage limits became interruptions keep a plain failure with Retry.
+      return { style: "filled", icon: "failed", title: `${input.providerLabel} usage limit reached`, detail: usageLimitLabel(failure.limitType), details, primary: RETRY };
     case "auth":
       return {
         style: "filled",
@@ -165,24 +163,6 @@ function failureNotice(failure: PersistedTurnFailure, input: TurnEndingInput): F
         primary: input.providerSignedOut ? { action: "sign_in", label: "Sign in" } : RETRY,
       };
   }
-}
-
-function usageLimitNotice(failure: PersistedTurnFailure, input: TurnEndingInput): FilledNotice {
-  const limit = failure.limitType ? LIMIT_LABELS[failure.limitType] ?? failure.limitType : "Usage limit";
-  const base = {
-    style: "filled",
-    icon: "usage_limit",
-    title: `${input.providerLabel} usage limit reached`,
-    secondary: { action: "switch_model", label: "Switch model" },
-  } as const;
-  if (input.scheduledRetryAt) {
-    return { ...base, detail: `Retrying at ${clockTime(input.scheduledRetryAt)}`, primary: { action: "cancel_retry", label: "Cancel retry" } };
-  }
-  if (failure.resetsAt) {
-    const resetsAt = clockTime(failure.resetsAt);
-    return { ...base, detail: `${limit} · resets ${resetsAt}`, primary: { action: "retry_at", label: `Retry at ${resetsAt}` } };
-  }
-  return { ...base, detail: limit, primary: RETRY };
 }
 
 function retryableDetail(failure: PersistedTurnFailure): string {
@@ -199,10 +179,4 @@ function rawDetails(message: string, executionId: string | null): string {
 
 function firstLine(text: string): string {
   return text.split("\n", 1)[0]!.trim();
-}
-
-/** Local 24-hour "HH:MM", the format the notice table specifies. */
-function clockTime(iso: string): string {
-  const date = new Date(iso);
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }

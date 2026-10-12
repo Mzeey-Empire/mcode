@@ -22,6 +22,7 @@ import { killOrphanedServer, reapOrphanedPtys } from "../../runtime/process/orph
 import { PtyPidRegistry } from "../../features/terminal/host/pty-pid-registry.js";
 
 // Services
+import { TurnResumeScheduler } from "../../features/agents/recovery/turn-resume-scheduler.js";
 import {
   FilesystemBrowser,
   GitComparisonService,
@@ -360,6 +361,7 @@ workspaceEnvironmentService.setAutomaticSetupDispatcher({
   const subagentRosterService = container.resolve(SubagentRosterService);
   const stopObservingSubagentRosters = subagentRosterService.observeCommittedEvents();
 const turnRecoveryService = container.resolve(TurnRecoveryService);
+const turnResumeScheduler = container.resolve(TurnResumeScheduler);
 const threadControlService = container.resolve(ThreadControlService);
 const threadStartupService = container.resolve(ThreadStartupService);
 const threadStartupFetchDecisions = container.resolve(ThreadStartupFetchDecisions);
@@ -511,6 +513,10 @@ const reliabilityHarness = createReliabilityHarnessAdapter(databaseWriter, undef
 const jobObject = container.resolve<JobObject>("JobObject");
 
 const portPush = new PortPush();
+turnResumeScheduler.onChange((event) => {
+  broadcast("thread.resumeScheduled", event);
+  portPush.send("thread.resumeScheduled", event);
+});
 
 /** IPC push server for named pipe / Unix domain socket transport. */
 const ipcServer = new IpcPushServer();
@@ -558,6 +564,10 @@ const pullRequestCompletionEffect = new TurnPullRequestCompletionEffect(
 );
 threadCompletionService.registerResourceOwner("ci-watcher", (threadId) =>
   ciWatcherService.teardownThread(threadId),
+);
+// A completed thread must not reopen when a resume scheduled before completion fires.
+threadCompletionService.registerResourceOwner("turn-resume", (threadId) =>
+  turnResumeScheduler.unschedule(threadId),
 );
 threadCompletionService.registerResourceOwner("workspace-environment", async (threadId) => {
   const release = workspaceEnvironmentService.beginThreadDeletion(threadId);
@@ -809,6 +819,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   goalLifecycleService,
   subagentRosterService,
   turnRecoveryService,
+  turnResumeScheduler,
   threadControlService,
   threadStartupService,
   threadStartupFetchDecisions,
@@ -1028,6 +1039,7 @@ async function bootstrapServer(): Promise<void> {
       },
     });
     await recoverTurnsAtStartup();
+    await turnResumeScheduler.start();
     recordStartupCheckpoint("turn recovery completed");
     await settleOrphanedBackgroundToolsAtStartup();
     recordStartupCheckpoint("orphaned background tools settled");
@@ -1075,6 +1087,7 @@ async function shutdown(): Promise<void> {
 
   shutdownCoordinator.setPhase("drain admitted transport work");
   await stopAdmissionAndDrain();
+  await turnResumeScheduler.shutdown();
 
   // 0. Close the MessagePort stream transport
   shutdownCoordinator.setPhase("detach message transport");

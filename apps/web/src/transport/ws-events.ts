@@ -271,6 +271,14 @@ export function startPushListeners(): void {
   );
 
   unsubs.push(
+    pushEmitter.on("thread.resumeScheduled", (data) => {
+      const parsed = WS_CHANNELS["thread.resumeScheduled"].safeParse(data);
+      if (!parsed.success) return;
+      useWorkspaceStore.getState().applyScheduledResume(parsed.data.threadId, parsed.data.resume);
+    }),
+  );
+
+  unsubs.push(
     pushEmitter.on("thread.deleted", (data) => {
       const parsed = WS_CHANNELS["thread.deleted"].safeParse(data);
       if (!parsed.success) return;

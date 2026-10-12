@@ -2218,31 +2218,19 @@ describe("AgentService Ended finalization", () => {
       content: "partial answer before failure",
       tokens: null,
     } satisfies AgentEvent);
-    const acceptedNoEarlierThan = Date.now();
     providerEmitter.emit("event", {
       type: AgentEventType.Error,
       threadId: thread.id,
       turnExecutionId: executionId,
       error: "provider failed",
-      failure: { kind: "usage_limit", status: 429, retryAfterMs: 60_000, limitType: "five_hour" },
+      failure: { kind: "fatal", status: 500, code: "internal_error" },
     } satisfies AgentEvent);
     await vi.waitFor(() => expect(canonicalSink.loadCheckpoint(executionId)?.terminalOutcome).toBe("errored"));
-    const acceptedNoLaterThan = Date.now();
 
-    const ending = canonicalSink.loadTurnByExecution(executionId)?.ending;
-    expect(ending).toMatchObject({
+    expect(canonicalSink.loadTurnByExecution(executionId)?.ending).toEqual({
       outcome: "errored",
-      failure: {
-        kind: "usage_limit",
-        provider: "codex",
-        message: "provider failed",
-        status: 429,
-        limitType: "five_hour",
-      },
+      failure: { kind: "fatal", provider: "codex", message: "provider failed", status: 500, code: "internal_error" },
     });
-    const resetsAt = ending?.outcome === "errored" ? Date.parse(ending.failure.resetsAt ?? "") : Number.NaN;
-    expect(resetsAt).toBeGreaterThanOrEqual(acceptedNoEarlierThan + 60_000);
-    expect(resetsAt).toBeLessThanOrEqual(acceptedNoLaterThan + 60_000);
 
     const { messages } = messageRepo.listByThread(thread.id, 10);
     const assistant = messages.find((message) => message.role === "assistant");
@@ -2270,6 +2258,45 @@ describe("AgentService Ended finalization", () => {
       outcome: "errored",
       executionId,
     })));
+  });
+
+  it("ends a provider usage limit as an interruption that keeps the absolute reset time", async () => {
+    const workspace = await workspaceRepo.create("Test", process.cwd());
+    const thread = await threadRepo.create(workspace.id, "Limited thread", "direct", "main", true, "codex");
+
+    await service.sendMessage({
+      threadId: thread.id,
+      content: "please investigate",
+      permissionMode: "default",
+      model: "gpt-5",
+      attachments: [],
+      provider: "codex",
+    });
+    const executionId = activeExecutionId(service, thread.id);
+    const acceptedNoEarlierThan = Date.now();
+    providerEmitter.emit("event", {
+      type: AgentEventType.Error,
+      threadId: thread.id,
+      turnExecutionId: executionId,
+      error: "You've hit your usage limit",
+      failure: { kind: "usage_limit", status: 429, retryAfterMs: 60_000, limitType: "five_hour" },
+    } satisfies AgentEvent);
+    await vi.waitFor(() => expect(canonicalSink.loadCheckpoint(executionId)?.terminalOutcome).toBe("interrupted"));
+    const acceptedNoLaterThan = Date.now();
+
+    const turn = canonicalSink.loadTurnByExecution(executionId);
+    expect(turn?.status).toBe("Interrupted");
+    expect(turn?.ending).toEqual({ outcome: "interrupted", cause: "usage_limit",
+      usageLimit: { resetsAt: expect.any(String), limitType: "five_hour" } });
+    const resetsAt = turn?.ending?.outcome === "interrupted" ? Date.parse(turn.ending.usageLimit?.resetsAt ?? "") : Number.NaN;
+    expect(resetsAt).toBeGreaterThanOrEqual(acceptedNoEarlierThan + 60_000);
+    expect(resetsAt).toBeLessThanOrEqual(acceptedNoLaterThan + 60_000);
+    await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith("turn.persisted", expect.objectContaining({
+      threadId: thread.id,
+      outcome: "interrupted",
+      executionId,
+    })));
+    expect(broadcast).toHaveBeenCalledWith("thread.status", { threadId: thread.id, status: "interrupted" });
   });
 
   it("keeps a completed turn completed when a provider sends a late error", async () => {

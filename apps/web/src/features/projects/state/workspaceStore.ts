@@ -37,7 +37,7 @@ import {
   releaseBrowserAutomationThreadScope,
   releaseBrowserAutomationWorkspaceScopes,
 } from "@/features/preview/automation/browserAutomationStore";
-import type { ApprovalReviewMode, ContextWindowMode, DevinMode, ReasoningLevel, InteractionMode, OrchestrationMode, TurnRuntimeSnapshot, Message } from "@mcode/contracts";
+import type { ApprovalReviewMode, ContextWindowMode, DevinMode, ReasoningLevel, InteractionMode, OrchestrationMode, ScheduledTurnResume, TurnRuntimeSnapshot, Message } from "@mcode/contracts";
 import { isDetachedWorktree, normalizeWorktreePath, type AttachedWorktree } from "@/lib/worktree";
 import { readRememberedComposerMode } from "@/lib/composer-mode-preference";
 import { readRememberedStartFromOrigin, rememberStartFromOrigin } from "@/lib/start-from-origin-preference";
@@ -704,6 +704,8 @@ interface WorkspaceState {
   applyThreadLifecycle: (thread: Thread) => void;
   /** Remove a thread after server-authoritative automatic cleanup. */
   applyThreadDeleted: (threadId: string) => void;
+  /** Record a thread's committed resume schedule, or its removal. */
+  applyScheduledResume: (threadId: string, resume: ScheduledTurnResume | null) => void;
   setActiveThread: (id: string | null) => void;
   /** Enter a clean pending-thread composer, optionally selecting its workspace first. */
   beginNewThread: (workspaceId?: string | null) => void;
@@ -1724,6 +1726,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       useTerminalStore.getState().clearThread(thread.id);
       useDiffStore.getState().clearRightPanel(thread.workspace_id, thread.id);
     }
+  },
+
+  applyScheduledResume: (threadId, resume) => {
+    const existing = get().threads.find((thread) => thread.id === threadId);
+    if (!existing) return;
+    // A thread list fetched before this change would otherwise restore the old schedule.
+    bumpThreadListMutationEpoch(existing.workspace_id);
+    set((state) => ({
+      threads: state.threads.map((thread) => thread.id === threadId ? { ...thread, scheduled_resume: resume } : thread),
+    }));
   },
 
   applyThreadDeleted: (threadId) => {

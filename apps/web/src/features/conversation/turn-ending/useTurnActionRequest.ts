@@ -2,25 +2,21 @@ import { useCallback, useState } from "react";
 
 /** One end-notice action's request state. */
 export interface TurnActionRequest {
-  run: () => void;
+  run: (request: () => Promise<unknown>) => void;
   pending: boolean;
   error: string | null;
 }
 
-/** Sends one end-notice action for a turn, keeping the server's refusal visible until the next attempt. */
-export function useTurnActionRequest(
-  threadId: string,
-  turnId: string,
-  send: (params: { threadId: string; turnId: string }) => Promise<unknown>,
-): TurnActionRequest {
+/** Sends end-notice requests for a turn, keeping the server's refusal visible until the next attempt. */
+export function useTurnActionRequest(): TurnActionRequest {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const run = useCallback(() => {
+  const run = useCallback((request: () => Promise<unknown>) => {
     setPending(true);
     setError(null);
-    send({ threadId, turnId })
+    request()
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)))
       .finally(() => setPending(false));
-  }, [send, threadId, turnId]);
+  }, []);
   return { run, pending, error };
 }

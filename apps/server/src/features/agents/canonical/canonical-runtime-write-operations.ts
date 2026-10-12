@@ -5,9 +5,18 @@ import {
   PreviewAnnotationBundleSchema, ProviderIdentitySchema, SelectedTextCommentsSchema,
   StoredAttachmentSchema, SystemNoticeMetadataSchema, TurnOutcomeSchema,
   MessageSchema, NarrativeEntrySchema, TurnFileEffectSummarySchema,
-  InterruptionCauseSchema, PersistedTurnFailureSchema, TurnStopCauseSchema,
+  InterruptionCauseSchema, PersistedTurnFailureSchema, TurnStopCauseSchema, TurnUsageLimitSchema,
 } from "@mcode/contracts";
+import type { TurnEndingCause } from "./turn-ending.js";
 import { databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
+
+/** Mirrors `TurnEndingCause`: one cause per ending, with a usage limit only beside its own cause. */
+const TurnEndingCauseSchema: z.ZodType<TurnEndingCause, z.ZodTypeDef, unknown> = z.union([
+  z.object({ stop: TurnStopCauseSchema }).strict(),
+  z.object({ cause: InterruptionCauseSchema.exclude(["usage_limit"]) }).strict(),
+  z.object({ cause: z.literal("usage_limit"), usageLimit: TurnUsageLimitSchema }).strict(),
+  z.object({ failure: PersistedTurnFailureSchema }).strict(),
+]);
 
 const committedPublications = z.object({ events: z.array(CanonicalAgentEventEnvelopeSchema) });
 function runtimeOperation<Input, Output>(name: string, input: z.ZodType<Input, z.ZodTypeDef, unknown>,
@@ -72,8 +81,7 @@ const fileEvidence = z.object({ threadId: identity, turnId: identity, executionI
 export const CanonicalRuntimeParentFinishSchema = z.object({ threadId: identity, turnId: identity,
   executionId: identity, providerId: identity, providerIdentities: z.array(ProviderIdentitySchema),
   outcome: TurnOutcomeSchema, error: z.string().optional(), deliveryAttempt: z.number().int().positive().optional(),
-  ending: z.object({ stop: TurnStopCauseSchema.optional(), cause: InterruptionCauseSchema.optional(),
-    failure: PersistedTurnFailureSchema.optional() }).strict().optional(),
+  ending: TurnEndingCauseSchema.optional(),
   selectedTurnDiff: selectedDiff.optional(), fileEvidence: fileEvidence.optional(),
   projection: z.union([z.object({ kind: z.literal("writer-staged"), messageId: identity.optional() }),
     z.object({ message: MessageSchema().nullable(), narrative: z.array(NarrativeEntrySchema()) })]) });

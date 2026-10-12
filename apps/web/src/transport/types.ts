@@ -11,6 +11,8 @@ import type {
   SettleUnknownSteerParams,
   SettleUnknownSteerResult,
   TurnRetryParams,
+  TurnResumeScheduleParams,
+  ScheduledTurnResume,
   TurnRetryResult,
   TurnResumeParams,
   TurnResumeResult,
@@ -439,6 +441,10 @@ export interface McodeTransport {
   settleUnknownSteer(params: SettleUnknownSteerParams): Promise<SettleUnknownSteerResult>;
   /** Retry the thread's latest errored turn as a new attempt in the same provider session. */
   retryErroredTurn(params: TurnRetryParams): Promise<TurnRetryResult>;
+  /** Resume the thread's latest usage-limited turn at a future time; replaces any earlier schedule. */
+  scheduleTurnResume(params: TurnResumeScheduleParams): Promise<ScheduledTurnResume>;
+  /** Cancel the thread's scheduled resume; succeeds when none exists. */
+  unscheduleTurnResume(threadId: string): Promise<void>;
   /** Resume the thread's latest interrupted turn, continuing its provider session when the provider can. */
   resumeInterruptedTurn(params: TurnResumeParams): Promise<TurnResumeResult>;
   /** Read one authoritative startup lifecycle by its client-generated identity. */

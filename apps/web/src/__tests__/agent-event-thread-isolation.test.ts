@@ -86,7 +86,7 @@ describe("Agent event thread isolation", () => {
       const { handleAgentEvent } = useThreadStore.getState();
 
       // Thread B errors while user views Thread A
-      handleAgentEvent({ type: "error", threadId: THREAD_B, error: "Out of tokens" } as AgentEvent);
+      handleAgentEvent({ type: "error", threadId: THREAD_B, error: "Out of tokens", failure: { kind: "fatal" } });
 
       // Thread B's error is recorded under its own key
       expect(getTestThreadError(THREAD_B)).toBe("Out of tokens");
@@ -97,7 +97,7 @@ describe("Agent event thread isolation", () => {
     it("session.error for active thread sets error on that thread only", () => {
       const { handleAgentEvent } = useThreadStore.getState();
 
-      handleAgentEvent({ type: "error", threadId: THREAD_A, error: "CLI not found" } as AgentEvent);
+      handleAgentEvent({ type: "error", threadId: THREAD_A, error: "CLI not found", failure: { kind: "fatal" } });
 
       expect(getTestThreadError(THREAD_A)).toBe("CLI not found");
       expect(getTestThreadError(THREAD_B)).toBeUndefined();
@@ -106,8 +106,8 @@ describe("Agent event thread isolation", () => {
     it("errors from two concurrent threads are tracked independently", () => {
       const { handleAgentEvent } = useThreadStore.getState();
 
-      handleAgentEvent({ type: "error", threadId: THREAD_A, error: "Error A" } as AgentEvent);
-      handleAgentEvent({ type: "error", threadId: THREAD_B, error: "Error B" } as AgentEvent);
+      handleAgentEvent({ type: "error", threadId: THREAD_A, error: "Error A", failure: { kind: "fatal" } });
+      handleAgentEvent({ type: "error", threadId: THREAD_B, error: "Error B", failure: { kind: "fatal" } });
 
       expect(getTestThreadError(THREAD_A)).toBe("Error A");
       expect(getTestThreadError(THREAD_B)).toBe("Error B");

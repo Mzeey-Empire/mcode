@@ -1183,6 +1183,9 @@ export function createWsTransport(
     settleUnknownSteer: (params) =>
       rpc<import("@mcode/contracts").SettleUnknownSteerResult>("agent.settleUnknownSteer", params),
     retryErroredTurn: async (params) => WS_METHODS()["turn.retry"].result.parse(await rpc<unknown>("turn.retry", params)),
+    scheduleTurnResume: async (params) =>
+      WS_METHODS()["turn.resume.schedule"].result.parse(await rpc<unknown>("turn.resume.schedule", params)),
+    unscheduleTurnResume: async (threadId) => { await rpc<unknown>("turn.resume.unschedule", { threadId }); },
     resumeInterruptedTurn: async (params) => WS_METHODS()["turn.resume"].result.parse(await rpc<unknown>("turn.resume", params)),
     getThreadStartup: (startupId) =>
       rpc<ThreadStartup | null>("thread.startup.get", { startupId }),

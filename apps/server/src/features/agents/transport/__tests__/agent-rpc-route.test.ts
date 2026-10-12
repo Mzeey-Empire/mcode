@@ -27,6 +27,7 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
     threadControlService: { respondToApproval: unused, listPendingApprovals: unused },
     toolCallRecordRepo: { listByMessage: unused, listByParent: unused },
     turnRecoveryService: { retryErroredTurn: unused, resumeTurn: unused },
+    turnResumeScheduler: { schedule: unused, unschedule: unused },
   };
   return { deps, close: () => undefined };
 }

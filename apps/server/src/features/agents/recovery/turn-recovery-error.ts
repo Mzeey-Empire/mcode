@@ -7,9 +7,12 @@ const TurnRecoveryErrorCodeSchema = z.enum([
   "TURN_RECOVERY_STARTUP_ACTIVE",
   "TURN_RECOVERY_NOT_ERRORED",
   "TURN_RECOVERY_NOT_INTERRUPTED",
+  "TURN_RECOVERY_NOT_USAGE_LIMITED",
   "TURN_RECOVERY_CONFLICT",
   "TURN_RECOVERY_INPUT_MISSING",
   "TURN_RECOVERY_NOT_ADMITTED",
+  "TURN_RECOVERY_SCHEDULE_INVALID_TIME",
+  "TURN_RECOVERY_SCHEDULE_TOO_FAR",
 ]);
 
 /** A rejected recovery action with a stable code preserved by the database writer. */

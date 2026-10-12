@@ -19,7 +19,8 @@ export interface ThreadTurnEndNoticeProps {
 export function ThreadTurnEndNotice({ threadId, turnId, providerId, notice }: ThreadTurnEndNoticeProps) {
   const retry = useTurnRetry(threadId, turnId);
   const resume = useTurnResume(threadId, turnId);
-  const actions: TurnEndActionHandlers = { retry: retry.retry, resume: resume.resume };
+  // Resume takes an optional model, so the click event must not reach it.
+  const actions: TurnEndActionHandlers = { retry: retry.retry, resume: () => resume.resume() };
   if (providerId) actions.sign_in = () => signInToSignedOutProvider(providerId);
   return (
     <TurnEndNotice

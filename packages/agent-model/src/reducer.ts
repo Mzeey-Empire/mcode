@@ -348,8 +348,14 @@ function reduceTurnInterrupted(
   return updateTurnLifecycle(state, event.routing.threadId, event.routing.turnId, acceptedInputState, {
     status: "Interrupted",
     endedAt: event.payload.endedAt,
-    ending: { outcome: "interrupted", cause: event.payload.cause ?? "unknown" },
+    ending: interruptedEnding(event.payload),
   });
+}
+
+function interruptedEnding(payload: AgentEventFor<"turn.interrupted">["payload"]): AgentTurnEnding {
+  const cause = payload.cause ?? "unknown";
+  if (cause !== "usage_limit" || payload.usageLimit === undefined) return { outcome: "interrupted", cause };
+  return { outcome: "interrupted", cause, usageLimit: payload.usageLimit };
 }
 
 function reduceTurnErrored(

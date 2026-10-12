@@ -5,6 +5,7 @@
  */
 
 import type { WebSocket } from "ws";
+import type { TurnResumeScheduler } from "../../features/agents/recovery/turn-resume-scheduler.js";
 import * as NodeHTTP from "node:http";
 import type { z } from "zod";
 
@@ -251,6 +252,8 @@ export interface RouterDeps {
   subagentRosterService: SubagentRosterService;
   /** Owns restart reconciliation and explicit turn recovery actions. */
   turnRecoveryService: TurnRecoveryService;
+  /** Owns durable scheduled resumes and their cancellation. */
+  turnResumeScheduler: TurnResumeScheduler;
   /** Owns durable approvals for protected delegated-thread mutations. */
   threadControlService: ThreadControlService;
   /** Owns server-authoritative thread startup lifecycle state. */

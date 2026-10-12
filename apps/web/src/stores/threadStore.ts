@@ -18,6 +18,7 @@ import {
   CONVERSATION_HISTORY_PAGE_MAX_BYTES,
   createSubagentPresentation,
   mergeSubagentPresentation,
+  providerFailureOutcome,
 } from "@mcode/contracts";
 import { getTransport, RpcError } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -2842,10 +2843,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   ): void => {
     if (!runtime.runtimeActive || (runtime.incomingExecutionId && runtime.runtimeRecord.turnExecutionId !== runtime.incomingExecutionId)) return;
     clearStreamingTextUsage(event.threadId);
+    const outcome = providerFailureOutcome(event.failure);
     patchRec(event.threadId, () => ({
-      error: event.error,
-      errorSource: "turn",
-      runtimePhase: "errored",
+      // A usage limit is an interruption the composer tray explains, not an error to surface.
+      ...(outcome === "errored" ? { error: event.error, errorSource: "turn" as const } : {}),
+      runtimePhase: outcome,
       streaming: "",
       streamingPreview: "",
       responseTextIsStreaming: false,
@@ -2858,7 +2860,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       apiRetry: undefined,
     }));
     useWorkspaceStore.setState((workspace) => ({
-      threads: workspace.threads.map((thread) => thread.id === event.threadId ? { ...thread, status: "errored" as const } : thread),
+      threads: workspace.threads.map((thread) => thread.id === event.threadId ? { ...thread, status: outcome } : thread),
     }));
   };
 
