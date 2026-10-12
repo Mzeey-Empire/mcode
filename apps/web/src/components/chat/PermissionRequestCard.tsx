@@ -2,20 +2,8 @@ import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { Shield, Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getTransport } from "@/transport";
-import { useThreadStore } from "@/stores/threadStore";
 import { useApprovalStore, type StoredApproval } from "@/stores/approvalStore";
-import type { ApprovalQuestion, ApprovalAnswers, ApprovalSubject } from "@mcode/contracts";
-
-function subjectPreview(subject: ApprovalSubject): string {
-  switch (subject.kind) {
-    case "command": return subject.command;
-    case "file_edit": return subject.files.map((file) => file.path).join("\n");
-    case "fetch": return subject.url;
-    case "tool": return subject.preview ?? subject.toolName;
-    case "thread_operation": return [subject.operation, subject.targetTitle ?? subject.targetThreadId, subject.message].filter(Boolean).join("\n");
-    case "question": return "Question";
-  }
-}
+import type { ApprovalQuestion, ApprovalAnswers } from "@mcode/contracts";
 
 function PendingQuestionRequest({
   requestId,
@@ -121,7 +109,7 @@ function PendingQuestionRequest({
 }
 
 
-/** Inline card for a pending approval; once decided, the narrative receipt replaces it. */
+/** Inline card for a pending question; approvals render in the composer's approval dock instead. */
 export function PermissionRequestCard({ request }: { request: StoredApproval }) {
   const [responding, setResponding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -131,6 +119,8 @@ export function PermissionRequestCard({ request }: { request: StoredApproval }) 
     return () => clearTimeout(timer);
   }, []);
 
+  if (request.subject.kind !== "question") return null;
+
   const respond = async (choiceId: string, answers?: ApprovalAnswers) => {
     setResponding(true);
     setError(null);
@@ -138,33 +128,17 @@ export function PermissionRequestCard({ request }: { request: StoredApproval }) 
       const result = await getTransport().respondToApproval(request.requestId, { choiceId, ...(answers ? { answers } : {}) });
       if (result.status === "failed") setError("Failed to send response. Please try again.");
       else if (result.status === "not_pending") useApprovalStore.getState().remove(request.requestId);
-      else if (choiceId === "switch_bypass") void useThreadStore.getState().setThreadSettings(request.threadId, { devinMode: "bypass" });
     } catch {
       setError("Failed to send response. Please try again.");
     } finally {
       setResponding(false);
     }
   };
-  const label = request.reason ?? (request.subject.kind === "tool" ? request.subject.toolName : request.subject.kind.replace(/_/g, " "));
-  const icon = <Shield size={13} className="shrink-0" />;
-  if (request.subject.kind === "question") {
-    return <PendingQuestionRequest requestId={request.requestId} icon={icon} label={label}
-      questions={request.subject.questions} responding={responding} ready={ready} error={error}
-      onRespond={(decision, answers) => {
-        const choice = request.choices.find((item) => decision === "deny" ? item.intent === "deny" : item.intent === "allow_once");
-        if (choice) void respond(choice.id, answers);
-      }} />;
-  }
-  return <div className="border-l-2 border-primary/60 pl-3 py-2 flex flex-col gap-2">
-    <div className="flex items-center gap-2 text-xs font-medium text-primary">{icon}<span>Permission requested: {label}</span></div>
-    <pre className="text-xs leading-relaxed text-muted/80 bg-hover/30 rounded px-2 py-1.5 max-h-[120px] overflow-auto whitespace-pre-wrap break-all font-mono">{subjectPreview(request.subject)}</pre>
-    <div className="flex flex-wrap items-start gap-2">
-      {request.choices.map((choice) => <button key={choice.id} disabled={responding || !ready}
-        onClick={() => void respond(choice.id)}
-        className="inline-flex flex-col items-start gap-1 px-2 py-1 text-xs font-medium rounded-md bg-primary text-primary-ink hover:bg-primary/90 cursor-pointer disabled:pointer-events-none disabled:opacity-50">
-        <span>{choice.label}</span>{choice.description && <span className="font-normal">{choice.description}</span>}
-      </button>)}
-    </div>
-    {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-  </div>;
+  const label = request.reason ?? "question";
+  return <PendingQuestionRequest requestId={request.requestId} icon={<Shield size={13} className="shrink-0" />} label={label}
+    questions={request.subject.questions} responding={responding} ready={ready} error={error}
+    onRespond={(decision, answers) => {
+      const choice = request.choices.find((item) => decision === "deny" ? item.intent === "deny" : item.intent === "allow_once");
+      if (choice) void respond(choice.id, answers);
+    }} />;
 }

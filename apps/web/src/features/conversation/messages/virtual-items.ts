@@ -602,7 +602,9 @@ interface NarrativeIndicatorInput {
 const NO_HOLDING_SIGNALS: RunHoldingSignals = { stopPending: false, compacting: false };
 
 function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts, answering, holdingSignals }: NarrativeIndicatorInput): ChatVirtualItem | undefined {
-  if (!isAgentRunning && toolCalls.length === 0) return undefined;
+  // An integration can ask for approval on an idle thread; the status line still has to say the thread waits.
+  const live = isAgentRunning || holdingSignals?.waitingFor === "approval";
+  if (!live && toolCalls.length === 0 && !holdingSignals?.exiting) return undefined;
   const topLevelTools = toolCalls.filter((toolCall) => toolCall.parentToolCallId == null);
   const running = topLevelTools.filter(isTurnWorkRunning);
   const status = deriveRunStatus({
@@ -612,12 +614,12 @@ function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts
     answering,
     summaryHeading: currentActivityHeading(thoughts),
   });
-  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: topLevelTools.length, status, startTime, isAgentRunning };
+  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: topLevelTools.length, status, startTime, isAgentRunning: live };
 }
 
 function permissionRequestItems(permissions: Parameters<typeof buildVolatileItems>[4]): ChatVirtualItem[] {
-  // A settled request is a tombstone; its durable receipt renders in the narrative.
-  return permissions?.filter((request) => !request.settled).map((request) => ({ key: `permission-${request.requestId}`, type: "permission-request" as const, request })) ?? [];
+  // A settled request is a tombstone whose receipt renders in the narrative; other approvals live in the dock.
+  return permissions?.filter((request) => !request.settled && request.subject.kind === "question").map((request) => ({ key: `permission-${request.requestId}`, type: "permission-request" as const, request })) ?? [];
 }
 
 function sameAgentDisplayState(

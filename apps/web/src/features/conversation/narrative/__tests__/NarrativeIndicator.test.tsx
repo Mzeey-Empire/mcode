@@ -36,6 +36,15 @@ describe("NarrativeIndicator", () => {
     expect(container.textContent).not.toMatch(/subagent/i);
   });
 
+  it("drops steps and the clock while the turn waits on the user", () => {
+    render(
+      <NarrativeIndicator stepCount={3} status={{ label: "Waiting for approval", icon: "dot" }} startTime={Date.now() - 23000} isAgentRunning />,
+    );
+    expect(screen.getByText("Waiting for approval")).toBeInTheDocument();
+    expect(screen.queryByText(/steps?/)).not.toBeInTheDocument();
+    expect(screen.queryByText("0:23")).not.toBeInTheDocument();
+  });
+
   it("draws animated layers for working rows and a spinner for holding rows", () => {
     const { rerender, container } = render(<NarrativeIndicator stepCount={1} status={lint} isAgentRunning />);
     expect(container.querySelector('svg.stacked-layers-animated[data-run-status-icon="layers"]')).not.toBeNull();

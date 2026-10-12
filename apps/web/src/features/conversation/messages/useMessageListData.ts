@@ -19,6 +19,7 @@ import type { Message } from "@/transport/types";
 import { useTurnEndings } from "../turn-ending/useTurnEndings";
 import type { ThoughtSegment } from "../narrative/types";
 import type { RunHoldingSignals, RunRetry } from "../narrative/run-status";
+import { useStatusLineExit } from "../narrative/status-line-exit";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
 const EMPTY_TURN_MAP: Record<string, string> = {};
@@ -84,6 +85,24 @@ function resolveCanonicalTurnIdentity(
     currentTurnResponseKey: preferCanonical(projection?.currentTurnResponseKey, legacy.responseKey),
     assistantResponseKeys: preferCanonical(projection?.assistantResponseKeys, legacy.responseKeys),
   };
+}
+
+/** Turn-level states that hold the status line, plus whether it is fading out after going off. */
+function useRunHoldingSignals(threadId: string | null | undefined, isAgentRunning: boolean, awaitingApproval: boolean): RunHoldingSignals {
+  const stopPending = useThreadStore((state) => threadId ? (state.pendingStopCounts[threadId] ?? 0) > 0 : false);
+  const compacting = useThreadRecord(threadId, (record) => record.isCompacting);
+  // Primitive selectors: an object-returning selector yields a fresh reference per store update and loops rerenders.
+  const retryKind = useThreadRecord(threadId, (record): RunRetry["kind"] | undefined =>
+    record.rateLimit ? "rate-limited" : record.apiRetry ? "retrying" : undefined);
+  const retryErrorStatus = useThreadRecord(threadId, (record) => record.apiRetry?.errorStatus);
+  const exiting = useStatusLineExit(threadId, isAgentRunning || awaitingApproval);
+  return useMemo<RunHoldingSignals>(() => {
+    const retry: RunRetry | undefined =
+      retryKind === "retrying" ? { kind: "retrying", errorStatus: retryErrorStatus }
+        : retryKind === "rate-limited" ? { kind: "rate-limited" }
+          : undefined;
+    return { stopPending, compacting, retry, ...(awaitingApproval ? { waitingFor: "approval" as const } : {}), ...(exiting ? { exiting: true } : {}) };
+  }, [stopPending, compacting, retryKind, retryErrorStatus, awaitingApproval, exiting]);
 }
 
 /** Reads and normalizes the transcript data needed by the conversation viewport. */
@@ -174,21 +193,10 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const loadNewerMessages = useThreadStore((state) => state.loadNewerMessages);
   const approvals = useApprovalStore((state) => state.approvals);
   const permissions = useMemo(() => approvals.filter((request) => request.threadId === renderedThreadId), [approvals, renderedThreadId]);
+  const awaitingApproval = useMemo(() => permissions.some(isDockApproval), [permissions]);
   const hooks = useThreadRecord(renderedThreadId, (record) => record.hooks);
   const decidedApprovals = useThreadRecord(renderedThreadId, (record) => record.approvals);
-  const stopPending = useThreadStore((state) => renderedThreadId ? (state.pendingStopCounts[renderedThreadId] ?? 0) > 0 : false);
-  const compacting = useThreadRecord(renderedThreadId, (record) => record.isCompacting);
-  // Primitive selectors: an object-returning selector yields a fresh reference per store update and loops rerenders.
-  const retryKind = useThreadRecord(renderedThreadId, (record): RunRetry["kind"] | undefined =>
-    record.rateLimit ? "rate-limited" : record.apiRetry ? "retrying" : undefined);
-  const retryErrorStatus = useThreadRecord(renderedThreadId, (record) => record.apiRetry?.errorStatus);
-  const holdingSignals = useMemo<RunHoldingSignals>(() => {
-    const retry: RunRetry | undefined =
-      retryKind === "retrying" ? { kind: "retrying", errorStatus: retryErrorStatus }
-        : retryKind === "rate-limited" ? { kind: "rate-limited" }
-          : undefined;
-    return { stopPending, compacting, retry };
-  }, [stopPending, compacting, retryKind, retryErrorStatus]);
+  const holdingSignals = useRunHoldingSignals(renderedThreadId, isAgentDisplayActive(canonicalContent.agentDisplayState), awaitingApproval);
   const persistedNarrativeByMessage = useThreadRecord(renderedThreadId, (record) => record.narrativeByMessage);
   const legacyCurrentTurnMessageId = useThreadRecord(renderedThreadId, (record) => record.currentTurnMessageId);
   const legacyCurrentTurnResponseKey = useThreadRecord(renderedThreadId, (record) => record.currentTurnResponseKey);
@@ -250,4 +258,4 @@ function withoutHiddenMessages(messages: Message[], hidden: ReadonlySet<string>)
 
 /** Normalized thread data consumed by transcript submodules. */
 export type MessageListData = ReturnType<typeof useMessageListData>;
-import { useApprovalStore } from "@/stores/approvalStore";
+import { isDockApproval, useApprovalStore } from "@/stores/approvalStore";

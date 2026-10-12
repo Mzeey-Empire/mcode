@@ -248,6 +248,10 @@
   --text-code: 1.4rem;
   --text-code--line-height: 2rem;
   --text-code--font-weight: 400;
+  /* Paper's scope text in the approval dock: commands, URLs, and paths a user authorizes. */
+  --text-code-small: 1.3rem;
+  --text-code-small--line-height: 2rem;
+  --text-code-small--font-weight: 400;
   --font-sans: "Public Sans Variable", "Public Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
   --color-page: var(--page);
@@ -1105,7 +1109,7 @@ input[type="range"].settings-range::-moz-range-thumb {
 /* Turn-end exit for the live narrative step indicator: fade while collapsing
    the row (max-height covers the bar's content + padding; margin-top folds
    away with it) so the rows below glide up instead of snapping. Duration must
-   match EXIT_DURATION_MS in NarrativeIndicator.tsx. */
+   match STATUS_LINE_EXIT_MS in narrative/status-line-exit.ts. */
 @keyframes narrative-indicator-out {
   from { opacity: 1; max-height: 48px; margin-top: 6px; }
   to   { opacity: 0; max-height: 0;    margin-top: 0; }
