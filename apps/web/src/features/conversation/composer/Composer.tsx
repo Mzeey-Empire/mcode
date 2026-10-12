@@ -34,7 +34,6 @@ import { useQueueStore } from "@/stores/queueStore";
 import { attachmentAcceptAttribute, isGoalOpen } from "@mcode/contracts";
 import type { MessageMention, SelectedTextComment } from "@mcode/contracts";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
-import { useElementWidth } from "@/hooks/useElementWidth";
 import { useComposerFormController } from "./draft/useComposerFormController";
 import { useComposerExecutionTarget } from "./execution/useComposerExecutionTarget";
 import { useComposerAgentControlState } from "./controls/useComposerAgentControlState";
@@ -68,10 +67,6 @@ function createPopupKeyboardEvent(key: string): React.KeyboardEvent {
     preventDefault: () => {},
     stopPropagation: () => {},
   } as unknown as React.KeyboardEvent;
-}
-
-function showComposerOptionsInline(composerWidth: number): boolean {
-  return composerWidth === 0 || composerWidth >= 640;
 }
 
 function popupAnchorRect(
@@ -298,12 +293,6 @@ export function Composer({
   // Container-based (not viewport-based) so the layout responds to the right
   // panel opening, sidebar resizing, etc. — not just window resizes.
   const composerContainerRef = useRef<HTMLDivElement>(null);
-  const composerWidth = useElementWidth(composerContainerRef);
-  // Default to inline before the first measurement lands so the first frame
-  // doesn't briefly render the popover trigger and snap to inline buttons.
-  const showInlineComposerOptions = showComposerOptionsInline(composerWidth);
-
-
   const activeThread = useWorkspaceThread(threadId, (thread) => thread);
   const form = useComposerFormController({
     threadId,
@@ -670,7 +659,6 @@ export function Composer({
             unavailableSelectedTextCommentIds,
             startingThread,
             hasContent: surfaceState.hasContent,
-            showInlineComposerOptions,
             attachmentInputRef,
             attachmentInputAccept: ATTACHMENT_INPUT_ACCEPT,
             composerContainerRef,

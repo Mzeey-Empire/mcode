@@ -181,6 +181,7 @@ import {
   ThreadStartupCancelInputSchema,
   ThreadStartupResolveInputSchema,
   ThreadStartupGetInputSchema,
+  ThreadStartupRetryAgentInputSchema,
   ThreadStartupListInputSchema,
   ThreadStartupListResultSchema,
   ThreadStartupSchema,
@@ -1120,6 +1121,11 @@ export const WS_METHODS = lazySchema(() => ({
   /** Resolve a blocked origin fetch before a thread exists. */
   "thread.startup.resolve": {
     params: ThreadStartupResolveInputSchema(),
+    result: ThreadStartupSchema(),
+  },
+  /** Send a startup's saved first message again when its agent failed before admitting a turn. */
+  "thread.startup.retryAgent": {
+    params: ThreadStartupRetryAgentInputSchema(),
     result: ThreadStartupSchema(),
   },
   /** Create one external thread-control pairing and return its credential once. */

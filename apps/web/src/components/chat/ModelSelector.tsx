@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo, type ReactElement } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import { ChevronDown, Lock, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PICKER_PANEL_CLASS, Picker, type PickerRow, type PickerRowAction, type PickerTab } from "@/components/ui/picker";
@@ -18,6 +18,7 @@ import {
 } from "@/stores/modelFavoritesStore";
 import { tokenizeSearch, matchesAllTokens } from "@/lib/searchTokens";
 import { ProviderIcon } from "@/components/ui/provider-icon";
+import { cn } from "@/lib/utils";
 
 /** Provider shown when the selected model belongs to no known provider. */
 const DEFAULT_PROVIDER_ID = "claude";
@@ -69,6 +70,10 @@ interface ModelSelectorProps {
   locked: boolean;
   /** Provider locked: can switch models within the same provider but not change provider (thread started) */
   providerLocked?: boolean;
+  /** Muted summary after the model name, such as the reasoning level. */
+  detail?: ReactNode;
+  /** Settings for the selected model, shown under the catalog and alone while the model is locked. */
+  settings?: ReactNode;
   /** Replaces the selected-model button that opens the picker. */
   trigger?: ReactElement;
 }
@@ -457,6 +462,34 @@ function LockedModelLabel({
   );
 }
 
+/** The Composer's model trigger: provider icon and model name in ink, then a muted detail and chevron. */
+function ModelSelectorTrigger({
+  iconProviderId,
+  shortLabel,
+  detail,
+  locked,
+  ...buttonProps
+}: Pick<SelectedModelPresentation, "iconProviderId" | "shortLabel"> & Omit<ComponentProps<typeof Button>, "children"> & {
+  readonly detail: ReactNode;
+  readonly locked: boolean;
+}) {
+  return (
+    <Button
+      {...buttonProps}
+      variant="ghost"
+      size="compact"
+      data-testid="model-selector-trigger"
+      className="min-w-0 max-w-full shrink px-2 text-ink"
+    >
+      <ProviderIcon provider={iconProviderId} size={16} />
+      <span className="min-w-0 text-fade">{shortLabel}</span>
+      {detail ? <span className="flex shrink-0 items-center gap-1 text-body-small text-muted">{detail}</span> : null}
+      {locked ? <Lock aria-label="Model locked while the agent runs" className="size-3 text-muted" /> : null}
+      <ChevronDown aria-hidden className="size-3 text-muted" />
+    </Button>
+  );
+}
+
 /**
  * Composer model picker: a {@link Picker} with a Favourites tab and one tab per provider. A locked
  * thread shows the model as a label; a provider-locked thread keeps only its provider's tab.
@@ -467,7 +500,9 @@ export function ModelSelector({
   onSelect,
   locked,
   providerLocked,
-  trigger,
+  detail,
+  settings,
+  trigger: customTrigger,
 }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ModelPickerTab>(FAVORITES_TAB);
@@ -542,33 +577,40 @@ export function ModelSelector({
     setOpen(false);
   };
 
-  if (locked) {
+  if (locked && !settings) {
     return <LockedModelLabel {...presentation} />;
+  }
+
+  const trigger = (
+    <PopoverTrigger
+      render={
+        customTrigger ?? <ModelSelectorTrigger iconProviderId={presentation.iconProviderId} shortLabel={presentation.shortLabel} detail={detail} locked={locked} />
+      }
+    />
+  );
+
+  // A running turn locks the model, but its settings (reasoning, Fast) stay editable mid-run.
+  if (locked) {
+    return (
+      <Popover open={open} onOpenChange={setOpen}>
+        {trigger}
+        <PopoverContent role="dialog" aria-label="Model settings" side="top" align="end" className="max-h-(--available-height) w-auto min-w-[224px] overflow-y-auto p-1">
+          {settings}
+        </PopoverContent>
+      </Popover>
+    );
   }
 
   const loading = activeTab !== FAVORITES_TAB && loadingProviders.has(activeTab);
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={trigger ?? (
-          <Button
-            variant="ghost"
-            size="compact"
-            data-testid="model-selector-trigger"
-            className="max-w-full shrink whitespace-normal text-muted transition-colors hover:bg-hover/40 hover:text-ink"
-          >
-            <ProviderIcon provider={presentation.iconProviderId} size={16} />
-            <span className="min-w-0 whitespace-normal text-sm [overflow-wrap:anywhere]">{presentation.shortLabel}</span>
-            <ChevronDown size={11} className="shrink-0" aria-hidden />
-          </Button>
-        )}
-      />
+      {trigger}
       <PopoverContent
         role="dialog"
         aria-label="Choose model and provider"
         side="top"
-        align="start"
-        className={PICKER_PANEL_CLASS}
+        align="end"
+        className={cn(PICKER_PANEL_CLASS, "max-h-(--available-height) overflow-y-auto")}
       >
         <Picker
           tabs={tabs}
@@ -587,6 +629,7 @@ export function ModelSelector({
           }
           renderItem={renderItem}
           onSelect={(option) => handleSelectModel(option.modelId, option.providerId)}
+          footer={settings}
         />
       </PopoverContent>
     </Popover>

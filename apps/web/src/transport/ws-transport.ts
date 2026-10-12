@@ -1195,6 +1195,8 @@ export function createWsTransport(
       rpc<ThreadStartup>("thread.startup.cancel", { startupId }),
     resolveThreadStartup: (startupId, action) =>
       rpc<ThreadStartup>("thread.startup.resolve", { startupId, action }),
+    retryThreadStartupAgent: (startupId) =>
+      rpc<ThreadStartup>("thread.startup.retryAgent", { startupId }),
     createAndSendMessage: (input: CreateAndSendInput) => {
       const state = useSettingsStore.getState();
       const guardrails = state.loaded

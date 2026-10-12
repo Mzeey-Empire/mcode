@@ -186,6 +186,7 @@ export const mockTransport: McodeTransport = {
   listThreadStartups: vi.fn().mockResolvedValue({ records: [] }),
   cancelThreadStartup: vi.fn(),
   resolveThreadStartup: vi.fn(),
+  retryThreadStartupAgent: vi.fn(),
   continueWithoutSaving: vi.fn().mockResolvedValue(undefined),
   stopAgent: vi.fn().mockImplementation((threadId: string) => Promise.resolve({
     threadId,

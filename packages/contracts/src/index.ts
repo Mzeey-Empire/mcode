@@ -1111,6 +1111,7 @@ export {
   ThreadStartupListResultSchema,
   ThreadStartupCancelInputSchema,
   ThreadStartupResolveInputSchema,
+  ThreadStartupRetryAgentInputSchema,
 } from "./thread-startup.js";
 export type {
   ThreadStartupKind,
@@ -1130,6 +1131,7 @@ export type {
   ThreadStartupListResult,
   ThreadStartupCancelInput,
   ThreadStartupResolveInput,
+  ThreadStartupRetryAgentInput,
 } from "./thread-startup.js";
 export type {
   PullRequestProvider,

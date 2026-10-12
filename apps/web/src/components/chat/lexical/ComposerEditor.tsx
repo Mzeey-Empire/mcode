@@ -52,7 +52,7 @@ interface ComposerEditorProps {
   onPopupKeyDown?: (key: string) => boolean;
 }
 
-const COMPOSER_MIN_HEIGHT = "80px";
+const COMPOSER_MIN_HEIGHT = "56px";
 const COMPOSER_MAX_HEIGHT = "30vh";
 const COMPACT_EDITOR_MIN_HEIGHT = "2.25rem";
 const COMPACT_EDITOR_MIN_HEIGHT_PX = 36;
@@ -154,14 +154,14 @@ export function ComposerEditor({
               autoFocus={autoFocus}
               className={compact
                 ? "w-full resize-none bg-transparent px-2 pt-2.5 pb-1.5 text-sm leading-5 text-ink placeholder:text-muted focus:outline-none"
-                : "w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-ink placeholder:text-muted focus:outline-none"}
+                : "w-full resize-none bg-transparent text-body text-ink placeholder:text-muted focus:outline-none"}
               id={id}
               aria-label={ariaLabel}
               aria-placeholder={placeholder}
               placeholder={
                 <div className={compact
                   ? "pointer-events-none absolute left-2 top-2.5 text-sm text-muted"
-                  : "pointer-events-none absolute left-4 top-3 text-sm text-muted"}>
+                  : "pointer-events-none absolute left-0 top-0 text-body text-muted"}>
                   {placeholder}
                 </div>
               }

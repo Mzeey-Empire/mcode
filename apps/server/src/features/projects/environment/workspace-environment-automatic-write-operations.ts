@@ -30,6 +30,7 @@ export const workspaceEnvironmentAutomaticWriteOperations = {
   retryCurrentAttempt: databaseWriteOperation("workspaceEnvironmentAutomatic.retryCurrentAttempt", z.tuple([z.tuple([z.string()]), clock]), z.boolean()),
   interruptUnfinishedAttempts: databaseWriteOperation("workspaceEnvironmentAutomatic.interruptUnfinishedAttempts", z.tuple([z.tuple([]), clock]), z.void()),
   claimReleasedTurn: databaseWriteOperation<[Parameters<WorkspaceEnvironmentAutomaticStore["claimReleasedTurn"]>, string], ReturnType<WorkspaceEnvironmentAutomaticStore["claimReleasedTurn"]>>("workspaceEnvironmentAutomatic.claimReleasedTurn", z.tuple([z.union([z.tuple([]), z.tuple([z.string().optional()])]), clock]), z.object({ id: z.string(), submission: QueuedTurnSubmissionSchema }).strict().nullable()),
+  releaseUnsentClaim: databaseWriteOperation("workspaceEnvironmentAutomatic.releaseUnsentClaim", z.tuple([z.tuple([z.string()]), clock]), z.boolean()),
   markDispatched: databaseWriteOperation("workspaceEnvironmentAutomatic.markDispatched", z.tuple([z.tuple([z.string()]), clock]), z.boolean()),
 };
 
@@ -50,6 +51,7 @@ export function workspaceEnvironmentAutomaticWriteHandlers(db: Database): Readon
     [operations.retryCurrentAttempt.name, databaseWriteHandler(operations.retryCurrentAttempt, (input) => new WorkspaceEnvironmentAutomaticStore(db, () => input[1]).retryCurrentAttempt(...input[0]))],
     [operations.interruptUnfinishedAttempts.name, databaseWriteHandler(operations.interruptUnfinishedAttempts, (input) => new WorkspaceEnvironmentAutomaticStore(db, () => input[1]).interruptUnfinishedAttempts(...input[0]))],
     [operations.claimReleasedTurn.name, databaseWriteHandler(operations.claimReleasedTurn, (input) => new WorkspaceEnvironmentAutomaticStore(db, () => input[1]).claimReleasedTurn(...input[0]))],
+    [operations.releaseUnsentClaim.name, databaseWriteHandler(operations.releaseUnsentClaim, (input) => new WorkspaceEnvironmentAutomaticStore(db, () => input[1]).releaseUnsentClaim(...input[0]))],
     [operations.markDispatched.name, databaseWriteHandler(operations.markDispatched, (input) => new WorkspaceEnvironmentAutomaticStore(db, () => input[1]).markDispatched(...input[0]))],
   ]);
 }

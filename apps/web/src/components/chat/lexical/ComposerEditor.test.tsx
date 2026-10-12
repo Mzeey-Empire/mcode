@@ -43,7 +43,7 @@ describe("ComposerEditor", () => {
     );
 
     expect(screen.getByRole("textbox", { name: "Composer" })).toHaveStyle({
-      minHeight: "80px",
+      minHeight: "56px",
       maxHeight: "30vh",
       overflowY: "auto",
     });

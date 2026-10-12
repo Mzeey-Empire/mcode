@@ -56,14 +56,15 @@ async function harness(kind: ThreadStartup["kind"], phase: ThreadStartup["phase"
     snapshot: { threadId: thread.id, turnExecutionId: "execution-1", phase: "cancelled" },
   }));
   const stopAutomaticSetup = vi.fn(async () => stoppedSetup);
+  const retryAutomaticAgentStart = vi.fn(async () => undefined);
   const deps = {
     threadStartupFetchDecisions: new ThreadStartupFetchDecisions(),
     threadStartupService: service,
-    workspaceEnvironmentService: { stopAutomaticSetup },
+    workspaceEnvironmentService: { stopAutomaticSetup, retryAutomaticAgentStart },
     agentService: { stopSession },
   };
   const cancel = () => routeThreadStartupRpc("thread.startup.cancel", { startupId: startup.startupId }, deps);
-  return { service, thread, stopSession, stopAutomaticSetup, cancel, deps };
+  return { service, thread, stopSession, stopAutomaticSetup, retryAutomaticAgentStart, cancel, deps };
 }
 
 const intentCases = [
@@ -230,5 +231,15 @@ describe("thread startup RPC", () => {
     stopSession.mockRejectedValue(failure);
     await expect(cancel()).rejects.toBe(failure);
     expect(service.get(startup.startupId)).toMatchObject({ state: "running", phase: "agent", cancellation: "requested" });
+  });
+
+  it("retries a failed agent start for the startup's thread and returns the updated record", async () => {
+    const { service, thread, retryAutomaticAgentStart, deps } = await harness("managed-worktree", "agent");
+    await service.fail(startup.startupId, { code: "AGENT_START_FAILED", message: "Failed", retryable: true });
+    retryAutomaticAgentStart.mockImplementation(async () => { await service.retryAgent(startup.startupId); });
+    const result = await routeThreadStartupRpc("thread.startup.retryAgent", { startupId: startup.startupId }, deps);
+    expect(retryAutomaticAgentStart).toHaveBeenCalledExactlyOnceWith({ threadId: thread.id });
+    expect(result).toMatchObject({ state: "running", phase: "agent" });
+    expect(result).not.toHaveProperty("error");
   });
 });

@@ -6,6 +6,7 @@ const startupTransport = {
   cancelThreadStartup: vi.fn(),
   resolveThreadStartup: vi.fn(),
   retryErroredTurn: vi.fn(),
+  retryThreadStartupAgent: vi.fn(),
 };
 
 vi.mock("@/transport", () => ({
@@ -15,7 +16,7 @@ vi.mock("@/transport", () => ({
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useThreadStartupStore } from "../state/thread-startup-store";
-import { useStartupCancel, useStartupFetchDecision, useStartupTurnRetry } from "../useStartupActions";
+import { useStartupCancel, useStartupAgentRetry, useStartupFetchDecision } from "../useStartupActions";
 
 const startupId = "00000000-0000-4000-8000-000000000001";
 const T0 = "2026-09-02T12:00:00.000Z";
@@ -137,7 +138,7 @@ describe("useStartupFetchDecision", () => {
   });
 });
 
-describe("useStartupTurnRetry", () => {
+describe("useStartupAgentRetry", () => {
   function turn(id: string, status: AgentTurn["status"]): AgentTurn {
     return {
       id, threadId: "thread-1", status, trigger: { kind: "user" }, permissionMode: "full",
@@ -153,26 +154,48 @@ describe("useStartupTurnRetry", () => {
     resetThreadStoreForTests({ records: new Map([["thread-1", record]]) });
   }
 
+  const agentFailed = (kind: ThreadStartup["kind"] = "managed-worktree") => startup({
+    kind, state: "failed", phase: "agent",
+    error: { code: "AGENT_START_FAILED", message: "Agent failed", retryable: true },
+  });
+
   beforeEach(() => {
     startupTransport.retryErroredTurn.mockReset();
     startupTransport.retryErroredTurn.mockResolvedValue(undefined);
+    startupTransport.retryThreadStartupAgent.mockReset();
+    useThreadStartupStore.setState({ recordsByStartupId: {}, startupIdByThreadId: {} });
   });
 
   it("retries the thread's only turn when it errored", async () => {
     seedTurns(turn("turn-1", "Errored"));
-    const { result } = renderHook(() => useStartupTurnRetry("thread-1"));
+    const { result } = renderHook(() => useStartupAgentRetry(agentFailed(), "thread-1"));
     act(() => result.current?.retry());
     expect(startupTransport.retryErroredTurn).toHaveBeenCalledWith({ threadId: "thread-1", turnId: "turn-1" });
+    expect(startupTransport.retryThreadStartupAgent).not.toHaveBeenCalled();
     await waitFor(() => expect(result.current?.pending).toBe(false));
   });
 
+  it("resends a managed worktree's saved first message when the agent failed before any turn", async () => {
+    seedTurns();
+    const resumed = { ...agentFailed(), state: "running" as const, error: undefined, revision: 2 };
+    startupTransport.retryThreadStartupAgent.mockResolvedValue(resumed);
+    const { result } = renderHook(() => useStartupAgentRetry(agentFailed(), "thread-1"));
+    act(() => result.current?.retry());
+    expect(result.current?.pending).toBe(true);
+    expect(startupTransport.retryThreadStartupAgent).toHaveBeenCalledWith(startupId);
+    expect(startupTransport.retryErroredTurn).not.toHaveBeenCalled();
+    await waitFor(() => expect(result.current?.pending).toBe(false));
+    expect(useThreadStartupStore.getState().recordsByStartupId[startupId]).toMatchObject({ state: "running", revision: 2 });
+  });
+
   it.each([
-    ["the only turn did not error", [turn("turn-1", "Completed")]],
-    ["the thread already has a second turn", [turn("turn-1", "Errored"), turn("turn-2", "Errored")]],
-    ["the thread has no turn", []],
-  ] as const)("offers no retry when %s", (_name, turns) => {
+    ["the only turn did not error", "managed-worktree", [turn("turn-1", "Completed")]],
+    ["the thread already has a second turn", "managed-worktree", [turn("turn-1", "Errored"), turn("turn-2", "Errored")]],
+    ["a direct start has no turn", "direct", []],
+    ["an existing worktree start has no turn", "attached-worktree", []],
+  ] as const)("offers no retry when %s", (_name, kind, turns) => {
     seedTurns(...turns);
-    const { result } = renderHook(() => useStartupTurnRetry("thread-1"));
+    const { result } = renderHook(() => useStartupAgentRetry(agentFailed(kind), "thread-1"));
     expect(result.current).toBeUndefined();
   });
 });
