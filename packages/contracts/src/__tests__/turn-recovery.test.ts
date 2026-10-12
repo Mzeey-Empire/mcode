@@ -55,7 +55,10 @@ describe("turn recovery contracts", () => {
     const resume = WS_METHODS()["turn.resume"];
     expect(resume.params.parse({ threadId: "thread-1", turnId: "turn-1" }))
       .toEqual({ threadId: "thread-1", turnId: "turn-1" });
-    expect(resume.params.safeParse({ threadId: "thread-1", turnId: "turn-1", model: "m" }).success).toBe(false);
+    expect(resume.params.parse({ threadId: "thread-1", turnId: "turn-1", model: " gpt-5 " }).model).toBe("gpt-5");
+    expect(resume.params.safeParse({ threadId: "thread-1", turnId: "turn-1", model: " " }).success).toBe(false);
+    expect(resume.params.safeParse({ threadId: "thread-1", turnId: "turn-1", model: "m".repeat(257) }).success).toBe(false);
+    expect(resume.params.safeParse({ threadId: "thread-1", turnId: "turn-1", extra: true }).success).toBe(false);
     expect(resume.params.safeParse({ threadId: "", turnId: "turn-1" }).success).toBe(false);
     expect(resume.result.parse({ turnId: "turn-2", mode: "native-session" }))
       .toEqual({ turnId: "turn-2", mode: "native-session" });

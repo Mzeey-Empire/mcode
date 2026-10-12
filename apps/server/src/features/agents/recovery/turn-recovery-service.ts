@@ -20,6 +20,7 @@ import {
 } from "./turn-resume.js";
 import type { SendMessageCommand } from "../orchestration/agent-service.js";
 import type {
+  AgentTurnEnding,
   IProviderRegistry,
   Message,
   Thread,
@@ -42,7 +43,9 @@ type TurnDispatch = (command: SendMessageCommand) => Promise<void>;
 
 /** The latest attempt of a turn with its thread and accepted input, validated for a recovery action. */
 export interface RecoverableTurn {
+  readonly turnId: string;
   readonly executionId: string;
+  readonly ending: AgentTurnEnding | null;
   readonly thread: Thread;
   readonly message: Message;
 }
@@ -131,16 +134,41 @@ export class TurnRecoveryService {
   }
 
   /**
-   * Continue the latest interrupted turn as a new attempt. The provider's own session is tried first when it can
-   * be resumed; when the provider reports that session gone, a fresh session seeded with the conversation takes over.
+   * Continue the latest interrupted turn as a new attempt, optionally on another model. The provider's own session
+   * is tried first when it can be resumed; when the provider reports that session gone, a fresh session seeded with
+   * the conversation takes over.
    */
   async resumeTurn(input: TurnResumeParams, dispatch: TurnDispatch): Promise<TurnResumeResult> {
-    return this.continueTurn(this.requireRecoverableTurn(input, "Interrupted"), dispatch);
+    const interrupted = this.requireRecoverableTurn(input, "Interrupted");
+    const target = { ...interrupted, thread: { ...interrupted.thread, model: input.model ?? interrupted.thread.model } };
+    return this.continueTurn(target, dispatch, this.limitedBeforeOutput(target));
   }
 
-  private async continueTurn(target: RecoverableTurn, dispatch: TurnDispatch): Promise<TurnResumeResult> {
+  /** Check that the latest attempt is a usage-limit interruption that can be resumed, without consuming it. */
+  requireResumableUsageLimitTurn(input: TurnResumeParams): RecoverableTurn {
+    const target = this.requireRecoverableTurn(input, "Interrupted");
+    if (target.ending?.outcome === "interrupted" && target.ending.cause === "usage_limit") return target;
+    throw new TurnRecoveryError("TURN_RECOVERY_NOT_USAGE_LIMITED", "Only usage-limited turns can be scheduled to resume");
+  }
+
+  /**
+   * A usage limit can reject the turn before the provider records the prompt, so a native session would only see
+   * the bare continuation. A seeded session already replays the prompt; only the native path must send it again.
+   */
+  private limitedBeforeOutput(target: RecoverableTurn): boolean {
+    if (target.ending?.outcome !== "interrupted" || target.ending.cause !== "usage_limit") return false;
+    if (target.message.is_internal) return false;
+    const output = this.canonicalSink.loadTerminalProjection(target.turnId);
+    return output.message === null && output.toolCallCount === 0;
+  }
+
+  private async continueTurn(
+    target: RecoverableTurn,
+    dispatch: TurnDispatch,
+    resendPrompt = false,
+  ): Promise<TurnResumeResult> {
     if (chooseResumePath(this.resumePathInput(target.thread)) === "native-session") {
-      return this.resumeNatively(target, dispatch);
+      return this.resumeNatively(target, dispatch, resendPrompt);
     }
     return { turnId: await this.dispatchSeededResume(target, target.executionId, dispatch), mode: "seeded-session" };
   }
@@ -155,14 +183,18 @@ export class TurnRecoveryService {
     return { supportsSessionResume, sdkSessionId: thread.sdk_session_id, threadProvider, turnProvider };
   }
 
-  private async resumeNatively(target: RecoverableTurn, dispatch: TurnDispatch): Promise<TurnResumeResult> {
+  private async resumeNatively(
+    target: RecoverableTurn,
+    dispatch: TurnDispatch,
+    resendPrompt: boolean,
+  ): Promise<TurnResumeResult> {
     const turnId = NodeCrypto.randomUUID();
     const watch = new NativeResumeWatch(turnId);
     let releaseRuntime!: () => void;
     const released = new Promise<void>((resolve) => { releaseRuntime = resolve; });
     try {
       await this.dispatchAttempt(turnId, {
-        ...this.continuationCommand(target, target.executionId),
+        ...(resendPrompt ? this.promptResendCommand(target) : this.continuationCommand(target, target.executionId)),
         resumeRequired: true,
         onRuntimeReleased: releaseRuntime,
       }, dispatch);
@@ -257,7 +289,10 @@ export class TurnRecoveryService {
     if (state.hasRunningTurn) throw new TurnRecoveryError("TURN_RECOVERY_RUNNING", "The thread has a running turn");
     this.requireTerminalStartup(input.threadId);
     this.requireStatus(turn.status, status);
-    return { executionId: turn.executionId, ...this.requireRecoveryInput(input.threadId, turn.id) };
+    return {
+      turnId: turn.id, executionId: turn.executionId, ending: turn.ending,
+      ...this.requireRecoveryInput(input.threadId, turn.id),
+    };
   }
 
   private requireStatus(actual: string, required: "Errored" | "Interrupted"): void {
@@ -298,6 +333,11 @@ export class TurnRecoveryService {
       previewAnnotations: this.optionalValue(message.previewAnnotations),
       retryOfExecutionId: executionId,
     };
+  }
+
+  private promptResendCommand(target: RecoverableTurn): SendMessageCommand {
+    const attachments = this.attachmentService.prepareRetryAttachments(target.thread.id, target.message.attachments ?? []);
+    return this.retryCommand(target.thread, target.message, attachments, target.executionId);
   }
 
   private continuationCommand(target: RecoverableTurn, retryOfExecutionId: string): SendMessageCommand {

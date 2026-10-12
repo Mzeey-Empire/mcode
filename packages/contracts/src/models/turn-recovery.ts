@@ -44,10 +44,11 @@ export const TurnRetryResultSchema = lazySchema(() => z.object({
 /** Identity returned after retry admission succeeds. */
 export type TurnRetryResult = z.infer<ReturnType<typeof TurnRetryResultSchema>>;
 
-/** Resume the latest interrupted attempt as a new attempt of the same turn. */
+/** Resume the latest interrupted attempt as a new attempt of the same turn, optionally switching its model. */
 export const TurnResumeParamsSchema = lazySchema(() => z.object({
   threadId: z.string().min(1).max(256),
   turnId: AgentTurnIdSchema,
+  model: z.string().trim().min(1).max(256).optional(),
 }).strict());
 /** Input for resuming an interrupted attempt. */
 export type TurnResumeParams = z.infer<ReturnType<typeof TurnResumeParamsSchema>>;
