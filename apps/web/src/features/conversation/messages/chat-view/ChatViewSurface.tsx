@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentProps, type ReactNode, type Ref } from "react";
 import { GitFork } from "lucide-react";
-import type { Message, RecoveryIncident, SelectedTextComment, ThreadStartup, ThreadStartupKind } from "@mcode/contracts";
+import type { Message, SelectedTextComment, ThreadStartup, ThreadStartupKind } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -12,7 +12,6 @@ import { CollapsibleError } from "@/components/chat/CollapsibleError";
 import { ConversationHoldOverlay } from "@/components/chat/ConversationHoldOverlay";
 import { HandoffDocDialog, useHandoffFallback } from "@/components/chat/handoff-fallback";
 import { HeaderActions } from "@/components/chat/HeaderActions";
-import { InterruptedSessionsBanner } from "@/components/chat/InterruptedSessionsBanner";
 import { PlanQuestionWizard } from "@/components/chat/PlanQuestionWizard";
 import { ThreadTitleEditor } from "@/components/chat/ThreadTitleEditor";
 import { CanvasHeader } from "@/components/shell/CanvasHeader";
@@ -79,24 +78,12 @@ export interface ChatViewInteractions {
   onExitForkMode: () => void;
 }
 
-/** Recovery banner state and actions for the active conversation. */
-export interface ChatRecoveryBannerState {
-  /** Restart-scoped incident returned by the server, when visible. */
-  incident: RecoveryIncident | null;
-  /** Dismisses one incident for the browser app session. */
-  onDismiss: (incidentId: string) => void;
-  /** Retries each exact turn in the visible incident. */
-  onRetry: (executionIds: readonly string[]) => Promise<void>;
-}
-
 /** Props for the root chat visual surface. */
 export interface ChatViewSurfaceProps {
   /** Current selection and message display state. */
   state: ChatViewState;
   /** Chat UI actions. */
   interactions: ChatViewInteractions;
-  /** State used by recovery banners. */
-  recovery: ChatRecoveryBannerState;
   /** Current inline title editing state. */
   editingThreadId: string | null;
   /** Updates inline title editing state. */
@@ -318,15 +305,10 @@ function ThreadHeader({ state, rename }: { state: ChatViewState; rename?: Thread
   );
 }
 
-/** Renders restart recovery and worktree warning banners. */
-function ActiveThreadBanners({ state, recovery }: { state: ChatViewState; recovery: ChatRecoveryBannerState }) {
+/** Renders the worktree hook warning banner. */
+function ActiveThreadBanners({ state }: { state: ChatViewState }) {
   const thread = state.activeThread!;
-  return (
-    <>
-      {recovery.incident && <div className="px-4 pt-2"><InterruptedSessionsBanner incident={recovery.incident} onDismiss={() => recovery.onDismiss(recovery.incident!.id)} onRetry={recovery.onRetry} /></div>}
-      {thread.clientWarnings?.length ? <div className="mx-auto w-full max-w-3xl px-4 pt-2"><Notice tone="warning" collapsible title="Post-checkout hook encountered an error" detail={<WarningOutput lines={thread.clientWarnings} />} onDismiss={() => useWorkspaceStore.getState().dismissWarnings(thread.id)} dismissLabel="Dismiss warning" /></div> : null}
-    </>
-  );
+  return thread.clientWarnings?.length ? <div className="mx-auto w-full max-w-3xl px-4 pt-2"><Notice tone="warning" collapsible title="Post-checkout hook encountered an error" detail={<WarningOutput lines={thread.clientWarnings} />} onDismiss={() => useWorkspaceStore.getState().dismissWarnings(thread.id)} dismissLabel="Dismiss warning" /></div> : null;
 }
 
 /** Command output in the Paper code inset. */
@@ -713,7 +695,6 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
   const {
     state,
     interactions,
-    recovery,
     editingThreadId,
     onEditingThreadIdChange,
     pendingSelectedTextComment,
@@ -741,7 +722,7 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
     <div ref={state.chatPaneRef} className={cn("relative flex h-full flex-col bg-background", state.overviewPaddingRight && "[--chat-gutter:--spacing(6)]")} data-testid="chat-view" data-thread-view>
       <OverviewLayer>
         <ThreadHeader state={state} rename={{ editingThreadId, onEditingThreadIdChange, onSaveTitle: interactions.onSaveTitle }} />
-        <ActiveThreadBanners state={state} recovery={recovery} />
+        <ActiveThreadBanners state={state} />
         {conversationErrorBanner ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">{conversationErrorBanner}: {state.sessionError}</p></div> : null}
         <HandoffFallbackNotice threadId={thread.id} />
         <SavingDelayedDialog open={state.savingStatus?.mode === "saving-delayed"} onStopSafely={interactions.onStopSafely} onContinueWithoutSaving={interactions.onContinueWithoutSaving} />

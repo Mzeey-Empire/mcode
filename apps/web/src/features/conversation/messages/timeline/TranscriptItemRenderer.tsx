@@ -6,6 +6,7 @@ import { TurnChangesBar } from "../../turn/TurnChangesBar";
 import { TurnMetaLine } from "../../turn/TurnMetaLine";
 import { WorkFold, workFoldLabel } from "../../turn/WorkFold";
 import { TurnEndNotice } from "../../turn-ending/TurnEndNotice";
+import { useTurnResume } from "../../turn-ending/useTurnResume";
 import { useTurnRetry } from "../../turn-ending/useTurnRetry";
 import { MessageBubble } from "../MessageBubble";
 import { VisibleNarrativeLoader } from "../TranscriptNarrativeRow";
@@ -151,13 +152,21 @@ type TurnEndNoticeItem = Extract<ChatVirtualItem, { type: "turn-end-notice" }>;
 function TurnEndNoticeTranscriptItemRenderer({ item, threadId }: TranscriptItemRendererProps) {
   const ending = item as TurnEndNoticeItem;
   return threadId
-    ? <RetryableTurnEndNotice threadId={threadId} ending={ending} />
+    ? <ActionableTurnEndNotice threadId={threadId} ending={ending} />
     : <TurnEndNotice notice={ending.notice} />;
 }
 
-function RetryableTurnEndNotice({ threadId, ending }: { threadId: string; ending: TurnEndNoticeItem }) {
-  const { retry, pending, error } = useTurnRetry(threadId, ending.turnId);
-  return <TurnEndNotice notice={ending.notice} actions={{ retry }} pending={pending} error={error} />;
+function ActionableTurnEndNotice({ threadId, ending }: { threadId: string; ending: TurnEndNoticeItem }) {
+  const retry = useTurnRetry(threadId, ending.turnId);
+  const resume = useTurnResume(threadId, ending.turnId);
+  return (
+    <TurnEndNotice
+      notice={ending.notice}
+      actions={{ retry: retry.retry, resume: resume.resume }}
+      pending={retry.pending || resume.pending}
+      error={retry.error ?? resume.error}
+    />
+  );
 }
 
 const TRANSCRIPT_ITEM_COMPONENTS: Record<ChatVirtualItem["type"], TranscriptItemComponent> = {

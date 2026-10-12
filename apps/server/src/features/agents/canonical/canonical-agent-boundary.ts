@@ -218,11 +218,6 @@ export class CanonicalAgentBoundary {
     return this.reader.listHeldBackgroundToolCalls();
   }
 
-  /** Load the visible entries for one restart-scoped recovery incident. */
-  listRecoveryIncidentEntries(...args: Parameters<CanonicalAgentStore["listRecoveryIncidentEntries"]>): ReturnType<CanonicalAgentStore["listRecoveryIncidentEntries"]> {
-    return this.reader.listRecoveryIncidentEntries(...args);
-  }
-
   /** Load interrupted checkpoints that permit an explicit recovery action. */
   listInterruptedCheckpoints(...args: Parameters<CanonicalAgentStore["listInterruptedCheckpoints"]>): ReturnType<CanonicalAgentStore["listInterruptedCheckpoints"]> {
     return this.reader.listInterruptedCheckpoints(...args);

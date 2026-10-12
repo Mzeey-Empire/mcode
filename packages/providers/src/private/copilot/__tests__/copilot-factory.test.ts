@@ -314,7 +314,18 @@ describe("Copilot public factory", () => {
 
   it("propagates durable resume failure without silently starting fresh", async () => {
     sdk.resume.mockRejectedValueOnce(new Error("native resume failed"));
-    await expect(provider.sendTurn(request({ resumeFrom: "existing-native-session" }))).rejects.toThrow("native resume failed");
+    await expect(provider.sendTurn(request({ resumeFrom: "existing-native-session", resumeRequired: true }))).rejects.toMatchObject({
+      message: expect.stringContaining("native resume failed"),
+      failure: { kind: "fatal", code: "session_resume_unavailable" },
+    });
+    expect(sdk.create).not.toHaveBeenCalled();
+  });
+
+  it("keeps an ordinary resume failure out of the seeded fallback", async () => {
+    sdk.resume.mockRejectedValueOnce(new Error("native resume failed"));
+    const sent = provider.sendTurn(request({ resumeFrom: "existing-native-session" }));
+    await expect(sent).rejects.toThrow("native resume failed");
+    await expect(sent).rejects.not.toMatchObject({ failure: { code: "session_resume_unavailable" } });
     expect(sdk.create).not.toHaveBeenCalled();
   });
 

@@ -37,6 +37,8 @@ import {
   type CodexAppServerOptions,
 } from "../../private/codex/codex-app-server.js";
 import { logger } from "@mcode/shared";
+import { SessionResumeUnavailableError } from "../../provider-turn-error.js";
+import { classifyCodexLocalFailure } from "../../private/codex/codex-failure-classifier.js";
 
 const noSleep = (): Promise<void> => Promise.resolve();
 
@@ -614,6 +616,34 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
     expect(startRequest?.params).toEqual(expect.objectContaining({
       developerInstructions: "configured rules\n\nmcode runtime",
     }));
+    await server.kill();
+  }, 10_000);
+
+  it("fails a required resume of a missing thread instead of starting a fresh thread", async () => {
+    let startCount = 0;
+    harnessFakeServer((req): Record<string, unknown> => {
+      if (req.method === "thread/resume") return { error: { message: "no rollout found for thread id thread-existing" } };
+      if (req.method === "thread/start") {
+        startCount += 1;
+        return { result: { thread: { id: "thread-fresh" } } };
+      }
+      return { result: {} };
+    });
+    const server = new CodexAppServer({
+      cliPath: "codex",
+      workingDirectory: "/tmp",
+      getSpawnEnv: () => ({}),
+      resumeThreadId: "thread-existing",
+      requireResume: true,
+    });
+
+    const failure = await server.start().then(() => undefined, (error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SessionResumeUnavailableError);
+    expect(failure).toMatchObject({ failure: { kind: "fatal", code: "session_resume_unavailable" } });
+    expect(classifyCodexLocalFailure(failure)).toEqual({ kind: "fatal", code: "session_resume_unavailable" });
+    expect(startCount).toBe(0);
+    expect(server.threadId).toBeNull();
     await server.kill();
   }, 10_000);
 

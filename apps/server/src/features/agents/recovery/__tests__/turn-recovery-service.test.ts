@@ -27,7 +27,9 @@ import { AttachmentService } from "../../../attachments/storage/attachment-servi
 import type { SendMessageCommand } from "../../orchestration/agent-service.js";
 import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-startup-repo.js";
 import { turnRecoveryErrorCode } from "../turn-recovery-error.js";
-import type { PreviewAnnotationBundle, ThreadStartup } from "@mcode/contracts";
+import { notifyCommittedCanonicalEvents } from "../../canonical/committed-canonical-events.js";
+import { chooseResumePath, RESUME_CONTINUATION_PROMPT } from "../turn-resume.js";
+import type { CanonicalAgentEventEnvelope, PreviewAnnotationBundle, ThreadStartup } from "@mcode/contracts";
 
 const NOW = "2026-08-10T09:00:00.000Z";
 const THREAD_ID = "00000000-0000-4000-8000-000000000021";
@@ -54,7 +56,8 @@ describe("TurnRecoveryService", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "workspace-recovery", "Recovery", "main", "codex", "active", NOW, NOW);
-    published = vi.fn();
+    // Real commits publish here, so forwarding them reaches committed-event observers the way production does.
+    published = vi.fn<CanonicalAgentEventPublisher>((events) => notifyCommittedCanonicalEvents(events));
     sink = new CanonicalAgentStore(db, published);
     runtimeSink = new CanonicalAgentBoundary(db, writer, new CanonicalAgentWriterClient(writer), published);
     threadRepo = new ThreadRepo(db, writer);
@@ -92,15 +95,23 @@ describe("TurnRecoveryService", () => {
     await closeAgentStorageTestDatabases();
   });
 
-  describe("retryTurn", () => {
+  describe("turn recovery actions", () => {
     let service: TurnRecoveryService;
     let attachments: AttachmentService;
 
     beforeEach(() => {
       vi.stubEnv("MCODE_DATA_DIR", NodePath.dirname(db.filename));
       attachments = new AttachmentService();
-      service = new TurnRecoveryService(runtimeSink, threadRepo, attachments, defaultCheckpoints, startupRepo);
+      service = new TurnRecoveryService(runtimeSink, threadRepo, attachments, defaultCheckpoints, startupRepo,
+        messageRepo, providerRegistry(true));
     });
+
+    function providerRegistry(supportsSessionResume: boolean) {
+      const provider = { descriptor: { capabilities: [
+        { name: "session-resume", support: supportsSessionResume ? "supported" : "unsupported" },
+      ] } };
+      return { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} };
+    }
 
     function failTurn(turnId = TURN_ID): void {
       const turn = sink.loadTurn(turnId);
@@ -120,7 +131,8 @@ describe("TurnRecoveryService", () => {
         permissionMode: "supervised", providerIdentities: [], retryOfExecutionId: command.retryOfExecutionId,
         userMessage: { kind: "create", content: command.content, sequence: messageRepo.listByThread(THREAD_ID, 100).messages.length + 1,
           attachments: persisted.stored, replyToMessageId: command.replyToMessageId,
-          quotedText: command.quotedText, mentions: command.mentions, previewAnnotations: command.previewAnnotations },
+          quotedText: command.quotedText, mentions: command.mentions, previewAnnotations: command.previewAnnotations,
+          isInternal: command.internalUserMessage },
       });
     }
 
@@ -130,33 +142,33 @@ describe("TurnRecoveryService", () => {
       { threadId: "other-thread", turnId: TURN_ID },
       { threadId: THREAD_ID, turnId: "missing-turn" },
     ])("rejects a missing or foreign turn %j", async (input) => {
-      await expect(service.retryTurn(input, rejectDispatch)).rejects.toMatchObject({ code: "TURN_RETRY_NOT_FOUND" });
+      await expect(service.retryErroredTurn(input, rejectDispatch)).rejects.toMatchObject({ code: "TURN_RECOVERY_NOT_FOUND" });
     });
 
     it.each(["completed", "cancelled", "interrupted"] as const)("rejects a %s turn", async (outcome) => {
       sink.finishParentTurn({ threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
         providerId: "codex", providerIdentities: [], outcome, projectTurn: () => ({ message: null, narrative: [] }) });
-      await expect(service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
-        .rejects.toMatchObject({ code: "TURN_RETRY_NOT_ERRORED" });
+      await expect(service.retryErroredTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
+        .rejects.toMatchObject({ code: "TURN_RECOVERY_NOT_ERRORED" });
     });
 
     it("rejects a thread with a running turn", async () => {
-      await expect(service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
-        .rejects.toMatchObject({ code: "TURN_RETRY_RUNNING" });
+      await expect(service.retryErroredTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
+        .rejects.toMatchObject({ code: "TURN_RECOVERY_RUNNING" });
     });
 
     it("rejects a missing accepted user message without consuming the attempt", async () => {
       failTurn();
       db.prepare("DELETE FROM canonical_agent_items WHERE turn_id = ? AND kind = 'message'").run(TURN_ID);
-      await expect(service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
-        .rejects.toMatchObject({ code: "TURN_RETRY_INPUT_MISSING" });
+      await expect(service.retryErroredTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
+        .rejects.toMatchObject({ code: "TURN_RECOVERY_INPUT_MISSING" });
       expect(sink.loadCheckpoint(EXECUTION_ID)?.phase).toBe("errored");
     });
 
     it("does not return an attempt identity when dispatch was handled without admission", async () => {
       failTurn();
-      await expect(service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, async () => {}))
-        .rejects.toMatchObject({ code: "TURN_RETRY_NOT_ADMITTED" });
+      await expect(service.retryErroredTurn({ threadId: THREAD_ID, turnId: TURN_ID }, async () => {}))
+        .rejects.toMatchObject({ code: "TURN_RECOVERY_NOT_ADMITTED" });
       expect(sink.loadCheckpoint(EXECUTION_ID)?.phase).toBe("errored");
     });
 
@@ -178,14 +190,14 @@ describe("TurnRecoveryService", () => {
     it.each(["pending", "running", "blocked"] as const)("rejects a %s startup", async (state) => {
       failTurn();
       await addStartup(state);
-      await expect(service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
-        .rejects.toMatchObject({ code: "TURN_RETRY_STARTUP_ACTIVE" });
+      await expect(service.retryErroredTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
+        .rejects.toMatchObject({ code: "TURN_RECOVERY_STARTUP_ACTIVE" });
     });
 
     it.each(["completed", "failed", "cancelled", "interrupted"] as const)("allows a terminal %s startup", async (state) => {
       failTurn();
       await addStartup(state);
-      const result = await service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, admit);
+      const result = await service.retryErroredTurn({ threadId: THREAD_ID, turnId: TURN_ID }, admit);
       expect(sink.loadTurn(result.turnId)).toMatchObject({ status: "Running", attemptOf: TURN_ID });
     });
 
@@ -195,8 +207,8 @@ describe("TurnRecoveryService", () => {
       failTurn("later-turn");
       db.prepare("UPDATE canonical_agent_turns SET updated_at = ? WHERE id = ?")
         .run("2099-01-01T00:00:00.000Z", TURN_ID);
-      await expect(service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
-        .rejects.toMatchObject({ code: "TURN_RETRY_NOT_LATEST" });
+      await expect(service.retryErroredTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
+        .rejects.toMatchObject({ code: "TURN_RECOVERY_NOT_LATEST" });
     });
 
     it.each([undefined, "replacement-model"])("preserves accepted input and session while selecting model %s", async (model) => {
@@ -227,7 +239,7 @@ describe("TurnRecoveryService", () => {
         projectTurn: () => ({ message: partial, narrative: [] }) });
       const failed = sink.loadTurn(TURN_ID);
       const accepted = sink.loadUserMessage(TURN_ID);
-      const result = await service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID, model }, async (command) => {
+      const result = await service.retryErroredTurn({ threadId: THREAD_ID, turnId: TURN_ID, model }, async (command) => {
         expect(command.model).toBe(model ?? "original-model");
         expect(Object.hasOwn(command, "forceFreshSession")).toBe(false);
         expect(command.retryOfExecutionId).toBe(EXECUTION_ID);
@@ -256,7 +268,7 @@ describe("TurnRecoveryService", () => {
       // A live provider ending checkpoints phase 'finalized' and keeps the outcome separately.
       db.prepare("UPDATE canonical_agent_ingest_checkpoints SET phase = 'finalized' WHERE execution_id = ?").run(EXECUTION_ID);
 
-      const result = await service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, admit);
+      const result = await service.retryErroredTurn({ threadId: THREAD_ID, turnId: TURN_ID }, admit);
 
       expect(sink.loadTurn(result.turnId)).toMatchObject({ status: "Running", attemptOf: TURN_ID });
       expect(sink.loadCheckpoint(EXECUTION_ID)?.phase).toBe("retried");
@@ -264,16 +276,16 @@ describe("TurnRecoveryService", () => {
 
     it("keeps retry chains flat and rejects a second retry of each consumed attempt", async () => {
       failTurn();
-      const first = await service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, admit);
-      await expect(service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
-        .rejects.toMatchObject({ code: "TURN_RETRY_CONFLICT" });
+      const first = await service.retryErroredTurn({ threadId: THREAD_ID, turnId: TURN_ID }, admit);
+      await expect(service.retryErroredTurn({ threadId: THREAD_ID, turnId: TURN_ID }, rejectDispatch))
+        .rejects.toMatchObject({ code: "TURN_RECOVERY_CONFLICT" });
       failTurn(first.turnId);
-      const second = await service.retryTurn({ threadId: THREAD_ID, turnId: first.turnId }, admit);
+      const second = await service.retryErroredTurn({ threadId: THREAD_ID, turnId: first.turnId }, admit);
       expect(sink.loadTurn(second.turnId)?.attemptOf).toBe("turn-recovery");
       expect(sink.loadTurn(first.turnId)).toMatchObject({ status: "Errored", attemptOf: "turn-recovery" });
       expect(sink.loadTurn(TURN_ID)).toMatchObject({ status: "Errored", attemptOf: null });
-      await expect(service.retryTurn({ threadId: THREAD_ID, turnId: first.turnId }, rejectDispatch))
-        .rejects.toMatchObject({ code: "TURN_RETRY_CONFLICT" });
+      await expect(service.retryErroredTurn({ threadId: THREAD_ID, turnId: first.turnId }, rejectDispatch))
+        .rejects.toMatchObject({ code: "TURN_RECOVERY_CONFLICT" });
     });
 
     it("returns a conflict from the transactional consume when two retries pass the initial checks", async () => {
@@ -288,17 +300,239 @@ describe("TurnRecoveryService", () => {
         await admit(command);
       };
       const results = await Promise.allSettled([
-        service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, dispatch),
-        service.retryTurn({ threadId: THREAD_ID, turnId: TURN_ID }, dispatch),
+        service.retryErroredTurn({ threadId: THREAD_ID, turnId: TURN_ID }, dispatch),
+        service.retryErroredTurn({ threadId: THREAD_ID, turnId: TURN_ID }, dispatch),
       ]);
       expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
       const rejected = results.find((result) => result.status === "rejected");
       if (rejected?.status !== "rejected") throw new Error("Concurrent retry did not conflict");
-      expect(turnRecoveryErrorCode(rejected.reason)).toBe("TURN_RETRY_CONFLICT");
+      expect(turnRecoveryErrorCode(rejected.reason)).toBe("TURN_RECOVERY_CONFLICT");
       expect(messageRepo.listByThread(THREAD_ID, 100).messages).toHaveLength(2);
       expect(sink.loadTurn(TURN_ID)?.ending).toEqual({ outcome: "errored",
         failure: { kind: "fatal", provider: "codex", message: "Invalid model" } });
     });
+    describe("resumeTurn", () => {
+      const UNAVAILABLE = { kind: "fatal", provider: "codex", message: "Session gone", code: "session_resume_unavailable" } as const;
+
+      function interruptTurn(turnId = TURN_ID): void {
+        const turn = sink.loadTurn(turnId);
+        if (!turn?.executionId) throw new Error("Test turn missing");
+        sink.finishParentTurn({ threadId: THREAD_ID, turnId, executionId: turn.executionId,
+          providerId: "codex", providerIdentities: [], outcome: "interrupted",
+          projectTurn: () => ({ message: null, narrative: [] }) });
+      }
+
+      function errorAttempt(turnId: string, failure: { kind: "fatal"; provider: "codex"; message: string; code?: string }): void {
+        const turn = sink.loadTurn(turnId);
+        if (!turn?.executionId) throw new Error("Attempt missing");
+        sink.finishParentTurn({ threadId: THREAD_ID, turnId, executionId: turn.executionId,
+          providerId: "codex", providerIdentities: [], outcome: "errored", error: failure.message,
+          ending: { failure }, projectTurn: () => ({ message: null, narrative: [] }) });
+      }
+
+      function providerStarted(turnId: string): CanonicalAgentEventEnvelope {
+        const executionId = sink.loadTurn(turnId)?.executionId;
+        if (!executionId) throw new Error("Attempt missing");
+        return { eventId: `${executionId}:provider-started`, routing: { threadId: THREAD_ID, turnId, executionId },
+          sourceProviderId: "codex", sourceIdentities: [], acceptedSequence: 1, durableRevision: 1,
+          serverTimestamps: { acceptedAt: NOW }, payload: { type: "turn.provider-started", at: NOW } };
+      }
+
+      function sourceTurnId(command: SendMessageCommand): string {
+        if (!command.sourceTurnId) throw new Error("Resume must assign its attempt identity");
+        return command.sourceTurnId;
+      }
+
+      function withNativeSession(): void {
+        db.prepare("UPDATE threads SET sdk_session_id = ? WHERE id = ?").run("native-session-1", THREAD_ID);
+      }
+
+      const resume = (dispatch: (command: SendMessageCommand) => Promise<void>) =>
+        service.resumeTurn({ threadId: THREAD_ID, turnId: TURN_ID }, dispatch);
+
+      it.each([
+        { supportsSessionResume: true, sdkSessionId: "s", threadProvider: "codex", turnProvider: "codex", mode: "native-session" },
+        { supportsSessionResume: false, sdkSessionId: "s", threadProvider: "codex", turnProvider: "codex", mode: "seeded-session" },
+        { supportsSessionResume: true, sdkSessionId: null, threadProvider: "codex", turnProvider: "codex", mode: "seeded-session" },
+        { supportsSessionResume: true, sdkSessionId: "", threadProvider: "codex", turnProvider: "codex", mode: "seeded-session" },
+        { supportsSessionResume: true, sdkSessionId: "s", threadProvider: "claude", turnProvider: "codex", mode: "seeded-session" },
+        { supportsSessionResume: true, sdkSessionId: "s", threadProvider: "codex", turnProvider: null, mode: "seeded-session" },
+      ] as const)("chooses $mode for %j", ({ mode, ...input }) => {
+        expect(chooseResumePath(input)).toBe(mode);
+      });
+
+      it("continues the native session with a hidden continuation and keeps the interrupted record", async () => {
+        withNativeSession();
+        interruptTurn();
+        const interrupted = sink.loadTurn(TURN_ID);
+        const accepted = sink.loadUserMessage(TURN_ID);
+        const commands: SendMessageCommand[] = [];
+        const result = await resume(async (command) => {
+          commands.push(command);
+          await admit(command);
+          notifyCommittedCanonicalEvents([providerStarted(sourceTurnId(command))]);
+        });
+        expect(result.mode).toBe("native-session");
+        expect(commands).toHaveLength(1);
+        expect(commands[0]).toMatchObject({ content: RESUME_CONTINUATION_PROMPT, attachments: [], resumeRequired: true,
+          internalUserMessage: true, retryOfExecutionId: EXECUTION_ID, sourceTurnId: result.turnId });
+        expect(Object.hasOwn(commands[0]!, "forceFreshSession")).toBe(false);
+        expect(sink.loadTurn(result.turnId)).toMatchObject({ status: "Running", attemptOf: TURN_ID });
+        expect(sink.loadUserMessage(result.turnId)).toMatchObject({ content: RESUME_CONTINUATION_PROMPT, is_internal: true });
+        expect(sink.loadTurn(TURN_ID)).toEqual(interrupted);
+        expect(sink.loadUserMessage(TURN_ID)).toEqual(accepted);
+        expect(sink.loadCheckpoint(EXECUTION_ID)?.phase).toBe("retried");
+      });
+
+      it("falls back to a seeded fresh session after the provider reports the native session gone", async () => {
+        withNativeSession();
+        interruptTurn();
+        const commands: SendMessageCommand[] = [];
+        const result = await resume(async (command) => {
+          commands.push(command);
+          await admit(command);
+          if (commands.length > 1) return;
+          errorAttempt(sourceTurnId(command), UNAVAILABLE);
+          command.onRuntimeReleased?.();
+        });
+        expect(result.mode).toBe("seeded-session");
+        expect(commands).toHaveLength(2);
+        const [native, seeded] = commands;
+        const nativeTurnId = sourceTurnId(native!);
+        expect(result.turnId).toBe(seeded!.sourceTurnId);
+        expect(seeded).toMatchObject({ content: RESUME_CONTINUATION_PROMPT, attachments: [], forceFreshSession: true,
+          internalUserMessage: true, retryOfExecutionId: sink.loadTurn(nativeTurnId)?.executionId });
+        expect(Object.hasOwn(seeded!, "resumeRequired")).toBe(false);
+        expect(seeded!.providerWireOverride).toContain("User: repeat only when asked");
+        expect(seeded!.providerWireOverride?.endsWith(`\n\n---\n\n${RESUME_CONTINUATION_PROMPT}`)).toBe(true);
+        expect(sink.loadTurn(nativeTurnId)).toMatchObject({ status: "Errored", attemptOf: TURN_ID });
+        expect(sink.loadTurn(result.turnId)).toMatchObject({ status: "Running", attemptOf: TURN_ID });
+        expect(sink.loadTurn(TURN_ID)?.status).toBe("Interrupted");
+      });
+
+      it("keeps the native attempt when it ends for any other reason", async () => {
+        withNativeSession();
+        interruptTurn();
+        const commands: SendMessageCommand[] = [];
+        const result = await resume(async (command) => {
+          commands.push(command);
+          await admit(command);
+          errorAttempt(sourceTurnId(command), { kind: "fatal", provider: "codex", message: "Invalid model" });
+          command.onRuntimeReleased?.();
+        });
+        expect(result).toEqual({ turnId: commands[0]!.sourceTurnId, mode: "native-session" });
+        expect(commands).toHaveLength(1);
+      });
+
+      it("seeds a fresh session from the interrupted turn's input when no native session exists", async () => {
+        messageRepo.createAssistantIdempotent({ id: "later-answer", threadId: THREAD_ID, content: "Partial work after the input", sequence: 2 });
+        interruptTurn();
+        const commands: SendMessageCommand[] = [];
+        const result = await resume(async (command) => {
+          commands.push(command);
+          await admit(command);
+        });
+        expect(result.mode).toBe("seeded-session");
+        expect(commands).toHaveLength(1);
+        expect(commands[0]).toMatchObject({ forceFreshSession: true, retryOfExecutionId: EXECUTION_ID, internalUserMessage: true });
+        expect(commands[0]!.providerWireOverride).toContain("User: repeat only when asked");
+        expect(commands[0]!.providerWireOverride).not.toContain("Partial work after the input");
+        expect(sink.loadTurn(result.turnId)).toMatchObject({ attemptOf: TURN_ID });
+      });
+
+      it("seeds when the thread switched providers since the interrupted turn", async () => {
+        db.prepare("UPDATE threads SET provider = ?, sdk_session_id = ? WHERE id = ?").run("claude", "claude-session", THREAD_ID);
+        interruptTurn();
+        const commands: SendMessageCommand[] = [];
+        const result = await resume(async (command) => {
+          commands.push(command);
+          await admit(command);
+        });
+        expect(result.mode).toBe("seeded-session");
+        expect(commands[0]?.forceFreshSession).toBe(true);
+      });
+
+      it("fits a seeded Codex input inside the inline limit", async () => {
+        db.prepare("UPDATE messages SET content = ? WHERE thread_id = ?").run("x".repeat(60_000), THREAD_ID);
+        interruptTurn();
+        const commands: SendMessageCommand[] = [];
+        await resume(async (command) => {
+          commands.push(command);
+          await admit(command);
+        });
+        const wire = commands[0]?.providerWireOverride ?? "";
+        expect(wire.length).toBeLessThanOrEqual(14_000);
+        expect(wire.endsWith(RESUME_CONTINUATION_PROMPT)).toBe(true);
+      });
+
+      it("answers native-session when the provider neither starts nor ends within the wait bound", async () => {
+        withNativeSession();
+        interruptTurn();
+        let attemptId = "";
+        const pending = resume(async (command) => {
+          await admit(command);
+          attemptId = sourceTurnId(command);
+          vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        });
+        try {
+          await vi.waitFor(() => expect(attemptId).not.toBe(""));
+          await vi.advanceTimersByTimeAsync(15_000);
+          await expect(pending).resolves.toEqual({ turnId: attemptId, mode: "native-session" });
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it.each([
+        { name: "an errored turn", prepare: () => failTurn(), code: "TURN_RECOVERY_NOT_INTERRUPTED" },
+        { name: "a running turn", prepare: () => {}, code: "TURN_RECOVERY_RUNNING" },
+      ])("rejects $name", async ({ prepare, code }) => {
+        prepare();
+        await expect(resume(rejectDispatch)).rejects.toMatchObject({ code });
+      });
+
+      it("retries a failed native attempt by requiring the native session again", async () => {
+        withNativeSession();
+        interruptTurn();
+        const first = await resume(async (command) => {
+          await admit(command);
+          errorAttempt(sourceTurnId(command), { kind: "fatal", provider: "codex", message: "Rate limited" });
+          command.onRuntimeReleased?.();
+        });
+        const commands: SendMessageCommand[] = [];
+        const retried = await service.retryErroredTurn({ threadId: THREAD_ID, turnId: first.turnId }, async (command) => {
+          commands.push(command);
+          await admit(command);
+          notifyCommittedCanonicalEvents([providerStarted(sourceTurnId(command))]);
+        });
+        expect(commands).toHaveLength(1);
+        expect(commands[0]).toMatchObject({ content: RESUME_CONTINUATION_PROMPT, resumeRequired: true,
+          internalUserMessage: true, retryOfExecutionId: sink.loadTurn(first.turnId)?.executionId });
+        expect(sink.loadTurn(retried.turnId)).toMatchObject({ attemptOf: TURN_ID });
+      });
+
+      it("retries a failed seeded attempt by reseeding a fresh session", async () => {
+        interruptTurn();
+        const first = await resume(admit);
+        expect(first.mode).toBe("seeded-session");
+        errorAttempt(first.turnId, { kind: "fatal", provider: "codex", message: "Rate limited" });
+        const commands: SendMessageCommand[] = [];
+        await service.retryErroredTurn({ threadId: THREAD_ID, turnId: first.turnId, model: "gpt-5.5" }, async (command) => {
+          commands.push(command);
+          await admit(command);
+        });
+        expect(commands).toHaveLength(1);
+        expect(commands[0]).toMatchObject({ forceFreshSession: true, internalUserMessage: true, model: "gpt-5.5" });
+        expect(commands[0]!.providerWireOverride).toContain("User: repeat only when asked");
+      });
+
+      it("rejects a second resume of the same interrupted attempt", async () => {
+        interruptTurn();
+        await resume(admit);
+        await expect(resume(rejectDispatch)).rejects.toMatchObject({ code: "TURN_RECOVERY_CONFLICT" });
+      });
+    });
+
   });
 
   function startUnfinishedTurn(input: {
@@ -790,7 +1024,7 @@ describe("TurnRecoveryService", () => {
     }).mode).toBe("snapshot");
   });
 
-  it("reports only the exact turns interrupted by the current restart", async () => {
+  it("stamps only the turns interrupted by the current restart with one incident id", async () => {
     const other = {
       workspaceId: "workspace-other",
       workspaceName: "Other workspace",
@@ -829,14 +1063,9 @@ describe("TurnRecoveryService", () => {
       projectTurn: () => ({ message: null, narrative: [] }),
     });
     db.prepare("UPDATE threads SET user_completed_at = ? WHERE id = ?").run(NOW, completed.threadId);
-    db.prepare("UPDATE canonical_agent_turns SET started_at = ? WHERE execution_id = ?")
-      .run("2026-08-10T09:00:00.000Z", EXECUTION_ID);
-    db.prepare("UPDATE canonical_agent_turns SET started_at = ? WHERE execution_id = ?")
-      .run("2026-08-10T09:02:00.000Z", other.executionId);
-    db.prepare("UPDATE canonical_agent_turns SET started_at = ? WHERE execution_id = ?")
-      .run("2026-08-10T09:01:00.000Z", completed.executionId);
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-10T09:03:00.000Z"));
+    const incidentOf = (executionId: string) => db.prepare(
+      "SELECT recovery_incident_id AS id FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?",
+    ).get(executionId) as { id: string | null } | undefined;
     const service = new TurnRecoveryService(
       runtimeSink,
       threadRepo,
@@ -844,110 +1073,25 @@ describe("TurnRecoveryService", () => {
       defaultCheckpoints,
       startupRepo,
     );
-    try {
-      expect(await service.reconcileOnStartup()).toEqual({
-        interrupted: [EXECUTION_ID, other.executionId, completed.executionId],
-      });
-      const incident = service.currentRecoveryIncident();
-      expect(incident).toMatchObject({
-        createdAt: "2026-08-10T09:03:00.000Z",
-        entries: [
-          {
-            workspaceId: "workspace-recovery",
-            workspaceName: "Workspace",
-            threadId: THREAD_ID,
-            threadTitle: "Recovery",
-            executionId: EXECUTION_ID,
-            startedAt: "2026-08-10T09:00:00.000Z",
-            interruptedAt: "2026-08-10T09:03:00.000Z",
-            durationMs: 180_000,
-          },
-          {
-            workspaceId: other.workspaceId,
-            workspaceName: other.workspaceName,
-            threadId: other.threadId,
-            threadTitle: other.threadTitle,
-            executionId: other.executionId,
-            startedAt: "2026-08-10T09:02:00.000Z",
-            interruptedAt: "2026-08-10T09:03:00.000Z",
-            durationMs: 60_000,
-          },
-        ],
-      });
-      expect(incident?.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
 
-      const cleanRestart = new TurnRecoveryService(
-        runtimeSink,
-        threadRepo,
-        new AttachmentService(),
-        defaultCheckpoints,
-        startupRepo,
-      );
-      expect(await cleanRestart.reconcileOnStartup()).toEqual({ interrupted: [] });
-      expect(cleanRestart.currentRecoveryIncident()).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+    expect(await service.reconcileOnStartup()).toEqual({
+      interrupted: [EXECUTION_ID, other.executionId, completed.executionId],
+    });
+    const incidentId = incidentOf(EXECUTION_ID)?.id;
+    expect(incidentId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(incidentOf(other.executionId)?.id).toBe(incidentId);
+    expect(incidentOf(completed.executionId)?.id).toBe(incidentId);
+    expect(incidentOf(historic.executionId)?.id ?? null).toBeNull();
 
-  it("dispatches an explicit Retry as a fresh execution with the accepted user input", async () => {
-    const service = new TurnRecoveryService(
+    const cleanRestart = new TurnRecoveryService(
       runtimeSink,
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
       startupRepo,
     );
-    await service.reconcileOnStartup();
-    const dispatched: SendMessageCommand[] = [];
-    const dispatch = vi.fn(async (command: SendMessageCommand) => {
-      dispatched.push(command);
-    });
-
-    await service.retry(EXECUTION_ID, dispatch);
-
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      threadId: THREAD_ID,
-      content: "repeat only when asked",
-      provider: "codex",
-      forceFreshSession: true,
-      retryOfExecutionId: EXECUTION_ID,
-    }));
-
-    const retryCommand = dispatched[0]!;
-    sink.startParentTurn({
-      thread: {
-        id: THREAD_ID,
-        workspaceId: "workspace-recovery",
-        providerId: "codex",
-        createdAt: NOW,
-      },
-      turnId: "turn-retry",
-      executionId: "00000000-0000-4000-8000-000000000016",
-      permissionMode: "supervised",
-      providerIdentities: [],
-      retryOfExecutionId: retryCommand.retryOfExecutionId,
-      projectUserMessage: () => new MessageStore(db).create(
-        THREAD_ID,
-        "user",
-        retryCommand.content,
-        2,
-      ),
-    });
-
-    expect(sink.listInterruptedCheckpoints()).toEqual([]);
-    expect(sink.loadCheckpoint(EXECUTION_ID)?.phase).toBe("retried");
-    expect(sink.loadTurn(TURN_ID)?.attemptOf).toBeNull();
-    expect(sink.loadTurn("turn-retry")?.attemptOf).toBe(TURN_ID);
-    expect(service.currentRecoveryIncident()).toBeNull();
-
-    sink.finishParentTurn({ threadId: THREAD_ID, turnId: "turn-retry", executionId: "00000000-0000-4000-8000-000000000016",
-      providerId: "codex", providerIdentities: [], outcome: "errored", error: "failed again", projectTurn: () => ({ message: null, narrative: [] }) });
-    sink.startParentTurn({ thread: { id: THREAD_ID, workspaceId: "workspace-recovery", providerId: "codex", createdAt: NOW },
-      turnId: "turn-retry-again", executionId: "00000000-0000-4000-8000-000000000017", permissionMode: "supervised", providerIdentities: [],
-      retryOfExecutionId: "00000000-0000-4000-8000-000000000016", projectUserMessage: () => messageRepo.create(THREAD_ID, "user", "Retry again", 3) });
-    expect(sink.loadTurn("turn-retry-again")?.attemptOf).toBe(TURN_ID);
-    expect(sink.loadCheckpoint("00000000-0000-4000-8000-000000000016")?.phase).toBe("retried");
+    expect(await cleanRestart.reconcileOnStartup()).toEqual({ interrupted: [] });
+    expect(incidentOf(EXECUTION_ID)?.id).toBe(incidentId);
   });
 
   it("rolls back the attempt link and retry consumption when starting fails", () => {
@@ -960,31 +1104,6 @@ describe("TurnRecoveryService", () => {
     expect(sink.loadCheckpoint(EXECUTION_ID)?.phase).toBe("errored");
     expect(sink.loadTurn("failed-start")).toBeNull();
     expect(sink.loadCheckpoint("00000000-0000-4000-8000-000000000018")).toBeNull();
-  });
-
-  it("rejects a provider failure outside the current restart incident", async () => {
-    sink.finishParentTurn({
-      threadId: THREAD_ID,
-      turnId: TURN_ID,
-      executionId: EXECUTION_ID,
-      providerId: "codex",
-      providerIdentities: [],
-      outcome: "errored",
-      error: "provider failed",
-      projectTurn: () => ({ message: null, narrative: [] }),
-    });
-    await threadRepo.updateStatus(THREAD_ID, "errored");
-
-    const service = new TurnRecoveryService(
-      runtimeSink,
-      threadRepo,
-      new AttachmentService(),
-      defaultCheckpoints,
-      startupRepo,
-    );
-    const dispatch = vi.fn(async () => undefined);
-    await expect(service.retry(EXECUTION_ID, dispatch)).rejects.toThrow();
-    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("interrupts an execution whose recovered narrative exceeds one semantic batch", async () => {

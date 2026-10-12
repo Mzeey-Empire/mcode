@@ -7,16 +7,12 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
-import type { RecoveryIncident } from "@mcode/contracts";
 import { App } from "../app/App";
 import { useConnectionStore } from "@/stores/connectionStore";
-import { useRecoveryIncidentStore } from "@/features/recovery/state/recoveryIncidentStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useSidebarWidthStore } from "@/components/sidebar/sidebarWidthStore";
 import { useNavigationHistoryStore } from "@/stores/navigationHistoryStore";
 import { executeCommand, getAllCommands } from "@/lib/command-registry";
-
-const getRecoveryIncident = vi.hoisted(() => vi.fn());
 
 if (typeof globalThis.ResizeObserver === "undefined") {
   globalThis.ResizeObserver = class ResizeObserverMock {
@@ -33,7 +29,6 @@ vi.mock("@/transport", async () => ({
   getTransport: () => ({
     listWorkspaces: vi.fn().mockResolvedValue([]),
     listThreads: vi.fn().mockResolvedValue([]),
-    getRecoveryIncident,
     getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
     sendMessage: vi.fn().mockResolvedValue(undefined),
     createAndSendMessage: vi
@@ -112,17 +107,10 @@ describe("App", () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     useConnectionStore.setState({ status: "connecting" });
-    useRecoveryIncidentStore.setState({
-      incident: null,
-      dismissedIncidentIds: new Set<string>(),
-      retriedExecutionIds: new Set<string>(),
-    });
     delete (window as unknown as Record<string, unknown>).desktopBridge;
   });
 
   beforeEach(() => {
-    getRecoveryIncident.mockReset();
-    getRecoveryIncident.mockResolvedValue(null);
     useNavigationHistoryStore.setState({ entries: [], index: -1 });
     useUiStore.setState({
       primarySurface: "chat",
@@ -280,35 +268,6 @@ describe("App", () => {
           name: "Pull requests",
         }),
       ).toBeInTheDocument();
-    });
-  });
-
-  it("loads the recovery incident while Settings replaces the chat surface", async () => {
-    const incident: RecoveryIncident = {
-      id: "00000000-0000-4000-8000-000000000001",
-      createdAt: "2026-09-01T12:00:00.000Z",
-      entries: [{
-        workspaceId: "workspace-1",
-        workspaceName: "Project A",
-        threadId: "thread-1",
-        threadTitle: "Thread A",
-        executionId: "00000000-0000-4000-8000-000000000002",
-        startedAt: "2026-09-01T11:59:00.000Z",
-        interruptedAt: "2026-09-01T12:00:00.000Z",
-        durationMs: 60_000,
-      }],
-    };
-    getRecoveryIncident.mockResolvedValue(incident);
-
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    await screen.findByRole("button", { name: "Back to chat" });
-
-    act(() => useConnectionStore.setState({ status: "connected" }));
-
-    await waitFor(() => {
-      expect(getRecoveryIncident).toHaveBeenCalledTimes(1);
-      expect(useRecoveryIncidentStore.getState().incident).toEqual(incident);
     });
   });
 

@@ -185,8 +185,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
    * give-up so the retry's own terminal events still reach the UI.
    */
   private readonly endedSuppressionThreads = new Set<string>();
-  /** Resolves queued automatic dispatches only after their authoritative runtime releases its active slot. */
-  private readonly automaticQueuedTurnCompletionResolvers = new Map<string, () => void>();
+  /** Callbacks keyed by turn execution that run once that runtime releases its active slot, so follow-up turns can admit. */
+  private readonly runtimeReleaseCallbacks = new Map<string, () => void>();
   /**
    * Per-thread dispatch state for transient retries. Fire-and-forget providers
    * A provider can return from `sendTurn` before the stream ends, so the retry
@@ -554,6 +554,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     this.turnGenerations.set(command.threadId, generation);
     const turnExecutionId = this.turnRuntime.start(command.threadId).turnExecutionId!;
     this.activeMutationReservations.set(command.threadId, token);
+    if (command.onRuntimeReleased) this.runtimeReleaseCallbacks.set(turnExecutionId, command.onRuntimeReleased);
     command.onTurnStarted?.({ threadId: command.threadId, turnExecutionId, phase: "running" });
     return { threadId: command.threadId, turnExecutionId, mutationReservationToken: token, generation };
   }
@@ -585,6 +586,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
     if (ownsMutation) this.activeMutationReservations.delete(lease.threadId);
     this.mutationReservations.release(lease.threadId, lease.mutationReservationToken);
+    this.runtimeReleaseCallbacks.delete(lease.turnExecutionId);
   }
 
   /** Terminalize an admitted turn when durable admission cannot complete. */
@@ -980,7 +982,19 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     this.turnRetryDispatchByThread.set(prepared.lease.threadId, dispatch);
     this.retryingThreads.add(prepared.lease.threadId);
     this.bindClaudeCanonicalDelivery(prepared.provider);
+    if (prepared.replaceSession) await this.replacePooledSession(prepared);
     await this.sendPreparedDispatch(prepared.lease.threadId, dispatch);
+  }
+
+  /** Evict the pooled session while suppressing its teardown `Ended`, which would otherwise end the new turn. */
+  private async replacePooledSession(prepared: PreparedTurnDispatch): Promise<void> {
+    const threadId = prepared.lease.threadId;
+    this.endedSuppressionThreads.add(threadId);
+    try {
+      await this.evictPooledSession(prepared.provider, prepared.request.sessionId);
+    } finally {
+      this.endedSuppressionThreads.delete(threadId);
+    }
   }
 
   private bindClaudeCanonicalDelivery(provider: IAgentProvider): void {
@@ -1649,9 +1663,9 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       this.memoryPressureService.markIdle(threadId);
     }
     if (executionId) {
-      const resolve = this.automaticQueuedTurnCompletionResolvers.get(executionId);
+      const resolve = this.runtimeReleaseCallbacks.get(executionId);
       if (resolve) {
-        this.automaticQueuedTurnCompletionResolvers.delete(executionId);
+        this.runtimeReleaseCallbacks.delete(executionId);
         resolve();
       }
     }
@@ -1835,8 +1849,10 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     dispatch: ReturnType<TurnRuntimeController["getCurrentRetryDispatch"]>,
     error: unknown,
   ): dispatch is NonNullable<ReturnType<TurnRuntimeController["getCurrentRetryDispatch"]>> {
+    // A transient retry restarts against a fresh session, which a required resume must never do.
     return dispatch !== null
       && !dispatch.retryInFlight
+      && dispatch.turnRequest.resumeRequired !== true
       && this.turnErrorPolicy.shouldRetry(error, dispatch.attempt);
   }
 
@@ -2218,10 +2234,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     let cancellationWon = false;
     const send = this.sendMessage({
       ...this.turnAdmissions.queuedCommand(submission),
-      onTurnStarted: (runtime) => {
-        this.automaticQueuedTurnCompletionResolvers.set(runtime.turnExecutionId!, resolveCompletion);
-        resolveStarted();
-      },
+      onTurnStarted: () => resolveStarted(),
+      onRuntimeReleased: resolveCompletion,
     }, () => {
       const canReserve = this.threadCreation.canAdmitQueuedAgent(submission.threadId, startupId);
       cancellationWon ||= !canReserve;

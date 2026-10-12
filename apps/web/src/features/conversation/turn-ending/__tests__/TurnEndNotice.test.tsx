@@ -24,6 +24,14 @@ const USAGE_LIMIT: FilledNotice = {
   primary: { action: "retry_at", label: "Retry at 14:05" },
 };
 
+const INTERRUPTED: FilledNotice = {
+  style: "filled",
+  icon: "interrupted",
+  title: "Interrupted",
+  detail: "Mcode closed while Codex was working",
+  primary: { action: "resume", label: "Resume" },
+};
+
 describe("TurnEndNotice", () => {
   it("renders a quiet notice as title and detail with no buttons", () => {
     render(<TurnEndNotice notice={{ style: "quiet", title: "Stopped by Mcode", detail: "Mcode couldn't answer an approval request" }} />);
@@ -82,6 +90,15 @@ describe("TurnEndNotice", () => {
     expect(screen.queryByRole("button", { name: "Switch model" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Retry at 14:05" })).toBeNull();
     expect(screen.getByText("Codex usage limit reached")).toBeInTheDocument();
+  });
+
+  it("calls the Resume handler on an interrupted notice", () => {
+    const resume = vi.fn();
+    render(<TurnEndNotice notice={INTERRUPTED} actions={{ retry: vi.fn(), resume }} />);
+    expect(screen.getByRole("status")).toHaveTextContent("InterruptedMcode closed while Codex was working");
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    expect(resume).toHaveBeenCalledTimes(1);
   });
 
   it("shows why the last action failed", () => {

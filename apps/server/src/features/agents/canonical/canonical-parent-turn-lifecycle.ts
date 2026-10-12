@@ -422,7 +422,7 @@ export class CanonicalParentTurnLifecycle {
         inArray(canonicalAgentIngestCheckpoints.terminalOutcome, ["interrupted", "errored"]),
       )));
     if (consumed.changes !== 1) {
-      throw new TurnRecoveryError("TURN_RETRY_CONFLICT", `Execution is no longer retryable: ${retryOfExecutionId}`);
+      throw new TurnRecoveryError("TURN_RECOVERY_CONFLICT", `Execution is no longer retryable: ${retryOfExecutionId}`);
     }
   }
 }

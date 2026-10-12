@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { SelectedTextComment } from "@mcode/contracts";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { useRecoveryIncidentStore, useVisibleRecoveryIncident } from "@/features/recovery/state/recoveryIncidentStore";
 import { useThreadStore } from "@/stores/threadStore";
 import {
   useComposerDraftStore,
@@ -11,7 +10,7 @@ import { getTransport } from "@/transport";
 import type { SubagentRosterTarget } from "../narrative";
 import { readThreadRecord } from "../state";
 import { useThreadSubscriptionReconciler } from "../subscriptions/useThreadSubscriptionReconciler";
-import { ChatViewSurface, type ChatViewInteractions, type ChatRecoveryBannerState } from "./chat-view/ChatViewSurface";
+import { ChatViewSurface, type ChatViewInteractions } from "./chat-view/ChatViewSurface";
 import { useChatViewState } from "./chat-view/useChatViewState";
 import type { SelectedTextCommentSourceNavigationRequest } from "./MessageList";
 
@@ -214,9 +213,6 @@ export function ChatView({ onSubagentSelect, onOpenSubagents }: ChatViewProps = 
     value: null,
   });
   const [dismissedErrorState, setDismissedErrorState] = useState<DismissedSessionError | null>(null);
-  const recoveryIncident = useVisibleRecoveryIncident();
-  const dismissRecoveryIncident = useRecoveryIncidentStore((store) => store.dismissIncident);
-  const markRecoveryEntriesRetried = useRecoveryIncidentStore((store) => store.markEntriesRetried);
   const threadEpochRef = useRef({ epoch: 0, threadId: state.activeThreadId });
   if (threadEpochRef.current.threadId !== state.activeThreadId) {
     threadEpochRef.current = {
@@ -288,18 +284,6 @@ export function ChatView({ onSubagentSelect, onOpenSubagents }: ChatViewProps = 
   const handleContinueWithoutSaving = useCallback(async () => {
     if (state.savingStatus?.mode === "saving-delayed") await getTransport().continueWithoutSaving(state.savingStatus.executionId);
   }, [state.savingStatus]);
-  const retryRecoveryEntries = useCallback(async (executionIds: readonly string[]) => {
-    const retried: string[] = [];
-    for (const executionId of executionIds) {
-      try {
-        await getTransport().retryTurn(executionId);
-        retried.push(executionId);
-      } catch (error) {
-        console.error("Failed to retry interrupted turn", executionId, error);
-      }
-    }
-    if (retried.length > 0) markRecoveryEntriesRetried(retried);
-  }, [markRecoveryEntriesRetried]);
   const handleDismissCliError = useCallback(() => {
     setDismissedErrorState({ error: state.sessionError, threadEpoch });
   }, [state.sessionError, threadEpoch]);
@@ -332,18 +316,11 @@ export function ChatView({ onSubagentSelect, onOpenSubagents }: ChatViewProps = 
     handleStopSafely,
     selectedTextComments.interactions,
   ]);
-  const recovery: ChatRecoveryBannerState = {
-    incident: recoveryIncident,
-    onDismiss: dismissRecoveryIncident,
-    onRetry: retryRecoveryEntries,
-  };
-
   // No `key` here: a remount would discard the virtualizer state owned by MessageList.
   return (
     <ChatViewSurface
       state={state}
       interactions={interactions}
-      recovery={recovery}
       editingThreadId={visibleEditingThreadId}
       onEditingThreadIdChange={(threadId) =>
         setEditingThreadState({ threadEpoch, value: threadId })

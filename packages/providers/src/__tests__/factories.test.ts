@@ -94,6 +94,7 @@ describe("Provider factories", () => {
         { name: "child-cancellation", support: "supported" },
         { name: "turn-diff", support: "supported" },
         { name: "approval-review", support: "supported" },
+        { name: "session-resume", support: "supported" },
         // No CLI version is cached yet, and steering needs one.
         { name: "turn-steer", support: "unsupported" },
       ]);
