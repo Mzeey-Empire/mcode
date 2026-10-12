@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useApprovalStore } from "@/stores/approvalStore";
+import { selectDockApprovals, useApprovalStore } from "@/stores/approvalStore";
 import { act, renderHook } from "@testing-library/react";
 import { useMessageListData } from "@/features/conversation/messages/useMessageListData";
 import { createMockApproval } from "@/__tests__/mocks/transport";
@@ -420,17 +420,18 @@ describe("ws-events approval.requested", () => {
     vi.restoreAllMocks();
   });
 
-  it("creates permission controls only from an actual provider permission request", () => {
+  it("puts a pushed command approval in the dock, not the transcript", () => {
     const request = createMockApproval({ requestId: "permission-1", threadId: "thread-1" });
     useApprovalStore.setState({ approvals: [] });
     startPushListeners();
 
-    expect(buildVolatileItems([], undefined, undefined, undefined, useApprovalStore.getState().approvals))
-      .not.toContainEqual(expect.objectContaining({ type: "permission-request" }));
+    expect(selectDockApprovals(useApprovalStore.getState().approvals, "thread-1")).toEqual([]);
     pushEmitter.emit("approval.requested", request);
 
+    expect(selectDockApprovals(useApprovalStore.getState().approvals, "thread-1"))
+      .toMatchObject([{ requestId: "permission-1", subject: { kind: "command", command: "git status" } }]);
     expect(buildVolatileItems([], undefined, undefined, undefined, useApprovalStore.getState().approvals))
-      .toMatchObject([{ type: "permission-request", request: { requestId: "permission-1", subject: { kind: "command", command: "git status" } } }]);
+      .not.toContainEqual(expect.objectContaining({ type: "permission-request" }));
   });
 });
 
