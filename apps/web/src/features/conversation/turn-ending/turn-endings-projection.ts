@@ -63,6 +63,20 @@ export function projectTurnEndings(threadId: string, state: AgentModelState, pro
   return { endingsByMessageId, hiddenMessageIds };
 }
 
+/** The thread's most recently started turn attempt. */
+export function latestThreadTurn(threadId: string, state: AgentModelState): AgentTurn | undefined {
+  let latest: AgentTurn | undefined;
+  for (const turn of Object.values(state.turns)) {
+    if (turn.threadId === threadId && (!latest || compareTurns(turn, latest) > 0)) latest = turn;
+  }
+  return latest;
+}
+
+/** Display name of the thread's provider, or "The provider" when it is unknown. */
+export function threadProviderLabel(threadId: string, state: AgentModelState): string {
+  return providerName(knownProviderId(state.threads[threadId]?.providerId));
+}
+
 /**
  * Keeps the previous projection when nothing it renders changed.
  * Canonical state changes on every streamed event, and a fresh object would rebuild every stable transcript row.

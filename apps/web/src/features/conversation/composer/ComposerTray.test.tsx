@@ -44,14 +44,14 @@ describe("ComposerTray", () => {
       model: "",
       permissionMode: "full",
     });
-    render(<ComposerTray threadId={THREAD} queue={<p>queued rows</p>} />);
+    render(<ComposerTray threadId={THREAD} running={false} queue={<p>queued rows</p>} />);
 
     expect(screen.getByText("queued rows")).toBeInTheDocument();
     expect(screen.queryByRole("group")).not.toBeInTheDocument();
   });
 
   it("renders nothing without tasks", () => {
-    const { container } = render(<ComposerTray threadId={THREAD} queue={null} />);
+    const { container } = render(<ComposerTray threadId={THREAD} running={false} queue={null} />);
 
     expect(container).toBeEmptyDOMElement();
   });
@@ -59,7 +59,7 @@ describe("ComposerTray", () => {
   it("renders the title, settled count and one segment per task", () => {
     useTaskStore.getState().setTasks(THREAD, FOUR_TASKS, "msg-1");
 
-    render(<ComposerTray threadId={THREAD} queue={null} />);
+    render(<ComposerTray threadId={THREAD} running={false} queue={null} />);
 
     const row = screen.getByRole("group", { name: "Tasks, 1 of 4 done" });
     expect(row).toHaveTextContent("Tasks");
@@ -92,14 +92,14 @@ describe("ComposerTray", () => {
       },
     });
 
-    render(<ComposerTray threadId={THREAD} queue={null} />);
+    render(<ComposerTray threadId={THREAD} running={false} queue={null} />);
 
     expect(screen.getByRole("group", { name: "Tidy thread actions menu, 1 of 4 done" })).toBeInTheDocument();
   });
 
   it("expands on chevron click and collapses on Escape", () => {
     useTaskStore.getState().setTasks(THREAD, FOUR_TASKS, "msg-1");
-    render(<ComposerTray threadId={THREAD} queue={null} />);
+    render(<ComposerTray threadId={THREAD} running={false} queue={null} />);
 
     const chevron = screen.getByRole("button", { name: "Show tasks" });
     expect(chevron).toHaveAttribute("aria-expanded", "false");
@@ -123,7 +123,7 @@ describe("ComposerTray", () => {
 
   it("toggles from the keyboard with Enter on the chevron", async () => {
     useTaskStore.getState().setTasks(THREAD, FOUR_TASKS, "msg-1");
-    render(<ComposerTray threadId={THREAD} queue={null} />);
+    render(<ComposerTray threadId={THREAD} running={false} queue={null} />);
     const user = userEvent.setup();
 
     screen.getByRole("button", { name: "Show tasks" }).focus();
@@ -136,7 +136,7 @@ describe("ComposerTray", () => {
 
   it("renders the expanded list before the task row so the tray grows upward", () => {
     useTaskStore.getState().setTasks(THREAD, FOUR_TASKS, "msg-1");
-    render(<ComposerTray threadId={THREAD} queue={null} />);
+    render(<ComposerTray threadId={THREAD} running={false} queue={null} />);
 
     fireEvent.click(screen.getByRole("group", { name: "Tasks, 1 of 4 done" }));
 

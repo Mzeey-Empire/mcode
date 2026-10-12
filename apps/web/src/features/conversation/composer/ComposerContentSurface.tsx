@@ -163,6 +163,7 @@ function ComposerTraySurface({
   return (
     <ComposerTray
       threadId={model.threadId}
+      running={model.isAgentRunning}
       queue={(
         <ComposerQueueList
           threadId={model.threadId}
