@@ -639,6 +639,22 @@ export class WorkspaceEnvironmentAutomaticStore {
     })();
   }
 
+  /**
+   * Release a claim whose dispatch failed before its runtime was reserved, so the user can send it again.
+   * A reserved claim is always marked dispatched, so a claim still dispatching never reached a provider.
+   */
+  releaseUnsentClaim(threadId: string): boolean {
+    const result = runChanges(this.orm
+      .update(workspaceEnvironmentQueuedTurns)
+      .set({ state: "released", dispatchingAt: null })
+      .where(sql`${workspaceEnvironmentQueuedTurns.id} = (
+        SELECT id FROM workspace_environment_queued_turns
+        WHERE thread_id = ${threadId} AND state = 'dispatching'
+        ORDER BY queue_position ASC LIMIT 1
+      )`));
+    return result.changes === 1;
+  }
+
   /** Return Threads with released Turns so startup can resume only committed dispatch work. */
   releasedThreadIds(): string[] {
     return this.orm

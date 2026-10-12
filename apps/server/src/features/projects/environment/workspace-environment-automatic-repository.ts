@@ -73,6 +73,11 @@ export class WorkspaceEnvironmentAutomaticRepository {
     return this.writer.execute(workspaceEnvironmentAutomaticWriteOperations.retryCurrentAttempt, [input, this.now()]);
   }
 
+  /** Commit releaseUnsentClaim through its database owner. */
+  releaseUnsentClaim(...input: Parameters<WorkspaceEnvironmentAutomaticStore["releaseUnsentClaim"]>): Promise<ReturnType<WorkspaceEnvironmentAutomaticStore["releaseUnsentClaim"]>> {
+    return this.writer.execute(workspaceEnvironmentAutomaticWriteOperations.releaseUnsentClaim, [input, this.now()]);
+  }
+
   /** Commit interruptUnfinishedAttempts through its database owner. */
   interruptUnfinishedAttempts(...input: Parameters<WorkspaceEnvironmentAutomaticStore["interruptUnfinishedAttempts"]>): Promise<ReturnType<WorkspaceEnvironmentAutomaticStore["interruptUnfinishedAttempts"]>> {
     return this.writer.execute(workspaceEnvironmentAutomaticWriteOperations.interruptUnfinishedAttempts, [input, this.now()]);

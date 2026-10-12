@@ -296,6 +296,23 @@ export class ThreadStartupStateStore {
     });
   }
 
+  /** Run a failed agent phase again; only a failure before the first turn was admitted has anything to resend. */
+  retryAgent(startupId: string): ThreadStartup {
+    const startup = this.require(startupId);
+    if (startup.state !== "failed" || startup.phase !== "agent" || startup.cancellation === "requested") return startup;
+    const activeIndex = this.currentIndex(startup);
+    const { error: _error, ...cleared } = startup;
+    return this.persistNext({
+      ...cleared,
+      state: "running",
+      steps: startup.steps.map((step, index) => {
+        if (index !== activeIndex) return step;
+        const { endedAt: _endedAt, ...restarted } = step;
+        return { ...restarted, state: "running", startedAt: this.now().toISOString() };
+      }),
+    });
+  }
+
   /** Record cancellation intent. Integrations must query this before they stop owned work. */
   cancel(startupId: string): ThreadStartup {
     const startup = this.require(startupId);
