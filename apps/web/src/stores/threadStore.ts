@@ -3784,7 +3784,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         return { pendingStopCounts };
       });
       invalidateDeferredNarrativeEvents(threadId);
-      threadHydrator.invalidatePermissionSnapshots(threadId);
     }
   },
 
@@ -3863,7 +3862,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     for (const threadId of resetPendingIds) {
       clearStreamingTextUsage(threadId);
       invalidateDeferredNarrativeEvents(threadId);
-      threadHydrator.invalidatePermissionSnapshots(threadId);
       // Threads that left the running set may hold queued follow-ups; drains are
       // otherwise only scheduled by turnComplete, which reconnect can miss.
       if (!get().runningThreadIds.has(threadId)) scheduleDrainAfterEdit(threadId);
@@ -4023,7 +4021,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     clearNarrativeLoadState(threadId);
     clearDequeueTimer(threadId);
     invalidateDeferredNarrativeEvents(threadId);
-    threadHydrator.forgetThread(threadId);
     forgetScrollTop(threadId);
 
     const isCurrentThread = get().currentThreadId === threadId;
@@ -4056,7 +4053,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       clearNarrativeLoadState(threadId);
       clearDequeueTimer(threadId);
       invalidateDeferredNarrativeEvents(threadId);
-      threadHydrator.forgetThread(threadId);
       forgetScrollTop(threadId);
     }
 
@@ -4367,7 +4363,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       getRunningThreadIds: () => get().runningThreadIds,
       invalidateConversation: (id) => conversationResidency.invalidateConversation(id),
       invalidateDeferredNarrativeEvents,
-      invalidatePermissionSnapshots: (id) => threadHydrator.invalidatePermissionSnapshots(id),
       isDisplayConversationLeased: (id) => conversationResidency.isDisplayConversationLeased(id),
       promoteDeferredNarrativeEvents,
       scheduleDeferredNarrativeCleanup,

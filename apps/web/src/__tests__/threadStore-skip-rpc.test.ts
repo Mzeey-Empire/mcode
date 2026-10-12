@@ -107,7 +107,7 @@ describe("loadMessages (cache-hit) - hydration staleness gate", () => {
     resetState();
   });
 
-  it("skips listPendingApprovals and getThreadTasks on a cache-hit within the staleness window", async () => {
+  it("skips getThreadTasks on a cache-hit within the staleness window", async () => {
     const thread = createMockThread({ id: THREAD_ID, has_file_changes: false });
     useWorkspaceStore.setState({ threads: [thread] });
 
@@ -121,14 +121,13 @@ describe("loadMessages (cache-hit) - hydration staleness gate", () => {
     useThreadStore.setState({ currentThreadId: "other-thread" });
     vi.clearAllMocks();
 
-    // Second load within 2s of the first - the gate should suppress both side-effect RPCs.
+    // Second load within 2s of the first - the gate should suppress the side-effect RPCs.
     await activateTestConversation(THREAD_ID);
     // Give any erroneously-scheduled microtasks a chance to fire.
     await new Promise((r) => setTimeout(r, 20));
 
     expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
     expect(mockTransport.getMessages).not.toHaveBeenCalled();
-    expect(mockTransport.listPendingApprovals).not.toHaveBeenCalled();
     expect(mockTransport.getThreadTasks).not.toHaveBeenCalled();
   });
 
@@ -156,7 +155,6 @@ describe("loadMessages (cache-hit) - hydration staleness gate", () => {
     await activateTestConversation(THREAD_ID);
 
     await vi.waitFor(() => {
-      expect(mockTransport.listPendingApprovals).toHaveBeenCalledWith(THREAD_ID);
       expect(mockTransport.getThreadTasks).toHaveBeenCalledWith(THREAD_ID);
     });
   });

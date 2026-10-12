@@ -586,7 +586,6 @@ export class ThreadHydrator {
 
   /** Discard a stale cached conversation before an authoritative mutation. */
   invalidateConversation(threadId: string): void {
-    this.auxiliaryHydrator.invalidatePermissions(threadId);
     this.cancelDeferredForThread(threadId);
     if (
       this.activeHydrates.has(threadId)
@@ -610,16 +609,6 @@ export class ThreadHydrator {
         })),
       };
     });
-  }
-
-  /** Invalidate permission snapshots when live request state changes. */
-  invalidatePermissionSnapshots(threadId: string): void {
-    this.auxiliaryHydrator.invalidatePermissions(threadId);
-  }
-
-  /** Release per-thread generation state after its resident record is deleted. */
-  forgetThread(threadId: string): void {
-    this.auxiliaryHydrator.forgetThread(threadId);
   }
 
   private pruneInvalidationGeneration(threadId: string): void {
@@ -687,7 +676,6 @@ export class ThreadHydrator {
     const threadId = this.deps.getState().currentThreadId;
     if (!threadId) return;
 
-    this.auxiliaryHydrator.invalidatePermissions(threadId);
     this.deps.flushPendingTextDeltas();
     const hadActiveHydrate = this.activeHydrates.has(threadId);
     this.deps.setState((state: ThreadHydratorWriteState) => {

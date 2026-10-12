@@ -387,7 +387,7 @@ describe("ws-events approval.requested", () => {
   it.each(["approval.requested", "approval.resolved"] as const)("logs and drops malformed %s without changing state", (channel) => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const request = createMockApproval({ requestId: "pending", threadId: "thread-1" });
-    useApprovalStore.setState({ approvals: [{ ...request, settled: false }], revision: 0 });
+    useApprovalStore.setState({ approvals: [{ ...request, settled: false }] });
     const before = useApprovalStore.getState();
     startPushListeners();
     expect(() => pushEmitter.emit(channel, { requestId: "pending", secret: "private" })).not.toThrow();
@@ -397,7 +397,7 @@ describe("ws-events approval.requested", () => {
 
   it("shows a cross-thread send approval only in the owner's dock", () => {
     const request = createMockApproval({ requestId: "approval-send", threadId: "thread-A", subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "thread-B", message: "Needs approval." } });
-    useApprovalStore.setState({ approvals: [], revision: 0 });
+    useApprovalStore.setState({ approvals: [] });
     startPushListeners();
     const owner = renderHook(() => useMessageListData("thread-A"));
     const target = renderHook(() => useMessageListData("thread-B"));
@@ -422,7 +422,7 @@ describe("ws-events approval.requested", () => {
 
   it("creates permission controls only from an actual provider permission request", () => {
     const request = createMockApproval({ requestId: "permission-1", threadId: "thread-1" });
-    useApprovalStore.setState({ approvals: [], revision: 0 });
+    useApprovalStore.setState({ approvals: [] });
     startPushListeners();
 
     expect(buildVolatileItems([], undefined, undefined, undefined, useApprovalStore.getState().approvals))
