@@ -19,10 +19,10 @@ A quick check: if the test would still pass when every imported function returne
 
 ## Keep tests cheap
 
-The web suite pays about 0.65 s of environment setup and imports per file before any test runs, and more than half of its files have under 50 ms of test body. Server tests that open a database pay for migrations on each test.
+The web suite pays about 0.65 s of environment setup and imports per file before any test runs, and more than half of its files have under 50 ms of test body. In the server suite, a new database writer worker costs about 250 ms, almost all of it spent loading the writer's modules. That was most of each test in the slowest server files.
 
 - **No real sleeps.** Use `vi.useFakeTimers()` and `vi.advanceTimersByTimeAsync`, or `vi.waitFor` for a condition. Lint rejects awaited `setTimeout` sleeps in web tests. Server tests that drive real processes, sockets, or file watchers may still wait on the clock.
 - **Inject production delays.** When code under test waits on purpose, as `CleanupWorker` does for Windows file handles, let the test pass a zero delay instead of paying it.
 - **Extend the unit's existing test file.** Do not start a new file for one more case.
 - **Use the node environment unless the test needs a DOM.** Web `*.test.ts` files run in node. Add `// @vitest-environment jsdom` at the top of a `.ts` test only when it touches `window` or `document`.
-- **Use the shared database fixtures.** They copy a migrated template database, so a test does not re-run migrations.
+- **Use the shared database fixtures.** They copy a migrated template database instead of re-running migrations, and they reuse a cleanly closed writer worker through `leaseWriterWorker`. A test that builds its own `ApplicationDatabaseWriter` should pass `leaseWriterWorker` too, unless it kills or replaces workers, as the writer lifecycle tests do.

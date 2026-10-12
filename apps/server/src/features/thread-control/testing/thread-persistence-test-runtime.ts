@@ -4,8 +4,9 @@ import * as NodePath from "node:path";
 import { afterEach } from "vitest";
 import type { Database } from "bun:sqlite";
 import { openMigratedTestDatabase } from "../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
-import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
+import { ApplicationDatabaseWriter, type DatabaseWriterWorker } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { openReadOnlyDatabase } from "../../../runtime/persistence/sqlite/read-only-database.js";
+import { leaseWriterWorker } from "../../../runtime/persistence/sqlite/testing/reusable-writer-worker.js";
 
 const runtimes: Array<{
   directory: string;
@@ -15,7 +16,7 @@ const runtimes: Array<{
 }> = [];
 
 /** Real temporary SQLite and worker owner for asynchronous service integration tests. */
-export function createThreadPersistenceTestRuntime(createWorker?: () => Worker): {
+export function createThreadPersistenceTestRuntime(createWorker: () => DatabaseWriterWorker = leaseWriterWorker): {
   database: Database;
   reader: ReturnType<typeof openReadOnlyDatabase>;
   writer: ApplicationDatabaseWriter;
