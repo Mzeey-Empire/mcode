@@ -314,7 +314,6 @@ export class CleanupWorker {
   ): Promise<LockedCleanupResult> {
     const sourceThread = this.threadRepo.findById(job.thread_id);
     if (!sourceThread) return { completed: true, threadIds: [] };
-    if (!sourceThread.worktree_managed) return this.keepWorktree(job);
     if (!await this.matchesJobWorktree(sourceThread, job)) return this.keepWorktree(job);
 
     const decision = await this.cleanupPolicy.decide({

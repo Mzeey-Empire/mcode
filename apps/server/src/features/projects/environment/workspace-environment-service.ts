@@ -1281,7 +1281,10 @@ export class WorkspaceEnvironmentService {
       if (sibling.id === thread.id || sibling.deleted_at != null || !sibling.worktree_path) return false;
       if (this.automaticWorktreePath(sibling.worktree_path) !== path) return false;
       const phase = this.options.runtimePhase?.(sibling.id);
-      return phase === "running" || phase === "finalizing" || this.hasNonterminalStartup(sibling.id);
+      if (phase === "running" || phase === "finalizing") return true;
+      if (!this.hasNonterminalStartup(sibling.id)) return false;
+      // Undecided siblings serialize behind this start and must not make both starts skip.
+      return this.requireAutomaticRepository().snapshot(sibling.id).attempt?.state !== "queued";
     });
   }
 

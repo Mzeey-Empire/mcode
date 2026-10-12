@@ -48,11 +48,14 @@ starts Setup only after that admission commits.
 Branched starts continue another thread and skip Setup before admission, so
 their first turn dispatches without entering the gate. Other starts check for
 a non-deleted sibling at the same normalized worktree path. A sibling with a
-running or finalizing turn, or a nonterminal startup, makes Setup skip with
-`thread-running-here` and releases the gate as not required. The environment
+running or finalizing turn, or a nonterminal startup that has already passed
+its setup decision, makes Setup skip with `thread-running-here` and releases
+the gate as not required. The environment
 service serializes this check and command launch per path so simultaneous
-starts cannot both launch Setup. Path comparison normalizes separators and
-trailing slashes, and ignores case on Windows.
+starts cannot both launch Setup. A sibling whose automatic attempt is still
+queued waits for its own decision and does not make the first start skip.
+Path comparison normalizes separators and trailing slashes, and ignores case
+on Windows.
 
 The gate answers whether queued prompts may start. An attempt records what
 happened to one Setup command. A passed attempt releases the gate. No applicable

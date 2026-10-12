@@ -30,10 +30,6 @@ How Mcode deletes finished threads and their worktrees, and how failures recover
 
 ## Retain vs remove
 
-Attached worktrees are retained even inside Mcode's sandbox. Setup eligibility
-does not grant removal ownership; only `worktree_managed` threads can schedule
-or execute worktree removal.
-
 The policy may retain the checkout (`outside-sandbox`, `primary-branch`,
 `default-branch-unknown`, `current-branch-unknown`, shared by a live thread).
 Retain means "keep the directory"; the thread row is still hard-deleted.

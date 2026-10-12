@@ -19,8 +19,7 @@ import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { TurnRuntimeRegistry } from "../../../agents/turns/turn-runtime.js";
 import { ThreadStartupFetchDecisions } from "../../../thread-startup/thread-startup-fetch-decisions.js";
 import { routeThreadStartupRpc } from "../../../thread-startup/transport/thread-startup-rpc.js";
-import { ProjectWorktreeService } from "../../worktrees/project-worktree-service.js";
-import { WorkspaceRepo } from "../../persistence/workspace-repo.js";
+import { GitWorktreeService } from "../../git/git-worktree-service.js";
 import { CleanupJobRepo } from "../../../thread-control/cleanup/persistence/cleanup-job-repo.js";
 
 const roots: string[] = [];
@@ -298,6 +297,7 @@ describe("automatic Project Setup", () => {
     const startupId = await startAttached(startups, attachedThreadId);
     await service.queueAutomaticFirstTurn(queuedInput(1, attachedThreadId));
     await eventually(() => expect(start).toHaveBeenCalledOnce());
+    const removeWorktree = vi.spyOn(GitWorktreeService.prototype, "removeWorktree").mockResolvedValue(true);
     await routeThreadStartupRpc("thread.startup.cancel", { startupId }, {
       threadStartupService: startups,
       threadStartupFetchDecisions: new ThreadStartupFetchDecisions(),
@@ -307,11 +307,7 @@ describe("automatic Project Setup", () => {
     expect(startups.get(startupId)).toMatchObject({ state: "cancelled", phase: "setup", cancellation: "requested" });
     expect(service.getAutomaticSetup({ threadId: attachedThreadId })).toMatchObject({ gate: "not-required", queuedTurns: [{ state: "cancelled" }] });
     expect(close).toHaveBeenCalledOnce();
-    const worktrees = new ProjectWorktreeService(threads, new WorkspaceRepo(databaseReader(db), databaseWriter(db)), databaseWriter(db), {
-      createWorktree: async () => { throw new Error("Attached checkout must not be created"); },
-      removeWorktree: async () => { throw new Error("Attached checkout must not be removed"); },
-    }, { decide: async () => ({ action: "remove", worktreePath: checkout, branch: "feature" }) });
-    expect(await worktrees.scheduleCleanup(attachedThreadId)).toBe(false);
+    expect(removeWorktree).not.toHaveBeenCalled();
     expect(new CleanupJobRepo(databaseReader(db), databaseWriter(db)).count()).toBe(0);
     expect(await NodeFSPromises.readFile(NodePath.join(checkout, "keep.txt"), "utf8")).toBe("attached checkout");
   });
