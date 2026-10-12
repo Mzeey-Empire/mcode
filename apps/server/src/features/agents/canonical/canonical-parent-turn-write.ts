@@ -586,12 +586,20 @@ function validExecutionFileEvidence(
   if (!sameTerminalFileOwner(evidence, threadId, turnId, executionId, deliveryAttempt)
     || !TurnFileEffectSummarySchema().safeParse(evidence.fileEffects).success
     || evidence.fileEffects.fileCount !== evidence.fileEffects.effects.length) return false;
+  const snapshot = evidence.snapshot;
+  if (!snapshot) return evidence.fileEffects.fileCount === 0 && evidence.filesChanged.length === 0;
+  return validFilesChanged(evidence, snapshot) && validExecutionSnapshot(snapshot, evidence);
+}
+
+/** Tracked workspace paths are authoritative; without them, filesChanged is the Git comparison of real refs. */
+function validFilesChanged(
+  evidence: PreparedExecutionFileEvidence,
+  snapshot: NonNullable<PreparedExecutionFileEvidence["snapshot"]>,
+): boolean {
   const paths = evidence.fileEffects.effects.filter((effect) => effect.scope === "workspace")
     .map((effect) => effect.path);
-  if (JSON.stringify(evidence.filesChanged) !== JSON.stringify(paths)) return false;
-  const snapshot = evidence.snapshot;
-  if (!snapshot) return evidence.fileEffects.fileCount === 0 && paths.length === 0;
-  return validExecutionSnapshot(snapshot, evidence, paths);
+  if (paths.length > 0) return JSON.stringify(evidence.filesChanged) === JSON.stringify(paths);
+  return evidence.filesChanged.length === 0 || (snapshot.refBefore !== "" && snapshot.refAfter !== "");
 }
 
 function sameTerminalFileOwner(
@@ -609,11 +617,10 @@ function sameTerminalFileOwner(
 function validExecutionSnapshot(
   snapshot: NonNullable<PreparedExecutionFileEvidence["snapshot"]>,
   evidence: PreparedExecutionFileEvidence,
-  paths: readonly string[],
 ): boolean {
   return snapshot.threadId === evidence.threadId && snapshot.executionId === evidence.executionId
     && snapshot.worktreePath === null && isSnapshotRef(snapshot.refBefore) && isSnapshotRef(snapshot.refAfter)
-    && JSON.stringify(snapshot.filesChanged) === JSON.stringify(paths)
+    && JSON.stringify(snapshot.filesChanged) === JSON.stringify(evidence.filesChanged)
     && JSON.stringify(snapshot.fileEffects) === JSON.stringify(evidence.fileEffects);
 }
 
