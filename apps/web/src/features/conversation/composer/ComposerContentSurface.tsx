@@ -267,7 +267,8 @@ function getEditorPlaceholder(model: ComposerContentSurfaceProps["model"]) {
 function ComposerEditorSurface({
   model,
   actions,
-}: Pick<ComposerContentSurfaceProps, "model" | "actions">) {
+  hidden,
+}: Pick<ComposerContentSurfaceProps, "model" | "actions"> & { readonly hidden: boolean }) {
   const disabled = model.startingThread || model.planPending || model.isStaleWorktree || Boolean(model.providerReason);
 
   return (
@@ -289,6 +290,20 @@ function ComposerEditorSurface({
         placeholder={getEditorPlaceholder(model)}
         ariaLabel="Message Mcode"
       />
+      {!hidden && (
+        <ComposerEditorPopups model={model} actions={actions} />
+      )}
+    </div>
+  );
+}
+
+/** Popups anchored to the editor; positioned against it, so they cannot outlive it being hidden. */
+function ComposerEditorPopups({
+  model,
+  actions,
+}: Pick<ComposerContentSurfaceProps, "model" | "actions">) {
+  return (
+    <>
       <FileTagPopup
         items={model.fileAutocomplete.suggestions}
         isOpen={model.fileAutocomplete.isOpen}
@@ -308,7 +323,7 @@ function ComposerEditorSurface({
         onRetry={model.slashCommand.onRetry}
       />
       <SpellcheckContextMenu editorRef={model.editorContainerRef} />
-    </div>
+    </>
   );
 }
 
@@ -654,6 +669,7 @@ function ComposerInputSurface({
       className={cn(
         "relative z-(--layer-sticky) rounded-composer border border-border bg-selected",
         // Hidden, not unmounted, while approvals wait, so the draft and editor state survive.
+        // Its popups and control-bar menus do unmount: they anchor to the hidden box and would float or keep focus.
         hidden && "hidden",
         model.isNewThread && "-mt-px",
         model.isDragOver && "ring-2 ring-primary",
@@ -682,9 +698,9 @@ function ComposerInputSurface({
       />
       <ComposerProviderUnavailableNotice model={model} />
       <ComposerQueueEditNotice model={model} actions={actions} />
-      <ComposerEditorSurface model={model} actions={actions} />
+      <ComposerEditorSurface model={model} actions={actions} hidden={hidden} />
       <ComposerAttachmentSurface model={model} actions={actions} />
-      <ComposerControlBar model={model} actions={actions} />
+      {!hidden && <ComposerControlBar model={model} actions={actions} />}
     </div>
   );
 }
