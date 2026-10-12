@@ -96,6 +96,8 @@ describe("completed thread cleanup Git safety", () => {
       } as unknown as ThreadDeletionTeardownService,
       { run: vi.fn().mockResolvedValue(undefined) },
       hostRuntime,
+      undefined,
+      0,
     );
   }
 
