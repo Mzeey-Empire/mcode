@@ -221,6 +221,22 @@ describe("automatic Project Setup", () => {
     expect(start).toHaveBeenCalledOnce();
   });
 
+  it("runs Setup once when two starts reach Setup before either is admitted", async () => {
+    const { service, threads, startups, prepare, start } = await automaticHarness({ managed: false, threadIds: [attachedThreadId, siblingThreadId] });
+    await threads.updateWorktreePath(siblingThreadId, `/project/.worktrees/${attachedThreadId}`);
+    await startAttached(startups, attachedThreadId);
+    await startAttached(startups, siblingThreadId, "00000000-0000-4000-8000-000000000002");
+    await Promise.all([
+      service.queueAutomaticFirstTurn(queuedInput(1, attachedThreadId)),
+      service.queueAutomaticFirstTurn(queuedInput(2, siblingThreadId)),
+    ]);
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: siblingThreadId }).gate).toBe("not-required"));
+    expect(service.getAutomaticSetup({ threadId: attachedThreadId })).toMatchObject({ gate: "blocked", attempt: { state: "running" } });
+    expect(startups.findByThreadId(siblingThreadId)?.steps[2].detail).toEqual({ phase: "setup", skipReason: "thread-running-here" });
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledOnce();
+  });
+
   it("matches Windows path casing when checking live siblings", async () => {
     const { service, threads, runtimes, prepare } = await automaticHarness({ managed: false, threadIds: [attachedThreadId, siblingThreadId] });
     vi.spyOn(service, "platform").mockReturnValue("windows");
