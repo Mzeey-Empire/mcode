@@ -1034,7 +1034,7 @@ function makeSnapshot(overrides: Partial<TurnSnapshot>): TurnSnapshot {
     message_id: "message-1",
     thread_id: "thread-1",
     ref_before: "before",
-    ref_after: "after", attempt_count: 1, reverted_paths: [],
+    ref_after: "after", attempt_count: 1, reverted_paths: [], message_sequence: 0,
     files_changed: [],
     worktree_path: "/repo",
     created_at: new Date().toISOString(),

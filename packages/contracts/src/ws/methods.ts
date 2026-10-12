@@ -1505,11 +1505,17 @@ export const WS_METHODS = lazySchema(() => ({
       threadId: z.string(),
       filePath: z.string().optional(),
       maxLines: z.number().int().positive().optional(),
+      /** Keep only whole turns whose latest attempt settled after this message sequence. */
+      afterSequence: z.number().int().nonnegative().optional(),
     }),
     result: ReviewFileDiffResultSchema(),
   },
   "snapshot.getCumulativeDiffStats": {
-    params: z.object({ threadId: z.string() }),
+    params: z.object({
+      threadId: z.string(),
+      /** Keep only whole turns whose latest attempt settled after this message sequence. */
+      afterSequence: z.number().int().nonnegative().optional(),
+    }),
     result: ReviewComparisonResultSchema(),
   },
   "clipboard.saveFile": {

@@ -46,10 +46,10 @@ const snapshotHandlers: SnapshotHandlerMap = {
     });
   },
   "snapshot.getCumulativeDiff": (deps, params) => {
-    const range = cumulativeRange(deps, params.threadId);
+    const range = cumulativeRange(deps, params.threadId, params.afterSequence);
     return range.status === "ready" ? readSnapshotRangeDiff(deps, range, params.filePath, params.maxLines) : "";
   },
-  "snapshot.getCumulativeDiffStats": (deps, params) => readSnapshotRangeComparison(deps, cumulativeRange(deps, params.threadId), true),
+  "snapshot.getCumulativeDiffStats": (deps, params) => readSnapshotRangeComparison(deps, cumulativeRange(deps, params.threadId, params.afterSequence), true),
 };
 
 /** Checks whether a method belongs to the snapshot RPC family. */
@@ -76,8 +76,8 @@ function rangeForSnapshot(deps: SnapshotRouterDeps, snapshotId: string): TurnSna
     : { status: "unavailable", reason: "snapshot-expired" };
 }
 
-function cumulativeRange(deps: SnapshotRouterDeps, threadId: string): TurnSnapshotRange {
-  return snapshotRange(deps.turnSnapshotRanges.listSnapshots(threadId).filter((row) => row.ref_before && row.ref_after));
+function cumulativeRange(deps: SnapshotRouterDeps, threadId: string, afterSequence?: number): TurnSnapshotRange {
+  return snapshotRange(deps.turnSnapshotRanges.listSnapshots(threadId, afterSequence).filter((row) => row.ref_before && row.ref_after));
 }
 
 /** Git evidence requires the original checkout and retained refs. */

@@ -41,11 +41,20 @@ export class TurnSnapshotRangeReader {
     return collectTurns(threadId, ordered, attempts, this.snapshots.listByThread(threadId));
   }
 
-  /** Hide every remaining row of an incomplete turn from cumulative readers. */
-  listSnapshots(threadId: string): TurnSnapshot[] {
-    return this.listTurns(threadId).flatMap((turn) => turn.complete
+  /**
+   * Hide every remaining row of an incomplete turn from cumulative readers. With `afterSequence`,
+   * keep only whole turns whose latest attempt settled after it, so a retried turn keeps its earlier attempts.
+   */
+  listSnapshots(threadId: string, afterSequence?: number): TurnSnapshot[] {
+    return this.listTurns(threadId).flatMap((turn) => turn.complete && settledAfter(turn, afterSequence)
       ? turn.rows.map((row) => ({ ...row, attempt_count: turn.rows.length })) : []);
   }
+}
+
+function settledAfter(turn: SnapshotTurn, afterSequence: number | undefined): boolean {
+  if (afterSequence === undefined) return true;
+  const latest = turn.rows.find((row) => row.message_id === turn.messageId);
+  return latest !== undefined && latest.message_sequence > afterSequence;
 }
 
 function collectTurns(threadId: string, ordered: OrderedMessage[], attempts: Attempt[], snapshots: TurnSnapshot[]): SnapshotTurn[] {
