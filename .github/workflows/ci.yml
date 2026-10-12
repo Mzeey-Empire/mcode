@@ -227,7 +227,9 @@ jobs:
       - run: bun install --frozen-lockfile
       # Every Vitest run sizes its worker pool to all cores, so parallel package
       # tasks oversubscribe the runner and starve timing-sensitive tests.
-      - run: bun run test ${{ matrix.args }}
+      # On GitHub Actions Turbo defaults to grouped logs, which hold a task's
+      # output until it ends, so a one-task job prints nothing for minutes.
+      - run: bun run test --log-order=stream ${{ matrix.args }}
 
   # Branch protection requires `Test`. A matrix reports one check per suite, so
   # this job turns them into the single required check.
