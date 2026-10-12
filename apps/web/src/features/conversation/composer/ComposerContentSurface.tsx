@@ -37,6 +37,7 @@ import type { ComposerMode } from "./execution/composer-mode";
 import { NewThreadTargetRail } from "./execution/NewThreadTargetRail";
 import { ComposerTray } from "./ComposerTray";
 import { useDraftWriteFailureStore } from "@/lib/composer-draft-storage";
+import { ApprovalAnnouncer, ApprovalDock, useDockApprovals } from "@/features/conversation/approvals/ApprovalDock";
 import { DiffCommentsComposerAttachment } from "./DiffCommentsComposerAttachment";
 import { SelectedTextCommentsComposerAttachment } from "./SelectedTextCommentsComposerAttachment";
 
@@ -644,13 +645,16 @@ function ComposerControlBar({
 function ComposerInputSurface({
   model,
   actions,
-}: ComposerContentSurfaceProps) {
+  hidden,
+}: ComposerContentSurfaceProps & { readonly hidden: boolean }) {
   return (
     <div
       ref={model.composerContainerRef}
       data-testid="composer-surface"
       className={cn(
         "relative z-(--layer-sticky) rounded-composer border border-border bg-selected",
+        // Hidden, not unmounted, while approvals wait, so the draft and editor state survive.
+        hidden && "hidden",
         model.isNewThread && "-mt-px",
         model.isDragOver && "ring-2 ring-primary",
       )}
@@ -703,11 +707,25 @@ function DraftWriteFailureNotice() {
 }
 
 export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
+  const { model, actions } = props;
+  const approvals = useDockApprovals(model.threadId);
+  const docked = approvals.length > 0;
   return (
     <>
       <ComposerNewThreadSurface {...props} />
       <ComposerTraySurface {...props} />
-      <ComposerInputSurface {...props} />
+      <ApprovalAnnouncer requests={approvals} />
+      {docked && (
+        <ApprovalDock
+          requests={approvals}
+          composerContainerRef={model.composerContainerRef}
+          isAgentRunning={model.isAgentRunning}
+          isStopPending={model.isStopPending}
+          onStop={actions.onStop}
+          onFocusComposer={actions.onFocusComposer}
+        />
+      )}
+      <ComposerInputSurface {...props} hidden={docked} />
       {props.model.queuedSend && (
         <p className="px-1 pt-1 text-xs text-muted/60">
           queued · sends when handoff lands

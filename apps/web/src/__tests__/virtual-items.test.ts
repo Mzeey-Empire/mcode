@@ -12,6 +12,7 @@ import {
 import type { ChatVirtualItem } from "@/features/conversation/messages/virtual-items";
 import type { ThoughtSegment } from "@/features/conversation/narrative/types";
 import type { Message, ToolCall, HookExecution, ToolCallRecord, HookExecutionRecord } from "@/transport/types";
+import type { ApprovalRequest } from "@mcode/contracts";
 
 const STREAMING_AGENT = { phase: "streaming" } as const;
 const COMPLETED_AGENT = { phase: "completed" } as const;
@@ -25,6 +26,11 @@ it("opens text only for the current active response and keeps historical message
   expect(items.find((item) => item.type === "message" && item.message.id === "old")).toMatchObject({ textIsStreaming: undefined });
   expect(items.find((item) => item.type === "message" && item.message.id === "current")).toMatchObject({ textIsStreaming: true });
 });
+
+const QUESTION_SUBJECT = {
+  kind: "question",
+  questions: [{ header: "Deploy", question: "Deploy now?", options: [{ label: "Yes" }], multiple: false, custom: false }],
+} satisfies ApprovalRequest["subject"];
 
 describe("activity heading row identity", () => {
   it("updates for heading changes and closure but preserves the row during body deltas", () => {
@@ -1097,7 +1103,7 @@ describe("buildVolatileItems with hooks", () => {
 
   it("narrative-flow appears before permission-request items", () => {
     const hooks = [makeHook()];
-    const permissions = [{ ...createMockApproval({ requestId: "p1" }), settled: false }];
+    const permissions = [{ ...createMockApproval({ requestId: "p1", subject: QUESTION_SUBJECT }), settled: false }];
     const items = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, permissions, hooks);
     const types = items.map((i) => i.type);
     const narrativeIdx = types.indexOf("narrative-flow");
@@ -1105,13 +1111,19 @@ describe("buildVolatileItems with hooks", () => {
     expect(narrativeIdx).toBeLessThan(permIdx);
   });
 
-  it("drops a decided permission card and keeps the pending one", () => {
+  it("drops a decided question card and keeps the pending one", () => {
     const permissions = [
-      { ...createMockApproval({ requestId: "decided" }), settled: true },
-      { ...createMockApproval({ requestId: "pending" }), settled: false },
+      { ...createMockApproval({ requestId: "decided", subject: QUESTION_SUBJECT }), settled: true },
+      { ...createMockApproval({ requestId: "pending", subject: QUESTION_SUBJECT }), settled: false },
     ];
     const items = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, permissions);
     expect(items.filter((i) => i.type === "permission-request").map((i) => i.key)).toEqual(["permission-pending"]);
+  });
+
+  it("leaves pending approvals to the composer dock", () => {
+    const permissions = [{ ...createMockApproval({ requestId: "command" }), settled: false }];
+    const items = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, permissions);
+    expect(items.some((i) => i.type === "permission-request")).toBe(false);
   });
 
   it("narrative-flow item carries the hooks array", () => {

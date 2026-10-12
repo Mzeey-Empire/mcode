@@ -616,8 +616,8 @@ function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts
 }
 
 function permissionRequestItems(permissions: Parameters<typeof buildVolatileItems>[4]): ChatVirtualItem[] {
-  // A settled request is a tombstone; its durable receipt renders in the narrative.
-  return permissions?.filter((request) => !request.settled).map((request) => ({ key: `permission-${request.requestId}`, type: "permission-request" as const, request })) ?? [];
+  // A settled request is a tombstone whose receipt renders in the narrative; other approvals live in the dock.
+  return permissions?.filter((request) => !request.settled && request.subject.kind === "question").map((request) => ({ key: `permission-${request.requestId}`, type: "permission-request" as const, request })) ?? [];
 }
 
 function sameAgentDisplayState(

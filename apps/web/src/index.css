@@ -248,6 +248,10 @@
   --text-code: 1.4rem;
   --text-code--line-height: 2rem;
   --text-code--font-weight: 400;
+  /* Paper's scope text in the approval dock: commands, URLs, and paths a user authorizes. */
+  --text-code-small: 1.3rem;
+  --text-code-small--line-height: 2rem;
+  --text-code-small--font-weight: 400;
   --font-sans: "Public Sans Variable", "Public Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
   --color-page: var(--page);
