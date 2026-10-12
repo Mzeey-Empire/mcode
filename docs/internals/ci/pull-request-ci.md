@@ -4,7 +4,7 @@
 
 ## Runner choice
 
-Linux checks run on paid Blacksmith runners or on free GitHub-hosted `ubuntu-24.04` runners. The `Pick Runner` job chooses one provider per pull request and publishes two labels: `small` for Typecheck, Lint, and Build Check, and `large` for Test.
+Linux checks run on paid Blacksmith runners or on free GitHub-hosted `ubuntu-24.04` runners. The `Pick Runner` job chooses one provider per pull request and publishes two labels: `small` for Typecheck, Lint, Build Check, and the package tests, and `large` for the server and web test shards.
 
 The `CI_LINUX_RUNNER` repository variable selects the policy:
 
@@ -26,11 +26,13 @@ GitHub treats a skipped required check as passing. If `Pick Runner` failed and t
 
 Each dependent check therefore runs with `if: ${{ !cancelled() }}`, falls back to `ubuntu-24.04` when no label was published, and fails in its first step when `Pick Runner` did not succeed. Keep all three parts when adding a check that `needs: pick-runner`.
 
-## Test runs package tasks one at a time
+## Test is split across runners
 
-Test runs `bun run test --concurrency=1`. Each Vitest run sizes its worker pool to the machine's cores. When Turbo ran package test tasks in parallel, several pools competed for 4 vCPUs. Timing-sensitive tests, such as the pull-request performance budgets and `vi.waitFor` deadlines, then failed on GitHub-hosted runners ([#2020](https://github.com/Mzeey-Empire/mcode/issues/2020)).
+Server and web tests take nearly all of the test time, so `Test packages`, two `Test server` shards, and two `Test web` shards each run on their own runner. The `Test` job passes only when every suite passes, so branch protection keeps requiring one check.
 
-Serial tasks cost about 20% more wall time. Uncached Test takes roughly 9 to 12.5 minutes on GitHub-hosted runners, measured in October 2026. Do not raise Turbo concurrency for Test, and do not loosen a timing budget to make a parallel run pass.
+Each Vitest run sizes its worker pool to the machine's cores. When Turbo ran package test tasks in parallel on one runner, several pools competed for 4 vCPUs. Timing-sensitive tests, such as the pull-request performance budgets and `vi.waitFor` deadlines, then failed on GitHub-hosted runners ([#2020](https://github.com/Mzeey-Empire/mcode/issues/2020)). Keep one suite per runner, keep `--concurrency=1` for the package tests, and do not loosen a timing budget to make a shared runner pass.
+
+Vitest shards split a suite by file count, not by duration. If one shard of a suite runs much longer than the other, add a shard or move slow files rather than adding cores.
 
 ## Cached results prove nothing
 

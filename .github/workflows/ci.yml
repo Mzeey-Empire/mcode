@@ -154,16 +154,41 @@ jobs:
       - run: bun run lint
       - run: bun run lint:architecture
 
-  test:
-    name: Test
+  # Server and web take nearly all of the test time, so each runs in two shards
+  # on its own runner instead of after the other on one.
+  test-suite:
+    name: Test ${{ matrix.suite }}
     needs: pick-runner
     # Skipped required checks count as passing, so run and fail instead.
     if: ${{ !cancelled() }}
-    runs-on: ${{ needs.pick-runner.outputs.large || 'ubuntu-24.04' }}
-    # Passing runs on GitHub-hosted runners take up to about 15 minutes.
-    timeout-minutes: 25
+    runs-on: ${{ needs.pick-runner.outputs[matrix.size] || 'ubuntu-24.04' }}
+    timeout-minutes: 15
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: packages
+            id: packages
+            size: small
+            args: "--concurrency=1 --filter=!@mcode/server --filter=!mcode-frontend"
+          - suite: server 1/2
+            id: server-1
+            size: large
+            args: "--filter=@mcode/server -- --shard=1/2"
+          - suite: server 2/2
+            id: server-2
+            size: large
+            args: "--filter=@mcode/server -- --shard=2/2"
+          - suite: web 1/2
+            id: web-1
+            size: large
+            args: "--filter=mcode-frontend -- --shard=1/2"
+          - suite: web 2/2
+            id: web-2
+            size: large
+            args: "--filter=mcode-frontend -- --shard=2/2"
     steps:
       - name: Require a runner choice
         if: needs.pick-runner.result != 'success'
@@ -196,13 +221,35 @@ jobs:
         continue-on-error: true
         with:
           path: .turbo/cache
-          key: ${{ runner.os }}-turbo-test-${{ github.sha }}
+          key: ${{ runner.os }}-turbo-test-${{ matrix.id }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-turbo-test-
+            ${{ runner.os }}-turbo-test-${{ matrix.id }}-
       - run: bun install --frozen-lockfile
       # Every Vitest run sizes its worker pool to all cores, so parallel package
-      # tasks oversubscribe a 4 vCPU runner and starve timing-sensitive tests.
-      - run: bun run test --concurrency=1
+      # tasks oversubscribe the runner and starve timing-sensitive tests.
+      # On GitHub Actions Turbo defaults to grouped logs, which hold a task's
+      # output until it ends, so a one-task job prints nothing for minutes.
+      - run: bun run test --log-order=stream ${{ matrix.args }}
+
+  # Branch protection requires `Test`. A matrix reports one check per suite, so
+  # this job turns them into the single required check.
+  test:
+    name: Test
+    needs: test-suite
+    # `always()`: a cancelled or skipped suite must still produce a failing check.
+    if: ${{ always() }}
+    # A few seconds of work is billed as a full Blacksmith minute.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require every test suite to pass
+        env:
+          RESULT: ${{ needs.test-suite.result }}
+        run: |
+          if [ "$RESULT" != success ]; then
+            echo "::error::Test suites finished with result '$RESULT'."
+            exit 1
+          fi
 
   build-check:
     name: Build Check

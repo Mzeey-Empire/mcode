@@ -8,8 +8,8 @@ const serverPackageRoot = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url
 
 // Each fork is a Bun process (`bun --bun vitest`). Two forks keep the Windows
 // process-integration tests, which spawn PowerShell, git, and job-object trees, inside
-// their timing bounds. CI runs this suite alone (turbo --concurrency=1) on 4 vCPU Linux
-// runners, so a third fork still leaves a core for the main process and spawned children.
+// their timing bounds. CI runs each shard of this suite alone on a 4 vCPU Linux runner,
+// so a third fork still leaves a core for the main process and spawned children.
 function serverTestWorkers(): number {
   return process.env.CI && process.platform === "linux" ? 3 : 2;
 }
