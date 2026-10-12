@@ -311,9 +311,31 @@ describe("Claude public factory core and capabilities", () => {
     await provider.shutdown();
   });
 
+  it("ends a required resume of a missing conversation without a fresh query", async () => {
+    const missing = { type: "result", uuid: "RESUME_MISSING", is_error: true, errors: ["No conversation found with session ID: GONE"] };
+    installTransport(() => [missing], false);
+    const { provider, events } = fixture();
+    await provider.sendTurn(request({ resumeFrom: "GONE", resumeRequired: true }));
+    expect(sdkQuery).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(events().map(({ event }) => event.type)).toContain(AgentEventType.Ended));
+    expect(events().find(({ event }) => event.type === AgentEventType.Error)?.event)
+      .toMatchObject({ failure: { kind: "fatal", code: "session_resume_unavailable" } });
+    expect(events().filter(({ event }) => event.type === AgentEventType.System && event.subtype === "session_restarted")).toEqual([]);
+  });
+
+  it("still restarts a missing conversation fresh when resume is not required", async () => {
+    const missing = { type: "result", uuid: "RESUME_MISSING", is_error: true, errors: ["No conversation found with session ID: GONE"] };
+    installTransport((_turn, options) => options.resume ? [missing] : [result()], false);
+    const { provider, events } = fixture();
+    await provider.sendTurn(request({ resumeFrom: "GONE" }));
+    await completed(events, 1);
+    expect(sdkQuery).toHaveBeenCalledTimes(2);
+    expect(events().filter(({ event }) => event.type === AgentEventType.System).map(({ event }) => event.subtype)).toContain("session_restarted");
+  });
+
   it("declares only implemented profiles and explicitly excludes native continuation and independent child cancellation", () => {
     const { provider } = fixture();
-    expect(provider.descriptor.capabilities.filter(({ support }) => support === "supported").map(({ name }) => name)).toEqual(["build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "clean-fork", "orchestration", "browser-access", "thread-control", "turn-steer"]);
+    expect(provider.descriptor.capabilities.filter(({ support }) => support === "supported").map(({ name }) => name)).toEqual(["build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "clean-fork", "orchestration", "browser-access", "thread-control", "turn-steer", "session-resume"]);
     expect(provider.descriptor.capabilities).toContainEqual({ name: "provider-continuation", support: "unsupported" });
     expect(provider.descriptor.capabilities).toContainEqual({ name: "child-cancellation", support: "unsupported" });
   });

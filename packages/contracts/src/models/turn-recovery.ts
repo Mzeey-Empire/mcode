@@ -44,32 +44,30 @@ export const TurnRetryResultSchema = lazySchema(() => z.object({
 /** Identity returned after retry admission succeeds. */
 export type TurnRetryResult = z.infer<ReturnType<typeof TurnRetryResultSchema>>;
 
+/** Resume the latest interrupted attempt as a new attempt of the same turn. */
+export const TurnResumeParamsSchema = lazySchema(() => z.object({
+  threadId: z.string().min(1).max(256),
+  turnId: AgentTurnIdSchema,
+}).strict());
+/** Input for resuming an interrupted attempt. */
+export type TurnResumeParams = z.infer<ReturnType<typeof TurnResumeParamsSchema>>;
+
+/**
+ * How a resumed attempt continues. `native-session` continues the provider's
+ * saved session; `seeded-session` starts a fresh session seeded with the
+ * thread's visible conversation because the saved session was unavailable.
+ */
+export const TurnResumeModeSchema = lazySchema(() => z.enum(["native-session", "seeded-session"]));
+/** How a resumed attempt continues. */
+export type TurnResumeMode = z.infer<ReturnType<typeof TurnResumeModeSchema>>;
+
+/** Identity and continuation mode of the attempt that carries the resume. */
+export const TurnResumeResultSchema = lazySchema(() => z.object({
+  turnId: AgentTurnIdSchema,
+  mode: TurnResumeModeSchema(),
+}).strict());
+/** Identity and continuation mode returned after resume admission succeeds. */
+export type TurnResumeResult = z.infer<ReturnType<typeof TurnResumeResultSchema>>;
+
 /** Maximum recovery records returned or reconciled in one bounded operation. */
 export const MAX_TURN_RECOVERIES = 100;
-
-/** One turn interrupted by a specific backend restart. */
-export const RecoveryIncidentEntrySchema = lazySchema(() =>
-  z.object({
-    workspaceId: z.string().trim().min(1).max(256),
-    workspaceName: z.string().trim().min(1).max(256),
-    threadId: z.string().trim().min(1).max(256),
-    threadTitle: z.string().trim().min(1).max(512),
-    executionId: z.string().uuid(),
-    startedAt: z.string().datetime({ offset: true }),
-    interruptedAt: z.string().datetime({ offset: true }),
-    durationMs: z.number().int().nonnegative(),
-  }).strict(),
-);
-/** One turn interrupted by a specific backend restart. */
-export type RecoveryIncidentEntry = z.infer<ReturnType<typeof RecoveryIncidentEntrySchema>>;
-
-/** Restart-scoped recovery state that remains stable for the current server run. */
-export const RecoveryIncidentSchema = lazySchema(() =>
-  z.object({
-    id: z.string().uuid(),
-    createdAt: z.string().datetime({ offset: true }),
-    entries: z.array(RecoveryIncidentEntrySchema()).min(1).max(MAX_TURN_RECOVERIES),
-  }).strict(),
-);
-/** Restart-scoped recovery state that remains stable for the current server run. */
-export type RecoveryIncident = z.infer<ReturnType<typeof RecoveryIncidentSchema>>;

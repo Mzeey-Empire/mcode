@@ -90,6 +90,12 @@ export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "prov
   forceFreshSession?: boolean;
   /** Interrupted execution consumed atomically when the replacement turn starts. */
   retryOfExecutionId?: string;
+  /** Continues the thread's native provider session or fails; never opens a fresh one. */
+  resumeRequired?: boolean;
+  /** Stores the user row hidden from the transcript, for server-authored continuation prompts. */
+  internalUserMessage?: boolean;
+  /** Runs once this turn's runtime releases its active slot, so a follow-up turn on the thread can admit. */
+  onRuntimeReleased?: () => void;
   /** First-Turn message and attachment data already committed by the automatic Setup gate. */
   persistedUserMessage?: {
     readonly id: string;
@@ -166,6 +172,8 @@ export interface PreparedTurnDispatch {
   readonly contextSeed: number;
   readonly contextWindow: number | null;
   readonly workerOwned?: true;
+  /** Discard any pooled provider session first, so a fresh-session turn cannot inherit its native history. */
+  readonly replaceSession?: true;
 }
 
 /** The stable outcome of handling a complete send command. */
@@ -539,6 +547,7 @@ export class TurnAdmissionDispatchCoordinator {
       contextSeed: prepared.thread.last_context_tokens ?? 0,
       contextWindow: prepared.thread.context_window,
       ...(this.parentStartOwner ? { workerOwned: true as const } : {}),
+      ...(prepared.command.forceFreshSession ? { replaceSession: true as const } : {}),
     };
   }
 
@@ -837,6 +846,7 @@ export class TurnAdmissionDispatchCoordinator {
           attachments: attachments.stored.length > 0 ? [...attachments.stored] : undefined,
           replyToMessageId: command.replyToMessageId,
           quotedText: command.quotedText,
+          ...(command.internalUserMessage ? { isInternal: true } : {}),
           mentions: prepared.mentions.length > 0 ? [...prepared.mentions] : undefined,
           previewAnnotations: command.previewAnnotations,
           origin: this.messageOrigin(command),
@@ -1023,6 +1033,7 @@ export class TurnAdmissionDispatchCoordinator {
       ...guardrails,
       threadControlEligible: this.isThreadControlEligible(prepared),
       resumeFrom: this.resumeFrom(prepared, attachments),
+      ...(prepared.command.resumeRequired ? { resumeRequired: true } : {}),
       providerOptions: this.providerOptions(prepared, settings),
     } as TurnRequest;
   }

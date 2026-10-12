@@ -4,7 +4,8 @@ import { Command } from "@/components/ui/command";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useUiStore } from "@/stores/uiStore";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
-import { useProjectAutomaticSetupStore } from "@/features/projects/environment";
+import type { ThreadStartup } from "@mcode/contracts";
+import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { createMockThread, createMockWorkspace } from "@/__tests__/mocks/transport";
 import type { RecentThread } from "@/transport/types";
 
@@ -71,6 +72,31 @@ vi.mock("@/features/projects/state/workspaceStore", () => ({
 
 import { filterAndSortRecentThreads, ThreadSearchView } from "../ThreadSearchView";
 
+function setupStartup(threadId: string, setup: ThreadStartup["steps"][number]["state"], block?: ThreadStartup["block"]): ThreadStartup {
+  return {
+    startupId: `startup-${threadId}`,
+    workspaceId: "ws-1",
+    threadId,
+    kind: "managed-worktree",
+    state: setup === "running" ? "running" : "blocked",
+    phase: "setup",
+    steps: [
+      { phase: "thread", state: "completed" },
+      { phase: "worktree", state: "completed" },
+      { phase: "setup", state: setup },
+      { phase: "agent", state: "pending" },
+    ],
+    transcript: [],
+    cancellation: "none",
+    revision: setup === "running" ? 1 : 2,
+    createdAt: "",
+    updatedAt: "",
+    ...(block ? { block } : {}),
+  };
+}
+
+const SETUP_FAILED_BLOCK = { code: "SETUP_FAILED", message: "Setup failed", actions: ["retry", "continue"] } satisfies ThreadStartup["block"];
+
 beforeAll(() => {
   if (typeof window.ResizeObserver === "undefined") {
     window.ResizeObserver = class ResizeObserver {
@@ -91,7 +117,7 @@ beforeEach(() => {
     useCommandPaletteStore.getState().open({ intent: "threadSearch" });
     useCommandPaletteStore.getState().setQuery("quiet-lantern");
     threadAttentionStore.setState({ byThreadId: {}, onScreenThreadId: null });
-    useProjectAutomaticSetupStore.setState({ snapshotsByThread: {}, updateEpochByThread: {}, refreshFailedByThread: {} });
+    useThreadStartupStore.setState({ recordsByStartupId: {}, startupIdByThreadId: {}, dismissedStartupIds: new Set() });
   });
 });
 
@@ -133,13 +159,10 @@ describe("ThreadSearchView", () => {
     expect(screen.queryByText("Errored")).not.toBeInTheDocument();
   });
 
-  it("shows Setup failed from the setup snapshot the sidebar cached", () => {
+  it("shows Setup failed from the thread's startup record", () => {
     act(() => {
-      useProjectAutomaticSetupStore.getState().applySnapshot(thread.id, {
-        gate: "blocked",
-        attempt: { id: "attempt-1", state: "failed", reason: "setup_failed", snapshot: null, outcome: "command_failure", createdAt: "", startedAt: "", finishedAt: "", exitCode: 1, output: "failed", outputTruncated: false },
-        queuedTurns: [],
-      });
+      const startup = setupStartup(thread.id, "failed", SETUP_FAILED_BLOCK);
+      useThreadStartupStore.setState({ recordsByStartupId: { [startup.startupId]: startup }, startupIdByThreadId: { [thread.id]: startup.startupId } });
     });
     render(<Command shouldFilter={false}><ThreadSearchView /></Command>);
 

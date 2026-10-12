@@ -24,6 +24,14 @@ const USAGE_LIMIT: FilledNotice = {
   primary: { action: "retry_at", label: "Retry at 14:05", at: "2026-10-11T13:05:00.000Z" },
 };
 
+const INTERRUPTED: FilledNotice = {
+  style: "filled",
+  icon: "interrupted",
+  title: "Interrupted",
+  detail: "Mcode closed while Codex was working",
+  primary: { action: "resume", label: "Resume" },
+};
+
 describe("TurnEndNotice", () => {
   it("renders a quiet notice as title and detail with no buttons", () => {
     render(<TurnEndNotice notice={{ style: "quiet", title: "Stopped by Mcode", detail: "Mcode couldn't answer an approval request" }} />);
@@ -94,6 +102,15 @@ describe("TurnEndNotice", () => {
   it("disables Switch model while a request is pending", () => {
     render(<TurnEndNotice notice={USAGE_LIMIT} actions={{ switch_model: (trigger) => trigger }} pending />);
     expect(screen.getByRole("button", { name: "Switch model" })).toBeDisabled();
+  });
+
+  it("calls the Resume handler on an interrupted notice", () => {
+    const resume = vi.fn();
+    render(<TurnEndNotice notice={INTERRUPTED} actions={{ retry: vi.fn(), resume }} />);
+    expect(screen.getByRole("status")).toHaveTextContent("InterruptedMcode closed while Codex was working");
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    expect(resume).toHaveBeenCalledTimes(1);
   });
 
   it("shows why the last action failed", () => {

@@ -21,7 +21,7 @@ export const ENABLED_PROVIDER_CONFORMANCE: readonly ProviderConformanceRegistrat
   {
     providerId: "claude",
     factory: createClaudeProvider,
-    requiredProfiles: ["core", "build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "clean-fork", "orchestration", "browser-access", "thread-control", "turn-steer"],
+    requiredProfiles: ["core", "build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "clean-fork", "orchestration", "browser-access", "thread-control", "turn-steer", "session-resume"],
     fixtureFiles: [fixtureFile("claude"), namedFixtureFile("claude-native.synthetic.json"), namedFixtureFile("claude-startup-error.captured.json")],
     requiredFixtureProvenance: ["captured", "synthetic"],
     supportedVersions: [{
@@ -49,6 +49,7 @@ export const ENABLED_PROVIDER_CONFORMANCE: readonly ProviderConformanceRegistrat
       "child-cancellation",
       "turn-diff",
       "approval-review",
+      "session-resume",
     ],
     fixtureFiles: [
       fixtureFile("codex"),
@@ -66,7 +67,7 @@ export const ENABLED_PROVIDER_CONFORMANCE: readonly ProviderConformanceRegistrat
   {
     providerId: "copilot",
     factory: createCopilotProvider,
-    requiredProfiles: ["core", "build", "plan", "completion", "permissions", "usage", "session-eviction", "clean-fork", "browser-access", "thread-control"],
+    requiredProfiles: ["core", "build", "plan", "completion", "permissions", "usage", "session-eviction", "clean-fork", "browser-access", "thread-control", "session-resume"],
     fixtureFiles: [fixtureFile("copilot"), namedFixtureFile("copilot-core.captured.json")],
     requiredFixtureProvenance: ["captured", "synthetic"],
     supportedVersions: [{
@@ -88,6 +89,7 @@ export const ENABLED_PROVIDER_CONFORMANCE: readonly ProviderConformanceRegistrat
       "clean-fork",
       "browser-access",
       "thread-control",
+      "session-resume",
     ],
     fixtureFiles: [
       fixtureFile("cursor"),
@@ -104,7 +106,7 @@ export const ENABLED_PROVIDER_CONFORMANCE: readonly ProviderConformanceRegistrat
   {
     providerId: "opencode",
     factory: createOpencodeProvider,
-    requiredProfiles: ["core", "build", "plan", "permissions", "session-eviction"],
+    requiredProfiles: ["core", "build", "plan", "permissions", "session-eviction", "session-resume"],
     fixtureFiles: [fixtureFile("opencode")],
     supportedVersions: [{
       component: "opencode-cli",

@@ -143,6 +143,7 @@ const CODEX_SUPPORTED_CAPABILITIES = [
   "child-cancellation",
   "turn-diff",
   "approval-review",
+  "session-resume",
 ] as const satisfies readonly ProviderCapabilityName[];
 
 function codexDescriptor(turnSteer: "supported" | "unsupported") {
@@ -419,7 +420,7 @@ interface CodexSpawnContext {
   resumeFrom: string | undefined;
   sandbox: SandboxMode;
   approvalPolicy: "never" | "on-request";
-  pendingSpawn: { input: CodexTurnInput; turnOptions: CodexTurnOptions; turnExecutionId: string; threadControlEligible: boolean } | undefined;
+  pendingSpawn: { input: CodexTurnInput; turnOptions: CodexTurnOptions; turnExecutionId: string; threadControlEligible: boolean; resumeRequired: boolean } | undefined;
   stagedExecutionId: string | undefined;
   threadControlEligible: boolean;
   browserAccess: { stage: BrowserAutomationSessionLeaseStage; workspaceId: string; permissionCapability: "observe" | "interact" | "privileged" } | undefined;
@@ -774,6 +775,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       turnId: string;
       deliveryAttempt: number;
       threadControlEligible: boolean;
+      resumeRequired: boolean;
       signal: AbortSignal;
     }
   >();
@@ -1306,7 +1308,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private stageCodexTurn(turn: PreparedCodexTurn): void {
     const { request } = turn;
     const sessionId = request.sessionId;
-    this.pendingSpawnTurns.set(sessionId, { input: turn.input, turnOptions: turn.turnOptions, turnExecutionId: request.turnExecutionId, turnId: request.turnId, deliveryAttempt: request.deliveryAttempt ?? 1, threadControlEligible: turn.threadControlEligible, signal: turn.signal });
+    this.pendingSpawnTurns.set(sessionId, { input: turn.input, turnOptions: turn.turnOptions, turnExecutionId: request.turnExecutionId, turnId: request.turnId, deliveryAttempt: request.deliveryAttempt ?? 1, threadControlEligible: turn.threadControlEligible, resumeRequired: request.resumeRequired === true, signal: turn.signal });
     if (!this.host.browser.isConfigured()) return;
     const stage = this.host.browser.stage({ providerId: this.id, providerSessionId: request.resumeFrom ?? sessionId, mcodeSessionId: sessionId, threadId: request.threadId, workspaceId: request.workspaceId, permissionCapability: turn.browserPermissionCapability });
     const previous = this.pendingBrowserAccess.get(sessionId);
@@ -1560,6 +1562,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       sandbox: context.sandbox,
       approvalPolicy: context.approvalPolicy,
       resumeThreadId: context.resumeFrom || undefined,
+      requireResume: context.pendingSpawn?.resumeRequired === true,
       developerInstructions,
       approvalHandler: context.approvalPolicy === "on-request"
         ? (request) => this.handleApprovalRequest(context.sessionId, context.threadId, request)

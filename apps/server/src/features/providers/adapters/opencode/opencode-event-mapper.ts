@@ -1,4 +1,5 @@
 import { createSubagentPresentation, type AgentEvent, type TurnFailure } from "@mcode/contracts";
+import { ProviderTurnError } from "@mcode/providers";
 
 /**
  * SSE envelope accepted in both wrapped and flat shapes.
@@ -187,6 +188,7 @@ function classifyOpenCodeApiFailure(data: Record<string, unknown>): TurnFailure 
 
 /** Classifies native session errors and HTTP client failures without losing their status. */
 export function classifyOpenCodeFailure(error: unknown): TurnFailure {
+  if (error instanceof ProviderTurnError) return error.failure;
   if (error instanceof Error) return classifyOpenCodeApiFailure({ message: error.message });
   if (!isRecord(error)) return { kind: "fatal" };
   const code = boundedString(boundText(error.name).trim(), 128);

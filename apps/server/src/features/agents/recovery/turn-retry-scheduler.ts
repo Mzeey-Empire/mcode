@@ -31,8 +31,8 @@ export class TurnRetryScheduler {
 
   constructor(
     private readonly store: TurnRetryScheduleStore,
-    private readonly recovery: Pick<TurnRecoveryService, "requireRetryableTurn" | "retryTurn">,
-    private readonly dispatch: Parameters<TurnRecoveryService["retryTurn"]>[1],
+    private readonly recovery: Pick<TurnRecoveryService, "requireRetryableTurn" | "retryErroredTurn">,
+    private readonly dispatch: Parameters<TurnRecoveryService["retryErroredTurn"]>[1],
     private publish: (event: { threadId: string; retry: ScheduledTurnRetry | null }) => void,
     private readonly clock: TurnRetrySchedulerClock = systemClock,
   ) {}
@@ -48,10 +48,10 @@ export class TurnRetryScheduler {
     const now = this.clock.now();
     const delay = Date.parse(input.at) - now;
     if (!Number.isFinite(delay) || delay <= 0) {
-      throw new TurnRecoveryError("TURN_RETRY_SCHEDULE_INVALID_TIME", "Retry must be scheduled in the future");
+      throw new TurnRecoveryError("TURN_RECOVERY_SCHEDULE_INVALID_TIME", "Retry must be scheduled in the future");
     }
     if (delay > MAX_SCHEDULE_MS) {
-      throw new TurnRecoveryError("TURN_RETRY_SCHEDULE_TOO_FAR", "Retry cannot be scheduled more than 31 days ahead");
+      throw new TurnRecoveryError("TURN_RECOVERY_SCHEDULE_TOO_FAR", "Retry cannot be scheduled more than 31 days ahead");
     }
     this.disarm(input.threadId);
     const entry: ArmedRetry = { row: { threadId: input.threadId, turnId: input.turnId,
@@ -137,6 +137,6 @@ export class TurnRetryScheduler {
     if (!stored || stored.executionId !== executionId) return;
     const turn = this.recovery.requireRetryableTurn({ threadId, turnId });
     if (turn.executionId !== executionId) return;
-    await this.recovery.retryTurn({ threadId, turnId }, this.dispatch);
+    await this.recovery.retryErroredTurn({ threadId, turnId }, this.dispatch);
   }
 }

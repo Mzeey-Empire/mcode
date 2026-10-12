@@ -300,8 +300,9 @@ export type { Thread, RecentThread, ThreadCheckoutState } from "./models/thread.
 
 export {
   MAX_TURN_RECOVERIES,
-  RecoveryIncidentEntrySchema,
-  RecoveryIncidentSchema,
+  TurnResumeModeSchema,
+  TurnResumeParamsSchema,
+  TurnResumeResultSchema,
   TurnRetryParamsSchema,
   TurnRetryResultSchema,
   ScheduledTurnRetrySchema,
@@ -309,7 +310,15 @@ export {
   TurnRetryUnscheduleParamsSchema,
   ThreadRetryScheduledSchema,
 } from "./models/turn-recovery.js";
-export type { RecoveryIncidentEntry, RecoveryIncident, TurnRetryParams, TurnRetryResult, ScheduledTurnRetry, TurnRetryScheduleParams } from "./models/turn-recovery.js";
+export type {
+  TurnResumeMode,
+  TurnResumeParams,
+  TurnResumeResult,
+  TurnRetryParams,
+  TurnRetryResult,
+  ScheduledTurnRetry,
+  TurnRetryScheduleParams,
+} from "./models/turn-recovery.js";
 
 export {
   MessageSchema,

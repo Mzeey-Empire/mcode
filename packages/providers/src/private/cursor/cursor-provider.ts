@@ -106,6 +106,7 @@ const CURSOR_SUPPORTED_CAPABILITIES = [
   "clean-fork",
   "browser-access",
   "thread-control",
+  "session-resume",
 ] as const;
 
 function cursorCliProbeBinaries(settings: Settings): string[] {

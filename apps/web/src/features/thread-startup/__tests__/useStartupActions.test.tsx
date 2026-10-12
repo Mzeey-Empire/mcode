@@ -1,18 +1,21 @@
-import type { ThreadStartup } from "@mcode/contracts";
+import type { AgentTurn, ThreadStartup } from "@mcode/contracts";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const startupTransport = {
   cancelThreadStartup: vi.fn(),
   resolveThreadStartup: vi.fn(),
+  retryErroredTurn: vi.fn(),
 };
 
 vi.mock("@/transport", () => ({
   getTransport: () => startupTransport,
 }));
 
+import { createEmptyThreadRecord } from "@/stores/thread-record";
+import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useThreadStartupStore } from "../state/thread-startup-store";
-import { useStartupCancel, useStartupFetchDecision } from "../useStartupActions";
+import { useStartupCancel, useStartupFetchDecision, useStartupTurnRetry } from "../useStartupActions";
 
 const startupId = "00000000-0000-4000-8000-000000000001";
 const T0 = "2026-09-02T12:00:00.000Z";
@@ -131,5 +134,45 @@ describe("useStartupFetchDecision", () => {
     expect(result.current?.pending).toBe("continue");
     await act(async () => answer(fetchBlocked));
     await waitFor(() => expect(result.current?.pending).toBeNull());
+  });
+});
+
+describe("useStartupTurnRetry", () => {
+  function turn(id: string, status: AgentTurn["status"]): AgentTurn {
+    return {
+      id, threadId: "thread-1", status, trigger: { kind: "user" }, permissionMode: "full",
+      approvalReviewMode: "manual", approvalReviewReason: "manual-requested", attemptOf: null,
+      executionId: "00000000-0000-4000-8000-000000000042",
+      providerIdentities: [], startedAt: T0, providerStartedAt: null, ending: null, endedAt: T0, createdAt: T0, updatedAt: T0,
+    };
+  }
+
+  function seedTurns(...turns: AgentTurn[]) {
+    const record = createEmptyThreadRecord();
+    for (const t of turns) record.canonicalAgent.state.turns[t.id] = t;
+    resetThreadStoreForTests({ records: new Map([["thread-1", record]]) });
+  }
+
+  beforeEach(() => {
+    startupTransport.retryErroredTurn.mockReset();
+    startupTransport.retryErroredTurn.mockResolvedValue(undefined);
+  });
+
+  it("retries the thread's only turn when it errored", async () => {
+    seedTurns(turn("turn-1", "Errored"));
+    const { result } = renderHook(() => useStartupTurnRetry("thread-1"));
+    act(() => result.current?.retry());
+    expect(startupTransport.retryErroredTurn).toHaveBeenCalledWith({ threadId: "thread-1", turnId: "turn-1" });
+    await waitFor(() => expect(result.current?.pending).toBe(false));
+  });
+
+  it.each([
+    ["the only turn did not error", [turn("turn-1", "Completed")]],
+    ["the thread already has a second turn", [turn("turn-1", "Errored"), turn("turn-2", "Errored")]],
+    ["the thread has no turn", []],
+  ] as const)("offers no retry when %s", (_name, turns) => {
+    seedTurns(...turns);
+    const { result } = renderHook(() => useStartupTurnRetry("thread-1"));
+    expect(result.current).toBeUndefined();
   });
 });

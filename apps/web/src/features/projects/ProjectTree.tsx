@@ -83,7 +83,7 @@ import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
 import { FILE_EXPLORER_ID } from "@/lib/resolveDefaultOpenInApp";
 import { getTransport } from "@/transport";
 import { useToastStore } from "@/stores/toastStore";
-import type { ChecksStatus, ThreadAttention, WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
+import type { ChecksStatus, ThreadAttention } from "@mcode/contracts";
 import type { Workspace, Thread } from "@/transport/types";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
@@ -91,13 +91,13 @@ import { StatusMark } from "@/components/ui/status-mark";
 import { relativeTime } from "@/lib/time";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { ThreadStatusLane } from "@/features/thread-attention/ThreadStatusLane";
-import { threadRowLook, threadRowSetup, useThreadRowState, type ThreadRowLook } from "@/features/thread-attention/thread-row-presentation";
+import { threadRowLook, threadRowSetup, threadStartupRecord, useThreadRowState, type ThreadRowLook, type ThreadStartupMaps } from "@/features/thread-attention/thread-row-presentation";
+import { useThreadStartupStore, useWorkspaceStartupRecovery } from "@/features/thread-startup/state/thread-startup-store";
 import {
   deriveThreadRowState,
   rollUpThreadRowStates,
   type ThreadRowState,
 } from "@/features/thread-attention/thread-row-state";
-import { useProjectAutomaticSetup, useProjectAutomaticSetupStore } from "@/features/projects/environment";
 import {
   DndContext,
   DragOverlay,
@@ -582,6 +582,7 @@ export function ProjectTree() {
   }, [loadWorkspaces]);
 
   useLoadExpandedWorkspaceThreads(workspaces, expanded, loadThreads);
+  useWorkspaceStartupRecovery(workspaceIds);
 
   // In-flight lifecycle flags outlive any one row; tearing the whole tree down
   // is the boundary where they should not linger.
@@ -880,7 +881,8 @@ export function ProjectTree() {
   const startupThreadIds = useMemo(() => new Set(pendingStartupIds), [pendingStartupIds]);
   const attentionByThreadId = threadAttentionStore((state) => state.byThreadId);
   const onScreenThreadId = threadAttentionStore((state) => state.onScreenThreadId);
-  const setupSnapshotsByThreadId = useProjectAutomaticSetupStore((state) => state.snapshotsByThread);
+  const startupRecordsById = useThreadStartupStore((state) => state.recordsByStartupId);
+  const startupIdByThreadId = useThreadStartupStore((state) => state.startupIdByThreadId);
   // Normalized set of existing worktree paths for stale detection.
   const validWorktreePaths = useMemo(() => {
     const set = new Set<string>();
@@ -946,7 +948,7 @@ export function ProjectTree() {
         startupThreadIds,
         attentionByThreadId,
         onScreenThreadId,
-        setupSnapshotsByThreadId,
+        startups: { recordsByStartupId: startupRecordsById, startupIdByThreadId },
       }),
     [
       workspaces,
@@ -962,7 +964,8 @@ export function ProjectTree() {
       startupThreadIds,
       attentionByThreadId,
       onScreenThreadId,
-      setupSnapshotsByThreadId,
+      startupRecordsById,
+      startupIdByThreadId,
     ],
   );
 
@@ -1274,7 +1277,7 @@ interface ProjectTreeRowsInput {
   readonly startupThreadIds: ReadonlySet<string>;
   readonly attentionByThreadId: Readonly<Record<string, ThreadAttention>>;
   readonly onScreenThreadId: string | null;
-  readonly setupSnapshotsByThreadId: Readonly<Record<string, WorkspaceEnvironmentAutomaticSetupSnapshot>>;
+  readonly startups: ThreadStartupMaps;
 }
 
 /** Maps workspaces to virtual rows; children live inside the group row so a
@@ -1319,8 +1322,7 @@ const QUIET_ROW_STATE: ThreadRowState = { kind: "quiet" };
 
 /**
  * Mirrors useThreadRowState from plain inputs, because a collapsed project has
- * no mounted thread rows to call the hook. Setup reads whatever snapshot an
- * earlier mount already cached.
+ * no mounted thread rows to call the hook.
  */
 function collapsedThreadRowState(thread: WorkspaceThread, input: ProjectTreeRowsInput): ThreadRowState {
   return deriveThreadRowState({
@@ -1328,7 +1330,7 @@ function collapsedThreadRowState(thread: WorkspaceThread, input: ProjectTreeRows
     running: input.runningThreadIds.has(thread.id)
       || input.startupThreadIds.has(thread.id)
       || thread.clientPreparing === true,
-    setup: threadRowSetup(input.setupSnapshotsByThreadId[thread.id]),
+    setup: threadRowSetup(threadStartupRecord(input.startups, thread.id)),
     onScreen: input.onScreenThreadId === thread.id,
   });
 }
@@ -1417,11 +1419,6 @@ const ThreadRow = memo(function ThreadRow({
   const isActive = useWorkspaceStore((s) => s.activeThreadId === thread.id);
   const isRunning = useThreadStore((s) => isThreadExecuting(thread.id, s));
   const startupPending = useWorkspaceStore((s) => s.pendingStartupByThreadId[thread.id] !== undefined);
-  // Mounting fetches and caches this thread's setup snapshot, which the row state reads from the shared store.
-  useProjectAutomaticSetup(
-    thread.id,
-    thread.mode === "worktree" && thread.worktree_managed === true,
-  );
   const rowState = useThreadRowState(thread.id, thread.clientPreparing === true);
   const presentation = createThreadRowPresentation(
     thread,

@@ -15,7 +15,7 @@ describe("classifyCursorFailure", () => {
     [new Error("v: [resource_exhausted] Error"), { kind: "retryable" }],
     [new Error("ACP connection closed"), { kind: "retryable" }],
     [new RequestError(-32602, "Invalid params"), { kind: "fatal", code: "-32602" }],
-    [new SessionRecoveryFailedError(), { kind: "fatal" }],
+    [new SessionRecoveryFailedError(), { kind: "fatal", code: "session_resume_unavailable" }],
     [new Error("Unauthorized"), { kind: "fatal" }],
   ])("classifies %o", (error, expected) => {
     expect(classifyCursorFailure(error)).toEqual(expected);

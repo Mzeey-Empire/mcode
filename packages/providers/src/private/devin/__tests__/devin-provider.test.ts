@@ -8,7 +8,7 @@ import which from "which";
 import { getDefaultSettings, type TurnRequest } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import type { ProviderHostPorts } from "../../../host-ports.js";
-import { AcpSessionRuntime } from "../../protocols/acp/acp-session-runtime.js";
+import { AcpSessionRuntime, SessionRecoveryFailedError } from "../../protocols/acp/acp-session-runtime.js";
 import type { AcpPermissionOutcome, AcpPermissionRequest } from "../../protocols/acp/acp-session-types.js";
 import { ProviderTurnError } from "../../../provider-turn-error.js";
 import { DevinProvider } from "../devin-provider.js";
@@ -316,6 +316,19 @@ describe("DevinProvider", () => {
     expect(fake.connection.loadSession).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: "saved-acp-session" }),
     );
+    expect(fake.connection.newSession).not.toHaveBeenCalled();
+  });
+
+  it("fails a required resume of an unrecoverable session instead of opening a fresh one", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    vi.mocked(fake.runtime.openSession).mockRejectedValue(new SessionRecoveryFailedError());
+    starts.push(mockAcpStart([fake]));
+    createProvider(host);
+
+    await expect(provider!.sendTurn(turn({ resumeFrom: "saved-acp-session", resumeRequired: true }))).rejects.toMatchObject({
+      failure: { kind: "fatal", code: "session_resume_unavailable" },
+    });
     expect(fake.connection.newSession).not.toHaveBeenCalled();
   });
 

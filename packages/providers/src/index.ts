@@ -93,7 +93,11 @@ export {
 export { approvalChoice, approvalOutcome } from "./approval-scope.js";
 export { isNewer, isSemver, meetsMinVersion } from "./version-policy.js";
 export { approvalReceipt } from "./approvals/approval-receipt.js";
-export { ProviderTurnError } from "./provider-turn-error.js";
+export {
+  ProviderTurnError,
+  SESSION_RESUME_UNAVAILABLE_CODE,
+  SessionResumeUnavailableError,
+} from "./provider-turn-error.js";
 export { describeDevinAuth } from "./private/devin/devin-credentials.js";
 export {
   createCliStatusRunner,

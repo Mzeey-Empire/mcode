@@ -6,8 +6,8 @@ import type { SendMessageCommand } from "../turns/turn-admission-dispatch-coordi
 const PREVIEW_ANNOTATION_FENCE_START = "<!-- mcode-preview-annotations:v1";
 const PREVIEW_ANNOTATION_FENCE_END = "mcode-preview-annotations:end -->";
 
-/** Dispatch a retry with the same annotation and admission semantics as a user RPC. */
-export function dispatchRetryTurn(service: Pick<AgentService, "sendMessage">, command: SendMessageCommand): Promise<void> {
+/** Dispatch a server-built recovery attempt, rebuilding its provider input the way a composer send does. */
+export function sendRecoveryAttempt(service: Pick<AgentService, "sendMessage">, command: SendMessageCommand): Promise<void> {
   return sendAdmittedTurn(service, { ...command,
     content: appendPreviewAnnotations(command.content, command.previewAnnotations),
     displayContent: command.content });
@@ -32,6 +32,8 @@ export async function sendAdmittedTurn(service: Pick<AgentService, "sendMessage"
     logger.error("Admitted turn dispatch failed", { threadId: command.threadId,
       error: error instanceof Error ? error.message : String(error) });
   });
+  // Completion arrives through the execution stream. Keeping this RPC open
+  // would let its timeout undo a healthy turn that is still running.
   await Promise.race([admission, dispatch]);
 }
 

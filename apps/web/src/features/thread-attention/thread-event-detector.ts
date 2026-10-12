@@ -1,6 +1,6 @@
 import type { ThreadAttention, ThreadWaitingKind } from "@mcode/contracts";
-import { useProjectAutomaticSetupStore } from "@/features/projects/environment";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
@@ -223,7 +223,7 @@ export function startThreadEventDetector(): () => void {
   });
   const unsubscribeThread = useThreadStore.subscribe(evaluateWatched);
   const unsubscribeWorkspace = useWorkspaceStore.subscribe(evaluateWatched);
-  const unsubscribeSetup = useProjectAutomaticSetupStore.subscribe(evaluateWatched);
+  const unsubscribeStartup = useThreadStartupStore.subscribe(evaluateWatched);
   const notifications = window.desktopBridge?.notifications;
   const notificationClick = notifications?.onClick(openThread);
   evaluateAll(true);
@@ -232,7 +232,7 @@ export function startThreadEventDetector(): () => void {
     unsubscribeAttention();
     unsubscribeThread();
     unsubscribeWorkspace();
-    unsubscribeSetup();
+    unsubscribeStartup();
     unsubscribeToasts();
     if (notificationClick) notifications?.offClick(notificationClick);
     for (const threadId of shown.keys()) withdraw(threadId);

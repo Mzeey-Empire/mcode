@@ -270,6 +270,7 @@ describe("CursorProvider session continuity", () => {
         expect.objectContaining({
           type: "error",
           error: "SessionRecoveryFailed: Cursor could not recover the saved session. Retry starts a new Cursor session.",
+          failure: { kind: "fatal", code: "session_resume_unavailable" },
         }),
         expect.objectContaining({ type: "ended", turnExecutionId: "execution-failed" }),
       ]));

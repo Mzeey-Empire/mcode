@@ -1153,3 +1153,76 @@ describe("AgentService transient-failure auto-retry", () => {
     expect(threadRepo.recordTurnOutcome).toHaveBeenCalledWith(THREAD_ID, "errored", expect.any(String));
   });
 });
+
+describe("AgentService recovery dispatch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const command = {
+    threadId: THREAD_ID,
+    content: "continue",
+    permissionMode: "default",
+    model: "claude-sonnet-4-6",
+    attachments: [],
+    provider: "claude",
+  } as const;
+
+  it("fails a required resume once instead of retrying it against a fresh session", async () => {
+    const { service, sendTurn, discardSession, threadRepo } = buildService();
+    startAgentServiceIngressForTest(service);
+    sendTurn.mockRejectedValue(new Error("read ECONNRESET"));
+    const onRuntimeReleased = vi.fn();
+
+    await service.sendMessage({ ...command, resumeRequired: true, onRuntimeReleased });
+
+    expect(sendTurn).toHaveBeenCalledTimes(1);
+    expect(sendTurn.mock.calls[0][0]).toMatchObject({ resumeRequired: true, resumeFrom: "sess-abc" });
+    expect(discardSession).not.toHaveBeenCalled();
+    expect(threadRepo.clearSdkSessionId).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(onRuntimeReleased).toHaveBeenCalledTimes(1));
+  });
+
+  it("evicts the pooled session before a fresh-session turn without letting its teardown end the turn", async () => {
+    const { service, sendTurn, discardSession, waitForSessionExit, providerEmitter } = buildService();
+    startAgentServiceIngressForTest(service);
+    discardSession.mockImplementation(() => {
+      queueMicrotask(() => {
+        const executionId = service.runtimeAccess().runtimeSnapshots()
+          .find((snapshot) => snapshot.threadId === THREAD_ID)?.turnExecutionId;
+        if (executionId) providerEmitter.emit("event", { type: "ended", threadId: THREAD_ID, turnExecutionId: executionId });
+      });
+    });
+    waitForSessionExit.mockImplementation(async () => {
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+    });
+
+    await service.sendMessage({ ...command, forceFreshSession: true });
+
+    expect(discardSession).toHaveBeenCalledWith(`mcode-${THREAD_ID}`);
+    expect(discardSession.mock.invocationCallOrder[0]).toBeLessThan(sendTurn.mock.invocationCallOrder[0]!);
+    expect((sendTurn.mock.calls[0][0] as TurnRequest).resumeFrom).toBeUndefined();
+    expect(service.runtimeAccess().runtimeSnapshots().find((snapshot) => snapshot.threadId === THREAD_ID)?.phase).toBe("running");
+  });
+
+  it("signals runtime release after the turn ends, early enough for a follow-up turn to admit", async () => {
+    const { service, sendTurn, providerEmitter } = buildService();
+    startAgentServiceIngressForTest(service);
+    let followUp: Promise<void> | undefined;
+    const onRuntimeReleased = vi.fn(() => {
+      followUp = Promise.resolve().then(() => service.sendMessage({ ...command, content: "follow up" }));
+    });
+
+    await service.sendMessage({ ...command, onRuntimeReleased });
+    expect(onRuntimeReleased).not.toHaveBeenCalled();
+    const executionId = (sendTurn.mock.calls[0][0] as TurnRequest).turnExecutionId;
+    providerEmitter.emit("event", { type: "turnComplete", threadId: THREAD_ID, turnExecutionId: executionId,
+      reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 });
+    providerEmitter.emit("event", { type: "ended", threadId: THREAD_ID, turnExecutionId: executionId });
+
+    await vi.waitFor(() => expect(onRuntimeReleased).toHaveBeenCalledTimes(1));
+    await followUp;
+    expect(sendTurn).toHaveBeenCalledTimes(2);
+    expect((sendTurn.mock.calls[1][0] as TurnRequest).turnExecutionId).not.toBe(executionId);
+  });
+});

@@ -414,6 +414,7 @@ describe("Provider conformance registry", () => {
       "child-cancellation",
       "turn-diff",
       "approval-review",
+      "session-resume",
     ]);
 
     expect([...new Set(fixtures.map((fixture) => fixture.providerId))].sort()).toEqual([

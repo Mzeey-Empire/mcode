@@ -210,6 +210,21 @@ export function useThreadStartupLookup({
   return { startup, resolving };
 }
 
+/**
+ * Loads each project's recent startup records once per connection, so sidebar rows show a
+ * startup stopped on setup before anyone opens the thread.
+ */
+export function useWorkspaceStartupRecovery(workspaceIds: readonly string[]): void {
+  const connected = useConnectionStore((state) => state.status === "connected");
+  const key = workspaceIds.join(" ");
+  useEffect(() => {
+    if (!connected || !key) return;
+    for (const workspaceId of key.split(" ")) {
+      void useThreadStartupStore.getState().recover({ workspaceId }).catch(() => undefined);
+    }
+  }, [connected, key]);
+}
+
 /** Reads one startup by its client identity or its bound durable thread. */
 export function useThreadStartup(input: {
   readonly startupId?: string;

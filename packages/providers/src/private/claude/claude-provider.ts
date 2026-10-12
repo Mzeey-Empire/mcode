@@ -9,6 +9,7 @@ import * as NodeEvents from "node:events";
 import { approvalReceipt } from "../../approvals/approval-receipt.js";
 import type { ApprovalOutcome, ApprovalChoice } from "@mcode/contracts";
 import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
+import { SessionResumeUnavailableError } from "../../provider-turn-error.js";
 import { claudeApprovalBody } from "./claude-approval.js";
 
 type ClaudeApprovalDecision = "allow" | "allow-session" | "deny" | "cancelled" | "auto-deny";
@@ -547,6 +548,8 @@ interface ClaudeSendMessageParams {
   model: string;
   fallbackModel?: string;
   resume: boolean;
+  /** The saved session must be resumed; a failed resume ends the turn instead of starting fresh. */
+  resumeRequired: boolean;
   permissionMode: string;
   attachments?: AttachmentMeta[];
   reasoningLevel?: ReasoningLevel;
@@ -630,7 +633,7 @@ export class ClaudeProvider
   readonly id = "claude" as const;
   readonly subagentReporting = SUBAGENT_REPORTING.claude;
   readonly descriptor = Object.freeze({ id: "claude" as const, capabilities: [
-    ...(["build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "clean-fork", "orchestration", "browser-access", "thread-control", "turn-steer"] as const).map((name) => ({ name, support: "supported" as const })),
+    ...(["build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "clean-fork", "orchestration", "browser-access", "thread-control", "turn-steer", "session-resume"] as const).map((name) => ({ name, support: "supported" as const })),
     { name: "provider-continuation" as const, support: "unsupported" as const },
     { name: "child-cancellation" as const, support: "unsupported" as const },
   ] });
@@ -797,6 +800,7 @@ export class ClaudeProvider
       model: req.model,
       fallbackModel: req.fallbackModel,
       resume: req.resumeFrom !== undefined,
+      resumeRequired: req.resumeRequired === true,
       permissionMode: req.permissionMode,
       attachments: req.attachments,
       reasoningLevel: req.reasoningLevel,
@@ -1842,12 +1846,41 @@ export class ClaudeProvider
       resumeWaiter.dispose();
     }
     if (!retry) return "ok";
+    this.sdkSessionIds.delete(context.params.sessionId);
+    await this.runtime.stop(context.params.sessionId);
+    if (context.params.resumeRequired) {
+      await this.failUnavailableClaudeResume(context);
+      return "stopped";
+    }
     logger.info("Resume failed, falling back to fresh query()", {
       sessionId: context.params.sessionId,
     });
-    this.sdkSessionIds.delete(context.params.sessionId);
-    await this.runtime.stop(context.params.sessionId);
+    this.publishTurnEvent(context.routing, context.params.sessionId, {
+      type: AgentEventType.System,
+      threadId: context.threadId,
+      subtype: "session_restarted",
+    } satisfies AgentEvent);
     return "retry";
+  }
+
+  /** Ends a resume-required turn whose saved conversation is gone, leaving recovery to the server. */
+  private async failUnavailableClaudeResume(context: ClaudeTurnContext): Promise<void> {
+    const error = new SessionResumeUnavailableError("Claude could not resume the saved conversation");
+    logger.warn("Required Claude resume failed; not starting a fresh session", {
+      sessionId: context.params.sessionId,
+    });
+    this.publishTurnEvent(context.routing, context.params.sessionId, {
+      type: AgentEventType.Error,
+      threadId: context.threadId,
+      error: error.message,
+      failure: error.failure,
+    } satisfies AgentEvent);
+    this.publishTurnEvent(context.routing, context.params.sessionId, {
+      type: AgentEventType.Ended,
+      threadId: context.threadId,
+      turnExecutionId: context.routing.executionId,
+    } satisfies AgentEvent);
+    await this.waitForCanonicalExecution(context.routing);
   }
 
   private async doSendMessage(
@@ -1903,7 +1936,7 @@ export class ClaudeProvider
     });
     if (reuseOutcome === "handled") return;
     if (reuseOutcome === "retry_fresh")
-      return await this.doSendMessage({ ...params, resume: false }, routing);
+      return await this.doSendMessage({ ...params, resume: params.resumeRequired && params.resume }, routing);
 
     const resumeId = this.sdkSessionIds.get(sessionId) ?? uuid;
     const baseOptions = await this.createClaudeBaseOptions(
@@ -2469,23 +2502,8 @@ export class ClaudeProvider
     sessionId: string,
     state: ClaudeStreamLoopState,
   ): void {
-    const threadId = sessionId.startsWith("mcode-")
-      ? sessionId.slice(6)
-      : sessionId;
-    logger.warn(
-      "Resume failed: conversation not found, will retry with fresh query()",
-      { sessionId },
-    );
+    logger.warn("Resume failed: conversation not found", { sessionId });
     this.sdkSessionIds.delete(sessionId);
-    this.publishTurnEvent(
-      state.currentRouting,
-      sessionId,
-      {
-        type: AgentEventType.System,
-        threadId,
-        subtype: "session_restarted",
-      } satisfies AgentEvent,
-    );
     this.emit(`_resumeFailed:${sessionId}`);
     state.suppressEnded = true;
   }

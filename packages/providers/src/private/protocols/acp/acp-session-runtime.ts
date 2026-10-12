@@ -7,6 +7,7 @@ import {
   type Client,
 } from "@agentclientprotocol/sdk";
 import type { ProviderProcessPort } from "../../../host-ports.js";
+import { SessionResumeUnavailableError } from "../../../provider-turn-error.js";
 import type {
   AcpClientFactory,
   AcpSessionCallbacks,
@@ -53,8 +54,11 @@ export type AcpSessionOperation = {
   sessionId: string;
 };
 
-/** Signals that a persisted ACP session could not be recovered without replacing it. */
-export class SessionRecoveryFailedError extends Error {
+/**
+ * Signals that a persisted ACP session could not be recovered without replacing it.
+ * It is a resume-unavailable failure, so the server can recover the turn from a seeded session.
+ */
+export class SessionRecoveryFailedError extends SessionResumeUnavailableError {
   constructor() {
     super("ACP session recovery failed");
     this.name = "SessionRecoveryFailedError";

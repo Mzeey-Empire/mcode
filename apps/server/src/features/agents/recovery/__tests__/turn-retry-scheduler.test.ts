@@ -286,10 +286,10 @@ describe("TurnRetryScheduler", () => {
   });
 
   it.each([
-    ["2026-10-11T12:00:00.000Z", "TURN_RETRY_SCHEDULE_INVALID_TIME"],
-    ["2026-10-10T12:00:00.000Z", "TURN_RETRY_SCHEDULE_INVALID_TIME"],
-    ["invalid", "TURN_RETRY_SCHEDULE_INVALID_TIME"],
-    ["2026-11-11T12:00:00.001Z", "TURN_RETRY_SCHEDULE_TOO_FAR"],
+    ["2026-10-11T12:00:00.000Z", "TURN_RECOVERY_SCHEDULE_INVALID_TIME"],
+    ["2026-10-10T12:00:00.000Z", "TURN_RECOVERY_SCHEDULE_INVALID_TIME"],
+    ["invalid", "TURN_RECOVERY_SCHEDULE_INVALID_TIME"],
+    ["2026-11-11T12:00:00.001Z", "TURN_RECOVERY_SCHEDULE_TOO_FAR"],
   ])("rejects deadline %s with %s", async (at, code) => {
     await expect(scheduler.schedule(input(at))).rejects.toMatchObject({ code });
     expect(store.listAll()).toEqual([]);
@@ -300,8 +300,8 @@ describe("TurnRetryScheduler", () => {
     const nextExecution = "00000000-0000-4000-8000-000000000016";
     startTurn("later-turn", nextExecution);
     finishTurn("later-turn", nextExecution, "completed");
-    await expect(scheduler.schedule(input())).rejects.toMatchObject({ code: "TURN_RETRY_NOT_LATEST" });
-    await expect(scheduler.schedule({ ...input(), turnId: "later-turn" })).rejects.toMatchObject({ code: "TURN_RETRY_NOT_ERRORED" });
+    await expect(scheduler.schedule(input())).rejects.toMatchObject({ code: "TURN_RECOVERY_NOT_LATEST" });
+    await expect(scheduler.schedule({ ...input(), turnId: "later-turn" })).rejects.toMatchObject({ code: "TURN_RECOVERY_NOT_ERRORED" });
     expect(store.listAll()).toEqual([]);
   });
 

@@ -22,7 +22,7 @@ import type { NarrativeStore } from "../conversation/narrative/narrative-store.j
 import type { MessageRepo } from "../conversation/persistence/message-repo.js";
 import type { HookExecutionRepo } from "../events/persistence/hook-execution-repo.js";
 import type { AgentService } from "../orchestration/agent-service.js";
-import { appendPreviewAnnotations, dispatchRetryTurn, sendAdmittedTurn } from "./turn-message-dispatch.js";
+import { appendPreviewAnnotations, sendAdmittedTurn, sendRecoveryAttempt } from "./turn-message-dispatch.js";
 import type { TurnRetryScheduler } from "../recovery/turn-retry-scheduler.js";
 import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 import type { AgentTurnContinuationPort } from "../orchestration/agent-runtime-internal-ports.js";
@@ -41,9 +41,8 @@ type AgentRpcMethod =
   | "agent.steer"
   | "agent.listHeldSteers"
   | "agent.settleUnknownSteer"
-  | "agent.recoveryIncident"
-  | "agent.retry"
   | "turn.retry"
+  | "turn.resume"
   | "turn.retry.schedule"
   | "turn.retry.unschedule"
   | "agent.continueWithoutSaving"
@@ -108,7 +107,7 @@ export interface AgentRouterDeps {
     "respondToApproval" | "listPendingApprovals"
   >;
   toolCallRecordRepo: Pick<ToolCallRecordRepo, "listByMessage" | "listByParent">;
-  turnRecoveryService: Pick<TurnRecoveryService, "currentRecoveryIncident" | "retry" | "retryTurn">;
+  turnRecoveryService: Pick<TurnRecoveryService, "retryErroredTurn" | "resumeTurn">;
   turnRetryScheduler: Pick<TurnRetryScheduler, "schedule" | "unschedule">;
   turnSteers?: Pick<TurnSteerService, "steer" | "listHeldSteers" | "settleUnknownSteer">;
 }
@@ -164,13 +163,10 @@ const agentHandlers: AgentRpcHandlerMap = {
   "agent.steer": (deps, params) => requireTurnSteers(deps).steer(params),
   "agent.listHeldSteers": (deps) => requireTurnSteers(deps).listHeldSteers(),
   "agent.settleUnknownSteer": (deps, params) => requireTurnSteers(deps).settleUnknownSteer(params),
-  "agent.recoveryIncident": (deps) => deps.turnRecoveryService.currentRecoveryIncident(),
-  "agent.retry": async (deps, params) => {
-    await deps.turnRecoveryService.retry(params.executionId, (command) =>
-      dispatchRetryTurn(deps.agentService, command));
-  },
-  "turn.retry": (deps, params) => deps.turnRecoveryService.retryTurn(params, (command) =>
-    dispatchRetryTurn(deps.agentService, command)),
+  "turn.retry": (deps, params) => deps.turnRecoveryService.retryErroredTurn(params, (command) =>
+    sendRecoveryAttempt(deps.agentService, command)),
+  "turn.resume": (deps, params) => deps.turnRecoveryService.resumeTurn(params, (command) =>
+    sendRecoveryAttempt(deps.agentService, command)),
   "turn.retry.schedule": (deps, params) => deps.turnRetryScheduler.schedule(params),
   "turn.retry.unschedule": (deps, params) => deps.turnRetryScheduler.unschedule(params.threadId),
   "agent.continueWithoutSaving": (deps, params) => {

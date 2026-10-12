@@ -4,7 +4,7 @@ import { broadcast } from "../../../application/transport/push.js";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { TurnRetryScheduleStore } from "../recovery/turn-retry-schedule-store.js";
 import { TurnRetryScheduler } from "../recovery/turn-retry-scheduler.js";
-import { dispatchRetryTurn } from "../transport/turn-message-dispatch.js";
+import { sendRecoveryAttempt } from "../transport/turn-message-dispatch.js";
 
 import {
   ApprovalService,
@@ -175,7 +175,7 @@ export function registerAgentServices(container: DependencyContainer): void {
   container.register(TurnRetryScheduler, {
     useFactory: instanceCachingFactory((c) => new TurnRetryScheduler(
       c.resolve(TurnRetryScheduleStore), c.resolve(TurnRecoveryService),
-      (command) => dispatchRetryTurn(c.resolve(AgentService), command),
+      (command) => sendRecoveryAttempt(c.resolve(AgentService), command),
       (event) => broadcast("thread.retryScheduled", event),
     )),
   });
