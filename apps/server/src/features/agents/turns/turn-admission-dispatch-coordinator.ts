@@ -49,7 +49,7 @@ import {
   type GoalCommandEffectReceipt,
 } from "../goals/goal-lifecycle-service.js";
 import { PlanTurnService } from "../planning/plan-turn-service.js";
-import type { TurnRetryScheduler } from "../recovery/turn-retry-scheduler.js";
+import type { TurnResumeScheduler } from "../recovery/turn-resume-scheduler.js";
 import {
   type ParentTurnDurability,
 } from "./parent-turn-durability.js";
@@ -219,7 +219,7 @@ export class TurnAdmissionDispatchCoordinator {
     private readonly files: FileService | undefined,
     private readonly platform: NodeJS.Platform,
     private readonly parentStartOwner?: TurnParentStartOwner,
-    private readonly retryScheduler?: Pick<TurnRetryScheduler, "unschedule">,
+    private readonly resumeScheduler?: Pick<TurnResumeScheduler, "unschedule">,
   ) {}
 
   /** Admit one command and return an immutable package for the runtime owner. */
@@ -228,14 +228,14 @@ export class TurnAdmissionDispatchCoordinator {
     runtime: TurnRuntimeAdmissionAuthority,
     canReserve?: () => boolean,
   ): Promise<TurnAdmissionResult> {
-    await this.retryScheduler?.unschedule(command.threadId);
+    await this.resumeScheduler?.unschedule(command.threadId);
     const release = command.stagedDraftImageIds?.length
       ? this.attachments.leaseDraftImages(command.threadId, command.stagedDraftImageIds)
       : undefined;
     try {
       const admitted = await this.admitLeased(command, runtime, canReserve);
       // A schedule can be requested while preparation awaits I/O and the old attempt is still latest.
-      await this.retryScheduler?.unschedule(command.threadId);
+      await this.resumeScheduler?.unschedule(command.threadId);
       command.onAdmissionComplete?.();
       return admitted;
     } finally {

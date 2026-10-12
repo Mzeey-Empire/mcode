@@ -55,7 +55,7 @@ function claudeThread(): AgentThread {
 }
 
 const FAILED = { outcome: "errored", failure: { kind: "fatal", provider: "codex", message: "boom" } } as const;
-const NO_SCHEDULE = { providerSignedOut: false, scheduledRetry: null, now: new Date(2026, 9, 11, 9, 0).getTime() };
+const NO_SCHEDULE = { providerSignedOut: false, scheduledResume: null, now: new Date(2026, 9, 11, 9, 0).getTime() };
 
 describe("projectTurnEndings", () => {
   it("shows a retried turn as its first prompt plus the latest attempt's work", () => {
@@ -176,8 +176,8 @@ describe("reuseTurnEndings", () => {
     const limited = { outcome: "errored", failure: { kind: "usage_limit", provider: "codex", message: "limit", resetsAt } } as const;
     const state = stateWith([turn("t1", 0, { status: "Errored", ending: limited })], [messageItem("u1", "t1", "user", 0)]);
     const primary = (turnId: string) => {
-      const scheduledRetry = { turnId, at: resetsAt };
-      const notice = projectTurnEndings(THREAD_ID, state, { ...NO_SCHEDULE, scheduledRetry }).endingsByMessageId.u1?.view.notice;
+      const scheduledResume = { turnId, at: resetsAt };
+      const notice = projectTurnEndings(THREAD_ID, state, { ...NO_SCHEDULE, scheduledResume }).endingsByMessageId.u1?.view.notice;
       return notice?.style === "filled" ? notice.primary : undefined;
     };
     expect(primary("t1")).toEqual({ action: "cancel_retry", label: "Cancel retry" });
@@ -200,6 +200,6 @@ describe("nextRetryAtLapse", () => {
     const resetsAt = new Date(2026, 9, 11, 14, 5).toISOString();
     const state = stateWith([turn("t1", 0, { status: "Errored", ending: limitedAt(resetsAt) })], [messageItem("u1", "t1", "user", 0)]);
 
-    expect(nextRetryAtLapse(projectTurnEndings(THREAD_ID, state, { ...NO_SCHEDULE, scheduledRetry: { turnId: "t1", at: resetsAt } }))).toBeNull();
+    expect(nextRetryAtLapse(projectTurnEndings(THREAD_ID, state, { ...NO_SCHEDULE, scheduledResume: { turnId: "t1", at: resetsAt } }))).toBeNull();
   });
 });

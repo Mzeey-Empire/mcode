@@ -23,7 +23,7 @@ import type { MessageRepo } from "../conversation/persistence/message-repo.js";
 import type { HookExecutionRepo } from "../events/persistence/hook-execution-repo.js";
 import type { AgentService } from "../orchestration/agent-service.js";
 import { appendPreviewAnnotations, sendAdmittedTurn, sendRecoveryAttempt } from "./turn-message-dispatch.js";
-import type { TurnRetryScheduler } from "../recovery/turn-retry-scheduler.js";
+import type { TurnResumeScheduler } from "../recovery/turn-resume-scheduler.js";
 import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 import type { AgentTurnContinuationPort } from "../orchestration/agent-runtime-internal-ports.js";
 import type { TaskRepo } from "../orchestration/persistence/task-repo.js";
@@ -43,8 +43,8 @@ type AgentRpcMethod =
   | "agent.settleUnknownSteer"
   | "turn.retry"
   | "turn.resume"
-  | "turn.retry.schedule"
-  | "turn.retry.unschedule"
+  | "turn.resume.schedule"
+  | "turn.resume.unschedule"
   | "agent.continueWithoutSaving"
   | "agent.createAndSend"
   | "agent.stop"
@@ -108,7 +108,7 @@ export interface AgentRouterDeps {
   >;
   toolCallRecordRepo: Pick<ToolCallRecordRepo, "listByMessage" | "listByParent">;
   turnRecoveryService: Pick<TurnRecoveryService, "retryErroredTurn" | "resumeTurn">;
-  turnRetryScheduler: Pick<TurnRetryScheduler, "schedule" | "unschedule">;
+  turnResumeScheduler: Pick<TurnResumeScheduler, "schedule" | "unschedule">;
   turnSteers?: Pick<TurnSteerService, "steer" | "listHeldSteers" | "settleUnknownSteer">;
 }
 
@@ -167,8 +167,8 @@ const agentHandlers: AgentRpcHandlerMap = {
     sendRecoveryAttempt(deps.agentService, command)),
   "turn.resume": (deps, params) => deps.turnRecoveryService.resumeTurn(params, (command) =>
     sendRecoveryAttempt(deps.agentService, command)),
-  "turn.retry.schedule": (deps, params) => deps.turnRetryScheduler.schedule(params),
-  "turn.retry.unschedule": (deps, params) => deps.turnRetryScheduler.unschedule(params.threadId),
+  "turn.resume.schedule": (deps, params) => deps.turnResumeScheduler.schedule(params),
+  "turn.resume.unschedule": (deps, params) => deps.turnResumeScheduler.unschedule(params.threadId),
   "agent.continueWithoutSaving": (deps, params) => {
     if (!deps.agentContinuation) throw new Error("Agent turn continuation is unavailable");
     deps.agentContinuation.continueWithoutSaving(params.executionId);

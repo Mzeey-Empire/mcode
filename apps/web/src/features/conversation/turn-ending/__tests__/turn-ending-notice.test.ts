@@ -12,7 +12,7 @@ function input(overrides: Partial<TurnEndingInput> = {}): TurnEndingInput {
     durationMs: 42_000,
     providerLabel: "Codex",
     providerSignedOut: false,
-    scheduledRetryAt: null,
+    scheduledResumeAt: null,
     now: new Date(2026, 9, 11, 9, 0).getTime(),
     isStartupTurn: false,
     isLatestTurn: true,
@@ -172,7 +172,7 @@ describe("turnEndingView: errored", () => {
   });
 
   it("offers Cancel retry while an automatic retry is scheduled", () => {
-    const view = turnEndingView(input({ scheduledRetryAt: localIso(9, 30), ending: errored({ kind: "usage_limit", resetsAt: localIso(14, 5) }) }));
+    const view = turnEndingView(input({ scheduledResumeAt: localIso(9, 30), ending: errored({ kind: "usage_limit", resetsAt: localIso(14, 5) }) }));
     expect(view.notice).toMatchObject({ detail: "Retrying at 09:30", primary: { action: "cancel_retry", label: "Cancel retry" } });
   });
 
@@ -187,7 +187,7 @@ describe("turnEndingView: errored", () => {
   it("offers Cancel retry beside Switch model while a schedule waits past its reset time", () => {
     const view = turnEndingView(input({
       now: new Date(2026, 9, 11, 14, 6).getTime(),
-      scheduledRetryAt: localIso(14, 5),
+      scheduledResumeAt: localIso(14, 5),
       ending: errored({ kind: "usage_limit", resetsAt: localIso(14, 5) }),
     }));
     expect(view.notice).toMatchObject({

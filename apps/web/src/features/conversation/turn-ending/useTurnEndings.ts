@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AgentModelState, ScheduledTurnRetry } from "@mcode/contracts";
+import type { AgentModelState, ScheduledTurnResume } from "@mcode/contracts";
 import { useProviderStatusStore } from "@/stores/providerStatusStore";
 import {
   nextRetryAtLapse,
@@ -19,7 +19,7 @@ const MAX_TIMEOUT_MS = 2_147_483_647;
 export function useTurnEndings(
   threadId: string | null | undefined,
   state: AgentModelState,
-  scheduledRetry: ScheduledTurnRetry | null,
+  scheduledResume: ScheduledTurnResume | null,
 ): TurnEndingsProjection {
   const providerId = threadId ? state.threads[threadId]?.providerId : undefined;
   const providerSignedOut = useProviderStatusStore((store) =>
@@ -32,12 +32,12 @@ export function useTurnEndings(
     if (!threadId) return NO_TURN_ENDINGS;
     const next = projectTurnEndings(threadId, state, {
       providerSignedOut,
-      scheduledRetry,
+      scheduledResume,
       now: Math.max(wokeAt, Date.now()),
     });
     previous.current = reuseTurnEndings(previous.current, next);
     return previous.current;
-  }, [threadId, state, providerSignedOut, scheduledRetry, wokeAt]);
+  }, [threadId, state, providerSignedOut, scheduledResume, wokeAt]);
   const lapseAt = nextRetryAtLapse(projection);
   useEffect(() => {
     if (lapseAt === null) return;

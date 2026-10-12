@@ -2,8 +2,8 @@ import { Lifecycle, instanceCachingFactory, type DependencyContainer } from "tsy
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import { broadcast } from "../../../application/transport/push.js";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
-import { TurnRetryScheduleStore } from "../recovery/turn-retry-schedule-store.js";
-import { TurnRetryScheduler } from "../recovery/turn-retry-scheduler.js";
+import { TurnResumeScheduleStore } from "../recovery/turn-resume-schedule-store.js";
+import { TurnResumeScheduler } from "../recovery/turn-resume-scheduler.js";
 import { sendRecoveryAttempt } from "../transport/turn-message-dispatch.js";
 
 import {
@@ -171,12 +171,12 @@ export function registerAgentServices(container: DependencyContainer): void {
     { useClass: TurnRecoveryService },
     { lifecycle: Lifecycle.Singleton },
   );
-  container.register(TurnRetryScheduleStore, { useClass: TurnRetryScheduleStore }, { lifecycle: Lifecycle.Singleton });
-  container.register(TurnRetryScheduler, {
-    useFactory: instanceCachingFactory((c) => new TurnRetryScheduler(
-      c.resolve(TurnRetryScheduleStore), c.resolve(TurnRecoveryService),
+  container.register(TurnResumeScheduleStore, { useClass: TurnResumeScheduleStore }, { lifecycle: Lifecycle.Singleton });
+  container.register(TurnResumeScheduler, {
+    useFactory: instanceCachingFactory((c) => new TurnResumeScheduler(
+      c.resolve(TurnResumeScheduleStore), c.resolve(TurnRecoveryService),
       (command) => sendRecoveryAttempt(c.resolve(AgentService), command),
-      (event) => broadcast("thread.retryScheduled", event),
+      (event) => broadcast("thread.resumeScheduled", event),
     )),
   });
   container.register(
@@ -286,7 +286,7 @@ export function registerAgentServices(container: DependencyContainer): void {
       c.resolve(FileService),
       c.resolve<HostRuntime>("HostRuntime").platform,
       c.resolve(WorkerOwnedTurnRuntime).owner,
-      c.resolve(TurnRetryScheduler),
+      c.resolve(TurnResumeScheduler),
     )),
   });
   container.register(TurnConversationProjectionService, { useClass: TurnConversationProjectionService }, { lifecycle: Lifecycle.Singleton });

@@ -111,7 +111,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     deleted_at: null,
     user_completed_at: null,
     scheduled_deletion_at: null,
-    scheduled_retry: null,
+    scheduled_resume: null,
     cleanup_state: null,
     cleanup_reason: null,
     last_context_tokens: null,
@@ -168,26 +168,26 @@ describe("ws-events thread.lifecycleChanged", () => {
   });
 });
 
-describe("ws-events thread.retryScheduled", () => {
+describe("ws-events thread.resumeScheduled", () => {
   beforeEach(() => {
     useWorkspaceStore.setState({ threads: [makeThread({ id: "thread-1" })] });
     startPushListeners();
   });
   afterEach(() => stopPushListeners());
 
-  const scheduledRetry = () => useWorkspaceStore.getState().threads[0]?.scheduled_retry;
+  const scheduledResume = () => useWorkspaceStore.getState().threads[0]?.scheduled_resume;
 
-  it("shows a retry another client scheduled and clears it when cancelled", () => {
-    pushEmitter.emit("thread.retryScheduled", { threadId: "thread-1", retry: { turnId: "turn-7", at: "2026-10-11T14:05:00.000Z" } });
-    expect(scheduledRetry()).toEqual({ turnId: "turn-7", at: "2026-10-11T14:05:00.000Z" });
+  it("shows a resume another client scheduled and clears it when cancelled", () => {
+    pushEmitter.emit("thread.resumeScheduled", { threadId: "thread-1", resume: { turnId: "turn-7", at: "2026-10-11T14:05:00.000Z" } });
+    expect(scheduledResume()).toEqual({ turnId: "turn-7", at: "2026-10-11T14:05:00.000Z" });
 
-    pushEmitter.emit("thread.retryScheduled", { threadId: "thread-1", retry: null });
-    expect(scheduledRetry()).toBeNull();
+    pushEmitter.emit("thread.resumeScheduled", { threadId: "thread-1", resume: null });
+    expect(scheduledResume()).toBeNull();
   });
 
   it("ignores a malformed schedule", () => {
-    pushEmitter.emit("thread.retryScheduled", { threadId: "thread-1", retry: { turnId: "turn-7", at: "soon" } });
-    expect(scheduledRetry()).toBeNull();
+    pushEmitter.emit("thread.resumeScheduled", { threadId: "thread-1", resume: { turnId: "turn-7", at: "soon" } });
+    expect(scheduledResume()).toBeNull();
   });
 });
 

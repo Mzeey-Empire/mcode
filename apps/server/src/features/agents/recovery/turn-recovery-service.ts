@@ -128,11 +128,6 @@ export class TurnRecoveryService {
     return { turnId };
   }
 
-  /** Check that the latest errored attempt can be retried, without consuming it. */
-  requireRetryableTurn(input: TurnRetryParams): RecoverableTurn {
-    return this.requireRecoverableTurn(input, "Errored");
-  }
-
   /**
    * Continue the latest interrupted turn as a new attempt, optionally on another model. The provider's own session
    * is tried first when it can be resumed; when the provider reports that session gone, a fresh session seeded with
@@ -303,7 +298,7 @@ export class TurnRecoveryService {
 
   private requireRecoveryInput(threadId: string, turnId: string): { thread: Thread; message: Message } {
     const thread = this.threadRepo.findById(threadId);
-    // A scheduled retry can outlive its thread, so a deleted thread is not recoverable.
+    // A scheduled resume can outlive its thread, so a deleted thread is not recoverable.
     if (!thread || thread.deleted_at !== null) throw new TurnRecoveryError("TURN_RECOVERY_NOT_FOUND", "Thread not found");
     const message = this.canonicalSink.loadUserMessage(turnId);
     if (!message) throw new TurnRecoveryError("TURN_RECOVERY_INPUT_MISSING", "Accepted turn input not found");

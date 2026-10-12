@@ -11,7 +11,7 @@ vi.mock("@/transport", async () => ({
 
 const retryErroredTurn = mockTransport.retryErroredTurn as ReturnType<typeof vi.fn>;
 
-const scheduledRetry = () => useWorkspaceStore.getState().threads.find((thread) => thread.id === "thread-1")?.scheduled_retry;
+const scheduledResume = () => useWorkspaceStore.getState().threads.find((thread) => thread.id === "thread-1")?.scheduled_resume;
 const NOW = new Date("2026-10-11T09:00:00.000Z");
 
 beforeEach(() => {
@@ -57,22 +57,22 @@ describe("useTurnRetry", () => {
   it("schedules a retry at the reset time and shows it on the thread", async () => {
     const { result } = renderHook(() => useTurnRetry("thread-1", "turn-7"));
     await act(async () => result.current.retryAt("2026-10-11T14:05:00.000Z"));
-    expect(mockTransport.scheduleTurnRetry).toHaveBeenCalledWith({ threadId: "thread-1", turnId: "turn-7", at: "2026-10-11T14:05:00.000Z" });
-    expect(scheduledRetry()).toEqual({ turnId: "turn-7", at: "2026-10-11T14:05:00.000Z" });
+    expect(mockTransport.scheduleTurnResume).toHaveBeenCalledWith({ threadId: "thread-1", turnId: "turn-7", at: "2026-10-11T14:05:00.000Z" });
+    expect(scheduledResume()).toEqual({ turnId: "turn-7", at: "2026-10-11T14:05:00.000Z" });
   });
 
   it("retries now when the reset time has already passed", async () => {
     const { result } = renderHook(() => useTurnRetry("thread-1", "turn-7"));
     await act(async () => result.current.retryAt("2026-10-11T08:59:00.000Z"));
-    expect(mockTransport.scheduleTurnRetry).not.toHaveBeenCalled();
+    expect(mockTransport.scheduleTurnResume).not.toHaveBeenCalled();
     expect(retryErroredTurn).toHaveBeenCalledWith({ threadId: "thread-1", turnId: "turn-7" });
   });
 
   it("cancels the scheduled retry and clears it from the thread", async () => {
-    useWorkspaceStore.getState().applyScheduledRetry("thread-1", { turnId: "turn-7", at: "2026-10-11T14:05:00.000Z" });
+    useWorkspaceStore.getState().applyScheduledResume("thread-1", { turnId: "turn-7", at: "2026-10-11T14:05:00.000Z" });
     const { result } = renderHook(() => useTurnRetry("thread-1", "turn-7"));
     await act(async () => result.current.cancelRetry());
-    expect(mockTransport.unscheduleTurnRetry).toHaveBeenCalledWith("thread-1");
-    expect(scheduledRetry()).toBeNull();
+    expect(mockTransport.unscheduleTurnResume).toHaveBeenCalledWith("thread-1");
+    expect(scheduledResume()).toBeNull();
   });
 });

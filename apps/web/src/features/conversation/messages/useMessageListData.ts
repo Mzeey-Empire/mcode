@@ -127,9 +127,9 @@ export function useMessageListData(displayThreadId: string | undefined) {
       renderedThreadId,
     ],
   );
-  const scheduledRetry = useWorkspaceStore((store) =>
-    store.threads.find((thread) => thread.id === renderedThreadId)?.scheduled_retry ?? null);
-  const turnEndings = useTurnEndings(renderedThreadId, canonicalAgentState, scheduledRetry);
+  const scheduledResume = useWorkspaceStore((store) =>
+    store.threads.find((thread) => thread.id === renderedThreadId)?.scheduled_resume ?? null);
+  const turnEndings = useTurnEndings(renderedThreadId, canonicalAgentState, scheduledResume);
   const legacyAgentDisplayState = useMemo(
     () => agentDisplayStateFromRuntimePhase(legacyRuntimePhase, legacyAgentError),
     [legacyAgentError, legacyRuntimePhase],

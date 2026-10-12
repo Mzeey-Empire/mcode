@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
-import { ScheduledTurnRetrySchema } from "./turn-recovery.js";
+import { ScheduledTurnResumeSchema } from "./turn-recovery.js";
 import { DevinModeSchema, ThreadStatusSchema, ThreadModeSchema, InteractionModeSchema, OrchestrationModeSchema, PermissionModeSchema } from "./enums.js";
 import { ContextWindowModeSchema, ReasoningLevelSchema } from "./settings.js";
 
@@ -45,8 +45,8 @@ export const ThreadSchema = lazySchema(() =>
   user_completed_at: z.string().nullable(),
   /** Server timestamp after which automatic deletion can begin. */
   scheduled_deletion_at: z.string().nullable(),
-  /** Explicit retry restored from the persisted thread schedule. */
-  scheduled_retry: ScheduledTurnRetrySchema().nullable(),
+  /** Explicit resume restored from the persisted thread schedule. */
+  scheduled_resume: ScheduledTurnResumeSchema().nullable(),
   /** Current automatic cleanup state, or null before cleanup becomes due. */
   cleanup_state: ThreadCleanupStateSchema.nullable(),
   /** Bounded user-safe reason when automatic cleanup needs attention. */

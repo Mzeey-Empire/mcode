@@ -153,8 +153,8 @@ export const threads = sqliteTable(
   ],
 );
 
-/** One user-authorized retry deadline per thread. */
-export const turnRetrySchedules = sqliteTable("turn_retry_schedules", {
+/** One user-authorized resume deadline per thread. */
+export const turnResumeSchedules = sqliteTable("turn_resume_schedules", {
   threadId: text("thread_id").primaryKey().notNull().references(() => threads.id, { onDelete: "cascade" }),
   turnId: text("turn_id").notNull(),
   executionId: text("execution_id").notNull(),

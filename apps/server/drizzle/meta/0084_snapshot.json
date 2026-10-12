@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7c49770e-0be2-4ccc-b69f-bed8d8b49bc4",
+  "id": "95fa8141-6383-47f8-87e8-f3c25f8063f2",
   "prevId": "a11511ef-af45-4cab-aa1f-235eb03c6f5e",
   "tables": {
     "approval_receipts": {
@@ -4659,8 +4659,8 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "turn_retry_schedules": {
-      "name": "turn_retry_schedules",
+    "turn_resume_schedules": {
+      "name": "turn_resume_schedules",
       "columns": {
         "thread_id": {
           "name": "thread_id",
@@ -4700,9 +4700,9 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "turn_retry_schedules_thread_id_threads_id_fk": {
-          "name": "turn_retry_schedules_thread_id_threads_id_fk",
-          "tableFrom": "turn_retry_schedules",
+        "turn_resume_schedules_thread_id_threads_id_fk": {
+          "name": "turn_resume_schedules_thread_id_threads_id_fk",
+          "tableFrom": "turn_resume_schedules",
           "tableTo": "threads",
           "columnsFrom": [
             "thread_id"

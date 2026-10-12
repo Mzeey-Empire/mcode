@@ -1,4 +1,4 @@
-import { ProviderIdSchema, type AgentItem, type AgentModelState, type AgentTurn, type Message, type ProviderId, type ScheduledTurnRetry, type TurnOutcome } from "@mcode/contracts";
+import { ProviderIdSchema, type AgentItem, type AgentModelState, type AgentTurn, type Message, type ProviderId, type ScheduledTurnResume, type TurnOutcome } from "@mcode/contracts";
 import { MODEL_PROVIDERS } from "@/lib/model-registry";
 import { sameTurnEndNotice, turnEndingView, type TurnEndingView } from "./turn-ending-notice";
 
@@ -28,7 +28,7 @@ export interface TurnEndingsContext {
   /** The thread provider's live sign-in condition, which picks an auth failure's primary action. */
   providerSignedOut: boolean;
   /** The thread's pending retry; only the attempt it names shows it. */
-  scheduledRetry: ScheduledTurnRetry | null;
+  scheduledResume: ScheduledTurnResume | null;
   /** Epoch ms used to decide whether a usage limit has already reset. */
   now: number;
 }
@@ -60,7 +60,7 @@ export function projectTurnEndings(threadId: string, state: AgentModelState, con
         durationMs: turnDurationMs(latest),
         providerLabel,
         providerSignedOut: context.providerSignedOut,
-        scheduledRetryAt: context.scheduledRetry?.turnId === latest.id ? context.scheduledRetry.at : null,
+        scheduledResumeAt: context.scheduledResume?.turnId === latest.id ? context.scheduledResume.at : null,
         now: context.now,
         // The startup trail owns only the thread's first attempt; a retry of it gets an ordinary notice.
         isStartupTurn: index === 0 && latest === first,

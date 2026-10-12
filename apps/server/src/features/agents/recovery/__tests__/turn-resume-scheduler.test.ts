@@ -5,7 +5,7 @@ import * as NodeEvents from "node:events";
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logger } from "@mcode/shared";
-import type { IAgentProvider, IProviderRegistry, ScheduledTurnRetry } from "@mcode/contracts";
+import type { IAgentProvider, IProviderRegistry, ScheduledTurnResume } from "@mcode/contracts";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
@@ -36,16 +36,17 @@ import { AttachmentService } from "../../../attachments/storage/attachment-servi
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { TurnAdmissionDispatchCoordinator, type SendMessageCommand, type TurnRuntimeAdmissionAuthority } from "../../turns/turn-admission-dispatch-coordinator.js";
 import { TurnRecoveryService } from "../turn-recovery-service.js";
-import { TurnRetryScheduleStore } from "../turn-retry-schedule-store.js";
-import { TurnRetryScheduler, type TurnRetrySchedulerClock } from "../turn-retry-scheduler.js";
+import { TurnResumeScheduleStore } from "../turn-resume-schedule-store.js";
+import { TurnResumeScheduler, type TurnResumeSchedulerClock } from "../turn-resume-scheduler.js";
+import { RESUME_CONTINUATION_PROMPT } from "../turn-resume.js";
 
 const NOW = "2026-10-11T12:00:00.000Z";
 const THREAD_ID = "scheduled-thread";
-const TURN_ID = "failed-turn";
+const TURN_ID = "limited-turn";
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000015";
 const DAY_MS = 86_400_000;
 
-class FakeClock implements TurnRetrySchedulerClock {
+class FakeClock implements TurnResumeSchedulerClock {
   time = Date.parse(NOW);
   private nextId = 1;
   readonly timers = new Map<number, { at: number; callback: () => Promise<void> }>();
@@ -55,7 +56,7 @@ class FakeClock implements TurnRetrySchedulerClock {
     this.timers.set(id, { at: this.time + delay, callback });
     return id;
   }
-  clearTimeout(id: ReturnType<TurnRetrySchedulerClock["setTimeout"]>): void {
+  clearTimeout(id: ReturnType<TurnResumeSchedulerClock["setTimeout"]>): void {
     if (typeof id !== "number") throw new Error("Unexpected native timer in fake clock");
     this.timers.delete(id);
   }
@@ -72,29 +73,37 @@ class FakeClock implements TurnRetrySchedulerClock {
   }
 }
 
-describe("TurnRetryScheduler", () => {
+describe("TurnResumeScheduler", () => {
   let db: Database;
   let sink: CanonicalAgentStore;
   let boundary: CanonicalAgentBoundary;
   let threads: ThreadRepo;
-  let store: TurnRetryScheduleStore;
+  let store: TurnResumeScheduleStore;
   let recovery: TurnRecoveryService;
-  let scheduler: TurnRetryScheduler;
+  let scheduler: TurnResumeScheduler;
   let clock: FakeClock;
   let messages: MessageStore;
-  let published: Array<{ threadId: string; retry: ScheduledTurnRetry | null }>;
+  let published: Array<{ threadId: string; resume: ScheduledTurnResume | null }>;
   let dispatch: ReturnType<typeof vi.fn<(command: SendMessageCommand) => Promise<void>>>;
   let firedAt: number[];
 
   function startTurn(turnId: string, executionId: string): void {
-    sink.startParentTurn({ thread: { id: THREAD_ID, workspaceId: "workspace-retry", providerId: "codex", createdAt: NOW },
+    sink.startParentTurn({ thread: { id: THREAD_ID, workspaceId: "workspace-resume", providerId: "codex", createdAt: NOW },
       turnId, executionId, permissionMode: "supervised", providerIdentities: [],
       projectUserMessage: () => messages.create(THREAD_ID, "user", "Finish the task", 1) });
   }
 
-  function finishTurn(turnId = TURN_ID, executionId = EXECUTION_ID, outcome: "errored" | "completed" = "errored"): void {
+  function limitTurn(turnId = TURN_ID, executionId = EXECUTION_ID): void {
     sink.finishParentTurn({ threadId: THREAD_ID, turnId, executionId, providerId: "codex", providerIdentities: [],
-      outcome, projectTurn: () => ({ message: null, narrative: [] }) });
+      outcome: "interrupted", error: "Usage limit reached",
+      ending: { cause: "usage_limit", usageLimit: { resetsAt: "2026-10-11T12:01:00.000Z", limitType: "five_hour" } },
+      projectTurn: () => ({ message: null, narrative: [] }) });
+  }
+
+  function finishTurn(turnId: string, executionId: string, outcome: "errored" | "completed" | "interrupted"): void {
+    sink.finishParentTurn({ threadId: THREAD_ID, turnId, executionId, providerId: "codex", providerIdentities: [],
+      outcome, ...(outcome === "interrupted" ? { ending: { cause: "app_closed" as const } } : {}),
+      projectTurn: () => ({ message: null, narrative: [] }) });
   }
 
   const input = (at = "2026-10-11T12:01:00.000Z") => ({ threadId: THREAD_ID, turnId: TURN_ID, at });
@@ -105,32 +114,35 @@ describe("TurnRetryScheduler", () => {
     await writer.whenReady();
     vi.stubEnv("MCODE_DATA_DIR", NodePath.dirname(db.filename));
     db.prepare("INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
-      .run("workspace-retry", "Retry fixture", NodePath.dirname(db.filename), NOW, NOW);
+      .run("workspace-resume", "Resume fixture", NodePath.dirname(db.filename), NOW, NOW);
     db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(THREAD_ID, "workspace-retry", "Scheduled retry", "main", "codex", "errored", NOW, NOW);
+      .run(THREAD_ID, "workspace-resume", "Scheduled resume", "main", "codex", "interrupted", NOW, NOW);
     sink = new CanonicalAgentStore(db, () => {});
     boundary = new CanonicalAgentBoundary(db, writer, new CanonicalAgentWriterClient(writer), () => {});
     threads = new ThreadRepo(db, writer);
-    store = new TurnRetryScheduleStore(db, writer);
+    store = new TurnResumeScheduleStore(db, writer);
     messages = new MessageStore(db);
+    // Without a resumable provider session the resume seeds a fresh one, so admission settles without a live provider.
+    const provider = { descriptor: { capabilities: [{ name: "session-resume", support: "unsupported" as const }] } };
     recovery = new TurnRecoveryService(boundary, threads, new AttachmentService(),
-      new ParentAssistantTextCheckpointService(db, writer), new ThreadStartupRepo(db, writer));
+      new ParentAssistantTextCheckpointService(db, writer), new ThreadStartupRepo(db, writer), new MessageRepo(db, writer),
+      { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} });
     startTurn(TURN_ID, EXECUTION_ID);
-    finishTurn();
+    limitTurn();
     clock = new FakeClock();
     published = [];
     firedAt = [];
     dispatch = vi.fn(async (command) => {
       firedAt.push(clock.now());
       expect(store.get(THREAD_ID)).toBeNull();
-      expect(published.at(-1)).toEqual({ threadId: THREAD_ID, retry: null });
+      expect(published.at(-1)).toEqual({ threadId: THREAD_ID, resume: null });
       await scheduler.unschedule(command.threadId);
-      if (!command.sourceTurnId) throw new Error("Retry requires an attempt identity");
-      await boundary.startParentTurn({ thread: { id: THREAD_ID, workspaceId: "workspace-retry", providerId: "codex", createdAt: NOW },
+      if (!command.sourceTurnId) throw new Error("Resume requires an attempt identity");
+      await boundary.startParentTurn({ thread: { id: THREAD_ID, workspaceId: "workspace-resume", providerId: "codex", createdAt: NOW },
         turnId: command.sourceTurnId, executionId: NodeCrypto.randomUUID(), permissionMode: "supervised", providerIdentities: [],
         retryOfExecutionId: command.retryOfExecutionId, userMessage: { kind: "create", content: command.content, sequence: 2 } });
     });
-    scheduler = new TurnRetryScheduler(store, recovery, dispatch, (event) => published.push(event), clock);
+    scheduler = new TurnResumeScheduler(store, recovery, dispatch, (event) => published.push(event), clock);
   });
 
   afterEach(async () => {
@@ -141,26 +153,29 @@ describe("TurnRetryScheduler", () => {
   });
 
   it("persists the notice on every thread read and fires at the requested deadline", async () => {
-    const retry = { turnId: TURN_ID, at: "2026-10-11T12:01:00.000Z" };
-    expect(await scheduler.schedule(input())).toEqual(retry);
+    const resume = { turnId: TURN_ID, at: "2026-10-11T12:01:00.000Z" };
+    expect(await scheduler.schedule(input())).toEqual(resume);
     expect(store.listAll()).toEqual([{ threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
       runAt: "2026-10-11T12:01:00.000Z", createdAt: NOW }]);
-    expect(threads.findById(THREAD_ID)?.scheduled_retry).toEqual(retry);
-    expect(threads.listByWorkspace("workspace-retry")[0]?.scheduled_retry).toEqual(retry);
-    expect(threads.listRecent()[0]?.scheduled_retry).toEqual(retry);
-    expect(threads.search({ query: "Scheduled" }).threads[0]?.scheduled_retry).toEqual(retry);
-    expect(threads.listAllByWorkspace("workspace-retry")[0]?.scheduled_retry).toEqual(retry);
-    expect(published).toEqual([{ threadId: THREAD_ID, retry }]);
+    expect(threads.findById(THREAD_ID)?.scheduled_resume).toEqual(resume);
+    expect(threads.listByWorkspace("workspace-resume")[0]?.scheduled_resume).toEqual(resume);
+    expect(threads.listRecent()[0]?.scheduled_resume).toEqual(resume);
+    expect(threads.search({ query: "Scheduled" }).threads[0]?.scheduled_resume).toEqual(resume);
+    expect(threads.listAllByWorkspace("workspace-resume")[0]?.scheduled_resume).toEqual(resume);
+    expect(published).toEqual([{ threadId: THREAD_ID, resume }]);
     await clock.advance(59_999);
     expect(dispatch).toHaveBeenCalledTimes(0);
     await clock.advance(1);
     expect(firedAt).toEqual([Date.parse("2026-10-11T12:01:00.000Z")]);
     expect(dispatch).toHaveBeenCalledTimes(1);
-    expect(dispatch.mock.calls[0]?.[0]).toMatchObject({ content: "Finish the task", retryOfExecutionId: EXECUTION_ID });
-    expect(threads.findById(THREAD_ID)?.scheduled_retry).toBeNull();
+    const command = dispatch.mock.calls[0]?.[0];
+    expect(command).toMatchObject({ content: RESUME_CONTINUATION_PROMPT, internalUserMessage: true, forceFreshSession: true,
+      retryOfExecutionId: EXECUTION_ID });
+    expect(command?.providerWireOverride).toContain("Finish the task");
+    expect(threads.findById(THREAD_ID)?.scheduled_resume).toBeNull();
   });
 
-  it("does not write or publish when no retry is scheduled", async () => {
+  it("does not write or publish when no resume is scheduled", async () => {
     const writer = vi.spyOn(agentStorageTestWriter(db), "execute");
     await scheduler.unschedule(THREAD_ID);
     expect(writer).not.toHaveBeenCalled();
@@ -168,35 +183,35 @@ describe("TurnRetryScheduler", () => {
   });
 
   it("loads scheduled and unscheduled threads together in one query per list", async () => {
-    const second = await threads.create("workspace-retry", "Second", "worktree", "second");
-    const unscheduled = await threads.create("workspace-retry", "Unscheduled", "worktree", "third");
+    const second = await threads.create("workspace-resume", "Second", "worktree", "second");
+    const unscheduled = await threads.create("workspace-resume", "Unscheduled", "worktree", "third");
     db.prepare("UPDATE threads SET worktree_path = ?").run(NodePath.dirname(db.filename));
-    const retry = await scheduler.schedule(input());
-    const secondRetry = { turnId: "second-turn", at: "2026-10-11T12:02:00.000Z" };
-    await store.upsert({ threadId: second.id, turnId: secondRetry.turnId, executionId: EXECUTION_ID,
-      runAt: secondRetry.at, createdAt: NOW });
+    const resume = await scheduler.schedule(input());
+    const secondResume = { turnId: "second-turn", at: "2026-10-11T12:02:00.000Z" };
+    await store.upsert({ threadId: second.id, turnId: secondResume.turnId, executionId: EXECUTION_ID,
+      runAt: secondResume.at, createdAt: NOW });
     const prepare = vi.spyOn(db, "prepare");
     const reads = [
-      () => threads.listByWorkspace("workspace-retry"),
+      () => threads.listByWorkspace("workspace-resume"),
       () => threads.listRecent(),
       () => threads.search({ query: "" }).threads,
-      () => threads.listAllByWorkspace("workspace-retry"),
-      () => threads.findWorktreeThreadsByWorkspace("workspace-retry"),
+      () => threads.listAllByWorkspace("workspace-resume"),
+      () => threads.findWorktreeThreadsByWorkspace("workspace-resume"),
     ];
     for (const read of reads) {
       prepare.mockClear();
-      expect(Object.fromEntries(read().map((thread) => [thread.id, thread.scheduled_retry])))
-        .toEqual({ [THREAD_ID]: retry, [second.id]: secondRetry, [unscheduled.id]: null });
+      expect(Object.fromEntries(read().map((thread) => [thread.id, thread.scheduled_resume])))
+        .toEqual({ [THREAD_ID]: resume, [second.id]: secondResume, [unscheduled.id]: null });
       expect(prepare).toHaveBeenCalledTimes(1);
     }
   });
 
-  it("cancels a stored retry even when no timer is armed", async () => {
+  it("cancels a stored resume even when no timer is armed", async () => {
     await scheduler.schedule(input());
     await scheduler.shutdown();
     await scheduler.unschedule(THREAD_ID);
     expect(store.get(THREAD_ID)).toBeNull();
-    expect(published.at(-1)).toEqual({ threadId: THREAD_ID, retry: null });
+    expect(published.at(-1)).toEqual({ threadId: THREAD_ID, resume: null });
   });
 
   it("cancels durably, publishes null and remains idempotent", async () => {
@@ -205,7 +220,7 @@ describe("TurnRetryScheduler", () => {
     await scheduler.unschedule(THREAD_ID);
     expect(store.listAll()).toEqual([]);
     expect(clock.timers.size).toBe(0);
-    expect(published.slice(1)).toEqual([{ threadId: THREAD_ID, retry: null }]);
+    expect(published.slice(1)).toEqual([{ threadId: THREAD_ID, resume: null }]);
     await clock.advance(120_000);
     expect(dispatch).toHaveBeenCalledTimes(0);
   });
@@ -244,7 +259,7 @@ describe("TurnRetryScheduler", () => {
       expect(admitted.kind).toBe("dispatch");
       expect(store.listAll()).toEqual([]);
       expect(clock.timers.size).toBe(0);
-      expect(published.at(-1)).toEqual({ threadId: THREAD_ID, retry: null });
+      expect(published.at(-1)).toEqual({ threadId: THREAD_ID, resume: null });
       await clock.advance(60_000);
       expect(dispatch).toHaveBeenCalledTimes(0);
     } finally { settings.dispose(); }
@@ -269,14 +284,14 @@ describe("TurnRetryScheduler", () => {
     await scheduler.start();
     expect(store.get(THREAD_ID)).toBeNull();
     expect(dispatch).toHaveBeenCalledTimes(minutes <= 15 ? 1 : 0);
-    expect(threads.findById(THREAD_ID)?.scheduled_retry).toBeNull();
+    expect(threads.findById(THREAD_ID)?.scheduled_resume).toBeNull();
   });
 
   it("restores future rows at boot and chunks a 31-day timer without firing early", async () => {
     await scheduler.schedule(input("2026-11-11T12:00:00.000Z"));
     await scheduler.shutdown();
     expect(clock.timers.size).toBe(0);
-    scheduler = new TurnRetryScheduler(store, recovery, dispatch, (event) => published.push(event), clock);
+    scheduler = new TurnResumeScheduler(store, recovery, dispatch, (event) => published.push(event), clock);
     await scheduler.start();
     expect([...clock.timers.values()].map((timer) => timer.at - clock.now())).toEqual([2_147_483_647]);
     await clock.advance(30 * DAY_MS);
@@ -296,13 +311,40 @@ describe("TurnRetryScheduler", () => {
     expect(published).toEqual([]);
   });
 
-  it("rejects a non-latest and a non-errored attempt using recovery eligibility", async () => {
+  it("rejects a non-latest attempt using recovery eligibility", async () => {
     const nextExecution = "00000000-0000-4000-8000-000000000016";
     startTurn("later-turn", nextExecution);
     finishTurn("later-turn", nextExecution, "completed");
     await expect(scheduler.schedule(input())).rejects.toMatchObject({ code: "TURN_RECOVERY_NOT_LATEST" });
-    await expect(scheduler.schedule({ ...input(), turnId: "later-turn" })).rejects.toMatchObject({ code: "TURN_RECOVERY_NOT_ERRORED" });
     expect(store.listAll()).toEqual([]);
+    expect(published).toEqual([]);
+  });
+
+  it.each([
+    ["completed", "TURN_RECOVERY_NOT_INTERRUPTED"],
+    ["errored", "TURN_RECOVERY_NOT_INTERRUPTED"],
+    ["interrupted", "TURN_RECOVERY_NOT_USAGE_LIMITED"],
+  ] as const)("refuses to schedule a %s turn that no usage limit stopped", async (outcome, code) => {
+    const nextExecution = "00000000-0000-4000-8000-000000000016";
+    startTurn("later-turn", nextExecution);
+    finishTurn("later-turn", nextExecution, outcome);
+    await expect(scheduler.schedule({ ...input(), turnId: "later-turn" })).rejects.toMatchObject({ code });
+    expect(store.listAll()).toEqual([]);
+    expect(published).toEqual([]);
+  });
+
+  it("drops a restored row whose turn is no longer a usage-limit interruption", async () => {
+    const errorLog = vi.spyOn(logger, "error").mockImplementation(() => logger);
+    const nextExecution = "00000000-0000-4000-8000-000000000016";
+    startTurn("later-turn", nextExecution);
+    finishTurn("later-turn", nextExecution, "interrupted");
+    await store.upsert({ threadId: THREAD_ID, turnId: "later-turn", executionId: nextExecution,
+      runAt: NOW, createdAt: "2026-10-11T11:00:00.000Z" });
+    await scheduler.start();
+    expect(store.listAll()).toEqual([]);
+    expect(dispatch).toHaveBeenCalledTimes(0);
+    expect(errorLog).toHaveBeenCalledWith("Scheduled turn resume failed",
+      { threadId: THREAD_ID, error: "Only usage-limited turns can be scheduled to resume" });
   });
 
   it.each(["soft", "hard"])("removes a schedule with %s thread deletion and never dispatches it", async (mode) => {
@@ -315,7 +357,7 @@ describe("TurnRetryScheduler", () => {
     expect(clock.timers.size).toBe(0);
   });
 
-  it.each([false, true])("disarms retries through thread deletion, including rescheduling during teardown: %s", async (reschedule) => {
+  it.each([false, true])("disarms resumes through thread deletion, including rescheduling during teardown: %s", async (reschedule) => {
     await scheduler.schedule(input());
     const writer = agentStorageTestWriter(db);
     const workspaces = new WorkspaceRepo(db, writer);
@@ -344,7 +386,7 @@ describe("TurnRetryScheduler", () => {
     await scheduling;
     expect(store.listAll()).toEqual([]);
     expect(clock.timers.size).toBe(0);
-    expect(published).toEqual([{ threadId: THREAD_ID, retry: null }]);
+    expect(published).toEqual([{ threadId: THREAD_ID, resume: null }]);
   });
 
   it("lets cancellation win while a due callback waits for the writer", async () => {
@@ -356,14 +398,14 @@ describe("TurnRetryScheduler", () => {
     expect(store.listAll()).toEqual([]);
   });
 
-  it("logs retry dispatch failure after clearing the notice and preserves the failed attempt", async () => {
+  it("logs resume dispatch failure after clearing the notice and preserves the interrupted attempt", async () => {
     const errorLog = vi.spyOn(logger, "error").mockImplementation(() => logger);
     dispatch.mockRejectedValueOnce(new Error("Provider unavailable"));
     await scheduler.schedule(input());
     await clock.advance(60_000);
     expect(store.listAll()).toEqual([]);
-    expect(sink.loadTurn(TURN_ID)?.status).toBe("Errored");
-    expect(published.at(-1)).toEqual({ threadId: THREAD_ID, retry: null });
-    expect(errorLog).toHaveBeenCalledWith("Scheduled turn retry failed", { threadId: THREAD_ID, error: "Provider unavailable" });
+    expect(sink.loadTurn(TURN_ID)?.status).toBe("Interrupted");
+    expect(published.at(-1)).toEqual({ threadId: THREAD_ID, resume: null });
+    expect(errorLog).toHaveBeenCalledWith("Scheduled turn resume failed", { threadId: THREAD_ID, error: "Provider unavailable" });
   });
 });

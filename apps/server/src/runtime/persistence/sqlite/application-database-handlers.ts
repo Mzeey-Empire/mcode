@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { turnRetryScheduleWriteHandlers } from "../../../features/agents/recovery/turn-retry-schedule-store.js";
+import { turnResumeScheduleWriteHandlers } from "../../../features/agents/recovery/turn-resume-schedule-store.js";
 import { WorkspaceStore } from "../../../features/projects/persistence/workspace-store.js";
 import { projectLifecycleWriteHandlers } from "../../../features/projects/lifecycle/project-lifecycle-write-operations.js";
 import { workspaceWriteOperations } from "../../../features/projects/persistence/workspace-write-operations.js";
@@ -39,7 +39,7 @@ export function applicationDatabaseHandlers(db: Database): ReadonlyMap<string, (
   const workspace = new WorkspaceStore(db);
   const operations = workspaceWriteOperations;
   return new Map([
-    ...turnRetryScheduleWriteHandlers(db),
+    ...turnResumeScheduleWriteHandlers(db),
     ...sqliteMaintenanceWriteHandlers(db),
     ...agentStorageWriteHandlers(db),
     ...projectLifecycleWriteHandlers(db),

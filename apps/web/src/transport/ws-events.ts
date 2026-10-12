@@ -271,10 +271,10 @@ export function startPushListeners(): void {
   );
 
   unsubs.push(
-    pushEmitter.on("thread.retryScheduled", (data) => {
-      const parsed = WS_CHANNELS["thread.retryScheduled"].safeParse(data);
+    pushEmitter.on("thread.resumeScheduled", (data) => {
+      const parsed = WS_CHANNELS["thread.resumeScheduled"].safeParse(data);
       if (!parsed.success) return;
-      useWorkspaceStore.getState().applyScheduledRetry(parsed.data.threadId, parsed.data.retry);
+      useWorkspaceStore.getState().applyScheduledResume(parsed.data.threadId, parsed.data.resume);
     }),
   );
 

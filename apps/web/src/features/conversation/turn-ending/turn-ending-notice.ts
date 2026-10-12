@@ -12,7 +12,7 @@ export interface TurnEndingInput {
   /** True while the provider status reports the user signed out. */
   providerSignedOut: boolean;
   /** ISO time of the user's scheduled retry of this turn, or null. */
-  scheduledRetryAt: string | null;
+  scheduledResumeAt: string | null;
   /** Epoch ms the table reads time against; a reset already past offers plain Retry. */
   now: number;
   /** The thread's first turn, whose pre-frame ending the startup trail owns. */
@@ -183,8 +183,8 @@ function usageLimitNotice(failure: PersistedTurnFailure, input: TurnEndingInput)
     title: `${input.providerLabel} usage limit reached`,
     secondary: { action: "switch_model", label: "Switch model" },
   } as const;
-  if (input.scheduledRetryAt) {
-    return { ...base, detail: `Retrying at ${clockTime(input.scheduledRetryAt)}`, primary: { action: "cancel_retry", label: "Cancel retry" } };
+  if (input.scheduledResumeAt) {
+    return { ...base, detail: `Retrying at ${clockTime(input.scheduledResumeAt)}`, primary: { action: "cancel_retry", label: "Cancel retry" } };
   }
   if (failure.resetsAt && Date.parse(failure.resetsAt) > input.now) {
     const resetsAt = clockTime(failure.resetsAt);

@@ -102,13 +102,13 @@ import { TurnRevertScopeSchema, TurnRevertPreviewSchema, TurnRevertResultSchema 
 import { AgentStopResultSchema, TurnRuntimeSnapshotSchema } from "../models/turn-runtime.js";
 import { CanonicalSubagentStopRequestSchema, CanonicalSubagentStopResultSchema } from "../models/canonical-subagent-roster.js";
 import {
-  ScheduledTurnRetrySchema,
+  ScheduledTurnResumeSchema,
   TurnResumeParamsSchema,
   TurnResumeResultSchema,
   TurnRetryParamsSchema,
   TurnRetryResultSchema,
-  TurnRetryScheduleParamsSchema,
-  TurnRetryUnscheduleParamsSchema,
+  TurnResumeScheduleParamsSchema,
+  TurnResumeUnscheduleParamsSchema,
 } from "../models/turn-recovery.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
 import { PlanSaveVersionSchema, PlanVersionSchema, PlanActionSchema } from "../models/plan.js";
@@ -1080,12 +1080,12 @@ export const WS_METHODS = lazySchema(() => ({
     params: TurnRetryParamsSchema(),
     result: TurnRetryResultSchema(),
   },
-  "turn.retry.schedule": {
-    params: TurnRetryScheduleParamsSchema(),
-    result: ScheduledTurnRetrySchema(),
+  "turn.resume.schedule": {
+    params: TurnResumeScheduleParamsSchema(),
+    result: ScheduledTurnResumeSchema(),
   },
-  "turn.retry.unschedule": {
-    params: TurnRetryUnscheduleParamsSchema(),
+  "turn.resume.unschedule": {
+    params: TurnResumeUnscheduleParamsSchema(),
     result: z.void(),
   },
   /** Resume an interrupted attempt, natively when possible, otherwise from a seeded session. */

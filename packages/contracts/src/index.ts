@@ -305,10 +305,10 @@ export {
   TurnResumeResultSchema,
   TurnRetryParamsSchema,
   TurnRetryResultSchema,
-  ScheduledTurnRetrySchema,
-  TurnRetryScheduleParamsSchema,
-  TurnRetryUnscheduleParamsSchema,
-  ThreadRetryScheduledSchema,
+  ScheduledTurnResumeSchema,
+  TurnResumeScheduleParamsSchema,
+  TurnResumeUnscheduleParamsSchema,
+  ThreadResumeScheduledSchema,
 } from "./models/turn-recovery.js";
 export type {
   TurnResumeMode,
@@ -316,8 +316,8 @@ export type {
   TurnResumeResult,
   TurnRetryParams,
   TurnRetryResult,
-  ScheduledTurnRetry,
-  TurnRetryScheduleParams,
+  ScheduledTurnResume,
+  TurnResumeScheduleParams,
 } from "./models/turn-recovery.js";
 
 export {

@@ -7,14 +7,14 @@ import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { and, asc, desc, eq, getTableColumns, gt, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import { DevinModeSchema, ReasoningLevelSchema, ScheduledTurnRetrySchema, type AcknowledgeSeenResult, type TurnOutcome } from "@mcode/contracts";
+import { DevinModeSchema, ReasoningLevelSchema, ScheduledTurnResumeSchema, type AcknowledgeSeenResult, type TurnOutcome } from "@mcode/contracts";
 import type { DevinMode, Thread, RecentThread, ThreadMode, ThreadStatus, ReasoningLevel, InteractionMode, OrchestrationMode, PermissionMode, ContextWindowMode } from "@mcode/contracts";
 import {
   canonicalAgentThreads,
   cleanupJobs,
   pullRequestReviewLinks,
   threads,
-  turnRetrySchedules,
+  turnResumeSchedules,
   workspaces,
 } from "../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
@@ -22,10 +22,10 @@ import { transcriptMessageVisibility } from "../../agents/conversation/persisten
 import { SequenceAheadError } from "../attention/sequence-ahead-error.js";
 
 type ThreadRow = typeof threads.$inferSelect & {
-  scheduledRetry: typeof turnRetrySchedules.$inferSelect | null;
+  scheduledResume: typeof turnResumeSchedules.$inferSelect | null;
 };
 
-const threadSelection = { ...getTableColumns(threads), scheduledRetry: turnRetrySchedules };
+const threadSelection = { ...getTableColumns(threads), scheduledResume: turnResumeSchedules };
 
 const canonicalChildVisibility = sql`NOT EXISTS (
   SELECT 1
@@ -61,9 +61,9 @@ function parseCleanupState(value: string | null): Thread["cleanup_state"] {
 }
 
 function rowToThread(row: ThreadRow): Thread {
-  const schedule = row.scheduledRetry;
+  const schedule = row.scheduledResume;
   return {
-    scheduled_retry: schedule ? ScheduledTurnRetrySchema().parse({ turnId: schedule.turnId, at: schedule.runAt }) : null,
+    scheduled_resume: schedule ? ScheduledTurnResumeSchema().parse({ turnId: schedule.turnId, at: schedule.runAt }) : null,
     ...rowToThreadIdentity(row),
     ...rowToThreadLifecycle(row),
     ...rowToThreadPreferences(row),
@@ -192,7 +192,7 @@ function createThreadRecord(input: ThreadCreateRecordInput): Thread {
     deleted_at: null,
     user_completed_at: null,
     scheduled_deletion_at: null,
-    scheduled_retry: null,
+    scheduled_resume: null,
     cleanup_state: null,
     cleanup_reason: null,
     last_context_tokens: null,
@@ -434,7 +434,7 @@ export class ThreadStore {
     const row = this.orm
       .select(threadSelection)
       .from(threads)
-      .leftJoin(turnRetrySchedules, eq(turnRetrySchedules.threadId, threads.id))
+      .leftJoin(turnResumeSchedules, eq(turnResumeSchedules.threadId, threads.id))
       .where(and(
         eq(threads.id, id),
         options.createdByIntegrationId === undefined
@@ -453,7 +453,7 @@ export class ThreadStore {
     const rows = this.orm
       .select(threadSelection)
       .from(threads)
-      .leftJoin(turnRetrySchedules, eq(turnRetrySchedules.threadId, threads.id))
+      .leftJoin(turnResumeSchedules, eq(turnResumeSchedules.threadId, threads.id))
       .where(and(
         eq(threads.workspaceId, workspaceId),
         isNull(threads.deletedAt),
@@ -486,7 +486,7 @@ export class ThreadStore {
       })
       .from(threads)
       .innerJoin(workspaces, eq(workspaces.id, threads.workspaceId))
-      .leftJoin(turnRetrySchedules, eq(turnRetrySchedules.threadId, threads.id))
+      .leftJoin(turnResumeSchedules, eq(turnResumeSchedules.threadId, threads.id))
       .where(and(
         isNull(threads.deletedAt),
         isNull(threads.userCompletedAt),
@@ -516,7 +516,7 @@ export class ThreadStore {
       })
       .from(threads)
       .innerJoin(workspaces, eq(workspaces.id, threads.workspaceId))
-      .leftJoin(turnRetrySchedules, eq(turnRetrySchedules.threadId, threads.id))
+      .leftJoin(turnResumeSchedules, eq(turnResumeSchedules.threadId, threads.id))
       .where(and(...searchConditions(opts)))
       .orderBy(...resolveSearchOrder(opts.sort))
       .limit(clampedLimit)
@@ -846,7 +846,7 @@ export class ThreadStore {
         .where(eq(threads.id, id))
         );
       if (result.changes > 0) {
-        tx.delete(turnRetrySchedules).where(eq(turnRetrySchedules.threadId, id)).run();
+        tx.delete(turnResumeSchedules).where(eq(turnResumeSchedules.threadId, id)).run();
         tx.update(pullRequestReviewLinks)
           .set({ primaryThreadId: null, updatedAt: now })
           .where(eq(pullRequestReviewLinks.primaryThreadId, id))
@@ -1170,7 +1170,7 @@ export class ThreadStore {
     const rows = this.orm
       .select(threadSelection)
       .from(threads)
-      .leftJoin(turnRetrySchedules, eq(turnRetrySchedules.threadId, threads.id))
+      .leftJoin(turnResumeSchedules, eq(turnResumeSchedules.threadId, threads.id))
       .where(and(eq(threads.workspaceId, workspaceId), isNotNull(threads.worktreePath)))
       .all();
     return rows.map(rowToThread);
@@ -1184,7 +1184,7 @@ export class ThreadStore {
     const rows = this.orm
       .select(threadSelection)
       .from(threads)
-      .leftJoin(turnRetrySchedules, eq(turnRetrySchedules.threadId, threads.id))
+      .leftJoin(turnResumeSchedules, eq(turnResumeSchedules.threadId, threads.id))
       .where(eq(threads.workspaceId, workspaceId))
       .all();
     return rows.map(rowToThread);

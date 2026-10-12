@@ -26,13 +26,13 @@ export function useTurnRetry(threadId: string, turnId: string): TurnRetry {
     // The notice can outlive its reset time; the server refuses a schedule in the past.
     if (Date.parse(at) <= Date.now()) return retry();
     run(async () => {
-      const scheduled = await getTransport().scheduleTurnRetry({ threadId, turnId, at });
-      useWorkspaceStore.getState().applyScheduledRetry(threadId, scheduled);
+      const scheduled = await getTransport().scheduleTurnResume({ threadId, turnId, at });
+      useWorkspaceStore.getState().applyScheduledResume(threadId, scheduled);
     });
   }, [retry, run, threadId, turnId]);
   const cancelRetry = useCallback(() => run(async () => {
-    await getTransport().unscheduleTurnRetry(threadId);
-    useWorkspaceStore.getState().applyScheduledRetry(threadId, null);
+    await getTransport().unscheduleTurnResume(threadId);
+    useWorkspaceStore.getState().applyScheduledResume(threadId, null);
   }), [run, threadId]);
   return { retry, retryAt, cancelRetry, pending, error };
 }

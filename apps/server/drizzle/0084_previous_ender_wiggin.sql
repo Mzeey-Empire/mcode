@@ -1,4 +1,4 @@
-CREATE TABLE `turn_retry_schedules` (
+CREATE TABLE `turn_resume_schedules` (
 	`thread_id` text PRIMARY KEY NOT NULL,
 	`turn_id` text NOT NULL,
 	`execution_id` text NOT NULL,
