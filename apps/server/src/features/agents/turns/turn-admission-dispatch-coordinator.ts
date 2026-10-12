@@ -29,6 +29,8 @@ import { FileService } from "../../projects/files/file-service.js";
 import { GitWorktreeService } from "../../projects/git/git-worktree-service.js";
 import { WorkspaceEnvironmentService } from "../../projects/index.js";
 import { WorkspaceEnvironmentServiceError } from "../../projects/environment/workspace-environment-errors.js";
+import { isAutomaticSetupThread } from "../../projects/environment/workspace-environment-service.js";
+import { normalizeWorktreePath } from "../../projects/git/worktree-path.js";
 import { injectMentionFileContents, validateMessageMentions } from "./message-mentions.js";
 import type { WorkspaceEnvironmentQueuedTurnSubmission } from "../../projects/environment/workspace-environment-automatic-repository.js";
 import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
@@ -404,7 +406,7 @@ export class TurnAdmissionDispatchCoordinator {
     | { readonly kind: "ready"; readonly attachments: PersistedAttachmentData }
   > {
     const thread = this.requireThread(command.threadId);
-    if (thread.mode !== "worktree" || thread.worktree_managed !== true || !this.environment) {
+    if (!isAutomaticSetupThread(thread) || !this.environment) {
       return { kind: "not-managed" };
     }
     const providerId = this.selectProvider(thread.provider, command.provider);
@@ -429,10 +431,7 @@ export class TurnAdmissionDispatchCoordinator {
   }
 
   private sameWorktreePath(left: string, right: string): boolean {
-    const normalize = (value: string) => value.replace(/\\/g, "/").replace(/\/$/, "");
-    const known = normalize(left);
-    const input = normalize(right);
-    return this.platform === "win32" ? known.toLowerCase() === input.toLowerCase() : known === input;
+    return normalizeWorktreePath(left, this.platform) === normalizeWorktreePath(right, this.platform);
   }
 
   private async prepare(command: SendMessageCommand): Promise<{ kind: "ready"; value: PreparedCommand } | { kind: "handled" } | { kind: "queued" }> {
@@ -666,8 +665,7 @@ export class TurnAdmissionDispatchCoordinator {
   }
 
   private isBlockedAutomaticSetup(command: SendMessageCommand, thread: Exclude<ReturnType<ThreadRepo["findById"]>, null>): boolean {
-    return thread.mode === "worktree"
-      && thread.worktree_managed === true
+    return isAutomaticSetupThread(thread)
       && this.environment !== undefined
       && !command.persistedUserMessage
       && this.environment.getAutomaticSetup({ threadId: command.threadId }).gate === "blocked";

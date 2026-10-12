@@ -30,6 +30,7 @@ import { TerminalCommandService } from "../../terminal/commands/terminal-command
 import { TERMINAL_BACKEND_TOKEN, type TerminalBackend } from "../../terminal/backends/terminal-backend.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
 import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
+import { TurnRuntimeController } from "../../agents/orchestration/turn-runtime-controller.js";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 
 /** Register the workspace repository and its string-keyed dependency alias. */
@@ -115,6 +116,7 @@ export function registerProjectServices(container: DependencyContainer): void {
         workspaceEnvironmentService = new WorkspaceEnvironmentService({
           platform: workspaceEnvironmentPlatform(c.resolve<HostRuntime>("HostRuntime").platform),
           threads: c.resolve(ThreadRepo),
+          runtimePhase: (threadId) => c.resolve(TurnRuntimeController).snapshot(threadId)?.phase,
           workspaces: c.resolve(WorkspaceRepo),
           terminalCommands: c.resolve(TerminalCommandService),
           terminalRecovery: c.isRegistered(TERMINAL_BACKEND_TOKEN)

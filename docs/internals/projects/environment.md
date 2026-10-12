@@ -39,11 +39,20 @@ return renewed approval work when that mismatch requires another review.
 
 ## The Setup gate is separate from its attempts
 
-Automatic Setup holds the first prompt for a managed New worktree before the
+Automatic Setup holds the first prompt for any worktree thread, managed or attached, before the
 provider starts. The [automatic Setup store](../../../apps/server/src/features/projects/environment/workspace-environment-automatic-store.ts#L115)
 atomically saves the visible user message, the queued submission, and a blocked
 gate. The [environment service](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts#L368)
 starts Setup only after that admission commits.
+
+Branched starts continue another thread and skip Setup before admission, so
+their first turn dispatches without entering the gate. Other starts check for
+a non-deleted sibling at the same normalized worktree path. A sibling with a
+running or finalizing turn, or a nonterminal startup, makes Setup skip with
+`thread-running-here` and releases the gate as not required. The environment
+service serializes this check and command launch per path so simultaneous
+starts cannot both launch Setup. Path comparison normalizes separators and
+trailing slashes, and ignores case on Windows.
 
 The gate answers whether queued prompts may start. An attempt records what
 happened to one Setup command. A passed attempt releases the gate. No applicable
@@ -77,7 +86,8 @@ whether an uncertain dispatch succeeded. At server startup,
 marks unfinished Setup attempts interrupted and drains committed releases. It
 does not automatically rerun the interrupted Setup command.
 
-Manual Setup runs in Direct mode or an unmanaged existing worktree. Its latest
+Manual Setup remains available in Direct mode and attached worktrees after
+startup. It cannot bypass an active automatic gate or startup. Its latest
 attempt is transient server state, and it does not start a provider turn. The
 [manual admission guard](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts#L1916)
 keeps managed worktrees on the automatic gate path.

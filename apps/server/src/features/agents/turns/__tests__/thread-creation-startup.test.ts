@@ -195,30 +195,32 @@ async function branchHarness() {
 }
 
 describe("ThreadCreationCoordinator startup lifecycle", () => {
-  it("records an attached checkout and skips setup before first dispatch", async () => {
-    const { workspace, startups, coordinator } = await harness();
+  it("records an attached checkout and runs setup before its queued first turn", async () => {
+    const { workspace, startups, coordinator, admissions } = await harness();
+    admissions.admitInitialAutomaticTurn.mockResolvedValue({ kind: "queued" });
     const created = await coordinator.createInitialTurn({ workspaceId: workspace.id, content: "Use existing",
       mode: "worktree", branch: "main", existingWorktreePath: "/project/existing", startupId: managedStartupId });
-    expect(created.kind).toBe("dispatch");
-    expect(startups.get(managedStartupId)).toMatchObject({ kind: "attached-worktree", phase: "agent", steps: [
+    expect(created.kind).toBe("queued");
+    expect(startups.get(managedStartupId)).toMatchObject({ kind: "attached-worktree", phase: "setup", steps: [
       { phase: "thread", state: "completed" },
       { phase: "worktree", state: "completed", detail: { phase: "worktree", mode: "opened", folderName: "existing", path: "/project/existing" } },
-      { phase: "setup", state: "skipped", detail: { phase: "setup", skipReason: "not-configured" } },
-      { phase: "agent", state: "running" },
+      { phase: "setup", state: "running" },
+      { phase: "agent", state: "pending" },
     ] });
   });
 
   it("branches into an attached checkout, skips setup and dispatches its first turn", async () => {
-    const { workspace, startups, parent, fork, makeCoordinator } = await branchHarness();
+    const { workspace, startups, parent, fork, makeCoordinator, admissions } = await branchHarness();
     const coordinator = makeCoordinator();
     const created = await coordinator.createInitialTurn({ workspaceId: workspace.id, content: "Branch here",
       mode: "worktree", branch: "main", existingWorktreePath: "/project/existing", parentThreadId: parent.id,
       forkedFromMessageId: fork.id, startupId: managedStartupId });
     expect(created).toMatchObject({ kind: "dispatch", command: { content: "Branch here", providerWireOverride: "Parent handoff" } });
+    expect(admissions.admitInitialAutomaticTurn).not.toHaveBeenCalled();
     expect(startups.get(managedStartupId)).toMatchObject({ kind: "attached-worktree", phase: "agent", steps: [
       { phase: "thread", state: "completed" },
       { phase: "worktree", state: "completed", detail: { phase: "worktree", mode: "opened", folderName: "existing", path: "/project/existing" } },
-      { phase: "setup", state: "skipped", detail: { phase: "setup", skipReason: "not-configured" } },
+      { phase: "setup", state: "skipped", detail: { phase: "setup" } },
       { phase: "agent", state: "running" },
     ] });
     await coordinator.startInitialAgent(managedStartupId);

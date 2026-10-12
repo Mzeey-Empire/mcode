@@ -231,6 +231,17 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
     expect(gitWorktrees.removeWorktree).not.toHaveBeenCalled();
   });
 
+  it("retains attached sandbox worktrees when retention cleanup expires", async () => {
+    const workspace = await workspaces.create("Project", "/repo");
+    addThread(workspace.id, "attached", "C:\\Users\\user\\.mcode\\worktrees\\repo\\attached", "feature/attached", new Date(0).toISOString());
+    database.prepare("UPDATE threads SET worktree_managed = 0 WHERE id = ?").run("attached");
+    await worker.poll();
+    expect(threads.findById("attached")).toBeNull();
+    expect(cleanupJobs.count()).toBe(0);
+    expect(gitWorktrees.removeWorktree).not.toHaveBeenCalled();
+    expect(cleanupPolicy.decide).not.toHaveBeenCalled();
+  });
+
   it("retries failed worktree removal without deleting the thread", async () => {
     const workspace = (await workspaces.create("Project", "/repo"));
     addThread(

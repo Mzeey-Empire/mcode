@@ -183,7 +183,7 @@ export class ProjectWorktreeService {
 
   private getWorktreeCleanupCandidate(threadId: string): Thread | null {
     const thread = this.threadRepo.findById(threadId);
-    if (!thread || thread.deleted_at !== null || !thread.worktree_path) return null;
+    if (!thread || !thread.worktree_managed || thread.deleted_at !== null || !thread.worktree_path) return null;
     return thread;
   }
 

@@ -69,7 +69,7 @@ describe("ThreadService.delete", () => {
     ).run(id, workspaceId, id, branch, path, managed ? 1 : 0, now, now);
   }
 
-  it("queues every sandbox worktree, even when legacy metadata says it is unmanaged", async () => {
+  it("keeps attached sandbox worktrees and deletes only their thread", async () => {
     const workspace = (await workspaces.create("Project", "/repo"));
     addWorktreeThread(
       workspace.id,
@@ -81,12 +81,9 @@ describe("ThreadService.delete", () => {
 
     await threadService.delete("thread-1", true);
 
-    expect(cleanupJobs.findByThreadId("thread-1")).toMatchObject({
-      workspace_path: "/repo",
-      worktree_path: "C:\\Users\\user\\.mcode\\worktrees\\repo\\feature",
-      branch: "feature/delete",
-    });
-    expect(threads.findById("thread-1")?.status).toBe("deleted");
+    expect(cleanupJobs.count()).toBe(0);
+    expect(threads.findById("thread-1")).toBeNull();
+    expect(cleanupPolicy.decide).not.toHaveBeenCalled();
   });
 
   it.each([
