@@ -8,6 +8,8 @@ import { noGlobalHostRuntime } from "./rules/no-global-host-runtime.ts";
 import { noNativeTitleTooltip } from "./rules/no-native-title-tooltip.ts";
 import { noRawColor } from "./rules/no-raw-color.ts";
 import { noRawShadow } from "./rules/no-raw-shadow.ts";
+import { noRealTimerSleep } from "./rules/no-real-timer-sleep.ts";
+import { noSourceTextTest } from "./rules/no-source-text-test.ts";
 import { requireLazyNontrivialSchema } from "./rules/require-lazy-nontrivial-schema.ts";
 
 /** Mcode-specific code-quality rules for Oxlint. */
@@ -23,6 +25,8 @@ export const mcodePlugin = definePlugin({
     "no-native-title-tooltip": noNativeTitleTooltip,
     "no-raw-color": noRawColor,
     "no-raw-shadow": noRawShadow,
+    "no-real-timer-sleep": noRealTimerSleep,
+    "no-source-text-test": noSourceTextTest,
     "require-lazy-nontrivial-schema": requireLazyNontrivialSchema,
   },
 });
