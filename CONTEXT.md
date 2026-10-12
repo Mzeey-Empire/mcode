@@ -1034,6 +1034,15 @@ says _All turns_, while the code, the view id (`cumulative`), and this
 glossary keep the name _Cumulative_, mirroring the _Project_ (UI) /
 _Workspace_ (code) split.
 
+### Since you looked
+The [[Cumulative]] diff of only the turns that settled after this visit's
+seen baseline: the [[Thread attention]] seen marker as it stood when the
+visit first advanced it. Whole turns are kept, so a turn retried after the
+baseline includes its earlier attempts. A live turn is left out until it
+settles. The view is available only when such a turn changed files, is never
+the default view, and resets when the user leaves the thread.
+_Avoid_: Unread changes, new since last visit (the baseline is per visit, not per user).
+
 ## Open-in app
 
 ### Open-in app
