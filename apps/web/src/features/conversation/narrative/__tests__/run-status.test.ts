@@ -1,20 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { ToolCall } from "@/transport/types";
-import { deriveRunStatus, type RunStatusInput } from "../run-status";
+import { deriveRunStatus, type RunStatus, type RunStatusInput } from "../run-status";
 
 const idle: RunStatusInput = { stopPending: false, compacting: false, subagentsRunning: false, answering: false };
 const lint: ToolCall = { id: "lint", toolName: "Bash", toolInput: { command: "bun run lint" }, output: null, isError: false, isComplete: false };
 
 describe("deriveRunStatus", () => {
-  it.each<[string, Partial<RunStatusInput>, { label: string; icon: "layers" | "spinner" }]>([
+  it.each<[string, Partial<RunStatusInput>, RunStatus]>([
     ["stop in flight", { stopPending: true }, { label: "Stopping", icon: "spinner" }],
     ["compacting", { compacting: true }, { label: "Compacting context", icon: "spinner" }],
     ["rate limited", { retry: { kind: "rate-limited" } }, { label: "Rate limited", icon: "spinner" }],
     ["retrying without a status", { retry: { kind: "retrying" } }, { label: "Retrying", icon: "spinner" }],
     ["retrying after a known status", { retry: { kind: "retrying", errorStatus: 502 } }, { label: "Retrying after 502 Bad Gateway", icon: "spinner" }],
     ["retrying after an unlisted status", { retry: { kind: "retrying", errorStatus: 520 } }, { label: "Retrying after HTTP 520", icon: "spinner" }],
-    ["pending approval", { waitingFor: "approval" }, { label: "Waiting for approval", icon: "layers" }],
-    ["plan questions", { waitingFor: "answers" }, { label: "Waiting for your answers", icon: "layers" }],
+    ["pending approval", { waitingFor: "approval" }, { label: "Waiting for approval", icon: "dot" }],
+    ["plan questions", { waitingFor: "answers" }, { label: "Waiting for your answers", icon: "dot" }],
     ["tool running", { activeTool: lint }, { label: "Running bun run lint", icon: "layers" }],
     ["only subagents running", { subagentsRunning: true }, { label: "Waiting on subagents", icon: "layers" }],
     ["answer streaming", { answering: true }, { label: "Answering", icon: "layers" }],

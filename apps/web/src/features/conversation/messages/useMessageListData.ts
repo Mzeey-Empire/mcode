@@ -174,6 +174,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const loadNewerMessages = useThreadStore((state) => state.loadNewerMessages);
   const approvals = useApprovalStore((state) => state.approvals);
   const permissions = useMemo(() => approvals.filter((request) => request.threadId === renderedThreadId), [approvals, renderedThreadId]);
+  const awaitingApproval = useMemo(() => permissions.some(isDockApproval), [permissions]);
   const hooks = useThreadRecord(renderedThreadId, (record) => record.hooks);
   const decidedApprovals = useThreadRecord(renderedThreadId, (record) => record.approvals);
   const stopPending = useThreadStore((state) => renderedThreadId ? (state.pendingStopCounts[renderedThreadId] ?? 0) > 0 : false);
@@ -187,8 +188,8 @@ export function useMessageListData(displayThreadId: string | undefined) {
       retryKind === "retrying" ? { kind: "retrying", errorStatus: retryErrorStatus }
         : retryKind === "rate-limited" ? { kind: "rate-limited" }
           : undefined;
-    return { stopPending, compacting, retry };
-  }, [stopPending, compacting, retryKind, retryErrorStatus]);
+    return { stopPending, compacting, retry, ...(awaitingApproval ? { waitingFor: "approval" as const } : {}) };
+  }, [stopPending, compacting, retryKind, retryErrorStatus, awaitingApproval]);
   const persistedNarrativeByMessage = useThreadRecord(renderedThreadId, (record) => record.narrativeByMessage);
   const legacyCurrentTurnMessageId = useThreadRecord(renderedThreadId, (record) => record.currentTurnMessageId);
   const legacyCurrentTurnResponseKey = useThreadRecord(renderedThreadId, (record) => record.currentTurnResponseKey);
@@ -250,4 +251,4 @@ function withoutHiddenMessages(messages: Message[], hidden: ReadonlySet<string>)
 
 /** Normalized thread data consumed by transcript submodules. */
 export type MessageListData = ReturnType<typeof useMessageListData>;
-import { useApprovalStore } from "@/stores/approvalStore";
+import { isDockApproval, useApprovalStore } from "@/stores/approvalStore";

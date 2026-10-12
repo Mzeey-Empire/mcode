@@ -99,6 +99,9 @@ function useFrozenStatus(status: RunStatus, isAgentRunning: boolean): RunStatus 
 }
 
 function RunStatusIcon({ icon, running }: { icon: RunStatus["icon"]; running: boolean }) {
+  if (icon === "dot") {
+    return <span className="size-1.5 shrink-0 rounded-full bg-primary" data-run-status-icon="dot" />;
+  }
   if (icon === "spinner") {
     // D5 keeps spinners on the 12/16 scale, so the 12px spinner sits centred in the 14px icon slot.
     return (
@@ -140,23 +143,26 @@ export function NarrativeIndicator({
   const shown = useFrozenStatus(status, isAgentRunning);
 
   if (phase === "done") return null;
+  // The turn is held on the user, so its step count and clock are not what they need to see.
+  const waiting = shown.icon === "dot";
 
   return (
     <div
       className={cn(
-        "mt-2 flex h-6 items-center gap-1.5 pl-2 text-xs",
+        "mt-2 flex h-6 items-center pl-2 text-xs",
+        waiting ? "gap-2" : "gap-1.5",
         phase === "exiting" && "narrative-indicator-exit",
       )}
       data-state={phase}
     >
       <RunStatusIcon icon={shown.icon} running={phase === "running"} />
-      {stepCount > 0 && (
+      {!waiting && stepCount > 0 && (
         <span className="shrink-0 text-muted">
           {stepCount} {stepCount === 1 ? "step" : "steps"} ·
         </span>
       )}
-      <span className="min-w-0 font-medium text-ink text-fade">{shown.label}</span>
-      {startTime !== undefined && (
+      <span className={cn("min-w-0 text-fade", waiting ? "text-muted" : "font-medium text-ink")}>{shown.label}</span>
+      {!waiting && startTime !== undefined && (
         <span className="shrink-0 font-mono text-muted">{formatClock(elapsed)}</span>
       )}
     </div>

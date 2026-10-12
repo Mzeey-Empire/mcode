@@ -2,8 +2,8 @@ import type { ToolCall } from "@/transport/types";
 import { statusPhrase } from "../turn-ending/provider-retry";
 import { toolActivityLabel } from "./activity-label";
 
-/** Single source for the status line label and icon. */
-export type RunStatus = { label: string; icon: "layers" | "spinner" };
+/** Single source for the status line label and icon. `dot` marks a turn held on the user, with no step count or clock. */
+export type RunStatus = { label: string; icon: "layers" | "spinner" | "dot" };
 
 /** A provider retry holding the turn; `errorStatus` is the HTTP status that triggered it, absent for connection errors. */
 export type RunRetry = { kind: "rate-limited" } | { kind: "retrying"; errorStatus?: number };
@@ -13,11 +13,11 @@ export interface RunHoldingSignals {
   stopPending: boolean;
   compacting: boolean;
   retry?: RunRetry;
+  waitingFor?: "approval" | "answers";
 }
 
 /** Everything the status line needs to pick one label for a running turn. */
 export interface RunStatusInput extends RunHoldingSignals {
-  waitingFor?: "approval" | "answers";
   /** Latest incomplete top-level call that is not an Agent call. */
   activeTool?: ToolCall;
   /** Any incomplete top-level Agent call. */
@@ -45,7 +45,7 @@ const RUN_STATUS_RULES: readonly RunStatusRule[] = [
   { icon: "spinner", label: (input) => (input.stopPending ? "Stopping" : undefined) },
   { icon: "spinner", label: (input) => (input.compacting ? "Compacting context" : undefined) },
   { icon: "spinner", label: (input) => (input.retry ? retryLabel(input.retry) : undefined) },
-  { icon: "layers", label: (input) => (input.waitingFor ? WAITING_LABELS[input.waitingFor] : undefined) },
+  { icon: "dot", label: (input) => (input.waitingFor ? WAITING_LABELS[input.waitingFor] : undefined) },
   { icon: "layers", label: (input) => (input.activeTool ? toolActivityLabel(input.activeTool) : undefined) },
   { icon: "layers", label: (input) => (input.subagentsRunning ? "Waiting on subagents" : undefined) },
   { icon: "layers", label: (input) => (input.answering ? "Answering" : undefined) },
