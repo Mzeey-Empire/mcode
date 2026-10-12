@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReasoningLevel } from "@mcode/contracts";
@@ -69,8 +69,7 @@ describe("ComposerModelControl", () => {
     const onSelectionChange = renderLockedControl("message-1");
 
     await userEvent.click(screen.getByTestId("model-selector-trigger"));
-    const fastMode = await screen.findByRole("radiogroup", { name: "Fast mode" });
-    await userEvent.click(within(fastMode).getByRole("radio", { name: "On" }));
+    await userEvent.click(await screen.findByRole("switch", { name: "Fast mode" }));
 
     expect(onSelectionChange).toHaveBeenCalledWith({ codexFastMode: true });
     expect(setThreadSettings).not.toHaveBeenCalled();

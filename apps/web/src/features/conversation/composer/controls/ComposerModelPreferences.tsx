@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Zap } from "lucide-react";
 import { SegmentedControl, type SegmentedOption } from "@/components/ui/segmented-control";
 import { SteppedSlider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
 import { supports1MContextWindow, supportsThinkingToggle } from "@/lib/model-registry";
 import { useThreadStore, type ThreadSettings } from "@/stores/threadStore";
@@ -227,11 +228,6 @@ const CONTEXT_WINDOW_OPTIONS = [
   { value: "1m", label: "1M" },
 ] as const satisfies readonly SegmentedOption[];
 
-const OFF_ON_OPTIONS = [
-  { value: "off", label: "Off" },
-  { value: "on", label: "On" },
-] as const satisfies readonly SegmentedOption[];
-
 function ComposerContextWindowOptions({
   state,
   actionProps,
@@ -269,13 +265,10 @@ function ComposerThinkingOptions({
 
   return (
     <ComposerPreferenceRow label="Thinking">
-      <SegmentedControl
-        size="compact"
+      <Switch
         aria-label="Thinking"
-        options={OFF_ON_OPTIONS}
-        value={state.thinking ? "on" : "off"}
-        onChange={(value) => {
-          const thinking = value === "on";
+        checked={state.thinking}
+        onCheckedChange={(thinking) => {
           actionProps.onSelectionChange({ thinking });
           persistThreadSetting(actionProps, { thinking }, { skipForks: true });
         }}
@@ -295,13 +288,10 @@ function ComposerFastModeOptions({
 
   return (
     <ComposerPreferenceRow label="Fast">
-      <SegmentedControl
-        size="compact"
+      <Switch
         aria-label="Fast mode"
-        options={OFF_ON_OPTIONS}
-        value={state.codexFastMode ? "on" : "off"}
-        onChange={(value) => {
-          const checked = value === "on";
+        checked={state.codexFastMode}
+        onCheckedChange={(checked) => {
           const codexFastMode = checked === actionProps.defaults.globalCodexFast ? null : checked;
           actionProps.onSelectionChange({ codexFastMode });
           persistThreadSetting(actionProps, { codexFastMode }, { skipForks: true });
