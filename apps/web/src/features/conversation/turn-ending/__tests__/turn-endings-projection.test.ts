@@ -1,4 +1,4 @@
-import { createAgentModelState, type AgentItem, type AgentModelState, type AgentTurn } from "@mcode/contracts";
+import { createAgentModelState, type AgentItem, type AgentModelState, type AgentThread, type AgentTurn } from "@mcode/contracts";
 import { describe, expect, it } from "vitest";
 import { projectTurnEndings, reuseTurnEndings } from "../turn-endings-projection";
 
@@ -47,6 +47,13 @@ function stateWith(turns: AgentTurn[], items: AgentItem[]): AgentModelState {
   return state;
 }
 
+function claudeThread(): AgentThread {
+  return {
+    id: THREAD_ID, workspaceId: "workspace-1", rootThreadId: THREAD_ID, providerId: "claude", providerIdentities: [],
+    activityState: "Idle", conversationRevision: 1, rosterRevision: 0, createdAt: at(0), updatedAt: at(0),
+  };
+}
+
 const FAILED = { outcome: "errored", failure: { kind: "fatal", provider: "codex", message: "boom" } } as const;
 
 describe("projectTurnEndings", () => {
@@ -67,12 +74,13 @@ describe("projectTurnEndings", () => {
       ],
     );
 
-    const projection = projectTurnEndings(THREAD_ID, state);
+    const projection = projectTurnEndings(THREAD_ID, state, false);
 
     expect([...projection.hiddenMessageIds].sort()).toEqual(["a2", "u2-retry"]);
     expect(Object.keys(projection.endingsByMessageId).sort()).toEqual(["a1", "a2-retry"]);
     expect(projection.endingsByMessageId["a2-retry"]).toEqual({
       turnId: "t2-retry",
+      providerId: null,
       view: {
         foldLabel: "Failed after 5s",
         notice: {
@@ -93,7 +101,7 @@ describe("projectTurnEndings", () => {
       [messageItem("u1", "t1", "user", 0), messageItem("u2", "t2", "user", 10), messageItem("u3", "t3", "user", 20)],
     );
 
-    const ending = projectTurnEndings(THREAD_ID, state).endingsByMessageId.u2;
+    const ending = projectTurnEndings(THREAD_ID, state, false).endingsByMessageId.u2;
 
     expect(ending?.turnId).toBe("t2");
     expect(ending?.view.notice).not.toHaveProperty("primary");
@@ -108,8 +116,9 @@ describe("projectTurnEndings", () => {
       [messageItem("u1", "t1", "user", 0)],
     );
 
-    expect(projectTurnEndings(THREAD_ID, state).endingsByMessageId.u1).toEqual({
+    expect(projectTurnEndings(THREAD_ID, state, false).endingsByMessageId.u1).toEqual({
       turnId: "t1-retry",
+      providerId: null,
       view: {
         foldLabel: null,
         notice: {
@@ -124,25 +133,40 @@ describe("projectTurnEndings", () => {
     });
   });
 
+  it("offers Sign in for an auth failure only while the thread's provider is signed out", () => {
+    const state = stateWith(
+      [turn("t1", 0, { status: "Errored", ending: { outcome: "errored", failure: { kind: "auth", provider: "claude", message: "401" } } })],
+      [messageItem("u1", "t1", "user", 0)],
+    );
+    state.threads[THREAD_ID] = claudeThread();
+
+    const signedOut = projectTurnEndings(THREAD_ID, state, true).endingsByMessageId.u1;
+    const signedIn = projectTurnEndings(THREAD_ID, state, false).endingsByMessageId.u1;
+
+    expect(signedOut?.providerId).toBe("claude");
+    expect(signedOut?.view.notice).toMatchObject({ title: "Claude is signed out", primary: { action: "sign_in", label: "Sign in" } });
+    expect(signedIn?.view.notice).toMatchObject({ title: "Claude is signed out", primary: { action: "retry", label: "Retry" } });
+  });
+
   it("ignores running turns and other threads", () => {
     const state = stateWith(
       [turn("t1", 0, { status: "Running", endedAt: null }), turn("other", 5, { threadId: "thread-2", status: "Errored" })],
       [messageItem("u1", "t1", "user", 0)],
     );
 
-    expect(projectTurnEndings(THREAD_ID, state)).toEqual({ endingsByMessageId: {}, hiddenMessageIds: new Set() });
+    expect(projectTurnEndings(THREAD_ID, state, false)).toEqual({ endingsByMessageId: {}, hiddenMessageIds: new Set() });
   });
 });
 
 describe("reuseTurnEndings", () => {
   it("keeps the previous projection when nothing it renders changed", () => {
     const state = stateWith([turn("t1", 0, { status: "Errored", ending: FAILED })], [messageItem("u1", "t1", "user", 0)]);
-    const previous = projectTurnEndings(THREAD_ID, state);
+    const previous = projectTurnEndings(THREAD_ID, state, false);
 
-    expect(reuseTurnEndings(previous, projectTurnEndings(THREAD_ID, state))).toBe(previous);
+    expect(reuseTurnEndings(previous, projectTurnEndings(THREAD_ID, state, false))).toBe(previous);
 
     state.turns.t1 = { ...state.turns.t1!, ending: { ...FAILED, failure: { ...FAILED.failure, message: "other" } } };
-    const changed = projectTurnEndings(THREAD_ID, state);
+    const changed = projectTurnEndings(THREAD_ID, state, false);
     expect(reuseTurnEndings(previous, changed)).toBe(changed);
   });
 });

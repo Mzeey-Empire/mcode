@@ -135,7 +135,10 @@ import {
   ProviderRateLimitStore,
   recordRateLimitEvents,
 } from "../../features/providers/status/provider-rate-limit-store.js";
-import { ProviderStatusService } from "../../features/providers/status/provider-status-service.js";
+import {
+  ProviderStatusService,
+  recheckAfterAuthFailure,
+} from "../../features/providers/status/provider-status-service.js";
 import { ProviderRegistry } from "../../features/providers/composition/provider-registry.js";
 import { ProviderEventIngress } from "../../features/providers/composition/provider-event-ingress.js";
 import type { CursorProviderBoundary } from "@mcode/providers";
@@ -436,6 +439,7 @@ const modelCacheService = container.resolve(ModelCacheService);
 const providerUsageWarmup = container.resolve(ProviderUsageWarmupService);
 const providerStatus = container.resolve(ProviderStatusService);
 providerEventIngress.observeDelivered(recordRateLimitEvents(container.resolve(ProviderRateLimitStore)));
+providerEventIngress.observeDelivered(recheckAfterAuthFailure(providerStatus));
 recordStartupCheckpoint("services resolved");
 
 await seedAgentRuntimeWorkspace({

@@ -1,4 +1,5 @@
 import { inject, injectable } from "tsyringe";
+import { AgentEventType } from "@mcode/contracts";
 import type {
   IAgentProvider,
   ProviderAuth,
@@ -19,6 +20,7 @@ import { NpmReleaseFeed } from "./npm-release-feed.js";
 import { CliUpdateRunner, type CliUpdateRequest } from "./cli-update-runner.js";
 import { ModelSightingsRepo } from "./model-sightings-repo.js";
 import { ModelCacheService } from "../models/model-cache-service.js";
+import type { ProviderEventIngressEvent } from "../composition/provider-event-ingress.js";
 
 const LIST_CACHE_MS = 10 * 60 * 1000;
 // Generous enough for a cold SDK start; a check past it would otherwise hold every caller of refresh().
@@ -85,6 +87,15 @@ export class ProviderStatusService {
       this.inFlight = null;
     });
     return this.inFlight;
+  }
+
+  /**
+   * Re-checks one enabled provider, sharing any check already running for it.
+   * A disabled or unregistered provider is left alone.
+   */
+  recheck(providerId: ProviderId): Promise<void> {
+    const provider = this.enabledProviders().find((source) => source.id === providerId);
+    return provider ? this.refreshProvider(provider) : Promise.resolve();
   }
 
   private async refreshEnabled(): Promise<void> {
@@ -243,6 +254,25 @@ export class ProviderStatusService {
     const enabled = this.settings.get().provider.enabled;
     return this.registry.resolveAll().filter((provider) => enabled[provider.id]);
   }
+}
+
+/**
+ * Builds a provider-event-ingress observer that re-checks a provider's sign-in after one of its turns
+ * fails with an auth error, so the bell and the turn's end notice see the signed-out state.
+ */
+export function recheckAfterAuthFailure(
+  service: Pick<ProviderStatusService, "recheck">,
+): (delivered: ProviderEventIngressEvent) => void {
+  return (delivered) => {
+    if (delivered.event.type !== AgentEventType.Error || delivered.event.failure.kind !== "auth") return;
+    // The observer runs inside ingress delivery, so a failed check is logged here rather than left unhandled.
+    service.recheck(delivered.providerId).catch((error: unknown) => {
+      logger.warn("Provider re-check after an auth failure failed", {
+        providerId: delivered.providerId,
+        error: error instanceof Error ? error.name : typeof error,
+      });
+    });
+  };
 }
 
 class StatusCheckTimeoutError extends Error {

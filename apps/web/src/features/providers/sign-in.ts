@@ -1,4 +1,4 @@
-import { HOME_TERMINAL_SCOPE_ID } from "@mcode/contracts";
+import { HOME_TERMINAL_SCOPE_ID, type ProviderId } from "@mcode/contracts";
 import { useTerminalStore } from "@/features/terminal";
 import { createTerminalForScope } from "@/lib/ensure-terminal";
 import { useProviderStatusStore } from "@/stores/providerStatusStore";
@@ -33,6 +33,15 @@ export function signInToProvider(argv: readonly string[]): void {
     return;
   }
   createTerminalForScope(HOME_TERMINAL_SCOPE_ID, (ptyId) => typeSignInCommand(ptyId, argv));
+}
+
+/**
+ * Starts sign-in for a provider the status store reports as signed out, using
+ * the command the server sent. Does nothing once the provider is no longer signed out.
+ */
+export function signInToSignedOutProvider(providerId: ProviderId): void {
+  const auth = useProviderStatusStore.getState().statuses.find((status) => status.providerId === providerId)?.auth;
+  if (auth?.state === "signed_out") signInToProvider(auth.signIn.argv);
 }
 
 /**
