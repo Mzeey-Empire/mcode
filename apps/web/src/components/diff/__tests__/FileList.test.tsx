@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useDiffStore } from "@/stores/diffStore";
@@ -156,8 +156,9 @@ describe("FileList jump to file", () => {
         jumpViewKey="turn:other-msg"
       />,
     );
-    // Let the consume effect run before asserting the request survived.
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Consumption clears the request synchronously, so flushing the mount
+    // effects is enough to prove this list left it alone.
+    await act(async () => {});
     expect(useDiffStore.getState().reviewFileJumpRequest).not.toBeNull();
     expect(transport.getSnapshotDiff).not.toHaveBeenCalled();
     unmount();

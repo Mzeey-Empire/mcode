@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptViewport, type TranscriptHost, type TranscriptPosition } from "../transcript-viewport";
 import { VirtualViewport } from "@/components/ui/virtual-viewport";

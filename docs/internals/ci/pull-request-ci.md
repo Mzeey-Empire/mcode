@@ -34,7 +34,7 @@ Serial tasks cost about 20% more wall time. Uncached Test takes roughly 9 to 12.
 
 ## Cached results prove nothing
 
-Test, Typecheck, and Build Check restore Turbo outputs from the remote cache (`TURBO_TOKEN`) and from `.turbo/cache`. A green Test with `Cached: 10 cached, 10 total` replayed earlier results and ran no tests. When you need proof that the suite passes on a runner, for example after a CI change, run `bun run test --concurrency=1 --force` there.
+Test, Typecheck, and Build Check restore Turbo outputs from `.turbo/cache`, which `actions/cache` saves per commit. There is no remote cache, so a task hits only when an earlier run on the same runner provider saved outputs for identical inputs. A green Test with `Cached: 10 cached, 10 total` replayed earlier results and ran no tests. When you need proof that the suite passes on a runner, for example after a CI change, run `bun run test --concurrency=1 --force` there.
 
 ## Electron sandbox on Ubuntu 24.04
 

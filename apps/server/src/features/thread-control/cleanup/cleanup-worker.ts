@@ -86,6 +86,9 @@ export class CleanupWorker {
     @inject("HostRuntime") private readonly hostRuntime: HostRuntime,
     @inject(ThreadControlMutationReservationService, { isOptional: true })
     mutationReservations?: ThreadControlMutationReservationService,
+    // Tests that pin a Windows host have no real process handles to wait for.
+    @inject("CleanupHandleReleaseDelayMs", { isOptional: true })
+    private readonly handleReleaseDelayMs = HANDLE_RELEASE_DELAY_MS,
   ) {
     this.mutationReservations = mutationReservations
       ?? new ThreadControlMutationReservationService();
@@ -425,7 +428,7 @@ export class CleanupWorker {
     // Claude does not report each child process, so this releases remaining Windows file handles.
     await killDescendantsByName(process.pid, "claude.exe", this.hostRuntime.platform);
     if (this.hostRuntime.platform === "win32") {
-      await new Promise<void>((resolve) => setTimeout(resolve, HANDLE_RELEASE_DELAY_MS));
+      await new Promise<void>((resolve) => setTimeout(resolve, this.handleReleaseDelayMs));
     }
   }
   /**

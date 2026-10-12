@@ -60,6 +60,10 @@ Internal guides are grouped in topic subfolders. Use this index to find a guide.
 
 - [Pull request CI](internals/ci/pull-request-ci.md): runner choice, serial tests, and cache and sandbox traps
 
+### Testing
+
+- [Writing tests](internals/testing/writing-tests.md): what a test must catch, banned patterns, and per-file cost
+
 ### Persistence and settings
 
 - [Database migrations](internals/persistence/db-migrations.md)

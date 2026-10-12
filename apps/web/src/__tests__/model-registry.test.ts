@@ -8,6 +8,7 @@ import {
   getDefaultModel,
   getDefaultModelId,
   getDefaultReasoningLevel,
+  getModelContextWindow,
   getCodexDefaultReasoningLevel,
   getCodexReasoningLevels,
   isMaxEffortModel,
@@ -640,5 +641,16 @@ describe("resolveThreadModelId", () => {
 
   it("passes through unknown locked model ID (dynamic listing providers)", () => {
     expect(resolveThreadModelId("cursor-dynamic-123", "claude-sonnet-4-6")).toBe("cursor-dynamic-123");
+  });
+});
+
+describe("getModelContextWindow", () => {
+  it("falls back to 200_000 for Haiku 4.5 even in 1m mode (not supported)", () => {
+    expect(getModelContextWindow("claude-haiku-4-5", "1m")).toBe(200_000);
+  });
+
+  it("resolves dated SDK variants via prefix match", () => {
+    expect(getModelContextWindow("claude-haiku-4-5-20251001", "200k")).toBe(200_000);
+    expect(getModelContextWindow("claude-sonnet-4-6-20260101", "1m")).toBe(1_000_000);
   });
 });

@@ -2,7 +2,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
-import { openDatabase } from "../../../runtime/persistence/sqlite/database.js";
+import { openMigratedTestDatabase } from "../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 
 const fixtures = new Map<Database, { writer: ApplicationDatabaseWriter; directory: string; producers: Set<() => Promise<void>> }>();
@@ -11,7 +11,7 @@ const fixtures = new Map<Database, { writer: ApplicationDatabaseWriter; director
 export function openAgentStorageTestDatabase(): Database {
   const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-agent-service-"));
   const dbPath = NodePath.join(directory, "app.sqlite");
-  const db = openDatabase({ dbPath });
+  const db = openMigratedTestDatabase(dbPath);
   fixtures.set(db, { writer: new ApplicationDatabaseWriter(dbPath), directory, producers: new Set() });
   return db;
 }

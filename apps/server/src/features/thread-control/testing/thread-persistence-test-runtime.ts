@@ -2,26 +2,27 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach } from "vitest";
-import { openDatabase } from "../../../runtime/persistence/sqlite/database.js";
+import type { Database } from "bun:sqlite";
+import { openMigratedTestDatabase } from "../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { openReadOnlyDatabase } from "../../../runtime/persistence/sqlite/read-only-database.js";
 
 const runtimes: Array<{
   directory: string;
-  database: ReturnType<typeof openDatabase>;
+  database: Database;
   reader: ReturnType<typeof openReadOnlyDatabase>;
   writer: ApplicationDatabaseWriter;
 }> = [];
 
 /** Real temporary SQLite and worker owner for asynchronous service integration tests. */
 export function createThreadPersistenceTestRuntime(createWorker?: () => Worker): {
-  database: ReturnType<typeof openDatabase>;
+  database: Database;
   reader: ReturnType<typeof openReadOnlyDatabase>;
   writer: ApplicationDatabaseWriter;
 } {
   const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-thread-owner-"));
   const dbPath = NodePath.join(directory, "app.sqlite");
-  const database = openDatabase({ dbPath });
+  const database = openMigratedTestDatabase(dbPath);
   const reader = openReadOnlyDatabase(dbPath);
   const writer = new ApplicationDatabaseWriter(dbPath, createWorker);
   runtimes.push({ directory, database, reader, writer });

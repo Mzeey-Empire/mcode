@@ -132,6 +132,7 @@ Clients communicate over typed WebSockets (`packages/contracts`). `apps/server` 
 
 ## Verifying
 
+- Before you write or keep a test, read [docs/internals/testing/writing-tests.md](docs/internals/testing/writing-tests.md). A test must fail for a real bug; source-text, class-name, mock-echo, and set-then-read tests do not.
 - Smallest proof that the change works. `bun run --cwd <workspace> test -- --reporter=dot --silent=passed-only <test-file> [<test-file> ...]`. For files in different workspaces, run one command per workspace.
 - The flags keep output short so failures are not truncated: passing tests print a dot, while failing tests keep their diff, stack trace, and console output. If a failure needs more context, rerun that file without the flags.
 - Do not use `bun test`: it invokes Bun's native test runner and bypasses the workspace Vitest configuration.

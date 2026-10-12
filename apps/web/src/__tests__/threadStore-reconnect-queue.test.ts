@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import type { AgentEvent, AgentStopResult } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useQueueStore } from "@/stores/queueStore";

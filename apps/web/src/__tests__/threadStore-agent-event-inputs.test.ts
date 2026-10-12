@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import type { AgentEvent } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";

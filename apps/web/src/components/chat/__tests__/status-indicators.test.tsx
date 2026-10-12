@@ -21,17 +21,6 @@ vi.mock("@/features/terminal", () => ({
 import { TerminalStatusIndicator } from "../TerminalStatusIndicator";
 
 describe("TerminalStatusIndicator", () => {
-  it("renders a pulse dot when terminals are active", () => {
-    render(<TerminalStatusIndicator />);
-    const dot = document.querySelector(".animate-pulse");
-    expect(dot).toBeInTheDocument();
-  });
-
-  it("does not use animate-shimmer-text", () => {
-    render(<TerminalStatusIndicator />);
-    expect(document.querySelector(".animate-shimmer-text")).not.toBeInTheDocument();
-  });
-
   it("shows the terminal count label", () => {
     render(<TerminalStatusIndicator />);
     expect(screen.getByText(/2 active terminals/)).toBeInTheDocument();

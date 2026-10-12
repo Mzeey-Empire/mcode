@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { useApprovalStore } from "@/stores/approvalStore";
 import { act, renderHook } from "@testing-library/react";
 import { useMessageListData } from "@/features/conversation/messages/useMessageListData";

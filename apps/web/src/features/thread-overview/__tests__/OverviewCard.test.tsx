@@ -9,6 +9,7 @@ import type { OverviewEntry, OverviewSectionId } from "../overview-registry";
 import type { OverviewSubject } from "../overview-subject";
 
 // Vitest stubs imported CSS, so the card's section rules are loaded from disk.
+// oxlint-disable-next-line mcode/no-source-text-test -- The CSS is injected into jsdom so the test checks computed layout, not text.
 const cardCss = NodeFS.readFileSync(
   NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "../overview-card.css"),
   "utf8",

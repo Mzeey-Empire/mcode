@@ -55,7 +55,18 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
+
+/** Fakes only timeouts so tests can skip the reconnect backoff without freezing `Date`. */
+function fakeReconnectTimers() {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+}
+
+/** Elapses the transport's minimum reconnect delay. */
+async function elapseReconnectDelay() {
+  await vi.advanceTimersByTimeAsync(1_000);
+}
 
 describe("agent command transport", () => {
   it.each([false, true])("retries only saving work for the exact thread, retried=%s", async (retried) => {
@@ -76,6 +87,7 @@ describe("agent command transport", () => {
   });
 
   it("requests settled diffs after reconnect and admits Live only after a fresh push for that thread", async () => {
+    fakeReconnectTimers();
     const transport = createWsTransport("ws://localhost:1234");
     mockWs.simulateOpen();
     async function expectLiveAdmission(threadId: string, includeLive: boolean) {
@@ -94,7 +106,8 @@ describe("agent command transport", () => {
     await expectLiveAdmission("thread-2", false);
     const previous = mockWs;
     previous.close();
-    await vi.waitFor(() => expect(mockWs === previous).toBe(false), { timeout: 3000 });
+    await elapseReconnectDelay();
+    expect(mockWs).not.toBe(previous);
     mockWs.simulateOpen();
     await expectLiveAdmission("thread-1", false);
     mockWs.onmessage?.({ data: JSON.stringify({ type: "push", channel: "turn.diffChanged", data: { threadId: "thread-1" } }) });
@@ -283,6 +296,7 @@ describe("agent command transport", () => {
     useSettingsStore.setState({ loaded: true });
     let now = Date.now();
     vi.spyOn(Date, "now").mockImplementation(() => now);
+    fakeReconnectTimers();
     const transport = createWsTransport("ws://localhost:1234");
     mockWs.simulateOpen();
     const startupId = "00000000-0000-4000-8000-000000000073";
@@ -307,7 +321,8 @@ describe("agent command transport", () => {
     firstSocket.close();
     await Promise.resolve();
     expect(settled).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(mockWs).not.toBe(firstSocket), { timeout: 3000 });
+    await elapseReconnectDelay();
+    expect(mockWs).not.toBe(firstSocket);
     mockWs.simulateOpen();
     await vi.waitFor(() => expect(mockWs.sent.some((row) => JSON.parse(row).method === "agent.createAndSend")).toBe(true));
     const replay = mockWs.sent.map((row) => JSON.parse(row) as { id: string; method: string; params: Record<string, unknown> })
@@ -321,6 +336,7 @@ describe("agent command transport", () => {
   });
 
   it("sends an offline startup after its initial socket fails and reconnects", async () => {
+    fakeReconnectTimers();
     const transport = createWsTransport("ws://localhost:1234");
     const pending = transport.createAndSendMessage({
       workspaceId: "workspace-1", content: "Build once", model: "gpt-5", mode: "direct", branch: "main",
@@ -329,7 +345,8 @@ describe("agent command transport", () => {
     const initialSocket = mockWs;
     expect(initialSocket.sent).toHaveLength(0);
     initialSocket.close();
-    await vi.waitFor(() => expect(mockWs).not.toBe(initialSocket), { timeout: 3000 });
+    await elapseReconnectDelay();
+    expect(mockWs).not.toBe(initialSocket);
     mockWs.simulateOpen();
     await vi.waitFor(() => expect(mockWs.sent.some((row) => JSON.parse(row).method === "agent.createAndSend")).toBe(true));
     const request = mockWs.sent.map((row) => JSON.parse(row) as { id: string; method: string; params: { startupId: string } })

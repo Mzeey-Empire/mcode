@@ -164,6 +164,9 @@ for (let index = 0; index < 20; index += 1) {
   process.stdout.write("WF:high-output:chunk:" + index + ":" + payload + "\n");
 }
 process.stdout.write("WF:high-output:end\n");
+// Exiting mid-drain lets the Linux PTY report hangup before the reader takes the
+// tail, and node-pty drops whatever is unread, so hold the slave open briefly.
+setTimeout(() => process.exit(0), 200);
 `;
 
 const RECONNECT_PROGRAM = String.raw`

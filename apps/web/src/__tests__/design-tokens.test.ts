@@ -5,6 +5,7 @@ import * as NodeURL from "node:url";
 import paperExport from "../design-tokens.paper.json";
 
 const here = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
+// oxlint-disable-next-line mcode/no-source-text-test -- index.css token values are the data checked against the Paper export.
 const indexCss = NodeFS.readFileSync(NodePath.resolve(here, "../index.css"), "utf8");
 
 /** html sets `font-size: 62.5%`, so 1rem is 10px. */

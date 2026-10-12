@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import type { AgentEvent } from "@mcode/contracts";
 import {
   getTestThreadStreaming,

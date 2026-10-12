@@ -127,7 +127,6 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    environment: "jsdom",
     setupFiles: "./src/test-setup.ts",
     pool: "threads",
     minWorkers: 1,
@@ -143,5 +142,12 @@ export default defineConfig({
     env: {
       NODE_ENV: "test",
     },
+    // jsdom setup costs more per file than most .ts test bodies, so only
+    // component tests get it. A .ts file that needs the DOM opts in with a
+    // `// @vitest-environment jsdom` docblock.
+    projects: [
+      { extends: true, test: { name: "dom", environment: "jsdom", include: ["src/**/*.test.tsx"] } },
+      { extends: true, test: { name: "node", environment: "node", include: ["src/**/*.test.ts"] } },
+    ],
   },
 });

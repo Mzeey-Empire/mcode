@@ -31,8 +31,8 @@ import type { ApplicationDatabaseWriterResponse } from "../../../../runtime/pers
 
 const HOST_RUNTIME = { platform: "win32", architecture: "x64", nodeAbi: "127" } as const;
 
-// Each test runs a real teardown path: a PowerShell descendant scan plus the
-// 1.5s Windows handle-release delay puts every case near the 5s default.
+// Each test runs a real teardown path; the PowerShell descendant scan alone can
+// approach the 5s default on Windows.
 describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
   let database: Database;
   let cleanupJobs: CleanupJobRepo;
@@ -82,6 +82,7 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
       { run: vi.fn().mockResolvedValue(undefined) },
       HOST_RUNTIME,
       new ThreadControlMutationReservationService(),
+      0,
     );
   });
 
@@ -490,7 +491,7 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
       gitWorktrees, cleanupPolicy, mutationLock, ownedWorkspaces,
       { removeForThread: vi.fn() } as unknown as AttachmentService,
       { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
-      threadDeletion, { run: vi.fn().mockResolvedValue(undefined) }, HOST_RUNTIME, new ThreadControlMutationReservationService(),
+      threadDeletion, { run: vi.fn().mockResolvedValue(undefined) }, HOST_RUNTIME, new ThreadControlMutationReservationService(), 0,
     );
 
     await expect(uncertainCleanup.processOneJob()).rejects.toBeInstanceOf(DatabaseWriteOutcomeUnknown);
@@ -622,6 +623,7 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
         new CleanupActionRunner(environment),
         HOST_RUNTIME,
         new ThreadControlMutationReservationService(),
+        0,
       );
       return { cleanupWorker, prepare };
     }

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcknowledgeSeenResult, ThreadAttention } from "@mcode/contracts";
 import { mockTransport, createMockMessage, createMockThread } from "@/__tests__/mocks/transport";

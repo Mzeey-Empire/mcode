@@ -1,8 +1,8 @@
 import { createMockApproval } from "@/__tests__/mocks/transport";
 import type { McodeTransport } from "@/transport/types";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PermissionRequestCard } from "./PermissionRequestCard";
 
 const { respondToApproval } = vi.hoisted(() => ({
@@ -37,6 +37,23 @@ const questions = [
   },
 ];
 
+beforeEach(() => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+function setupUser() {
+  return userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+}
+
+/** Elapses the card's misclick guard so its actions become enabled. */
+async function armCards() {
+  await act(() => vi.advanceTimersByTimeAsync(600));
+}
+
 function renderQuestionCard() {
   render(
     <PermissionRequestCard
@@ -51,9 +68,10 @@ describe("PermissionRequestCard question flow", () => {
   });
 
   it("collects single, multiple, and custom answers without offering session approval", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderQuestionCard();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled());
+    await armCards();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
 
     expect(screen.getByRole("button", { name: "Submit answers" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Change allow mode" })).not.toBeInTheDocument();
@@ -72,9 +90,10 @@ describe("PermissionRequestCard question flow", () => {
   });
 
   it("rejects a question through the normal deny action", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderQuestionCard();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled());
+    await armCards();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "Deny" }));
 
@@ -82,7 +101,7 @@ describe("PermissionRequestCard question flow", () => {
   });
 
   it("keeps same-index radio answers independent across simultaneous cards", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <>
         <PermissionRequestCard request={{ ...createMockApproval({ requestId: "que_1", subject: { kind: "question", questions } }), settled: false }} />
@@ -90,7 +109,8 @@ describe("PermissionRequestCard question flow", () => {
       </>,
     );
     const yesOptions = screen.getAllByRole("radio", { name: "Yes" });
-    await waitFor(() => expect(yesOptions.every((option) => !option.hasAttribute("disabled"))).toBe(true));
+    await armCards();
+    expect(yesOptions.every((option) => !option.hasAttribute("disabled"))).toBe(true);
 
     await user.click(yesOptions[0]!);
     await user.click(yesOptions[1]!);
@@ -106,7 +126,7 @@ describe("PermissionRequestCard provider-native options", () => {
   });
 
   it("renders provider options verbatim and responds with the selected optionId", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <PermissionRequestCard
         request={{ ...createMockApproval({ requestId: "req-1", choices: [
@@ -115,7 +135,8 @@ describe("PermissionRequestCard provider-native options", () => {
         ] }), settled: false }}
       />,
     );
-    await waitFor(() => expect(screen.getByRole("button", { name: "Allow once" })).toBeEnabled());
+    await armCards();
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "Reject" }));
 
@@ -124,13 +145,14 @@ describe("PermissionRequestCard provider-native options", () => {
 
   it("shows a failed acknowledgement and leaves the advertised choices retryable", async () => {
     respondToApproval.mockResolvedValueOnce({ status: "failed", message: "offline" });
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <PermissionRequestCard
         request={{ ...createMockApproval({ requestId: "req-2" }), settled: false }}
       />,
     );
-    await waitFor(() => expect(screen.getByRole("button", { name: "Allow once" })).toBeEnabled());
+    await armCards();
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "Deny" }));
 

@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, onTestFinished, vi } from "vitest";
 import type { Thread } from "@/transport/types";
 import type { ReactNode } from "react";
 import type { ThreadStartup, WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
@@ -1619,14 +1619,21 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
   });
 
   it("stops retrying a rejected thread subscription after the retry limit", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     chatViewTransportMock.subscribeThread.mockRejectedValue(new Error("persistent subscribe failure"));
 
     render(<ChatView />);
 
-    await waitFor(() => {
-      expect(chatViewTransportMock.subscribeThread).toHaveBeenCalledTimes(5);
-    }, { timeout: 3000 });
-    await new Promise((resolve) => setTimeout(resolve, 1700));
+    // Each retry timer only requests a re-render; act flushes it, and the
+    // reconcile effect then issues the next subscribe.
+    for (let retry = 0; retry < 4; retry += 1) {
+      await act(() => vi.advanceTimersByTimeAsync(1_600));
+    }
+    expect(chatViewTransportMock.subscribeThread).toHaveBeenCalledTimes(5);
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
     expect(chatViewTransportMock.subscribeThread).toHaveBeenCalledTimes(5);
   });
 
@@ -1947,6 +1954,10 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
   });
 
   it("clears a pending atomic set on unmount without retrying after it settles", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const requests: Array<{ resolve: () => void }> = [];
     const setThreadSubscriptions = vi.fn(() => new Promise<void>((resolve) => {
       requests.push({ resolve });
@@ -1971,7 +1982,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(2);
 
     requests[0]?.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(2);
   });
 
@@ -2159,6 +2170,10 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     });
     const thread2 = makeThread({ id: "thread-2", title: "Thread 2", status: "active" });
     const thread3 = makeThread({ id: "thread-3", title: "Thread 3", status: "active" });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const { rerender } = render(<ChatView />);
 
     await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledTimes(1));
@@ -2186,15 +2201,14 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     requests[2]?.reject(new Error("current D3 failure"));
 
     for (let requestIndex = 3; requestIndex < 6; requestIndex += 1) {
-      await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledTimes(requestIndex + 1), {
-        timeout: 3000,
-      });
+      await act(() => vi.advanceTimersByTimeAsync(1_600));
+      expect(setThreadSubscriptions).toHaveBeenCalledTimes(requestIndex + 1);
       requests[requestIndex]?.reject(new Error(`current retry ${requestIndex - 2} failure`));
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 1_700));
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(6);
-  }, 10_000);
+  });
 
   it("reconciles the complete atomic set after reconnecting", async () => {
     const setThreadSubscriptions = enableAtomicSubscriptionTransport();

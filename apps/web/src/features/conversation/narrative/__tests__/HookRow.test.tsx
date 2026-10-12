@@ -98,26 +98,4 @@ describe("HookRow", () => {
 
     expect(closestCollapsible(detail)).toHaveClass("grid-rows-[1fr]");
   });
-
-  it("does not overflow narrow containers with long hook names", () => {
-    const { container } = render(
-      <div style={{ width: 360 }}>
-        <HookRow
-          hook={makeHook({
-            hookName: "SessionStart:startup:with-a-long-single-token-hook-name",
-            toolName: "VeryLongToolNameWithoutNaturalBreaks",
-            outputLines: ["ok"],
-            fullOutput: ["ok"],
-          })}
-        />
-      </div>,
-    );
-
-    const wrapper = container.firstElementChild as HTMLElement;
-    const row = screen.getByRole("button", { name: /SessionStart:startup/ });
-
-    expect(row).toHaveClass("min-w-0", "overflow-hidden");
-    expect(screen.getByText(/SessionStart:startup/)).toHaveClass("min-w-0", "text-fade");
-    expect(wrapper.scrollWidth).toBeLessThanOrEqual(wrapper.clientWidth);
-  });
 });

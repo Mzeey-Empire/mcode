@@ -118,6 +118,8 @@ describe("Cleanup integration", () => {
       mockThreadDeletion,
       { run: vi.fn().mockResolvedValue(undefined) },
       TEST_HOST_RUNTIME,
+      undefined,
+      0,
     );
 
     workspaceService = new WorkspaceService(

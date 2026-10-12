@@ -7,7 +7,7 @@
  */
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import {
   BROWSER_AUTOMATION_CONTRACT_VERSION,
   getDefaultSettings,
@@ -124,6 +124,7 @@ import * as NodeURL from "node:url";
 function declaredLayerValues(): Record<string, number> {
   // Vitest's CSS handling yields an empty string for `index.css?raw`.
   const here = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
+  // oxlint-disable-next-line mcode/no-source-text-test -- The declared z-index layers are the data whose stacking order is checked.
   const indexCss = NodeFS.readFileSync(NodePath.resolve(here, "../../../../index.css"), "utf8");
   const layers: Record<string, number> = {};
   for (const match of indexCss.matchAll(/(--layer-[a-z-]+):\s*(-?\d+);/g)) {
@@ -1586,6 +1587,10 @@ describe("PreviewPanel: full panel state", () => {
   });
 
   it("keeps one hosted placement mounted while its viewport coordinator registers", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const threadId = "thread-adoption-stability";
     const tabId = "tab-adoption-stability";
     mockUsePreviewTabs.mockReturnValue({
@@ -1618,9 +1623,7 @@ describe("PreviewPanel: full panel state", () => {
     const initialPlacement = screen.getByTestId("preview-webview");
 
     await waitFor(() => expect(prepare).toHaveBeenCalled());
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
+    await act(() => vi.advanceTimersByTimeAsync(50));
 
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(release).not.toHaveBeenCalled();
