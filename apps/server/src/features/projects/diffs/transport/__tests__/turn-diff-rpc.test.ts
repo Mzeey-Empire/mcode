@@ -23,8 +23,8 @@ describe("turn diff route outcomes", { timeout: 30_000 }, () => {
       const flags = ignoreWhitespace ? ["-w"] : [];
       const range = ["--find-renames", row.ref_before, row.ref_after, ...flags];
       const paths = ["--", ":(literal)space.ts", ":(literal)code.ts"];
-      fake.setResponse(["diff", "--name-status", ...range, ...paths], { stdout: "M\tspace.ts\nM\tcode.ts\n", stderr: "" });
-      fake.setResponse(["diff", "--numstat", ...range, ...paths], { stdout: "1\t1\tcode.ts\n" + (ignoreWhitespace ? "" : "2\t2\tspace.ts\n"), stderr: "" });
+      fake.setResponse(["diff", "--name-status", "-z", ...range, ...paths], { stdout: "M\0space.ts\0M\0code.ts\0", stderr: "" });
+      fake.setResponse(["diff", "--numstat", "-z", ...range, ...paths], { stdout: "1\t1\tcode.ts\0" + (ignoreWhitespace ? "" : "2\t2\tspace.ts\0"), stderr: "" });
       fake.setResponse(["diff", ...range, "--", ":(literal)code.ts"], { stdout: patch, stderr: "" });
       const comparison = await routeTurnDiffRpc("turnDiff.getComparison", { threadId: "thread", messageId: "message-one", ignoreWhitespace }, fixture.deps);
       expect(comparison).toMatchObject({ status: "ready", comparison: {
@@ -49,6 +49,13 @@ describe("turn diff route outcomes", { timeout: 30_000 }, () => {
     expect(await routeTurnDiffRpc("turnDiff.getFileDiff", { threadId: "thread", comparisonId: `git:${row.id}`, filePath: "space.ts", ignoreWhitespace: true }, fixture.deps)).toBe("");
     expect(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: "thread", messageId: "message-one" }, fixture.deps))
       .toMatchObject({ status: "ready", comparison: { files: [{ path: "space.ts", additions: 1, deletions: 1 }], additions: 1, deletions: 1 } });
+  });
+
+  it("keeps substantive edits to non-ASCII paths when hiding whitespace with real Git", async () => {
+    await fixture.attempt({ id: "base", edits: { "café.ts": "before\n" } });
+    await fixture.attempt({ id: "one", edits: { "café.ts": "after\n" } });
+    expect(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: "thread", messageId: "message-one", ignoreWhitespace: true }, fixture.deps))
+      .toMatchObject({ status: "ready", comparison: { files: [{ path: "café.ts", additions: 1, deletions: 1 }], additions: 1, deletions: 1 } });
   });
 
   it.each(["native", "tracked", "live"] as const)("leaves %s whitespace patches and comparisons unchanged", async (source) => {

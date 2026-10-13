@@ -49,18 +49,18 @@ describe("SnapshotService unified output", () => {
     )).resolves.toBe(`${PATCH}\n${secondPatch}`);
   });
 
-  it("still parses newline-terminated stats and file statuses", async () => {
+  it("reads NUL-delimited stats and file statuses with paths left unquoted", async () => {
     fake.setResponse(
-      ["diff", "--numstat", "--find-renames", "before", "after"],
-      { stdout: "\n1\t2\texample.txt\n\n", stderr: "" },
+      ["diff", "--numstat", "-z", "--find-renames", "before", "after"],
+      { stdout: "1\t2\tcafé.txt\0", stderr: "" },
     );
     fake.setResponse(
-      ["diff", "--name-status", "--find-renames", "before", "after"],
-      { stdout: "\nM\texample.txt\n\n", stderr: "" },
+      ["diff", "--name-status", "-z", "--find-renames", "before", "after"],
+      { stdout: "M\0café.txt\0", stderr: "" },
     );
 
     await expect(service.getDiffStats("/repo", "before", "after")).resolves.toEqual([
-      { filePath: "example.txt", additions: 1, deletions: 2, changeType: "modified" },
+      { filePath: "café.txt", additions: 1, deletions: 2, changeType: "modified" },
     ]);
   });
 });
@@ -194,22 +194,19 @@ describe("SnapshotService ref and numstat validation", () => {
     expect(fake.calls).toHaveLength(0);
   });
 
-  it("returns destination paths for simple and brace-form numstat renames", async () => {
+  it("returns destination paths for renames and keeps tab-containing paths whole", async () => {
     const executor: GitExecutor = {
       async exec(args) {
         return args.includes("--name-status")
-          ? { stdout: "R100\told.txt\tnew.txt\nM\tarch/x86/Makefile\n", stderr: "" }
-          : {
-              stdout: "0\t0\told.txt => new.txt\n1\t2\tarch/{i386 => x86}/Makefile\n",
-              stderr: "",
-            };
+          ? { stdout: "R100\0old.txt\0new.txt\0M\0tab\there.txt\0", stderr: "" }
+          : { stdout: "0\t0\t\0old.txt\0new.txt\0" + "1\t2\ttab\there.txt\0", stderr: "" };
       },
     };
     const service = new SnapshotService(executor);
 
     await expect(service.getDiffStats("/repo", "before", "after")).resolves.toEqual([
       { filePath: "new.txt", additions: 0, deletions: 0, changeType: "renamed" },
-      { filePath: "arch/x86/Makefile", additions: 1, deletions: 2, changeType: "modified" },
+      { filePath: "tab\there.txt", additions: 1, deletions: 2, changeType: "modified" },
     ]);
   });
 });
