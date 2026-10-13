@@ -48,10 +48,14 @@ export function mapCopilotEvent(event: SessionEvent, threadId: string, turn: Cop
 
 function mapChildEvent(event: SessionEvent, threadId: string, turn: CopilotTurnState, owner: string): CopilotMappedEvent[] {
   switch (event.type) {
-    case "assistant.message_delta": return childEvent(turn, owner,
-      { type: "textDelta", threadId, delta: event.data.deltaContent }, { nativeItemId: event.data.messageId });
-    case "assistant.message": return childEvent(turn, owner,
-      { type: "textDelta", threadId, delta: event.data.content }, { nativeItemId: event.data.messageId, final: true });
+    case "assistant.message_delta":
+      if ("phase" in event.data && event.data.phase === "thinking") return [];
+      return childEvent(turn, owner,
+        { type: "textDelta", threadId, delta: event.data.deltaContent }, { nativeItemId: event.data.messageId });
+    case "assistant.message":
+      if (!event.data.content || event.data.phase === "thinking") return [];
+      return childEvent(turn, owner,
+        { type: "textDelta", threadId, delta: event.data.content }, { nativeItemId: event.data.messageId, final: true });
     case "tool.execution_start":
     case "tool.execution_complete": return mapToolEvent(event, threadId, turn) ?? [];
     default: return [];

@@ -108,6 +108,33 @@ describe("Copilot subagent mapping", () => {
     }
   });
 
+  it("drops an empty child message containing only tool requests", () => {
+    const turn = turnState();
+    start(turn, "T1");
+    expect(mapCopilotEvent({ ...metadata, type: "assistant.message", data: {
+      messageId: "M", content: "", parentToolCallId: "T1",
+      toolRequests: [{ toolCallId: "read", name: "Read", arguments: {} }],
+    } }, "thread", turn)).toEqual([]);
+  });
+
+  it("drops child thinking messages", () => {
+    const turn = turnState();
+    start(turn, "T1");
+    const message: SessionEvent = { ...metadata, type: "assistant.message", data: {
+      messageId: "M", content: "Private reasoning", parentToolCallId: "T1", phase: "thinking",
+    } };
+    expect(mapCopilotEvent(message, "thread", turn)).toEqual([]);
+  });
+
+  it("drops phase-tagged child thinking deltas", () => {
+    const turn = turnState();
+    start(turn, "T1");
+    const delta = { ...metadata, type: "assistant.message_delta" as const, ephemeral: true as const, data: {
+      messageId: "M", deltaContent: "Private reasoning", parentToolCallId: "T1", phase: "thinking",
+    } };
+    expect(mapCopilotEvent(delta, "thread", turn)).toEqual([]);
+  });
+
   it("keeps two interleaved children separate from each other and the parent", () => {
     const turn = turnState();
     start(turn, "T1");
