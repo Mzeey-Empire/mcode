@@ -246,8 +246,9 @@ update, omit that choice, never a deny choice.
 
 - Claude offers a session choice only for non-empty, describable rule or directory
   suggestions. Every forwarded update targets the session, even when the SDK
-  suggests persistent settings. Mode changes are omitted because they change
-  policy beyond the named scope.
+  suggests persistent settings. A suggestion set that includes a mode change
+  offers no session choice, because a mode change alters policy beyond the named
+  scope.
 - Copilot stores exact shell command identifiers only when the native request
   permits session approval. Every identifier in a later request must be granted.
   Shell requests with file-write redirection never match a grant. Copilot CLI
