@@ -60,6 +60,24 @@ describe("ClaudeEventMapper native dispatch", () => {
     expect(evidence.at(-1)?.parent).toEqual({ kind: "native", id: "PARENT_2" });
   });
 
+  it("adds the model and effort a subagent ran with to its Agent call, once each, under the Agent's own parent", async () => {
+    const { mapper, events, evidence } = createMapper();
+    const childMessage = (model: string) => ({ type: "assistant", parent_tool_use_id: "AGENT_1", message: { model, content: [] } });
+    await mapper.map({ type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "tool_use", id: "AGENT_1", name: "Agent", input: { subagent_type: "general-purpose", model: "sonnet" } }] } });
+    await mapper.map(childMessage("<synthetic>"));
+    await mapper.map(childMessage("claude-sonnet-5-5"));
+    await mapper.map(childMessage("claude-sonnet-5-5"));
+    mapper.reportSubagentRun("AGENT_1", { reasoningEffort: "high" });
+    mapper.reportSubagentRun("AGENT_1", { reasoningEffort: "high" });
+    mapper.reportSubagentRun("UNKNOWN", { reasoningEffort: "low" });
+
+    expect(events.slice(1)).toEqual([
+      { type: AgentEventType.ToolUse, threadId: "test", toolCallId: "AGENT_1", toolName: "Agent", toolInput: { model: "claude-sonnet-5-5" }, parentToolCallId: undefined },
+      { type: AgentEventType.ToolUse, threadId: "test", toolCallId: "AGENT_1", toolName: "Agent", toolInput: { reasoningEffort: "high" }, parentToolCallId: undefined },
+    ]);
+    expect(evidence.slice(1).map((source) => source.parent)).toEqual([{ kind: "root" }, { kind: "root" }]);
+  });
+
   it.each(["__proto__", "constructor", "toString"])(
     "ignores unsafe native type %s",
     async (type) => {

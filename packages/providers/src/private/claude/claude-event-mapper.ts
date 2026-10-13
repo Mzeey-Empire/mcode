@@ -119,6 +119,8 @@ export class ClaudeEventMapper {
   private compacting = false;
   private readonly toolUseIds = new Set<string>();
   private readonly toolParents = new Map<string, ClaudeParentEvidence>();
+  /** Agent calls by id, with the run settings already reported for each. */
+  private readonly subagentRuns = new Map<string, { parentToolCallId: string | undefined; model?: string; reasoningEffort?: string }>();
   /** Open thinking content-block index to its reasoning item id, for the message currently streaming. */
   private readonly reasoningItemByBlock = new Map<number, string>();
   private reasoningMessageKey: string | undefined;
@@ -190,6 +192,7 @@ export class ClaudeEventMapper {
   resetExecution(): void {
     this.toolUseIds.clear();
     this.toolParents.clear();
+    this.subagentRuns.clear();
     this.reasoningItemByBlock.clear();
     this.reasoningMessageKey = undefined;
     this.lastAssistantText = "";
@@ -303,7 +306,29 @@ export class ClaudeEventMapper {
     }
     for (const block of content)
       if (block.type === "tool_use") this.emitToolUse(block, parentToolCallId);
+    if (parentToolCallId) this.reportSubagentRun(parentToolCallId, { model: runModel(objectValue(assistant).model) });
     return "none";
+  }
+
+  /**
+   * Adds the model or effort a subagent actually ran with to its Agent call.
+   * The Agent input names a model only when Claude overrides it, so the run itself is the evidence.
+   */
+  reportSubagentRun(agentToolCallId: string, run: { model?: string; reasoningEffort?: string }): void {
+    const reported = this.subagentRuns.get(agentToolCallId);
+    if (!reported) return;
+    const toolInput: Record<string, string> = {};
+    if (run.model && !reported.model) toolInput.model = reported.model = run.model;
+    if (run.reasoningEffort && !reported.reasoningEffort) toolInput.reasoningEffort = reported.reasoningEffort = run.reasoningEffort;
+    if (Object.keys(toolInput).length === 0) return;
+    // An empty source makes emit attribute the Agent call to its own recorded parent, not to the child message.
+    const source = this.nativeSource;
+    this.nativeSource = {};
+    try {
+      this.emit({ type: AgentEventType.ToolUse, threadId: this.threadId, toolCallId: agentToolCallId, toolName: "Agent", toolInput, parentToolCallId: reported.parentToolCallId });
+    } finally {
+      this.nativeSource = source;
+    }
   }
 
   private emitToolUse(
@@ -315,6 +340,7 @@ export class ClaudeEventMapper {
     if (toolCallId && this.toolUseIds.has(toolCallId)) return;
     if (toolCallId) this.registerToolUse(toolCallId);
     const toolName = stringOr(block.name, "unknown");
+    if (toolName === "Agent" && toolCallId) this.trackSubagentRun(toolCallId, parentToolCallId);
     logger.debug("Claude ToolUse from assistant block", {
       toolId: toolCallId,
       toolName,
@@ -328,6 +354,11 @@ export class ClaudeEventMapper {
       toolInput: objectValue(block.input),
       parentToolCallId,
     });
+  }
+
+  private trackSubagentRun(toolCallId: string, parentToolCallId: string | undefined): void {
+    if (this.subagentRuns.size >= MAX_TRACKED_TOOLS) throw new Error("Claude native tool identity bound exceeded");
+    this.subagentRuns.set(toolCallId, { parentToolCallId });
   }
 
   private registerToolUse(id: string): void {
@@ -838,6 +869,10 @@ function subagentReport(text: string): string {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+/** The model a subagent message ran on; the CLI labels messages it wrote itself, such as API errors, `<synthetic>`. */
+function runModel(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "<synthetic>" ? validIdentity(value) : undefined;
 }
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
