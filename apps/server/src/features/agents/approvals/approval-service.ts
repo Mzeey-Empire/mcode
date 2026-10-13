@@ -32,7 +32,7 @@ export class ApprovalService {
   private readonly responses = new Map<string, { note: string | undefined; result: ApprovalRespondResult }>();
   private readonly noteAdmissions = new Map<string, Promise<void>>();
   private ready: Promise<void> = Promise.resolve();
-  private stopped = false;
+  private newResponsesBlocked = false;
 
   constructor(
     @inject("IProviderRegistry") private readonly providers: { resolveAll(): ApprovalProvider[] },
@@ -51,9 +51,12 @@ export class ApprovalService {
     return this.ready;
   }
 
-  /** Stop recording attempts whose provider acknowledgement may still be in flight. */
-  stop(): void {
-    this.stopped = true;
+  /**
+   * Refuse responds that have not started, at shutdown. A respond already waiting on its
+   * adapter still records the result, so an acknowledged note is never retried as unknown.
+   */
+  blockNewResponses(): void {
+    this.newResponsesBlocked = true;
   }
 
   /** Restore retained notes after startup reconciliation. */
@@ -164,7 +167,7 @@ export class ApprovalService {
 
   private async respond(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     await this.ready;
-    if (this.stopped) throw new Error("ApprovalService has stopped");
+    if (this.newResponsesBlocked) throw new Error("ApprovalService is shutting down");
     const replay = this.replay(requestId, response);
     if (replay) return replay;
     const threadResult = await this.respondToThreadControl(requestId, response);
@@ -215,7 +218,6 @@ export class ApprovalService {
     const refused = await this.prepareResponse(envelope, owner, response);
     if (refused) return refused;
     const result = await this.deliver(envelope.requestId, owner, response);
-    if (this.stopped) throw new Error("ApprovalService stopped before recording the answer");
     if (result.status === "not_pending") return this.endedNote(envelope.requestId);
     if (result.status === "resolved") {
       const note = "autoDeny" in response ? undefined : response.note;

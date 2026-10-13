@@ -1080,7 +1080,7 @@ await bootstrapServer();
 async function shutdown(): Promise<void> {
   shutdownCoordinator.setPhase("begin shutdown");
   logger.info("Shutdown initiated");
-  approvalService.stop();
+  approvalService.blockNewResponses();
 
   // Disarm the grace-period controller so its timer does not fire after
   // an externally-triggered shutdown (e.g. SIGTERM).

@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import * as NodeEvents from "node:events";
 import * as NodeCrypto from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ApprovalRequestBody, ApprovalRequestEnvelope, ApprovalRespondResult, ApprovalResponse } from "@mcode/contracts";
 import { ApprovalService } from "../approval-service.js";
 import { ApprovalNoteRepo } from "../approval-note-repo.js";
@@ -67,7 +67,9 @@ async function setup(delivery: Delivery = "next_turn") {
     userMessage: existingMessageId ? { kind: "existing", messageId: existingMessageId }
       : { kind: "create", messageId: NodeCrypto.randomUUID(), content: note, sequence: 1 },
   });
-  return { ...runtime, notes, adapter, thread, service, restart, admit };
+  // The process exits after the provider acknowledged the answer and before the note status write.
+  const crashBeforeRecording = () => vi.spyOn(notes, "settle").mockRejectedValueOnce(new Error("Server exited before recording the answer"));
+  return { ...runtime, notes, adapter, thread, service, restart, admit, crashBeforeRecording };
 }
 
 describe("durable approval notes", () => {
@@ -120,8 +122,8 @@ describe("durable approval notes", () => {
     const test = await setup(delivery);
     test.adapter.afterAcknowledgement = () => {
       expect(test.notes.find("request")).toMatchObject({ note, threadId: test.thread.id, delivery, state: "pending" });
-      test.service.stop();
     };
+    test.crashBeforeRecording();
     await expect(test.service.respondToApproval("request", response)).rejects.toThrow();
     expect(test.notes.find("request")?.state).toBe("pending");
     expect(test.adapter.delivered).toEqual(delivery === "next_turn" ? [] : [note]);
@@ -131,6 +133,17 @@ describe("durable approval notes", () => {
     expect(await restarted.respondToApproval("request", response)).toEqual(delivery === "next_turn"
       ? { status: "resolved", noteDelivery: "next_turn" } : { status: "not_pending", note: "delivery_unknown" });
     expect(test.adapter.calls).toBe(1);
+  });
+
+  it("records an acknowledged note when shutdown begins during the adapter call", async () => {
+    const test = await setup("native");
+    test.adapter.afterAcknowledgement = () => test.service.blockNewResponses();
+    expect(await test.service.respondToApproval("request", response)).toEqual({ status: "resolved", noteDelivery: "native" });
+    expect(test.notes.find("request")?.state).toBe("delivered");
+    await expect(test.service.respondToApproval("request", response)).rejects.toThrow("ApprovalService is shutting down");
+    const restarted = await test.restart();
+    expect(await restarted.listNotes()).toEqual([]);
+    expect(test.adapter.delivered).toEqual([note]);
   });
 
   it("holds an unanswered steer and replays its unknown result during this service run", async () => {
@@ -145,7 +158,7 @@ describe("durable approval notes", () => {
 
   it("admits one message after Send again in two windows and rejects the second claim", async () => {
     const test = await setup("native");
-    test.adapter.afterAcknowledgement = () => test.service.stop();
+    test.crashBeforeRecording();
     await expect(test.service.respondToApproval("request", response)).rejects.toThrow();
     const service = await test.restart();
     expect(await Promise.all([service.resendNote("request"), service.resendNote("request")])).toEqual([{ status: "queued" }, { status: "queued" }]);
@@ -191,7 +204,7 @@ describe("durable approval notes", () => {
     test.adapter.result = { status: "resolved", noteDelivery: delivery };
     await test.service.respondToApproval("request", response);
     expect(await test.service.updateNote("request", "Only run web tests")).toEqual({ status: "updated" });
-    test.service.stop();
+    test.service.blockNewResponses();
     const restarted = await test.restart();
     expect(await restarted.listNotes()).toEqual([{ requestId: "request", threadId: test.thread.id, note: "Only run web tests",
       state: delivery === "next_turn" ? "queued" : "delivery_unknown" }]);
