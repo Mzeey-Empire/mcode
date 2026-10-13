@@ -2,12 +2,13 @@ import * as NodeCrypto from "node:crypto";
 import {
   AgentEventType,
   createCanonicalSubagentPresentation,
+  codexCollaborationExtension,
   type CodexChildEvidence,
   type CodexCollaborationEvidence,
   type CodexContinuationEvidence,
   type AgentEvent,
   type CollaborationActionKind,
-  type ProviderRuntimeExtension,
+  type CodexCollaborationExtension,
   type SubagentPresentation,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
@@ -101,12 +102,12 @@ export class CodexCollaborationEventAdapter implements ProviderEventAdapter {
   }
 
   private runtimeEvent(input: ProviderEventIngressEvent): CodexRuntimeEvent {
-    const extension = input.runtimeExtension;
+    const extension = codexCollaborationExtension(input.runtimeExtension);
     if (!extension || extension.providerId !== this.providerId) return input.event;
     return this.applyExtension(input.event, extension);
   }
 
-  private applyExtension(event: AgentEvent, extension: ProviderRuntimeExtension): CodexRuntimeEvent {
+  private applyExtension(event: AgentEvent, extension: CodexCollaborationExtension): CodexRuntimeEvent {
     if (event.type !== AgentEventType.ToolUse && event.type !== AgentEventType.ToolResult) {
       return {
         ...event,

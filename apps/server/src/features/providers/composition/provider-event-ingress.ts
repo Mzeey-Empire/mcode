@@ -2,6 +2,7 @@ import { logger } from "@mcode/shared";
 import * as NodePerfHooks from "node:perf_hooks";
 import {
   AgentEventType,
+  isChildRoutedRuntimeEvent,
   isTurnDiffSource,
   ProviderIdSchema,
   type AgentEvent,
@@ -455,7 +456,7 @@ export class ProviderEventIngress {
     }
     const threadId = event.event.threadId;
     const queue = this.pendingByThread.get(threadId);
-    const terminal = isTerminalLifecycleEvent(event.event);
+    const terminal = !isChildRoutedRuntimeEvent(event.runtimeExtension) && isTerminalLifecycleEvent(event.event);
     const byteLength = serializedEventByteLength(event.event);
     const queueCapacity = this.queueCapacity({ event, queue, terminal, byteLength });
     if (queueCapacity) {

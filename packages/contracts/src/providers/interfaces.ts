@@ -23,13 +23,13 @@ import type { Provider } from "../compat/agent-model.js";
  */
 export type ProviderId = "claude" | "codex" | "gemini" | "copilot" | "cursor" | "opencode" | "devin";
 
-/** Child evidence currently reported by each adapter, including unavailable providers. */
+/** Reported child evidence. childTranscript gates neutral child-thread observations on the server. */
 export const SUBAGENT_REPORTING: Record<ProviderId, { childTranscript: boolean; childSteps: boolean } | null> = {
   codex: { childTranscript: true, childSteps: false },
   claude: { childTranscript: false, childSteps: true },
   devin: { childTranscript: false, childSteps: true },
   cursor: { childTranscript: false, childSteps: false },
-  copilot: { childTranscript: false, childSteps: true },
+  copilot: { childTranscript: true, childSteps: false },
   // Child steps are proven by apps/server/src/features/providers/adapters/opencode/__tests__/fixtures/task-subagent.captured.json.
   opencode: { childTranscript: false, childSteps: true },
   gemini: null,

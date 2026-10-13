@@ -39,10 +39,13 @@ function parseLinkedWorktrees(output: string) {
   });
 }
 
-function parseRefs(output: string, contextPath: string, linkedPaths: ReadonlySet<string>): GitRef[] {
+function parseRefs(
+  output: string, contextPath: string, linkedPaths: ReadonlySet<string>, detectedDefault: string | null,
+): GitRef[] {
   const contextKey = pathKey(NodeFS.realpathSync.native(contextPath));
   const rows = output.split("\n").filter(Boolean).map((line) => rawRefSchema.parse(line.replace(/\r$/, "").split("\0")));
-  const defaultRef = rows.find(([fullName]) => fullName === "refs/remotes/origin/HEAD")?.[6];
+  const defaultRef = rows.find(([fullName]) => fullName === "refs/remotes/origin/HEAD")?.[6]
+    ?? (detectedDefault ? `refs/remotes/origin/${detectedDefault}` : undefined);
   const localDefault = defaultRef?.replace(/^refs\/remotes\/origin\//, "refs/heads/");
   return rows.filter(([fullName, , , , , , symref]) => !(fullName.endsWith("/HEAD") && symref))
     .map(([fullName, shortName, headSha, head, worktreePath, committedAt]) => {
@@ -110,13 +113,16 @@ function readOffset(cursor: string | undefined): number {
   return offset;
 }
 
-/** Parse Git output, apply the purpose and query, and page the single sorted target list. */
+/**
+ * Parse Git output, apply the purpose and query, and page the single sorted target list. The live `origin/HEAD`
+ * symref names the default; `detectedDefault` (a bare branch name) covers repos without one.
+ */
 export function buildRefPage(
-  refsOutput: string, worktreeOutput: string, contextPath: string, options: RefOptions,
+  refsOutput: string, worktreeOutput: string, contextPath: string, options: RefOptions, detectedDefault: string | null,
 ): GitRefsListResult {
   const linked = parseLinkedWorktrees(worktreeOutput);
   const paths = new Set(linked.map((worktree) => pathKey(worktree.path)));
-  const refs = parseRefs(refsOutput, contextPath, paths);
+  const refs = parseRefs(refsOutput, contextPath, paths, detectedDefault);
   const linkedBranches = new Set(linked.flatMap((worktree) => worktree.branch ? [worktree.branch] : []));
   const targets: Target[] = purposeFilters[options.purpose](refs, options, linkedBranches);
   if (options.purpose === "existing-worktree") {

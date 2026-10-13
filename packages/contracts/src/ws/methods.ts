@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { GitSearchCommitsParamsSchema, GitSearchCommitsResultSchema } from "../git.js";
 import {
   ListHeldSteersResultSchema, SettleUnknownSteerParamsSchema, SettleUnknownSteerResultSchema,
   TurnSteerParamsSchema, TurnSteerResultSchema,
@@ -931,6 +932,10 @@ export const WS_METHODS = lazySchema(() => ({
     params: GitRefsListParamsSchema(),
     result: GitRefsListResultSchema(),
   },
+  "git.searchCommits": {
+    params: GitSearchCommitsParamsSchema(),
+    result: GitSearchCommitsResultSchema(),
+  },
   "git.currentBranch": {
     params: z.object({ workspaceId: z.string() }),
     result: z.string().nullable(),
@@ -1050,7 +1055,7 @@ export const WS_METHODS = lazySchema(() => ({
       workspaceId: z.string(),
       view: z.enum(["unstaged", "staged", "branch", "commit", "uncommitted"]),
       base: GitRefNameSchema.optional(),
-      target: GitRefNameSchema.optional(),
+      compare: GitRefNameSchema.optional(),
       sha: z.string().optional(),
       threadId: z.string().optional(),
     }),

@@ -1473,6 +1473,7 @@ export function createWsTransport(
       }),
     getBranchComparison: (workspaceId, threadId?) =>
       rpc<BranchComparison>("git.branchComparison", { workspaceId, threadId }),
+    searchCommits: (params) => rpc<import("@mcode/contracts").GitSearchCommitsResult>("git.searchCommits", params),
     getRemoteUrl: (workspaceId, threadId?) =>
       rpc<GitRemoteUrl>("git.getRemoteUrl", { workspaceId, threadId }),
     getReviewState: (workspaceId, threadId?) =>

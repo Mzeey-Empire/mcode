@@ -85,7 +85,7 @@ describe("GitComparisonService unified output", () => {
   });
 
   it("returns unsafe-ref before executing the comparison", async () => {
-    expect(await service.readReviewComparison(workspaceId, "branch", { base: "--output=outside", target: "HEAD" })).toMatchObject({ status: "failed", failure: { kind: "unsafe-ref" } });
+    expect(await service.readReviewComparison(workspaceId, "branch", { base: "--output=outside", compare: "HEAD" })).toMatchObject({ status: "failed", failure: { kind: "unsafe-ref" } });
     expect(fake.calls).toEqual([]);
   });
 

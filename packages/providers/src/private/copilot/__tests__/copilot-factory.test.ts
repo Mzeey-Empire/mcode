@@ -6,7 +6,7 @@ import { DeterministicCanonicalSink } from "../../../conformance/deterministic-s
 import { loadProviderFixtureManifest } from "../../../conformance/fixture-safety.js";
 import * as NodeURL from "node:url";
 
-const sdk = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), forceStop: vi.fn(), create: vi.fn(), resume: vi.fn(), models: vi.fn(), session: undefined as FakeSession | undefined }));
+const sdk = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), forceStop: vi.fn(), getState: vi.fn(), create: vi.fn(), resume: vi.fn(), models: vi.fn(), session: undefined as FakeSession | undefined }));
 vi.mock("@github/copilot-sdk", () => ({
   approveAll: () => ({ kind: "approved" }),
   CopilotClient: class {
@@ -14,6 +14,7 @@ vi.mock("@github/copilot-sdk", () => ({
     start = sdk.start;
     stop = sdk.stop;
     forceStop = sdk.forceStop;
+    getState = sdk.getState;
     createSession = sdk.create;
     resumeSession = sdk.resume;
     listModels = sdk.models;
@@ -53,7 +54,10 @@ function host(sink: DeterministicCanonicalSink): ProviderHostPorts {
   };
 }
 function projections(sink: DeterministicCanonicalSink) {
-  return sink.snapshot().events.flatMap(({ payload }) => payload.type === "item.recorded" ? [ProviderRuntimeEventSchema().parse(payload.item.payload.runtimeEvent).event] : []);
+  return runtimeEvents(sink).map((runtime) => runtime.event);
+}
+function runtimeEvents(sink: DeterministicCanonicalSink) {
+  return sink.snapshot().events.flatMap(({ payload }) => payload.type === "item.recorded" ? [ProviderRuntimeEventSchema().parse(payload.item.payload.runtimeEvent)] : []);
 }
 
 function shellPermission(identifiers = ["git status"], hasWriteFileRedirection = false): PermissionRequest {
@@ -73,7 +77,7 @@ describe("Copilot public factory", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     session = new FakeSession(); sdk.session = session;
-    sdk.start.mockResolvedValue(undefined); sdk.stop.mockResolvedValue([]); sdk.forceStop.mockResolvedValue(undefined);
+    sdk.start.mockResolvedValue(undefined); sdk.stop.mockResolvedValue([]); sdk.forceStop.mockResolvedValue(undefined); sdk.getState.mockReturnValue("connected");
     sdk.create.mockResolvedValue(session); sdk.resume.mockResolvedValue(session);
     sdk.models.mockResolvedValue(["model", "other-model"].map((id) => ({ id, name: id, capabilities: { supports: { reasoningEffort: true } }, supportedReasoningEfforts: ["low", "high", "xhigh"], defaultReasoningEffort: "low" })));
     sink = new DeterministicCanonicalSink({ maxEvents: 2_000, maxDiagnostics: 32 }); ports = host(sink);
@@ -377,13 +381,41 @@ describe("Copilot public factory", () => {
     session.emit({ type: "subagent.completed", data: { toolCallId: "child-invocation", agentName: "worker", agentDisplayName: "Worker" } });
     await finish();
     expect(projections(sink).filter((event) => event.type === "message")).toEqual([]);
-    expect(projections(sink).filter((event) => event.type === "textDelta")).toEqual([expect.objectContaining({ delta: "parent output" })]);
+    expect(runtimeEvents(sink).filter((runtime) => runtime.event.type === "textDelta")).toMatchObject([
+      { event: { delta: "private child output" }, extension: { providerId: "copilot", kind: "child-thread",
+        childThread: { role: "child", path: ["child-invocation"], nativeItemId: "child-message", final: true } } },
+      { event: { delta: "parent output" } },
+    ]);
+    expect(runtimeEvents(sink).filter((runtime) => !runtime.extension && runtime.event.type === "textDelta")
+      .map((runtime) => runtime.event)).toEqual([expect.objectContaining({ delta: "parent output" })]);
     const native = sink.snapshot().events.find((event) => event.eventId.includes("parent-delta"));
     expect(native?.providerTimestamp).toBe("2026-10-02T10:00:00.000Z");
     expect(native?.sourceSequence).toBeUndefined();
     const child = sink.snapshot().events.find((event) => event.eventId.includes("child-start"));
     expect(child?.sourceIdentities).toContainEqual({ providerId: "copilot", scope: "item", value: "child-invocation", provenance: "native" });
     expect(JSON.stringify(child)).toContain('"predecessorEventId"');
+  });
+
+  it.each(["completed", "cancelled", "failed"] as const)("closes open children once when the parent is %s", async (outcome) => {
+    await provider.sendTurn(request());
+    for (let index = 0; index < 6; index += 1) session.emit({ type: "subagent.started", data: {
+      toolCallId: `child-${index}`, agentName: "worker", agentDisplayName: "Worker", agentDescription: "Inspect",
+    } });
+    session.emit({ type: "subagent.completed", data: { toolCallId: "child-0", agentName: "worker", agentDisplayName: "Worker" } });
+    if (outcome === "cancelled") await provider.stopSession("mcode-thread-1");
+    else if (outcome === "failed") session.emit({ type: "session.error", data: { errorType: "fatal", message: "Native failed" } });
+    else session.emit({ type: "session.idle", ephemeral: true, data: {} });
+    await vi.waitFor(() => expect(runtimeEvents(sink).filter((runtime) => !runtime.extension).at(-1)?.event.type).toBe("ended"));
+    const endings = runtimeEvents(sink).filter((runtime) => runtime.extension?.kind === "child-thread" && runtime.event.type === "ended");
+    expect(endings.map((runtime) => runtime.extension)).toEqual([1, 2, 3, 4, 5].map((index) => ({
+      providerId: "copilot", kind: "child-thread", childThread: { role: "child", path: [`child-${index}`] },
+    })));
+    expect(endings.map((runtime) => runtime.event)).toEqual([1, 2, 3, 4, 5].map(() => ({ type: "ended", threadId: "thread-1",
+      turnExecutionId: request().turnExecutionId, outcome: outcome === "completed" ? "interrupted" : outcome === "cancelled" ? "cancelled" : "errored" })));
+    const runtime = runtimeEvents(sink);
+    const parentTerminal = runtime.findIndex((entry) => !entry.extension
+      && ["turnComplete", "error", "ended"].includes(entry.event.type));
+    expect(runtime.slice(parentTerminal).filter((entry) => entry.extension?.kind === "child-thread")).toEqual([]);
   });
 
   it("deduplicates native IDs and pairs tool starts/results in order", async () => {
@@ -449,6 +481,44 @@ describe("Copilot public factory", () => {
     session.emit({ type: "session.idle", ephemeral: true, data: {} });
     await vi.waitFor(() => expect(projections(sink).at(-1)?.type).toBe("ended"));
     expect(projections(sink).filter((event) => event.type === "ended")).toEqual([expect.objectContaining({ outcome: "errored" })]);
+  });
+
+  describe("after the Copilot CLI exits", () => {
+    beforeEach(() => { vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] }); });
+    afterEach(() => { vi.useRealTimers(); });
+    async function crashCli() {
+      sdk.getState.mockReturnValue("disconnected");
+      session.disconnect.mockRejectedValue(new Error("Connection is closed."));
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
+    async function resumeOnFreshClient(endedBefore: number) {
+      sdk.getState.mockReturnValue("connected");
+      const replacement = new FakeSession(); sdk.resume.mockResolvedValueOnce(replacement);
+      await provider.sendTurn(request({ turnId: "turn-2", turnExecutionId: "00000000-0000-4000-8000-000000000002", resumeFrom: session.sessionId }));
+      replacement.emit({ type: "session.idle", ephemeral: true, data: {} });
+      await vi.waitFor(() => expect(projections(sink).filter((event) => event.type === "ended")).toHaveLength(endedBefore + 1));
+      expect(sdk.start).toHaveBeenCalledTimes(2);
+      expect(sdk.resume).toHaveBeenCalledWith(session.sessionId, expect.anything());
+      expect(projections(sink).at(-1)).toEqual(expect.objectContaining({ type: "ended", turnExecutionId: "00000000-0000-4000-8000-000000000002" }));
+      expect(projections(sink).at(-1)).not.toHaveProperty("outcome");
+    }
+
+    it("fails the running turn instead of leaving it waiting for Stop", async () => {
+      await provider.sendTurn(request());
+      await crashCli();
+      await vi.waitFor(() => expect(projections(sink).at(-1)).toEqual(expect.objectContaining({ type: "ended", outcome: "errored" })));
+      expect(projections(sink)).toContainEqual(expect.objectContaining({ type: "error", error: "Copilot CLI disconnected" }));
+      expect(sdk.forceStop).toHaveBeenCalledOnce();
+      await resumeOnFreshClient(1);
+    });
+
+    it("drops an idle session bound to the dead client", async () => {
+      await provider.sendTurn(request());
+      await finish();
+      await crashCli();
+      await vi.waitFor(() => expect(sdk.forceStop).toHaveBeenCalledOnce());
+      await resumeOnFreshClient(1);
+    });
   });
 
   it("propagates durable resume failure without silently starting fresh", async () => {

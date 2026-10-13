@@ -8,7 +8,7 @@
 import * as NodeCrypto from "node:crypto";
 import { injectable, inject, delay } from "tsyringe";
 import { logger } from "@mcode/shared";
-import { AgentEventType, ProviderRuntimeEventSchema, isSessionEvictable, isTurnSteerCapable, providerFailureOutcome } from "@mcode/contracts";
+import { AgentEventType, ProviderRuntimeEventSchema, isChildRoutedRuntimeEvent, isSessionEvictable, isTurnSteerCapable, providerFailureOutcome } from "@mcode/contracts";
 import type { ClaudeCanonicalEventRouting, ClaudeProviderBoundary, CodexProviderBoundary, CopilotProviderBoundary, ProviderTurnOpening } from "@mcode/providers";
 import { ProviderTurnError } from "@mcode/providers";
 import type {
@@ -2405,8 +2405,9 @@ function workerTerminalOutcome(event: AgentEvent): TurnOutcome | null {
   return event.outcome === "cancelled" ? "interrupted" : event.outcome;
 }
 
-function writerOwnedProviderExtension(extension: ProviderRuntimeEvent["extension"]): boolean {
-  return Boolean(extension?.child || extension?.collaboration || extension?.continuation);
+/** Keeps child events and Codex collaboration observations out of parent terminal detection. */
+export function writerOwnedProviderExtension(extension: ProviderRuntimeEvent["extension"]): boolean {
+  return isChildRoutedRuntimeEvent(extension) || Boolean(extension?.kind === "codex-collaboration" && extension.collaboration);
 }
 
 function matchesWorkerEvent(event: AgentEvent, batch: WorkerOwnedProviderEventBatch): boolean {

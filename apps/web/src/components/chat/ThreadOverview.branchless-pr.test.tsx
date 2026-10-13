@@ -424,7 +424,7 @@ describe("ThreadOverview branchless Create PR", () => {
     expect(await screen.findByTestId("thread-overview-change-summary")).toHaveAttribute("aria-label", "3 additions, 1 deletions");
     expect(mockGetReviewState).toHaveBeenCalledWith("ws-1", "thread-1");
     expect(mockGetReviewComparison).toHaveBeenLastCalledWith({
-      workspaceId: "ws-1", threadId: "thread-1", view: "branch", base: "main", target: "HEAD",
+      workspaceId: "ws-1", threadId: "thread-1", view: "branch", base: "main", compare: "HEAD",
     });
   });
 

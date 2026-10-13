@@ -126,6 +126,25 @@ describe("legacy provider transaction projection", () => {
     expect(db.query("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Running" });
   });
 
+  it("forwards neutral delegates and rejects child content on the fallback path", async () => {
+    owner = new ApplicationDatabaseWriter(NodePath.join(directory, "app.sqlite"));
+    client = new CanonicalAgentWriterClient(owner);
+    const delegate = { ...draft(1, { type: "toolUse", threadId: execution.threadId, turnExecutionId: execution.executionId,
+      toolCallId: "task", toolName: "Agent", toolInput: { description: "Explore" } },
+    { providerId: "copilot", kind: "child-thread", childThread: { role: "delegate", path: ["task"], prompt: "Explore" } }), sourceProviderId: "copilot" };
+    const forwarded = await client.commitProjected("neutral:delegate", { ...execution, phase: "running", events: [delegate] });
+    expect(forwarded.providerProjection.events.map((entry) => entry.event)).toMatchObject([{ type: "toolUse", toolCallId: "task" }]);
+    const child = { ...draft(2, { type: "textDelta", threadId: execution.threadId, turnExecutionId: execution.executionId, delta: "Private" },
+      { providerId: "copilot", kind: "child-thread", childThread: { role: "child", path: ["task"], nativeItemId: "message" } }), sourceProviderId: "copilot" };
+    const rejected = await client.commitProjected("neutral:child", { ...execution, phase: "running", events: [child] });
+    expect(rejected.providerProjection.events).toEqual([]);
+    const diagnostics = db.query<{ payload_json: string }, []>("SELECT payload_json FROM canonical_agent_items WHERE kind = 'error'").all();
+    expect(diagnostics.map((row) => JSON.parse(row.payload_json))).toMatchObject([
+      { projection: "codexChildRoutingFailure", reason: "child-thread-requires-accepted-path" },
+    ]);
+    expect(db.query("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Running" });
+  });
+
   it("rolls back both raw and child state when the final receipt cannot commit", async () => {
     db.run("CREATE TRIGGER reject_receipt BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.operation_id = 'projected:failed' BEGIN SELECT RAISE(ABORT, 'receipt failed'); END");
     owner = new ApplicationDatabaseWriter(NodePath.join(directory, "app.sqlite"));

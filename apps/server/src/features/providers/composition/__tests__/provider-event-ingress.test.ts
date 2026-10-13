@@ -547,6 +547,22 @@ describe("ProviderEventIngress", () => {
     await drainIngress(ingress);
   });
 
+  it("queues a burst of child endings without consuming the parent's terminal allowance", async () => {
+    const { ingress, overflowed, received } = createIngress();
+    for (let index = 0; index < 6; index += 1) {
+      ingress.acceptProviderRuntime("copilot", { event: { type: "ended", threadId: "terminal-thread",
+        turnExecutionId: EXECUTION_ID, outcome: "interrupted" }, extension: { providerId: "copilot",
+        kind: "child-thread", childThread: { role: "child", path: [`task-${index}`] } } });
+    }
+    ingress.acceptProviderRuntime("copilot", terminalEvent("terminal-thread"));
+    expect(ingress.queueMetrics()).toMatchObject({ pendingEvents: 7, rejectedQueueEvents: 0 });
+    expect(overflowed).toEqual([]);
+    await drainIngress(ingress);
+    expect(received.map((entry) => entry.event.type)).toEqual([
+      "ended", "ended", "ended", "ended", "ended", "ended", "turnComplete",
+    ]);
+  });
+
   it("retains the measured seven-thread event burst without overflow", async () => {
     const { ingress, overflowed, received } = createIngress();
     const threadIds = Array.from({ length: 7 }, (_, index) => `thread-${index + 1}`);
