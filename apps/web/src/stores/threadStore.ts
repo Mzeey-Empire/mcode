@@ -564,6 +564,8 @@ interface ThreadState {
   getThreadSettings: (threadId: string) => ThreadSettings;
   /** Merge partial settings and persist to server. Resolves to false if RPC fails or patch is empty. */
   setThreadSettings: (threadId: string, settings: Partial<ThreadSettings>) => Promise<boolean>;
+  /** Merge partial settings that the server already persisted, without another RPC. */
+  applyPersistedThreadSettings: (threadId: string, settings: Partial<ThreadSettings>) => void;
 
   /** Fetch and refresh provider usage info from the server for the given thread and provider. */
   fetchProviderUsage: (threadId: string, providerId: string) => Promise<void>;
@@ -4004,6 +4006,14 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
     if (Object.keys(patch).length === 0) return Promise.resolve(false);
 
+    get().applyPersistedThreadSettings(threadId, patch);
+    return getTransport().updateThreadSettings(threadId, transportThreadSettingsPatch(patch)).catch(() => false);
+  },
+
+  applyPersistedThreadSettings: (threadId, settings) => {
+    const patch = cleanThreadSettingsPatch(settings);
+    if (Object.keys(patch).length === 0) return;
+
     set((state) => ({
       records: patchThreadRecord(state.records, threadId, {
         settings: { ...state.getThreadSettings(threadId), ...patch },
@@ -4015,8 +4025,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         ? workspaceThreadSettingsPatch(thread, patch)
         : thread),
     }));
-
-    return getTransport().updateThreadSettings(threadId, transportThreadSettingsPatch(patch)).catch(() => false);
   },
 
   clearThreadState: (threadId) => {
@@ -4174,18 +4182,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const thread = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
     const model = thread?.model ?? undefined;
     const provider = thread?.provider ?? undefined;
-
-    if (action === "implement") {
-      // Implementation runs in build mode; leave plan mode so the composer
-      // label and future sends match the execution phase. Await the
-      // persistence RPC and abort the implement turn on failure so the
-      // local UI cannot diverge from the stored thread row (a stale row
-      // would flip the thread back to Plan on reload).
-      const persisted = await get().setThreadSettings(threadId, {
-        interactionMode: INTERACTION_MODES.BUILD,
-      });
-      if (!persisted) return;
-    }
 
     await get().sendMessage(
       threadId,

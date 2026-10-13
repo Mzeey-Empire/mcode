@@ -1416,6 +1416,7 @@ export function createWsTransport(
       rpc<{ versions: import("@mcode/contracts").PlanVersion[] }>("plan.snapshot", { threadId }).then((snapshot) => snapshot.versions),
 
     savePlanVersion: (payload) => rpc<import("@mcode/contracts").PlanVersion>("plan.saveVersion", payload),
+    implementPlan: (payload) => rpc<import("@mcode/contracts").PlanImplementReceipt>("plan.implement", payload),
 
     // Snapshots
     getSnapshotDiff: (snapshotId, filePath?, maxLines?) =>

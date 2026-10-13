@@ -258,4 +258,18 @@ describe("overview Changes, Tasks and Usage rows", () => {
     expect(panel.activeTabId).toBe(rightPanelSingletonId("tasks"));
     expect(screen.queryByTestId("thread-overview-plan")).not.toBeInTheDocument();
   });
+
+  it("shows the Implement turn's task progress on an accepted plan row", () => {
+    const accepted = { ...planVersion(2), status: "accepted" as const, acceptedMessageId: "accepted-message" };
+    usePlanStore.setState({ plansByThread: { [thread.id]: [accepted] } });
+    useTaskStore.getState().setTasks(thread.id, [task("1", "completed"), task("2", "in_progress")], "other-message");
+    const { unmount } = render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    expect(screen.getByTestId("thread-overview-plan")).toHaveTextContent("v2");
+    unmount();
+
+    useTaskStore.getState().setTasks(thread.id, [task("1", "completed"), task("2", "in_progress")], "accepted-message");
+    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+
+    expect(screen.getByTestId("thread-overview-plan")).toHaveTextContent("1/2");
+  });
 });

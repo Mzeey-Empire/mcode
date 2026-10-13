@@ -18,6 +18,8 @@ export interface ContextState {
    * owns the zoom and full-screen keys. On macOS the native menu roles own them.
    */
   rendererOwnsWindowKeys: boolean;
+  /** The active thread has a plan version that Implement would act on now. */
+  planImplementable: boolean;
 }
 
 /** Valid context key names. */
@@ -32,6 +34,7 @@ function getDefaultContext(): ContextState {
     settingsOpen: false,
     showLanding: false,
     rendererOwnsWindowKeys: false,
+    planImplementable: false,
   };
 }
 

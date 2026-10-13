@@ -9,10 +9,12 @@ import { cn } from "@/lib/utils";
 import { useDiffStore } from "@/stores/diffStore";
 import { threadOverviewKey, useOverviewStore } from "@/stores/overviewStore";
 import { usePlanStore } from "@/stores/planStore";
+import { selectTaskProgress, useTaskStore } from "@/stores/taskStore";
 import { type Thread } from "@/transport";
 
 function PlanEntry({ thread }: { thread: Thread }) {
   const latest = usePlanStore((s): PlanVersion | undefined => s.plansByThread[thread.id]?.at(-1));
+  const bubble = useTaskStore((s) => s.taskBubbleByThread[thread.id]);
   const openPlan = useCallback(() => {
     // Opening the right panel docks nothing in its place, so a floating card would cover the plan.
     useOverviewStore.getState().dismissOverlay(threadOverviewKey(thread.id));
@@ -20,6 +22,10 @@ function PlanEntry({ thread }: { thread: Thread }) {
     useDiffStore.getState().setRightPanelTab(thread.workspace_id, thread.id, "tasks");
   }, [thread.id, thread.workspace_id]);
   if (!latest) return null;
+  // Once the Implement turn reports tasks, its progress says more than the version number.
+  const implementing = latest.acceptedMessageId !== null && bubble?.sourceMessageId === latest.acceptedMessageId;
+  const progress = implementing ? selectTaskProgress(bubble, undefined) : null;
+  const trailing = progress ? `${progress.settled}/${progress.total}` : `v${latest.version}`;
   return (
     <Button
       variant="ghost"
@@ -38,7 +44,7 @@ function PlanEntry({ thread }: { thread: Thread }) {
         />
       </span>
       <span className="text-fade min-w-0 grow text-sm text-ink">{latest.title}</span>
-      <span className="shrink-0 text-xs tabular-nums text-muted">v{latest.version}</span>
+      <span className="shrink-0 text-xs tabular-nums text-muted">{trailing}</span>
     </Button>
   );
 }

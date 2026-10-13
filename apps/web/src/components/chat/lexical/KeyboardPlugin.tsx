@@ -18,6 +18,7 @@ import {
 } from "lexical";
 import { $isMentionNode } from "./MentionNode";
 import { $isSlashCommandNode } from "./SlashCommandNode";
+import { evaluateWhen } from "@/lib/context-tracker";
 
 /** Keyboard handling callbacks for the Lexical chat composer. */
 interface KeyboardPluginProps {
@@ -59,6 +60,17 @@ function isImeEnter(event: KeyboardEvent): boolean {
 function handlePopupEnter(event: KeyboardEvent | null, refs: KeyboardRefs): boolean {
   if (!event || event.shiftKey || event.ctrlKey || event.metaKey || isImeEnter(event)) return false;
   return handlePopupKey(event, "Enter", refs);
+}
+
+/**
+ * Claims Ctrl/Cmd+Shift+Enter while a plan is implementable, so Lexical
+ * inserts no line break and the document shortcut runs Implement instead.
+ */
+function handlePlanImplementEnter(event: KeyboardEvent | null): boolean {
+  if (!event || !event.shiftKey || !(event.ctrlKey || event.metaKey) || isImeEnter(event)) return false;
+  if (!evaluateWhen("planImplementable")) return false;
+  event.preventDefault();
+  return true;
 }
 
 /** Submits the Composer for an unhandled Enter key. */
@@ -215,6 +227,12 @@ export function KeyboardPlugin({
       COMMAND_PRIORITY_CRITICAL,
     );
 
+    const unregisterPlanImplementEnter = editor.registerCommand(
+      KEY_ENTER_COMMAND,
+      handlePlanImplementEnter,
+      COMMAND_PRIORITY_CRITICAL,
+    );
+
     // Normal Enter-to-submit at HIGH priority
     const unregisterSubmitEnter = editor.registerCommand(
       KEY_ENTER_COMMAND,
@@ -240,6 +258,7 @@ export function KeyboardPlugin({
       unregisterTab();
       unregisterEsc();
       unregisterPopupEnter();
+      unregisterPlanImplementEnter();
       unregisterSubmitEnter();
       unregisterBackspace();
       unregisterDelete();

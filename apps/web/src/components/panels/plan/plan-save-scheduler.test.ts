@@ -293,4 +293,104 @@ describe("PlanSaveScheduler", () => {
       { threadId: THREAD, versionId: MINTED_ID, baseVersionId: READY_ID, baseRevision: 0, contentMd: "now" },
     ]);
   });
+
+  describe("Implement hand-off", () => {
+    it("waits for the save in flight and implements the revision it returned", async () => {
+      const { scheduler, saves } = setup();
+      const saved = draft(MINTED_ID, 1, "mine");
+      scheduler.edit("mine", ready);
+      await vi.advanceTimersByTimeAsync(500);
+
+      let latest = ready;
+      const basis = scheduler.beginImplement(() => ({ target: latest, latest }));
+      latest = saved;
+      saves[0].resolve(saved);
+
+      await expect(basis).resolves.toEqual({ versionId: MINTED_ID, expectedRevision: 1 });
+      expect(scheduler.getSnapshot()).toMatchObject({ kind: "implementing", carried: null });
+    });
+
+    it("carries unsent text on the latest version instead of autosaving it", async () => {
+      const { scheduler, payloads } = setup();
+      scheduler.edit("mine", ready);
+
+      const basis = await scheduler.beginImplement(() => ({ target: ready, latest: ready }));
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      const pending = { versionId: MINTED_ID, baseVersionId: READY_ID, baseRevision: 0, contentMd: "mine" };
+      expect(basis).toEqual({ versionId: MINTED_ID, expectedRevision: 1, pending });
+      expect(payloads()).toEqual([]);
+      scheduler.edit("ignored", ready);
+      expect(scheduler.getSnapshot()).toMatchObject({ kind: "implementing", text: "mine" });
+
+      scheduler.finishImplement({ kind: "admitted" });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(scheduler.getSnapshot()).toEqual({ kind: "idle" });
+      expect(payloads()).toEqual([]);
+    });
+
+    it("keeps unsent text out of an older version's request and saves it afterwards", async () => {
+      const { scheduler, payloads } = setup();
+      const older = version({ id: AGENT_ID, version: 1 });
+      scheduler.edit("mine", ready);
+
+      const basis = await scheduler.beginImplement(() => ({ target: older, latest: ready }));
+      expect(basis).toEqual({ versionId: AGENT_ID, expectedRevision: 0 });
+
+      scheduler.finishImplement({ kind: "failed", latest: null });
+      await vi.advanceTimersByTimeAsync(500);
+      expect(payloads()).toEqual([
+        { threadId: THREAD, versionId: MINTED_ID, baseVersionId: READY_ID, baseRevision: 0, contentMd: "mine" },
+      ]);
+    });
+
+    it("holds carried text in a conflict when the version changed", async () => {
+      const { scheduler, versions } = setup();
+      const theirs = draft(OTHER_DRAFT_ID, 1, "theirs");
+      scheduler.edit("mine", ready);
+      await scheduler.beginImplement(() => ({ target: ready, latest: ready }));
+
+      scheduler.finishImplement({ kind: "conflict", latest: theirs });
+
+      expect(versions).toEqual([theirs]);
+      expect(scheduler.getSnapshot()).toEqual({ kind: "conflict", text: "mine", latest: theirs, canKeep: true });
+    });
+
+    it("treats carried text as saved when the failed request already stored it", async () => {
+      const { scheduler, payloads } = setup();
+      scheduler.edit("mine", ready);
+      await scheduler.beginImplement(() => ({ target: ready, latest: ready }));
+
+      scheduler.finishImplement({ kind: "failed", latest: draft(MINTED_ID, 1, "mine") });
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(scheduler.getSnapshot()).toEqual({ kind: "idle" });
+      expect(payloads()).toEqual([]);
+    });
+
+    it("resumes autosave when a failed request did not store the carried text", async () => {
+      const { scheduler, payloads } = setup();
+      scheduler.edit("mine", ready);
+      await scheduler.beginImplement(() => ({ target: ready, latest: ready }));
+
+      scheduler.finishImplement({ kind: "failed", latest: null });
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(payloads()).toHaveLength(1);
+      expect(payloads()[0]).toMatchObject({ versionId: MINTED_ID, contentMd: "mine" });
+    });
+
+    it("does not start while a conflict waits for the user", async () => {
+      const { scheduler, saves } = setup();
+      scheduler.edit("mine", ready);
+      scheduler.flush();
+      saves[0].reject(conflictError(draft(OTHER_DRAFT_ID, 1, "theirs")));
+      await settle();
+      const pick = vi.fn(() => ({ target: ready, latest: ready }));
+
+      await expect(scheduler.beginImplement(pick)).resolves.toBeNull();
+      expect(pick).not.toHaveBeenCalled();
+      expect(scheduler.getSnapshot()).toMatchObject({ kind: "conflict" });
+    });
+  });
 });
