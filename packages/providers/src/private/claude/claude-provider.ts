@@ -715,6 +715,7 @@ export class ClaudeProvider
     string,
     {
       threadId: string;
+      agentID?: string;
       toolName: string;
       input: unknown;
       title?: string;
@@ -1317,6 +1318,7 @@ export class ClaudeProvider
     return new Promise((resolve) => {
       this.pendingPermissions.set(requestId, {
         threadId,
+        agentID: options.agentID,
         toolName,
         input,
         title: options?.title,
@@ -2412,11 +2414,21 @@ export class ClaudeProvider
     }
     if (message.subtype !== "task_started" || message.task_type !== "local_agent") return;
     const description = typeof message.description === "string" ? message.description.trim() : "";
-    state.subagentApprovalOrigins.set(message.task_id, {
+    const origin: Extract<ApprovalRequestBody["origin"], { kind: "subagent" }> = {
       kind: "subagent",
       label: (description || "Subagent").slice(0, 200),
       ...(typeof message.tool_use_id === "string" ? { parentToolCallId: message.tool_use_id } : {}),
-    });
+    };
+    state.subagentApprovalOrigins.set(message.task_id, origin);
+    this.updateClaudeApprovalOrigins(state.currentRouting.threadId, message.task_id, origin);
+  }
+
+  private updateClaudeApprovalOrigins(threadId: string, agentID: string, origin: ApprovalRequestBody["origin"]): void {
+    for (const [requestId, pending] of this.pendingPermissions) {
+      if (pending.threadId !== threadId || pending.agentID !== agentID) continue;
+      pending.body = { ...pending.body, origin };
+      this.emit("approval_request", { requestId, threadId, body: pending.body } satisfies ApprovalRequestEnvelope);
+    }
   }
 
   /**

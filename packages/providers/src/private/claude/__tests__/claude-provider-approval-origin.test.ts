@@ -19,7 +19,7 @@ describe("Claude approval origin", () => {
 
   afterEach(async () => { await provider.shutdown(); });
 
-  async function startTurn(threadId: string, messages: Record<string, unknown>[]): Promise<CanUseTool> {
+  async function startTurn(threadId: string, messages: Record<string, unknown>[], queuedMessages?: AsyncIterable<Record<string, unknown>>): Promise<CanUseTool> {
     let ready: (callback: CanUseTool) => void = () => {};
     const callback = new Promise<CanUseTool>((resolve) => { ready = resolve; });
     mockQuery.mockImplementation(({ prompt, options }: Parameters<typeof query>[0]) => {
@@ -31,6 +31,7 @@ describe("Claude approval origin", () => {
         for await (const _message of prompt) {
           yield* messages;
           ready(canUseTool);
+          if (queuedMessages) yield* queuedMessages;
           await closed;
           return;
         }
@@ -86,6 +87,53 @@ describe("Claude approval origin", () => {
   it("keeps an unidentified child honest without borrowing another child's label", async () => {
     const canUseTool = await startTurn("unknown", [taskStarted("Print date")]);
     expect(await requestOrigin(canUseTool, "unseen-child")).toEqual({ kind: "subagent", label: "Subagent" });
+  });
+
+  it("enriches every pending request for the task, without updating another agent or thread", async () => {
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event) => events.push(event));
+    let releaseTask = () => {};
+    const taskReady = new Promise<void>((resolve) => { releaseTask = resolve; });
+    let finishTask = () => {};
+    const taskConsumed = new Promise<void>((resolve) => { finishTask = resolve; });
+    async function* queuedMessages() {
+      await taskReady;
+      yield taskStarted("Print date");
+      finishTask();
+    }
+    const canUseTool = await startTurn("parent", [], queuedMessages());
+    const otherThread = await startTurn("other-thread", []);
+    const decisions: ReturnType<CanUseTool>[] = [];
+    for (const [index, callback] of [canUseTool, canUseTool, canUseTool, otherThread].entries()) {
+      decisions.push(callback("Bash", { command: "date" }, {
+        signal: new AbortController().signal, toolUseID: `tool-${index}`, requestId: `native-${index}`,
+        agentID: index === 2 ? "other-child" : "ab6ba61b35d02c4b7",
+      }));
+      await vi.waitFor(() => expect(requests).toHaveLength(index + 1));
+    }
+    const originals = requests.slice();
+    expect(originals.map(({ body }) => ApprovalRequestBodySchema().parse(body).origin)).toEqual([
+      { kind: "subagent", label: "Subagent" }, { kind: "subagent", label: "Subagent" },
+      { kind: "subagent", label: "Subagent" }, { kind: "subagent", label: "Subagent" },
+    ]);
+
+    releaseTask();
+    await taskConsumed;
+    expect(requests).toHaveLength(6);
+    const origin: ApprovalOrigin = { kind: "subagent", label: "Print date", parentToolCallId: "toolu_016k" };
+    expect(requests.slice(4)).toEqual(originals.slice(0, 2).map((request) => ({
+      ...request, body: { ...request.body, origin },
+    })));
+    for (const [index, request] of originals.entries()) {
+      expect(await provider.resolveApproval(request.requestId, { choiceId: "deny" })).toEqual({ status: "resolved" });
+      expect(await decisions[index]).toMatchObject({ behavior: "deny" });
+    }
+    await vi.waitFor(() => expect(events.filter(({ event }) => event.type === AgentEventType.ApprovalDecided)).toMatchObject([
+      { event: { origin } }, { event: { origin } },
+      { event: { origin: { kind: "subagent", label: "Subagent" } } },
+      { event: { origin: { kind: "subagent", label: "Subagent" } } },
+    ]));
+    expect(provider.listPendingApprovals()).toEqual([]);
   });
 
   it.each([
