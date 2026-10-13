@@ -148,8 +148,7 @@ export function BrowserChrome({
             threadId={threadId}
             designModeActive={designModeActive}
             elementPickBusy={capture.elementPickBusy}
-            captureBusy={capture.captureBusy}
-            regionBusy={capture.regionBusy}
+            screenshotArmed={capture.screenshotArmed}
             focusRequest={omniboxFocusTick}
             onNavigate={(url) => {
               invalidateBrowserAutomationTargetObservation(browserWorkspaceId, threadId, activeWebviewTabId);
@@ -169,7 +168,7 @@ export function BrowserChrome({
             }}
             onOpenExternal={onWebviewOpenExternal}
             onToggleDesign={onToggleDesignMode}
-            onScreenshot={capture.onAddPictureReference}
+            onScreenshot={capture.onToggleScreenshot}
             onNewPage={() => {
               invalidateBrowserAutomationTargetObservation(browserWorkspaceId, threadId, activeWebviewTabId);
               tabs.newTab();
@@ -178,8 +177,6 @@ export function BrowserChrome({
               invalidateBrowserAutomationTargetObservation(browserWorkspaceId, threadId, activeWebviewTabId);
               activeWebviewRef()?.forceReload();
             }}
-            onRegionCapture={capture.onAddRegionPictureReference}
-            onDumpContent={capture.onAddPageContextOnly}
             onClearCookies={bridge.clearCookies}
             onClearCache={bridge.clearCache}
             onGetZoom={onWebviewGetZoom}

@@ -238,6 +238,7 @@ export function PreviewPanel({
     workspaceId,
     surfaceRef,
     automationOnly,
+    presentationActive,
     tabs,
     browserWorkspaceId,
     activeWebviewTabId,

@@ -102,11 +102,6 @@ export type PreviewAnnotationSnapshotRequest = {
   readonly markers: readonly PreviewAnnotationSnapshotMarker[];
 };
 
-/** Result of capturing preview page context without a PNG (desktop only). */
-export type PreviewContextReferenceResult =
-  | { readonly ok: true; readonly capture: McodeBrowserCapture }
-  | { readonly ok: false; readonly error: string };
-
 /** Complete identity and generation for one renderer-hosted Electron surface. */
 export interface PreviewSurfaceRef {
   readonly identity: {
@@ -254,20 +249,19 @@ interface PreviewBridge {
    */
   onShortcutFired(callback: (combo: string) => void): () => void;
   getNavigationState(): Promise<{ canGoBack: boolean; canGoForward: boolean }>;
-  /** Captures the visible preview as PNG; desktop only. */
+  /**
+   * Arms the Screenshot overlay on the active page; desktop only. A click in
+   * the page resolves a viewport image, a drag resolves a region image
+   * (`capture.captureKind` says which). Esc in the page, a too-thin drag, or
+   * {@link PreviewBridge.cancelCapture} resolves `{ ok: false, error: "cancelled" }`.
+   */
   capturePictureReference(): Promise<PreviewPictureReferenceResult>;
-  /** Drag a rectangle on the preview, then capture that region as PNG; desktop only. */
-  capturePictureReferenceRegion(): Promise<PreviewPictureReferenceResult>;
   /** Pick an element by hover and click; captures its box as PNG with selector and excerpt; desktop only. */
   capturePictureReferenceElementPick(): Promise<PreviewPictureReferenceResult>;
   /** Captures the visible preview with annotation marker and target highlight overlays burned in. */
   captureAnnotationSnapshot(
     payload: PreviewAnnotationSnapshotRequest,
   ): Promise<PreviewPictureReferenceResult>;
-  /**
-   * Captures structured page context (v2) without a screenshot. Desktop only.
-   */
-  capturePageContext(): Promise<PreviewContextReferenceResult>;
   /** Deletes workspace-relative preview spill files after the message was sent or the queue dropped them. */
   releaseBrowserCaptureSpills(paths: readonly string[]): Promise<void>;
   /**

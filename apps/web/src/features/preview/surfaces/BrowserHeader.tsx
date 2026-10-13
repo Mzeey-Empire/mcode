@@ -38,10 +38,8 @@ export interface BrowserHeaderProps {
   readonly designModeActive: boolean;
   /** True while an element-pick session is in flight (shows a spinner on Design). */
   readonly elementPickBusy: boolean;
-  /** True while a viewport screenshot is in flight (shows a spinner on Screenshot). */
-  readonly captureBusy: boolean;
-  /** True while a region crop is in flight (disables Screenshot to avoid overlap). */
-  readonly regionBusy: boolean;
+  /** True while the Screenshot overlay is armed (Screenshot shows pressed; pressing again cancels). */
+  readonly screenshotArmed: boolean;
   /**
    * Monotonic token: each change focuses + selects the URL input. Lets the
    * mod+shift+b shortcut drop the caret straight into the address bar.
@@ -53,15 +51,12 @@ export interface BrowserHeaderProps {
   readonly onReload: () => void;
   readonly onOpenExternal: () => void;
   readonly onToggleDesign: () => void;
+  /** Arms the Screenshot overlay, or cancels it when already armed. */
   readonly onScreenshot: () => void;
   /** Open a new browser page (kebab). */
   readonly onNewPage: () => void;
   /** Hard reload that bypasses the guest cache (kebab). */
   readonly onForceReload: () => void;
-  /** Region crop capture (kebab). */
-  readonly onRegionCapture: () => void;
-  /** Page-content dump capture (kebab). */
-  readonly onDumpContent: () => void;
   /** Clear the preview session's cookies (kebab). */
   readonly onClearCookies: () => void;
   /** Clear the preview session's HTTP cache (kebab). */
@@ -278,15 +273,14 @@ interface BrowserPageActionsProps {
   readonly threadId: string;
   readonly designModeActive: boolean;
   readonly elementPickBusy: boolean;
-  readonly captureBusy: boolean;
-  readonly regionBusy: boolean;
+  readonly screenshotArmed: boolean;
   readonly onToggleDesign: () => void;
   readonly onScreenshot: () => void;
 }
 
 type BrowserActionProps = Pick<
   BrowserPageActionsProps,
-  "threadId" | "designModeActive" | "elementPickBusy" | "captureBusy" | "regionBusy" | "onToggleDesign" | "onScreenshot"
+  "threadId" | "designModeActive" | "elementPickBusy" | "screenshotArmed" | "onToggleDesign" | "onScreenshot"
 >;
 
 function DesignAction({ threadId, designModeActive, elementPickBusy, onToggleDesign }: BrowserActionProps) {
@@ -305,17 +299,17 @@ function DesignAction({ threadId, designModeActive, elementPickBusy, onToggleDes
   );
 }
 
-function ScreenshotAction({ threadId, elementPickBusy, captureBusy, regionBusy, onScreenshot }: BrowserActionProps) {
+function ScreenshotAction({ threadId, elementPickBusy, screenshotArmed, onScreenshot }: BrowserActionProps) {
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <Button type="button" variant="ghost" size="icon-compact" aria-label="Screenshot" disabled={!threadId || captureBusy || regionBusy || elementPickBusy} onClick={onScreenshot} className={cn("shrink-0", ICON_HIT_SLOP, captureBusy && "bg-primary/10 text-primary")}>
-            {captureBusy ? <Spinner size={16} className="text-current" /> : <Camera size={16} aria-hidden />}
+          <Button type="button" variant="ghost" size="icon-compact" aria-label="Screenshot" aria-pressed={screenshotArmed} disabled={!threadId || elementPickBusy} onClick={onScreenshot} className={cn("shrink-0", ICON_HIT_SLOP, screenshotArmed && "bg-primary/10 text-primary")}>
+            <Camera size={16} aria-hidden />
           </Button>
         }
       />
-      <TooltipContent side="top" sideOffset={6} className="max-w-[min(16rem,calc(100vw-1.5rem))] text-xs">Screenshot the visible viewport</TooltipContent>
+      <TooltipContent side="top" sideOffset={6} className="max-w-[min(16rem,calc(100vw-1.5rem))] text-xs">Screenshot: click the page for the viewport, drag for a region</TooltipContent>
     </Tooltip>
   );
 }
@@ -325,16 +319,15 @@ function BrowserPageActions({
   threadId,
   designModeActive,
   elementPickBusy,
-  captureBusy,
-  regionBusy,
+  screenshotArmed,
   onToggleDesign,
   onScreenshot,
 }: BrowserPageActionsProps) {
   if (!hasLoadedPage) return null;
   return (
     <>
-      <DesignAction threadId={threadId} designModeActive={designModeActive} elementPickBusy={elementPickBusy} captureBusy={captureBusy} regionBusy={regionBusy} onToggleDesign={onToggleDesign} onScreenshot={onScreenshot} />
-      <ScreenshotAction threadId={threadId} designModeActive={designModeActive} elementPickBusy={elementPickBusy} captureBusy={captureBusy} regionBusy={regionBusy} onToggleDesign={onToggleDesign} onScreenshot={onScreenshot} />
+      <DesignAction threadId={threadId} designModeActive={designModeActive} elementPickBusy={elementPickBusy} screenshotArmed={screenshotArmed} onToggleDesign={onToggleDesign} onScreenshot={onScreenshot} />
+      <ScreenshotAction threadId={threadId} designModeActive={designModeActive} elementPickBusy={elementPickBusy} screenshotArmed={screenshotArmed} onToggleDesign={onToggleDesign} onScreenshot={onScreenshot} />
     </>
   );
 }
@@ -362,8 +355,7 @@ export function BrowserHeader({
   threadId,
   designModeActive,
   elementPickBusy,
-  captureBusy,
-  regionBusy,
+  screenshotArmed,
   focusRequest,
   onNavigate,
   onGoBack,
@@ -374,8 +366,6 @@ export function BrowserHeader({
   onScreenshot,
   onNewPage,
   onForceReload,
-  onRegionCapture,
-  onDumpContent,
   onClearCookies,
   onClearCache,
   onGetZoom,
@@ -395,13 +385,11 @@ export function BrowserHeader({
     >
       <BrowserNavigationControls canBack={canBack} canFwd={canFwd} hasLoadedPage={hasLoadedPage} onGoBack={onGoBack} onGoForward={onGoForward} onReload={onReload} />
       <BrowserUrlBar url={url} pageTitle={pageTitle} faviconUrl={faviconUrl} hasLoadedPage={hasLoadedPage} focusRequest={focusRequest} onNavigate={onNavigate} onOpenExternal={onOpenExternal} onHumanFocus={onHumanFocus} />
-      <BrowserPageActions hasLoadedPage={hasLoadedPage} threadId={threadId} designModeActive={designModeActive} elementPickBusy={elementPickBusy} captureBusy={captureBusy} regionBusy={regionBusy} onToggleDesign={onToggleDesign} onScreenshot={onScreenshot} />
+      <BrowserPageActions hasLoadedPage={hasLoadedPage} threadId={threadId} designModeActive={designModeActive} elementPickBusy={elementPickBusy} screenshotArmed={screenshotArmed} onToggleDesign={onToggleDesign} onScreenshot={onScreenshot} />
       <BrowserOverflowMenu
         hasLoadedPage={hasLoadedPage}
         onNewPage={onNewPage}
         onForceReload={onForceReload}
-        onDumpContent={onDumpContent}
-        onRegionCapture={onRegionCapture}
         onClearCookies={onClearCookies}
         onClearCache={onClearCache}
         onGetZoom={onGetZoom}

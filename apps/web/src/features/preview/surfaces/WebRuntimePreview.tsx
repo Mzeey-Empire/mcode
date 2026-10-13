@@ -407,8 +407,7 @@ export function WebRuntimePreview({
         threadId=""
         designModeActive={false}
         elementPickBusy={false}
-        captureBusy={false}
-        regionBusy={false}
+        screenshotArmed={false}
         onNavigate={(url) => {
           invalidateBrowserAutomationTargetObservation(identity.workspaceId, threadId, WEB_RUNTIME_PREVIEW_TAB_ID);
           setInputUrl(url);
@@ -428,8 +427,6 @@ export function WebRuntimePreview({
           invalidateBrowserAutomationTargetObservation(identity.workspaceId, threadId, WEB_RUNTIME_PREVIEW_TAB_ID);
           browserSurfaceHost.navigate(identity, visiblePage.address ?? fixtureUrl);
         }}
-        onRegionCapture={noOp}
-        onDumpContent={noOp}
         onClearCookies={noOp}
         onClearCache={noOp}
         onGetZoom={async () => zoom}

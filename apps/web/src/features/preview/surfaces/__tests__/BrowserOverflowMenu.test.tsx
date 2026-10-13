@@ -10,8 +10,6 @@ function menu(active: boolean, elements: { leading: HTMLElement; row2: HTMLEleme
         hasLoadedPage
         onNewPage={vi.fn()}
         onForceReload={vi.fn()}
-        onDumpContent={vi.fn()}
-        onRegionCapture={vi.fn()}
         onClearCookies={vi.fn()}
         onClearCache={vi.fn()}
         onGetZoom={vi.fn(async () => 1)}

@@ -4,13 +4,11 @@ import {
   CodeXml,
   Cookie,
   EllipsisVertical,
-  FileText,
   Hand,
   Minus,
   Plus,
   RotateCw,
   Smartphone,
-  SquareDashedMousePointer,
   Trash2,
 } from "lucide-react";
 import type { BrowserAutomationControllerState } from "@mcode/contracts";
@@ -35,10 +33,6 @@ export interface BrowserOverflowMenuProps {
   readonly onNewPage: () => void;
   /** Hard reload that bypasses the guest cache. */
   readonly onForceReload: () => void;
-  /** Attach the page's structured content to the chat without a screenshot. */
-  readonly onDumpContent: () => void;
-  /** Drag a region on the page and attach it to the chat. */
-  readonly onRegionCapture: () => void;
   /** Clear the preview session's cookies. */
   readonly onClearCookies: () => void;
   /** Clear the preview session's HTTP cache. */
@@ -64,7 +58,7 @@ export interface BrowserOverflowMenuProps {
 /**
  * Overflow menu for the browser header. Holds the rarely-used tools that the
  * minimal header deliberately omits, in the order set by the right-panel epic:
- * New page, Force reload, Dump page content, Region capture, Developer tools,
+ * New page, Force reload, Developer tools,
  * Show device toolbar, Zoom, Clear cookies, and Clear cache. Keeps the everyday
  * header to back/forward, the
  * URL, design, and screenshot.
@@ -73,8 +67,6 @@ export function BrowserOverflowMenu({
   hasLoadedPage,
   onNewPage,
   onForceReload,
-  onDumpContent,
-  onRegionCapture,
   onClearCookies,
   onClearCache,
   onGetZoom,
@@ -133,14 +125,6 @@ export function BrowserOverflowMenu({
       >
         <DropdownMenuItem label="New page" icon={<Plus />} onClick={onNewPage} />
         <DropdownMenuItem label="Force reload" icon={<RotateCw />} disabledReason={pageReason} onClick={onForceReload} />
-        <DropdownMenuSeparator />
-        <DropdownMenuItem label="Dump page content" icon={<FileText />} disabledReason={pageReason} onClick={onDumpContent} />
-        <DropdownMenuItem
-          label="Region capture"
-          icon={<SquareDashedMousePointer />}
-          disabledReason={pageReason}
-          onClick={onRegionCapture}
-        />
         <DropdownMenuSeparator />
         <DropdownMenuItem label="Developer tools" icon={<CodeXml />} disabledReason={pageReason} onClick={onOpenDevTools} />
         <DropdownMenuItem

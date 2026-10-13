@@ -23,7 +23,6 @@ const CAPTURE_KIND_LABEL: Record<PreviewCaptureKind, string> = {
   viewport: "screenshot",
   region: "region",
   element: "element",
-  context: "page context",
 };
 
 function previewSurfaceClassName(

@@ -37,7 +37,7 @@ const {
   mockOnAddElementAnnotation: vi.fn(),
   mockCaptureAnnotationSnapshot: vi.fn(),
   mockCaptureSuccess: {
-    current: undefined as ((kind: "viewport" | "region" | "element" | "context") => void) | undefined,
+    current: undefined as ((kind: "viewport" | "region" | "element") => void) | undefined,
   },
   mockGetProviderCatalog: vi.fn().mockResolvedValue({
     providerId: "claude",
@@ -76,19 +76,15 @@ vi.mock("../../tabs/usePreviewTabs", () => ({
 
 vi.mock("../../capture/usePreviewCapture", () => ({
   usePreviewCapture: ({ onSuccess }: {
-    readonly onSuccess?: (kind: "viewport" | "region" | "element" | "context") => void;
+    readonly onSuccess?: (kind: "viewport" | "region" | "element") => void;
   }) => {
     mockCaptureSuccess.current = onSuccess;
     return {
-      captureBusy: false,
-      regionBusy: false,
+      screenshotArmed: false,
       elementPickBusy: false,
-      contextBusy: false,
       anyCaptureActive: false,
-      onAddPictureReference: vi.fn(),
-      onAddRegionPictureReference: vi.fn(),
+      onToggleScreenshot: vi.fn(),
       onAddElementPickPictureReference: vi.fn(),
-      onAddPageContextOnly: vi.fn(),
       onAddElementAnnotation: mockOnAddElementAnnotation,
       captureAnnotationSnapshot: mockCaptureAnnotationSnapshot,
     };
