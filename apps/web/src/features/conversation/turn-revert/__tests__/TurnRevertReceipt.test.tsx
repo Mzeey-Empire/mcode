@@ -147,11 +147,21 @@ describe("TurnRevertReceipt", () => {
     expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
   });
 
-  it("leaves a receipt pushed mid-load to the load, so the load still commits", async () => {
+  it("holds a receipt pushed mid-load until the load commits, then appends it once", async () => {
     const { acceptTurnRevert } = await import("../useTurnRevert");
     useThreadStore.setState({ records: new Map([["thread-1", { ...createEmptyThreadRecord(), loading: true }]]) });
     acceptTurnRevert({ threadId: "thread-1", receipt: undoReceipt });
     expect(useThreadStore.getState().records.get("thread-1")?.messages).toEqual([]);
+    useThreadStore.setState({ records: new Map([["thread-1", { ...createEmptyThreadRecord(), messages: [revertReceipt], loading: false }]]) });
+    expect(useThreadStore.getState().records.get("thread-1")?.messages.map((m) => m.id)).toEqual(["receipt-1", "receipt-2"]);
+  });
+
+  it("does not duplicate a mid-load receipt that the load already read", async () => {
+    const { acceptTurnRevert } = await import("../useTurnRevert");
+    useThreadStore.setState({ records: new Map([["thread-1", { ...createEmptyThreadRecord(), loading: true }]]) });
+    acceptTurnRevert({ threadId: "thread-1", receipt: undoReceipt });
+    useThreadStore.setState({ records: new Map([["thread-1", { ...createEmptyThreadRecord(), messages: [revertReceipt, undoReceipt], loading: false }]]) });
+    expect(useThreadStore.getState().records.get("thread-1")?.messages.map((m) => m.id)).toEqual(["receipt-1", "receipt-2"]);
   });
 
   it("shows a receipt another window committed once, through the push", async () => {

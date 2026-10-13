@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { TurnRevertPreview, TurnRevertResult, TurnRevertScope, TurnRevertedEvent } from "@mcode/contracts";
+import type { Message, TurnRevertPreview, TurnRevertResult, TurnRevertScope, TurnRevertedEvent } from "@mcode/contracts";
 import { useDiffStore } from "@/stores/diffStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { getTransport } from "@/transport";
@@ -28,13 +28,27 @@ export async function sendUntilAnswered(send: () => Promise<TurnRevertResult>): 
   }
 }
 
+// A load may have read the thread before this receipt was committed, so append it after the load settles.
+function appendOnceLoaded(threadId: string, receipt: Message): void {
+  const isLoading = (state: ReturnType<typeof useThreadStore.getState>) => state.records.get(threadId)?.loading === true;
+  if (!isLoading(useThreadStore.getState())) {
+    useThreadStore.getState().appendServerNotice(threadId, receipt);
+    return;
+  }
+  const unsubscribe = useThreadStore.subscribe((state) => {
+    if (isLoading(state)) return;
+    unsubscribe();
+    state.appendServerNotice(threadId, receipt);
+  });
+}
+
 /**
  * Applies a committed revert or undo to this window: the receipt joins the
  * timeline once, and snapshots refetch so `reverted` annotations update. Both
  * the mutation's own answer and the `turn.reverted` push call this.
  */
 export function acceptTurnRevert({ threadId, receipt }: Pick<TurnRevertedEvent, "threadId" | "receipt">): void {
-  useThreadStore.getState().appendServerNotice(threadId, receipt);
+  appendOnceLoaded(threadId, receipt);
   void getTransport()
     .listSnapshots(threadId)
     .then((snapshots) => useDiffStore.getState().setSnapshots(threadId, snapshots))

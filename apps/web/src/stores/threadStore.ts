@@ -544,8 +544,8 @@ interface ThreadState {
   ) => void;
   /**
    * Append a persisted server notice, such as a revert receipt, once. Threads
-   * without a loaded tail, or still loading one, are skipped: the load reads it
-   * from the server, and appending mid-load would make the load discard itself.
+   * without a loaded tail, or still loading one, are skipped, because appending
+   * mid-load would make the load discard itself. Callers retry after the load.
    */
   appendServerNotice: (threadId: string, message: Message) => void;
   /** Clear the interrupt file-notice banner for one thread (user dismissed). */
