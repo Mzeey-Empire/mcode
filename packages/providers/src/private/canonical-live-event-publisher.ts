@@ -2,6 +2,7 @@ import { logger } from "@mcode/shared";
 import * as NodeCrypto from "node:crypto";
 import {
   AgentEventType,
+  isChildRoutedRuntimeEvent,
   type ProviderIdentity,
   type ProviderId,
   type ProviderRuntimeEvent,
@@ -120,7 +121,8 @@ export class CanonicalLiveEventPublisher {
 
   private admit(queue: ProviderExecutionQueue, routing: CanonicalLiveEventRouting, runtimeEvent: ProviderRuntimeEvent,
     sourceIdentities: readonly ProviderIdentity[], native: NativeLiveEventEvidence | string | undefined): boolean {
-    const terminal = runtimeEvent.event.type === AgentEventType.TurnComplete || runtimeEvent.event.type === AgentEventType.Ended;
+    const terminal = !isChildRoutedRuntimeEvent(runtimeEvent.extension)
+      && ["turnComplete", "ended"].includes(runtimeEvent.event.type);
     if (queue.failure && (this.failureLifetime === "provider" || !terminal)) return false;
     if (typeof native === "string" && this.replayed(queue, routing, runtimeEvent, sourceIdentities, native)) return false;
     const terminalReserve = this.failureLifetime === "execution" && !terminal ? 2 : 0;
