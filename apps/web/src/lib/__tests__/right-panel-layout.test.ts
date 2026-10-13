@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { setLayoutMeasurements } from "@/lib/composer-layout";
 import {
   hideRightPanelAdaptive,
+  showChatAdaptive,
   showRightPanelAdaptive,
 } from "@/lib/right-panel-layout";
 import { useDiffStore } from "@/stores/diffStore";
@@ -43,5 +44,26 @@ describe("right-panel-layout", () => {
       width: 520,
       widthSource: "user",
     });
+  });
+
+  it("shows the chat beside a maximized panel when both fit", () => {
+    showRightPanelAdaptive("ws-1", "thread-1");
+    useUiStore.getState().setRightPanelMaximized(true);
+
+    showChatAdaptive("ws-1", "thread-1");
+
+    expect(useUiStore.getState().rightPanelMaximized).toBe(false);
+    expect(useDiffStore.getState().getRightPanelVisible("ws-1", "thread-1")).toBe(true);
+  });
+
+  it("hides the panel to show the chat when both cannot fit", () => {
+    setLayoutMeasurements(700, 700);
+    showRightPanelAdaptive("ws-1", "thread-1");
+    expect(useUiStore.getState().rightPanelMaximized).toBe(true);
+
+    showChatAdaptive("ws-1", "thread-1");
+
+    expect(useUiStore.getState().rightPanelMaximized).toBe(false);
+    expect(useDiffStore.getState().getRightPanelVisible("ws-1", "thread-1")).toBe(false);
   });
 });

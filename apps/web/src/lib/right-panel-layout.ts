@@ -76,6 +76,19 @@ export function hideRightPanelAdaptive(workspaceId: string, threadId?: string | 
   useUiStore.getState().setRightPanelMaximized(false);
 }
 
+/**
+ * Puts the chat on screen for a reveal. Clearing maximize alone is not enough
+ * when chat and panel cannot fit side by side: the layout guard maximizes again.
+ */
+export function showChatAdaptive(workspaceId: string, threadId?: string | null): void {
+  const panelWidth = useDiffStore.getState().getRightPanel(workspaceId, threadId).width;
+  if (canFitSideBySidePanel(getContentRowWidth(), panelWidth)) {
+    useUiStore.getState().setRightPanelMaximized(false);
+    return;
+  }
+  hideRightPanelAdaptive(workspaceId, threadId);
+}
+
 /** Active workspace/thread hide helper for layout guard and Escape paths. */
 export function hideActiveRightPanelAdaptive(): void {
   const { activeWorkspaceId, activeThreadId } = useWorkspaceStore.getState();

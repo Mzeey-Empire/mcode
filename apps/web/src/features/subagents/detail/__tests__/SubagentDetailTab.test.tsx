@@ -6,8 +6,10 @@ import {
 } from "@mcode/contracts";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
-import { useMessageRevealStore } from "@/features/conversation/messages/message-reveal-store";
 import { useUiStore } from "@/stores/uiStore";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { setLayoutMeasurements } from "@/lib/composer-layout";
+import { useMessageRevealStore } from "@/features/conversation/messages/message-reveal-store";
 import { useSubagentRosterStore } from "../../state/subagentRosterStore";
 import { SubagentDetailTab } from "../SubagentDetailTab";
 
@@ -98,7 +100,9 @@ describe("SubagentDetailTab", () => {
   });
 
   it("explains a meta-tier entry and reveals the reply that carries its result", async () => {
-    useUiStore.setState({ rightPanelMaximized: true });
+    setLayoutMeasurements(1200, 1200);
+    useWorkspaceStore.setState({ activeWorkspaceId: "workspace-1", activeThreadId: "thread-1" });
+    useUiStore.setState({ rightPanelMaximized: true, rightPanelMaximizedByLayout: false });
     await renderTab([entry({ provider: "cursor", tier: "meta" })]);
 
     expect(screen.getByText(

@@ -9,10 +9,11 @@ import { getConversationResidency, MessageList } from "@/features/conversation";
 import { projectCanonicalMessageList } from "@/features/conversation/messages/canonical-message-projection";
 import { useMessageRevealStore } from "@/features/conversation/messages/message-reveal-store";
 import { MODEL_PROVIDERS } from "@/lib/model-registry";
+import { showChatAdaptive } from "@/lib/right-panel-layout";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { cn } from "@/lib/utils";
 import { useThreadRecord } from "@/stores/thread-selectors";
 import { useToastStore } from "@/stores/toastStore";
-import { useUiStore } from "@/stores/uiStore";
 import { getTransport } from "@/transport";
 import { useSubagentRoster, useSubagentRosterStore } from "../state/subagentRosterStore";
 import { subagentStatusLabel } from "../subagent-status";
@@ -135,8 +136,8 @@ function MetaTier({ threadId, entry }: { readonly threadId: string; readonly ent
     {sourceMessageId && (
       <Button type="button" variant="secondary" size="compact" shape="round" className="self-start bg-selected"
         onClick={() => {
-          // A maximized panel covers the chat, so the reveal would scroll a transcript nobody can see.
-          useUiStore.getState().setRightPanelMaximized(false);
+          const workspaceId = useWorkspaceStore.getState().activeWorkspaceId;
+          if (workspaceId) showChatAdaptive(workspaceId, threadId);
           useMessageRevealStore.getState().requestReveal(threadId, sourceMessageId);
         }}>
         Show in chat
