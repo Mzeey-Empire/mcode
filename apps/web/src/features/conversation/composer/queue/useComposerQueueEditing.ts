@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PreviewAnnotationBundle } from "@mcode/contracts";
 import { releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-capture-spill";
 import {
@@ -124,6 +124,7 @@ export function useComposerQueueEditing({
 } {
   const [editing, setEditing] = useState<ComposerQueueEdit | null>(null);
   const originalMessageRef = useRef<QueuedMessage | null>(null);
+  const originalIndexRef = useRef(0);
   const restoredPreviewAnnotationsClearedRef = useRef(false);
   // While a direct dispatch owns the edit's content, cancel/discard must not
   // reinsert the popped original — it would resend as a ghost queue entry.
@@ -186,6 +187,7 @@ export function useComposerQueueEditing({
       if (!popped) return;
 
       originalMessageRef.current = popped;
+      originalIndexRef.current = targetIndex;
       restoredPreviewAnnotationsClearedRef.current = false;
       setEditing(startEdit(popped, targetIndex));
       queue.setEditingThreadId(threadId);
@@ -195,6 +197,15 @@ export function useComposerQueueEditing({
     },
     [annotations, captureEdit, editing, form, threadId],
   );
+
+  // Every reconnect restore skips a note open here, so leaving the thread puts it back in its slot.
+  useEffect(() => () => {
+    const original = originalMessageRef.current;
+    if (!threadId || !original?.approvalNote || editConsumedByDispatchRef.current) return;
+    useQueueStore.getState().insertAt(threadId, originalIndexRef.current, toQueuePayload(original));
+    finishEditing();
+    scheduleDrainAfterEdit(threadId);
+  }, [finishEditing, threadId]);
 
   const cancelEdit = useCallback(() => {
     if (!threadId || !editing || editConsumedByDispatchRef.current) return;

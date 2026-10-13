@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useQueueStore, type QueuedMessage } from "@/stores/queueStore";
+import { queueApprovalNote } from "./queued-approval-note";
 import {
   useComposerQueueEditing,
   type ComposerQueueEditForm,
@@ -8,6 +9,7 @@ import {
 
 vi.mock("@/stores/threadStore", () => ({
   scheduleDrainAfterEdit: vi.fn(),
+  useThreadStore: { getState: () => ({ getThreadSettings: () => ({ permissionMode: "full" }) }) },
 }));
 
 const THREAD_ID = "queue-editing-thread";
@@ -100,5 +102,20 @@ describe("useComposerQueueEditing dispatch consumption", () => {
 
     expect(queuedContents()).toEqual(["queued original"]);
     expect(hook.result.current.editing).toBeNull();
+  });
+
+  it("puts an open note back when the composer leaves its thread, so restore can reach it", () => {
+    queueApprovalNote(THREAD_ID, "request-1", "Lint only apps/web", "queued");
+    const [note] = useQueueStore.getState().queues[THREAD_ID]!;
+    const { hook } = setup();
+    act(() => hook.result.current.loadIntoComposer(note!));
+    expect(queuedContents()).toEqual([]);
+
+    hook.unmount();
+    expect(queuedContents()).toEqual(["Lint only apps/web"]);
+    queueApprovalNote(THREAD_ID, "request-1", "Lint only apps/server", "queued");
+
+    expect(useQueueStore.getState().queues[THREAD_ID]?.map((message) => [message.content, message.approvalNote]))
+      .toEqual([["Lint only apps/server", { requestId: "request-1", state: "queued" }]]);
   });
 });
