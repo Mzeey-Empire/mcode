@@ -132,6 +132,33 @@ describe("accepted Copilot collaboration", () => {
     expect(port.loadTurn(execution.turnId)?.status).toBe("Running");
   });
 
+  it("keeps the final child answer when a delta arrives afterward", () => {
+    const port = new AcceptedCodexCollaboration(initial());
+    port.prepare(delegate());
+    const final = port.prepare(observation({ type: "textDelta", threadId: "parent", delta: "Full answer" },
+      { nativeItemId: "message", final: true }));
+    expect(final.changes).toMatchObject([{ kind: "item-recorded", item: { payload: {
+      eventKey: "stream-complete", message: { content: "Full answer" },
+    } } }]);
+    expect(port.prepare(observation({ type: "textDelta", threadId: "parent", delta: "Full answer" },
+      { nativeItemId: "message" }))).toEqual({ projection: { status: "consumed" }, changes: [] });
+    expect(port.recordChildItem(child(port), { kind: "message", nativeItemId: "message", text: "Late", mode: "append" }).payload)
+      .toMatchObject({ eventKey: "stream-complete", message: { content: "Full answer" } });
+  });
+
+  it.each([
+    { event: { type: "textDelta", threadId: "parent", delta: "Missing identity" }, reason: "missing-native-item-id" },
+    { event: { type: "system", threadId: "parent", subtype: "unsupported" }, reason: "unsupported-event-type" },
+  ] satisfies { event: AgentEvent; reason: string }[])("diagnoses $reason separately from an unknown delegation", ({ event, reason }) => {
+    const port = new AcceptedCodexCollaboration(initial());
+    port.prepare(delegate());
+    const result = port.prepare({ providerId: "copilot", sourceKind: "provider-runtime",
+      event: { ...event, turnExecutionId: execution.executionId },
+      runtimeExtension: { providerId: "copilot", kind: "child-thread", childThread: { role: "child", path: ["TOOL_6"] } } });
+    expect(result.projection).toMatchObject({ status: "rejected", diagnostic: { reason } });
+    expect(port.loadTurn(execution.turnId)?.status).toBe("Running");
+  });
+
   it("records diagnostics for unknown children, mismatched duplicates and new items after close", () => {
     const port = new AcceptedCodexCollaboration(initial());
     const tool = observation({ type: "toolUse", threadId: "parent", toolName: "Read", toolCallId: "read", toolInput: { path: "one" } });

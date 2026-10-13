@@ -273,13 +273,13 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
     }
   }
 
-  /** Record child content through the same item core as native Codex observations. */
   recordChildItem(child: ChildThreadHandle, input: ChildItemInput): AgentItem {
     const turn = this.requireTurn(child.turnId);
     const record = childItemRecord(child.childThreadId, input);
     const key = input.kind === "message" ? "stream" : record.eventKey;
     const id = `item:child:${hash(JSON.stringify([turn.id, input.nativeItemId, key, input.kind]))}`;
     const existing = this.state.items[id];
+    if (existing?.payload.eventKey === "stream-complete" && record.eventKey === "stream") return existing;
     if (existing && input.kind !== "message" && !NodeUtil.isDeepStrictEqual(existing.payload,
       { ...publicChildPayload(record.payload), nativeItemId: input.nativeItemId, eventKey: record.eventKey })) {
       throw new ChildThreadRejection("duplicate-mismatch");

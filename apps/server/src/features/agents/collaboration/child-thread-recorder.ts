@@ -39,7 +39,7 @@ export type ChildTurnClose =
 /** Owner reads needed to resolve a root or nested delegation. */
 export type ChildThreadReads = Pick<CodexCollaborationDurability, "loadTurn" | "loadTurnByExecution">;
 
-/** Idempotent child writes over the accepted owner's state. Expected refusals use ChildThreadRejection. */
+/** Child writes over accepted state. Final messages replace deltas and ignore later appends; the first terminal outcome wins. */
 export interface ChildThreadRecorder {
   delegate(input: ChildDelegationInput): ChildThreadHandle;
   findDelegation(parentThreadId: string, parentItemId: string): ChildThreadHandle | null;
@@ -51,7 +51,7 @@ export interface ChildThreadRecorder {
 /** A data refusal that must become a parent diagnostic instead of failing its turn. */
 export class ChildThreadRejection extends Error {
   constructor(readonly reason: "unknown-delegation" | "child-turn-terminal" | "duplicate-mismatch"
-    | "parent-turn-not-running" | "child-transcript-not-declared") {
+    | "parent-turn-not-running" | "child-transcript-not-declared" | "missing-native-item-id" | "unsupported-event-type") {
     super(reason);
   }
 }

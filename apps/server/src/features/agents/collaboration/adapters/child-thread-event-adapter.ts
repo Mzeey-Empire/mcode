@@ -40,7 +40,7 @@ export class ChildThreadEventAdapter implements ExtensionAdapter {
       const child = this.recorder.delegate({ providerId, parentThreadId: owner.threadId, parentTurnId: owner.turnId,
         parentItemId, nativeParentItemId, prompt: evidence.prompt, title: evidence.title, agentType: evidence.agentType });
       if (evidence.path.length > 1) return { status: "consumed" };
-      if (event.type !== "toolUse") throw new ChildThreadRejection("unknown-delegation");
+      if (event.type !== "toolUse") throw new ChildThreadRejection("unsupported-event-type");
       return { status: "forward", event: { ...event,
         subagentPresentation: createCanonicalSubagentPresentation(event.toolInput, event.toolCallId, child.childThreadId) } };
     }
@@ -66,7 +66,7 @@ export class ChildThreadEventAdapter implements ExtensionAdapter {
     evidence: Extract<ChildThreadEvidence, { role: "child" }>): void {
     switch (event.type) {
       case "textDelta":
-        if (!evidence.nativeItemId) throw new ChildThreadRejection("unknown-delegation");
+        if (!evidence.nativeItemId) throw new ChildThreadRejection("missing-native-item-id");
         this.recorder.recordChildItem(child, { kind: "message", nativeItemId: evidence.nativeItemId,
           text: event.delta, mode: evidence.final ? "replace" : "append" });
         return;
@@ -78,10 +78,17 @@ export class ChildThreadEventAdapter implements ExtensionAdapter {
         this.recorder.recordChildItem(child, { kind: "tool-result", nativeItemId: event.toolCallId,
           output: event.output, isError: event.isError ?? false });
         return;
-      case "turnComplete": this.recorder.closeChild(child, { outcome: "completed" }); return;
-      case "error": this.recorder.closeChild(child, { outcome: "errored", error: event.error }); return;
-      case "ended": this.closeEnded(child, event); return;
-      default: throw new ChildThreadRejection("unknown-delegation");
+      case "turnComplete":
+        this.recorder.closeChild(child, { outcome: "completed" });
+        return;
+      case "error":
+        this.recorder.closeChild(child, { outcome: "errored", error: event.error });
+        return;
+      case "ended":
+        this.closeEnded(child, event);
+        return;
+      default:
+        throw new ChildThreadRejection("unsupported-event-type");
     }
   }
 
