@@ -114,6 +114,20 @@ function unsentEditOfLatest(editing: EditingState | null, { target, latest }: Im
   return { ...editing.target, contentMd: editing.text };
 }
 
+// The user pressed Implement on one version. Only the session's own save may
+// move the request onto another, by forking the version into its draft; a
+// picker change while that save is in flight must not.
+function pickAfterSave(
+  pressed: ImplementPick | null,
+  current: ImplementPick | null,
+  session: DraftTarget | null,
+): ImplementPick | null {
+  if (pressed === null || current === null) return null;
+  if (current.target.id === pressed.target.id) return current;
+  const savedInto = session !== null && pressed.target.id === session.baseVersionId && current.target.id === session.versionId;
+  return savedInto ? current : { target: pressed.target, latest: current.latest };
+}
+
 function revisionAfterSaving(carried: ImplementPending): number {
   return carried.baseRevision + 1;
 }
@@ -212,18 +226,21 @@ export class PlanSaveScheduler {
   /**
    * Hands the session to an Implement request. Waits for the save in flight,
    * since its response decides the revision on screen, then calls `pick` for
-   * the version to implement and its thread's latest. Unsent text rides the
+   * the version to implement and its thread's latest. The version picked at
+   * the press stays the target unless that save forked it into the draft. Unsent text rides the
    * request only when the latest version is the one on screen. Returns null,
    * and resumes autosave, when there is nothing to implement or a conflict
    * waits for the user.
    */
   async beginImplement(pick: () => ImplementPick | null): Promise<ImplementBasis | null> {
     if (!canHandOff(this.#state)) return null;
+    const pressed = pick();
+    const session = this.#state.kind === "editing" ? this.#state.target : null;
     this.#paused = true;
     this.#clearDebounce();
     await this.#untilNoSaveInFlight();
     const state = this.getSnapshot();
-    const picked = pick();
+    const picked = pickAfterSave(pressed, pick(), session);
     if (!canHandOff(state) || picked === null) {
       this.#resumeAutosave();
       return null;
