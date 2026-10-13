@@ -357,7 +357,7 @@ export class PlanSaveScheduler {
   #enterConflict(text: string, latest: PlanVersion): void {
     this.#clearDebounce();
     this.#retryAttempt = 0;
-    this.#set({ kind: "conflict", text, latest, canKeep: latest.status !== "accepted" });
+    this.#set({ kind: "conflict", text, latest, canKeep: latest.status === "draft" || latest.status === "ready" });
     this.deps.onVersion(latest);
   }
 }

@@ -247,6 +247,17 @@ describe("PlanSaveScheduler", () => {
     expect(saves).toHaveLength(1);
   });
 
+  it("offers only Use saved version when the latest is superseded", async () => {
+    const { scheduler, saves } = setup();
+    const superseded = draft(OTHER_DRAFT_ID, 2, "older draft");
+    scheduler.edit("mine", ready);
+    await vi.advanceTimersByTimeAsync(500);
+    saves[0].reject(conflictError({ ...superseded, status: "superseded" }));
+    await settle();
+
+    expect(scheduler.getSnapshot()).toMatchObject({ kind: "conflict", text: "mine", canKeep: false });
+  });
+
   it("Use saved version returns to idle and the next edit adopts the saved draft", async () => {
     const { scheduler, saves, payloads } = setup();
     const theirs = draft(OTHER_DRAFT_ID, 2, "theirs");
