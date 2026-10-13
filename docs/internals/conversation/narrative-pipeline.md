@@ -254,7 +254,7 @@ therefore reveal the existing view.
 
 A mounted hidden transcript holds a display lease through
 [`ConversationResidency`](../../../apps/web/src/features/conversation/residency/conversation-residency.ts).
-An open [canonical subagent detail view](../../../apps/web/src/features/subagents/roster/SubagentsPanel.tsx)
+An open [transcript-tier subagent tab](../../../apps/web/src/features/subagents/detail/SubagentDetailTab.tsx)
 uses the same lease mechanism. Leases are reference counted, so closing one
 view cannot release a conversation that another view still displays. Selection
 and display leases both protect resident content. A non-selected transcript can
