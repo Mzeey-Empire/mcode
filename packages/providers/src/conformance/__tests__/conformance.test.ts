@@ -86,9 +86,9 @@ function replayPlanText(trace: Exclude<SyntheticPlanTrace, { providerId: "claude
     const context = { threadId: "THREAD_1", partRole: "assistant", forwardedText: new Map<string, string>() };
     return trace.events.flatMap((event) => mapOpenCodeEnvelope(event, context).events);
   }
-  const state: CopilotTurnState = { nativeIdleObserved: false, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0,
+  const state: CopilotTurnState = { turnExecutionId: "00000000-0000-4000-8000-000000000001", invocations: new Map(), nativeIdleObserved: false, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0,
     tools: new Map(), pendingPermissions: new Map(), settle: () => undefined, completed: Promise.resolve() };
-  return trace.events.flatMap((event) => mapCopilotEvent(event, "THREAD_1", state));
+  return trace.events.flatMap((event) => mapCopilotEvent(event, "THREAD_1", state).map((mapped) => mapped.event));
 }
 
 async function replayClaudePlan(trace: Extract<SyntheticPlanTrace, { providerId: "claude" }>): Promise<PlanCapture[]> {
@@ -611,13 +611,13 @@ describe("Classified failures after core fixture replay", () => {
   it("retains Copilot quota classification after the captured core trace", () => {
     const fixture = loadProviderFixtureManifest(NodePath.resolve(import.meta.dirname, "../fixtures/copilot-core.captured.json"));
     assert(fixture.input.copilotNativeEvents);
-    const state: CopilotTurnState = { nativeIdleObserved: false, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0,
+    const state: CopilotTurnState = { turnExecutionId: "00000000-0000-4000-8000-000000000001", invocations: new Map(), nativeIdleObserved: false, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0,
       tools: new Map(), pendingPermissions: new Map(), settle: () => undefined, completed: Promise.resolve() };
     for (const event of fixture.input.copilotNativeEvents) mapCopilotEvent(event, "THREAD_1", state);
     const events = mapCopilotEvent({ type: "session.error", id: "EVENT_999", timestamp: "2000-01-01T00:00:00.000Z", parentId: null,
       data: { errorType: "quota", statusCode: 429, message: "Synthetic quota exhausted" },
     }, "THREAD_1", state);
-    expect(events.filter((event) => event.type === "error").map((event) => AgentEventSchema().parse(event))).toEqual([
+    expect(events.map((mapped) => mapped.event).filter((event) => event.type === "error").map((event) => AgentEventSchema().parse(event))).toEqual([
       { type: "error", threadId: "THREAD_1", error: "Synthetic quota exhausted", failure: { kind: "usage_limit", status: 429, code: "quota" } },
     ]);
   });

@@ -16,7 +16,7 @@ import { assertActiveTurnRecoveryRetention } from "../../turns/active-turn-recov
 import type { ExecutionIdentity } from "../../execution/execution-mailbox-protocol.js";
 import { backgroundHeldToolIds } from "../../tools/background-held-tools.js";
 
-// These adapters attach explicit parents through Copilot SDK parentToolCallId and OpenCode child-session routing.
+// Copilot children route into canonical threads. OpenCode attaches explicit parents through child-session routing.
 const PROVIDERS_WITH_EXPLICIT_TOOL_PARENTS: ReadonlySet<ProviderId> = new Set(["copilot", "opencode"]);
 
 /** Buffered tool call with raw input preserved for deferred summarization. */

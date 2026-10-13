@@ -53,7 +53,10 @@ function host(sink: DeterministicCanonicalSink): ProviderHostPorts {
   };
 }
 function projections(sink: DeterministicCanonicalSink) {
-  return sink.snapshot().events.flatMap(({ payload }) => payload.type === "item.recorded" ? [ProviderRuntimeEventSchema().parse(payload.item.payload.runtimeEvent).event] : []);
+  return runtimeEvents(sink).map((runtime) => runtime.event);
+}
+function runtimeEvents(sink: DeterministicCanonicalSink) {
+  return sink.snapshot().events.flatMap(({ payload }) => payload.type === "item.recorded" ? [ProviderRuntimeEventSchema().parse(payload.item.payload.runtimeEvent)] : []);
 }
 
 function shellPermission(identifiers = ["git status"], hasWriteFileRedirection = false): PermissionRequest {
@@ -377,13 +380,41 @@ describe("Copilot public factory", () => {
     session.emit({ type: "subagent.completed", data: { toolCallId: "child-invocation", agentName: "worker", agentDisplayName: "Worker" } });
     await finish();
     expect(projections(sink).filter((event) => event.type === "message")).toEqual([]);
-    expect(projections(sink).filter((event) => event.type === "textDelta")).toEqual([expect.objectContaining({ delta: "parent output" })]);
+    expect(runtimeEvents(sink).filter((runtime) => runtime.event.type === "textDelta")).toMatchObject([
+      { event: { delta: "private child output" }, extension: { providerId: "copilot", kind: "child-thread",
+        childThread: { role: "child", path: ["child-invocation"], nativeItemId: "child-message", final: true } } },
+      { event: { delta: "parent output" } },
+    ]);
+    expect(runtimeEvents(sink).filter((runtime) => !runtime.extension && runtime.event.type === "textDelta")
+      .map((runtime) => runtime.event)).toEqual([expect.objectContaining({ delta: "parent output" })]);
     const native = sink.snapshot().events.find((event) => event.eventId.includes("parent-delta"));
     expect(native?.providerTimestamp).toBe("2026-10-02T10:00:00.000Z");
     expect(native?.sourceSequence).toBeUndefined();
     const child = sink.snapshot().events.find((event) => event.eventId.includes("child-start"));
     expect(child?.sourceIdentities).toContainEqual({ providerId: "copilot", scope: "item", value: "child-invocation", provenance: "native" });
     expect(JSON.stringify(child)).toContain('"predecessorEventId"');
+  });
+
+  it.each(["completed", "cancelled", "failed"] as const)("closes open children once when the parent is %s", async (outcome) => {
+    await provider.sendTurn(request());
+    for (let index = 0; index < 6; index += 1) session.emit({ type: "subagent.started", data: {
+      toolCallId: `child-${index}`, agentName: "worker", agentDisplayName: "Worker", agentDescription: "Inspect",
+    } });
+    session.emit({ type: "subagent.completed", data: { toolCallId: "child-0", agentName: "worker", agentDisplayName: "Worker" } });
+    if (outcome === "cancelled") await provider.stopSession("mcode-thread-1");
+    else if (outcome === "failed") session.emit({ type: "session.error", data: { errorType: "fatal", message: "Native failed" } });
+    else session.emit({ type: "session.idle", ephemeral: true, data: {} });
+    await vi.waitFor(() => expect(runtimeEvents(sink).filter((runtime) => !runtime.extension).at(-1)?.event.type).toBe("ended"));
+    const endings = runtimeEvents(sink).filter((runtime) => runtime.extension?.kind === "child-thread" && runtime.event.type === "ended");
+    expect(endings.map((runtime) => runtime.extension)).toEqual([1, 2, 3, 4, 5].map((index) => ({
+      providerId: "copilot", kind: "child-thread", childThread: { role: "child", path: [`child-${index}`] },
+    })));
+    expect(endings.map((runtime) => runtime.event)).toEqual([1, 2, 3, 4, 5].map(() => ({ type: "ended", threadId: "thread-1",
+      turnExecutionId: request().turnExecutionId, outcome: outcome === "completed" ? "interrupted" : outcome === "cancelled" ? "cancelled" : "errored" })));
+    const runtime = runtimeEvents(sink);
+    const parentTerminal = runtime.findIndex((entry) => !entry.extension
+      && ["turnComplete", "error", "ended"].includes(entry.event.type));
+    expect(runtime.slice(parentTerminal).filter((entry) => entry.extension?.kind === "child-thread")).toEqual([]);
   });
 
   it("deduplicates native IDs and pairs tool starts/results in order", async () => {

@@ -1,12 +1,17 @@
 import type { SessionEvent } from "@github/copilot-sdk";
 import { describe, expect, it } from "vitest";
-import { AgentEventSchema } from "@mcode/contracts";
+import { AgentEventSchema, ProviderRuntimeEventSchema, providerRuntimeEvent } from "@mcode/contracts";
 import { parseCopilotCapturedTrace } from "../../../conformance/copilot-trace.js";
-import { mapCopilotEvent, type CopilotTurnState } from "../copilot-event-mapper.js";
+import { mapCopilotEvent, closeOpenChildren, type CopilotTurnState } from "../copilot-event-mapper.js";
 
 function turnState(): CopilotTurnState {
-  return { nativeIdleObserved: false, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0,
+  return { turnExecutionId: "00000000-0000-4000-8000-000000000001", invocations: new Map(), nativeIdleObserved: false, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0,
     tools: new Map(), pendingPermissions: new Map(), completed: Promise.resolve(), settle: () => {} };
+}
+
+
+function parentEvents(event: SessionEvent, threadId: string, turn: CopilotTurnState) {
+  return mapCopilotEvent(event, threadId, turn).map((mapped) => mapped.event);
 }
 
 describe("Copilot session errors", () => {
@@ -19,7 +24,7 @@ describe("Copilot session errors", () => {
     { errorType: "context_limit", statusCode: 503, failure: { kind: "fatal", status: 503, code: "context_limit" } },
     { errorType: "unknown", failure: { kind: "fatal", code: "unknown" } },
   ])("classifies $errorType with status $statusCode", ({ errorType, statusCode, failure }) => {
-    const events = mapCopilotEvent({ id: "EVENT_1", parentId: null, timestamp: "2000-01-01T00:00:00.000Z",
+    const events = parentEvents({ id: "EVENT_1", parentId: null, timestamp: "2000-01-01T00:00:00.000Z",
       type: "session.error", data: { errorType, statusCode, message: "Native failure" },
     }, "thread", turnState());
     expect(events).toEqual([{ type: "error", threadId: "thread", error: "Native failure", failure }]);
@@ -31,7 +36,7 @@ describe("Copilot session errors", () => {
       const event: SessionEvent = { id: "EVENT_1", parentId: null, timestamp: "2000-01-01T00:00:00.000Z",
         type: "session.error", data: { errorType: "query", message: "Native failure" } };
       Object.assign(event.data, { statusCode });
-      expect(mapCopilotEvent(event, "thread", turnState())).toEqual([
+      expect(parentEvents(event, "thread", turnState())).toEqual([
         { type: "error", threadId: "thread", error: "Native failure", failure: { kind: "fatal", code: "query" } },
       ]);
     },
@@ -41,7 +46,7 @@ describe("Copilot session errors", () => {
     const event: SessionEvent = { id: "EVENT_1", parentId: null, timestamp: "2000-01-01T00:00:00.000Z",
       type: "session.error", data: { errorType: "query", statusCode: 503, message: "Native failure" } };
     Object.assign(event.data, { errorType });
-    expect(mapCopilotEvent(event, "thread", turnState())).toEqual([
+    expect(parentEvents(event, "thread", turnState())).toEqual([
       { type: "error", threadId: "thread", error: "Native failure", failure: { kind: "retryable", status: 503 } },
     ]);
   });
@@ -66,53 +71,151 @@ function trace(failed = false, description = true) {
 }
 
 describe("Copilot subagent mapping", () => {
-  it("enriches one Agent call and keeps child tools nested without leaking child text", () => {
+  const metadata = { id: "EVENT_1", parentId: null, timestamp: "2000-01-01T00:00:00.000Z" };
+  function start(turn: CopilotTurnState, toolCallId: string, parentToolCallId?: string, args: Record<string, unknown> = {}) {
+    const provisional = mapCopilotEvent({ ...metadata, type: "tool.execution_start", data: {
+      toolCallId, toolName: "task", arguments: args, ...(parentToolCallId ? { parentToolCallId } : {}),
+    } }, "thread", turn);
+    const delegated = mapCopilotEvent({ ...metadata, type: "subagent.started", data: {
+      toolCallId, agentName: "explore", agentDisplayName: "Explorer", agentDescription: "Inspect the code",
+    } }, "thread", turn);
+    return { provisional, delegated };
+  }
+
+  it("routes child text and tools with evidence while keeping parent text intact", () => {
     const turn = turnState();
     const events = trace().flatMap((event) => mapCopilotEvent(event, "thread", turn));
-    const agents = events.filter((event) => event.type === "toolUse" && event.toolName === "Agent");
-    expect(agents.map((event) => event.toolCallId)).toEqual(["TOOL_1", "TOOL_1"]);
-    expect(agents[1]).toMatchObject({ toolInput: { description: "REDACTED_CONTENT", prompt: "PROMPT_1", subagentType: "AGENT_1" },
-      subagentPresentation: { task: "REDACTED_CONTENT", displayName: "AGENT 1", identityKey: "TOOL_1", detail: { kind: "transcript-unavailable" } } });
-    expect(events.filter((event) => "parentToolCallId" in event && event.parentToolCallId)).toEqual([
-      { type: "toolUse", threadId: "thread", toolCallId: "TOOL_2", toolName: "read", toolInput: {}, parentToolCallId: "TOOL_1" },
-      { type: "toolProgress", threadId: "thread", toolCallId: "TOOL_2", toolName: "read", elapsedSeconds: 1, parentToolCallId: "TOOL_1" },
-      { type: "toolResult", threadId: "thread", toolCallId: "TOOL_2", output: "REDACTED_TOOL_OUTPUT", isError: false, parentToolCallId: "TOOL_1" },
+    expect(events.filter((mapped) => mapped.event.type === "textDelta")).toEqual([
+      { event: { type: "textDelta", threadId: "thread", delta: "REDACTED_CHILD_CONTENT" },
+        childThread: { role: "child", path: ["TOOL_1"], nativeItemId: "MESSAGE_1", final: true } },
+      { event: { type: "textDelta", threadId: "thread", delta: "REDACTED_CHILD_CONTENT" },
+        childThread: { role: "child", path: ["TOOL_1"], nativeItemId: "MESSAGE_1" } },
+      { event: { type: "textDelta", threadId: "thread", delta: "REDACTED_CONTENT" } },
     ]);
-    expect(events.filter((event) => event.type === "toolResult" && event.toolCallId === "TOOL_1")).toEqual([
-      { type: "toolResult", threadId: "thread", toolCallId: "TOOL_1", output: "REDACTED_TOOL_OUTPUT", isError: false },
+    expect(turn.assistantText).toEqual({ messageId: "MESSAGE_2", content: "REDACTED_CONTENT" });
+    expect(turn.pendingAssistantMessage).toBeUndefined();
+    expect(events.filter((mapped) => mapped.childThread?.role === "child" && mapped.event.type.startsWith("tool"))).toEqual([
+      { event: { type: "toolUse", threadId: "thread", toolCallId: "TOOL_2", toolName: "read", toolInput: {} },
+        childThread: { role: "child", path: ["TOOL_1"] } },
+      { event: { type: "toolResult", threadId: "thread", toolCallId: "TOOL_2", output: "REDACTED_TOOL_OUTPUT", isError: false },
+        childThread: { role: "child", path: ["TOOL_1"] } },
     ]);
-    expect(events.filter((event) => event.type === "textDelta")).toEqual([{ type: "textDelta", threadId: "thread", delta: "REDACTED_CONTENT" }]);
+    expect(events.some((mapped) => "parentToolCallId" in mapped.event)).toBe(false);
+    for (const mapped of events) {
+      const runtime = providerRuntimeEvent(mapped.event, mapped.childThread
+        ? { providerId: "copilot", kind: "child-thread", childThread: mapped.childThread } : undefined);
+      expect(ProviderRuntimeEventSchema().parse(runtime)).toEqual(runtime);
+    }
   });
 
-  it("preserves the task prompt instead of replacing it with the agent description", () => {
+  it("keeps two interleaved children separate from each other and the parent", () => {
     const turn = turnState();
-    const metadata = { id: "EVENT_1", parentId: null, timestamp: "2000-01-01T00:00:00.000Z" };
-    mapCopilotEvent({ ...metadata, type: "tool.execution_start", data: {
-      toolCallId: "TOOL_1", toolName: "task", arguments: { prompt: "Inspect the parser" },
-    } }, "thread", turn);
-    const events = mapCopilotEvent({ ...metadata, id: "EVENT_2", type: "subagent.started", data: {
-      toolCallId: "TOOL_1", agentName: "explore", agentDisplayName: "Explorer", agentDescription: "Explores code",
-    } }, "thread", turn);
-    expect(events).toMatchObject([{ type: "toolUse", toolName: "Agent", toolInput: { prompt: "Inspect the parser" } }]);
+    start(turn, "T1");
+    start(turn, "T2");
+    const events = [
+      mapCopilotEvent({ ...metadata, type: "assistant.message_delta", ephemeral: true, data: {
+        messageId: "M1", deltaContent: "First", parentToolCallId: "T1",
+      } }, "thread", turn),
+      mapCopilotEvent({ ...metadata, type: "assistant.message_delta", ephemeral: true, data: {
+        messageId: "P", deltaContent: "Parent",
+      } }, "thread", turn),
+      mapCopilotEvent({ ...metadata, type: "tool.execution_start", data: {
+        toolCallId: "read", toolName: "Read", arguments: {}, parentToolCallId: "T2",
+      } }, "thread", turn),
+      mapCopilotEvent({ ...metadata, type: "assistant.message_delta", ephemeral: true, data: {
+        messageId: "M2", deltaContent: "Second", parentToolCallId: "T2",
+      } }, "thread", turn),
+    ].flat();
+    expect(events.map((mapped) => mapped.childThread?.path ?? [])).toEqual([["T1"], [], ["T2"], ["T2"]]);
+    expect(events.filter((mapped) => !mapped.childThread).map((mapped) => mapped.event)).toEqual([
+      { type: "textDelta", threadId: "thread", delta: "Parent" },
+    ]);
+    expect(turn.assistantText).toEqual({ messageId: "P", content: "Parent" });
   });
 
-  it("retains failure even when the enclosing task completes successfully and falls back to the display name", () => {
+  it.each([["Inspect parser", "Inspect parser"], [undefined, "Explorer"]])(
+    "uses agentDescription for the prompt and %s for the title", (description, title) => {
+      const turn = turnState();
+      const result = start(turn, "T1", undefined, { ...(description ? { description } : {}), prompt: "Stale task prompt" });
+      expect(result.provisional[0]?.event).toMatchObject({ toolInput: description ? { description } : {} });
+      expect(JSON.stringify(result.provisional)).not.toContain("Stale task prompt");
+      expect(result.delegated).toMatchObject([{ event: { type: "toolUse", toolName: "Agent",
+        toolInput: { description: title, prompt: "Inspect the code", subagentType: "explore" } },
+        childThread: { role: "delegate", path: ["T1"], prompt: "Inspect the code", title, agentType: "explore" } }]);
+    },
+  );
+
+  it("closes completed children and preserves failure after a successful task result", () => {
+    const completedTurn = turnState();
+    const complete = trace().flatMap((event) => mapCopilotEvent(event, "thread", completedTurn));
+    expect(complete.filter((mapped) => mapped.event.type === "turnComplete")).toMatchObject([
+      { event: { type: "turnComplete" }, childThread: { role: "child", path: ["TOOL_1"] } },
+    ]);
     const turn = turnState();
     const events = trace(true, false).flatMap((event) => mapCopilotEvent(event, "thread", turn));
-    expect(events.filter((event) => event.type === "toolUse" && event.toolName === "Agent")[1]).toMatchObject({
-      subagentPresentation: { task: "AGENT_2" }, toolInput: { prompt: "PROMPT_1", subagentType: "AGENT_1" },
-    });
-    expect(events.filter((event) => event.type === "toolResult" && event.toolCallId === "TOOL_1")).toEqual([
-      { type: "toolResult", threadId: "thread", toolCallId: "TOOL_1", output: "REDACTED_CONTENT", isError: true },
-      { type: "toolResult", threadId: "thread", toolCallId: "TOOL_1", output: "REDACTED_TOOL_OUTPUT", isError: true },
+    expect(events.filter((mapped) => mapped.event.type === "error")).toMatchObject([
+      { event: { error: "REDACTED_CONTENT", failure: { kind: "fatal" } }, childThread: { role: "child", path: ["TOOL_1"] } },
     ]);
+    expect(events.filter((mapped) => mapped.event.type === "turnComplete")).toEqual([]);
+    expect(events.filter((mapped) => mapped.event.type === "toolResult" && mapped.event.toolCallId === "TOOL_1")).toEqual([
+      { event: { type: "toolResult", threadId: "thread", toolCallId: "TOOL_1", output: "REDACTED_CONTENT", isError: true } },
+      { event: { type: "toolResult", threadId: "thread", toolCallId: "TOOL_1", output: "REDACTED_TOOL_OUTPUT", isError: true } },
+    ]);
+    expect(closeOpenChildren(turn, "thread", "interrupted")).toEqual([]);
+  });
+
+  it("routes a late tool result using retained invocation ancestry", () => {
+    const turn = turnState();
+    start(turn, "T1");
+    mapCopilotEvent({ ...metadata, type: "tool.execution_start", data: {
+      toolCallId: "read", toolName: "Read", arguments: {}, parentToolCallId: "T1",
+    } }, "thread", turn);
+    mapCopilotEvent({ ...metadata, type: "subagent.completed", data: {
+      toolCallId: "T1", agentName: "explore", agentDisplayName: "Explorer",
+    } }, "thread", turn);
+    expect(mapCopilotEvent({ ...metadata, type: "tool.execution_complete", data: {
+      toolCallId: "read", success: true, result: { content: "Late" },
+    } }, "thread", turn)).toEqual([{ event: { type: "toolResult", threadId: "thread", toolCallId: "read", output: "Late", isError: false },
+      childThread: { role: "child", path: ["T1"] } }]);
+  });
+
+  it.each(["interrupted", "cancelled", "errored"] as const)("closes only open children once with %s", (outcome) => {
+    const turn = turnState();
+    start(turn, "T1");
+    start(turn, "T2");
+    mapCopilotEvent({ ...metadata, type: "subagent.completed", data: {
+      toolCallId: "T1", agentName: "explore", agentDisplayName: "Explorer",
+    } }, "thread", turn);
+    expect(closeOpenChildren(turn, "thread", outcome)).toEqual([{ event: {
+      type: "ended", threadId: "thread", turnExecutionId: turn.turnExecutionId, outcome,
+    }, childThread: { role: "child", path: ["T2"] } }]);
+    expect(closeOpenChildren(turn, "thread", outcome)).toEqual([]);
+  });
+
+  it("builds nested paths and drops missing or cyclic ancestry instead of publishing at the root", () => {
+    const turn = turnState();
+    start(turn, "T1");
+    const nested = start(turn, "T2", "T1");
+    expect(nested.provisional[0]?.childThread).toEqual({ role: "child", path: ["T1"] });
+    expect(nested.delegated[0]?.childThread).toMatchObject({ role: "delegate", path: ["T1", "T2"] });
+    const message: SessionEvent = { ...metadata, type: "assistant.message", data: {
+      messageId: "M", content: "Grandchild", parentToolCallId: "T2",
+    } };
+    expect(mapCopilotEvent(message, "thread", turn)[0]?.childThread).toEqual({
+      role: "child", path: ["T1", "T2"], nativeItemId: "M", final: true,
+    });
+    turn.invocations.set("T1", { parentToolCallId: "T2", state: "open" });
+    expect(mapCopilotEvent(message, "thread", turn)).toEqual([]);
+    turn.invocations.delete("T1");
+    expect(mapCopilotEvent(message, "thread", turn)).toEqual([]);
+    expect(turn.assistantText).toBeUndefined();
   });
 });
 
 describe("Copilot reasoning mapping", () => {
   const at = (index: number) => ({ id: `EVENT_${index}`, parentId: null, timestamp: "2000-01-01T00:00:00.000Z" });
   function map(turn: CopilotTurnState, events: SessionEvent[]) {
-    return events.flatMap((event) => mapCopilotEvent(event, "thread", turn));
+    return events.flatMap((event) => parentEvents(event, "thread", turn));
   }
 
   it("streams reasoning deltas and closes the block with an empty done delta when the final text matches", () => {
