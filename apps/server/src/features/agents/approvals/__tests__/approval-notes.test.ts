@@ -109,7 +109,9 @@ describe("durable approval notes", () => {
     test.adapter.error = false;
     test.adapter.result = { status: "not_pending" };
     const state = delivery === "next_turn" ? "queued" : "delivery_unknown";
-    expect(await test.service.respondToApproval("request", response)).toEqual({ status: "not_pending", note: state });
+    expect(await Promise.all([
+      test.service.respondToApproval("request", response), test.service.respondToApproval("request", response),
+    ])).toEqual([{ status: "not_pending", note: state }, { status: "not_pending", note: state }]);
     expect(await test.service.listNotes()).toEqual([{ requestId: "request", threadId: test.thread.id, note, state }]);
     expect(test.adapter.delivered).toEqual([]);
   });

@@ -117,7 +117,10 @@ export class ApprovalService {
       response = parsed.data;
     }
     const pending = this.inFlight.get(requestId);
-    if (pending) return pending.then((result) => this.replay(requestId, response) ?? result);
+    if (pending) return pending.then((result) => {
+      const replay = this.replay(requestId, response);
+      return replay?.status === "failed" ? replay : result;
+    });
     return this.track(requestId, () => this.respond(requestId, response));
   }
 
