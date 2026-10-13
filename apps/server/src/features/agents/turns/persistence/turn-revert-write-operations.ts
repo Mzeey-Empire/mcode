@@ -57,5 +57,5 @@ function writeReceipt(db: Database, row: typeof turnReverts.$inferSelect, conten
   const notices = new MessageStore(db);
   const kind = row.state === "committed" ? (row.kind === "undo" ? "turn-revert-undone" : "turn-reverted") : "turn-revert-interrupted";
   return notices.createSystemNotice(row.threadId, content, notices.getLatestSequenceIncludingInternal(row.threadId) + 1,
-    { kind, presentation: "timeline", revertId: row.id }).id;
+    { kind, presentation: "timeline", revertId: row.id, ...(row.undoesRevertId ? { undoesRevertId: row.undoesRevertId } : {}) }).id;
 }

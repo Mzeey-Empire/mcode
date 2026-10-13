@@ -35,6 +35,8 @@ export interface SystemNoticeMetadata {
   /** `provider-turn` marks the opening line of a turn the provider started without a prompt. */
   kind: "diagnostic" | "warning" | "security" | "configuration" | "deprecation" | "model-rerouted" | "authentication-recovered" | "provider-turn" | "turn-reverted" | "turn-revert-undone" | "turn-revert-interrupted";
   revertId?: string;
+  /** Set on an undo receipt: the revert it undid, so a reloaded timeline knows that revert can no longer be undone. */
+  undoesRevertId?: string;
   presentation: "timeline" | "toast";
   scope?: "turn" | "session";
   sessionId?: string;
@@ -51,6 +53,7 @@ export interface SystemNoticeMetadata {
 export const SystemNoticeMetadataSchema = lazySchema<z.ZodType<SystemNoticeMetadata>>(() => z.object({
   kind: z.enum(["diagnostic", "warning", "security", "configuration", "deprecation", "model-rerouted", "authentication-recovered", "provider-turn", "turn-reverted", "turn-revert-undone", "turn-revert-interrupted"]),
   revertId: z.string().max(64).optional(),
+  undoesRevertId: z.string().max(64).optional(),
   presentation: z.enum(["timeline", "toast"]),
   scope: z.enum(["turn", "session"]).optional(),
   sessionId: z.string().max(64).optional(),

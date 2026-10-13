@@ -28,6 +28,8 @@ describe("turn revert server operation", () => {
     expect(await service.preview(request)).toEqual({ status: "nothing_to_revert" });
     const undo = { threadId: "thread", revertId: first.revert.id, requestId: NodeCrypto.randomUUID() };
     const undone = committed(await service.undo(undo));
+    expect(undone.receipt).toMatchObject({ content: "Undid revert · Turn 1",
+      systemNotice: { kind: "turn-revert-undone", revertId: undone.revert.id, undoesRevertId: first.revert.id } });
     expect(f.read("a")).toEqual(Buffer.from("after\n")); expect(f.read("binary")).toEqual(Buffer.from([0, 254, 2]));
     const again = await f.request(turn.messageId), second = committed(await service.apply(again));
     expect(second.revert.id).not.toBe(first.revert.id);
