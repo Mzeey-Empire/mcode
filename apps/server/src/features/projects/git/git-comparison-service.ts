@@ -73,13 +73,14 @@ export class GitComparisonService {
   async readCommitDiff(
     workspaceId: string,
     sha: string,
-    filePath?: string,
-    maxLines?: number,
+    options: { filePath?: string; maxLines?: number; ignoreWhitespace?: boolean } = {},
   ): Promise<string> {
+    const { filePath, maxLines, ignoreWhitespace } = options;
     assertCommitSha(sha);
     const repoPath = this.requireWorkspace(workspaceId).path;
     const readDiff = async (range: string, truncate: boolean) => {
       const args = ["-C", repoPath, "diff", "--find-renames", range];
+      if (ignoreWhitespace) args.push("-w");
       if (filePath) args.push("--", filePath);
       const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000 });
       return truncate ? truncateUnifiedDiff(stdout, maxLines) : stdout;
@@ -121,15 +122,13 @@ export class GitComparisonService {
   async readWorkingTreeDiff(
     workspaceId: string,
     staged: boolean,
-    filePath?: string,
-    maxLines?: number,
-    repoPath?: string,
-    untracked = false,
-    previousPath?: string,
+    options: { filePath?: string; maxLines?: number; repoPath?: string; untracked?: boolean; previousPath?: string; ignoreWhitespace?: boolean } = {},
   ): Promise<string> {
+    const { filePath, maxLines, repoPath, untracked, previousPath, ignoreWhitespace } = options;
     const cwd = repoPath ?? this.requireWorkspace(workspaceId).path;
     // Patch output can refresh index stats even with optional locks disabled.
     const args = ["-C", cwd, "-c", "diff.autoRefreshIndex=false", "diff", "--find-renames"];
+    if (ignoreWhitespace) args.push("-w");
     if (staged) args.push("--cached");
     if (filePath) {
       args.push("--", `:(literal)${filePath}`);
@@ -176,10 +175,9 @@ export class GitComparisonService {
     workspaceId: string,
     base?: string,
     target?: string,
-    filePath?: string,
-    maxLines?: number,
-    repoPath?: string,
+    options: { filePath?: string; maxLines?: number; repoPath?: string; ignoreWhitespace?: boolean } = {},
   ): Promise<string> {
+    const { filePath, maxLines, repoPath, ignoreWhitespace } = options;
     const cwd = repoPath ?? this.requireWorkspace(workspaceId).path;
     const resolvedBase = base ?? await this.detectDefaultBranch(cwd);
     if (!resolvedBase) return "";
@@ -187,6 +185,7 @@ export class GitComparisonService {
     assertSafeRef(resolvedBase);
     assertSafeRef(resolvedTarget);
     const args = ["-C", cwd, "diff", "--find-renames", `${resolvedBase}...${resolvedTarget}`];
+    if (ignoreWhitespace) args.push("-w");
     if (filePath) args.push("--", filePath);
     try {
       const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000 });
@@ -200,7 +199,7 @@ export class GitComparisonService {
   async readReviewComparison(
     workspaceId: string,
     view: ReviewView,
-    opts: { base?: string; target?: string; sha?: string },
+    opts: { base?: string; target?: string; sha?: string; ignoreWhitespace?: boolean },
     repoPath?: string,
   ): Promise<ReviewComparisonResult> {
     const cwd = repoPath ?? this.requireWorkspace(workspaceId).path;
@@ -208,6 +207,7 @@ export class GitComparisonService {
       assertReviewWorktree(cwd);
       const suffix = await this.resolveReviewComparisonSuffix(cwd, view, opts);
       if (!suffix) return { status: "unavailable", reason: await this.hasCommits(cwd) ? "no-base" : "unborn" };
+      if (opts.ignoreWhitespace) suffix.push("-w");
       const comparison = view === "unstaged" || view === "uncommitted"
         ? await this.withIntentToAddIndex(cwd, (env, untracked) => this.runReviewComparison(cwd, suffix, env, untracked))
         : await this.readReviewComparisonWithCommitFallback(cwd, view, opts.sha, suffix);
@@ -360,7 +360,7 @@ export class GitComparisonService {
     const stats = parsePerFileNumstat(numstat.value.stdout);
     let files: ReviewFileChange[];
     try {
-      files = parseReviewFileChanges(names.value.stdout, parseBinaryPaths(numstat.value.stdout))
+      files = parseReviewFileChanges(names.value.stdout, parseBinaryPaths(numstat.value.stdout), range.includes("-w") ? stats : undefined)
         .map((file) => ({ ...file, ...stats.get(file.path), untracked: untracked.has(file.path) }));
     } catch (error) {
       if (!(error instanceof ReviewComparisonLimitError)) throw error;
@@ -425,7 +425,7 @@ export class GitComparisonService {
       assertSafeSha(sha);
       const parents = await this.gitExecutor.exec(["-C", cwd, "rev-list", "--parents", "-n", "1", sha], { timeout: 10_000 });
       if (!/^[a-f0-9]{40}$/.test(parents.stdout.trim())) throw error;
-      return this.runReviewComparison(cwd, [EMPTY_TREE, sha]);
+      return this.runReviewComparison(cwd, [EMPTY_TREE, sha, ...suffix.filter((arg) => arg === "-w")]);
     }
   }
 
@@ -750,13 +750,16 @@ function branchComparisonSelection(
   return { base, target, isComparisonAvailable };
 }
 
-function parseReviewFileChanges(stdout: string, binaryPaths: ReadonlySet<string>): ReviewFileChange[] {
+function parseReviewFileChanges(stdout: string, binaryPaths: ReadonlySet<string>, visibleStats?: ReadonlyMap<string, unknown>): ReviewFileChange[] {
   const fields = stdout.split("\0");
   const files: ReviewFileChange[] = [];
   for (let index = 0; index < fields.length;) {
+    const status = fields[index];
     const parsed = parseReviewFileChange(fields, index, binaryPaths);
     index = parsed.nextIndex;
     if (!parsed.file) continue;
+    // Git -w still lists whitespace-only modifications in --name-status.
+    if (visibleStats && status === "M" && !visibleStats.has(parsed.file.path)) continue;
     files.push(parsed.file);
     assertReviewComparisonFileCount(files.length);
   }

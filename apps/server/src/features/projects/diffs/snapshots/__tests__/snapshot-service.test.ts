@@ -32,9 +32,9 @@ describe("SnapshotService unified output", () => {
     fake.setResponse(args, { stdout: PATCH, stderr: "" });
 
     await expect(service.getDiff("/repo", "before", "after")).resolves.toBe(PATCH);
-    await expect(service.getDiff("/repo", "before", "after", undefined, 20)).resolves.toBe(PATCH);
-    await expect(service.getDiff("/repo", "before", "after", undefined, 9)).resolves.toBe(PATCH.slice(0, -1));
-    await expect(service.getDiff("/repo", "before", "after", undefined, 8)).resolves.toBe("");
+    await expect(service.getDiff("/repo", "before", "after", { maxLines: 20 })).resolves.toBe(PATCH);
+    await expect(service.getDiff("/repo", "before", "after", { maxLines: 9 })).resolves.toBe(PATCH.slice(0, -1));
+    await expect(service.getDiff("/repo", "before", "after", { maxLines: 8 })).resolves.toBe("");
   });
 
   it("preserves the trailing blank context of every attributed path batch", async () => {
@@ -45,7 +45,7 @@ describe("SnapshotService unified output", () => {
     fake.setResponse([...args, "--", ...pathspecs.slice(128)], { stdout: secondPatch, stderr: "" });
 
     await expect(service.getDiff(
-      "/repo", "before", "after", undefined, undefined, paths,
+      "/repo", "before", "after", { allowedPaths: paths },
     )).resolves.toBe(`${PATCH}\n${secondPatch}`);
   });
 
@@ -227,7 +227,7 @@ describe("SnapshotService attributed path batching", () => {
     const service = new SnapshotService(executor);
     const paths = Array.from({ length: 600 }, (_, index) => `src/file-${index}.ts`);
 
-    const diff = await service.getDiff("/repo", "before", "after", undefined, undefined, paths);
+    const diff = await service.getDiff("/repo", "before", "after", { allowedPaths: paths });
 
     expect(calls).toHaveLength(5);
     expect(calls.every((args) => args.filter((arg) => arg.startsWith(":(literal)")).length <= 128)).toBe(true);
@@ -252,10 +252,7 @@ describe("SnapshotService attributed path batching", () => {
       "/repo",
       "before",
       "after",
-      undefined,
-      undefined,
-      groups.flat(),
-      groups,
+      { allowedPaths: groups.flat(), allowedPathGroups: groups },
     );
 
     expect(calls).toHaveLength(2);
