@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { ReviewFileChange } from "@mcode/contracts";
 import { FileTypeIcon } from "@/components/ui/file-type-icon";
@@ -30,6 +30,8 @@ function splitFilePath(path: string): { readonly name: string; readonly folder: 
 export function ReviewFileHeader({ file, expanded, highlighted, onToggle, actions }: ReviewFileHeaderProps) {
   const { name, folder } = splitFilePath(file.path);
   const Chevron = expanded ? ChevronDown : ChevronRight;
+  const countsId = useId();
+  const countsDescription = describeLineCounts(file.deletions, file.additions);
   return (
     <div
       data-jump-highlight={highlighted ? "true" : undefined}
@@ -39,6 +41,7 @@ export function ReviewFileHeader({ file, expanded, highlighted, onToggle, action
         type="button"
         aria-expanded={expanded}
         aria-label={expanded ? `Collapse ${file.path}` : `Expand ${file.path}`}
+        aria-describedby={countsDescription ? countsId : undefined}
         onClick={onToggle}
         className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus/55"
       >
@@ -47,11 +50,12 @@ export function ReviewFileHeader({ file, expanded, highlighted, onToggle, action
         </span>
         <FileTypeIcon filePath={file.path} />
         <span aria-hidden className="flex min-w-0 flex-1 items-center gap-2 text-code-small">
-          <span className="shrink-0 font-medium text-ink">{name}</span>
-          {folder ? <span data-testid="review-file-folder" className="text-fade text-muted">{folder}</span> : null}
+          <span className="text-fade font-medium text-ink">{name}</span>
+          {folder ? <span data-testid="review-file-folder" className="text-fade flex-1 text-muted">{folder}</span> : null}
         </span>
         <FileLineCounts deletions={file.deletions} additions={file.additions} />
       </button>
+      {countsDescription ? <span id={countsId} hidden>{countsDescription}</span> : null}
       {expanded ? actions : null}
     </div>
   );
@@ -60,9 +64,16 @@ export function ReviewFileHeader({ file, expanded, highlighted, onToggle, action
 function FileLineCounts({ deletions, additions }: { readonly deletions: number | null; readonly additions: number | null }) {
   if (!deletions && !additions) return null;
   return (
-    <span data-testid="review-file-counts" className="flex shrink-0 items-center gap-1.5 font-mono text-caption tabular-nums">
+    <span aria-hidden data-testid="review-file-counts" className="flex shrink-0 items-center gap-1.5 font-mono text-caption tabular-nums">
       {deletions ? <span className="text-error">-{deletions}</span> : null}
       {additions ? <span className="text-success">+{additions}</span> : null}
     </span>
   );
+}
+
+function describeLineCounts(deletions: number | null, additions: number | null): string {
+  const parts: string[] = [];
+  if (deletions) parts.push(`${deletions} ${deletions === 1 ? "deletion" : "deletions"}`);
+  if (additions) parts.push(`${additions} ${additions === 1 ? "addition" : "additions"}`);
+  return parts.join(", ");
 }

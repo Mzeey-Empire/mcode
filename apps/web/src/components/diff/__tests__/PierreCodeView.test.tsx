@@ -158,8 +158,9 @@ describe("Review file header", () => {
   it("shows counts but no file actions while collapsed", async () => {
     renderReviewDiff(false);
 
-    await screen.findByRole("button", { name: `Expand ${MENU_FILE.path}` });
+    const toggle = await screen.findByRole("button", { name: `Expand ${MENU_FILE.path}` });
     expect(screen.getByTestId("review-file-counts").textContent).toBe("-9+4");
+    expect(toggle).toHaveAccessibleDescription("9 deletions, 4 additions");
     expect(screen.queryByRole("group", { name: "File actions" })).toBeNull();
   });
 

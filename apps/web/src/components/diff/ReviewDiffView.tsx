@@ -769,11 +769,14 @@ pre, code {
   padding-inline: 10px 12px;
 }
 /* Pierre sizes basic bands to the gutter and the label text; Paper runs them edge to edge.
-   It makes [data-code] a size container only for "line-info", so 100cqi needs this here. */
+   It makes [data-code] a size container only for "line-info", so 100cqi needs this here.
+   Split layouts that render [data-code] as display: contents have no box to measure,
+   so their bands keep Pierre's sizing rather than resolving 100cqi against the viewport. */
 [data-code] {
   container-type: inline-size;
 }
-[data-separator="line-info-basic"] [data-separator-wrapper] {
+pre:not([data-diff-type="split"][data-overflow="wrap"], [data-dehydrated][data-diff-type="split"][data-overflow="scroll"])
+  [data-separator="line-info-basic"] [data-separator-wrapper] {
   width: 100cqi;
 }
 [data-separator="line-info-basic"][data-expand-index] [data-separator-wrapper] {
