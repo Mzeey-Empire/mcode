@@ -49,7 +49,7 @@ export function ComposerQueueList({
   const idle = useThreadStore((s) => !s.runningThreadIds.has(threadId));
   if (queue.length === 0) return null;
 
-  const canSendNow = (message: QueuedMessage) => !isPaused
+  const canSendNow = (message: QueuedMessage) => !isPaused && message.approvalNote?.state !== "unsaved"
     && (route === "send" || (route === "steer" && canSteer && isSteerable(message)));
 
   const edit = async (message: QueuedMessage) => {
@@ -85,6 +85,7 @@ export function ComposerQueueList({
               <QueueRowActions
                 position={index + 1}
                 pending={pendingLabel(message)}
+                unsaved={message.approvalNote?.state === "unsaved"}
                 canSendNow={canSendNow(message)}
                 onSendNow={() => onSendNow(message)}
                 onEdit={() => void edit(message)}
@@ -136,17 +137,19 @@ function pendingLabel(message: QueuedMessage): string | undefined {
 interface QueueRowActionsProps {
   readonly position: number;
   readonly pending: string | undefined;
+  /** A note edit the server never saved: it waits, but Edit and Remove still work. */
+  readonly unsaved: boolean;
   readonly canSendNow: boolean;
   readonly onSendNow: () => void;
   readonly onEdit: () => void;
   readonly onRemove: () => void;
 }
 
-function QueueRowActions({ position, pending, canSendNow, onSendNow, onEdit, onRemove }: QueueRowActionsProps) {
+function QueueRowActions({ position, pending, unsaved, canSendNow, onSendNow, onEdit, onRemove }: QueueRowActionsProps) {
   const busy = pending !== undefined;
   return (
     <span className="flex shrink-0 items-center justify-end gap-1">
-      <span role="status" className="text-body-small text-muted">{pending}</span>
+      <span role="status" className="text-body-small text-muted">{pending ?? (unsaved ? "Not saved" : undefined)}</span>
       <span className="flex w-24 items-center justify-end">
       {canSendNow && !busy ? (
         <IconButton aria-label={`Send queued message ${position} now`} tooltip="Send now" onClick={onSendNow}>

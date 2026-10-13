@@ -35,7 +35,8 @@ export type QueuedSteer =
  */
 export interface QueuedApprovalNote {
   readonly requestId: string;
-  readonly state: "queued" | "delivery_unknown" | "settling";
+  /** `unsaved` holds an edit the server never saved; it is saved again on reconnect or the next Edit. */
+  readonly state: "queued" | "delivery_unknown" | "settling" | "unsaved";
 }
 
 /** A message waiting to be sent while the thread is busy with another turn. */
@@ -83,7 +84,7 @@ export function isHeldQueuedMessage(message: QueuedMessage): boolean {
   const state = message.steer?.state;
   const noteState = message.approvalNote?.state;
   return state === "steering" || state === "delivery_unknown" || state === "settling"
-    || noteState === "delivery_unknown" || noteState === "settling";
+    || noteState === "delivery_unknown" || noteState === "settling" || noteState === "unsaved";
 }
 
 /** True when Mcode cannot tell whether the provider took this message's steer or deny note. */
@@ -455,7 +456,9 @@ export const useQueueStore = create<QueueState>((set, get) => ({
       const current = state.queues[threadId] ?? [];
       const index = current.findIndex((item) => item.approvalNote?.requestId === requestId);
       if (index === -1) return { queues: { ...state.queues, [threadId]: [...current, message] } };
-      if (current[index].approvalNote?.state === "settling") return state;
+      // A local edit the server has not saved yet is newer than the server's text.
+      const localState = current[index].approvalNote?.state;
+      if (localState === "settling" || localState === "unsaved") return state;
       const nextList = [...current];
       nextList[index] = { ...current[index], content: message.content, displayContent: message.displayContent, approvalNote: message.approvalNote };
       return { queues: { ...state.queues, [threadId]: nextList } };

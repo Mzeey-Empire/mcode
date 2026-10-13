@@ -936,7 +936,10 @@ describe("threadStore reconnect and queued follow-ups", () => {
     });
 
     describe("after an edit", () => {
-      const edit = { requestId: REQUEST, savedText: "Only lint the web app" };
+      const original = {
+        content: "Only lint the web app", attachments: [], model: "", permissionMode: "full" as const,
+        approvalNote: { requestId: REQUEST, state: "queued" as const },
+      };
       const editedPayload = { content: "Lint only apps/web", attachments: [], model: "", permissionMode: "full" as const };
       const updateNote = () => mockTransport.updateApprovalNote as ReturnType<typeof vi.fn>;
 
@@ -945,7 +948,7 @@ describe("threadStore reconnect and queued follow-ups", () => {
         let save!: (result: { status: "updated" }) => void;
         updateNote().mockReturnValueOnce(new Promise((resolve) => { save = resolve; }));
 
-        requeueEditedNote(THREAD_ID, 0, editedPayload, edit);
+        requeueEditedNote(THREAD_ID, 0, editedPayload, REQUEST);
         scheduleDrainAfterEdit(THREAD_ID);
         await vi.advanceTimersByTimeAsync(400);
         expect(mockTransport.sendMessage).not.toHaveBeenCalled();
@@ -956,21 +959,40 @@ describe("threadStore reconnect and queued follow-ups", () => {
         expect(mockTransport.sendMessage).toHaveBeenCalledTimes(1);
       });
 
-      it("shows the text the server will send when the edit is not saved", async () => {
+      it("keeps an edit the server did not save, and never sends the old text", async () => {
+        vi.useFakeTimers();
+        updateNote().mockRejectedValueOnce(new Error("socket closed")).mockRejectedValueOnce(new Error("socket closed"));
+        listNotes().mockResolvedValueOnce([{ requestId: REQUEST, threadId: THREAD_ID, note: "Only lint the web app", state: "queued" }]);
+
+        requeueEditedNote(THREAD_ID, 0, editedPayload, REQUEST);
+        await vi.advanceTimersByTimeAsync(0);
+        await restoreApprovalNotes();
+        scheduleDrainAfterEdit(THREAD_ID);
+        await vi.advanceTimersByTimeAsync(400);
+
+        expect(mockTransport.sendMessage).not.toHaveBeenCalled();
+        expect(notes()).toEqual([["Lint only apps/web", { requestId: REQUEST, state: "unsaved" }]]);
+      });
+
+      it("saves an unsaved edit on reconnect, then sends it", async () => {
         vi.useFakeTimers();
         updateNote().mockRejectedValueOnce(new Error("socket closed"));
-
-        requeueEditedNote(THREAD_ID, 0, editedPayload, edit);
+        requeueEditedNote(THREAD_ID, 0, editedPayload, REQUEST);
         await vi.advanceTimersByTimeAsync(0);
 
-        expect(notes()).toEqual([["Only lint the web app", { requestId: REQUEST, state: "queued" }]]);
+        await restoreApprovalNotes();
+        await vi.advanceTimersByTimeAsync(400);
+
+        expect(updateNote()).toHaveBeenLastCalledWith(REQUEST, "Lint only apps/web");
+        expect(mockTransport.sendMessage).toHaveBeenCalledTimes(1);
+        expect(notes()).toEqual([]);
       });
 
       it("keeps an emptied note queued when the server cannot remove it", async () => {
         vi.useFakeTimers();
         (mockTransport.removeApprovalNote as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("socket closed"));
 
-        const removed = await discardEditedNote(THREAD_ID, 0, edit);
+        const removed = await discardEditedNote(THREAD_ID, 0, original);
 
         expect(removed).toBe(false);
         expect(notes()).toEqual([["Only lint the web app", { requestId: REQUEST, state: "queued" }]]);

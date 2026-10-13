@@ -69,7 +69,7 @@ export function queueComposerSubmission({
 
 function putQueued(threadId: string, editing: ComposerQueueEdit | null, payload: ReturnType<typeof createPersistentQueuePayload>): boolean {
   if (!editing) return useQueueStore.getState().enqueue(threadId, payload);
-  if (editing.approvalNote) return requeueEditedNote(threadId, editing.originalIndex, payload, editing.approvalNote);
+  if (editing.approvalNote) return requeueEditedNote(threadId, editing.originalIndex, payload, editing.approvalNote.requestId);
   return useQueueStore.getState().insertAt(threadId, editing.originalIndex, payload);
 }
 

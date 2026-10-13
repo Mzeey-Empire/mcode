@@ -5,17 +5,17 @@ import {
   MCODE_BROWSER_CAPTURE_FENCE_CLOSE,
   MCODE_BROWSER_CAPTURE_FENCE_OPEN,
 } from "@/features/preview/capture/browser-capture-append";
-import { useQueueStore, type QueuedMessage } from "@/stores/queueStore";
+import { useQueueStore, type QueuedApprovalNote, type QueuedMessage } from "@/stores/queueStore";
 import { scheduleDrainAfterEdit } from "@/stores/threadStore";
 import { useToastStore } from "@/stores/toastStore";
-import { discardEditedNote, requeueEditedNote, setApprovalNoteInEdit, type ApprovalNoteEdit } from "./queued-approval-note";
+import { discardEditedNote, requeueEditedNote, setApprovalNoteInEdit } from "./queued-approval-note";
 
 /** The queue slot currently restored into the Composer for editing. */
 export interface ComposerQueueEdit {
   messageId: string;
   originalIndex: number;
   /** Set when the slot holds a deny note, whose edits the server must save. */
-  approvalNote?: ApprovalNoteEdit;
+  approvalNote?: QueuedApprovalNote;
 }
 
 /** The live Composer operations needed to restore or clear a queued message. */
@@ -77,13 +77,14 @@ function preserveBrowserCapturePayload(
 function startEdit(popped: QueuedMessage, originalIndex: number): ComposerQueueEdit {
   if (!popped.approvalNote) return { messageId: popped.id, originalIndex };
   setApprovalNoteInEdit(popped.approvalNote.requestId, true);
-  return { messageId: popped.id, originalIndex, approvalNote: { requestId: popped.approvalNote.requestId, savedText: popped.content } };
+  return { messageId: popped.id, originalIndex, approvalNote: popped.approvalNote };
 }
 
 function putBackSwappedEdit(
   threadId: string,
   editing: ComposerQueueEdit,
   payload: Omit<QueuedMessage, "id" | "queuedAt"> | null,
+  original: QueuedMessage | null,
 ): void {
   const note = editing.approvalNote;
   if (!note) {
@@ -91,8 +92,8 @@ function putBackSwappedEdit(
     return;
   }
   setApprovalNoteInEdit(note.requestId, false);
-  if (payload) requeueEditedNote(threadId, editing.originalIndex, payload, note);
-  else void discardEditedNote(threadId, editing.originalIndex, note);
+  if (payload) requeueEditedNote(threadId, editing.originalIndex, payload, note.requestId);
+  else if (original) void discardEditedNote(threadId, editing.originalIndex, toQueuePayload(original));
 }
 
 function showRemovedFromQueue(slot: number): void {
@@ -179,7 +180,7 @@ export function useComposerQueueEditing({
       if (targetIndex === -1) return;
 
       form.invalidateAttachments();
-      if (editing) putBackSwappedEdit(threadId, editing, form.hasContent() ? captureEdit() : null);
+      if (editing) putBackSwappedEdit(threadId, editing, form.hasContent() ? captureEdit() : null, originalMessageRef.current);
 
       const popped = queue.popMessage(threadId, message.id);
       if (!popped) return;
@@ -214,11 +215,11 @@ export function useComposerQueueEditing({
 
     const slot = editing.originalIndex;
     const browserCaptureSpillPaths = originalMessageRef.current?.browserCaptureSpillPaths ?? [];
-    const note = editing.approvalNote;
+    const original = editing.approvalNote ? originalMessageRef.current : null;
     finishEditing();
     annotations.clear();
-    if (note) {
-      void discardEditedNote(threadId, slot, note).then((removed) => {
+    if (original) {
+      void discardEditedNote(threadId, slot, toQueuePayload(original)).then((removed) => {
         if (removed) showRemovedFromQueue(slot);
       });
     } else {
