@@ -39,6 +39,8 @@ export {
   PreviewPanel,
 } from "./surfaces/PreviewPanel";
 export type { PreviewPanelProps } from "./surfaces/PreviewPanel";
+export { BrowserTabStrip } from "./surfaces/BrowserTabStrip";
+export type { BrowserTabStripProps } from "./surfaces/BrowserTabStrip";
 
 export { usePreviewTabSet, usePreviewTabs } from "./tabs/usePreviewTabs";
 export {

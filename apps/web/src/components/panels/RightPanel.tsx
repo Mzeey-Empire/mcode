@@ -22,6 +22,7 @@ import type { PanelScope } from "@/lib/panel-tabs";
 import { DiffPanel } from "@/components/diff";
 import {
   BROWSER_AUTOMATION_WARM_TARGET_LIMIT,
+  BrowserTabStrip,
   PreviewPanel,
   browserAutomationScopeKey,
   browserAutomationTargetKey,
@@ -85,7 +86,6 @@ export function reconcileWarmPreviewScopes(
 import { SubagentsPanel } from "@/features/subagents";
 import { ProjectEnvironmentPanel } from "@/features/projects/environment";
 import { TerminalTool } from "./TerminalTool";
-import { BrowserToolHeader } from "./BrowserToolHeader";
 
 const EMPTY_SCOPE_TERMINALS: readonly TerminalInstance[] = [];
 
@@ -672,7 +672,7 @@ function RightPanelContent({
           scopes={warmPreviewScopes}
         />
         {previewActive && panelScopeId ? (
-          <BrowserToolHeader
+          <BrowserTabStrip
             workspaceId={activeWorkspaceId}
             threadId={activeThreadId}
             scopeId={panelScopeId}

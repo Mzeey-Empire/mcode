@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { PanelTabStrip, type PanelTabStripItem } from "./PanelTabStrip";
+import { PanelTabStrip, type PanelTabStripAppearance, type PanelTabStripItem } from "./PanelTabStrip";
 
 const ITEMS: readonly PanelTabStripItem[] = [
   { id: "a", label: "Terminal", icon: null },
@@ -14,15 +14,24 @@ function stubScrollBox({ clientWidth, scrollWidth }: { clientWidth: number; scro
   vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockReturnValue(scrollWidth);
 }
 
-function renderStrip() {
+function renderStrip({
+  appearance,
+  onSelect = () => {},
+  onClose = () => {},
+}: {
+  readonly appearance?: PanelTabStripAppearance;
+  readonly onSelect?: (id: string) => void;
+  readonly onClose?: (id: string) => void;
+} = {}) {
   return render(
     <PanelTabStrip
+      appearance={appearance}
       items={ITEMS}
       activeId="a"
       label="Terminals"
       addLabel="New terminal"
-      onSelect={() => {}}
-      onClose={() => {}}
+      onSelect={onSelect}
+      onClose={onClose}
       onAdd={() => {}}
     />,
   );
@@ -107,5 +116,34 @@ describe("PanelTabStrip overflow", () => {
     const scroller = screen.getByRole("group", { name: "Terminals" });
     fireEvent.wheel(scroller, { deltaY: 120, deltaX: 0 });
     expect(scroller.scrollLeft).toBe(120);
+  });
+});
+
+describe("PanelTabStrip browser appearance", () => {
+  it("fades the hidden edge without scroll chevrons and still scrolls by wheel", () => {
+    stubScrollBox({ clientWidth: 200, scrollWidth: 500 });
+    renderStrip({ appearance: "browser" });
+    const scroller = screen.getByRole("group", { name: "Terminals" });
+
+    fireEvent.wheel(scroller, { deltaY: 120, deltaX: 0 });
+
+    expect(scroller.getAttribute("data-overflow-end")).toBe("true");
+    expect(screen.queryByRole("button", { name: "Scroll tabs left" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Scroll tabs right" })).toBeNull();
+    expect(scroller.scrollLeft).toBe(120);
+  });
+
+  it("selects and closes tabs through the same controls as the default strip", () => {
+    const events: string[] = [];
+    renderStrip({
+      appearance: "browser",
+      onSelect: (id) => events.push(`select:${id}`),
+      onClose: (id) => events.push(`close:${id}`),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Terminal (2)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Terminal (3)" }));
+
+    expect(events).toEqual(["select:b", "close:c"]);
   });
 });
