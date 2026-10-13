@@ -261,6 +261,7 @@ export class CursorAcpClientBridge {
       rawToolInput: params.toolCall.rawInput,
       toolCallId: params.toolCall.toolCallId,
       kind: params.toolCall.kind,
+      content: params.toolCall.content,
       options: params.options,
     });
     const request = { requestId, threadId: entry.threadId, body };

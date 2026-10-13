@@ -1,5 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
+import { z } from "zod";
 import type {
   CursorAcpTraceEnvelope,
   CursorAcpTraceExpectedSemantics,
@@ -370,27 +371,29 @@ function parseCursorAcpExtMethodEnvelope(
   throw new TypeError(`Cursor ACP trace envelope ${index} method is invalid`);
 }
 
+const CursorPermissionToolCallSchema = z.object({
+  title: z.string().max(256), toolCallId: z.string().max(256).optional(),
+  kind: z.enum(["edit", "read", "delete", "move", "execute", "search", "fetch", "think", "other"]).optional(),
+  content: z.array(z.object({ type: z.literal("diff"), path: z.literal("fixture.txt"), oldText: z.literal("old\n").nullable(), newText: z.literal("new\n") }).strict()).max(256).optional(),
+  rawInput: z.object({ path: z.literal("fixture.txt").optional() }).strict().optional(),
+}).strict();
+const CursorPermissionOptionsSchema = z.array(z.object({
+  optionId: z.string().min(1).max(256), name: z.string().min(1).max(256),
+  kind: z.enum(["allow_once", "allow_always", "reject_once", "reject_always"]),
+}).strict()).min(1).max(10);
+
 function parseCursorAcpPermissionRequest(
   value: unknown,
 ): Extract<CursorAcpTraceEnvelope, { kind: "request-permission" }>["request"] {
   const request = requireRecord(value, "Cursor ACP permission request");
   requireExactKeys(request, ["sessionId", "options", "toolCall"], "Cursor ACP permission request");
   requireBoundedString(request.sessionId, "Cursor ACP permission sessionId", 256);
-  if (!Array.isArray(request.options) || request.options.length !== 1) {
-    throw new TypeError("Cursor ACP permission options are invalid");
-  }
-  const option = requireRecord(request.options[0], "Cursor ACP permission option");
-  requireExactKeys(option, ["optionId", "kind", "name"], "Cursor ACP permission option");
-  requireBoundedString(option.optionId, "Cursor ACP permission optionId", 256);
-  requireBoundedString(option.name, "Cursor ACP permission name", 256);
-  if (option.kind !== "allow_once") throw new TypeError("Cursor ACP permission option kind is invalid");
-  const toolCall = requireRecord(request.toolCall, "Cursor ACP permission toolCall");
-  requireExactKeys(toolCall, ["title"], "Cursor ACP permission toolCall");
-  requireBoundedString(toolCall.title, "Cursor ACP permission tool title", 256);
+  const options = CursorPermissionOptionsSchema.parse(request.options);
+  const toolCall = CursorPermissionToolCallSchema.parse(request.toolCall);
   return {
     sessionId: request.sessionId,
-    options: [{ optionId: option.optionId, kind: "allow_once", name: option.name }],
-    toolCall: { title: toolCall.title },
+    options,
+    toolCall,
   };
 }
 
@@ -474,6 +477,11 @@ function rejectForbiddenArray(value: readonly unknown[], key: string, depth: num
 
 function rejectForbiddenRecord(value: object, depth: number): void {
   for (const [childKey, childValue] of Object.entries(value)) {
+    if (childKey === "toolCall") {
+      const toolCall = CursorPermissionToolCallSchema.parse(childValue);
+      rejectForbiddenContent({ title: toolCall.title, toolCallId: toolCall.toolCallId, kind: toolCall.kind }, childKey, depth + 1);
+      continue;
+    }
     const fixedRedaction = childKey === "content" && (childValue === "REDACTED_CONTENT" || childValue === "REDACTED_CHILD_CONTENT" || childValue === "REDACTED_TOOL_OUTPUT");
     if (FORBIDDEN_KEYS.test(childKey) && !fixedRedaction) throw new TypeError(`Provider fixture contains forbidden field: ${childKey}`);
     rejectForbiddenContent(childValue, childKey, depth + 1);

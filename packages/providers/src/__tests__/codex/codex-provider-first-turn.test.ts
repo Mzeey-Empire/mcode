@@ -87,7 +87,7 @@ vi.mock("../../private/codex/codex-app-server.js", async () => {
 
 import { BrowserAutomationSessionLease, CodexProvider, stubEnvService } from "./codex-provider-test-fixture.js";
 import { AgentEventSchema, AgentEventType, ProviderRuntimeEventSchema } from "@mcode/contracts";
-import type { ProviderFileMutationStart, ProviderRuntimeEvent, ProviderTurnDiffUpdate, TurnRequest } from "@mcode/contracts";
+import type { ApprovalRequestEnvelope, ProviderFileMutationStart, ProviderRuntimeEvent, ProviderTurnDiffUpdate, TurnRequest } from "@mcode/contracts";
 import type { ProviderEventBatch, ProviderEventSinkPort, ProviderEventSubmissionReceipt } from "../../host-ports.js";
 
 const schemaValidExecutionId = "00000000-0000-4000-8000-000000000001";
@@ -148,6 +148,43 @@ function makeProvider(
  * first turn on queueMicrotask ran before that and skipped runTurn entirely.
  */
 describe("CodexProvider first turn on new session", () => {
+  it.each([false, true])("enriches a file approval from native changes arriving late: %s", async (late) => {
+    const provider = makeProvider();
+    const emitted: ApprovalRequestEnvelope[] = [];
+    provider.on("approval_request", (request) => emitted.push(request));
+    await provider.sendTurn({
+      turnId: "approval-turn", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
+      threadId, message: "edit", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "supervised",
+    });
+    await vi.waitFor(() => expect(sendTurnMock.mock.calls.length).toBe(1));
+    const server = appServers[0];
+    assert(server?.options.approvalHandler);
+    const changes = [{ path: "fixture.txt", kind: { type: "update" }, diff: "--- a/fixture.txt\n+++ b/fixture.txt\n@@ -1 +1 @@\n-old\n+new\n" }];
+    const started = { jsonrpc: "2.0", method: "item/started", params: { threadId: "sdk-thread-1", turnId: "turn-test-id", item: { type: "fileChange", id: "edit-1", changes } } };
+    if (!late) server.emit("notification", started);
+    const request: CodexApprovalRequest = { rpcId: 1, method: "item/fileChange/requestApproval", params: { threadId: "sdk-thread-1", itemId: "edit-1" } };
+    const native = server.options.approvalHandler(request);
+    const initial = emitted[0];
+    assert(initial);
+    if (late) server.emit("notification", { jsonrpc: "2.0", method: "item/fileChange/patchUpdated", params: { threadId: "sdk-thread-1", turnId: "turn-test-id", itemId: "edit-1", changes } });
+    const pending = provider.listPendingApprovals();
+    expect(pending).toEqual([emitted.at(-1)]);
+    expect(emitted.map(({ requestId }) => requestId)).toEqual(late ? [initial.requestId, initial.requestId] : [initial.requestId]);
+    expect(pending[0]?.body).toMatchObject({ subject: { kind: "file_edit", files: [{
+      path: "fixture.txt", change: "edited", additions: 1, deletions: 1,
+      patch: "--- a/fixture.txt\n+++ b/fixture.txt\n@@ -1 +1 @@\n-old\n+new\n",
+    }] } });
+    const result = provider.resolveApproval(initial.requestId, { choiceId: "deny" });
+    expect(await native).toEqual({ decision: "decline" });
+    request.responseWritten?.(true);
+    expect(await result).toEqual({ status: "resolved" });
+    server.emit("notification", started);
+    expect(provider.listPendingApprovals()).toEqual([]);
+    expect(emitted).toHaveLength(late ? 2 : 1);
+    await provider.shutdown();
+  });
+
   it.each([false, true])("orders one cancellation receipt before stop (failed deny: %s)", async (failedDeny) => {
     const batches: ProviderEventBatch[] = [];
     const provider = makeProvider(undefined, undefined, undefined, { submit: async (batch) => { batches.push(batch); return acceptedEventReceipt; } });

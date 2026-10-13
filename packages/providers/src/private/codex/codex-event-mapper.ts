@@ -1439,7 +1439,7 @@ export class CodexEventMapper {
     if (changes.length === 0) return {};
     return {
       files: changes.map((change) => change.path).filter(Boolean).join(", "),
-      changes: changes.filter((change) => typeof change.path === "string" && change.path.length > 0).slice(0, 256).map((change) => ({ path: change.path, kind: change.kind })),
+      changes: changes.filter((change) => typeof change.path === "string" && change.path.length > 0).slice(0, 256).map((change) => ({ path: change.path, kind: change.kind, ...(change.diff !== undefined ? { diff: change.diff } : {}) })),
     };
   }
 

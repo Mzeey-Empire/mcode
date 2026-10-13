@@ -1,13 +1,15 @@
-import type { PermissionOption, RequestPermissionOutcome } from "@agentclientprotocol/sdk";
+import type { PermissionOption, RequestPermissionOutcome, ToolCallContent } from "@agentclientprotocol/sdk";
 import type { ApprovalRequestBody, ApprovalResponse, ApprovalSubject } from "@mcode/contracts";
 import { z } from "zod";
+import { createTextPatch } from "@mcode/shared";
+import { approvalPatch } from "../../../approval-patch.js";
 import { acpApprovalChoices, acpNoteChoiceId } from "../../../approval-scope.js";
 
 const InputSchema = z.object({ command: z.string().optional(), cwd: z.string().optional(), path: z.string().optional(), url: z.string().optional() }).passthrough();
 
 /** Keep ACP choice identities and scope intact while building the display body. */
 export function synthesizeCursorAcpApprovalRequest(input: {
-  toolTitle: string; rawToolInput: unknown; toolCallId?: string; kind?: string | null; options: PermissionOption[];
+  toolTitle: string; rawToolInput: unknown; toolCallId?: string; kind?: string | null; content?: ToolCallContent[] | null; options: PermissionOption[];
 }): ApprovalRequestBody {
   const choices = acpApprovalChoices(input.options);
   return {
@@ -17,16 +19,26 @@ export function synthesizeCursorAcpApprovalRequest(input: {
   };
 }
 
-function cursorSubject(input: { toolTitle: string; rawToolInput: unknown; kind?: string | null }): ApprovalSubject {
+function cursorSubject(input: { toolTitle: string; rawToolInput: unknown; kind?: string | null; content?: ToolCallContent[] | null }): ApprovalSubject {
+  const files = cursorDiffFiles(input.content, input.kind);
+  if (files.length) return { kind: "file_edit", files };
   const parsed = InputSchema.safeParse(input.rawToolInput ?? {});
   if (!parsed.success) return { kind: "tool", toolName: input.toolTitle, preview: JSON.stringify(input.rawToolInput) };
   const args = parsed.data;
   if (input.kind === "execute" && args.command) return { kind: "command", command: args.command, cwd: args.cwd };
   if (input.kind === "fetch" && args.url) return { kind: "fetch", url: args.url };
-  if (["edit", "delete", "move"].includes(input.kind ?? "") && args.path) {
+  if (args.path && ["edit", "delete", "move"].some((kind) => kind === input.kind)) {
     return cursorFileSubject(args.path, input.kind);
   }
   return { kind: "tool", toolName: input.toolTitle, preview: JSON.stringify(args) };
+}
+
+function cursorDiffFiles(content: ToolCallContent[] | null | undefined, kind: string | null | undefined): Extract<ApprovalSubject, { kind: "file_edit" }>["files"] {
+  return content?.flatMap<Extract<ApprovalSubject, { kind: "file_edit" }>["files"][number]>((entry) => {
+    if (entry.type !== "diff") return [];
+    const change = entry.oldText === null ? "added" : kind === "delete" ? "removed" : "edited";
+    return [{ path: entry.path, change, ...approvalPatch(createTextPatch(entry.path.replaceAll("\\", "/"), entry.oldText ?? "", entry.newText, change)) }];
+  }) ?? [];
 }
 
 function cursorFileSubject(path: string, kind: string | null | undefined): ApprovalSubject {

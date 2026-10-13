@@ -32,6 +32,18 @@ function expectChildToolResultIdentity(
 }
 
 describe("CodexEventMapper", () => {
+  it("preserves the native file diff in tool input", () => {
+    const events = new CodexEventMapper("thread", "native").mapNotification({
+      jsonrpc: "2.0", method: "item/started", params: { threadId: "native", item: {
+        id: "edit-1", type: "fileChange", changes: [{ path: "fixture.txt", kind: "update", diff: "@@ -1 +1 @@\n-old\n+new\n" }],
+      } },
+    });
+    expect(events.map(({ event }) => event)).toContainEqual({
+      type: "toolUse", threadId: "thread", toolCallId: "edit-1", toolName: "file_change",
+      toolInput: { files: "fixture.txt", changes: [{ path: "fixture.txt", kind: "update", diff: "@@ -1 +1 @@\n-old\n+new\n" }] },
+    });
+  });
+
   let mapper: CodexEventMapper;
 
   beforeEach(() => {

@@ -91,6 +91,22 @@ describe("Copilot public factory", () => {
     await finish();
   });
 
+  it.each([false, true])("publishes write diffs and counts without rejecting oversized patches: %s", async (oversized) => {
+    await provider.sendTurn(request({ permissionMode: "supervised" }));
+    const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
+    const diff = "--- a/fixture.txt\n+++ b/fixture.txt\n@@ -1 +1,2 @@\n-old\n+new\n+" + (oversized ? "x".repeat(262_144) : "second") + "\n";
+    const native = options.onPermissionRequest({ kind: "write", fileName: "fixture.txt", diff, toolCallId: "edit-1" }, { sessionId: session.sessionId });
+    const [pending] = provider.listPendingApprovals?.("thread-1") ?? [];
+    expect(pending?.body).toMatchObject({ subject: { kind: "file_edit", files: [{
+      path: "fixture.txt", change: "edited", additions: 2, deletions: 1,
+      ...(oversized ? { patchTruncated: true } : { patch: "--- a/fixture.txt\n+++ b/fixture.txt\n@@ -1 +1,2 @@\n-old\n+new\n+second\n" }),
+    }] } });
+    if (oversized) expect(JSON.stringify(pending?.body)).not.toContain('"patch":');
+    expect(await provider.resolveApproval?.(pending!.requestId, { choiceId: "deny" })).toEqual({ status: "resolved" });
+    expect(await native).toEqual({ kind: "denied-interactively-by-user" });
+    await finish();
+  });
+
   it("publishes one session-stopped receipt before ending a pending permission", async () => {
     await provider.sendTurn(request({ permissionMode: "supervised" }));
     const options: SessionConfig = sdk.create.mock.calls[0]?.[0];

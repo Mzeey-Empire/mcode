@@ -1,4 +1,32 @@
 import type { ApprovalRequestBody, ApprovalSubject } from "@mcode/contracts";
+import { z } from "zod";
+import { approvalPatch } from "../../approval-patch.js";
+
+const FileChangesSchema = z.array(z.object({ path: z.string(), kind: z.union([z.string(), z.object({ type: z.string() })]), diff: z.string().optional() }));
+const FileChangeNoticeSchema = z.union([
+  z.object({ method: z.literal("item/started"), params: z.object({ threadId: z.string().optional(), item: z.object({ id: z.string(), type: z.literal("fileChange"), changes: FileChangesSchema }) }) })
+    .transform(({ params }) => ({ threadId: params.threadId, itemId: params.item.id, changes: params.item.changes })),
+  z.object({ method: z.literal("item/fileChange/patchUpdated"), params: z.object({ threadId: z.string().optional(), itemId: z.string(), changes: FileChangesSchema }) })
+    .transform(({ params }) => params),
+]);
+
+/** Parse only the native notices that can enrich a pending file approval. */
+export function codexApprovalFileChange(notification: unknown) {
+  const parsed = FileChangeNoticeSchema.safeParse(notification);
+  if (!parsed.success) return undefined;
+  const subject = codexFileSubject(parsed.data.changes);
+  return subject ? { key: JSON.stringify([parsed.data.threadId, parsed.data.itemId]), subject } : undefined;
+}
+
+function codexFileSubject(changes: unknown): ApprovalSubject | undefined {
+  const parsed = FileChangesSchema.safeParse(changes);
+  if (!parsed.success || parsed.data.length === 0) return undefined;
+  return { kind: "file_edit", files: parsed.data.map(({ path, kind, diff }) => {
+    const type = typeof kind === "string" ? kind : kind.type;
+    const change = type === "add" ? "added" : type === "delete" ? "removed" : "edited";
+    return { path, change, ...(diff === undefined ? { additions: 0, deletions: 0 } : approvalPatch(diff)) };
+  }) };
+}
 
 /** Native Codex methods which ask the host to authorize an operation. */
 export const CODEX_APPROVAL_METHODS = [
@@ -54,7 +82,7 @@ function codexSubject(method: string, params: CodexApprovalParams): ApprovalSubj
     return { kind: "command", command: params.command, ...(typeof params.cwd === "string" ? { cwd: params.cwd } : {}) };
   }
   if (method === "item/fileChange/requestApproval") {
-    return { kind: "tool", toolName: "FileWrite", preview: JSON.stringify({ itemId: params.itemId, grantRoot: params.grantRoot }) };
+    return codexFileSubject(params.changes) ?? { kind: "tool", toolName: "FileWrite", preview: JSON.stringify({ itemId: params.itemId, grantRoot: params.grantRoot }) };
   }
   if (method === "item/permissions/requestApproval") return { kind: "tool", toolName: "WorkspacePermissions", preview: JSON.stringify({ permissions: params.permissions }) };
   return { kind: "tool", toolName: method === "applyPatchApproval" ? "ApplyPatch" : "Shell", preview: JSON.stringify(params) };

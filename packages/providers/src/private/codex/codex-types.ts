@@ -421,7 +421,7 @@ export interface CompletedItem {
   exitCode?: number | null;
 
   // fileChange
-  changes?: Array<{ path: string; kind: string }>;
+  changes?: Array<{ path: string; kind: string | { type: string; move_path?: string | null }; diff?: string }>;
 
   // mcpToolCall / dynamicToolCall / collabAgentToolCall (`tool` is CollabAgentTool in app-server v2)
   server?: string;

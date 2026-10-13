@@ -91,6 +91,7 @@ import type {
 import {
   mapDecisionToCodexResponse,
   synthesizeCodexApprovalRequest,
+  codexApprovalFileChange,
 } from "./codex-permission-mapper.js";
 import { CodexPromptResolutionError, parseCodexSlashInvocation } from "./codex-prompt.js";
 import { createCliStatusRunner, readCliStatusVersion, resolveCliStatusBinary } from "../status/cli-status-runner.js";
@@ -307,6 +308,7 @@ function failedCodexInternalMcpStartup(params: Record<string, unknown>): CodexIn
  * attention on a permission card counts as activity.
  */
 interface CodexSessionState {
+  approvalFileChanges?: Map<string, ApprovalRequestBody["subject"]>;
   /** Session id this state belongs to; lets `close`/drain reference provider-owned maps. */
   sessionId: string;
   /** Thread id derived from the session id; reused for event emission on teardown. */
@@ -1641,6 +1643,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const nativeTurnId = nativeTurnIdFromParams(rawNotification.params);
     // Reject old main-turn events before they can reset the shared mapper for a new dispatch.
     if (mainNotification && !this.isCurrentCodexMainTurn(entry, nativeTurnId)) return;
+    this.updateApprovalFileChanges(context.sessionId, rawNotification, mainNotification);
     this.handleCodexUsageNotification(rawNotification, server, context.threadId);
     const replayThreadId = this.bindCodexTurnStarted(entry, rawNotification.method, mainNotification, nativeThreadId, nativeTurnId);
     const events = this.mapCodexNotificationEvents(context.threadId, notification, mapper, rawNotification);
@@ -2884,6 +2887,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private handleApprovalRequest(sessionId: string, threadId: string, request: CodexApprovalRequest): Promise<unknown> {
     const requestId = NodeCrypto.randomUUID();
     const body = synthesizeCodexApprovalRequest({ method: request.method, params: request.params });
+    if (request.method === "item/fileChange/requestApproval") {
+      body.subject = this.runtime.get(sessionId)?.approvalFileChanges?.get(JSON.stringify([request.params.threadId, request.params.itemId])) ?? body.subject;
+    }
     const acknowledged = new Promise<boolean>((resolve) => { request.responseWritten = resolve; });
     return new Promise<unknown>((resolve) => {
       this.pendingPermissions.set(requestId, {
@@ -2892,6 +2898,23 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       });
       this.emit("approval_request", { requestId, threadId, body } satisfies ApprovalRequestEnvelope);
     });
+  }
+
+  private updateApprovalFileChanges(sessionId: string, notification: CodexNotification, mainNotification: boolean): void {
+    const state = this.runtime.get(sessionId);
+    if (!state) return;
+    const cache = state.approvalFileChanges ??= new Map();
+    if (notification.method === "turn/completed" && mainNotification) { cache.clear(); return; }
+    const update = codexApprovalFileChange(notification);
+    if (!update) return;
+    const { key, subject } = update;
+    cache.set(key, subject);
+    for (const [requestId, pending] of this.pendingPermissions) {
+      if (pending.sessionId !== sessionId || pending.method !== "item/fileChange/requestApproval"
+        || JSON.stringify([pending.params.threadId, pending.params.itemId]) !== key) continue;
+      pending.body = { ...pending.body, subject };
+      this.emit("approval_request", { requestId, threadId: pending.threadId, body: pending.body } satisfies ApprovalRequestEnvelope);
+    }
   }
 
   /** Publish resolution only after the native response write completes. */

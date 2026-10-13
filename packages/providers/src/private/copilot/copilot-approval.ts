@@ -1,5 +1,6 @@
 import type { PermissionRequest } from "@github/copilot-sdk";
 import type { ApprovalRequestBody, ApprovalSubject } from "@mcode/contracts";
+import { approvalPatch } from "../../approval-patch.js";
 
 /** Map only the scope Copilot already supplies; scoped grants remain a later ticket. */
 export function copilotApprovalBody(native: PermissionRequest): ApprovalRequestBody {
@@ -17,7 +18,8 @@ export function copilotApprovalBody(native: PermissionRequest): ApprovalRequestB
 function copilotSubject(native: PermissionRequest): ApprovalSubject {
   if (native.kind === "shell" && typeof native.fullCommandText === "string") return { kind: "command", command: native.fullCommandText };
   if (native.kind === "write" && typeof native.fileName === "string") {
-    return { kind: "file_edit", files: [{ path: native.fileName, change: "edited", additions: 0, deletions: 0 }] };
+    return { kind: "file_edit", files: [{ path: native.fileName, change: "edited",
+      ...(typeof native.diff === "string" ? approvalPatch(native.diff) : { additions: 0, deletions: 0 }) }] };
   }
   if (native.kind === "url" && typeof native.url === "string") return { kind: "fetch", url: native.url };
   return { kind: "tool", toolName: native.kind, preview: JSON.stringify({

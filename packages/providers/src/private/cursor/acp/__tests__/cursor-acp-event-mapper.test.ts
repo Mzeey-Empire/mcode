@@ -1,8 +1,9 @@
 import * as NodeEvents from "node:events";
+import * as NodeURL from "node:url";
 import type * as NodeChildProcess from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import type { Client, ClientSideConnection, SessionNotification } from "@agentclientprotocol/sdk";
-import { AgentEventType, type AgentEvent } from "@mcode/contracts";
+import { AgentEventType, ApprovalRequestBodySchema, type AgentEvent } from "@mcode/contracts";
 import { AcpSessionRuntime } from "../../../protocols/acp/acp-session-runtime.js";
 import { CursorAcpClientBridge } from "../cursor-acp-client-bridge.js";
 import {
@@ -10,6 +11,7 @@ import {
   mapCursorAcpSessionNotification,
 } from "../cursor-acp-event-mapper.js";
 import { resolveCursorAssistantMessageContent } from "../../stream-json/cursor-stream-event-mapper.js";
+import { loadProviderFixtureManifest } from "../../../../conformance/fixture-safety.js";
 
 function fakeChild(): NodeChildProcess.ChildProcess {
   return Object.assign(new NodeEvents.EventEmitter(), {
@@ -19,6 +21,29 @@ function fakeChild(): NodeChildProcess.ChildProcess {
 }
 
 describe("mapCursorAcpSessionNotification", () => {
+  it("publishes the diff from a native ACP permission fixture", async () => {
+    const fixture = loadProviderFixtureManifest(NodeURL.fileURLToPath(new URL("../../../../conformance/fixtures/cursor-core.synthetic.json", import.meta.url)));
+    const envelope = fixture.input.cursorAcpTrace?.envelopes.find((item) => item.kind === "request-permission");
+    if (envelope?.kind !== "request-permission") throw new Error("Missing permission fixture");
+    const emitted: unknown[] = [];
+    const bridge = new CursorAcpClientBridge({
+      settings: { get: async () => ({ provider: {} }) }, publishEvent: () => {}, publishNativeTurnDiff: () => {},
+      emitApprovalRequest: (request) => emitted.push(request), emitApprovalResolved: () => {}, emitPlanCaptured: () => {},
+    });
+    const result = bridge.requestPermission({ permissionMode: "supervised", threadId: "thread", mcodeSessionId: "session",
+      connection: { signal: new AbortController().signal }, child: { exitCode: null } },
+    { ...envelope.request, options: [...envelope.request.options], toolCall: { ...envelope.request.toolCall, toolCallId: "edit-1" } }, () => {});
+    await Promise.resolve();
+    const [pending] = bridge.listPendingApprovals();
+    expect(emitted).toEqual([pending]);
+    expect(ApprovalRequestBodySchema().parse(pending?.body)).toMatchObject({ subject: { kind: "file_edit", files: [{
+      path: "fixture.txt", change: "edited", additions: 1, deletions: 1,
+      patch: "diff --git a/fixture.txt b/fixture.txt\n--- a/fixture.txt\n+++ b/fixture.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+    }] } });
+    expect(await bridge.resolveApproval(pending!.requestId, { choiceId: "CURSOR_SYNTHETIC_ALLOW" })).toEqual({ status: "resolved" });
+    expect(await result).toEqual({ outcome: { outcome: "selected", optionId: "CURSOR_SYNTHETIC_ALLOW" } });
+  });
+
   const threadId = "t1";
 
   it("maps agent text chunks to TextDelta and accumulates assistant text", () => {
