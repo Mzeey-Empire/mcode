@@ -186,12 +186,14 @@ describe("DiffPanel", () => {
     render(<DiffPanel />);
 
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("logic.ts,indent.ts"));
+    expect(screen.getByTestId("review-stat-summary")).toHaveTextContent(/^2 files\s*\+2/);
     const toggle = screen.getByTestId("review-whitespace-toggle");
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     expect(toggle).toHaveAccessibleName("Hide whitespace changes");
 
     await userEvent.setup().click(toggle);
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent(/^logic\.ts$/));
+    expect(screen.getByTestId("review-stat-summary")).toHaveTextContent(/^1 file\s*\+1/);
     expect(transport.getReviewComparison).toHaveBeenLastCalledWith(expect.objectContaining({ view: "unstaged", ignoreWhitespace: true }));
     expect(screen.getByTestId("diff-files")).toHaveAttribute("data-ignore-whitespace", "true");
     expect(screen.getByTestId("review-whitespace-toggle")).toHaveAttribute("aria-pressed", "true");
@@ -216,6 +218,23 @@ describe("DiffPanel", () => {
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     await userEvent.setup().hover(toggle);
     expect(await screen.findByText("Not available for agent patches")).toBeInTheDocument();
+  });
+
+  it.each([
+    { view: "cumulative" as const, baseline: undefined },
+    { view: "since-looked" as const, baseline: 4 },
+  ])("rereads $view without whitespace-only files", async ({ view, baseline }) => {
+    pickThreadView(view);
+    threadAttentionStore.setState({ visitBaselines: { "thread-1": 4 } });
+    transport.getCumulativeDiffStats.mockImplementation((_thread: string, _after: number | undefined, options: { ignoreWhitespace?: boolean }) =>
+      Promise.resolve(options.ignoreWhitespace ? stats("logic.ts") : stats("logic.ts", "indent.ts")));
+    render(<DiffPanel />);
+
+    await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("indent.ts,logic.ts"));
+    await userEvent.setup().click(screen.getByTestId("review-whitespace-toggle"));
+    await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent(/^logic\.ts$/));
+    expect(transport.getCumulativeDiffStats).toHaveBeenLastCalledWith("thread-1", baseline, { ignoreWhitespace: true });
+    expect(screen.getByTestId("diff-files")).toHaveAttribute("data-ignore-whitespace", "true");
   });
 
   it("offers the whitespace control on a Git-fallback turn", async () => {
