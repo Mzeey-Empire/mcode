@@ -193,6 +193,8 @@ vi.mock("@/components/chat/PermissionRequestCard", () => ({ PermissionRequestCar
 vi.mock("@/components/chat/HookActivitySection", () => ({ HookActivitySection: () => null }));
 
 import { MessageList, type SelectedTextCommentSourceNavigationRequest } from "../MessageList";
+import { useMessageRevealStore } from "../message-reveal-store";
+import { useToastStore } from "@/stores/toastStore";
 import {
   recallScrollPosition,
   recallScrollTop,
@@ -373,6 +375,38 @@ describe("MessageList thread switch", () => {
     await waitFor(() => expect(loadOlderMessagesSpy).toHaveBeenCalledWith("thread-A"));
     rerender(<MessageList {...props} />);
     await waitFor(() => expect(onSelectedTextCommentSourceOpened).toHaveBeenCalledWith(request));
+  });
+
+  it("pages older history until a revealed message is resident, then consumes the reveal", async () => {
+    messagesValue = [{ id: "m1", sequence: 2, thread_id: "thread-A", role: "assistant", content: "Current message" }];
+    hasMoreMessagesValue = true;
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(5000);
+    loadOlderMessagesSpy.mockImplementationOnce(async () => {
+      messagesValue = [
+        { id: "m2", sequence: 1, thread_id: "thread-A", role: "assistant", content: "Subagent reply" },
+        { id: "m1", sequence: 2, thread_id: "thread-A", role: "assistant", content: "Current message" },
+      ];
+      return "loaded";
+    });
+    useMessageRevealStore.setState({ request: { threadId: "thread-A", messageId: "m2" } });
+    const { rerender } = render(<MessageList />);
+
+    await waitFor(() => expect(loadOlderMessagesSpy).toHaveBeenCalledWith("thread-A"));
+    expect(useMessageRevealStore.getState().request).toEqual({ threadId: "thread-A", messageId: "m2" });
+    rerender(<MessageList />);
+    await waitFor(() => expect(useMessageRevealStore.getState().request).toBeNull());
+    expect(useToastStore.getState().toasts).toEqual([]);
+  });
+
+  it("drops a reveal and says so once history holds no such message", async () => {
+    useToastStore.setState({ toasts: [] });
+    messagesValue = [{ id: "m1", sequence: 1, thread_id: "thread-A", role: "assistant", content: "Only message" }];
+    useMessageRevealStore.setState({ request: { threadId: "thread-A", messageId: "gone" } });
+    render(<MessageList />);
+
+    await waitFor(() => expect(useMessageRevealStore.getState().request).toBeNull());
+    expect(useToastStore.getState().toasts.map((toast) => toast.title)).toEqual(["Couldn't find that reply in the chat"]);
+    expect(loadOlderMessagesSpy).not.toHaveBeenCalled();
   });
 
   it("marks a source unavailable only after its resident message fails canonical reconstruction", async () => {

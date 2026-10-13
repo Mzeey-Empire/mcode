@@ -27,7 +27,8 @@ import { isTranscriptGroupOpen, toolCallDisclosureKey, type TranscriptNarrativeI
 import { resolveUserMessagePreview } from "@/components/chat/user-message-preview";
 import { estimateMessageListItemHeight, type MessageListItem } from "./message-list-virtualization";
 import { TranscriptViewport, type TranscriptHost, type TranscriptPosition } from "./transcript-viewport";
-import { useMessageRevealStore } from "./message-reveal-store";
+import { useToastStore } from "@/stores/toastStore";
+import { useMessageRevealStore, type MessageRevealRequest } from "./message-reveal-store";
 
 const SOURCE_NAVIGATION_MAX_FRAMES = 20;
 const FILL_VIEWPORT_RATIO = 1.5;
@@ -133,6 +134,12 @@ function useSourceNavigationCallbacks(
     onOpened: (completedTarget) => complete(completedTarget, callbacks.onOpened),
     onUnavailable: (completedTarget) => complete(completedTarget, callbacks.onUnavailable),
   }), [callbacks, complete]);
+}
+
+/** Ends a reveal whose message history no longer holds, so the request cannot fire a later surprise jump. */
+function missReveal(request: MessageRevealRequest): void {
+  useMessageRevealStore.getState().consume(request);
+  useToastStore.getState().show({ kind: "failed", title: "Couldn't find that reply in the chat" });
 }
 
 function requestMissingSourceHistory({
@@ -489,10 +496,22 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
     state.request?.threadId === data.renderedThreadId ? state.request : null);
   useEffect(() => {
     if (!revealRequest || items.length === 0) return;
-    // One attempt per request, so a message outside the loaded window never causes a later surprise jump.
-    useMessageRevealStore.getState().consume(revealRequest);
-    scrollToMessage(revealRequest.messageId);
-  }, [revealRequest, items, scrollToMessage]);
+    if (items.some((item) => item.type === "message" && item.message.id === revealRequest.messageId)) {
+      useMessageRevealStore.getState().consume(revealRequest);
+      scrollToMessage(revealRequest.messageId);
+      return;
+    }
+    if (data.isLoadingMore || data.isLoadingNewer) return;
+    const loadPage = data.hasMore ? data.loadOlderMessages : data.hasNewer ? data.loadNewerMessages : null;
+    if (!loadPage) {
+      missReveal(revealRequest);
+      return;
+    }
+    void loadPage(revealRequest.threadId).then(
+      (result) => { if (result === "failed") missReveal(revealRequest); },
+      () => missReveal(revealRequest),
+    );
+  }, [revealRequest, items, scrollToMessage, data.hasMore, data.hasNewer, data.isLoadingMore, data.isLoadingNewer, data.loadOlderMessages, data.loadNewerMessages]);
   const jumpToUser = useCallback(() => {
     if (stickyMessage) scrollToMessage(stickyMessage.id);
   }, [stickyMessage, scrollToMessage]);
