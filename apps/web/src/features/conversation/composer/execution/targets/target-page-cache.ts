@@ -244,5 +244,5 @@ function useShownRowsWhileLoading<T, E>(list: TargetPageList<T, E>, listId: stri
   }, [list, listId, waiting]);
   const previous = shown.current;
   if (!waiting || previous === null || previous.listId !== listId) return list;
-  return { ...previous.list, status: LOADING, loadMore: noop, retry: noop };
+  return { ...previous.list, total: null, status: LOADING, loadMore: noop, retry: noop };
 }

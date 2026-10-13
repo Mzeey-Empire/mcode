@@ -31,6 +31,8 @@ export interface PickerRow {
   readonly icon?: ReactNode;
   /** Draws the name in the mono face, for branch names, ids and paths. */
   readonly mono?: boolean;
+  /** A short mono label in a fixed-width lane before the name, such as a commit's short sha, so names align. */
+  readonly prefix?: string;
   /** Short muted detail on the right, such as a group or a source. */
   readonly tag?: string;
   /** Keeps the row listed and dimmed but not choosable. */
@@ -90,6 +92,8 @@ export interface PickerProps<T> {
   readonly items: readonly T[];
   /** Size of the full result set. `null` while unknown, which hides the "Showing N of M" line. */
   readonly total: number | null;
+  /** Replaces the "Showing N of M" line, for lists that count something else, such as matches in a range. */
+  readonly countLabel?: string;
   /** Asks for the next page. Called once per page when the list nears its end. */
   readonly onLoadMore?: () => void;
   readonly status: PickerStatus;
@@ -97,7 +101,7 @@ export interface PickerProps<T> {
   readonly onRetry?: () => void;
   readonly selectedKey?: string;
   readonly renderItem: (item: T) => PickerRow;
-  /** Offers another tab when the query matches nothing here, e.g. "matches in Pull requests". */
+  /** Offers another tab when this one shows nothing, e.g. "matches in Pull requests". */
   readonly emptySwitch?: { readonly tabId: string; readonly label: string };
   /** Content under the list, set off by a divider, such as a toggle row. */
   readonly footer?: ReactNode;
@@ -214,7 +218,7 @@ export function Picker<T>(props: PickerProps<T>) {
       ) : hasRows ? null : (
         <PickerEmptyState {...props} listId={listId} />
       )}
-      <PickerFooter loaded={items.length} total={props.total} footer={props.footer} />
+      <PickerFooter loaded={items.length} total={props.total} countLabel={props.countLabel} footer={props.footer} />
     </div>
   );
 }
@@ -249,14 +253,18 @@ function PickerTabs({ tabs, activeTab, onTabChange }: Pick<PickerProps<unknown>,
   );
 }
 
-function PickerFooter({ loaded, total, footer }: { readonly loaded: number; readonly total: number | null; readonly footer?: ReactNode }) {
+interface PickerFooterProps {
+  readonly loaded: number;
+  readonly total: number | null;
+  readonly countLabel?: string;
+  readonly footer?: ReactNode;
+}
+
+function PickerFooter({ loaded, total, countLabel, footer }: PickerFooterProps) {
+  const count = countLabel ?? (total !== null ? `Showing ${loaded} of ${total}` : null);
   return (
     <>
-      {total !== null ? (
-        <p className="px-2 pt-1 pb-2 text-caption text-muted">
-          Showing {loaded} of {total}
-        </p>
-      ) : null}
+      {count !== null ? <p className="px-2 pt-1 pb-2 text-caption text-muted">{count}</p> : null}
       {footer ? <div className="border-t border-border p-2">{footer}</div> : null}
     </>
   );
@@ -539,6 +547,9 @@ function PickerOptionContent({ row, selected, onRunAction }: { readonly row: Pic
           {row.icon}
         </span>
       ) : null}
+      {row.prefix !== undefined ? (
+        <span className="w-[5.6rem] shrink-0 font-mono text-caption text-muted">{row.prefix}</span>
+      ) : null}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className={cn("text-fade", row.mono && "font-mono text-caption")}>{row.name}</span>
         {row.description != null ? (
@@ -608,7 +619,7 @@ function PickerEmptyState<T>({ status, query, emptySwitch, onTabChange, listId }
   return (
     <div id={listId} className="flex flex-col items-start gap-1 px-2 py-2">
       <p className="text-label text-ink">{query ? `Nothing matches “${query}”` : "Nothing to show"}</p>
-      {query && emptySwitch ? (
+      {emptySwitch ? (
         <Button variant="ghost" size="compact" onClick={() => onTabChange?.(emptySwitch.tabId)}>
           Show {emptySwitch.label}
         </Button>

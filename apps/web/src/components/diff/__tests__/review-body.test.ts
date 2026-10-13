@@ -27,7 +27,7 @@ describe("reviewBody", () => {
     [context({ view: "unstaged" }), "No unstaged changes"],
     [context({ view: "staged" }), "Nothing staged"],
     [context({ view: "commit" }), "No file changes in this commit"],
-    [context({ view: "branch", branchRange: { base: "main", target: "feat/x" } }), "No changes between feat/x and main"],
+    [context({ view: "branch", branchRange: { base: "refs/remotes/origin/main", compare: "refs/heads/feat/x" } }), "No changes between feat/x and origin/main"],
   ])("names what is empty for %o", (ctx, title) => {
     expect(reviewBody({ status: "ready", comparison: EMPTY }, ctx)).toMatchObject({ kind: "empty", title });
   });

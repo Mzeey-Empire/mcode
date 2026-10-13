@@ -41,8 +41,8 @@ vi.mock("../WorktreeFilesPane", () => ({
   ),
 }));
 
-vi.mock("../CommitPicker", () => ({ CommitPicker: () => <span>commit picker</span> }));
-vi.mock("../BranchRefPicker", () => ({ BranchRefPicker: () => <span>branch picker</span> }));
+vi.mock("../CommitOperandPicker", () => ({ CommitOperandPicker: () => <span>commit picker</span> }));
+vi.mock("../BranchOperandPickers", () => ({ BranchOperandPickers: () => <span>branch pickers</span> }));
 
 // Every view's body is a FileList; the stub exposes which comparison it was handed.
 vi.mock("../FileList", () => ({
@@ -362,6 +362,48 @@ describe("DiffPanel", () => {
 
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("fixed.ts"));
     expect(transport.getReviewComparison).toHaveBeenLastCalledWith(expect.objectContaining({ view: "commit", sha: "abc123" }));
+  });
+
+  it("diffs the picked Branch operands as base...compare, with no swap", async () => {
+    pickThreadView("branch");
+    useDiffStore.setState({
+      branchComparison: {
+        base: "refs/remotes/origin/main", compare: "refs/heads/feature", isUnborn: false, isComparisonAvailable: true,
+      },
+      branchComparisonKey: "workspace-1:thread-1",
+      branchSelectionByScope: {
+        "workspace-1:thread-1": { base: "refs/heads/mcode-3f2a", compare: "refs/remotes/origin/main" },
+      },
+    });
+    transport.getReviewComparison.mockReset().mockResolvedValue(stats("picked.ts"));
+    render(<DiffPanel />);
+
+    await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("picked.ts"));
+    expect(transport.getReviewComparison).toHaveBeenLastCalledWith(expect.objectContaining({
+      view: "branch", base: "refs/heads/mcode-3f2a", compare: "refs/remotes/origin/main",
+    }));
+    expect(screen.getByTestId("diff-files")).toHaveAttribute(
+      "data-id", expect.stringContaining("refs/heads/mcode-3f2a...refs/remotes/origin/main"),
+    );
+  });
+
+  it("does not diff another thread's Branch operands while this thread's default resolves", async () => {
+    pickThreadView("branch");
+    useDiffStore.setState({
+      branchComparison: {
+        base: "refs/remotes/origin/main", compare: "refs/heads/other", isUnborn: false, isComparisonAvailable: true,
+      },
+      branchComparisonKey: "workspace-1:thread-other",
+      branchSelectionByScope: {
+        "workspace-1:thread-other": { base: "refs/heads/main", compare: "refs/heads/other" },
+      },
+    });
+    transport.getReviewComparison.mockReset().mockResolvedValue(stats("other.ts"));
+    render(<DiffPanel />);
+
+    await act(async () => {});
+    expect(transport.getReviewComparison).not.toHaveBeenCalledWith(expect.objectContaining({ view: "branch" }));
+    expect(screen.queryByText("other.ts")).not.toBeInTheDocument();
   });
 
   it("keeps the Turn diff and Files atomic through refresh success and shows a comparison failure", async () => {

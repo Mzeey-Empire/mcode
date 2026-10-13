@@ -28,6 +28,7 @@ import { emitPtyData, emitPtyExit } from "@/features/terminal/adapters/pty-data-
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useThreadStartupStore } from "@/features/thread-startup";
 import { invalidateBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";
+import { invalidateReviewOperandLists } from "@/components/diff/review-operand-lists";
 import { acceptTurnRevert } from "@/features/conversation/turn-revert/useTurnRevert";
 
 /** Unsubscribe handles for all push listeners. */
@@ -498,6 +499,7 @@ export function startPushListeners(): void {
     pushEmitter.on("branch.changed", (data) => {
       const { workspaceId } = data as { workspaceId: string };
       invalidateBranchTargets(workspaceId);
+      invalidateReviewOperandLists(workspaceId);
     }),
   );
 
