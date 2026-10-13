@@ -250,7 +250,10 @@ update, omit that choice, never a deny choice.
   policy beyond the named scope.
 - Copilot stores exact shell command identifiers only when the native request
   permits session approval. Every identifier in a later request must be granted.
-  Shell requests with file-write redirection never match a grant.
+  Shell requests with file-write redirection never match a grant. Copilot CLI
+  1.0.25 enables its script-safety parser only in its own CLI modes, so SDK
+  sessions report `canOfferSessionApproval: false` for every shell request and
+  only URL and MCP grants appear in practice.
   URL grants cover the origin (scheme, host and port); MCP grants cover the server/tool
   pair. These grants never approve read, write or custom-tool requests and clear
   on permission-mode changes and session close.
