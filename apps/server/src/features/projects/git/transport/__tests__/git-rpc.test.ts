@@ -45,7 +45,7 @@ describe("strict thread checkout resolution", () => {
       .toEqual({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } });
     expect(executor.calls.every((call) => call.args[1] === fixture.directory)).toBe(true);
     executor.reset();
-    await expect(routeGitRpc("git.log", { workspaceId: "ws", threadId: "unknown" }, deps)).rejects.toThrow();
+    await expect(routeGitRpc("git.getRemoteUrl", { workspaceId: "ws", threadId: "unknown" }, deps)).rejects.toThrow();
     expect(executor.calls).toEqual([]);
   });
 
