@@ -271,5 +271,19 @@ describe("overview Changes, Tasks and Usage rows", () => {
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 
     expect(screen.getByTestId("thread-overview-plan")).toHaveTextContent("1/2");
+    expect(screen.getByTestId("thread-overview-plan"))
+      .toHaveAccessibleName("Open plan Tidy thread actions menu, version 2, 1 of 2 tasks done");
+  });
+
+  it("keeps the implemented plan's progress on the row after a newer draft supersedes it", () => {
+    const accepted = { ...planVersion(2), status: "accepted" as const, acceptedMessageId: "accepted-message" };
+    const newer = { ...planVersion(3), status: "draft" as const, title: "Next plan" };
+    usePlanStore.setState({ plansByThread: { [thread.id]: [accepted, newer] } });
+    useTaskStore.getState().setTasks(thread.id, [task("1", "completed"), task("2", "in_progress")], "accepted-message");
+    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+
+    const row = screen.getByTestId("thread-overview-plan");
+    expect(row).toHaveTextContent("Tidy thread actions menu");
+    expect(row).toHaveTextContent("1/2");
   });
 });
