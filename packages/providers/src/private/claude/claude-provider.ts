@@ -1311,10 +1311,12 @@ export class ClaudeProvider
     routing?: ClaudeCanonicalEventRouting,
   ): Promise<ClaudeApprovalDecision> {
     const session = this.runtime.get(`mcode-${threadId}`);
+    const body = await claudeApprovalBody(toolName, input, options, session?.cwd);
+    if (options.signal?.aborted) return "cancelled";
+    // Read the origin after the await: the stream can consume task_started while file evidence loads.
     const stream = session ? this.streamStates.get(session.query) : undefined;
     const origin = options.agentID ? stream?.subagentApprovalOrigins.get(options.agentID) : undefined;
-    const body = await claudeApprovalBody(toolName, input, { ...options, origin }, session?.cwd);
-    if (options.signal?.aborted) return "cancelled";
+    if (origin) body.origin = origin;
     return new Promise((resolve) => {
       this.pendingPermissions.set(requestId, {
         threadId,

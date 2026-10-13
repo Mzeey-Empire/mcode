@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanUseTool, query } from "@anthropic-ai/claude-agent-sdk";
-import { AgentEventType, ApprovalRequestBodySchema, type ApprovalRequestEnvelope, type ApprovalOrigin, type ProviderRuntimeEvent } from "@mcode/contracts";
+import { AgentEventType, ApprovalRequestBodySchema, type ApprovalRequestEnvelope, type ApprovalOrigin, type ApprovalSubject, type ProviderRuntimeEvent } from "@mcode/contracts";
 import { ClaudeProvider, stubEnvService, stubJobObject } from "./helpers/provider-fixture.js";
 import { queryMethodStubs } from "./helpers/mock-sdk-query.js";
 
-const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }));
+type FilePatch = Extract<ApprovalSubject, { kind: "file_edit" }>["files"][number];
+
+const { mockQuery, mockFilePatch } = vi.hoisted(() => ({ mockQuery: vi.fn(), mockFilePatch: vi.fn() }));
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: mockQuery }));
+vi.mock("../claude-approval-patch.js", () => ({ claudeFilePatch: mockFilePatch }));
 
 describe("Claude approval origin", () => {
   let provider: ClaudeProvider;
@@ -144,5 +147,33 @@ describe("Claude approval origin", () => {
     expect(await requestOrigin(canUseTool, "ab6ba61b35d02c4b7")).toEqual({
       kind: "subagent", label, parentToolCallId: "toolu_016k",
     });
+  });
+
+  it("labels a file approval whose task starts while its patch is still loading", async () => {
+    let releasePatch: (patch: FilePatch) => void = () => {};
+    mockFilePatch.mockReturnValueOnce(new Promise<FilePatch>((resolve) => { releasePatch = resolve; }));
+    let releaseTask = () => {};
+    const taskReady = new Promise<void>((resolve) => { releaseTask = resolve; });
+    let finishTask = () => {};
+    const taskConsumed = new Promise<void>((resolve) => { finishTask = resolve; });
+    async function* queuedMessages() {
+      await taskReady;
+      yield taskStarted("Print date");
+      finishTask();
+    }
+    const canUseTool = await startTurn("held", [], queuedMessages());
+    const decision = canUseTool("Edit", { file_path: "a.ts", old_string: "a", new_string: "b" }, {
+      signal: new AbortController().signal, toolUseID: "toolu_015R", requestId: "native-request", agentID: "ab6ba61b35d02c4b7",
+    });
+    await vi.waitFor(() => expect(mockFilePatch).toHaveBeenCalled());
+    releaseTask();
+    await taskConsumed;
+    releasePatch({ path: "a.ts", change: "edited", additions: 1, deletions: 1 });
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(ApprovalRequestBodySchema().parse(requests[0].body).origin).toEqual({
+      kind: "subagent", label: "Print date", parentToolCallId: "toolu_016k",
+    });
+    expect(await provider.resolveApproval(requests[0].requestId, { choiceId: "deny" })).toEqual({ status: "resolved" });
+    expect(await decision).toMatchObject({ behavior: "deny" });
   });
 });
