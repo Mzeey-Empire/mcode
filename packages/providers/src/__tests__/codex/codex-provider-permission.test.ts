@@ -203,6 +203,41 @@ describe("CodexProvider permission flow", () => {
     }
   });
 
+  it("publishes the deny receipt when the turn ends while the note is still steering", async () => {
+    const version = vi.spyOn(codexVersion, "currentCodexVersion").mockReturnValue("99.0.0");
+    const stdin = new NodeStream.PassThrough();
+    const rpc = new CodexRpcClient(stdin, new NodeStream.PassThrough());
+    const server = new CodexAppServer({ cliPath: "codex", platform: process.platform, workingDirectory: "/" });
+    server["rpc"] = rpc;
+    const sent: unknown[] = [];
+    stdin.on("data", (data: Buffer) => sent.push(JSON.parse(data.toString())));
+    seedSession(provider, sessionId, threadId, { server, mapper: { reset() {}, drainPendingAssistantBoundary: () => [] } });
+    const outcomes: ApprovalOutcome[] = [];
+    provider.on("approval_resolved", (event) => outcomes.push(event.outcome));
+    const nativeRequest: CodexApprovalRequest = { rpcId: 72, method: "item/commandExecution/requestApproval",
+      params: { threadId: "native-main", turnId: "main-turn", command: "bun run lint" } };
+    try {
+      const deny = provider["handleApprovalRequest"](sessionId, threadId, nativeRequest);
+      const [pending] = provider.listPendingApprovals(threadId);
+      if (!pending) throw new Error("Missing approval");
+      const delivery = provider.resolveApproval(pending.requestId, { choiceId: "deny", note: "Only lint the web app" });
+      await deny;
+      nativeRequest.responseWritten?.(true);
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
+      expect(provider.listPendingApprovals(threadId)).toEqual([]);
+
+      provider["drainPending"](() => true, "turn_ended");
+
+      expect(outcomes).toEqual([{ status: "denied", choiceLabel: "Deny", note: "Only lint the web app" }]);
+      await vi.advanceTimersByTimeAsync(20_001);
+      expect(await delivery).toEqual({ status: "resolved", noteDelivery: "unknown" });
+      expect(outcomes).toHaveLength(1);
+    } finally {
+      rpc.dispose();
+      version.mockRestore();
+    }
+  });
+
   it("emits approval_resolved when resolveApproval fires", async () => {
     const resolved: Array<{ requestId: string; threadId: string; outcome: ApprovalOutcome }> = [];
     provider.on("approval_resolved", (p) => resolved.push(p));
