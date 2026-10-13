@@ -175,7 +175,7 @@ describe("CodexProvider permission flow", () => {
       stdout.write(JSON.stringify({ id: message.id, ...(answer === "accepted"
         ? { result: { turnId: "child-turn" } } : { error: { code: -32601, message: errors[answer] } }) }) + "\n");
     });
-    seedSession(provider, sessionId, threadId, { server, mapper: { reset() {}, drainPendingAssistantBoundary: () => [] } });
+    seedSession(provider, sessionId, threadId, { server, mapper: new CodexEventMapper(threadId, "native-parent") });
     const outcomes: ApprovalOutcome[] = [];
     provider.on("approval_resolved", (event) => outcomes.push(event.outcome));
     const nativeRequest: CodexApprovalRequest = { rpcId: 71, method: "item/commandExecution/requestApproval",
@@ -211,7 +211,7 @@ describe("CodexProvider permission flow", () => {
     server["rpc"] = rpc;
     const sent: unknown[] = [];
     stdin.on("data", (data: Buffer) => sent.push(JSON.parse(data.toString())));
-    seedSession(provider, sessionId, threadId, { server, mapper: { reset() {}, drainPendingAssistantBoundary: () => [] } });
+    seedSession(provider, sessionId, threadId, { server, mapper: new CodexEventMapper(threadId, "native-parent") });
     const outcomes: ApprovalOutcome[] = [];
     provider.on("approval_resolved", (event) => outcomes.push(event.outcome));
     const nativeRequest: CodexApprovalRequest = { rpcId: 72, method: "item/commandExecution/requestApproval",
