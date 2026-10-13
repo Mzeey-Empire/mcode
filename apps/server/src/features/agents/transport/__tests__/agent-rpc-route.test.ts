@@ -61,6 +61,25 @@ describe("routeMessage Agent RPCs", () => {
     expect(await routeAgentRpc("approval.listNotes", {}, deps)).toEqual([]);
   });
 
+  it("sends the saved note when another window edited it after this client read it", async () => {
+    const runtime = createThreadPersistenceTestRuntime();
+    const workspace = await new WorkspaceRepo(runtime.reader, runtime.writer).create("Notes", "/notes-fixture");
+    const thread = await new ThreadRepo(runtime.reader, runtime.writer).create(workspace.id, "Notes", "direct", "main");
+    const notes = new ApprovalNoteRepo(runtime.reader, runtime.writer);
+    await notes.insertPending({ requestId: "deny", threadId: thread.id, note: "Original note", delivery: "next_turn" });
+    const approvals = new ApprovalService({ resolveAll: () => [] }, notes);
+    await approvals.start({ publishApprovalRequest() {}, publishApprovalResolved() {}, async stopSession() {} });
+    const sent: SendMessageCommand[] = [];
+    const { deps } = admissionFixture(async (command: SendMessageCommand) => {
+      sent.push(command);
+      command.onAdmissionComplete?.();
+    });
+    deps.approvalService = approvals;
+    expect(await routeAgentRpc("approval.updateNote", { requestId: "deny", note: "Edited note" }, deps)).toEqual({ status: "updated" });
+    await routeAgentRpc("agent.send", { threadId: thread.id, content: "Original note", approvalNoteRequestId: "deny" }, deps);
+    expect(sent).toMatchObject([{ content: "Edited note", displayContent: "Edited note" }]);
+  });
+
   it("records the user as the cause of an agent.stop", async () => {
     const fixture = admissionFixture(async () => {});
     const stopSession = vi.fn<AgentRouterDeps["agentService"]["stopSession"]>(async (threadId) => ({

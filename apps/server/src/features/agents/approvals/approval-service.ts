@@ -85,8 +85,11 @@ export class ApprovalService {
     return { status: await this.notes.removeNote(requestId) ? "removed" : "closed" };
   }
 
-  /** Let a competing send finish admission before checking its claim, even while its turn still runs. */
-  async admitNote(requestId: string, threadId: string, admit: () => Promise<void>): Promise<void> {
+  /**
+   * Let a competing send finish admission before checking its claim, even while its turn still runs.
+   * `admit` receives the stored note, which is the text the user last saved, not a client's copy.
+   */
+  async admitNote(requestId: string, threadId: string, admit: (note: string) => Promise<void>): Promise<void> {
     const previous = this.noteAdmissions.get(requestId);
     let release!: () => void;
     const released = new Promise<void>((resolve) => { release = resolve; });
@@ -96,7 +99,7 @@ export class ApprovalService {
       await this.ready;
       const row = this.notes.find(requestId);
       if (row?.state !== "queued" || row.threadId !== threadId) throw new ApprovalNoteAlreadyDeliveredError();
-      await admit();
+      await admit(row.note);
     } finally {
       release();
       if (this.noteAdmissions.get(requestId) === released) this.noteAdmissions.delete(requestId);

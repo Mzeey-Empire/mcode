@@ -145,15 +145,16 @@ const agentHandlers: AgentRpcHandlerMap = {
     const settleAdmission = registerMessageAdmission(params);
     const started = serverWorkTrace ? NodePerfHooks.performance.now() : 0;
     try {
-      const admit = () => sendAdmittedTurn(deps.agentService, {
+      const admit = (content: string, displayContent: string) => sendAdmittedTurn(deps.agentService, {
         ...params,
-        content: appendPreviewAnnotations(params.content, params.previewAnnotations),
-        displayContent: params.displayContent ?? params.content,
+        content: appendPreviewAnnotations(content, params.previewAnnotations),
+        displayContent,
       });
       if (params.approvalNoteRequestId !== undefined) {
-        await deps.approvalService.admitNote(params.approvalNoteRequestId, params.threadId, admit);
+        // Another window may have edited the note after this client read it, so send the saved text.
+        await deps.approvalService.admitNote(params.approvalNoteRequestId, params.threadId, (note) => admit(note, note));
       } else {
-        await admit();
+        await admit(params.content, params.displayContent ?? params.content);
       }
     } finally {
       settleAdmission?.();
