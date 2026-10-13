@@ -1,11 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { ApprovalRequestBodySchema } from "@mcode/contracts";
 
-vi.mock("@mcode/shared", () => ({
+vi.mock("@mcode/shared", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@mcode/shared")>(),
   logger: { warn: vi.fn(), info: vi.fn(), debug: vi.fn(), error: vi.fn() },
 }));
 
 import {
+  codexApprovalFileChange,
   mapDecisionToCodexResponse,
   synthesizeCodexApprovalRequest,
   CODEX_APPROVAL_METHODS,
@@ -104,6 +106,34 @@ describe("mapDecisionToCodexResponse", () => {
         mapDecisionToCodexResponse("item/somePermissionsThing/requestApproval", "deny", {}),
       ).toEqual({ permissions: {}, scope: "turn" });
     });
+  });
+});
+
+describe("codexApprovalFileChange", () => {
+  function filesFrom(changes: unknown[]) {
+    const subject = codexApprovalFileChange({ method: "item/fileChange/patchUpdated", params: { threadId: "t", itemId: "i", changes } })?.subject;
+    return subject?.kind === "file_edit" ? subject.files : [];
+  }
+
+  it("adds file headers to the header-less hunks Codex sends for an update", () => {
+    const [file] = filesFrom([{ path: String.raw`C:\repo\a.ts`, kind: { type: "update", move_path: null }, diff: "@@ -1 +1 @@\n-old\n+new\n" }]);
+    expect(file).toMatchObject({ change: "edited", additions: 1, deletions: 1, patch: "--- a/C:/repo/a.ts\n+++ b/C:/repo/a.ts\n@@ -1 +1 @@\n-old\n+new\n" });
+  });
+
+  it("drops the Moved to note and targets the new path for a move", () => {
+    const [file] = filesFrom([{ path: "a.ts", kind: { type: "update", move_path: "b.ts" }, diff: "@@ -1 +1 @@\n-old\n+new\n\n\nMoved to: b.ts" }]);
+    expect(file?.patch).toBe("--- a/a.ts\n+++ b/b.ts\n@@ -1 +1 @@\n-old\n+new\n");
+  });
+
+  it("turns the whole-file content Codex sends for an add or delete into a patch", () => {
+    const [added, removed] = filesFrom([
+      { path: "new.ts", kind: { type: "add" }, diff: "one\ntwo\n" },
+      { path: "old.ts", kind: { type: "delete" }, diff: "gone\n" },
+    ]);
+    expect(added).toMatchObject({ change: "added", additions: 2, deletions: 0 });
+    expect(added?.patch).toContain("+++ b/new.ts\n@@ -0,0 +1,2 @@\n+one\n+two");
+    expect(removed).toMatchObject({ change: "removed", additions: 0, deletions: 1 });
+    expect(removed?.patch).toContain("--- a/old.ts\n+++ /dev/null");
   });
 });
 

@@ -1,8 +1,14 @@
 import type { ApprovalRequestBody, ApprovalSubject } from "@mcode/contracts";
 import { z } from "zod";
+import { createTextPatch } from "@mcode/shared";
 import { approvalPatch } from "../../approval-patch.js";
 
-const FileChangesSchema = z.array(z.object({ path: z.string(), kind: z.union([z.string(), z.object({ type: z.string() })]), diff: z.string().optional() }));
+const FileChangesSchema = z.array(z.object({
+  path: z.string(),
+  kind: z.union([z.string(), z.object({ type: z.string(), move_path: z.string().nullish() })]),
+  diff: z.string().optional(),
+}));
+type FileChange = z.infer<typeof FileChangesSchema>[number];
 const FileChangeNoticeSchema = z.union([
   z.object({ method: z.literal("item/started"), params: z.object({ threadId: z.string().optional(), item: z.object({ id: z.string(), type: z.literal("fileChange"), changes: FileChangesSchema }) }) })
     .transform(({ params }) => ({ threadId: params.threadId, itemId: params.item.id, changes: params.item.changes })),
@@ -21,11 +27,22 @@ export function codexApprovalFileChange(notification: unknown) {
 function codexFileSubject(changes: unknown): ApprovalSubject | undefined {
   const parsed = FileChangesSchema.safeParse(changes);
   if (!parsed.success || parsed.data.length === 0) return undefined;
-  return { kind: "file_edit", files: parsed.data.map(({ path, kind, diff }) => {
-    const type = typeof kind === "string" ? kind : kind.type;
+  return { kind: "file_edit", files: parsed.data.map((file) => {
+    const type = typeof file.kind === "string" ? file.kind : file.kind.type;
     const change = type === "add" ? "added" : type === "delete" ? "removed" : "edited";
-    return { path, change, ...(diff === undefined ? { additions: 0, deletions: 0 } : approvalPatch(diff)) };
+    return { path: file.path, change, ...(file.diff === undefined ? { additions: 0, deletions: 0 } : approvalPatch(unifiedPatch(file, change))) };
   }) };
+}
+
+// Codex sends whole file content for adds and deletes, and header-less hunks (plus a "Moved to" note) for updates.
+function unifiedPatch({ path, kind, diff = "" }: FileChange, change: "added" | "removed" | "edited"): string | undefined {
+  const patchPath = path.replaceAll("\\", "/");
+  if (change === "added") return createTextPatch(patchPath, "", diff, "added");
+  if (change === "removed") return createTextPatch(patchPath, diff, "", "removed");
+  if (diff.startsWith("--- ") || diff.startsWith("diff --git ")) return diff;
+  const movePath = typeof kind === "string" ? undefined : kind.move_path?.replaceAll("\\", "/");
+  const hunks = movePath ? diff.replace(/\n\nMoved to: [^\n]*$/, "") : diff;
+  return `--- a/${patchPath}\n+++ b/${movePath ?? patchPath}\n${hunks}`;
 }
 
 /** Native Codex methods which ask the host to authorize an operation. */
