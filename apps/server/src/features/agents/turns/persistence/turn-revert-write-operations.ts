@@ -31,8 +31,15 @@ export function markTurnRevertsAgentNotified(db: Database, threadId: string, rev
     eq(turnReverts.state, "committed"), inArray(turnReverts.kind, ["turn", "file"]),
     isNull(turnReverts.undoneByRevertId), isNull(turnReverts.agentNotifiedAt),
   )).returning({ id: turnReverts.id }).all();
-  // An Undo or another admission invalidates the prepared prompt; roll back its message too.
-  if (claimed.length !== revertIds.length) throw new Error("Revert notice changed during turn admission");
+  if (claimed.length !== revertIds.length) throw new StaleRevertNoticeError();
+}
+
+/** An Undo or a concurrent admission claimed a revert after its note entered the prompt. */
+export class StaleRevertNoticeError extends Error {
+  name = "StaleRevertNoticeError";
+  constructor() {
+    super("Revert notice changed during turn admission");
+  }
 }
 
 /** Journal writes execute only on the application's writable connection. */

@@ -199,7 +199,7 @@ it("rejects an Undo racing the selected notice without saving its user message",
   const id = await f.revert(["a.ts"]);
   f.beforeCommit.run = async () => { await f.revert(["a.ts"], { kind: "undo", undoesRevertId: id }); f.beforeCommit.run = async () => {}; };
   const messageId = NodeCrypto.randomUUID();
-  await expect(f.send({ messageId })).rejects.toThrow();
+  await expect(f.send({ messageId })).rejects.toThrow("Revert notice changed during turn admission");
   expect(f.messages.findByIdInThread(f.thread.id, messageId)).toBeNull();
   expect(f.reverts.get(id)?.agentNotifiedAt).toBeNull();
   expect((await f.send({ messageId })).request.message).toBe("What changed?");
