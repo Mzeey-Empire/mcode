@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { ApprovalSubject as ApprovalSubjectModel } from "@mcode/contracts";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { ApprovalPatchPreview } from "./ApprovalPatchPreview";
 
 type SubjectOf<K extends ApprovalSubjectModel["kind"]> = Extract<ApprovalSubjectModel, { kind: K }>;
 
@@ -44,22 +45,24 @@ function splitPath(path: string): { name: string; folder: string } {
   return { name, folder: path.slice(0, Math.max(0, path.length - name.length)).replace(/[\\/]$/, "") };
 }
 
+// One file shows in the dock; the rest are counted here and listed in Open diff.
 function FileEditSubject({ subject }: { readonly subject: SubjectOf<"file_edit"> }) {
+  const [file] = subject.files;
+  if (!file) return null;
+  const { name, folder } = splitPath(file.path);
+  const otherFiles = subject.files.length - 1;
   return (
     <SubjectBlock>
-      {subject.files.map((file) => {
-        const { name, folder } = splitPath(file.path);
-        return (
-          <div key={file.path} className="flex h-5 items-center gap-2 font-mono">
-            <span className="flex min-w-0 flex-1 items-center gap-2 text-code-small text-fade">
-              <span className="text-ink">{name}</span>
-              {folder && <span className="text-muted">{folder}</span>}
-            </span>
-            <span className="shrink-0 text-xs text-success">+{file.additions}</span>
-            <span className="shrink-0 text-xs text-error">−{file.deletions}</span>
-          </div>
-        );
-      })}
+      <div className="flex h-5 items-center gap-2 font-code">
+        <span className="flex min-w-0 flex-1 items-center gap-2 text-code-small text-fade">
+          <span className="text-ink">{name}</span>
+          {folder && <span className="text-muted">{folder}</span>}
+        </span>
+        {otherFiles > 0 && <span className="shrink-0 text-xs text-muted">+{otherFiles} {otherFiles === 1 ? "file" : "files"}</span>}
+        <span className="shrink-0 text-xs text-success">+{file.additions}</span>
+        <span className="shrink-0 text-xs text-error">−{file.deletions}</span>
+      </div>
+      <ApprovalPatchPreview files={subject.files} />
     </SubjectBlock>
   );
 }
