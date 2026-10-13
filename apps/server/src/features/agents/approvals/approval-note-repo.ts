@@ -38,6 +38,7 @@ const rowSchema = intentSchema.extend({
 export type ApprovalNoteRow = z.infer<typeof rowSchema>;
 
 const insert = databaseWriteOperation("approvalNote.insert", intentSchema, z.void());
+const discard = databaseWriteOperation("approvalNote.discard", z.string(), z.void());
 const recover = databaseWriteOperation("approvalNote.recover", z.string().optional(), z.void());
 const settle = databaseWriteOperation("approvalNote.settle", z.object({
   requestId: z.string(), delivery: z.enum(["native", "steer", "next_turn", "unknown"]),
@@ -52,7 +53,16 @@ export function approvalNoteWriteHandlers(db: Database): ReadonlyMap<string, (in
   const held = (requestId: string) => and(eq(approvalNotes.requestId, requestId), inArray(approvalNotes.state, ["queued", "delivery_unknown"]));
   return new Map([
     [insert.name, databaseWriteHandler(insert, (input) => {
-      orm.insert(approvalNotes).values({ ...input, state: "pending" }).onConflictDoNothing().run();
+      // A pending row is an attempt whose adapter call failed before the provider took the answer,
+      // so the next answer replaces it. Any other state is a settled note that must stay as it is.
+      orm.insert(approvalNotes).values({ ...input, state: "pending" }).onConflictDoUpdate({
+        target: approvalNotes.requestId,
+        set: { note: input.note, delivery: input.delivery, updatedAt: new Date().toISOString() },
+        setWhere: eq(approvalNotes.state, "pending"),
+      }).run();
+    })],
+    [discard.name, databaseWriteHandler(discard, (requestId) => {
+      orm.delete(approvalNotes).where(and(eq(approvalNotes.requestId, requestId), eq(approvalNotes.state, "pending"))).run();
     })],
     [recover.name, databaseWriteHandler(recover, (requestId) => {
       // A next_turn note never reaches the provider during the answer, so it is safe to queue.
@@ -120,9 +130,14 @@ export class ApprovalNoteRepo {
       .map((row) => ({ ...row, state: heldStateSchema.parse(row.state) }));
   }
 
-  /** Persist intent before calling the provider. */
+  /** Persist intent before calling the provider, replacing an attempt that never reached it. */
   insertPending(input: z.infer<typeof intentSchema>): Promise<void> {
     return this.writer.execute(insert, input);
+  }
+
+  /** Drop an attempt that never reached the provider when the new answer carries no note. */
+  discardPending(requestId: string): Promise<void> {
+    return this.writer.execute(discard, requestId);
   }
 
   /** Recover all pending attempts at startup, or one ended attempt on retry. */

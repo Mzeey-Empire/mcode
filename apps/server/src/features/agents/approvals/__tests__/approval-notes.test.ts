@@ -19,6 +19,7 @@ class Adapter extends NodeEvents.EventEmitter {
   readonly id = "codex";
   pending: ApprovalRequestEnvelope[] = [];
   calls = 0;
+  answers: ApprovalResponse[] = [];
   delivered: string[] = [];
   result: ApprovalRespondResult;
   error = false;
@@ -33,6 +34,7 @@ class Adapter extends NodeEvents.EventEmitter {
 
   async resolveApproval(_requestId: string, answer: ApprovalResponse): Promise<ApprovalRespondResult> {
     this.calls++;
+    this.answers.push(answer);
     if (this.error) throw new Error("Provider connection lost");
     if (this.result.status === "resolved") {
       if (!("autoDeny" in answer) && answer.note && this.result.noteDelivery !== "next_turn") this.delivered.push(answer.note);
@@ -102,6 +104,28 @@ describe("durable approval notes", () => {
     expect(await test.service.respondToApproval("request", response)).toEqual({ status: "resolved", noteDelivery: "native" });
     expect(test.adapter.delivered).toEqual([note]);
     expect(test.notes.find("request")?.state).toBe("delivered");
+  });
+
+  it("lets Allow replace a note whose adapter call failed", async () => {
+    const test = await setup("native");
+    test.adapter.error = true;
+    await test.service.respondToApproval("request", response);
+    test.adapter.error = false;
+    expect(await test.service.respondToApproval("request", { choiceId: "allow" })).toEqual({ status: "resolved", noteDelivery: "native" });
+    expect(test.adapter.answers.at(-1)).toEqual({ choiceId: "allow" });
+    expect(test.adapter.delivered).toEqual([]);
+    expect(test.notes.find("request")).toBeNull();
+  });
+
+  it("delivers a different note after the first note's adapter call failed", async () => {
+    const test = await setup("native");
+    test.adapter.error = true;
+    await test.service.respondToApproval("request", response);
+    test.adapter.error = false;
+    const edited = "Only lint the server";
+    expect(await test.service.respondToApproval("request", { choiceId: "deny", note: edited })).toEqual({ status: "resolved", noteDelivery: "native" });
+    expect(test.adapter.delivered).toEqual([edited]);
+    expect(test.notes.find("request")).toMatchObject({ note: edited, state: "delivered" });
   });
 
   it.each<Delivery>(["native", "steer", "next_turn"])("recovers a failed %s attempt when the adapter answers not_pending", async (delivery) => {

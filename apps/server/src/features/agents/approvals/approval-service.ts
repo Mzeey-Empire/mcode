@@ -172,11 +172,17 @@ export class ApprovalService {
     if (replay) return replay;
     const threadResult = await this.respondToThreadControl(requestId, response);
     if (threadResult && threadResult.status !== "not_pending") return threadResult;
+    const holder = this.providerHolder(requestId);
+    if (holder) return this.respondToProvider(holder.envelope, holder.owner, response);
+    return this.endedNote(requestId);
+  }
+
+  private providerHolder(requestId: string): { envelope: ApprovalRequestEnvelope; owner: ApprovalOwner } | undefined {
     for (const owner of this.providers.resolveAll()) {
       const envelope = owner.listPendingApprovals?.().find((item) => item.requestId === requestId);
-      if (envelope) return this.respondToProvider(envelope, owner, response);
+      if (envelope) return { envelope, owner };
     }
-    return this.endedNote(requestId);
+    return undefined;
   }
 
   private async respondToThreadControl(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult | undefined> {
@@ -192,6 +198,9 @@ export class ApprovalService {
     const note = "autoDeny" in response ? undefined : response.note?.trim();
     const saved = this.responses.get(requestId);
     const row = this.notes.find(requestId);
+    // A pending row the provider still lists is an attempt whose adapter call failed before the
+    // provider took the answer. It answered nothing, so the new answer replaces it.
+    if (!saved && row?.state === "pending" && this.providerHolder(requestId)) return undefined;
     if ((saved && saved.note !== note) || (row && row.note !== note)) {
       return { status: "failed", message: "This request was already answered" };
     }
@@ -239,6 +248,8 @@ export class ApprovalService {
       if (error) return { status: "failed", message: error };
       if (response.note && request.noteDelivery !== "none") {
         await this.notes.insertPending({ requestId: request.requestId, threadId: request.threadId, note: response.note, delivery: request.noteDelivery });
+      } else if (this.notes.find(request.requestId)?.state === "pending") {
+        await this.notes.discardPending(request.requestId);
       }
     }
     return undefined;
