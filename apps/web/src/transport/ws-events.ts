@@ -28,6 +28,7 @@ import { emitPtyData, emitPtyExit } from "@/features/terminal/adapters/pty-data-
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useThreadStartupStore } from "@/features/thread-startup";
 import { invalidateBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";
+import { invalidateReviewOperandLists } from "@/components/diff/review-operand-lists";
 import { acceptTurnRevert } from "@/features/conversation/turn-revert/useTurnRevert";
 
 /** Unsubscribe handles for all push listeners. */
@@ -494,10 +495,12 @@ export function startPushListeners(): void {
   );
 
   // branch.changed: the composer derives an unpicked branch from these lists, so a refetch also moves that default.
+  // Review's operand lists outlive a closed picker, so a created or switched branch must reach them too.
   unsubs.push(
     pushEmitter.on("branch.changed", (data) => {
       const { workspaceId } = data as { workspaceId: string };
       invalidateBranchTargets(workspaceId);
+      invalidateReviewOperandLists(workspaceId);
     }),
   );
 
