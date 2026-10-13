@@ -121,8 +121,7 @@ export class CanonicalLiveEventPublisher {
 
   private admit(queue: ProviderExecutionQueue, routing: CanonicalLiveEventRouting, runtimeEvent: ProviderRuntimeEvent,
     sourceIdentities: readonly ProviderIdentity[], native: NativeLiveEventEvidence | string | undefined): boolean {
-    const terminal = !isChildRoutedRuntimeEvent(runtimeEvent.extension)
-      && ["turnComplete", "ended"].includes(runtimeEvent.event.type);
+    const terminal = isParentTerminal(runtimeEvent);
     if (queue.failure && (this.failureLifetime === "provider" || !terminal)) return false;
     if (typeof native === "string" && this.replayed(queue, routing, runtimeEvent, sourceIdentities, native)) return false;
     const terminalReserve = this.failureLifetime === "execution" && !terminal ? 2 : 0;
@@ -253,4 +252,9 @@ export class CanonicalLiveEventPublisher {
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+function isParentTerminal(runtimeEvent: ProviderRuntimeEvent): boolean {
+  if (isChildRoutedRuntimeEvent(runtimeEvent.extension)) return false;
+  return runtimeEvent.event.type === AgentEventType.TurnComplete || runtimeEvent.event.type === AgentEventType.Ended;
 }

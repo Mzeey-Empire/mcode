@@ -126,15 +126,6 @@ describe("Copilot subagent mapping", () => {
     expect(mapCopilotEvent(message, "thread", turn)).toEqual([]);
   });
 
-  it("drops phase-tagged child thinking deltas", () => {
-    const turn = turnState();
-    start(turn, "T1");
-    const delta = { ...metadata, type: "assistant.message_delta" as const, ephemeral: true as const, data: {
-      messageId: "M", deltaContent: "Private reasoning", parentToolCallId: "T1", phase: "thinking",
-    } };
-    expect(mapCopilotEvent(delta, "thread", turn)).toEqual([]);
-  });
-
   it("keeps two interleaved children separate from each other and the parent", () => {
     const turn = turnState();
     start(turn, "T1");
