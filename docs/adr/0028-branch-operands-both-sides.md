@@ -39,7 +39,7 @@ The Branch view has two pickable operands, written `compare → base`:
   a failed comparison, not a silent fallback.
 
 **Default-branch direction.** On the default branch, the default compares the
-branch against its upstream as `origin/main → main`: compare `main`, base
+branch against its upstream as `main → origin/main`: compare `main`, base
 `origin/main`. It shows unpushed commits. This replaces ADR-0007 rule 1's
 `main...origin/main` example and keeps the behaviour users already had. It
 matches ADR-0007's own context, which names the unpushed diff as the most
