@@ -22,6 +22,7 @@ import type {
   GoalCommandEffectIntent,
 } from "../commands/command-router.js";
 import { AgentRuntimeCommandPort } from "../orchestration/agent-turn-command-port.js";
+import { isRunningRuntime } from "../orchestration/agent-service-helpers.js";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 
 type AgentMessage = Extract<AgentEvent, { type: "message" }>;
@@ -317,7 +318,7 @@ export class GoalLifecycleService {
   }
 
   private isActive(threadId: string): boolean {
-    return this.runtime.runtimeSnapshots().some((snapshot) => snapshot.threadId === threadId && snapshot.phase !== "idle");
+    return this.runtime.runtimeSnapshots().some((snapshot) => snapshot.threadId === threadId && isRunningRuntime(snapshot));
   }
 
   private registerEffect(
