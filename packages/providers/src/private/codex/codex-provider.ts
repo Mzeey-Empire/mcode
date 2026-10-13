@@ -63,7 +63,7 @@ import { checkCodexVersion, currentCodexVersion, clearVersionCache } from "./cod
 import { meetsMinVersion } from "../../version-policy.js";
 import { CodexAppServer, warmCodexAppServer } from "./codex-app-server.js";
 import type { CodexApprovalRequest } from "./codex-app-server.js";
-import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
+import { approvalChoice, approvalOutcome, approvalResult } from "../../approval-scope.js";
 import { CodexEventMapper } from "./codex-event-mapper.js";
 import {
   CodexCanonicalEventPublisher,
@@ -2940,8 +2940,26 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       return { status: "failed", message: "The answer did not reach Codex" };
     }
     if (!this.pendingPermissions.delete(requestId)) return { status: "not_pending" };
-    this.publishApprovalDecision(requestId, entry, approvalOutcome(choice, response));
-    return { status: "resolved" };
+    const result = await this.approvalNoteResult(entry, response);
+    this.publishApprovalDecision(requestId, entry, approvalOutcome(choice, response, result.noteDelivery));
+    return result;
+  }
+
+  private async approvalNoteResult(entry: PendingPermissionEntry, response: ApprovalResponse): Promise<Extract<ApprovalRespondResult, { status: "resolved" }>> {
+    if ("autoDeny" in response || !response.note) return { status: "resolved" };
+    return approvalResult(response, await this.deliverApprovalNote(entry, response.note));
+  }
+
+  private async deliverApprovalNote(entry: PendingPermissionEntry, note: string): Promise<"steer" | "next_turn" | "unknown"> {
+    if (!this.descriptor.capabilities.some((capability) => capability.name === "turn-steer" && capability.support === "supported")) return "next_turn";
+    const state = this.runtime.get(entry.sessionId);
+    const nativeThreadId = entry.params.threadId;
+    const nativeTurnId = entry.params.turnId;
+    if (!state || typeof nativeThreadId !== "string" || typeof nativeTurnId !== "string") return "next_turn";
+    const result = await state.server.steerTurn(nativeTurnId, undefined, [{ type: "text", text: note }], nativeThreadId);
+    if (result.outcome === "accepted") return "steer";
+    if (result.outcome === "rejected") return "next_turn";
+    return "unknown";
   }
 
   private nativeApprovalDecision(choice: ApprovalChoice | undefined, response: ApprovalResponse): Parameters<typeof mapDecisionToCodexResponse>[1] {

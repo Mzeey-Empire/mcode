@@ -113,6 +113,7 @@ import type { AttachmentService } from "../../features/attachments/storage/attac
 import { DraftImageMissingError } from "../../features/attachments/storage/draft-image-missing-error.js";
 import { SequenceAheadError } from "../../features/thread-control/attention/sequence-ahead-error.js";
 import { TurnSteerConflictError, TurnSteerMentionError, asTurnSteerError } from "../../features/agents/steering/turn-steer.js";
+import { ApprovalNoteAdmissionErrorSchema } from "@mcode/contracts";
 import { isMemoryRpcMethod, routeMemoryRpc } from "../../runtime/memory/transport/memory-rpc.js";
 import { isGitRpcMethod, routeGitRpc } from "../../features/projects/git/transport/git-rpc.js";
 import { isSnapshotRpcMethod, routeSnapshotRpc } from "../../features/projects/diffs/transport/snapshot-rpc.js";
@@ -494,6 +495,10 @@ function domainRouteError(id: string, error: unknown, message: string): WebSocke
 }
 
 function steerRouteError(id: string, error: unknown, message: string): WebSocketResponse | null {
+  if (error instanceof Error && "code" in error) {
+    const noteError = ApprovalNoteAdmissionErrorSchema().safeParse({ code: error.code, message });
+    if (noteError.success) return { id, error: noteError.data };
+  }
   if (error instanceof TurnSteerConflictError || error instanceof TurnSteerMentionError) {
     return { id, error: { code: error.code, message } };
   }

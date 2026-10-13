@@ -1442,15 +1442,14 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
   }
 
   /**
-   * Adds user input to the active main turn with `turn/steer`. Codex refuses it when
+   * Adds user input to an exact main or child turn with `turn/steer`. Codex refuses it when
    * `expectedTurnId` is no longer the active turn, so a steer can never start a new one.
    */
-  async steerTurn(expectedTurnId: string, clientUserMessageId: string, input: TurnInputPart[]): Promise<TurnSteerOutcome> {
-    const threadId = this.threadId;
+  async steerTurn(expectedTurnId: string, clientUserMessageId: string | undefined, input: TurnInputPart[], threadId = this.threadId): Promise<TurnSteerOutcome> {
     if (!threadId) return { outcome: "rejected", reason: "turn_not_running", detail: "No Codex thread is open." };
     try {
       await this.rpc.sendRequest<TurnSteerParams, TurnSteerResult>("turn/steer", {
-        threadId, expectedTurnId, clientUserMessageId, input,
+        threadId, expectedTurnId, ...(clientUserMessageId ? { clientUserMessageId } : {}), input,
       });
       return { outcome: "accepted" };
     } catch (error) {

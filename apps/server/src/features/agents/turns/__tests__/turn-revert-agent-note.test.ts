@@ -26,6 +26,7 @@ import { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-questio
 import { GoalLifecycleService } from "../../goals/goal-lifecycle-service.js";
 import { AgentRuntimeCommandPort, AgentTurnCommandPort } from "../../orchestration/agent-turn-command-port.js";
 import { TurnRevertStore } from "../persistence/turn-revert-store.js";
+import { ApprovalNoteRepo } from "../../approvals/approval-note-repo.js";
 import { prepareTurnRevert, settleTurnRevert } from "../persistence/turn-revert-write-operations.js";
 import { TurnAdmissionDispatchCoordinator, type SendMessageCommand, type TurnParentStartOwner, type TurnRuntimeAdmissionAuthority } from "../turn-admission-dispatch-coordinator.js";
 
@@ -109,10 +110,25 @@ async function fixture(workerOwned: boolean) {
     if (payload.type !== "item.recorded" || payload.item.kind !== "message") return [];
     return [MessageSchema().parse(payload.item.payload.message)];
   });
-  return { db, thread, threads, messages, reverts, revert, send, beforeCommit, publishedMessages };
+  return { db, writer, thread, threads, messages, reverts, revert, send, beforeCommit, publishedMessages };
 }
 
 describe.each([false, true])("revert note admission, worker owned = %s", (workerOwned) => {
+  it("admits a queued approval note as literal user input once, including slash-prefixed text", async () => {
+    const f = await fixture(workerOwned);
+    const notes = new ApprovalNoteRepo(f.db, f.writer);
+    await notes.insertPending({ requestId: "deny-note", threadId: f.thread.id, note: "/clear", delivery: "next_turn" });
+    await notes.settle("deny-note", "next_turn");
+    const messageId = NodeCrypto.randomUUID();
+    const dispatched = await f.send({ content: "/clear", messageId, approvalNoteRequestId: "deny-note" });
+    expect(dispatched.request.message).toBe("/clear");
+    expect(f.messages.findById(messageId)?.content).toBe("/clear");
+    expect(notes.find("deny-note")?.state).toBe("delivered");
+    await expect(f.send({ content: "/clear", approvalNoteRequestId: "deny-note" }))
+      .rejects.toMatchObject({ code: "note_already_delivered" });
+    expect(f.publishedMessages().filter((message) => message.content === "/clear").map((message) => message.id)).toEqual([messageId]);
+  });
+
   it("sends the literal note once while keeping persisted and published user content clean", async () => {
     const f = await fixture(workerOwned);
     expect((await f.send()).request.message).toBe("What changed?");

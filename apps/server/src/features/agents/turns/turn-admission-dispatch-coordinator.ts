@@ -460,7 +460,7 @@ export class TurnAdmissionDispatchCoordinator {
     if (automatic.kind !== "continue") return automatic;
     try {
       const provider = this.providers.resolve(providerId);
-      const routed = command.providerOriginated
+      const routed = command.providerOriginated || command.approvalNoteRequestId !== undefined
         ? { kind: "ready" as const, content: command.content, commandEffect: null }
         : await this.routeCommand(command, provider);
       if (routed.kind === "handled") {
@@ -652,11 +652,11 @@ export class TurnAdmissionDispatchCoordinator {
           : null,
       };
     }
-    if (command.resendOfSteerId) {
+    if (command.resendOfSteerId || command.approvalNoteRequestId !== undefined) {
       // A resend is claimed in the transaction that starts its turn. Queued behind Setup it would
       // dispatch later without that claim, so the held steer would never close; it waits client-side instead.
       throw new WorkspaceEnvironmentServiceError("WORKSPACE_ENVIRONMENT_SETUP_UNAVAILABLE",
-        "Send again can run once Project Setup finishes.");
+        "Queued messages can run once Project Setup finishes.");
     }
     const attachments = await this.persistCommandAttachments(command);
     try {
@@ -870,6 +870,7 @@ export class TurnAdmissionDispatchCoordinator {
       approvalReviewReason: review.reason,
       providerIdentities: this.resumeIdentities(prepared),
       retryOfExecutionId: command.retryOfExecutionId,
+      approvalNoteRequestId: command.approvalNoteRequestId,
       ...(command.resendOfSteerId ? { resendOfSteerId: command.resendOfSteerId } : {}),
       userMessage,
       reopenThread: prepared.thread.user_completed_at !== null,

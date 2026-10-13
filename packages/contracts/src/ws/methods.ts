@@ -367,6 +367,8 @@ export const SendMessageSchema = lazySchema(() => z.object({
      * held steer once, or fails with `steer_resend_closed` and starts no turn.
      */
     resendOfSteerId: z.string().uuid().optional(),
+    /** Queued deny note claimed atomically with this turn's user message. */
+    approvalNoteRequestId: z.string().optional(),
 }));
 
 /** Validated command for sending a message to an existing thread. */
@@ -1219,6 +1221,23 @@ export const WS_METHODS = lazySchema(() => ({
   "approval.listPending": {
     params: z.object({ threadId: z.string().optional() }),
     result: z.array(ApprovalRequestSchema()).max(500),
+  },
+  "approval.listNotes": {
+    params: z.object({}),
+    result: z.array(z.object({ requestId: z.string(), threadId: z.string(), note: z.string(),
+      state: z.enum(["queued", "delivery_unknown"]) })).max(500),
+  },
+  "approval.updateNote": {
+    params: z.object({ requestId: z.string(), note: z.string().trim().min(1).max(4_000) }),
+    result: z.object({ status: z.enum(["updated", "closed"]) }),
+  },
+  "approval.resendNote": {
+    params: z.object({ requestId: z.string() }),
+    result: z.object({ status: z.enum(["queued", "closed"]) }),
+  },
+  "approval.removeNote": {
+    params: z.object({ requestId: z.string() }),
+    result: z.object({ status: z.enum(["removed", "closed"]) }),
   },
   "message.list": {
     params: z.object({

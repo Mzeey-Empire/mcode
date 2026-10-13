@@ -12,6 +12,12 @@ import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
 import type { ApprovalRequestEnvelope, ApprovalOutcome, ApprovalOrigin, ProviderRuntimeEvent } from "@mcode/contracts";
 import { AgentEventType } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
+import * as NodeStream from "node:stream";
+import { CodexRpcClient } from "../../private/codex/codex-rpc-client.js";
+import * as codexVersion from "../../private/codex/codex-version.js";
+import { z } from "zod";
+
+const steerWireRequestSchema = z.object({ id: z.number(), method: z.string(), params: z.unknown() });
 
 /**
  * These tests exercise the provider-level permission plumbing in isolation:
@@ -143,6 +149,55 @@ describe("CodexProvider permission flow", () => {
     expect(await resolved).toEqual({ status: "resolved" });
     expect(response).toEqual({ decision: "accept" });
     expect(provider.listPendingApprovals!(threadId)).toHaveLength(0);
+  });
+
+  it.each([
+    { answer: "accepted", expected: "steer" },
+    { answer: "ended", expected: "next_turn" },
+    { answer: "mismatch", expected: "next_turn" },
+    { answer: "unsupported", expected: "next_turn" },
+    { answer: "no-answer", expected: "unknown" },
+    { answer: "old-cli", expected: "next_turn" },
+  ])("delivers a deny note through the steer protocol: $answer", async ({ answer, expected }) => {
+    const version = vi.spyOn(codexVersion, "currentCodexVersion").mockReturnValue(answer === "old-cli" ? "0.1.0" : "99.0.0");
+    const stdin = new NodeStream.PassThrough();
+    const stdout = new NodeStream.PassThrough();
+    const rpc = new CodexRpcClient(stdin, stdout);
+    const server = new CodexAppServer({ cliPath: "codex", platform: process.platform, workingDirectory: "/" });
+    server["rpc"] = rpc;
+    const sent: unknown[] = [];
+    stdin.on("data", (data: Buffer) => {
+      const message = steerWireRequestSchema.parse(JSON.parse(data.toString()));
+      sent.push(message);
+      if (answer === "no-answer") return;
+      const errors: Record<string, string> = { ended: "turn is not running", mismatch: "expected turn id mismatch", unsupported: "method not found" };
+      stdout.write(JSON.stringify({ id: message.id, ...(answer === "accepted"
+        ? { result: { turnId: "child-turn" } } : { error: { code: -32601, message: errors[answer] } }) }) + "\n");
+    });
+    seedSession(provider, sessionId, threadId, { server, mapper: { reset() {}, drainPendingAssistantBoundary: () => [] } });
+    const outcomes: ApprovalOutcome[] = [];
+    provider.on("approval_resolved", (event) => outcomes.push(event.outcome));
+    const nativeRequest: CodexApprovalRequest = { rpcId: 71, method: "item/commandExecution/requestApproval",
+      params: { threadId: "native-child", turnId: "child-turn", command: "bun run lint" } };
+    try {
+      const deny = provider["handleApprovalRequest"](sessionId, threadId, nativeRequest);
+      const [pending] = provider.listPendingApprovals(threadId);
+      if (!pending) throw new Error("Missing approval");
+      const delivery = provider.resolveApproval(pending.requestId, { choiceId: "deny", note: "Only lint the web app" });
+      expect(await deny).toEqual({ decision: "decline" });
+      expect(sent).toEqual([]);
+      nativeRequest.responseWritten?.(true);
+      if (answer === "no-answer") await vi.advanceTimersByTimeAsync(20_001);
+      expect(await delivery).toEqual({ status: "resolved", noteDelivery: expected });
+      expect(sent).toEqual(answer === "old-cli" ? [] : [{ id: 1, method: "turn/steer", params: {
+        threadId: "native-child", expectedTurnId: "child-turn", input: [{ type: "text", text: "Only lint the web app" }],
+      } }]);
+      expect(outcomes).toEqual([{ status: "denied", choiceLabel: "Deny", note: "Only lint the web app",
+        ...(expected === "unknown" ? {} : { noteDelivery: expected }) }]);
+    } finally {
+      rpc.dispose();
+      version.mockRestore();
+    }
   });
 
   it("emits approval_resolved when resolveApproval fires", async () => {

@@ -5,6 +5,7 @@ import {
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import { inject, injectable } from "tsyringe";
+import { ApprovalNoteAlreadyDeliveredError, ApprovalNoteRepo, type ApprovalNoteRow } from "./approval-note-repo.js";
 
 type ApprovalProvider = Pick<IAgentProvider, "id" | "on" | "resolveApproval" | "listPendingApprovals">;
 type ApprovalOwner = Pick<IAgentProvider, "resolveApproval" | "listPendingApprovals"> & { id: ProviderId | null };
@@ -28,16 +29,72 @@ export class ApprovalService {
   private threadControl?: ThreadApprovalSource;
   private readonly inFlight = new Map<string, Promise<ApprovalRespondResult>>();
   private readonly automatic = new Set<string>();
+  private readonly responses = new Map<string, { note: string | undefined; result: ApprovalRespondResult }>();
+  private readonly noteAdmissions = new Map<string, Promise<void>>();
+  private ready: Promise<void> = Promise.resolve();
+  private stopped = false;
 
-  constructor(@inject("IProviderRegistry") private readonly providers: { resolveAll(): ApprovalProvider[] }) {}
+  constructor(
+    @inject("IProviderRegistry") private readonly providers: { resolveAll(): ApprovalProvider[] },
+    @inject(ApprovalNoteRepo) private readonly notes: ApprovalNoteRepo,
+  ) {}
 
   /** Connect the publication effects and subscribe once during server startup. */
-  start(publication: ApprovalPublication, threadControl?: ThreadApprovalSource): void {
+  start(publication: ApprovalPublication, threadControl?: ThreadApprovalSource): Promise<void> {
     this.publication = publication;
     this.threadControl = threadControl;
+    this.ready = this.notes.recoverPending();
     for (const provider of this.providers.resolveAll()) {
       provider.on("approval_request", (envelope) => this.publish(envelope, provider));
       provider.on("approval_resolved", (payload) => this.resolved(payload));
+    }
+    return this.ready;
+  }
+
+  /** Stop recording attempts whose provider acknowledgement may still be in flight. */
+  stop(): void {
+    this.stopped = true;
+  }
+
+  /** Restore retained notes after startup reconciliation. */
+  async listNotes() {
+    await this.ready;
+    return this.notes.listNotes();
+  }
+
+  /** Edit a note only while it is held. */
+  async updateNote(requestId: string, note: string): Promise<{ status: "updated" | "closed" }> {
+    await this.ready;
+    return { status: await this.notes.updateNote(requestId, note) ? "updated" : "closed" };
+  }
+
+  /** Explicitly queue an uncertain note; admission still claims it once. */
+  async resendNote(requestId: string): Promise<{ status: "queued" | "closed" }> {
+    await this.ready;
+    return { status: await this.notes.resendNote(requestId) ? "queued" : "closed" };
+  }
+
+  /** Remove a held note durably. */
+  async removeNote(requestId: string): Promise<{ status: "removed" | "closed" }> {
+    await this.ready;
+    return { status: await this.notes.removeNote(requestId) ? "removed" : "closed" };
+  }
+
+  /** Let a competing send finish admission before checking its claim, even while its turn still runs. */
+  async admitNote(requestId: string, threadId: string, admit: () => Promise<void>): Promise<void> {
+    const previous = this.noteAdmissions.get(requestId);
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    this.noteAdmissions.set(requestId, released);
+    try {
+      await previous;
+      await this.ready;
+      const row = this.notes.find(requestId);
+      if (row?.state !== "queued" || row.threadId !== threadId) throw new ApprovalNoteAlreadyDeliveredError();
+      await admit();
+    } finally {
+      release();
+      if (this.noteAdmissions.get(requestId) === released) this.noteAdmissions.delete(requestId);
     }
   }
 
@@ -54,8 +111,13 @@ export class ApprovalService {
 
   /** Coalesce concurrent answers and return the adapter's acknowledged result. */
   respondToApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
+    if (!("autoDeny" in response)) {
+      const parsed = ApprovalResponseSchema().safeParse(response);
+      if (!parsed.success) return Promise.resolve({ status: "failed", message: "This approval response is not supported" });
+      response = parsed.data;
+    }
     const pending = this.inFlight.get(requestId);
-    if (pending) return pending;
+    if (pending) return pending.then((result) => this.replay(requestId, response) ?? result);
     return this.track(requestId, () => this.respond(requestId, response));
   }
 
@@ -98,20 +160,69 @@ export class ApprovalService {
   }
 
   private async respond(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
-    if (!("autoDeny" in response)) {
-      const parsed = ApprovalResponseSchema().safeParse(response);
-      if (!parsed.success || parsed.data.note) return { status: "failed", message: "This approval response is not supported" };
-    }
-    const threadResult = await this.threadControl?.respondToApproval(requestId, response);
+    await this.ready;
+    if (this.stopped) throw new Error("ApprovalService has stopped");
+    const replay = this.replay(requestId, response);
+    if (replay) return replay;
+    const threadResult = await this.respondToThreadControl(requestId, response);
     if (threadResult && threadResult.status !== "not_pending") return threadResult;
     for (const owner of this.providers.resolveAll()) {
       const envelope = owner.listPendingApprovals?.().find((item) => item.requestId === requestId);
       if (envelope) return this.respondToProvider(envelope, owner, response);
     }
+    return this.endedNote(requestId);
+  }
+
+  private async respondToThreadControl(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult | undefined> {
+    const request = this.threadControl?.listPendingApprovals().find((item) => item.requestId === requestId);
+    if (request && !("autoDeny" in response)) {
+      const error = this.responseError(request, response);
+      if (error) return { status: "failed", message: error };
+    }
+    return this.threadControl?.respondToApproval(requestId, response);
+  }
+
+  private replay(requestId: string, response: ApprovalResponse): ApprovalRespondResult | undefined {
+    const note = "autoDeny" in response ? undefined : response.note?.trim();
+    const saved = this.responses.get(requestId);
+    const row = this.notes.find(requestId);
+    if ((saved && saved.note !== note) || (row && row.note !== note)) {
+      return { status: "failed", message: "This request was already answered" };
+    }
+    if (row && row.state !== "pending") return this.storedResult(row);
+    if (saved) return saved.result;
+    return undefined;
+  }
+
+  private storedResult(row: ApprovalNoteRow): ApprovalRespondResult {
+    if (row.state === "delivered" || row.state === "queued") return { status: "resolved", noteDelivery: row.delivery };
+    if (row.state === "delivery_unknown") return this.responses.get(row.requestId)?.result ?? { status: "not_pending", note: "delivery_unknown" };
     return { status: "not_pending" };
   }
 
+  private async endedNote(requestId: string): Promise<ApprovalRespondResult> {
+    const row = this.notes.find(requestId);
+    if (!row) return { status: "not_pending" };
+    if (row.state !== "pending") return this.storedResult(row);
+    await this.notes.recoverPending(requestId);
+    return { status: "not_pending", note: row.delivery === "next_turn" ? "queued" : "delivery_unknown" };
+  }
+
   private async respondToProvider(envelope: ApprovalRequestEnvelope, owner: ApprovalOwner, response: ApprovalResponse): Promise<ApprovalRespondResult> {
+    const refused = await this.prepareResponse(envelope, owner, response);
+    if (refused) return refused;
+    const result = await this.deliver(envelope.requestId, owner, response);
+    if (this.stopped) throw new Error("ApprovalService stopped before recording the answer");
+    if (result.status === "not_pending") return this.endedNote(envelope.requestId);
+    if (result.status === "resolved") {
+      const note = "autoDeny" in response ? undefined : response.note;
+      if (note) await this.notes.settle(envelope.requestId, result.noteDelivery ?? "unknown");
+      this.responses.set(envelope.requestId, { note, result });
+    }
+    return result;
+  }
+
+  private async prepareResponse(envelope: ApprovalRequestEnvelope, owner: ApprovalOwner, response: ApprovalResponse): Promise<ApprovalRespondResult | undefined> {
     if (!("autoDeny" in response)) {
       const request = this.toApprovalRequest(envelope, owner);
       if (!request) {
@@ -119,10 +230,21 @@ export class ApprovalService {
         const reason = !parsed.success && parsed.error.issues.some((issue) => issue.code === "too_big") ? "too_large" : "unreadable";
         return this.failClosed(envelope, owner, reason);
       }
-      if (!request.choices.some((choice) => choice.id === response.choiceId)) return { status: "failed", message: "The approval choice is unavailable" };
-      if (response.answers && request.subject.kind !== "question") return { status: "failed", message: "This approval does not accept question answers" };
+      const error = this.responseError(request, response);
+      if (error) return { status: "failed", message: error };
+      if (response.note && request.noteDelivery !== "none") {
+        await this.notes.insertPending({ requestId: request.requestId, threadId: request.threadId, note: response.note, delivery: request.noteDelivery });
+      }
     }
-    return this.deliver(envelope.requestId, owner, response);
+    return undefined;
+  }
+
+  private responseError(request: ApprovalRequest, response: Exclude<ApprovalResponse, { autoDeny: string }>): string | undefined {
+    const choice = request.choices.find((choice) => choice.id === response.choiceId);
+    if (!choice) return "The approval choice is unavailable";
+    if (response.answers && request.subject.kind !== "question") return "This approval does not accept question answers";
+    if (response.note && (choice.intent !== "deny" || request.noteDelivery === "none")) return "This approval does not accept a note";
+    return undefined;
   }
 
   private async deliver(requestId: string, owner: ApprovalOwner, response: ApprovalResponse): Promise<ApprovalRespondResult> {

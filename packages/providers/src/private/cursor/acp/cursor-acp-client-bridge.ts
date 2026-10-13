@@ -12,7 +12,7 @@ import type {
 import { logger } from "@mcode/shared";
 import { AgentEventType, PLAN_MAX_CONTENT_CHARS } from "@mcode/contracts";
 import type { AgentEvent, ApprovalOutcome, ApprovalRequestBody, ApprovalRequestEnvelope, ApprovalResponse, ApprovalRespondResult } from "@mcode/contracts";
-import { approvalChoice, approvalOutcome } from "../../../approval-scope.js";
+import { approvalChoice, approvalOutcome, approvalResult } from "../../../approval-scope.js";
 import type { CursorProviderPorts } from "../../../factory-types.js";
 import { buildCursorAskQuestionExtResponse } from "./cursor-acp-ask-question.js";
 import {
@@ -83,8 +83,9 @@ export class CursorAcpClientBridge {
     pending.resolve({ outcome });
     this.pendingPermissions.delete(requestId);
     await Promise.resolve();
-    this.publishApprovalDecision(pending, approvalOutcome(choice, response));
-    return { status: "resolved" };
+    const result = approvalResult(response, "next_turn");
+    this.publishApprovalDecision(pending, approvalOutcome(choice, response, result.noteDelivery));
+    return result;
   }
 
   /** Lists outstanding permission requests for one thread. */

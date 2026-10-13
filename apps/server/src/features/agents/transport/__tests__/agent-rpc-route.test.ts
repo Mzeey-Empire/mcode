@@ -6,6 +6,11 @@ import { PlanServiceError } from "../../planning/plan-service.js";
 import { TurnSteerConflictError, TurnSteerError, TurnSteerMentionError } from "../../steering/turn-steer.js";
 import type { PlanVersion } from "@mcode/contracts";
 import type { SendMessageCommand } from "../../turns/turn-admission-dispatch-coordinator.js";
+import { ApprovalService } from "../../approvals/approval-service.js";
+import { ApprovalNoteRepo } from "../../approvals/approval-note-repo.js";
+import { createThreadPersistenceTestRuntime } from "../../../thread-control/testing/thread-persistence-test-runtime.js";
+import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
+import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 
 function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMessage"]): {
   deps: AgentRouterDeps; close(): void;
@@ -13,7 +18,8 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
   const unused = (): never => { throw new Error("Unexpected dependency in admission-only route"); };
   const deps: AgentRouterDeps = {
     agentService: { sendMessage, createAndSend: unused, stopSession: unused, runtimeAccess: unused },
-    approvalService: { respondToApproval: unused, listPendingApprovals: unused },
+    approvalService: { respondToApproval: unused, listPendingApprovals: unused, listNotes: unused,
+      updateNote: unused, resendNote: unused, removeNote: unused, admitNote: unused },
     hookExecutionRepo: { listByMessage: unused },
     messageRepo: { listByThread: unused, listByThreadAfter: unused, listSessionNotices: unused, confirmUserMessage: unused },
     narrativeStore: { load: unused },
@@ -33,6 +39,28 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
 }
 
 describe("routeMessage Agent RPCs", () => {
+  it("restores, edits, resends and removes a durable note through the approval RPC handlers", async () => {
+    const runtime = createThreadPersistenceTestRuntime();
+    const workspace = await new WorkspaceRepo(runtime.reader, runtime.writer).create("Notes", "/notes-fixture");
+    const thread = await new ThreadRepo(runtime.reader, runtime.writer).create(workspace.id, "Notes", "direct", "main");
+    const notes = new ApprovalNoteRepo(runtime.reader, runtime.writer);
+    await notes.insertPending({ requestId: "deny", threadId: thread.id, note: "Original note", delivery: "native" });
+    const approvals = new ApprovalService({ resolveAll: () => [] }, notes);
+    await approvals.start({ publishApprovalRequest() {}, publishApprovalResolved() {}, async stopSession() {} });
+    const { deps } = admissionFixture(async () => { throw new Error("No turn should be sent"); });
+    deps.approvalService = approvals;
+    expect(await routeAgentRpc("approval.listNotes", {}, deps)).toEqual([
+      { requestId: "deny", threadId: thread.id, note: "Original note", state: "delivery_unknown" },
+    ]);
+    expect(await routeAgentRpc("approval.updateNote", { requestId: "deny", note: "Edited note" }, deps)).toEqual({ status: "updated" });
+    expect(await routeAgentRpc("approval.resendNote", { requestId: "deny" }, deps)).toEqual({ status: "queued" });
+    expect(await routeAgentRpc("approval.listNotes", {}, deps)).toEqual([
+      { requestId: "deny", threadId: thread.id, note: "Edited note", state: "queued" },
+    ]);
+    expect(await routeAgentRpc("approval.removeNote", { requestId: "deny" }, deps)).toEqual({ status: "removed" });
+    expect(await routeAgentRpc("approval.listNotes", {}, deps)).toEqual([]);
+  });
+
   it("records the user as the cause of an agent.stop", async () => {
     const fixture = admissionFixture(async () => {});
     const stopSession = vi.fn<AgentRouterDeps["agentService"]["stopSession"]>(async (threadId) => ({

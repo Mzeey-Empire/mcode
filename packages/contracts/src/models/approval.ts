@@ -116,6 +116,12 @@ export type ApprovalOrigin = z.infer<ReturnType<typeof ApprovalOriginSchema>>;
 export type ApprovalResponse = z.infer<ReturnType<typeof ApprovalResponseSchema>> | { autoDeny: "unreadable" | "too_large" };
 /** Native answer delivery status. */
 export type ApprovalRespondResult = z.infer<ReturnType<typeof ApprovalRespondResultSchema>>;
+/** Admission refused a note that another client sent or removed. */
+export const ApprovalNoteAdmissionErrorSchema = lazySchema(() => z.object({
+  code: z.literal("note_already_delivered"), message: z.string(),
+}));
+/** Typed failure returned by agent.send when its note claim is closed. */
+export type ApprovalNoteAdmissionError = z.infer<ReturnType<typeof ApprovalNoteAdmissionErrorSchema>>;
 /** Ordered answers. */
 export type ApprovalAnswers = z.infer<ReturnType<typeof ApprovalAnswersSchema>>;
 /** Provider question. */

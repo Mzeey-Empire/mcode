@@ -130,6 +130,22 @@ describe("ClaudeProvider scoped pre-grant (off-band handoff Read)", () => {
     expect(scopedPreGrant.hasActiveGrant(threadId)).toBe(false);
   });
 
+  it.each([undefined, "Only lint the web app"])("delivers a deny message through the SDK callback: %s", async (note) => {
+    await startTurn("note-thread");
+    const events: ApprovalRequestEnvelope[] = [];
+    const outcomes: unknown[] = [];
+    provider.on("approval_request", (event) => events.push(event));
+    provider.on("approval_resolved", (event) => outcomes.push(event.outcome));
+    const decision = captured.canUseTool!("Bash", { command: "bun run lint" }, { toolUseID: "lint" });
+    await vi.waitFor(() => expect(events).toHaveLength(1));
+    const request = events[0];
+    assert(request);
+    expect(await provider.resolveApproval(request.requestId, { choiceId: "deny", note }))
+      .toEqual(note ? { status: "resolved", noteDelivery: "native" } : { status: "resolved" });
+    expect(await decision).toEqual({ behavior: "deny", message: note ?? "The user declined this request" });
+    expect(outcomes).toEqual([{ status: "denied", choiceLabel: "Deny", ...(note ? { note, noteDelivery: "native" } : {}) }]);
+  });
+
   it("does not bypass a Read of a different path (emits a approval_request)", async () => {
     const threadId = "thread-other";
     scopedPreGrant.issue({ threadId, toolName: "Read", path: "/tmp/granted.md" });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ApprovalAnswersSchema, ApprovalRequestBodySchema, ApprovalRequestSchema } from "../approval.js";
 
-import { WS_METHODS } from "../../ws/methods.js";
+import { WS_METHODS, SendMessageSchema } from "../../ws/methods.js";
 
 const body = {
   requestedAt: "2026-10-10T10:00:00Z",
@@ -15,6 +15,16 @@ const body = {
 };
 
 describe("approval choice safety", () => {
+  it("normalizes note edits and keeps the note identity through send validation", () => {
+    expect(WS_METHODS()["approval.updateNote"].params.parse({ requestId: "deny-1", note: "  Only lint the web app  " }))
+      .toEqual({ requestId: "deny-1", note: "Only lint the web app" });
+    expect(SendMessageSchema().parse({ threadId: "owner", content: "Only lint the web app", approvalNoteRequestId: "deny-1" }))
+      .toEqual({ threadId: "owner", content: "Only lint the web app", approvalNoteRequestId: "deny-1" });
+  });
+  it.each(["", "  ", "x".repeat(4_001)])("rejects unusable notes at both RPC input boundaries: %#", (note) => {
+    expect(WS_METHODS()["approval.respond"].params.safeParse({ requestId: "deny-1", choiceId: "deny", note }).success).toBe(false);
+    expect(WS_METHODS()["approval.updateNote"].params.safeParse({ requestId: "deny-1", note }).success).toBe(false);
+  });
   it("preserves distinct reject choices and exact labels", () => {
     expect(ApprovalRequestBodySchema().parse(body)).toEqual(body);
     expect(ApprovalRequestSchema().parse({ ...body, requestId: "request", threadId: "owner", providerId: "cursor" }))

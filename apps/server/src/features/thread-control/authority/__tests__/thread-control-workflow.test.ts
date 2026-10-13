@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { threads as threadTable } from "../../../../runtime/persistence/sqlite/schema.js";
 import { ApprovalService } from "../../../agents/approvals/approval-service.js";
+import { ApprovalNoteRepo } from "../../../agents/approvals/approval-note-repo.js";
 import { describe, expect, it, vi } from "vitest";
 import { ThreadCreateBatchResultSchema } from "@mcode/contracts";
 import { MessageRepo } from "../../../agents/conversation/persistence/message-repo.js";
@@ -99,7 +100,7 @@ describe("internal thread-control MCP workflow", () => {
     };
     const providers = { resolve: vi.fn(() => ({ id: "codex" })) };
     const models = { listModels: vi.fn().mockResolvedValue([{ id: "gpt-default" }]) };
-    const approvalService = new ApprovalService({ resolveAll: () => [] });
+    const approvalService = new ApprovalService({ resolveAll: () => [] }, new ApprovalNoteRepo(persistenceRuntime.reader, persistenceRuntime.writer));
     approvalService.start({ publishApprovalRequest: vi.fn(), publishApprovalResolved: vi.fn(), stopSession: agentService.stopSession });
     const service = new ThreadControlService(
       approvalService,

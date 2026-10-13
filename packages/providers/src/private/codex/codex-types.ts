@@ -195,7 +195,7 @@ export interface TurnStartResult {
 export interface TurnSteerParams {
   threadId: string;
   expectedTurnId: string;
-  clientUserMessageId: string;
+  clientUserMessageId?: string;
   input: TurnInputPart[];
 }
 /** Result returned by the `turn/steer` RPC method. */

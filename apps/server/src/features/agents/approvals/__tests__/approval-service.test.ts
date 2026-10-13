@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApprovalRequestEnvelope, ApprovalResponse, ApprovalRespondResult, ApprovalRequestBody } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import { ApprovalService } from "../approval-service.js";
+import { ApprovalNoteRepo } from "../approval-note-repo.js";
+import { createThreadPersistenceTestRuntime } from "../../../thread-control/testing/thread-persistence-test-runtime.js";
 
 vi.mock("@mcode/shared", () => ({ logger: { warn: vi.fn(), error: vi.fn() } }));
 
@@ -23,19 +25,31 @@ class FakeProvider extends NodeEvents.EventEmitter {
   }
 }
 
-function setup() {
+function setup(threadControl?: Parameters<ApprovalService["start"]>[1]) {
   const provider = new FakeProvider();
   const publishApprovalRequest = vi.fn();
   const publishApprovalResolved = vi.fn();
   const stopSession = vi.fn(async () => { provider.pending = []; });
-  const service = new ApprovalService({ resolveAll: () => [provider] });
-  service.start({ publishApprovalRequest, publishApprovalResolved, stopSession });
+  const runtime = createThreadPersistenceTestRuntime();
+  const service = new ApprovalService({ resolveAll: () => [provider] }, new ApprovalNoteRepo(runtime.reader, runtime.writer));
+  service.start({ publishApprovalRequest, publishApprovalResolved, stopSession }, threadControl);
   return { provider, service, publishApprovalRequest, publishApprovalResolved, stopSession };
 }
 
 beforeEach(() => vi.clearAllMocks());
 
 describe("ApprovalService", () => {
+  it("keeps a thread-operation approval pending when its response carries an unsupported note", async () => {
+    let answered = false;
+    const request = { ...body, requestId: "thread-operation", threadId: "owner", providerId: "cursor" as const,
+      noteDelivery: "none" as const, noteChoiceId: undefined };
+    const test = setup({ listPendingApprovals: () => answered ? [] : [request],
+      respondToApproval: async () => { answered = true; return { status: "resolved" }; } });
+    expect(await test.service.respondToApproval(request.requestId, { choiceId: "reject_once", note: "Keep it here" }))
+      .toEqual({ status: "failed", message: "This approval does not accept a note" });
+    expect(test.service.listPendingApprovals()).toEqual([request]);
+  });
+
   it("does not report automatic denial before the native acknowledgement and never logs payload values", async () => {
     const test = setup();
     const delivery = Promise.withResolvers<ApprovalRespondResult>();

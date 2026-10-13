@@ -6,7 +6,7 @@ import { CopilotClient, approveAll } from "@github/copilot-sdk";
 import type { CopilotSession, SessionEvent, ModelInfo, PermissionRequest as NativePermissionRequest, PermissionRequestResult } from "@github/copilot-sdk";
 import { z } from "zod";
 import type { AgentEvent, IAgentProvider, ISessionEvictable, ApprovalChoice, ApprovalResponse, ApprovalRespondResult, ApprovalRequestEnvelope, ProviderIdentity, ProviderModelInfo, TurnRequest, CompletionOptions } from "@mcode/contracts";
-import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
+import { approvalChoice, approvalOutcome, approvalResult } from "../../approval-scope.js";
 import { copilotApprovalBody, copilotSessionScope } from "./copilot-approval.js";
 import { BROWSER_AUTOMATION_OPERATION_METADATA, providerRuntimeEvent } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
@@ -338,17 +338,20 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
       pending.resolve(this.nativeApprovalResult(choice, response));
       turn.pendingPermissions.delete(requestId);
       await Promise.resolve();
-      this.publish(state, approvalReceipt(pending.request, approvalOutcome(choice, response)));
+      const result = approvalResult(response, "native");
+      const outcome = approvalOutcome(choice, response, result.noteDelivery);
+      this.publish(state, approvalReceipt(pending.request, outcome));
       this.emit("approval_resolved", { requestId, threadId: pending.request.threadId,
-        outcome: approvalOutcome(choice, response) });
-      return { status: "resolved" };
+        outcome });
+      return result;
     }
     return { status: "not_pending" };
   }
 
   private nativeApprovalResult(choice: ApprovalChoice | undefined, response: ApprovalResponse): PermissionRequestResult {
     if ("autoDeny" in response) return { kind: "denied-no-approval-rule-and-could-not-request-from-user" };
-    return choice?.intent === "deny" ? { kind: "denied-interactively-by-user" } : { kind: "approved" };
+    if (choice?.intent === "deny") return { kind: "denied-interactively-by-user", ...(response.note ? { feedback: response.note } : {}) };
+    return { kind: "approved" };
   }
 
   /** List stable routing and display bodies from pending native callbacks. */

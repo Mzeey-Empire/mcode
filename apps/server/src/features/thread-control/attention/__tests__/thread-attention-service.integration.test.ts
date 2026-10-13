@@ -7,6 +7,7 @@ import { ThreadRepo } from "../../persistence/thread-repo.js";
 import { ThreadStore } from "../../persistence/thread-store.js";
 import { createThreadPersistenceTestRuntime } from "../../testing/thread-persistence-test-runtime.js";
 import { ApprovalService } from "../../../agents/approvals/approval-service.js";
+import { ApprovalNoteRepo } from "../../../agents/approvals/approval-note-repo.js";
 import { TurnSnapshotRepo } from "../../../agents/turns/persistence/turn-snapshot-repo.js";
 import { CanonicalParentTurnWrite } from "../../../agents/canonical/canonical-parent-turn-write.js";
 import { CanonicalExecutionSemanticWriter } from "../../../agents/canonical/canonical-execution-semantic-writer.js";
@@ -27,7 +28,7 @@ async function fixture() {
   const a = await threads.create(workspace.id, "A", "direct", "main", true, "codex");
   const b = await threads.create(workspace.id, "B", "direct", "main", true, "codex");
   const requests: ApprovalRequest[] = [];
-  const approvals = new ApprovalService({ resolveAll: () => [] });
+  const approvals = new ApprovalService({ resolveAll: () => [] }, new ApprovalNoteRepo(runtime.reader, runtime.writer));
   const pushes: ThreadAttention[] = [];
   const service = new ThreadAttentionService(runtime.reader, runtime.writer, [approvalWaitingSource(approvals)], (attention) => pushes.push(attention));
   approvals.start({

@@ -8,11 +8,11 @@ import { SUBAGENT_REPORTING } from "@mcode/contracts";
 import * as NodeEvents from "node:events";
 import { approvalReceipt } from "../../approvals/approval-receipt.js";
 import type { ApprovalOutcome, ApprovalChoice } from "@mcode/contracts";
-import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
+import { approvalChoice, approvalOutcome, approvalResult } from "../../approval-scope.js";
 import { SessionResumeUnavailableError } from "../../provider-turn-error.js";
 import { claudeApprovalBody } from "./claude-approval.js";
 
-type ClaudeApprovalDecision = "allow" | "allow-session" | "deny" | "cancelled" | "auto-deny";
+type ClaudeApprovalDecision = "allow" | "allow-session" | "deny" | "cancelled" | "auto-deny" | { denyNote: string };
 import * as NodeFSPromises from "node:fs/promises";
 import { z } from "zod";
 import * as NodePath from "node:path";
@@ -1361,6 +1361,7 @@ export class ClaudeProvider
     toolName: string,
     requestId: string,
   ): ClaudeToolPermissionResult {
+    if (typeof decision === "object") return { behavior: "deny", message: decision.denyNote };
     switch (decision) {
       case "allow":
         return { behavior: "allow" as const, updatedInput: input };
@@ -1371,7 +1372,7 @@ export class ClaudeProvider
           updatedPermissions: options?.suggestions?.map((update) => ({ ...update, destination: "session" })),
         };
       case "deny":
-        return { behavior: "deny" as const, message: "User denied" };
+        return { behavior: "deny" as const, message: "The user declined this request" };
       case "auto-deny":
         return { behavior: "deny", message: "Mcode could not display this permission request" };
       case "cancelled":
@@ -3258,12 +3259,14 @@ export class ClaudeProvider
     entry.resolve(this.nativeApprovalDecision(choice, response));
     this.pendingPermissions.delete(requestId);
     await Promise.resolve();
-    this.publishApprovalDecision(requestId, entry, approvalOutcome(choice, response));
-    return { status: "resolved" };
+    const result = approvalResult(response, "native");
+    this.publishApprovalDecision(requestId, entry, approvalOutcome(choice, response, result.noteDelivery));
+    return result;
   }
 
   private nativeApprovalDecision(choice: ApprovalChoice | undefined, response: ApprovalResponse): ClaudeApprovalDecision {
     if ("autoDeny" in response) return "auto-deny";
+    if (choice?.intent === "deny" && response.note) return { denyNote: response.note };
     if (choice?.intent === "allow_once") return "allow";
     return choice?.id === "allow-session" ? "allow-session" : "deny";
   }
