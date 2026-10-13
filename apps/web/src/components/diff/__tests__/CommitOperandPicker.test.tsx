@@ -84,6 +84,24 @@ describe("CommitOperandPicker", () => {
     );
   });
 
+  it("does not count the unfiltered rows as matches while the search is in flight", async () => {
+    renderPicker();
+    fireEvent.click(await screen.findByTestId("commit-picker-trigger"));
+    await screen.findByText("412 commits");
+    let answer: () => void = () => {};
+    vi.mocked(mockTransport.searchCommits).mockImplementationOnce((params) =>
+      new Promise((resolve) => { answer = () => resolve(searchPage(params)); }));
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "delete" } });
+
+    await waitFor(() => expect(vi.mocked(mockTransport.searchCommits)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ query: "delete" }),
+    ));
+    expect(screen.queryByText(/matches in 412 commits/)).not.toBeInTheDocument();
+    answer();
+    expect(await screen.findByText("4 matches in 412 commits")).toBeInTheDocument();
+  });
+
   it("stores the picked commit and closes", async () => {
     renderPicker();
     fireEvent.click(await screen.findByTestId("commit-picker-trigger"));
