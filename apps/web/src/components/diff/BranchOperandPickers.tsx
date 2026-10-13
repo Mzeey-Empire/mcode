@@ -220,7 +220,7 @@ function RefSideList({ side, value, workspaceId, threadId, onPick, onReset }: Re
       emptySwitch={otherMatches > 0 ? { tabId: otherTab, label: `${otherMatches} in ${SIDE_LABEL[otherTab]}` } : undefined}
       onSelect={(ref) => onPick(ref.fullName)}
       footer={onReset ? (
-        <Button type="button" variant="ghost" size="compact" className="w-full justify-start" onClick={onReset}>
+        <Button type="button" variant="ghost" size="compact" className="w-full justify-start px-2" onClick={onReset}>
           Reset to default
         </Button>
       ) : undefined}
