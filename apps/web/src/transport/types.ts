@@ -821,7 +821,7 @@ export interface McodeTransport {
   getBranchDiff(workspaceId: string, base?: string, target?: string, filePath?: string, maxLines?: number, threadId?: string): Promise<string>;
   /** Resolve qualified default operands in the thread's checkout. */
   getBranchComparison(workspaceId: string, threadId?: string): Promise<BranchComparison>;
-  /** Search and page the complete default ahead-of-base commit range. */
+  /** Search and page the Commit view's range: the commits since the checkout forked from its base. */
   searchCommits(params: import("@mcode/contracts").GitSearchCommitsParams): Promise<import("@mcode/contracts").GitSearchCommitsResult>;
   /** Resolve a workspace or thread checkout's origin remote into a normalized web URL and repository label. */
   getRemoteUrl(workspaceId: string, threadId?: string): Promise<GitRemoteUrl>;

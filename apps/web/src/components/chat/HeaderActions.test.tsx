@@ -1118,7 +1118,7 @@ describe("resolveThreadOverviewChangeSummary", () => {
     });
     expect(result.summary).toEqual({ files: 1, additions: 13, deletions: 3 });
     expect(transport.getReviewComparison).toHaveBeenLastCalledWith({
-      workspaceId: "ws-1", view: "branch", base: "origin/main", target: "feat/x", threadId: "thread-1",
+      workspaceId: "ws-1", view: "branch", base: "origin/main", compare: "feat/x", threadId: "thread-1",
     });
   });
 

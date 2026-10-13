@@ -38,8 +38,8 @@ import {
   type ReviewViewAvailabilityMap,
 } from "@/lib/review-views";
 import { useDiffStore, type DiffRenderMode, type DiffViewMode } from "@/stores/diffStore";
-import { BranchRefPicker } from "./BranchRefPicker";
-import { CommitPicker } from "./CommitPicker";
+import { BranchOperandPickers } from "./BranchOperandPickers";
+import { CommitOperandPicker } from "./CommitOperandPicker";
 import { DiffStat } from "./DiffStat";
 import { FileJumpPopover } from "./FileList";
 import { TurnPicker } from "./TurnPicker";
@@ -362,11 +362,20 @@ function operandPicker(
   workspaceId: string | null,
   diffScopeRevision: number,
 ) {
-  if (operand === "commit") return <CommitPicker />;
+  if (operand === "commit" && workspaceId) {
+    return (
+      <CommitOperandPicker
+        key={`${workspaceId}:${threadId ?? ""}`}
+        workspaceId={workspaceId}
+        threadId={threadId ?? undefined}
+        diffScopeRevision={diffScopeRevision}
+      />
+    );
+  }
   if (operand === "turn" && threadId) return <TurnPicker threadId={threadId} />;
   if (operand === "branch" && workspaceId) {
     return (
-      <BranchRefPicker
+      <BranchOperandPickers
         workspaceId={workspaceId}
         threadId={threadId ?? undefined}
         diffScopeRevision={diffScopeRevision}

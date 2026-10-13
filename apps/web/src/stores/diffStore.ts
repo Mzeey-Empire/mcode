@@ -57,6 +57,44 @@ export type DiffViewMode =
  */
 export type ReviewTurnSelection = "latest" | (string & {});
 
+/** A Branch comparison's two sides as qualified refs (or `HEAD`), diffed as `${base}...${compare}`. */
+export interface BranchOperands {
+  readonly base: string;
+  readonly compare: string;
+}
+
+/** The two sides the Branch pickers show. A side is `null` until it names a ref. */
+export interface BranchSelection {
+  readonly base: string | null;
+  readonly compare: string | null;
+}
+
+/** The sides the Branch pickers show: the user's pick for the scope, else the server default. */
+export function branchSelectionFor(
+  comparison: BranchComparison | null,
+  selection: BranchSelection | undefined,
+): BranchSelection {
+  if (selection) return selection;
+  // An unavailable default names no base: the local-only default branch would otherwise diff against itself.
+  return { base: comparison?.isComparisonAvailable ? comparison.base : null, compare: comparison?.compare ?? null };
+}
+
+/** The operands the Branch view diffs, or `null` until both sides name a ref. */
+export function effectiveBranchOperands(
+  comparison: BranchComparison | null,
+  selection: BranchSelection | undefined,
+): BranchOperands | null {
+  const { base, compare } = branchSelectionFor(comparison, selection);
+  return base && compare ? { base, compare } : null;
+}
+
+/** A qualified ref as people name it: `refs/heads/x` is `x`, `refs/remotes/origin/x` is `origin/x`. */
+export function refLabel(ref: string): string {
+  if (ref.startsWith("refs/heads/")) return ref.slice("refs/heads/".length);
+  if (ref.startsWith("refs/remotes/")) return ref.slice("refs/remotes/".length);
+  return ref;
+}
+
 /** Diff rendering mode. */
 export type DiffRenderMode = "unified" | "side-by-side";
 
@@ -501,27 +539,18 @@ interface DiffState {
    */
   readonly selectedTurnByThread: Record<string, ReviewTurnSelection>;
   /**
-   * The Branch view's current→selected comparison for the current scope, or null
-   * until the picker resolves it. Drives both the ref picker and the rendered
-   * Branch diff. See
-   * `docs/adr/0007-branch-comparison-default-and-range.md`.
+   * The server's default Branch comparison for the current scope, or null until
+   * the pickers resolve it. See `docs/adr/0028-branch-operands-both-sides.md`.
    */
   branchComparison: BranchComparison | null;
-  /**
-   * The scope key (`workspaceId:threadId`) {@link branchComparison} was resolved
-   * for. Lets the picker re-resolve on a scope change while preserving a user's
-   * picked comparison ref when toggling views within the same scope.
-   */
+  /** The scope key (`workspaceId:threadId`) {@link branchComparison} was resolved for. */
   branchComparisonKey: string | null;
   /**
-   * Per-scope "the user manually picked a Branch comparison operand" flag, keyed
-   * by the same `workspaceId:threadId` scope as {@link branchComparisonKey}. While
-   * set, re-resolution preserves the user's picked ref (when it still exists)
-   * instead of reverting to the server default - so a turn-driven `diffRevision`
-   * bump or a picker remount no longer clobbers the selection. Mirrors
-   * `reviewViewManuallySelectedByThread` (ADR-0011).
+   * The operands the user picked, by the same scope key as {@link branchComparisonKey}.
+   * Kept apart from the default so a re-resolve never clobbers a pick; see
+   * {@link branchSelectionFor}.
    */
-  branchManuallySelectedByScope: Record<string, boolean>;
+  branchSelectionByScope: Record<string, BranchSelection>;
   /**
    * The `diffRevision` each scope's {@link branchComparison} was last resolved at,
    * keyed by scope. Store-backed (not a component ref) so the "already resolved for
@@ -651,20 +680,14 @@ interface DiffState {
    * or the assistant message ID of the turn to pin.
    */
   setReviewTurnForThread: (threadId: string, selection: ReviewTurnSelection) => void;
-  /**
-   * Apply a freshly resolved Branch comparison for a scope, recording the revision
-   * it was resolved at and preserving the user's manually picked target when that
-   * scope is flagged and the picked ref still exists.
-   */
+  /** Apply a freshly resolved default Branch comparison for a scope, recording the revision it was resolved at. */
   resolveBranchComparison: (
     comparison: BranchComparison,
     key: string,
     revision: number,
   ) => void;
-  /** Override the base ref of the active Branch comparison (no-op if none resolved). */
-  setBranchBase: (ref: string) => void;
-  /** Override the target ref of the active Branch comparison (no-op if none resolved). */
-  setBranchTarget: (ref: string) => void;
+  /** Record the user's Branch operands for a scope. Both sides are stored, so one pick pins the pair. */
+  setBranchSelection: (key: string, selection: BranchSelection) => void;
   /** Set the Commit view's picked operand by SHA, or `null` to fall back to the latest commit. */
   setSelectedCommitSha: (sha: string | null) => void;
   setRenderMode: (mode: DiffRenderMode) => void;
@@ -710,7 +733,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   selectedTurnByThread: {},
   branchComparison: null,
   branchComparisonKey: null,
-  branchManuallySelectedByScope: {},
+  branchSelectionByScope: {},
   branchResolvedRevisionByScope: {},
   selectedCommitSha: null,
   renderMode: "unified",
@@ -899,50 +922,16 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       selectedTurnByThread: { ...s.selectedTurnByThread, [threadId]: selection },
     })),
   resolveBranchComparison: (comparison, key, revision) =>
-    set((s) => {
-      const sameScope = s.branchComparisonKey === key;
-      const priorTarget = sameScope ? s.branchComparison?.target ?? null : null;
-      // Preserve a manual pick across re-resolution, but only when the chosen ref
-      // still exists in the freshly resolved set (a deleted branch must fall back).
-      const keepTarget =
-        s.branchManuallySelectedByScope[key] === true &&
-        priorTarget !== null &&
-        comparison.refs.some((ref) => ref.name === priorTarget);
-      return {
-        branchComparison: keepTarget
-          ? { ...comparison, target: priorTarget }
-          : comparison,
-        branchComparisonKey: key,
-        branchResolvedRevisionByScope: {
-          ...s.branchResolvedRevisionByScope,
-          [key]: revision,
-        },
-      };
-    }),
-  setBranchBase: (ref) =>
-    set((s) =>
-      s.branchComparison && s.branchComparisonKey
-        ? {
-            branchComparison: { ...s.branchComparison, base: ref },
-            branchManuallySelectedByScope: {
-              ...s.branchManuallySelectedByScope,
-              [s.branchComparisonKey]: true,
-            },
-          }
-        : {},
-    ),
-  setBranchTarget: (ref) =>
-    set((s) =>
-      s.branchComparison && s.branchComparisonKey
-        ? {
-            branchComparison: { ...s.branchComparison, target: ref },
-            branchManuallySelectedByScope: {
-              ...s.branchManuallySelectedByScope,
-              [s.branchComparisonKey]: true,
-            },
-          }
-        : {},
-    ),
+    set((s) => ({
+      branchComparison: comparison,
+      branchComparisonKey: key,
+      branchResolvedRevisionByScope: {
+        ...s.branchResolvedRevisionByScope,
+        [key]: revision,
+      },
+    })),
+  setBranchSelection: (key, selection) =>
+    set((s) => ({ branchSelectionByScope: { ...s.branchSelectionByScope, [key]: selection } })),
   setSelectedCommitSha: (sha) => set({ selectedCommitSha: sha }),
   setRenderMode: (mode) => set({ renderMode: mode }),
   setBulkDiffExpand: (expand) =>
@@ -1043,8 +1032,8 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       const reviewFilesVisibleByScope = { ...state.reviewFilesVisibleByScope };
       delete reviewFilesVisibleByScope[threadId];
       writeReviewFilesVisibility(reviewFilesVisibleByScope);
-      const branchManuallySelectedByScope = omitByKeySuffix(
-        state.branchManuallySelectedByScope,
+      const branchSelectionByScope = omitByKeySuffix(
+        state.branchSelectionByScope,
         `:${threadId}`,
       );
       const branchResolvedRevisionByScope = omitByKeySuffix(
@@ -1068,7 +1057,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         selectedTurnByThread,
         diffRevisionByScope,
         reviewFilesVisibleByScope,
-        branchManuallySelectedByScope,
+        branchSelectionByScope,
         branchResolvedRevisionByScope,
         inlineDiffCache,
       };
@@ -1080,7 +1069,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         key.startsWith(cachePrefix),
       );
       const hasBranchScope =
-        Object.keys(state.branchManuallySelectedByScope).some((key) =>
+        Object.keys(state.branchSelectionByScope).some((key) =>
           key.startsWith(cachePrefix),
         ) ||
         Object.keys(state.branchResolvedRevisionByScope).some((key) =>
@@ -1106,8 +1095,8 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         rightPanelFallbackByWorkspace,
         diffRevisionByScope,
         reviewFilesVisibleByScope,
-        branchManuallySelectedByScope: omitByKeyPrefix(
-          state.branchManuallySelectedByScope,
+        branchSelectionByScope: omitByKeyPrefix(
+          state.branchSelectionByScope,
           cachePrefix,
         ),
         branchResolvedRevisionByScope: omitByKeyPrefix(

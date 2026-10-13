@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { BranchComparison, GitBranch } from "@mcode/contracts";
+import type { BranchComparison } from "@mcode/contracts";
 import type { RightPanelState } from "../stores/diffStore";
 import { reviewViewAvailability } from "../lib/review-views";
 import {
@@ -13,6 +13,7 @@ import {
   createDefaultRightPanelState,
   createRightPanelState,
   DEFAULT_LINE_WRAP,
+  effectiveBranchOperands,
 } from "../stores/diffStore";
 
 describe("diffStore", () => {
@@ -37,7 +38,7 @@ describe("diffStore", () => {
       diffRevisionByScope: {},
       branchComparison: null,
       branchComparisonKey: null,
-      branchManuallySelectedByScope: {},
+      branchSelectionByScope: {},
       branchResolvedRevisionByScope: {},
     });
   });
@@ -147,95 +148,82 @@ describe("diffStore", () => {
     });
   });
 
-  // The Branch comparison operand must survive a turn-driven re-resolve. A
-  // `files.changed`/`turn.persisted` event bumps the scope revision, which
-  // re-fetches the server default; without the sticky guard that fetch would
-  // clobber the user's picked target. See ADR-0007.
-  describe("sticky Branch comparison operand", () => {
-    const ref = (name: string, isCurrent = false): GitBranch => ({
-      name,
-      shortSha: "abc1234",
-      type: name.startsWith("origin/") ? "remote" : "local",
-      isCurrent,
-    });
-    const comparison = (target: string | null): BranchComparison => ({
-      base: "feature",
-      target,
-      refs: [ref("feature", true), ref("main"), ref("origin/main")],
+  // Both Branch operands are the user's pick once made. A `files.changed` event bumps the scope revision and
+  // re-resolves the server default; that fetch must not clobber the pick. See ADR-0028.
+  describe("Branch operands", () => {
+    const comparison = (overrides: Partial<BranchComparison> = {}): BranchComparison => ({
+      base: "refs/remotes/origin/main",
+      compare: "refs/heads/feature",
       isUnborn: false,
       isComparisonAvailable: true,
+      ...overrides,
     });
     const key = "ws-1:thread-1";
-
-    it("records the resolved revision and seeds the comparison for a scope", () => {
-      const { resolveBranchComparison } = useDiffStore.getState();
-      resolveBranchComparison(comparison("main"), key, 3);
+    const operands = () => {
       const state = useDiffStore.getState();
-      expect(state.branchComparison?.target).toBe("main");
-      expect(state.branchComparisonKey).toBe(key);
-      expect(state.branchResolvedRevisionByScope[key]).toBe(3);
+      return effectiveBranchOperands(state.branchComparison, state.branchSelectionByScope[key]);
+    };
+
+    it("diffs the resolved default until the user picks", () => {
+      useDiffStore.getState().resolveBranchComparison(comparison(), key, 1);
+      expect(operands()).toEqual({ base: "refs/remotes/origin/main", compare: "refs/heads/feature" });
     });
 
-    it("preserves a manual target pick across a revision-bump re-resolve", () => {
-      const { resolveBranchComparison, setBranchTarget } = useDiffStore.getState();
-      resolveBranchComparison(comparison("main"), key, 1);
-      setBranchTarget("origin/main"); // user picks a different ref
+    it("names no base when the default comparison is unavailable", () => {
+      useDiffStore.getState().resolveBranchComparison(
+        comparison({ base: "refs/heads/main", compare: "refs/heads/main", isComparisonAvailable: false }),
+        key,
+        1,
+      );
+      expect(operands()).toBeNull();
+    });
 
-      // A turn re-resolves the server default (target "main") at a new revision.
-      resolveBranchComparison(comparison("main"), key, 2);
+    it("keeps a picked pair across a revision-bump re-resolve", () => {
+      const { resolveBranchComparison, setBranchSelection } = useDiffStore.getState();
+      resolveBranchComparison(comparison(), key, 1);
+      setBranchSelection(key, { base: "refs/heads/mcode-3f2a", compare: "refs/remotes/origin/main" });
 
+      resolveBranchComparison(comparison(), key, 2);
+
+      expect(operands()).toEqual({ base: "refs/heads/mcode-3f2a", compare: "refs/remotes/origin/main" });
+      expect(useDiffStore.getState().branchResolvedRevisionByScope[key]).toBe(2);
+    });
+
+    it("does not carry a pick into another scope", () => {
+      const { resolveBranchComparison, setBranchSelection } = useDiffStore.getState();
+      resolveBranchComparison(comparison(), key, 1);
+      setBranchSelection(key, { base: "refs/heads/mcode-3f2a", compare: "refs/remotes/origin/main" });
+
+      resolveBranchComparison(comparison(), "ws-1:thread-2", 1);
       const state = useDiffStore.getState();
-      expect(state.branchComparison?.target).toBe("origin/main");
-      expect(state.branchResolvedRevisionByScope[key]).toBe(2);
+
+      expect(effectiveBranchOperands(state.branchComparison, state.branchSelectionByScope["ws-1:thread-2"])).toEqual({
+        base: "refs/remotes/origin/main",
+        compare: "refs/heads/feature",
+      });
     });
 
-    it("falls back to the server default when the picked ref no longer exists", () => {
-      const { resolveBranchComparison, setBranchTarget } = useDiffStore.getState();
-      resolveBranchComparison(comparison("main"), key, 1);
-      setBranchTarget("origin/main");
-
-      // The picked ref is gone from the freshly resolved set (e.g. branch deleted).
-      const withoutOrigin: BranchComparison = {
-        ...comparison("main"),
-        refs: [ref("feature", true), ref("main")],
-      };
-      resolveBranchComparison(withoutOrigin, key, 2);
-
-      expect(useDiffStore.getState().branchComparison?.target).toBe("main");
-    });
-
-    it("does not preserve a pick across a scope change", () => {
-      const { resolveBranchComparison, setBranchTarget } = useDiffStore.getState();
-      resolveBranchComparison(comparison("main"), key, 1);
-      setBranchTarget("origin/main");
-
-      // A different scope resolves fresh — the prior scope's pick must not leak.
-      resolveBranchComparison(comparison("main"), "ws-1:thread-2", 1);
-
-      expect(useDiffStore.getState().branchComparison?.target).toBe("main");
-    });
-
-    it("drops the scope's sticky state on clearThread", () => {
-      const { resolveBranchComparison, setBranchTarget, clearThread } = useDiffStore.getState();
-      resolveBranchComparison(comparison("main"), key, 1);
-      setBranchTarget("origin/main");
+    it("drops the scope's pick on clearThread", () => {
+      const { resolveBranchComparison, setBranchSelection, clearThread } = useDiffStore.getState();
+      resolveBranchComparison(comparison(), key, 1);
+      setBranchSelection(key, { base: "refs/heads/main", compare: "refs/heads/feature" });
 
       clearThread("thread-1");
 
       const state = useDiffStore.getState();
-      expect(state.branchManuallySelectedByScope[key]).toBeUndefined();
+      expect(state.branchSelectionByScope[key]).toBeUndefined();
       expect(state.branchResolvedRevisionByScope[key]).toBeUndefined();
     });
 
-    it("drops the scope's sticky state on clearWorkspace", () => {
-      const { resolveBranchComparison, setBranchTarget, clearWorkspace } = useDiffStore.getState();
-      resolveBranchComparison(comparison("main"), key, 1);
-      setBranchTarget("origin/main");
+    it("drops the scope's pick on clearWorkspace", () => {
+      const { resolveBranchComparison, setBranchSelection, clearWorkspace } = useDiffStore.getState();
+      resolveBranchComparison(comparison(), key, 1);
+      setBranchSelection(key, { base: "refs/heads/main", compare: "refs/heads/feature" });
 
       clearWorkspace("ws-1");
 
       const state = useDiffStore.getState();
-      expect(state.branchManuallySelectedByScope[key]).toBeUndefined();
+      expect(state.branchSelectionByScope[key]).toBeUndefined();
       expect(state.branchResolvedRevisionByScope[key]).toBeUndefined();
     });
   });

@@ -3,7 +3,7 @@ import type { ReviewComparison, ReviewFileChange, ReviewTurn } from "@mcode/cont
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { sinceLookedBaseline, threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { useWorkspaceFileRefresh } from "@/features/projects/files/useWorkspaceFileRefresh";
-import { useDiffStore, type ReviewTurnSelection } from "@/stores/diffStore";
+import { effectiveBranchOperands, useDiffStore, type BranchOperands, type BranchSelection, type ReviewTurnSelection } from "@/stores/diffStore";
 import { getTransport } from "@/transport";
 import { ReviewHeader } from "./ReviewHeader";
 import { FileList } from "./FileList";
@@ -50,7 +50,7 @@ interface ComparisonLoadInput {
   readonly activeThreadId: string | null;
   readonly activeWorkspaceId: string | null;
   readonly branchComparison: DiffStoreState["branchComparison"];
-  readonly branchRange: { readonly base: string; readonly target: string } | null;
+  readonly branchRange: BranchOperands | null;
   readonly mutableComparisonRevision: number;
   readonly selectedCommitSha: string | null;
   /** The Turn view's resolved turn: the pinned one, or the newest while following latest. */
@@ -141,7 +141,7 @@ async function loadGitComparison(
         threadId: input.activeThreadId ?? undefined,
         sha: input.viewMode === "commit" ? input.selectedCommitSha ?? undefined : undefined,
         base: input.viewMode === "branch" ? input.branchRange?.base : undefined,
-        target: input.viewMode === "branch" ? input.branchRange?.target : undefined,
+        compare: input.viewMode === "branch" ? input.branchRange?.compare : undefined,
       });
   return {
     outcome,
@@ -170,7 +170,7 @@ function getGitComparisonMetadata(
 function unavailableBranchOutcome(input: ComparisonLoadInput): ReviewOutcome | null {
   if (input.viewMode !== "branch") return null;
   if (input.branchComparison?.isUnborn) return { status: "unavailable", reason: "unborn" };
-  if (input.branchComparison?.isComparisonAvailable === false || !input.branchRange) {
+  if (!input.branchRange) {
     return { status: "unavailable", reason: "no-base" };
   }
   return null;
@@ -178,7 +178,7 @@ function unavailableBranchOutcome(input: ComparisonLoadInput): ReviewOutcome | n
 
 function getGitComparisonId(input: ComparisonLoadInput & { readonly viewMode: GitView }): string {
   if (input.viewMode === "commit") return input.selectedCommitSha!;
-  if (input.viewMode === "branch") return `${input.branchRange!.base}...${input.branchRange!.target}`;
+  if (input.viewMode === "branch") return `${input.branchRange!.base}...${input.branchRange!.compare}`;
   return input.activeWorkspaceId!;
 }
 
@@ -266,6 +266,7 @@ interface DiffPanelStore {
   readonly activeThreadClientOnly: boolean;
   readonly activeWorkspaceId: string | null;
   readonly branchComparison: DiffStoreState["branchComparison"];
+  readonly branchSelection: BranchSelection | undefined;
   readonly bumpDiffRevision: DiffStoreState["bumpDiffRevision"];
   readonly diffRevision: number;
   readonly diffScopeId: string | null;
@@ -317,6 +318,9 @@ function useDiffPanelStore(): DiffPanelStore {
     activeThreadClientOnly,
     activeWorkspaceId,
     branchComparison: useDiffStore((state) => state.branchComparison),
+    branchSelection: useDiffStore((state) =>
+      state.branchComparisonKey ? state.branchSelectionByScope[state.branchComparisonKey] : undefined,
+    ),
     bumpDiffRevision: useDiffStore((state) => state.bumpDiffRevision),
     diffRevision,
     diffScopeId,
@@ -404,7 +408,7 @@ function useFilesPanelController({
 }
 
 interface ComparisonController {
-  readonly branchRange: { readonly base: string; readonly target: string } | null;
+  readonly branchRange: BranchOperands | null;
   readonly comparisonFiles: readonly ReviewFileChange[];
   readonly comparisonLoading: boolean;
   readonly comparisonPending: boolean;
@@ -426,8 +430,8 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
   const { turnMessageId, reviewTurnsLoaded, reviewTurnsError, turnLive } = turnComparisonFacts(store);
   const mutableComparisonRevision = getMutableComparisonRevision(viewMode, store.diffRevision, turnLive);
   const branchRange = useMemo(
-    () => getBranchRange(store.branchComparison),
-    [store.branchComparison],
+    () => effectiveBranchOperands(store.branchComparison, store.branchSelection),
+    [store.branchComparison, store.branchSelection],
   );
   // Following latest keeps one identity across turns, so the shown diff stays
   // up until the next turn's comparison settles instead of flashing to loading.
@@ -619,18 +623,11 @@ function isTurnLive(reviewTurns: readonly ReviewTurn[] | undefined, turnMessageI
   return reviewTurns?.some((turn) => turn.messageId === turnMessageId && turn.phase === "live") ?? false;
 }
 
-function getBranchRange(
-  branchComparison: DiffStoreState["branchComparison"],
-): { readonly base: string; readonly target: string } | null {
-  if (!branchComparison?.base || !branchComparison.target) return null;
-  return { base: branchComparison.target, target: branchComparison.base };
-}
-
 function getComparisonIdentity(
   diffScopeId: string | null,
   viewMode: DiffViewMode,
   selectedCommitSha: string | null,
-  branchRange: { readonly base: string; readonly target: string } | null,
+  branchRange: BranchOperands | null,
   turnSelection: ReviewTurnSelection,
   sinceLookedBaseline: number | null,
 ): string {
@@ -641,12 +638,12 @@ function getComparisonIdentity(
 function comparisonOperand(
   viewMode: DiffViewMode,
   selectedCommitSha: string | null,
-  branchRange: { readonly base: string; readonly target: string } | null,
+  branchRange: BranchOperands | null,
   turnSelection: ReviewTurnSelection,
   sinceLookedBaseline: number | null,
 ): string {
   if (viewMode === "commit") return selectedCommitSha ?? "";
-  if (viewMode === "branch" && branchRange) return `${branchRange.base}...${branchRange.target}`;
+  if (viewMode === "branch" && branchRange) return `${branchRange.base}...${branchRange.compare}`;
   if (viewMode === "turn") return turnSelection;
   if (viewMode === "since-looked") return String(sinceLookedBaseline ?? "");
   return "";
