@@ -42,6 +42,7 @@ import {
 } from "../../providers/availability/provider-availability-errors.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { MessageRepo } from "../conversation/persistence/message-repo.js";
+import { TurnRevertStore } from "./persistence/turn-revert-store.js";
 import {
   type DataOnlyParentTurnStartInput,
   type ParentUserMessageWrite,
@@ -209,6 +210,7 @@ export class TurnAdmissionDispatchCoordinator {
     private readonly threads: ThreadRepo,
     private readonly workspaces: WorkspaceRepo,
     private readonly messages: MessageRepo,
+    private readonly reverts: TurnRevertStore,
     private readonly worktrees: GitWorktreeService,
     private readonly attachments: AttachmentService,
     private readonly providers: IProviderRegistry,
@@ -529,7 +531,10 @@ export class TurnAdmissionDispatchCoordinator {
   ): Promise<PreparedTurnDispatch> {
     const sourceTurnId = prepared.command.sourceTurnId ?? NodeCrypto.randomUUID();
     const parentStartInput = this.prepareParentTurnStartInput(prepared, lease, sourceTurnId, attachmentData, review);
-    const wirePayload = await this.buildWirePayload(prepared);
+    const revertNotice = prepared.command.providerOriginated
+      ? { revertIds: [], paths: [] } : this.reverts.pendingAgentNotice(prepared.thread.id);
+    parentStartInput.revertNoticeIds = revertNotice.revertIds;
+    const wirePayload = await this.buildWirePayload(prepared, revertNotice.paths);
     await this.commitParentStart(prepared, lease, sourceTurnId, parentStartInput);
     await this.publishCommittedEffects(prepared, sourceTurnId);
     const request = await this.buildTurnRequest(prepared, lease, sourceTurnId, attachmentData, cwd, wirePayload, review);
@@ -957,7 +962,7 @@ export class TurnAdmissionDispatchCoordinator {
     if (providerId === "devin" && value !== undefined) target.devin_mode = value;
   }
 
-  private async buildWirePayload(prepared: PreparedCommand): Promise<string> {
+  private async buildWirePayload(prepared: PreparedCommand, revertedPaths: readonly string[]): Promise<string> {
     let payload = this.withPlanInstructions(prepared);
     if (this.effectiveInteractionMode(prepared.command) === "plan" && prepared.command.providerWireOverride === undefined) {
       payload = this.plans.buildQuestionPrompt(payload);
@@ -969,7 +974,9 @@ export class TurnAdmissionDispatchCoordinator {
       prepared.command.providerWireOverride ?? payload,
       prepared.command.selectedTextComments,
     );
-    return prepared.providerId === "codex" ? providerPayload : this.injectMentionFileContents(prepared, providerPayload);
+    const wirePayload = prepared.providerId === "codex" ? providerPayload : await this.injectMentionFileContents(prepared, providerPayload);
+    return revertedPaths.length === 0 ? wirePayload
+      : `Note from Mcode: the user reverted your earlier changes to: ${revertedPaths.join(", ")} (restored to their state before that turn).\n${wirePayload}`;
   }
 
   private withPlanInstructions(prepared: PreparedCommand): string {

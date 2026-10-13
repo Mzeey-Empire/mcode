@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { TurnRevertStore } from "../../turns/persistence/turn-revert-store.js";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import * as NodeEvents from "node:events";
@@ -242,7 +243,7 @@ describe("TurnResumeScheduler", () => {
     const commands = new AgentRuntimeCommandPort();
     const plans = new PlanTurnService(threads, providers,
       new PlanQuestionService(messageRepo, new PlanQuestionAnswersRepo(db, writer)), new PlanRepo(db, writer), new AgentTurnCommandPort(commands));
-    const admission = new TurnAdmissionDispatchCoordinator(threads, workspaces, messageRepo,
+    const admission = new TurnAdmissionDispatchCoordinator(threads, workspaces, messageRepo, new TurnRevertStore(db),
       new GitWorktreeService(workspaces, new FakeGitExecutor(), hostRuntime), new AttachmentService(), providers,
       new ProviderAvailabilityService(settings, providers), boundary, settings, plans,
       new GoalLifecycleService(threads, providers, writer, commands, boundary), undefined, undefined, hostRuntime.platform,

@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { and, desc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
 import { TurnRevertRecordSchema, TurnRevertResultSchema } from "@mcode/contracts";
@@ -22,6 +22,18 @@ export type StoredRevert = ReturnType<typeof decodeRevert>;
 /** Read-only journal access. Mutations belong to the application database writer. */
 export class TurnRevertStore {
   constructor(private readonly db: Database) {}
+  /** Unreported reverts whose changes still stand, in deterministic journal order. */
+  pendingAgentNotice(threadId: string) {
+    const rows = drizzle(this.db).select().from(turnReverts).where(and(
+      eq(turnReverts.threadId, threadId), eq(turnReverts.state, "committed"),
+      inArray(turnReverts.kind, ["turn", "file"]), isNull(turnReverts.undoneByRevertId),
+      isNull(turnReverts.agentNotifiedAt),
+    )).orderBy(asc(turnReverts.createdAt), asc(turnReverts.id)).all().map(decodeRevert);
+    return {
+      revertIds: rows.map((row) => row.id),
+      paths: [...new Set(rows.flatMap((row) => row.files.map((file) => file.path)))],
+    };
+  }
   /** Find one operation by id. */
   get(id: string): StoredRevert | null {
     const row = drizzle(this.db).select().from(turnReverts).where(eq(turnReverts.id, id)).get();

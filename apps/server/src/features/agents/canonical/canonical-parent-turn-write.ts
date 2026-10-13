@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 
 import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";
+import { markTurnRevertsAgentNotified } from "../turns/persistence/turn-revert-write-operations.js";
 import { NarrativeReadStore } from "../conversation/narrative/narrative-read-store.js";
 import { recoveredNarrativeRows } from "../conversation/narrative/recovered-narrative-rows.js";
 import { ApprovalReceiptStore } from "../approvals/approval-receipt-store.js";
@@ -102,6 +103,8 @@ export interface DataOnlyParentTurnStartInput extends Omit<ParentTurnStartInput,
   answeredPlanQuestionMessageId?: string;
   /** Uncertain steer whose queued resend this turn sends; claimed with the user message. */
   resendOfSteerId?: string;
+  /** Reverts included only in the provider prompt, claimed with the user-message projection. */
+  revertNoticeIds?: readonly string[];
 }
 
 /** Values for one canonical event and checkpoint transaction. */
@@ -273,6 +276,7 @@ export class CanonicalParentTurnWrite {
           throw new Error(`Thread not found: ${input.thread.id}`);
         }
         const message = projectParentUserMessage(this.messages, input.thread.id, input.userMessage);
+        markTurnRevertsAgentNotified(this.db, input.thread.id, input.revertNoticeIds ?? []);
         if (input.answeredPlanQuestionMessageId) {
           this.planAnswers.markAnswered(input.answeredPlanQuestionMessageId, input.thread.id);
         }

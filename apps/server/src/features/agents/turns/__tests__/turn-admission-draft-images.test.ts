@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { TurnRevertStore } from "../persistence/turn-revert-store.js";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
@@ -69,7 +70,7 @@ async function fixture(providerId: ProviderId = "codex", beforeCommit: () => Pro
   const plans = new PlanTurnService(threads, providers, new PlanQuestionService(messages, new PlanQuestionAnswersRepo(db, writer)), new PlanRepo(db, writer), new AgentTurnCommandPort(commands));
   const owner: TurnParentStartOwner = { start: async ({ parentTurn }) => { await beforeCommit(); await canonical.startParentTurn(parentTurn); } };
   const admission = new TurnAdmissionDispatchCoordinator(
-    threads, workspaces, messages, worktrees, attachments, providers,
+    threads, workspaces, messages, new TurnRevertStore(db), worktrees, attachments, providers,
     new ProviderAvailabilityService(settings, providers), canonical, settings, plans,
     new GoalLifecycleService(threads, providers, writer, commands, canonical), undefined,
     new FileService(workspaces, threads, worktrees, git, hostRuntime), hostRuntime.platform, owner,
