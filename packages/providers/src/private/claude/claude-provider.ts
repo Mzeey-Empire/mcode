@@ -595,6 +595,7 @@ interface ClaudeSpawnBrowserAccess {
 }
 
 interface ClaudeStreamLoopState {
+  subagentApprovalOrigins: Map<string, Extract<ApprovalRequestBody["origin"], { kind: "subagent" }>>;
   currentTurnExecutionId: string;
   currentRouting: ClaudeCanonicalEventRouting;
   pendingPromptExecutionIds: string[];
@@ -714,6 +715,7 @@ export class ClaudeProvider
     string,
     {
       threadId: string;
+      agentID?: string;
       toolName: string;
       input: unknown;
       title?: string;
@@ -1308,11 +1310,17 @@ export class ClaudeProvider
     options: Parameters<CanUseTool>[2],
     routing?: ClaudeCanonicalEventRouting,
   ): Promise<ClaudeApprovalDecision> {
-    const body = await claudeApprovalBody(toolName, input, options, this.runtime.get(`mcode-${threadId}`)?.cwd);
+    const session = this.runtime.get(`mcode-${threadId}`);
+    const body = await claudeApprovalBody(toolName, input, options, session?.cwd);
     if (options.signal?.aborted) return "cancelled";
+    // Read the origin after the await: the stream can consume task_started while file evidence loads.
+    const stream = session ? this.streamStates.get(session.query) : undefined;
+    const origin = options.agentID ? stream?.subagentApprovalOrigins.get(options.agentID) : undefined;
+    if (origin) body.origin = origin;
     return new Promise((resolve) => {
       this.pendingPermissions.set(requestId, {
         threadId,
+        agentID: options.agentID,
         toolName,
         input,
         title: options?.title,
@@ -2276,6 +2284,7 @@ export class ClaudeProvider
       ? sessionId.slice(6)
       : sessionId;
     const state: Omit<ClaudeStreamLoopState, "mapper"> = {
+      subagentApprovalOrigins: new Map(),
       currentTurnExecutionId: routing.executionId,
       currentRouting: routing,
       pendingPromptExecutionIds: [],
@@ -2360,6 +2369,7 @@ export class ClaudeProvider
     } catch (error: unknown) {
       this.publishClaudeStreamError(sessionId, q, state, error);
     } finally {
+      state.subagentApprovalOrigins.clear();
       await this.finalizeClaudeStream(sessionId, q, state);
     }
   }
@@ -2375,6 +2385,7 @@ export class ClaudeProvider
       this.emit(`_resumeOk:${sessionId}`);
     }
     state.mapper.captureSessionIdentity(message, state.sessionInitialized);
+    this.trackClaudeApprovalTask(state, message);
     state.mapper.settleBackgroundTask(message);
     if (await this.skipUnownedClaudeOutput(sessionId, state, message)) return true;
     const isResumeFailure = this.isFailedClaudeResume(message, state.sessionInitialized);
@@ -2394,6 +2405,31 @@ export class ClaudeProvider
     const outcome = await state.mapper.map(message);
     if (outcome !== "none") await this.endClaudeTurn(sessionId, state);
     return true;
+  }
+
+  private trackClaudeApprovalTask(state: ClaudeStreamLoopState, message: Record<string, unknown>): void {
+    if (message.type !== "system" || typeof message.task_id !== "string") return;
+    if (message.subtype === "task_notification") {
+      state.subagentApprovalOrigins.delete(message.task_id);
+      return;
+    }
+    if (message.subtype !== "task_started" || message.task_type !== "local_agent") return;
+    const description = typeof message.description === "string" ? message.description.trim() : "";
+    const origin: Extract<ApprovalRequestBody["origin"], { kind: "subagent" }> = {
+      kind: "subagent",
+      label: (description || "Subagent").slice(0, 200),
+      ...(typeof message.tool_use_id === "string" ? { parentToolCallId: message.tool_use_id } : {}),
+    };
+    state.subagentApprovalOrigins.set(message.task_id, origin);
+    this.updateClaudeApprovalOrigins(state.currentRouting.threadId, message.task_id, origin);
+  }
+
+  private updateClaudeApprovalOrigins(threadId: string, agentID: string, origin: ApprovalRequestBody["origin"]): void {
+    for (const [requestId, pending] of this.pendingPermissions) {
+      if (pending.threadId !== threadId || pending.agentID !== agentID) continue;
+      pending.body = { ...pending.body, origin };
+      this.emit("approval_request", { requestId, threadId, body: pending.body } satisfies ApprovalRequestEnvelope);
+    }
   }
 
   /**
