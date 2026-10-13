@@ -83,6 +83,16 @@ describe("SubagentRosterService", () => {
     expect(service.loadRoster(request).entries.map((row) => row.title)).toEqual(["Verify ui child", "Inspect the build_log"]);
   });
 
+  it("reports the model and reasoning effort as separate fields", () => {
+    const { db, call, service } = harness("copilot");
+    message(db, "message", "copilot");
+    call("tuned", "message", { model: "gpt-5.6-sol", reasoningEffort: "high", status: "completed" });
+    call("plain", "message", { status: "completed", sortOrder: 1 });
+    expect(service.loadRoster(request).entries.map((row) => [row.id, row.model, row.reasoningEffort]).sort()).toEqual([
+      ["call:plain", null, null], ["call:tuned", "gpt-5.6-sol", "high"],
+    ]);
+  });
+
   it.each([true, false])("uses OpenCode childSteps=%s only when there are no recorded steps", (childSteps) => {
     const { db, call, service } = harness("opencode", { ...SUBAGENT_REPORTING, opencode: { childTranscript: false, childSteps } });
     message(db, "message", "opencode");

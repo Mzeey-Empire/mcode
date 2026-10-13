@@ -20,7 +20,7 @@ function at(seconds: number): string {
 
 function entry(title: string, overrides: Partial<SubagentRosterEntry> = {}): SubagentRosterEntry {
   return {
-    id: `call:${title}`, provider: "claude", title, prompt: null, subagentType: null, model: null,
+    id: `call:${title}`, provider: "claude", title, prompt: null, subagentType: null, model: null, reasoningEffort: null,
     stepCount: 0, status: "running", startedAt: at(0), endedAt: null, tier: "steps", canStop: false,
     sourceToolCallId: title, childThreadId: null, sourceMessageId: null, parentEntryId: null,
     ...overrides,

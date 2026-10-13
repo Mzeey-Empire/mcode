@@ -16,7 +16,7 @@ vi.mock("@/transport", async (original) => ({
 function row(id: string, status: SubagentRosterEntry["status"] = "running"): SubagentRosterEntry {
   return {
     id: `call:${id}`, provider: "claude", title: id, prompt: "Inspect the project",
-    subagentType: "Explore", model: null, stepCount: 0, status,
+    subagentType: "Explore", model: null, reasoningEffort: null, stepCount: 0, status,
     startedAt: "2026-10-10T10:00:00.000Z", endedAt: null, tier: "steps", canStop: false,
     sourceToolCallId: id, childThreadId: null, sourceMessageId: "message", parentEntryId: null,
   };

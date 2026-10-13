@@ -13,7 +13,7 @@ vi.mock("@/transport", async (importOriginal) => ({
 const thread = createMockThread({ id: "parent", provider: "codex" });
 
 function entry(id: string, provider: SubagentRosterEntry["provider"], status: SubagentRosterEntry["status"]): SubagentRosterEntry {
-  return { id: `call:${id}`, provider, title: id, prompt: null, subagentType: null, model: null, stepCount: 0,
+  return { id: `call:${id}`, provider, title: id, prompt: null, subagentType: null, model: null, reasoningEffort: null, stepCount: 0,
     status, startedAt: "2026-10-10T10:00:00.000Z", endedAt: null, tier: "steps", canStop: false,
     sourceToolCallId: id, sourceMessageId: "message", childThreadId: null, parentEntryId: null };
 }

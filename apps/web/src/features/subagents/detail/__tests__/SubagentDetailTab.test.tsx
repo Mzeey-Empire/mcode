@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import {
@@ -26,7 +26,7 @@ vi.mock("@/transport", async (original) => ({
 function entry(overrides: Partial<SubagentRosterEntry> = {}): SubagentRosterEntry {
   return {
     id: "call:explore", provider: "codex", title: "Explore", prompt: "Map the rail",
-    subagentType: null, model: null, stepCount: 0, status: "done",
+    subagentType: null, model: null, reasoningEffort: null, stepCount: 0, status: "done",
     startedAt: "2026-10-13T10:00:00.000Z", endedAt: "2026-10-13T10:00:09.000Z", tier: "steps", canStop: false,
     sourceToolCallId: "explore", childThreadId: null, sourceMessageId: "message-7", parentEntryId: null,
     ...overrides,
@@ -103,6 +103,16 @@ describe("SubagentDetailTab", () => {
     expect(screen.queryByText("Summary")).not.toBeInTheDocument();
     expect(screen.queryByText(/shares its steps/)).not.toBeInTheDocument();
     expect(screen.getByTestId("subagent-parent-prompt")).toHaveTextContent("Map the rail");
+  });
+
+  it("labels the agent, model, and effort the way the composer does, and leaves out what was not reported", async () => {
+    transport.loadSubagentDetail.mockResolvedValue(detail());
+    await renderTab([entry({ subagentType: "Hubble", model: "gpt-5.6-sol", reasoningEffort: "xhigh" })]);
+    expect(screen.getByTestId("subagent-detail-meta")).toHaveTextContent(/^Hubble · GPT-5\.6 Sol X-High9s$/);
+
+    cleanup();
+    await renderTab([entry({ provider: "claude" })]);
+    expect(screen.getByTestId("subagent-detail-meta")).toHaveTextContent(/^9s$/);
   });
 
   it("says no steps were recorded only after a finished entry recorded none", async () => {

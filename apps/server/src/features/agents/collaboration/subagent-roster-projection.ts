@@ -83,7 +83,7 @@ function narrativeMetadata(call: RosterToolCall) {
   const prompt = call.subagentPrompt ?? null;
   const title = subagentTitle((call.presentation?.task ?? prompt)?.split("\n")[0] || call.displayName || "Subagent task");
   return { title, prompt, subagentType: call.subagentType ?? null,
-    model: subagentModelLabel(call.model, call.reasoningEffort) };
+    model: call.model ?? null, reasoningEffort: call.reasoningEffort ?? null };
 }
 
 const SNAKE_CASE_IDENTIFIER = /^[a-z0-9]+(?:_[a-z0-9]+)+$/i;
@@ -91,11 +91,6 @@ const SNAKE_CASE_IDENTIFIER = /^[a-z0-9]+(?:_[a-z0-9]+)+$/i;
 /** Codex names children by snake_case task identifiers, which read better as words in a title. */
 export function subagentTitle(title: string): string {
   return SNAKE_CASE_IDENTIFIER.test(title) ? formatSubagentDisplayName(title) : title;
-}
-
-/** Combine the reported model and reasoning without inventing missing metadata. */
-export function subagentModelLabel(model?: string, reasoning?: string): string | null {
-  return [model, reasoning].filter(Boolean).join(" · ") || null;
 }
 
 /** Keep the latest activity while preserving its total count and summary. */

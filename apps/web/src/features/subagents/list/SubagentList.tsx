@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { useToastStore } from "@/stores/toastStore";
 import { subagentStatusLabel } from "../subagent-status";
 import { elapsed, useNow } from "../live-duration";
+import { subagentKind } from "../subagent-kind";
 
 /** Props for {@link SubagentList}. */
 export interface SubagentListProps {
@@ -32,8 +33,7 @@ function partitionRows(entries: readonly SubagentRosterEntry[]) {
 }
 
 function rowMeta(row: SubagentRosterEntry): string {
-  const kind = [row.subagentType, row.model].filter(Boolean).join(" · ");
-  return [kind, row.stepCount > 0 ? `${row.stepCount} steps` : null].filter(Boolean).join(" · ");
+  return [subagentKind(row), row.stepCount > 0 ? `${row.stepCount} steps` : null].filter(Boolean).join(" · ");
 }
 
 function StatusTrail({ row, now }: { readonly row: SubagentRosterEntry; readonly now: number }) {

@@ -413,7 +413,7 @@ describe("ActivityRail subagent tabs", () => {
   function subagent(status: SubagentRosterEntry["status"]): SubagentRosterEntry {
     return {
       id: "call:explore", provider: "codex", title: "Explore the rail", prompt: null,
-      subagentType: null, model: null, stepCount: 0, status,
+      subagentType: null, model: null, reasoningEffort: null, stepCount: 0, status,
       startedAt: "2026-10-13T10:00:00.000Z", endedAt: null, tier: "steps", canStop: false,
       sourceToolCallId: "explore", childThreadId: null, sourceMessageId: null, parentEntryId: null,
     };

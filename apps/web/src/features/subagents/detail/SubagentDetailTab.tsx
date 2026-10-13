@@ -19,6 +19,7 @@ import { getTransport } from "@/transport";
 import { useSubagentRoster, useSubagentRosterStore } from "../state/subagentRosterStore";
 import { subagentStatusLabel } from "../subagent-status";
 import { elapsed, useNow } from "../live-duration";
+import { subagentKind } from "../subagent-kind";
 import { openSubagentDetail, openSubagentsPanel } from "./open-subagent-detail";
 import { ParentPromptBubble } from "./ParentPromptBubble";
 
@@ -61,15 +62,15 @@ function DetailBody({ children }: { readonly children: ReactNode }) {
 function DetailHeader({ threadId, entry }: { readonly threadId: string; readonly entry: SubagentRosterEntry }) {
   const running = entry.status === "running";
   const now = useNow(running);
-  const kind = [entry.subagentType, entry.model].filter(Boolean).join(" · ");
+  const kind = subagentKind(entry);
   const duration = elapsed(entry, now);
   return <>
     <PanelHeaderSlot slot="leading">
       <PanelTitlePill headingLevel={2} icon={<ProviderIcon provider={entry.provider} size={16} />}>{entry.title}</PanelTitlePill>
     </PanelHeaderSlot>
     <PanelHeaderSlot slot="row2">
-      <div data-testid="subagent-detail-meta" className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-[18px] bg-selected px-3">
-        <span className="text-fade min-w-0 flex-1 text-xs text-muted">{kind}</span>
+      <div data-testid="subagent-detail-meta" className="flex h-8 min-w-0 items-center gap-2 rounded-[18px] bg-selected px-3">
+        {kind && <span className="text-fade min-w-0 text-xs text-muted">{kind}</span>}
         <span aria-hidden className={cn("size-[7px] shrink-0 rounded-full", running ? "bg-success" : "bg-muted")} />
         {duration && <span className="shrink-0 font-mono text-xs text-ink">{duration}</span>}
       </div>
