@@ -17,6 +17,11 @@ type ThreadApprovalSource = {
   respondToApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult>;
 };
 
+function answeredWithOtherNote(note: string | undefined, saved: { note: string | undefined } | undefined, row: ApprovalNoteRow | null): boolean {
+  if (saved && saved.note !== note) return true;
+  return row !== null && row.note !== note;
+}
+
 /** Runtime effects shared by provider and thread-operation approvals. */
 export interface ApprovalPublication {
   publishApprovalRequest(request: ApprovalRequest): void;
@@ -200,18 +205,22 @@ export class ApprovalService {
   }
 
   private replay(requestId: string, response: ApprovalResponse): ApprovalRespondResult | undefined {
-    const note = "autoDeny" in response ? undefined : response.note?.trim();
     const saved = this.responses.get(requestId);
     const row = this.notes.find(requestId);
-    // A pending row the provider still lists is an attempt whose adapter call failed before the
-    // provider took the answer. It answered nothing, so the new answer replaces it.
-    if (!saved && row?.state === "pending" && this.providerHolder(requestId)) return undefined;
-    if ((saved && saved.note !== note) || (row && row.note !== note)) {
-      return { status: "failed", message: "This request was already answered" };
-    }
+    if (!saved && this.isUndeliveredAttempt(row)) return undefined;
+    const note = "autoDeny" in response ? undefined : response.note?.trim();
+    if (answeredWithOtherNote(note, saved, row)) return { status: "failed", message: "This request was already answered" };
     if (row && row.state !== "pending") return this.storedResult(row);
-    if (saved) return saved.result;
-    return undefined;
+    return saved?.result;
+  }
+
+  /**
+   * A pending row the provider still lists is an attempt whose adapter call failed before the
+   * provider took the answer. It answered nothing, so a new answer may replace it.
+   */
+  private isUndeliveredAttempt(row: ApprovalNoteRow | null): boolean {
+    if (row?.state !== "pending") return false;
+    return this.providerHolder(row.requestId) !== undefined;
   }
 
   private storedResult(row: ApprovalNoteRow): ApprovalRespondResult {
