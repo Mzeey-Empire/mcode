@@ -881,6 +881,40 @@ describe("AgentService.sendMessage — /goal command", () => {
     }));
   });
 
+  it("post-turn native refresh runs once a provider turn completes", async () => {
+    const { svc, goals, providerStub } = buildService(database);
+    const activeGoal: GoalState = {
+      threadId: thread.id,
+      objective: "say hi",
+      status: "active",
+      tokenBudget: null,
+      tokensUsed: 0,
+      timeUsedSeconds: 0,
+      createdAt: Date.now() - 1_000,
+      updatedAt: Date.now() - 1_000,
+      providerId: "claude",
+      source: "claude",
+      controls: { canInspect: true, canClear: true },
+    };
+    providerStub.hasNativeGoalCommand.mockReturnValue(true);
+    providerStub.getGoal.mockReturnValue(activeGoal);
+    providerStub.runNativeGoalCommand.mockResolvedValue({ kind: "empty" });
+    providerStub.emit("event", {
+      type: AgentEventType.TurnComplete,
+      threadId: thread.id,
+      reason: "end_turn",
+      costUsd: null,
+      tokensIn: 0,
+      tokensOut: 0,
+    });
+    await waitForAgentServiceIngressForTest(svc, thread.id);
+    await vi.waitFor(() => expect(svc.runtimeAccess().runtimeSnapshots()
+      .find((snapshot) => snapshot.threadId === thread.id)?.phase).toBe("completed"));
+    goals.refreshAfterTurn(thread.id);
+
+    await vi.waitFor(() => expect(providerStub.runNativeGoalCommand).toHaveBeenCalledWith(`mcode-${thread.id}`, "/goal"));
+  });
+
   it("post-turn native refresh does not enqueue /goal if a new turn starts after reading the cache", async () => {
     const { svc: _svc, goals, providerStub } = buildService(database);
     const activeGoal: GoalState = {
