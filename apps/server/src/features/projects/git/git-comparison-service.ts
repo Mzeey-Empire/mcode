@@ -348,13 +348,14 @@ export class GitComparisonService {
       if (!base) return { ok: true, commits: [], matchCount: 0, totalCount: 0 };
       const range = `${base}..HEAD`;
       const [log, count] = await Promise.all([
-        this.gitExecutor.exec(["-C", cwd, "log", range, "--format=%H%x00%h%x00%s%x00%aI", "--"], { timeout: 10_000 }),
+        this.gitExecutor.exec(["-C", cwd, "log", range, "--format=%H%x00%h%x00%s%x00%at", "--"], { timeout: 10_000 }),
         this.gitExecutor.exec(["-C", cwd, "rev-list", "--count", range, "--"], { timeout: 10_000 }),
       ]);
       const query = (params.query ?? "").toLowerCase();
       const commits = log.stdout.trimEnd().split("\n").filter(Boolean).map((line) => {
-        const [sha = "", shortSha = "", subject = "", date = ""] = line.replace(/\r$/, "").split("\0");
-        return { sha, shortSha, subject, date };
+        const [sha = "", shortSha = "", subject = "", authoredAt = ""] = line.replace(/\r$/, "").split("\0");
+        // %aI prints UTC as "+00:00" or "Z" depending on the git version; epoch seconds read the same everywhere.
+        return { sha, shortSha, subject, date: new Date(Number(authoredAt) * 1000).toISOString() };
       }).filter((commit) => commit.subject.toLowerCase().includes(query) || commit.sha.toLowerCase().startsWith(query));
       return {
         ok: true,

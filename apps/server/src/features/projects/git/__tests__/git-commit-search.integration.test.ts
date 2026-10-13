@@ -91,7 +91,7 @@ describe("commit search across the full ahead-of-base range", { timeout: 30_000 
     const result = await search(sha.slice(0, 12).toUpperCase());
     expect(result).toEqual({ ok: true, commits: [{
       sha, shortSha: git(["rev-parse", "--short", sha]), subject: "Delete item 1",
-      date: "2023-11-14T22:13:21+00:00",
+      date: "2023-11-14T22:13:21.000Z",
     }], matchCount: 1, totalCount: 300 });
   });
 
