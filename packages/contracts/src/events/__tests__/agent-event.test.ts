@@ -1,5 +1,40 @@
 import { describe, it, expect } from "vitest";
 import { AgentEventSchema, AgentEventType } from "../agent-event.js";
+import { ProviderRuntimeEventSchema } from "../provider-runtime-event.js";
+
+describe("child-thread runtime boundary", () => {
+  const extension = { providerId: "copilot", kind: "child-thread",
+    childThread: { role: "child", path: ["task-1"], nativeItemId: "message-1" } };
+  const event = { type: "textDelta", threadId: "parent", delta: "private child text" };
+
+  it("preserves private routing evidence outside the renderer event", () => {
+    expect(ProviderRuntimeEventSchema().parse({ event, extension })).toEqual({ event, extension });
+    expect(AgentEventSchema().safeParse({ ...event, childThread: extension.childThread }).success).toBe(false);
+  });
+
+  it("rejects child text without identity and invalid ancestry", () => {
+    for (const childThread of [
+      { role: "child", path: ["task-1"] },
+      { ...extension.childThread, path: [] },
+      { ...extension.childThread, path: Array(9).fill("task-1") },
+    ]) {
+      expect(ProviderRuntimeEventSchema().safeParse({ event, extension: { ...extension, childThread } }).success).toBe(false);
+    }
+  });
+
+  it("requires a delegate to match its Agent tool and rejects nested-step evidence", () => {
+    const delegate = { ...extension, childThread: { role: "delegate", path: ["task-1"], prompt: "Investigate" } };
+    const tool = { type: "toolUse", threadId: "parent", toolName: "Agent", toolCallId: "task-1", toolInput: {} };
+    expect(ProviderRuntimeEventSchema().parse({ event: tool, extension: delegate })).toEqual({ event: tool, extension: delegate });
+    for (const invalid of [{ ...tool, toolCallId: "other" }, { ...tool, toolName: "Read" }, event]) {
+      expect(ProviderRuntimeEventSchema().safeParse({ event: invalid, extension: delegate }).success).toBe(false);
+    }
+    expect(ProviderRuntimeEventSchema().safeParse({ event: { ...tool, parentToolCallId: "outer" }, extension }).success).toBe(false);
+    expect(ProviderRuntimeEventSchema().safeParse({ event: tool,
+      extension: { ...extension, childThread: { ...extension.childThread, final: true } } }).success).toBe(false);
+    expect(ProviderRuntimeEventSchema().safeParse({ event: { type: "reasoningDelta", threadId: "parent", delta: "hidden" }, extension }).success).toBe(false);
+  });
+});
 
 describe("AgentEvent provider_unavailable", () => {
   it("preserves a bounded durable publication identity", () => {

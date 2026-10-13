@@ -1,9 +1,11 @@
+import "reflect-metadata";
 import { describe, expect, it } from "vitest";
 import { AgentEventSchema, type AgentEvent, type ProviderRuntimeEvent } from "@mcode/contracts";
 import type { ProviderEventDraft } from "@mcode/providers";
 import { CodexEventMapper } from "../../../../../../../packages/providers/src/private/codex/codex-event-mapper.js";
 import { CodexLiveEventReducer } from "../codex-live-event-reducer.js";
 import { ProviderExecutionEventState } from "../provider-execution-event-state.js";
+import { writerOwnedProviderExtension } from "../../orchestration/turn-runtime-controller.js";
 
 const execution = {
   threadId: "test-thread",
@@ -25,14 +27,14 @@ function reduceEvent(reducer: CodexLiveEventReducer, type: AgentEvent["type"], f
   return reduction;
 }
 
-function runtimeDraft(input: AgentEvent, sequence: number, planCapture?: ProviderRuntimeEvent["planCapture"]): ProviderEventDraft {
+function runtimeDraft(input: AgentEvent, sequence: number, planCapture?: ProviderRuntimeEvent["planCapture"], extension?: ProviderRuntimeEvent["extension"]): ProviderEventDraft {
   const timestamp = "2026-09-30T10:00:00.000Z";
   const itemId = `runtime:${sequence}`;
   return { eventId: `provider:${sequence}`, routing: { ...execution, itemId },
     sourceProviderId: "codex", sourceIdentities: [], sourceSequence: sequence,
     payload: { type: "item.recorded", item: {
       id: itemId, threadId: execution.threadId, turnId: execution.turnId,
-      kind: "system", providerIdentities: [], payload: { projection: "providerRuntimeEvent", runtimeEvent: { event: input, ...(planCapture ? { planCapture } : {}) } },
+      kind: "system", providerIdentities: [], payload: { projection: "providerRuntimeEvent", runtimeEvent: { event: input, ...(extension ? { extension } : {}), ...(planCapture ? { planCapture } : {}) } },
       createdAt: timestamp, updatedAt: timestamp,
     } } };
 }
@@ -43,6 +45,30 @@ function prepareCandidate(accepted: ProviderExecutionEventState, input: AgentEve
   if (prepared.kind !== "parent") throw new Error(`Expected parent preparation, received ${prepared.kind}`);
   return { candidate, prepared: prepared.prepared };
 }
+
+describe("ProviderExecutionEventState child routing", () => {
+  it("keeps child completion out of parent effects while retaining its delegate card", () => {
+    const state = new ProviderExecutionEventState("copilot", execution, { precedingMessageId: "user", planFeature: "none" });
+    state.startFromAdmission();
+    const child = runtimeDraft(event("turnComplete", { reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 }), 1,
+      undefined, { providerId: "copilot", kind: "child-thread", childThread: { role: "child", path: ["task"] } });
+    expect(state.prepare([{ ...child, sourceProviderId: "copilot" }])).toEqual({ kind: "writer-owned" });
+    const delegate = runtimeDraft(event("toolUse", { toolName: "Agent", toolCallId: "task", toolInput: { description: "Explore" } }), 2,
+      undefined, { providerId: "copilot", kind: "child-thread", childThread: { role: "delegate", path: ["task"], prompt: "Explore" } });
+    const result = state.prepare([{ ...delegate, sourceProviderId: "copilot" }]);
+    expect(result).toMatchObject({ kind: "parent", prepared: { publication: { event: { type: "toolUse", toolCallId: "task" } } } });
+  });
+});
+
+describe("writerOwnedProviderExtension", () => {
+  it("excludes child terminals from parent detection while leaving delegates visible", () => {
+    expect(writerOwnedProviderExtension({ providerId: "copilot", kind: "child-thread",
+      childThread: { role: "child", path: ["task"] } })).toBe(true);
+    expect(writerOwnedProviderExtension({ providerId: "copilot", kind: "child-thread",
+      childThread: { role: "delegate", path: ["task"], prompt: "Explore" } })).toBe(false);
+    expect(writerOwnedProviderExtension(undefined)).toBe(false);
+  });
+});
 
 describe("CodexLiveEventReducer", () => {
   it.each(["boundary", "tool", "text-item"])("settles a closing plan fence before the next %s", (boundary) => {

@@ -433,7 +433,7 @@ export type AgentEvent = z.infer<ReturnType<typeof AgentEventSchema>>;
 
 function rejectProviderRuntimeFields(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  for (const field of ["codexChild", "codexContinuation", "providerRuntimeExtension"] as const) {
+  for (const field of ["codexChild", "codexContinuation", "childThread", "providerRuntimeExtension"] as const) {
     if (field in value) {
       return undefined;
     }
