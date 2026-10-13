@@ -342,13 +342,15 @@ describe("PlanPanel", () => {
       expect(interactionMode(thread)).toBe("plan");
     });
 
-    it("resends the same request once after the connection drops mid-request", async () => {
+    it("resends the same request after each connection drop until one answers", async () => {
       const thread = "thread-implement-reconnect";
       startInPlan(thread, [makePlan(2, { id: READY_ID })]);
-      implementPlan.mockImplementationOnce(async () => {
+      const dropConnection = async () => {
         useConnectionStore.setState({ status: "reconnecting" });
-        throw new Error("WebSocket closed");
-      });
+        throw new Error("WebSocket disconnected");
+      };
+      implementPlan.mockImplementationOnce(dropConnection);
+      implementPlan.mockImplementationOnce(dropConnection);
       implementPlan.mockImplementationOnce(async (request) => receiptFor(request));
       render(<PlanPanel threadId={thread} />);
 
@@ -357,10 +359,25 @@ describe("PlanPanel", () => {
       expect(interactionMode(thread)).toBe("plan");
 
       act(() => useConnectionStore.setState({ status: "connected" }));
-
       await waitFor(() => expect(implementPlan).toHaveBeenCalledTimes(2));
-      expect(implementPlan.mock.calls[1][0]).toEqual(implementPlan.mock.calls[0][0]);
+      act(() => useConnectionStore.setState({ status: "connected" }));
+
+      await waitFor(() => expect(implementPlan).toHaveBeenCalledTimes(3));
+      expect(implementPlan.mock.calls[2][0]).toEqual(implementPlan.mock.calls[0][0]);
       await waitFor(() => expect(interactionMode(thread)).toBe("build"));
+      expect(screen.queryByTestId("plan-implement-notice")).toBeNull();
+    });
+
+    it("reports a closed transport as interrupted without resending", async () => {
+      const thread = "thread-implement-closed";
+      startInPlan(thread, [makePlan(2, { id: READY_ID })]);
+      implementPlan.mockRejectedValueOnce(new Error("Transport closed"));
+      render(<PlanPanel threadId={thread} />);
+
+      await pressImplement("Implement v2");
+
+      expect(await screen.findByTestId("plan-implement-notice")).toHaveTextContent(IMPLEMENT_FAILED_NOTICE);
+      expect(implementPlan).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -99,15 +99,22 @@ function mirrorAdmittedBuildMode(threadId: string): void {
   useThreadStore.getState().applyPersistedThreadSettings(threadId, { interactionMode: INTERACTION_MODES.BUILD });
 }
 
+function isConnectionDrop(error: unknown): boolean {
+  return error instanceof Error && !(error instanceof RpcError) && error.message === "WebSocket disconnected";
+}
+
+// A dropped socket leaves the outcome unknown, and the server admits a
+// requestId at most once, so the same request is resent until one answers.
 async function sendImplementWithReplay(request: PlanImplement): Promise<ImplementOutcome> {
-  const send = () => getTransport().implementPlan(request).then((): ImplementOutcome => ({ kind: "admitted" }));
-  try {
-    return await send();
-  } catch (error) {
-    if (error instanceof RpcError) return classifyImplementFailure(error);
+  while (true) {
+    try {
+      await getTransport().implementPlan(request);
+      return { kind: "admitted" };
+    } catch (error) {
+      if (!isConnectionDrop(error)) return classifyImplementFailure(error);
+    }
+    await untilConnected();
   }
-  await untilConnected();
-  return send().catch(classifyImplementFailure);
 }
 
 /**
