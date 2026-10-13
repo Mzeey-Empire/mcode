@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { and, eq, gt, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import * as NodeFSPromises from "node:fs/promises";
+import type { TurnRuntimeSnapshot } from "@mcode/contracts";
 import { canonicalAgentTurns, threads, threadStartups, turnSnapshots } from "../../../../runtime/persistence/sqlite/schema.js";
 import { attributedWorkspacePaths } from "../snapshots/snapshot-attribution.js";
 import { resolveSnapshotCwd } from "../snapshots/resolve-snapshot-cwd.js";
@@ -9,9 +10,14 @@ import type { SnapshotRouterDeps } from "../transport/snapshot-rpc.js";
 import type { ReadyRevertRange } from "./turn-revert-preview.js";
 import { ReviewWorktreeMissingError } from "../../git/review-comparison-errors.js";
 
+type RuntimePhase = Pick<TurnRuntimeSnapshot, "threadId" | "phase">;
+
 /** Resolve active turns and later attribution across every thread sharing this checkout. */
-export function turnRevertContext(db: Database, deps: SnapshotRouterDeps, runtimeBusy: (threadId: string) => boolean) {
+export function turnRevertContext(db: Database, deps: SnapshotRouterDeps, runtimeSnapshots: () => readonly RuntimePhase[]) {
   const orm = drizzle(db);
+  // The runtime keeps a finished turn's terminal phase for minutes, so only these phases still write files.
+  const runtimeBusy = (threadId: string) => runtimeSnapshots()
+    .some((snapshot) => snapshot.threadId === threadId && (snapshot.phase === "running" || snapshot.phase === "finalizing"));
   const resolveCwd = (threadId: string, worktreePath?: string | null) => resolveSnapshotCwd(deps, { thread_id: threadId, worktree_path: worktreePath ?? null });
   async function sameCwd(threadId: string, cwd: string, worktreePath?: string | null) {
     try { return await NodeFSPromises.realpath(resolveCwd(threadId, worktreePath)) === await NodeFSPromises.realpath(cwd); }

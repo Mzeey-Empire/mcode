@@ -706,7 +706,7 @@ const turnRevertService = new TurnRevertService({
   writer: databaseWriter, lock: container.resolve(RepositoryGitMutationLock), storeId: container.resolve<StoreId>(SNAPSHOT_STORE_ID),
   ...turnRevertContext(db, { turnSnapshotRepo, turnSnapshotRanges: container.resolve(TurnSnapshotRangeReader),
     snapshotService, threadService, workspaceService, gitWorktrees, sweepSnapshotPins },
-  (threadId) => agentRuntimeCommands.runtimeSnapshots().some((snapshot) => snapshot.threadId === threadId && snapshot.phase !== "idle")),
+  () => agentRuntimeCommands.runtimeSnapshots()),
   publish: ({ revert, receipt }) => {
     broadcast("turn.reverted", { threadId: revert.threadId, revert, receipt });
     broadcast("turn.diffChanged", { threadId: revert.threadId });
