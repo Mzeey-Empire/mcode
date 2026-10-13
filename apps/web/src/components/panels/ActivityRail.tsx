@@ -95,8 +95,9 @@ function getPointerReorderDirection(
   item: HTMLDivElement,
   pointerY: number,
 ): -1 | 1 | null {
+  // The store moves tools past the whole subagent group, so measure only neighbors in the item's own lane.
   const siblings = Array.from(
-    item.parentElement?.querySelectorAll<HTMLElement>(":scope > [data-rail-instance]") ?? [],
+    item.parentElement?.querySelectorAll<HTMLElement>(`:scope > [data-rail-lane="${item.dataset.railLane}"]`) ?? [],
   );
   const index = siblings.indexOf(item);
   const previous = siblings[index - 1];
@@ -111,10 +112,12 @@ function getPointerReorderDirection(
 /** Pointer and keyboard reorder boundary for one top-level rail instance. */
 function ReorderableRailItem({
   instanceId,
+  lane,
   children,
   onReorder,
 }: {
   instanceId: string;
+  lane: "tool" | "subagent";
   children: ReactNode;
   onReorder: (instanceId: string, direction: -1 | 1) => void;
 }) {
@@ -166,6 +169,7 @@ function ReorderableRailItem({
   return (
     <div
       data-rail-instance={instanceId}
+      data-rail-lane={lane}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -582,7 +586,7 @@ function RailTabInstances({
   return tabInstances.map((instance) => (
     <Fragment key={instance.id}>
       {instance.id === firstSubagentId && <RailDivider />}
-      <ReorderableRailItem instanceId={instance.id} onReorder={onReorder}>
+      <ReorderableRailItem instanceId={instance.id} lane={isSubagentTabInstance(instance) ? "subagent" : "tool"} onReorder={onReorder}>
         {isSubagentTabInstance(instance) ? (
           <RailSubagentTab
             entryId={instance.entryId}
