@@ -21,7 +21,7 @@ function sessionDescription(updates: PermissionUpdate[] | undefined): string | u
   if (!updates?.length) return undefined;
   const descriptions: string[] = [];
   for (const update of updates) {
-    const description = updateDescription(update);
+    const description = sessionScopedUpdateDescription(update);
     if (!description) return undefined;
     descriptions.push(description);
   }
@@ -29,7 +29,7 @@ function sessionDescription(updates: PermissionUpdate[] | undefined): string | u
   return description.length <= 500 ? description : undefined;
 }
 
-function updateDescription(update: PermissionUpdate): string | undefined {
+function sessionScopedUpdateDescription(update: PermissionUpdate): string | undefined {
   switch (update.type) {
     case "addRules":
     case "replaceRules":
@@ -40,7 +40,6 @@ function updateDescription(update: PermissionUpdate): string | undefined {
     case "removeDirectories":
       return update.directories.length ? `Remove accessible directories: ${update.directories.join(", ")}` : undefined;
     case "setMode":
-      // A mode switch changes policy beyond the named tool or resource scope.
       return undefined;
     default: {
       const unhandled: never = update;
