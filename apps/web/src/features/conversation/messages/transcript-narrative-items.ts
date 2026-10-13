@@ -1,5 +1,6 @@
 import type { Message, ToolCall } from "@/transport/types";
 import { buildNarrativeItems } from "../narrative/build-narrative";
+import { deliveredDenyNote } from "../narrative/ApprovalReceiptRow";
 import { buildPersistedNarrativeItems } from "../narrative/build-persisted-narrative";
 import type { NarrativeItem } from "../narrative/types";
 import { rendersAsSingleCallRow } from "../narrative/ToolSummaryLine";
@@ -44,6 +45,17 @@ export interface TranscriptFoldNoteItem {
   readonly text: string;
 }
 
+/**
+ * A deny note the agent received, shown after a closed work fold. The user said it to the agent
+ * mid-turn, so it stays in the conversation like a steered message; an open fold shows it on its receipt.
+ */
+export interface TranscriptDenyNoteItem {
+  readonly type: "deny-note";
+  readonly key: string;
+  readonly messageId: string;
+  readonly text: string;
+}
+
 function callDisclosureKey(call: ToolCall): string {
   return `tool-call:${call.id}`;
 }
@@ -78,10 +90,10 @@ export function isTranscriptGroupOpen(row: TranscriptNarrativeItem | TranscriptT
 
 /** Inserts open group children into the existing viewport, without another scroll owner. */
 export function expandTranscriptToolGroups(
-  items: readonly (ChatVirtualItem | TranscriptNarrativeItem | TranscriptFoldNoteItem)[],
+  items: readonly ExpandedTranscriptItem[],
   expandedGroups: ReadonlySet<string>,
-): (ChatVirtualItem | TranscriptNarrativeItem | TranscriptFoldNoteItem | TranscriptToolItem)[] {
-  return items.flatMap((row): (ChatVirtualItem | TranscriptNarrativeItem | TranscriptFoldNoteItem | TranscriptToolItem)[] => {
+): (ExpandedTranscriptItem | TranscriptToolItem)[] {
+  return items.flatMap((row): (ExpandedTranscriptItem | TranscriptToolItem)[] => {
     if (row.type !== "narrative-row" || row.item.type !== "tool-group" || !isTranscriptGroupOpen(row, expandedGroups)) return [row];
     const calls = row.item.group.calls;
     if (rendersAsSingleCallRow(calls)) return [row];
@@ -158,7 +170,7 @@ function narrativeRows(
   });
 }
 
-type ExpandedTranscriptItem = ChatVirtualItem | TranscriptNarrativeItem | TranscriptFoldNoteItem;
+type ExpandedTranscriptItem = ChatVirtualItem | TranscriptNarrativeItem | TranscriptFoldNoteItem | TranscriptDenyNoteItem;
 type WorkFoldVirtualItem = Extract<ChatVirtualItem, { type: "work-fold" }>;
 type NarrativeFlowVirtualItem = Extract<ChatVirtualItem, { type: "narrative-flow" }>;
 
@@ -212,7 +224,21 @@ function expandItem(
 ): ExpandedTranscriptItem[] {
   if (item.type === "narrative-flow") return liveNarrativeRows(item, context.livePrefix, context.transitions);
   if (item.type !== "work-fold") return [item];
-  return context.expandedFolds.has(item.key) ? [item, ...foldChildren(item, live, context)] : [item];
+  return context.expandedFolds.has(item.key) ? [item, ...foldChildren(item, live, context)] : [item, ...denyNotes(item, live, context)];
+}
+
+function denyNotes(
+  fold: WorkFoldVirtualItem,
+  live: NarrativeFlowVirtualItem | undefined,
+  context: ExpansionContext,
+): TranscriptDenyNoteItem[] {
+  const outcomes = live?.approvals.length
+    ? live.approvals.map((receipt) => ({ requestId: receipt.requestId, outcome: receipt.outcome }))
+    : (context.recordsByMessage[fold.messageId]?.approvals ?? []).map((record) => ({ requestId: record.id, outcome: record.outcome }));
+  return outcomes.flatMap(({ requestId, outcome }) => {
+    const text = deliveredDenyNote(outcome);
+    return text ? [{ type: "deny-note", key: `${fold.key}:deny-note:${requestId}`, messageId: fold.messageId, text }] : [];
+  });
 }
 
 function foldChildren(

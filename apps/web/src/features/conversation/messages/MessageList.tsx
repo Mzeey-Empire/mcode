@@ -17,6 +17,7 @@ import { findSelectedTextCommentContent, reconstructCanonicalMessageRange } from
 import { isMessageListPerformanceBuild, measureMessageListPerformance } from "@/performance/message-list-performance";
 import { TranscriptItemRenderer } from "./timeline/TranscriptItemRenderer";
 import { WorkFoldNote } from "../turn/WorkFold";
+import { DenyNoteBubble } from "../narrative/ApprovalReceiptRow";
 import { MessageListOverlays } from "./MessageListOverlays";
 import type { SelectedTextCommentEditorScope } from "./selection/SelectedTextCommentControls";
 import { findViewportMessageAnchor } from "./message-list-scroll";
@@ -309,6 +310,7 @@ function isCallExpanded(item: TranscriptNarrativeItem | TranscriptToolItem, expa
 const ROW_PADDING_BY_TYPE: Partial<Record<MessageListItem["type"], string>> = {
   "work-fold": "pt-2 pb-1",
   "fold-note": "pb-3",
+  "deny-note": "pb-2",
   "turn-meta-line": "pt-1 pb-2",
 };
 
@@ -546,6 +548,8 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
                 <div data-testid="message-list-leading-content">{item.content}</div>
               ) : item.type === "fold-note" ? (
                 <WorkFoldNote text={item.text} />
+              ) : item.type === "deny-note" ? (
+                <DenyNoteBubble note={item.text} />
               ) : item.type === "narrative-row" || item.type === "tool-row" ? (
                 <TranscriptNarrativeRow row={item} threadId={data.renderedThreadId} expanded={isTranscriptGroupOpen(item, expandedGroups)} callExpanded={isCallExpanded(item, expandedGroups)} entering={enteringGroups.has(transcriptGroupKey(item))} onToggle={toggleGroup} onSubagentSelect={props.onSubagentSelect} onOpenSubagents={props.onOpenSubagents} />
               ) : (

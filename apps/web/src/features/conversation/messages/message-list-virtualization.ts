@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import type { NarrativeItem } from "../narrative/types";
 import type { ChatVirtualItem } from "./virtual-items";
-import type { TranscriptFoldNoteItem, TranscriptNarrativeItem, TranscriptToolItem } from "./transcript-narrative-items";
+import type { TranscriptDenyNoteItem, TranscriptFoldNoteItem, TranscriptNarrativeItem, TranscriptToolItem } from "./transcript-narrative-items";
 
 /** A transcript row rendered before the persisted conversation items. */
-export type MessageListItem = ChatVirtualItem | TranscriptNarrativeItem | TranscriptToolItem | TranscriptFoldNoteItem | {
+export type MessageListItem = ChatVirtualItem | TranscriptNarrativeItem | TranscriptToolItem | TranscriptFoldNoteItem | TranscriptDenyNoteItem | {
   readonly key: "leading-content";
   readonly type: "leading-content";
   readonly content: ReactNode;
@@ -42,6 +42,7 @@ const NARRATIVE_ROW_HEIGHT_BY_ITEM_TYPE: Partial<Record<NarrativeItem["type"], n
 export function estimateMessageListItemHeight(item: MessageListItem): number {
   if (item.type === "tool-row") return 32;
   if (item.type === "fold-note") return 20;
+  if (item.type === "deny-note") return 44;
   if (item.type === "narrative-row") return NARRATIVE_ROW_HEIGHT_BY_ITEM_TYPE[item.item.type] ?? 32;
   return item.type === "leading-content" || item.type === "after-first-user-content"
     ? DEFAULT_MESSAGE_LIST_ITEM_HEIGHT

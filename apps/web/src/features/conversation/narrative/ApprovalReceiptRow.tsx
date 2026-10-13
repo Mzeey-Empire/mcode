@@ -56,9 +56,10 @@ export function deliveredDenyNote(outcome: ApprovalOutcome): string | undefined 
   return outcome.noteDelivery === "native" || outcome.noteDelivery === "steer" ? outcome.note : undefined;
 }
 
-function DenyNoteBubble({ note }: { note: string }) {
+/** A delivered deny note, drawn as the user's own message. */
+export function DenyNoteBubble({ note }: { note: string }) {
   return (
-    <div className="flex justify-end">
+    <div className="flex justify-end pt-3">
       <p className="min-w-0 max-w-[min(82%,56rem)] overflow-hidden break-words whitespace-pre-wrap rounded-lg rounded-br-md bg-selected px-3 py-1.5 text-sm leading-relaxed text-ink">
         {note}
       </p>

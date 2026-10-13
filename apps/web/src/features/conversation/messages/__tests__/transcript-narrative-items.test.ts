@@ -199,6 +199,32 @@ describe("transcript narrative rows", () => {
     expect(open.map(rowLabel)).toEqual(["work-fold", "approval", "message"]);
   });
 
+  it("keeps a delivered deny note in view while its fold is closed, and shows it once when open", () => {
+    const denied = (requestId: string, noteDelivery: "native" | "next_turn") => ({
+      requestId, subjectLabel: "rm -rf build", decidedAt: 1200,
+      outcome: { status: "denied" as const, choiceLabel: "Deny", note: `Note ${requestId}`, noteDelivery },
+    });
+    const turn = { threadId: "thread", executionId: "execution", messageId: "answer" };
+    const projected = createTranscriptItemProjector()({
+      messages: [message("answer", "Done", "execution")], currentTurn: turn,
+      agentDisplayState: { phase: "completed" }, agentStartTime: 1000, streamingText: undefined, toolCalls: [],
+      approvals: [denied("req-1", "native"), denied("req-2", "next_turn")],
+      committedAssistantBody: "Done",
+    });
+    const records: Record<string, PersistedNarrativeRecords> = { answer: { tools: [], thoughts: [], hooks: [], approvals: [{
+      id: "req-1", message_id: "answer", tool_call_id: null, kind: "command", subject_label: "rm -rf build",
+      outcome: denied("req-1", "native").outcome, origin: null, decided_at: new Date(1200).toISOString(), sort_order: 0,
+    }] } };
+    const saved: ChatVirtualItem[] = [fold("work-fold:answer", "answer", "Done"), { type: "message", key: "answer", message: message("answer", "Done") }];
+
+    const closed = expandTranscriptNarrative(projected, {}, new Set(), turn);
+    expect(closed.map(rowLabel)).toEqual(["work-fold", "deny-note", "message"]);
+    expect(closed.flatMap((row) => row.type === "deny-note" ? [row.text] : [])).toEqual(["Note req-1"]);
+    expect(expandTranscriptNarrative(projected, {}, new Set(["work-fold:answer"]), turn).map(rowLabel))
+      .toEqual(["work-fold", "approval", "approval", "message"]);
+    expect(expandTranscriptNarrative(saved, records, new Set()).map(rowLabel)).toEqual(["work-fold", "deny-note", "message"]);
+  });
+
   it("bounds persisted narrative expansion for very large saved tool histories", () => {
     const records: NonNullable<PersistedNarrativeRecords> = {
       approvals: [], hooks: [],
