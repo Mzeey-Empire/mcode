@@ -44,7 +44,6 @@ interface SettledComparison {
   readonly turnMessageId: string | null;
   /** The seen baseline a Since you looked comparison loaded after, which names its patches. */
   readonly afterSequence?: number;
-  /** Whether the comparison was read with whitespace changes hidden; its patches must match. */
   readonly ignoreWhitespace: boolean;
 }
 
@@ -343,7 +342,6 @@ function useDiffPanelStore(): DiffPanelStore {
     diffRevision,
     diffScopeId,
     filesVisible,
-    // The preference is per thread, so threadless git views always show whitespace.
     ignoreWhitespace: useDiffStore((state) =>
       activeThreadId ? state.getIgnoreWhitespace(activeThreadId) : false,
     ),

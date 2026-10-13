@@ -221,12 +221,11 @@ function statusOf(
   return (fileDiff?.hunks.length ?? 0) === 0 ? "empty" : undefined;
 }
 
-/** Props for the Review comparison diff surface. */
-/** Hidden-whitespace patches differ from full ones for the same comparison, so they cache apart. */
 function patchCacheVersion(comparisonVersion: string | number, ignoreWhitespace: boolean | undefined): string | number {
   return ignoreWhitespace ? `${comparisonVersion}:ignore-whitespace` : comparisonVersion;
 }
 
+/** Props for the Review comparison diff surface. */
 interface ReviewDiffViewProps {
   readonly files: ReviewFileChange[];
   readonly source: DiffSource;

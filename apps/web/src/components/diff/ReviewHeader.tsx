@@ -434,10 +434,6 @@ function WrapToggle() {
   );
 }
 
-/**
- * Whitespace hiding re-reads Git with `-w`. Agent patches are recorded text with
- * no Git read behind them, so the flag cannot change them.
- */
 function whitespaceUnavailableReason(threadId: string | null, comparison: ReviewComparison | null): string | null {
   if (!threadId) return "Open a thread to hide whitespace changes";
   const source = comparison?.turnDiff?.source;
@@ -459,11 +455,8 @@ function WhitespaceToggle({ comparison }: { readonly comparison: ReviewCompariso
         tooltip={unavailableReason ?? "Hide whitespace changes"}
         aria-describedby={disabled ? reasonId : undefined}
         pressed={ignoreWhitespace && !disabled}
-        // Stay hoverable while disabled so the tooltip can say why. The tooltip
-        // trigger drops Base UI's aria-disabled, so it is set here directly.
         disabled={disabled}
         focusableWhenDisabled
-        aria-disabled={disabled || undefined}
         className="aria-disabled:opacity-50"
         data-testid="review-whitespace-toggle"
         onClick={() => {
