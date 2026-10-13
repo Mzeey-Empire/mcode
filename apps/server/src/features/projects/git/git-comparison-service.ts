@@ -484,8 +484,7 @@ export class GitComparisonService {
   private async resolveForkBase(cwd: string, savedBaseBranch: string | null | undefined): Promise<string | null> {
     if (savedBaseBranch) return this.qualifyComparisonRef(cwd, savedBaseBranch);
     const ref = await this.detectDefaultComparisonRef(cwd);
-    if (ref) assertSafeRef(ref);
-    return ref ?? null;
+    return ref ? this.qualifyComparisonRef(cwd, ref) : null;
   }
 
   private async qualifyComparisonRef(cwd: string, ref: string): Promise<string> {
