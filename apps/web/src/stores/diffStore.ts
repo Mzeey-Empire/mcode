@@ -165,6 +165,8 @@ export type SubagentTabInstance = {
   readonly id: `subagent:${string}`;
   readonly type: "subagent";
   readonly entryId: string;
+  /** Opening sequence; a reorder moves tabs, so position cannot say which is oldest. */
+  readonly openedOrder: number;
 };
 
 /** One rail entry: a tool, or a subagent detail tab grouped after Subagents. */
@@ -191,9 +193,11 @@ export function rightPanelToolInstance(type: RightPanelTool): RightPanelToolInst
   }
 }
 
-/** The rail instance for one subagent's detail tab. */
-export function subagentTabInstance(entryId: string): SubagentTabInstance {
-  return { id: `subagent:${entryId}`, type: "subagent", entryId };
+let lastSubagentTabOrder = 0;
+
+/** The rail instance for one subagent's detail tab, ordered after every tab opened before it. */
+export function subagentTabInstance(entryId: string, openedOrder = ++lastSubagentTabOrder): SubagentTabInstance {
+  return { id: `subagent:${entryId}`, type: "subagent", entryId, openedOrder };
 }
 
 /** Whether a rail entry is a subagent detail tab rather than a tool. */
@@ -258,20 +262,18 @@ function moveTabInstance(
   return arrangeTabInstances([...lane, ...instances.filter((instance) => !inLane(instance))]);
 }
 
-/**
- * Drops subagent tabs from the front of the group (the oldest, since new tabs
- * append) until it fits {@link SUBAGENT_TAB_LIMIT}, sparing `keepIds`.
- */
+/** Drops the earliest-opened subagent tabs until the group fits {@link SUBAGENT_TAB_LIMIT}, sparing `keepIds`. */
 function withinSubagentTabLimit(
   instances: readonly RightPanelTabInstance[],
   keepIds: ReadonlySet<string>,
 ): RightPanelTabInstance[] {
-  let excess = instances.filter(isSubagentTabInstance).length - SUBAGENT_TAB_LIMIT;
-  return instances.filter((instance) => {
-    if (excess <= 0 || !isSubagentTabInstance(instance) || keepIds.has(instance.id)) return true;
-    excess -= 1;
-    return false;
-  });
+  const subagentTabs = instances.filter(isSubagentTabInstance);
+  const dropped = new Set<string>(subagentTabs
+    .filter((tab) => !keepIds.has(tab.id))
+    .sort((left, right) => left.openedOrder - right.openedOrder)
+    .slice(0, Math.max(0, subagentTabs.length - SUBAGENT_TAB_LIMIT))
+    .map((tab) => tab.id));
+  return instances.filter((instance) => !dropped.has(instance.id));
 }
 
 /** Tab instance shape accepted from older in-memory panel records. */
@@ -279,6 +281,7 @@ export type LegacyRightPanelTabInstance = {
   readonly id: string;
   readonly type: string;
   readonly entryId?: string;
+  readonly openedOrder?: number;
 };
 
 /** Shell rail tabs used type `terminal`; Project Action rail tabs used `action-terminal`. */
@@ -328,7 +331,7 @@ function isArranged(instances: readonly RightPanelTabInstance[], activeTabId: st
 
 function canonicalInstance(instance: LegacyRightPanelTabInstance): RightPanelTabInstance | null {
   if (instance.type === "subagent") {
-    return instance.entryId ? subagentTabInstance(instance.entryId) : null;
+    return instance.entryId ? subagentTabInstance(instance.entryId, instance.openedOrder) : null;
   }
   const type = LEGACY_TERMINAL_TYPE.test(instance.type) ? "terminal" : instance.type;
   return isRightPanelTool(type) ? rightPanelToolInstance(type) : null;
@@ -336,7 +339,8 @@ function canonicalInstance(instance: LegacyRightPanelTabInstance): RightPanelTab
 
 function isCanonicalInstance(instance: LegacyRightPanelTabInstance): instance is RightPanelTabInstance {
   if (instance.type === "subagent") {
-    return Boolean(instance.entryId) && instance.id === `subagent:${instance.entryId}`;
+    return Boolean(instance.entryId) && instance.id === `subagent:${instance.entryId}` &&
+      typeof instance.openedOrder === "number";
   }
   return isRightPanelTool(instance.type) && instance.id === rightPanelSingletonId(instance.type);
 }

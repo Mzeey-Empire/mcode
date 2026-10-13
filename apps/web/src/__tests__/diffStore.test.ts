@@ -775,6 +775,25 @@ describe("diffStore", () => {
       ]);
     });
 
+    it("caps by opening order, not rail position, after a reorder", () => {
+      const { openSubagentTab, reorderRightPanelTab } = useDiffStore.getState();
+      for (const entry of ["1", "2", "3", "4", "5", "6", "7", "8"]) openSubagentTab("ws-1", "thread-1", entry);
+      reorderRightPanelTab("ws-1", "thread-1", "subagent:2", -1);
+      openSubagentTab("ws-1", "thread-1", "9");
+
+      expect(ids()).toEqual([
+        "singleton:subagents",
+        "subagent:2",
+        "subagent:3",
+        "subagent:4",
+        "subagent:5",
+        "subagent:6",
+        "subagent:7",
+        "subagent:8",
+        "subagent:9",
+      ]);
+    });
+
     it("closes every subagent tab with the Subagents tool and hides the panel with the last tab", () => {
       const { openSubagentTab, closeRightPanelTabInstance, showRightPanel, getRightPanel, getRightPanelVisible } =
         useDiffStore.getState();
