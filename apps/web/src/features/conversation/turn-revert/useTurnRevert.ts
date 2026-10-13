@@ -5,6 +5,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import { getTransport } from "@/transport";
 import { RpcError } from "@/transport/ws-transport";
 import type { RevertFailure } from "./revert-copy";
+import { announceTurnRevert } from "./TurnRevertAnnouncer";
 
 const MAX_SENDS = 5;
 
@@ -44,11 +45,12 @@ function appendOnceLoaded(threadId: string, receipt: Message): void {
 
 /**
  * Applies a committed revert or undo to this window: the receipt joins the
- * timeline once, and snapshots refetch so `reverted` annotations update. Both
+ * timeline once and is announced, and snapshots refetch so `reverted` annotations update. Both
  * the mutation's own answer and the `turn.reverted` push call this.
  */
 export function acceptTurnRevert({ threadId, receipt }: Pick<TurnRevertedEvent, "threadId" | "receipt">): void {
   appendOnceLoaded(threadId, receipt);
+  announceTurnRevert(threadId, receipt);
   void getTransport()
     .listSnapshots(threadId)
     .then((snapshots) => useDiffStore.getState().setSnapshots(threadId, snapshots))
