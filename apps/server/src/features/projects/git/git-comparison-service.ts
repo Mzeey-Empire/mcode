@@ -206,11 +206,11 @@ export class GitComparisonService {
     try {
       assertReviewWorktree(cwd);
       const suffix = await this.resolveReviewComparisonSuffix(cwd, view, opts);
+      const ignoreWhitespace = opts.ignoreWhitespace ?? false;
       if (!suffix) return { status: "unavailable", reason: await this.hasCommits(cwd) ? "no-base" : "unborn" };
-      if (opts.ignoreWhitespace) suffix.push("-w");
       const comparison = view === "unstaged" || view === "uncommitted"
-        ? await this.withIntentToAddIndex(cwd, (env, untracked) => this.runReviewComparison(cwd, suffix, env, untracked))
-        : await this.readReviewComparisonWithCommitFallback(cwd, view, opts.sha, suffix);
+        ? await this.withIntentToAddIndex(cwd, (env, untracked) => this.runReviewComparison(cwd, suffix, ignoreWhitespace, env, untracked))
+        : await this.readReviewComparisonWithCommitFallback(cwd, view, opts.sha, suffix, ignoreWhitespace);
       return { status: "ready", comparison };
     } catch (error) {
       return reviewComparisonFailure(error);
@@ -342,7 +342,14 @@ export class GitComparisonService {
     return stdout.trim();
   }
 
-  private async runReviewComparison(cwd: string, range: readonly string[], env: NodeJS.ProcessEnv = { GIT_OPTIONAL_LOCKS: "0" }, untracked: ReadonlySet<string> = new Set()): Promise<ReviewComparison> {
+  private async runReviewComparison(
+    cwd: string,
+    comparisonRange: readonly string[],
+    ignoreWhitespace: boolean,
+    env: NodeJS.ProcessEnv = { GIT_OPTIONAL_LOCKS: "0" },
+    untracked: ReadonlySet<string> = new Set(),
+  ): Promise<ReviewComparison> {
+    const range = ignoreWhitespace ? [...comparisonRange, "-w"] : comparisonRange;
     // Both children must settle before the temporary index is removed.
     const results = await Promise.allSettled([
       this.gitExecutor.exec(
@@ -360,7 +367,7 @@ export class GitComparisonService {
     const stats = parsePerFileNumstat(numstat.value.stdout);
     let files: ReviewFileChange[];
     try {
-      files = parseReviewFileChanges(names.value.stdout, parseBinaryPaths(numstat.value.stdout), range.includes("-w") ? stats : undefined)
+      files = parseReviewFileChanges(names.value.stdout, parseBinaryPaths(numstat.value.stdout), ignoreWhitespace ? stats : undefined)
         .map((file) => ({ ...file, ...stats.get(file.path), untracked: untracked.has(file.path) }));
     } catch (error) {
       if (!(error instanceof ReviewComparisonLimitError)) throw error;
@@ -415,9 +422,10 @@ export class GitComparisonService {
     view: ReviewView,
     sha: string | undefined,
     suffix: readonly string[],
+    ignoreWhitespace: boolean,
   ): Promise<ReviewComparison> {
     try {
-      return await this.runReviewComparison(cwd, suffix);
+      return await this.runReviewComparison(cwd, suffix, ignoreWhitespace);
     } catch (error) {
       if (view !== "commit") throw error;
       const failure = reviewComparisonFailure(error);
@@ -425,7 +433,7 @@ export class GitComparisonService {
       assertSafeSha(sha);
       const parents = await this.gitExecutor.exec(["-C", cwd, "rev-list", "--parents", "-n", "1", sha], { timeout: 10_000 });
       if (!/^[a-f0-9]{40}$/.test(parents.stdout.trim())) throw error;
-      return this.runReviewComparison(cwd, [EMPTY_TREE, sha, ...suffix.filter((arg) => arg === "-w")]);
+      return this.runReviewComparison(cwd, [EMPTY_TREE, sha], ignoreWhitespace);
     }
   }
 

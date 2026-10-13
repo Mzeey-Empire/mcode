@@ -128,6 +128,19 @@ function numstatDestinationPath(path: string): string {
   return separatorIndex >= 0 ? path.slice(separatorIndex + 4) : path;
 }
 
+/** Which paths a snapshot diff reads, and whether it hides whitespace changes. */
+export interface SnapshotDiffScope {
+  readonly allowedPaths?: readonly string[];
+  readonly allowedPathGroups?: readonly (readonly string[])[];
+  readonly ignoreWhitespace?: boolean;
+}
+
+/** A snapshot patch read, optionally narrowed to one file and capped in length. */
+export interface SnapshotPatchOptions extends SnapshotDiffScope {
+  readonly filePath?: string;
+  readonly maxLines?: number;
+}
+
 function hasUnsafeDiffRefs(refBefore: string, refAfter: string): boolean {
   return !refBefore || !refAfter || refBefore.startsWith("-") || refAfter.startsWith("-");
 }
@@ -339,7 +352,7 @@ export class SnapshotService {
     cwd: string,
     refBefore: string,
     refAfter: string,
-    options: { filePath?: string; maxLines?: number; allowedPaths?: readonly string[]; allowedPathGroups?: readonly (readonly string[])[]; ignoreWhitespace?: boolean } = {},
+    options: SnapshotPatchOptions = {},
   ): Promise<string> {
     const { filePath, maxLines, allowedPaths, allowedPathGroups, ignoreWhitespace } = options;
     if (hasUnsafeDiffRefs(refBefore, refAfter)) return "";
@@ -432,7 +445,7 @@ export class SnapshotService {
     cwd: string,
     refBefore: string,
     refAfter: string,
-    options: { allowedPaths?: readonly string[]; allowedPathGroups?: readonly (readonly string[])[]; ignoreWhitespace?: boolean } = {},
+    options: SnapshotDiffScope = {},
   ): Promise<DiffStats[]> {
     const { allowedPaths, allowedPathGroups, ignoreWhitespace } = options;
     if (hasUnsafeDiffRefs(refBefore, refAfter) || refBefore === refAfter) return [];
