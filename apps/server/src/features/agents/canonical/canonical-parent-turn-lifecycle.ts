@@ -4,12 +4,12 @@ import { and, eq, inArray, ne } from "drizzle-orm";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
 import { backgroundHeldToolIds, narrativeToolCallLinks } from "../tools/background-held-tools.js";
 import {
+  approvalNotes,
   canonicalAgentIngestCheckpoints,
   messages,
 } from "../../../runtime/persistence/sqlite/schema.js";
 import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts";
 import { TurnRecoveryError } from "../recovery/turn-recovery-error.js";
-import { approvalNotes } from "../../../runtime/persistence/sqlite/schema.js";
 import { ApprovalNoteAlreadyDeliveredError } from "../approvals/approval-note-repo.js";
 import type {
   AgentThread,

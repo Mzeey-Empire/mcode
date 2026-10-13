@@ -18,6 +18,15 @@ export class ApprovalNoteAlreadyDeliveredError extends Error implements Approval
   }
 }
 
+/**
+ * True for a refused note claim. The turn-admission claim runs on the database writer, which
+ * rebuilds a thrown error as a plain `Error` carrying only its `code`, so the class alone misses it.
+ */
+export function isApprovalNoteAlreadyDelivered(error: unknown): boolean {
+  if (error instanceof ApprovalNoteAlreadyDeliveredError) return true;
+  return error instanceof Error && "code" in error && error.code === "note_already_delivered";
+}
+
 const deliverySchema = z.enum(["native", "steer", "next_turn"]);
 const heldStateSchema = z.enum(["queued", "delivery_unknown"]);
 const intentSchema = z.object({ requestId: z.string(), threadId: z.string(), note: z.string(), delivery: deliverySchema });
@@ -46,24 +55,45 @@ export function approvalNoteWriteHandlers(db: Database): ReadonlyMap<string, (in
       orm.insert(approvalNotes).values({ ...input, state: "pending" }).onConflictDoNothing().run();
     })],
     [recover.name, databaseWriteHandler(recover, (requestId) => {
-      orm.update(approvalNotes).set({
-        state: sql`CASE WHEN ${approvalNotes.delivery} = 'next_turn' THEN 'queued' ELSE 'delivery_unknown' END`,
-        updatedAt: new Date().toISOString(),
-      }).where(and(eq(approvalNotes.state, "pending"), requestId === undefined ? undefined : eq(approvalNotes.requestId, requestId))).run();
+      // A next_turn note never reaches the provider during the answer, so it is safe to queue.
+      // A native or steer note may have reached the provider before the attempt ended, so it is
+      // held as delivery_unknown until the user decides whether to send it again.
+      const recoveredState = sql`CASE WHEN ${approvalNotes.delivery} = 'next_turn' THEN 'queued' ELSE 'delivery_unknown' END`;
+      const onlyRequest = requestId === undefined ? undefined : eq(approvalNotes.requestId, requestId);
+      orm.update(approvalNotes)
+        .set({ state: recoveredState, updatedAt: new Date().toISOString() })
+        .where(and(eq(approvalNotes.state, "pending"), onlyRequest))
+        .run();
     })],
     [settle.name, databaseWriteHandler(settle, ({ requestId, delivery }) => {
       let state: ApprovalNoteRow["state"] = "delivered";
       if (delivery === "unknown") state = "delivery_unknown";
       if (delivery === "next_turn") state = "queued";
-      orm.update(approvalNotes).set({ state, ...(delivery === "unknown" ? {} : { delivery }), updatedAt: new Date().toISOString() })
-        .where(and(eq(approvalNotes.requestId, requestId), eq(approvalNotes.state, "pending"))).run();
+      const settledDelivery = delivery === "unknown" ? {} : { delivery };
+      orm.update(approvalNotes)
+        .set({ state, ...settledDelivery, updatedAt: new Date().toISOString() })
+        .where(and(eq(approvalNotes.requestId, requestId), eq(approvalNotes.state, "pending")))
+        .run();
     })],
-    [update.name, databaseWriteHandler(update, ({ requestId, note }) => runChanges(orm.update(approvalNotes)
-      .set({ note, updatedAt: new Date().toISOString() }).where(held(requestId))).changes > 0)],
-    [resend.name, databaseWriteHandler(resend, (requestId) => runChanges(orm.update(approvalNotes)
-      .set({ state: "queued", delivery: "next_turn", updatedAt: new Date().toISOString() }).where(held(requestId))).changes > 0)],
-    [remove.name, databaseWriteHandler(remove, (requestId) => runChanges(orm.update(approvalNotes)
-      .set({ state: "removed", updatedAt: new Date().toISOString() }).where(held(requestId))).changes > 0)],
+    [update.name, databaseWriteHandler(update, ({ requestId, note }) => {
+      const updated = orm.update(approvalNotes)
+        .set({ note, updatedAt: new Date().toISOString() })
+        .where(held(requestId));
+      return runChanges(updated).changes > 0;
+    })],
+    [resend.name, databaseWriteHandler(resend, (requestId) => {
+      // A resent note now travels with the next turn, and a replayed answer reports this delivery.
+      const queued = orm.update(approvalNotes)
+        .set({ state: "queued", delivery: "next_turn", updatedAt: new Date().toISOString() })
+        .where(held(requestId));
+      return runChanges(queued).changes > 0;
+    })],
+    [remove.name, databaseWriteHandler(remove, (requestId) => {
+      const removed = orm.update(approvalNotes)
+        .set({ state: "removed", updatedAt: new Date().toISOString() })
+        .where(held(requestId));
+      return runChanges(removed).changes > 0;
+    })],
   ]);
 }
 
