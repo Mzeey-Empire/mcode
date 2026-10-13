@@ -113,7 +113,7 @@ describe("GitRepositoryService.listRefsAt", () => {
       const refs = await routeGitRpc("git.refs.list", { ...params, purpose: "review", side: "local", query: "context" }, deps);
       expect(refs).toMatchObject({ ok: true, items: [{ fullName: "refs/heads/context", isCurrent: true }] });
       expect(await routeGitRpc("git.branchComparison", params, deps)).toMatchObject({
-        base: "origin/main", isComparisonAvailable: true,
+        base: "refs/remotes/origin/main", isComparisonAvailable: true,
       });
       expect(await routeGitRpc("git.log", { ...params, limit: 1 }, deps)).toMatchObject([{ message: "base" }]);
       expect(await routeGitRpc("git.branchDiff", { ...params, base: "main", target: "context" }, deps)).toBe("");
