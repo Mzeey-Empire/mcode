@@ -767,4 +767,15 @@ pre, code {
 [data-separator-content] {
   padding-inline: 10px 12px;
 }
+/* Pierre sizes basic bands to the gutter and the label text; Paper runs them edge to edge.
+   It makes [data-code] a size container only for "line-info", so 100cqi needs this here. */
+[data-code] {
+  container-type: inline-size;
+}
+[data-separator="line-info-basic"] [data-separator-wrapper] {
+  width: 100cqi;
+}
+[data-separator="line-info-basic"][data-expand-index] [data-separator-wrapper] {
+  grid-template-columns: 32px 1fr;
+}
 `;
