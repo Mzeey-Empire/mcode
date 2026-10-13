@@ -495,7 +495,6 @@ export function startPushListeners(): void {
   );
 
   // branch.changed: the composer derives an unpicked branch from these lists, so a refetch also moves that default.
-  // Review's operand lists outlive a closed picker, so a created or switched branch must reach them too.
   unsubs.push(
     pushEmitter.on("branch.changed", (data) => {
       const { workspaceId } = data as { workspaceId: string };

@@ -15,7 +15,6 @@ vi.mock("@/transport", async () => ({
 
 installListboxLayout();
 
-// 412 commits since the fork, newest first. The four "delete" commits all sit past the first page of 100.
 const DELETE_AT = new Set([150, 200, 300, 400]);
 const COMMITS = Array.from({ length: 412 }, (_, index) => {
   const sha = index.toString(16).padStart(4, "0").padEnd(40, "f");

@@ -318,7 +318,6 @@ function useDiffPanelStore(): DiffPanelStore {
     activeThreadId,
     activeThreadClientOnly,
     activeWorkspaceId,
-    // Read for the active scope: while a newly opened scope resolves, the cached default still names the last one.
     branchComparison: useDiffStore((state) =>
       branchScope && state.branchComparisonKey === branchScope ? state.branchComparison : null,
     ),

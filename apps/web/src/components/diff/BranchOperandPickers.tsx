@@ -20,21 +20,14 @@ const SIDE_TABS: readonly PickerTab[] = [
 
 const SIDE_LABEL: Record<GitRefSide, string> = { local: "Local", origin: "Origin" };
 
-/** The tab each operand picker opens on. Base usually names a remote ref and compare a local one. */
 const lastTabBySide: Record<OperandSide, GitRefSide> = { base: "origin", compare: "local" };
 
 const UNAVAILABLE: BranchComparison = { base: null, compare: null, isUnborn: false, isComparisonAvailable: false };
 
-/**
- * Resolves the scope's default Branch comparison (ADR-0028) into the diff store, once per scope and revision. The
- * guard lives in the store so a remount does not refetch.
- */
 function useResolveBranchComparison(workspaceId: string, threadId: string | undefined, diffScopeRevision: number) {
   const key = branchScopeKey(workspaceId, threadId);
-  // Another scope's default must not show while this one resolves.
   const comparison = useDiffStore((s) => (s.branchComparisonKey === key ? s.branchComparison : null));
   const resolveBranchComparison = useDiffStore((s) => s.resolveBranchComparison);
-  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const state = useDiffStore.getState();
@@ -42,31 +35,23 @@ function useResolveBranchComparison(workspaceId: string, threadId: string | unde
       state.branchComparisonKey === key &&
       state.branchComparison &&
       state.branchResolvedRevisionByScope[key] === diffScopeRevision
-    ) {
-      // oxlint-disable-next-line react/set-state-in-effect -- The store cache is the external source of truth for this request lifecycle.
-      setLoading(false);
-      return;
-    }
+    ) return;
     let cancelled = false;
-    // oxlint-disable-next-line react/set-state-in-effect -- Starting the branch-comparison request must synchronize its pending indicator.
-    setLoading(true);
     void getTransport()
       .getBranchComparison(workspaceId, threadId)
       .catch(() => UNAVAILABLE)
       .then((result) => {
         if (cancelled) return;
         resolveBranchComparison(result, key, diffScopeRevision);
-        setLoading(false);
       });
     return () => {
       cancelled = true;
     };
   }, [key, workspaceId, threadId, diffScopeRevision, resolveBranchComparison]);
 
-  return { comparison, loading };
+  return comparison;
 }
 
-/** Props for {@link BranchOperandPickers}. */
 interface BranchOperandPickersProps {
   readonly workspaceId: string;
   readonly threadId?: string;
@@ -80,7 +65,7 @@ interface BranchOperandPickersProps {
  * `${base}...${compare}`.
  */
 export function BranchOperandPickers({ workspaceId, threadId, diffScopeRevision }: BranchOperandPickersProps) {
-  const { comparison, loading } = useResolveBranchComparison(workspaceId, threadId, diffScopeRevision);
+  const comparison = useResolveBranchComparison(workspaceId, threadId, diffScopeRevision);
   const key = branchScopeKey(workspaceId, threadId);
   const selection = useDiffStore((s) => s.branchSelectionByScope[key]);
   const setBranchSelection = useDiffStore((s) => s.setBranchSelection);
@@ -90,12 +75,11 @@ export function BranchOperandPickers({ workspaceId, threadId, diffScopeRevision 
     if (diffScopeRevision > 0) invalidateReviewOperandLists(workspaceId);
   }, [workspaceId, diffScopeRevision]);
 
-  if (loading && !comparison) return <OperandPlaceholder>Resolving</OperandPlaceholder>;
+  if (!comparison) return <OperandPlaceholder>Resolving</OperandPlaceholder>;
   if (comparison?.isUnborn) return <OperandPlaceholder>No commits yet</OperandPlaceholder>;
 
   const sides = branchSelectionFor(comparison, selection);
   const pick = (side: OperandSide, ref: string) => setBranchSelection(key, { ...sides, [side]: ref });
-  // A pick pins the pair, so this is the way back to the default, e.g. a branchless thread's HEAD.
   const reset = selection ? () => clearBranchSelection(key) : undefined;
   return (
     <div className="flex min-w-0 items-center gap-1" data-testid="branch-operand-pickers" role="group" aria-label="Branch comparison">
@@ -116,7 +100,6 @@ interface RefSidePickerProps {
   readonly workspaceId: string;
   readonly threadId: string | undefined;
   readonly onPick: (side: OperandSide, ref: string) => void;
-  /** Restores the default pair; absent while the default shows. */
   readonly onReset: (() => void) | undefined;
 }
 
@@ -178,7 +161,6 @@ interface RefSideListProps {
   readonly onReset: (() => void) | undefined;
 }
 
-/** The open picker body. Mounted only while open, so the query starts empty each time. */
 function RefSideList({ side, value, workspaceId, threadId, onPick, onReset }: RefSideListProps) {
   const [tab, setTab] = useState<GitRefSide>(lastTabBySide[side]);
   const [query, setQuery] = useState("");
@@ -186,7 +168,6 @@ function RefSideList({ side, value, workspaceId, threadId, onPick, onReset }: Re
   const list = useReviewRefs({ workspaceId, threadId, side: tab, query: searched });
   const otherTab: GitRefSide = tab === "local" ? "origin" : "local";
   const empty = list.status.kind === "ready" && list.items.length === 0;
-  // A one-row page of the other tab is enough to learn whether it has matches.
   const other = useReviewRefs(searched !== "" || empty ? { workspaceId, threadId, side: otherTab, query: searched, limit: 1 } : null);
   const otherMatches = other.total ?? 0;
 
@@ -197,7 +178,6 @@ function RefSideList({ side, value, workspaceId, threadId, onPick, onReset }: Re
   };
   const renderRow = (ref: GitRef): PickerRow => ({
     key: ref.fullName,
-    // The tab already says Origin, so only origin drops its prefix; another remote's prefix tells its twins apart.
     name: ref.remote === "origin" ? ref.branchName : ref.shortName,
     mono: true,
   });

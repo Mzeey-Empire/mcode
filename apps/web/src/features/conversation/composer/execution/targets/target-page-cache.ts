@@ -244,6 +244,5 @@ function useShownRowsWhileLoading<T, E>(list: TargetPageList<T, E>, listId: stri
   }, [list, listId, waiting]);
   const previous = shown.current;
   if (!waiting || previous === null || previous.listId !== listId) return list;
-  // The held rows answer the earlier query, so their total would miscount the new one.
   return { ...previous.list, total: null, status: LOADING, loadMore: noop, retry: noop };
 }

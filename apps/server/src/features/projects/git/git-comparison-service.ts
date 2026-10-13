@@ -309,7 +309,7 @@ export class GitComparisonService {
     );
     const status = parseReviewStatus(stdout);
     if (!status.head) return { isGitRepo: true, ...status, commitsAhead: null, branchDefault: { unavailable: "unborn" } };
-    const commitsAhead = await this.resolveCommitViewBase(cwd, savedBaseBranch).then(async (base) => {
+    const commitsAhead = await this.resolveForkBase(cwd, savedBaseBranch).then(async (base) => {
       if (!base) return null;
       const { stdout } = await this.gitExecutor.exec(["-C", cwd, "rev-list", "--count", `${base}..HEAD`], { timeout: 10_000 });
       return { base, count: Number(stdout.trim()) };
@@ -343,7 +343,7 @@ export class GitComparisonService {
   ): Promise<GitSearchCommitsResult> {
     try {
       const cwd = repoPath ?? this.requireWorkspace(params.workspaceId).path;
-      const base = (await this.hasCommits(cwd)) ? await this.resolveCommitViewBase(cwd, savedBaseBranch) : null;
+      const base = (await this.hasCommits(cwd)) ? await this.resolveForkBase(cwd, savedBaseBranch) : null;
       if (!base) return { ok: true, commits: [], matchCount: 0, totalCount: 0 };
       const range = `${base}..HEAD`;
       const [log, count] = await Promise.all([
@@ -480,11 +480,7 @@ export class GitComparisonService {
     });
   }
 
-  /**
-   * The Commit view lists commits since the fork, not the Branch default's range: a pushed branch's unpushed
-   * range is often empty. Branchless threads fork from their saved base (ADR-0015).
-   */
-  private async resolveCommitViewBase(cwd: string, savedBaseBranch: string | null | undefined): Promise<string | null> {
+  private async resolveForkBase(cwd: string, savedBaseBranch: string | null | undefined): Promise<string | null> {
     if (savedBaseBranch) return this.qualifyComparisonRef(cwd, savedBaseBranch);
     const ref = await this.detectDefaultComparisonRef(cwd);
     if (ref) assertSafeRef(ref);

@@ -8,10 +8,8 @@ import { useDebouncedQuery } from "@/features/conversation/composer/execution/ta
 import { useDiffStore } from "@/stores/diffStore";
 import { invalidateReviewOperandLists, pickerStatus, useCommitSearch, type SearchedCommit } from "./review-operand-lists";
 
-/** Paper's commit picker is wider than the 320px panel so subjects have room beside the sha and time. */
 const COMMIT_PANEL_CLASS = "w-[min(92vw,38rem)] p-2";
 
-/** Format an ISO date to a compact relative string. */
 function relativeTime(isoDate: string): string {
   const then = new Date(isoDate).getTime();
   if (!isFinite(then)) return "";
@@ -23,7 +21,6 @@ function relativeTime(isoDate: string): string {
   return new Date(isoDate).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-/** Props for {@link CommitOperandPicker}. */
 interface CommitOperandPickerProps {
   readonly workspaceId: string;
   readonly threadId?: string;
@@ -40,12 +37,10 @@ export function CommitOperandPicker({ workspaceId, threadId, diffScopeRevision }
   const selectedSha = useDiffStore((s) => s.selectedCommitSha);
   const setSelectedSha = useDiffStore((s) => s.setSelectedCommitSha);
   const [open, setOpen] = usePanelHeaderMenuOpen();
-  // A commit found by search can sit past the unfiltered list's loaded pages; keep its row to name it.
   const [picked, setPicked] = useState<SearchedCommit | null>(null);
   const range = useCommitSearch({ workspaceId, threadId, query: "" });
   const latest = range.items[0];
 
-  // The picked sha belongs to the previous scope's checkout; the latest commit of this one replaces it.
   useEffect(() => {
     setSelectedSha(null);
   }, [setSelectedSha]);
@@ -117,12 +112,10 @@ interface CommitListProps {
   readonly workspaceId: string;
   readonly threadId: string | undefined;
   readonly selectedSha: string | null;
-  /** Commits in the whole range, from the unfiltered list. */
   readonly rangeCount: number | null;
   readonly onPick: (commit: SearchedCommit) => void;
 }
 
-/** The open picker body. Mounted only while open, so the query starts empty each time. */
 function CommitList({ workspaceId, threadId, selectedSha, rangeCount, onPick }: CommitListProps) {
   const [query, setQuery] = useState("");
   const searched = useDebouncedQuery(query);
@@ -151,7 +144,6 @@ function CommitList({ workspaceId, threadId, selectedSha, rangeCount, onPick }: 
   );
 }
 
-/** "4 matches in 412 commits" while searching; the range size otherwise. */
 function countLabel(query: string, matches: number | null, rangeCount: number | null): string | undefined {
   if (rangeCount === null) return undefined;
   const commits = `${rangeCount} ${rangeCount === 1 ? "commit" : "commits"}`;

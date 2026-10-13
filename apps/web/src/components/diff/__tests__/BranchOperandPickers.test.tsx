@@ -34,13 +34,11 @@ function ref(fullName: string, overrides: Partial<GitRef> = {}): GitRef {
   };
 }
 
-// As the server sorts them: the default branch, then the thread worktree's branch, then the rest.
 const LOCAL: readonly GitRef[] = [
   ref("refs/heads/main", { isDefault: true }),
   ref("refs/heads/mcode-3f2a", { isCurrent: true, worktree: { path: "C:\\repo\\.worktrees\\mcode-3f2a", folder: "mcode-3f2a" } }),
   ...Array.from({ length: 148 }, (_, index) => ref(`refs/heads/topic-${String(index).padStart(3, "0")}`)),
 ];
-// origin/main has diverged from main, so both are listed and both are pickable. upstream/main is a third "main".
 const ORIGIN: readonly GitRef[] = [
   ref("refs/remotes/origin/main", { isDefault: true, headSha: "b".repeat(40) }),
   ref("refs/remotes/origin/release"),
@@ -118,7 +116,6 @@ function storedOperands() {
 }
 
 describe("BranchOperandPickers", () => {
-  // Runs first: the tab each side opens on is remembered for the session.
   it("opens base on Origin and compare on Local", async () => {
     await renderPickers();
     await open("base");
@@ -187,7 +184,6 @@ describe("BranchOperandPickers", () => {
     expect(within(alert).getByText("Couldn't load the list")).toBeInTheDocument();
     expect(within(alert).getByText("git for-each-ref failed")).toBeInTheDocument();
     fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
-    // Either tab may be open; each lists its default branch first.
     await waitFor(() => expect(listedNames()[0]).toBe("main"));
   });
 

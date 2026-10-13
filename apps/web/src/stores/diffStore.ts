@@ -80,7 +80,6 @@ export function branchSelectionFor(
   selection: BranchSelection | undefined,
 ): BranchSelection {
   if (selection) return selection;
-  // An unavailable default names no base: the local-only default branch would otherwise diff against itself.
   return { base: comparison?.isComparisonAvailable ? comparison.base : null, compare: comparison?.compare ?? null };
 }
 

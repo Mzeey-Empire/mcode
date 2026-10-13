@@ -148,8 +148,6 @@ describe("diffStore", () => {
     });
   });
 
-  // Both Branch operands are the user's pick once made. A `files.changed` event bumps the scope revision and
-  // re-resolves the server default; that fetch must not clobber the pick. See ADR-0028.
   describe("Branch operands", () => {
     const comparison = (overrides: Partial<BranchComparison> = {}): BranchComparison => ({
       base: "refs/remotes/origin/main",

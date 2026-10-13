@@ -58,7 +58,6 @@ export function useReviewRefs(request: ReviewRefsRequest | null): TargetPageList
     [workspaceId, threadId, side, query, limit],
   );
   const list = useTargetPageList(reviewRefs, params);
-  // Review lists refs only; detached checkouts belong to the existing-worktree purpose.
   const items = useMemo(() => list.items.filter((target): target is GitRef => target.kind === "ref"), [list.items]);
   return useMemo(() => ({ ...list, items }), [list, items]);
 }
