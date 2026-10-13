@@ -9,6 +9,13 @@ import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { restoreQueuedSteers, sendHeldSteerAgain } from "@/features/conversation/composer/queue/queued-steer";
+import {
+  queueApprovalNote,
+  removeApprovalNote,
+  restoreApprovalNotes,
+  sendApprovalNoteAgain,
+  setApprovalNoteInEdit,
+} from "@/features/conversation/composer/queue/queued-approval-note";
 import { createMockThread, mockTransport } from "./mocks/transport";
 
 vi.mock("@/transport", async () => ({
@@ -826,6 +833,95 @@ describe("threadStore reconnect and queued follow-ups", () => {
       useQueueStore.getState().requeueAsResend(THREAD_ID, STEER, other.id);
 
       expect(contents()).toEqual([[other.id, undefined]]);
+    });
+  });
+
+  describe("deny notes on reconnect", () => {
+    const REQUEST = "33333333-3333-4333-8333-333333333333";
+    const listNotes = () => mockTransport.listApprovalNotes as ReturnType<typeof vi.fn>;
+    const notes = () => (useQueueStore.getState().queues[THREAD_ID] ?? []).map((m) => [m.content, m.approvalNote]);
+
+    it("restores a held note once however many times it reconnects", async () => {
+      listNotes().mockResolvedValue([{ requestId: REQUEST, threadId: THREAD_ID, note: "Only lint the web app", state: "queued" }]);
+
+      await restoreApprovalNotes();
+      await restoreApprovalNotes();
+
+      expect(notes()).toEqual([["Only lint the web app", { requestId: REQUEST, state: "queued" }]]);
+    });
+
+    it("takes the server's state for a note this window already holds", async () => {
+      queueApprovalNote(THREAD_ID, REQUEST, "Only lint the web app", "queued");
+      listNotes().mockResolvedValueOnce([{ requestId: REQUEST, threadId: THREAD_ID, note: "Only lint the web app", state: "delivery_unknown" }]);
+
+      await restoreApprovalNotes();
+
+      expect(notes()).toEqual([["Only lint the web app", { requestId: REQUEST, state: "delivery_unknown" }]]);
+    });
+
+    it("does not restore a note that is open in the composer", async () => {
+      setApprovalNoteInEdit(REQUEST, true);
+      listNotes().mockResolvedValueOnce([{ requestId: REQUEST, threadId: THREAD_ID, note: "Only lint the web app", state: "queued" }]);
+
+      await restoreApprovalNotes();
+      setApprovalNoteInEdit(REQUEST, false);
+
+      expect(notes()).toEqual([]);
+    });
+
+    it("sends a queued note once when the thread is already idle", async () => {
+      vi.useFakeTimers();
+
+      queueApprovalNote(THREAD_ID, REQUEST, "Only lint the web app", "queued");
+      await vi.advanceTimersByTimeAsync(400);
+
+      expect(mockTransport.sendMessage).toHaveBeenCalledTimes(1);
+      expect(mockTransport.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ approvalNoteRequestId: REQUEST }));
+      expect(notes()).toEqual([]);
+    });
+
+    it("leaves a delivery-unknown note waiting for the user after the turn ends", async () => {
+      vi.useFakeTimers();
+
+      queueApprovalNote(THREAD_ID, REQUEST, "Only lint the web app", "delivery_unknown");
+      useThreadStore.getState().handleAgentEvent({
+        type: "turnComplete", threadId: THREAD_ID, reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0,
+      });
+      await vi.advanceTimersByTimeAsync(400);
+
+      expect(mockTransport.sendMessage).not.toHaveBeenCalled();
+      expect(notes()).toEqual([["Only lint the web app", { requestId: REQUEST, state: "delivery_unknown" }]]);
+    });
+
+    it("sends a delivery-unknown note once after Send again", async () => {
+      vi.useFakeTimers();
+      queueApprovalNote(THREAD_ID, REQUEST, "Only lint the web app", "delivery_unknown");
+
+      await sendApprovalNoteAgain(THREAD_ID, useQueueStore.getState().queues[THREAD_ID]![0]!);
+      await vi.advanceTimersByTimeAsync(400);
+
+      expect(mockTransport.resendApprovalNote).toHaveBeenCalledWith(REQUEST);
+      expect(mockTransport.sendMessage).toHaveBeenCalledTimes(1);
+      expect(notes()).toEqual([]);
+    });
+
+    it("drops a note another window already sent or removed when Send again finds it closed", async () => {
+      queueApprovalNote(THREAD_ID, REQUEST, "Only lint the web app", "delivery_unknown");
+      (mockTransport.resendApprovalNote as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ status: "closed" });
+
+      await sendApprovalNoteAgain(THREAD_ID, useQueueStore.getState().queues[THREAD_ID]![0]!);
+
+      expect(notes()).toEqual([]);
+      expect(mockTransport.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("keeps a note in the tray when the server cannot be asked to remove it", async () => {
+      queueApprovalNote(THREAD_ID, REQUEST, "Only lint the web app", "delivery_unknown");
+      (mockTransport.removeApprovalNote as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("socket closed"));
+
+      await removeApprovalNote(THREAD_ID, useQueueStore.getState().queues[THREAD_ID]![0]!);
+
+      expect(notes()).toEqual([["Only lint the web app", { requestId: REQUEST, state: "delivery_unknown" }]]);
     });
   });
 });

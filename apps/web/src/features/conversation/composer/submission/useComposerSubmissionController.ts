@@ -126,7 +126,7 @@ export function useComposerSubmissionController({
       submission: PreparedComposerSubmission,
       target: ComposerExecutionTargetController["target"],
     ): Promise<void> => {
-      if (shouldQueueActiveSubmit({ threadId, isAgentRunning, branchFromMessageId, isNewThread, submission })) {
+      if (shouldQueueActiveSubmit({ threadId, isAgentRunning, branchFromMessageId, isNewThread, editing: queue.editing, submission })) {
         queuePrepared(submission);
         return;
       }
@@ -204,7 +204,7 @@ export function useComposerSubmissionController({
       completeQueued(submission);
       return "complete";
     }
-    if (shouldQueueActiveSubmit({ threadId, isAgentRunning, branchFromMessageId, isNewThread, submission })) {
+    if (shouldQueueActiveSubmit({ threadId, isAgentRunning, branchFromMessageId, isNewThread, editing: queue.editing, submission })) {
       queuePrepared(submission);
       return "complete";
     }
@@ -286,16 +286,22 @@ function shouldDeferToHandoff({
   return Boolean(threadId && !branchFromMessageId && !isNewThread);
 }
 
-/** Checks active-turn queue policy against the stable submitted text. */
+/**
+ * Checks active-turn queue policy against the stable submitted text. An edited deny note always
+ * returns to the queue, because only queue admission delivers it exactly once.
+ */
 function shouldQueueActiveSubmit({
   threadId,
   isAgentRunning,
   branchFromMessageId,
   isNewThread,
+  editing,
   submission,
 }: Pick<UseComposerSubmissionControllerOptions, "threadId" | "isAgentRunning" | "branchFromMessageId" | "isNewThread"> & {
+  editing: ComposerSubmissionQueue["editing"];
   submission: PreparedComposerSubmission;
 }): boolean {
+  if (editing?.approvalNote) return true;
   return shouldQueueActiveThreadSubmit(
     threadId,
     isAgentRunning,

@@ -1,6 +1,7 @@
 import { ArrowUp, CornerDownRight, Paperclip, Pencil, X } from "lucide-react";
 import { ProviderIdSchema } from "@mcode/contracts";
 import { Button, IconButton } from "@/components/ui/button";
+import { removeApprovalNote, sendApprovalNoteAgain } from "@/features/conversation/composer/queue/queued-approval-note";
 import {
   isSteerable,
   releaseHeldSteer,
@@ -55,6 +56,10 @@ export function ComposerQueueList({
     if (await releaseHeldSteer(threadId, message) === "plain") onLoadIntoComposer(message);
   };
   const remove = async (message: QueuedMessage) => {
+    if (message.approvalNote) {
+      await removeApprovalNote(threadId, message);
+      return;
+    }
     if (await releaseHeldSteer(threadId, message) === "plain") useQueueStore.getState().removeFromQueue(threadId, message.id);
   };
 
@@ -71,7 +76,9 @@ export function ComposerQueueList({
             {isDeliveryUnknown(message) ? (
               <DeliveryUnknownActions
                 position={index + 1}
-                onSendAgain={() => void sendHeldSteerAgain(threadId, message)}
+                onSendAgain={() => void (message.approvalNote
+                  ? sendApprovalNoteAgain(threadId, message)
+                  : sendHeldSteerAgain(threadId, message))}
                 onRemove={() => void remove(message)}
               />
             ) : (
@@ -122,7 +129,7 @@ function QueueRowText({ message }: { message: QueuedMessage }) {
 /** What a row is waiting on, if anything; nothing may change the item until it answers. */
 function pendingLabel(message: QueuedMessage): string | undefined {
   if (message.steer?.state === "steering") return "Adding to turn";
-  if (message.steer?.state === "settling") return "Settling";
+  if (message.steer?.state === "settling" || message.approvalNote?.state === "settling") return "Settling";
   return undefined;
 }
 

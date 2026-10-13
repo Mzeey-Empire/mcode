@@ -444,7 +444,7 @@ interface ThreadState {
   // Message actions
   loadOlderMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
   loadNewerMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
-  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string, planAction?: import("@mcode/contracts").PlanAction, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts").ApprovalReviewMode, devinMode?: DevinMode, messageId?: string, resendOfSteerId?: string) => Promise<boolean>;
+  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string, planAction?: import("@mcode/contracts").PlanAction, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts").ApprovalReviewMode, devinMode?: DevinMode, messageId?: string, resendOfSteerId?: string, approvalNoteRequestId?: string) => Promise<boolean>;
   /** Remove one durably cancelled message from the resident thread transcript. */
   removePersistedMessage: (threadId: string, messageId: string) => void;
   stopAgent: (threadId: string) => Promise<void>;
@@ -764,10 +764,12 @@ function canAutoDrainQueuedMessage(threadId: string): boolean {
 
 /**
  * Sends a claimed queue item and settles its lease. A resend reuses the replacement id the
- * server issued, so admission can claim the held steer it replaces.
+ * server issued, so admission can claim the held steer it replaces; a deny note names its
+ * request, so admission delivers it once.
  */
 export async function sendQueuedMessage(threadId: string, message: QueuedMessage): Promise<void> {
   const resendOfSteerId = message.steer?.state === "resend" ? message.steer.resendOfSteerId : undefined;
+  const approvalNoteRequestId = message.approvalNote?.requestId;
   try {
     const sent = await useThreadStore.getState().sendMessage(
       threadId,
@@ -791,8 +793,9 @@ export async function sendQueuedMessage(threadId: string, message: QueuedMessage
       undefined,
       message.approvalReviewMode,
       message.devinMode,
-      resendOfSteerId ? message.id : undefined,
+      resendOfSteerId || approvalNoteRequestId ? message.id : undefined,
       resendOfSteerId,
+      approvalNoteRequestId,
     );
     useQueueStore.getState().settleQueuedDispatch(threadId, message.id, sent);
   } catch {
@@ -3705,7 +3708,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
    * message to local state, marks the thread as running, then dispatches
    * to the transport layer. On failure, rolls back the running state.
    */
-  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText, planAction, mentions, previewAnnotations, goalObjective, orchestrationMode, selectedTextComments, approvalReviewMode, devinMode, messageId, resendOfSteerId) => {
+  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText, planAction, mentions, previewAnnotations, goalObjective, orchestrationMode, selectedTextComments, approvalReviewMode, devinMode, messageId, resendOfSteerId, approvalNoteRequestId) => {
     conversationResidency.invalidateConversation(threadId);
 
     const { isControlCommand, runningBeforeControl } = prepareOutgoingTurn(threadId, content);
@@ -3748,11 +3751,14 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         selectedTextComments,
         devinMode,
         resendOfSteerId,
+        approvalNoteRequestId,
       });
       return true;
     } catch (error) {
-      // Another window already settled this resend, so the queue item is spent, not retryable.
-      const alreadySent = Boolean(resendOfSteerId) && error instanceof RpcError && error.code === "steer_resend_closed";
+      // Another window already settled this resend or note, so the queue item is spent, not retryable.
+      const alreadySent = error instanceof RpcError
+        && ((Boolean(resendOfSteerId) && error.code === "steer_resend_closed")
+          || (Boolean(approvalNoteRequestId) && error.code === "note_already_delivered"));
       if (alreadySent) useQueueStore.getState().settleQueuedDispatch(threadId, userMessage.id, true);
       return rollbackFailedSend(
         threadId, error, isControlCommand, runningBeforeControl,

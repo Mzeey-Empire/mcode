@@ -5,14 +5,17 @@ import {
   MCODE_BROWSER_CAPTURE_FENCE_CLOSE,
   MCODE_BROWSER_CAPTURE_FENCE_OPEN,
 } from "@/features/preview/capture/browser-capture-append";
-import { useQueueStore, type QueuedMessage } from "@/stores/queueStore";
+import { useQueueStore, type QueuedApprovalNote, type QueuedMessage } from "@/stores/queueStore";
 import { scheduleDrainAfterEdit } from "@/stores/threadStore";
 import { useToastStore } from "@/stores/toastStore";
+import { discardApprovalNote, saveApprovalNoteEdit, setApprovalNoteInEdit } from "./queued-approval-note";
 
 /** The queue slot currently restored into the Composer for editing. */
 export interface ComposerQueueEdit {
   messageId: string;
   originalIndex: number;
+  /** Set when the slot holds a deny note, whose edits the server must save. */
+  approvalNote?: QueuedApprovalNote;
 }
 
 /** The live Composer operations needed to restore or clear a queued message. */
@@ -71,6 +74,32 @@ function preserveBrowserCapturePayload(
   };
 }
 
+/** Opens a popped queue item for editing; a deny note stays out of reconnect restores meanwhile. */
+function startEdit(popped: QueuedMessage, originalIndex: number): ComposerQueueEdit {
+  if (!popped.approvalNote) return { messageId: popped.id, originalIndex };
+  setApprovalNoteInEdit(popped.approvalNote.requestId, true);
+  return { messageId: popped.id, originalIndex, approvalNote: popped.approvalNote };
+}
+
+/**
+ * Returns the edit being swapped out to its slot. An emptied edit leaves the queue, as it always
+ * has; a deny note also leaves the server, so the next reconnect does not bring it back.
+ */
+function putBackSwappedEdit(
+  threadId: string,
+  editing: ComposerQueueEdit,
+  payload: Omit<QueuedMessage, "id" | "queuedAt"> | null,
+): void {
+  const note = editing.approvalNote;
+  if (payload) {
+    useQueueStore.getState().insertAt(threadId, editing.originalIndex, note ? { ...payload, approvalNote: note } : payload);
+    if (note) void saveApprovalNoteEdit(threadId, note.requestId, payload.content);
+  } else if (note) {
+    void discardApprovalNote(note.requestId);
+  }
+  if (note) setApprovalNoteInEdit(note.requestId, false);
+}
+
 /** Manages the pop, restore, swap, cancel, and completion lifecycle for one queued Composer message. */
 export function useComposerQueueEditing({
   threadId,
@@ -97,6 +126,8 @@ export function useComposerQueueEditing({
   const editConsumedByDispatchRef = useRef(false);
 
   const finishEditing = useCallback(() => {
+    const noteRequestId = originalMessageRef.current?.approvalNote?.requestId;
+    if (noteRequestId) setApprovalNoteInEdit(noteRequestId, false);
     editConsumedByDispatchRef.current = false;
     originalMessageRef.current = null;
     restoredPreviewAnnotationsClearedRef.current = false;
@@ -127,6 +158,13 @@ export function useComposerQueueEditing({
     }
   }, [editing]);
 
+  const captureEdit = useCallback(() => {
+    const restoredPreviewAnnotations = restoredPreviewAnnotationsClearedRef.current
+      ? undefined
+      : originalMessageRef.current?.previewAnnotations;
+    return preserveBrowserCapturePayload(form.capture(restoredPreviewAnnotations), originalMessageRef.current);
+  }, [form]);
+
   const loadIntoComposer = useCallback(
     (message: QueuedMessage) => {
       if (!threadId || editConsumedByDispatchRef.current) return;
@@ -138,32 +176,20 @@ export function useComposerQueueEditing({
       if (targetIndex === -1) return;
 
       form.invalidateAttachments();
-      if (editing && form.hasContent()) {
-        const restoredPreviewAnnotations = restoredPreviewAnnotationsClearedRef.current
-          ? undefined
-          : originalMessageRef.current?.previewAnnotations;
-        queue.insertAt(
-          threadId,
-          editing.originalIndex,
-          preserveBrowserCapturePayload(
-            form.capture(restoredPreviewAnnotations),
-            originalMessageRef.current,
-          ),
-        );
-      }
+      if (editing) putBackSwappedEdit(threadId, editing, form.hasContent() ? captureEdit() : null);
 
       const popped = queue.popMessage(threadId, message.id);
       if (!popped) return;
 
       originalMessageRef.current = popped;
       restoredPreviewAnnotationsClearedRef.current = false;
-      setEditing({ messageId: popped.id, originalIndex: targetIndex });
+      setEditing(startEdit(popped, targetIndex));
       queue.setEditingThreadId(threadId);
 
       form.restore(popped);
       annotations.restore(popped.previewAnnotations);
     },
-    [annotations, editing, form, threadId],
+    [annotations, captureEdit, editing, form, threadId],
   );
 
   const cancelEdit = useCallback(() => {
@@ -185,6 +211,7 @@ export function useComposerQueueEditing({
 
     const slot = editing.originalIndex;
     const browserCaptureSpillPaths = originalMessageRef.current?.browserCaptureSpillPaths ?? [];
+    if (editing.approvalNote) void discardApprovalNote(editing.approvalNote.requestId);
     finishEditing();
     annotations.clear();
     scheduleDrainAfterEdit(threadId);

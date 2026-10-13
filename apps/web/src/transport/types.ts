@@ -76,6 +76,7 @@ import type {
   ApprovalResponse,
   ApprovalRespondResult,
   ApprovalRequest,
+  HeldApprovalNote,
   CreateAndSendResult,
   ThreadStartup,
   ThreadStartupResolveInput,
@@ -473,6 +474,14 @@ export interface McodeTransport {
   ): Promise<ApprovalRespondResult>;
   /** List pending permission requests for a thread (used to re-hydrate after reconnect). */
   listPendingApprovals(threadId?: string): Promise<ApprovalRequest[]>;
+  /** Deny notes the server still holds, restored to the queue on connect. */
+  listApprovalNotes(): Promise<HeldApprovalNote[]>;
+  /** Save an edit to a held deny note. `closed` means it was already sent or removed. */
+  updateApprovalNote(requestId: string, note: string): Promise<{ status: "updated" | "closed" }>;
+  /** Send again on a delivery-unknown deny note: it becomes queued for the next turn. */
+  resendApprovalNote(requestId: string): Promise<{ status: "queued" | "closed" }>;
+  /** Remove a held deny note so it does not come back on reconnect. */
+  removeApprovalNote(requestId: string): Promise<{ status: "removed" | "closed" }>;
   /** Submit answers to a plan-mode question batch and resume the agent session. */
   answerPlanQuestions(
     threadId: string,

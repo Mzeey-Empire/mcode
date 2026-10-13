@@ -4,6 +4,8 @@ import { stripPreviewAnnotationFence } from "@/features/preview/capture/preview-
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";
 import { useQueueStore } from "@/stores/queueStore";
+import { scheduleDrainAfterEdit } from "@/stores/threadStore";
+import { saveApprovalNoteEdit } from "../queue/queued-approval-note";
 import { removeTakenDiffComments } from "../draft/draft-diff-comments";
 import type { ComposerAgentSelection, ComposerFormController } from "../draft/useComposerFormController";
 import type { ComposerQueueEdit } from "../queue/useComposerQueueEditing";
@@ -61,10 +63,13 @@ export function queueComposerSubmission({
   if (!threadId) return false;
   const spillPaths = collectBrowserCaptureSpillPaths(submission.prepared.browserCaptures);
   const payload = createPersistentQueuePayload(submission, spillPaths);
+  const note = editing?.approvalNote;
   const enqueued = editing
-    ? useQueueStore.getState().insertAt(threadId, editing.originalIndex, payload)
+    ? useQueueStore.getState().insertAt(threadId, editing.originalIndex, note ? { ...payload, approvalNote: note } : payload)
     : useQueueStore.getState().enqueue(threadId, payload);
   if (!enqueued) void releaseBrowserCaptureSpills(spillPaths);
+  // The note sends once its edit is saved, so admission delivers the new text.
+  if (enqueued && note) void saveApprovalNoteEdit(threadId, note.requestId, payload.content).then(() => scheduleDrainAfterEdit(threadId));
   return enqueued;
 }
 
