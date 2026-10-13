@@ -1,7 +1,28 @@
-import { render, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { parsePatchFiles } from "@pierre/diffs";
 import { CodeView } from "@pierre/diffs/react";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import type { ReviewFileChange } from "@mcode/contracts";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { ReviewDiffView } from "@/components/diff/ReviewDiffView";
+import { useDiffStore } from "@/stores/diffStore";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+
+const transport = vi.hoisted(() => ({
+  getWorkingTreeDiff: vi.fn(),
+  readFileContent: vi.fn(),
+  readFileAtRef: vi.fn(),
+}));
+
+vi.mock("@/transport", async (original) => ({
+  ...(await original<object>()),
+  getTransport: () => transport,
+}));
+
+// The Open action's editor picker asks the transport for installed apps.
+vi.mock("@/hooks/useOpenInApps", () => ({
+  useOpenInApps: () => [],
+}));
 
 // jsdom lacks both observers the pierre Virtualizer constructs unconditionally.
 // Reporting every item as intersecting is fine for assertions on content; the
@@ -76,5 +97,80 @@ describe("pierre CodeView spike", () => {
       expect(shadowText()).toContain("const added = 3;");
       expect(shadowText()).toContain("stay();");
     });
+  });
+});
+
+const MENU_FILE: ReviewFileChange = {
+  path: "apps/web/src/features/thread-actions/ThreadActionsMenu.tsx",
+  previousPath: null,
+  changeType: "modified",
+  binary: false,
+  additions: 4,
+  deletions: 9,
+  untracked: false,
+};
+
+const MENU_PATCH = `diff --git a/${MENU_FILE.path} b/${MENU_FILE.path}
+index 1111111..2222222 100644
+--- a/${MENU_FILE.path}
++++ b/${MENU_FILE.path}
+@@ -1,2 +1,2 @@
+ const groups = [];
+-const gone = 1;
++const kept = 2;
+`;
+
+function renderReviewDiff(defaultFilesExpanded: boolean) {
+  return render(
+    <div style={{ height: 600, width: 536 }}>
+      <ReviewDiffView
+        files={[MENU_FILE]}
+        source="unstaged"
+        id="workspace-fixture"
+        threadId="thread-fixture"
+        defaultFilesExpanded={defaultFilesExpanded}
+        jumpTarget={null}
+        onJumpSettled={() => {}}
+        highlightPath={null}
+        renderMode="unified"
+        lineWrap
+      />
+    </div>,
+  );
+}
+
+describe("Review file header", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useWorkspaceStore.setState({ activeWorkspaceId: "workspace-fixture", threads: [] });
+    useDiffStore.setState({ inlineDiffCache: {}, bulkDiffExpand: null });
+    transport.getWorkingTreeDiff.mockResolvedValue(MENU_PATCH);
+  });
+
+  afterEach(cleanup);
+
+  it("reads name first, then the whole folder, then deletions before additions", async () => {
+    renderReviewDiff(false);
+
+    const toggle = await screen.findByRole("button", { name: `Expand ${MENU_FILE.path}` });
+    expect(toggle.textContent).toBe("ThreadActionsMenu.tsxapps/web/src/features/thread-actions-9+4");
+  });
+
+  it("shows counts but no file actions while collapsed", async () => {
+    renderReviewDiff(false);
+
+    await screen.findByRole("button", { name: `Expand ${MENU_FILE.path}` });
+    expect(screen.getByTestId("review-file-counts").textContent).toBe("-9+4");
+    expect(screen.queryByRole("group", { name: "File actions" })).toBeNull();
+  });
+
+  it("shows file actions once the file is expanded", async () => {
+    renderReviewDiff(false);
+
+    await userEvent.click(await screen.findByRole("button", { name: `Expand ${MENU_FILE.path}` }));
+
+    expect(await screen.findByRole("button", { name: `Collapse ${MENU_FILE.path}` })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Copy file path" })).toBeInTheDocument();
+    expect(screen.getByTestId("review-file-counts").textContent).toBe("-9+4");
   });
 });

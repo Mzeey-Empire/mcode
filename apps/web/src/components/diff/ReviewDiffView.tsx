@@ -10,7 +10,7 @@ import {
   type CodeViewItem,
   type CodeViewReactOptions,
 } from "@pierre/diffs/react";
-import { ChevronRight, MessageCircle } from "lucide-react";
+import { MessageCircle } from "lucide-react";
 import { inlineDiffCacheKey, useDiffStore, type DiffSource } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
@@ -26,9 +26,9 @@ import { FileDiffCache } from "@/lib/file-diff-cache";
 import { parseDiffLines, isMarkdownFile } from "@/lib/diff-parser";
 import { parseFirstHunkLine } from "@/lib/parse-first-hunk-line";
 import { useShikiTheme } from "@/hooks/useTheme";
-import { cn } from "@/lib/utils";
 import { joinPaths } from "@/lib/path";
 import { FileActionBar } from "./FileActionBar";
+import { ReviewFileHeader } from "./ReviewFileHeader";
 import { DiffCommentEditor } from "./DiffCommentEditor";
 import { DiffPreview } from "./DiffPreview";
 
@@ -514,7 +514,10 @@ export function ReviewDiffView({
       enableGutterUtility: true,
       // File separation is layout-owned: margins would corrupt the
       // virtualizer's height bookkeeping, so spacing goes through pierre.
-      layout: { paddingTop: 10, paddingBottom: 10, gap: 16 },
+      // The bottom padding lets the last lines scroll clear of the floating Commit button.
+      layout: { paddingTop: 10, paddingBottom: 72, gap: 16 },
+      itemMetrics: { diffHeaderHeight: REVIEW_FILE_HEADER_HEIGHT },
+      hunkSeparators: "line-info-basic",
       unsafeCSS: DIFF_UNSAFE_CSS,
     }),
     [lineWrap, loadFileContents, renderMode, shikiTheme, source],
@@ -592,39 +595,45 @@ export function ReviewDiffView({
     );
   };
 
+  const filesByPath = useMemo(() => new Map(files.map((file) => [file.path, file] as const)), [files]);
+
+  const renderFileActions = (path: string) => {
+    const absolutePath = basePath ? joinPaths(basePath, path) : undefined;
+    const absoluteDir =
+      absolutePath?.slice(
+        0,
+        Math.max(absolutePath.lastIndexOf("/"), absolutePath.lastIndexOf("\\")) + 1,
+      ) || undefined;
+    return (
+      <FileActionBar
+        filePath={path}
+        absolutePath={absolutePath}
+        absoluteDir={absoluteDir}
+        openAtLine={patches[path] !== undefined ? parseFirstHunkLine(patches[path]) : undefined}
+        isMarkdown={isMarkdownFile(path)}
+        previewMode={previewPaths.has(path)}
+        onTogglePreview={() => togglePreview(path)}
+      />
+    );
+  };
+
   return (
     <CodeView
       ref={handleRef}
       items={items}
       options={options}
       className="min-h-0 flex-1 overflow-y-auto"
-      renderHeaderPrefix={(item) => (
-        <HeaderToggleButton
-          itemId={item.id}
-          expanded={!item.collapsed}
-          highlighted={highlightPath === item.id}
-          onToggle={() => toggleExpanded(item.id)}
-        />
-      )}
-      renderHeaderMetadata={(item) => {
-        if (item.collapsed) return null;
-        const absolutePath = basePath ? joinPaths(basePath, item.id) : undefined;
-        const absoluteDir =
-          absolutePath?.slice(
-            0,
-            Math.max(absolutePath.lastIndexOf("/"), absolutePath.lastIndexOf("\\")) + 1,
-          ) || undefined;
+      renderCustomHeader={(item) => {
+        const file = filesByPath.get(item.id);
+        if (!file) return null;
+        const expanded = !item.collapsed;
         return (
-          <FileActionBar
-            filePath={item.id}
-            absolutePath={absolutePath}
-            absoluteDir={absoluteDir}
-            openAtLine={
-              patches[item.id] !== undefined ? parseFirstHunkLine(patches[item.id]) : undefined
-            }
-            isMarkdown={isMarkdownFile(item.id)}
-            previewMode={previewPaths.has(item.id)}
-            onTogglePreview={() => togglePreview(item.id)}
+          <ReviewFileHeader
+            file={file}
+            expanded={expanded}
+            highlighted={highlightPath === item.id}
+            onToggle={() => toggleExpanded(item.id)}
+            actions={renderFileActions(item.id)}
           />
         );
       }}
@@ -658,44 +667,6 @@ export function ReviewDiffView({
         </button>
       )}
     />
-  );
-}
-
-interface HeaderToggleButtonProps {
-  readonly itemId: string;
-  readonly expanded: boolean;
-  readonly highlighted: boolean;
-  readonly onToggle: () => void;
-}
-
-/**
- * Collapse toggle rendered into pierre's header prefix slot. Carries the
- * jump-highlight marker so document CSS can flash the owning item host;
- * slotted nodes are light-DOM descendants of it.
- */
-function HeaderToggleButton({ itemId, expanded, highlighted, onToggle }: HeaderToggleButtonProps) {
-  return (
-    <button
-      type="button"
-      aria-expanded={expanded}
-      aria-label={expanded ? `Collapse ${itemId}` : `Expand ${itemId}`}
-      data-jump-highlight={highlighted ? "true" : undefined}
-      onClick={onToggle}
-      className={cn(
-        "flex size-5 shrink-0 items-center justify-center rounded transition-colors",
-        "hover:bg-ink/[0.08]",
-        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus/55",
-      )}
-    >
-      <ChevronRight
-        aria-hidden="true"
-        size={14}
-        className={cn(
-          "text-muted/70 transition-transform duration-150",
-          expanded && "rotate-90",
-        )}
-      />
-    </button>
   );
 }
 
@@ -759,12 +730,14 @@ function SavedAnnotationChip({
   );
 }
 
+/** Pixel height of {@link ReviewFileHeader}; pierre reserves it before measuring. */
+const REVIEW_FILE_HEADER_HEIGHT = 36;
+
 /**
- * Maps the app's diff tokens onto pierre's override variables. Applied inside
- * each shadow root, so values resolve against the document-level theme vars.
+ * Maps the app's diff tokens onto pierre's override variables and styles the
+ * collapsed-context bands per Paper 10a. Custom properties inherit through the
+ * shadow boundary, so var(--diff-*) resolves to the document theme.
  */
-// Maps our --diff-* tokens onto pierre's override vars. Custom properties
-// inherit through the shadow boundary, so var(--diff-*) resolves to the theme.
 const DIFF_UNSAFE_CSS = `
 :host {
   --diffs-bg: var(--background);
@@ -776,8 +749,22 @@ const DIFF_UNSAFE_CSS = `
   --diffs-deletion-color-override: var(--diff-remove-text);
   --diffs-font-family: var(--font-mono);
   --diffs-font-features: "liga" 0, "calt" 0;
+  --diffs-bg-separator-override: var(--panel);
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
 }
-[data-diffs-header="default"] {
-  border-bottom: 1px solid color-mix(in oklch, var(--border), transparent 70%);
+pre, code {
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+}
+[data-separator] {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+[data-separator-content], [data-expand-button] {
+  color: var(--muted);
+}
+[data-separator-content] {
+  padding-inline: 10px 12px;
 }
 `;

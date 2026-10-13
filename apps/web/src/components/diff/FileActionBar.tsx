@@ -36,30 +36,19 @@ interface FileActionBarProps {
   readonly onTogglePreview: () => void;
 }
 
-/**
- * Compact icon-button shared by every action. Muted at rest, brightens on hover.
- * Hover uses an ink overlay: these buttons sit on the opaque `bg-hover` header
- * bar, where a `hover/xx` layer composites back to the same fill and shows no
- * change.
- */
+/** 24px icon button shared by every action, per Paper 10a. Muted at rest, ink on hover. */
 const ACTION_BUTTON_CLASS = [
-  "h-6 w-6 shrink-0 p-0 text-muted/70",
+  "size-6 shrink-0 rounded-sm p-0 text-muted",
   "transition-colors hover:bg-ink/10 hover:text-ink",
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus/55",
 ].join(" ");
 
-/**
- * Active segment of the Diff/Preview toggle. `bg-background` reads as a distinct
- * recessed (dark theme) / raised (light theme) segment against the hover fill in
- * either theme — a `muted/xx` fill would be invisible here.
- */
-const ACTION_BUTTON_ACTIVE = "bg-background text-ink";
+/** Active segment of the Diff/Preview toggle. */
+const ACTION_BUTTON_ACTIVE = "bg-selected text-ink";
 
 /**
- * Horizontal toolbar of per-file actions that lives in the file header bar:
- * a Diff/Preview view toggle (markdown only), Copy path, and Open in editor.
- * Replaces the old overlay rail now that the diff view is a flat list rather
- * than discrete cards.
+ * Per-file actions in the Review file header: a Diff/Preview toggle (markdown
+ * only), Copy path, and Open in editor.
  */
 export function FileActionBar({
   filePath,
@@ -105,7 +94,7 @@ export function FileActionBar({
   }, [absolutePath, filePath]);
 
   return (
-    <div role="group" aria-label="File actions" className="flex shrink-0 items-center gap-0.5 pr-1.5">
+    <div role="group" aria-label="File actions" className="flex shrink-0 items-center gap-0.5 pl-1">
       {isMarkdown && (
         <>
           <Button
@@ -118,7 +107,7 @@ export function FileActionBar({
             }}
             className={cn(ACTION_BUTTON_CLASS, !previewMode && ACTION_BUTTON_ACTIVE)}
           >
-            <CodeXml size={13} />
+            <CodeXml size={14} />
           </Button>
           <Button
             type="button"
@@ -130,7 +119,7 @@ export function FileActionBar({
             }}
             className={cn(ACTION_BUTTON_CLASS, previewMode && ACTION_BUTTON_ACTIVE)}
           >
-            <FileText size={13} />
+            <FileText size={14} />
           </Button>
         </>
       )}
@@ -142,7 +131,7 @@ export function FileActionBar({
         onClick={handleCopyPath}
         className={ACTION_BUTTON_CLASS}
       >
-        <ClipboardCopy size={13} />
+        <ClipboardCopy size={14} />
       </Button>
 
       {absolutePath && (
@@ -157,7 +146,7 @@ export function FileActionBar({
               aria-label="Open file in editor"
               className={ACTION_BUTTON_CLASS}
             >
-              <ExternalLink size={13} />
+              <ExternalLink size={14} />
             </Button>
           }
         />
