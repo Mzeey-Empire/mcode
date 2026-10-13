@@ -5,6 +5,7 @@ import { approvalPatch } from "../../approval-patch.js";
 
 const ShellScopeSchema = z.object({
   canOfferSessionApproval: z.literal(true),
+  hasWriteFileRedirection: z.literal(false),
   commands: z.array(z.object({ identifier: z.string().min(1).regex(/\S/) })).min(1),
 });
 const McpScopeSchema = z.object({ serverName: z.string().min(1), toolName: z.string().min(1) });
@@ -33,7 +34,7 @@ export function copilotSessionScope(native: PermissionRequest): CopilotSessionSc
       if (typeof native.url !== "string" || !URL.canParse(native.url)) return undefined;
       const url = new URL(native.url);
       if (!["https:", "http:"].includes(url.protocol)) return undefined;
-      scope = { keys: [JSON.stringify(["url", url.host])], description: `URLs on host: ${url.host}` };
+      scope = { keys: [JSON.stringify(["url", url.origin])], description: `URLs on origin: ${url.origin}` };
       break;
     }
     case "mcp": {

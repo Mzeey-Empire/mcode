@@ -1,6 +1,13 @@
 import type { ApprovalChoice, ApprovalRequestBody, ApprovalSubject } from "@mcode/contracts";
 import type { PermissionRuleValue, PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
 import { claudeFilePatch } from "./claude-approval-patch.js";
+
+const SessionScopedUpdateSchema = z.union([
+  z.object({ type: z.enum(["addRules", "replaceRules", "removeRules"]), behavior: z.enum(["allow", "deny", "ask"]),
+    rules: z.array(z.object({ toolName: z.string().min(1), ruleContent: z.string().optional() })).min(1) }),
+  z.object({ type: z.enum(["addDirectories", "removeDirectories"]), directories: z.array(z.string().min(1)).min(1) }),
+]);
 
 /** Build Claude's scope and bounded file evidence before publishing the approval. */
 export async function claudeApprovalBody(toolName: string, input: Record<string, unknown>, options: {
@@ -30,6 +37,7 @@ function sessionDescription(updates: PermissionUpdate[] | undefined): string | u
 }
 
 function sessionScopedUpdateDescription(update: PermissionUpdate): string | undefined {
+  if (!SessionScopedUpdateSchema.safeParse(update).success) return undefined;
   switch (update.type) {
     case "addRules":
     case "replaceRules":
@@ -42,8 +50,8 @@ function sessionScopedUpdateDescription(update: PermissionUpdate): string | unde
     case "setMode":
       return undefined;
     default: {
-      const unhandled: never = update;
-      return unhandled;
+      update satisfies never;
+      return undefined;
     }
   }
 }

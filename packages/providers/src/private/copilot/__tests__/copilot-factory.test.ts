@@ -56,11 +56,11 @@ function projections(sink: DeterministicCanonicalSink) {
   return sink.snapshot().events.flatMap(({ payload }) => payload.type === "item.recorded" ? [ProviderRuntimeEventSchema().parse(payload.item.payload.runtimeEvent).event] : []);
 }
 
-function shellPermission(identifiers = ["git status"]): PermissionRequest {
+function shellPermission(identifiers = ["git status"], hasWriteFileRedirection = false): PermissionRequest {
   return {
     kind: "shell", fullCommandText: identifiers.join(" && "), intention: "Inspect the checkout",
     commands: identifiers.map((identifier) => ({ identifier, readOnly: true })),
-    possiblePaths: [], possibleUrls: [], hasWriteFileRedirection: false, canOfferSessionApproval: true,
+    possiblePaths: [], possibleUrls: [], hasWriteFileRedirection, canOfferSessionApproval: true,
   };
 }
 
@@ -219,11 +219,28 @@ describe("Copilot public factory", () => {
     await finish();
   });
 
+  it.each([true, undefined, "false"])("prompts despite a shell grant when file-write redirection is %j", async (hasWriteFileRedirection) => {
+    await provider.sendTurn(request({ permissionMode: "supervised" }));
+    const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
+    const result = options.onPermissionRequest({ ...shellPermission(["git"]), fullCommandText: "git status" }, { sessionId: session.sessionId });
+    await respond(pendingApproval().requestId, "allow-session");
+    expect(await result).toEqual({ kind: "approved" });
+    const redirected = options.onPermissionRequest({ ...shellPermission(["git"], true),
+      fullCommandText: "git status > src/index.ts", hasWriteFileRedirection }, { sessionId: session.sessionId });
+    const pending = pendingApproval();
+    expect(pending.body.choices).toEqual([
+      { id: "allow", intent: "allow_once", label: "Allow once" }, { id: "deny", intent: "deny", label: "Deny" },
+    ]);
+    await respond(pending.requestId, "deny");
+    expect(await redirected).toEqual({ kind: "denied-interactively-by-user" });
+    await finish();
+  });
+
   it.each<{ name: string; initial: PermissionRequest; same: PermissionRequest; outside: PermissionRequest[]; description: string }>([
-    { name: "URL host", initial: { kind: "url", url: "https://example.com/a", intention: "Read docs" },
+    { name: "URL origin", initial: { kind: "url", url: "https://example.com/a", intention: "Read docs" },
       same: { kind: "url", url: "https://example.com/b" },
-      outside: [{ kind: "url", url: "https://other.example/a" }, { kind: "url", url: "https://example.com:8443/a" }],
-      description: "URLs on host: example.com" },
+      outside: [{ kind: "url", url: "https://other.example/a" }, { kind: "url", url: "https://example.com:8443/a" }, { kind: "url", url: "http://example.com/a" }],
+      description: "URLs on origin: https://example.com" },
     { name: "MCP server and tool", initial: { kind: "mcp", serverName: "docs", toolName: "search", toolTitle: "Search", readOnly: true, args: { query: "one" } },
       same: { kind: "mcp", serverName: "docs", toolName: "search", args: { query: "two" } },
       outside: [{ kind: "mcp", serverName: "other", toolName: "search" }, { kind: "mcp", serverName: "docs", toolName: "write" }],

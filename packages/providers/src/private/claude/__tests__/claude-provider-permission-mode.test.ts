@@ -156,6 +156,15 @@ describe("ClaudeProvider permission mode changes", () => {
   it.each<{ name: string; suggestions?: PermissionUpdate[] }>([
     { name: "missing suggestions" },
     { name: "empty suggestions", suggestions: [] },
+    { name: "an unknown update mixed with a rule", suggestions: [
+      { type: "addRules", behavior: "allow", rules: [{ toolName: "Read" }], destination: "session" },
+      JSON.parse('{"type":"futureUpdate","destination":"userSettings"}'),
+    ] },
+    { name: "missing rules", suggestions: [JSON.parse('{"type":"addRules","behavior":"allow","destination":"session"}')] },
+    { name: "missing directories", suggestions: [JSON.parse('{"type":"addDirectories","destination":"session"}')] },
+    { name: "malformed rules", suggestions: [JSON.parse('{"type":"addRules","behavior":"allow","rules":[{"toolName":"Bash","ruleContent":42}],"destination":"session"}')] },
+    { name: "malformed directories", suggestions: [JSON.parse('{"type":"removeDirectories","directories":[42],"destination":"session"}')] },
+    { name: "unknown rule behavior", suggestions: [JSON.parse('{"type":"addRules","behavior":"futureBehavior","rules":[{"toolName":"Read"}],"destination":"session"}')] },
     { name: "a mode switch mixed with a rule", suggestions: [
       { type: "addRules", behavior: "allow", rules: [{ toolName: "Read" }], destination: "session" },
       { type: "setMode", mode: "bypassPermissions", destination: "localSettings" },
