@@ -275,7 +275,7 @@ function visibleThread(): Thread {
   };
 }
 
-function VisibleBrowserHeader({ onStopAutomation }: { readonly onStopAutomation: () => void }) {
+function VisibleBrowserToolbar({ onStopAutomation }: { readonly onStopAutomation: () => void }) {
   const controller = useBrowserAutomationStore((state) => state.controllers.get(TARGET_KEY) ?? null);
   const activeRequest = useBrowserAutomationStore((state) => state.activeRequests.size > 0);
   const enabled = { kind: "enabled", run: vi.fn() } as const;
@@ -473,7 +473,7 @@ describe("visible Browser conformance observer", () => {
     } satisfies BrowserAutomationControllerState);
     expect(useBrowserAutomationStore.getState().controllers.get(TARGET_KEY)?.controller).toBe("agent");
     const onStopAutomation = vi.fn();
-    render(<VisibleBrowserHeader onStopAutomation={onStopAutomation} />);
+    render(<VisibleBrowserToolbar onStopAutomation={onStopAutomation} />);
 
     const initialUrl = await visibleBrowserCurrentUrl(user);
     expect(initialUrl).toBe("https://example.test/checkout?token=redacted");
@@ -926,7 +926,7 @@ describe("visible Browser conformance observer", () => {
       controller: "agent",
       controlEpoch: 7,
     });
-    render(<VisibleBrowserHeader onStopAutomation={vi.fn()} />);
+    render(<VisibleBrowserToolbar onStopAutomation={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "More" }));
     expect(await screen.findByRole("menuitem", { name: "Take control" })).toBeInTheDocument();
 
