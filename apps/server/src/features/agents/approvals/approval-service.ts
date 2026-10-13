@@ -5,7 +5,8 @@ import {
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import { inject, injectable } from "tsyringe";
-import { ApprovalNoteAlreadyDeliveredError, ApprovalNoteRepo, type ApprovalNoteRow } from "./approval-note-repo.js";
+import { ApprovalNoteAlreadyDeliveredError } from "./approval-note-errors.js";
+import { ApprovalNoteRepo, type ApprovalNoteRow } from "./approval-note-repo.js";
 
 type ApprovalProvider = Pick<IAgentProvider, "id" | "on" | "resolveApproval" | "listPendingApprovals">;
 type ApprovalOwner = Pick<IAgentProvider, "resolveApproval" | "listPendingApprovals"> & { id: ProviderId | null };

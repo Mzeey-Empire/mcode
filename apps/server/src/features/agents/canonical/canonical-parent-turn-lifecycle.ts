@@ -10,7 +10,7 @@ import {
 } from "../../../runtime/persistence/sqlite/schema.js";
 import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts";
 import { TurnRecoveryError } from "../recovery/turn-recovery-error.js";
-import { ApprovalNoteAlreadyDeliveredError } from "../approvals/approval-note-repo.js";
+import { ApprovalNoteAlreadyDeliveredError } from "../approvals/approval-note-errors.js";
 import type {
   AgentThread,
   AgentTurn,
