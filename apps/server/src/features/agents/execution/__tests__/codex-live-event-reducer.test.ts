@@ -5,7 +5,7 @@ import type { ProviderEventDraft } from "@mcode/providers";
 import { CodexEventMapper } from "../../../../../../../packages/providers/src/private/codex/codex-event-mapper.js";
 import { CodexLiveEventReducer } from "../codex-live-event-reducer.js";
 import { ProviderExecutionEventState } from "../provider-execution-event-state.js";
-import { TurnRuntimeController } from "../../orchestration/turn-runtime-controller.js";
+import { writerOwnedProviderExtension } from "../../orchestration/turn-runtime-controller.js";
 
 const execution = {
   threadId: "test-thread",
@@ -46,23 +46,31 @@ function prepareCandidate(accepted: ProviderExecutionEventState, input: AgentEve
   return { candidate, prepared: prepared.prepared };
 }
 
-describe("CodexLiveEventReducer", () => {
+describe("ProviderExecutionEventState child routing", () => {
   it("keeps child completion out of parent effects while retaining its delegate card", () => {
     const state = new ProviderExecutionEventState("copilot", execution, { precedingMessageId: "user", planFeature: "none" });
     state.startFromAdmission();
     const child = runtimeDraft(event("turnComplete", { reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 }), 1,
       undefined, { providerId: "copilot", kind: "child-thread", childThread: { role: "child", path: ["task"] } });
     expect(state.prepare([{ ...child, sourceProviderId: "copilot" }])).toEqual({ kind: "writer-owned" });
-    const controller = TurnRuntimeController.prototype;
-    expect(controller["parentRuntimeEvent"]({ ...execution, batchId: "child-complete", deliveryAttempt: 1,
-      phase: "running", events: [{ ...child, sourceProviderId: "copilot" }] })).toBeNull();
     const delegate = runtimeDraft(event("toolUse", { toolName: "Agent", toolCallId: "task", toolInput: { description: "Explore" } }), 2,
       undefined, { providerId: "copilot", kind: "child-thread", childThread: { role: "delegate", path: ["task"], prompt: "Explore" } });
     const result = state.prepare([{ ...delegate, sourceProviderId: "copilot" }]);
     expect(result).toMatchObject({ kind: "parent", prepared: { publication: { event: { type: "toolUse", toolCallId: "task" } } } });
-    expect(controller["parentRuntimeEvent"]({ ...execution, batchId: "delegate", deliveryAttempt: 1,
-      phase: "running", events: [{ ...delegate, sourceProviderId: "copilot" }] })).toMatchObject({ type: "toolUse", toolCallId: "task" });
   });
+});
+
+describe("writerOwnedProviderExtension", () => {
+  it("excludes child terminals from parent detection while leaving delegates visible", () => {
+    expect(writerOwnedProviderExtension({ providerId: "copilot", kind: "child-thread",
+      childThread: { role: "child", path: ["task"] } })).toBe(true);
+    expect(writerOwnedProviderExtension({ providerId: "copilot", kind: "child-thread",
+      childThread: { role: "delegate", path: ["task"], prompt: "Explore" } })).toBe(false);
+    expect(writerOwnedProviderExtension(undefined)).toBe(false);
+  });
+});
+
+describe("CodexLiveEventReducer", () => {
   it.each(["boundary", "tool", "text-item"])("settles a closing plan fence before the next %s", (boundary) => {
     const reducer = new CodexLiveEventReducer(execution, "output");
     const firstItem = `assistant-text:${"a".repeat(64)}`;

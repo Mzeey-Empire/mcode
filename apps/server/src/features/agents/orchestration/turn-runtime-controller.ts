@@ -2405,7 +2405,8 @@ function workerTerminalOutcome(event: AgentEvent): TurnOutcome | null {
   return event.outcome === "cancelled" ? "interrupted" : event.outcome;
 }
 
-function writerOwnedProviderExtension(extension: ProviderRuntimeEvent["extension"]): boolean {
+/** Keeps child events and Codex collaboration observations out of parent terminal detection. */
+export function writerOwnedProviderExtension(extension: ProviderRuntimeEvent["extension"]): boolean {
   return isChildRoutedRuntimeEvent(extension) || Boolean(extension?.kind === "codex-collaboration" && extension.collaboration);
 }
 

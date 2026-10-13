@@ -16,8 +16,7 @@ import { assertActiveTurnRecoveryRetention } from "../../turns/active-turn-recov
 import type { ExecutionIdentity } from "../../execution/execution-mailbox-protocol.js";
 import { backgroundHeldToolIds } from "../../tools/background-held-tools.js";
 
-// Copilot children route into canonical threads. OpenCode attaches explicit parents through child-session routing.
-const PROVIDERS_WITH_EXPLICIT_TOOL_PARENTS: ReadonlySet<ProviderId> = new Set(["copilot", "opencode"]);
+const PROVIDERS_WITHOUT_STACK_PARENT_FALLBACK: ReadonlySet<ProviderId> = new Set(["copilot", "opencode"]);
 
 /** Buffered tool call with raw input preserved for deferred summarization. */
 export interface BufferedToolCall extends CreateToolCallRecordInput {
@@ -452,7 +451,7 @@ export class NarrativeTurnState {
    */
   getCurrentParentToolCallId(threadId: string, providerId?: ProviderId): string | undefined {
     this.assertThread(threadId);
-    if (providerId !== undefined && PROVIDERS_WITH_EXPLICIT_TOOL_PARENTS.has(providerId)) return undefined;
+    if (providerId !== undefined && PROVIDERS_WITHOUT_STACK_PARENT_FALLBACK.has(providerId)) return undefined;
     return this.getStackDerivedParentFallback(threadId);
   }
 

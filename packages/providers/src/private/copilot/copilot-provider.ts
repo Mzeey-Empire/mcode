@@ -5,7 +5,7 @@ import * as NodeCrypto from "node:crypto";
 import { CopilotClient, approveAll } from "@github/copilot-sdk";
 import type { CopilotSession, SessionEvent, ModelInfo, PermissionRequest as NativePermissionRequest, PermissionRequestResult } from "@github/copilot-sdk";
 import { z } from "zod";
-import type { AgentEvent, IAgentProvider, ISessionEvictable, ApprovalChoice, ApprovalResponse, ApprovalRespondResult, ApprovalRequestEnvelope, ProviderIdentity, ProviderModelInfo, TurnRequest, CompletionOptions } from "@mcode/contracts";
+import type { AgentEvent, ChildThreadEvidence, IAgentProvider, ISessionEvictable, ApprovalChoice, ApprovalResponse, ApprovalRespondResult, ApprovalRequestEnvelope, ProviderIdentity, ProviderModelInfo, TurnRequest, CompletionOptions } from "@mcode/contracts";
 import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
 import { copilotApprovalBody, copilotSessionScope } from "./copilot-approval.js";
 import { BROWSER_AUTOMATION_OPERATION_METADATA, providerRuntimeEvent } from "@mcode/contracts";
@@ -302,10 +302,13 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     if (content) this.publish(state, { type: "assistantMessageBoundary", threadId: state.request.threadId, isFinalResponse: true });
   }
 
-  private publish(state: CopilotSessionState, event: AgentEvent, native?: SessionEvent, childThread?: import("@mcode/contracts").ChildThreadEvidence): void {
-    // The execution worker rejects child observations after a parent terminal.
-    if (event.type === "error" && !childThread && state.turn) this.publishOpenChildEndings(state, state.turn);
+  private publish(state: CopilotSessionState, event: AgentEvent, native?: SessionEvent, childThread?: ChildThreadEvidence): void {
+    this.endOpenChildrenBeforeParentError(state, event, childThread);
     this.publisher.publish(routingFor(state.request), providerRuntimeEvent({ ...event, turnExecutionId: state.request.turnExecutionId }, childThread ? { providerId: "copilot", kind: "child-thread", childThread } : undefined), nativeIdentities(state.session.sessionId, native), native ? { id: native.id, timestamp: native.timestamp, predecessorEventId: native.parentId, type: native.type, data: nativeEvidence(native) } : undefined);
+  }
+
+  private endOpenChildrenBeforeParentError(state: CopilotSessionState, event: AgentEvent, childThread?: ChildThreadEvidence): void {
+    if (event.type === "error" && !childThread && state.turn) this.publishOpenChildEndings(state, state.turn);
   }
 
   private requestPermission(sessionId: string, native: NativePermissionRequest): Promise<PermissionRequestResult> | PermissionRequestResult {
