@@ -37,6 +37,30 @@ function capturedTrace(): NativeEvent[] {
   return selected;
 }
 
+// Event order transcribed from a live CLI 1.0.25 run where a background sub-agent started its own sub-agent.
+function nestedLiveTrace(): NativeEvent[] {
+  let index = 0;
+  const meta = () => ({ id: `EVENT_${index++}`, parentId: null, timestamp: NOW });
+  const outer = { parentToolCallId: "OUTER" };
+  const inner = { parentToolCallId: "INNER" };
+  const agent = { agentName: "general-purpose", agentDisplayName: "General Purpose Agent" };
+  return [
+    { ...meta(), type: "tool.execution_start", data: { toolCallId: "OUTER", toolName: "task", arguments: { description: "Delegate", mode: "background" } } },
+    { ...meta(), type: "subagent.started", data: { toolCallId: "OUTER", ...agent, agentDescription: "OUTER_PROMPT" } },
+    { ...meta(), type: "tool.execution_complete", data: { toolCallId: "OUTER", success: true, result: { content: "Agent started in background" } } },
+    { ...meta(), type: "assistant.message", data: { messageId: "OUTER_M1", content: "", ...outer } },
+    { ...meta(), type: "tool.execution_start", data: { toolCallId: "INNER", toolName: "task", arguments: { description: "Read" }, ...outer } },
+    { ...meta(), type: "subagent.started", data: { toolCallId: "INNER", ...agent, agentDescription: "INNER_PROMPT" } },
+    { ...meta(), type: "tool.execution_start", data: { toolCallId: "VIEW", toolName: "view", arguments: { path: "alpha.txt" }, ...inner } },
+    { ...meta(), type: "tool.execution_complete", data: { toolCallId: "VIEW", success: true, result: { content: "secret" }, ...inner } },
+    { ...meta(), type: "assistant.message", data: { messageId: "INNER_M1", content: "INNER_ANSWER", ...inner } },
+    { ...meta(), type: "subagent.completed", data: { toolCallId: "INNER", ...agent } },
+    { ...meta(), type: "tool.execution_complete", data: { toolCallId: "INNER", success: true, result: { content: "INNER_ANSWER" }, ...outer } },
+    { ...meta(), type: "assistant.message", data: { messageId: "OUTER_M2", content: "OUTER_ANSWER", ...outer } },
+    { ...meta(), type: "subagent.completed", data: { toolCallId: "OUTER", ...agent } },
+  ];
+}
+
 function initial(terminal = false) {
   const thread: AgentThread = { id: "parent", workspaceId: "workspace", rootThreadId: "parent", providerId: "copilot",
     providerIdentities: [], activityState: "Active", conversationRevision: 0, rosterRevision: 0, createdAt: NOW, updatedAt: NOW };
@@ -204,6 +228,24 @@ describe("accepted Copilot collaboration", () => {
         payload: { message: { content: "Grandchild answer" } } } }],
     });
     expect(port.findDelegation("parent", "toolCall:inner")).toBeNull();
+  });
+
+  it("records the live nested order as an inner transcript under the outer child", () => {
+    const port = new AcceptedCodexCollaboration(initial());
+    const turn = turnState();
+    const prepared = nestedLiveTrace().flatMap((event) => mapCopilotEvent(event, "parent", turn)).map((mapped) => port.prepare(ingress(mapped)));
+    expect(prepared.filter((result) => result.projection.status === "rejected")).toEqual([]);
+    const outer = port.findDelegation("parent", "toolCall:OUTER");
+    const inner = outer && port.findDelegation(outer.childThreadId, "toolCall:INNER");
+    if (!outer || !inner) throw new Error("Expected outer and inner delegations");
+    const items = prepared.flatMap((result) => result.changes.flatMap((change) => change.kind === "item-recorded" ? [change.item] : []));
+    const transcript = (threadId: string) => items.filter((item) => item.threadId === threadId).map((item) => item.payload.projection === "message"
+      ? MessageSchema().parse(item.payload.message).content : [item.payload.projection, item.payload.nativeItemId].filter(Boolean).join(":"));
+    expect(transcript(outer.childThreadId)).toEqual(["OUTER_PROMPT", "codexChildToolCall:INNER", "codexSubagent",
+      "codexChildToolResult:INNER", "OUTER_ANSWER"]);
+    expect(transcript(inner.childThreadId)).toEqual(["INNER_PROMPT", "codexChildToolCall:VIEW", "codexChildToolResult:VIEW", "INNER_ANSWER"]);
+    expect([port.loadTurn(outer.turnId)?.status, port.loadTurn(inner.turnId)?.status]).toEqual(["Completed", "Completed"]);
+    expect(port.loadTurn(execution.turnId)?.status).toBe("Running");
   });
 });
 
