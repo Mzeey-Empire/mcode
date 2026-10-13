@@ -8,7 +8,6 @@ import type { WebSocket } from "ws";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { routeMessage, type RouterDeps } from "../ws-router.js";
 import { DraftImageMissingError } from "../../../features/attachments/storage/draft-image-missing-error.js";
-import { ApprovalNoteAlreadyDeliveredError } from "../../../features/agents/approvals/approval-note-errors.js";
 import { CodexCatalogService } from "../../../features/providers/catalog/codex-catalog-service.js";
 import { ProviderCatalogService } from "../../../features/providers/catalog/provider-catalog-service.js";
 import { ProviderCatalogSnapshotRepo } from "../../../features/providers/catalog/persistence/provider-catalog-snapshot-repo.js";
@@ -793,24 +792,6 @@ mcode-preview-annotations:end -->`,
     expect(failure).toMatchObject({
       id: "missing-image",
       error: { code: "draft_image_missing", data: { stagingId } },
-    });
-  });
-
-  it.each([
-    ["the approval service", new ApprovalNoteAlreadyDeliveredError()],
-    ["the database writer", Object.assign(new Error("This note was already sent or removed"), { code: "note_already_delivered" })],
-  ])("returns a closed note claim from %s as note_already_delivered", async (_source, refusal) => {
-    const admitNote = vi.fn().mockRejectedValue(refusal);
-    const deps = { agentService: { sendMessage: vi.fn() }, approvalService: { admitNote } } as unknown as RouterDeps;
-
-    const response = await routeMessage(JSON.stringify({
-      id: "send-note", method: "agent.send",
-      params: { threadId: "thread-1", content: "Only lint the web app", approvalNoteRequestId: "deny-1" },
-    }), deps);
-
-    expect(response).toEqual({
-      id: "send-note",
-      error: { code: "note_already_delivered", message: "This note was already sent or removed" },
     });
   });
 

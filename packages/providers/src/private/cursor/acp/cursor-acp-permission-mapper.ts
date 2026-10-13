@@ -3,7 +3,7 @@ import type { ApprovalRequestBody, ApprovalResponse, ApprovalSubject } from "@mc
 import { z } from "zod";
 import { createTextPatch } from "@mcode/shared";
 import { approvalPatch } from "../../../approval-patch.js";
-import { acpApprovalChoices, acpNoteChoiceId } from "../../../approval-scope.js";
+import { acpApprovalChoices } from "../../../approval-scope.js";
 
 const InputSchema = z.object({ command: z.string().optional(), cwd: z.string().optional(), path: z.string().optional(), url: z.string().optional() }).passthrough();
 
@@ -14,8 +14,7 @@ export function synthesizeCursorAcpApprovalRequest(input: {
   const choices = acpApprovalChoices(input.options);
   return {
     toolCallId: input.toolCallId, requestedAt: new Date().toISOString(),
-    subject: cursorSubject(input), choices, noteDelivery: "next_turn",
-    noteChoiceId: acpNoteChoiceId(input.options, choices), origin: { kind: "agent" },
+    subject: cursorSubject(input), choices, noteDelivery: "none", origin: { kind: "agent" },
   };
 }
 

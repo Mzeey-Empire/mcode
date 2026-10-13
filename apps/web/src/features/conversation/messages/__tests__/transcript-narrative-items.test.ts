@@ -199,21 +199,21 @@ describe("transcript narrative rows", () => {
     expect(open.map(rowLabel)).toEqual(["work-fold", "approval", "message"]);
   });
 
-  it("keeps a delivered deny note in view while its fold is closed, and shows it once when open", () => {
-    const denied = (requestId: string, noteDelivery: "native" | "next_turn") => ({
+  it("keeps a deny note in view while its fold is closed, and shows it once when open", () => {
+    const denied = (requestId: string, note?: string) => ({
       requestId, subjectLabel: "rm -rf build", decidedAt: 1200,
-      outcome: { status: "denied" as const, choiceLabel: "Deny", note: `Note ${requestId}`, noteDelivery },
+      outcome: { status: "denied" as const, choiceLabel: "Deny", ...(note ? { note } : {}) },
     });
     const turn = { threadId: "thread", executionId: "execution", messageId: "answer" };
     const projected = createTranscriptItemProjector()({
       messages: [message("answer", "Done", "execution")], currentTurn: turn,
       agentDisplayState: { phase: "completed" }, agentStartTime: 1000, streamingText: undefined, toolCalls: [],
-      approvals: [denied("req-1", "native"), denied("req-2", "next_turn")],
+      approvals: [denied("req-1", "Note req-1"), denied("req-2")],
       committedAssistantBody: "Done",
     });
     const records: Record<string, PersistedNarrativeRecords> = { answer: { tools: [], thoughts: [], hooks: [], approvals: [{
       id: "req-1", message_id: "answer", tool_call_id: null, kind: "command", subject_label: "rm -rf build",
-      outcome: denied("req-1", "native").outcome, origin: null, decided_at: new Date(1200).toISOString(), sort_order: 0,
+      outcome: denied("req-1", "Note req-1").outcome, origin: null, decided_at: new Date(1200).toISOString(), sort_order: 0,
     }] } };
     const saved: ChatVirtualItem[] = [fold("work-fold:answer", "answer", "Done"), { type: "message", key: "answer", message: message("answer", "Done") }];
 

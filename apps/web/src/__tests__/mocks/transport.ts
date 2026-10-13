@@ -15,7 +15,7 @@ export function createMockApproval(overrides: Partial<ApprovalRequest> = {}): Ap
     requestId: "req-1", threadId: "thread-1", providerId: "codex", requestedAt: "2026-10-10T10:00:00Z",
     subject: { kind: "command", command: "git status" },
     choices: [{ id: "allow", intent: "allow_once", label: "Allow once" }, { id: "deny", intent: "deny", label: "Deny" }],
-    noteDelivery: "steer", noteChoiceId: "deny", origin: { kind: "agent" }, ...overrides,
+    noteDelivery: "native", noteChoiceId: "deny", origin: { kind: "agent" }, ...overrides,
   };
 }
 
@@ -197,10 +197,6 @@ export const mockTransport: McodeTransport = {
   })),
   respondToApproval: vi.fn().mockResolvedValue(undefined),
   listPendingApprovals: vi.fn().mockResolvedValue([]),
-  listApprovalNotes: vi.fn().mockResolvedValue([]),
-  updateApprovalNote: vi.fn().mockResolvedValue({ status: "updated" }),
-  resendApprovalNote: vi.fn().mockResolvedValue({ status: "queued" }),
-  removeApprovalNote: vi.fn().mockResolvedValue({ status: "removed" }),
   answerPlanQuestions: vi.fn().mockResolvedValue(undefined),
   dismissPlanQuestions: vi.fn().mockResolvedValue(undefined),
   getActiveAgentCount: vi.fn().mockResolvedValue(0),

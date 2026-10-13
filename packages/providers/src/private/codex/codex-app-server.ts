@@ -14,7 +14,7 @@ import which from "which";
 import { resolveSubagentDisplayName, type TurnFailureKind, type TurnSteerOutcome } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import { SessionResumeUnavailableError } from "../../provider-turn-error.js";
-import { CodexRequestNotSentError, CodexRpcClient, CodexRpcResponseError, CodexTransportError } from "./codex-rpc-client.js";
+import { CodexRpcClient, CodexRpcResponseError, CodexTransportError } from "./codex-rpc-client.js";
 import { listCodexModels } from "./codex-models.js";
 import { codexIgnoredNotificationReason } from "./codex-notification-policy.js";
 import { parseCodexNotification } from "./codex-notification-validation.js";
@@ -1442,19 +1442,19 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
   }
 
   /**
-   * Adds user input to an exact main or child turn with `turn/steer`. Codex refuses it when
+   * Adds user input to the active main turn with `turn/steer`. Codex refuses it when
    * `expectedTurnId` is no longer the active turn, so a steer can never start a new one.
    */
-  async steerTurn(expectedTurnId: string, clientUserMessageId: string | undefined, input: TurnInputPart[], threadId = this.threadId): Promise<TurnSteerOutcome> {
+  async steerTurn(expectedTurnId: string, clientUserMessageId: string, input: TurnInputPart[]): Promise<TurnSteerOutcome> {
+    const threadId = this.threadId;
     if (!threadId) return { outcome: "rejected", reason: "turn_not_running", detail: "No Codex thread is open." };
     try {
       await this.rpc.sendRequest<TurnSteerParams, TurnSteerResult>("turn/steer", {
-        threadId, expectedTurnId, ...(clientUserMessageId ? { clientUserMessageId } : {}), input,
+        threadId, expectedTurnId, clientUserMessageId, input,
       });
       return { outcome: "accepted" };
     } catch (error) {
       if (error instanceof CodexRpcResponseError) return codexSteerRejection(error.message);
-      if (error instanceof CodexRequestNotSentError) return { outcome: "rejected", reason: "turn_not_running", detail: error.message };
       // A timeout or lost connection may come after Codex took the input.
       return { outcome: "unknown", detail: error instanceof Error ? error.message : String(error) };
     }

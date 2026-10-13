@@ -100,18 +100,18 @@ describe("Copilot public factory", () => {
     return provider.resolveApproval(requestId, { choiceId });
   }
 
-  it("delivers a deny note as native feedback and records its delivery", async () => {
+  it("delivers a deny note as native feedback and records it on the receipt", async () => {
     await provider.sendTurn(request({ permissionMode: "supervised" }));
     const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
     const native = options.onPermissionRequest({ kind: "shell", fullCommandText: "bun run lint", toolCallId: "lint" }, { sessionId: session.sessionId });
     const [pending] = provider.listPendingApprovals?.("thread-1") ?? [];
     if (!pending) throw new Error("Missing approval");
     expect(await provider.resolveApproval?.(pending.requestId, { choiceId: "deny", note: "Only lint the web app" }))
-      .toEqual({ status: "resolved", noteDelivery: "native" });
+      .toEqual({ status: "resolved" });
     expect(await native).toEqual({ kind: "denied-interactively-by-user", feedback: "Only lint the web app" });
     await finish();
     expect(projections(sink).filter((event) => event.type === "approvalDecided")).toMatchObject([
-      { outcome: { status: "denied", note: "Only lint the web app", noteDelivery: "native" } },
+      { outcome: { status: "denied", note: "Only lint the web app" } },
     ]);
   });
 

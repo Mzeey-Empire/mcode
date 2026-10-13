@@ -7,8 +7,6 @@ import { OpenCodeProvider } from "../opencode-provider.js";
 import { OpenCodeServerPool } from "../opencode-server-pool.js";
 import { OpenCodeReplySessionNotFoundError } from "../opencode-http-client.js";
 import { ApprovalService } from "../../../../agents/approvals/approval-service.js";
-import { ApprovalNoteRepo } from "../../../../agents/approvals/approval-note-repo.js";
-import { createThreadPersistenceTestRuntime } from "../../../../thread-control/testing/thread-persistence-test-runtime.js";
 import { logger } from "@mcode/shared";
 import type { ApprovalRequestEnvelope, TurnRequest } from "@mcode/contracts";
 
@@ -214,7 +212,7 @@ describe("OpenCodeProvider permission flow", () => {
     await provider.shutdown();
   });
 
-  it.each([undefined, "Only lint the web app"])("relays reject and queues its note: %s", async (note) => {
+  it("relays reject and resolves unknown ids as false", async () => {
     const http = fakeHttp([shellAsk()]);
     const { provider } = testProvider(http);
     const resolved: unknown[] = [];
@@ -222,14 +220,12 @@ describe("OpenCodeProvider permission flow", () => {
 
     const sending = provider.sendTurn(turnRequest());
     await vi.waitFor(() => expect(provider.listPendingApprovals("thread-1")).toHaveLength(1));
-    expect(await provider.resolveApproval("per_1", { choiceId: "reject", note }))
-      .toEqual(note ? { status: "resolved", noteDelivery: "next_turn" } : { status: "resolved" });
+    expect(await provider.resolveApproval("per_1", { choiceId: "reject" })).toEqual({ status: "resolved" });
     await sending;
     expect(http.replyPermission).toHaveBeenCalledWith(
       { baseUrl: "http://127.0.0.1:4096", directory: "/w/a" }, "ses_1", "per_1", "reject", "v2", expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
-    expect(resolved).toEqual([{ requestId: "per_1", threadId: "thread-1",
-      outcome: { status: "denied", choiceLabel: "Deny", ...(note ? { note, noteDelivery: "next_turn" } : {}) } }]);
+    expect(resolved).toEqual([{ requestId: "per_1", threadId: "thread-1", outcome: { status: "denied", choiceLabel: "Deny" } }]);
     expect(await provider.resolveApproval("nope", { choiceId: "once" })).toEqual({ status: "not_pending" });
     await provider.shutdown();
   });
@@ -579,8 +575,7 @@ describe("OpenCodeProvider notice dedup", () => {
     provider.on("approval_resolved", resolved);
     const publishApprovalRequest = vi.fn();
     const publishApprovalResolved = vi.fn();
-    const runtime = createThreadPersistenceTestRuntime();
-    const service = new ApprovalService({ resolveAll: () => [provider] }, new ApprovalNoteRepo(runtime.reader, runtime.writer));
+    const service = new ApprovalService({ resolveAll: () => [provider] });
     service.start({ publishApprovalRequest, publishApprovalResolved, stopSession: async () => provider.stopSession(turnRequest().sessionId) });
     await provider.sendTurn(turnRequest());
     expect(requested.mock.calls[0]?.[0].body.subject).toEqual({ kind: "tool", toolName: "bash", preview: JSON.stringify({ action: "bash", resources: ["x".repeat(70_000)] }) });
@@ -599,8 +594,7 @@ describe("OpenCodeProvider notice dedup", () => {
     const resolved = vi.fn();
     provider.on("approval_resolved", resolved);
     const publishApprovalResolved = vi.fn();
-    const runtime = createThreadPersistenceTestRuntime();
-    const service = new ApprovalService({ resolveAll: () => [provider] }, new ApprovalNoteRepo(runtime.reader, runtime.writer));
+    const service = new ApprovalService({ resolveAll: () => [provider] });
     service.start({ publishApprovalRequest: vi.fn(), publishApprovalResolved, stopSession: async () => provider.stopSession(turnRequest().sessionId) });
     await provider.sendTurn(turnRequest());
     await vi.waitFor(() => expect(publishApprovalResolved.mock.calls).toEqual([[{ requestId: "per_large", threadId: "thread-1", outcome: { status: "cancelled", reason: "unanswerable" } }]]));

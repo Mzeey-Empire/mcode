@@ -9,7 +9,6 @@ import { useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { createMockThread, mockTransport } from "@/__tests__/mocks/transport";
 import { RpcError } from "@/transport";
-import { queueApprovalNote } from "./queued-approval-note";
 import { useQueuedMessageDispatch, useSendNowRoute } from "./useQueuedMessageDispatch";
 
 vi.mock("@/transport", async () => ({
@@ -20,7 +19,6 @@ vi.mock("@/transport", async () => ({
 const THREAD_ID = "queued-message-dispatch-thread";
 const HELD_STEER_ID = "11111111-1111-4111-8111-111111111111";
 const REPLACEMENT_ID = "22222222-2222-4222-8222-222222222222";
-const NOTE_REQUEST_ID = "33333333-3333-4333-8333-333333333333";
 const CANCELLED_STOP: AgentStopResult = {
   threadId: THREAD_ID,
   turnExecutionId: "execution-1",
@@ -322,59 +320,6 @@ describe("useQueuedMessageDispatch", () => {
     expect(queuedContents()).toEqual([]);
     expect(useQueueStore.getState().inFlightQueuedMessages[THREAD_ID]).toBeUndefined();
     expect(getThreadRecord(useThreadStore.getState().records, THREAD_ID).error).toBeNull();
-  });
-
-  it("sends a queued deny note under its own item id, naming its request", async () => {
-    queueApprovalNote(THREAD_ID, NOTE_REQUEST_ID, "Only lint the web app", "queued");
-    const noteItemId = queued(0).id;
-    const { result } = renderHook(() => useQueuedMessageDispatch(THREAD_ID));
-
-    await act(async () => {
-      await result.current.sendNow(queued(0));
-    });
-
-    expect(mockTransport.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
-      messageId: noteItemId,
-      approvalNoteRequestId: NOTE_REQUEST_ID,
-      content: "Only lint the web app",
-    }));
-    expect(queuedContents()).toEqual([]);
-  });
-
-  it("drops a deny note another window already delivered, without an error", async () => {
-    queueApprovalNote(THREAD_ID, NOTE_REQUEST_ID, "Only lint the web app", "queued");
-    (mockTransport.sendMessage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new RpcError("note delivered", "note_already_delivered"),
-    );
-    const { result } = renderHook(() => useQueuedMessageDispatch(THREAD_ID));
-
-    await act(async () => {
-      await result.current.sendNow(queued(0));
-    });
-
-    expect(queuedContents()).toEqual([]);
-    expect(getThreadRecord(useThreadStore.getState().records, THREAD_ID).error).toBeNull();
-  });
-
-  it("never steers a queued deny note into the running turn", async () => {
-    runTurn();
-    queueApprovalNote(THREAD_ID, NOTE_REQUEST_ID, "Only lint the web app", "queued");
-    const { result } = renderHook(() => useQueuedMessageDispatch(THREAD_ID));
-
-    await act(async () => {
-      await result.current.sendNow(queued(0));
-    });
-
-    expect(mockTransport.steerTurn).not.toHaveBeenCalled();
-    expect(mockTransport.sendMessage).not.toHaveBeenCalled();
-    expect(queuedContents()).toEqual(["Only lint the web app"]);
-  });
-
-  it("holds a delivery-unknown deny note out of the dispatcher", () => {
-    queueApprovalNote(THREAD_ID, NOTE_REQUEST_ID, "Only lint the web app", "delivery_unknown");
-    queueMessage("later follow-up");
-
-    expect(useQueueStore.getState().claimNextQueuedMessage(THREAD_ID)?.content).toBe("later follow-up");
   });
 
   it("sends a rejected steer as the next turn when its turn ended meanwhile", async () => {

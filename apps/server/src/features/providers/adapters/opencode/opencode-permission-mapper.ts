@@ -108,7 +108,7 @@ export function synthesizeOpenCodeApprovalRequest(input: {
     body: {
       requestedAt: new Date().toISOString(), toolCallId: tool.success ? tool.data.callID : undefined,
       subject: askSubjectOf(scope),
-      choices, noteDelivery: "next_turn", noteChoiceId: "reject", origin: input.origin,
+      choices, noteDelivery: "none", origin: input.origin,
     },
   };
 }

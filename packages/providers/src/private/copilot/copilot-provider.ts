@@ -6,7 +6,7 @@ import { CopilotClient, approveAll } from "@github/copilot-sdk";
 import type { CopilotSession, SessionEvent, ModelInfo, PermissionRequest as NativePermissionRequest, PermissionRequestResult } from "@github/copilot-sdk";
 import { z } from "zod";
 import type { AgentEvent, IAgentProvider, ISessionEvictable, ApprovalChoice, ApprovalResponse, ApprovalRespondResult, ApprovalRequestEnvelope, ProviderIdentity, ProviderModelInfo, TurnRequest, CompletionOptions } from "@mcode/contracts";
-import { approvalChoice, approvalOutcome, approvalResult } from "../../approval-scope.js";
+import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
 import { copilotApprovalBody, copilotSessionScope } from "./copilot-approval.js";
 import { BROWSER_AUTOMATION_OPERATION_METADATA, providerRuntimeEvent } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
@@ -338,12 +338,11 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
       pending.resolve(this.nativeApprovalResult(choice, response));
       turn.pendingPermissions.delete(requestId);
       await Promise.resolve();
-      const result = approvalResult(response, "native");
-      const outcome = approvalOutcome(choice, response, result.noteDelivery);
+      const outcome = approvalOutcome(choice, response);
       this.publish(state, approvalReceipt(pending.request, outcome));
       this.emit("approval_resolved", { requestId, threadId: pending.request.threadId,
         outcome });
-      return result;
+      return { status: "resolved" };
     }
     return { status: "not_pending" };
   }

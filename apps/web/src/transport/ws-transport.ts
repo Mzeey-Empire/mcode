@@ -587,9 +587,6 @@ export function createWsTransport(
       void import("@/features/conversation/composer/queue/queued-steer")
         .then(({ restoreQueuedSteers }) => restoreQueuedSteers())
         .catch((error: unknown) => console.warn("[queued-steer] restore failed", error));
-      void import("@/features/conversation/composer/queue/queued-approval-note")
-        .then(({ restoreApprovalNotes }) => restoreApprovalNotes())
-        .catch((error: unknown) => console.warn("[approval-notes] restore failed", error));
 
       // Expose a sentinel in dev/test builds so Playwright can synchronize on
       // hydration completion before injecting agent events. Without this, tests
@@ -1225,14 +1222,6 @@ export function createWsTransport(
       WS_METHODS()["approval.respond"].result.parse(await rpc<unknown>("approval.respond", { requestId, ...response })),
     listPendingApprovals: (threadId) =>
       rpc<ApprovalRequest[]>("approval.listPending", { threadId }),
-    listApprovalNotes: async () =>
-      WS_METHODS()["approval.listNotes"].result.parse(await rpc<unknown>("approval.listNotes", {})),
-    updateApprovalNote: async (requestId, note) =>
-      WS_METHODS()["approval.updateNote"].result.parse(await rpc<unknown>("approval.updateNote", { requestId, note })),
-    resendApprovalNote: async (requestId) =>
-      WS_METHODS()["approval.resendNote"].result.parse(await rpc<unknown>("approval.resendNote", { requestId })),
-    removeApprovalNote: async (requestId) =>
-      WS_METHODS()["approval.removeNote"].result.parse(await rpc<unknown>("approval.removeNote", { requestId })),
     answerPlanQuestions: (threadId, answers, permissionMode?, reasoningLevel?, contextWindow?, thinking?) =>
       rpc<void>("agent.answerQuestions", { threadId, answers, permissionMode, reasoningLevel, contextWindow, thinking }),
     dismissPlanQuestions: (threadId) =>

@@ -32,19 +32,6 @@ const entry = { permissionMode: "default" as const, threadId: "owner", mcodeSess
 const toolCall = { toolCallId: "tool-1", title: "Bash", kind: "execute" as const, rawInput: { command: "echo ok" } };
 
 describe("Cursor native approval boundary", () => {
-  it("denies natively and leaves the note for the next turn", async () => {
-    const test = setup();
-    const native = test.requestPermission(entry, { sessionId: "session-1", toolCall, options });
-    const [request] = test.bridge.listPendingApprovals("owner");
-    if (!request) throw new Error("Expected a pending request");
-    expect(await test.bridge.resolveApproval(request.requestId, { choiceId: "reject_once", note: "Only lint the web app" }))
-      .toEqual({ status: "resolved", noteDelivery: "next_turn" });
-    expect(await native).toEqual({ outcome: { outcome: "selected", optionId: "reject_once" } });
-    expect(test.publishEvent.mock.calls.map(([, event]) => event)).toMatchObject([
-      { type: "approvalDecided", outcome: { status: "denied", note: "Only lint the web app", noteDelivery: "next_turn" } },
-    ]);
-  });
-
   it("keeps both reject choices and sends reject_always by its exact id", async () => {
     const test = setup();
     const native = test.requestPermission(entry, { sessionId: "session-1", toolCall, options });
@@ -60,7 +47,7 @@ describe("Cursor native approval boundary", () => {
       { id: "reject_once", intent: "deny", label: "Reject once" },
       { id: "reject_always", intent: "deny", label: "Reject always" },
     ]);
-    expect(body.noteChoiceId).toBe("reject_once");
+    expect(body.noteDelivery).toBe("none");
     expect(test.emitApprovalRequest.mock.calls).toEqual([[request]]);
     expect(await test.bridge.resolveApproval(request.requestId, { choiceId: "reject_always" })).toEqual({ status: "resolved" });
     await expect(native).resolves.toEqual({ outcome: { outcome: "selected", optionId: "reject_always" } });

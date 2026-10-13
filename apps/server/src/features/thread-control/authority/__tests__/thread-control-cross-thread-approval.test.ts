@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { ApprovalRequest } from "@mcode/contracts";
 import { broadcast } from "../../../../application/transport/push.js";
 import { ApprovalService } from "../../../agents/approvals/approval-service.js";
-import { ApprovalNoteRepo } from "../../../agents/approvals/approval-note-repo.js";
 import { AgentService } from "../../../agents/orchestration/agent-service.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { WorktreeRepo } from "../../../projects/persistence/worktree-repo.js";
@@ -39,7 +38,7 @@ function createFixture() {
   ]).run();
   const agent = vi.mockObject(AgentService.prototype);
   agent.runtimeAccess.mockReturnValue({ activeCount: () => 0, activeThreadIds: () => [], runtimeSnapshots: () => [] });
-  const approvalService = new ApprovalService({ resolveAll: () => [] }, new ApprovalNoteRepo(runtime.reader, runtime.writer));
+  const approvalService = new ApprovalService({ resolveAll: () => [] });
   approvalService.start({
     publishApprovalRequest: (request) => broadcast("approval.requested", request),
     publishApprovalResolved: vi.fn(),

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ApprovalAnswersSchema, ApprovalRequestBodySchema, ApprovalRequestSchema } from "../approval.js";
 
-import { WS_METHODS, SendMessageSchema } from "../../ws/methods.js";
+import { WS_METHODS } from "../../ws/methods.js";
 
 const body = {
   requestedAt: "2026-10-10T10:00:00Z",
@@ -11,29 +11,12 @@ const body = {
     { id: "reject_once", intent: "deny", label: "Reject once" },
     { id: "reject_always", intent: "deny", label: "Reject always" },
   ],
-  noteDelivery: "next_turn", noteChoiceId: "reject_once", origin: { kind: "agent" },
+  noteDelivery: "native", noteChoiceId: "reject_once", origin: { kind: "agent" },
 };
 
 describe("approval choice safety", () => {
-  it("normalizes note edits", () => {
-    expect(WS_METHODS()["approval.updateNote"].params.parse({ requestId: "deny-1", note: "  Only lint the web app  " }))
-      .toEqual({ requestId: "deny-1", note: "Only lint the web app" });
-  });
-  it.each(["", "x".repeat(257)])("rejects a note request id no approval can have: %#", (requestId) => {
-    expect(SendMessageSchema().safeParse({ threadId: "owner", content: "Only lint the web app", approvalNoteRequestId: requestId }).success).toBe(false);
-    for (const method of ["approval.updateNote", "approval.resendNote", "approval.removeNote"] as const) {
-      expect(WS_METHODS()[method].params.safeParse({ requestId, note: "Only lint the web app" }).success).toBe(false);
-    }
-  });
-  it("accepts a note request id as long as an approval request id", () => {
-    const requestId = "x".repeat(256);
-    expect(ApprovalRequestSchema().safeParse({ ...body, requestId, threadId: "owner", providerId: "codex" }).success).toBe(true);
-    expect(SendMessageSchema().safeParse({ threadId: "owner", content: "Only lint the web app", approvalNoteRequestId: requestId }).success).toBe(true);
-    expect(WS_METHODS()["approval.resendNote"].params.safeParse({ requestId }).success).toBe(true);
-  });
-  it.each(["", "  ", "x".repeat(4_001)])("rejects unusable notes at both RPC input boundaries: %#", (note) => {
+  it.each(["", "  ", "x".repeat(4_001)])("rejects an unusable note at the respond boundary: %#", (note) => {
     expect(WS_METHODS()["approval.respond"].params.safeParse({ requestId: "deny-1", choiceId: "deny", note }).success).toBe(false);
-    expect(WS_METHODS()["approval.updateNote"].params.safeParse({ requestId: "deny-1", note }).success).toBe(false);
   });
   it("preserves distinct reject choices and exact labels", () => {
     expect(ApprovalRequestBodySchema().parse(body)).toEqual(body);

@@ -1,8 +1,6 @@
 import { createMockApproval, createMockThread } from "@/__tests__/mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useApprovalStore } from "@/stores/approvalStore";
-import { useQueueStore } from "@/stores/queueStore";
-import { useThreadStore } from "@/stores/threadStore";
 import type { McodeTransport } from "@/transport/types";
 import type { ApprovalRequest, ApprovalSubject } from "@mcode/contracts";
 import { disposeHighlighter } from "@pierre/diffs";
@@ -64,8 +62,6 @@ beforeEach(() => {
   respondToApproval.mockReset().mockResolvedValue({ status: "resolved" });
   useApprovalStore.setState({ approvals: [], submissions: {} });
   useWorkspaceStore.setState({ threads: [] });
-  useQueueStore.setState({ queues: {} });
-  useThreadStore.setState({ runningThreadIds: new Set() });
 });
 
 afterEach(() => {
@@ -529,38 +525,5 @@ describe("ApprovalDock deny with a note", () => {
       ["req-1", { choiceId: "deny", note: "Only lint" }],
       ["req-1", { choiceId: "deny", note: "Only lint" }],
     ]);
-  });
-
-  it.each([
-    [{ status: "resolved", noteDelivery: "next_turn" }, "queued"],
-    [{ status: "resolved", noteDelivery: "unknown" }, "delivery_unknown"],
-    [{ status: "not_pending", note: "delivery_unknown" }, "delivery_unknown"],
-  ] as const)("queues a note the provider did not take after %o", async (result, state) => {
-    useThreadStore.setState({ runningThreadIds: new Set(["thread-1"]) });
-    respondToApproval.mockResolvedValueOnce(result);
-    const user = setupUser();
-    addApproval();
-    render(<DockHarness />);
-    await elapseGuard();
-
-    await user.click(screen.getByRole("textbox", { name: NOTE }));
-    await user.keyboard("Only lint{Enter}");
-
-    expect(useQueueStore.getState().queues["thread-1"]?.map((m) => [m.content, m.approvalNote])).toEqual([
-      ["Only lint", { requestId: "req-1", state }],
-    ]);
-  });
-
-  it("does not queue a note the provider took with the deny", async () => {
-    respondToApproval.mockResolvedValueOnce({ status: "resolved", noteDelivery: "steer" });
-    const user = setupUser();
-    addApproval();
-    render(<DockHarness />);
-    await elapseGuard();
-
-    await user.click(screen.getByRole("textbox", { name: NOTE }));
-    await user.keyboard("Only lint{Enter}");
-
-    expect(useQueueStore.getState().queues["thread-1"] ?? []).toEqual([]);
   });
 });

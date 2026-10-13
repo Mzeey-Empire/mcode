@@ -70,10 +70,6 @@ type AgentRpcMethod =
   | "thread.getTasks"
   | "approval.respond"
   | "approval.listPending"
-  | "approval.listNotes"
-  | "approval.updateNote"
-  | "approval.resendNote"
-  | "approval.removeNote"
   | "recap.generate";
 
 type AgentRpcParams<Method extends AgentRpcMethod> = Method extends "subagent.roster"
@@ -93,7 +89,7 @@ export interface AgentRouterDeps {
   agentContinuation?: Pick<AgentTurnContinuationPort, "continueWithoutSaving">;
   approvalService: Pick<
     ApprovalService,
-    "respondToApproval" | "listPendingApprovals" | "listNotes" | "updateNote" | "resendNote" | "removeNote" | "admitNote"
+    "respondToApproval" | "listPendingApprovals"
   >;
   gitWatcherService?: Pick<GitWatcherService, "watchThreadWorktree">;
   hookExecutionRepo: Pick<HookExecutionRepo, "listByMessage">;
@@ -145,16 +141,11 @@ const agentHandlers: AgentRpcHandlerMap = {
     const settleAdmission = registerMessageAdmission(params);
     const started = serverWorkTrace ? NodePerfHooks.performance.now() : 0;
     try {
-      const admit = (content: string, displayContent: string) => sendAdmittedTurn(deps.agentService, {
+      await sendAdmittedTurn(deps.agentService, {
         ...params,
-        content: appendPreviewAnnotations(content, params.previewAnnotations),
-        displayContent,
+        content: appendPreviewAnnotations(params.content, params.previewAnnotations),
+        displayContent: params.displayContent ?? params.content,
       });
-      if (params.approvalNoteRequestId !== undefined) {
-        await deps.approvalService.admitNote(params.approvalNoteRequestId, params.threadId, (note) => admit(note, note));
-      } else {
-        await admit(params.content, params.displayContent ?? params.content);
-      }
     } finally {
       settleAdmission?.();
       if (serverWorkTrace) serverWorkTrace.record("agent-send", params.threadId, undefined, NodePerfHooks.performance.now() - started);
@@ -240,10 +231,6 @@ const agentHandlers: AgentRpcHandlerMap = {
     return deps.approvalService.respondToApproval(requestId, response);
   },
   "approval.listPending": (deps, params) => deps.approvalService.listPendingApprovals(params.threadId),
-  "approval.listNotes": (deps) => deps.approvalService.listNotes(),
-  "approval.updateNote": (deps, params) => deps.approvalService.updateNote(params.requestId, params.note),
-  "approval.resendNote": (deps, params) => deps.approvalService.resendNote(params.requestId),
-  "approval.removeNote": (deps, params) => deps.approvalService.removeNote(params.requestId),
   "recap.generate": (deps, params) => deps.recapService.generate(params),
 };
 

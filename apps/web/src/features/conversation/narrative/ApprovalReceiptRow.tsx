@@ -46,14 +46,9 @@ function isApprovedOutcome(outcome: ApprovalOutcome): boolean {
   return outcome.status === "allowed" || outcome.status === "answered";
 }
 
-/**
- * The deny note the agent already received with the deny or as a steer. A note that waits for
- * the next turn becomes its own user message when it sends, and one whose delivery is unknown
- * may never have arrived, so neither shows here.
- */
+/** The note the agent received with the deny. */
 export function deliveredDenyNote(outcome: ApprovalOutcome): string | undefined {
-  if (outcome.status !== "denied") return undefined;
-  return outcome.noteDelivery === "native" || outcome.noteDelivery === "steer" ? outcome.note : undefined;
+  return outcome.status === "denied" ? outcome.note : undefined;
 }
 
 /** A delivered deny note, drawn as the user's own message. */

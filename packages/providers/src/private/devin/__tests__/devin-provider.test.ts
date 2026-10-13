@@ -400,7 +400,7 @@ describe("DevinProvider", () => {
     expect(modelCalls).toEqual(["swe-2-medium"]);
   });
 
-  it.each([undefined, "Only lint the web app"])("passes provider-native permission options through and queues deny notes: %s", async (note) => {
+  it("passes provider-native permission options through and resolves them by optionId", async () => {
     const host = createHost();
     const fake = createFakeRuntime("devin-acp-1", 101);
     starts.push(mockAcpStart([fake]));
@@ -436,11 +436,9 @@ describe("DevinProvider", () => {
     expect(body.subject).toEqual({ kind: "command", command: "rm -rf build" });
     expect(body.toolCallId).toBe("tc-perm");
 
-    expect(await p.resolveApproval(request.requestId, { choiceId: "reject_once", note }))
-      .toEqual(note ? { status: "resolved", noteDelivery: "next_turn" } : { status: "resolved" });
+    expect(await p.resolveApproval(request.requestId, { choiceId: "reject_once" })).toEqual({ status: "resolved" });
     await sending;
-    expect(resolvedEvents).toEqual([{ requestId: request.requestId, threadId: request.threadId,
-      outcome: { status: "denied", choiceLabel: "Reject", ...(note ? { note, noteDelivery: "next_turn" } : {}) } }]);
+    expect(resolvedEvents).toEqual([{ requestId: request.requestId, threadId: request.threadId, outcome: { status: "denied", choiceLabel: "Reject" } }]);
   });
 
   it.each(["connection", "session"])("does not acknowledge an approval on a closed %s", async (closed) => {

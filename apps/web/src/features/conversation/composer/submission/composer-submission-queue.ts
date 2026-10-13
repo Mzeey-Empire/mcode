@@ -4,7 +4,6 @@ import { stripPreviewAnnotationFence } from "@/features/preview/capture/preview-
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";
 import { useQueueStore } from "@/stores/queueStore";
-import { requeueEditedNote } from "../queue/queued-approval-note";
 import { removeTakenDiffComments } from "../draft/draft-diff-comments";
 import type { ComposerAgentSelection, ComposerFormController } from "../draft/useComposerFormController";
 import type { ComposerQueueEdit } from "../queue/useComposerQueueEditing";
@@ -62,15 +61,11 @@ export function queueComposerSubmission({
   if (!threadId) return false;
   const spillPaths = collectBrowserCaptureSpillPaths(submission.prepared.browserCaptures);
   const payload = createPersistentQueuePayload(submission, spillPaths);
-  const enqueued = putQueued(threadId, editing, payload);
+  const enqueued = editing
+    ? useQueueStore.getState().insertAt(threadId, editing.originalIndex, payload)
+    : useQueueStore.getState().enqueue(threadId, payload);
   if (!enqueued) void releaseBrowserCaptureSpills(spillPaths);
   return enqueued;
-}
-
-function putQueued(threadId: string, editing: ComposerQueueEdit | null, payload: ReturnType<typeof createPersistentQueuePayload>): boolean {
-  if (!editing) return useQueueStore.getState().enqueue(threadId, payload);
-  if (editing.approvalNote) return requeueEditedNote(threadId, editing.originalIndex, payload, editing.approvalNote.requestId);
-  return useQueueStore.getState().insertAt(threadId, editing.originalIndex, payload);
 }
 
 /** Applies the shared UI cleanup after a queued submit is accepted. */

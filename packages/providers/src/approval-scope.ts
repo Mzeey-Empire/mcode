@@ -1,4 +1,4 @@
-import { ApprovalChoiceSchema, type ApprovalChoice, type ApprovalOutcome, type ApprovalRequestBody, type ApprovalResponse, type ApprovalRespondResult } from "@mcode/contracts";
+import { ApprovalChoiceSchema, type ApprovalChoice, type ApprovalOutcome, type ApprovalRequestBody, type ApprovalResponse } from "@mcode/contracts";
 
 /** Resolve a response against the choices the adapter actually advertised. */
 export function approvalChoice(body: ApprovalRequestBody, response: ApprovalResponse): ApprovalChoice | undefined {
@@ -6,26 +6,11 @@ export function approvalChoice(body: ApprovalRequestBody, response: ApprovalResp
   return body.choices.find((choice) => choice.id === response.choiceId);
 }
 
-/** Include note delivery only when this answer actually carries a note. */
-export function approvalResult(response: ApprovalResponse,
-  noteDelivery: "native" | "steer" | "next_turn" | "unknown"): Extract<ApprovalRespondResult, { status: "resolved" }> {
-  if ("autoDeny" in response || !response.note) return { status: "resolved" };
-  return { status: "resolved", noteDelivery };
-}
-
 /** Build a resolution only after the adapter's native answer has completed. */
-export function approvalOutcome(choice: ApprovalChoice | undefined, response: ApprovalResponse,
-  noteDelivery?: Extract<ApprovalRespondResult, { status: "resolved" }>["noteDelivery"]): ApprovalOutcome {
+export function approvalOutcome(choice: ApprovalChoice | undefined, response: ApprovalResponse): ApprovalOutcome {
   if ("autoDeny" in response) return { status: "auto_denied", reason: response.autoDeny };
   if (!choice) return { status: "cancelled", reason: "unanswerable" };
-  if (choice.intent === "deny") {
-    const outcome: Extract<ApprovalOutcome, { status: "denied" }> = { status: "denied", choiceLabel: choice.label };
-    if (response.note) {
-      outcome.note = response.note;
-      if (noteDelivery && noteDelivery !== "unknown") outcome.noteDelivery = noteDelivery;
-    }
-    return outcome;
-  }
+  if (choice.intent === "deny") return { status: "denied", choiceLabel: choice.label, ...(response.note ? { note: response.note } : {}) };
   if (response.answers) return { status: "answered", count: response.answers.length };
   return { status: "allowed", intent: choice.intent, choiceLabel: choice.label };
 }
@@ -52,11 +37,4 @@ function acpChoice(option: AcpPermissionOption): ApprovalChoice | undefined {
   if (intent !== "deny") return undefined;
   const plain: ApprovalChoice = { id: option.optionId, label: "Deny", intent };
   return ApprovalChoiceSchema().safeParse(plain).success ? plain : undefined;
-}
-
-/** Prefer the native one-off reject for the future deny-note action. */
-export function acpNoteChoiceId(options: readonly { optionId: string; kind?: string | null }[], choices: ApprovalChoice[]): string | undefined {
-  const rejectOnceId = options.find((option) => option.kind === "reject_once")?.optionId;
-  return choices.find((choice) => choice.id === rejectOnceId)?.id
-    ?? choices.find((choice) => choice.intent === "deny")?.id;
 }

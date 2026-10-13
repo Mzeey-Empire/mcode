@@ -135,7 +135,6 @@ import {
 } from "../providers/capability-catalog.js";
 import {
   ApprovalRespondResultSchema,
-  HeldApprovalNoteSchema,
   ApprovalRequestSchema,
   ApprovalAnswersSchema,
 } from "../models/approval.js";
@@ -368,8 +367,6 @@ export const SendMessageSchema = lazySchema(() => z.object({
      * held steer once, or fails with `steer_resend_closed` and starts no turn.
      */
     resendOfSteerId: z.string().uuid().optional(),
-    /** Queued deny note claimed atomically with this turn's user message. */
-    approvalNoteRequestId: z.string().min(1).max(256).optional(),
 }));
 
 /** Validated command for sending a message to an existing thread. */
@@ -1222,22 +1219,6 @@ export const WS_METHODS = lazySchema(() => ({
   "approval.listPending": {
     params: z.object({ threadId: z.string().optional() }),
     result: z.array(ApprovalRequestSchema()).max(500),
-  },
-  "approval.listNotes": {
-    params: z.object({}),
-    result: z.array(HeldApprovalNoteSchema()).max(500),
-  },
-  "approval.updateNote": {
-    params: z.object({ requestId: z.string().min(1).max(256), note: z.string().trim().min(1).max(4_000) }),
-    result: z.object({ status: z.enum(["updated", "closed"]) }),
-  },
-  "approval.resendNote": {
-    params: z.object({ requestId: z.string().min(1).max(256) }),
-    result: z.object({ status: z.enum(["queued", "closed"]) }),
-  },
-  "approval.removeNote": {
-    params: z.object({ requestId: z.string().min(1).max(256) }),
-    result: z.object({ status: z.enum(["removed", "closed"]) }),
   },
   "message.list": {
     params: z.object({

@@ -1,7 +1,5 @@
 import "reflect-metadata";
 import { ApprovalService } from "../../../agents/approvals/approval-service.js";
-import { ApprovalNoteRepo } from "../../../agents/approvals/approval-note-repo.js";
-import { createThreadPersistenceTestRuntime } from "../../testing/thread-persistence-test-runtime.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PendingThreadCreateApproval, PendingThreadSendApproval, PendingThreadStopApproval } from "../persistence/thread-control-approval-repo.js";
 import { THREAD_GET_TRANSCRIPT_MAX_BYTES } from "@mcode/contracts";
@@ -24,12 +22,8 @@ const authority: InternalThreadControlAuthority = {
   permissionMode: "supervised",
 };
 
-let approvalService: ApprovalService;
-beforeEach(async () => {
-  const runtime = createThreadPersistenceTestRuntime();
-  approvalService = new ApprovalService({ resolveAll: () => [] }, new ApprovalNoteRepo(runtime.reader, runtime.writer));
-  await approvalService.start({ publishApprovalRequest: (request) => mockBroadcast("approval.requested", request), publishApprovalResolved: (result) => mockBroadcast("approval.resolved", result), stopSession: async () => {} });
-});
+const approvalService = new ApprovalService({ resolveAll: () => [] });
+approvalService.start({ publishApprovalRequest: (request) => mockBroadcast("approval.requested", request), publishApprovalResolved: (result) => mockBroadcast("approval.resolved", result), stopSession: async () => {} });
 
 describe("ThreadControlService", () => {
   const workspace = {

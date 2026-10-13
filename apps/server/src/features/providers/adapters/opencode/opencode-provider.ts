@@ -34,7 +34,6 @@ import {
   SessionResumeUnavailableError,
   approvalChoice,
   approvalOutcome,
-  approvalResult,
   approvalReceipt,
   createCliStatusRunner,
   readCliStatusVersion,
@@ -533,10 +532,9 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     try {
       await this.relayDecision(entry, response);
       if (!this.ownsPendingAsk(entry)) return { status: "not_pending" };
-      const result = approvalResult(response, "next_turn");
-      const outcome: ApprovalOutcome = approvalOutcome(choice, response, result.noteDelivery);
+      const outcome: ApprovalOutcome = approvalOutcome(choice, response);
       this.resolvePendingAsk(entry, outcome);
-      return result;
+      return { status: "resolved" };
     } catch (error) {
       entry.replying = false;
       if (error instanceof OpenCodeReplySessionNotFoundError) this.invalidateReplySession(entry);

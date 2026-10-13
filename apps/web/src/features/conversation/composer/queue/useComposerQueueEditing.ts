@@ -1,21 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { PreviewAnnotationBundle } from "@mcode/contracts";
 import { releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-capture-spill";
 import {
   MCODE_BROWSER_CAPTURE_FENCE_CLOSE,
   MCODE_BROWSER_CAPTURE_FENCE_OPEN,
 } from "@/features/preview/capture/browser-capture-append";
-import { useQueueStore, type QueuedApprovalNote, type QueuedMessage } from "@/stores/queueStore";
+import { useQueueStore, type QueuedMessage } from "@/stores/queueStore";
 import { scheduleDrainAfterEdit } from "@/stores/threadStore";
 import { useToastStore } from "@/stores/toastStore";
-import { discardEditedNote, requeueEditedNote, setApprovalNoteInEdit } from "./queued-approval-note";
 
 /** The queue slot currently restored into the Composer for editing. */
 export interface ComposerQueueEdit {
   messageId: string;
   originalIndex: number;
-  /** Set when the slot holds a deny note, whose edits the server must save. */
-  approvalNote?: QueuedApprovalNote;
 }
 
 /** The live Composer operations needed to restore or clear a queued message. */
@@ -74,36 +71,6 @@ function preserveBrowserCapturePayload(
   };
 }
 
-function startEdit(popped: QueuedMessage, originalIndex: number): ComposerQueueEdit {
-  if (!popped.approvalNote) return { messageId: popped.id, originalIndex };
-  setApprovalNoteInEdit(popped.approvalNote.requestId, true);
-  return { messageId: popped.id, originalIndex, approvalNote: popped.approvalNote };
-}
-
-function putBackSwappedEdit(
-  threadId: string,
-  editing: ComposerQueueEdit,
-  payload: Omit<QueuedMessage, "id" | "queuedAt"> | null,
-  original: QueuedMessage | null,
-): void {
-  const note = editing.approvalNote;
-  if (!note) {
-    if (payload) useQueueStore.getState().insertAt(threadId, editing.originalIndex, payload);
-    return;
-  }
-  setApprovalNoteInEdit(note.requestId, false);
-  if (payload) requeueEditedNote(threadId, editing.originalIndex, payload, note.requestId);
-  else if (original) void discardEditedNote(threadId, editing.originalIndex, toQueuePayload(original));
-}
-
-function showRemovedFromQueue(slot: number): void {
-  useToastStore.getState().show({
-    kind: "info",
-    title: "Removed from queue",
-    meta: `Slot ${String(slot + 1).padStart(2, "0")}`,
-  });
-}
-
 /** Manages the pop, restore, swap, cancel, and completion lifecycle for one queued Composer message. */
 export function useComposerQueueEditing({
   threadId,
@@ -124,15 +91,12 @@ export function useComposerQueueEditing({
 } {
   const [editing, setEditing] = useState<ComposerQueueEdit | null>(null);
   const originalMessageRef = useRef<QueuedMessage | null>(null);
-  const originalIndexRef = useRef(0);
   const restoredPreviewAnnotationsClearedRef = useRef(false);
   // While a direct dispatch owns the edit's content, cancel/discard must not
   // reinsert the popped original — it would resend as a ghost queue entry.
   const editConsumedByDispatchRef = useRef(false);
 
   const finishEditing = useCallback(() => {
-    const noteRequestId = originalMessageRef.current?.approvalNote?.requestId;
-    if (noteRequestId) setApprovalNoteInEdit(noteRequestId, false);
     editConsumedByDispatchRef.current = false;
     originalMessageRef.current = null;
     restoredPreviewAnnotationsClearedRef.current = false;
@@ -163,13 +127,6 @@ export function useComposerQueueEditing({
     }
   }, [editing]);
 
-  const captureEdit = useCallback(() => {
-    const restoredPreviewAnnotations = restoredPreviewAnnotationsClearedRef.current
-      ? undefined
-      : originalMessageRef.current?.previewAnnotations;
-    return preserveBrowserCapturePayload(form.capture(restoredPreviewAnnotations), originalMessageRef.current);
-  }, [form]);
-
   const loadIntoComposer = useCallback(
     (message: QueuedMessage) => {
       if (!threadId || editConsumedByDispatchRef.current) return;
@@ -181,31 +138,33 @@ export function useComposerQueueEditing({
       if (targetIndex === -1) return;
 
       form.invalidateAttachments();
-      if (editing) putBackSwappedEdit(threadId, editing, form.hasContent() ? captureEdit() : null, originalMessageRef.current);
+      if (editing && form.hasContent()) {
+        const restoredPreviewAnnotations = restoredPreviewAnnotationsClearedRef.current
+          ? undefined
+          : originalMessageRef.current?.previewAnnotations;
+        queue.insertAt(
+          threadId,
+          editing.originalIndex,
+          preserveBrowserCapturePayload(
+            form.capture(restoredPreviewAnnotations),
+            originalMessageRef.current,
+          ),
+        );
+      }
 
       const popped = queue.popMessage(threadId, message.id);
       if (!popped) return;
 
       originalMessageRef.current = popped;
-      originalIndexRef.current = targetIndex;
       restoredPreviewAnnotationsClearedRef.current = false;
-      setEditing(startEdit(popped, targetIndex));
+      setEditing({ messageId: popped.id, originalIndex: targetIndex });
       queue.setEditingThreadId(threadId);
 
       form.restore(popped);
       annotations.restore(popped.previewAnnotations);
     },
-    [annotations, captureEdit, editing, form, threadId],
+    [annotations, editing, form, threadId],
   );
-
-  // Every reconnect restore skips a note open here, so leaving the thread puts it back in its slot.
-  useEffect(() => () => {
-    const original = originalMessageRef.current;
-    if (!threadId || !original?.approvalNote || editConsumedByDispatchRef.current) return;
-    useQueueStore.getState().insertAt(threadId, originalIndexRef.current, toQueuePayload(original));
-    finishEditing();
-    scheduleDrainAfterEdit(threadId);
-  }, [finishEditing, threadId]);
 
   const cancelEdit = useCallback(() => {
     if (!threadId || !editing || editConsumedByDispatchRef.current) return;
@@ -226,18 +185,17 @@ export function useComposerQueueEditing({
 
     const slot = editing.originalIndex;
     const browserCaptureSpillPaths = originalMessageRef.current?.browserCaptureSpillPaths ?? [];
-    const original = editing.approvalNote ? originalMessageRef.current : null;
     finishEditing();
     annotations.clear();
-    if (original) {
-      void discardEditedNote(threadId, slot, toQueuePayload(original)).then((removed) => {
-        if (removed) showRemovedFromQueue(slot);
-      });
-    } else {
-      showRemovedFromQueue(slot);
-    }
     scheduleDrainAfterEdit(threadId);
     void releaseBrowserCaptureSpills(browserCaptureSpillPaths);
+    useToastStore
+      .getState()
+      .show({
+        kind: "info",
+        title: "Removed from queue",
+        meta: `Slot ${String(slot + 1).padStart(2, "0")}`,
+      });
     return true;
   }, [annotations, editing, finishEditing, threadId]);
 

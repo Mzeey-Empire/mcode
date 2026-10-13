@@ -31,7 +31,7 @@ import {
   type TurnRequest,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
-import { acpApprovalChoices, acpNoteChoiceId, approvalChoice, approvalOutcome, approvalResult } from "../../approval-scope.js";
+import { acpApprovalChoices, approvalChoice, approvalOutcome } from "../../approval-scope.js";
 import type { ProviderHostPorts } from "../../host-ports.js";
 import { SessionRuntime, type SpawnArgs, type SpawnResult } from "../session-runtime.js";
 import { AcpSessionRuntime } from "../protocols/acp/acp-session-runtime.js";
@@ -779,9 +779,8 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     this.pendingPermissions.delete(requestId);
     await Promise.resolve();
     this.applyApprovalMode(pending.entry, selected);
-    const result = approvalResult(response, "next_turn");
-    this.publishApprovalDecision(pending, approvalOutcome(choice, response, result.noteDelivery));
-    return result;
+    this.publishApprovalDecision(pending, approvalOutcome(choice, response));
+    return { status: "resolved" };
   }
 
   private applyApprovalMode(entry: DevinAcpSessionEntry, selected: { optionId: string } | undefined): void {
@@ -822,7 +821,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       body: {
         toolCallId: params.toolCall.toolCallId, requestedAt: new Date().toISOString(),
         subject: command ? { kind: "command", command } : { kind: "tool", toolName: snapshot?.toolName || params.toolCall.title || "Tool", preview: JSON.stringify(snapshot?.input ?? params.toolCall.rawInput ?? {}) },
-        choices, noteDelivery: "next_turn", noteChoiceId: acpNoteChoiceId(options, choices), origin: { kind: "agent" },
+        choices, noteDelivery: "none", origin: { kind: "agent" },
       },
     };
   }

@@ -27,18 +27,6 @@ export type QueuedSteer =
     readonly previous: Extract<QueuedSteer, { state: "delivery_unknown" | "resend" }>;
   };
 
-/**
- * A deny note the server holds for this item until turn admission claims it. A `queued` note
- * sends like any queued message but never steers, because only admission claims it once.
- * Mcode cannot tell whether the provider took a `delivery_unknown` note, so it waits for the
- * user. `settling` holds the item while the server answers Send again or Remove.
- */
-export interface QueuedApprovalNote {
-  readonly requestId: string;
-  /** `unsaved` holds an edit the server never saved; it is saved again on reconnect or the next Edit. */
-  readonly state: "queued" | "delivery_unknown" | "settling" | "unsaved";
-}
-
 /** A message waiting to be sent while the thread is busy with another turn. */
 export interface QueuedMessage {
   id: string;
@@ -75,21 +63,17 @@ export interface QueuedMessage {
   queuedAt: number;
   /** Present while a steer of this message is unsettled or it is the resend of one. */
   steer?: QueuedSteer;
-  /** Present when this item is a deny note the server holds. */
-  approvalNote?: QueuedApprovalNote;
 }
 
 /** True while the provider may hold this message, so the dispatcher must not send it. */
 export function isHeldQueuedMessage(message: QueuedMessage): boolean {
   const state = message.steer?.state;
-  const noteState = message.approvalNote?.state;
-  return state === "steering" || state === "delivery_unknown" || state === "settling"
-    || noteState === "delivery_unknown" || noteState === "settling" || noteState === "unsaved";
+  return state === "steering" || state === "delivery_unknown" || state === "settling";
 }
 
-/** True when Mcode cannot tell whether the provider took this message's steer or deny note. */
+/** True when Mcode cannot tell whether the provider took this message's steer. */
 export function isDeliveryUnknown(message: QueuedMessage): boolean {
-  return message.steer?.state === "delivery_unknown" || message.approvalNote?.state === "delivery_unknown";
+  return message.steer?.state === "delivery_unknown";
 }
 
 const MAX_QUEUE_DEPTH = 20;
@@ -159,13 +143,6 @@ interface QueueState {
   requeueAsResend: (threadId: string, steerId: string, replacementMessageId: string) => void;
   /** Append a held steer the server reported and this window has no copy of. */
   adoptHeldSteer: (threadId: string, message: QueuedMessage) => void;
-  /**
-   * Add a deny note, or update the state of the item that already holds it. Nothing changes
-   * while that item is settling or out for sending, since those answers decide it.
-   */
-  upsertApprovalNote: (threadId: string, message: QueuedMessage & { approvalNote: QueuedApprovalNote }) => void;
-  /** Record a held deny note's state on its queue item. */
-  setApprovalNoteState: (threadId: string, messageId: string, state: QueuedApprovalNote["state"]) => void;
   /**
    * Remove a specific queued message and return it. Used by the queue editor
    * while it prepares the edited replacement.
@@ -446,34 +423,6 @@ export const useQueueStore = create<QueueState>((set, get) => ({
       if (current.some((item) => item.id === message.id)) return state;
       if (state.inFlightQueuedMessages[threadId]?.message.id === message.id) return state;
       return { queues: { ...state.queues, [threadId]: [...current, message] } };
-    });
-  },
-
-  upsertApprovalNote: (threadId, message) => {
-    set((state) => {
-      const requestId = message.approvalNote.requestId;
-      if (state.inFlightQueuedMessages[threadId]?.message.approvalNote?.requestId === requestId) return state;
-      const current = state.queues[threadId] ?? [];
-      const index = current.findIndex((item) => item.approvalNote?.requestId === requestId);
-      if (index === -1) return { queues: { ...state.queues, [threadId]: [...current, message] } };
-      // A local edit the server has not saved yet is newer than the server's text.
-      const localState = current[index].approvalNote?.state;
-      if (localState === "settling" || localState === "unsaved") return state;
-      const nextList = [...current];
-      nextList[index] = { ...current[index], content: message.content, displayContent: message.displayContent, approvalNote: message.approvalNote };
-      return { queues: { ...state.queues, [threadId]: nextList } };
-    });
-  },
-
-  setApprovalNoteState: (threadId, messageId, noteState) => {
-    set((state) => {
-      const current = state.queues[threadId];
-      const index = current?.findIndex((message) => message.id === messageId) ?? -1;
-      const note = current?.[index]?.approvalNote;
-      if (!current || !note) return state;
-      const nextList = [...current];
-      nextList[index] = { ...current[index], approvalNote: { ...note, state: noteState } };
-      return { queues: { ...state.queues, [threadId]: nextList } };
     });
   },
 

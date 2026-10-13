@@ -141,12 +141,12 @@ describe("ClaudeProvider scoped pre-grant (off-band handoff Read)", () => {
     const request = events[0];
     assert(request);
     expect(await provider.resolveApproval(request.requestId, { choiceId: "deny", note }))
-      .toEqual(note ? { status: "resolved", noteDelivery: "native" } : { status: "resolved" });
+      .toEqual({ status: "resolved" });
     expect(await decision).toEqual({
       behavior: "deny",
       message: note ? `The user declined this request and said: ${note}` : "The user declined this request",
     });
-    expect(outcomes).toEqual([{ status: "denied", choiceLabel: "Deny", ...(note ? { note, noteDelivery: "native" } : {}) }]);
+    expect(outcomes).toEqual([{ status: "denied", choiceLabel: "Deny", ...(note ? { note } : {}) }]);
   });
 
   it("does not bypass a Read of a different path (emits a approval_request)", async () => {

@@ -65,22 +65,13 @@ describe("approvalReceiptCopy", () => {
     expect(approvalReceiptCopy(outcome)).toEqual({ label, showsSubject });
   });
 
-  it.each(["native", "steer"] as const)("shows a note delivered by %s as the user's words", (noteDelivery) => {
+  it("shows the deny note as the user's words", () => {
     render(
       <ApprovalReceiptRow
-        receipt={{ requestId: "r", subjectLabel: "bun run lint", outcome: { status: "denied", choiceLabel: "Deny", note: "Only lint the web app", noteDelivery }, decidedAt: 0 }}
+        receipt={{ requestId: "r", subjectLabel: "bun run lint", outcome: { status: "denied", choiceLabel: "Deny", note: "Only lint the web app" }, decidedAt: 0 }}
       />,
     );
     expect(screen.getByText("Only lint the web app")).toBeTruthy();
-  });
-
-  it("leaves a next-turn note to its own user message", () => {
-    render(
-      <ApprovalReceiptRow
-        receipt={{ requestId: "r", subjectLabel: "bun run lint", outcome: { status: "denied", choiceLabel: "Deny", note: "Only lint the web app", noteDelivery: "next_turn" }, decidedAt: 0 }}
-      />,
-    );
-    expect(screen.queryByText("Only lint the web app")).toBeNull();
   });
 
   it("hides the subject when Mcode could not read the request", () => {

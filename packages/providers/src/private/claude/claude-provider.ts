@@ -8,7 +8,7 @@ import { SUBAGENT_REPORTING } from "@mcode/contracts";
 import * as NodeEvents from "node:events";
 import { approvalReceipt } from "../../approvals/approval-receipt.js";
 import type { ApprovalOutcome, ApprovalChoice } from "@mcode/contracts";
-import { approvalChoice, approvalOutcome, approvalResult } from "../../approval-scope.js";
+import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
 import { SessionResumeUnavailableError } from "../../provider-turn-error.js";
 import { claudeApprovalBody } from "./claude-approval.js";
 
@@ -3260,9 +3260,8 @@ export class ClaudeProvider
     entry.resolve(this.nativeApprovalDecision(choice, response));
     this.pendingPermissions.delete(requestId);
     await Promise.resolve();
-    const result = approvalResult(response, "native");
-    this.publishApprovalDecision(requestId, entry, approvalOutcome(choice, response, result.noteDelivery));
-    return result;
+    this.publishApprovalDecision(requestId, entry, approvalOutcome(choice, response));
+    return { status: "resolved" };
   }
 
   private nativeApprovalDecision(choice: ApprovalChoice | undefined, response: ApprovalResponse): ClaudeApprovalDecision {

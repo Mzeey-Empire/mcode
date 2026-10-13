@@ -63,7 +63,7 @@ import { checkCodexVersion, currentCodexVersion, clearVersionCache } from "./cod
 import { meetsMinVersion } from "../../version-policy.js";
 import { CodexAppServer, warmCodexAppServer } from "./codex-app-server.js";
 import type { CodexApprovalRequest } from "./codex-app-server.js";
-import { approvalChoice, approvalOutcome, approvalResult } from "../../approval-scope.js";
+import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
 import { CodexEventMapper } from "./codex-event-mapper.js";
 import {
   CodexCanonicalEventPublisher,
@@ -384,8 +384,6 @@ interface PendingPermissionEntry {
   replying?: boolean;
   /** A drain that skipped this entry mid-write; a failed write settles it with this reason. */
   deferredDrain?: "session_stopped" | "turn_ended";
-  /** The written answer's receipt, published by a turn end that comes while its note is still steering. */
-  noteReceipt?: ApprovalOutcome;
   sessionId: string;
   threadId: string;
   body: ApprovalRequestBody;
@@ -393,12 +391,6 @@ interface PendingPermissionEntry {
   method: string;
   params: Record<string, unknown>;
   resolve: (response: unknown) => void;
-}
-
-/** An answered approval whose note is still steering must not be asked again. */
-function isOpenFileChangeApproval(pending: PendingPermissionEntry, sessionId: string, key: string): boolean {
-  return !pending.noteReceipt && pending.sessionId === sessionId && pending.method === "item/fileChange/requestApproval"
-    && JSON.stringify([pending.params.threadId, pending.params.itemId]) === key;
 }
 
 interface PreparedCodexTurn {
@@ -2922,7 +2914,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const { key, subject } = update;
     cache.set(key, subject);
     for (const [requestId, pending] of this.pendingPermissions) {
-      if (!isOpenFileChangeApproval(pending, sessionId, key)) continue;
+      if (pending.sessionId !== sessionId || pending.method !== "item/fileChange/requestApproval"
+        || JSON.stringify([pending.params.threadId, pending.params.itemId]) !== key) continue;
       pending.body = { ...pending.body, subject };
       this.emit("approval_request", { requestId, threadId: pending.threadId, body: pending.body } satisfies ApprovalRequestEnvelope);
     }
@@ -2946,29 +2939,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       if (entry.deferredDrain) this.drainPending((pending) => pending === entry, entry.deferredDrain);
       return { status: "failed", message: "The answer did not reach Codex" };
     }
-    if (!this.pendingPermissions.has(requestId)) return { status: "not_pending" };
-    entry.noteReceipt = approvalOutcome(choice, response);
-    const result = await this.approvalNoteResult(entry, response);
-    if (!this.pendingPermissions.delete(requestId)) return result;
-    this.publishApprovalDecision(requestId, entry, approvalOutcome(choice, response, result.noteDelivery));
-    return result;
-  }
-
-  private async approvalNoteResult(entry: PendingPermissionEntry, response: ApprovalResponse): Promise<Extract<ApprovalRespondResult, { status: "resolved" }>> {
-    if ("autoDeny" in response || !response.note) return { status: "resolved" };
-    return approvalResult(response, await this.deliverApprovalNote(entry, response.note));
-  }
-
-  private async deliverApprovalNote(entry: PendingPermissionEntry, note: string): Promise<"steer" | "next_turn" | "unknown"> {
-    if (!this.descriptor.capabilities.some((capability) => capability.name === "turn-steer" && capability.support === "supported")) return "next_turn";
-    const state = this.runtime.get(entry.sessionId);
-    const nativeThreadId = entry.params.threadId;
-    const nativeTurnId = entry.params.turnId;
-    if (!state || typeof nativeThreadId !== "string" || typeof nativeTurnId !== "string") return "next_turn";
-    const result = await state.server.steerTurn(nativeTurnId, undefined, [{ type: "text", text: note }], nativeThreadId);
-    if (result.outcome === "accepted") return "steer";
-    if (result.outcome === "rejected") return "next_turn";
-    return "unknown";
+    if (!this.pendingPermissions.delete(requestId)) return { status: "not_pending" };
+    this.publishApprovalDecision(requestId, entry, approvalOutcome(choice, response));
+    return { status: "resolved" };
   }
 
   private nativeApprovalDecision(choice: ApprovalChoice | undefined, response: ApprovalResponse): Parameters<typeof mapDecisionToCodexResponse>[1] {
@@ -2979,7 +2952,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   /** List stable routing envelopes, optionally filtered by owning thread. */
   listPendingApprovals(threadId?: string): ApprovalRequestEnvelope[] {
     return [...this.pendingPermissions.entries()].flatMap(([requestId, entry]) =>
-      !entry.noteReceipt && (threadId === undefined || entry.threadId === threadId) ? [{ requestId, threadId: entry.threadId, body: entry.body }] : []);
+      threadId === undefined || entry.threadId === threadId ? [{ requestId, threadId: entry.threadId, body: entry.body }] : []);
   }
 
   /**
@@ -3003,11 +2976,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       if (!predicate(entry)) continue;
       // An answer awaiting its write acknowledgement belongs to resolveApproval, which publishes the real outcome.
       if (entry.replying) {
-        // The completion that follows this drain would reject a receipt published after it.
-        if (entry.noteReceipt) {
-          this.pendingPermissions.delete(requestId);
-          this.publishApprovalDecision(requestId, entry, entry.noteReceipt);
-        } else entry.deferredDrain = reason;
+        entry.deferredDrain = reason;
         continue;
       }
       this.pendingPermissions.delete(requestId);

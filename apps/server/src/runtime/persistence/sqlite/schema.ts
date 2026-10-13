@@ -564,17 +564,6 @@ export const approvalReceipts = sqliteTable("approval_receipts", {
   sortOrder: integer("sort_order").notNull(),
 }, (table) => [index("idx_approval_receipts_message_sort_order_id").on(table.messageId, table.sortOrder, table.id)]);
 
-/** Deny-note intent retained across provider failures and restarts. */
-export const approvalNotes = sqliteTable("approval_notes", {
-  requestId: text("request_id").primaryKey().notNull(),
-  threadId: text("thread_id").notNull().references(() => threads.id, { onDelete: "cascade" }),
-  note: text("note").notNull(),
-  delivery: text("delivery").notNull(),
-  state: text("state").notNull(),
-  createdAt: text("created_at").notNull().default(timestampDefault),
-  updatedAt: text("updated_at").notNull().default(timestampDefault),
-});
-
 export const hookExecutions = sqliteTable(
   "hook_executions",
   {

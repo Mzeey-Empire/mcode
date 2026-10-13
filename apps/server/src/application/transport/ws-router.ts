@@ -113,7 +113,6 @@ import type { AttachmentService } from "../../features/attachments/storage/attac
 import { DraftImageMissingError } from "../../features/attachments/storage/draft-image-missing-error.js";
 import { SequenceAheadError } from "../../features/thread-control/attention/sequence-ahead-error.js";
 import { TurnSteerConflictError, TurnSteerMentionError, asTurnSteerError } from "../../features/agents/steering/turn-steer.js";
-import { isApprovalNoteAlreadyDelivered } from "../../features/agents/approvals/approval-note-errors.js";
 import { isMemoryRpcMethod, routeMemoryRpc } from "../../runtime/memory/transport/memory-rpc.js";
 import { isGitRpcMethod, routeGitRpc } from "../../features/projects/git/transport/git-rpc.js";
 import { isSnapshotRpcMethod, routeSnapshotRpc } from "../../features/projects/diffs/transport/snapshot-rpc.js";
@@ -491,12 +490,7 @@ function domainRouteError(id: string, error: unknown, message: string): WebSocke
     return { id, error: { code: error.code, message, data: { stagingId: error.stagingId } } };
   }
   if (error instanceof SequenceAheadError || error instanceof TurnRevertValidationError) return { id, error: { code: error.code, message } };
-  return approvalNoteRouteError(id, error, message) ?? steerRouteError(id, error, message);
-}
-
-function approvalNoteRouteError(id: string, error: unknown, message: string): WebSocketResponse | null {
-  if (!isApprovalNoteAlreadyDelivered(error)) return null;
-  return { id, error: { code: "note_already_delivered", message } };
+  return steerRouteError(id, error, message);
 }
 
 function steerRouteError(id: string, error: unknown, message: string): WebSocketResponse | null {

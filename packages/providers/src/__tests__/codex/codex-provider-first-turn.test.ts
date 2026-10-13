@@ -257,7 +257,7 @@ describe("CodexProvider first turn on new session", () => {
     const nativeResponse = handler(native);
     const pending = provider.listPendingApprovals(threadId);
     expect(pending).toHaveLength(1);
-    expect(pending[0]?.body).toMatchObject({ toolCallId: "tool-1", subject: { kind: "command", command: "bun run lint", cwd: "/fixture" }, noteDelivery: "steer" });
+    expect(pending[0]?.body).toMatchObject({ toolCallId: "tool-1", subject: { kind: "command", command: "bun run lint", cwd: "/fixture" }, noteDelivery: "none" });
     const result = provider.resolveApproval(pending[0]!.requestId, { choiceId: "deny" });
     expect(await nativeResponse).toEqual({ decision: "decline" });
     expect(resolved.mock.calls).toEqual([]);

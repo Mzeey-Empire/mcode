@@ -1,7 +1,6 @@
 import { ArrowUp, CornerDownRight, Paperclip, Pencil, X } from "lucide-react";
 import { ProviderIdSchema } from "@mcode/contracts";
 import { Button, IconButton } from "@/components/ui/button";
-import { removeApprovalNote, sendApprovalNoteAgain } from "@/features/conversation/composer/queue/queued-approval-note";
 import {
   isSteerable,
   releaseHeldSteer,
@@ -49,17 +48,13 @@ export function ComposerQueueList({
   const idle = useThreadStore((s) => !s.runningThreadIds.has(threadId));
   if (queue.length === 0) return null;
 
-  const canSendNow = (message: QueuedMessage) => !isPaused && message.approvalNote?.state !== "unsaved"
+  const canSendNow = (message: QueuedMessage) => !isPaused
     && (route === "send" || (route === "steer" && canSteer && isSteerable(message)));
 
   const edit = async (message: QueuedMessage) => {
     if (await releaseHeldSteer(threadId, message) === "plain") onLoadIntoComposer(message);
   };
   const remove = async (message: QueuedMessage) => {
-    if (message.approvalNote) {
-      await removeApprovalNote(threadId, message);
-      return;
-    }
     if (await releaseHeldSteer(threadId, message) === "plain") useQueueStore.getState().removeFromQueue(threadId, message.id);
   };
 
@@ -76,16 +71,13 @@ export function ComposerQueueList({
             {isDeliveryUnknown(message) ? (
               <DeliveryUnknownActions
                 position={index + 1}
-                onSendAgain={() => void (message.approvalNote
-                  ? sendApprovalNoteAgain(threadId, message)
-                  : sendHeldSteerAgain(threadId, message))}
+                onSendAgain={() => void sendHeldSteerAgain(threadId, message)}
                 onRemove={() => void remove(message)}
               />
             ) : (
               <QueueRowActions
                 position={index + 1}
                 pending={pendingLabel(message)}
-                unsaved={message.approvalNote?.state === "unsaved"}
                 canSendNow={canSendNow(message)}
                 onSendNow={() => onSendNow(message)}
                 onEdit={() => void edit(message)}
@@ -130,26 +122,24 @@ function QueueRowText({ message }: { message: QueuedMessage }) {
 /** What a row is waiting on, if anything; nothing may change the item until it answers. */
 function pendingLabel(message: QueuedMessage): string | undefined {
   if (message.steer?.state === "steering") return "Adding to turn";
-  if (message.steer?.state === "settling" || message.approvalNote?.state === "settling") return "Settling";
+  if (message.steer?.state === "settling") return "Settling";
   return undefined;
 }
 
 interface QueueRowActionsProps {
   readonly position: number;
   readonly pending: string | undefined;
-  /** A note edit the server never saved: it waits, but Edit and Remove still work. */
-  readonly unsaved: boolean;
   readonly canSendNow: boolean;
   readonly onSendNow: () => void;
   readonly onEdit: () => void;
   readonly onRemove: () => void;
 }
 
-function QueueRowActions({ position, pending, unsaved, canSendNow, onSendNow, onEdit, onRemove }: QueueRowActionsProps) {
+function QueueRowActions({ position, pending, canSendNow, onSendNow, onEdit, onRemove }: QueueRowActionsProps) {
   const busy = pending !== undefined;
   return (
     <span className="flex shrink-0 items-center justify-end gap-1">
-      <span role="status" className="text-body-small text-muted">{pending ?? (unsaved ? "Not saved" : undefined)}</span>
+      <span role="status" className="text-body-small text-muted">{pending}</span>
       <span className="flex w-24 items-center justify-end">
       {canSendNow && !busy ? (
         <IconButton aria-label={`Send queued message ${position} now`} tooltip="Send now" onClick={onSendNow}>

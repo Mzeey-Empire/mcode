@@ -24,7 +24,6 @@ export interface ParentTurnStartInput {
   approvalReviewReason?: string;
   providerIdentities: readonly ProviderIdentity[];
   retryOfExecutionId?: string;
-  approvalNoteRequestId?: string;
   projectUserMessage: () => Message;
 }
 

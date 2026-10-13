@@ -52,7 +52,7 @@ export const ApprovalOriginSchema = lazySchema(() => z.discriminatedUnion("kind"
 const approvalRequestBodyObject = lazySchema(() => z.object({
   toolCallId: z.string().max(256).optional(), requestedAt: z.string(), reason: z.string().max(1_000).optional(),
   subject: ApprovalSubjectSchema(), choices: z.array(ApprovalChoiceSchema()).min(1).max(10),
-  noteDelivery: z.enum(["native", "steer", "next_turn", "none"]), noteChoiceId: z.string().min(1).max(200).optional(),
+  noteDelivery: z.enum(["native", "none"]), noteChoiceId: z.string().min(1).max(200).optional(),
   origin: ApprovalOriginSchema(),
 }).strict());
 
@@ -83,7 +83,7 @@ export const ApprovalRequestSchema = lazySchema(() => approvalRequestBodyObject(
 /** The acknowledged result of an approval. */
 export const ApprovalOutcomeSchema = lazySchema(() => z.discriminatedUnion("status", [
   z.object({ status: z.literal("allowed"), intent: z.enum(["allow_once", "allow_scoped", "provider"]), choiceLabel: z.string().max(200) }),
-  z.object({ status: z.literal("denied"), choiceLabel: z.string().max(200), note: z.string().max(4_000).optional(), noteDelivery: z.enum(["native", "steer", "next_turn"]).optional() }),
+  z.object({ status: z.literal("denied"), choiceLabel: z.string().max(200), note: z.string().max(4_000).optional() }),
   z.object({ status: z.literal("answered"), count: z.number().int().min(1) }),
   z.object({ status: z.literal("cancelled"), reason: z.enum(["session_stopped", "turn_ended", "unanswerable"]) }),
   z.object({ status: z.literal("auto_denied"), reason: z.enum(["unreadable", "too_large"]) }),
@@ -94,8 +94,8 @@ export const ApprovalResponseSchema = lazySchema(() => z.object({
 }));
 /** Delivery result returned after the provider acknowledges its native answer. */
 export const ApprovalRespondResultSchema = lazySchema(() => z.discriminatedUnion("status", [
-  z.object({ status: z.literal("resolved"), noteDelivery: z.enum(["native", "steer", "next_turn", "unknown"]).optional() }),
-  z.object({ status: z.literal("not_pending"), note: z.enum(["queued", "delivery_unknown"]).optional() }),
+  z.object({ status: z.literal("resolved") }),
+  z.object({ status: z.literal("not_pending") }),
   z.object({ status: z.literal("failed"), message: z.string().max(500) }),
 ]));
 /** Routing identity is separate from untrusted display data. */
@@ -116,18 +116,6 @@ export type ApprovalOrigin = z.infer<ReturnType<typeof ApprovalOriginSchema>>;
 export type ApprovalResponse = z.infer<ReturnType<typeof ApprovalResponseSchema>> | { autoDeny: "unreadable" | "too_large" };
 /** Native answer delivery status. */
 export type ApprovalRespondResult = z.infer<ReturnType<typeof ApprovalRespondResultSchema>>;
-/** A deny note the server still holds, restored to its thread's queue on connect. */
-export const HeldApprovalNoteSchema = lazySchema(() => z.object({
-  requestId: z.string().min(1).max(256), threadId: z.string(), note: z.string(), state: z.enum(["queued", "delivery_unknown"]),
-}));
-/** A deny note waiting for turn admission or for the user's decision. */
-export type HeldApprovalNote = z.infer<ReturnType<typeof HeldApprovalNoteSchema>>;
-/** Admission refused a note that another client sent or removed. */
-export const ApprovalNoteAdmissionErrorSchema = lazySchema(() => z.object({
-  code: z.literal("note_already_delivered"), message: z.string(),
-}));
-/** Typed failure returned by agent.send when its note claim is closed. */
-export type ApprovalNoteAdmissionError = z.infer<ReturnType<typeof ApprovalNoteAdmissionErrorSchema>>;
 /** Ordered answers. */
 export type ApprovalAnswers = z.infer<ReturnType<typeof ApprovalAnswersSchema>>;
 /** Provider question. */

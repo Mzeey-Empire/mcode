@@ -4,8 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApprovalRequestEnvelope, ApprovalResponse, ApprovalRespondResult, ApprovalRequestBody } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import { ApprovalService } from "../approval-service.js";
-import { ApprovalNoteRepo } from "../approval-note-repo.js";
-import { createThreadPersistenceTestRuntime } from "../../../thread-control/testing/thread-persistence-test-runtime.js";
 
 vi.mock("@mcode/shared", () => ({ logger: { warn: vi.fn(), error: vi.fn() } }));
 
@@ -13,7 +11,7 @@ const body: ApprovalRequestBody = {
   requestedAt: "2026-10-10T10:00:00Z", subject: { kind: "command", command: "bun run lint" },
   choices: [{ id: "allow", intent: "allow_once", label: "Allow once" },
     { id: "reject_once", intent: "deny", label: "Reject once" }, { id: "reject_always", intent: "deny", label: "Reject always" }],
-  noteDelivery: "next_turn", noteChoiceId: "reject_once", origin: { kind: "agent" },
+  noteDelivery: "native", noteChoiceId: "reject_once", origin: { kind: "agent" },
 };
 
 class FakeProvider extends NodeEvents.EventEmitter {
@@ -30,8 +28,7 @@ function setup(threadControl?: Parameters<ApprovalService["start"]>[1]) {
   const publishApprovalRequest = vi.fn();
   const publishApprovalResolved = vi.fn();
   const stopSession = vi.fn(async () => { provider.pending = []; });
-  const runtime = createThreadPersistenceTestRuntime();
-  const service = new ApprovalService({ resolveAll: () => [provider] }, new ApprovalNoteRepo(runtime.reader, runtime.writer));
+  const service = new ApprovalService({ resolveAll: () => [provider] });
   service.start({ publishApprovalRequest, publishApprovalResolved, stopSession }, threadControl);
   return { provider, service, publishApprovalRequest, publishApprovalResolved, stopSession };
 }
@@ -39,17 +36,6 @@ function setup(threadControl?: Parameters<ApprovalService["start"]>[1]) {
 beforeEach(() => vi.clearAllMocks());
 
 describe("ApprovalService", () => {
-  it("keeps a thread-operation approval pending when its response carries an unsupported note", async () => {
-    let answered = false;
-    const request = { ...body, requestId: "thread-operation", threadId: "owner", providerId: "cursor" as const,
-      noteDelivery: "none" as const, noteChoiceId: undefined };
-    const test = setup({ listPendingApprovals: () => answered ? [] : [request],
-      respondToApproval: async () => { answered = true; return { status: "resolved" }; } });
-    expect(await test.service.respondToApproval(request.requestId, { choiceId: "reject_once", note: "Keep it here" }))
-      .toEqual({ status: "failed", message: "This approval does not accept a note" });
-    expect(test.service.listPendingApprovals()).toEqual([request]);
-  });
-
   it("does not report automatic denial before the native acknowledgement and never logs payload values", async () => {
     const test = setup();
     const delivery = Promise.withResolvers<ApprovalRespondResult>();
@@ -133,5 +119,34 @@ describe("ApprovalService", () => {
     ]);
     expect(results).toEqual([{ status: "failed", message: "offline" }, { status: "failed", message: "offline" }]);
     expect(test.provider.resolveApproval.mock.calls).toEqual([["valid", { choiceId: "reject_always" }]]);
+  });
+
+  it("passes a deny note to a provider that reads it natively", async () => {
+    const test = setup();
+    test.provider.pending = [{ requestId: "valid", threadId: "owner", body }];
+    test.provider.resolveApproval.mockResolvedValue({ status: "resolved" });
+    expect(await test.service.respondToApproval("valid", { choiceId: "reject_always", note: "  Only lint apps/web  " })).toEqual({ status: "resolved" });
+    expect(test.provider.resolveApproval.mock.calls).toEqual([["valid", { choiceId: "reject_always", note: "Only lint apps/web" }]]);
+  });
+
+  it.each([
+    ["a provider with no note route", { ...body, noteDelivery: "none" as const, noteChoiceId: undefined }, "reject_once"],
+    ["an allow choice", body, "allow"],
+  ])("refuses a note on %s and leaves the request pending", async (_case, requestBody, choiceId) => {
+    const test = setup();
+    test.provider.pending = [{ requestId: "valid", threadId: "owner", body: requestBody }];
+    expect(await test.service.respondToApproval("valid", { choiceId, note: "Keep it here" }))
+      .toEqual({ status: "failed", message: "This approval does not accept a note" });
+    expect(test.provider.resolveApproval).not.toHaveBeenCalled();
+  });
+
+  it("refuses a note on a thread-operation approval before answering it", async () => {
+    const request = { ...body, requestId: "thread-operation", threadId: "owner", providerId: "cursor" as const,
+      noteDelivery: "none" as const, noteChoiceId: undefined };
+    const respondToApproval = vi.fn(async () => ({ status: "resolved" as const }));
+    const test = setup({ listPendingApprovals: () => [request], respondToApproval });
+    expect(await test.service.respondToApproval(request.requestId, { choiceId: "reject_once", note: "Keep it here" }))
+      .toEqual({ status: "failed", message: "This approval does not accept a note" });
+    expect(respondToApproval).not.toHaveBeenCalled();
   });
 });
