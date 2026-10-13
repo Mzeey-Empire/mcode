@@ -1,7 +1,6 @@
 import "reflect-metadata";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import * as NodeFS from "fs";
-import type { WorkspaceRepo } from "../../persistence/workspace-repo.js";
 import { GitComparisonService } from "../git-comparison-service.js";
 import { GitRepositoryService } from "../git-repository-service.js";
 import { createMockGitExecutor } from "../execution/__tests__/mock-git-executor.js";
@@ -71,6 +70,10 @@ function mockBranchComparisonGit(
   args: string[],
   scenario: ReturnType<typeof resolveBranchComparisonScenario>,
 ): GitScenarioResponse {
+  if (args.includes("--symbolic-full-name")) {
+    const ref = args.at(-1) ?? "";
+    return { stdout: `${ref.startsWith("origin/") ? "refs/remotes/" : "refs/heads/"}${ref}\n`, stderr: "" };
+  }
   const handlers = [
     branchListScenarioResponse,
     abbreviatedRefScenarioResponse,
@@ -150,7 +153,7 @@ describe("GitComparisonService.resolveBranchComparison", () => {
     vi.resetAllMocks();
     const mock = createMockGitExecutor();
     execFn = mock.execFn;
-    const workspaceRepo = {} as WorkspaceRepo;
+    const workspaceRepo = { findById: () => undefined };
     gitService = new GitComparisonService(
       workspaceRepo,
       mock.executor,
@@ -183,8 +186,8 @@ describe("GitComparisonService.resolveBranchComparison", () => {
     const result = await gitService.resolveBranchComparison("ws", REPO);
 
     expect(result).toMatchObject({
-      base: "origin/feat/x",
-      target: "feat/x",
+      base: "refs/remotes/origin/feat/x",
+      compare: "refs/heads/feat/x",
       isUnborn: false,
       isComparisonAvailable: true,
     });
@@ -203,15 +206,14 @@ describe("GitComparisonService.resolveBranchComparison", () => {
     const result = await gitService.resolveBranchComparison("ws", REPO);
 
     expect(result).toMatchObject({
-      base: "origin/main",
-      target: "feat/x",
+      base: "refs/remotes/origin/main",
+      compare: "refs/heads/feat/x",
       isUnborn: false,
       isComparisonAvailable: true,
     });
-    expect(result.refs.length).toBe(3);
   });
 
-  it("compares current → upstream on the default branch when upstream is set", async () => {
+  it("shows unpushed commits on the default branch when upstream is set", async () => {
     setup({
       current: "main",
       upstream: "origin/main",
@@ -224,14 +226,14 @@ describe("GitComparisonService.resolveBranchComparison", () => {
     const result = await gitService.resolveBranchComparison("ws", REPO);
 
     expect(result).toMatchObject({
-      base: "main",
-      target: "origin/main",
+      base: "refs/remotes/origin/main",
+      compare: "refs/heads/main",
       isUnborn: false,
       isComparisonAvailable: true,
     });
   });
 
-  it("compares current → origin default on the default branch when origin exists but upstream is unset", async () => {
+  it("shows unpushed commits on the default branch without upstream", async () => {
     setup({
       current: "main",
       branches: [
@@ -243,8 +245,8 @@ describe("GitComparisonService.resolveBranchComparison", () => {
     const result = await gitService.resolveBranchComparison("ws", REPO);
 
     expect(result).toMatchObject({
-      base: "main",
-      target: "origin/main",
+      base: "refs/remotes/origin/main",
+      compare: "refs/heads/main",
       isUnborn: false,
       isComparisonAvailable: true,
     });
@@ -261,8 +263,8 @@ describe("GitComparisonService.resolveBranchComparison", () => {
     const result = await gitService.resolveBranchComparison("ws", REPO);
 
     expect(result).toMatchObject({
-      base: "main",
-      target: "main",
+      base: "refs/heads/main",
+      compare: "refs/heads/main",
       isUnborn: false,
       isComparisonAvailable: false,
     });
@@ -280,14 +282,14 @@ describe("GitComparisonService.resolveBranchComparison", () => {
     const result = await gitService.resolveBranchComparison("ws", REPO);
 
     expect(result).toMatchObject({
-      base: "origin/main",
-      target: "HEAD",
+      base: "refs/remotes/origin/main",
+      compare: "HEAD",
       isUnborn: false,
       isComparisonAvailable: true,
     });
   });
 
-  it("does not expose git's detached pseudo-ref as a selectable branch", async () => {
+  it("uses the saved base for a branchless checkout", async () => {
     setup({
       current: "HEAD",
       branches: [
@@ -297,15 +299,14 @@ describe("GitComparisonService.resolveBranchComparison", () => {
       ],
     });
 
-    const result = await gitService.resolveBranchComparison("ws", REPO);
+    const result = await gitService.resolveBranchComparison("ws", REPO, "release");
 
     expect(result).toMatchObject({
-      base: "origin/main",
-      target: "HEAD",
+      base: "refs/heads/release",
+      compare: "HEAD",
       isUnborn: false,
       isComparisonAvailable: true,
     });
-    expect(result.refs.map((ref) => ref.name)).not.toContain("(no branch)");
   });
 
   it("reports an explicit empty state on an unborn branch", async () => {
@@ -319,8 +320,7 @@ describe("GitComparisonService.resolveBranchComparison", () => {
 
     expect(result).toEqual({
       base: null,
-      target: null,
-      refs: [],
+      compare: null,
       isUnborn: true,
       isComparisonAvailable: false,
     });
@@ -340,8 +340,8 @@ describe("GitComparisonService.resolveBranchComparison", () => {
     const result = await gitService.resolveBranchComparison("ws", REPO);
 
     expect(result).toMatchObject({
-      base: "origin/develop",
-      target: "feat/y",
+      base: "refs/remotes/origin/develop",
+      compare: "refs/heads/feat/y",
       isComparisonAvailable: true,
     });
   });
@@ -360,8 +360,8 @@ describe("GitComparisonService.resolveBranchComparison", () => {
     const result = await gitService.resolveBranchComparison("ws", REPO);
 
     expect(result).toMatchObject({
-      base: "main",
-      target: "feat/local-only",
+      base: "refs/heads/main",
+      compare: "refs/heads/feat/local-only",
       isUnborn: false,
       isComparisonAvailable: true,
     });
@@ -380,7 +380,7 @@ describe("GitComparisonService.resolveBranchComparison", () => {
 
     expect(result).toMatchObject({
       base: null,
-      target: "feat/unknown-base",
+      compare: "refs/heads/feat/unknown-base",
       isUnborn: false,
       isComparisonAvailable: true,
     });
@@ -395,7 +395,7 @@ describe("GitComparisonService branch comparison ranges", () => {
     vi.resetAllMocks();
     const mock = createMockGitExecutor();
     execFn = mock.execFn;
-    const workspaceRepo = {} as WorkspaceRepo;
+    const workspaceRepo = { findById: () => undefined };
     gitService = new GitComparisonService(
       workspaceRepo,
       mock.executor,
@@ -417,7 +417,7 @@ describe("GitComparisonService branch comparison ranges", () => {
 
   it("rejects a ref that could smuggle a git flag (argument injection)", async () => {
     await expect(
-      gitService.readReviewComparison("ws", "branch", { base: "--output=/tmp/pwned", target: "HEAD" }, REPO),
+      gitService.readReviewComparison("ws", "branch", { base: "--output=/tmp/pwned", compare: "HEAD" }, REPO),
     ).resolves.toMatchObject({ status: "failed", failure: { kind: "unsafe-ref" } });
     await expect(
       gitService.readBranchComparisonDiff("ws", "main", "-rf", undefined, undefined, REPO),

@@ -45,7 +45,7 @@ function routerDeps(workspaceRepo: WorkspaceRepo, threadRepo: ThreadRepo): GitRo
     gitRepository: service,
     gitWorktrees: new GitWorktreeService(workspaceRepo, new RealGitExecutor(), hostRuntime),
     gitComparison: {
-      listCommits: unexpected, readCommitDiff: unexpected, listCommitChangedFiles: unexpected,
+      listCommits: unexpected, searchCommits: unexpected, readCommitDiff: unexpected, listCommitChangedFiles: unexpected,
       readWorkingTreeDiff: unexpected, readFileAtRef: unexpected,
       readBranchComparisonDiff: unexpected,
       resolveBranchComparison: unexpected, readReviewState: unexpected, readReviewComparison: unexpected,

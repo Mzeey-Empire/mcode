@@ -819,8 +819,10 @@ export interface McodeTransport {
   readFileAtRef(workspaceId: string, ref: string, filePath: string, threadId?: string): Promise<string>;
   /** Get the unified diff between two refs (`base...target`, three-dot), optionally per file. Omit base/target to use the detected default branch → HEAD. Pass threadId to read the thread's worktree. */
   getBranchDiff(workspaceId: string, base?: string, target?: string, filePath?: string, maxLines?: number, threadId?: string): Promise<string>;
-  /** Resolve the default Branch comparison (base→target per ADR 0007) plus the refs that populate the pickers. Pass threadId so "current branch" is the thread's worktree branch. */
+  /** Resolve qualified default operands in the thread's checkout. */
   getBranchComparison(workspaceId: string, threadId?: string): Promise<BranchComparison>;
+  /** Search and page the complete default ahead-of-base commit range. */
+  searchCommits(params: import("@mcode/contracts").GitSearchCommitsParams): Promise<import("@mcode/contracts").GitSearchCommitsResult>;
   /** Resolve a workspace or thread checkout's origin remote into a normalized web URL and repository label. */
   getRemoteUrl(workspaceId: string, threadId?: string): Promise<GitRemoteUrl>;
   /** Probe dirty state and available Review comparisons. */
@@ -830,7 +832,7 @@ export interface McodeTransport {
     workspaceId: string;
     view: "unstaged" | "staged" | "branch" | "commit" | "uncommitted";
     base?: string;
-    target?: string;
+    compare?: string;
     sha?: string;
     threadId?: string;
   }): Promise<import("@mcode/contracts").ReviewComparisonResult>;

@@ -74,7 +74,8 @@ function originFetchError(error: unknown, branch: string): OriginFetchError {
   return new OriginFetchError("network_or_auth", "Could not fetch from origin. Check your connection and Git access.", detail);
 }
 
-function gitListError(error: unknown): GitListError {
+/** Classify failures shared by ref and commit picker listings. */
+export function gitListError(error: unknown): GitListError {
   const parsed = gitCommandFailureSchema.safeParse(error);
   const failure = parsed.success ? parsed.data : {};
   const detail = (failure.stderr || failure.message || String(error)).split(/\r?\n/)[0]?.slice(0, 2000);

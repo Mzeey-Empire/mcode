@@ -327,7 +327,7 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
     expect(await service.readReviewState("fixture", cwd)).toEqual({
       isGitRepo: true, head: git("rev-parse", "HEAD"), branch: "main",
       uncommitted: { staged: 0, unstaged: 1, untracked: 1 }, commitsAhead: null,
-      branchDefault: { base: "main", compare: "origin/main" },
+      branchDefault: { base: "refs/remotes/origin/main", compare: "refs/heads/main" },
     });
   });
 
@@ -390,8 +390,8 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
     expect(await service.readReviewState("fixture", cwd)).toEqual({
       isGitRepo: true, head: git("rev-parse", "HEAD"), branch: "feature",
       uncommitted: { staged: 0, unstaged: 0, untracked: 0 },
-      commitsAhead: { count: 1, base: "main" },
-      branchDefault: { base: "main", compare: "feature" },
+      commitsAhead: { count: 1, base: "refs/heads/main" },
+      branchDefault: { base: "refs/heads/main", compare: "refs/heads/feature" },
     });
     expect(indexHash()).toBe(before);
   });

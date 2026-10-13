@@ -6,6 +6,8 @@ import { logger, truncateUnifiedDiff } from "@mcode/shared";
 import type {
   BranchComparison,
   GitCommit,
+  GitSearchCommitsParams,
+  GitSearchCommitsResult,
   ReviewComparison,
   ReviewComparisonResult,
   ReviewFileChange,
@@ -13,7 +15,7 @@ import type {
 } from "@mcode/contracts";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import type { GitExecutor } from "./execution/index.js";
-import { GitRepositoryService } from "./git-repository-service.js";
+import { GitRepositoryService, gitListError } from "./git-repository-service.js";
 import { batchLiteralPaths } from "./literal-paths.js";
 import { assertReviewWorktree, reviewComparisonFailure, ReviewComparisonLimitError, UnsafeReviewRefError } from "./review-comparison-errors.js";
 
@@ -28,7 +30,7 @@ export class GitComparisonService {
   private readonly originDefaultRefCache = new Map<string, string | null>();
 
   constructor(
-    @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
+    @inject(WorkspaceRepo) private readonly workspaceRepo: Pick<WorkspaceRepo, "findById">,
     @inject("GitExecutor") private readonly gitExecutor: GitExecutor,
     @inject(GitRepositoryService, { isOptional: true })
     gitRepository?: GitRepositoryService,
@@ -200,7 +202,7 @@ export class GitComparisonService {
   async readReviewComparison(
     workspaceId: string,
     view: ReviewView,
-    opts: { base?: string; target?: string; sha?: string },
+    opts: { base?: string; compare?: string; sha?: string },
     repoPath?: string,
   ): Promise<ReviewComparisonResult> {
     const cwd = repoPath ?? this.requireWorkspace(workspaceId).path;
@@ -307,30 +309,64 @@ export class GitComparisonService {
     );
     const status = parseReviewStatus(stdout);
     if (!status.head) return { isGitRepo: true, ...status, commitsAhead: null, branchDefault: { unavailable: "unborn" } };
-    const base = await this.resolveCommitListBase(cwd, status.branch ?? "HEAD", undefined);
-    const commitsAhead = base ? await this.gitExecutor.exec(
-      ["-C", cwd, "rev-list", "--count", `${base}..HEAD`], { timeout: 10_000 },
-    ).then(({ stdout }) => ({ base, count: Number(stdout.trim()) }), () => null) : null;
     const selection = await this.selectBranchComparison(cwd, savedBaseBranch);
-    const branchDefault = selection.isComparisonAvailable && selection.base && selection.target
-      ? { compare: selection.target, base: selection.base }
+    const base = selection.base;
+    const commitsAhead = base ? await this.gitExecutor.exec(
+      ["-C", cwd, "rev-list", "--count", `${base}..${selection.compare}`], { timeout: 10_000 },
+    ).then(({ stdout }) => ({ base, count: Number(stdout.trim()) }), () => null) : null;
+    const branchDefault = selection.isComparisonAvailable && selection.base && selection.compare
+      ? { compare: selection.compare, base: selection.base }
       : { unavailable: "no-base" as const };
     return { isGitRepo: true, ...status, commitsAhead, branchDefault };
   }
 
-  /** Resolve the default Branch comparison and the available references. */
+  /** Resolve qualified operands for the checkout's default Branch comparison. */
   async resolveBranchComparison(
     workspaceId: string,
     repoPath?: string,
     savedBaseBranch?: string | null,
   ): Promise<BranchComparison> {
     const cwd = repoPath ?? this.requireWorkspace(workspaceId).path;
-    const refs = await this.gitRepository.listBranchesAt(cwd);
     if (!(await this.hasCommits(cwd))) {
-      return { base: null, target: null, refs, isUnborn: true, isComparisonAvailable: false };
+      return { base: null, compare: null, isUnborn: true, isComparisonAvailable: false };
     }
     const selection = await this.selectBranchComparison(cwd, savedBaseBranch);
-    return { ...selection, refs, isUnborn: false };
+    return { ...selection, isUnborn: false };
+  }
+
+  /** Search all commits ahead of the resolved base before applying pagination. */
+  async searchCommits(
+    params: GitSearchCommitsParams,
+    repoPath?: string,
+    savedBaseBranch?: string | null,
+  ): Promise<GitSearchCommitsResult> {
+    try {
+      const cwd = repoPath ?? this.requireWorkspace(params.workspaceId).path;
+      const selection = await this.resolveBranchComparison(params.workspaceId, cwd, savedBaseBranch);
+      if (!selection.base || !selection.compare || selection.isUnborn) {
+        return { ok: true, commits: [], matchCount: 0, totalCount: 0 };
+      }
+      assertSafeRef(selection.base);
+      assertSafeRef(selection.compare);
+      const range = `${selection.base}..${selection.compare}`;
+      const [log, count] = await Promise.all([
+        this.gitExecutor.exec(["-C", cwd, "log", range, "--format=%H%x00%h%x00%s%x00%aI", "--"], { timeout: 10_000 }),
+        this.gitExecutor.exec(["-C", cwd, "rev-list", "--count", range, "--"], { timeout: 10_000 }),
+      ]);
+      const query = (params.query ?? "").toLowerCase();
+      const commits = log.stdout.trimEnd().split("\n").filter(Boolean).map((line) => {
+        const [sha = "", shortSha = "", subject = "", date = ""] = line.replace(/\r$/, "").split("\0");
+        return { sha, shortSha, subject, date };
+      }).filter((commit) => commit.subject.toLowerCase().includes(query) || commit.sha.toLowerCase().startsWith(query));
+      return {
+        ok: true,
+        commits: commits.slice(params.offset, params.offset + params.limit),
+        matchCount: commits.length,
+        totalCount: Number(count.stdout.trim()),
+      };
+    } catch (error) {
+      return { ok: false, error: gitListError(error) };
+    }
   }
 
   /** Read a diff stat summary between two refs. */
@@ -404,10 +440,10 @@ export class GitComparisonService {
   ): Promise<string[] | null> {
     const base = opts.base ?? await this.detectDefaultBranch(cwd);
     if (!base) return null;
-    const target = opts.target ?? "HEAD";
+    const compare = opts.compare ?? "HEAD";
     assertSafeRef(base);
-    assertSafeRef(target);
-    return [`${base}...${target}`];
+    assertSafeRef(compare);
+    return [`${base}...${compare}`];
   }
 
   private async readReviewComparisonWithCommitFallback(
@@ -437,7 +473,27 @@ export class GitComparisonService {
     const originDefaultRef = await this.detectOriginDefaultRef(cwd);
     const current = await this.gitRepository.getCurrentBranchAt(cwd);
     const upstream = await this.getCurrentUpstreamRef(cwd, current);
-    return selectBranchComparison({ current, defaultBranch, originDefaultRef, savedBaseBranch, upstream });
+    const savedBase = savedBaseBranch ? await this.qualifyComparisonRef(cwd, savedBaseBranch) : savedBaseBranch;
+    return selectBranchComparison({
+      current: current && current !== "HEAD" ? `refs/heads/${current}` : current,
+      defaultBranch: defaultBranch ? `refs/heads/${defaultBranch}` : null,
+      originDefaultRef: originDefaultRef ? `refs/remotes/${originDefaultRef}` : null,
+      savedBaseBranch: savedBase,
+      upstream: upstream ? await this.qualifyComparisonRef(cwd, upstream) : null,
+    });
+  }
+
+  private async qualifyComparisonRef(cwd: string, ref: string): Promise<string> {
+    assertSafeRef(ref);
+    if (ref.startsWith("refs/") || ref === "HEAD") return ref;
+    const { stdout } = await this.gitExecutor.exec(
+      ["-C", cwd, "rev-parse", "--symbolic-full-name", ref], { timeout: 10_000 },
+    );
+    const qualified = stdout.trim();
+    if (!qualified.startsWith("refs/heads/") && !qualified.startsWith("refs/remotes/")) {
+      throw new UnsafeReviewRefError(`Unresolved comparison ref: ${ref}`);
+    }
+    return qualified;
   }
 
   private async getCurrentUpstreamRef(cwd: string, current: string | null): Promise<string | null> {
@@ -558,7 +614,7 @@ export class GitComparisonService {
 
 type ReviewView = "unstaged" | "staged" | "branch" | "commit" | "uncommitted";
 
-type ReviewComparisonOptions = { base?: string; target?: string; sha?: string };
+type ReviewComparisonOptions = { base?: string; compare?: string; sha?: string };
 
 type CommitLogArguments = {
   effectivePath: string;
@@ -580,7 +636,7 @@ type BranchComparisonContext = {
 
 type BranchComparisonSelection = {
   base: string | null;
-  target: string | null;
+  compare: string | null;
   isComparisonAvailable: boolean;
 };
 
@@ -710,19 +766,9 @@ function selectNamedBranchComparison(
   context: BranchComparisonContext,
   current: string,
 ): BranchComparisonSelection {
-  if (context.upstream) return selectTrackedBranchComparison(context, current, context.upstream);
-  if (context.originDefaultRef) return selectTrackedBranchComparison(context, current, context.originDefaultRef);
+  if (context.upstream) return branchComparisonSelection(context.upstream, current, true);
+  if (context.originDefaultRef) return branchComparisonSelection(context.originDefaultRef, current, true);
   return selectUntrackedBranchComparison(context, current);
-}
-
-function selectTrackedBranchComparison(
-  context: BranchComparisonContext,
-  current: string,
-  comparisonRef: string,
-): BranchComparisonSelection {
-  return isDefaultBranch(context.defaultBranch, current)
-    ? branchComparisonSelection(current, comparisonRef, true)
-    : branchComparisonSelection(comparisonRef, current, true);
 }
 
 function selectUntrackedBranchComparison(
@@ -744,10 +790,10 @@ function isDefaultBranch(defaultBranch: string | null, current: string): boolean
 
 function branchComparisonSelection(
   base: string | null,
-  target: string | null,
+  compare: string | null,
   isComparisonAvailable: boolean,
 ): BranchComparisonSelection {
-  return { base, target, isComparisonAvailable };
+  return { base, compare, isComparisonAvailable };
 }
 
 function parseReviewFileChanges(stdout: string, binaryPaths: ReadonlySet<string>): ReviewFileChange[] {
