@@ -396,6 +396,35 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
     expect(indexHash()).toBe(before);
   });
 
+  it("diffs a diverged local branch against its origin twin from the fork point, in the picked direction", async () => {
+    write("shared.txt", "base\n");
+    commit();
+    git("checkout", "-b", "remote-side");
+    write("shared.txt", "origin\n");
+    commit();
+    git("update-ref", "refs/remotes/origin/main", "HEAD");
+    git("checkout", "main");
+    git("branch", "-D", "remote-side");
+    write("shared.txt", "local\n");
+    write("local.txt", "local only\n");
+    commit();
+    const compare = async (base: string, head: string) => {
+      const result = await service.readReviewComparison("fixture", "branch", { base, compare: head }, cwd);
+      if (result.status !== "ready") throw new Error(JSON.stringify(result));
+      return result.comparison.files.map(({ path, changeType, additions, deletions }) => ({ path, changeType, additions, deletions }));
+    };
+    expect(await compare("refs/remotes/origin/main", "refs/heads/main")).toEqual([
+      { path: "local.txt", changeType: "added", additions: 1, deletions: 0 },
+      { path: "shared.txt", changeType: "modified", additions: 1, deletions: 1 },
+    ]);
+    expect(await compare("refs/heads/main", "refs/remotes/origin/main")).toEqual([
+      { path: "shared.txt", changeType: "modified", additions: 1, deletions: 1 },
+    ]);
+    const patch = await service.readBranchComparisonDiff("fixture", "refs/remotes/origin/main", "refs/heads/main", "shared.txt", undefined, cwd);
+    expect(patch).toContain("-base\n+local\n");
+    expect(patch).not.toMatch(/^[-+]origin$/m);
+  });
+
   it("diffs only the selected paths from HEAD, untracked included, without touching the real index", async () => {
     write("tracked.ts", "one\n");
     write("other.ts", "one\n");
