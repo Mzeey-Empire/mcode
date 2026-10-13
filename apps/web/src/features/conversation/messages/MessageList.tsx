@@ -152,6 +152,30 @@ function missReveal(request: MessageRevealRequest): void {
   useToastStore.getState().show({ kind: "failed", title: "Couldn't find that reply in the chat" });
 }
 
+type RevealHistory = Pick<MessageListData, "hasMore" | "hasNewer" | "loadOlderMessages" | "loadNewerMessages">;
+
+/** Loads the next history page toward a reveal's message, or ends the search once both directions are spent. */
+function pageRevealSearch(search: RevealSearch, history: RevealHistory): void {
+  if (search.inFlight) return;
+  // The history window evicts as it pages, so its flags flip back; one pass older, then one newer, ends the search.
+  if (search.direction === "older" && !history.hasMore) search.direction = "newer";
+  if ((search.direction === "newer" && !history.hasNewer) || search.pages >= MAX_REVEAL_PAGES) {
+    missReveal(search.request);
+    return;
+  }
+  const loadPage = search.direction === "older" ? history.loadOlderMessages : history.loadNewerMessages;
+  search.pages += 1;
+  search.inFlight = true;
+  void loadPage(search.request.threadId).then(
+    (result) => {
+      search.inFlight = false;
+      // A skipped page changes nothing, so no later render would retry it.
+      if (result !== "loaded") missReveal(search.request);
+    },
+    () => missReveal(search.request),
+  );
+}
+
 function requestMissingSourceHistory({
   itemIndex,
   target,
@@ -517,24 +541,10 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
       ? revealSearch.current
       : { request: revealRequest, direction: "older" as const, pages: 0, inFlight: false };
     revealSearch.current = search;
-    if (search.inFlight) return;
-    // The history window evicts as it pages, so its flags flip back; one pass older, then one newer, ends the search.
-    if (search.direction === "older" && !data.hasMore) search.direction = "newer";
-    if ((search.direction === "newer" && !data.hasNewer) || search.pages >= MAX_REVEAL_PAGES) {
-      missReveal(revealRequest);
-      return;
-    }
-    const loadPage = search.direction === "older" ? data.loadOlderMessages : data.loadNewerMessages;
-    search.pages += 1;
-    search.inFlight = true;
-    void loadPage(revealRequest.threadId).then(
-      (result) => {
-        search.inFlight = false;
-        // A skipped page changes nothing, so no later render would retry it.
-        if (result !== "loaded") missReveal(revealRequest);
-      },
-      () => missReveal(revealRequest),
-    );
+    pageRevealSearch(search, {
+      hasMore: data.hasMore, hasNewer: data.hasNewer,
+      loadOlderMessages: data.loadOlderMessages, loadNewerMessages: data.loadNewerMessages,
+    });
   }, [revealRequest, items, scrollToMessage, data.hasMore, data.hasNewer, data.isLoadingMore, data.isLoadingNewer, data.loadOlderMessages, data.loadNewerMessages]);
   const jumpToUser = useCallback(() => {
     if (stickyMessage) scrollToMessage(stickyMessage.id);
