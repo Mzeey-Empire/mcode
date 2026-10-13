@@ -9,6 +9,7 @@ import type { ScopedPreGrantService } from "../permissions/scoped-pre-grant.js";
 import type { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { broadcast } from "../../../application/transport/push.js";
 import type { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
+import { sendAdmittedTurn } from "../transport/turn-message-dispatch.js";
 import { mergePlanVersions } from "./merge-plan-versions.js";
 import type { PlanFileWriter } from "./plan-file-writer.js";
 import { planWriteOperations } from "./persistence/plan-write-operations.js";
@@ -95,7 +96,9 @@ export class PlanService {
     if (provider.id === "claude" || provider.id === "copilot") {
       runtime.grants.issue({ threadId: input.threadId, toolName: "Read", path: this.files.path(input.threadId) });
     }
-    await runtime.commands.sendMessage({ threadId: input.threadId, messageId: prepared.request.messageId,
+    // The receipt only needs admission. Starting or resuming the provider
+    // session can take far longer, and its failures arrive on the turn.
+    await sendAdmittedTurn(runtime.commands, { threadId: input.threadId, messageId: prepared.request.messageId,
       content: prepared.request.wireText, displayContent: `Implement plan v${prepared.request.version}`,
       interactionMode: "build", mutationReservationToken: token, planImplement: { requestId: input.requestId },
       model: thread.model ?? undefined, reasoningLevel: thread.reasoning_level ?? undefined,

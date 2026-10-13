@@ -173,7 +173,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     expect(await new PlanService(writer, workers.progress, files, runtime).implement(input)).toEqual(first);
     expect(turns()).toEqual([{ status: "Running" }]);
     expect(userMessages()).toEqual([{ id: first.messageId, content: "Implement plan v1" }]);
-    expect(sent.map(turn => turn.message)).toEqual([
+    await expect.poll(() => sent.map(turn => turn.message)).toEqual([
       `Implement plan v1: "Original".\n\nThis is the plan the user approved. It supersedes any earlier plan or plan file, including your own. Mcode keeps this text at ${files.path(threadId)}.\n\n# Original\nExact plan text.`,
     ]);
     expect(atDispatch).toEqual([{ text: "# Original\nExact plan text.", status: "accepted" }]);
@@ -196,7 +196,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     expect(new PlanImplementStore(database).read(stale.requestId)).toBeNull();
     assertUnaccepted();
     await service.implement(request(newer));
-    expect(sent.map(turn => turn.message.endsWith("\n\n# Window B\nRevision five."))).toEqual([true]);
+    await expect.poll(() => sent.map(turn => turn.message.endsWith("\n\n# Window B\nRevision five."))).toEqual([true]);
     expect(NodeFS.readFileSync(files.path(threadId), "utf8")).toBe("# Window B\nRevision five.");
   });
 
@@ -216,7 +216,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
       pending: { versionId, baseVersionId: ready.id, baseRevision: 0, contentMd: "# Unsaved\nLast keystroke." } });
     expect((await service.snapshot({ threadId })).versions.map(v => [v.status, v.revision, v.acceptedMessageId]))
       .toEqual([["superseded", 0, null], ["accepted", 1, receipt.messageId]]);
-    expect(sent.map(turn => turn.message.endsWith("\n\n# Unsaved\nLast keystroke."))).toEqual([true]);
+    await expect.poll(() => sent.map(turn => turn.message.endsWith("\n\n# Unsaved\nLast keystroke."))).toEqual([true]);
   });
 
   it("passes the newest agent file proof with draft text and durably returns the adapter outcome", async () => {
@@ -272,7 +272,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     const receipt = await service.implement(request());
     expect((await service.snapshot({ threadId })).versions.map(v => [v.status, v.acceptedMessageId]))
       .toEqual([["accepted", receipt.messageId], ["superseded", null]]);
-    expect(atDispatch).toEqual([{ text: "# Original\nExact plan text.", status: "accepted" }]);
+    await expect.poll(() => atDispatch).toEqual([{ text: "# Original\nExact plan text.", status: "accepted" }]);
     expect(NodeFS.readFileSync(files.path(threadId), "utf8")).toBe("# Original\nExact plan text.");
   });
 
@@ -302,7 +302,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
   it("implements at the thread's reasoning level", async () => {
     await runtime.threads.updateSettings(threadId, { reasoning_level: "xhigh" });
     await service.implement(request());
-    expect(sent.map(turn => turn.reasoningLevel)).toEqual(["xhigh"]);
+    await expect.poll(() => sent.map(turn => turn.reasoningLevel)).toEqual(["xhigh"]);
   });
 
   it("rolls back pending edits when a fault occurs before the request row", async () => {
@@ -355,6 +355,16 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     expect(userMessages()).toEqual([{ id: receipt.messageId, content: "Implement plan v1" }]);
     await writer.execute(planImplementWriteOperations.fail, { requestId: input.requestId, code: "interrupted" });
     expect(await service.implement(input)).toEqual(receipt);
+    send.mockRestore();
+  });
+
+  it("answers on admission while the provider is still starting the turn", async () => {
+    const providerStarting = deferred();
+    const send = vi.spyOn(provider, "sendTurn").mockImplementationOnce(() => providerStarting.promise);
+    const receipt = await service.implement(request());
+    expect(receipt.state).toBe("admitted");
+    await expect.poll(() => send.mock.calls.length).toBe(1);
+    providerStarting.resolve();
     send.mockRestore();
   });
 
