@@ -343,7 +343,6 @@ function RailEntry({
   );
 }
 
-/** A tool's rail entry, named and drawn from the tab catalog. */
 function RailTab({
   id,
   active,
@@ -379,7 +378,6 @@ function RailTab({
   );
 }
 
-/** One subagent's rail entry: its provider icon, its title as the label, and a dot while it runs. */
 function RailSubagentTab({
   entryId,
   entry,
@@ -426,7 +424,6 @@ function RailSubagentTab({
   );
 }
 
-/** Separates the tools from the subagent tabs grouped after Subagents. */
 function RailDivider() {
   return <div data-testid="rail-subagent-divider" aria-hidden className="mx-auto my-1 h-px w-5 shrink-0 bg-border" />;
 }
