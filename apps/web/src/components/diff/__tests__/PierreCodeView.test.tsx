@@ -19,7 +19,6 @@ vi.mock("@/transport", async (original) => ({
   getTransport: () => transport,
 }));
 
-// The Open action's editor picker asks the transport for installed apps.
 vi.mock("@/hooks/useOpenInApps", () => ({
   useOpenInApps: () => [],
 }));

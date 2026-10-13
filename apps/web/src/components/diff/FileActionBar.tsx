@@ -36,14 +36,12 @@ interface FileActionBarProps {
   readonly onTogglePreview: () => void;
 }
 
-/** 24px icon button shared by every action, per Paper 10a. Muted at rest, ink on hover. */
 const ACTION_BUTTON_CLASS = [
   "size-6 shrink-0 rounded-sm p-0 text-muted",
   "transition-colors hover:bg-ink/10 hover:text-ink",
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus/55",
 ].join(" ");
 
-/** Active segment of the Diff/Preview toggle. */
 const ACTION_BUTTON_ACTIVE = "bg-selected text-ink";
 
 /**

@@ -4,7 +4,6 @@ import type { ReviewFileChange } from "@mcode/contracts";
 import { FileTypeIcon } from "@/components/ui/file-type-icon";
 import { cn } from "@/lib/utils";
 
-/** Props for {@link ReviewFileHeader}. */
 interface ReviewFileHeaderProps {
   readonly file: ReviewFileChange;
   readonly expanded: boolean;
@@ -15,7 +14,6 @@ interface ReviewFileHeaderProps {
   readonly actions: ReactNode;
 }
 
-/** Splits a workspace-relative path into its file name and parent folder. */
 function splitFilePath(path: string): { readonly name: string; readonly folder: string } {
   const index = path.lastIndexOf("/");
   return index < 0
@@ -59,10 +57,6 @@ export function ReviewFileHeader({ file, expanded, highlighted, onToggle, action
   );
 }
 
-/**
- * Deletions before additions, per Paper 10a. A side the comparison could not
- * count (null) or that is zero is left out, matching the Changes bar.
- */
 function FileLineCounts({ deletions, additions }: { readonly deletions: number | null; readonly additions: number | null }) {
   if (!deletions && !additions) return null;
   return (

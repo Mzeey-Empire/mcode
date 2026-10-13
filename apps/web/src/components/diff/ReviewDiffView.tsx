@@ -514,8 +514,7 @@ export function ReviewDiffView({
       enableGutterUtility: true,
       // File separation is layout-owned: margins would corrupt the
       // virtualizer's height bookkeeping, so spacing goes through pierre.
-      // The bottom padding lets the last lines scroll clear of the floating Commit button.
-      layout: { paddingTop: 10, paddingBottom: 72, gap: 16 },
+      layout: { paddingTop: 10, paddingBottom: COMMIT_BUTTON_CLEARANCE, gap: 16 },
       itemMetrics: { diffHeaderHeight: REVIEW_FILE_HEADER_HEIGHT },
       hunkSeparators: "line-info-basic",
       unsafeCSS: DIFF_UNSAFE_CSS,
@@ -732,6 +731,8 @@ function SavedAnnotationChip({
 
 /** Pixel height of {@link ReviewFileHeader}; pierre reserves it before measuring. */
 const REVIEW_FILE_HEADER_HEIGHT = 36;
+
+const COMMIT_BUTTON_CLEARANCE = 72;
 
 /**
  * Maps the app's diff tokens onto pierre's override variables and styles the
