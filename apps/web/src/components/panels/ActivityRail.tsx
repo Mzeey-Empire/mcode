@@ -688,17 +688,21 @@ function ActivityRailView({
           expanded ? "w-(--container-right-rail-expanded)" : "w-(--container-right-rail)",
         )}
       >
-      <RailTabInstances
-        tabInstances={tabInstances}
-        activeTabId={activeTabId}
-        subagentEntries={subagentEntries}
-        changesCount={changesCount}
-        changesFresh={changesFresh}
-        expanded={expanded}
-        onSelect={onSelect}
-        onClose={onClose}
-        onReorder={onReorder}
-      />
+      {/* Eight subagent tabs below the tools outgrow a short window. The bleed
+          padding keeps the active bar and running dot outside the scroll clip. */}
+      <div data-testid="activity-rail-tabs" className="-mx-2 -my-1 flex min-h-0 shrink flex-col items-stretch gap-1 overflow-y-auto px-2 py-1 [scrollbar-width:none]">
+        <RailTabInstances
+          tabInstances={tabInstances}
+          activeTabId={activeTabId}
+          subagentEntries={subagentEntries}
+          changesCount={changesCount}
+          changesFresh={changesFresh}
+          expanded={expanded}
+          onSelect={onSelect}
+          onClose={onClose}
+          onReorder={onReorder}
+        />
+      </div>
       <RailFooter
         scope={scope}
         tabInstances={tabInstances}
