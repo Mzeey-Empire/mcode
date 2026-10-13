@@ -1,11 +1,12 @@
 import type { ReviewComparison, ReviewState } from "@mcode/contracts";
-import { Fragment, useContext, useEffect, useMemo, useState } from "react";
+import { Fragment, useContext, useEffect, useId, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronsDownUp,
   ChevronsUpDown,
   Columns2,
   Files,
+  Pilcrow,
   RefreshCw,
   Rows2,
   TextWrap,
@@ -314,8 +315,7 @@ function ReviewControlsRow({
         <RefreshButton refreshing={refreshing} onRefresh={onRefresh} />
         <RenderModePill />
         <WrapToggle />
-        {/* S10-13 places the whitespace toggle here. */}
-        <span data-testid="review-whitespace-slot" />
+        <WhitespaceToggle comparison={comparison} />
         <ToggleAllButton defaultFilesExpanded={defaultFilesExpanded} />
         <FileJump scopeId={scopeId} comparison={comparison} />
         <FilesToggle scopeId={scopeId} />
@@ -431,6 +431,49 @@ function WrapToggle() {
     >
       <TextWrap />
     </IconButton>
+  );
+}
+
+/**
+ * Whitespace hiding re-reads Git with `-w`. Agent patches are recorded text with
+ * no Git read behind them, so the flag cannot change them.
+ */
+function whitespaceUnavailableReason(threadId: string | null, comparison: ReviewComparison | null): string | null {
+  if (!threadId) return "Open a thread to hide whitespace changes";
+  const source = comparison?.turnDiff?.source;
+  return source && source !== "git" ? "Not available for agent patches" : null;
+}
+
+function WhitespaceToggle({ comparison }: { readonly comparison: ReviewComparison | null }) {
+  const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
+  const ignoreWhitespace = useDiffStore((s) => (activeThreadId ? s.getIgnoreWhitespace(activeThreadId) : false));
+  const toggleIgnoreWhitespace = useDiffStore((s) => s.toggleIgnoreWhitespace);
+  const reasonId = useId();
+  const unavailableReason = whitespaceUnavailableReason(activeThreadId, comparison);
+  const disabled = unavailableReason !== null;
+  return (
+    <>
+      <IconButton
+        shape="round"
+        aria-label="Hide whitespace changes"
+        tooltip={unavailableReason ?? "Hide whitespace changes"}
+        aria-describedby={disabled ? reasonId : undefined}
+        pressed={ignoreWhitespace && !disabled}
+        // Stay hoverable while disabled so the tooltip can say why. The tooltip
+        // trigger drops Base UI's aria-disabled, so it is set here directly.
+        disabled={disabled}
+        focusableWhenDisabled
+        aria-disabled={disabled || undefined}
+        className="aria-disabled:opacity-50"
+        data-testid="review-whitespace-toggle"
+        onClick={() => {
+          if (activeThreadId && !disabled) toggleIgnoreWhitespace(activeThreadId);
+        }}
+      >
+        <Pilcrow />
+      </IconButton>
+      {disabled ? <span id={reasonId} hidden>{unavailableReason}</span> : null}
+    </>
   );
 }
 

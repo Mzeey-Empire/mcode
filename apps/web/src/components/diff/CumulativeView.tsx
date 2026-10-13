@@ -6,6 +6,8 @@ interface CumulativeViewProps {
   threadId: string;
   comparison: ReviewComparison;
   cacheVersion: string | number;
+  /** Whether the comparison was read with whitespace changes hidden. */
+  ignoreWhitespace: boolean;
   /** Since you looked passes its seen baseline; All turns omits it. */
   afterSequence?: number;
 }
@@ -14,7 +16,7 @@ interface CumulativeViewProps {
  * Deduplicated file list across snapshots: every turn for All turns, or the
  * turns settled after `afterSequence` for Since you looked.
  */
-export function CumulativeView({ threadId, comparison, cacheVersion, afterSequence }: CumulativeViewProps) {
+export function CumulativeView({ threadId, comparison, cacheVersion, ignoreWhitespace, afterSequence }: CumulativeViewProps) {
   const sinceLooked = afterSequence !== undefined;
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -24,6 +26,7 @@ export function CumulativeView({ threadId, comparison, cacheVersion, afterSequen
         id={sinceLooked ? String(afterSequence) : threadId}
         threadId={threadId}
         cacheVersion={cacheVersion}
+        ignoreWhitespace={ignoreWhitespace}
         jumpViewKey={sinceLooked ? "since-looked" : "cumulative"}
       />
     </div>

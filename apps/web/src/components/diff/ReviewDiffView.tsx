@@ -222,12 +222,18 @@ function statusOf(
 }
 
 /** Props for the Review comparison diff surface. */
+/** Hidden-whitespace patches differ from full ones for the same comparison, so they cache apart. */
+function patchCacheVersion(comparisonVersion: string | number, ignoreWhitespace: boolean | undefined): string | number {
+  return ignoreWhitespace ? `${comparisonVersion}:ignore-whitespace` : comparisonVersion;
+}
+
 interface ReviewDiffViewProps {
   readonly files: ReviewFileChange[];
   readonly source: DiffSource;
   readonly id: string;
   readonly threadId: string;
   readonly cacheVersion?: string | number;
+  readonly ignoreWhitespace?: boolean;
   readonly defaultFilesExpanded: boolean;
   /** File to expand and scroll to; cleared through onJumpSettled. */
   readonly jumpTarget: { readonly path: string; readonly token: number } | null;
@@ -248,7 +254,8 @@ export function ReviewDiffView({
   source,
   id,
   threadId,
-  cacheVersion = 0,
+  cacheVersion: comparisonVersion = 0,
+  ignoreWhitespace,
   defaultFilesExpanded,
   jumpTarget,
   onJumpSettled,
@@ -264,6 +271,7 @@ export function ReviewDiffView({
   // Patch contents are scoped to the comparison identity: a revision bump or
   // a source/id/thread switch must refetch rather than relabel the previous
   // identity's bytes under the new metadata.
+  const cacheVersion = patchCacheVersion(comparisonVersion, ignoreWhitespace);
   const patchScope = `${threadId}:${source}:${id}:${cacheVersion}`;
   const seedPatches = (): Record<string, string> => {
     const cache = useDiffStore.getState().inlineDiffCache;
@@ -348,7 +356,7 @@ export function ReviewDiffView({
       const pendingKey = `${scope} ${path}`;
       if (pendingPatches.current.has(pendingKey)) continue;
       pendingPatches.current.add(pendingKey);
-      void loadFileDiff(transport, source, id, path, threadId, file.untracked, file.previousPath ?? undefined)
+      void loadFileDiff(transport, source, id, path, threadId, file.untracked, file.previousPath ?? undefined, { ignoreWhitespace })
         .then((result) => {
           // Responses from a superseded identity land after the scope reset;
           // the scope tag keeps them out of the mounted comparison, and the
@@ -370,7 +378,7 @@ export function ReviewDiffView({
         })
         .finally(() => pendingPatches.current.delete(pendingKey));
     }
-  }, [effectiveExpanded, failedPatches, files, patchScope, patches, source, id, threadId, cacheVersion]);
+  }, [effectiveExpanded, failedPatches, files, patchScope, patches, source, id, threadId, cacheVersion, ignoreWhitespace]);
 
   const retryPatch = useCallback((path: string) => {
     setPatchState((prev) => {

@@ -267,6 +267,34 @@ describe("diffStore", () => {
     });
   });
 
+  describe("hide whitespace", () => {
+    beforeEach(() => {
+      localStorage.clear();
+      useDiffStore.setState({ ignoreWhitespaceByThread: {} });
+    });
+
+    it("survives a reload per thread and forgets a cleared thread", async () => {
+      useDiffStore.getState().toggleIgnoreWhitespace("thread-1");
+      useDiffStore.getState().toggleIgnoreWhitespace("thread-2");
+      useDiffStore.getState().clearThread("thread-2");
+
+      vi.resetModules();
+      const { useDiffStore: reloaded } = await import("../stores/diffStore");
+      expect(reloaded.getState().getIgnoreWhitespace("thread-1")).toBe(true);
+      expect(reloaded.getState().getIgnoreWhitespace("thread-2")).toBe(false);
+      expect(reloaded.getState().getIgnoreWhitespace("thread-3")).toBe(false);
+    });
+
+    it("forgets the preference once turned back off", async () => {
+      useDiffStore.getState().toggleIgnoreWhitespace("thread-1");
+      useDiffStore.getState().toggleIgnoreWhitespace("thread-1");
+
+      vi.resetModules();
+      const { useDiffStore: reloaded } = await import("../stores/diffStore");
+      expect(reloaded.getState().getIgnoreWhitespace("thread-1")).toBe(false);
+    });
+  });
+
   describe("diff revisions", () => {
     it("increments per mutable diff scope", () => {
       const { bumpDiffRevision } = useDiffStore.getState();

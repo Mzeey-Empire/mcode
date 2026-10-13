@@ -44,6 +44,8 @@ interface SettledComparison {
   readonly turnMessageId: string | null;
   /** The seen baseline a Since you looked comparison loaded after, which names its patches. */
   readonly afterSequence?: number;
+  /** Whether the comparison was read with whitespace changes hidden; its patches must match. */
+  readonly ignoreWhitespace: boolean;
 }
 
 interface ComparisonLoadInput {
@@ -51,6 +53,7 @@ interface ComparisonLoadInput {
   readonly activeWorkspaceId: string | null;
   readonly branchComparison: DiffStoreState["branchComparison"];
   readonly branchRange: { readonly base: string; readonly target: string } | null;
+  readonly ignoreWhitespace: boolean;
   readonly mutableComparisonRevision: number;
   readonly selectedCommitSha: string | null;
   /** The Turn view's resolved turn: the pinned one, or the newest while following latest. */
@@ -142,12 +145,14 @@ async function loadGitComparison(
         sha: input.viewMode === "commit" ? input.selectedCommitSha ?? undefined : undefined,
         base: input.viewMode === "branch" ? input.branchRange?.base : undefined,
         target: input.viewMode === "branch" ? input.branchRange?.target : undefined,
+        ignoreWhitespace: input.ignoreWhitespace,
       });
   return {
     outcome,
     git: { source: metadata.source, id: metadata.id },
     cacheVersion: input.mutableComparisonRevision,
     turnMessageId: null,
+    ignoreWhitespace: input.ignoreWhitespace,
   };
 }
 
@@ -183,7 +188,9 @@ function getGitComparisonId(input: ComparisonLoadInput & { readonly viewMode: Gi
 }
 
 async function loadCumulativeComparison(input: ComparisonLoadInput): Promise<LoadedComparison> {
-  const result = await getTransport().getCumulativeDiffStats(input.activeThreadId!);
+  const result = await getTransport().getCumulativeDiffStats(input.activeThreadId!, undefined, {
+    ignoreWhitespace: input.ignoreWhitespace,
+  });
   return {
     outcome: result.status === "ready"
       ? { status: "ready", comparison: withSnapshotFileFacts(result.comparison, input.snapshots ?? []) }
@@ -191,15 +198,24 @@ async function loadCumulativeComparison(input: ComparisonLoadInput): Promise<Loa
     git: null,
     cacheVersion: input.snapshotVersion,
     turnMessageId: null,
+    ignoreWhitespace: input.ignoreWhitespace,
   };
 }
 
 async function loadSinceLookedComparison(input: ComparisonLoadInput): Promise<LoadedComparison> {
   const baseline = input.sinceLookedBaseline;
   if (baseline === null) {
-    return { outcome: { status: "unselected" }, git: null, cacheVersion: input.snapshotVersion, turnMessageId: null };
+    return {
+      outcome: { status: "unselected" },
+      git: null,
+      cacheVersion: input.snapshotVersion,
+      turnMessageId: null,
+      ignoreWhitespace: input.ignoreWhitespace,
+    };
   }
-  const result = await getTransport().getCumulativeDiffStats(input.activeThreadId!, baseline);
+  const result = await getTransport().getCumulativeDiffStats(input.activeThreadId!, baseline, {
+    ignoreWhitespace: input.ignoreWhitespace,
+  });
   // A turn whose earlier attempt settled before the baseline still gets its
   // paths and counts from the server, but its change type falls back to "modified".
   const snapshots = (input.snapshots ?? []).filter((snapshot) => snapshot.message_sequence > baseline);
@@ -211,6 +227,7 @@ async function loadSinceLookedComparison(input: ComparisonLoadInput): Promise<Lo
     cacheVersion: input.snapshotVersion,
     turnMessageId: null,
     afterSequence: baseline,
+    ignoreWhitespace: input.ignoreWhitespace,
   };
 }
 
@@ -240,15 +257,19 @@ async function loadTurnDiffComparison(input: ComparisonLoadInput): Promise<Loade
       git: null,
       cacheVersion: input.mutableComparisonRevision,
       turnMessageId: null,
+      ignoreWhitespace: input.ignoreWhitespace,
     };
   }
-  const outcome = await getTransport().getTurnDiffComparison(input.activeThreadId!, input.turnMessageId);
+  const outcome = await getTransport().getTurnDiffComparison(input.activeThreadId!, input.turnMessageId, {
+    ignoreWhitespace: input.ignoreWhitespace,
+  });
   return {
     outcome,
     git: null,
     // A live turn's diff id carries its revision, so it also versions the patch cache.
     cacheVersion: readyComparison(outcome)?.turnDiff?.id ?? input.mutableComparisonRevision,
     turnMessageId: input.turnMessageId,
+    ignoreWhitespace: input.ignoreWhitespace,
   };
 }
 
@@ -270,6 +291,7 @@ interface DiffPanelStore {
   readonly diffRevision: number;
   readonly diffScopeId: string | null;
   readonly filesVisible: boolean;
+  readonly ignoreWhitespace: boolean;
   readonly requestReviewFileJump: DiffStoreState["requestReviewFileJump"];
   readonly selectedCommitSha: DiffStoreState["selectedCommitSha"];
   readonly turnSelection: ReviewTurnSelection;
@@ -321,6 +343,10 @@ function useDiffPanelStore(): DiffPanelStore {
     diffRevision,
     diffScopeId,
     filesVisible,
+    // The preference is per thread, so threadless git views always show whitespace.
+    ignoreWhitespace: useDiffStore((state) =>
+      activeThreadId ? state.getIgnoreWhitespace(activeThreadId) : false,
+    ),
     requestReviewFileJump: useDiffStore((state) => state.requestReviewFileJump),
     selectedCommitSha: useDiffStore((state) => state.selectedCommitSha),
     // An absent selection follows the latest turn.
@@ -445,6 +471,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     activeWorkspaceId: store.activeWorkspaceId,
     branchComparison: store.branchComparison,
     branchRange,
+    ignoreWhitespace: store.ignoreWhitespace,
     mutableComparisonRevision,
     selectedCommitSha: store.selectedCommitSha,
     turnMessageId,
@@ -464,6 +491,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     store.activeThreadId,
     store.activeWorkspaceId,
     store.branchComparison,
+    store.ignoreWhitespace,
     store.selectedCommitSha,
     store.sinceLookedBaseline,
     store.snapshots,
@@ -606,7 +634,14 @@ function reviewTurnsFetchKey(store: DiffPanelStore, snapshotVersion: string, tur
 
 /** A thrown request carries no typed outcome, so it settles as a failure with its message. */
 function failedComparison(identity: string, error: unknown): SettledComparison {
-  return { identity, outcome: requestFailedOutcome(error), git: null, cacheVersion: "", turnMessageId: null };
+  return {
+    identity,
+    outcome: requestFailedOutcome(error),
+    git: null,
+    cacheVersion: "",
+    turnMessageId: null,
+    ignoreWhitespace: false,
+  };
 }
 
 /** A running turn's evidence moves with the worktree, so it refetches on each mutation; a settled turn never changes. */
@@ -926,6 +961,7 @@ function ReadyComparisonView({
         id={settled.git.id}
         cacheVersion={settled.cacheVersion}
         threadId={scopeId}
+        ignoreWhitespace={settled.ignoreWhitespace}
       />
     );
   }
@@ -935,6 +971,7 @@ function ReadyComparisonView({
         threadId={scopeId}
         comparison={comparison}
         cacheVersion={settled.cacheVersion}
+        ignoreWhitespace={settled.ignoreWhitespace}
         afterSequence={settled.afterSequence}
       />
     );
@@ -950,6 +987,7 @@ function ReadyComparisonView({
         id={turnDiffId}
         threadId={scopeId}
         cacheVersion={settled.cacheVersion}
+        ignoreWhitespace={settled.ignoreWhitespace}
         defaultFilesExpanded
         jumpViewKey={`turn:${settled.turnMessageId ?? ""}`}
       />
