@@ -72,7 +72,6 @@ export class PlanImplementStore {
     return agent?.nativePlanFileJson ? NativePlanFileRefSchema().parse(JSON.parse(agent.nativePlanFileJson)) : null;
   }
 
-  /** Read a durable request, including its provider-file outcome. */
   read(requestId: string): PlanImplementRequest | null {
     const row = this.orm.select().from(planImplementRequests).where(eq(planImplementRequests.requestId, requestId)).get();
     return row ? this.toRequest(row) : null;

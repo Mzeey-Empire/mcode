@@ -105,14 +105,16 @@ function canHandOff(state: PlanDraftState): state is Extract<PlanDraftState, { k
   return state.kind === "idle" || state.kind === "editing";
 }
 
-// Unsent text belongs to the latest version, so it rides only an Implement of that version.
-function carriedEdit(editing: EditingState | null, { target, latest }: ImplementPick): ImplementPending | null {
+function unsentEditOfLatest(editing: EditingState | null, { target, latest }: ImplementPick): ImplementPending | null {
   if (editing === null || editing.text === editing.ackedText || target.id !== latest.id) return null;
   return { ...editing.target, contentMd: editing.text };
 }
 
-// A request that failed after its prepare step still saved the carried text.
-function carriedWasSaved(carried: ImplementPending, outcome: ImplementOutcome): boolean {
+function revisionAfterSaving(carried: ImplementPending): number {
+  return carried.baseRevision + 1;
+}
+
+function latestHoldsCarriedEdit(carried: ImplementPending, outcome: ImplementOutcome): boolean {
   if (outcome.kind === "admitted") return true;
   return outcome.latest?.id === carried.versionId && outcome.latest.contentMd === carried.contentMd;
 }
@@ -120,7 +122,7 @@ function carriedWasSaved(carried: ImplementPending, outcome: ImplementOutcome): 
 function sessionAfterImplement(state: ImplementingState, outcome: ImplementOutcome): PlanDraftState {
   const { resume, carried } = state;
   if (resume === null || resume.text === resume.ackedText) return IDLE;
-  return carried !== null && carriedWasSaved(carried, outcome) ? IDLE : resume;
+  return carried !== null && latestHoldsCarriedEdit(carried, outcome) ? IDLE : resume;
 }
 
 /**
@@ -221,10 +223,9 @@ export class PlanSaveScheduler {
       return null;
     }
     const editing = state.kind === "editing" ? state : null;
-    const carried = carriedEdit(editing, picked);
+    const carried = unsentEditOfLatest(editing, picked);
     this.#set({ kind: "implementing", text: editing?.text ?? picked.latest.contentMd, carried, resume: editing });
-    // A carried edit saves at baseRevision, which the server then expects to find one higher.
-    if (carried) return { versionId: carried.versionId, expectedRevision: carried.baseRevision + 1, pending: carried };
+    if (carried) return { versionId: carried.versionId, expectedRevision: revisionAfterSaving(carried), pending: carried };
     return { versionId: picked.target.id, expectedRevision: picked.target.revision };
   }
 

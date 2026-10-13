@@ -95,9 +95,11 @@ function classifyImplementFailure(error: unknown): Exclude<ImplementOutcome, { k
   return changed && latest ? { kind: "conflict", latest } : { kind: "failed", latest };
 }
 
-// A dropped connection leaves the outcome unknown. The server keys the request
-// by requestId, so one resend after reconnecting returns the stored outcome.
-async function sendImplement(request: PlanImplement): Promise<ImplementOutcome> {
+function mirrorAdmittedBuildMode(threadId: string): void {
+  useThreadStore.getState().applyPersistedThreadSettings(threadId, { interactionMode: INTERACTION_MODES.BUILD });
+}
+
+async function sendImplementWithReplay(request: PlanImplement): Promise<ImplementOutcome> {
   const send = () => getTransport().implementPlan(request).then((): ImplementOutcome => ({ kind: "admitted" }));
   try {
     return await send();
@@ -123,11 +125,10 @@ export async function implementPlan(threadId: string): Promise<void> {
     const basis = await scheduler.beginImplement(() => currentTarget(threadId));
     if (!basis) return;
     const carried = basis.pending !== undefined;
-    const outcome = await sendImplement({ requestId: crypto.randomUUID(), threadId, target: "thread", ...basis });
+    const outcome = await sendImplementWithReplay({ requestId: crypto.randomUUID(), threadId, target: "thread", ...basis });
     scheduler.finishImplement(outcome);
     if (outcome.kind === "admitted") {
-      // Admission switched the thread row to Build; nothing pushes that row back.
-      useThreadStore.getState().applyPersistedThreadSettings(threadId, { interactionMode: INTERACTION_MODES.BUILD });
+      mirrorAdmittedBuildMode(threadId);
     } else if (outcome.kind === "conflict" && !carried) {
       usePlanStore.getState().setActiveVersion(threadId, null);
       setNotice(threadId, PLAN_CHANGED_NOTICE);

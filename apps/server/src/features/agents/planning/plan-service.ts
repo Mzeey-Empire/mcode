@@ -109,9 +109,7 @@ export class PlanService {
     if (request?.status === "admitted") {
       return this.publishAdmission(request);
     }
-    // The same token belongs to the running turn after admission; only failures release it here.
-    runtime.reservations.release(input.threadId, token);
-    if (!runtime.reservations.get(input.threadId)) runtime.grants.clear(input.threadId);
+    releaseFailedImplementReservation(input.threadId, token, runtime);
     if (request) {
       this.progress?.reloadPlans(input.threadId);
       await this.files.writeAfterCommit(input.threadId);
@@ -176,4 +174,9 @@ function implementFailureCode(failure: unknown): string {
     return failure.code;
   }
   return "implement_failed";
+}
+
+function releaseFailedImplementReservation(threadId: string, token: string, runtime: PlanImplementRuntime): void {
+  runtime.reservations.release(threadId, token);
+  if (!runtime.reservations.get(threadId)) runtime.grants.clear(threadId);
 }

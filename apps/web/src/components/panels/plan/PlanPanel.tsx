@@ -29,16 +29,13 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
   const executing = useThreadStore((s) => isThreadExecuting(threadId, s));
   const scheduler = planSaveScheduler(threadId);
   const draft = useSyncExternalStore(scheduler.subscribe, scheduler.getSnapshot);
-  const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
-  // The right panel stays mounted while hidden, so mounting alone does not put the plan on screen.
-  const onScreen = useDiffStore((s) => workspaceId !== null && s.getRightPanelVisible(workspaceId, threadId));
   const viewed = selectViewedPlanVersion(versions, activeVersion);
   const latest = versions.at(-1) ?? null;
 
+  useRegisterPlanPanelVisibility(threadId);
   useEffect(() => scheduler.reconcile(latest), [scheduler, latest]);
   // Closing the panel or switching threads must not strand debounced text.
   useEffect(() => () => scheduler.flush(), [scheduler]);
-  useEffect(() => (onScreen ? showPlanPanel(threadId) : undefined), [onScreen, threadId]);
 
   if (!viewed || !latest) return null;
 
@@ -75,4 +72,10 @@ function PlanImplementNotice({ threadId }: { readonly threadId: string }) {
       {notice}
     </div>
   );
+}
+
+function useRegisterPlanPanelVisibility(threadId: string): void {
+  const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const visible = useDiffStore((s) => workspaceId !== null && s.getRightPanelVisible(workspaceId, threadId));
+  useEffect(() => (visible ? showPlanPanel(threadId) : undefined), [visible, threadId]);
 }

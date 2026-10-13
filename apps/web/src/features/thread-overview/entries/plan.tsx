@@ -22,7 +22,6 @@ function PlanEntry({ thread }: { thread: Thread }) {
     useDiffStore.getState().setRightPanelTab(thread.workspace_id, thread.id, "tasks");
   }, [thread.id, thread.workspace_id]);
   if (!latest) return null;
-  // Once the Implement turn reports tasks, its progress says more than the version number.
   const implementing = latest.acceptedMessageId !== null && bubble?.sourceMessageId === latest.acceptedMessageId;
   const progress = implementing ? selectTaskProgress(bubble, undefined) : null;
   const trailing = progress ? `${progress.settled}/${progress.total}` : `v${latest.version}`;

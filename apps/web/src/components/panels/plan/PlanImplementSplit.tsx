@@ -5,7 +5,6 @@ import { formatKeybinding, getKeybindingForCommand } from "@/lib/keybinding-mana
 import { isMac } from "@/lib/platform";
 import { implementPlan, isPlanVersionImplementable, usePlanImplementStore } from "./plan-implement";
 
-/** Props for {@link PlanImplementSplit}. */
 interface PlanImplementSplitProps {
   readonly threadId: string;
   /** The version the panel is showing; the split implements exactly this one. */
