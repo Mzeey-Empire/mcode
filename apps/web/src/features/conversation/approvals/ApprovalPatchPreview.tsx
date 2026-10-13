@@ -17,9 +17,13 @@ export const APPROVAL_PATCH_PREVIEW_LINES = 3;
 // Lines take one colour per kind; syntax colours would compete with the add and remove signal.
 const PATCH_UNSAFE_CSS = `
 :host {
+  background-color: transparent;
   --diffs-bg: transparent;
+  --diffs-bg-context-override: transparent;
   --diffs-bg-addition-override: transparent;
   --diffs-bg-deletion-override: transparent;
+  --diffs-bg-addition-number-override: transparent;
+  --diffs-bg-deletion-number-override: transparent;
   --diffs-addition-color-override: var(--color-success);
   --diffs-deletion-color-override: var(--color-error);
   --diffs-font-family: var(--font-mono);
