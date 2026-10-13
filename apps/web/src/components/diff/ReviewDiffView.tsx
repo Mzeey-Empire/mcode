@@ -750,7 +750,7 @@ const DIFF_UNSAFE_CSS = `
   --diffs-deletion-color-override: var(--diff-remove-text);
   --diffs-font-family: var(--font-mono);
   --diffs-font-features: "liga" 0, "calt" 0;
-  --diffs-bg-separator-override: var(--panel);
+  --diffs-bg-separator-override: var(--diff-band);
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0, "calt" 0;
 }
