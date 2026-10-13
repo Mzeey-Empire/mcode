@@ -139,6 +139,17 @@ describe("commit search across the full ahead-of-base range", { timeout: 30_000 
     } finally { await database.close(); }
   });
 
+  it("lists commits since the fork for a fully pushed branch", async () => {
+    const pushed = NodePath.join(directory, "pushed");
+    git(["worktree", "add", "-b", "pushed", pushed, "feature"]);
+    git(["update-ref", "refs/remotes/origin/pushed", "feature"]);
+    git(["config", "branch.pushed.remote", "origin"]);
+    git(["config", "branch.pushed.merge", "refs/heads/pushed"]);
+    const result = await service.searchCommits({ ...params, limit: 1 }, pushed);
+    expect(result).toMatchObject({ ok: true, matchCount: 300, totalCount: 300 });
+    expect(await service.readReviewState("fixture", pushed)).toMatchObject({ commitsAhead: { count: 300 } });
+  });
+
   it.each(["log", "rev-list"])("returns a typed timeout when %s is killed", async (command) => {
     const timedOut = new GitComparisonService({ findById: () => undefined }, {
       exec: async (args, options) => {

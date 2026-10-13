@@ -309,11 +309,12 @@ export class GitComparisonService {
     );
     const status = parseReviewStatus(stdout);
     if (!status.head) return { isGitRepo: true, ...status, commitsAhead: null, branchDefault: { unavailable: "unborn" } };
+    const commitsAhead = await this.resolveCommitViewBase(cwd, savedBaseBranch).then(async (base) => {
+      if (!base) return null;
+      const { stdout } = await this.gitExecutor.exec(["-C", cwd, "rev-list", "--count", `${base}..HEAD`], { timeout: 10_000 });
+      return { base, count: Number(stdout.trim()) };
+    }).catch(() => null);
     const selection = await this.selectBranchComparison(cwd, savedBaseBranch);
-    const base = selection.base;
-    const commitsAhead = base ? await this.gitExecutor.exec(
-      ["-C", cwd, "rev-list", "--count", `${base}..${selection.compare}`], { timeout: 10_000 },
-    ).then(({ stdout }) => ({ base, count: Number(stdout.trim()) }), () => null) : null;
     const branchDefault = selection.isComparisonAvailable && selection.base && selection.compare
       ? { compare: selection.compare, base: selection.base }
       : { unavailable: "no-base" as const };
@@ -334,7 +335,7 @@ export class GitComparisonService {
     return { ...selection, isUnborn: false };
   }
 
-  /** Search all commits ahead of the resolved base before applying pagination. */
+  /** Search all commits ahead of the Commit view's base before applying pagination. */
   async searchCommits(
     params: GitSearchCommitsParams,
     repoPath?: string,
@@ -342,13 +343,9 @@ export class GitComparisonService {
   ): Promise<GitSearchCommitsResult> {
     try {
       const cwd = repoPath ?? this.requireWorkspace(params.workspaceId).path;
-      const selection = await this.resolveBranchComparison(params.workspaceId, cwd, savedBaseBranch);
-      if (!selection.base || !selection.compare || selection.isUnborn) {
-        return { ok: true, commits: [], matchCount: 0, totalCount: 0 };
-      }
-      assertSafeRef(selection.base);
-      assertSafeRef(selection.compare);
-      const range = `${selection.base}..${selection.compare}`;
+      const base = (await this.hasCommits(cwd)) ? await this.resolveCommitViewBase(cwd, savedBaseBranch) : null;
+      if (!base) return { ok: true, commits: [], matchCount: 0, totalCount: 0 };
+      const range = `${base}..HEAD`;
       const [log, count] = await Promise.all([
         this.gitExecutor.exec(["-C", cwd, "log", range, "--format=%H%x00%h%x00%s%x00%aI", "--"], { timeout: 10_000 }),
         this.gitExecutor.exec(["-C", cwd, "rev-list", "--count", range, "--"], { timeout: 10_000 }),
@@ -481,6 +478,17 @@ export class GitComparisonService {
       savedBaseBranch: savedBase,
       upstream: upstream ? await this.qualifyComparisonRef(cwd, upstream) : null,
     });
+  }
+
+  /**
+   * The Commit view lists commits since the fork, not the Branch default's range: a pushed branch's unpushed
+   * range is often empty. Branchless threads fork from their saved base (ADR-0015).
+   */
+  private async resolveCommitViewBase(cwd: string, savedBaseBranch: string | null | undefined): Promise<string | null> {
+    if (savedBaseBranch) return this.qualifyComparisonRef(cwd, savedBaseBranch);
+    const ref = await this.detectDefaultComparisonRef(cwd);
+    if (ref) assertSafeRef(ref);
+    return ref ?? null;
   }
 
   private async qualifyComparisonRef(cwd: string, ref: string): Promise<string> {
