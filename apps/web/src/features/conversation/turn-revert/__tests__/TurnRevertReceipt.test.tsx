@@ -109,6 +109,14 @@ describe("TurnRevertReceipt", () => {
     expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
   });
 
+  it("has no Undo when the receipt says its revert was undone, even with the undo receipt not loaded", () => {
+    const undoneReceipt = { ...revertReceipt, systemNotice: { ...revertReceipt.systemNotice!, undoneByRevertId: "revert-2" } };
+    seedMessages([undoneReceipt]);
+    render(<Timeline />);
+    expect(screen.getByText("Reverted Turn 3")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
+  });
+
   it("disables Undo when files changed since the revert", async () => {
     transport.undoTurnRevert.mockResolvedValue({ status: "stale", preview: { status: "nothing_to_revert" } });
     render(<TurnRevertReceipt message={revertReceipt} />);

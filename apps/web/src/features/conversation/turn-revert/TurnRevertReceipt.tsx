@@ -17,9 +17,11 @@ function splitReceipt(content: string): { label: string; detail: string | null }
   return at === -1 ? { label: content, detail: null } : { label: content.slice(0, at), detail: content.slice(at + 3) };
 }
 
-function useIsUndone(threadId: string, revertId: string | undefined): boolean {
-  return useThreadRecord(threadId, (record) =>
+function useIsUndone(receipt: Message): boolean {
+  const revertId = receipt.systemNotice?.revertId;
+  const undoneInHistory = useThreadRecord(receipt.thread_id, (record) =>
     revertId !== undefined && record.messages.some((message) => message.systemNotice?.kind === "turn-revert-undone" && message.systemNotice.undoesRevertId === revertId));
+  return undoneInHistory || receipt.systemNotice?.undoneByRevertId !== undefined;
 }
 
 type UndoState = { readonly pending: boolean; readonly done: boolean; readonly disabledReason: string | null };
@@ -59,7 +61,7 @@ function useUndoRevert(threadId: string, revertId: string | undefined) {
 export function TurnRevertReceipt({ message }: { readonly message: Message }) {
   const notice = message.systemNotice;
   const revertId = notice?.revertId;
-  const undone = useIsUndone(message.thread_id, revertId);
+  const undone = useIsUndone(message);
   const { pending, done, disabledReason, undo } = useUndoRevert(message.thread_id, revertId);
   const { label, detail } = splitReceipt(message.content);
   const undoable = notice?.kind === "turn-reverted" && revertId !== undefined && !undone && !done;
