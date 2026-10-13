@@ -83,18 +83,25 @@ describe("SubagentDetailTab", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows a steps-tier entry's steps, truncation, summary, and what the provider shares", async () => {
+  it("shows a steps-tier entry's steps, truncation, and its report as the reply", async () => {
     transport.loadSubagentDetail.mockResolvedValue(detail({
       totalSteps: 12,
-      steps: [{ toolCallId: "t1", toolName: "Read", label: "ActivityRail.tsx", status: "done", additions: 3, deletions: 1 }],
-      summary: "The rail groups tools.",
+      steps: [
+        { toolCallId: "t1", toolName: "Read", label: "ActivityRail.tsx", status: "done", additions: 3, deletions: 1 },
+        { toolCallId: "t2", toolName: "Edit", label: "RightPanel.tsx", status: "done", additions: 4, deletions: 0 },
+      ],
+      summary: "# Rail\n\nThe rail groups tools.",
     }));
     await renderTab([entry()]);
 
-    expect(await screen.findByText("Showing the last 1 of 12 steps.")).toBeInTheDocument();
-    expect(screen.getByTestId("subagent-step")).toHaveTextContent("ReadActivityRail.tsx+3 −1");
-    expect(screen.getByText("The rail groups tools.")).toBeInTheDocument();
-    expect(screen.getByText("Codex shares its steps and a summary, not the full conversation.")).toBeInTheDocument();
+    expect(await screen.findByText("Showing the last 2 of 12 steps.")).toBeInTheDocument();
+    const [read, edit] = screen.getAllByTestId("subagent-step");
+    expect(read).toHaveTextContent("ReadActivityRail.tsx+3−1");
+    expect(edit).toHaveTextContent("EditedRightPanel.tsx+4");
+    expect(await screen.findByRole("heading", { name: "Rail" })).toBeInTheDocument();
+    expect(screen.getByTestId("subagent-reply")).toHaveTextContent("The rail groups tools.");
+    expect(screen.queryByText("Summary")).not.toBeInTheDocument();
+    expect(screen.queryByText(/shares its steps/)).not.toBeInTheDocument();
     expect(screen.getByTestId("subagent-parent-prompt")).toHaveTextContent("Map the rail");
   });
 

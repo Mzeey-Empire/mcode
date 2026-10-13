@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { SubagentDetail, SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
 import { Button, IconButton } from "@/components/ui/button";
 import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
@@ -6,6 +6,7 @@ import { ProviderIcon } from "@/components/ui/provider-icon";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { DEFAULT_ICON, TOOL_ICONS, TOOL_LABELS, resolveToolName } from "@/components/chat/tool-renderers/constants";
 import { getConversationResidency, MessageList } from "@/features/conversation";
+import { TURN_PROSE_CLASS } from "@/features/conversation/narrative/narrative-layout";
 import { projectCanonicalMessageList } from "@/features/conversation/messages/canonical-message-projection";
 import { useMessageRevealStore } from "@/features/conversation/messages/message-reveal-store";
 import { MODEL_PROVIDERS } from "@/lib/model-registry";
@@ -20,6 +21,8 @@ import { subagentStatusLabel } from "../subagent-status";
 import { elapsed, useNow } from "../live-duration";
 import { openSubagentDetail, openSubagentsPanel } from "./open-subagent-detail";
 import { ParentPromptBubble } from "./ParentPromptBubble";
+
+const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
 
 function providerName(entry: SubagentRosterEntry): string {
   return MODEL_PROVIDERS.find((provider) => provider.id === entry.provider)?.name ?? entry.provider;
@@ -166,7 +169,6 @@ function StepsTier({ threadId, entry, roster }: {
       Couldn't load subagent activity <Button variant="ghost" size="compact" onClick={() => setRetry((value) => value + 1)}>Retry</Button>
     </p>}
     {detail && <StepsDetail detail={detail} running={entry.status === "running"} />}
-    <p className="text-xs text-muted">{providerName(entry)} shares its steps and a summary, not the full conversation.</p>
   </>;
 }
 
@@ -181,13 +183,19 @@ function StepsDetail({ detail, running }: { readonly detail: SubagentDetail; rea
       </ul>
     )}
     {detail.totalSteps === 0 && !running && <p className="text-body-small text-muted">No steps were recorded.</p>}
-    {detail.summary && (
-      <div className="flex flex-col gap-1.5">
-        <span className="text-xs font-medium text-muted">Summary</span>
-        <p className="whitespace-pre-wrap text-sm leading-[22px] text-ink">{detail.summary}</p>
-      </div>
-    )}
+    {detail.summary && <SubagentReply text={detail.summary} />}
   </>;
+}
+
+/** The subagent's final report, rendered the way the main thread renders an agent reply. */
+function SubagentReply({ text }: { readonly text: string }) {
+  return (
+    <div data-testid="subagent-reply" className={TURN_PROSE_CLASS}>
+      <Suspense fallback={<p className="whitespace-pre-wrap">{text}</p>}>
+        <LazyMarkdownContent content={text} isStreaming={false} />
+      </Suspense>
+    </div>
+  );
 }
 
 /** "Read file" reads as "Read <target>" in a step row, so the label's first word is the verb. */
@@ -199,15 +207,23 @@ function StepRow({ step }: { readonly step: SubagentDetail["steps"][number] }) {
   const toolName = resolveToolName(step.toolName);
   const Icon = TOOL_ICONS[toolName] ?? DEFAULT_ICON;
   const verb = stepVerb(toolName);
-  const changed = step.additions !== undefined || step.deletions !== undefined;
   return (
     <li data-testid="subagent-step" className="flex h-7 min-w-0 items-center gap-2 text-body-small">
       <Icon size={14} aria-hidden className={cn("shrink-0", step.status === "failed" ? "text-error" : "text-muted")} />
       <span className="shrink-0 text-muted">{verb}</span>
       {step.label !== step.toolName && <span className="text-fade min-w-0 flex-1 text-ink">{step.label}</span>}
-      {changed && (
-        <span className="ml-auto shrink-0 font-mono text-xs text-muted">+{step.additions ?? 0} −{step.deletions ?? 0}</span>
-      )}
+      <StepChanges additions={step.additions ?? 0} deletions={step.deletions ?? 0} />
     </li>
+  );
+}
+
+/** Matches the main thread's turn change counts so the same edit reads the same in both places. */
+function StepChanges({ additions, deletions }: { readonly additions: number; readonly deletions: number }) {
+  if (additions === 0 && deletions === 0) return null;
+  return (
+    <span className="ml-auto flex shrink-0 gap-1.5 font-mono text-caption tabular-nums">
+      {additions > 0 && <span className="text-success">+{additions}</span>}
+      {deletions > 0 && <span className="text-error">−{deletions}</span>}
+    </span>
   );
 }
