@@ -182,18 +182,36 @@ describe("Copilot subagent mapping", () => {
     expect(closeOpenChildren(turn, "thread", "interrupted")).toEqual([]);
   });
 
-  it("routes a late tool result using retained invocation ancestry", () => {
+  it.each([
+    ["Copilot completed it", (turn: CopilotTurnState) => mapCopilotEvent({ ...metadata, type: "subagent.completed", data: {
+      toolCallId: "T1", agentName: "explore", agentDisplayName: "Explorer" } }, "thread", turn)],
+    ["the parent turn ended", (turn: CopilotTurnState) => closeOpenChildren(turn, "thread", "cancelled")],
+  ] as const)("drops child observations after %s instead of routing them to a final transcript", (_, close) => {
     const turn = turnState();
     start(turn, "T1");
     mapCopilotEvent({ ...metadata, type: "tool.execution_start", data: {
       toolCallId: "read", toolName: "Read", arguments: {}, parentToolCallId: "T1",
     } }, "thread", turn);
-    mapCopilotEvent({ ...metadata, type: "subagent.completed", data: {
-      toolCallId: "T1", agentName: "explore", agentDisplayName: "Explorer",
-    } }, "thread", turn);
+    close(turn);
     expect(mapCopilotEvent({ ...metadata, type: "tool.execution_complete", data: {
       toolCallId: "read", success: true, result: { content: "Late" },
-    } }, "thread", turn)).toEqual([{ event: { type: "toolResult", threadId: "thread", toolCallId: "read", output: "Late", isError: false },
+    } }, "thread", turn)).toEqual([]);
+    expect(mapCopilotEvent({ ...metadata, type: "assistant.message", data: {
+      messageId: "M", content: "Late", parentToolCallId: "T1",
+    } }, "thread", turn)).toEqual([]);
+  });
+
+  // Live CLI 1.0.25 order: the inner task result lands in the outer child after the inner child completes.
+  it("routes a nested task result to the open outer child after the inner child completes", () => {
+    const turn = turnState();
+    start(turn, "T1");
+    start(turn, "T2", "T1");
+    mapCopilotEvent({ ...metadata, type: "subagent.completed", data: {
+      toolCallId: "T2", agentName: "explore", agentDisplayName: "Explorer",
+    } }, "thread", turn);
+    expect(mapCopilotEvent({ ...metadata, type: "tool.execution_complete", data: {
+      toolCallId: "T2", success: true, result: { content: "Inner answer" }, parentToolCallId: "T1",
+    } }, "thread", turn)).toEqual([{ event: { type: "toolResult", threadId: "thread", toolCallId: "T2", output: "Inner answer", isError: false },
       childThread: { role: "child", path: ["T1"] } }]);
   });
 

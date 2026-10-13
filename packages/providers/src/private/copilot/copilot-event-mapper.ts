@@ -73,7 +73,14 @@ function delegationPath(turn: CopilotTurnState, toolCallId: string): string[] | 
   return path;
 }
 
+// A closed child's transcript is final, so later observations are dropped here rather than surfaced as parent routing errors.
 function childEvent(turn: CopilotTurnState, owner: string, event: AgentEvent,
+  detail: Pick<Extract<ChildThreadEvidence, { role: "child" }>, "nativeItemId" | "final"> = {}): CopilotMappedEvent[] {
+  if (turn.invocations.get(owner)?.state === "closed") return [];
+  return childEvidence(turn, owner, event, detail);
+}
+
+function childEvidence(turn: CopilotTurnState, owner: string, event: AgentEvent,
   detail: Pick<Extract<ChildThreadEvidence, { role: "child" }>, "nativeItemId" | "final"> = {}): CopilotMappedEvent[] {
   const path = delegationPath(turn, owner);
   return path ? [{ event, childThread: { role: "child", path, ...detail } }] : [];
@@ -91,7 +98,7 @@ export function closeOpenChildren(turn: CopilotTurnState, threadId: string,
   for (const [toolCallId, invocation] of turn.invocations) {
     if (invocation.state === "closed") continue;
     invocation.state = "closed";
-    events.push(...childEvent(turn, toolCallId, { type: "ended", threadId, turnExecutionId: turn.turnExecutionId, outcome }));
+    events.push(...childEvidence(turn, toolCallId, { type: "ended", threadId, turnExecutionId: turn.turnExecutionId, outcome }));
   }
   return events;
 }
@@ -221,7 +228,7 @@ function closeInvocation(turn: CopilotTurnState, toolCallId: string, event: Agen
   const invocation = turn.invocations.get(toolCallId);
   if (!invocation || invocation.state === "closed") return [];
   invocation.state = "closed";
-  return childEvent(turn, toolCallId, event);
+  return childEvidence(turn, toolCallId, event);
 }
 function completeTool(event: Extract<SessionEvent, { type: "tool.execution_complete" }>, threadId: string, turn: CopilotTurnState): CopilotMappedEvent[] {
   const tool = turn.tools.get(event.data.toolCallId);
