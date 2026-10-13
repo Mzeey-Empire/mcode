@@ -193,6 +193,8 @@ vi.mock("@/components/chat/PermissionRequestCard", () => ({ PermissionRequestCar
 vi.mock("@/components/chat/HookActivitySection", () => ({ HookActivitySection: () => null }));
 
 import { MessageList, type SelectedTextCommentSourceNavigationRequest } from "../MessageList";
+import { useMessageRevealStore } from "../message-reveal-store";
+import { useToastStore } from "@/stores/toastStore";
 import {
   recallScrollPosition,
   recallScrollTop,
@@ -373,6 +375,134 @@ describe("MessageList thread switch", () => {
     await waitFor(() => expect(loadOlderMessagesSpy).toHaveBeenCalledWith("thread-A"));
     rerender(<MessageList {...props} />);
     await waitFor(() => expect(onSelectedTextCommentSourceOpened).toHaveBeenCalledWith(request));
+  });
+
+  it("pages older history until a revealed message is resident, then consumes the reveal", async () => {
+    messagesValue = [{ id: "m1", sequence: 2, thread_id: "thread-A", role: "assistant", content: "Current message" }];
+    hasMoreMessagesValue = true;
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(5000);
+    loadOlderMessagesSpy.mockImplementation(async () => {
+      messagesValue = [
+        { id: "m2", sequence: 1, thread_id: "thread-A", role: "assistant", content: "Subagent reply" },
+        { id: "m1", sequence: 2, thread_id: "thread-A", role: "assistant", content: "Current message" },
+      ];
+      return "loaded";
+    });
+    useMessageRevealStore.setState({ request: { threadId: "thread-A", messageId: "m2" } });
+    const { rerender } = render(<MessageList />);
+
+    await waitFor(() => expect(loadOlderMessagesSpy).toHaveBeenCalledWith("thread-A"));
+    expect(useMessageRevealStore.getState().request).toEqual({ threadId: "thread-A", messageId: "m2" });
+    rerender(<MessageList />);
+    await waitFor(() => expect(useMessageRevealStore.getState().request).toBeNull());
+    expect(useToastStore.getState().toasts).toEqual([]);
+  });
+
+  it("keeps paging toward a reveal when each page renders before its load settles", async () => {
+    messagesValue = [{ id: "page-0", sequence: 100, thread_id: "thread-A", role: "assistant", content: "Page 0" }];
+    hasMoreMessagesValue = true;
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(5000);
+    let page = 0;
+    let rerenderList: (() => void) | null = null;
+    // The real store publishes a page and clears its loading flag before the load promise resolves.
+    loadOlderMessagesSpy.mockImplementation(async () => {
+      await Promise.resolve();
+      page += 1;
+      messagesValue = [
+        { id: `page-${page}`, sequence: 100 - page, thread_id: "thread-A", role: "assistant", content: `Page ${page}` },
+        ...messagesValue,
+      ];
+      act(() => rerenderList?.());
+      return "loaded";
+    });
+    useMessageRevealStore.setState({ request: { threadId: "thread-A", messageId: "page-2" } });
+    const { rerender } = render(<MessageList />);
+    rerenderList = () => rerender(<MessageList />);
+
+    await waitFor(() => expect(useMessageRevealStore.getState().request).toBeNull());
+    expect(loadOlderMessagesSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a reveal when another history load owns the page", async () => {
+    useToastStore.setState({ toasts: [] });
+    messagesValue = [{ id: "m1", sequence: 2, thread_id: "thread-A", role: "assistant", content: "Current message" }];
+    hasMoreMessagesValue = true;
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(5000);
+    let rerenderList: (() => void) | null = null;
+    loadOlderMessagesSpy.mockImplementationOnce(async () => {
+      // The viewport-fill load already holds this page, and the store publishes its loading flag.
+      await Promise.resolve();
+      recordOverridesByThread["thread-A"] = { isLoadingMore: true };
+      act(() => rerenderList?.());
+      return "skipped";
+    });
+    useMessageRevealStore.setState({ request: { threadId: "thread-A", messageId: "m2" } });
+    const { rerender } = render(<MessageList />);
+    rerenderList = () => rerender(<MessageList />);
+    await waitFor(() => expect(loadOlderMessagesSpy).toHaveBeenCalledWith("thread-A"));
+    await act(async () => {});
+
+    messagesValue = [
+      { id: "m2", sequence: 1, thread_id: "thread-A", role: "assistant", content: "Subagent reply" },
+      { id: "m1", sequence: 2, thread_id: "thread-A", role: "assistant", content: "Current message" },
+    ];
+    recordOverridesByThread = {};
+    rerender(<MessageList />);
+    await waitFor(() => expect(useMessageRevealStore.getState().request).toBeNull());
+    expect(useToastStore.getState().toasts).toEqual([]);
+  });
+
+  it("stays quiet when a superseded reveal's page load fails", async () => {
+    useToastStore.setState({ toasts: [] });
+    messagesValue = [{ id: "m1", sequence: 2, thread_id: "thread-A", role: "assistant", content: "Current message" }];
+    hasMoreMessagesValue = true;
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(5000);
+    let failPage: (result: "failed") => void = () => {};
+    loadOlderMessagesSpy.mockImplementation(() => new Promise((resolve) => { failPage = resolve; }));
+    useMessageRevealStore.setState({ request: { threadId: "thread-A", messageId: "older" } });
+    render(<MessageList />);
+    await waitFor(() => expect(loadOlderMessagesSpy).toHaveBeenCalledWith("thread-A"));
+
+    act(() => useMessageRevealStore.getState().requestReveal("thread-A", "m1"));
+    await waitFor(() => expect(useMessageRevealStore.getState().request).toBeNull());
+    await act(async () => failPage("failed"));
+    expect(useToastStore.getState().toasts).toEqual([]);
+  });
+
+  it("drops a reveal and says so once history holds no such message", async () => {
+    useToastStore.setState({ toasts: [] });
+    messagesValue = [{ id: "m1", sequence: 1, thread_id: "thread-A", role: "assistant", content: "Only message" }];
+    useMessageRevealStore.setState({ request: { threadId: "thread-A", messageId: "gone" } });
+    render(<MessageList />);
+
+    await waitFor(() => expect(useMessageRevealStore.getState().request).toBeNull());
+    expect(useToastStore.getState().toasts.map((toast) => toast.title)).toEqual(["Couldn't find that reply in the chat"]);
+    expect(loadOlderMessagesSpy).not.toHaveBeenCalled();
+  });
+
+  it("stops paging for a reveal when the history window keeps reporting more", async () => {
+    useToastStore.setState({ toasts: [] });
+    messagesValue = [{ id: "page-0", sequence: 100, thread_id: "thread-A", role: "assistant", content: "Page 0" }];
+    hasMoreMessagesValue = true;
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(5000);
+    let page = 0;
+    loadOlderMessagesSpy.mockImplementation(async () => {
+      page += 1;
+      // An evicting window: each page replaces the last and still reports older history.
+      messagesValue = [{ id: `page-${page}`, sequence: 100 - page, thread_id: "thread-A", role: "assistant", content: `Page ${page}` }];
+      return "loaded";
+    });
+    useMessageRevealStore.setState({ request: { threadId: "thread-A", messageId: "gone" } });
+    const { rerender } = render(<MessageList />);
+
+    for (let attempt = 0; attempt < 30 && useMessageRevealStore.getState().request; attempt += 1) {
+      await act(async () => {});
+      rerender(<MessageList />);
+    }
+
+    expect(useMessageRevealStore.getState().request).toBeNull();
+    expect(loadOlderMessagesSpy).toHaveBeenCalledTimes(20);
+    expect(useToastStore.getState().toasts.map((toast) => toast.title)).toEqual(["Couldn't find that reply in the chat"]);
   });
 
   it("marks a source unavailable only after its resident message fails canonical reconstruction", async () => {

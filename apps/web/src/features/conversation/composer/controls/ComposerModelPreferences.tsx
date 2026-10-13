@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
 import { supports1MContextWindow, supportsThinkingToggle } from "@/lib/model-registry";
+import { formatReasoningLabel } from "@/lib/format-model-label";
 import { useThreadStore, type ThreadSettings } from "@/stores/threadStore";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
 
@@ -86,15 +87,8 @@ function hasAvailablePreference(
   return reasoningLevels.length > 0 || has1M || hasThinking || hasCodexFast;
 }
 
-function reasoningLabel(level: string): string {
-  if (level === "xhigh") return "X-High";
-  if (level === "none") return "None";
-  if (level === "minimal") return "Minimal";
-  return level.charAt(0).toUpperCase() + level.slice(1);
-}
-
 function getPreferenceLabel(state: Omit<ModelPreferenceState, "preferenceLabel" | "preferenceTooltip" | "canShowPreferences">, selection: ComposerAgentSelection): string {
-  if (state.reasoningLevels.length > 0) return reasoningLabel(selection.reasoning);
+  if (state.reasoningLevels.length > 0) return formatReasoningLabel(selection.reasoning);
   if (state.hasThinking) return "Thinking";
   if (state.hasCodexFast) return state.codexFastMode ? "Fast" : "Off";
   return state.contextWindow === "1m" ? "1M" : "200K";
@@ -194,7 +188,7 @@ function ComposerReasoningSlider({
       value={state.reasoningLevels.indexOf(reasoning)}
       stops={state.reasoningLevels.length}
       aria-label="Reasoning effort"
-      getStopLabel={(stop) => reasoningLabel(state.reasoningLevels[stop] ?? reasoning)}
+      getStopLabel={(stop) => formatReasoningLabel(state.reasoningLevels[stop] ?? reasoning)}
       onValueChange={(stop) => {
         const reasoning = state.reasoningLevels[stop];
         if (!reasoning) return;
@@ -305,7 +299,7 @@ function ComposerSettingsHeader({
         <span className="flex min-w-0 items-baseline gap-2 text-body-small">
           <span className="text-muted">Reasoning</span>
           <span data-testid="composer-settings-label" className="text-fade font-medium text-ink">
-            {reasoningLabel(actionProps.selection.reasoning)}
+            {formatReasoningLabel(actionProps.selection.reasoning)}
           </span>
         </span>
       ) : (

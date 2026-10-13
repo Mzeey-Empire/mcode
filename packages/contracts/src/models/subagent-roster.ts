@@ -19,6 +19,7 @@ export const SubagentRosterEntrySchema = lazySchema(() => z.object({
   prompt: z.string().nullable(),
   subagentType: z.string().nullable(),
   model: z.string().nullable(),
+  reasoningEffort: z.string().nullable(),
   stepCount: z.number().int().nonnegative(),
   status: SubagentStatusSchema,
   startedAt: z.string().datetime(),

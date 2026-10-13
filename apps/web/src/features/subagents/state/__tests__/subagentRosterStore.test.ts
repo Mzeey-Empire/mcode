@@ -12,7 +12,7 @@ vi.mock("@/transport", async (original) => ({
 function entry(overrides: Partial<SubagentRosterEntry> = {}): SubagentRosterEntry {
   return {
     id: "call:spawn-1", provider: "codex", title: "Inspect the build", prompt: null,
-    subagentType: null, model: null, stepCount: 0, status: "running",
+    subagentType: null, model: null, reasoningEffort: null, stepCount: 0, status: "running",
     startedAt: "2026-10-10T10:00:00.000Z", endedAt: null, tier: "meta", canStop: false,
     sourceToolCallId: "spawn-1", childThreadId: null, sourceMessageId: "message-1", parentEntryId: null,
     ...overrides,

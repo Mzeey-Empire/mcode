@@ -22,7 +22,6 @@ describe("diffStore", () => {
       previewUrlByThread: {},
       rightPanelByThread: {},
       rightPanelFallbackByWorkspace: {},
-      subagentDetailByThread: {},
       reviewFilesVisibleByScope: {},
       snapshotsByThread: {},
       snapshotsLoadingByThread: {},
@@ -738,6 +737,121 @@ describe("diffStore", () => {
     });
   });
 
+  describe("subagent tabs", () => {
+    const ids = () => useDiffStore.getState().getRightPanel("ws-1", "thread-1").tabInstances.map((tab) => tab.id);
+
+    it("groups subagent tabs after the Subagents tool and opens Subagents when absent", () => {
+      const { setRightPanelTab, openSubagentTab, getRightPanel } = useDiffStore.getState();
+      setRightPanelTab("ws-1", "thread-1", "preview");
+      openSubagentTab("ws-1", "thread-1", "a");
+      setRightPanelTab("ws-1", "thread-1", "changes");
+      openSubagentTab("ws-1", "thread-1", "b");
+
+      expect(ids()).toEqual([
+        "singleton:preview",
+        "singleton:subagents",
+        "subagent:a",
+        "subagent:b",
+        "singleton:changes",
+      ]);
+      const panel = getRightPanel("ws-1", "thread-1");
+      expect(panel.activeTabId).toBe("subagent:b");
+      expect(panel.activeTab).toBe("subagents");
+      expect(panel.openTabs).toEqual(["preview", "subagents", "changes"]);
+    });
+
+    it("focuses an already open subagent tab instead of adding a second", () => {
+      const { openSubagentTab, setRightPanelTab, getRightPanel } = useDiffStore.getState();
+      openSubagentTab("ws-1", "thread-1", "a");
+      setRightPanelTab("ws-1", "thread-1", "preview");
+      openSubagentTab("ws-1", "thread-1", "a");
+
+      expect(ids()).toEqual(["singleton:subagents", "subagent:a", "singleton:preview"]);
+      expect(getRightPanel("ws-1", "thread-1").activeTabId).toBe("subagent:a");
+    });
+
+    it("caps the group at eight by dropping the oldest inactive tab", () => {
+      const { openSubagentTab, setRightPanelTabInstance } = useDiffStore.getState();
+      for (const entry of ["1", "2", "3", "4", "5", "6", "7", "8"]) openSubagentTab("ws-1", "thread-1", entry);
+      setRightPanelTabInstance("ws-1", "thread-1", "subagent:1");
+      openSubagentTab("ws-1", "thread-1", "9");
+
+      expect(ids()).toEqual([
+        "singleton:subagents",
+        "subagent:1",
+        "subagent:3",
+        "subagent:4",
+        "subagent:5",
+        "subagent:6",
+        "subagent:7",
+        "subagent:8",
+        "subagent:9",
+      ]);
+    });
+
+    it("caps by opening order, not rail position, after a reorder", () => {
+      const { openSubagentTab, reorderRightPanelTab } = useDiffStore.getState();
+      for (const entry of ["1", "2", "3", "4", "5", "6", "7", "8"]) openSubagentTab("ws-1", "thread-1", entry);
+      reorderRightPanelTab("ws-1", "thread-1", "subagent:2", -1);
+      openSubagentTab("ws-1", "thread-1", "9");
+
+      expect(ids()).toEqual([
+        "singleton:subagents",
+        "subagent:2",
+        "subagent:3",
+        "subagent:4",
+        "subagent:5",
+        "subagent:6",
+        "subagent:7",
+        "subagent:8",
+        "subagent:9",
+      ]);
+    });
+
+    it("closes every subagent tab with the Subagents tool and hides the panel with the last tab", () => {
+      const { openSubagentTab, closeRightPanelTabInstance, showRightPanel, getRightPanel, getRightPanelVisible } =
+        useDiffStore.getState();
+      openSubagentTab("ws-1", "thread-1", "a");
+      openSubagentTab("ws-1", "thread-1", "b");
+      showRightPanel("ws-1", "thread-1");
+
+      closeRightPanelTabInstance("ws-1", "thread-1", "subagent:b");
+      expect(getRightPanel("ws-1", "thread-1").activeTabId).toBe("subagent:a");
+
+      closeRightPanelTabInstance("ws-1", "thread-1", "singleton:subagents");
+      expect(ids()).toEqual([]);
+      expect(getRightPanelVisible("ws-1", "thread-1")).toBe(false);
+    });
+
+    it("reorders subagent tabs only within their group and moves tools past the group", () => {
+      const { setRightPanelTab, openSubagentTab, reorderRightPanelTab } = useDiffStore.getState();
+      openSubagentTab("ws-1", "thread-1", "a");
+      openSubagentTab("ws-1", "thread-1", "b");
+      setRightPanelTab("ws-1", "thread-1", "preview");
+
+      reorderRightPanelTab("ws-1", "thread-1", "subagent:a", -1);
+      expect(ids()).toEqual(["singleton:subagents", "subagent:a", "subagent:b", "singleton:preview"]);
+
+      reorderRightPanelTab("ws-1", "thread-1", "subagent:b", -1);
+      expect(ids()).toEqual(["singleton:subagents", "subagent:b", "subagent:a", "singleton:preview"]);
+
+      reorderRightPanelTab("ws-1", "thread-1", "singleton:preview", -1);
+      expect(ids()).toEqual(["singleton:preview", "singleton:subagents", "subagent:b", "subagent:a"]);
+    });
+
+    it("keeps subagent tabs per thread and out of the workspace fallback", () => {
+      const { openSubagentTab, getRightPanel } = useDiffStore.getState();
+      openSubagentTab("ws-1", "thread-1", "a");
+      openSubagentTab("ws-1", "thread-2", "b");
+
+      expect(ids()).toEqual(["singleton:subagents", "subagent:a"]);
+      expect(getRightPanel("ws-1", "thread-2").tabInstances.map((tab) => tab.id))
+        .toEqual(["singleton:subagents", "subagent:b"]);
+      expect(getRightPanel("ws-1", "thread-3").tabInstances.some((tab) => tab.type === "subagent")).toBe(false);
+      expect(getRightPanel("ws-1").tabInstances.some((tab) => tab.type === "subagent")).toBe(false);
+    });
+  });
+
   // The threadless Browser/Terminal shell writes to one workspace-level fallback
   // record, which must survive having no thread active and persist across
   // navigation. See ADR-0020.
@@ -1130,17 +1244,6 @@ describe("diffStore", () => {
   });
 
   describe("clearThread", () => {
-    it("stores detail navigation per thread and clears it with the thread", () => {
-      const { selectSubagentDetail, clearSubagentDetail, clearThread } = useDiffStore.getState();
-      selectSubagentDetail("thread-1", { id: "agent-1", scrollTop: 48 });
-      selectSubagentDetail("thread-2", { id: "agent-2", scrollTop: 0 });
-
-      clearSubagentDetail("thread-1");
-      expect(useDiffStore.getState().subagentDetailByThread["thread-1"]).toBeUndefined();
-      clearThread("thread-2");
-      expect(useDiffStore.getState().subagentDetailByThread["thread-2"]).toBeUndefined();
-    });
-
     it("should remove all per-thread entries", () => {
       const {
         setSnapshots,

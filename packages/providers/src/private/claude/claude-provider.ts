@@ -25,6 +25,7 @@ import type {
   SDKUserMessage,
   PostCompactHookInput,
   StopHookInput,
+  HookInput,
   CanUseTool,
 } from "@anthropic-ai/claude-agent-sdk";
 import { logger } from "@mcode/shared";
@@ -1700,6 +1701,21 @@ export class ClaudeProvider
     return {
       PostCompact: [{ hooks: [this.createPostCompactHook(context)] }],
       Stop: [{ hooks: [this.createGoalStopHook(context)] }],
+      // Only hooks running inside a subagent report the effort it runs at, so read it from its tool calls and its stop.
+      PreToolUse: [{ hooks: [this.createSubagentEffortHook(context)] }],
+      SubagentStop: [{ hooks: [this.createSubagentEffortHook(context)] }],
+    };
+  }
+
+  private createSubagentEffortHook(context: ClaudeTurnContext) {
+    return async (input: HookInput) => {
+      const level = input.effort?.level;
+      if (!input.agent_id || !level) return {};
+      const session = this.runtime.get(context.params.sessionId);
+      const stream = session ? this.streamStates.get(session.query) : undefined;
+      const agentToolCallId = stream?.subagentApprovalOrigins.get(input.agent_id)?.parentToolCallId;
+      if (agentToolCallId) stream.mapper.reportSubagentRun(agentToolCallId, { reasoningEffort: level });
+      return {};
     };
   }
 

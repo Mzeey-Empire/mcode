@@ -147,7 +147,7 @@ vi.mock("@/stores/threadStore", () => ({
 
 vi.mock("@/features/subagents", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/subagents")>()),
-  openSubagentsRoster: mockOpenSubagentsPanel,
+  openSubagentsPanel: mockOpenSubagentsPanel,
 }));
 
 vi.mock("@/components/ui/dialog", () => ({
@@ -184,7 +184,7 @@ import { canStartBranchlessCreatePr } from "@/features/thread-overview/branch-cr
 import { ProjectEnvironmentPanel } from "@/features/projects/environment";
 
 function rosterEntry(id: string, overrides: Partial<SubagentRosterEntry> = {}): SubagentRosterEntry {
-  return { id: `call:${id}`, provider: "codex", title: id, prompt: null, subagentType: null, model: null,
+  return { id: `call:${id}`, provider: "codex", title: id, prompt: null, subagentType: null, model: null, reasoningEffort: null,
     stepCount: 0, status: "done", startedAt: "2026-10-10T10:00:00.000Z", endedAt: null,
     tier: "transcript", canStop: false, sourceToolCallId: id, childThreadId: null,
     sourceMessageId: null, parentEntryId: null, ...overrides };

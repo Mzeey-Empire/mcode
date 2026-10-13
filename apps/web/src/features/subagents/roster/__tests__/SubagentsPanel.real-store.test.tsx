@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
 import { useDiffStore } from "@/stores/diffStore";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { pushEmitter } from "@/transport";
 import { useSubagentRosterStore } from "../../state/subagentRosterStore";
@@ -15,7 +16,7 @@ vi.mock("@/transport", async (original) => ({
 function row(id: string, status: SubagentRosterEntry["status"] = "running"): SubagentRosterEntry {
   return {
     id: `call:${id}`, provider: "claude", title: id, prompt: "Inspect the project",
-    subagentType: "Explore", model: null, stepCount: 0, status,
+    subagentType: "Explore", model: null, reasoningEffort: null, stepCount: 0, status,
     startedAt: "2026-10-10T10:00:00.000Z", endedAt: null, tier: "steps", canStop: false,
     sourceToolCallId: id, childThreadId: null, sourceMessageId: "message", parentEntryId: null,
   };
@@ -27,7 +28,8 @@ function roster(entries: SubagentRosterEntry[], revision = 1): SubagentRoster {
 describe("SubagentsPanel real roster store", () => {
   beforeEach(() => {
     useSubagentRosterStore.setState({ rosters: new Map(), errors: new Set() });
-    useDiffStore.setState({ subagentDetailByThread: {} });
+    useDiffStore.setState({ rightPanelByThread: {}, rightPanelFallbackByWorkspace: {} });
+    useWorkspaceStore.setState({ activeWorkspaceId: "workspace-1", activeThreadId: "thread-1" });
     useThreadStore.setState({ currentThreadId: "thread-1", records: new Map() });
     transport.loadSubagentRoster.mockReset();
     transport.loadSubagentDetail.mockReset();
@@ -57,21 +59,13 @@ describe("SubagentsPanel real roster store", () => {
     interval.mockRestore();
   });
 
-  it("keeps an open entry selected after refresh and loads server steps", async () => {
+  it("opens a clicked row as its own rail tab", async () => {
     transport.loadSubagentRoster.mockResolvedValue(roster([row("Inspect UI")]));
-    transport.loadSubagentDetail.mockResolvedValue({
-      entryId: "call:Inspect UI", totalSteps: 0, steps: [], summary: "No issues found",
-    });
     render(<SubagentsPanel threadId="thread-1" />);
     fireEvent.click(await screen.findByRole("button", { name: "Open Inspect UI details, Running" }));
-    await screen.findByText("No issues found");
-    expect(useDiffStore.getState().subagentDetailByThread["thread-1"]?.id).toBe("call:Inspect UI");
-    transport.loadSubagentRoster.mockResolvedValue(roster([row("Inspect UI", "stopped")], 3));
-    await act(async () => { await useSubagentRosterStore.getState().refresh("thread-1"); });
-    expect(screen.getByRole("status")).toHaveTextContent("Stopped");
-    expect(transport.loadSubagentDetail.mock.calls).toEqual([
-      ["thread-1", "call:Inspect UI"], ["thread-1", "call:Inspect UI"],
-    ]);
+    const panel = useDiffStore.getState().getRightPanel("workspace-1", "thread-1");
+    expect(panel.activeTabId).toBe("subagent:call:Inspect UI");
+    expect(panel.tabInstances.map((tab) => tab.id)).toEqual(["singleton:subagents", "subagent:call:Inspect UI"]);
   });
 
   it("offers Retry after an error and retains the last good rows", async () => {

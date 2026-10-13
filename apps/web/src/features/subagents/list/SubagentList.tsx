@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Check, Layers } from "lucide-react";
 import type { CanonicalSubagentStopResult, SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
 import { Button, IconButton } from "@/components/ui/button";
@@ -7,7 +7,9 @@ import { ProviderIcon } from "@/components/ui/provider-icon";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useToastStore } from "@/stores/toastStore";
-import { formatLiveDuration, subagentStatusLabel } from "../subagent-status";
+import { subagentStatusLabel } from "../subagent-status";
+import { elapsed, useNow } from "../live-duration";
+import { subagentKind } from "../subagent-kind";
 
 /** Props for {@link SubagentList}. */
 export interface SubagentListProps {
@@ -18,8 +20,6 @@ export interface SubagentListProps {
   readonly onSelect: (row: SubagentRosterEntry) => void;
   readonly onStop: (row: SubagentRosterEntry) => Promise<CanonicalSubagentStopResult>;
 }
-
-const LIVE_TICK_MS = 1_000;
 
 function byNewestStart(a: SubagentRosterEntry, b: SubagentRosterEntry): number {
   return Date.parse(b.startedAt) - Date.parse(a.startedAt);
@@ -32,26 +32,8 @@ function partitionRows(entries: readonly SubagentRosterEntry[]) {
   return { running, finished };
 }
 
-/** Re-renders once a second only while something is live, so an idle list costs nothing. */
-function useNow(live: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!live) return;
-    const timer = window.setInterval(() => setNow(Date.now()), LIVE_TICK_MS);
-    return () => window.clearInterval(timer);
-  }, [live]);
-  return now;
-}
-
-/** Only a running row reads the clock; a finished row without an end time has no honest duration. */
-function elapsed(row: SubagentRosterEntry, now: number): string | null {
-  const end = row.status === "running" ? now : row.endedAt && Date.parse(row.endedAt);
-  return end ? formatLiveDuration(end - Date.parse(row.startedAt)) : null;
-}
-
 function rowMeta(row: SubagentRosterEntry): string {
-  const kind = [row.subagentType, row.model].filter(Boolean).join(" · ");
-  return [kind, row.stepCount > 0 ? `${row.stepCount} steps` : null].filter(Boolean).join(" · ");
+  return [subagentKind(row), row.stepCount > 0 ? `${row.stepCount} steps` : null].filter(Boolean).join(" · ");
 }
 
 function StatusTrail({ row, now }: { readonly row: SubagentRosterEntry; readonly now: number }) {

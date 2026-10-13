@@ -25,7 +25,7 @@ import { and, eq, inArray, ne, or } from "drizzle-orm";
 import { messages, threads, toolCallRecords } from "../../../runtime/persistence/sqlite/schema.js";
 import { NarrativeStore } from "../conversation/narrative/narrative-store.js";
 import { broadcast } from "../../../application/transport/push.js";
-import { narrativeRosterEntry, narrativeSubagentDetail, rootAgent, subagentStatusFrom, subagentModelLabel, type RosterToolCall } from "./subagent-roster-projection.js";
+import { narrativeRosterEntry, narrativeSubagentDetail, rootAgent, subagentStatusFrom, subagentTitle, type RosterToolCall } from "./subagent-roster-projection.js";
 import type { CanonicalChildRow } from "../canonical/canonical-child-roster.js";
 import { subscribeCommittedCanonicalEvents } from "../canonical/committed-canonical-events.js";
 
@@ -343,14 +343,16 @@ function canonicalDisplayMetadata(row: CanonicalChildRow, narrative: SubagentRos
   return {
     title: narrative.title === "Subagent task" ? fallback.title : narrative.title,
     prompt: narrative.prompt ?? fallback.prompt, subagentType: narrative.subagentType ?? fallback.subagentType,
-    model: narrative.model ?? fallback.model,
+    // Model and effort describe one run, so they come from the same source.
+    ...(narrative.model ? { model: narrative.model, reasoningEffort: narrative.reasoningEffort }
+      : { model: fallback.model, reasoningEffort: fallback.reasoningEffort }),
   };
 }
 
 function canonicalMetadata(row: CanonicalChildRow) {
   return {
-    title: row.task?.split("\n")[0] ?? "Subagent task", prompt: row.task ?? null,
-    subagentType: row.identity ?? null, model: subagentModelLabel(row.model, row.reasoning),
+    title: subagentTitle(row.task?.split("\n")[0] ?? "Subagent task"), prompt: row.task ?? null,
+    subagentType: row.identity ?? null, model: row.model ?? null, reasoningEffort: row.reasoning ?? null,
   };
 }
 

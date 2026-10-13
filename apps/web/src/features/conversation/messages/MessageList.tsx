@@ -27,10 +27,14 @@ import { isTranscriptGroupOpen, toolCallDisclosureKey, type TranscriptNarrativeI
 import { resolveUserMessagePreview } from "@/components/chat/user-message-preview";
 import { estimateMessageListItemHeight, type MessageListItem } from "./message-list-virtualization";
 import { TranscriptViewport, type TranscriptHost, type TranscriptPosition } from "./transcript-viewport";
+import { useToastStore } from "@/stores/toastStore";
+import { useMessageRevealStore, type MessageRevealRequest } from "./message-reveal-store";
 
 const SOURCE_NAVIGATION_MAX_FRAMES = 20;
 const FILL_VIEWPORT_RATIO = 1.5;
 const MAX_FILL_PAGES = 3;
+/** Bounds a Show in chat search so a message that history no longer holds ends in a miss, not endless paging. */
+const MAX_REVEAL_PAGES = 20;
 
 /** A card source request that MessageList resolves through its resident transcript. */
 export interface SelectedTextCommentSourceNavigationRequest {
@@ -132,6 +136,48 @@ function useSourceNavigationCallbacks(
     onOpened: (completedTarget) => complete(completedTarget, callbacks.onOpened),
     onUnavailable: (completedTarget) => complete(completedTarget, callbacks.onUnavailable),
   }), [callbacks, complete]);
+}
+
+/** Progress of paging history for one reveal request. */
+interface RevealSearch {
+  readonly request: MessageRevealRequest;
+  direction: "older" | "newer";
+  pages: number;
+  inFlight: boolean;
+}
+
+/** Ends a reveal whose message history no longer holds, so the request cannot fire a later surprise jump. */
+function missReveal(request: MessageRevealRequest): void {
+  // A later reveal replaced this one; its outstanding page load must not report a miss for it.
+  if (useMessageRevealStore.getState().request !== request) return;
+  useMessageRevealStore.getState().consume(request);
+  useToastStore.getState().show({ kind: "failed", title: "Couldn't find that reply in the chat" });
+}
+
+type RevealHistory = Pick<MessageListData, "hasMore" | "hasNewer" | "loadOlderMessages" | "loadNewerMessages">;
+
+/** Loads the next history page toward a reveal's message, or ends the search once both directions are spent. */
+function pageRevealSearch(search: RevealSearch, history: RevealHistory, onPageSettled: () => void): void {
+  if (search.inFlight) return;
+  // The history window evicts as it pages, so its flags flip back; one pass older, then one newer, ends the search.
+  if (search.direction === "older" && !history.hasMore) search.direction = "newer";
+  if ((search.direction === "newer" && !history.hasNewer) || search.pages >= MAX_REVEAL_PAGES) {
+    missReveal(search.request);
+    return;
+  }
+  const loadPage = search.direction === "older" ? history.loadOlderMessages : history.loadNewerMessages;
+  search.pages += 1;
+  search.inFlight = true;
+  void loadPage(search.request.threadId).then(
+    (result) => {
+      search.inFlight = false;
+      if (result === "failed") missReveal(search.request);
+      // A skip means another load owns the page. That load, or one that landed before this
+      // settled, can render while the search still looks in flight, so look again either way.
+      else onPageSettled();
+    },
+    () => missReveal(search.request),
+  );
 }
 
 function requestMissingSourceHistory({
@@ -484,6 +530,27 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
       setHighlightedKey(row.key);
     }
   }, []);
+  const revealSearch = useRef<RevealSearch | null>(null);
+  const [revealPagesSettled, setRevealPagesSettled] = useState(0);
+  const revealRequest = useMessageRevealStore((state) =>
+    state.request?.threadId === data.renderedThreadId ? state.request : null);
+  useEffect(() => {
+    if (!revealRequest || items.length === 0) return;
+    if (items.some((item) => item.type === "message" && item.message.id === revealRequest.messageId)) {
+      useMessageRevealStore.getState().consume(revealRequest);
+      scrollToMessage(revealRequest.messageId);
+      return;
+    }
+    if (data.isLoadingMore || data.isLoadingNewer) return;
+    const search = revealSearch.current?.request === revealRequest
+      ? revealSearch.current
+      : { request: revealRequest, direction: "older" as const, pages: 0, inFlight: false };
+    revealSearch.current = search;
+    pageRevealSearch(search, {
+      hasMore: data.hasMore, hasNewer: data.hasNewer,
+      loadOlderMessages: data.loadOlderMessages, loadNewerMessages: data.loadNewerMessages,
+    }, () => setRevealPagesSettled((count) => count + 1));
+  }, [revealPagesSettled, revealRequest, items, scrollToMessage, data.hasMore, data.hasNewer, data.isLoadingMore, data.isLoadingNewer, data.loadOlderMessages, data.loadNewerMessages]);
   const jumpToUser = useCallback(() => {
     if (stickyMessage) scrollToMessage(stickyMessage.id);
   }, [stickyMessage, scrollToMessage]);

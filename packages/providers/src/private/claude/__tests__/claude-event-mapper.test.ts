@@ -60,6 +60,37 @@ describe("ClaudeEventMapper native dispatch", () => {
     expect(evidence.at(-1)?.parent).toEqual({ kind: "native", id: "PARENT_2" });
   });
 
+  it("adds the model and effort a subagent ran with to its Agent call, once each, under the Agent's own parent", async () => {
+    const { mapper, events, evidence } = createMapper();
+    const childMessage = (model: string) => ({ type: "assistant", parent_tool_use_id: "AGENT_1", message: { model, content: [] } });
+    await mapper.map({ type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "tool_use", id: "AGENT_1", name: "Agent", input: { subagent_type: "general-purpose", model: "sonnet" } }] } });
+    await mapper.map(childMessage("<synthetic>"));
+    await mapper.map(childMessage("claude-sonnet-5-5"));
+    await mapper.map(childMessage("claude-sonnet-5-5"));
+    mapper.reportSubagentRun("AGENT_1", { reasoningEffort: "high" });
+    mapper.reportSubagentRun("AGENT_1", { reasoningEffort: "high" });
+    mapper.reportSubagentRun("UNKNOWN", { reasoningEffort: "low" });
+
+    expect(events.slice(1)).toEqual([
+      { type: AgentEventType.ToolUse, threadId: "test", toolCallId: "AGENT_1", toolName: "Agent", toolInput: { model: "claude-sonnet-5-5" }, parentToolCallId: undefined },
+      { type: AgentEventType.ToolUse, threadId: "test", toolCallId: "AGENT_1", toolName: "Agent", toolInput: { reasoningEffort: "high" }, parentToolCallId: undefined },
+    ]);
+    expect(evidence.slice(1).map((source) => source.parent)).toEqual([{ kind: "root" }, { kind: "root" }]);
+  });
+
+  it("reports an Agent's subagent_type as subagentType from assistant blocks and standalone tool_use messages", async () => {
+    const { mapper, events } = createMapper();
+    await mapper.map({ type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "tool_use", id: "AGENT_1", name: "Agent", input: { subagent_type: "general-purpose" } }] } });
+    await mapper.map({ type: "tool_use", id: "AGENT_2", tool_name: "Agent", tool_input: { subagent_type: "Explore" } });
+    await mapper.map({ type: "tool_use", id: "READ_1", tool_name: "Read", tool_input: { subagent_type: "Explore" } });
+
+    expect(events.map((event) => event.type === AgentEventType.ToolUse && event.toolInput)).toEqual([
+      { subagent_type: "general-purpose", subagentType: "general-purpose" },
+      { subagent_type: "Explore", subagentType: "Explore" },
+      { subagent_type: "Explore" },
+    ]);
+  });
+
   it.each(["__proto__", "constructor", "toString"])(
     "ignores unsafe native type %s",
     async (type) => {
@@ -123,10 +154,32 @@ describe("ClaudeEventMapper tool results", () => {
 
   it("joins text blocks instead of storing their JSON", async () => {
     await expect(outputOf([
-      { type: "text", text: "[Subagent hand-back] Found the cause" },
+      { type: "text", text: "Found the cause" },
       { type: "image", source: { type: "base64", data: "AAAA" } },
       { type: "text", text: "in auth.ts" },
-    ])).resolves.toBe("[Subagent hand-back] Found the cause\nin auth.ts");
+    ])).resolves.toBe("Found the cause\nin auth.ts");
+  });
+
+  it("keeps only the report from a framed subagent hand-back", async () => {
+    await expect(outputOf([{
+      type: "text",
+      text: [
+        "  Note quoted by the harness",
+        "[Subagent hand-back] The text below is the final report of a subagent. The report follows:",
+        "  # Fixture repo",
+        "  ",
+        "    indented code",
+        "agentId: a1b2 (use SendMessage with to: 'a1b2', summary: '<5-10 word recap>' to continue this agent)",
+        "<usage>subagent_tokens: 10</usage>",
+      ].join("\n"),
+    }])).resolves.toBe("# Fixture repo\n\n  indented code");
+  });
+
+  it("drops the resume trailer block from an unframed subagent result", async () => {
+    await expect(outputOf([
+      { type: "text", text: "Found the cause" },
+      { type: "text", text: "agentId: a1b2 (use SendMessage with to: 'a1b2', summary: '<5-10 word recap>' to continue this agent)\n<usage>subagent_tokens: 10</usage>" },
+    ])).resolves.toBe("Found the cause");
   });
 
   it("falls back to JSON when no block carries text", async () => {

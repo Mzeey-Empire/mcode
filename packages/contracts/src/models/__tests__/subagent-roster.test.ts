@@ -5,7 +5,7 @@ const roster: SubagentRoster = {
   owningParentThreadId: "parent", epoch: "boot-one", revision: 7, truncated: false,
   entries: [{
     id: "call:agent-1", provider: "claude", title: "Inspect the build", prompt: "Find the build failure",
-    subagentType: "Explore", model: null, stepCount: 2, status: "stopped",
+    subagentType: "Explore", model: null, reasoningEffort: null, stepCount: 2, status: "stopped",
     startedAt: "2026-10-10T10:00:00.000Z", endedAt: "2026-10-10T10:01:00.000Z",
     tier: "steps", canStop: false, sourceToolCallId: "agent-1", childThreadId: null,
     sourceMessageId: "message-1", parentEntryId: null,

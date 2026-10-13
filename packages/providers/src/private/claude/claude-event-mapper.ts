@@ -53,6 +53,11 @@ const BACKGROUND_TASK_STATUS: ReadonlyMap<string, BackgroundToolStatus> = new Ma
   ["completed", "completed"], ["failed", "failed"], ["stopped", "cancelled"],
 ]);
 const SESSION_ENDED_OUTPUT = "Stopped when the Claude session ended.";
+// The CLI frames a subagent's report for the model's benefit. It indents every report
+// line, so the first column-zero line after the frame ends the report.
+const HANDBACK_FRAME_PREFIX = "[Subagent hand-back] ";
+const HANDBACK_REPORT_INDENT = "  ";
+const AGENT_RESUME_TRAILER = /^agentId: \S+ \(use SendMessage/;
 type BackgroundToolStatus = ProviderBackgroundToolSettlement["status"];
 
 /** State read by the Claude SDK event mapper. */
@@ -114,6 +119,8 @@ export class ClaudeEventMapper {
   private compacting = false;
   private readonly toolUseIds = new Set<string>();
   private readonly toolParents = new Map<string, ClaudeParentEvidence>();
+  /** Agent calls by id, with the run settings already reported for each. */
+  private readonly subagentRuns = new Map<string, { parentToolCallId: string | undefined; model?: string; reasoningEffort?: string }>();
   /** Open thinking content-block index to its reasoning item id, for the message currently streaming. */
   private readonly reasoningItemByBlock = new Map<number, string>();
   private reasoningMessageKey: string | undefined;
@@ -185,6 +192,7 @@ export class ClaudeEventMapper {
   resetExecution(): void {
     this.toolUseIds.clear();
     this.toolParents.clear();
+    this.subagentRuns.clear();
     this.reasoningItemByBlock.clear();
     this.reasoningMessageKey = undefined;
     this.lastAssistantText = "";
@@ -298,7 +306,29 @@ export class ClaudeEventMapper {
     }
     for (const block of content)
       if (block.type === "tool_use") this.emitToolUse(block, parentToolCallId);
+    if (parentToolCallId) this.reportSubagentRun(parentToolCallId, { model: runModel(objectValue(assistant).model) });
     return "none";
+  }
+
+  /**
+   * Adds the model or effort a subagent actually ran with to its Agent call.
+   * The Agent input names a model only when Claude overrides it, so the run itself is the evidence.
+   */
+  reportSubagentRun(agentToolCallId: string, run: { model?: string; reasoningEffort?: string }): void {
+    const reported = this.subagentRuns.get(agentToolCallId);
+    if (!reported) return;
+    const toolInput: Record<string, string> = {};
+    if (run.model && !reported.model) toolInput.model = reported.model = run.model;
+    if (run.reasoningEffort && !reported.reasoningEffort) toolInput.reasoningEffort = reported.reasoningEffort = run.reasoningEffort;
+    if (Object.keys(toolInput).length === 0) return;
+    // An empty source makes emit attribute the Agent call to its own recorded parent, not to the child message.
+    const source = this.nativeSource;
+    this.nativeSource = {};
+    try {
+      this.emit({ type: AgentEventType.ToolUse, threadId: this.threadId, toolCallId: agentToolCallId, toolName: "Agent", toolInput, parentToolCallId: reported.parentToolCallId });
+    } finally {
+      this.nativeSource = source;
+    }
   }
 
   private emitToolUse(
@@ -310,6 +340,7 @@ export class ClaudeEventMapper {
     if (toolCallId && this.toolUseIds.has(toolCallId)) return;
     if (toolCallId) this.registerToolUse(toolCallId);
     const toolName = stringOr(block.name, "unknown");
+    if (toolName === "Agent" && toolCallId) this.trackSubagentRun(toolCallId, parentToolCallId);
     logger.debug("Claude ToolUse from assistant block", {
       toolId: toolCallId,
       toolName,
@@ -320,9 +351,14 @@ export class ClaudeEventMapper {
       threadId: this.threadId,
       toolCallId,
       toolName,
-      toolInput: objectValue(block.input),
+      toolInput: canonicalToolInput(toolName, objectValue(block.input)),
       parentToolCallId,
     });
+  }
+
+  private trackSubagentRun(toolCallId: string, parentToolCallId: string | undefined): void {
+    if (this.subagentRuns.size >= MAX_TRACKED_TOOLS) throw new Error("Claude native tool identity bound exceeded");
+    this.subagentRuns.set(toolCallId, { parentToolCallId });
   }
 
   private registerToolUse(id: string): void {
@@ -597,7 +633,7 @@ export class ClaudeEventMapper {
       threadId: this.threadId,
       toolCallId,
       toolName,
-      toolInput: firstObjectValue(message.tool_input, message.input),
+      toolInput: canonicalToolInput(toolName, firstObjectValue(message.tool_input, message.input)),
       parentToolCallId,
     });
     return "none";
@@ -810,16 +846,33 @@ function readParentEvidence(message: Message): ClaudeParentEvidence {
 
 /** Claude sends rich results as content blocks; keep their text so stored summaries read as prose, not JSON. */
 function toolResultText(content: unknown): string {
-  if (typeof content === "string") return content;
+  if (typeof content === "string") return subagentReport(content);
   if (Array.isArray(content)) {
-    const texts = content.map(objectValue).filter((block) => block.type === "text").map((block) => stringValue(block.text));
-    if (texts.length > 0) return texts.join("\n");
+    const texts = content.map(objectValue).filter((block) => block.type === "text").map((block) => stringValue(block.text))
+      .filter((text) => !AGENT_RESUME_TRAILER.test(text));
+    if (texts.length > 0) return subagentReport(texts.join("\n"));
   }
   return JSON.stringify(content ?? "");
+}
+/** Keeps only the subagent's own report from a framed hand-back; other text passes through. */
+function subagentReport(text: string): string {
+  const lines = text.split("\n");
+  const frame = lines.findIndex((line) => line.startsWith(HANDBACK_FRAME_PREFIX));
+  if (frame === -1) return text;
+  const report: string[] = [];
+  for (const line of lines.slice(frame + 1)) {
+    if (!line.startsWith(HANDBACK_REPORT_INDENT)) break;
+    report.push(line.slice(HANDBACK_REPORT_INDENT.length));
+  }
+  return report.join("\n");
 }
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+/** The model a subagent message ran on; the CLI labels messages it wrote itself, such as API errors, `<synthetic>`. */
+function runModel(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "<synthetic>" ? validIdentity(value) : undefined;
 }
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
@@ -836,6 +889,11 @@ function numberValue(value: unknown): number | undefined {
 }
 function numberOrNull(value: unknown): number | null {
   return typeof value === "number" ? value : null;
+}
+/** Claude names an Agent's type `subagent_type`; the shared tool input contract reads `subagentType`. */
+function canonicalToolInput(toolName: string, input: Message): Message {
+  const subagentType = toolName === "Agent" ? validIdentity(input.subagent_type) : undefined;
+  return subagentType ? { ...input, subagentType } : input;
 }
 function objectValue(value: unknown): Message {
   return objectOrUndefined(value) ?? {};

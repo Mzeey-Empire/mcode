@@ -16,7 +16,7 @@ function agent(id = "agent-1", overrides: Partial<ToolCall> = {}): ToolCall {
 
 function entry(id = "agent-1", overrides: Partial<SubagentRosterEntry> = {}): SubagentRosterEntry {
   return { id: `call:${id}`, provider: "claude", title: "Read detection module", prompt: "Private prompt",
-    subagentType: "Explore", model: null, stepCount: 2, status: "running",
+    subagentType: "Explore", model: null, reasoningEffort: null, stepCount: 2, status: "running",
     startedAt: "2026-10-10T10:00:00.000Z", endedAt: null, tier: "steps", canStop: false,
     sourceToolCallId: id, sourceMessageId: "message", childThreadId: null, parentEntryId: null, ...overrides };
 }

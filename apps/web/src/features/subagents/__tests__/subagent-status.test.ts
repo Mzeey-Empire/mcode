@@ -17,7 +17,7 @@ describe("shared subagent surface words", () => {
     const entries = ["running", "running", "done", "failed", "stopped"].map((status, index) =>
       SubagentRosterEntrySchema().parse({
         id: `call:${index}`, provider: "claude", title: "Inspect", prompt: null,
-        subagentType: null, model: null, stepCount: 0, status,
+        subagentType: null, model: null, reasoningEffort: null, stepCount: 0, status,
         startedAt: "2026-10-10T10:00:00.000Z", endedAt: null, tier: "steps",
         canStop: false, sourceToolCallId: String(index), childThreadId: null,
         sourceMessageId: null, parentEntryId: null,

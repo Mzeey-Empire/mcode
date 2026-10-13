@@ -88,6 +88,12 @@ export function resolveModelDisplayLabel(
   return formatModelLabel(id);
 }
 
+/** Format a reasoning level the way the composer's model trigger shows it, such as "High" or "X-High". */
+export function formatReasoningLabel(level: string): string {
+  if (level === "xhigh") return "X-High";
+  return level.charAt(0).toUpperCase() + level.slice(1);
+}
+
 /** Format a raw model identifier into a display label (registry and heuristics). */
 export function formatModelLabel(modelId: string): string {
   const id = modelId.trim();
