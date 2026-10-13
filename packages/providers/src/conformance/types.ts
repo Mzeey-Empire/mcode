@@ -73,8 +73,12 @@ export interface CursorAcpTracePermissionRequestEnvelope {
   kind: "request-permission";
   request: {
     sessionId: string;
-    options: readonly [{ optionId: string; kind: "allow_once"; name: string }];
-    toolCall: { title: string };
+    options: readonly import("@agentclientprotocol/sdk").PermissionOption[];
+    toolCall: {
+      title: string; toolCallId?: string; kind?: import("@agentclientprotocol/sdk").ToolKind;
+      content?: Array<{ type: "diff"; path: string; oldText: string | null; newText: string }>;
+      rawInput?: { path?: string };
+    };
   };
 }
 

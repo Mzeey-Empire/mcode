@@ -1300,7 +1300,7 @@ export class ClaudeProvider
     return result;
   }
 
-  private waitForClaudePermission(
+  private async waitForClaudePermission(
     requestId: string,
     threadId: string,
     toolName: string,
@@ -1308,8 +1308,9 @@ export class ClaudeProvider
     options: Parameters<CanUseTool>[2],
     routing?: ClaudeCanonicalEventRouting,
   ): Promise<ClaudeApprovalDecision> {
+    const body = await claudeApprovalBody(toolName, input, options, this.runtime.get(`mcode-${threadId}`)?.cwd);
+    if (options.signal?.aborted) return "cancelled";
     return new Promise((resolve) => {
-      const body = claudeApprovalBody(toolName, input, options);
       this.pendingPermissions.set(requestId, {
         threadId,
         toolName,

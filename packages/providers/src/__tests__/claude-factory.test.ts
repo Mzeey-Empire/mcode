@@ -58,27 +58,43 @@ afterEach(async () => { await Promise.allSettled(providers.splice(0).map((provid
 async function completed(events: () => ProviderRuntimeEvent[], count: number) { await vi.waitFor(() => expect(events().filter(({ event }) => event.type === AgentEventType.TurnComplete)).toHaveLength(count)); }
 
 describe("Claude public factory core and capabilities", () => {
-  it.each([false, true])("publishes one cancellation receipt when stopped (failed auto-deny: %s)", async (failedDeny) => {
+  it("publishes one cancellation receipt when stopped", async () => {
     const transport = installTransport(() => []);
     const { provider, events } = fixture();
     await provider.sendTurn(request());
     await vi.waitFor(() => expect(transport.optionsSeen.length).toBe(1));
     const canUseTool = transport.optionsSeen[0]?.canUseTool;
     assert(canUseTool);
-    const controller = new AbortController();
-    if (failedDeny) controller.abort();
-    const native = canUseTool("Bash", { command: "bun run lint" }, { signal: controller.signal, toolUseID: "tool-1" });
-    const [pending] = provider.listPendingApprovals?.() ?? [];
-    assert(pending);
-    if (failedDeny) expect(await provider.resolveApproval?.(pending.requestId, { autoDeny: "unreadable" })).toMatchObject({ status: "failed" });
+    const native = canUseTool("Bash", { command: "bun run lint" }, { signal: new AbortController().signal, toolUseID: "tool-1" });
+    const pending = await vi.waitFor(() => {
+      const [registered] = provider.listPendingApprovals?.() ?? [];
+      assert(registered);
+      return registered;
+    });
     await provider.stopSession("mcode-thread-1");
     await native;
     await vi.waitFor(() => expect(events().filter(({ event }) => event.type === "approvalDecided").map(({ event }) => event)).toEqual([{
       type: "approvalDecided", threadId: "thread-1", requestId: pending.requestId, turnExecutionId: execution1,
-      kind: failedDeny ? "tool" : "command", subjectLabel: failedDeny ? "Mcode couldn't read this request" : "bun run lint",
-      outcome: { status: "cancelled", reason: failedDeny ? "unanswerable" : "session_stopped" },
-      ...(failedDeny ? {} : { toolCallId: "tool-1", origin: { kind: "agent" } }),
+      kind: "command", subjectLabel: "bun run lint", outcome: { status: "cancelled", reason: "session_stopped" },
+      toolCallId: "tool-1", origin: { kind: "agent" },
     }]));
+  });
+
+  it("cancels a closed permission callback without publishing an approval", async () => {
+    const transport = installTransport(() => []);
+    const { provider, events } = fixture();
+    await provider.sendTurn(request());
+    await vi.waitFor(() => expect(transport.optionsSeen.length).toBe(1));
+    const canUseTool = transport.optionsSeen[0]?.canUseTool;
+    assert(canUseTool);
+    const emitted = vi.fn();
+    provider.on("approval_request", emitted);
+    const controller = new AbortController();
+    controller.abort();
+    expect(await canUseTool("Bash", { command: "bun run lint" }, { signal: controller.signal, toolUseID: "tool-1" })).toMatchObject({ behavior: "deny" });
+    expect(emitted).not.toHaveBeenCalled();
+    expect(provider.listPendingApprovals?.()).toEqual([]);
+    expect(events().filter(({ event }) => event.type === "approvalDecided")).toEqual([]);
   });
 
   it("exposes native command scope and acknowledges the SDK deny callback", async () => {
@@ -89,8 +105,11 @@ describe("Claude public factory core and capabilities", () => {
     const canUseTool = transport.optionsSeen[0]?.canUseTool;
     assert(canUseTool);
     const native = canUseTool("Bash", { command: "bun run lint" }, { signal: new AbortController().signal, toolUseID: "tool-approval" });
-    const pending = provider.listPendingApprovals?.("thread-1") ?? [];
-    expect(pending).toHaveLength(1);
+    const pending = await vi.waitFor(() => {
+      const registered = provider.listPendingApprovals?.("thread-1") ?? [];
+      expect(registered).toHaveLength(1);
+      return registered;
+    });
     expect(pending[0]?.body).toMatchObject({
       toolCallId: "tool-approval", subject: { kind: "command", command: "bun run lint" },
       noteDelivery: "native", noteChoiceId: "deny", origin: { kind: "agent" },
@@ -110,8 +129,11 @@ describe("Claude public factory core and capabilities", () => {
     const emitted = vi.fn();
     provider.on("approval_request", emitted);
     const tooLarge = canUseTool("Bash", { command: "x".repeat(70_000) }, { signal: new AbortController().signal, toolUseID: "oversized", decisionReason: "r".repeat(1_001) });
-    const [oversized] = provider.listPendingApprovals?.() ?? [];
-    assert(oversized);
+    const oversized = await vi.waitFor(() => {
+      const [registered] = provider.listPendingApprovals?.() ?? [];
+      assert(registered);
+      return registered;
+    });
     expect(oversized.body).toMatchObject({ subject: { kind: "command", command: "x".repeat(70_000) }, reason: "r".repeat(1_001) });
     expect(emitted.mock.calls).toEqual([[oversized]]);
     expect(await provider.resolveApproval?.(oversized.requestId, { autoDeny: "too_large" })).toEqual({ status: "resolved" });

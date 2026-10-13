@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, assert } from "vitest";
+import * as NodeFSPromises from "node:fs/promises";
+import * as NodePath from "node:path";
+import type { ApprovalRequestEnvelope } from "@mcode/contracts";
 
 /**
  * Verifies the off-band handoff bypass in ClaudeProvider.canUseTool (PRD #538):
@@ -10,7 +13,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * can invoke it directly (the real SDK only calls it when the model requests a
  * tool, which this lightweight mock does not simulate).
  */
-function makeFakeSdkQuery(captured: { canUseTool?: Function }) {
+function makeFakeSdkQuery(captured: { canUseTool?: Function; finishTurn?: () => void }) {
   return ({
     prompt,
     options,
@@ -26,6 +29,7 @@ function makeFakeSdkQuery(captured: { canUseTool?: Function }) {
         if (userMsg.done) {
           return { value: undefined as unknown as Record<string, unknown>, done: true };
         }
+        await new Promise<void>((resolve) => { captured.finishTurn = resolve; });
         return {
           value: {
             type: "result",
@@ -50,14 +54,14 @@ function makeFakeSdkQuery(captured: { canUseTool?: Function }) {
     Object.assign(generator, {
       setModel: vi.fn(async () => {}),
       interrupt: vi.fn(async () => {}),
-      close: vi.fn(() => {}),
+      close: vi.fn(() => captured.finishTurn?.()),
     });
     return generator;
   };
 }
 
 const { captured, mockQuery } = vi.hoisted(() => {
-  const captured: { canUseTool?: Function } = {};
+  const captured: { canUseTool?: Function; finishTurn?: () => void } = {};
   return { captured, mockQuery: vi.fn() };
 });
 
@@ -91,13 +95,15 @@ describe("ClaudeProvider scoped pre-grant (off-band handoff Read)", () => {
     provider = new ClaudeProvider(stubEnvService(), stubJobObject(), scopedPreGrant);
   });
 
-  async function startTurn(threadId: string): Promise<void> {
+  afterEach(async () => { await provider.shutdown(); });
+
+  async function startTurn(threadId: string, cwd = process.cwd()): Promise<void> {
     await provider.sendTurn({
       turnExecutionId: "test-execution",
       sessionId: `mcode-${threadId}`,
       threadId,
       message: "hello",
-      cwd: process.cwd(),
+      cwd,
       model: "claude-sonnet-4-6",
       // supervised => SDK "default": tool calls would normally prompt.
       permissionMode: "supervised",
@@ -136,8 +142,73 @@ describe("ClaudeProvider scoped pre-grant (off-band handoff Read)", () => {
     // race it against a tick to confirm it emitted a request rather than
     // returning an immediate allow.
     const decision = captured.canUseTool!("Read", { path: "/tmp/other.md" }, {});
-    await Promise.resolve();
-    expect(permissionEvents).toHaveLength(1);
+    await vi.waitFor(() => expect(permissionEvents).toHaveLength(1));
     void decision; // left pending; no resolution needed for this assertion
+  });
+
+  it.each([
+    { toolName: "Edit", replaceAll: false }, { toolName: "Edit", replaceAll: true },
+    { toolName: "Write", replaceAll: false }, { toolName: "MultiEdit", replaceAll: false },
+  ])("publishes a real patch for native $toolName input (replace all: $replaceAll)", async ({ toolName, replaceAll }) => {
+    const root = NodePath.resolve("../../.dev/fixture-repo");
+    await NodeFSPromises.mkdir(root, { recursive: true });
+    const cwd = await NodeFSPromises.mkdtemp(NodePath.join(root, "claude-approval-"));
+    try {
+      await NodeFSPromises.writeFile(NodePath.join(cwd, "fixture.txt"), replaceAll ? "old\nold\n" : "old\n");
+      await startTurn("patch-thread", cwd);
+      const input = toolName === "Write" ? { file_path: "fixture.txt", content: "new\n" }
+        : toolName === "MultiEdit" ? { file_path: "fixture.txt", edits: [{ old_string: "old", new_string: "middle" }, { old_string: "middle", new_string: "new" }] }
+        : { file_path: "fixture.txt", old_string: "old\n", new_string: "new\n", replace_all: replaceAll };
+      const events: ApprovalRequestEnvelope[] = [];
+      provider.on("approval_request", (event) => events.push(event));
+      const decision = captured.canUseTool!(toolName, input, { toolUseID: "edit-1" });
+      await vi.waitFor(() => expect(events).toHaveLength(1));
+      expect(events[0]?.body).toMatchObject({ toolCallId: "edit-1", subject: { kind: "file_edit", files: [{
+        path: "fixture.txt", change: "edited", additions: replaceAll ? 2 : 1, deletions: replaceAll ? 2 : 1,
+        patch: replaceAll
+          ? "diff --git a/fixture.txt b/fixture.txt\n--- a/fixture.txt\n+++ b/fixture.txt\n@@ -1,2 +1,2 @@\n-old\n-old\n+new\n+new\n"
+          : "diff --git a/fixture.txt b/fixture.txt\n--- a/fixture.txt\n+++ b/fixture.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+      }] } });
+      assert(events[0]);
+      expect(await provider.resolveApproval(events[0].requestId, { choiceId: "deny" })).toEqual({ status: "resolved" });
+      expect(await decision).toMatchObject({ behavior: "deny" });
+    } finally { await NodeFSPromises.rm(cwd, { recursive: true, force: true }); }
+  });
+
+  it("distinguishes an added file from unreadable, oversized, and escaping Write targets", async () => {
+    const root = NodePath.resolve("../../.dev/fixture-repo");
+    await NodeFSPromises.mkdir(root, { recursive: true });
+    const fixture = await NodeFSPromises.mkdtemp(NodePath.join(root, "claude-boundary-"));
+    const cwd = NodePath.join(fixture, "worktree");
+    await NodeFSPromises.mkdir(cwd);
+    await NodeFSPromises.mkdir(NodePath.join(fixture, "outside"));
+    await NodeFSPromises.writeFile(NodePath.join(fixture, "outside", "secret.txt"), "private\n");
+    await NodeFSPromises.writeFile(NodePath.join(cwd, "large.txt"), "x".repeat(1_048_577));
+    await NodeFSPromises.symlink(NodePath.join(fixture, "outside"), NodePath.join(cwd, "linked"), "junction");
+    try {
+      await startTurn("boundary-thread", cwd);
+      const events: ApprovalRequestEnvelope[] = [];
+      provider.on("approval_request", (event) => events.push(event));
+      for (const file of ["new.txt", "nested/new.txt", "large.txt", "../outside/secret.txt", "linked/secret.txt"]) {
+        const decision = captured.canUseTool!("Write", { file_path: file, content: "new\n" }, {});
+        await vi.waitFor(() => expect(events.at(-1)?.body).toMatchObject({ subject: { files: [{ path: file }] } }));
+        const request = events.at(-1);
+        assert(request);
+        expect(request.body).toMatchObject({ subject: { kind: "file_edit", files: [file.endsWith("new.txt") ? {
+          path: file, change: "added", additions: 1, deletions: 0,
+          patch: file === "new.txt"
+            ? "diff --git a/new.txt b/new.txt\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1,1 @@\n+new\n"
+            : "diff --git a/nested/new.txt b/nested/new.txt\n--- /dev/null\n+++ b/nested/new.txt\n@@ -0,0 +1,1 @@\n+new\n",
+        } : { path: file, change: "edited", additions: 0, deletions: 0, patchTruncated: true }] } });
+        expect(JSON.stringify(request.body)).not.toContain("private");
+        expect(await provider.resolveApproval(request.requestId, { choiceId: "deny" })).toEqual({ status: "resolved" });
+        expect(await decision).toMatchObject({ behavior: "deny" });
+      }
+      const signal = new AbortController();
+      const cancelled = captured.canUseTool!("Write", { file_path: "new.txt", content: "new\n" }, { signal: signal.signal });
+      signal.abort();
+      expect(await cancelled).toMatchObject({ behavior: "deny" });
+      expect(events).toHaveLength(5);
+    } finally { await NodeFSPromises.rm(fixture, { recursive: true, force: true }); }
   });
 });

@@ -2,10 +2,11 @@ import { createMockApproval, createMockThread } from "@/__tests__/mocks/transpor
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useApprovalStore } from "@/stores/approvalStore";
 import type { McodeTransport } from "@/transport/types";
-import type { ApprovalRequest } from "@mcode/contracts";
+import type { ApprovalRequest, ApprovalSubject } from "@mcode/contracts";
+import { disposeHighlighter } from "@pierre/diffs";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useRef } from "react";
+import { StrictMode, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { APPROVAL_ARM_DELAY_MS, ApprovalAnnouncer, ApprovalDock, useDockApprovals } from "../ApprovalDock";
 
@@ -342,5 +343,112 @@ describe("ApprovalDock subjects", () => {
 
     expect(screen.getByRole("heading", { name: "Wants to run a command" })).toBeInTheDocument();
     expect(screen.getByText("Explorer")).toBeInTheDocument();
+  });
+});
+
+const SHORT_PATCH = "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = () => 1;\n";
+const LONG_PATCH = "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n keep();\n-old();\n+next();\n tail();\n";
+const TWO_HUNK_PATCH = "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-one();\n+uno();\n@@ -9 +9 @@\n+nine();\n";
+
+/** Pierre draws into a shadow root, so screen queries cannot see the diff text. */
+function renderedDiffText(container: Element): string {
+  return [...container.querySelectorAll("*")].map((node) => node.shadowRoot?.textContent ?? "").join("");
+}
+
+function addFileEdit(files: Extract<ApprovalSubject, { kind: "file_edit" }>["files"]) {
+  addApproval({ subject: { kind: "file_edit", files } });
+}
+
+describe("ApprovalDock file edits", () => {
+  it("shows the diff without Open diff when it fits in three lines", () => {
+    addFileEdit([{ path: "src/a.ts", change: "edited", additions: 1, deletions: 1, patch: SHORT_PATCH }]);
+    render(<DockHarness />);
+
+    expect(screen.getByTestId("approval-patch-preview")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open diff" })).not.toBeInTheDocument();
+  });
+
+  it("previews only the first three rows and opens the rest", async () => {
+    const user = setupUser();
+    addFileEdit([{ path: "src/a.ts", change: "edited", additions: 1, deletions: 1, patch: LONG_PATCH }]);
+    render(<DockHarness />);
+
+    await vi.waitFor(() => expect(renderedDiffText(screen.getByTestId("approval-patch-preview"))).toContain("next();"));
+    expect(renderedDiffText(screen.getByTestId("approval-patch-preview"))).not.toContain("tail();");
+    await user.click(screen.getByRole("button", { name: "Open diff" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Proposed changes" });
+    await vi.waitFor(() => expect(renderedDiffText(dialog)).toContain("tail();"));
+  });
+
+  it("draws the preview under StrictMode while the highlighter is still loading", async () => {
+    await disposeHighlighter();
+    addFileEdit([{ path: "src/a.ts", change: "edited", additions: 1, deletions: 1, patch: LONG_PATCH }]);
+    render(<StrictMode><DockHarness /></StrictMode>);
+
+    await vi.waitFor(() => expect(renderedDiffText(screen.getByTestId("approval-patch-preview"))).toContain("next();"));
+  });
+
+  it("offers Open diff when a later hunk would not fit", () => {
+    addFileEdit([{ path: "src/a.ts", change: "edited", additions: 2, deletions: 1, patch: TWO_HUNK_PATCH }]);
+    render(<DockHarness />);
+
+    expect(screen.getByRole("button", { name: "Open diff" })).toBeInTheDocument();
+  });
+
+  it("keeps later files reachable when the first file has no patch", async () => {
+    const user = setupUser();
+    addFileEdit([
+      { path: "src/big.ts", change: "edited", additions: 0, deletions: 0, patchTruncated: true },
+      { path: "src/a.ts", change: "edited", additions: 1, deletions: 1, patch: SHORT_PATCH },
+      { path: "src/c.ts", change: "edited", additions: 1, deletions: 1, patch: SHORT_PATCH },
+    ]);
+    render(<DockHarness />);
+
+    expect(screen.getByText("+2 files")).toBeInTheDocument();
+    expect(screen.queryByTestId("approval-patch-preview")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open diff" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Proposed changes" });
+    await vi.waitFor(() => expect(renderedDiffText(dialog)).toContain("const a = () => 1;"));
+  });
+
+  it("opens every file's full patch when the first diff runs past three lines", async () => {
+    const user = setupUser();
+    addFileEdit([
+      { path: "src/a.ts", change: "edited", additions: 1, deletions: 1, patch: LONG_PATCH },
+      { path: "src/b.ts", change: "added", additions: 0, deletions: 0, patchTruncated: true },
+    ]);
+    render(<DockHarness />);
+
+    expect(screen.getByText("+1 file")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open diff" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Proposed changes" });
+    expect(dialog).toHaveTextContent("src/a.ts");
+    expect(dialog).toHaveTextContent("src/b.ts");
+    expect(dialog).toHaveTextContent("No diff available");
+  });
+
+  it("keeps digits typed in the full diff from answering the request", async () => {
+    const user = setupUser();
+    addFileEdit([{ path: "src/a.ts", change: "edited", additions: 1, deletions: 1, patch: LONG_PATCH }]);
+    render(<DockHarness />);
+    await elapseGuard();
+
+    await user.click(screen.getByRole("button", { name: "Open diff" }));
+    await screen.findByRole("dialog", { name: "Proposed changes" });
+    await user.keyboard("1");
+
+    expect(respondToApproval).not.toHaveBeenCalled();
+  });
+
+  it("shows only the path row when the provider sent no patch", () => {
+    addFileEdit([{ path: "src/devin.ts", change: "edited", additions: 0, deletions: 0 }]);
+    render(<DockHarness />);
+
+    expect(screen.getByText("devin.ts")).toBeInTheDocument();
+    expect(screen.queryByTestId("approval-patch-preview")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open diff" })).not.toBeInTheDocument();
   });
 });
