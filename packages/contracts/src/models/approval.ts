@@ -116,6 +116,12 @@ export type ApprovalOrigin = z.infer<ReturnType<typeof ApprovalOriginSchema>>;
 export type ApprovalResponse = z.infer<ReturnType<typeof ApprovalResponseSchema>> | { autoDeny: "unreadable" | "too_large" };
 /** Native answer delivery status. */
 export type ApprovalRespondResult = z.infer<ReturnType<typeof ApprovalRespondResultSchema>>;
+/** A deny note the server still holds, restored to its thread's queue on connect. */
+export const HeldApprovalNoteSchema = lazySchema(() => z.object({
+  requestId: z.string(), threadId: z.string(), note: z.string(), state: z.enum(["queued", "delivery_unknown"]),
+}));
+/** A deny note waiting for turn admission or for the user's decision. */
+export type HeldApprovalNote = z.infer<ReturnType<typeof HeldApprovalNoteSchema>>;
 /** Admission refused a note that another client sent or removed. */
 export const ApprovalNoteAdmissionErrorSchema = lazySchema(() => z.object({
   code: z.literal("note_already_delivered"), message: z.string(),

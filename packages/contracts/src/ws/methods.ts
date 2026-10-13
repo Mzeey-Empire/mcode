@@ -135,6 +135,7 @@ import {
 } from "../providers/capability-catalog.js";
 import {
   ApprovalRespondResultSchema,
+  HeldApprovalNoteSchema,
   ApprovalRequestSchema,
   ApprovalAnswersSchema,
 } from "../models/approval.js";
@@ -1224,8 +1225,7 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "approval.listNotes": {
     params: z.object({}),
-    result: z.array(z.object({ requestId: z.string(), threadId: z.string(), note: z.string(),
-      state: z.enum(["queued", "delivery_unknown"]) })).max(500),
+    result: z.array(HeldApprovalNoteSchema()).max(500),
   },
   "approval.updateNote": {
     params: z.object({ requestId: z.string(), note: z.string().trim().min(1).max(4_000) }),
