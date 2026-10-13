@@ -1,17 +1,67 @@
 import type { ApprovalChoice, ApprovalRequestBody, ApprovalSubject } from "@mcode/contracts";
+import type { PermissionRuleValue, PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
 import { claudeFilePatch } from "./claude-approval-patch.js";
 
 /** Build Claude's scope and bounded file evidence before publishing the approval. */
 export async function claudeApprovalBody(toolName: string, input: Record<string, unknown>, options: {
-  toolUseID?: string; decisionReason?: string; suggestions?: unknown[];
+  toolUseID?: string; decisionReason?: string; suggestions?: PermissionUpdate[];
 }, cwd?: string): Promise<ApprovalRequestBody> {
   const choices: ApprovalChoice[] = [{ id: "allow", intent: "allow_once", label: "Allow once" }];
-  const description = options.suggestions?.length ? JSON.stringify(options.suggestions) : undefined;
-  if (description && description.length <= 500) choices.push({ id: "allow-session", intent: "provider", label: "Allow suggested permissions", description });
+  const description = sessionDescription(options.suggestions);
+  if (description) {
+    choices.push({ id: "allow-session", intent: "allow_scoped", label: "Allow for this session", description });
+  }
   choices.push({ id: "deny", intent: "deny", label: "Deny" });
   return { requestedAt: new Date().toISOString(), toolCallId: options.toolUseID,
     reason: options.decisionReason, subject: await claudeSubject(toolName, input, cwd),
     choices, noteDelivery: "native", noteChoiceId: "deny", origin: { kind: "agent" } };
+}
+
+function sessionDescription(updates: PermissionUpdate[] | undefined): string | undefined {
+  if (!updates?.length) return undefined;
+  const descriptions: string[] = [];
+  for (const update of updates) {
+    const description = updateDescription(update);
+    if (!description) return undefined;
+    descriptions.push(description);
+  }
+  const description = descriptions.join("; ");
+  return description.length <= 500 ? description : undefined;
+}
+
+function updateDescription(update: PermissionUpdate): string | undefined {
+  switch (update.type) {
+    case "addRules":
+    case "replaceRules":
+    case "removeRules":
+      return ruleUpdateDescription(update);
+    case "addDirectories":
+      return update.directories.length ? `Add accessible directories: ${update.directories.join(", ")}` : undefined;
+    case "removeDirectories":
+      return update.directories.length ? `Remove accessible directories: ${update.directories.join(", ")}` : undefined;
+    case "setMode":
+      // A mode switch changes policy beyond the named tool or resource scope.
+      return undefined;
+    default: {
+      const unhandled: never = update;
+      return unhandled;
+    }
+  }
+}
+
+function ruleUpdateDescription(update: Extract<PermissionUpdate, { rules: PermissionRuleValue[] }>): string | undefined {
+  if (!update.rules.length) return undefined;
+  const rules = update.rules.map(ruleDescription).join(", ");
+  if (update.type === "replaceRules") return `Replace all session ${update.behavior} rules with: ${rules}`;
+  if (update.type === "removeRules") return `Remove session ${update.behavior} rules for: ${rules}`;
+  return `Add session ${update.behavior} rules for: ${rules}`;
+}
+
+function ruleDescription(rule: PermissionRuleValue): string {
+  if (rule.toolName === "Bash" && rule.ruleContent?.endsWith(":*")) {
+    return `${rule.ruleContent.slice(0, -2)} commands`;
+  }
+  return rule.ruleContent === undefined ? `all ${rule.toolName} uses` : `${rule.toolName}(${rule.ruleContent})`;
 }
 
 async function claudeSubject(toolName: string, input: Record<string, unknown>, cwd?: string): Promise<ApprovalSubject> {

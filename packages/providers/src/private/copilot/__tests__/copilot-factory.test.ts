@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CopilotSession, SessionConfig, SessionEvent } from "@github/copilot-sdk";
+import type { CopilotSession, PermissionRequest, SessionConfig, SessionEvent } from "@github/copilot-sdk";
 import { ProviderRuntimeEventSchema, type TurnRequest } from "@mcode/contracts";
 import { createCopilotProvider, type CopilotProviderBoundary, type ProviderHostPorts } from "../../../index.js";
 import { DeterministicCanonicalSink } from "../../../conformance/deterministic-sink.js";
@@ -56,6 +56,14 @@ function projections(sink: DeterministicCanonicalSink) {
   return sink.snapshot().events.flatMap(({ payload }) => payload.type === "item.recorded" ? [ProviderRuntimeEventSchema().parse(payload.item.payload.runtimeEvent).event] : []);
 }
 
+function shellPermission(identifiers = ["git status"]): PermissionRequest {
+  return {
+    kind: "shell", fullCommandText: identifiers.join(" && "), intention: "Inspect the checkout",
+    commands: identifiers.map((identifier) => ({ identifier, readOnly: true })),
+    possiblePaths: [], possibleUrls: [], hasWriteFileRedirection: false, canOfferSessionApproval: true,
+  };
+}
+
 describe("Copilot public factory", () => {
   let session: FakeSession;
   let sink: DeterministicCanonicalSink;
@@ -77,6 +85,19 @@ describe("Copilot public factory", () => {
     session.emit({ type: "session.idle", ephemeral: true, data: {} });
     await vi.waitFor(() => expect(projections(sink).at(-1)?.type).toBe("ended"));
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+
+  function pendingApproval() {
+    const pending = provider.listPendingApprovals?.("thread-1") ?? [];
+    expect(pending).toHaveLength(1);
+    const [ask] = pending;
+    if (!ask) throw new Error("Missing approval");
+    return ask;
+  }
+
+  async function respond(requestId: string, choiceId: string) {
+    if (!provider.resolveApproval) throw new Error("Provider cannot answer approvals");
+    return provider.resolveApproval(requestId, { choiceId });
   }
 
   it("keeps full native command scope and acknowledges a user denial", async () => {
@@ -170,17 +191,102 @@ describe("Copilot public factory", () => {
     expect(session.rpc.mode.set.mock.calls).toEqual([[{ mode: "plan" }], [{ mode: "interactive" }]]);
   });
 
-  it("routes supervised approval and scoped grants through the native callback", async () => {
+  it("keeps shell grants across turns without approving a write or a partly granted command", async () => {
     await provider.sendTurn(request({ permissionMode: "supervised" }));
     const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
-    const permission = options.onPermissionRequest({ kind: "write", path: "/fixture/a" }, { sessionId: session.sessionId });
-    const pending = provider.listPendingApprovals?.("thread-1") ?? [];
-    expect(await provider.resolveApproval?.(pending[0]!.requestId, { choiceId: "allow-session" })).toEqual({ status: "resolved" });
+    const permission = options.onPermissionRequest(shellPermission(), { sessionId: session.sessionId });
+    const pending = pendingApproval();
+    expect(pending.body.choices).toContainEqual({ id: "allow-session", intent: "allow_scoped", label: "Allow for this session", description: "Shell command identifiers: git status" });
+    expect(await respond(pending.requestId, "allow-session")).toEqual({ status: "resolved" });
     expect(await permission).toEqual({ kind: "approved" });
-    expect(await options.onPermissionRequest({ kind: "write", path: "/fixture/different" }, { sessionId: session.sessionId })).toEqual({ kind: "approved" });
+    await finish();
+    await provider.sendTurn(request({ permissionMode: "supervised", turnId: "turn-2", turnExecutionId: "00000000-0000-4000-8000-000000000002" }));
+    expect(await options.onPermissionRequest(shellPermission(), { sessionId: session.sessionId })).toEqual({ kind: "approved" });
     expect(provider.listPendingApprovals?.("thread-1")).toEqual([]);
+    for (const native of [
+      { kind: "write", fileName: "/fixture/different", intention: "Edit a file", diff: "" } satisfies PermissionRequest,
+      shellPermission(["git status", "rm"]),
+      { ...shellPermission(), canOfferSessionApproval: false },
+    ]) {
+      const result = options.onPermissionRequest(native, { sessionId: session.sessionId });
+      const ask = pendingApproval();
+      expect(ask.body.subject.kind).toBe(native.kind === "write" ? "file_edit" : "command");
+      await respond(ask.requestId, "deny");
+      expect(await result).toEqual({ kind: "denied-interactively-by-user" });
+    }
     vi.mocked(ports.grants.consume).mockReturnValueOnce(true);
     expect(await options.onPermissionRequest({ kind: "write", path: "/fixture/a" }, { sessionId: session.sessionId })).toEqual({ kind: "approved" });
+    await finish();
+  });
+
+  it.each<{ name: string; initial: PermissionRequest; same: PermissionRequest; outside: PermissionRequest[]; description: string }>([
+    { name: "URL host", initial: { kind: "url", url: "https://example.com/a", intention: "Read docs" },
+      same: { kind: "url", url: "https://example.com/b" },
+      outside: [{ kind: "url", url: "https://other.example/a" }, { kind: "url", url: "https://example.com:8443/a" }],
+      description: "URLs on host: example.com" },
+    { name: "MCP server and tool", initial: { kind: "mcp", serverName: "docs", toolName: "search", toolTitle: "Search", readOnly: true, args: { query: "one" } },
+      same: { kind: "mcp", serverName: "docs", toolName: "search", args: { query: "two" } },
+      outside: [{ kind: "mcp", serverName: "other", toolName: "search" }, { kind: "mcp", serverName: "docs", toolName: "write" }],
+      description: "MCP server: docs; tool: search" },
+  ])("matches only the stated $name scope", async ({ initial, same, outside, description }) => {
+    await provider.sendTurn(request({ permissionMode: "supervised" }));
+    const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
+    const result = options.onPermissionRequest(initial, { sessionId: session.sessionId });
+    const pending = pendingApproval();
+    expect(pending.body.choices).toContainEqual({ id: "allow-session", intent: "allow_scoped", label: "Allow for this session", description });
+    await respond(pending.requestId, "allow-session");
+    expect(await result).toEqual({ kind: "approved" });
+    expect(await options.onPermissionRequest(same, { sessionId: session.sessionId })).toEqual({ kind: "approved" });
+    for (const native of outside) {
+      const denied = options.onPermissionRequest(native, { sessionId: session.sessionId });
+      const ask = pendingApproval();
+      await respond(ask.requestId, "deny");
+      expect(await denied).toEqual({ kind: "denied-interactively-by-user" });
+    }
+    await finish();
+  });
+
+  it.each<PermissionRequest>([
+    { kind: "write", fileName: "/fixture/a" }, { kind: "read", path: "/fixture/a" },
+    { kind: "custom-tool", toolName: "custom" },
+    { ...shellPermission(), canOfferSessionApproval: false },
+    { ...shellPermission(), commands: [] }, { ...shellPermission(), commands: [{ identifier: 42 }] },
+    { ...shellPermission(), commands: [{ identifier: "x".repeat(500) }] },
+    { kind: "url", url: "not a URL" }, { kind: "mcp", serverName: "docs" },
+  ])("retains deny without inventing or truncating a scope: %j", async (native) => {
+    await provider.sendTurn(request({ permissionMode: "supervised" }));
+    const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
+    const result = options.onPermissionRequest(native, { sessionId: session.sessionId });
+    const [pending] = provider.listPendingApprovals?.() ?? [];
+    expect(pending?.body.choices).toEqual([
+      { id: "allow", intent: "allow_once", label: "Allow once" }, { id: "deny", intent: "deny", label: "Deny" },
+    ]);
+    if (!pending) throw new Error("Missing approval");
+    expect(await provider.resolveApproval?.(pending.requestId, { choiceId: "allow-session" })).toMatchObject({ status: "failed" });
+    await provider.resolveApproval?.(pending.requestId, { choiceId: "deny" });
+    expect(await result).toEqual({ kind: "denied-interactively-by-user" });
+    await finish();
+  });
+
+  it.each(["permission mode change", "session close"])("forgets grants after %s", async (reset) => {
+    await provider.sendTurn(request({ permissionMode: "supervised" }));
+    const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
+    const result = options.onPermissionRequest(shellPermission(), { sessionId: session.sessionId });
+    const pending = pendingApproval();
+    await respond(pending.requestId, "allow-session");
+    expect(await result).toEqual({ kind: "approved" });
+    await finish();
+    if (reset === "session close") await provider.discardSession?.("mcode-thread-1");
+    else {
+      await provider.sendTurn(request({ permissionMode: "full", turnId: "turn-2", turnExecutionId: "00000000-0000-4000-8000-000000000002" }));
+      await finish();
+    }
+    await provider.sendTurn(request({ permissionMode: "supervised", turnId: "turn-3", turnExecutionId: "00000000-0000-4000-8000-000000000003" }));
+    const currentOptions: SessionConfig = sdk.create.mock.calls.at(-1)?.[0];
+    const denied = currentOptions.onPermissionRequest(shellPermission(), { sessionId: session.sessionId });
+    const ask = pendingApproval();
+    await respond(ask.requestId, "deny");
+    expect(await denied).toEqual({ kind: "denied-interactively-by-user" });
     await finish();
   });
 

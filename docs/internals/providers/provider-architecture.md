@@ -214,12 +214,6 @@ covers off-PATH installs.
   "unsupported"`. Its adapter has a throwaway history-replay side channel,
   but the pipeline does not call it. The descriptor's `clean-fork` capability
   does not override this gate.
-- **Permissions pass through verbatim.** `session/request_permission` options
-  (allow once / allow for session / always allow in project / switch to
-  bypass / reject) render as real option buttons; `allow_always_global` is
-  hidden because it writes outside the worktree. `switch_bypass` updates the
-  thread's `devin_mode` so the composer reflects the mode Devin actually
-  entered.
 - **Conditional cost data.** `contextEstimate` comes from `usage_update` and
   token counts from the `session/prompt` response. If Devin ever sends a
   `usage_update.cost` payload, its USD amount lands on `turnComplete.costUsd`;
@@ -241,3 +235,39 @@ covers off-PATH installs.
   The next turn reloads the session via `session/load`. The cancel write is
   outside this window and can block teardown, so this is not an end-to-end
   cancellation deadline. See [the adapter](../../../packages/providers/src/private/devin/devin-provider.ts).
+
+## Approvals
+
+Choice intent describes authority, not button wording. `allow_once` permits the
+current request, `allow_scoped` permits the stated scope, and `provider` preserves
+a native option whose semantics Mcode must not relabel. Scope descriptions are
+sent whole. If a scoped description exceeds 500 characters or cannot state every
+update, omit that choice, never a deny choice.
+
+- Claude offers a session choice only for non-empty, describable rule or directory
+  suggestions. Every forwarded update targets the session, even when the SDK
+  suggests persistent settings. Mode changes are omitted because they change
+  policy beyond the named scope.
+- Copilot stores exact shell command identifiers only when the native request
+  permits session approval. Every identifier in a later request must be granted.
+  URL grants cover the host, including its port; MCP grants cover the server/tool
+  pair. These grants never approve read, write or custom-tool requests and clear
+  on permission-mode changes and session close.
+- Codex retains its native session approval for the stated command or files.
+  Cursor and Devin preserve native labels and option IDs, including both reject
+  variants. Their `allow_always` options have provider intent, not an invented
+  session lifetime. Devin hides `allow_always_global` and reflects `switch_bypass`
+  in the thread's mode.
+- OpenCode's "Always allow" describes the saved grant patterns, which can be
+  broader than the requested resources. These grants outlive the current session.
+  In v2, an absent or empty `save` list persists nothing, so only "Allow once"
+  is offered with the requested patterns. See upstream
+  [permission reply handling](https://github.com/anomalyco/opencode/blob/dev/packages/core/src/permission.ts).
+
+Deny-note delivery is separate from choosing a deny option. Claude's native
+protocol accepts a message and Copilot's accepts feedback. Codex needs a steer,
+with next-turn delivery if rejected and an unknown state if no acknowledgement
+arrives. Cursor and Devin need next-turn delivery. OpenCode currently declares
+next-turn delivery; v2's optional native message must be wired through the reply
+transport before claiming native delivery. These are delivery contracts, not a
+reason to reinterpret an allow option as a deny.

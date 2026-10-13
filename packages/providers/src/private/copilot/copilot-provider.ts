@@ -7,7 +7,7 @@ import type { CopilotSession, SessionEvent, ModelInfo, PermissionRequest as Nati
 import { z } from "zod";
 import type { AgentEvent, IAgentProvider, ISessionEvictable, ApprovalChoice, ApprovalResponse, ApprovalRespondResult, ApprovalRequestEnvelope, ProviderIdentity, ProviderModelInfo, TurnRequest, CompletionOptions } from "@mcode/contracts";
 import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
-import { copilotApprovalBody } from "./copilot-approval.js";
+import { copilotApprovalBody, copilotSessionScope } from "./copilot-approval.js";
 import { BROWSER_AUTOMATION_OPERATION_METADATA, providerRuntimeEvent } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import { buildMcodeInstructionPlan, renderMcodeInstructions } from "@mcode/thread-orchestration";
@@ -33,7 +33,7 @@ interface CopilotSessionState {
   nativeEventIds: Set<string>;
   childInvocations: Map<string, string>;
   utilityBusy?: boolean;
-  sessionApproval: boolean;
+  sessionGrants: Set<string>;
   retireRequested?: boolean;
 }
 
@@ -122,7 +122,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
       state.request = { ...state.request, model: request.model, reasoningLevel: request.reasoningLevel };
     }
     await this.awaitNativeResource(state.session.rpc.mode.set({ mode: request.interactionMode === "plan" ? "plan" : "interactive" }), 30_000, "Copilot mode selection");
-    if (state.request.permissionMode !== request.permissionMode) state.sessionApproval = false;
+    if (state.request.permissionMode !== request.permissionMode) state.sessionGrants.clear();
     state.request = request;
   }
 
@@ -153,7 +153,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     const request = admission.request;
     if (admission.utility) {
       const session = await this.awaitNativeResource((await this.getClient()).createSession({ onPermissionRequest: approveAll, model: request.model || undefined, workingDirectory: args.cwd, enableConfigDiscovery: true, skillDirectories: userSkillDirectories(), systemMessage: { content: readUserInstructions() ?? "" } }), 30_000, "Copilot session startup");
-      return { state: { sessionId: args.sessionId, session, cwd: args.cwd, request, browserGrant: null, browserCapability: "privileged", nativeEventIds: new Set(), childInvocations: new Map(), sessionApproval: false, utilityBusy: true }, pids: [] };
+      return { state: { sessionId: args.sessionId, session, cwd: args.cwd, request, browserGrant: null, browserCapability: "privileged", nativeEventIds: new Set(), childInvocations: new Map(), sessionGrants: new Set(), utilityBusy: true }, pids: [] };
     }
     const browserCapability = providerBrowserPermissionCapability(request.permissionMode, request.interactionMode);
     const stage = this.host.browser.stage({ providerId: this.id, providerSessionId: args.resumeFrom ?? args.sessionId, mcodeSessionId: args.sessionId, threadId: args.threadId, workspaceId: request.workspaceId, permissionCapability: browserCapability });
@@ -163,7 +163,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
       const options = await this.sessionOptions(request, browserGrant);
       const operation = openCopilotSession(client, options, args.resumeFrom, request.resumeRequired === true);
       const session = await this.awaitNativeResource(operation, 30_000, "Copilot session startup");
-      return { state: { sessionId: args.sessionId, session, cwd: args.cwd, request, browserGrant, browserCapability, nativeEventIds: new Set(), childInvocations: new Map(), sessionApproval: false }, pids: [] };
+      return { state: { sessionId: args.sessionId, session, cwd: args.cwd, request, browserGrant, browserCapability, nativeEventIds: new Set(), childInvocations: new Map(), sessionGrants: new Set() }, pids: [] };
     } catch (error) {
       if (browserGrant) this.host.browser.release(browserGrant.leaseId);
       await bounded(this.host.threadControl.close(args.sessionId), 5_000, "Copilot startup thread-control close");
@@ -306,13 +306,14 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     const policy = nativeApprovalPolicy(state.request, native);
     if (policy) return policy;
     if (this.consumePermissionGrant(state, native)) return { kind: "approved" };
-    if (state.sessionApproval) return { kind: "approved" };
+    const scope = copilotSessionScope(native);
+    if (scope?.keys.every((key) => state.sessionGrants.has(key))) return { kind: "approved" };
     if (turn.pendingPermissions.size >= 64) return { kind: "denied-by-rules", rules: [] };
     const requestId = NodeCrypto.randomUUID();
-    const body = copilotApprovalBody(native);
+    const body = copilotApprovalBody(native, scope);
     const request = { requestId, threadId: state.request.threadId, body };
     return new Promise((resolve) => {
-      turn.pendingPermissions.set(requestId, { request, resolve });
+      turn.pendingPermissions.set(requestId, { request, resolve, sessionGrantKeys: scope?.keys ?? [] });
       this.emit("approval_request", request);
     });
   }
@@ -331,7 +332,9 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
       if ("autoDeny" in response) pending.unanswerable = true;
       const choice = approvalChoice(pending.request.body, response);
       if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
-      if (!("autoDeny" in response) && choice?.id === "allow-session") state.sessionApproval = true;
+      if (choice?.id === "allow-session") {
+        for (const key of pending.sessionGrantKeys) state.sessionGrants.add(key);
+      }
       pending.resolve(this.nativeApprovalResult(choice, response));
       turn.pendingPermissions.delete(requestId);
       await Promise.resolve();
@@ -395,7 +398,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     state.turn?.settle("cancelled");
     state.nativeEventIds.clear();
     state.childInvocations.clear();
-    state.sessionApproval = false;
+    state.sessionGrants.clear();
     try {
       try { await state.controls; }
       finally { await this.awaitNativeResource(state.session.disconnect(), 5_000, "Copilot session close"); }

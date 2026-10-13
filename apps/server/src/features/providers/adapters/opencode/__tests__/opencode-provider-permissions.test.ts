@@ -148,6 +148,39 @@ function questionAsk(id = "que_1") {
 }
 
 describe("OpenCodeProvider permission flow", () => {
+  it.each([
+    { save: undefined, description: "git *", choice: "once" },
+    { save: [], description: "git *", choice: "once" },
+    { save: ["git *", "node *"], description: "git *, node *", choice: "always" },
+    { save: ["x".repeat(501)], description: "git *", choice: "once" },
+  ])("states requested or saved scope without inventing a session grant: %j", async ({ save, description, choice }) => {
+    const http = fakeHttp([{ type: "permission.v2.asked", properties: {
+      id: "per_scope", sessionID: "ses_1", action: "bash", resources: ["git *"], ...(save === undefined ? {} : { save }),
+    } }]);
+    const { provider } = testProvider(http);
+    const cards: ApprovalRequestEnvelope[] = [];
+    provider.on("approval_request", (card) => cards.push(card));
+    const sending = provider.sendTurn(turnRequest());
+    await vi.waitFor(() => expect(cards).toHaveLength(1));
+    const body = ApprovalRequestBodySchema().parse(cards[0]?.body);
+    expect(body.choices).toEqual(choice === "always" ? [
+      { id: "once", intent: "allow_once", label: "Allow once" },
+      { id: "always", intent: "allow_scoped", label: "Always allow", description },
+      { id: "reject", intent: "deny", label: "Deny" },
+    ] : [
+      { id: "once", intent: "allow_once", label: "Allow once", description },
+      { id: "reject", intent: "deny", label: "Deny" },
+    ]);
+    if (choice === "once") {
+      expect(await provider.resolveApproval("per_scope", { choiceId: "always" })).toMatchObject({ status: "failed" });
+    }
+    expect(await provider.resolveApproval("per_scope", { choiceId: choice })).toEqual({ status: "resolved" });
+    await sending;
+    expect(provider.listPendingApprovals("thread-1")).toEqual([]);
+    expect(http.replyPermission.mock.calls.map((call) => call.slice(1, 5))).toEqual([["ses_1", "per_scope", choice, "v2"]]);
+    await provider.shutdown();
+  });
+
   it("cards a shell ask once and relays approve-once exactly once", async () => {
     const http = fakeHttp([shellAsk(), shellAsk()]);
     const { provider, submitted } = testProvider(http);
