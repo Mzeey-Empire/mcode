@@ -8,6 +8,7 @@ import {
   filesFromStats,
   pathsEditedLater,
   recordedEffects,
+  revertedPaths,
   toForwardSlashes,
   type TurnChanges,
 } from "./changes-tree";
@@ -90,15 +91,26 @@ function resolveTurnChanges({ snapshot, snapshots, listSettled, stats, filesChan
     const paths = filesChanged.map(toForwardSlashes);
     return listSettled ? { status: "unavailable", paths } : { status: "loading", paths };
   }
-  const editedLater = pathsEditedLater(snapshot, snapshots);
+  const marks = { editedLater: pathsEditedLater(snapshot, snapshots), reverted: revertedPaths(snapshot) };
   const effects = recordedEffects(snapshot);
   if (effects && !needsRangeStats(snapshot)) {
-    return { status: "ready", files: filesFromEffects(effects, editedLater) };
+    return { status: "ready", files: filesFromEffects(effects, marks) };
   }
   const paths = snapshot.files_changed.map(toForwardSlashes);
   if (!stats) return { status: "loading", paths };
   if (stats.stats === "failed") return { status: "unavailable", paths };
-  return { status: "ready", files: filesFromStats(stats.stats, editedLater) };
+  return { status: "ready", files: filesFromStats(stats.stats, marks) };
+}
+
+/** One turn's changes plus the snapshot facts the turn menu needs. */
+export interface TurnChangesResult {
+  readonly changes: TurnChanges;
+  /** The turn's snapshot, or undefined while loading or once it is gone. */
+  readonly snapshot: TurnSnapshot | undefined;
+  /** Server id of the turn's assistant message. */
+  readonly serverMessageId: string;
+  /** The thread's snapshot list has loaded, so a missing snapshot is really gone. */
+  readonly listSettled: boolean;
 }
 
 /**
@@ -111,7 +123,7 @@ export function useTurnChanges(
   threadId: string | null | undefined,
   messageId: string,
   filesChanged: readonly string[],
-): TurnChanges {
+): TurnChangesResult {
   const snapshots = useDiffStore((s) => (threadId ? s.snapshotsByThread[threadId] : undefined));
   const serverMessageId = threadId
     ? (readThreadRecord(threadId).serverMessageIds[messageId] ?? messageId)
@@ -121,8 +133,9 @@ export function useTurnChanges(
   const stats = useRangeStats(snapshot && needsRangeStats(snapshot) ? snapshot.id : null);
   const listSettled = !threadId || settledFor === threadId;
 
-  return useMemo(
+  const changes = useMemo(
     () => resolveTurnChanges({ snapshot, snapshots: snapshots ?? [], listSettled, stats, filesChanged }),
     [snapshot, snapshots, listSettled, stats, filesChanged],
   );
+  return { changes, snapshot, serverMessageId, listSettled };
 }

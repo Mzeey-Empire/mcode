@@ -10,7 +10,7 @@ import {
 } from "../changes-tree";
 
 function file(path: string, additions = 1, deletions = 0): ChangedFile {
-  return { path, kind: "modified", counts: { kind: "lines", additions, deletions }, editedLater: false };
+  return { path, kind: "modified", counts: { kind: "lines", additions, deletions }, editedLater: false, reverted: false };
 }
 
 function describeRow(row: ChangesRow): string {
@@ -92,8 +92,8 @@ describe("buildChangesTree", () => {
       file("top.ts", 100, 100),
       file("server/a.ts", 10, 2),
       file("server/deep/b.ts", 5, 3),
-      { path: "server/deep/logo.png", kind: "added", counts: { kind: "binary" }, editedLater: false },
-      { path: "server/c.ts", kind: "modified", counts: { kind: "uncounted" }, editedLater: false },
+      { path: "server/deep/logo.png", kind: "added", counts: { kind: "binary" }, editedLater: false, reverted: false },
+      { path: "server/c.ts", kind: "modified", counts: { kind: "uncounted" }, editedLater: false, reverted: false },
     ]);
     const [server] = tree.folders;
     expect(server).toMatchObject({ label: "server", fileCount: 4, additions: 15, deletions: 5 });

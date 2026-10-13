@@ -550,6 +550,23 @@ small explicit allowlist, not a heuristic.
 > **Behaviour pending.** Today every turn failure is treated as terminal and
 > costs a manual re-send, transient or not.
 
+### Turn revert
+Puts the files a finished turn changed back to their state before that turn,
+using the turn's snapshot. It writes the working tree only; the index and
+commits are untouched. It is the same for every provider, because it reads
+Mcode's own snapshots and file attribution, not the provider's history. Files
+a turn changed through commands cannot be attributed and are not reverted.
+Edits a later turn or the user made to the same files are removed too, and the
+confirm says so before anything is written.
+_Avoid_: rollback, undo turn, checkpoint restore
+
+### Revert receipt
+The timeline row a turn revert leaves where it happened, such as "Reverted
+Turn 3 · 7 files". It offers Undo until the revert is undone or its recovery
+material expires. An undo leaves its own receipt, and a revert interrupted by
+a crash leaves a receipt that says which files were put back.
+_Avoid_: revert message, revert toast
+
 ## Handoff
 
 ### Handoff

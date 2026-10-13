@@ -28,6 +28,7 @@ import { emitPtyData, emitPtyExit } from "@/features/terminal/adapters/pty-data-
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useThreadStartupStore } from "@/features/thread-startup";
 import { invalidateBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";
+import { acceptTurnRevert } from "@/features/conversation/turn-revert/useTurnRevert";
 
 /** Unsubscribe handles for all push listeners. */
 let unsubs: (() => void)[] = [];
@@ -438,6 +439,11 @@ export function startPushListeners(): void {
   unsubs.push(pushEmitter.on("turn.diffChanged", (data) => {
     const parsed = WS_CHANNELS["turn.diffChanged"].safeParse(data);
     if (parsed.success) useDiffStore.getState().bumpDiffRevision(parsed.data.threadId);
+  }));
+
+  unsubs.push(pushEmitter.on("turn.reverted", (data) => {
+    const parsed = WS_CHANNELS["turn.reverted"].safeParse(data);
+    if (parsed.success) acceptTurnRevert(parsed.data);
   }));
 
   unsubs.push(

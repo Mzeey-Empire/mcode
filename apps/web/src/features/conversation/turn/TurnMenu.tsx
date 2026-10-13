@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, Diff, Ellipsis } from "lucide-react";
+import { Copy, Diff, Ellipsis, Undo } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,10 +17,14 @@ export interface TurnMenuProps {
   readonly onReviewChanges: () => void;
   /** Copies every path the turn changed. */
   readonly onCopyFilePaths: () => void;
+  /** Opens the revert confirm under the bar. */
+  readonly onRevertTurn: () => void;
+  /** Why the turn cannot be reverted, when the client already knows. */
+  readonly revertDisabledReason: string | null;
 }
 
 /** The ⋯ menu at the end of a turn's changes bar. */
-export function TurnMenu({ onReviewChanges, onCopyFilePaths }: TurnMenuProps) {
+export function TurnMenu({ onReviewChanges, onCopyFilePaths, onRevertTurn, revertDisabledReason }: TurnMenuProps) {
   const [open, setOpen] = useState(false);
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -45,6 +49,14 @@ export function TurnMenu({ onReviewChanges, onCopyFilePaths }: TurnMenuProps) {
           icon={<Copy />}
           className={TURN_MENU_ROW_CLASS}
           onClick={onCopyFilePaths}
+        />
+        <DropdownMenuItem
+          label="Revert this turn…"
+          icon={<Undo />}
+          destructive
+          disabledReason={revertDisabledReason}
+          className={TURN_MENU_ROW_CLASS}
+          onClick={onRevertTurn}
         />
       </DropdownMenuContent>
     </DropdownMenu>

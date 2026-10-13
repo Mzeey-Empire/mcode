@@ -28,6 +28,7 @@ import { EntityToken } from "@/components/chat/EntityToken";
 import { basename } from "@/lib/path";
 import { SelectedTextCommentsComposerAttachment } from "../composer/SelectedTextCommentsComposerAttachment";
 import { isCurrentComposerProviderNotice } from "../notices/provider-notices";
+import { TURN_REVERT_NOTICE_KINDS, TurnRevertReceipt } from "../turn-revert/TurnRevertReceipt";
 
 /** Text may still arrive while the turn runs, even after its own text stream ended at a boundary. */
 function isTextStillArriving(textIsStreaming: boolean | undefined, agentDisplayState: AgentDisplayState | undefined): boolean {
@@ -801,6 +802,7 @@ function SystemMessageContent({ message }: Pick<MessageBubbleProps, "message">) 
   if (isHandoffMessage(message.role, message.content) && parseHandoffJson(message.content)) {
     return <HandoffCard content={message.content} />;
   }
+  if (message.systemNotice && TURN_REVERT_NOTICE_KINDS.has(message.systemNotice.kind)) return <TurnRevertReceipt message={message} />;
   if (message.systemNotice?.kind === "security") {
     return (
       <div className="flex items-start gap-2.5 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm" role="alert">

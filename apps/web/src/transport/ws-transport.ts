@@ -1,4 +1,4 @@
-import type { DiffStats, FileReadResult, ProjectIcon, FilesystemBrowseResult, ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn, WorkspaceCreateResult, WorkspaceFileChanges, WorkspaceFileList } from "@mcode/contracts";
+import type { DiffStats, FileReadResult, ProjectIcon, FilesystemBrowseResult, ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn, TurnRevertPreview, TurnRevertResult, WorkspaceCreateResult, WorkspaceFileChanges, WorkspaceFileList } from "@mcode/contracts";
 import type {
   McodeTransport,
   Workspace,
@@ -1434,6 +1434,11 @@ export function createWsTransport(
     listSnapshots: (threadId) =>
       rpc<TurnSnapshot[]>("snapshot.listByThread", { threadId }),
     listReviewTurns: (threadId) => rpc<ReviewTurn[]>("turnDiff.listTurns", { threadId }),
+    previewTurnRevert: (threadId, messageId, scope) =>
+      rpc<TurnRevertPreview>("turn.revert.preview", { threadId, messageId, scope }),
+    applyTurnRevert: (params) => rpc<TurnRevertResult>("turn.revert.apply", params),
+    undoTurnRevert: (threadId, revertId, requestId) =>
+      rpc<TurnRevertResult>("turn.revert.undo", { threadId, revertId, requestId }),
     getCumulativeDiff: (threadId, filePath?, maxLines?, afterSequence?) =>
       rpc<ReviewFileDiffResult>("snapshot.getCumulativeDiff", { threadId, filePath, maxLines, afterSequence }),
     getCumulativeDiffStats: (threadId, afterSequence?) =>

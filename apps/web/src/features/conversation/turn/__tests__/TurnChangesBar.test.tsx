@@ -5,11 +5,13 @@ import type { DiffStats, FileEffect, TurnSnapshot } from "@mcode/contracts";
 import { createMockThread } from "@/__tests__/mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useDiffStore } from "@/stores/diffStore";
+import { useThreadStore } from "@/stores/threadStore";
 import { TurnChangesBar } from "../TurnChangesBar";
 
 const transport = vi.hoisted(() => ({
   listSnapshots: vi.fn(),
   getSnapshotDiffStats: vi.fn(),
+  previewTurnRevert: vi.fn(),
 }));
 
 vi.mock("@/transport", () => ({
@@ -114,6 +116,7 @@ describe("TurnChangesBar", () => {
       reviewViewManuallySelectedByThread: {},
       viewMode: "turn",
     });
+    useThreadStore.setState({ runningThreadIds: new Set() });
   });
 
   it("lists recorded effects by folder with kinds, counts, and later edits", () => {
@@ -345,5 +348,50 @@ describe("TurnChangesBar", () => {
       path: "src/b.ts",
       viewKey: "turn:msg-1",
     });
+  });
+
+  it("marks reverted files in place of later edits and says the whole turn is reverted", async () => {
+    seedSnapshots([
+      withEffects([effect("src/a.ts"), effect("src/b.ts")], { reverted_paths: ["src\\a.ts", "src/b.ts"] }),
+      snapshot({ id: "snap-2", message_id: "msg-2", created_at: "2026-10-01T11:00:00.000Z", files_changed: ["src/a.ts"] }),
+    ]);
+    const user = userEvent.setup();
+
+    renderBar();
+
+    expect(header()).toHaveTextContent("Changed 2 files+2−2reverted");
+    expect(row("src/a.ts")).toHaveTextContent("a.tsreverted+1−1");
+    expect(row("src/a.ts")).not.toHaveTextContent("edited later");
+    await user.click(screen.getByRole("button", { name: "Turn actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Revert this turn…", description: "Already reverted" }))
+      .toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("disables Revert this turn while the thread is running", async () => {
+    seedSnapshots([withEffects([effect("src/a.ts")])]);
+    useThreadStore.setState({ runningThreadIds: new Set(["thread-1"]) });
+    const user = userEvent.setup();
+
+    renderBar();
+    await user.click(screen.getByRole("button", { name: "Turn actions" }));
+
+    expect(await screen.findByRole("menuitem", { name: "Revert this turn…", description: "Wait for the turn to finish" }))
+      .toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("collapses the list and opens the confirm under the bar", async () => {
+    seedSnapshots([withEffects([effect("src/a.ts")])]);
+    transport.previewTurnRevert.mockResolvedValue({ status: "ready", previewToken: "t", files: [{ path: "src/a.ts", action: "restore", state: "clean", binary: false }], skipped: [], unattributedChangeCount: 0 });
+    const user = userEvent.setup();
+
+    renderBar();
+    await user.click(screen.getByRole("button", { name: "Turn actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Revert this turn…" }));
+
+    expect(screen.getByRole("button", { expanded: false, name: /^Changed/ })).toBeInTheDocument();
+    expect(await screen.findByText("Revert 1 file to before this turn?")).toBeInTheDocument();
+    expect(transport.previewTurnRevert).toHaveBeenCalledWith("thread-1", "msg-1", { kind: "turn" });
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("revert-confirm")).not.toBeInTheDocument();
   });
 });
