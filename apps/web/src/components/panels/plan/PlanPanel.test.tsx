@@ -368,6 +368,32 @@ describe("PlanPanel", () => {
       expect(screen.queryByTestId("plan-implement-notice")).toBeNull();
     });
 
+    it("waits for the dropped socket's close event before resending", async () => {
+      const thread = "thread-implement-closing";
+      startInPlan(thread, [makePlan(2, { id: READY_ID })]);
+      // Drops until the close event has run, capped so a resend that never
+      // yields to it fails the count below instead of starving the worker.
+      let closeEventRan = false;
+      let attempts = 0;
+      implementPlan.mockImplementation(async (request) => {
+        attempts += 1;
+        if (closeEventRan || attempts > 20) return receiptFor(request);
+        setTimeout(() => {
+          closeEventRan = true;
+          useConnectionStore.setState({ status: "reconnecting" });
+        }, 0);
+        throw new Error("WebSocket disconnected");
+      });
+      render(<PlanPanel threadId={thread} />);
+
+      await pressImplement("Implement v2");
+      await waitFor(() => expect(useConnectionStore.getState().status).toBe("reconnecting"));
+      act(() => useConnectionStore.setState({ status: "connected" }));
+
+      await waitFor(() => expect(interactionMode(thread)).toBe("build"));
+      expect(implementPlan).toHaveBeenCalledTimes(2);
+    });
+
     it("reports a closed transport as interrupted without resending", async () => {
       const thread = "thread-implement-closed";
       startInPlan(thread, [makePlan(2, { id: READY_ID })]);

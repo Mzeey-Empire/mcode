@@ -113,6 +113,9 @@ async function sendImplementWithReplay(request: PlanImplement): Promise<Implemen
     } catch (error) {
       if (!isConnectionDrop(error)) return classifyImplementFailure(error);
     }
+    // A closing socket rejects before its close event marks the connection
+    // lost, so the status can still read connected until a later task runs.
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
     await untilConnected();
   }
 }
