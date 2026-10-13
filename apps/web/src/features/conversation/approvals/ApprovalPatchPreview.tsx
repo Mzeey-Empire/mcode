@@ -14,7 +14,6 @@ type ApprovalFilePatch = Extract<ApprovalSubject, { kind: "file_edit" }>["files"
 export const APPROVAL_PATCH_PREVIEW_LINES = 3;
 
 // Pierre renders inside a shadow root, so app tokens and the ligature rule only reach it as host variables.
-// Lines take one colour per kind; syntax colours would compete with the add and remove signal.
 const PATCH_UNSAFE_CSS = `
 :host {
   background-color: transparent;
@@ -34,7 +33,6 @@ const PATCH_UNSAFE_CSS = `
 [data-line] { color: var(--color-muted); }
 [data-line][data-line-type="change-addition"] { color: var(--color-success); }
 [data-line][data-line-type="change-deletion"] { color: var(--color-error); }
-[data-line] span { color: inherit; }
 `;
 
 // Pierre pads the block by 8px, which would push the third row out of the 60px frame.
@@ -98,6 +96,9 @@ function ApprovalPatchDiff({ patch, unsafeCSS }: { readonly patch: string; reado
     disableFileHeader: true,
     disableLineNumbers: true,
     hunkSeparators: "simple",
+    // Lines take one colour per kind; syntax colours would compete with the add and remove signal.
+    // Pierre renders any diff longer than this as plain text, so no grammar is loaded either.
+    tokenizeMaxLength: 0,
     unsafeCSS,
   } as const), [theme, unsafeCSS]);
   return ready ? <PatchDiff patch={patch} options={options} disableWorkerPool /> : null;
