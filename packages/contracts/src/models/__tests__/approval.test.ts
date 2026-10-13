@@ -15,11 +15,21 @@ const body = {
 };
 
 describe("approval choice safety", () => {
-  it("normalizes note edits and keeps the note identity through send validation", () => {
+  it("normalizes note edits", () => {
     expect(WS_METHODS()["approval.updateNote"].params.parse({ requestId: "deny-1", note: "  Only lint the web app  " }))
       .toEqual({ requestId: "deny-1", note: "Only lint the web app" });
-    expect(SendMessageSchema().parse({ threadId: "owner", content: "Only lint the web app", approvalNoteRequestId: "deny-1" }))
-      .toEqual({ threadId: "owner", content: "Only lint the web app", approvalNoteRequestId: "deny-1" });
+  });
+  it.each(["", "x".repeat(257)])("rejects a note request id no approval can have: %#", (requestId) => {
+    expect(SendMessageSchema().safeParse({ threadId: "owner", content: "Only lint the web app", approvalNoteRequestId: requestId }).success).toBe(false);
+    for (const method of ["approval.updateNote", "approval.resendNote", "approval.removeNote"] as const) {
+      expect(WS_METHODS()[method].params.safeParse({ requestId, note: "Only lint the web app" }).success).toBe(false);
+    }
+  });
+  it("accepts a note request id as long as an approval request id", () => {
+    const requestId = "x".repeat(256);
+    expect(ApprovalRequestSchema().safeParse({ ...body, requestId, threadId: "owner", providerId: "codex" }).success).toBe(true);
+    expect(SendMessageSchema().safeParse({ threadId: "owner", content: "Only lint the web app", approvalNoteRequestId: requestId }).success).toBe(true);
+    expect(WS_METHODS()["approval.resendNote"].params.safeParse({ requestId }).success).toBe(true);
   });
   it.each(["", "  ", "x".repeat(4_001)])("rejects unusable notes at both RPC input boundaries: %#", (note) => {
     expect(WS_METHODS()["approval.respond"].params.safeParse({ requestId: "deny-1", choiceId: "deny", note }).success).toBe(false);

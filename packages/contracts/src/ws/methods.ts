@@ -369,7 +369,7 @@ export const SendMessageSchema = lazySchema(() => z.object({
      */
     resendOfSteerId: z.string().uuid().optional(),
     /** Queued deny note claimed atomically with this turn's user message. */
-    approvalNoteRequestId: z.string().optional(),
+    approvalNoteRequestId: z.string().min(1).max(256).optional(),
 }));
 
 /** Validated command for sending a message to an existing thread. */
@@ -1228,15 +1228,15 @@ export const WS_METHODS = lazySchema(() => ({
     result: z.array(HeldApprovalNoteSchema()).max(500),
   },
   "approval.updateNote": {
-    params: z.object({ requestId: z.string(), note: z.string().trim().min(1).max(4_000) }),
+    params: z.object({ requestId: z.string().min(1).max(256), note: z.string().trim().min(1).max(4_000) }),
     result: z.object({ status: z.enum(["updated", "closed"]) }),
   },
   "approval.resendNote": {
-    params: z.object({ requestId: z.string() }),
+    params: z.object({ requestId: z.string().min(1).max(256) }),
     result: z.object({ status: z.enum(["queued", "closed"]) }),
   },
   "approval.removeNote": {
-    params: z.object({ requestId: z.string() }),
+    params: z.object({ requestId: z.string().min(1).max(256) }),
     result: z.object({ status: z.enum(["removed", "closed"]) }),
   },
   "message.list": {

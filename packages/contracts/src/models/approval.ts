@@ -118,7 +118,7 @@ export type ApprovalResponse = z.infer<ReturnType<typeof ApprovalResponseSchema>
 export type ApprovalRespondResult = z.infer<ReturnType<typeof ApprovalRespondResultSchema>>;
 /** A deny note the server still holds, restored to its thread's queue on connect. */
 export const HeldApprovalNoteSchema = lazySchema(() => z.object({
-  requestId: z.string(), threadId: z.string(), note: z.string(), state: z.enum(["queued", "delivery_unknown"]),
+  requestId: z.string().min(1).max(256), threadId: z.string(), note: z.string(), state: z.enum(["queued", "delivery_unknown"]),
 }));
 /** A deny note waiting for turn admission or for the user's decision. */
 export type HeldApprovalNote = z.infer<ReturnType<typeof HeldApprovalNoteSchema>>;
