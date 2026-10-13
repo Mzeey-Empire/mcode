@@ -4,9 +4,12 @@ import {
   AgentEventSchema, AgentEventType, CANONICAL_SUBAGENT_TASK_MAX_LENGTH, MessageSchema, createAgentModelState, resolveSubagentDisplayName, resolveSubagentMetadata,
   type AgentEvent,
   type AgentItem, type AgentModelState, type AgentThread, type AgentTurn, type CollaborationAction, type Message,
-  type ProviderIdentity, type TurnOutcome,
+  type ProviderIdentity, type TurnOutcome, type ProviderRuntimeExtensionKind,
 } from "@mcode/contracts";
 import { CodexCollaborationEventAdapter } from "../collaboration/adapters/codex-collaboration-event-adapter.js";
+import { ChildThreadEventAdapter, type ExtensionAdapter } from "../collaboration/adapters/child-thread-event-adapter.js";
+import { childThreadHandle, ChildThreadRejection, type ChildThreadRecorder, type ChildThreadHandle,
+  type ChildDelegationInput, type ChildItemInput, type ChildTurnClose } from "../collaboration/child-thread-recorder.js";
 import type {
   CanonicalChildTurnFinishInput, CodexChildDelegation, CodexChildDelegationInput, CodexChildDeliveryInput,
   CodexChildIdentityInput, CodexChildItemInput, CodexChildRetryInput, CodexChildRoutingDiagnosticInput,
@@ -49,9 +52,9 @@ type PreparationCheckpoint = { readonly state: AgentModelState; readonly indexes
  * that candidate only after admission. This helper owns its collaboration indexes; other accepted
  * parent records can be supplied to the next fork without reindexing ordinary history.
  */
-export class AcceptedCodexCollaboration implements CodexCollaborationDurability {
+export class AcceptedCodexCollaboration implements CodexCollaborationDurability, ChildThreadRecorder {
   private state: AgentModelState;
-  private readonly adapter: CodexCollaborationEventAdapter;
+  private readonly adapters: { readonly [K in ProviderRuntimeExtensionKind]: ExtensionAdapter };
   private changes: AcceptedCollaborationChange[] = [];
   private indexes: CollaborationIndexes = { nativeThreads: new Map(), nativeTurns: new Map(), executions: new Map(),
     delegations: new Map(), receivers: new Map(), nativeActions: new Map() };
@@ -64,7 +67,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability 
     for (const turn of Object.values(hydrated.turns)) this.indexTurn(turn);
     for (const action of Object.values(hydrated.collaborationActions)) this.indexAction(action);
     this.releaseOwnership();
-    this.adapter = new CodexCollaborationEventAdapter(this);
+    this.adapters = { "codex-collaboration": new CodexCollaborationEventAdapter(this), "child-thread": new ChildThreadEventAdapter(this) };
   }
 
   /** Shares immutable records/indexes; supplied accepted records refresh reads without a history scan. */
@@ -80,7 +83,8 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability 
   prepare(input: ProviderEventIngressEvent): { projection: ProviderEventProjection; changes: readonly AcceptedCollaborationChange[] } {
     const before = this.beginPreparation();
     try {
-      const projection = publicProjection(this.adapter.project(input));
+      const adapter = this.adapters[input.runtimeExtension?.kind ?? "codex-collaboration"];
+      const projection = publicProjection(adapter.project(input));
       if (projection.status === "rejected") this.retainDiagnosticChanges(before);
       return { projection, changes: this.preparedChanges() };
     } catch (error) {
@@ -214,6 +218,86 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability 
     return this.delegation(unique(this.indexes.receivers, nativeId, "Codex receiver"));
   }
 
+  /** Resolve a neutral delegation without creating state. */
+  findDelegation(parentThreadId: string, parentItemId: string): ChildThreadHandle | null {
+    const delegation = this.loadCodexChildDelegation(parentThreadId, parentItemId);
+    const turnId = delegation?.collaborationAction.target.turnId;
+    if (!delegation || !turnId) return null;
+    return { [childThreadHandle]: true, parentThreadId, parentItemId, childThreadId: delegation.childThread.id, turnId };
+  }
+
+  /** Open one deterministic child turn, or merge a replayed delegation's metadata. */
+  delegate(input: ChildDelegationInput): ChildThreadHandle {
+    const parent = this.loadTurn(input.parentTurnId);
+    if (!parent || parent.threadId !== input.parentThreadId) throw new ChildThreadRejection("parent-turn-not-running");
+    const existing = this.findDelegation(input.parentThreadId, input.parentItemId);
+    if (existing) {
+      this.mergeChildDelegation(input, parent);
+      return existing;
+    }
+    if (parent.status !== "Running") throw new ChildThreadRejection("parent-turn-not-running");
+    const parentThread = this.requireThread(parent.threadId);
+    const key = hash(JSON.stringify(["child-thread", parent.threadId, input.parentItemId]));
+    const now = timestamp();
+    const child: AgentThread = { id: `thread:child:${key}`, workspaceId: parentThread.workspaceId,
+      parentThreadId: parent.threadId, rootThreadId: parentThread.rootThreadId,
+      owningParentThreadId: parentThread.owningParentThreadId ?? parent.threadId, providerId: input.providerId,
+      providerIdentities: [], activityState: "Active", conversationRevision: 0, rosterRevision: 0, createdAt: now, updatedAt: now };
+    const action: CollaborationAction = { id: `collaboration:child:${key}`, kind: "delegate",
+      source: { threadId: parent.threadId, turnId: parent.id, itemId: input.parentItemId }, target: { threadId: child.id },
+      status: "Acknowledged", deliveryUnknown: false, message: input.prompt, providerIdentities: [], createdAt: now, updatedAt: now };
+    const turnKey = hash(JSON.stringify(["child-turn", child.id]));
+    const turn = startedTurn(`turn:child:${turnKey}`, derivedExecutionId(turnKey), child.id, action, parent.permissionMode,
+      [{ providerId: input.providerId, scope: "turn", value: input.nativeParentItemId, provenance: "derived" }], now);
+    const context = this.context(parent);
+    this.recordThread(child, context);
+    this.recordThread({ ...parentThread, rosterRevision: parentThread.rosterRevision + 1, updatedAt: now }, context);
+    this.recordItem({ id: input.parentItemId, threadId: parent.threadId, turnId: parent.id, kind: "tool-call",
+      providerIdentities: [], payload: { projection: "codexSubagent", toolName: "Agent", childThreadId: child.id,
+        ...childDelegationMetadata(input) }, createdAt: now, updatedAt: now }, context);
+    this.recordAction({ ...action, target: { threadId: child.id, turnId: turn.id } }, context);
+    this.putTurn(turn);
+    this.changes.push({ kind: "turn-started", ...this.context(turn), turn });
+    this.recordPrompt(turn, action, input.prompt);
+    return { [childThreadHandle]: true, parentThreadId: parent.threadId, parentItemId: input.parentItemId,
+      childThreadId: child.id, turnId: turn.id };
+  }
+
+  private mergeChildDelegation(input: ChildDelegationInput, parent: AgentTurn): void {
+    const delegation = this.loadCodexChildDelegation(input.parentThreadId, input.parentItemId);
+    if (!delegation || delegation.parentItem.turnId !== parent.id) throw new ChildThreadRejection("duplicate-mismatch");
+    const item = delegation.parentItem;
+    const payload = { ...item.payload, ...childDelegationMetadata(input) };
+    if (!NodeUtil.isDeepStrictEqual(payload, item.payload)) {
+      this.recordItem({ ...item, payload, updatedAt: timestamp() }, this.context(parent));
+    }
+  }
+
+  /** Record child content through the same item core as native Codex observations. */
+  recordChildItem(child: ChildThreadHandle, input: ChildItemInput): AgentItem {
+    const turn = this.requireTurn(child.turnId);
+    const record = childItemRecord(child.childThreadId, input);
+    const key = input.kind === "message" ? "stream" : record.eventKey;
+    const id = `item:child:${hash(JSON.stringify([turn.id, input.nativeItemId, key, input.kind]))}`;
+    const existing = this.state.items[id];
+    if (existing && input.kind !== "message" && !NodeUtil.isDeepStrictEqual(existing.payload,
+      { ...publicChildPayload(record.payload), nativeItemId: input.nativeItemId, eventKey: record.eventKey })) {
+      throw new ChildThreadRejection("duplicate-mismatch");
+    }
+    if (!existing && isTerminal(turn)) throw new ChildThreadRejection("child-turn-terminal");
+    return this.recordItemInTurn(turn, id, record, input.kind === "message");
+  }
+
+  /** Retain the first terminal outcome, including on replay. */
+  closeChild(child: ChildThreadHandle, close: ChildTurnClose): AgentTurn {
+    return this.finishTurn(this.requireTurn(child.turnId), close.outcome, close.outcome === "errored" ? close.error : undefined);
+  }
+
+  /** Retain routing failures on the parent without modifying its execution. */
+  reject(diagnostic: CodexChildRoutingDiagnosticInput): void {
+    this.recordCodexChildRoutingDiagnostic(diagnostic);
+  }
+
   startCodexChildDelegation(input: CodexChildDelegationInput): CodexChildDelegation {
     const parent = this.requireTurn(input.parentTurnId);
     this.assertExecution(parent, input.parentThreadId, input.parentExecutionId);
@@ -300,6 +384,10 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability 
     const turn = this.childTurn(input.childThreadId, input.nativeTurnId);
     const stream = input.kind === "message" && ["stream", "stream-complete"].includes(input.eventKey);
     const id = `item:codex-child:${hash(`${turn.id}:${input.nativeItemId}:${stream ? "stream" : input.eventKey}:${input.kind}`)}`;
+    return this.recordItemInTurn(turn, id, input, stream);
+  }
+
+  private recordItemInTurn(turn: AgentTurn, id: string, input: Omit<CodexChildItemInput, "nativeTurnId">, stream: boolean): AgentItem {
     const existing = this.state.items[id];
     if (existing) return this.updateChildItem(existing, input, turn, stream);
     if (isTerminal(turn)) throw new Error(`Codex child turn is terminal: ${turn.id}`);
@@ -427,7 +515,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability 
     this.recordItem({ id, threadId: turn.threadId, turnId: turn.id, kind: "message", providerIdentities: turn.providerIdentities,
       payload: { projection: "message", message }, createdAt: now, updatedAt: now }, this.context(turn));
   }
-  private updateChildItem(existing: AgentItem, input: CodexChildItemInput, turn: AgentTurn, stream: boolean): AgentItem {
+  private updateChildItem(existing: AgentItem, input: Omit<CodexChildItemInput, "nativeTurnId">, turn: AgentTurn, stream: boolean): AgentItem {
     if (input.kind !== "message") {
       assertSameChildPayload(existing, input);
       return existing;
@@ -620,7 +708,7 @@ function collaborationAction(input: CodexCollaborationActionInput, target: Agent
 function assertSourceItem(item: AgentItem | undefined, turn: AgentTurn): void {
   if (item && (item.threadId !== turn.threadId || item.turnId !== turn.id)) throw new Error("Collaboration source item identity conflict");
 }
-function assertSameChildPayload(existing: AgentItem, input: CodexChildItemInput): void {
+function assertSameChildPayload(existing: AgentItem, input: Omit<CodexChildItemInput, "nativeTurnId">): void {
   if (!NodeUtil.isDeepStrictEqual(existing.payload, { ...publicChildPayload(input.payload), nativeItemId: input.nativeItemId, eventKey: input.eventKey })) {
     throw new Error(`Codex child item identity conflict: ${existing.id}`);
   }
@@ -642,6 +730,24 @@ function assertActionIdentity(existing: CollaborationAction | undefined, action:
 }
 function sameAction(left: CollaborationAction, right: CollaborationAction): boolean {
   return NodeUtil.isDeepStrictEqual({ ...left, updatedAt: "" }, { ...right, updatedAt: "" });
+}
+function childDelegationMetadata(input: ChildDelegationInput): Record<string, string> {
+  return { ...(input.title ? { description: input.title } : {}), ...(input.agentType ? { identity: input.agentType } : {}) };
+}
+function derivedExecutionId(key: string): string {
+  return `${key.slice(0, 8)}-${key.slice(8, 12)}-4${key.slice(13, 16)}-8${key.slice(17, 20)}-${key.slice(20)}`;
+}
+function childItemRecord(childThreadId: string, input: ChildItemInput): Omit<CodexChildItemInput, "nativeTurnId"> {
+  const common = { childThreadId, nativeItemId: input.nativeItemId, kind: input.kind };
+  switch (input.kind) {
+    case "message": return { ...common, eventKey: input.mode === "replace" ? "stream-complete" : "stream",
+      payload: { projection: "message", message: { id: `child-message:${hash(JSON.stringify([childThreadId, input.nativeItemId]))}`,
+        role: "assistant", content: input.text } } };
+    case "tool-call": return { ...common, eventKey: "started",
+      payload: { projection: "codexChildToolCall", toolName: input.toolName, toolInput: input.toolInput } };
+    case "tool-result": return { ...common, eventKey: "completed",
+      payload: { projection: "codexChildToolResult", output: input.output, isError: input.isError } };
+  }
 }
 function startedTurn(id: string, executionId: string, threadId: string, action: CollaborationAction,
   permissionMode: AgentTurn["permissionMode"], providerIdentities: ProviderIdentity[], now: string): AgentTurn {
