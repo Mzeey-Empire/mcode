@@ -110,6 +110,15 @@ describe("GitRepositoryService.listRefsAt", () => {
       expect(await routeGitRpc("git.reviewComparison", { ...params, view: "unstaged" }, deps)).toMatchObject({
         status: "ready", comparison: { files: [{ path: "review-draft.txt", untracked: true, additions: 1 }] },
       });
+      const refs = await routeGitRpc("git.refs.list", { ...params, purpose: "review", side: "local", query: "context" }, deps);
+      expect(refs).toMatchObject({ ok: true, items: [{ fullName: "refs/heads/context", isCurrent: true }] });
+      expect(await routeGitRpc("git.branchComparison", params, deps)).toMatchObject({
+        base: "origin/main", isComparisonAvailable: true,
+      });
+      expect(await routeGitRpc("git.log", { ...params, limit: 1 }, deps)).toMatchObject([{ message: "base" }]);
+      expect(await routeGitRpc("git.branchDiff", { ...params, base: "main", target: "context" }, deps)).toBe("");
+      await expect(routeGitRpc("git.fileAtRef", { ...params, ref: "HEAD", filePath: "missing.txt" }, deps))
+        .rejects.toThrow(/show HEAD:missing\.txt/);
       const mismatch = { workspaceId: workspace.id, threadId: foreign.id };
       await expect(routeGitRpc("git.workingTreeDiff", { ...mismatch, staged: false }, deps)).rejects.toThrow(/does not belong/);
       await expect(routeGitRpc("git.reviewState", mismatch, deps)).rejects.toThrow(/does not belong/);
