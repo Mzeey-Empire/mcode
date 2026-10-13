@@ -75,7 +75,7 @@ export function BrowserUrlPill({ address, newPage, focusRequest }: BrowserUrlPil
       data-testid="browser-url-pill"
       className={cn(
         "group/url flex h-8 min-w-0 flex-1 items-center gap-1 rounded-2xl bg-selected pr-0.75 pl-3.5 transition-colors",
-        "hover:bg-control-border focus-within:bg-control-border",
+        "hover:bg-border focus-within:bg-border",
         newPage && "shadow-[inset_0_0_0_1px_var(--color-focus)]",
       )}
     >
