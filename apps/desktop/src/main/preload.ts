@@ -338,13 +338,12 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     }> {
       return ipcRenderer.invoke("preview:get-navigation-state");
     },
-    /** Capture the visible preview viewport as a PNG for attaching to the composer. */
+    /**
+     * Arm the Screenshot overlay. Click captures the viewport, drag captures a
+     * region, Esc or `cancelCapture` resolves `cancelled`.
+     */
     capturePictureReference(): Promise<unknown> {
       return ipcRenderer.invoke("preview:capture-picture-reference");
-    },
-    /** Drag to select a region; captures that part of the preview as PNG. */
-    capturePictureReferenceRegion(): Promise<unknown> {
-      return ipcRenderer.invoke("preview:capture-picture-region");
     },
     /** Hover to highlight, then click an element; captures its bounds as PNG with DOM context. */
     capturePictureReferenceElementPick(): Promise<unknown> {
@@ -353,10 +352,6 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     /** Capture the visible preview with annotation marker and target highlight context. */
     captureAnnotationSnapshot(payload: unknown): Promise<unknown> {
       return ipcRenderer.invoke("preview:capture-annotation-snapshot", payload);
-    },
-    /** Structured page context for the composer fence without capturing a PNG. */
-    capturePageContext(): Promise<unknown> {
-      return ipcRenderer.invoke("preview:capture-context-reference");
     },
     releaseBrowserCaptureSpills(paths: readonly string[]): Promise<void> {
       return ipcRenderer.invoke("preview:release-browser-capture-spill", [

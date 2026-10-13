@@ -594,6 +594,8 @@ export {
 export {
   BrowserPreviewBoundsSchema,
   BrowserPreviewCaptureKindSchema,
+  BrowserScreenshotOverlayPollSchema,
+  BrowserScreenshotSelectionSchema,
   BrowserPreviewElementStyleSchema,
   McodeBrowserCaptureV1Schema,
   AttachedBrowserCaptureV1Schema,
@@ -625,6 +627,8 @@ export {
 export type {
   BrowserPreviewBounds,
   BrowserPreviewCaptureKind,
+  BrowserScreenshotOverlayPoll,
+  BrowserScreenshotSelection,
   BrowserPreviewElementStyle,
   McodeBrowserCaptureV1,
   AttachedBrowserCaptureV1,

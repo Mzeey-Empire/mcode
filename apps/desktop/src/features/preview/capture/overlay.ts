@@ -1,5 +1,5 @@
 /**
- * In-page region drag and element-pick capture helpers for an adopted Preview guest.
+ * In-page Screenshot (click or drag) and element-pick capture helpers for an adopted Preview guest.
  */
 
 import * as NodeFSPromises from "node:fs/promises";
@@ -7,9 +7,11 @@ import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import { BrowserWindow, app, ipcMain, type WebContents } from "electron";
 import {
+  BrowserScreenshotOverlayPollSchema,
   PREVIEW_ANNOTATION_STRING_MAX,
   type AttachmentMeta,
   type BrowserPreviewElementStyle,
+  type BrowserScreenshotSelection,
 } from "@mcode/contracts";
 import {
   type Bounds,
@@ -23,6 +25,7 @@ import {
   previewCaptureFileStem,
   clampRectInPlace,
   parseBoundsRecord,
+  viewportBoundsFallback,
   sanitizeSelectorHintFromGuest,
   scrubHtmlExcerptForOutbound,
 } from "./handlers.js";
@@ -289,12 +292,16 @@ const EP_POLL_JS = `(function(){
 })()`;
 
 /**
- * Region drag-marquee runs entirely inside the guest page (parallel to the
+ * Screenshot overlay runs entirely inside the guest page (parallel to the
  * element-pick pattern in {@link EP_INJECT_JS}). A translucent fixed-position
  * layer captures pointer events at the document's capture phase, blocking the
  * underlying page, and a `window.__mcodeRgState` object holds the pending
- * commit rect or cancellation flag for the host to drain via executeJavaScript
+ * selection or cancellation flag for the host to drain via executeJavaScript
  * polling.
+ *
+ * Classification: a press that never moved 4px on either axis is a click
+ * (viewport). Otherwise the release point decides: both sides >= 4px is a
+ * region, anything thinner cancels so the user can try again.
  */
 const RG_INJECT_JS = `(function(){
   if (window.__mcodeRgTeardown) return;
@@ -320,6 +327,17 @@ const RG_INJECT_JS = `(function(){
   function bump(){ try { window.__mcodeRgState.seq++; } catch (e) {} }
 
   var dragging = false, activePointerId = -1, sx = 0, sy = 0, cx = 0, cy = 0;
+  var maxDx = 0, maxDy = 0;
+  function track(ev){
+    cx = ev.clientX; cy = ev.clientY;
+    maxDx = Math.max(maxDx, Math.abs(cx - sx));
+    maxDy = Math.max(maxDy, Math.abs(cy - sy));
+  }
+  function cancel(){
+    if (window.__mcodeRgState.commit) return;
+    window.__mcodeRgState.cancelled = true;
+    bump();
+  }
   function lay(){
     if (!dragging) { box.style.display = "none"; return; }
     var x = Math.min(sx, cx), y = Math.min(sy, cy);
@@ -345,12 +363,13 @@ const RG_INJECT_JS = `(function(){
     try { layer.setPointerCapture(ev.pointerId); } catch (e) {}
     sx = ev.clientX; sy = ev.clientY;
     cx = sx; cy = sy;
+    maxDx = 0; maxDy = 0;
     lay();
   }
   function onPointerMove(ev){
     if (!dragging || ev.pointerId !== activePointerId) return;
     ev.preventDefault(); ev.stopImmediatePropagation(); ev.stopPropagation();
-    cx = ev.clientX; cy = ev.clientY;
+    track(ev);
     lay();
   }
   function onPointerUp(ev){
@@ -359,16 +378,26 @@ const RG_INJECT_JS = `(function(){
     dragging = false;
     try { layer.releasePointerCapture(ev.pointerId); } catch (e) {}
     activePointerId = -1;
+    track(ev);
     var x = Math.min(sx, cx), y = Math.min(sy, cy);
     var w = Math.abs(cx - sx), h = Math.abs(cy - sy);
     box.style.display = "none";
-    if (w >= 4 && h >= 4) {
-      window.__mcodeRgState.commit = { x: x, y: y, width: w, height: h };
+    if (maxDx < 4 && maxDy < 4) {
+      window.__mcodeRgState.commit = { kind: "viewport" };
+    } else if (w >= 4 && h >= 4) {
+      window.__mcodeRgState.commit = { kind: "region", rect: { x: x, y: y, width: w, height: h } };
     } else {
-      // Too-small drags fall through to cancel so the user can try again.
-      window.__mcodeRgState.cancelled = true;
+      cancel();
+      return;
     }
     bump();
+  }
+  function onPointerCancel(ev){
+    if (!dragging || ev.pointerId !== activePointerId) return;
+    dragging = false;
+    activePointerId = -1;
+    box.style.display = "none";
+    cancel();
   }
   function blockEvent(ev){
     // Stop the page from seeing secondary click types during a selection.
@@ -379,10 +408,7 @@ const RG_INJECT_JS = `(function(){
   function onKeydown(ev){
     if (ev.key === "Escape" || ev.key === "Esc") {
       ev.preventDefault(); ev.stopImmediatePropagation(); ev.stopPropagation();
-      if (!window.__mcodeRgState.commit) {
-        window.__mcodeRgState.cancelled = true;
-        bump();
-      }
+      cancel();
     } else {
       // Swallow all other keys so page shortcuts do not fire during selection.
       ev.preventDefault(); ev.stopImmediatePropagation(); ev.stopPropagation();
@@ -396,7 +422,7 @@ const RG_INJECT_JS = `(function(){
   layer.addEventListener("pointerdown", onPointerDown, true);
   layer.addEventListener("pointermove", onPointerMove, true);
   layer.addEventListener("pointerup", onPointerUp, true);
-  layer.addEventListener("pointercancel", onPointerUp, true);
+  layer.addEventListener("pointercancel", onPointerCancel, true);
   document.addEventListener("keydown", onKeydown, true);
   for (var i = 0; i < EVENTS_BLOCK.length; i++) {
     document.addEventListener(EVENTS_BLOCK[i], blockEvent, true);
@@ -407,7 +433,7 @@ const RG_INJECT_JS = `(function(){
       layer.removeEventListener("pointerdown", onPointerDown, true);
       layer.removeEventListener("pointermove", onPointerMove, true);
       layer.removeEventListener("pointerup", onPointerUp, true);
-      layer.removeEventListener("pointercancel", onPointerUp, true);
+      layer.removeEventListener("pointercancel", onPointerCancel, true);
       document.removeEventListener("keydown", onKeydown, true);
       for (var j = 0; j < EVENTS_BLOCK.length; j++) {
         document.removeEventListener(EVENTS_BLOCK[j], blockEvent, true);
@@ -438,19 +464,12 @@ const RG_REMOVE_JS = `(function(){
   }
 })()`;
 
-/** JSON payload returned by the host poll script for region capture. */
-type RgPollPayload =
-  | { state: "idle"; seq: number }
-  | { state: "commit"; seq: number; x: number; y: number; width: number; height: number }
-  | { state: "cancelled"; seq: number }
-  | { state: "gone" };
-
-/** Polls the guest region state, returning the current commit/cancel/idle status. */
+/** Polls the guest Screenshot state; the host validates it with {@link BrowserScreenshotOverlayPollSchema}. */
 const RG_POLL_JS = `(function(){
   var st = window.__mcodeRgState;
   if (!st) return JSON.stringify({ state: "gone" });
   if (st.cancelled) return JSON.stringify({ state: "cancelled", seq: st.seq });
-  if (st.commit) return JSON.stringify({ state: "commit", seq: st.seq, x: st.commit.x, y: st.commit.y, width: st.commit.width, height: st.commit.height });
+  if (st.commit) return JSON.stringify({ state: "commit", seq: st.seq, selection: st.commit });
   return JSON.stringify({ state: "idle", seq: st.seq });
 })()`;
 
@@ -1099,8 +1118,7 @@ function finishOverlaySession(
 
 /**
  * Registers all overlay-related IPC handlers:
- * region-overlay-submit, region-overlay-cancel, cancel-capture,
- * capture-picture-region, capture-picture-element-pick.
+ * cancel-capture, capture-picture-reference (Screenshot), capture-picture-element-pick.
  *
  * Element-pick has no dedicated IPC handlers anymore. The pick session runs entirely
  * inside the guest page via {@link EP_INJECT_JS}; the host polls `window.__mcodeEpState`
@@ -1117,7 +1135,7 @@ export function registerOverlayHandlers(): void {
   });
 
   ipcMain.handle(
-    "preview:capture-picture-region",
+    "preview:capture-picture-reference",
     async (_event): Promise<PreviewPictureReferenceResult> => {
       const win = BrowserWindow.fromWebContents(_event.sender);
       if (!win || win.isDestroyed()) return { ok: false, error: "no-window" };
@@ -1236,9 +1254,20 @@ function schedulePollRegion(s: PreviewSession, hostWin: BrowserWindow): void {
 async function runRegionPollTick(s: PreviewSession, hostWin: BrowserWindow): Promise<void> {
   const pending = s.overlayPending;
   if (!overlayPollCanStart(s, pending, "region", hostWin)) return;
-  const payload = await readOverlayPollPayload<RgPollPayload>(pending.webContents, RG_POLL_JS);
+  const raw = await readOverlayPollPayload<unknown>(pending.webContents, RG_POLL_JS);
   if (!overlayPollStillCurrent(s, pending, "region")) return;
-  if (!payload || payload.state === "gone") {
+  if (raw === null) {
+    await reinjectOverlayPoll(pending.webContents, RG_INJECT_JS);
+    schedulePollRegion(s, hostWin);
+    return;
+  }
+  const parsed = BrowserScreenshotOverlayPollSchema().safeParse(raw);
+  if (!parsed.success) {
+    await finishOverlayCaptureFailure(s, pending, removeRgMarqueeHighlighter, "capture-failed");
+    return;
+  }
+  const payload = parsed.data;
+  if (payload.state === "gone") {
     await reinjectOverlayPoll(pending.webContents, RG_INJECT_JS);
     schedulePollRegion(s, hostWin);
     return;
@@ -1250,12 +1279,7 @@ async function runRegionPollTick(s: PreviewSession, hostWin: BrowserWindow): Pro
   }
 
   if (payload.state === "commit") {
-    await finishRegionCapture(s, {
-      x: payload.x,
-      y: payload.y,
-      width: payload.width,
-      height: payload.height,
-    });
+    await finishScreenshotCapture(s, payload.selection);
     return;
   }
 
@@ -1263,11 +1287,11 @@ async function runRegionPollTick(s: PreviewSession, hostWin: BrowserWindow): Pro
 }
 
 /**
- * Runs the capture for a committed region rectangle and produces the payload.
+ * Runs the capture for a committed Screenshot selection and produces the payload.
  * Tears down the injected marquee + handlers before capturePage so the dashed
  * frame is not in the PNG.
  */
-async function finishRegionCapture(s: PreviewSession, rect: Bounds): Promise<void> {
+async function finishScreenshotCapture(s: PreviewSession, selection: BrowserScreenshotSelection): Promise<void> {
   const pending = s.overlayPending;
   if (!pending || pending.mode !== "region") return;
   clearRegionPollTimer(s);
@@ -1277,12 +1301,17 @@ async function finishRegionCapture(s: PreviewSession, rect: Bounds): Promise<voi
     await finishOverlayCaptureFailure(s, pending, removeRgMarqueeHighlighter, "no-bounds");
     return;
   }
-  const r = clampRectInPlace(rect, lb.width, lb.height);
+  if (selection.kind === "viewport") {
+    const area: OverlayCaptureArea = { kind: "viewport", bounds: viewportBoundsFallback(lb.width, lb.height) };
+    await completeOverlayCapture(s, pending, area, removeRgMarqueeHighlighter, "viewport", { captureKind: "viewport" });
+    return;
+  }
+  const r = clampRectInPlace(selection.rect, lb.width, lb.height);
   if (r.width < 4 || r.height < 4) {
     await finishOverlayCaptureFailure(s, pending, removeRgMarqueeHighlighter, "region-too-small");
     return;
   }
-  await completeOverlayCapture(s, pending, r, removeRgMarqueeHighlighter, "region", { captureKind: "region" });
+  await completeOverlayCapture(s, pending, { kind: "rect", bounds: r }, removeRgMarqueeHighlighter, "region", { captureKind: "region" });
 }
 
 /**
@@ -1402,7 +1431,7 @@ async function finishElementPickCapture(
     await finishOverlayCaptureFailure(s, pending, removeEpPickHighlighter, preparation.error);
     return;
   }
-  await completeOverlayCapture(s, pending, preparation.bounds, removeEpPickHighlighter, "element", {
+  await completeOverlayCapture(s, pending, { kind: "rect", bounds: preparation.bounds }, removeEpPickHighlighter, "element", {
     captureKind: "element",
     selectorHint: preparation.hit.selectorHint,
     htmlExcerpt: preparation.hit.htmlExcerpt,
@@ -1465,22 +1494,33 @@ async function finishOverlayCaptureFailure(
   }
 }
 
+/**
+ * What to grab from the guest. A viewport capture passes no rect; its bounds
+ * only describe the image in the capture metadata. Shell x/y offsets must never
+ * become a capture rect because capturePage takes guest coordinates.
+ */
+type OverlayCaptureArea =
+  | { readonly kind: "viewport"; readonly bounds: Bounds }
+  | { readonly kind: "rect"; readonly bounds: Bounds };
+
+type OverlayCaptureFilePrefix = "viewport" | "region" | "element";
+
 async function completeOverlayCapture(
   s: PreviewSession,
   pending: NonNullable<PreviewSession["overlayPending"]>,
-  bounds: Bounds,
+  area: OverlayCaptureArea,
   remove: (webContents: WebContents) => Promise<void>,
-  namePrefix: "region" | "element",
+  namePrefix: OverlayCaptureFilePrefix,
   captureOptions: Parameters<typeof buildBrowserCapturePayload>[5],
 ): Promise<void> {
   try {
-    const buffer = await captureOverlayPng(s, pending, bounds, remove);
+    const buffer = await captureOverlayPng(s, pending, area, remove);
     if (!buffer) return;
     const meta = await persistOverlayPng(s, pending, buffer, namePrefix);
     if (!meta) return;
     const capture = await buildBrowserCapturePayload(
       pending.webContents,
-      bounds,
+      area.bounds,
       s.consoleBuffer,
       snapshotFailedRequestsForCapture(s),
       s.workspaceId,
@@ -1498,12 +1538,15 @@ async function completeOverlayCapture(
 async function captureOverlayPng(
   s: PreviewSession,
   pending: NonNullable<PreviewSession["overlayPending"]>,
-  bounds: Bounds,
+  area: OverlayCaptureArea,
   remove: (webContents: WebContents) => Promise<void>,
 ): Promise<Buffer | null> {
   await remove(pending.webContents);
   if (!overlaySessionStillCurrent(s, pending)) return null;
-  const buffer = (await pending.webContents.capturePage(bounds)).toPNG();
+  const image = area.kind === "viewport"
+    ? await pending.webContents.capturePage()
+    : await pending.webContents.capturePage(area.bounds);
+  const buffer = image.toPNG();
   if (!overlaySessionStillCurrent(s, pending)) return null;
   if (buffer.length > 0) return buffer;
   finishOverlaySession(s, pending, { ok: false, error: "empty-capture" });
@@ -1514,7 +1557,7 @@ async function persistOverlayPng(
   s: PreviewSession,
   pending: NonNullable<PreviewSession["overlayPending"]>,
   buffer: Buffer,
-  namePrefix: "region" | "element",
+  namePrefix: OverlayCaptureFilePrefix,
 ): Promise<AttachmentMeta | null> {
   const id = NodeCrypto.randomUUID();
   const stem = previewCaptureFileStem(pending.webContents.getURL());
