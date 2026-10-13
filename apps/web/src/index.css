@@ -155,6 +155,8 @@
   --diff-remove-gutter: oklch(0.78 0.11 25);
   --diff-remove-text: oklch(0.48 0.15 25);
   --diff-remove-strong: oklch(0.55 0.17 25);
+  /* Collapsed-context bands need a step off --background; light --panel matches it. */
+  --diff-band: var(--neutral-100);
 }
 
 .dark {
@@ -204,6 +206,7 @@
   --diff-remove-gutter: oklch(0.55 0.13 25);
   --diff-remove-text: oklch(0.86 0.09 25);
   --diff-remove-strong: oklch(0.78 0.13 25);
+  --diff-band: var(--neutral-800);
 }
 
 @theme inline {

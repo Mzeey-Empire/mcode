@@ -132,7 +132,7 @@ A worktree that has no named branch yet. It starts from a selected base
 branch and lets the thread run in isolation before the user decides whether
 the work needs a branch. In branch-facing UI, the current ref is shown as
 `HEAD` with a short commit hash rather than as the selected base branch.
-In Review comparisons, the target is shown as `HEAD` and the base remains
+In Review comparisons, the compare side is shown as `HEAD` and the base remains
 the selected base branch for that worktree.
 _Avoid_: Headless worktree
 
@@ -1019,14 +1019,15 @@ such as project files, without renaming the surface.
 _Avoid_: Worktree files, Changed files (names for a source, not the surface)
 
 ### Comparison
-What a Review view *is*: a **base** (before) and a **target** (after) that
-resolve to exactly one diff. Some comparisons have **fixed** operands the
+What a Review view *is*: a **base** (before) and a **compare** side (after)
+that resolve to exactly one diff. Some comparisons have **fixed** operands the
 user cannot change (Unstaged = index→worktree; Staged = HEAD→index); others
 have **picked** operands the user chooses through a picker that still
-resolves to a single diff — never N diffs at once. The picked comparisons
-are **Branch** (the current branch fixed on the left → one selected comparison
-ref on the right; the right side is the only picker), **Commit** (one commit
-chosen from a searchable list; default is the latest commit), and the turn
+resolves to a single diff, never N diffs at once. The picked comparisons
+are **Branch** (`compare → base`: both sides pickable from local or origin
+refs, sent as `base...compare`; local `main` and `origin/main` are separate
+choices; see ADR-0028), **Commit** (one commit from the commits since the
+fork, searched on the server; default is the latest commit), and the turn
 **picker** (one turn's diff).
 
 ### Turn view

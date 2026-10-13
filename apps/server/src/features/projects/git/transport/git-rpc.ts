@@ -9,6 +9,7 @@ import type { WorkspaceService } from "../../lifecycle/workspace-service.js";
 import type { WorkspaceRepo } from "../../persistence/workspace-repo.js";
 import type { GitComparisonService } from "../git-comparison-service.js";
 import type { GitRepositoryService } from "../git-repository-service.js";
+import { gitListError } from "../git-list-error.js";
 import type { GitPushService } from "../git-push-service.js";
 import type { CommitMessageGenerator } from "../commits/commit-message-generator.js";
 import type { GitCommitService } from "../commits/git-commit-service.js";
@@ -26,6 +27,7 @@ export interface GitRouterDeps {
   gitComparison: Pick<
     GitComparisonService,
     | "listCommits"
+    | "searchCommits"
     | "readCommitDiff"
     | "listCommitChangedFiles"
     | "readWorkingTreeDiff"
@@ -60,6 +62,14 @@ type GitHandlerMap = {
 };
 
 const gitHandlers: GitHandlerMap = {
+  "git.searchCommits": (deps, params) => {
+    const thread = params.threadId ? deps.threadRepo.findById(params.threadId) : null;
+    return deps.gitComparison.searchCommits(
+      params,
+      resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
+      thread?.checkout_state === "branchless" ? thread.base_branch ?? thread.branch : null,
+    );
+  },
   "git.refs.list": (deps, params) => deps.gitRepository.listRefsAt(
     resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId), params,
   ),
@@ -97,8 +107,7 @@ const gitHandlers: GitHandlerMap = {
       ? deps.gitComparison.readCommitDiff(
         params.workspaceId,
         params.sha,
-        params.filePath,
-        params.maxLines,
+        { filePath: params.filePath, maxLines: params.maxLines, ignoreWhitespace: params.ignoreWhitespace },
       )
       : "",
   "git.commitFiles": (deps, params) =>
@@ -110,11 +119,14 @@ const gitHandlers: GitHandlerMap = {
       ? deps.gitComparison.readWorkingTreeDiff(
         params.workspaceId,
         params.staged,
-        params.filePath,
-        params.maxLines,
-        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
-        params.untracked,
-        params.previousPath,
+        {
+          filePath: params.filePath,
+          maxLines: params.maxLines,
+          repoPath: resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
+          untracked: params.untracked,
+          previousPath: params.previousPath,
+          ignoreWhitespace: params.ignoreWhitespace,
+        },
       )
       : "",
   // Hydration needs the real old/new contents; a soft "" here would let the
@@ -136,14 +148,17 @@ const gitHandlers: GitHandlerMap = {
         params.workspaceId,
         params.base,
         params.target,
-        params.filePath,
-        params.maxLines,
-        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
+        {
+          filePath: params.filePath,
+          maxLines: params.maxLines,
+          repoPath: resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
+          ignoreWhitespace: params.ignoreWhitespace,
+        },
       )
       : "",
   "git.branchComparison": (deps, params) => {
     if (!isGitWorkspace(deps, params.workspaceId)) {
-      return { base: null, target: null, refs: [], isUnborn: false, isComparisonAvailable: false };
+      return { base: null, compare: null, isUnborn: false, isComparisonAvailable: false };
     }
     const thread = params.threadId ? deps.threadRepo.findById(params.threadId) : null;
     return deps.gitComparison.resolveBranchComparison(
@@ -164,7 +179,7 @@ const gitHandlers: GitHandlerMap = {
       ? deps.gitComparison.readReviewComparison(
         params.workspaceId,
         params.view,
-        { base: params.base, target: params.target, sha: params.sha },
+        { base: params.base, compare: params.compare, sha: params.sha, ignoreWhitespace: params.ignoreWhitespace },
         resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
       )
       : { status: "unavailable", reason: "no-base" },
@@ -199,6 +214,7 @@ export async function routeGitRpc<Method extends GitRpcMethod>(
   try {
     return await gitHandlers[method](deps, params);
   } catch (error) {
+    if (method === "git.searchCommits") return { ok: false, error: gitListError(error) };
     if (method === "git.reviewComparison" && error instanceof ReviewWorktreeMissingError) return reviewComparisonFailure(error);
     throw error;
   }

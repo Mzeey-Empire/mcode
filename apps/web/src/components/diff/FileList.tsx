@@ -42,6 +42,8 @@ interface FileListProps {
   defaultFilesExpanded?: boolean;
   /** Extra identity for mutable comparisons whose ref names can stay stable while content changes. */
   cacheVersion?: string | number;
+  /** Read Git patches with whitespace changes hidden, matching the comparison. */
+  ignoreWhitespace?: boolean;
   /**
    * Identity of the view rendering this list (e.g. `turn:<messageId>`).
    * View-keyed jump requests are consumed only by the list whose key matches,
@@ -63,6 +65,7 @@ export function FileList({
   threadId,
   defaultFilesExpanded = false,
   cacheVersion = 0,
+  ignoreWhitespace = false,
   jumpViewKey,
 }: FileListProps) {
   const [jumpTarget, setJumpTarget] = useState<{ path: string; token: number } | null>(null);
@@ -156,6 +159,7 @@ export function FileList({
           id={id}
           threadId={threadId}
           cacheVersion={cacheVersion}
+          ignoreWhitespace={ignoreWhitespace}
           defaultFilesExpanded={defaultFilesExpanded}
           jumpTarget={jumpTarget}
           onJumpSettled={clearJumpTarget}
@@ -174,6 +178,7 @@ export function FileList({
           id={id}
           threadId={threadId}
           cacheVersion={cacheVersion}
+          ignoreWhitespace={ignoreWhitespace}
           defaultFilesExpanded={defaultFilesExpanded}
           jumpTarget={jumpTarget}
           onJumpSettled={clearJumpTarget}

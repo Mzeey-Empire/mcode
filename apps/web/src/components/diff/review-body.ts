@@ -1,5 +1,5 @@
 import type { ReviewComparison, ReviewComparisonResult } from "@mcode/contracts";
-import type { DiffViewMode } from "@/stores/diffStore";
+import { refLabel, type BranchOperands, type DiffViewMode } from "@/stores/diffStore";
 
 /**
  * A comparison outcome as the Review panel holds it: a server result, a view
@@ -25,7 +25,7 @@ export interface ReviewBodyContext {
   /** The Turn view's ordinal for the selected turn, when it is known. */
   readonly turnOrdinal: number | null;
   /** The range the branch view actually compared. */
-  readonly branchRange: { readonly base: string; readonly target: string } | null;
+  readonly branchRange: BranchOperands | null;
 }
 
 const NOTHING_NEW_TITLE = "Nothing new since you looked";
@@ -91,7 +91,7 @@ function emptyBody(context: ReviewBodyContext): ReviewBody {
       return { kind: "empty", title: "No file changes in this commit" };
     case "branch":
       return context.branchRange
-        ? { kind: "empty", title: `No changes between ${context.branchRange.target} and ${context.branchRange.base}` }
+        ? { kind: "empty", title: `No changes between ${refLabel(context.branchRange.compare)} and ${refLabel(context.branchRange.base)}` }
         : { kind: "empty", title: "No changes on this branch" };
   }
 }

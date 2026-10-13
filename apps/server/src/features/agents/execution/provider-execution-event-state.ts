@@ -1,4 +1,4 @@
-import { ProviderRuntimeEventSchema, type AgentEvent, type ProviderRuntimeEvent } from "@mcode/contracts";
+import { ProviderRuntimeEventSchema, isChildRoutedRuntimeEvent, type AgentEvent, type ProviderRuntimeEvent } from "@mcode/contracts";
 import type { ProviderEventDraft } from "@mcode/providers";
 import { processProviderEventWorkerTask } from "../../providers/composition/provider-event-worker-protocol.js";
 import { CodexLiveEventReducer, type CodexPlanFeature, type SyntheticTerminalInput } from "./codex-live-event-reducer.js";
@@ -142,6 +142,5 @@ function isTerminalEvent(event: AgentEvent): boolean {
 }
 
 function hasWriterOwnedExtension(runtime: ProviderRuntimeEvent): boolean {
-  const extension = runtime.extension;
-  return Boolean(extension?.child || extension?.continuation);
+  return isChildRoutedRuntimeEvent(runtime.extension);
 }

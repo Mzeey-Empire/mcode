@@ -102,6 +102,48 @@ describe.each(factories)("$name publisher shutdown", ({ create }) => {
   });
 });
 
+describe("execution-lifetime publisher terminal reserve", () => {
+  it("rejects child endings after a sink failure while admitting the parent ending", async () => {
+    const submit = vi.fn<ProviderEventSinkPort["submit"]>()
+      .mockRejectedValueOnce(new Error("sink unavailable"))
+      .mockResolvedValue(receipt);
+    const publisher = new CanonicalLiveEventPublisher("copilot", { submit }, undefined, "execution");
+    publisher.publish(routing, event, []);
+    await expect(publisher.flushForExecution(routing)).rejects.toThrow();
+    publisher.publish(routing, providerRuntimeEvent(terminal.event, { providerId: "copilot", kind: "child-thread",
+      childThread: { role: "child", path: ["task"] } }), []);
+    publisher.publish(routing, terminal, []);
+    await expect(publisher.waitForExecution(routing)).rejects.toThrow();
+    expect(submit.mock.calls.map(([batch]) => batch.events[0]?.payload)).toMatchObject([
+      { type: "item.recorded", item: { payload: { runtimeEvent: event } } },
+      { type: "item.recorded", item: { payload: { runtimeEvent: terminal } } },
+    ]);
+  });
+
+  it("keeps parent terminal slots through a child-ending burst and rejects children after overflow", async () => {
+    const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
+    const publisher = new CanonicalLiveEventPublisher("copilot", { submit }, undefined, "execution");
+    for (let index = 0; index < 1_020; index += 1) publisher.publish(routing, event, []);
+    for (let index = 0; index < 6; index += 1) {
+      publisher.publish(routing, providerRuntimeEvent(index % 2 === 0 ? terminal.event : {
+        type: "turnComplete", threadId: routing.threadId, reason: "end_turn", tokensIn: 0, tokensOut: 0, costUsd: null,
+      }, { providerId: "copilot", kind: "child-thread", childThread: { role: "child", path: [`task-${index}`] } }), []);
+    }
+    publisher.publish(routing, providerRuntimeEvent({ type: "turnComplete", threadId: routing.threadId,
+      reason: "end_turn", tokensIn: 0, tokensOut: 0, costUsd: null }), []);
+    publisher.publish(routing, terminal, []);
+    await expect(publisher.waitForExecution(routing)).rejects.toThrow();
+    const emitted = submit.mock.calls.flatMap(([batch]) => batch.events.flatMap((draft) =>
+      draft.payload.type === "item.recorded"
+        ? [ProviderRuntimeEventSchema().parse(draft.payload.item.payload.runtimeEvent)] : []));
+    expect(emitted).toHaveLength(1_024);
+    expect(emitted.slice(1_020).map((runtime) => [runtime.event.type, runtime.extension?.kind === "child-thread"
+      ? runtime.extension.childThread.path : null])).toEqual([
+      ["ended", ["task-0"]], ["turnComplete", ["task-1"]], ["turnComplete", null], ["ended", null],
+    ]);
+  });
+});
+
 describe("Codex optional observation shutdown", () => {
   it("contains an optional failure and drains the following mandatory terminal", async () => {
     const submit = vi.fn<ProviderEventSinkPort["submit"]>()

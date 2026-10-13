@@ -1,4 +1,4 @@
-import { SUBAGENT_REPORTING } from "@mcode/contracts";
+import { SUBAGENT_REPORTING, codexCollaborationExtension } from "@mcode/contracts";
 /**
  * Codex provider adapter using the persistent `codex app-server` subprocess.
  *
@@ -569,7 +569,7 @@ function bufferPendingChildEvent(
 }
 
 function childEventIdentity(event: ProviderRuntimeEvent): string | undefined {
-  const evidence = event.extension?.child;
+  const evidence = codexCollaborationExtension(event.extension)?.child;
   if (!evidence) return undefined;
   if (evidence.nativeEventId) return evidence.nativeEventId;
   return `codex-child:${NodeCrypto.createHash("sha256").update(JSON.stringify([
@@ -686,7 +686,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
         deliveryAttempt: routing.deliveryAttempt,
       });
       // Native child evidence shares its parent's ordered stream and must not close the parent attempt.
-      if (runtimeEvent.event.type === AgentEventType.Ended && runtimeEvent.extension?.child === undefined) state.kind = "fenced";
+      if (runtimeEvent.event.type === AgentEventType.Ended && codexCollaborationExtension(runtimeEvent.extension)?.child === undefined) state.kind = "fenced";
       return;
     }
     super.emit("event", runtimeEvent);
@@ -696,7 +696,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private drainApprovalsAtTurnEnd(routing: CodexCanonicalEventRouting, runtimeEvent: ProviderRuntimeEvent): void {
     // A sub-agent finishing shares the parent's routing but leaves the parent turn, and its approvals, live.
-    if (runtimeEvent.extension?.child !== undefined) return;
+    if (codexCollaborationExtension(runtimeEvent.extension)?.child !== undefined) return;
     const { event } = runtimeEvent;
     if (event.type === "turnComplete" || event.type === "ended" || event.type === "error") {
       this.drainPending((entry) => entry.routing?.executionId === routing.executionId, "turn_ended");
@@ -1954,7 +1954,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     mapper: CodexEventMapper,
     rawNotification: { method?: string; params?: Record<string, unknown> },
   ): ProviderRuntimeEvent[] {
-    const generatedImageEvents = this.mapGeneratedImageEvents(threadId, notification).map(providerRuntimeEvent);
+    const generatedImageEvents = this.mapGeneratedImageEvents(threadId, notification).map((event) => providerRuntimeEvent(event));
     const mapperEvents = mapper.mapValidatedNotification(notification).events;
     const events = [...generatedImageEvents, ...mapperEvents];
     traceCodexIngest(threadId, rawNotification.method, rawNotification.params, events.map((event) => event.event));
@@ -2065,8 +2065,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   ): ProviderRuntimeEvent {
     if (!args.entry) return event;
     // Replayed child events share the parent notification batch. Their own native turn is the only safe attempt source.
-    const nativeTurnId = event.extension?.child
-      ? event.extension.child.nativeTurnId
+    const child = codexCollaborationExtension(event.extension)?.child;
+    const nativeTurnId = child
+      ? child.nativeTurnId
       : args.nativeTurnId;
     const bound = this.nativeTurnAttempt(args.entry, nativeTurnId);
     if (!bound || (args.eventExecutionId && bound.executionId !== args.eventExecutionId)) return event;
@@ -2093,7 +2094,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     if (!args.entry || args.mainNotification || !args.nativeThreadId) return false;
     const notice = event.event.type === AgentEventType.System && event.event.systemNotice;
     if (args.nativeTurnId && !notice) return false;
-    return args.mapper.hasReceiverThread(args.nativeThreadId) && Boolean(event.extension?.child)
+    return args.mapper.hasReceiverThread(args.nativeThreadId) && Boolean(codexCollaborationExtension(event.extension)?.child)
       && !this.matchesCodexChildTurnBinding(args.entry, args.eventExecutionId, event);
   }
 
@@ -2102,7 +2103,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   private matchesCodexChildTurnBinding(state: CodexSessionState, executionId: string | undefined, event: ProviderRuntimeEvent): boolean {
-    const bound = this.nativeTurnAttempt(state, event.extension?.child?.nativeTurnId);
+    const bound = this.nativeTurnAttempt(state, codexCollaborationExtension(event.extension)?.child?.nativeTurnId);
     return bound !== undefined && bound.executionId === executionId && bound.deliveryAttempt === event.deliveryAttempt;
   }
 

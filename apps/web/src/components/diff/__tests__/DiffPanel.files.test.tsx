@@ -41,18 +41,25 @@ vi.mock("../WorktreeFilesPane", () => ({
   ),
 }));
 
-vi.mock("../CommitPicker", () => ({ CommitPicker: () => <span>commit picker</span> }));
-vi.mock("../BranchRefPicker", () => ({ BranchRefPicker: () => <span>branch picker</span> }));
+vi.mock("../CommitOperandPicker", () => ({ CommitOperandPicker: () => <span>commit picker</span> }));
+vi.mock("../BranchOperandPickers", () => ({ BranchOperandPickers: () => <span>branch pickers</span> }));
 
 // Every view's body is a FileList; the stub exposes which comparison it was handed.
 vi.mock("../FileList", () => ({
-  FileList: ({ files, source, id, cacheVersion }: {
+  FileList: ({ files, source, id, cacheVersion, ignoreWhitespace }: {
     files: readonly { path: string }[];
     source: string;
     id: string;
     cacheVersion: string | number;
+    ignoreWhitespace?: boolean;
   }) => (
-    <section data-testid="diff-files" data-source={source} data-id={id} data-cache-version={cacheVersion}>
+    <section
+      data-testid="diff-files"
+      data-source={source}
+      data-id={id}
+      data-cache-version={cacheVersion}
+      data-ignore-whitespace={ignoreWhitespace ? "true" : "false"}
+    >
       {files.map((file) => file.path).join(",")}
     </section>
   ),
@@ -149,6 +156,7 @@ describe("DiffPanel", () => {
       diffRevisionByScope: {},
       reviewFilesVisibleByScope: {},
       lineWrapByThread: {},
+      ignoreWhitespaceByThread: {},
       bulkDiffExpand: null,
       reviewViewMenuOpen: false,
     });
@@ -171,6 +179,75 @@ describe("DiffPanel", () => {
     expect(screen.getByTestId("review-wrap-toggle")).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("hides whitespace-only files in Git views, keeps the choice across views, and remembers it", async () => {
+    pickThreadView("unstaged");
+    transport.getReviewComparison.mockImplementation((params: { ignoreWhitespace?: boolean }) =>
+      Promise.resolve(params.ignoreWhitespace ? stats("logic.ts") : stats("logic.ts", "indent.ts")));
+    render(<DiffPanel />);
+
+    await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("logic.ts,indent.ts"));
+    expect(screen.getByTestId("review-stat-summary")).toHaveTextContent(/^2 files\s*\+2/);
+    const toggle = screen.getByTestId("review-whitespace-toggle");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(toggle).toHaveAccessibleName("Hide whitespace changes");
+
+    await userEvent.setup().click(toggle);
+    await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent(/^logic\.ts$/));
+    expect(screen.getByTestId("review-stat-summary")).toHaveTextContent(/^1 file\s*\+1/);
+    expect(transport.getReviewComparison).toHaveBeenLastCalledWith(expect.objectContaining({ view: "unstaged", ignoreWhitespace: true }));
+    expect(screen.getByTestId("diff-files")).toHaveAttribute("data-ignore-whitespace", "true");
+    expect(screen.getByTestId("review-whitespace-toggle")).toHaveAttribute("aria-pressed", "true");
+    expect(JSON.parse(localStorage.getItem("mcode.review-ignore-whitespace.v1") ?? "{}")).toEqual({ "thread-1": true });
+
+    act(() => pickThreadView("staged"));
+    await waitFor(() => expect(transport.getReviewComparison).toHaveBeenLastCalledWith(
+      expect.objectContaining({ view: "staged", ignoreWhitespace: true }),
+    ));
+  });
+
+  it("dims the whitespace control on an agent patch and leaves the patch alone", async () => {
+    useDiffStore.setState({ ignoreWhitespaceByThread: { "thread-1": true } });
+    transport.listReviewTurns.mockResolvedValue([turn("msg-1", 1)]);
+    transport.getTurnDiffComparison.mockResolvedValue(comparison("native-1", "agent.ts"));
+    render(<DiffPanel />);
+
+    await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("agent.ts"));
+    const toggle = screen.getByTestId("review-whitespace-toggle");
+    expect(toggle).toHaveAttribute("aria-disabled", "true");
+    expect(toggle).toHaveAccessibleDescription("Not available for agent patches");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await userEvent.setup().hover(toggle);
+    expect(await screen.findByText("Not available for agent patches")).toBeInTheDocument();
+  });
+
+  it.each([
+    { view: "cumulative" as const, baseline: undefined },
+    { view: "since-looked" as const, baseline: 4 },
+  ])("rereads $view without whitespace-only files", async ({ view, baseline }) => {
+    pickThreadView(view);
+    threadAttentionStore.setState({ visitBaselines: { "thread-1": 4 } });
+    transport.getCumulativeDiffStats.mockImplementation((_thread: string, _after: number | undefined, options: { ignoreWhitespace?: boolean }) =>
+      Promise.resolve(options.ignoreWhitespace ? stats("logic.ts") : stats("logic.ts", "indent.ts")));
+    render(<DiffPanel />);
+
+    await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("indent.ts,logic.ts"));
+    await userEvent.setup().click(screen.getByTestId("review-whitespace-toggle"));
+    await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent(/^logic\.ts$/));
+    expect(transport.getCumulativeDiffStats).toHaveBeenLastCalledWith("thread-1", baseline, { ignoreWhitespace: true });
+    expect(screen.getByTestId("diff-files")).toHaveAttribute("data-ignore-whitespace", "true");
+  });
+
+  it("offers the whitespace control on a Git-fallback turn", async () => {
+    transport.listReviewTurns.mockResolvedValue([turn("msg-1", 1)]);
+    transport.getTurnDiffComparison.mockResolvedValue(ready({ files: [file("fallback.ts")], additions: 1, deletions: 0,
+      turnDiff: { id: "git:snap-1", phase: "settled", source: "git", fidelity: "same-file-changes-possible", revision: 0 } }));
+    render(<DiffPanel />);
+
+    await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("fallback.ts"));
+    await userEvent.setup().click(screen.getByTestId("review-whitespace-toggle"));
+    await waitFor(() => expect(transport.getTurnDiffComparison).toHaveBeenLastCalledWith("thread-1", "msg-1", { ignoreWhitespace: true }));
+  });
+
   it.each([false, true])("finishes the first snapshot load so the latest turn can render, failed=%s", async (failed) => {
     useDiffStore.setState({ snapshotsByThread: {} });
     const firstLoad = deferred<TurnSnapshot[]>();
@@ -183,7 +260,7 @@ describe("DiffPanel", () => {
     else firstLoad.resolve([]);
     await waitFor(() => expect(useDiffStore.getState().snapshotsLoadingByThread["thread-1"]).toBe(false));
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("agent.ts"));
-    expect(transport.getTurnDiffComparison).toHaveBeenCalledWith("thread-1", "msg-1");
+    expect(transport.getTurnDiffComparison).toHaveBeenCalledWith("thread-1", "msg-1", { ignoreWhitespace: false });
     transport.getTurnDiffComparison.mockResolvedValue(comparison("native-2", "refreshed.ts"));
     await userEvent.setup().click(screen.getByTestId("review-refresh"));
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("refreshed.ts"));
@@ -199,7 +276,7 @@ describe("DiffPanel", () => {
 
     transport.listReviewTurns.mockResolvedValue([turn("msg-1", 1), turn("msg-2", 2, "live")]);
     act(() => { useDiffStore.getState().bumpDiffRevision("thread-1"); });
-    await waitFor(() => expect(transport.getTurnDiffComparison).toHaveBeenCalledWith("thread-1", "msg-2"));
+    await waitFor(() => expect(transport.getTurnDiffComparison).toHaveBeenCalledWith("thread-1", "msg-2", { ignoreWhitespace: false }));
     expect(screen.getByTestId("diff-files")).toHaveTextContent("first.ts");
     expect(screen.queryByTestId("review-state")).not.toBeInTheDocument();
 
@@ -213,11 +290,11 @@ describe("DiffPanel", () => {
 
     render(<DiffPanel />);
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("picked.ts"));
-    expect(transport.getTurnDiffComparison).toHaveBeenCalledWith("thread-1", "msg-picked");
+    expect(transport.getTurnDiffComparison).toHaveBeenCalledWith("thread-1", "msg-picked", { ignoreWhitespace: false });
 
     transport.getTurnDiffComparison.mockResolvedValue(comparison("picked-2", "other.ts"));
     act(() => { useDiffStore.getState().setReviewTurnForThread("thread-1", "msg-other"); });
-    await waitFor(() => expect(transport.getTurnDiffComparison).toHaveBeenCalledWith("thread-1", "msg-other"));
+    await waitFor(() => expect(transport.getTurnDiffComparison).toHaveBeenCalledWith("thread-1", "msg-other", { ignoreWhitespace: false }));
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("other.ts"));
   });
 
@@ -285,6 +362,48 @@ describe("DiffPanel", () => {
 
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("fixed.ts"));
     expect(transport.getReviewComparison).toHaveBeenLastCalledWith(expect.objectContaining({ view: "commit", sha: "abc123" }));
+  });
+
+  it("diffs the picked Branch operands as base...compare, with no swap", async () => {
+    pickThreadView("branch");
+    useDiffStore.setState({
+      branchComparison: {
+        base: "refs/remotes/origin/main", compare: "refs/heads/feature", isUnborn: false, isComparisonAvailable: true,
+      },
+      branchComparisonKey: "workspace-1:thread-1",
+      branchSelectionByScope: {
+        "workspace-1:thread-1": { base: "refs/heads/mcode-3f2a", compare: "refs/remotes/origin/main" },
+      },
+    });
+    transport.getReviewComparison.mockReset().mockResolvedValue(stats("picked.ts"));
+    render(<DiffPanel />);
+
+    await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("picked.ts"));
+    expect(transport.getReviewComparison).toHaveBeenLastCalledWith(expect.objectContaining({
+      view: "branch", base: "refs/heads/mcode-3f2a", compare: "refs/remotes/origin/main",
+    }));
+    expect(screen.getByTestId("diff-files")).toHaveAttribute(
+      "data-id", expect.stringContaining("refs/heads/mcode-3f2a...refs/remotes/origin/main"),
+    );
+  });
+
+  it("does not diff another thread's Branch operands while this thread's default resolves", async () => {
+    pickThreadView("branch");
+    useDiffStore.setState({
+      branchComparison: {
+        base: "refs/remotes/origin/main", compare: "refs/heads/other", isUnborn: false, isComparisonAvailable: true,
+      },
+      branchComparisonKey: "workspace-1:thread-other",
+      branchSelectionByScope: {
+        "workspace-1:thread-other": { base: "refs/heads/main", compare: "refs/heads/other" },
+      },
+    });
+    transport.getReviewComparison.mockReset().mockResolvedValue(stats("other.ts"));
+    render(<DiffPanel />);
+
+    await act(async () => {});
+    expect(transport.getReviewComparison).not.toHaveBeenCalledWith(expect.objectContaining({ view: "branch" }));
+    expect(screen.queryByText("other.ts")).not.toBeInTheDocument();
   });
 
   it("keeps the Turn diff and Files atomic through refresh success and shows a comparison failure", async () => {
@@ -472,7 +591,7 @@ describe("DiffPanel", () => {
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("a.ts"));
     expect(screen.getByTestId("diff-files")).toHaveAttribute("data-source", "since-looked");
     expect(screen.getByTestId("diff-files")).toHaveAttribute("data-id", "4");
-    expect(transport.getCumulativeDiffStats).toHaveBeenLastCalledWith("thread-1", 4);
+    expect(transport.getCumulativeDiffStats).toHaveBeenLastCalledWith("thread-1", 4, { ignoreWhitespace: false });
     expect(screen.getByTestId("review-toggle-all")).toHaveAccessibleName("Expand all");
 
     transport.getCumulativeDiffStats.mockResolvedValue(stats("b.ts"));

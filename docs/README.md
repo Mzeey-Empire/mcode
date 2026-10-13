@@ -72,7 +72,7 @@ Internal guides are grouped in topic subfolders. Use this index to find a guide.
 ## Architecture decision records
 
 Point-in-time decisions. New ADRs take the next free number below. Numbers
-0018 and 0020 are each used twice historically; start new ADRs at 0027.
+0018 and 0020 are each used twice historically; start new ADRs at 0029.
 
 - [0001: Provider CLI discovery is per-provider; version policy is the one provider-blind seam](adr/0001-per-provider-cli-discovery-shared-version-policy.md)
 - [0002: Preview tab discard policy](adr/0002-preview-tab-discard-policy.md)
@@ -103,6 +103,7 @@ Point-in-time decisions. New ADRs take the next free number below. Numbers
 - [0025: Reasoning keeps the narrative persistence path](adr/0025-reasoning-keeps-the-narrative-persistence-path.md)
 - [0026: The rail lists tools; terminals and Browser pages are row-1 tabs](adr/0026-rail-lists-tools-terminals-and-pages-are-row-1-tabs.md)
 - [0027: Turn revert restores pre-turn content](adr/0027-turn-revert-restores-pre-turn-content.md)
+- [0028: Branch compares a picked compare ref against a picked base](adr/0028-branch-operands-both-sides.md)
 
 ## Agent runbooks
 

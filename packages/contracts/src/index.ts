@@ -785,15 +785,24 @@ export {
   CodexChildEvidenceSchema,
   CodexCollaborationEvidenceSchema,
   CodexContinuationEvidenceSchema,
+  CodexCollaborationExtensionSchema,
+  ChildThreadEvidenceSchema,
+  ChildThreadPathSchema,
+  ChildThreadExtensionSchema,
   ProviderRuntimeEventSchema,
   ProviderParentEvidenceSchema,
   ProviderRuntimeExtensionSchema,
   providerRuntimeEvent,
+  codexCollaborationExtension,
+  isChildRoutedRuntimeEvent,
 } from "./events/provider-runtime-event.js";
 export type {
   CodexChildEvidence,
   CodexCollaborationEvidence,
   CodexContinuationEvidence,
+  CodexCollaborationExtension,
+  ChildThreadEvidence,
+  ProviderRuntimeExtensionKind,
   ProviderRuntimeEvent,
   ProviderParentEvidence,
   ProviderRuntimeExtension,
@@ -954,6 +963,8 @@ export type {
 // Git / GitHub
 export { GitBranchSchema, WorktreeSchema, GitCommitSchema, BranchComparisonSchema, GitRemoteUrlSchema } from "./git.js";
 export type { GitBranch, WorktreeInfo, GitCommit, BranchComparison, GitRemoteUrl } from "./git.js";
+export { GitSearchCommitsParamsSchema, GitSearchCommitsResultSchema } from "./git.js";
+export type { GitSearchCommitsParams, GitSearchCommitsResult } from "./git.js";
 export { TargetWorktreeSchema, GitRefSchema, DetachedWorktreeTargetSchema, GitRefPurposeSchema, GitRefSideSchema, pagedTargetResultSchema, GitListErrorSchema, GitRefsListParamsSchema, GitRefsListResultSchema } from "./git.js";
 export type { TargetWorktree, GitRef, DetachedWorktreeTarget, GitRefPurpose, GitRefSide, GitListError, GitRefsListParams, GitRefsListResult } from "./git.js";
 export {

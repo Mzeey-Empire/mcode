@@ -51,6 +51,48 @@ export type DiffViewMode =
  */
 export type ReviewTurnSelection = "latest" | (string & {});
 
+/** A Branch comparison's two sides as qualified refs (or `HEAD`), diffed as `${base}...${compare}`. */
+export interface BranchOperands {
+  readonly base: string;
+  readonly compare: string;
+}
+
+/** The two sides the Branch pickers show. A side is `null` until it names a ref. */
+export interface BranchSelection {
+  readonly base: string | null;
+  readonly compare: string | null;
+}
+
+/** The scope a Branch comparison and its pick belong to (`workspaceId:threadId`). */
+export function branchScopeKey(workspaceId: string, threadId?: string | null): string {
+  return `${workspaceId}:${threadId ?? ""}`;
+}
+
+/** The sides the Branch pickers show: the user's pick for the scope, else the server default. */
+export function branchSelectionFor(
+  comparison: BranchComparison | null,
+  selection: BranchSelection | undefined,
+): BranchSelection {
+  if (selection) return selection;
+  return { base: comparison?.isComparisonAvailable ? comparison.base : null, compare: comparison?.compare ?? null };
+}
+
+/** The operands the Branch view diffs, or `null` until both sides name a ref. */
+export function effectiveBranchOperands(
+  comparison: BranchComparison | null,
+  selection: BranchSelection | undefined,
+): BranchOperands | null {
+  const { base, compare } = branchSelectionFor(comparison, selection);
+  return base && compare ? { base, compare } : null;
+}
+
+/** A qualified ref as people name it: `refs/heads/x` is `x`, `refs/remotes/origin/x` is `origin/x`. */
+export function refLabel(ref: string): string {
+  if (ref.startsWith("refs/heads/")) return ref.slice("refs/heads/".length);
+  if (ref.startsWith("refs/remotes/")) return ref.slice("refs/remotes/".length);
+  return ref;
+}
+
 /** Diff rendering mode. */
 export type DiffRenderMode = "unified" | "side-by-side";
 
@@ -75,30 +117,31 @@ export const PANEL_DEFAULT_WIDTH = 440;
 /** Wide snap target for the right panel (double-click drag handle). */
 export const PANEL_WIDE_WIDTH = 680;
 const REVIEW_FILES_VISIBILITY_STORAGE_KEY = "mcode.review-files-visible.v1";
+const IGNORE_WHITESPACE_STORAGE_KEY = "mcode.review-ignore-whitespace.v1";
 
-function readReviewFilesVisibility(): Record<string, boolean> {
+function readStoredFlags(storageKey: string): Record<string, boolean> {
   if (typeof localStorage === "undefined") return {};
   try {
-    const raw = localStorage.getItem(REVIEW_FILES_VISIBILITY_STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey);
     if (!raw || raw.length > 100_000) return {};
     const value: unknown = JSON.parse(raw);
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
     return Object.fromEntries(
       Object.entries(value)
         .slice(0, 1_000)
-        .filter(([key, visible]) => key.length > 0 && key.length <= 4_096 && typeof visible === "boolean"),
+        .filter(([key, flag]) => key.length > 0 && key.length <= 4_096 && typeof flag === "boolean"),
     );
   } catch {
     return {};
   }
 }
 
-function writeReviewFilesVisibility(value: Record<string, boolean>): void {
+function writeStoredFlags(storageKey: string, value: Record<string, boolean>): void {
   if (typeof localStorage === "undefined") return;
   try {
-    localStorage.setItem(REVIEW_FILES_VISIBILITY_STORAGE_KEY, JSON.stringify(value));
+    localStorage.setItem(storageKey, JSON.stringify(value));
   } catch {
-    // Visibility still updates for this session when browser persistence is unavailable.
+    // The flag still updates for this session when browser persistence is unavailable.
   }
 }
 
@@ -608,27 +651,18 @@ interface DiffState {
    */
   readonly selectedTurnByThread: Record<string, ReviewTurnSelection>;
   /**
-   * The Branch view's current→selected comparison for the current scope, or null
-   * until the picker resolves it. Drives both the ref picker and the rendered
-   * Branch diff. See
-   * `docs/adr/0007-branch-comparison-default-and-range.md`.
+   * The server's default Branch comparison for the current scope, or null until
+   * the pickers resolve it. See `docs/adr/0028-branch-operands-both-sides.md`.
    */
   branchComparison: BranchComparison | null;
-  /**
-   * The scope key (`workspaceId:threadId`) {@link branchComparison} was resolved
-   * for. Lets the picker re-resolve on a scope change while preserving a user's
-   * picked comparison ref when toggling views within the same scope.
-   */
+  /** The scope key (`workspaceId:threadId`) {@link branchComparison} was resolved for. */
   branchComparisonKey: string | null;
   /**
-   * Per-scope "the user manually picked a Branch comparison operand" flag, keyed
-   * by the same `workspaceId:threadId` scope as {@link branchComparisonKey}. While
-   * set, re-resolution preserves the user's picked ref (when it still exists)
-   * instead of reverting to the server default - so a turn-driven `diffRevision`
-   * bump or a picker remount no longer clobbers the selection. Mirrors
-   * `reviewViewManuallySelectedByThread` (ADR-0011).
+   * The operands the user picked, by the same scope key as {@link branchComparisonKey}.
+   * Kept apart from the default so a re-resolve never clobbers a pick; see
+   * {@link branchSelectionFor}.
    */
-  branchManuallySelectedByScope: Record<string, boolean>;
+  branchSelectionByScope: Record<string, BranchSelection>;
   /**
    * The `diffRevision` each scope's {@link branchComparison} was last resolved at,
    * keyed by scope. Store-backed (not a component ref) so the "already resolved for
@@ -653,6 +687,8 @@ interface DiffState {
   reviewFileJumpRequest: { scopeId: string; path: string; nonce: number; viewKey?: string } | null;
   /** Per-thread line-wrap preference keyed by thread ID. */
   readonly lineWrapByThread: Record<string, boolean>;
+  /** Threads whose Review hides whitespace changes, persisted across reloads. Absent means off. */
+  readonly ignoreWhitespaceByThread: Record<string, boolean>;
   /** Turn snapshots keyed by thread ID. */
   snapshotsByThread: Record<string, TurnSnapshot[]>;
   /** Whether snapshots are currently loading, keyed by thread ID. */
@@ -761,20 +797,16 @@ interface DiffState {
    * or the assistant message ID of the turn to pin.
    */
   setReviewTurnForThread: (threadId: string, selection: ReviewTurnSelection) => void;
-  /**
-   * Apply a freshly resolved Branch comparison for a scope, recording the revision
-   * it was resolved at and preserving the user's manually picked target when that
-   * scope is flagged and the picked ref still exists.
-   */
+  /** Apply a freshly resolved default Branch comparison for a scope, recording the revision it was resolved at. */
   resolveBranchComparison: (
     comparison: BranchComparison,
     key: string,
     revision: number,
   ) => void;
-  /** Override the base ref of the active Branch comparison (no-op if none resolved). */
-  setBranchBase: (ref: string) => void;
-  /** Override the target ref of the active Branch comparison (no-op if none resolved). */
-  setBranchTarget: (ref: string) => void;
+  /** Record the user's Branch operands for a scope. Both sides are stored, so one pick pins the pair. */
+  setBranchSelection: (key: string, selection: BranchSelection) => void;
+  /** Drop the scope's Branch pick so the server default shows again. */
+  clearBranchSelection: (key: string) => void;
   /** Set the Commit view's picked operand by SHA, or `null` to fall back to the latest commit. */
   setSelectedCommitSha: (sha: string | null) => void;
   setRenderMode: (mode: DiffRenderMode) => void;
@@ -786,6 +818,9 @@ interface DiffState {
   clearReviewFileJump: () => void;
   getLineWrap: (threadId: string) => boolean;
   toggleLineWrap: (threadId: string) => void;
+  /** Whether the thread's Review hides whitespace changes. */
+  getIgnoreWhitespace: (threadId: string) => boolean;
+  toggleIgnoreWhitespace: (threadId: string) => void;
   setSnapshots: (threadId: string, snapshots: TurnSnapshot[]) => void;
   setSnapshotsLoading: (threadId: string, loading: boolean) => void;
   /** Store the server's turn list for a thread. */
@@ -812,20 +847,21 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   previewUrlByThread: {},
   rightPanelByThread: {},
   rightPanelFallbackByWorkspace: {},
-  reviewFilesVisibleByScope: readReviewFilesVisibility(),
+  reviewFilesVisibleByScope: readStoredFlags(REVIEW_FILES_VISIBILITY_STORAGE_KEY),
   viewMode: "turn",
   reviewViewByThread: {},
   reviewViewManuallySelectedByThread: {},
   selectedTurnByThread: {},
   branchComparison: null,
   branchComparisonKey: null,
-  branchManuallySelectedByScope: {},
+  branchSelectionByScope: {},
   branchResolvedRevisionByScope: {},
   selectedCommitSha: null,
   renderMode: "unified",
   bulkDiffExpand: null,
   reviewFileJumpRequest: null,
   lineWrapByThread: {},
+  ignoreWhitespaceByThread: readStoredFlags(IGNORE_WHITESPACE_STORAGE_KEY),
   snapshotsByThread: {},
   snapshotsLoadingByThread: {},
   reviewTurnsByThread: {},
@@ -982,7 +1018,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         ...state.reviewFilesVisibleByScope,
         [scopeId]: visible,
       };
-      writeReviewFilesVisibility(reviewFilesVisibleByScope);
+      writeStoredFlags(REVIEW_FILES_VISIBILITY_STORAGE_KEY, reviewFilesVisibleByScope);
       return { reviewFilesVisibleByScope };
     }),
 
@@ -1013,50 +1049,21 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       selectedTurnByThread: { ...s.selectedTurnByThread, [threadId]: selection },
     })),
   resolveBranchComparison: (comparison, key, revision) =>
+    set((s) => ({
+      branchComparison: comparison,
+      branchComparisonKey: key,
+      branchResolvedRevisionByScope: {
+        ...s.branchResolvedRevisionByScope,
+        [key]: revision,
+      },
+    })),
+  setBranchSelection: (key, selection) =>
+    set((s) => ({ branchSelectionByScope: { ...s.branchSelectionByScope, [key]: selection } })),
+  clearBranchSelection: (key) =>
     set((s) => {
-      const sameScope = s.branchComparisonKey === key;
-      const priorTarget = sameScope ? s.branchComparison?.target ?? null : null;
-      // Preserve a manual pick across re-resolution, but only when the chosen ref
-      // still exists in the freshly resolved set (a deleted branch must fall back).
-      const keepTarget =
-        s.branchManuallySelectedByScope[key] === true &&
-        priorTarget !== null &&
-        comparison.refs.some((ref) => ref.name === priorTarget);
-      return {
-        branchComparison: keepTarget
-          ? { ...comparison, target: priorTarget }
-          : comparison,
-        branchComparisonKey: key,
-        branchResolvedRevisionByScope: {
-          ...s.branchResolvedRevisionByScope,
-          [key]: revision,
-        },
-      };
+      const { [key]: _cleared, ...rest } = s.branchSelectionByScope;
+      return { branchSelectionByScope: rest };
     }),
-  setBranchBase: (ref) =>
-    set((s) =>
-      s.branchComparison && s.branchComparisonKey
-        ? {
-            branchComparison: { ...s.branchComparison, base: ref },
-            branchManuallySelectedByScope: {
-              ...s.branchManuallySelectedByScope,
-              [s.branchComparisonKey]: true,
-            },
-          }
-        : {},
-    ),
-  setBranchTarget: (ref) =>
-    set((s) =>
-      s.branchComparison && s.branchComparisonKey
-        ? {
-            branchComparison: { ...s.branchComparison, target: ref },
-            branchManuallySelectedByScope: {
-              ...s.branchManuallySelectedByScope,
-              [s.branchComparisonKey]: true,
-            },
-          }
-        : {},
-    ),
   setSelectedCommitSha: (sha) => set({ selectedCommitSha: sha }),
   setRenderMode: (mode) => set({ renderMode: mode }),
   setBulkDiffExpand: (expand) =>
@@ -1081,6 +1088,15 @@ export const useDiffStore = create<DiffState>((set, get) => ({
           [threadId]: !current,
         },
       };
+    }),
+  getIgnoreWhitespace: (threadId) => get().ignoreWhitespaceByThread[threadId] ?? false,
+  toggleIgnoreWhitespace: (threadId) =>
+    set((state) => {
+      const ignoreWhitespaceByThread = { ...state.ignoreWhitespaceByThread };
+      if (ignoreWhitespaceByThread[threadId]) delete ignoreWhitespaceByThread[threadId];
+      else ignoreWhitespaceByThread[threadId] = true;
+      writeStoredFlags(IGNORE_WHITESPACE_STORAGE_KEY, ignoreWhitespaceByThread);
+      return { ignoreWhitespaceByThread };
     }),
   setSnapshots: (threadId, snapshots) =>
     set((s) => ({
@@ -1142,6 +1158,11 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete previewUrls[threadId];
       const lineWrapByThread = { ...state.lineWrapByThread };
       delete lineWrapByThread[threadId];
+      const ignoreWhitespaceByThread = { ...state.ignoreWhitespaceByThread };
+      if (threadId in ignoreWhitespaceByThread) {
+        delete ignoreWhitespaceByThread[threadId];
+        writeStoredFlags(IGNORE_WHITESPACE_STORAGE_KEY, ignoreWhitespaceByThread);
+      }
       const rightPanelByThread = { ...state.rightPanelByThread };
       delete rightPanelByThread[threadId];
       const reviewViewByThread = { ...state.reviewViewByThread };
@@ -1154,9 +1175,9 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete diffRevisionByScope[threadId];
       const reviewFilesVisibleByScope = { ...state.reviewFilesVisibleByScope };
       delete reviewFilesVisibleByScope[threadId];
-      writeReviewFilesVisibility(reviewFilesVisibleByScope);
-      const branchManuallySelectedByScope = omitByKeySuffix(
-        state.branchManuallySelectedByScope,
+      writeStoredFlags(REVIEW_FILES_VISIBILITY_STORAGE_KEY, reviewFilesVisibleByScope);
+      const branchSelectionByScope = omitByKeySuffix(
+        state.branchSelectionByScope,
         `:${threadId}`,
       );
       const branchResolvedRevisionByScope = omitByKeySuffix(
@@ -1173,13 +1194,14 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         reviewTurnsErrorByThread: reviewTurnsErrors,
         previewUrlByThread: previewUrls,
         lineWrapByThread,
+        ignoreWhitespaceByThread,
         rightPanelByThread,
         reviewViewByThread,
         reviewViewManuallySelectedByThread,
         selectedTurnByThread,
         diffRevisionByScope,
         reviewFilesVisibleByScope,
-        branchManuallySelectedByScope,
+        branchSelectionByScope,
         branchResolvedRevisionByScope,
         inlineDiffCache,
       };
@@ -1191,7 +1213,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         key.startsWith(cachePrefix),
       );
       const hasBranchScope =
-        Object.keys(state.branchManuallySelectedByScope).some((key) =>
+        Object.keys(state.branchSelectionByScope).some((key) =>
           key.startsWith(cachePrefix),
         ) ||
         Object.keys(state.branchResolvedRevisionByScope).some((key) =>
@@ -1212,13 +1234,13 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete diffRevisionByScope[workspaceId];
       const reviewFilesVisibleByScope = { ...state.reviewFilesVisibleByScope };
       delete reviewFilesVisibleByScope[workspaceId];
-      writeReviewFilesVisibility(reviewFilesVisibleByScope);
+      writeStoredFlags(REVIEW_FILES_VISIBILITY_STORAGE_KEY, reviewFilesVisibleByScope);
       return {
         rightPanelFallbackByWorkspace,
         diffRevisionByScope,
         reviewFilesVisibleByScope,
-        branchManuallySelectedByScope: omitByKeyPrefix(
-          state.branchManuallySelectedByScope,
+        branchSelectionByScope: omitByKeyPrefix(
+          state.branchSelectionByScope,
           cachePrefix,
         ),
         branchResolvedRevisionByScope: omitByKeyPrefix(

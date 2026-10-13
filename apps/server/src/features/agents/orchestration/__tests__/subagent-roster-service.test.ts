@@ -212,7 +212,7 @@ describe("SubagentRosterService", () => {
   });
 
   it("uses only persisted evidence for Copilot tiers and denies other parents' details", () => {
-    const { db, call, service } = harness("copilot", { ...SUBAGENT_REPORTING, copilot: { childTranscript: false, childSteps: false } });
+    const { db, call, children, service } = harness("copilot");
     message(db, "message", "copilot");
     call("empty", "message"); call("with-steps", "message");
     call("read", "message", { toolName: "Read", parentToolCallId: "with-steps" });
@@ -221,6 +221,10 @@ describe("SubagentRosterService", () => {
     ]);
     expect(() => service.loadDetail({ ...request, entryId: "call:empty" })).toThrow();
     expect(() => service.loadDetail({ ...request, entryId: "call:foreign" })).toThrow();
+    call("TOOL_6", "message", { subagentPrompt: "AGENT_9" });
+    children.push({ ...child("toolCall:TOOL_6"), provider: "copilot" });
+    expect(service.loadRoster(request).entries.find((row) => row.id === "call:TOOL_6"))
+      .toMatchObject({ id: "call:TOOL_6", provider: "copilot", tier: "transcript", childThreadId: "child-1", prompt: "AGENT_9", canStop: false });
   });
 
   it("returns the last 32 steps in order and the root result summary", () => {

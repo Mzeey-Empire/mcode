@@ -3,7 +3,7 @@ import type { ReviewComparison, ReviewFileChange, ReviewTurn } from "@mcode/cont
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { sinceLookedBaseline, threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { useWorkspaceFileRefresh } from "@/features/projects/files/useWorkspaceFileRefresh";
-import { useDiffStore, type ReviewTurnSelection } from "@/stores/diffStore";
+import { branchScopeKey, effectiveBranchOperands, useDiffStore, type BranchOperands, type BranchSelection, type ReviewTurnSelection } from "@/stores/diffStore";
 import { getTransport } from "@/transport";
 import { ReviewHeader } from "./ReviewHeader";
 import { FileList } from "./FileList";
@@ -44,13 +44,15 @@ interface SettledComparison {
   readonly turnMessageId: string | null;
   /** The seen baseline a Since you looked comparison loaded after, which names its patches. */
   readonly afterSequence?: number;
+  readonly ignoreWhitespace: boolean;
 }
 
 interface ComparisonLoadInput {
   readonly activeThreadId: string | null;
   readonly activeWorkspaceId: string | null;
   readonly branchComparison: DiffStoreState["branchComparison"];
-  readonly branchRange: { readonly base: string; readonly target: string } | null;
+  readonly branchRange: BranchOperands | null;
+  readonly ignoreWhitespace: boolean;
   readonly mutableComparisonRevision: number;
   readonly selectedCommitSha: string | null;
   /** The Turn view's resolved turn: the pinned one, or the newest while following latest. */
@@ -141,13 +143,15 @@ async function loadGitComparison(
         threadId: input.activeThreadId ?? undefined,
         sha: input.viewMode === "commit" ? input.selectedCommitSha ?? undefined : undefined,
         base: input.viewMode === "branch" ? input.branchRange?.base : undefined,
-        target: input.viewMode === "branch" ? input.branchRange?.target : undefined,
+        compare: input.viewMode === "branch" ? input.branchRange?.compare : undefined,
+        ignoreWhitespace: input.ignoreWhitespace,
       });
   return {
     outcome,
     git: { source: metadata.source, id: metadata.id },
     cacheVersion: input.mutableComparisonRevision,
     turnMessageId: null,
+    ignoreWhitespace: input.ignoreWhitespace,
   };
 }
 
@@ -170,7 +174,7 @@ function getGitComparisonMetadata(
 function unavailableBranchOutcome(input: ComparisonLoadInput): ReviewOutcome | null {
   if (input.viewMode !== "branch") return null;
   if (input.branchComparison?.isUnborn) return { status: "unavailable", reason: "unborn" };
-  if (input.branchComparison?.isComparisonAvailable === false || !input.branchRange) {
+  if (!input.branchRange) {
     return { status: "unavailable", reason: "no-base" };
   }
   return null;
@@ -178,12 +182,14 @@ function unavailableBranchOutcome(input: ComparisonLoadInput): ReviewOutcome | n
 
 function getGitComparisonId(input: ComparisonLoadInput & { readonly viewMode: GitView }): string {
   if (input.viewMode === "commit") return input.selectedCommitSha!;
-  if (input.viewMode === "branch") return `${input.branchRange!.base}...${input.branchRange!.target}`;
+  if (input.viewMode === "branch") return `${input.branchRange!.base}...${input.branchRange!.compare}`;
   return input.activeWorkspaceId!;
 }
 
 async function loadCumulativeComparison(input: ComparisonLoadInput): Promise<LoadedComparison> {
-  const result = await getTransport().getCumulativeDiffStats(input.activeThreadId!);
+  const result = await getTransport().getCumulativeDiffStats(input.activeThreadId!, undefined, {
+    ignoreWhitespace: input.ignoreWhitespace,
+  });
   return {
     outcome: result.status === "ready"
       ? { status: "ready", comparison: withSnapshotFileFacts(result.comparison, input.snapshots ?? []) }
@@ -191,15 +197,24 @@ async function loadCumulativeComparison(input: ComparisonLoadInput): Promise<Loa
     git: null,
     cacheVersion: input.snapshotVersion,
     turnMessageId: null,
+    ignoreWhitespace: input.ignoreWhitespace,
   };
 }
 
 async function loadSinceLookedComparison(input: ComparisonLoadInput): Promise<LoadedComparison> {
   const baseline = input.sinceLookedBaseline;
   if (baseline === null) {
-    return { outcome: { status: "unselected" }, git: null, cacheVersion: input.snapshotVersion, turnMessageId: null };
+    return {
+      outcome: { status: "unselected" },
+      git: null,
+      cacheVersion: input.snapshotVersion,
+      turnMessageId: null,
+      ignoreWhitespace: input.ignoreWhitespace,
+    };
   }
-  const result = await getTransport().getCumulativeDiffStats(input.activeThreadId!, baseline);
+  const result = await getTransport().getCumulativeDiffStats(input.activeThreadId!, baseline, {
+    ignoreWhitespace: input.ignoreWhitespace,
+  });
   // A turn whose earlier attempt settled before the baseline still gets its
   // paths and counts from the server, but its change type falls back to "modified".
   const snapshots = (input.snapshots ?? []).filter((snapshot) => snapshot.message_sequence > baseline);
@@ -211,6 +226,7 @@ async function loadSinceLookedComparison(input: ComparisonLoadInput): Promise<Lo
     cacheVersion: input.snapshotVersion,
     turnMessageId: null,
     afterSequence: baseline,
+    ignoreWhitespace: input.ignoreWhitespace,
   };
 }
 
@@ -240,15 +256,19 @@ async function loadTurnDiffComparison(input: ComparisonLoadInput): Promise<Loade
       git: null,
       cacheVersion: input.mutableComparisonRevision,
       turnMessageId: null,
+      ignoreWhitespace: input.ignoreWhitespace,
     };
   }
-  const outcome = await getTransport().getTurnDiffComparison(input.activeThreadId!, input.turnMessageId);
+  const outcome = await getTransport().getTurnDiffComparison(input.activeThreadId!, input.turnMessageId, {
+    ignoreWhitespace: input.ignoreWhitespace,
+  });
   return {
     outcome,
     git: null,
     // A live turn's diff id carries its revision, so it also versions the patch cache.
     cacheVersion: readyComparison(outcome)?.turnDiff?.id ?? input.mutableComparisonRevision,
     turnMessageId: input.turnMessageId,
+    ignoreWhitespace: input.ignoreWhitespace,
   };
 }
 
@@ -266,10 +286,12 @@ interface DiffPanelStore {
   readonly activeThreadClientOnly: boolean;
   readonly activeWorkspaceId: string | null;
   readonly branchComparison: DiffStoreState["branchComparison"];
+  readonly branchSelection: BranchSelection | undefined;
   readonly bumpDiffRevision: DiffStoreState["bumpDiffRevision"];
   readonly diffRevision: number;
   readonly diffScopeId: string | null;
   readonly filesVisible: boolean;
+  readonly ignoreWhitespace: boolean;
   readonly requestReviewFileJump: DiffStoreState["requestReviewFileJump"];
   readonly selectedCommitSha: DiffStoreState["selectedCommitSha"];
   readonly turnSelection: ReviewTurnSelection;
@@ -305,6 +327,7 @@ function useDiffPanelStore(): DiffPanelStore {
     activeThreadId ? (state.snapshotsLoadingByThread[activeThreadId] ?? false) : false,
   );
   const diffScopeId = activeThreadId ?? activeWorkspaceId;
+  const branchScope = activeWorkspaceId ? branchScopeKey(activeWorkspaceId, activeThreadId) : null;
   const filesVisible = useDiffStore((state) =>
     diffScopeId ? (state.reviewFilesVisibleByScope[diffScopeId] ?? false) : false,
   );
@@ -316,11 +339,17 @@ function useDiffPanelStore(): DiffPanelStore {
     activeThreadId,
     activeThreadClientOnly,
     activeWorkspaceId,
-    branchComparison: useDiffStore((state) => state.branchComparison),
+    branchComparison: useDiffStore((state) =>
+      branchScope && state.branchComparisonKey === branchScope ? state.branchComparison : null,
+    ),
+    branchSelection: useDiffStore((state) => (branchScope ? state.branchSelectionByScope[branchScope] : undefined)),
     bumpDiffRevision: useDiffStore((state) => state.bumpDiffRevision),
     diffRevision,
     diffScopeId,
     filesVisible,
+    ignoreWhitespace: useDiffStore((state) =>
+      activeThreadId ? state.getIgnoreWhitespace(activeThreadId) : false,
+    ),
     requestReviewFileJump: useDiffStore((state) => state.requestReviewFileJump),
     selectedCommitSha: useDiffStore((state) => state.selectedCommitSha),
     // An absent selection follows the latest turn.
@@ -404,7 +433,7 @@ function useFilesPanelController({
 }
 
 interface ComparisonController {
-  readonly branchRange: { readonly base: string; readonly target: string } | null;
+  readonly branchRange: BranchOperands | null;
   readonly comparisonFiles: readonly ReviewFileChange[];
   readonly comparisonLoading: boolean;
   readonly comparisonPending: boolean;
@@ -426,8 +455,8 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
   const { turnMessageId, reviewTurnsLoaded, reviewTurnsError, turnLive } = turnComparisonFacts(store);
   const mutableComparisonRevision = getMutableComparisonRevision(viewMode, store.diffRevision, turnLive);
   const branchRange = useMemo(
-    () => getBranchRange(store.branchComparison),
-    [store.branchComparison],
+    () => effectiveBranchOperands(store.branchComparison, store.branchSelection),
+    [store.branchComparison, store.branchSelection],
   );
   // Following latest keeps one identity across turns, so the shown diff stays
   // up until the next turn's comparison settles instead of flashing to loading.
@@ -445,6 +474,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     activeWorkspaceId: store.activeWorkspaceId,
     branchComparison: store.branchComparison,
     branchRange,
+    ignoreWhitespace: store.ignoreWhitespace,
     mutableComparisonRevision,
     selectedCommitSha: store.selectedCommitSha,
     turnMessageId,
@@ -464,6 +494,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     store.activeThreadId,
     store.activeWorkspaceId,
     store.branchComparison,
+    store.ignoreWhitespace,
     store.selectedCommitSha,
     store.sinceLookedBaseline,
     store.snapshots,
@@ -606,7 +637,14 @@ function reviewTurnsFetchKey(store: DiffPanelStore, snapshotVersion: string, tur
 
 /** A thrown request carries no typed outcome, so it settles as a failure with its message. */
 function failedComparison(identity: string, error: unknown): SettledComparison {
-  return { identity, outcome: requestFailedOutcome(error), git: null, cacheVersion: "", turnMessageId: null };
+  return {
+    identity,
+    outcome: requestFailedOutcome(error),
+    git: null,
+    cacheVersion: "",
+    turnMessageId: null,
+    ignoreWhitespace: false,
+  };
 }
 
 /** A running turn's evidence moves with the worktree, so it refetches on each mutation; a settled turn never changes. */
@@ -619,18 +657,11 @@ function isTurnLive(reviewTurns: readonly ReviewTurn[] | undefined, turnMessageI
   return reviewTurns?.some((turn) => turn.messageId === turnMessageId && turn.phase === "live") ?? false;
 }
 
-function getBranchRange(
-  branchComparison: DiffStoreState["branchComparison"],
-): { readonly base: string; readonly target: string } | null {
-  if (!branchComparison?.base || !branchComparison.target) return null;
-  return { base: branchComparison.target, target: branchComparison.base };
-}
-
 function getComparisonIdentity(
   diffScopeId: string | null,
   viewMode: DiffViewMode,
   selectedCommitSha: string | null,
-  branchRange: { readonly base: string; readonly target: string } | null,
+  branchRange: BranchOperands | null,
   turnSelection: ReviewTurnSelection,
   sinceLookedBaseline: number | null,
 ): string {
@@ -641,12 +672,12 @@ function getComparisonIdentity(
 function comparisonOperand(
   viewMode: DiffViewMode,
   selectedCommitSha: string | null,
-  branchRange: { readonly base: string; readonly target: string } | null,
+  branchRange: BranchOperands | null,
   turnSelection: ReviewTurnSelection,
   sinceLookedBaseline: number | null,
 ): string {
   if (viewMode === "commit") return selectedCommitSha ?? "";
-  if (viewMode === "branch" && branchRange) return `${branchRange.base}...${branchRange.target}`;
+  if (viewMode === "branch" && branchRange) return `${branchRange.base}...${branchRange.compare}`;
   if (viewMode === "turn") return turnSelection;
   if (viewMode === "since-looked") return String(sinceLookedBaseline ?? "");
   return "";
@@ -926,6 +957,7 @@ function ReadyComparisonView({
         id={settled.git.id}
         cacheVersion={settled.cacheVersion}
         threadId={scopeId}
+        ignoreWhitespace={settled.ignoreWhitespace}
       />
     );
   }
@@ -935,6 +967,7 @@ function ReadyComparisonView({
         threadId={scopeId}
         comparison={comparison}
         cacheVersion={settled.cacheVersion}
+        ignoreWhitespace={settled.ignoreWhitespace}
         afterSequence={settled.afterSequence}
       />
     );
@@ -950,6 +983,7 @@ function ReadyComparisonView({
         id={turnDiffId}
         threadId={scopeId}
         cacheVersion={settled.cacheVersion}
+        ignoreWhitespace={settled.ignoreWhitespace}
         defaultFilesExpanded
         jumpViewKey={`turn:${settled.turnMessageId ?? ""}`}
       />

@@ -191,7 +191,7 @@ export async function resolveThreadOverviewChangeSummary({
     workspaceId: thread.workspace_id,
     view: "branch",
     base: state.branchDefault.base,
-    target: state.branchDefault.compare,
+    compare: state.branchDefault.compare,
     threadId: thread.id,
   });
   return {

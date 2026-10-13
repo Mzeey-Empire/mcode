@@ -45,7 +45,7 @@ function routerDeps(workspaceRepo: WorkspaceRepo, threadRepo: ThreadRepo): GitRo
     gitRepository: service,
     gitWorktrees: new GitWorktreeService(workspaceRepo, new RealGitExecutor(), hostRuntime),
     gitComparison: {
-      listCommits: unexpected, readCommitDiff: unexpected, listCommitChangedFiles: unexpected,
+      listCommits: unexpected, searchCommits: unexpected, readCommitDiff: unexpected, listCommitChangedFiles: unexpected,
       readWorkingTreeDiff: unexpected, readFileAtRef: unexpected,
       readBranchComparisonDiff: unexpected,
       resolveBranchComparison: unexpected, readReviewState: unexpected, readReviewComparison: unexpected,
@@ -233,6 +233,21 @@ describe("GitRepositoryService.listRefsAt", () => {
     const matches = await list({ purpose: "new-thread", query: "branch-01", limit: 3 });
     expect(matches.total).toBe(10);
     expect(matches.items.map((item) => item.kind === "ref" ? item.shortName : item.kind)).toEqual(["branch-010", "branch-011", "branch-012"]);
+  });
+
+  it("marks local main as the default in a repo with no origin/HEAD", async () => {
+    const local = NodePath.join(directory, "local-only");
+    const run = (...args: string[]) => NodeChildProcess.execFileSync("git", ["-C", local, ...args], { encoding: "utf8" });
+    NodeFS.mkdirSync(local);
+    run("init", "-b", "main");
+    run("-c", "user.name=Refs", "-c", "user.email=refs@example.invalid", "-c", "commit.gpgSign=false",
+      "-c", `core.hooksPath=${directory}`, "commit", "--allow-empty", "-m", "base");
+    run("checkout", "-b", "feature");
+    const result = await list({ purpose: "review", side: "local" }, local);
+    expect(result.items).toMatchObject([
+      { fullName: "refs/heads/main", isDefault: true },
+      { fullName: "refs/heads/feature", isDefault: false },
+    ]);
   });
 
   it("returns git_failed and the first stderr line for a corrupt ref", async () => {

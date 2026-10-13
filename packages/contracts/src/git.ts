@@ -99,6 +99,30 @@ export const GitListErrorSchema = lazySchema(() => z.object({
 /** Git target listing failure. */
 export type GitListError = z.infer<ReturnType<typeof GitListErrorSchema>>;
 
+/** Search the complete ahead-of-base commit range for a checkout. */
+export const GitSearchCommitsParamsSchema = lazySchema(() => z.object({
+  workspaceId: z.string().min(1).max(256),
+  threadId: z.string().min(1).max(256).optional(),
+  query: z.string().max(200).optional(),
+  offset: z.number().int().nonnegative(),
+  limit: z.number().int().min(1).max(100),
+}));
+/** Commit search input. */
+export type GitSearchCommitsParams = z.infer<ReturnType<typeof GitSearchCommitsParamsSchema>>;
+
+/** A page of commit matches, or a Git failure that must remain visible. */
+export const GitSearchCommitsResultSchema = lazySchema(() => z.discriminatedUnion("ok", [
+  z.object({
+    ok: z.literal(true),
+    commits: z.array(z.object({ sha: z.string(), shortSha: z.string(), subject: z.string(), date: z.string() })).max(100),
+    matchCount: z.number().int().nonnegative(),
+    totalCount: z.number().int().nonnegative(),
+  }),
+  z.object({ ok: z.literal(false), error: GitListErrorSchema() }),
+]));
+/** Commit search response. */
+export type GitSearchCommitsResult = z.infer<ReturnType<typeof GitSearchCommitsResultSchema>>;
+
 /** Listing input: only Review accepts and requires a side. */
 export const GitRefsListParamsSchema = lazySchema(() => {
   const common = {
@@ -137,20 +161,14 @@ export const GitRemoteUrlSchema = lazySchema(() => z.object({
 export type GitRemoteUrl = z.infer<ReturnType<typeof GitRemoteUrlSchema>>;
 
 /**
- * A resolved Branch comparison: the base→target ref pair the Review tab's Branch
- * view diffs (always three-dot, `base...target`), plus the refs available to
- * populate the pickers. The default pair is resolved per
- * `docs/adr/0007-branch-comparison-default-and-range.md` before the diff call.
- * `base`/`target` are null only when no comparison can be formed (unborn branch,
- * or no base could be detected and the user must pick one).
+ * Qualified operands for a three-dot `base...compare` diff. Default-branch
+ * comparisons show unpushed changes; detached checkouts compare HEAD to their saved base.
  */
 export const BranchComparisonSchema = lazySchema(() => z.object({
   /** Base ref (the "from" side); null when unresolved (unborn / no base). */
   base: z.string().nullable(),
-  /** Target ref (the "to" side); null when unresolved (unborn / no base). */
-  target: z.string().nullable(),
-  /** Refs available to populate the base/target pickers (local, remote, worktree). */
-  refs: z.array(GitBranchSchema()),
+  /** Qualified compare ref, or HEAD for a detached checkout; null when unborn. */
+  compare: z.string().nullable(),
   /** True when HEAD has no commits yet — the diff is an explicit empty state. */
   isUnborn: z.boolean(),
   /**

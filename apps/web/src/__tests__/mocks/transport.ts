@@ -168,6 +168,7 @@ export const mockTransport: McodeTransport = {
   countBlockedThreadCleanupCandidates: vi.fn().mockResolvedValue({ count: 0 }),
   retryThreadCleanup: vi.fn().mockResolvedValue(createMockThread()),
   listRefs: vi.fn().mockResolvedValue({ ok: true, items: [], total: 0, nextCursor: null }),
+  searchCommits: vi.fn().mockResolvedValue({ ok: true, commits: [], matchCount: 0, totalCount: 0 }),
   listPullRequestTargets: vi.fn().mockResolvedValue({ ok: true, items: [], total: 0, nextCursor: null }),
   getCurrentBranch: vi.fn().mockResolvedValue("main"),
   checkoutBranch: vi.fn().mockResolvedValue(undefined),
@@ -374,8 +375,7 @@ export const mockTransport: McodeTransport = {
     .fn()
     .mockResolvedValue({
       base: null,
-      target: null,
-      refs: [],
+      compare: null,
       isUnborn: false,
       isComparisonAvailable: false,
     }),
