@@ -782,4 +782,10 @@ pre:not([data-diff-type="split"][data-overflow="wrap"], [data-dehydrated][data-d
 [data-separator="line-info-basic"][data-expand-index] [data-separator-wrapper] {
   grid-template-columns: 32px 1fr;
 }
+/* Pierre lays touch multi-button bands out as two side-by-side buttons, not stacked ones. */
+@media (pointer: coarse) {
+  [data-separator="line-info-basic"][data-expand-index] [data-separator-wrapper][data-separator-multi-button] {
+    grid-template-columns: 34px 34px 1fr;
+  }
+}
 `;
