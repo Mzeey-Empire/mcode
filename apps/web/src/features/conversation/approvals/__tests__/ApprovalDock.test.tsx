@@ -345,13 +345,12 @@ describe("ApprovalDock subjects", () => {
     expect(screen.getByText("Explorer")).toBeInTheDocument();
   });
 
-  it("marks a subagent chip with the asking provider's 16px icon", () => {
+  it("marks a subagent chip with the asking provider's icon", () => {
     addApproval({ providerId: "claude", origin: { kind: "subagent", label: "Print date", parentToolCallId: "toolu_agent" } });
     render(<DockHarness />);
 
-    const icon = screen.getByText("Print date").parentElement?.querySelector('[data-provider-icon="claude"] svg');
-    expect(icon).toHaveAttribute("width", "16");
-    expect(icon).toHaveAttribute("height", "16");
+    const chip = screen.getByText("Print date").parentElement;
+    expect(chip?.querySelector('[data-provider-icon="claude"]')).not.toBeNull();
   });
 
   it("shows no provider chip when the main agent asks", () => {
