@@ -311,6 +311,46 @@ describe("browser automation renderer scope", () => {
     store.unregisterTarget(workspaceId, threadId, tabId);
   });
 
+  it("lets the user leave Responsive mode after the page target is refreshed", async () => {
+    const workspaceId = "workspace-viewport-refresh";
+    const threadId = "thread-viewport-refresh";
+    const tabId = "tab-viewport-refresh";
+    const key = browserAutomationTargetKey(workspaceId, threadId, tabId);
+    const store = useBrowserAutomationStore.getState();
+    store.unregisterTarget(workspaceId, threadId, tabId);
+    store.registerTarget(workspaceId, threadId, tabId);
+    const target = useBrowserAutomationStore.getState().liveTargets.get(key)!;
+    const coordinator = createViewportCoordinator({
+      target: { threadId, tabId },
+      initial: { width: 1280, height: 800 },
+      targetGeneration: target.revision,
+      surface: {
+        setViewport: (size, operation, current) => useBrowserAutomationStore.getState().applyViewportIfCurrent(
+          workspaceId, threadId, tabId, current, operation.targetGeneration, size,
+        ),
+        resetViewport: (operation, current) => useBrowserAutomationStore.getState().resetViewportIfCurrent(
+          workspaceId, threadId, tabId, current, operation.targetGeneration,
+        ),
+        readViewport: () => useBrowserAutomationStore.getState().viewportByTarget.get(key) ?? null,
+        waitForLayout: async () => {},
+        isCurrent: (operation, current) => {
+          const state = useBrowserAutomationStore.getState();
+          return state.viewportCoordinators.get(key) === current &&
+            state.liveTargets.get(key)?.revision === operation.targetGeneration;
+        },
+      },
+    });
+    store.setViewportCoordinator(workspaceId, threadId, tabId, coordinator);
+
+    store.refreshTarget(workspaceId, threadId, tabId);
+
+    expect(await coordinator.requestUserMode("responsive")).toMatchObject({ status: "applied" });
+    expect(await coordinator.requestUserMode("regular")).toMatchObject({ status: "applied" });
+    expect(coordinator.snapshot().mode).toBe("regular");
+
+    store.unregisterTarget(workspaceId, threadId, tabId);
+  });
+
   it("interrupts a detached viewport host without creating a Regular-mode viewport on remount", async () => {
     const workspaceId = "workspace-viewport-remount";
     const threadId = "thread-viewport-remount";

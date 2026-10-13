@@ -249,9 +249,9 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
       viewportCoordinators.delete(key);
       return { liveTargets, viewportCoordinators };
     }),
-  refreshTarget: (workspaceId, threadId, tabId) =>
+  refreshTarget: (workspaceId, threadId, tabId) => {
+    const key = browserAutomationTargetKey(workspaceId, threadId, tabId);
     set((state) => {
-      const key = browserAutomationTargetKey(workspaceId, threadId, tabId);
       if (!state.liveTargets.has(key)) return state;
       const current = browserTargetRegistry.refresh(workspaceId, threadId, tabId);
       if (!current) return state;
@@ -262,7 +262,13 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
         lastUsedAt: Date.now(),
       });
       return { liveTargets };
-    }),
+    });
+    // Host viewport writes are accepted only at the live revision, and the desktop
+    // coordinator learns its generation once at mount. Without this, a page switch
+    // makes every later user resize or reset stale and Responsive mode can't be left.
+    const revision = get().liveTargets.get(key)?.revision;
+    if (revision !== undefined) get().viewportCoordinators.get(key)?.setTargetGeneration(revision);
+  },
   detachTarget: (workspaceId, threadId, tabId) => {
     const key = browserAutomationTargetKey(workspaceId, threadId, tabId);
     const coordinator = useBrowserAutomationStore.getState().viewportCoordinators.get(key);
