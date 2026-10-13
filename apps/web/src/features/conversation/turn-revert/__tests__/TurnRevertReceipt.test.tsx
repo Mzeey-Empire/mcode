@@ -81,6 +81,28 @@ describe("TurnRevertReceipt", () => {
     expect(transport.undoTurnRevert).toHaveBeenCalledWith("thread-1", "revert-1", expect.any(String));
   });
 
+  it("removes Undo after a successful undo even when the timeline is paged back", async () => {
+    transport.undoTurnRevert.mockResolvedValue(undone);
+    useThreadStore.setState({ records: new Map([["thread-1", { ...createEmptyThreadRecord(), messages: [revertReceipt], hasNewerMessages: true }]]) });
+    render(<Timeline />);
+    await userEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument());
+    expect(screen.queryByText("Undid revert")).not.toBeInTheDocument();
+  });
+
+  it("keeps Undo when the only notice naming the revert is an interrupted undo", () => {
+    const interruptedUndo = createMockMessage({
+      id: "receipt-3",
+      thread_id: "thread-1",
+      role: "system",
+      content: "Undo of Turn 3 was interrupted. Files were put back.",
+      systemNotice: { kind: "turn-revert-interrupted", presentation: "timeline", revertId: "revert-3", undoesRevertId: "revert-1" },
+    });
+    seedMessages([revertReceipt, interruptedUndo]);
+    render(<Timeline />);
+    expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
+  });
+
   it("has no Undo once a persisted undo receipt names the revert", () => {
     seedMessages([revertReceipt, undoReceipt]);
     render(<Timeline />);
@@ -115,6 +137,13 @@ describe("TurnRevertReceipt", () => {
     render(<TurnRevertReceipt message={interrupted} />);
     expect(screen.getByText("Revert of Turn 3 was interrupted. Files were put back.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
+  });
+
+  it("leaves a receipt pushed mid-load to the load, so the load still commits", async () => {
+    const { acceptTurnRevert } = await import("../useTurnRevert");
+    useThreadStore.setState({ records: new Map([["thread-1", { ...createEmptyThreadRecord(), loading: true }]]) });
+    acceptTurnRevert({ threadId: "thread-1", receipt: undoReceipt });
+    expect(useThreadStore.getState().records.get("thread-1")?.messages).toEqual([]);
   });
 
   it("shows a receipt another window committed once, through the push", async () => {

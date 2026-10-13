@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -158,11 +158,11 @@ function useCollapsedFolders(tree: ChangesTree, treeKey: string) {
  * line counts and a way into Review. Collapsed it is a single summary row.
  */
 export function TurnChangesBar({ threadId, messageId, filesChanged, isLatestTurn, manualExpandRef }: TurnChangesBarProps) {
-  const { changes, snapshot, serverMessageId, listSettled } = useTurnChanges(threadId, messageId, filesChanged);
+  const { changes, snapshot, serverMessageId, listLoaded } = useTurnChanges(threadId, messageId, filesChanged);
   const [expanded, toggleExpanded, collapseList] = useTurnExpanded(messageId, isLatestTurn, manualExpandRef);
   const [confirming, setConfirming] = useState(false);
   const allReverted = allFilesReverted(changes);
-  const revertDisabledReason = useRevertTurnDisabledReason(threadId, { snapshot, listSettled, allReverted });
+  const revertDisabledReason = useRevertTurnDisabledReason(threadId, { snapshot, listLoaded, allReverted });
   const files = useMemo(() => listedFiles(changes), [changes]);
   const treeKey = files.map((file) => file.path).join("\n");
   const tree = useMemo(() => buildChangesTree(files), [files]);
@@ -185,7 +185,11 @@ export function TurnChangesBar({ threadId, messageId, filesChanged, isLatestTurn
     collapseList();
     setConfirming(true);
   }, [collapseList]);
-  const closeRevert = useCallback(() => setConfirming(false), []);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const closeRevert = useCallback(() => {
+    setConfirming(false);
+    menuTriggerRef.current?.focus();
+  }, []);
 
   const folderIds = useMemo(() => allFolderIds(tree), [tree]);
   const collapseControl = expanded && folderIds.length > 0
@@ -208,6 +212,7 @@ export function TurnChangesBar({ threadId, messageId, filesChanged, isLatestTurn
       allReverted={allReverted}
       onRevertTurn={openRevert}
       revertDisabledReason={revertDisabledReason}
+      menuTriggerRef={menuTriggerRef}
     />
   );
 
@@ -234,11 +239,11 @@ export function TurnChangesBar({ threadId, messageId, filesChanged, isLatestTurn
           {header}
         </div>
       );
-  if (!confirming || !threadId) return bar;
+  // One wrapper in both states keeps the bar mounted, so closing the confirm can return focus to its menu.
   return (
     <div className="flex flex-col gap-2">
       {bar}
-      <TurnRevertBarConfirm threadId={threadId} messageId={serverMessageId} onClose={closeRevert} />
+      {confirming && threadId && <TurnRevertBarConfirm threadId={threadId} messageId={serverMessageId} onClose={closeRevert} />}
     </div>
   );
 }
@@ -262,6 +267,7 @@ interface BarHeaderProps {
   readonly allReverted: boolean;
   readonly onRevertTurn: () => void;
   readonly revertDisabledReason: string | null;
+  readonly menuTriggerRef: RefObject<HTMLButtonElement | null>;
 }
 
 function BarHeader(props: BarHeaderProps) {
@@ -309,6 +315,7 @@ function BarHeader(props: BarHeaderProps) {
         onCopyFilePaths={onCopyPaths}
         onRevertTurn={props.onRevertTurn}
         revertDisabledReason={props.revertDisabledReason}
+        triggerRef={props.menuTriggerRef}
       />
     </div>
   );

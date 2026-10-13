@@ -27,15 +27,21 @@ function needsRangeStats(snapshot: TurnSnapshot): boolean {
   return !recordedEffects(snapshot) || snapshot.attempt_count > 1;
 }
 
+interface SnapshotListFetch {
+  readonly threadId: string;
+  readonly ok: boolean;
+}
+
 /**
  * Fetches the thread's snapshot list when the store lacks it, or when the
- * cached list predates this turn. Returns the thread id whose fetch settled.
+ * cached list predates this turn. Returns the thread's settled fetch, if any.
  */
 function useSnapshotList(
   threadId: string | null | undefined,
   hasSnapshot: boolean,
-): string | null {
-  const [settledFor, setSettledFor] = useState<string | null>(null);
+): SnapshotListFetch | null {
+  const [settled, setSettled] = useState<SnapshotListFetch | null>(null);
+  const settledFor = settled?.threadId ?? null;
 
   useEffect(() => {
     if (!threadId || hasSnapshot || settledFor === threadId) return;
@@ -44,17 +50,22 @@ function useSnapshotList(
       .listSnapshots(threadId)
       .then((snapshots) => {
         useDiffStore.getState().setSnapshots(threadId, snapshots);
-        if (!cancelled) setSettledFor(threadId);
+        if (!cancelled) setSettled({ threadId, ok: true });
       })
       .catch(() => {
-        if (!cancelled) setSettledFor(threadId);
+        if (!cancelled) setSettled({ threadId, ok: false });
       });
     return () => {
       cancelled = true;
     };
   }, [threadId, hasSnapshot, settledFor]);
 
-  return settledFor;
+  return settled;
+}
+
+function snapshotListState(threadId: string | null | undefined, settled: SnapshotListFetch | null) {
+  const own = !threadId || settled?.threadId === threadId;
+  return { listSettled: own, listLoaded: own && (!threadId || settled?.ok === true) };
 }
 
 function useRangeStats(snapshotId: string | null): StatsResult | null {
@@ -109,8 +120,8 @@ export interface TurnChangesResult {
   readonly snapshot: TurnSnapshot | undefined;
   /** Server id of the turn's assistant message. */
   readonly serverMessageId: string;
-  /** The thread's snapshot list has loaded, so a missing snapshot is really gone. */
-  readonly listSettled: boolean;
+  /** The thread's snapshot list loaded, so a missing snapshot is really gone; a failed fetch proves nothing. */
+  readonly listLoaded: boolean;
 }
 
 /**
@@ -129,13 +140,13 @@ export function useTurnChanges(
     ? (readThreadRecord(threadId).serverMessageIds[messageId] ?? messageId)
     : messageId;
   const snapshot = snapshots?.find((s) => s.message_id === serverMessageId);
-  const settledFor = useSnapshotList(threadId, snapshot !== undefined);
+  const settled = useSnapshotList(threadId, snapshot !== undefined);
   const stats = useRangeStats(snapshot && needsRangeStats(snapshot) ? snapshot.id : null);
-  const listSettled = !threadId || settledFor === threadId;
+  const { listSettled, listLoaded } = snapshotListState(threadId, settled);
 
   const changes = useMemo(
     () => resolveTurnChanges({ snapshot, snapshots: snapshots ?? [], listSettled, stats, filesChanged }),
     [snapshot, snapshots, listSettled, stats, filesChanged],
   );
-  return { changes, snapshot, serverMessageId, listSettled };
+  return { changes, snapshot, serverMessageId, listLoaded };
 }

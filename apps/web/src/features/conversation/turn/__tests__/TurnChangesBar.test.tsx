@@ -393,5 +393,27 @@ describe("TurnChangesBar", () => {
     expect(transport.previewTurnRevert).toHaveBeenCalledWith("thread-1", "msg-1", { kind: "turn" });
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByTestId("revert-confirm")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Turn actions" })).toHaveFocus();
+  });
+
+  it("says the snapshot is gone only when the loaded list lacks it", async () => {
+    const user = userEvent.setup();
+
+    renderBar({ filesChanged: ["src/a.ts"] });
+    await user.click(screen.getByRole("button", { name: "Turn actions" }));
+
+    expect(await screen.findByRole("menuitem", { name: "Revert this turn…", description: "This turn's snapshot is gone" }))
+      .toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("leaves Revert this turn to the server when the snapshot list fails to load", async () => {
+    transport.listSnapshots.mockRejectedValue(new Error("socket closed"));
+    const user = userEvent.setup();
+
+    renderBar({ filesChanged: ["src/a.ts"] });
+    expect(await screen.findByText("Counts unavailable")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Turn actions" }));
+
+    expect(await screen.findByRole("menuitem", { name: "Revert this turn…" })).not.toHaveAttribute("aria-disabled", "true");
   });
 });

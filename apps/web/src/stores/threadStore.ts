@@ -544,7 +544,8 @@ interface ThreadState {
   ) => void;
   /**
    * Append a persisted server notice, such as a revert receipt, once. Threads
-   * without a loaded tail are skipped: their next load reads it from the server.
+   * without a loaded tail, or still loading one, are skipped: the load reads it
+   * from the server, and appending mid-load would make the load discard itself.
    */
   appendServerNotice: (threadId: string, message: Message) => void;
   /** Clear the interrupt file-notice banner for one thread (user dismissed). */
@@ -4378,7 +4379,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   appendServerNotice: (threadId, message) => {
     set((state) => {
       const rec = state.records.get(threadId);
-      if (!rec || rec.hasNewerMessages || rec.messages.some((m) => m.id === message.id)) return state;
+      if (!rec || rec.loading || rec.hasNewerMessages || rec.messages.some((m) => m.id === message.id)) return state;
       const { messages, evicted } = capMessages([...rec.messages, message]);
       return {
         records: patchThreadRecord(state.records, threadId, { messages, ...(evicted ? { hasMoreMessages: true } : {}) }),

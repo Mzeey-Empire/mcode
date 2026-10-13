@@ -9,8 +9,8 @@ import { useTurnRevert } from "./useTurnRevert";
 /** What the menu knows about a turn before asking the server. */
 export interface RevertTurnFacts {
   readonly snapshot: TurnSnapshot | undefined;
-  /** The snapshot list has loaded, so a missing snapshot is gone rather than pending. */
-  readonly listSettled: boolean;
+  /** The snapshot list has loaded, so a missing snapshot is gone rather than pending or unknown. */
+  readonly listLoaded: boolean;
   /** Every listed file of the turn is already back at its pre-turn state. */
   readonly allReverted: boolean;
 }
@@ -29,7 +29,7 @@ export function useRevertTurnDisabledReason(threadId: string | null | undefined,
   if (!threadId) return "This turn's snapshot is gone";
   if (running) return "Wait for the turn to finish";
   if (knownNotGit) return "Not a git repository";
-  if (!facts.snapshot && facts.listSettled) return "This turn's snapshot is gone";
+  if (!facts.snapshot && facts.listLoaded) return "This turn's snapshot is gone";
   if (facts.allReverted) return "Already reverted";
   return null;
 }

@@ -68,9 +68,11 @@ export function RevertConfirm({ state, title, onRevert, onCancel }: RevertConfir
       className="flex flex-col gap-2.5 rounded-control border border-error/35 bg-panel px-3.5 py-3"
       data-testid="revert-confirm"
     >
-      <p className="text-body-small font-medium text-ink" aria-live="polite">{copy.title}</p>
-      {copy.body && <p className="text-body-small text-muted">{copy.body}</p>}
-      {copy.note && <p className="text-body-small text-muted">{copy.note}</p>}
+      <div className="flex flex-col gap-2.5" aria-live="polite" aria-atomic="true">
+        <p className="text-body-small font-medium text-ink">{copy.title}</p>
+        {copy.body && <p className="text-body-small text-muted">{copy.body}</p>}
+        {copy.note && <p className="text-body-small text-muted">{copy.note}</p>}
+      </div>
       <div className="flex justify-end gap-2">
         <Button ref={cancelRef} variant="ghost" shape="round" className="px-3.5" onClick={onCancel}>
           {copy.action === "close" ? "Close" : "Cancel"}
