@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { TurnRevertStore } from "../../turns/persistence/turn-revert-store.js";
 import { ThreadStartupFetchDecisions } from "../../../thread-startup/thread-startup-fetch-decisions.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { agentStorageTestWriter, registerAgentStorageTestProducer } from "../../__tests__/agent-storage-fixture.js";
@@ -256,6 +257,7 @@ export function createAgentServiceForTest(
     threadRepo,
     workspaceRepo,
     messageRepo,
+    new TurnRevertStore(db),
     gitWorktrees,
     attachmentService,
     providerRegistry,

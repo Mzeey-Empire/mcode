@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
 import { messages, turnReverts } from "../../../../runtime/persistence/sqlite/schema.js";
@@ -22,6 +22,25 @@ export const settleTurnRevert = databaseWriteOperation("turnRevert.settle", z.ob
 }), z.void());
 /** Clear expired recovery material without deleting replay history. */
 export const expireTurnRevert = databaseWriteOperation("turnRevert.expire", z.object({ id: z.string() }), z.void());
+
+/** Claim exactly the prompt's reverts inside the caller's user-message transaction. */
+export function markTurnRevertsAgentNotified(db: Database, threadId: string, revertIds: readonly string[]): void {
+  if (revertIds.length === 0) return;
+  const claimed = drizzle(db).update(turnReverts).set({ agentNotifiedAt: new Date().toISOString() }).where(and(
+    eq(turnReverts.threadId, threadId), inArray(turnReverts.id, [...revertIds]),
+    eq(turnReverts.state, "committed"), inArray(turnReverts.kind, ["turn", "file"]),
+    isNull(turnReverts.undoneByRevertId), isNull(turnReverts.agentNotifiedAt),
+  )).returning({ id: turnReverts.id }).all();
+  if (claimed.length !== revertIds.length) throw new StaleRevertNoticeError();
+}
+
+/** An Undo or a concurrent admission claimed a revert after its note entered the prompt. */
+export class StaleRevertNoticeError extends Error {
+  name = "StaleRevertNoticeError";
+  constructor() {
+    super("Revert notice changed during turn admission");
+  }
+}
 
 /** Journal writes execute only on the application's writable connection. */
 export function turnRevertWriteHandlers(db: Database): ReadonlyMap<string, (input: unknown) => unknown> {

@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { TurnRevertStore } from "../../turns/persistence/turn-revert-store.js";
 import * as NodeCrypto from "node:crypto";
 import * as NodeEvents from "node:events";
 import * as NodeFS from "node:fs";
@@ -95,7 +96,7 @@ async function fixture(
     await startParentTurn(() => canonical.startParentTurn(parentTurn));
   } };
   const admission = new TurnAdmissionDispatchCoordinator(
-    threads, workspaces, messages, worktrees, new AttachmentService(), providers,
+    threads, workspaces, messages, new TurnRevertStore(db), worktrees, new AttachmentService(), providers,
     new ProviderAvailabilityService(settings, providers), canonical, settings, plans,
     new GoalLifecycleService(threads, providers, writer, commands, canonical), undefined,
     new FileService(workspaces, threads, worktrees, git, hostRuntime), hostRuntime.platform, owner,

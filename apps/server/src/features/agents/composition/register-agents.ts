@@ -3,6 +3,7 @@ import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import { broadcast } from "../../../application/transport/push.js";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { TurnResumeScheduleStore } from "../recovery/turn-resume-schedule-store.js";
+import { TurnRevertStore } from "../turns/persistence/turn-revert-store.js";
 import { TurnResumeScheduler } from "../recovery/turn-resume-scheduler.js";
 import { sendRecoveryAttempt } from "../transport/turn-message-dispatch.js";
 
@@ -274,6 +275,7 @@ export function registerAgentServices(container: DependencyContainer): void {
       c.resolve(ThreadRepo),
       c.resolve(WorkspaceRepo),
       c.resolve(MessageRepo),
+      new TurnRevertStore(c.resolve("Database")),
       c.resolve(GitWorktreeService),
       c.resolve(AttachmentService),
       c.resolve("IProviderRegistry"),
