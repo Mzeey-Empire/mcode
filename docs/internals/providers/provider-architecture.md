@@ -262,7 +262,9 @@ update, omit that choice, never a deny choice.
   Cursor and Devin preserve native labels and option IDs, including both reject
   variants. Their `allow_always` options have provider intent, not an invented
   session lifetime. Devin hides `allow_always_global` and reflects `switch_bypass`
-  in the thread's mode.
+  in the thread's mode. An option too long for the card is dropped, not truncated,
+  because one invalid choice would otherwise auto-deny the whole request. A reject
+  keeps its native ID under the label "Deny".
 - OpenCode's "Always allow" describes the saved grant patterns, which can be
   broader than the requested resources. These grants outlive the current session.
   In v2, an absent or empty `save` list persists nothing, so only "Allow once"
