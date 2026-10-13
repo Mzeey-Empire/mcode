@@ -98,7 +98,8 @@ export class PlanService {
     await runtime.commands.sendMessage({ threadId: input.threadId, messageId: prepared.request.messageId,
       content: prepared.request.wireText, displayContent: `Implement plan v${prepared.request.version}`,
       interactionMode: "build", mutationReservationToken: token, planImplement: { requestId: input.requestId },
-      model: thread.model ?? undefined, provider: ProviderIdSchema.parse(thread.provider), permissionMode: "default", attachments: [] });
+      model: thread.model ?? undefined, reasoningLevel: thread.reasoning_level ?? undefined,
+      provider: ProviderIdSchema.parse(thread.provider), permissionMode: "default", attachments: [] });
   }
 
   private async settleImplement(input: PlanImplement, token: string, runtime: PlanImplementRuntime, failure: unknown): Promise<PlanImplementReceipt> {
@@ -111,7 +112,8 @@ export class PlanService {
     }
     releaseFailedImplementReservation(input.threadId, token, runtime);
     if (request) {
-      this.progress?.reloadPlans(input.threadId);
+      // Preparation may have committed the request's unsent edit before it failed.
+      await this.publishVersions(input.threadId);
       await this.files.writeAfterCommit(input.threadId);
       return this.receiptOrFailure(request);
     }
@@ -120,10 +122,13 @@ export class PlanService {
   }
 
   private async publishAdmission(request: PlanImplementRequest): Promise<PlanImplementReceipt> {
-    const threadId = request.sourceThreadId;
+    await this.publishVersions(request.sourceThreadId);
+    return this.receiptOrFailure(request);
+  }
+
+  private async publishVersions(threadId: string): Promise<void> {
     const versions = this.progress?.reloadPlans(threadId) ?? (await this.snapshot({ threadId })).versions;
     for (const version of versions) broadcast("plan.versionUpserted", { threadId, version });
-    return this.receiptOrFailure(request);
   }
 
   private async receiptOrFailure(request: PlanImplementRequest): Promise<PlanImplementReceipt> {

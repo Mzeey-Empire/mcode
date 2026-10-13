@@ -27,6 +27,15 @@ import { AgentService } from "../agent-service.js";
 import { AGENT_TURN_COMMAND_PORT } from "../agent-turn-command-port.js";
 import { AgentEventPublicationRegistry } from "../agent-event-publication-registry.js";
 
+const pushes = vi.hoisted(() => ({ versions: [] as Array<{ threadId: string; version: PlanVersion }> }));
+vi.mock("../../../../application/transport/push.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../application/transport/push.js")>();
+  return { ...actual, broadcast: (...args: Parameters<typeof actual.broadcast>) => {
+    if (args[0] === "plan.versionUpserted") pushes.versions.push(args[1] as { threadId: string; version: PlanVersion });
+    actual.broadcast(...args);
+  } };
+});
+
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>(done => { resolve = done; });
@@ -276,6 +285,24 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     expect(NodeFS.readFileSync(files.path(threadId), "utf8")).toBe("# Edited\nDraft text.");
     expect(new PlanImplementStore(database).read(input.requestId)?.status).toBe("failed");
     expect(runtime.reservations.get(threadId)).toBeUndefined();
+  });
+
+  it("publishes the pending edit it saved when Implement fails after preparation", async () => {
+    provider.prepareImplement = async () => { throw new Error("Injected native file failure"); };
+    const versionId = NodeCrypto.randomUUID();
+    pushes.versions = [];
+    await expect(service.implement({ ...request(), versionId, expectedRevision: 1,
+      pending: { versionId, baseVersionId: ready.id, baseRevision: 0, contentMd: "# Pending" } }))
+      .rejects.toMatchObject({ code: "implement_failed" });
+    assertUnaccepted();
+    expect(pushes.versions).toContainEqual({ threadId,
+      version: expect.objectContaining({ id: versionId, revision: 1, contentMd: "# Pending", status: "draft" }) });
+  });
+
+  it("implements at the thread's reasoning level", async () => {
+    await runtime.threads.updateSettings(threadId, { reasoning_level: "xhigh" });
+    await service.implement(request());
+    expect(sent.map(turn => turn.reasoningLevel)).toEqual(["xhigh"]);
   });
 
   it("rolls back pending edits when a fault occurs before the request row", async () => {
