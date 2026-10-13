@@ -12,6 +12,8 @@ import {
   maxPanelWidthInSplit,
   projectRightPanelForScope,
   getDefaultPanelWidthPx,
+  isSubagentTabInstance,
+  rightPanelOpenTools,
 } from "@/stores/diffStore";
 import { PlanPanel } from "./plan";
 import { PanelEmptyState } from "./PanelEmptyState";
@@ -82,7 +84,7 @@ export function reconcileWarmPreviewScopes(
     ? previous
     : result;
 }
-import { SubagentsPanel } from "@/features/subagents";
+import { SubagentDetailTab, SubagentsPanel, useSubagentRoster } from "@/features/subagents";
 import { ProjectEnvironmentPanel } from "@/features/projects/environment";
 import { TerminalTool } from "./TerminalTool";
 import { BrowserToolHeader } from "./BrowserToolHeader";
@@ -392,7 +394,7 @@ function usePreviewPresentation({
     browserTabSet,
     renderedActiveTab: revealExistingPreview ? "preview" : activeTab,
     renderedActiveTabId: revealExistingPreview ? "singleton:preview" : activeTabId,
-    renderedOpenTabs: renderedTabInstances.map((instance) => instance.type),
+    renderedOpenTabs: rightPanelOpenTools(renderedTabInstances),
     renderedTabInstances,
   };
 }
@@ -620,6 +622,7 @@ function RightPanelContent({
   panelScopeId,
   previewActive,
   renderedActiveTab,
+  renderedActiveTabId,
   renderedOpenTabs,
   renderedTabInstances,
   terminalActive,
@@ -636,6 +639,7 @@ function RightPanelContent({
   readonly panelScopeId: string | null;
   readonly previewActive: boolean;
   readonly renderedActiveTab: string | null;
+  readonly renderedActiveTabId: string | null;
   readonly renderedOpenTabs: ReturnType<typeof projectRightPanelForScope>["openTabs"];
   readonly renderedTabInstances: ReturnType<typeof projectRightPanelForScope>["tabInstances"];
   readonly terminalActive: boolean;
@@ -653,7 +657,7 @@ function RightPanelContent({
           onCreateTab={onCreateTab}
         />
         <PlanPanelContent activeTab={renderedActiveTab} openTabs={renderedOpenTabs} threadId={activeThreadId} />
-        <SubagentsPanelContent activeTab={renderedActiveTab} openTabs={renderedTabInstances} threadId={activeThreadId} />
+        <SubagentsPanelContent activeTabId={renderedActiveTabId} tabInstances={renderedTabInstances} threadId={activeThreadId} />
         <EnvironmentPanelContent
           activeTab={renderedActiveTab}
           openTabs={renderedOpenTabs}
@@ -716,19 +720,22 @@ function PlanPanelContent({
   return <PlanPanel threadId={threadId} />;
 }
 
+/** The Subagents list and each subagent's own tab share the "subagents" tool, so they are told apart by instance id. */
 function SubagentsPanelContent({
-  activeTab,
-  openTabs,
+  activeTabId,
+  tabInstances,
   threadId,
 }: {
-  readonly activeTab: string | null;
-  readonly openTabs: ReturnType<typeof projectRightPanelForScope>["tabInstances"];
+  readonly activeTabId: string | null;
+  readonly tabInstances: ReturnType<typeof projectRightPanelForScope>["tabInstances"];
   readonly threadId: string | null;
 }) {
-  if (activeTab !== "subagents" || !openTabs.some((instance) => instance.type === "subagents") || !threadId) {
-    return null;
+  const active = tabInstances.find((instance) => instance.id === activeTabId);
+  if (!active || !threadId) return null;
+  if (isSubagentTabInstance(active)) {
+    return <SubagentDetailTab key={`${threadId}:${active.entryId}`} threadId={threadId} entryId={active.entryId} />;
   }
-  return <SubagentsPanel key={threadId} threadId={threadId} />;
+  return active.type === "subagents" ? <SubagentsPanel key={threadId} threadId={threadId} /> : null;
 }
 
 function EnvironmentPanelContent({
@@ -829,10 +836,14 @@ function RightPanelActivityRail({
   readonly setActivityRailExpanded: (expanded: boolean) => void;
   readonly setRightPanelTabInstance: ReturnType<typeof useDiffStore.getState>["setRightPanelTabInstance"];
 }) {
+  // Only a rail holding subagent tabs needs their names, so other threads never fetch a roster.
+  const rosterThreadId = renderedTabInstances.some(isSubagentTabInstance) ? activeThreadId ?? undefined : undefined;
+  const subagentEntries = useSubagentRoster(rosterThreadId)?.entries;
   return (
     <ActivityRail
       tabInstances={renderedTabInstances}
       activeTabId={renderedActiveTabId}
+      subagentEntries={subagentEntries}
       scope={panelScope}
       changesCount={changesCount}
       changesFresh={changesFresh}
@@ -1190,6 +1201,7 @@ export function RightPanel() {
             panelScopeId={panelScopeId}
             previewActive={previewActive}
             renderedActiveTab={renderedActiveTab}
+            renderedActiveTabId={renderedActiveTabId}
             renderedOpenTabs={renderedOpenTabs}
             renderedTabInstances={renderedTabInstances}
             terminalActive={terminalActive}

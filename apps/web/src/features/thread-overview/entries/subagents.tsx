@@ -3,7 +3,7 @@ import { useShallow } from "zustand/shallow";
 import type { SubagentRoster } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { ProviderDiscStack } from "@/components/ui/provider-icon";
-import { openSubagentsRoster } from "@/features/subagents";
+import { openSubagentsPanel } from "@/features/subagents";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { cn } from "@/lib/utils";
 import { useSubagentRosterStore } from "@/features/subagents/state/subagentRosterStore";
@@ -33,7 +33,7 @@ function SubagentsEntry({ thread }: { thread: Thread }) {
       size="compact"
       type="button"
       data-testid="thread-overview-subagents"
-      onClick={() => openSubagentsRoster()}
+      onClick={() => openSubagentsPanel()}
       aria-label={`Subagents, ${active} active, ${done} done`}
       className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-start gap-2")}
     >

@@ -5,9 +5,11 @@ import type {
   PointerEvent as ReactPointerEvent,
   ReactNode,
 } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Layers, Plus, X } from "lucide-react";
+import type { SubagentRosterEntry } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -24,7 +26,12 @@ import {
   type PanelScope,
   type PanelTabType,
 } from "@/lib/panel-tabs";
-import type { RightPanelTool, RightPanelTabInstance } from "@/stores/diffStore";
+import {
+  isSubagentTabInstance,
+  rightPanelOpenTools,
+  type RightPanelTool,
+  type RightPanelTabInstance,
+} from "@/stores/diffStore";
 import { cn } from "@/lib/utils";
 
 /** Past this many changed files the Review badge renders "{cap}+" instead of the exact count. */
@@ -258,6 +265,85 @@ function RailStatus({
 }
 
 /** One rail entry: a select glyph, plus a hover-revealed × to close. */
+function RailEntry({
+  domId,
+  icon,
+  label,
+  accessibleLabel,
+  status,
+  active,
+  expanded,
+  onSelect,
+  onClose,
+}: {
+  domId: string;
+  icon: ReactNode;
+  label: string;
+  accessibleLabel: string;
+  status?: ReactNode;
+  active: boolean;
+  expanded: boolean;
+  onSelect: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="group relative w-full">
+      {active && <RailActiveEdge />}
+      <RailTooltip content={label} disabled={expanded}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="compact"
+          data-rail-tab={domId}
+          data-active={active ? "true" : undefined}
+          aria-pressed={active}
+          aria-label={accessibleLabel}
+          onClick={onSelect}
+          className={cn(
+            RAIL_ENTRY_CLASS,
+            expanded ? "flex-row justify-start gap-2" : "flex-col gap-0",
+            active ? RAIL_ACTIVE_CLASS : RAIL_IDLE_CLASS,
+          )}
+        >
+          {icon}
+          <span
+            aria-hidden
+            className={cn(
+              "absolute left-8 right-8 text-fade text-left font-medium text-ink transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+              expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
+            )}
+          >
+            {label}
+          </span>
+          {status}
+        </Button>
+      </RailTooltip>
+      {/* Hover/focus-revealed close. A sibling button (not nested) so the markup
+          stays valid and the × is its own focusable, announced control. */}
+      <RailTooltip content={`Close ${label}`} disabled={expanded}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-compact"
+          aria-label={`Close ${label}`}
+          data-rail-close
+          onClick={onClose}
+          className={cn(
+            RAIL_TRAILING_CONTROL_CLASS,
+            "text-muted opacity-0 transition-opacity motion-reduce:duration-0 motion-reduce:transition-none hover:bg-panel hover:text-ink",
+            expanded
+              ? "focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+              : "pointer-events-none",
+          )}
+        >
+          <X size={12} />
+        </Button>
+      </RailTooltip>
+    </div>
+  );
+}
+
+/** A tool's rail entry, named and drawn from the tab catalog. */
 function RailTab({
   id,
   active,
@@ -272,73 +358,77 @@ function RailTab({
   expanded: boolean;
   changesCount: number;
   changesFresh: boolean;
-  onSelect: (id: RightPanelTool) => void;
-  onClose: (id: RightPanelTool) => void;
+  onSelect: () => void;
+  onClose: () => void;
 }) {
   const meta = metaForTab(id);
   if (!meta) return null;
   const { icon: Icon, label } = meta;
   return (
-    <div className="group relative w-full">
-      {active && <RailActiveEdge />}
-      <RailTooltip content={label} disabled={expanded}>
-        <Button
-          type="button"
-          variant="ghost"
-          size="compact"
-          data-rail-tab={railDomId(id)}
-          data-active={active ? "true" : undefined}
-          aria-pressed={active}
-          aria-label={railAccessibleLabel(id, label, changesCount, changesFresh)}
-          onClick={() => onSelect(id)}
-          className={cn(
-            RAIL_ENTRY_CLASS,
-            expanded ? "flex-row justify-start gap-2" : "flex-col gap-0",
-            active ? RAIL_ACTIVE_CLASS : RAIL_IDLE_CLASS,
-          )}
-        >
-          <Icon size={RAIL_ICON_SIZE} />
-          <span
-            aria-hidden
-            className={cn(
-              "absolute left-8 right-8 text-fade text-left font-medium text-ink transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
-              expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
-            )}
-          >
-            {label}
-          </span>
-          <RailStatus
-            id={id}
-            active={active}
-            expanded={expanded}
-            changesCount={changesCount}
-            changesFresh={changesFresh}
-          />
-        </Button>
-      </RailTooltip>
-      {/* Hover/focus-revealed close. A sibling button (not nested) so the markup
-          stays valid and the × is its own focusable, announced control. */}
-      <RailTooltip content={`Close ${label}`} disabled={expanded}>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-compact"
-          aria-label={`Close ${label}`}
-          data-rail-close
-          onClick={() => onClose(id)}
-          className={cn(
-            RAIL_TRAILING_CONTROL_CLASS,
-            "text-muted opacity-0 transition-opacity motion-reduce:duration-0 motion-reduce:transition-none hover:bg-panel hover:text-ink",
-            expanded
-              ? "focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
-              : "pointer-events-none",
-          )}
-        >
-          <X size={12} />
-        </Button>
-      </RailTooltip>
-    </div>
+    <RailEntry
+      domId={railDomId(id)}
+      icon={<Icon size={RAIL_ICON_SIZE} />}
+      label={label}
+      accessibleLabel={railAccessibleLabel(id, label, changesCount, changesFresh)}
+      status={<RailStatus id={id} active={active} expanded={expanded} changesCount={changesCount} changesFresh={changesFresh} />}
+      active={active}
+      expanded={expanded}
+      onSelect={onSelect}
+      onClose={onClose}
+    />
   );
+}
+
+/** One subagent's rail entry: its provider icon, its title as the label, and a dot while it runs. */
+function RailSubagentTab({
+  entryId,
+  entry,
+  active,
+  expanded,
+  onSelect,
+  onClose,
+}: {
+  entryId: string;
+  entry: SubagentRosterEntry | undefined;
+  active: boolean;
+  expanded: boolean;
+  onSelect: () => void;
+  onClose: () => void;
+}) {
+  const label = entry?.title ?? "Subagent";
+  const running = entry?.status === "running";
+  return (
+    <RailEntry
+      domId={`subagent:${entryId}`}
+      icon={
+        <span className="relative inline-flex shrink-0">
+          {entry ? <ProviderIcon provider={entry.provider} size={RAIL_ICON_SIZE} /> : <Layers size={RAIL_ICON_SIZE} />}
+          {running && (
+            // The ring takes the entry's own fill so the dot reads as cut out of it, active or idle.
+            <span
+              data-testid="rail-subagent-running"
+              aria-hidden
+              className={cn(
+                "absolute -top-1 -right-1 size-[6px] rounded-full bg-success ring-2",
+                active ? "ring-selected" : "ring-background group-hover:ring-hover",
+              )}
+            />
+          )}
+        </span>
+      }
+      label={label}
+      accessibleLabel={running ? `${label}, running` : label}
+      active={active}
+      expanded={expanded}
+      onSelect={onSelect}
+      onClose={onClose}
+    />
+  );
+}
+
+/** Separates the tools from the subagent tabs grouped after Subagents. */
+function RailDivider() {
+  return <div data-testid="rail-subagent-divider" aria-hidden className="mx-auto my-1 h-px w-5 shrink-0 bg-border" />;
 }
 
 /**
@@ -442,6 +532,8 @@ function RailAddControl({
 interface ActivityRailProps {
   readonly tabInstances: readonly RightPanelTabInstance[];
   readonly activeTabId: string | null;
+  /** The thread's roster entries, which name and badge its subagent tabs. */
+  readonly subagentEntries?: readonly SubagentRosterEntry[];
   readonly scope: PanelScope;
   readonly changesCount: number;
   readonly changesFresh: boolean;
@@ -466,10 +558,11 @@ interface ActivityRailViewProps extends ActivityRailProps {
   onBlurCapture: (event: ReactFocusEvent<HTMLDivElement>) => void;
 }
 
-/** One rail entry per open tool; Terminal records and Browser pages are tabs inside their tool. */
+/** One rail entry per open tool, then each open subagent behind a divider; Terminal records and Browser pages are tabs inside their tool. */
 function RailTabInstances({
   tabInstances,
   activeTabId,
+  subagentEntries,
   changesCount,
   changesFresh,
   expanded,
@@ -480,6 +573,7 @@ function RailTabInstances({
   ActivityRailViewProps,
   | "tabInstances"
   | "activeTabId"
+  | "subagentEntries"
   | "changesCount"
   | "changesFresh"
   | "expanded"
@@ -487,18 +581,33 @@ function RailTabInstances({
   | "onClose"
   | "onReorder"
 >) {
-  return tabInstances.map(({ id: instanceId, type }) => (
-    <ReorderableRailItem key={instanceId} instanceId={instanceId} onReorder={onReorder}>
-      <RailTab
-        id={type}
-        active={instanceId === activeTabId}
-        expanded={expanded}
-        changesCount={changesCount}
-        changesFresh={changesFresh}
-        onSelect={() => onSelect(instanceId)}
-        onClose={() => onClose(instanceId)}
-      />
-    </ReorderableRailItem>
+  const firstSubagentId = tabInstances.find(isSubagentTabInstance)?.id;
+  return tabInstances.map((instance) => (
+    <Fragment key={instance.id}>
+      {instance.id === firstSubagentId && <RailDivider />}
+      <ReorderableRailItem instanceId={instance.id} onReorder={onReorder}>
+        {isSubagentTabInstance(instance) ? (
+          <RailSubagentTab
+            entryId={instance.entryId}
+            entry={subagentEntries?.find((entry) => entry.id === instance.entryId)}
+            active={instance.id === activeTabId}
+            expanded={expanded}
+            onSelect={() => onSelect(instance.id)}
+            onClose={() => onClose(instance.id)}
+          />
+        ) : (
+          <RailTab
+            id={instance.type}
+            active={instance.id === activeTabId}
+            expanded={expanded}
+            changesCount={changesCount}
+            changesFresh={changesFresh}
+            onSelect={() => onSelect(instance.id)}
+            onClose={() => onClose(instance.id)}
+          />
+        )}
+      </ReorderableRailItem>
+    </Fragment>
   ));
 }
 
@@ -508,7 +617,7 @@ function RailFooter({
   expanded,
   onCreate,
 }: Pick<ActivityRailViewProps, "scope" | "tabInstances" | "expanded" | "onCreate">) {
-  const openTabs = tabInstances.map((instance) => instance.type);
+  const openTabs = rightPanelOpenTools(tabInstances);
   return (
     <>
       {/* The add control only appears once a tab is open; with none open the
@@ -528,6 +637,7 @@ function RailFooter({
 function ActivityRailView({
   tabInstances,
   activeTabId,
+  subagentEntries,
   scope,
   changesCount,
   changesFresh,
@@ -581,6 +691,7 @@ function ActivityRailView({
       <RailTabInstances
         tabInstances={tabInstances}
         activeTabId={activeTabId}
+        subagentEntries={subagentEntries}
         changesCount={changesCount}
         changesFresh={changesFresh}
         expanded={expanded}
@@ -608,6 +719,7 @@ function ActivityRailView({
 export function ActivityRail({
   tabInstances,
   activeTabId,
+  subagentEntries,
   scope,
   changesCount,
   changesFresh,
@@ -712,6 +824,7 @@ export function ActivityRail({
     <ActivityRailView
       tabInstances={tabInstances}
       activeTabId={activeTabId}
+      subagentEntries={subagentEntries}
       scope={scope}
       changesCount={changesCount}
       changesFresh={changesFresh}

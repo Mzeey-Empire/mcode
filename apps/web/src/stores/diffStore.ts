@@ -30,12 +30,6 @@ function isRightPanelTool(value: string): value is RightPanelTool {
   return RIGHT_PANEL_TOOLS.has(value);
 }
 
-/** Navigation state for one thread's Subagents detail view. */
-export interface SubagentDetailSelection {
-  readonly id: string;
-  readonly scrollTop: number;
-}
-
 /**
  * View mode within the Review (Changes) tab. The three turn views need a thread;
  * the four git views read the thread's checkout, or the workspace root without
@@ -159,9 +153,25 @@ export type RightPanelState = {
 };
 
 /** One open right-panel tool. Every tool is a singleton with a deterministic id. */
-export type RightPanelTabInstance = {
+export type RightPanelToolInstance = {
   [T in RightPanelTool]: { readonly id: `singleton:${T}`; readonly type: T };
 }[RightPanelTool];
+
+/**
+ * One subagent's detail tab. Thread-only, and always placed as a group right
+ * after the Subagents tool. `entryId` is the roster entry's stable id.
+ */
+export type SubagentTabInstance = {
+  readonly id: `subagent:${string}`;
+  readonly type: "subagent";
+  readonly entryId: string;
+};
+
+/** One rail entry: a tool, or a subagent detail tab grouped after Subagents. */
+export type RightPanelTabInstance = RightPanelToolInstance | SubagentTabInstance;
+
+/** Subagent tabs one thread keeps open; opening another closes the oldest inactive one. */
+export const SUBAGENT_TAB_LIMIT = 8;
 
 /** Stable identity for an open tool. */
 export function rightPanelSingletonId<T extends RightPanelTool>(type: T): `singleton:${T}` {
@@ -169,7 +179,7 @@ export function rightPanelSingletonId<T extends RightPanelTool>(type: T): `singl
 }
 
 /** The rail instance for one tool. */
-export function rightPanelToolInstance(type: RightPanelTool): RightPanelTabInstance {
+export function rightPanelToolInstance(type: RightPanelTool): RightPanelToolInstance {
   // The mapped union cannot narrow a generic `type`, so each member is spelled out.
   switch (type) {
     case "preview": return { id: "singleton:preview", type };
@@ -181,6 +191,21 @@ export function rightPanelToolInstance(type: RightPanelTool): RightPanelTabInsta
   }
 }
 
+/** The rail instance for one subagent's detail tab. */
+export function subagentTabInstance(entryId: string): SubagentTabInstance {
+  return { id: `subagent:${entryId}`, type: "subagent", entryId };
+}
+
+/** Whether a rail entry is a subagent detail tab rather than a tool. */
+export function isSubagentTabInstance(instance: RightPanelTabInstance): instance is SubagentTabInstance {
+  return instance.type === "subagent";
+}
+
+/** The open tools in rail order, without subagent detail tabs. */
+export function rightPanelOpenTools(instances: readonly RightPanelTabInstance[]): RightPanelTool[] {
+  return instances.flatMap((instance) => (isSubagentTabInstance(instance) ? [] : [instance.type]));
+}
+
 /** Resolve ordered instances from current or legacy in-memory panel state. */
 export function rightPanelTabInstances(
   state: Pick<RightPanelState, "openTabs"> & Partial<Pick<RightPanelState, "tabInstances">>,
@@ -188,16 +213,73 @@ export function rightPanelTabInstances(
   return state.tabInstances ?? state.openTabs.map(rightPanelToolInstance);
 }
 
-/** Resolve the active tool type from canonical instance state. */
+/**
+ * Resolve the active tool type from canonical instance state. A subagent tab
+ * belongs to the Subagents tool, so it reports `subagents`.
+ */
 export function rightPanelActiveTab(state: RightPanelState): RightPanelTool {
-  return (
-    state.tabInstances.find((instance) => instance.id === state.activeTabId)?.type ??
-    "tasks"
-  );
+  const active = state.tabInstances.find((instance) => instance.id === state.activeTabId);
+  if (!active) return "tasks";
+  return isSubagentTabInstance(active) ? "subagents" : active.type;
+}
+
+/**
+ * Places subagent tabs as one group directly after the Subagents tool, keeping
+ * each lane's order. Without the Subagents tool the group has no anchor, so its
+ * tabs close with it.
+ */
+function arrangeTabInstances(instances: readonly RightPanelTabInstance[]): RightPanelTabInstance[] {
+  const subagentTabs = instances.filter(isSubagentTabInstance);
+  return instances.flatMap((instance): RightPanelTabInstance[] => {
+    if (isSubagentTabInstance(instance)) return [];
+    return instance.type === "subagents" ? [instance, ...subagentTabs] : [instance];
+  });
+}
+
+/**
+ * Moves one rail entry by one position within its lane. Tools step over the
+ * whole subagent group; subagent tabs move only within the group. Returns null
+ * when the entry is missing or already at its lane's edge.
+ */
+function moveTabInstance(
+  instances: readonly RightPanelTabInstance[],
+  instanceId: string,
+  direction: -1 | 1,
+): RightPanelTabInstance[] | null {
+  const moving = instances.find((instance) => instance.id === instanceId);
+  if (!moving) return null;
+  const inLane = (instance: RightPanelTabInstance) =>
+    isSubagentTabInstance(instance) === isSubagentTabInstance(moving);
+  const lane = instances.filter(inLane);
+  const from = lane.indexOf(moving);
+  const to = from + direction;
+  if (to < 0 || to >= lane.length) return null;
+  [lane[from], lane[to]] = [lane[to], lane[from]];
+  return arrangeTabInstances([...lane, ...instances.filter((instance) => !inLane(instance))]);
+}
+
+/**
+ * Drops subagent tabs from the front of the group (the oldest, since new tabs
+ * append) until it fits {@link SUBAGENT_TAB_LIMIT}, sparing `keepIds`.
+ */
+function withinSubagentTabLimit(
+  instances: readonly RightPanelTabInstance[],
+  keepIds: ReadonlySet<string>,
+): RightPanelTabInstance[] {
+  let excess = instances.filter(isSubagentTabInstance).length - SUBAGENT_TAB_LIMIT;
+  return instances.filter((instance) => {
+    if (excess <= 0 || !isSubagentTabInstance(instance) || keepIds.has(instance.id)) return true;
+    excess -= 1;
+    return false;
+  });
 }
 
 /** Tab instance shape accepted from older in-memory panel records. */
-export type LegacyRightPanelTabInstance = { readonly id: string; readonly type: string };
+export type LegacyRightPanelTabInstance = {
+  readonly id: string;
+  readonly type: string;
+  readonly entryId?: string;
+};
 
 /** Shell rail tabs used type `terminal`; Project Action rail tabs used `action-terminal`. */
 const LEGACY_TERMINAL_TYPE = /^(?:action-)?terminal$/;
@@ -205,34 +287,57 @@ const LEGACY_TERMINAL_TYPE = /^(?:action-)?terminal$/;
 /**
  * Collapses older per-terminal rail instances (`terminal:<ptyId>`,
  * `action-terminal:<actionId>`) into one Terminal tool at the first one's
- * position and drops unknown tool types. An active legacy terminal instance
- * becomes the active Terminal tool. Returns the inputs unchanged when they are
- * already canonical. See ADR-0026.
+ * position, drops unknown tool types, and groups subagent tabs after the
+ * Subagents tool. An active legacy terminal instance becomes the active
+ * Terminal tool. Returns the inputs unchanged when they are already canonical.
+ * See ADR-0026.
  */
 export function normalizeRightPanelTabInstances(
   instances: readonly LegacyRightPanelTabInstance[],
   activeTabId: string | null,
 ): { readonly tabInstances: readonly RightPanelTabInstance[]; readonly activeTabId: string | null } {
   // Keep the array identity for canonical state so memoized readers stay stable.
-  if (instances.every(isCanonicalInstance) && new Set(instances.map((i) => i.type)).size === instances.length) {
+  if (instances.every(isCanonicalInstance) && isArranged(instances, activeTabId)) {
     return { tabInstances: instances, activeTabId };
   }
   const tabInstances: RightPanelTabInstance[] = [];
-  const seen = new Set<RightPanelTool>();
+  const seen = new Set<string>();
   let nextActiveTabId: string | null = null;
   for (const instance of instances) {
-    const type = LEGACY_TERMINAL_TYPE.test(instance.type) ? "terminal" : instance.type;
-    if (!isRightPanelTool(type)) continue;
-    const canonical = rightPanelToolInstance(type);
+    const canonical = canonicalInstance(instance);
+    if (!canonical) continue;
     if (instance.id === activeTabId) nextActiveTabId = canonical.id;
-    if (seen.has(type)) continue;
-    seen.add(type);
+    if (seen.has(canonical.id)) continue;
+    seen.add(canonical.id);
     tabInstances.push(canonical);
   }
-  return { tabInstances, activeTabId: nextActiveTabId };
+  const arranged = arrangeTabInstances(tabInstances);
+  return {
+    tabInstances: arranged,
+    activeTabId: arranged.some((instance) => instance.id === nextActiveTabId) ? nextActiveTabId : null,
+  };
+}
+
+function isArranged(instances: readonly RightPanelTabInstance[], activeTabId: string | null): boolean {
+  const arranged = arrangeTabInstances(instances);
+  return new Set(instances.map((instance) => instance.id)).size === instances.length &&
+    arranged.length === instances.length &&
+    arranged.every((instance, index) => instance === instances[index]) &&
+    (activeTabId === null || instances.some((instance) => instance.id === activeTabId));
+}
+
+function canonicalInstance(instance: LegacyRightPanelTabInstance): RightPanelTabInstance | null {
+  if (instance.type === "subagent") {
+    return instance.entryId ? subagentTabInstance(instance.entryId) : null;
+  }
+  const type = LEGACY_TERMINAL_TYPE.test(instance.type) ? "terminal" : instance.type;
+  return isRightPanelTool(type) ? rightPanelToolInstance(type) : null;
 }
 
 function isCanonicalInstance(instance: LegacyRightPanelTabInstance): instance is RightPanelTabInstance {
+  if (instance.type === "subagent") {
+    return Boolean(instance.entryId) && instance.id === `subagent:${instance.entryId}`;
+  }
   return isRightPanelTool(instance.type) && instance.id === rightPanelSingletonId(instance.type);
 }
 
@@ -262,7 +367,7 @@ export function createRightPanelState(input: RightPanelStateInput): RightPanelSt
   Object.defineProperties(state, {
     openTabs: {
       enumerable: true,
-      get: () => state.tabInstances.map((instance) => instance.type),
+      get: () => rightPanelOpenTools(state.tabInstances),
     },
     activeTab: {
       enumerable: true,
@@ -475,8 +580,6 @@ interface DiffState {
    * and ADR-0026.
    */
   readonly rightPanelFallbackByWorkspace: Record<string, RightPanelState>;
-  /** Selected Subagents detail and roster return position for each thread. */
-  readonly subagentDetailByThread: Record<string, SubagentDetailSelection>;
   /** Explicit Files visibility choices keyed by Review scope. Missing scopes start closed. */
   readonly reviewFilesVisibleByScope: Record<string, boolean>;
   /** View mode within the Changes tab (the single rendered view). */
@@ -621,10 +724,13 @@ interface DiffState {
   closeRightPanelTab: (workspaceId: string, threadId: string | null | undefined, tab: RightPanelTool) => void;
   /** Close every tab and hide one right-panel scope while preserving its width. */
   clearRightPanel: (workspaceId: string, threadId: string | null | undefined) => void;
-  /** Open a thread-scoped Subagents detail. */
-  selectSubagentDetail: (threadId: string, selection: SubagentDetailSelection) => void;
-  /** Return one thread to its Subagents roster. */
-  clearSubagentDetail: (threadId: string) => void;
+  /**
+   * Open one subagent's detail as a rail tab at the end of the subagent group
+   * and activate it. Adds the Subagents tool first when it is missing, and
+   * closes the oldest inactive subagent tab past {@link SUBAGENT_TAB_LIMIT}.
+   * Thread-only: subagent tabs never land in the workspace fallback.
+   */
+  openSubagentTab: (workspaceId: string, threadId: string, entryId: string) => void;
   /** Read the persisted Files visibility choice for a Review scope. */
   getReviewFilesVisible: (scopeId: string) => boolean;
   /** Persist an explicit Files visibility choice for a Review scope. */
@@ -702,7 +808,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   previewUrlByThread: {},
   rightPanelByThread: {},
   rightPanelFallbackByWorkspace: {},
-  subagentDetailByThread: {},
   reviewFilesVisibleByScope: readReviewFilesVisibility(),
   viewMode: "turn",
   reviewViewByThread: {},
@@ -800,11 +905,8 @@ export const useDiffStore = create<DiffState>((set, get) => ({
     set((state) => {
       const current = effectiveRightPanel(state, workspaceId, threadId);
       const currentInstances = rightPanelTabInstances(current);
-      const from = currentInstances.findIndex((instance) => instance.id === instanceId);
-      const to = from + direction;
-      if (from < 0 || to < 0 || to >= currentInstances.length) return {};
-      const tabInstances = [...currentInstances];
-      [tabInstances[from], tabInstances[to]] = [tabInstances[to], tabInstances[from]];
+      const tabInstances = moveTabInstance(currentInstances, instanceId, direction);
+      if (!tabInstances) return {};
       return writeRightPanel(state, workspaceId, threadId, {
         ...current,
         tabInstances,
@@ -819,18 +921,19 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         (instance) => instance.id === instanceId,
       );
       if (removedIndex < 0) return {};
-      const tabInstances = currentInstances.filter(
-        (instance) => instance.id !== instanceId,
+      // Closing Subagents also drops its now-anchorless subagent tabs.
+      const tabInstances = arrangeTabInstances(
+        currentInstances.filter((instance) => instance.id !== instanceId),
       );
       const activeTabId = current.activeTabId;
-      const nextActive =
-        activeTabId === instanceId
-          ? (tabInstances[removedIndex] ?? tabInstances[removedIndex - 1] ?? null)
-          : null;
+      const activeSurvives = tabInstances.some((instance) => instance.id === activeTabId);
+      const nextActive = activeSurvives
+        ? null
+        : (tabInstances[removedIndex] ?? tabInstances[removedIndex - 1] ?? null);
       return writeRightPanel(state, workspaceId, threadId, {
         ...current,
         tabInstances,
-        activeTabId: activeTabId === instanceId ? nextActive?.id ?? null : activeTabId,
+        activeTabId: activeSurvives ? activeTabId : nextActive?.id ?? null,
         // Closing the last tab closes the panel; reopening lands on the empty state.
         visible: tabInstances.length > 0 && current.visible,
       });
@@ -850,16 +953,23 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       });
     }),
 
-  selectSubagentDetail: (threadId, selection) =>
-    set((state) => ({
-      subagentDetailByThread: { ...state.subagentDetailByThread, [threadId]: selection },
-    })),
-  clearSubagentDetail: (threadId) =>
+  openSubagentTab: (workspaceId, threadId, entryId) =>
     set((state) => {
-      if (!(threadId in state.subagentDetailByThread)) return {};
-      const subagentDetailByThread = { ...state.subagentDetailByThread };
-      delete subagentDetailByThread[threadId];
-      return { subagentDetailByThread };
+      const current = effectiveRightPanel(state, workspaceId, threadId);
+      const tab = subagentTabInstance(entryId);
+      const currentInstances = rightPanelTabInstances(current);
+      if (currentInstances.some((instance) => instance.id === tab.id)) {
+        return writeRightPanel(state, workspaceId, threadId, { ...current, activeTabId: tab.id });
+      }
+      const withSubagents = currentInstances.some((instance) => instance.type === "subagents")
+        ? currentInstances
+        : [...currentInstances, rightPanelToolInstance("subagents")];
+      const keepIds = new Set([tab.id, ...(current.activeTabId ? [current.activeTabId] : [])]);
+      return writeRightPanel(state, workspaceId, threadId, {
+        ...current,
+        tabInstances: withinSubagentTabLimit(arrangeTabInstances([...withSubagents, tab]), keepIds),
+        activeTabId: tab.id,
+      });
     }),
   getReviewFilesVisible: (scopeId) => get().reviewFilesVisibleByScope[scopeId] ?? false,
   setReviewFilesVisible: (scopeId, visible) =>
@@ -1030,8 +1140,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete lineWrapByThread[threadId];
       const rightPanelByThread = { ...state.rightPanelByThread };
       delete rightPanelByThread[threadId];
-      const subagentDetailByThread = { ...state.subagentDetailByThread };
-      delete subagentDetailByThread[threadId];
       const reviewViewByThread = { ...state.reviewViewByThread };
       delete reviewViewByThread[threadId];
       const reviewViewManuallySelectedByThread = { ...state.reviewViewManuallySelectedByThread };
@@ -1062,7 +1170,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         previewUrlByThread: previewUrls,
         lineWrapByThread,
         rightPanelByThread,
-        subagentDetailByThread,
         reviewViewByThread,
         reviewViewManuallySelectedByThread,
         selectedTurnByThread,

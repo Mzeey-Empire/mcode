@@ -27,6 +27,7 @@ import { isTranscriptGroupOpen, toolCallDisclosureKey, type TranscriptNarrativeI
 import { resolveUserMessagePreview } from "@/components/chat/user-message-preview";
 import { estimateMessageListItemHeight, type MessageListItem } from "./message-list-virtualization";
 import { TranscriptViewport, type TranscriptHost, type TranscriptPosition } from "./transcript-viewport";
+import { useMessageRevealStore } from "./message-reveal-store";
 
 const SOURCE_NAVIGATION_MAX_FRAMES = 20;
 const FILL_VIEWPORT_RATIO = 1.5;
@@ -484,6 +485,14 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
       setHighlightedKey(row.key);
     }
   }, []);
+  const revealRequest = useMessageRevealStore((state) =>
+    state.request?.threadId === data.renderedThreadId ? state.request : null);
+  useEffect(() => {
+    if (!revealRequest || items.length === 0) return;
+    // One attempt per request, so a message outside the loaded window never causes a later surprise jump.
+    useMessageRevealStore.getState().consume(revealRequest);
+    scrollToMessage(revealRequest.messageId);
+  }, [revealRequest, items, scrollToMessage]);
   const jumpToUser = useCallback(() => {
     if (stickyMessage) scrollToMessage(stickyMessage.id);
   }, [stickyMessage, scrollToMessage]);

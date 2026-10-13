@@ -12,7 +12,7 @@ import {
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { SidebarResizeSeam } from "@/components/sidebar/SidebarResizeSeam";
 import { ChatView } from "@/features/conversation";
-import { openSubagentDetail, openSubagentsRoster } from "@/features/subagents";
+import { openSubagentDetail, openSubagentsPanel } from "@/features/subagents";
 import { useUpdateStore } from "@/stores/updateStore";
 import type { UpdateStatus } from "@/transport/desktop-bridge";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
@@ -320,7 +320,7 @@ function AppPrimarySurface(props: Pick<
       </CanvasSurface>
     );
   }
-  return <ChatView onSubagentSelect={openSubagentDetail} onOpenSubagents={openSubagentsRoster} />;
+  return <ChatView onSubagentSelect={openSubagentDetail} onOpenSubagents={openSubagentsPanel} />;
 }
 
 function AppMainSurface(props: Pick<

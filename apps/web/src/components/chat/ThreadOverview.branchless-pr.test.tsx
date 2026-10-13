@@ -147,7 +147,7 @@ vi.mock("@/stores/threadStore", () => ({
 
 vi.mock("@/features/subagents", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/subagents")>()),
-  openSubagentsRoster: mockOpenSubagentsPanel,
+  openSubagentsPanel: mockOpenSubagentsPanel,
 }));
 
 vi.mock("@/components/ui/dialog", () => ({

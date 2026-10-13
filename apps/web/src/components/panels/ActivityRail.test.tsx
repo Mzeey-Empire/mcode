@@ -1,6 +1,12 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { rightPanelSingletonId, rightPanelToolInstance, type RightPanelTool } from "@/stores/diffStore";
+import type { SubagentRosterEntry } from "@mcode/contracts";
+import {
+  rightPanelSingletonId,
+  rightPanelToolInstance,
+  subagentTabInstance,
+  type RightPanelTool,
+} from "@/stores/diffStore";
 import { ActivityRail } from "./ActivityRail";
 
 const EXPECTED_EXPAND_DELAY_MS = 140;
@@ -400,5 +406,51 @@ describe("ActivityRail expansion", () => {
     fireEvent.keyDown(content, { key: "ArrowDown", altKey: true, shiftKey: true });
     expect(handlers.onReorder).toHaveBeenCalledTimes(1);
     content.remove();
+  });
+});
+
+describe("ActivityRail subagent tabs", () => {
+  function subagent(status: SubagentRosterEntry["status"]): SubagentRosterEntry {
+    return {
+      id: "call:explore", provider: "codex", title: "Explore the rail", prompt: null,
+      subagentType: null, model: null, stepCount: 0, status,
+      startedAt: "2026-10-13T10:00:00.000Z", endedAt: null, tier: "steps", canStop: false,
+      sourceToolCallId: "explore", childThreadId: null, sourceMessageId: null, parentEntryId: null,
+    };
+  }
+
+  function subagentRail(status: SubagentRosterEntry["status"]) {
+    return (
+      <ActivityRail
+        tabInstances={[
+          rightPanelToolInstance("changes"),
+          rightPanelToolInstance("subagents"),
+          subagentTabInstance("call:explore"),
+        ]}
+        activeTabId={rightPanelSingletonId("changes")}
+        subagentEntries={[subagent(status)]}
+        scope="thread"
+        changesCount={0}
+        changesFresh={false}
+        {...handlers}
+      />
+    );
+  }
+
+  it("divides the subagent tabs from the tools and names each by its title", () => {
+    render(subagentRail("running"));
+    const rail = screen.getByTestId("activity-rail-surface");
+    const order = [...rail.querySelectorAll("[data-rail-tab], [data-testid='rail-subagent-divider']")]
+      .map((node) => node.getAttribute("data-rail-tab") ?? "divider");
+    expect(order).toEqual(["review", "subagents", "divider", "subagent:call:explore"]);
+    expect(screen.getByRole("button", { name: "Explore the rail, running" })).toBeInTheDocument();
+  });
+
+  it("drops the running dot once the subagent finishes", () => {
+    const { rerender } = render(subagentRail("running"));
+    expect(screen.getByTestId("rail-subagent-running")).toBeInTheDocument();
+    rerender(subagentRail("done"));
+    expect(screen.queryByTestId("rail-subagent-running")).toBeNull();
+    expect(screen.getByRole("button", { name: "Explore the rail" })).toBeInTheDocument();
   });
 });

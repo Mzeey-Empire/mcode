@@ -2,7 +2,6 @@ import { createRef } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
-import { useDiffStore } from "@/stores/diffStore";
 import { pushEmitter } from "@/transport";
 import { useSubagentRosterStore } from "../../state/subagentRosterStore";
 import { SubagentsPanel } from "../../roster/SubagentsPanel";
@@ -44,7 +43,6 @@ function rowOrder(): string[] {
 describe("SubagentList in the Subagents panel", () => {
   beforeEach(() => {
     useSubagentRosterStore.setState({ rosters: new Map(), errors: new Set() });
-    useDiffStore.setState({ subagentDetailByThread: {} });
     transport.loadSubagentRoster.mockReset();
     transport.loadSubagentDetail.mockReset();
     transport.stopCanonicalSubagent.mockReset();
