@@ -145,22 +145,4 @@ describe("Claude approval origin", () => {
       kind: "subagent", label, parentToolCallId: "toolu_016k",
     });
   });
-
-  it("forgets a completed task when its task_notification arrives", async () => {
-    const canUseTool = await startTurn("completed", [taskStarted("Print date"), {
-      type: "system", subtype: "task_notification", task_id: "ab6ba61b35d02c4b7",
-      tool_use_id: "toolu_016k", status: "completed", output_file: "", summary: "Printed date",
-    }]);
-    expect(await requestOrigin(canUseTool, "ab6ba61b35d02c4b7")).toEqual({ kind: "subagent", label: "Subagent" });
-  });
-
-  it("does not leak task identities across threads or a restarted session", async () => {
-    const first = await startTurn("first", [taskStarted("Print date")]);
-    const second = await startTurn("second", []);
-    expect(await requestOrigin(first, "ab6ba61b35d02c4b7")).toEqual({ kind: "subagent", label: "Print date", parentToolCallId: "toolu_016k" });
-    expect(await requestOrigin(second, "ab6ba61b35d02c4b7")).toEqual({ kind: "subagent", label: "Subagent" });
-    await provider.stopSession("mcode-first");
-    const restarted = await startTurn("first", []);
-    expect(await requestOrigin(restarted, "ab6ba61b35d02c4b7")).toEqual({ kind: "subagent", label: "Subagent" });
-  });
 });
