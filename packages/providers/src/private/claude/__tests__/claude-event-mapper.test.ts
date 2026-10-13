@@ -123,10 +123,32 @@ describe("ClaudeEventMapper tool results", () => {
 
   it("joins text blocks instead of storing their JSON", async () => {
     await expect(outputOf([
-      { type: "text", text: "[Subagent hand-back] Found the cause" },
+      { type: "text", text: "Found the cause" },
       { type: "image", source: { type: "base64", data: "AAAA" } },
       { type: "text", text: "in auth.ts" },
-    ])).resolves.toBe("[Subagent hand-back] Found the cause\nin auth.ts");
+    ])).resolves.toBe("Found the cause\nin auth.ts");
+  });
+
+  it("keeps only the report from a framed subagent hand-back", async () => {
+    await expect(outputOf([{
+      type: "text",
+      text: [
+        "  Note quoted by the harness",
+        "[Subagent hand-back] The text below is the final report of a subagent. The report follows:",
+        "  # Fixture repo",
+        "  ",
+        "    indented code",
+        "agentId: a1b2 (use SendMessage with to: 'a1b2', summary: '<5-10 word recap>' to continue this agent)",
+        "<usage>subagent_tokens: 10</usage>",
+      ].join("\n"),
+    }])).resolves.toBe("# Fixture repo\n\n  indented code");
+  });
+
+  it("drops the resume trailer block from an unframed subagent result", async () => {
+    await expect(outputOf([
+      { type: "text", text: "Found the cause" },
+      { type: "text", text: "agentId: a1b2 (use SendMessage with to: 'a1b2', summary: '<5-10 word recap>' to continue this agent)\n<usage>subagent_tokens: 10</usage>" },
+    ])).resolves.toBe("Found the cause");
   });
 
   it("falls back to JSON when no block carries text", async () => {

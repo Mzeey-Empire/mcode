@@ -53,6 +53,11 @@ const BACKGROUND_TASK_STATUS: ReadonlyMap<string, BackgroundToolStatus> = new Ma
   ["completed", "completed"], ["failed", "failed"], ["stopped", "cancelled"],
 ]);
 const SESSION_ENDED_OUTPUT = "Stopped when the Claude session ended.";
+// The CLI frames a subagent's report for the model's benefit. It indents every report
+// line, so the first column-zero line after the frame ends the report.
+const HANDBACK_FRAME_PREFIX = "[Subagent hand-back] ";
+const HANDBACK_REPORT_INDENT = "  ";
+const AGENT_RESUME_TRAILER = /^agentId: \S+ \(use SendMessage/;
 type BackgroundToolStatus = ProviderBackgroundToolSettlement["status"];
 
 /** State read by the Claude SDK event mapper. */
@@ -810,12 +815,25 @@ function readParentEvidence(message: Message): ClaudeParentEvidence {
 
 /** Claude sends rich results as content blocks; keep their text so stored summaries read as prose, not JSON. */
 function toolResultText(content: unknown): string {
-  if (typeof content === "string") return content;
+  if (typeof content === "string") return subagentReport(content);
   if (Array.isArray(content)) {
-    const texts = content.map(objectValue).filter((block) => block.type === "text").map((block) => stringValue(block.text));
-    if (texts.length > 0) return texts.join("\n");
+    const texts = content.map(objectValue).filter((block) => block.type === "text").map((block) => stringValue(block.text))
+      .filter((text) => !AGENT_RESUME_TRAILER.test(text));
+    if (texts.length > 0) return subagentReport(texts.join("\n"));
   }
   return JSON.stringify(content ?? "");
+}
+/** Keeps only the subagent's own report from a framed hand-back; other text passes through. */
+function subagentReport(text: string): string {
+  const lines = text.split("\n");
+  const frame = lines.findIndex((line) => line.startsWith(HANDBACK_FRAME_PREFIX));
+  if (frame === -1) return text;
+  const report: string[] = [];
+  for (const line of lines.slice(frame + 1)) {
+    if (!line.startsWith(HANDBACK_REPORT_INDENT)) break;
+    report.push(line.slice(HANDBACK_REPORT_INDENT.length));
+  }
+  return report.join("\n");
 }
 
 function stringValue(value: unknown): string {
