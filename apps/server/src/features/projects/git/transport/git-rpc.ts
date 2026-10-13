@@ -71,7 +71,7 @@ const gitHandlers: GitHandlerMap = {
     );
   },
   "git.refs.list": (deps, params) => deps.gitRepository.listRefsAt(
-    resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId), params,
+    resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true), params,
   ),
   "git.currentBranch": (deps, params) =>
     isGitWorkspace(deps, params.workspaceId)
@@ -97,7 +97,7 @@ const gitHandlers: GitHandlerMap = {
         params.branch,
         params.limit,
         params.baseBranch,
-        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
+        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
         params.skip,
         params.includeStats,
       )
@@ -139,7 +139,7 @@ const gitHandlers: GitHandlerMap = {
       params.workspaceId,
       params.ref,
       params.filePath,
-      resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
+      resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
     );
   },
   "git.branchDiff": (deps, params) =>
@@ -151,7 +151,7 @@ const gitHandlers: GitHandlerMap = {
         {
           filePath: params.filePath,
           maxLines: params.maxLines,
-          repoPath: resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
+          repoPath: resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
           ignoreWhitespace: params.ignoreWhitespace,
         },
       )
@@ -163,7 +163,7 @@ const gitHandlers: GitHandlerMap = {
     const thread = params.threadId ? deps.threadRepo.findById(params.threadId) : null;
     return deps.gitComparison.resolveBranchComparison(
       params.workspaceId,
-      resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
+      resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
       thread?.checkout_state === "branchless" ? thread.base_branch ?? thread.branch : null,
     );
   },
