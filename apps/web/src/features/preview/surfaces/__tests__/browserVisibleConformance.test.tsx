@@ -19,7 +19,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { buildPersistedNarrativeItems } from "@/features/conversation/narrative/build-persisted-narrative";
 import { ToolSummaryLine } from "@/features/conversation/narrative/ToolSummaryLine";
 import type { ToolCall, ToolCallRecord } from "@/transport/types";
-import { BrowserHeader, type BrowserHeaderProps } from "../BrowserHeader";
+import { BrowserToolbar } from "../BrowserToolbar";
+import type { BrowserTools } from "../browserToolbarModel";
 import { BrowserViewportToolbar } from "../BrowserViewportToolbar";
 import { ThreadOverview } from "@/components/chat/ThreadOverview";
 import type { Thread } from "@/transport";
@@ -274,53 +275,43 @@ function visibleThread(): Thread {
   };
 }
 
-function headerProps(overrides: Partial<BrowserHeaderProps> = {}): BrowserHeaderProps {
-  return {
-    url: "https://example.test/checkout?token=redacted",
-    pageTitle: "Checkout",
-    faviconUrl: null,
-    hasLoadedPage: true,
-    canBack: false,
-    canFwd: false,
-    threadId: THREAD_ID,
-    designModeActive: false,
-    elementPickBusy: false,
-    screenshotArmed: false,
-    onNavigate: vi.fn(),
-    onGoBack: vi.fn(),
-    onGoForward: vi.fn(),
-    onReload: vi.fn(),
-    onOpenExternal: vi.fn(),
-    onToggleDesign: vi.fn(),
-    onScreenshot: vi.fn(),
-    onNewPage: vi.fn(),
-    onForceReload: vi.fn(),
-    onClearCookies: vi.fn(),
-    onClearCache: vi.fn(),
-    onGetZoom: vi.fn().mockResolvedValue(1),
-    onSetZoom: vi.fn().mockResolvedValue(1),
-    ...overrides,
-  };
-}
-
-function VisibleBrowserHeader({ onStopAutomation }: { readonly onStopAutomation?: () => void }) {
+function VisibleBrowserHeader({ onStopAutomation }: { readonly onStopAutomation: () => void }) {
   const controller = useBrowserAutomationStore((state) => state.controllers.get(TARGET_KEY) ?? null);
   const activeRequest = useBrowserAutomationStore((state) => state.activeRequests.size > 0);
+  const enabled = { kind: "enabled", run: vi.fn() } as const;
+  const tools: BrowserTools = {
+    deviceToolbar: enabled,
+    developerTools: enabled,
+    forceReload: enabled,
+    zoom: { kind: "enabled", read: async () => 1, set: async (factor) => factor },
+    clearCookies: enabled,
+    clearCache: enabled,
+    takeover: controller?.controller === "agent"
+      ? { kind: "agent", busy: activeRequest, takeControl: onStopAutomation }
+      : { kind: "none" },
+  };
   return (
     <TooltipProvider>
-      <BrowserHeader
-        {...headerProps()}
-        automationController={controller}
-        automationBusy={activeRequest}
-        onStopAutomation={onStopAutomation}
+      <BrowserToolbar
+        page={{
+          kind: "loaded",
+          navigation: { back: enabled, forward: enabled, reload: enabled },
+          pageActions: { kind: "unavailable" },
+        }}
+        address={{
+          url: "https://example.test/checkout?token=redacted",
+          onNavigate: vi.fn(),
+          openExternal: enabled,
+          onHumanFocus: vi.fn(),
+        }}
+        tools={tools}
       />
     </TooltipProvider>
   );
 }
 
 function visibleBrowserRun(currentUrl: string | null) {
-  const urlInput = screen.getByRole("textbox", { name: "Preview URL" }) as HTMLInputElement;
-  const menu = screen.queryByTestId("browser-overflow-menu");
+  const menu = screen.queryByRole("menu");
   const ownsBrowser = menu
     ? Boolean(within(menu).queryByRole("menuitem", { name: "Take control" }))
     : false;
@@ -340,7 +331,8 @@ function visibleBrowserRun(currentUrl: string | null) {
       controlOwner,
       tabCount: 1,
       currentUrl,
-      title: urlInput.value,
+      // Row 2 shows only the address; the page title lives in the row-1 tab.
+      title: null,
       action: null,
       truncated: false,
     }],
@@ -485,7 +477,7 @@ describe("visible Browser conformance observer", () => {
 
     const initialUrl = await visibleBrowserCurrentUrl(user);
     expect(initialUrl).toBe("https://example.test/checkout?token=redacted");
-    await user.click(screen.getByRole("button", { name: "More browser tools" }));
+    await user.click(screen.getByRole("button", { name: "More" }));
     const takeover = await screen.findByRole("menuitem", { name: "Take control" });
     expect(takeover).toBeInTheDocument();
     const agentRun = visibleBrowserRun(initialUrl);
@@ -493,7 +485,7 @@ describe("visible Browser conformance observer", () => {
       surface: "browser",
       controlOwner: "agent",
       currentUrl: "https://example.test/checkout",
-      title: "Checkout",
+      title: null,
     });
     expect(agentRun.outcome.status).toBe("completed");
     expect(agentRun.outcome.status).not.toBe("unknown");
@@ -510,7 +502,7 @@ describe("visible Browser conformance observer", () => {
     });
     const releasedUrl = await visibleBrowserCurrentUrl(user);
     expect(releasedUrl).toBe(initialUrl);
-    await user.click(screen.getByRole("button", { name: "More browser tools" }));
+    await user.click(screen.getByRole("button", { name: "More" }));
     expect(screen.queryByRole("menuitem", { name: "Take control" })).not.toBeInTheDocument();
     expect(visibleBrowserRun(releasedUrl).visibleObservations[0]?.controlOwner).toBe("none");
   });
@@ -935,7 +927,7 @@ describe("visible Browser conformance observer", () => {
       controlEpoch: 7,
     });
     render(<VisibleBrowserHeader onStopAutomation={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "More browser tools" }));
+    await user.click(screen.getByRole("button", { name: "More" }));
     expect(await screen.findByRole("menuitem", { name: "Take control" })).toBeInTheDocument();
 
     act(() => {

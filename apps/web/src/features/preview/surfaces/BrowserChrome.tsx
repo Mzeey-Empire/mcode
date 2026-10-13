@@ -1,9 +1,8 @@
 /**
- * Owns the existing Browser header, annotation header and viewport toolbar wiring, separate from the page surface and design overlays.
+ * Owns the desktop Browser toolbar, annotation header and viewport toolbar wiring, separate from the page surface and design overlays.
  */
-import type { ReactNode } from "react";
 import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
-import { BrowserHeader } from "./BrowserHeader";
+import { BrowserToolbar } from "./BrowserToolbar";
 import { BrowserViewportToolbar } from "./BrowserViewportToolbar";
 import { PreviewAnnotationHeader } from "./PreviewAnnotationHeader";
 import { usePreviewAnnotationStore } from "../state/previewAnnotationStore";
@@ -16,7 +15,15 @@ import type { useDesignAnnotationEditor } from "../design/useDesignAnnotationEdi
 import type { useDesignPicker } from "../design/useDesignPicker";
 import type { useDesignAnnotationState } from "../design/useDesignAnnotationState";
 import type { usePreviewPage } from "./usePreviewPage";
-import type { BrowserAction, BrowserCommandActions } from "./browserToolbarModel";
+import {
+  browserAction,
+  type BrowserAction,
+  type BrowserAddress,
+  type BrowserNavigation,
+  type BrowserToolbarPage,
+  type BrowserTools,
+} from "./browserToolbarModel";
+import type { PreviewPageError } from "@mcode/contracts";
 import { useBrowserCommands } from "./useBrowserCommands";
 
 interface BrowserChromeProps {
@@ -37,8 +44,9 @@ interface BrowserChromeProps {
   readonly clearTransientAnnotationState: ReturnType<typeof useDesignPicker>["clearTransientAnnotationState"];
   readonly designModeSetActive: ReturnType<typeof useDesignAnnotationState>["designModeSetActive"];
   readonly webviewInputUrl: ReturnType<typeof usePreviewPage>["webviewInputUrl"];
-  readonly webviewPageStatus: ReturnType<typeof usePreviewPage>["webviewPageStatus"];
   readonly hasLoadedPage: boolean;
+  /** The page's load or rejected-navigation error; it wins over an address for the toolbar variant. */
+  readonly pageError: PreviewPageError | undefined;
   readonly webviewCanBack: ReturnType<typeof usePreviewPage>["webviewCanBack"];
   readonly webviewCanFwd: ReturnType<typeof usePreviewPage>["webviewCanFwd"];
   readonly designModeActive: ReturnType<typeof useDesignAnnotationState>["designModeActive"];
@@ -50,7 +58,6 @@ interface BrowserChromeProps {
   readonly activeWebviewRef: ReturnType<typeof usePreviewPage>["activeWebviewRef"];
   readonly onWebviewOpenExternal: ReturnType<typeof usePreviewPage>["onWebviewOpenExternal"];
   readonly onToggleDesignMode: ReturnType<typeof useDesignPicker>["onToggleDesignMode"];
-  readonly tabs: ReturnType<typeof usePreviewViewport>["tabs"];
   readonly bridge: ReturnType<typeof usePreviewPage>["bridge"];
   readonly onWebviewGetZoom: ReturnType<typeof usePreviewPage>["onWebviewGetZoom"];
   readonly onWebviewSetZoom: ReturnType<typeof usePreviewPage>["onWebviewSetZoom"];
@@ -64,19 +71,152 @@ interface BrowserChromeProps {
 const LOAD_A_PAGE_FIRST = "Load a page first";
 
 function pageAction(hasLoadedPage: boolean, run: () => void): BrowserAction {
-  return hasLoadedPage ? { kind: "enabled", run } : { kind: "disabled", reason: LOAD_A_PAGE_FIRST };
+  return browserAction(hasLoadedPage ? null : LOAD_A_PAGE_FIRST, run);
+}
+
+type DesktopToolbarInputs = Pick<
+  BrowserChromeProps,
+  | "threadId"
+  | "hasLoadedPage"
+  | "pageError"
+  | "webviewCanBack"
+  | "webviewCanFwd"
+  | "designModeActive"
+  | "capture"
+  | "activeWebviewRef"
+  | "onToggleDesignMode"
+> & { readonly invalidateObservation: () => void };
+
+function desktopNavigation({
+  webviewCanBack,
+  webviewCanFwd,
+  activeWebviewRef,
+  invalidateObservation,
+}: DesktopToolbarInputs): BrowserNavigation {
+  const withInvalidation = (run: () => void) => () => {
+    invalidateObservation();
+    run();
+  };
+  return {
+    back: browserAction(webviewCanBack ? null : "No earlier page", withInvalidation(() => activeWebviewRef()?.goBack())),
+    forward: browserAction(webviewCanFwd ? null : "No later page", withInvalidation(() => activeWebviewRef()?.goForward())),
+    reload: { kind: "enabled", run: withInvalidation(() => activeWebviewRef()?.reload()) },
+  };
+}
+
+/** Error wins over an address; a page with an address counts as loaded even while it loads. */
+function desktopPage(inputs: DesktopToolbarInputs): BrowserToolbarPage {
+  const { threadId, hasLoadedPage, pageError, designModeActive, capture, onToggleDesignMode } = inputs;
+  if (pageError) return { kind: "error", navigation: desktopNavigation(inputs) };
+  if (!hasLoadedPage) return { kind: "new" };
+  return {
+    kind: "loaded",
+    navigation: desktopNavigation(inputs),
+    pageActions: {
+      kind: "desktop",
+      designActive: designModeActive,
+      design: browserAction(threadId ? null : "Open a thread first", onToggleDesignMode),
+      screenshotArmed: capture.screenshotArmed,
+      screenshot: browserAction(
+        capture.elementPickBusy ? "Finish picking an element first" : null,
+        capture.onToggleScreenshot,
+      ),
+    },
+  };
+}
+
+type DesktopToolsInputs = Pick<
+  BrowserChromeProps,
+  | "threadId"
+  | "hasLoadedPage"
+  | "activeWebviewTabId"
+  | "activeWebviewRef"
+  | "bridge"
+  | "onWebviewGetZoom"
+  | "onWebviewSetZoom"
+  | "toggleViewportToolbar"
+  | "activeAutomationController"
+  | "activeAutomationRequest"
+> & { readonly invalidateObservation: () => void; readonly takeControl: () => void };
+
+function desktopTools(inputs: DesktopToolsInputs): BrowserTools {
+  const { threadId, hasLoadedPage, activeWebviewTabId, activeWebviewRef, bridge, invalidateObservation } = inputs;
+  return {
+    deviceToolbar: { kind: "enabled", run: inputs.toggleViewportToolbar },
+    developerTools: pageAction(hasLoadedPage, () => {
+      void window.desktopBridge?.preview.openGuestDevTools({ threadId, tabId: activeWebviewTabId });
+    }),
+    forceReload: pageAction(hasLoadedPage, () => {
+      invalidateObservation();
+      activeWebviewRef()?.forceReload();
+    }),
+    zoom: hasLoadedPage
+      ? { kind: "enabled", read: inputs.onWebviewGetZoom, set: inputs.onWebviewSetZoom }
+      : { kind: "disabled", reason: LOAD_A_PAGE_FIRST },
+    clearCookies: pageAction(hasLoadedPage, () => void bridge.clearCookies()),
+    clearCache: pageAction(hasLoadedPage, () => void bridge.clearCache()),
+    takeover: inputs.activeAutomationController?.controller === "agent"
+      ? { kind: "agent", busy: inputs.activeAutomationRequest !== undefined, takeControl: inputs.takeControl }
+      : { kind: "none" },
+  };
+}
+
+function desktopAddress(
+  props: Pick<BrowserChromeProps, "webviewInputUrl" | "onWebviewNavigate" | "onWebviewOpenExternal" | "activeAutomationController">,
+  invalidateObservation: () => void,
+): BrowserAddress {
+  return {
+    url: props.webviewInputUrl,
+    onNavigate: (url) => {
+      invalidateObservation();
+      props.onWebviewNavigate(url);
+    },
+    openExternal: { kind: "enabled", run: props.onWebviewOpenExternal },
+    onHumanFocus: () => {
+      if (props.activeAutomationController?.controller === "agent") invalidateObservation();
+    },
+  };
 }
 
 /** Puts the Browser or annotation header in the panel header's row 2; the viewport toolbar stays over the page. */
-export function BrowserChrome({
-  viewportToolbarOpen,
-  activeViewportState,
-  activeViewportCoordinator,
-  responsiveViewportScale,
-  closeViewportToolbar,
-  invalidateActiveViewportObservation,
-  coveredRight,
-  showAnnotationCommandBar,
+export function BrowserChrome(props: BrowserChromeProps) {
+  const { threadId, browserWorkspaceId, activeWebviewTabId } = props;
+  const invalidateObservation = (): void => {
+    invalidateBrowserAutomationTargetObservation(browserWorkspaceId, threadId, activeWebviewTabId);
+  };
+  const takeControl = (): void => {
+    interruptBrowserAutomationTarget(browserWorkspaceId, threadId, activeWebviewTabId, "user-stopped");
+  };
+  const tools = desktopTools({ ...props, invalidateObservation, takeControl });
+  useBrowserCommands({ active: props.commandsActive, actions: tools });
+
+  return (
+    <div
+      data-testid="browser-chrome"
+      className="pointer-events-auto relative z-(--layer-dropdown)"
+      style={props.coveredRight ? { clipPath: `inset(0 ${props.coveredRight}px 0 0)` } : undefined}
+    >
+      <PanelHeaderSlot slot="row2">
+        {/* A block wrapper so the header's own flex row spans the full row. */}
+        <div data-browser-chrome="" className="min-w-0 flex-1">
+          {props.showAnnotationCommandBar ? (
+            <AnnotationHeader {...props} />
+          ) : (
+            <BrowserToolbar
+              page={desktopPage({ ...props, invalidateObservation })}
+              address={desktopAddress(props, invalidateObservation)}
+              tools={tools}
+              focusRequest={props.omniboxFocusTick}
+            />
+          )}
+        </div>
+      </PanelHeaderSlot>
+      <ViewportToolbar {...props} />
+    </div>
+  );
+}
+
+function AnnotationHeader({
   pageAnnotations,
   bundleCount,
   annotationHeaderPageLabel,
@@ -85,156 +225,42 @@ export function BrowserChrome({
   requestComposerSubmit,
   clearTransientAnnotationState,
   designModeSetActive,
-  webviewInputUrl,
-  webviewPageStatus,
-  hasLoadedPage,
-  webviewCanBack,
-  webviewCanFwd,
-  designModeActive,
-  capture,
-  omniboxFocusTick,
-  browserWorkspaceId,
-  activeWebviewTabId,
-  onWebviewNavigate,
-  activeWebviewRef,
-  onWebviewOpenExternal,
-  onToggleDesignMode,
-  tabs,
-  bridge,
-  onWebviewGetZoom,
-  onWebviewSetZoom,
-  toggleViewportToolbar,
-  activeAutomationController,
-  activeAutomationRequest,
-  commandsActive,
 }: BrowserChromeProps) {
-  const invalidateObservation = (): void => {
-    invalidateBrowserAutomationTargetObservation(browserWorkspaceId, threadId, activeWebviewTabId);
-  };
-  const commandActions: BrowserCommandActions = {
-    deviceToolbar: { kind: "enabled", run: toggleViewportToolbar },
-    developerTools: pageAction(hasLoadedPage, () => {
-      void window.desktopBridge?.preview.openGuestDevTools({ threadId, tabId: activeWebviewTabId });
-    }),
-    forceReload: pageAction(hasLoadedPage, () => {
-      invalidateObservation();
-      activeWebviewRef()?.forceReload();
-    }),
-  };
-  useBrowserCommands({ active: commandsActive, actions: commandActions });
-
-  const renderViewportToolbar = (): ReactNode => {
-    if (!viewportToolbarOpen && activeViewportState?.mode !== "responsive") return null;
-    if (!activeViewportCoordinator || !activeViewportState) return null;
-    return (
-      <BrowserViewportToolbar
-        coordinator={activeViewportCoordinator}
-        state={activeViewportState}
-        scale={responsiveViewportScale}
-        onClose={closeViewportToolbar}
-        onUserViewportChange={invalidateActiveViewportObservation}
-      />
-    );
-  };
-
   return (
-    <div
-      data-testid="browser-chrome"
-      className="pointer-events-auto relative z-(--layer-dropdown)"
-      style={coveredRight ? { clipPath: `inset(0 ${coveredRight}px 0 0)` } : undefined}
-    >
-      <PanelHeaderSlot slot="row2">
-        {/* A block wrapper so the header's own flex row spans the full row. */}
-        <div data-browser-chrome="" className="min-w-0 flex-1">
-        {showAnnotationCommandBar ? (
-          <PreviewAnnotationHeader
-            pageCount={pageAnnotations.length}
-            bundleCount={bundleCount}
-            pageLabel={annotationHeaderPageLabel}
-            onDiscardPage={() => {
-              usePreviewAnnotationStore
-                .getState()
-                .discardPage(threadId, currentPageIdentity);
-            }}
-            onSend={requestComposerSubmit}
-            onExit={() => {
-              clearTransientAnnotationState();
-              designModeSetActive(threadId, false);
-              void window.desktopBridge?.preview?.cancelCapture();
-            }}
-          />
-        ) : (
-          <BrowserHeader
-            url={webviewInputUrl}
-            pageTitle={webviewPageStatus.title}
-            faviconUrl={webviewPageStatus.favicon}
-            hasLoadedPage={hasLoadedPage}
-            canBack={webviewCanBack}
-            canFwd={webviewCanFwd}
-            threadId={threadId}
-            designModeActive={designModeActive}
-            elementPickBusy={capture.elementPickBusy}
-            screenshotArmed={capture.screenshotArmed}
-            focusRequest={omniboxFocusTick}
-            onNavigate={(url) => {
-              invalidateBrowserAutomationTargetObservation(browserWorkspaceId, threadId, activeWebviewTabId);
-              onWebviewNavigate(url);
-            }}
-            onGoBack={() => {
-              invalidateBrowserAutomationTargetObservation(browserWorkspaceId, threadId, activeWebviewTabId);
-              activeWebviewRef()?.goBack();
-            }}
-            onGoForward={() => {
-              invalidateBrowserAutomationTargetObservation(browserWorkspaceId, threadId, activeWebviewTabId);
-              activeWebviewRef()?.goForward();
-            }}
-            onReload={() => {
-              invalidateBrowserAutomationTargetObservation(browserWorkspaceId, threadId, activeWebviewTabId);
-              activeWebviewRef()?.reload();
-            }}
-            onOpenExternal={onWebviewOpenExternal}
-            onToggleDesign={onToggleDesignMode}
-            onScreenshot={capture.onToggleScreenshot}
-            onNewPage={() => {
-              invalidateBrowserAutomationTargetObservation(browserWorkspaceId, threadId, activeWebviewTabId);
-              tabs.newTab();
-            }}
-            onForceReload={() => {
-              invalidateBrowserAutomationTargetObservation(browserWorkspaceId, threadId, activeWebviewTabId);
-              activeWebviewRef()?.forceReload();
-            }}
-            onClearCookies={bridge.clearCookies}
-            onClearCache={bridge.clearCache}
-            onGetZoom={onWebviewGetZoom}
-            onSetZoom={onWebviewSetZoom}
-            onOpenDevTools={() => {
-              void window.desktopBridge?.preview.openGuestDevTools({
-                threadId,
-                tabId: activeWebviewTabId,
-              });
-            }}
-            onToggleViewportToolbar={toggleViewportToolbar}
-            viewportToolbarVisible={viewportToolbarOpen || activeViewportState?.mode === "responsive"}
-            automationController={activeAutomationController ?? null}
-            automationBusy={activeAutomationRequest !== undefined}
-            onHumanFocus={() => {
-              if (activeAutomationController?.controller !== "agent") return;
-              invalidateBrowserAutomationTargetObservation(browserWorkspaceId, threadId, activeWebviewTabId);
-            }}
-            onStopAutomation={() =>
-              interruptBrowserAutomationTarget(
-                browserWorkspaceId,
-                threadId,
-                activeWebviewTabId,
-                "user-stopped",
-              )
-            }
-          />
-        )}
-        </div>
-      </PanelHeaderSlot>
-      {renderViewportToolbar()}
-    </div>
+    <PreviewAnnotationHeader
+      pageCount={pageAnnotations.length}
+      bundleCount={bundleCount}
+      pageLabel={annotationHeaderPageLabel}
+      onDiscardPage={() => {
+        usePreviewAnnotationStore.getState().discardPage(threadId, currentPageIdentity);
+      }}
+      onSend={requestComposerSubmit}
+      onExit={() => {
+        clearTransientAnnotationState();
+        designModeSetActive(threadId, false);
+        void window.desktopBridge?.preview?.cancelCapture();
+      }}
+    />
   );
+}
 
+function ViewportToolbar({
+  viewportToolbarOpen,
+  activeViewportState,
+  activeViewportCoordinator,
+  responsiveViewportScale,
+  closeViewportToolbar,
+  invalidateActiveViewportObservation,
+}: BrowserChromeProps) {
+  if (!viewportToolbarOpen && activeViewportState?.mode !== "responsive") return null;
+  if (!activeViewportCoordinator || !activeViewportState) return null;
+  return (
+    <BrowserViewportToolbar
+      coordinator={activeViewportCoordinator}
+      state={activeViewportState}
+      scale={responsiveViewportScale}
+      onClose={closeViewportToolbar}
+      onUserViewportChange={invalidateActiveViewportObservation}
+    />
+  );
 }
