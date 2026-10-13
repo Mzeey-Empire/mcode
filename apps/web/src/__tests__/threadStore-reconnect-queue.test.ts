@@ -6,12 +6,14 @@ import { useToastStore } from "@/stores/toastStore";
 import { releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-capture-spill";
 import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
-import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
+import { isThreadExecuting, scheduleDrainAfterEdit, useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { restoreQueuedSteers, sendHeldSteerAgain } from "@/features/conversation/composer/queue/queued-steer";
 import {
+  discardEditedNote,
   queueApprovalNote,
   removeApprovalNote,
+  requeueEditedNote,
   restoreApprovalNotes,
   sendApprovalNoteAgain,
   setApprovalNoteInEdit,
@@ -859,6 +861,15 @@ describe("threadStore reconnect and queued follow-ups", () => {
       expect(notes()).toEqual([["Only lint the web app", { requestId: REQUEST, state: "delivery_unknown" }]]);
     });
 
+    it("takes the server's text for a note this window already holds", async () => {
+      queueApprovalNote(THREAD_ID, REQUEST, "Only lint the web app", "queued");
+      listNotes().mockResolvedValueOnce([{ requestId: REQUEST, threadId: THREAD_ID, note: "Lint only apps/web", state: "queued" }]);
+
+      await restoreApprovalNotes();
+
+      expect(notes()).toEqual([["Lint only apps/web", { requestId: REQUEST, state: "queued" }]]);
+    });
+
     it("does not restore a note that is open in the composer", async () => {
       setApprovalNoteInEdit(REQUEST, true);
       listNotes().mockResolvedValueOnce([{ requestId: REQUEST, threadId: THREAD_ID, note: "Only lint the web app", state: "queued" }]);
@@ -922,6 +933,48 @@ describe("threadStore reconnect and queued follow-ups", () => {
       await removeApprovalNote(THREAD_ID, useQueueStore.getState().queues[THREAD_ID]![0]!);
 
       expect(notes()).toEqual([["Only lint the web app", { requestId: REQUEST, state: "delivery_unknown" }]]);
+    });
+
+    describe("after an edit", () => {
+      const edit = { requestId: REQUEST, savedText: "Only lint the web app" };
+      const editedPayload = { content: "Lint only apps/web", attachments: [], model: "", permissionMode: "full" as const };
+      const updateNote = () => mockTransport.updateApprovalNote as ReturnType<typeof vi.fn>;
+
+      it("sends nothing when the queue drains before the server saves the edit", async () => {
+        vi.useFakeTimers();
+        let save!: (result: { status: "updated" }) => void;
+        updateNote().mockReturnValueOnce(new Promise((resolve) => { save = resolve; }));
+
+        requeueEditedNote(THREAD_ID, 0, editedPayload, edit);
+        scheduleDrainAfterEdit(THREAD_ID);
+        await vi.advanceTimersByTimeAsync(400);
+        expect(mockTransport.sendMessage).not.toHaveBeenCalled();
+
+        save({ status: "updated" });
+        await vi.advanceTimersByTimeAsync(400);
+        expect(updateNote()).toHaveBeenCalledWith(REQUEST, "Lint only apps/web");
+        expect(mockTransport.sendMessage).toHaveBeenCalledTimes(1);
+      });
+
+      it("shows the text the server will send when the edit is not saved", async () => {
+        vi.useFakeTimers();
+        updateNote().mockRejectedValueOnce(new Error("socket closed"));
+
+        requeueEditedNote(THREAD_ID, 0, editedPayload, edit);
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(notes()).toEqual([["Only lint the web app", { requestId: REQUEST, state: "queued" }]]);
+      });
+
+      it("keeps an emptied note queued when the server cannot remove it", async () => {
+        vi.useFakeTimers();
+        (mockTransport.removeApprovalNote as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("socket closed"));
+
+        const removed = await discardEditedNote(THREAD_ID, 0, edit);
+
+        expect(removed).toBe(false);
+        expect(notes()).toEqual([["Only lint the web app", { requestId: REQUEST, state: "queued" }]]);
+      });
     });
   });
 });

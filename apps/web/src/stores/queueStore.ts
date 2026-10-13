@@ -457,7 +457,7 @@ export const useQueueStore = create<QueueState>((set, get) => ({
       if (index === -1) return { queues: { ...state.queues, [threadId]: [...current, message] } };
       if (current[index].approvalNote?.state === "settling") return state;
       const nextList = [...current];
-      nextList[index] = { ...current[index], approvalNote: message.approvalNote };
+      nextList[index] = { ...current[index], content: message.content, displayContent: message.displayContent, approvalNote: message.approvalNote };
       return { queues: { ...state.queues, [threadId]: nextList } };
     });
   },

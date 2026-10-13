@@ -5,17 +5,17 @@ import {
   MCODE_BROWSER_CAPTURE_FENCE_CLOSE,
   MCODE_BROWSER_CAPTURE_FENCE_OPEN,
 } from "@/features/preview/capture/browser-capture-append";
-import { useQueueStore, type QueuedApprovalNote, type QueuedMessage } from "@/stores/queueStore";
+import { useQueueStore, type QueuedMessage } from "@/stores/queueStore";
 import { scheduleDrainAfterEdit } from "@/stores/threadStore";
 import { useToastStore } from "@/stores/toastStore";
-import { discardApprovalNote, saveApprovalNoteEdit, setApprovalNoteInEdit } from "./queued-approval-note";
+import { discardEditedNote, requeueEditedNote, setApprovalNoteInEdit, type ApprovalNoteEdit } from "./queued-approval-note";
 
 /** The queue slot currently restored into the Composer for editing. */
 export interface ComposerQueueEdit {
   messageId: string;
   originalIndex: number;
   /** Set when the slot holds a deny note, whose edits the server must save. */
-  approvalNote?: QueuedApprovalNote;
+  approvalNote?: ApprovalNoteEdit;
 }
 
 /** The live Composer operations needed to restore or clear a queued message. */
@@ -77,7 +77,7 @@ function preserveBrowserCapturePayload(
 function startEdit(popped: QueuedMessage, originalIndex: number): ComposerQueueEdit {
   if (!popped.approvalNote) return { messageId: popped.id, originalIndex };
   setApprovalNoteInEdit(popped.approvalNote.requestId, true);
-  return { messageId: popped.id, originalIndex, approvalNote: popped.approvalNote };
+  return { messageId: popped.id, originalIndex, approvalNote: { requestId: popped.approvalNote.requestId, savedText: popped.content } };
 }
 
 function putBackSwappedEdit(
@@ -86,13 +86,21 @@ function putBackSwappedEdit(
   payload: Omit<QueuedMessage, "id" | "queuedAt"> | null,
 ): void {
   const note = editing.approvalNote;
-  if (payload) {
-    useQueueStore.getState().insertAt(threadId, editing.originalIndex, note ? { ...payload, approvalNote: note } : payload);
-    if (note) void saveApprovalNoteEdit(threadId, note.requestId, payload.content);
-  } else if (note) {
-    void discardApprovalNote(note.requestId);
+  if (!note) {
+    if (payload) useQueueStore.getState().insertAt(threadId, editing.originalIndex, payload);
+    return;
   }
-  if (note) setApprovalNoteInEdit(note.requestId, false);
+  setApprovalNoteInEdit(note.requestId, false);
+  if (payload) requeueEditedNote(threadId, editing.originalIndex, payload, note);
+  else void discardEditedNote(threadId, editing.originalIndex, note);
+}
+
+function showRemovedFromQueue(slot: number): void {
+  useToastStore.getState().show({
+    kind: "info",
+    title: "Removed from queue",
+    meta: `Slot ${String(slot + 1).padStart(2, "0")}`,
+  });
 }
 
 /** Manages the pop, restore, swap, cancel, and completion lifecycle for one queued Composer message. */
@@ -206,18 +214,18 @@ export function useComposerQueueEditing({
 
     const slot = editing.originalIndex;
     const browserCaptureSpillPaths = originalMessageRef.current?.browserCaptureSpillPaths ?? [];
-    if (editing.approvalNote) void discardApprovalNote(editing.approvalNote.requestId);
+    const note = editing.approvalNote;
     finishEditing();
     annotations.clear();
+    if (note) {
+      void discardEditedNote(threadId, slot, note).then((removed) => {
+        if (removed) showRemovedFromQueue(slot);
+      });
+    } else {
+      showRemovedFromQueue(slot);
+    }
     scheduleDrainAfterEdit(threadId);
     void releaseBrowserCaptureSpills(browserCaptureSpillPaths);
-    useToastStore
-      .getState()
-      .show({
-        kind: "info",
-        title: "Removed from queue",
-        meta: `Slot ${String(slot + 1).padStart(2, "0")}`,
-      });
     return true;
   }, [annotations, editing, finishEditing, threadId]);
 

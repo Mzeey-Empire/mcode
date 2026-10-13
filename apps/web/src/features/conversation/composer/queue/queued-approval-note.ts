@@ -15,17 +15,31 @@ export function setApprovalNoteInEdit(requestId: string, editing: boolean): void
   else notesInEdit.delete(requestId);
 }
 
-function noteMessage(threadId: string, requestId: string, note: string, state: HeldNoteState): QueuedMessage & { approvalNote: QueuedApprovalNote } {
+type QueuePayload = Omit<QueuedMessage, "id" | "queuedAt">;
+
+/** A queued deny note open in the composer, with the text the server holds for it. Only a queued note offers Edit. */
+export interface ApprovalNoteEdit {
+  readonly requestId: string;
+  readonly savedText: string;
+}
+
+function notePayload(threadId: string, requestId: string, note: string, state: HeldNoteState): QueuePayload & { approvalNote: QueuedApprovalNote } {
   const thread = useWorkspaceStore.getState().threads.find((item) => item.id === threadId);
   return {
-    id: crypto.randomUUID(),
     content: note,
     attachments: [],
     model: thread?.model ?? "",
     permissionMode: thread?.permission_mode ?? useThreadStore.getState().getThreadSettings(threadId).permissionMode,
-    queuedAt: Date.now(),
     approvalNote: { requestId, state },
   };
+}
+
+function noteMessage(threadId: string, requestId: string, note: string, state: HeldNoteState): QueuedMessage & { approvalNote: QueuedApprovalNote } {
+  return { ...notePayload(threadId, requestId, note, state), id: crypto.randomUUID(), queuedAt: Date.now() };
+}
+
+function findNote(threadId: string, requestId: string): QueuedMessage | undefined {
+  return (useQueueStore.getState().queues[threadId] ?? []).find((message) => message.approvalNote?.requestId === requestId);
 }
 
 /**
@@ -79,37 +93,55 @@ export async function sendApprovalNoteAgain(threadId: string, message: QueuedMes
   scheduleDrainAfterEdit(threadId);
 }
 
-/** Removes a note on the server first, so it does not come back on the next reconnect. */
-export async function removeApprovalNote(threadId: string, message: QueuedMessage): Promise<void> {
+/** Removes a note on the server first, so it does not come back on the next reconnect. Returns whether it left. */
+export async function removeApprovalNote(threadId: string, message: QueuedMessage): Promise<boolean> {
   const status = await settleNote(threadId, message, (requestId) => getTransport().removeApprovalNote(requestId));
   if (status !== null) useQueueStore.getState().removeFromQueue(threadId, message.id);
+  return status !== null;
 }
 
 /**
- * Saves an edited note on the server, where it survives a reload. A note that was already sent
- * or removed elsewhere leaves the queue.
+ * Puts an edited note back in its slot and saves the edit on the server, where it survives a
+ * reload. Admission sends the server's text, so the slot is held until the save lands.
  */
-export async function saveApprovalNoteEdit(threadId: string, requestId: string, content: string): Promise<void> {
-  const dropEditedNote = () => {
-    const queue = useQueueStore.getState();
-    const item = (queue.queues[threadId] ?? []).find((message) => message.approvalNote?.requestId === requestId);
-    if (item) queue.removeFromQueue(threadId, item.id);
-  };
+export function requeueEditedNote(threadId: string, index: number, payload: QueuePayload, edit: ApprovalNoteEdit): boolean {
+  const held = { ...payload, approvalNote: { requestId: edit.requestId, state: "settling" as const } };
+  if (!useQueueStore.getState().insertAt(threadId, index, held)) return false;
+  void saveNoteEdit(threadId, edit, payload.content);
+  return true;
+}
+
+async function saveNoteEdit(threadId: string, edit: ApprovalNoteEdit, content: string): Promise<void> {
   try {
-    const result = await getTransport().updateApprovalNote(requestId, content);
-    if (result.status === "closed") dropEditedNote();
+    const result = await getTransport().updateApprovalNote(edit.requestId, content);
+    if (result.status === "closed") {
+      const item = findNote(threadId, edit.requestId);
+      if (item) useQueueStore.getState().removeFromQueue(threadId, item.id);
+      return;
+    }
+    releaseEditedNote(threadId, edit);
   } catch (error) {
+    // The server still holds the old text and will send it, so the row shows that text again.
+    releaseEditedNote(threadId, edit);
+    useQueueStore.getState().upsertApprovalNote(threadId, noteMessage(threadId, edit.requestId, edit.savedText, "queued"));
     const meta = error instanceof Error ? error.message : String(error);
     useToastStore.getState().show({ kind: "failed", title: "The note edit was not saved", meta });
   }
 }
 
-/** Removes a note the user emptied while editing it. */
-export async function discardApprovalNote(requestId: string): Promise<void> {
-  try {
-    await getTransport().removeApprovalNote(requestId);
-  } catch (error) {
-    const meta = error instanceof Error ? error.message : String(error);
-    useToastStore.getState().show({ kind: "failed", title: "Could not remove the note", meta });
-  }
+function releaseEditedNote(threadId: string, edit: ApprovalNoteEdit): void {
+  const item = findNote(threadId, edit.requestId);
+  if (!item) return;
+  useQueueStore.getState().setApprovalNoteState(threadId, item.id, "queued");
+  scheduleDrainAfterEdit(threadId);
+}
+
+/**
+ * Removes a note the user emptied while editing it. The note holds its slot until the server
+ * removes it, so a failed removal leaves it queued. Returns whether it left.
+ */
+export async function discardEditedNote(threadId: string, index: number, edit: ApprovalNoteEdit): Promise<boolean> {
+  if (!useQueueStore.getState().insertAt(threadId, index, notePayload(threadId, edit.requestId, edit.savedText, "queued"))) return false;
+  const item = findNote(threadId, edit.requestId);
+  return item ? removeApprovalNote(threadId, item) : false;
 }
