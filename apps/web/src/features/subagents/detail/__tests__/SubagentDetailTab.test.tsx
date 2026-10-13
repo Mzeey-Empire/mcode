@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import {
   createAgentModelState, type AgentItem, type AgentTurn, type Message, type SubagentDetail, type SubagentRoster, type SubagentRosterEntry,
@@ -78,6 +78,11 @@ describe("SubagentDetailTab", () => {
     transport.loadSubagentDetail.mockReset();
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
   it("shows a steps-tier entry's steps, truncation, summary, and what the provider shares", async () => {
     transport.loadSubagentDetail.mockResolvedValue(detail({
       totalSteps: 12,
@@ -143,6 +148,29 @@ describe("SubagentDetailTab", () => {
 
     act(() => seedLiveChild("Something else"));
     expect(screen.getByTestId("subagent-parent-prompt")).toHaveTextContent("Map the rail");
+  });
+
+  it("offers Show all once a narrower panel makes the prompt overflow", async () => {
+    class ManualResizeObserver implements ResizeObserver {
+      static readonly all: ManualResizeObserver[] = [];
+      target: Element | null = null;
+      constructor(readonly callback: ResizeObserverCallback) { ManualResizeObserver.all.push(this); }
+      observe(target: Element) { this.target = target; }
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", ManualResizeObserver);
+    let scrollHeight = 100;
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(() => scrollHeight);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(132);
+    await renderTab([entry({ provider: "cursor", tier: "meta" })]);
+    expect(screen.queryByRole("button", { name: "Show all" })).toBeNull();
+
+    scrollHeight = 200;
+    const prompt = screen.getByTestId("subagent-parent-prompt");
+    act(() => ManualResizeObserver.all.filter((observer) => observer.target === prompt)
+      .forEach((observer) => observer.callback([], observer)));
+    expect(screen.getByRole("button", { name: "Show all" })).toBeInTheDocument();
   });
 
   it("says the subagent is gone once its entry leaves the roster", async () => {

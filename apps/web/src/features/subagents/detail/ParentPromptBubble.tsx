@@ -9,7 +9,13 @@ export function ParentPromptBubble({ prompt }: { readonly prompt: string }) {
   const [overflows, setOverflows] = useState(false);
   useLayoutEffect(() => {
     const text = textRef.current;
-    if (text && !expanded) setOverflows(text.scrollHeight > text.clientHeight);
+    if (!text || expanded) return;
+    const measure = () => setOverflows(text.scrollHeight > text.clientHeight);
+    measure();
+    // Narrowing the panel rewraps the prompt, so a prompt that fit can start overflowing.
+    const observer = new ResizeObserver(measure);
+    observer.observe(text);
+    return () => observer.disconnect();
   }, [prompt, expanded]);
   const clamped = !expanded && overflows;
   return (
