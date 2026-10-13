@@ -78,6 +78,19 @@ describe("ClaudeEventMapper native dispatch", () => {
     expect(evidence.slice(1).map((source) => source.parent)).toEqual([{ kind: "root" }, { kind: "root" }]);
   });
 
+  it("reports an Agent's subagent_type as subagentType from assistant blocks and standalone tool_use messages", async () => {
+    const { mapper, events } = createMapper();
+    await mapper.map({ type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "tool_use", id: "AGENT_1", name: "Agent", input: { subagent_type: "general-purpose" } }] } });
+    await mapper.map({ type: "tool_use", id: "AGENT_2", tool_name: "Agent", tool_input: { subagent_type: "Explore" } });
+    await mapper.map({ type: "tool_use", id: "READ_1", tool_name: "Read", tool_input: { subagent_type: "Explore" } });
+
+    expect(events.map((event) => event.type === AgentEventType.ToolUse && event.toolInput)).toEqual([
+      { subagent_type: "general-purpose", subagentType: "general-purpose" },
+      { subagent_type: "Explore", subagentType: "Explore" },
+      { subagent_type: "Explore" },
+    ]);
+  });
+
   it.each(["__proto__", "constructor", "toString"])(
     "ignores unsafe native type %s",
     async (type) => {

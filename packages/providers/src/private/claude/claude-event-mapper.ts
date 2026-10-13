@@ -351,7 +351,7 @@ export class ClaudeEventMapper {
       threadId: this.threadId,
       toolCallId,
       toolName,
-      toolInput: objectValue(block.input),
+      toolInput: canonicalToolInput(toolName, objectValue(block.input)),
       parentToolCallId,
     });
   }
@@ -633,7 +633,7 @@ export class ClaudeEventMapper {
       threadId: this.threadId,
       toolCallId,
       toolName,
-      toolInput: firstObjectValue(message.tool_input, message.input),
+      toolInput: canonicalToolInput(toolName, firstObjectValue(message.tool_input, message.input)),
       parentToolCallId,
     });
     return "none";
@@ -889,6 +889,11 @@ function numberValue(value: unknown): number | undefined {
 }
 function numberOrNull(value: unknown): number | null {
   return typeof value === "number" ? value : null;
+}
+/** Claude names an Agent's type `subagent_type`; the shared tool input contract reads `subagentType`. */
+function canonicalToolInput(toolName: string, input: Message): Message {
+  const subagentType = toolName === "Agent" ? validIdentity(input.subagent_type) : undefined;
+  return subagentType ? { ...input, subagentType } : input;
 }
 function objectValue(value: unknown): Message {
   return objectOrUndefined(value) ?? {};
