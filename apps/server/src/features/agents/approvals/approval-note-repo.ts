@@ -53,8 +53,6 @@ export function approvalNoteWriteHandlers(db: Database): ReadonlyMap<string, (in
   const held = (requestId: string) => and(eq(approvalNotes.requestId, requestId), inArray(approvalNotes.state, ["queued", "delivery_unknown"]));
   return new Map([
     [insert.name, databaseWriteHandler(insert, (input) => {
-      // A pending row is an attempt whose adapter call failed before the provider took the answer,
-      // so the next answer replaces it. Any other state is a settled note that must stay as it is.
       orm.insert(approvalNotes).values({ ...input, state: "pending" }).onConflictDoUpdate({
         target: approvalNotes.requestId,
         set: { note: input.note, delivery: input.delivery, updatedAt: new Date().toISOString() },
@@ -65,9 +63,6 @@ export function approvalNoteWriteHandlers(db: Database): ReadonlyMap<string, (in
       orm.delete(approvalNotes).where(and(eq(approvalNotes.requestId, requestId), eq(approvalNotes.state, "pending"))).run();
     })],
     [recover.name, databaseWriteHandler(recover, (requestId) => {
-      // A next_turn note never reaches the provider during the answer, so it is safe to queue.
-      // A native or steer note may have reached the provider before the attempt ended, so it is
-      // held as delivery_unknown until the user decides whether to send it again.
       const recoveredState = sql`CASE WHEN ${approvalNotes.delivery} = 'next_turn' THEN 'queued' ELSE 'delivery_unknown' END`;
       const onlyRequest = requestId === undefined ? undefined : eq(approvalNotes.requestId, requestId);
       orm.update(approvalNotes)
@@ -92,7 +87,6 @@ export function approvalNoteWriteHandlers(db: Database): ReadonlyMap<string, (in
       return runChanges(updated).changes > 0;
     })],
     [resend.name, databaseWriteHandler(resend, (requestId) => {
-      // A resent note now travels with the next turn, and a replayed answer reports this delivery.
       const queued = orm.update(approvalNotes)
         .set({ state: "queued", delivery: "next_turn", updatedAt: new Date().toISOString() })
         .where(held(requestId));

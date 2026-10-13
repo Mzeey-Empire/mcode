@@ -68,7 +68,6 @@ export function queueComposerSubmission({
     ? useQueueStore.getState().insertAt(threadId, editing.originalIndex, note ? { ...payload, approvalNote: note } : payload)
     : useQueueStore.getState().enqueue(threadId, payload);
   if (!enqueued) void releaseBrowserCaptureSpills(spillPaths);
-  // The note sends once its edit is saved, so admission delivers the new text.
   if (enqueued && note) void saveApprovalNoteEdit(threadId, note.requestId, payload.content).then(() => scheduleDrainAfterEdit(threadId));
   return enqueued;
 }

@@ -69,7 +69,6 @@ async function setup(delivery: Delivery = "next_turn") {
     userMessage: existingMessageId ? { kind: "existing", messageId: existingMessageId }
       : { kind: "create", messageId: NodeCrypto.randomUUID(), content: note, sequence: 1 },
   });
-  // The process exits after the provider acknowledged the answer and before the note status write.
   const crashBeforeRecording = () => vi.spyOn(notes, "settle").mockRejectedValueOnce(new Error("Server exited before recording the answer"));
   return { ...runtime, notes, adapter, thread, service, restart, admit, crashBeforeRecording };
 }

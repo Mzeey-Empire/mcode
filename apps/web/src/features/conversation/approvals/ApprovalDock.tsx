@@ -56,15 +56,10 @@ function useFocusedRow(requestId: string) {
   return [focus.requestId === requestId ? focus.row : 0, (row: number) => setFocus({ requestId, row })] as const;
 }
 
-/**
- * The deny-with-a-note row's state. Drafts are kept per request, so paging away and back keeps
- * what the user started typing. The row hides while an answer is in flight.
- */
 function useDockNote(active: StoredApproval, submission: ApprovalSubmission | undefined) {
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
   const choiceId = active.noteDelivery === "none" ? undefined : active.noteChoiceId;
   const submitting = submission?.state === "submitting";
-  // A note cannot be sent by a stray click or key, so it skips the misclick guard.
   const submit = (note: string) => {
     if (choiceId !== undefined && !submitting) void submitApprovalChoice(active, choiceId, note);
   };

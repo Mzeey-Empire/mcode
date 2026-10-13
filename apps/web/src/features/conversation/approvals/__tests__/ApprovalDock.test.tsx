@@ -536,7 +536,6 @@ describe("ApprovalDock deny with a note", () => {
     [{ status: "resolved", noteDelivery: "unknown" }, "delivery_unknown"],
     [{ status: "not_pending", note: "delivery_unknown" }, "delivery_unknown"],
   ] as const)("queues a note the provider did not take after %o", async (result, state) => {
-    // A running turn keeps the queued note from draining, so the test sees it in the tray.
     useThreadStore.setState({ runningThreadIds: new Set(["thread-1"]) });
     respondToApproval.mockResolvedValueOnce(result);
     const user = setupUser();

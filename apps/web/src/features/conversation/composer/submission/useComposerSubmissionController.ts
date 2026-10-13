@@ -126,7 +126,7 @@ export function useComposerSubmissionController({
       submission: PreparedComposerSubmission,
       target: ComposerExecutionTargetController["target"],
     ): Promise<void> => {
-      if (shouldQueueActiveSubmit({ threadId, isAgentRunning, branchFromMessageId, isNewThread, editing: queue.editing, submission })) {
+      if (shouldQueueSubmit({ threadId, isAgentRunning, branchFromMessageId, isNewThread, editing: queue.editing, submission })) {
         queuePrepared(submission);
         return;
       }
@@ -204,7 +204,7 @@ export function useComposerSubmissionController({
       completeQueued(submission);
       return "complete";
     }
-    if (shouldQueueActiveSubmit({ threadId, isAgentRunning, branchFromMessageId, isNewThread, editing: queue.editing, submission })) {
+    if (shouldQueueSubmit({ threadId, isAgentRunning, branchFromMessageId, isNewThread, editing: queue.editing, submission })) {
       queuePrepared(submission);
       return "complete";
     }
@@ -286,11 +286,8 @@ function shouldDeferToHandoff({
   return Boolean(threadId && !branchFromMessageId && !isNewThread);
 }
 
-/**
- * Checks active-turn queue policy against the stable submitted text. An edited deny note always
- * returns to the queue, because only queue admission delivers it exactly once.
- */
-function shouldQueueActiveSubmit({
+/** Checks queue policy against the stable submitted text. An edited deny note always returns to the queue. */
+function shouldQueueSubmit({
   threadId,
   isAgentRunning,
   branchFromMessageId,

@@ -7,7 +7,6 @@ import { getTransport } from "@/transport";
 
 type HeldNoteState = HeldApprovalNote["state"];
 
-/** Notes open in the composer for editing. Their item is out of the queue, so a restore must not add another. */
 const notesInEdit = new Set<string>();
 
 /** Marks a note as open in the composer, or closes it. */
@@ -22,7 +21,6 @@ function noteMessage(threadId: string, requestId: string, note: string, state: H
     id: crypto.randomUUID(),
     content: note,
     attachments: [],
-    // Empty inherits the thread's model at send time; the server stores only the text.
     model: thread?.model ?? "",
     permissionMode: thread?.permission_mode ?? useThreadStore.getState().getThreadSettings(threadId).permissionMode,
     queuedAt: Date.now(),
@@ -49,10 +47,6 @@ export async function restoreApprovalNotes(): Promise<void> {
   }
 }
 
-/**
- * Holds the item while the server answers, so no drain sends it meanwhile. Restores its
- * previous state and reports the failure when the server cannot be asked.
- */
 async function settleNote<Status extends string>(
   threadId: string,
   message: QueuedMessage,
@@ -77,7 +71,6 @@ export async function sendApprovalNoteAgain(threadId: string, message: QueuedMes
   const status = await settleNote(threadId, message, (requestId) => getTransport().resendApprovalNote(requestId));
   if (status === null) return;
   const queue = useQueueStore.getState();
-  // Closed means another window already sent or removed it.
   if (status === "closed") {
     queue.removeFromQueue(threadId, message.id);
     return;

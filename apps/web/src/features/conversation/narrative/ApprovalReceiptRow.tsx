@@ -56,7 +56,6 @@ export function deliveredDenyNote(outcome: ApprovalOutcome): string | undefined 
   return outcome.noteDelivery === "native" || outcome.noteDelivery === "steer" ? outcome.note : undefined;
 }
 
-/** Paper 06e: the user's deny note, drawn as their own bubble under the receipt. */
 function DenyNoteBubble({ note }: { note: string }) {
   return (
     <div className="flex justify-end">

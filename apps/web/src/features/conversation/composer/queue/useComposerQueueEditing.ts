@@ -74,17 +74,12 @@ function preserveBrowserCapturePayload(
   };
 }
 
-/** Opens a popped queue item for editing; a deny note stays out of reconnect restores meanwhile. */
 function startEdit(popped: QueuedMessage, originalIndex: number): ComposerQueueEdit {
   if (!popped.approvalNote) return { messageId: popped.id, originalIndex };
   setApprovalNoteInEdit(popped.approvalNote.requestId, true);
   return { messageId: popped.id, originalIndex, approvalNote: popped.approvalNote };
 }
 
-/**
- * Returns the edit being swapped out to its slot. An emptied edit leaves the queue, as it always
- * has; a deny note also leaves the server, so the next reconnect does not bring it back.
- */
 function putBackSwappedEdit(
   threadId: string,
   editing: ComposerQueueEdit,

@@ -9,7 +9,6 @@ import { ApprovalNoteAlreadyDeliveredError, ApprovalNoteRepo, type ApprovalNoteR
 
 type ApprovalProvider = Pick<IAgentProvider, "id" | "on" | "resolveApproval" | "listPendingApprovals">;
 type ApprovalOwner = Pick<IAgentProvider, "resolveApproval" | "listPendingApprovals"> & { id: ProviderId | null };
-/** Far more answers than a user can retry within one reconnect window. */
 const REMEMBERED_RESPONSES = 1_000;
 type Resolution ={ requestId: string; threadId: string; outcome: ApprovalOutcome };
 type ThreadApprovalSource = {
@@ -214,10 +213,6 @@ export class ApprovalService {
     return saved?.result;
   }
 
-  /**
-   * A pending row the provider still lists is an attempt whose adapter call failed before the
-   * provider took the answer. It answered nothing, so a new answer may replace it.
-   */
   private isUndeliveredAttempt(row: ApprovalNoteRow | null): boolean {
     if (row?.state !== "pending") return false;
     return this.providerHolder(row.requestId) !== undefined;
@@ -250,10 +245,6 @@ export class ApprovalService {
     return result;
   }
 
-  /**
-   * Keep recent results so a client whose reply was lost can replay its answer. The entry outlives
-   * the respond on purpose, so the map is bounded by age instead of deleted on settle.
-   */
   private rememberResponse(requestId: string, entry: { note: string | undefined; result: ApprovalRespondResult }): void {
     this.responses.set(requestId, entry);
     if (this.responses.size <= REMEMBERED_RESPONSES) return;

@@ -187,7 +187,6 @@ describe("CodexProvider permission flow", () => {
       const delivery = provider.resolveApproval(pending.requestId, { choiceId: "deny", note: "Only lint the web app" });
       expect(await deny).toEqual({ decision: "decline" });
       expect(sent).toEqual([]);
-      // The Codex connection closes between the native answer and the steer that carries the note.
       if (answer === "disposed") rpc.dispose();
       nativeRequest.responseWritten?.(true);
       if (answer === "no-answer") await vi.advanceTimersByTimeAsync(20_001);

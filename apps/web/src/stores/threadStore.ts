@@ -3755,7 +3755,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       });
       return true;
     } catch (error) {
-      // Another window already settled this resend or note, so the queue item is spent, not retryable.
       const alreadySent = error instanceof RpcError
         && ((Boolean(resendOfSteerId) && error.code === "steer_resend_closed")
           || (Boolean(approvalNoteRequestId) && error.code === "note_already_delivered"));

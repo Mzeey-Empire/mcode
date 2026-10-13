@@ -18,7 +18,6 @@ const steersInFlight = new Set<string>();
  * as the hidden text; those wait for the next turn instead.
  */
 export function isSteerable(message: QueuedMessage): boolean {
-  // A deny note is admitted once, as its own turn, so steering it would deliver it twice.
   return !message.steer && !message.approvalNote && carriesOnlyText(message);
 }
 

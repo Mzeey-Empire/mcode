@@ -151,7 +151,6 @@ const agentHandlers: AgentRpcHandlerMap = {
         displayContent,
       });
       if (params.approvalNoteRequestId !== undefined) {
-        // Another window may have edited the note after this client read it, so send the saved text.
         await deps.approvalService.admitNote(params.approvalNoteRequestId, params.threadId, (note) => admit(note, note));
       } else {
         await admit(params.content, params.displayContent ?? params.content);

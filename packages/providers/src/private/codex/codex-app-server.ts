@@ -1454,8 +1454,6 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
       return { outcome: "accepted" };
     } catch (error) {
       if (error instanceof CodexRpcResponseError) return codexSteerRejection(error.message);
-      // A closed connection or failed write means Codex never read the input, so the caller can
-      // send it with the next turn without a second copy reaching the model.
       if (error instanceof CodexRequestNotSentError) return { outcome: "rejected", reason: "turn_not_running", detail: error.message };
       // A timeout or lost connection may come after Codex took the input.
       return { outcome: "unknown", detail: error instanceof Error ? error.message : String(error) };

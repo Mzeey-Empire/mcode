@@ -7,10 +7,6 @@ import { useThreadStore } from "@/stores/threadStore";
 /** Devin's "Switch to Bypass" choice also flips the thread's mode, so later tool calls stop asking. */
 const DEVIN_SWITCH_BYPASS_CHOICE_ID = "switch_bypass";
 
-/**
- * A note the provider did not take with the deny goes to the thread's queue: one waiting for
- * the next turn as an ordinary queued item, one whose fate is unknown as a held item.
- */
 function queueUndeliveredNote(request: ApprovalRequest, note: string, result: ApprovalRespondResult): void {
   if (result.status === "resolved") {
     if (result.noteDelivery === "next_turn") queueApprovalNote(request.threadId, request.requestId, note, "queued");
