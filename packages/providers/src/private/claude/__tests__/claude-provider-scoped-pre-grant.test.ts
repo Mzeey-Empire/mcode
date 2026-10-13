@@ -142,7 +142,10 @@ describe("ClaudeProvider scoped pre-grant (off-band handoff Read)", () => {
     assert(request);
     expect(await provider.resolveApproval(request.requestId, { choiceId: "deny", note }))
       .toEqual(note ? { status: "resolved", noteDelivery: "native" } : { status: "resolved" });
-    expect(await decision).toEqual({ behavior: "deny", message: note ?? "The user declined this request" });
+    expect(await decision).toEqual({
+      behavior: "deny",
+      message: note ? `The user declined this request and said: ${note}` : "The user declined this request",
+    });
     expect(outcomes).toEqual([{ status: "denied", choiceLabel: "Deny", ...(note ? { note, noteDelivery: "native" } : {}) }]);
   });
 

@@ -1361,7 +1361,8 @@ export class ClaudeProvider
     toolName: string,
     requestId: string,
   ): ClaudeToolPermissionResult {
-    if (typeof decision === "object") return { behavior: "deny", message: decision.denyNote };
+    // Claude reads the deny message as the tool's result, so a bare note reads like command output.
+    if (typeof decision === "object") return { behavior: "deny", message: `The user declined this request and said: ${decision.denyNote}` };
     switch (decision) {
       case "allow":
         return { behavior: "allow" as const, updatedInput: input };
