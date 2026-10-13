@@ -1,12 +1,22 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SubagentDetail, SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
+import type { ReactNode } from "react";
+import {
+  createAgentModelState, type AgentItem, type AgentTurn, type Message, type SubagentDetail, type SubagentRoster, type SubagentRosterEntry,
+} from "@mcode/contracts";
+import { createEmptyThreadRecord } from "@/stores/thread-record";
+import { useThreadStore } from "@/stores/threadStore";
 import { useMessageRevealStore } from "@/features/conversation/messages/message-reveal-store";
 import { useUiStore } from "@/stores/uiStore";
 import { useSubagentRosterStore } from "../../state/subagentRosterStore";
 import { SubagentDetailTab } from "../SubagentDetailTab";
 
 const transport = vi.hoisted(() => ({ loadSubagentRoster: vi.fn(), loadSubagentDetail: vi.fn(), stopCanonicalSubagent: vi.fn() }));
+vi.mock("@/features/conversation", async (original) => ({
+  ...await original<typeof import("@/features/conversation")>(),
+  getConversationResidency: () => ({ mountDisplayConversation: () => {}, unmountDisplayConversation: () => {} }),
+  MessageList: ({ leadingContent }: { readonly leadingContent?: ReactNode }) => <div data-testid="child-transcript">{leadingContent}</div>,
+}));
 vi.mock("@/transport", async (original) => ({
   ...await original<typeof import("@/transport")>(), getTransport: () => transport,
 }));
@@ -27,6 +37,31 @@ function roster(entries: SubagentRosterEntry[], revision = 1): SubagentRoster {
 
 function detail(overrides: Partial<SubagentDetail> = {}): SubagentDetail {
   return { entryId: "call:explore", totalSteps: 0, steps: [], summary: null, ...overrides };
+}
+
+/** A live child whose opening prompt exists only as a canonical item, as before history hydrates. */
+function seedLiveChild(prompt: string) {
+  const timestamp = "2026-10-13T10:00:00.000Z";
+  const message: Message = {
+    id: "child-prompt", thread_id: "child-1", role: "user", content: prompt, tool_calls: null, files_changed: null,
+    cost_usd: null, tokens_used: null, timestamp, sequence: 1, attachments: null,
+  };
+  const turn: AgentTurn = {
+    id: "child-turn", threadId: "child-1", status: "Running",
+    trigger: { kind: "child", sourceThreadId: "thread-1", sourceTurnId: "parent-turn" },
+    permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested", attemptOf: null,
+    providerIdentities: [], startedAt: timestamp, providerStartedAt: null, ending: null, endedAt: null,
+    createdAt: timestamp, updatedAt: timestamp,
+  };
+  const item: AgentItem = {
+    id: "child-prompt-item", threadId: "child-1", turnId: turn.id, kind: "message", providerIdentities: [],
+    payload: { projection: "message", message }, createdAt: timestamp, updatedAt: timestamp,
+  };
+  const state = createAgentModelState();
+  state.turns[turn.id] = turn;
+  state.items[item.id] = item;
+  const record = createEmptyThreadRecord();
+  useThreadStore.setState({ records: new Map([["child-1", { ...record, canonicalAgent: { ...record.canonicalAgent, state } }]]) });
 }
 
 async function renderTab(rows: SubagentRosterEntry[]) {
@@ -94,6 +129,16 @@ describe("SubagentDetailTab", () => {
     expect(transport.loadSubagentDetail.mock.calls).toEqual([
       ["thread-1", "call:explore"], ["thread-1", "call:explore"],
     ]);
+  });
+
+  it("shows the parent's prompt above a transcript only when the child does not open with it", async () => {
+    const transcriptEntry = entry({ provider: "claude", tier: "transcript", childThreadId: "child-1", status: "running", endedAt: null });
+    seedLiveChild("Map the rail");
+    await renderTab([transcriptEntry]);
+    expect(screen.getByTestId("child-transcript")).toBeEmptyDOMElement();
+
+    act(() => seedLiveChild("Something else"));
+    expect(screen.getByTestId("subagent-parent-prompt")).toHaveTextContent("Map the rail");
   });
 
   it("says the subagent is gone once its entry leaves the roster", async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { SubagentDetail, SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
 import { Button, IconButton } from "@/components/ui/button";
 import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
@@ -6,6 +6,7 @@ import { ProviderIcon } from "@/components/ui/provider-icon";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { DEFAULT_ICON, TOOL_ICONS, TOOL_LABELS, resolveToolName } from "@/components/chat/tool-renderers/constants";
 import { getConversationResidency, MessageList } from "@/features/conversation";
+import { projectCanonicalMessageList } from "@/features/conversation/messages/canonical-message-projection";
 import { useMessageRevealStore } from "@/features/conversation/messages/message-reveal-store";
 import { MODEL_PROVIDERS } from "@/lib/model-registry";
 import { cn } from "@/lib/utils";
@@ -106,8 +107,15 @@ function TranscriptBody({ entry, childThreadId }: { readonly entry: SubagentRost
     residency.mountDisplayConversation(childThreadId);
     return () => residency.unmountDisplayConversation(childThreadId);
   }, [childThreadId]);
-  const firstUserText = useThreadRecord(childThreadId, (record) =>
-    record.messages.find((message) => message.role === "user")?.content);
+  const legacyMessages = useThreadRecord(childThreadId, (record) => record.messages);
+  const canonicalState = useThreadRecord(childThreadId, (record) => record.canonicalAgent.state);
+  // A live child's prompt can exist only as a canonical item, so read the messages the transcript renders.
+  const firstUserText = useMemo(() => {
+    const messages = projectCanonicalMessageList({
+      threadId: childThreadId, state: canonicalState, messages: legacyMessages, toolCalls: [], thoughtSegments: [],
+    })?.messages ?? legacyMessages;
+    return messages.find((message) => message.role === "user")?.content;
+  }, [childThreadId, canonicalState, legacyMessages]);
   // The child's transcript usually opens with the same prompt; showing it twice reads as two requests.
   const showPrompt = entry.prompt !== null && entry.prompt.trim() !== firstUserText?.trim();
   return (
