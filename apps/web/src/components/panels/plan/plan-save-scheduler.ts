@@ -91,6 +91,10 @@ function targetFor(latest: PlanVersion, newId: () => string): DraftTarget {
   return { versionId: newId(), baseVersionId: latest.id, baseRevision: latest.revision };
 }
 
+function isSessionRevision(version: PlanVersion, target: DraftTarget): boolean {
+  return version.id === target.versionId && version.revision === target.baseRevision;
+}
+
 const IDLE: PlanDraftState = { kind: "idle" };
 
 /** The version an Implement acts on, and the thread's latest version. */
@@ -193,13 +197,15 @@ export class PlanSaveScheduler {
   }
 
   /**
-   * Ends a settled session when the thread's latest version is a different
-   * version, such as a new agent capture. A newer revision of the session's
-   * own draft keeps the session, so the next save surfaces the conflict.
+   * Ends a settled session when the thread's latest version is not the
+   * revision the session saved, such as a new agent capture or another
+   * window's save to the same draft, so the editor shows what Implement
+   * would send. An unsettled session stays, and its next save surfaces the
+   * conflict.
    */
   reconcile(latest: PlanVersion | null): void {
     const state = this.#state;
-    if (state.kind !== "editing" || latest === null || latest.id === state.target.versionId) return;
+    if (state.kind !== "editing" || latest === null || isSessionRevision(latest, state.target)) return;
     if (this.#isSettled(state)) this.#set(IDLE);
   }
 

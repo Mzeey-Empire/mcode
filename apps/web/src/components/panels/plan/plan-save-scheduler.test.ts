@@ -276,11 +276,38 @@ describe("PlanSaveScheduler", () => {
 
     saves[0].resolve(draft(MINTED_ID, 1, "mine"));
     await settle();
-    scheduler.reconcile(draft(MINTED_ID, 2, "another window"));
+    scheduler.reconcile(draft(MINTED_ID, 1, "mine"));
     expect(scheduler.getSnapshot()).toMatchObject({ kind: "editing", text: "mine" });
 
     scheduler.reconcile(capture);
     expect(scheduler.getSnapshot()).toEqual({ kind: "idle" });
+  });
+
+  it("shows another window's save to the same draft once its own text is acknowledged", async () => {
+    const { scheduler, saves } = setup();
+    scheduler.edit("mine", ready);
+    await vi.advanceTimersByTimeAsync(500);
+    saves[0].resolve(draft(MINTED_ID, 1, "mine"));
+    await settle();
+
+    const theirs = draft(MINTED_ID, 2, "another window");
+    scheduler.reconcile(theirs);
+    expect(scheduler.getSnapshot()).toEqual({ kind: "idle" });
+
+    const basis = await scheduler.beginImplement(() => ({ target: theirs, latest: theirs }));
+    expect(basis).toEqual({ versionId: MINTED_ID, expectedRevision: 2 });
+  });
+
+  it("keeps unsaved text over another window's save to the same draft", async () => {
+    const { scheduler, saves } = setup();
+    scheduler.edit("mine", ready);
+    await vi.advanceTimersByTimeAsync(500);
+    saves[0].resolve(draft(MINTED_ID, 1, "mine"));
+    await settle();
+    scheduler.edit("mine, more", draft(MINTED_ID, 1, "mine"));
+
+    scheduler.reconcile(draft(MINTED_ID, 2, "another window"));
+    expect(scheduler.getSnapshot()).toMatchObject({ kind: "editing", text: "mine, more" });
   });
 
   it("flush sends pending text immediately", () => {
