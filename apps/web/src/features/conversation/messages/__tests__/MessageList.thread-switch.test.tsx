@@ -381,7 +381,7 @@ describe("MessageList thread switch", () => {
     messagesValue = [{ id: "m1", sequence: 2, thread_id: "thread-A", role: "assistant", content: "Current message" }];
     hasMoreMessagesValue = true;
     vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(5000);
-    loadOlderMessagesSpy.mockImplementationOnce(async () => {
+    loadOlderMessagesSpy.mockImplementation(async () => {
       messagesValue = [
         { id: "m2", sequence: 1, thread_id: "thread-A", role: "assistant", content: "Subagent reply" },
         { id: "m1", sequence: 2, thread_id: "thread-A", role: "assistant", content: "Current message" },
@@ -396,6 +396,31 @@ describe("MessageList thread switch", () => {
     rerender(<MessageList />);
     await waitFor(() => expect(useMessageRevealStore.getState().request).toBeNull());
     expect(useToastStore.getState().toasts).toEqual([]);
+  });
+
+  it("keeps paging toward a reveal when each page renders before its load settles", async () => {
+    messagesValue = [{ id: "page-0", sequence: 100, thread_id: "thread-A", role: "assistant", content: "Page 0" }];
+    hasMoreMessagesValue = true;
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(5000);
+    let page = 0;
+    let rerenderList: (() => void) | null = null;
+    // The real store publishes a page and clears its loading flag before the load promise resolves.
+    loadOlderMessagesSpy.mockImplementation(async () => {
+      await Promise.resolve();
+      page += 1;
+      messagesValue = [
+        { id: `page-${page}`, sequence: 100 - page, thread_id: "thread-A", role: "assistant", content: `Page ${page}` },
+        ...messagesValue,
+      ];
+      act(() => rerenderList?.());
+      return "loaded";
+    });
+    useMessageRevealStore.setState({ request: { threadId: "thread-A", messageId: "page-2" } });
+    const { rerender } = render(<MessageList />);
+    rerenderList = () => rerender(<MessageList />);
+
+    await waitFor(() => expect(useMessageRevealStore.getState().request).toBeNull());
+    expect(loadOlderMessagesSpy).toHaveBeenCalledTimes(2);
   });
 
   it("drops a reveal and says so once history holds no such message", async () => {

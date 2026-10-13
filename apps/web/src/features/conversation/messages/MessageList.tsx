@@ -155,7 +155,7 @@ function missReveal(request: MessageRevealRequest): void {
 type RevealHistory = Pick<MessageListData, "hasMore" | "hasNewer" | "loadOlderMessages" | "loadNewerMessages">;
 
 /** Loads the next history page toward a reveal's message, or ends the search once both directions are spent. */
-function pageRevealSearch(search: RevealSearch, history: RevealHistory): void {
+function pageRevealSearch(search: RevealSearch, history: RevealHistory, onPageLoaded: () => void): void {
   if (search.inFlight) return;
   // The history window evicts as it pages, so its flags flip back; one pass older, then one newer, ends the search.
   if (search.direction === "older" && !history.hasMore) search.direction = "newer";
@@ -171,6 +171,8 @@ function pageRevealSearch(search: RevealSearch, history: RevealHistory): void {
       search.inFlight = false;
       // A skipped page changes nothing, so no later render would retry it.
       if (result !== "loaded") missReveal(search.request);
+      // The page can render before this load settles, while the search still looks in flight.
+      else onPageLoaded();
     },
     () => missReveal(search.request),
   );
@@ -527,6 +529,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
     }
   }, []);
   const revealSearch = useRef<RevealSearch | null>(null);
+  const [revealPagesLoaded, setRevealPagesLoaded] = useState(0);
   const revealRequest = useMessageRevealStore((state) =>
     state.request?.threadId === data.renderedThreadId ? state.request : null);
   useEffect(() => {
@@ -544,8 +547,8 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
     pageRevealSearch(search, {
       hasMore: data.hasMore, hasNewer: data.hasNewer,
       loadOlderMessages: data.loadOlderMessages, loadNewerMessages: data.loadNewerMessages,
-    });
-  }, [revealRequest, items, scrollToMessage, data.hasMore, data.hasNewer, data.isLoadingMore, data.isLoadingNewer, data.loadOlderMessages, data.loadNewerMessages]);
+    }, () => setRevealPagesLoaded((count) => count + 1));
+  }, [revealPagesLoaded, revealRequest, items, scrollToMessage, data.hasMore, data.hasNewer, data.isLoadingMore, data.isLoadingNewer, data.loadOlderMessages, data.loadNewerMessages]);
   const jumpToUser = useCallback(() => {
     if (stickyMessage) scrollToMessage(stickyMessage.id);
   }, [stickyMessage, scrollToMessage]);
