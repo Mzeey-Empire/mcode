@@ -123,30 +123,31 @@ export const PANEL_DEFAULT_WIDTH = 440;
 /** Wide snap target for the right panel (double-click drag handle). */
 export const PANEL_WIDE_WIDTH = 680;
 const REVIEW_FILES_VISIBILITY_STORAGE_KEY = "mcode.review-files-visible.v1";
+const IGNORE_WHITESPACE_STORAGE_KEY = "mcode.review-ignore-whitespace.v1";
 
-function readReviewFilesVisibility(): Record<string, boolean> {
+function readStoredFlags(storageKey: string): Record<string, boolean> {
   if (typeof localStorage === "undefined") return {};
   try {
-    const raw = localStorage.getItem(REVIEW_FILES_VISIBILITY_STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey);
     if (!raw || raw.length > 100_000) return {};
     const value: unknown = JSON.parse(raw);
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
     return Object.fromEntries(
       Object.entries(value)
         .slice(0, 1_000)
-        .filter(([key, visible]) => key.length > 0 && key.length <= 4_096 && typeof visible === "boolean"),
+        .filter(([key, flag]) => key.length > 0 && key.length <= 4_096 && typeof flag === "boolean"),
     );
   } catch {
     return {};
   }
 }
 
-function writeReviewFilesVisibility(value: Record<string, boolean>): void {
+function writeStoredFlags(storageKey: string, value: Record<string, boolean>): void {
   if (typeof localStorage === "undefined") return;
   try {
-    localStorage.setItem(REVIEW_FILES_VISIBILITY_STORAGE_KEY, JSON.stringify(value));
+    localStorage.setItem(storageKey, JSON.stringify(value));
   } catch {
-    // Visibility still updates for this session when browser persistence is unavailable.
+    // The flag still updates for this session when browser persistence is unavailable.
   }
 }
 
@@ -579,6 +580,8 @@ interface DiffState {
   reviewFileJumpRequest: { scopeId: string; path: string; nonce: number; viewKey?: string } | null;
   /** Per-thread line-wrap preference keyed by thread ID. */
   readonly lineWrapByThread: Record<string, boolean>;
+  /** Threads whose Review hides whitespace changes, persisted across reloads. Absent means off. */
+  readonly ignoreWhitespaceByThread: Record<string, boolean>;
   /** Turn snapshots keyed by thread ID. */
   snapshotsByThread: Record<string, TurnSnapshot[]>;
   /** Whether snapshots are currently loading, keyed by thread ID. */
@@ -705,6 +708,9 @@ interface DiffState {
   clearReviewFileJump: () => void;
   getLineWrap: (threadId: string) => boolean;
   toggleLineWrap: (threadId: string) => void;
+  /** Whether the thread's Review hides whitespace changes. */
+  getIgnoreWhitespace: (threadId: string) => boolean;
+  toggleIgnoreWhitespace: (threadId: string) => void;
   setSnapshots: (threadId: string, snapshots: TurnSnapshot[]) => void;
   setSnapshotsLoading: (threadId: string, loading: boolean) => void;
   /** Store the server's turn list for a thread. */
@@ -732,7 +738,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   rightPanelByThread: {},
   rightPanelFallbackByWorkspace: {},
   subagentDetailByThread: {},
-  reviewFilesVisibleByScope: readReviewFilesVisibility(),
+  reviewFilesVisibleByScope: readStoredFlags(REVIEW_FILES_VISIBILITY_STORAGE_KEY),
   viewMode: "turn",
   reviewViewByThread: {},
   reviewViewManuallySelectedByThread: {},
@@ -746,6 +752,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   bulkDiffExpand: null,
   reviewFileJumpRequest: null,
   lineWrapByThread: {},
+  ignoreWhitespaceByThread: readStoredFlags(IGNORE_WHITESPACE_STORAGE_KEY),
   snapshotsByThread: {},
   snapshotsLoadingByThread: {},
   reviewTurnsByThread: {},
@@ -897,7 +904,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         ...state.reviewFilesVisibleByScope,
         [scopeId]: visible,
       };
-      writeReviewFilesVisibility(reviewFilesVisibleByScope);
+      writeStoredFlags(REVIEW_FILES_VISIBILITY_STORAGE_KEY, reviewFilesVisibleByScope);
       return { reviewFilesVisibleByScope };
     }),
 
@@ -968,6 +975,15 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         },
       };
     }),
+  getIgnoreWhitespace: (threadId) => get().ignoreWhitespaceByThread[threadId] ?? false,
+  toggleIgnoreWhitespace: (threadId) =>
+    set((state) => {
+      const ignoreWhitespaceByThread = { ...state.ignoreWhitespaceByThread };
+      if (ignoreWhitespaceByThread[threadId]) delete ignoreWhitespaceByThread[threadId];
+      else ignoreWhitespaceByThread[threadId] = true;
+      writeStoredFlags(IGNORE_WHITESPACE_STORAGE_KEY, ignoreWhitespaceByThread);
+      return { ignoreWhitespaceByThread };
+    }),
   setSnapshots: (threadId, snapshots) =>
     set((s) => ({
       snapshotsByThread: { ...s.snapshotsByThread, [threadId]: snapshots },
@@ -1028,6 +1044,11 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete previewUrls[threadId];
       const lineWrapByThread = { ...state.lineWrapByThread };
       delete lineWrapByThread[threadId];
+      const ignoreWhitespaceByThread = { ...state.ignoreWhitespaceByThread };
+      if (threadId in ignoreWhitespaceByThread) {
+        delete ignoreWhitespaceByThread[threadId];
+        writeStoredFlags(IGNORE_WHITESPACE_STORAGE_KEY, ignoreWhitespaceByThread);
+      }
       const rightPanelByThread = { ...state.rightPanelByThread };
       delete rightPanelByThread[threadId];
       const subagentDetailByThread = { ...state.subagentDetailByThread };
@@ -1042,7 +1063,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete diffRevisionByScope[threadId];
       const reviewFilesVisibleByScope = { ...state.reviewFilesVisibleByScope };
       delete reviewFilesVisibleByScope[threadId];
-      writeReviewFilesVisibility(reviewFilesVisibleByScope);
+      writeStoredFlags(REVIEW_FILES_VISIBILITY_STORAGE_KEY, reviewFilesVisibleByScope);
       const branchSelectionByScope = omitByKeySuffix(
         state.branchSelectionByScope,
         `:${threadId}`,
@@ -1061,6 +1082,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         reviewTurnsErrorByThread: reviewTurnsErrors,
         previewUrlByThread: previewUrls,
         lineWrapByThread,
+        ignoreWhitespaceByThread,
         rightPanelByThread,
         subagentDetailByThread,
         reviewViewByThread,
@@ -1101,7 +1123,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete diffRevisionByScope[workspaceId];
       const reviewFilesVisibleByScope = { ...state.reviewFilesVisibleByScope };
       delete reviewFilesVisibleByScope[workspaceId];
-      writeReviewFilesVisibility(reviewFilesVisibleByScope);
+      writeStoredFlags(REVIEW_FILES_VISIBILITY_STORAGE_KEY, reviewFilesVisibleByScope);
       return {
         rightPanelFallbackByWorkspace,
         diffRevisionByScope,

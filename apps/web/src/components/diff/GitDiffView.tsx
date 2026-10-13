@@ -12,10 +12,12 @@ interface GitDiffViewProps {
   id: string;
   cacheVersion: string | number;
   threadId: string;
+  /** Whether the comparison was read with whitespace changes hidden. */
+  ignoreWhitespace: boolean;
 }
 
 /** Render the diff projection of a git comparison with files, resolved by the parent Review lifecycle. */
-export function GitDiffView({ comparison, source, id, cacheVersion, threadId }: GitDiffViewProps) {
+export function GitDiffView({ comparison, source, id, cacheVersion, threadId, ignoreWhitespace }: GitDiffViewProps) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <FileList
@@ -24,6 +26,7 @@ export function GitDiffView({ comparison, source, id, cacheVersion, threadId }: 
         id={id}
         threadId={threadId}
         cacheVersion={cacheVersion}
+        ignoreWhitespace={ignoreWhitespace}
         defaultFilesExpanded
       />
     </div>

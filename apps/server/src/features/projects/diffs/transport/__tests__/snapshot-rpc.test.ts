@@ -11,6 +11,22 @@ describe("snapshot RPC whole-turn evidence", { timeout: 30_000 }, () => {
   beforeEach(async () => { fixture = await createSnapshotRangeFixture(); });
   afterEach(async () => { await fixture.close(); });
 
+  it("filters whitespace in cumulative stats and patches while preserving the default view", async () => {
+    await fixture.attempt({ id: "base", edits: { "space.ts": "a b\n", "code.ts": "before\n" } });
+    await fixture.attempt({ id: "one", edits: { "space.ts": "a  b\n", "code.ts": "after\n" } });
+    const params = { threadId: "thread", afterSequence: 2, ignoreWhitespace: true };
+    expect(await routeSnapshotRpc("snapshot.getCumulativeDiffStats", params, fixture.deps)).toMatchObject({
+      status: "ready", comparison: { files: [{ path: "code.ts", additions: 1, deletions: 1 }], additions: 1, deletions: 1 },
+    });
+    const patch = await routeSnapshotRpc("snapshot.getCumulativeDiff", params, fixture.deps);
+    expect(patch).toContain("+after");
+    expect(patch).not.toContain("space.ts");
+    expect(await routeSnapshotRpc("snapshot.getCumulativeDiff", { ...params, filePath: "space.ts" }, fixture.deps)).toBe("");
+    expect(await routeSnapshotRpc("snapshot.getCumulativeDiffStats", { threadId: "thread", afterSequence: 2 }, fixture.deps)).toMatchObject({
+      status: "ready", comparison: { files: [{ path: "code.ts" }, { path: "space.ts" }], additions: 2, deletions: 2 },
+    });
+  });
+
   it("skips empty refs in cumulative reads but reports nonempty missing refs as pruned", async () => {
     await fixture.attempt({ id: "one", edits: { "a.ts": "a\n" } });
     fixture.db.prepare("UPDATE turn_snapshots SET ref_before = ''").run();

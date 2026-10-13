@@ -121,7 +121,7 @@ describe("ReviewDiffView refresh", () => {
       additions: 0, deletions: 0, untracked: true,
     }]} />);
     await waitFor(() => expect(transport.getWorkingTreeDiff).toHaveBeenCalledWith(
-      "workspace-fixture", false, "file.txt", undefined, "thread-fixture", true, "old.txt",
+      "workspace-fixture", false, "file.txt", undefined, "thread-fixture", true, "old.txt", { ignoreWhitespace: undefined },
     ));
     await waitFor(() => expect(screen.getByTestId("items").textContent).toContain("old.txt"));
   });
@@ -141,6 +141,23 @@ describe("ReviewDiffView refresh", () => {
     );
     expect(transport.getWorkingTreeDiff.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(screen.getByTestId("items").textContent).not.toContain("FIRST_VERSION");
+  });
+
+  it("rereads the patch without whitespace changes when hiding them, at the same comparison version", async () => {
+    const view = render(<ReviewDiffView {...props} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("items").textContent).toContain("FIRST_VERSION"),
+    );
+
+    transport.getWorkingTreeDiff.mockResolvedValue(patch("WHITESPACE_HIDDEN"));
+    view.rerender(<ReviewDiffView {...props} ignoreWhitespace />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("items").textContent).toContain("WHITESPACE_HIDDEN"),
+    );
+    expect(transport.getWorkingTreeDiff).toHaveBeenLastCalledWith(
+      "workspace-fixture", false, "file.txt", undefined, "thread-fixture", false, undefined, { ignoreWhitespace: true },
+    );
   });
 
   it("refetches a same-named file when the comparison range changes", async () => {

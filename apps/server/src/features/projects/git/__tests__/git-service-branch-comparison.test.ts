@@ -407,7 +407,7 @@ describe("GitComparisonService branch comparison ranges", () => {
 
 
   it("diffs an explicit pair three-dot for branchDiff with renames", async () => {
-    await gitService.readBranchComparisonDiff("ws", "main", "origin/main", "a.ts", undefined, REPO);
+    await gitService.readBranchComparisonDiff("ws", "main", "origin/main", { filePath: "a.ts", repoPath: REPO });
 
     expect(execFn).toHaveBeenCalledWith(
       ["-C", REPO, "diff", "--find-renames", "main...origin/main", "--", "a.ts"],
@@ -420,7 +420,7 @@ describe("GitComparisonService branch comparison ranges", () => {
       gitService.readReviewComparison("ws", "branch", { base: "--output=/tmp/pwned", compare: "HEAD" }, REPO),
     ).resolves.toMatchObject({ status: "failed", failure: { kind: "unsafe-ref" } });
     await expect(
-      gitService.readBranchComparisonDiff("ws", "main", "-rf", undefined, undefined, REPO),
+      gitService.readBranchComparisonDiff("ws", "main", "-rf", { repoPath: REPO }),
     ).rejects.toThrow(/unsafe git ref/i);
     expect(execFn).not.toHaveBeenCalled();
   });

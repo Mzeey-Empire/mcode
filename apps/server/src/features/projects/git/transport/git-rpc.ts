@@ -107,8 +107,7 @@ const gitHandlers: GitHandlerMap = {
       ? deps.gitComparison.readCommitDiff(
         params.workspaceId,
         params.sha,
-        params.filePath,
-        params.maxLines,
+        { filePath: params.filePath, maxLines: params.maxLines, ignoreWhitespace: params.ignoreWhitespace },
       )
       : "",
   "git.commitFiles": (deps, params) =>
@@ -120,11 +119,14 @@ const gitHandlers: GitHandlerMap = {
       ? deps.gitComparison.readWorkingTreeDiff(
         params.workspaceId,
         params.staged,
-        params.filePath,
-        params.maxLines,
-        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
-        params.untracked,
-        params.previousPath,
+        {
+          filePath: params.filePath,
+          maxLines: params.maxLines,
+          repoPath: resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
+          untracked: params.untracked,
+          previousPath: params.previousPath,
+          ignoreWhitespace: params.ignoreWhitespace,
+        },
       )
       : "",
   // Hydration needs the real old/new contents; a soft "" here would let the
@@ -146,9 +148,12 @@ const gitHandlers: GitHandlerMap = {
         params.workspaceId,
         params.base,
         params.target,
-        params.filePath,
-        params.maxLines,
-        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
+        {
+          filePath: params.filePath,
+          maxLines: params.maxLines,
+          repoPath: resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
+          ignoreWhitespace: params.ignoreWhitespace,
+        },
       )
       : "",
   "git.branchComparison": (deps, params) => {
@@ -174,7 +179,7 @@ const gitHandlers: GitHandlerMap = {
       ? deps.gitComparison.readReviewComparison(
         params.workspaceId,
         params.view,
-        { base: params.base, compare: params.compare, sha: params.sha },
+        { base: params.base, compare: params.compare, sha: params.sha, ignoreWhitespace: params.ignoreWhitespace },
         resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
       )
       : { status: "unavailable", reason: "no-base" },

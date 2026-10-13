@@ -1420,13 +1420,15 @@ export function createWsTransport(
     // Snapshots
     getSnapshotDiff: (snapshotId, filePath?, maxLines?) =>
       rpc<ReviewFileDiffResult>("snapshot.getDiff", { snapshotId, filePath, maxLines }),
-    getTurnDiffComparison: (threadId, messageId?) =>
+    getTurnDiffComparison: (threadId, messageId?, options?) =>
       rpc<ReviewComparisonResult>("turnDiff.getComparison", {
         threadId,
         includeLive: messageId ? undefined : freshTurnDiffThreads.has(threadId),
         messageId,
+        ignoreWhitespace: options?.ignoreWhitespace,
       }),
-    getTurnDiffFile: (threadId, comparisonId, filePath) => rpc<ReviewFileDiffResult>("turnDiff.getFileDiff", { threadId, comparisonId, filePath }),
+    getTurnDiffFile: (threadId, comparisonId, filePath, options?) =>
+      rpc<ReviewFileDiffResult>("turnDiff.getFileDiff", { threadId, comparisonId, filePath, ignoreWhitespace: options?.ignoreWhitespace }),
     getSnapshotDiffStats: (snapshotId) =>
       rpc<DiffStats[] | Exclude<ReviewComparisonResult, { status: "ready" }>>("snapshot.getDiffStats", { snapshotId }),
     cleanupSnapshots: () =>
@@ -1439,10 +1441,12 @@ export function createWsTransport(
     applyTurnRevert: (params) => rpc<TurnRevertResult>("turn.revert.apply", params),
     undoTurnRevert: (threadId, revertId, requestId) =>
       rpc<TurnRevertResult>("turn.revert.undo", { threadId, revertId, requestId }),
-    getCumulativeDiff: (threadId, filePath?, maxLines?, afterSequence?) =>
-      rpc<ReviewFileDiffResult>("snapshot.getCumulativeDiff", { threadId, filePath, maxLines, afterSequence }),
-    getCumulativeDiffStats: (threadId, afterSequence?) =>
-      rpc("snapshot.getCumulativeDiffStats", { threadId, afterSequence }),
+    getCumulativeDiff: (threadId, filePath?, maxLines?, afterSequence?, options?) =>
+      rpc<ReviewFileDiffResult>("snapshot.getCumulativeDiff", {
+        threadId, filePath, maxLines, afterSequence, ignoreWhitespace: options?.ignoreWhitespace,
+      }),
+    getCumulativeDiffStats: (threadId, afterSequence?, options?) =>
+      rpc("snapshot.getCumulativeDiffStats", { threadId, afterSequence, ignoreWhitespace: options?.ignoreWhitespace }),
     getGitLog: (workspaceId, branch?, limit?, baseBranch?, threadId?, options?) =>
       rpc<GitCommit[]>("git.log", {
         workspaceId,
@@ -1453,16 +1457,20 @@ export function createWsTransport(
         skip: options?.skip,
         includeStats: options?.includeStats,
       }),
-    getCommitDiff: (workspaceId, sha, filePath?, maxLines?) =>
-      rpc<string>("git.commitDiff", { workspaceId, sha, filePath, maxLines }),
+    getCommitDiff: (workspaceId, sha, filePath?, maxLines?, options?) =>
+      rpc<string>("git.commitDiff", { workspaceId, sha, filePath, maxLines, ignoreWhitespace: options?.ignoreWhitespace }),
     getCommitFiles: (workspaceId, sha) =>
       rpc<string[]>("git.commitFiles", { workspaceId, sha }),
-    getWorkingTreeDiff: (workspaceId, staged, filePath?, maxLines?, threadId?, untracked?, previousPath?) =>
-      rpc<string>("git.workingTreeDiff", { workspaceId, staged, filePath, maxLines, threadId, untracked, previousPath }),
+    getWorkingTreeDiff: (workspaceId, staged, filePath?, maxLines?, threadId?, untracked?, previousPath?, options?) =>
+      rpc<string>("git.workingTreeDiff", {
+        workspaceId, staged, filePath, maxLines, threadId, untracked, previousPath, ignoreWhitespace: options?.ignoreWhitespace,
+      }),
     readFileAtRef: (workspaceId, ref, filePath, threadId?) =>
       rpc<string>("git.fileAtRef", { workspaceId, ref, filePath, threadId }),
-    getBranchDiff: (workspaceId, base?, target?, filePath?, maxLines?, threadId?) =>
-      rpc<string>("git.branchDiff", { workspaceId, base, target, filePath, maxLines, threadId }),
+    getBranchDiff: (workspaceId, base?, target?, filePath?, maxLines?, threadId?, options?) =>
+      rpc<string>("git.branchDiff", {
+        workspaceId, base, target, filePath, maxLines, threadId, ignoreWhitespace: options?.ignoreWhitespace,
+      }),
     getBranchComparison: (workspaceId, threadId?) =>
       rpc<BranchComparison>("git.branchComparison", { workspaceId, threadId }),
     searchCommits: (params) => rpc<import("@mcode/contracts").GitSearchCommitsResult>("git.searchCommits", params),

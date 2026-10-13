@@ -977,6 +977,8 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "git.commitDiff": {
     params: z.object({
+      /** Hide whitespace changes in Git diffs; omitted means false. */
+      ignoreWhitespace: z.boolean().optional(),
       workspaceId: z.string(),
       sha: z.string(),
       filePath: z.string().optional(),
@@ -993,6 +995,8 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "git.workingTreeDiff": {
     params: z.object({
+      /** Hide whitespace changes in Git diffs; omitted means false. */
+      ignoreWhitespace: z.boolean().optional(),
       workspaceId: z.string(),
       staged: z.boolean(),
       untracked: z.boolean().optional(),
@@ -1015,6 +1019,8 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "git.branchDiff": {
     params: z.object({
+      /** Hide whitespace changes in Git diffs; omitted means false. */
+      ignoreWhitespace: z.boolean().optional(),
       workspaceId: z.string(),
       /** Base ref of the comparison; omit to use the detected default branch. */
       base: GitRefNameSchema.optional(),
@@ -1044,6 +1050,8 @@ export const WS_METHODS = lazySchema(() => ({
   /** Resolve file metadata and totals for one Review comparison in one RPC. */
   "git.reviewComparison": {
     params: z.object({
+      /** Hide whitespace changes in Git diffs; omitted means false. */
+      ignoreWhitespace: z.boolean().optional(),
       workspaceId: z.string(),
       view: z.enum(["unstaged", "staged", "branch", "commit", "uncommitted"]),
       base: GitRefNameSchema.optional(),
@@ -1463,6 +1471,8 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "turnDiff.getComparison": {
     params: z.object({
+      /** Hide whitespace changes in Git diffs only; omitted means false. */
+      ignoreWhitespace: z.boolean().optional(),
       threadId: AgentThreadIdSchema,
       includeLive: z.boolean().optional(),
       messageId: z.string().min(1).max(512).optional(),
@@ -1470,7 +1480,13 @@ export const WS_METHODS = lazySchema(() => ({
     result: ReviewComparisonResultSchema(),
   },
   "turnDiff.getFileDiff": {
-    params: z.object({ threadId: AgentThreadIdSchema, comparisonId: z.string().min(1).max(TURN_DIFF_COMPARISON_ID_MAX_LENGTH), filePath: z.string().min(1).max(4096) }),
+    params: z.object({
+      threadId: AgentThreadIdSchema,
+      comparisonId: z.string().min(1).max(TURN_DIFF_COMPARISON_ID_MAX_LENGTH),
+      filePath: z.string().min(1).max(4096),
+      /** Hide whitespace changes in Git diffs only; omitted means false. */
+      ignoreWhitespace: z.boolean().optional(),
+    }),
     result: ReviewFileDiffResultSchema(),
   },
   "turn.revert.preview": {
@@ -1507,6 +1523,8 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "snapshot.getCumulativeDiff": {
     params: z.object({
+      /** Hide whitespace changes in Git diffs; omitted means false. */
+      ignoreWhitespace: z.boolean().optional(),
       threadId: z.string(),
       filePath: z.string().optional(),
       maxLines: z.number().int().positive().optional(),
@@ -1517,6 +1535,8 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "snapshot.getCumulativeDiffStats": {
     params: z.object({
+      /** Hide whitespace changes in Git diffs; omitted means false. */
+      ignoreWhitespace: z.boolean().optional(),
       threadId: z.string(),
       /** Keep only whole turns whose latest attempt settled after this message sequence. */
       afterSequence: z.number().int().nonnegative().optional(),

@@ -161,15 +161,33 @@ describe("SnapshotService integration", () => {
       tmpDir,
       refBefore,
       refAfter,
-      undefined,
-      undefined,
-      ["authored.txt"],
+      { allowedPaths: ["authored.txt"] },
     );
-    const stats = await service.getDiffStats(tmpDir, refBefore, refAfter, ["authored.txt"]);
+    const stats = await service.getDiffStats(tmpDir, refBefore, refAfter, { allowedPaths: ["authored.txt"] });
 
     expect(diff).toContain("authored.txt");
     expect(diff).not.toContain("unrelated.txt");
     expect(stats.map((entry) => entry.filePath)).toEqual(["authored.txt"]);
+  }, GIT_OPERATION_TIMEOUT_MS);
+
+  it("hides whitespace-only snapshot changes and preserves a pure rename", async () => {
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "space.txt"), "a b\n");
+    const refBefore = await service.captureRef(tmpDir);
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "space.txt"), "a  b\n");
+    NodeFS.renameSync(NodePath.join(tmpDir, "existing.txt"), NodePath.join(tmpDir, "renamed.txt"));
+    const refAfter = await service.captureRef(tmpDir);
+
+    expect(await service.getDiffStats(tmpDir, refBefore, refAfter, { ignoreWhitespace: true })).toEqual([
+      { filePath: "renamed.txt", changeType: "renamed", additions: 0, deletions: 0 },
+    ]);
+    expect(await service.getDiffStats(tmpDir, refBefore, refAfter)).toEqual([
+      { filePath: "renamed.txt", changeType: "renamed", additions: 0, deletions: 0 },
+      { filePath: "space.txt", changeType: "modified", additions: 1, deletions: 1 },
+    ]);
+    const patch = await service.getDiff(tmpDir, refBefore, refAfter, { ignoreWhitespace: true });
+    expect(patch).toContain("rename from existing.txt");
+    expect(patch).toContain("rename to renamed.txt");
+    expect(patch).not.toContain("space.txt");
   }, GIT_OPERATION_TIMEOUT_MS);
 
   it("keeps both sides of a rename when opening the renamed file", async () => {
@@ -181,10 +199,11 @@ describe("SnapshotService integration", () => {
       tmpDir,
       refBefore,
       refAfter,
-      "renamed.txt",
-      undefined,
-      ["renamed.txt", "existing.txt"],
-      [["renamed.txt", "existing.txt"]],
+      {
+        filePath: "renamed.txt",
+        allowedPaths: ["renamed.txt", "existing.txt"],
+        allowedPathGroups: [["renamed.txt", "existing.txt"]],
+      },
     );
 
     expect(diff).toContain("similarity index 100%");
