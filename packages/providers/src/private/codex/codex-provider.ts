@@ -2886,7 +2886,11 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   /** Keep routing separate and wait for the actual JSON-RPC write acknowledgement. */
   private handleApprovalRequest(sessionId: string, threadId: string, request: CodexApprovalRequest): Promise<unknown> {
     const requestId = NodeCrypto.randomUUID();
-    const body = synthesizeCodexApprovalRequest({ method: request.method, params: request.params });
+    const body = synthesizeCodexApprovalRequest({
+      method: request.method,
+      params: request.params,
+      origin: this.runtime.get(sessionId)?.mapper.approvalOrigin(request.params.threadId),
+    });
     if (request.method === "item/fileChange/requestApproval") {
       body.subject = this.runtime.get(sessionId)?.approvalFileChanges?.get(JSON.stringify([request.params.threadId, request.params.itemId])) ?? body.subject;
     }

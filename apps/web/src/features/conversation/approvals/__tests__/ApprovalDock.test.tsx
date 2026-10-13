@@ -344,6 +344,21 @@ describe("ApprovalDock subjects", () => {
     expect(screen.getByRole("heading", { name: "Wants to run a command" })).toBeInTheDocument();
     expect(screen.getByText("Explorer")).toBeInTheDocument();
   });
+
+  it("marks a subagent chip with the asking provider's icon", () => {
+    addApproval({ providerId: "claude", origin: { kind: "subagent", label: "Print date", parentToolCallId: "toolu_agent" } });
+    render(<DockHarness />);
+
+    const chip = screen.getByText("Print date").parentElement;
+    expect(chip?.querySelector('[data-provider-icon="claude"]')).not.toBeNull();
+  });
+
+  it("shows no provider chip when the main agent asks", () => {
+    addApproval({ providerId: "claude" });
+    const { container } = render(<DockHarness />);
+
+    expect(container.querySelector("[data-provider-icon]")).toBeNull();
+  });
 });
 
 const SHORT_PATCH = "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = () => 1;\n";

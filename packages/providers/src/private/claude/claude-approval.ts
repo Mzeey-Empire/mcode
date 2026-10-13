@@ -13,6 +13,7 @@ const SessionScopedUpdateSchema = z.union([
 /** Build Claude's scope and bounded file evidence before publishing the approval. */
 export async function claudeApprovalBody(toolName: string, input: Record<string, unknown>, options: {
   toolUseID?: string; decisionReason?: string; suggestions?: PermissionUpdate[];
+  agentID?: string; origin?: ApprovalRequestBody["origin"];
 }, cwd?: string): Promise<ApprovalRequestBody> {
   const choices: ApprovalChoice[] = [{ id: "allow", intent: "allow_once", label: "Allow once" }];
   const description = sessionDescription(options.suggestions);
@@ -22,7 +23,8 @@ export async function claudeApprovalBody(toolName: string, input: Record<string,
   choices.push({ id: "deny", intent: "deny", label: "Deny" });
   return { requestedAt: new Date().toISOString(), toolCallId: options.toolUseID,
     reason: options.decisionReason, subject: await claudeSubject(toolName, input, cwd),
-    choices, noteDelivery: "native", noteChoiceId: "deny", origin: { kind: "agent" } };
+    choices, noteDelivery: "native", noteChoiceId: "deny",
+    origin: options.origin ?? (options.agentID ? { kind: "subagent", label: "Subagent" } : { kind: "agent" }) };
 }
 
 function sessionDescription(updates: PermissionUpdate[] | undefined): string | undefined {
