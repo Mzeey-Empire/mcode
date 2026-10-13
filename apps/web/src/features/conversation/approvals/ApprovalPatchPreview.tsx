@@ -10,8 +10,7 @@ import { cn } from "@/lib/utils";
 
 type ApprovalFilePatch = Extract<ApprovalSubject, { kind: "file_edit" }>["files"][number];
 
-/** The dock shows this many diff lines; anything longer needs Open diff to be read. */
-export const APPROVAL_PATCH_PREVIEW_LINES = 3;
+const APPROVAL_PATCH_PREVIEW_LINES = 3;
 
 // Pierre renders inside a shadow root, so app tokens and the ligature rule only reach it as host variables.
 const PATCH_UNSAFE_CSS = `
@@ -42,11 +41,7 @@ const PREVIEW_UNSAFE_CSS = `${PATCH_UNSAFE_CSS}
 
 const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/;
 
-/**
- * The first hunk cut to the rows the dock shows, with its header recounted. Rendering only these
- * rows keeps a large patch from building thousands of hidden rows when the approval appears.
- */
-function previewPatch(patch: string): { patch: string; truncated: boolean } {
+function clipToPreviewRows(patch: string): { patch: string; truncated: boolean } {
   const lines = patch.split("\n");
   const hunkIndex = lines.findIndex((line) => HUNK_HEADER.test(line));
   const header = HUNK_HEADER.exec(lines[hunkIndex] ?? "");
@@ -138,7 +133,7 @@ function FullPatchDialog({ files, open, onOpenChange }: {
 export function ApprovalPatchPreview({ files }: { readonly files: readonly ApprovalFilePatch[] }) {
   const [open, setOpen] = useState(false);
   const firstPatch = files[0]?.patch;
-  const preview = useMemo(() => (firstPatch ? previewPatch(firstPatch) : undefined), [firstPatch]);
+  const preview = useMemo(() => (firstPatch ? clipToPreviewRows(firstPatch) : undefined), [firstPatch]);
   const hasMore = files.length > 1 || preview?.truncated === true;
   if (!preview && !hasMore) return null;
   return (

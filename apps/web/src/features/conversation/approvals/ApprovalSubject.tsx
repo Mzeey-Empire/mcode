@@ -45,7 +45,6 @@ function splitPath(path: string): { name: string; folder: string } {
   return { name, folder: path.slice(0, Math.max(0, path.length - name.length)).replace(/[\\/]$/, "") };
 }
 
-// One file shows in the dock; the rest are counted here and listed in Open diff.
 function FileEditSubject({ subject }: { readonly subject: SubjectOf<"file_edit"> }) {
   const [file] = subject.files;
   if (!file) return null;
