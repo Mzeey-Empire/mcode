@@ -69,6 +69,11 @@ export interface BranchSelection {
   readonly compare: string | null;
 }
 
+/** The scope a Branch comparison and its pick belong to (`workspaceId:threadId`). */
+export function branchScopeKey(workspaceId: string, threadId?: string | null): string {
+  return `${workspaceId}:${threadId ?? ""}`;
+}
+
 /** The sides the Branch pickers show: the user's pick for the scope, else the server default. */
 export function branchSelectionFor(
   comparison: BranchComparison | null,
@@ -688,6 +693,8 @@ interface DiffState {
   ) => void;
   /** Record the user's Branch operands for a scope. Both sides are stored, so one pick pins the pair. */
   setBranchSelection: (key: string, selection: BranchSelection) => void;
+  /** Drop the scope's Branch pick so the server default shows again. */
+  clearBranchSelection: (key: string) => void;
   /** Set the Commit view's picked operand by SHA, or `null` to fall back to the latest commit. */
   setSelectedCommitSha: (sha: string | null) => void;
   setRenderMode: (mode: DiffRenderMode) => void;
@@ -932,6 +939,11 @@ export const useDiffStore = create<DiffState>((set, get) => ({
     })),
   setBranchSelection: (key, selection) =>
     set((s) => ({ branchSelectionByScope: { ...s.branchSelectionByScope, [key]: selection } })),
+  clearBranchSelection: (key) =>
+    set((s) => {
+      const { [key]: _cleared, ...rest } = s.branchSelectionByScope;
+      return { branchSelectionByScope: rest };
+    }),
   setSelectedCommitSha: (sha) => set({ selectedCommitSha: sha }),
   setRenderMode: (mode) => set({ renderMode: mode }),
   setBulkDiffExpand: (expand) =>

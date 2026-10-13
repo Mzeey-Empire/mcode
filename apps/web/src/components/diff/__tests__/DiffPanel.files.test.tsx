@@ -310,6 +310,25 @@ describe("DiffPanel", () => {
     );
   });
 
+  it("does not diff another thread's Branch operands while this thread's default resolves", async () => {
+    pickThreadView("branch");
+    useDiffStore.setState({
+      branchComparison: {
+        base: "refs/remotes/origin/main", compare: "refs/heads/other", isUnborn: false, isComparisonAvailable: true,
+      },
+      branchComparisonKey: "workspace-1:thread-other",
+      branchSelectionByScope: {
+        "workspace-1:thread-other": { base: "refs/heads/main", compare: "refs/heads/other" },
+      },
+    });
+    transport.getReviewComparison.mockReset().mockResolvedValue(stats("other.ts"));
+    render(<DiffPanel />);
+
+    await act(async () => {});
+    expect(transport.getReviewComparison).not.toHaveBeenCalledWith(expect.objectContaining({ view: "branch" }));
+    expect(screen.queryByText("other.ts")).not.toBeInTheDocument();
+  });
+
   it("keeps the Turn diff and Files atomic through refresh success and shows a comparison failure", async () => {
     const turnDiff = gate<ReviewComparisonResult>(transport.getTurnDiffComparison);
     const nextList = deferred<TurnSnapshot[]>();

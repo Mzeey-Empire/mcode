@@ -3,7 +3,7 @@ import type { ReviewComparison, ReviewFileChange, ReviewTurn } from "@mcode/cont
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { sinceLookedBaseline, threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { useWorkspaceFileRefresh } from "@/features/projects/files/useWorkspaceFileRefresh";
-import { effectiveBranchOperands, useDiffStore, type BranchOperands, type BranchSelection, type ReviewTurnSelection } from "@/stores/diffStore";
+import { branchScopeKey, effectiveBranchOperands, useDiffStore, type BranchOperands, type BranchSelection, type ReviewTurnSelection } from "@/stores/diffStore";
 import { getTransport } from "@/transport";
 import { ReviewHeader } from "./ReviewHeader";
 import { FileList } from "./FileList";
@@ -306,6 +306,7 @@ function useDiffPanelStore(): DiffPanelStore {
     activeThreadId ? (state.snapshotsLoadingByThread[activeThreadId] ?? false) : false,
   );
   const diffScopeId = activeThreadId ?? activeWorkspaceId;
+  const branchScope = activeWorkspaceId ? branchScopeKey(activeWorkspaceId, activeThreadId) : null;
   const filesVisible = useDiffStore((state) =>
     diffScopeId ? (state.reviewFilesVisibleByScope[diffScopeId] ?? false) : false,
   );
@@ -317,10 +318,11 @@ function useDiffPanelStore(): DiffPanelStore {
     activeThreadId,
     activeThreadClientOnly,
     activeWorkspaceId,
-    branchComparison: useDiffStore((state) => state.branchComparison),
-    branchSelection: useDiffStore((state) =>
-      state.branchComparisonKey ? state.branchSelectionByScope[state.branchComparisonKey] : undefined,
+    // Read for the active scope: while a newly opened scope resolves, the cached default still names the last one.
+    branchComparison: useDiffStore((state) =>
+      branchScope && state.branchComparisonKey === branchScope ? state.branchComparison : null,
     ),
+    branchSelection: useDiffStore((state) => (branchScope ? state.branchSelectionByScope[branchScope] : undefined)),
     bumpDiffRevision: useDiffStore((state) => state.bumpDiffRevision),
     diffRevision,
     diffScopeId,
