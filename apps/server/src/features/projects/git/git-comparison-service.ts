@@ -766,7 +766,7 @@ function parseReviewFileChanges(stdout: string, binaryPaths: ReadonlySet<string>
     const parsed = parseReviewFileChange(fields, index, binaryPaths);
     index = parsed.nextIndex;
     if (!parsed.file) continue;
-    // Git -w still lists whitespace-only modifications in --name-status.
+    // Git before 2.55 still lists whitespace-only modifications in --name-status -w.
     if (visibleStats && status === "M" && !visibleStats.has(parsed.file.path)) continue;
     files.push(parsed.file);
     assertReviewComparisonFileCount(files.length);

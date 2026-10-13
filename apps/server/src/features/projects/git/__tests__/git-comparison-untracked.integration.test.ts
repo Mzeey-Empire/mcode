@@ -408,8 +408,6 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
     git("add", ".");
     git("update-index", "--chmod=+x", "mode.txt");
 
-    expect(git("diff", "--cached", "-w", "--name-status")).toContain("M\tspace.txt");
-    expect(git("diff", "--cached", "-w", "--numstat")).toBe("1\t1\tcode.txt\n0\t0\tmode.txt\n0\t0\told.txt => new.txt");
     const before = indexHash();
     expect(await service.readReviewComparison("fixture", "staged", { ignoreWhitespace: true }, cwd)).toEqual({
       status: "ready", comparison: { files: [
