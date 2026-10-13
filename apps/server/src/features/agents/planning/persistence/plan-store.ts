@@ -41,14 +41,24 @@ export class PlanStore {
     return this.db.transaction((): PlanSaveResult => {
       if (!this.threadExists(input.threadId)) return { ok: false, code: "thread_not_found", latestVersion: null };
       const latest = this.listByThread(input.threadId).at(-1) ?? null;
-      if (this.db.prepare(`SELECT 1 FROM canonical_agent_ingest_checkpoints checkpoint
-        JOIN canonical_agent_turns turn ON turn.id = checkpoint.turn_id
-        WHERE checkpoint.thread_id = ? AND checkpoint.terminal_outcome IS NULL
-          AND turn.status IN ('Pending', 'Running') LIMIT 1`).get(input.threadId)) {
+      if (this.hasUnfinishedExecution(input.threadId) || this.hasPreparingImplement(input.threadId)) {
         return { ok: false, code: "plan_busy", latestVersion: latest };
       }
       return this.saveAvailableVersion(input, latest);
     })();
+  }
+
+  /** Unfinished canonical executions exclude user plan mutations. */
+  hasUnfinishedExecution(threadId: string): boolean {
+    return Boolean(this.db.prepare(`SELECT 1 FROM canonical_agent_ingest_checkpoints checkpoint
+      JOIN canonical_agent_turns turn ON turn.id = checkpoint.turn_id
+      WHERE checkpoint.thread_id = ? AND checkpoint.terminal_outcome IS NULL
+        AND turn.status IN ('Pending', 'Running') LIMIT 1`).get(threadId));
+  }
+
+  /** A prepared snapshot holds all plan writes until admission or compensation. */
+  hasPreparingImplement(threadId: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM plan_implement_requests WHERE source_thread_id = ? AND status = 'preparing'").get(threadId));
   }
 
   private saveAvailableVersion(input: PlanSaveVersion, latest: PlanVersion | null): PlanSaveResult {
@@ -125,31 +135,34 @@ export class PlanStore {
 
   /** All durable versions in their per-thread order. */
   listByThread(threadId: string): PlanVersion[] {
-    return this.orm.select().from(plans).where(eq(plans.threadId, threadId)).orderBy(asc(plans.version)).all().map(toVersion);
+    return this.orm.select().from(plans).where(eq(plans.threadId, threadId)).orderBy(asc(plans.version)).all().map(row => this.toVersion(row));
   }
 
   /** Latest version eligible for the Mcode plan-file projection. */
   getLatestForThread(threadId: string): PlanVersion | null {
     const row = this.orm.select().from(plans).where(and(eq(plans.threadId, threadId), ne(plans.status, "superseded")))
       .orderBy(desc(plans.version)).get();
-    return row ? toVersion(row) : null;
+    return row ? this.toVersion(row) : null;
   }
 
   /** Find one assigned version. */
   getById(id: string): PlanVersion | null {
     const row = this.orm.select().from(plans).where(eq(plans.id, id)).get();
-    return row ? toVersion(row) : null;
+    return row ? this.toVersion(row) : null;
   }
 
   /** Find the agent version tied to an assistant message. */
   getByMessageId(messageId: string): PlanVersion | null {
     const row = this.orm.select().from(plans).where(eq(plans.messageId, messageId)).get();
-    return row ? toVersion(row) : null;
+    return row ? this.toVersion(row) : null;
   }
-}
 
-function toVersion(row: typeof plans.$inferSelect): PlanVersion {
-  return PlanVersionSchema().parse({ ...row, acceptedMessageId: null });
+  private toVersion(row: typeof plans.$inferSelect): PlanVersion {
+    const admitted = row.status === "accepted" ? this.db.prepare<{ message_id: string }, [string]>(
+      "SELECT message_id FROM plan_implement_requests WHERE version_id = ? AND status = 'admitted' LIMIT 1",
+    ).get(row.id) : null;
+    return PlanVersionSchema().parse({ ...row, acceptedMessageId: admitted?.message_id ?? null });
+  }
 }
 
 function isAcceptedVersion(threadId: string, version: PlanVersion | null): boolean {

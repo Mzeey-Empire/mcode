@@ -316,7 +316,7 @@ export interface RouterDeps {
   /** Repository for the plan-question wizard answered marker (sidecar table). */
   planQuestionAnswersRepo: PlanQuestionAnswersRepo;
   /** Repository for structured plan records. */
-  planService: Pick<PlanService, "saveVersion" | "snapshot">;
+  planService: Pick<PlanService, "saveVersion" | "snapshot" | "implement">;
   /** Registry of AI provider adapters for model discovery. */
   providerRegistry: IProviderRegistry;
   /** Tracks per-provider enabled flag and CLI verification state. */

@@ -2,6 +2,9 @@ import "reflect-metadata";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeCrypto from "node:crypto";
+import { PlanStore } from "../../planning/persistence/plan-store.js";
+import { PlanImplementStore } from "../../planning/persistence/plan-implement-store.js";
 import type { Database } from "bun:sqlite";
 import type { ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -130,6 +133,26 @@ describe("CanonicalParentTurnWrite", () => {
     })).toBe(true);
     expect(messages.findByIdInThreadIncludingInternal(THREAD_ID, messageId))
       .toMatchObject({ sequence: 3, is_internal: true, content: "Answer" });
+  });
+
+  it.each(["wrong-message", "stale-revision"])("rolls the entire Implement start back for %s", (fault) => {
+    const plans = new PlanStore(db);
+    const requests = new PlanImplementStore(db);
+    const assistant = new MessageRepo(db).create(THREAD_ID, "assistant", "Plan", 1);
+    const version = plans.create(THREAD_ID, assistant.id, { title: "Plan", contentMd: "# Plan", captureSource: "fence" }, "codex");
+    const requestId = NodeCrypto.randomUUID();
+    const prepared = requests.prepare({ input: { requestId, threadId: THREAD_ID, versionId: version.id,
+      expectedRevision: 0, target: "thread" }, fingerprint: "test", planFilePath: "C:/fixture/plan.md" });
+    if (!prepared.ok) throw new Error("Preparation failed");
+    if (fault === "stale-revision") db.prepare("UPDATE plans SET revision = 1 WHERE id = ?").run(version.id);
+    const start = { ...startInput(), planImplement: { requestId }, userMessage: { kind: "create" as const,
+      messageId: fault === "wrong-message" ? "wrong-message" : prepared.request.messageId,
+      content: "Implement plan v1", sequence: 2 } };
+    expect(() => writer.start(start)).toThrow();
+    expect(db.prepare("SELECT id FROM messages WHERE thread_id = ? AND role = 'user'").all(THREAD_ID)).toEqual([]);
+    expect(db.prepare("SELECT id FROM canonical_agent_turns WHERE thread_id = ?").all(THREAD_ID)).toEqual([]);
+    expect(plans.getById(version.id)?.status).toBe("ready");
+    expect(requests.read(requestId)?.status).toBe("preparing");
   });
 
   it("stages only parent-owned tools while retaining its canonical delegation anchor", async () => {

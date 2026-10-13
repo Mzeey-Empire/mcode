@@ -21,9 +21,8 @@ export const PlanVersionStatusSchema = lazySchema(() =>
 export type PlanVersionStatus = z.infer<ReturnType<typeof PlanVersionStatusSchema>>;
 
 /**
- * Server-side hint for plan-tab actions sent through `agent.send`.
- * Overrides thread interaction mode so implement/revise are not re-wrapped
- * with the plan-questions prompt.
+ * Legacy plan-tab action hint. Revise bypasses the plan-questions prompt.
+ * Implement uses `plan.implement`; its literal remains until S07-09 retires this contract.
  */
 export const PlanActionSchema = lazySchema(() => z.enum(["revise", "implement"]));
 
@@ -85,3 +84,41 @@ export const NativePlanFileOutcomeSchema = lazySchema(() =>
 
 /** Provider plan-file reconciliation result; paths never cross the client boundary. */
 export type NativePlanFileOutcome = z.infer<ReturnType<typeof NativePlanFileOutcomeSchema>>;
+
+/** Target identities retained by durable Implement requests. */
+export const PlanImplementTargetSchema = lazySchema(() => z.enum(["thread", "new-thread", "new-worktree"]));
+
+/** Implement the displayed revision, optionally saving its last edit atomically. */
+export const PlanImplementSchema = lazySchema(() => z.object({
+  requestId: z.string().uuid(),
+  threadId: z.string(),
+  versionId: z.string().uuid(),
+  expectedRevision: z.number().int().min(0),
+  pending: PlanSaveVersionSchema().omit({ threadId: true }).optional(),
+  target: z.literal("thread"),
+}).refine(input => !input.pending || input.pending.versionId === input.versionId, {
+  message: "Pending version must match the implemented version", path: ["pending", "versionId"],
+}));
+
+/** Validated Implement command. */
+export type PlanImplement = z.infer<ReturnType<typeof PlanImplementSchema>>;
+
+/** Durable admission identity returned on every successful replay. */
+export const PlanImplementReceiptSchema = lazySchema(() => z.object({
+  requestId: z.string().uuid(), versionId: z.string().uuid(), version: z.number().int().min(1),
+  targetThreadId: z.string(), messageId: z.string().uuid(),
+  nativePlanFile: NativePlanFileOutcomeSchema().nullable(), state: z.literal("admitted"),
+}));
+
+/** Implement admission receipt. */
+export type PlanImplementReceipt = z.infer<ReturnType<typeof PlanImplementReceiptSchema>>;
+
+/** Typed failures preserve the current version for explicit conflict resolution. */
+export const PlanImplementErrorSchema = lazySchema(() => z.object({
+  code: z.enum(["thread_busy", "plan_busy", "plan_read_only", "plan_conflict",
+    "implement_request_conflict", "implement_interrupted", "implement_failed"]),
+  latestVersion: PlanVersionSchema().nullable(),
+}));
+
+/** Rejected Implement command. */
+export type PlanImplementError = z.infer<ReturnType<typeof PlanImplementErrorSchema>>;
