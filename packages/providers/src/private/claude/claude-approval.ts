@@ -5,7 +5,8 @@ import { claudeFilePatch } from "./claude-approval-patch.js";
 
 const SessionScopedUpdateSchema = z.union([
   z.object({ type: z.enum(["addRules", "replaceRules", "removeRules"]), behavior: z.enum(["allow", "deny", "ask"]),
-    rules: z.array(z.object({ toolName: z.string().min(1), ruleContent: z.string().optional() })).min(1) }),
+    rules: z.array(z.object({ toolName: z.string().min(1), ruleContent: z.string().min(1)
+      .refine((content) => !content.endsWith(":*") || content.slice(0, -2).trim().length > 0).optional() })).min(1) }),
   z.object({ type: z.enum(["addDirectories", "removeDirectories"]), directories: z.array(z.string().min(1)).min(1) }),
 ]);
 

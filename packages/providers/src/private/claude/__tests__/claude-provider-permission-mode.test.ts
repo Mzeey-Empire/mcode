@@ -156,6 +156,15 @@ describe("ClaudeProvider permission mode changes", () => {
   it.each<{ name: string; suggestions?: PermissionUpdate[] }>([
     { name: "missing suggestions" },
     { name: "empty suggestions", suggestions: [] },
+    { name: "empty rule content", suggestions: [
+      { type: "addRules", behavior: "allow", rules: [{ toolName: "Bash", ruleContent: "" }], destination: "session" },
+    ] },
+    { name: "an empty command prefix", suggestions: [
+      { type: "addRules", behavior: "allow", rules: [{ toolName: "Bash", ruleContent: ":*" }], destination: "session" },
+    ] },
+    { name: "a blank command prefix mixed with a rule", suggestions: [
+      { type: "addRules", behavior: "allow", rules: [{ toolName: "Read" }, { toolName: "Bash", ruleContent: " \t:*" }], destination: "session" },
+    ] },
     { name: "an unknown update mixed with a rule", suggestions: [
       { type: "addRules", behavior: "allow", rules: [{ toolName: "Read" }], destination: "session" },
       JSON.parse('{"type":"futureUpdate","destination":"userSettings"}'),
