@@ -595,6 +595,7 @@ interface ClaudeSpawnBrowserAccess {
 }
 
 interface ClaudeStreamLoopState {
+  subagentApprovalOrigins: Map<string, Extract<ApprovalRequestBody["origin"], { kind: "subagent" }>>;
   currentTurnExecutionId: string;
   currentRouting: ClaudeCanonicalEventRouting;
   pendingPromptExecutionIds: string[];
@@ -1308,7 +1309,10 @@ export class ClaudeProvider
     options: Parameters<CanUseTool>[2],
     routing?: ClaudeCanonicalEventRouting,
   ): Promise<ClaudeApprovalDecision> {
-    const body = await claudeApprovalBody(toolName, input, options, this.runtime.get(`mcode-${threadId}`)?.cwd);
+    const session = this.runtime.get(`mcode-${threadId}`);
+    const stream = session ? this.streamStates.get(session.query) : undefined;
+    const origin = options.agentID ? stream?.subagentApprovalOrigins.get(options.agentID) : undefined;
+    const body = await claudeApprovalBody(toolName, input, { ...options, origin }, session?.cwd);
     if (options.signal?.aborted) return "cancelled";
     return new Promise((resolve) => {
       this.pendingPermissions.set(requestId, {
@@ -2215,6 +2219,7 @@ export class ClaudeProvider
 
   /** Provider teardown: close the SDK query handle. */
   async close(state: ClaudeSessionState): Promise<void> {
+    this.streamStates.get(state.query)?.subagentApprovalOrigins.clear();
     const results = await Promise.allSettled([
       Promise.resolve().then(() => { if (state.browserLease) this.host.browser.release(state.browserLease.leaseId); }),
       Promise.resolve().then(() => this.host.threadControl.close(state.sessionId)),
@@ -2276,6 +2281,7 @@ export class ClaudeProvider
       ? sessionId.slice(6)
       : sessionId;
     const state: Omit<ClaudeStreamLoopState, "mapper"> = {
+      subagentApprovalOrigins: new Map(),
       currentTurnExecutionId: routing.executionId,
       currentRouting: routing,
       pendingPromptExecutionIds: [],
@@ -2360,6 +2366,7 @@ export class ClaudeProvider
     } catch (error: unknown) {
       this.publishClaudeStreamError(sessionId, q, state, error);
     } finally {
+      state.subagentApprovalOrigins.clear();
       await this.finalizeClaudeStream(sessionId, q, state);
     }
   }
@@ -2375,6 +2382,7 @@ export class ClaudeProvider
       this.emit(`_resumeOk:${sessionId}`);
     }
     state.mapper.captureSessionIdentity(message, state.sessionInitialized);
+    this.trackClaudeApprovalTask(state, message);
     state.mapper.settleBackgroundTask(message);
     if (await this.skipUnownedClaudeOutput(sessionId, state, message)) return true;
     const isResumeFailure = this.isFailedClaudeResume(message, state.sessionInitialized);
@@ -2394,6 +2402,21 @@ export class ClaudeProvider
     const outcome = await state.mapper.map(message);
     if (outcome !== "none") await this.endClaudeTurn(sessionId, state);
     return true;
+  }
+
+  private trackClaudeApprovalTask(state: ClaudeStreamLoopState, message: Record<string, unknown>): void {
+    if (message.type !== "system" || typeof message.task_id !== "string") return;
+    if (message.subtype === "task_notification") {
+      state.subagentApprovalOrigins.delete(message.task_id);
+      return;
+    }
+    if (message.subtype !== "task_started" || message.task_type !== "local_agent") return;
+    const description = typeof message.description === "string" ? message.description.trim() : "";
+    state.subagentApprovalOrigins.set(message.task_id, {
+      kind: "subagent",
+      label: (description || "Subagent").slice(0, 200),
+      ...(typeof message.tool_use_id === "string" ? { parentToolCallId: message.tool_use_id } : {}),
+    });
   }
 
   /**

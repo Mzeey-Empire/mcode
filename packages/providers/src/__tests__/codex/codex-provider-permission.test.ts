@@ -8,7 +8,8 @@ vi.mock("@mcode/shared", () => ({
 import { CodexProvider, stubEnvService } from "./codex-provider-test-fixture.js";
 import type { CodexApprovalRequest } from "../../private/codex/codex-app-server.js";
 import { CodexAppServer } from "../../private/codex/codex-app-server.js";
-import type { ApprovalRequestEnvelope, ApprovalOutcome, ProviderRuntimeEvent } from "@mcode/contracts";
+import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
+import type { ApprovalRequestEnvelope, ApprovalOutcome, ApprovalOrigin, ProviderRuntimeEvent } from "@mcode/contracts";
 import { AgentEventType } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 
@@ -77,7 +78,7 @@ describe("CodexProvider permission flow", () => {
     // Pre-register a session entry so drain logic has something to iterate.
     seedSession(provider, sessionId, threadId, {
       server: { kill: vi.fn().mockResolvedValue(undefined), interruptTurn: vi.fn().mockResolvedValue(undefined), isAlive: true },
-      mapper: { reset: vi.fn(), drainPendingAssistantBoundary: vi.fn(() => []) },
+      mapper: new CodexEventMapper(threadId, "native-parent"),
       lastUsedAt: Date.now() - 1000,
       sandboxMode: "workspace-write",
     });
@@ -91,14 +92,35 @@ describe("CodexProvider permission flow", () => {
     }
   });
 
-  it.each(["ls -la", "x".repeat(70_000)])("emits and lists the entire command scope %#", async (command) => {
+  it.each<{
+    name: string; nativeThreadId?: string; identity?: string; command?: string; origin: ApprovalOrigin;
+  }>([
+    { name: "parent request", nativeThreadId: "native-parent", origin: { kind: "agent" } },
+    { name: "legacy request without a native thread", origin: { kind: "agent" } },
+    { name: "entire oversized command scope", command: "x".repeat(70_000), origin: { kind: "agent" } },
+    { name: "child activity name", nativeThreadId: "native-child", origin: { kind: "subagent", label: "worker", parentToolCallId: "spawn-child" } },
+    { name: "authoritative child identity", nativeThreadId: "native-child", identity: "Reviewer", origin: { kind: "subagent", label: "Reviewer", parentToolCallId: "spawn-child" } },
+    { name: "child metadata before spawn evidence", nativeThreadId: "metadata-only", identity: "Researcher", origin: { kind: "subagent", label: "Researcher" } },
+    { name: "unknown child", nativeThreadId: "unseen-child", origin: { kind: "subagent", label: "Subagent" } },
+    { name: "bounded child identity", nativeThreadId: "native-child", identity: "x".repeat(201), origin: { kind: "subagent", label: "x".repeat(200), parentToolCallId: "spawn-child" } },
+    { name: "blank identity retains activity name", nativeThreadId: "native-child", identity: "   ", origin: { kind: "subagent", label: "worker", parentToolCallId: "spawn-child" } },
+  ])("emits and lists $name with its origin and command scope", async ({ nativeThreadId, identity, command = "ls -la", origin }) => {
+    const mapper = new CodexEventMapper(threadId, "native-parent");
+    mapper.mapNotification({ method: "item/started", params: { threadId: "native-parent", turnId: "parent-turn", item: {
+      type: "subAgentActivity", id: "spawn-child", kind: "started", agentThreadId: "native-child", agentPath: "/root/worker",
+    } } });
+    if (identity !== undefined) mapper.applyChildThreadMetadata(nativeThreadId ?? "native-child", { identity });
+    seedSession(provider, sessionId, threadId, {
+      server: { kill: vi.fn().mockResolvedValue(undefined), interruptTurn: vi.fn().mockResolvedValue(undefined), isAlive: true },
+      mapper, sandboxMode: "workspace-write",
+    });
     const emitted: ApprovalRequestEnvelope[] = [];
     provider.on("approval_request", (r) => emitted.push(r));
 
     const nativeRequest: CodexApprovalRequest = {
       rpcId: 42,
       method: "item/commandExecution/requestApproval",
-      params: { command, cwd: "/tmp" },
+      params: { command, cwd: "/tmp", threadId: nativeThreadId },
     };
     const resultPromise = (provider as unknown as {
       handleApprovalRequest: (sessionId: string, threadId: string, req: unknown) => Promise<unknown>;
@@ -106,6 +128,7 @@ describe("CodexProvider permission flow", () => {
 
     expect(emitted).toHaveLength(1);
     expect(emitted[0].body).toMatchObject({ subject: { kind: "command", command, cwd: "/tmp" } });
+    expect(emitted[0].body).toHaveProperty("origin", origin);
     expect(emitted[0].threadId).toBe(threadId);
 
     const pending = provider.listPendingApprovals!(threadId);
@@ -240,7 +263,7 @@ describe("CodexProvider permission flow", () => {
     fakeServer.isAlive = true;
     seedSession(provider, sessionId, threadId, {
       server: fakeServer,
-      mapper: { reset: vi.fn(), drainPendingAssistantBoundary: vi.fn(() => []) },
+      mapper: new CodexEventMapper(threadId, "native-parent"),
       lastUsedAt: Date.now(),
       sandboxMode: "workspace-write",
     });

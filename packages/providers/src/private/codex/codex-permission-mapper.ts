@@ -74,6 +74,7 @@ export function mapDecisionToCodexResponse(method: string, decision: CodexApprov
 /** Adapter state supplies routing; native data supplies only the body. */
 export function synthesizeCodexApprovalRequest(input: {
   method: string; params: CodexApprovalParams;
+  origin?: ApprovalRequestBody["origin"];
 }): ApprovalRequestBody {
   const { method, params } = input;
   return {
@@ -90,7 +91,7 @@ export function synthesizeCodexApprovalRequest(input: {
       { id: "allow-session", intent: "allow_scoped", label: "Allow for this session" },
       { id: "deny", intent: "deny", label: "Deny" },
     ],
-    noteDelivery: "steer", noteChoiceId: "deny", origin: { kind: "agent" },
+    noteDelivery: "steer", noteChoiceId: "deny", origin: input.origin ?? { kind: "agent" },
   };
 }
 

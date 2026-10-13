@@ -6,6 +6,7 @@ import { logger } from "@mcode/shared";
 import { AgentEventType } from "@mcode/contracts";
 import type {
   AgentEvent,
+  ApprovalRequestBody,
   CodexChildEvidence,
   CodexCollaborationEvidence,
   GoalState,
@@ -267,6 +268,30 @@ export class CodexEventMapper {
   /** Updates the app-server thread id used to classify incoming notifications. */
   setMainCodexThreadId(threadId: string): void {
     this.mainCodexThreadId = threadId;
+  }
+
+  /** Identifies the requesting native thread using metadata already observed by this adapter. */
+  approvalOrigin(nativeThreadId: unknown): ApprovalRequestBody["origin"] {
+    if (typeof nativeThreadId !== "string" || !nativeThreadId || !this.mainCodexThreadId || nativeThreadId === this.mainCodexThreadId) {
+      return { kind: "agent" };
+    }
+    const parentToolCallId = this.collabReceiverThreadToCollabId.get(nativeThreadId);
+    return {
+      kind: "subagent",
+      label: this.subagentApprovalLabel(nativeThreadId, parentToolCallId),
+      ...(parentToolCallId ? { parentToolCallId } : {}),
+    };
+  }
+
+  private subagentApprovalLabel(nativeThreadId: string, parentToolCallId: string | undefined): string {
+    const toolInput = parentToolCallId ? this.spawnAgentToolInputById.get(parentToolCallId) : undefined;
+    const identity = this.childThreadMetadataById.get(nativeThreadId)?.agentName;
+    const agentName = toolInput ? this.stringField(toolInput, "agentName") : undefined;
+    const agentPath = toolInput ? this.stringField(toolInput, "agentPath") : undefined;
+    for (const label of [identity, agentName, agentPath?.split("/").filter(Boolean).pop()]) {
+      if (label?.trim()) return label.trim().slice(0, 200);
+    }
+    return "Subagent";
   }
 
   /** Reports whether a native thread was structurally registered by a Codex collaboration item. */
