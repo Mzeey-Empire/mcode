@@ -158,6 +158,7 @@ describe("CodexProvider permission flow", () => {
     { answer: "unsupported", expected: "next_turn" },
     { answer: "no-answer", expected: "unknown" },
     { answer: "old-cli", expected: "next_turn" },
+    { answer: "disposed", expected: "next_turn" },
   ])("delivers a deny note through the steer protocol: $answer", async ({ answer, expected }) => {
     const version = vi.spyOn(codexVersion, "currentCodexVersion").mockReturnValue(answer === "old-cli" ? "0.1.0" : "99.0.0");
     const stdin = new NodeStream.PassThrough();
@@ -186,10 +187,13 @@ describe("CodexProvider permission flow", () => {
       const delivery = provider.resolveApproval(pending.requestId, { choiceId: "deny", note: "Only lint the web app" });
       expect(await deny).toEqual({ decision: "decline" });
       expect(sent).toEqual([]);
+      // The Codex connection closes between the native answer and the steer that carries the note.
+      if (answer === "disposed") rpc.dispose();
       nativeRequest.responseWritten?.(true);
       if (answer === "no-answer") await vi.advanceTimersByTimeAsync(20_001);
       expect(await delivery).toEqual({ status: "resolved", noteDelivery: expected });
-      expect(sent).toEqual(answer === "old-cli" ? [] : [{ id: 1, method: "turn/steer", params: {
+      const steerSkipped = answer === "old-cli" || answer === "disposed";
+      expect(sent).toEqual(steerSkipped ? [] : [{ id: 1, method: "turn/steer", params: {
         threadId: "native-child", expectedTurnId: "child-turn", input: [{ type: "text", text: "Only lint the web app" }],
       } }]);
       expect(outcomes).toEqual([{ status: "denied", choiceLabel: "Deny", note: "Only lint the web app",

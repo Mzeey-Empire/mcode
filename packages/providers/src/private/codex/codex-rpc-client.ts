@@ -33,6 +33,18 @@ export class CodexTransportError extends Error {
   }
 }
 
+/**
+ * The request never reached the app-server: the client was already closed, or the stdin write
+ * failed. A caller can treat the request as not sent, unlike a timeout or a stream that closed
+ * after the write.
+ */
+export class CodexRequestNotSentError extends CodexTransportError {
+  constructor(message: string) {
+    super(message);
+    this.name = "CodexRequestNotSentError";
+  }
+}
+
 /** Default timeout in milliseconds for RPC requests. */
 const DEFAULT_TIMEOUT_MS = 20_000;
 
@@ -133,7 +145,7 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
     timeoutMs = DEFAULT_TIMEOUT_MS,
   ): Promise<TResult> {
     if (this.disposed) {
-      return Promise.reject(new CodexTransportError("RPC client is disposed"));
+      return Promise.reject(new CodexRequestNotSentError("RPC client is disposed"));
     }
 
     const id = this.nextId++;
@@ -150,7 +162,7 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
         if (err) {
           clearTimeout(timer);
           this.pending.delete(id);
-          reject(new CodexTransportError(`stdin write failed for ${method}: ${err.message}`));
+          reject(new CodexRequestNotSentError(`stdin write failed for ${method}: ${err.message}`));
         }
       });
     });
