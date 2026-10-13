@@ -148,6 +148,8 @@ interface RevealSearch {
 
 /** Ends a reveal whose message history no longer holds, so the request cannot fire a later surprise jump. */
 function missReveal(request: MessageRevealRequest): void {
+  // A later reveal replaced this one; its outstanding page load must not report a miss for it.
+  if (useMessageRevealStore.getState().request !== request) return;
   useMessageRevealStore.getState().consume(request);
   useToastStore.getState().show({ kind: "failed", title: "Couldn't find that reply in the chat" });
 }
@@ -155,7 +157,7 @@ function missReveal(request: MessageRevealRequest): void {
 type RevealHistory = Pick<MessageListData, "hasMore" | "hasNewer" | "loadOlderMessages" | "loadNewerMessages">;
 
 /** Loads the next history page toward a reveal's message, or ends the search once both directions are spent. */
-function pageRevealSearch(search: RevealSearch, history: RevealHistory, onPageLoaded: () => void): void {
+function pageRevealSearch(search: RevealSearch, history: RevealHistory, onPageSettled: () => void): void {
   if (search.inFlight) return;
   // The history window evicts as it pages, so its flags flip back; one pass older, then one newer, ends the search.
   if (search.direction === "older" && !history.hasMore) search.direction = "newer";
@@ -169,10 +171,10 @@ function pageRevealSearch(search: RevealSearch, history: RevealHistory, onPageLo
   void loadPage(search.request.threadId).then(
     (result) => {
       search.inFlight = false;
-      // A skipped page changes nothing, so no later render would retry it.
-      if (result !== "loaded") missReveal(search.request);
-      // The page can render before this load settles, while the search still looks in flight.
-      else onPageLoaded();
+      if (result === "failed") missReveal(search.request);
+      // A skip means another load owns the page. That load, or one that landed before this
+      // settled, can render while the search still looks in flight, so look again either way.
+      else onPageSettled();
     },
     () => missReveal(search.request),
   );
@@ -529,7 +531,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
     }
   }, []);
   const revealSearch = useRef<RevealSearch | null>(null);
-  const [revealPagesLoaded, setRevealPagesLoaded] = useState(0);
+  const [revealPagesSettled, setRevealPagesSettled] = useState(0);
   const revealRequest = useMessageRevealStore((state) =>
     state.request?.threadId === data.renderedThreadId ? state.request : null);
   useEffect(() => {
@@ -547,8 +549,8 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
     pageRevealSearch(search, {
       hasMore: data.hasMore, hasNewer: data.hasNewer,
       loadOlderMessages: data.loadOlderMessages, loadNewerMessages: data.loadNewerMessages,
-    }, () => setRevealPagesLoaded((count) => count + 1));
-  }, [revealPagesLoaded, revealRequest, items, scrollToMessage, data.hasMore, data.hasNewer, data.isLoadingMore, data.isLoadingNewer, data.loadOlderMessages, data.loadNewerMessages]);
+    }, () => setRevealPagesSettled((count) => count + 1));
+  }, [revealPagesSettled, revealRequest, items, scrollToMessage, data.hasMore, data.hasNewer, data.isLoadingMore, data.isLoadingNewer, data.loadOlderMessages, data.loadNewerMessages]);
   const jumpToUser = useCallback(() => {
     if (stickyMessage) scrollToMessage(stickyMessage.id);
   }, [stickyMessage, scrollToMessage]);
