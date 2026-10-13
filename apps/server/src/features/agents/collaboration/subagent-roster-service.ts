@@ -25,7 +25,7 @@ import { and, eq, inArray, ne, or } from "drizzle-orm";
 import { messages, threads, toolCallRecords } from "../../../runtime/persistence/sqlite/schema.js";
 import { NarrativeStore } from "../conversation/narrative/narrative-store.js";
 import { broadcast } from "../../../application/transport/push.js";
-import { narrativeRosterEntry, narrativeSubagentDetail, rootAgent, subagentStatusFrom, subagentModelLabel, type RosterToolCall } from "./subagent-roster-projection.js";
+import { narrativeRosterEntry, narrativeSubagentDetail, rootAgent, subagentStatusFrom, subagentModelLabel, subagentTitle, type RosterToolCall } from "./subagent-roster-projection.js";
 import type { CanonicalChildRow } from "../canonical/canonical-child-roster.js";
 import { subscribeCommittedCanonicalEvents } from "../canonical/committed-canonical-events.js";
 
@@ -349,7 +349,7 @@ function canonicalDisplayMetadata(row: CanonicalChildRow, narrative: SubagentRos
 
 function canonicalMetadata(row: CanonicalChildRow) {
   return {
-    title: row.task?.split("\n")[0] ?? "Subagent task", prompt: row.task ?? null,
+    title: subagentTitle(row.task?.split("\n")[0] ?? "Subagent task"), prompt: row.task ?? null,
     subagentType: row.identity ?? null, model: subagentModelLabel(row.model, row.reasoning),
   };
 }

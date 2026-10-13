@@ -75,6 +75,14 @@ describe("SubagentRosterService", () => {
     expect(detail.summary).toBe("Found the export");
   });
 
+  it("reads a snake_case task name as words in the title and keeps prose titles as written", () => {
+    const { db, call, service } = harness("copilot");
+    message(db, "message", "copilot");
+    call("named", "message", { inputSummary: "verify_ui_child", status: "completed" });
+    call("prose", "message", { inputSummary: "Inspect the build_log", status: "completed", sortOrder: 1 });
+    expect(service.loadRoster(request).entries.map((row) => row.title)).toEqual(["Verify ui child", "Inspect the build_log"]);
+  });
+
   it.each([true, false])("uses OpenCode childSteps=%s only when there are no recorded steps", (childSteps) => {
     const { db, call, service } = harness("opencode", { ...SUBAGENT_REPORTING, opencode: { childTranscript: false, childSteps } });
     message(db, "message", "opencode");

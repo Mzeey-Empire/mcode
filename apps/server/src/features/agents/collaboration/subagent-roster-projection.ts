@@ -1,5 +1,5 @@
 import {
-  createSubagentPresentation, type ProviderId, type SubagentDetail, type SubagentRosterEntry,
+  createSubagentPresentation, formatSubagentDisplayName, type ProviderId, type SubagentDetail, type SubagentRosterEntry,
   type SubagentStatus, type SubagentPresentation, type ToolCallRecord,
 } from "@mcode/contracts";
 import type { CreateToolCallRecordInput } from "../tools/persistence/tool-call-record-store.js";
@@ -81,9 +81,16 @@ export function narrativeRosterEntry(call: RosterToolCall, stepCount: number, pr
 
 function narrativeMetadata(call: RosterToolCall) {
   const prompt = call.subagentPrompt ?? null;
-  const title = (call.presentation?.task ?? prompt)?.split("\n")[0] || call.displayName || "Subagent task";
+  const title = subagentTitle((call.presentation?.task ?? prompt)?.split("\n")[0] || call.displayName || "Subagent task");
   return { title, prompt, subagentType: call.subagentType ?? null,
     model: subagentModelLabel(call.model, call.reasoningEffort) };
+}
+
+const SNAKE_CASE_IDENTIFIER = /^[a-z0-9]+(?:_[a-z0-9]+)+$/i;
+
+/** Codex names children by snake_case task identifiers, which read better as words in a title. */
+export function subagentTitle(title: string): string {
+  return SNAKE_CASE_IDENTIFIER.test(title) ? formatSubagentDisplayName(title) : title;
 }
 
 /** Combine the reported model and reasoning without inventing missing metadata. */
