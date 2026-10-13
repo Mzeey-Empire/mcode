@@ -19,8 +19,7 @@ interface ConfirmCopy {
   readonly title: string;
   readonly body: string | null;
   readonly note: string | null;
-  /** Revert or Retry is offered. Blocked and unrecoverable outcomes offer Close only. */
-  readonly action: "revert" | "retry" | null;
+  readonly action: "revert" | "retry" | "close";
 }
 
 type FailedState = Extract<TurnRevertState, { phase: "failed" }>;
@@ -30,7 +29,7 @@ function failedCopy(state: FailedState, title: RevertConfirmProps["title"]): Con
     ? { text: `Couldn't revert · ${state.failure.detail}`, retry: true }
     : failureCopy(state.failure);
   const ready = state.preview?.status === "ready" ? state.preview : null;
-  return { title: ready ? title(ready) : "Couldn't revert", body: text, note: null, action: retry && ready ? "retry" : null };
+  return { title: ready ? title(ready) : "Couldn't revert", body: text, note: null, action: retry && ready ? "retry" : "close" };
 }
 
 function confirmCopy(state: TurnRevertState, title: RevertConfirmProps["title"]): ConfirmCopy {
@@ -38,7 +37,7 @@ function confirmCopy(state: TurnRevertState, title: RevertConfirmProps["title"])
   if (state.phase === "failed") return failedCopy(state, title);
   const preview = state.preview;
   const blocked = previewBlockedReason(preview);
-  if (blocked !== null || preview.status !== "ready") return { title: blocked ?? "", body: null, note: null, action: null };
+  if (blocked !== null || preview.status !== "ready") return { title: blocked ?? "", body: null, note: null, action: "close" };
   return { title: title(preview), body: revertWarning(preview), note: unattributedNote(preview), action: "revert" };
 }
 
@@ -74,9 +73,9 @@ export function RevertConfirm({ state, title, onRevert, onCancel }: RevertConfir
       {copy.note && <p className="text-body-small text-muted">{copy.note}</p>}
       <div className="flex justify-end gap-2">
         <Button ref={cancelRef} variant="ghost" shape="round" className="px-3.5" onClick={onCancel}>
-          {copy.action === null ? "Close" : "Cancel"}
+          {copy.action === "close" ? "Close" : "Cancel"}
         </Button>
-        {copy.action && (
+        {copy.action !== "close" && (
           <Button
             variant="destructive"
             shape="round"

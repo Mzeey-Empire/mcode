@@ -27,7 +27,7 @@ export async function revertFixture() {
   const storeId = StoreIdSchema.parse(NodeCrypto.randomUUID());
   const pins = new SnapshotRefPins(gitExecutor, storeId, base.db, writer, lock, snapshots, hostRuntime);
   const published: TurnRevertResult[] = [];
-  const runtime: Pick<TurnRuntimeSnapshot, "threadId" | "phase">[] = [];
+  const runtime: TurnRuntimeSnapshot[] = [];
   const deps: TurnRevertDeps = { snapshots, ranges: base.ranges, writer, store, storeId, lock,
     ...turnRevertContext(base.db, base.deps, () => runtime), publish: (result) => { published.push(result); } };
   let cwd = base.directory;

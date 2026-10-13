@@ -52,7 +52,6 @@ function seedMessages(messages: Message[]) {
   useThreadStore.setState({ records: new Map([["thread-1", { ...createEmptyThreadRecord(), messages }]]) });
 }
 
-/** Renders every timeline message the way the conversation does, so a new receipt appears live. */
 function Timeline() {
   const messages = useThreadStore((s) => s.records.get("thread-1")?.messages ?? []);
   return <>{messages.map((message) => <TurnRevertReceipt key={message.id} message={message} />)}</>;

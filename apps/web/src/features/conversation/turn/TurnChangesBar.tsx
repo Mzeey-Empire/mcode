@@ -499,7 +499,6 @@ function FileAnnotations({ file }: { readonly file: ChangedFile }) {
   if (file.kind === "deleted") notes.push(<span key="kind" className="text-error">deleted</span>);
   const source = renameSource(file);
   if (source) notes.push(<span key="from" className="text-muted">from {source}</span>);
-  // A revert discards later edits too, so `reverted` replaces `edited later`.
   if (file.reverted) notes.push(<span key="later" className="text-muted">reverted</span>);
   else if (file.editedLater) notes.push(<span key="later" className="text-muted">edited later</span>);
   if (notes.length === 0) return null;

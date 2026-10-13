@@ -12,20 +12,11 @@ import { acceptTurnRevert, sendUntilAnswered } from "./useTurnRevert";
 /** System notice kinds that {@link TurnRevertReceipt} renders. */
 export const TURN_REVERT_NOTICE_KINDS = new Set(["turn-reverted", "turn-revert-undone", "turn-revert-interrupted"]);
 
-/**
- * The server writes "Reverted Turn 3 · 7 files" and "Undid revert · Turn 3".
- * The part after the first " · " is the mono detail of the receipt anatomy.
- */
 function splitReceipt(content: string): { label: string; detail: string | null } {
   const at = content.indexOf(" · ");
   return at === -1 ? { label: content, detail: null } : { label: content.slice(0, at), detail: content.slice(at + 3) };
 }
 
-/**
- * A revert stays undoable until an undo receipt names it. Receipts persist,
- * so this survives a reload; the server still answers `recovery_expired`
- * when the revert's safety material is gone.
- */
 function useIsUndone(threadId: string, revertId: string | undefined): boolean {
   return useThreadRecord(threadId, (record) =>
     revertId !== undefined && record.messages.some((message) => message.systemNotice?.undoesRevertId === revertId));
@@ -33,7 +24,6 @@ function useIsUndone(threadId: string, revertId: string | undefined): boolean {
 
 type UndoState = { readonly pending: boolean; readonly disabledReason: string | null };
 
-/** Undo for one committed revert, with a `requestId` per click that is resent after a reconnect. */
 function useUndoRevert(threadId: string, revertId: string | undefined) {
   const [state, setState] = useState<UndoState>({ pending: false, disabledReason: null });
   const undo = useCallback(() => {

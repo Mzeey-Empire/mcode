@@ -6,7 +6,6 @@ import { getTransport } from "@/transport";
 import { RpcError } from "@/transport/ws-transport";
 import type { RevertFailure } from "./revert-copy";
 
-/** A dropped socket can lose an answer the server already settled, so the same request is sent again. */
 const MAX_SENDS = 5;
 
 function isDisconnect(error: unknown): boolean {
@@ -39,7 +38,7 @@ export function acceptTurnRevert({ threadId, receipt }: Pick<TurnRevertedEvent, 
   void getTransport()
     .listSnapshots(threadId)
     .then((snapshots) => useDiffStore.getState().setSnapshots(threadId, snapshots))
-    .catch(() => { /* The bar keeps its last snapshots; the next turn end refetches. */ });
+    .catch((error: unknown) => console.warn("[turn-revert] snapshot refetch failed", { threadId, error }));
 }
 
 /** What the confirm shows while one revert is planned and applied. */
@@ -74,7 +73,6 @@ export function useTurnRevert(target: TurnRevertTarget, onReverted: () => void) 
   const key = `${threadId}
 ${messageId}
 ${scopeKey}`;
-  // State is keyed by target, so a new target reads as loading without a reset inside the effect.
   const [keyed, setKeyed] = useState<{ readonly key: string; readonly state: TurnRevertState } | null>(null);
   const state: TurnRevertState = keyed?.key === key ? keyed.state : { phase: "loading" };
   const mounted = useRef(true);

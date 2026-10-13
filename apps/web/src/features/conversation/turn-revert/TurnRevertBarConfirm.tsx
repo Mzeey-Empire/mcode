@@ -22,14 +22,13 @@ export interface RevertTurnFacts {
  */
 export function useRevertTurnDisabledReason(threadId: string | null | undefined, facts: RevertTurnFacts): string | null {
   const running = useThreadStore((s) => (threadId ? s.runningThreadIds.has(threadId) : false));
-  // Unknown git status is not a reason: the preview answers `not_git` itself.
-  const notGit = useWorkspaceStore((s) => {
+  const knownNotGit = useWorkspaceStore((s) => {
     const workspaceId = s.threads.find((t) => t.id === threadId)?.workspace_id;
     return s.workspaces.find((w) => w.id === workspaceId)?.is_git_repo === false;
   });
   if (!threadId) return "This turn's snapshot is gone";
   if (running) return "Wait for the turn to finish";
-  if (notGit) return "Not a git repository";
+  if (knownNotGit) return "Not a git repository";
   if (!facts.snapshot && facts.listSettled) return "This turn's snapshot is gone";
   if (facts.allReverted) return "Already reverted";
   return null;
