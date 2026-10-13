@@ -16,6 +16,8 @@ import { useDiffStore } from "@/stores/diffStore";
 import { BrowserHeader } from "./BrowserHeader";
 import { BrowserViewportToolbar } from "./BrowserViewportToolbar";
 import { BrowserViewportCanvas } from "./BrowserViewportCanvas";
+import type { BrowserCommandActions } from "./browserToolbarModel";
+import { useBrowserCommands } from "./useBrowserCommands";
 import {
   invalidateBrowserAutomationTargetObservation,
   useBrowserAutomationStore,
@@ -180,6 +182,9 @@ function RuntimePreviewContent({
     </div>
   );
 }
+
+/** Reason for desktop-only guest tools, which need the guest's webContents. */
+const DESKTOP_ONLY_REASON = "Available in the desktop app";
 
 /** Stable tab id used by the single web-runtime preview target. */
 export const WEB_RUNTIME_PREVIEW_TAB_ID = "web-preview";
@@ -381,6 +386,13 @@ export function WebRuntimePreview({
     useDiffStore.getState().setPreviewUrlForThread(threadId, next);
   };
 
+  const commandActions: BrowserCommandActions = {
+    deviceToolbar: { kind: "enabled", run: onToggleViewportToolbar },
+    developerTools: { kind: "disabled", reason: DESKTOP_ONLY_REASON },
+    forceReload: { kind: "disabled", reason: DESKTOP_ONLY_REASON },
+  };
+  useBrowserCommands({ active: presentationActive && !automationOnly, actions: commandActions });
+
   const noOp = (): void => undefined;
   const invalidateViewportObservation = (): void => {
     invalidateBrowserAutomationTargetObservation(identity.workspaceId, threadId, WEB_RUNTIME_PREVIEW_TAB_ID);
@@ -397,6 +409,7 @@ export function WebRuntimePreview({
 
   return (
     <div data-testid="web-runtime-preview" className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div data-browser-chrome="">
       <BrowserHeader
         url={headerState.url}
         pageTitle={headerState.pageTitle}
@@ -440,6 +453,7 @@ export function WebRuntimePreview({
         viewportToolbarVisible={viewportToolbarOpen || responsiveViewportSize !== null}
         onHumanFocus={() => invalidateBrowserAutomationTargetObservation(identity.workspaceId, threadId, WEB_RUNTIME_PREVIEW_TAB_ID)}
       />
+      </div>
       <RuntimeViewportToolbar
         visible={viewportToolbarOpen || responsiveViewportSize !== null}
         coordinator={viewportCoordinator}

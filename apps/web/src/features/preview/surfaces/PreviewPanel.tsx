@@ -451,6 +451,7 @@ export function PreviewPanel({
         toggleViewportToolbar={toggleViewportToolbar}
         activeAutomationController={activeAutomationController}
         activeAutomationRequest={activeAutomationRequest}
+        commandsActive={presentationActive && !automationOnly}
       />
 
       <BrowserPageLayer

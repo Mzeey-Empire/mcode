@@ -189,3 +189,97 @@ describe("window keys", () => {
     expect(fired).toEqual([]);
   });
 });
+
+describe("Browser keys", () => {
+  const browserCommandIds = [
+    "preview.guestDevTools.open",
+    "preview.deviceToolbar.toggle",
+    "preview.forceReload",
+  ];
+  let cleanup: (() => void) | undefined;
+  let fired: string[];
+
+  function start(overrides?: Parameters<typeof initShortcuts>[0]): void {
+    fired = [];
+    for (const id of browserCommandIds) {
+      registerCommand({ id, title: id, category: "Browser", handler: () => fired.push(id) });
+    }
+    cleanup = initShortcuts(overrides);
+  }
+
+  function focusInput(parent: HTMLElement): HTMLInputElement {
+    const input = document.createElement("input");
+    parent.appendChild(input);
+    document.body.appendChild(parent);
+    input.focus();
+    return input;
+  }
+
+  function browserChrome(): HTMLElement {
+    const chrome = document.createElement("div");
+    chrome.setAttribute("data-browser-chrome", "");
+    return chrome;
+  }
+
+  beforeEach(() => {
+    clearKeybindings();
+    clearCommands();
+    resetContext();
+  });
+
+  afterEach(() => {
+    cleanup?.();
+    document.body.replaceChildren();
+  });
+
+  it("runs F12, Ctrl Shift M and Ctrl Shift R from the focused URL input", () => {
+    start();
+    const input = focusInput(browserChrome());
+
+    input.dispatchEvent(createKeyEvent({ key: "F12" }));
+    input.dispatchEvent(createKeyEvent({ key: "M", ctrlKey: true, shiftKey: true }));
+    input.dispatchEvent(createKeyEvent({ key: "R", ctrlKey: true, shiftKey: true }));
+
+    expect(fired).toEqual([
+      "preview.guestDevTools.open",
+      "preview.deviceToolbar.toggle",
+      "preview.forceReload",
+    ]);
+  });
+
+  it("leaves F12 alone while focus is in chat", () => {
+    start();
+    const composer = document.createElement("div");
+    composer.setAttribute("data-testid", "composer");
+    const input = focusInput(composer);
+
+    const event = createKeyEvent({ key: "F12" });
+    input.dispatchEvent(event);
+
+    expect(fired).toEqual([]);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("no longer opens DevTools with the retired Ctrl Shift Y", () => {
+    start();
+    focusInput(browserChrome());
+
+    document.activeElement!.dispatchEvent(createKeyEvent({ key: "Y", ctrlKey: true, shiftKey: true }));
+
+    expect(fired).toEqual([]);
+  });
+
+  it("follows a user rebinding and a user unbinding", () => {
+    start([
+      { key: "mod+alt+i", command: "preview.guestDevTools.open", when: "browserFocused" },
+      { key: "", command: "-preview.forceReload" },
+    ]);
+    const input = focusInput(browserChrome());
+
+    input.dispatchEvent(createKeyEvent({ key: "F12" }));
+    input.dispatchEvent(createKeyEvent({ key: "R", ctrlKey: true, shiftKey: true }));
+    input.dispatchEvent(createKeyEvent({ key: "i", ctrlKey: true, altKey: true }));
+
+    expect(fired).toEqual(["preview.guestDevTools.open"]);
+  });
+});

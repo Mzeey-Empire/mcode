@@ -32,11 +32,12 @@ function isTerminalFocused(el: Element | null): boolean {
   );
 }
 
-/** Update the inputFocused and terminalFocused context based on the active element. */
+/** Update the focus-derived contexts from the active element. */
 function updateFocusContext(): void {
   const active = document.activeElement;
   setContext("inputFocused", isInputElement(active));
   setContext("terminalFocused", isTerminalFocused(active));
+  setContext("browserFocused", !!active?.closest("[data-browser-chrome]"));
 }
 
 function handleKeyDown(e: KeyboardEvent): void {

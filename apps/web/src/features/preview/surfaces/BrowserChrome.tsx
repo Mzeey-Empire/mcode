@@ -16,6 +16,8 @@ import type { useDesignAnnotationEditor } from "../design/useDesignAnnotationEdi
 import type { useDesignPicker } from "../design/useDesignPicker";
 import type { useDesignAnnotationState } from "../design/useDesignAnnotationState";
 import type { usePreviewPage } from "./usePreviewPage";
+import type { BrowserAction, BrowserCommandActions } from "./browserToolbarModel";
+import { useBrowserCommands } from "./useBrowserCommands";
 
 interface BrowserChromeProps {
   readonly viewportToolbarOpen: ReturnType<typeof usePreviewViewport>["viewportToolbarOpen"];
@@ -55,6 +57,14 @@ interface BrowserChromeProps {
   readonly toggleViewportToolbar: ReturnType<typeof usePreviewViewport>["toggleViewportToolbar"];
   readonly activeAutomationController: ReturnType<typeof usePreviewPage>["activeAutomationController"];
   readonly activeAutomationRequest: ReturnType<typeof usePreviewPage>["activeAutomationRequest"];
+  /** Whether this panel is the visible, interactive Browser and so owns the Browser commands. */
+  readonly commandsActive: boolean;
+}
+
+const LOAD_A_PAGE_FIRST = "Load a page first";
+
+function pageAction(hasLoadedPage: boolean, run: () => void): BrowserAction {
+  return hasLoadedPage ? { kind: "enabled", run } : { kind: "disabled", reason: LOAD_A_PAGE_FIRST };
 }
 
 /** Puts the Browser or annotation header in the panel header's row 2; the viewport toolbar stays over the page. */
@@ -96,7 +106,23 @@ export function BrowserChrome({
   toggleViewportToolbar,
   activeAutomationController,
   activeAutomationRequest,
+  commandsActive,
 }: BrowserChromeProps) {
+  const invalidateObservation = (): void => {
+    invalidateBrowserAutomationTargetObservation(browserWorkspaceId, threadId, activeWebviewTabId);
+  };
+  const commandActions: BrowserCommandActions = {
+    deviceToolbar: { kind: "enabled", run: toggleViewportToolbar },
+    developerTools: pageAction(hasLoadedPage, () => {
+      void window.desktopBridge?.preview.openGuestDevTools({ threadId, tabId: activeWebviewTabId });
+    }),
+    forceReload: pageAction(hasLoadedPage, () => {
+      invalidateObservation();
+      activeWebviewRef()?.forceReload();
+    }),
+  };
+  useBrowserCommands({ active: commandsActive, actions: commandActions });
+
   const renderViewportToolbar = (): ReactNode => {
     if (!viewportToolbarOpen && activeViewportState?.mode !== "responsive") return null;
     if (!activeViewportCoordinator || !activeViewportState) return null;
@@ -119,7 +145,7 @@ export function BrowserChrome({
     >
       <PanelHeaderSlot slot="row2">
         {/* A block wrapper so the header's own flex row spans the full row. */}
-        <div className="min-w-0 flex-1">
+        <div data-browser-chrome="" className="min-w-0 flex-1">
         {showAnnotationCommandBar ? (
           <PreviewAnnotationHeader
             pageCount={pageAnnotations.length}

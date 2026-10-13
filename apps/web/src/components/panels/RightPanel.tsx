@@ -790,6 +790,11 @@ function WarmPreviewSurfaces({
   });
 }
 
+/** The focus marker that makes Browser keys apply; see `updateFocusContext` in lib/shortcuts. */
+function browserChromeMarker(browserSelected: boolean): { readonly "data-browser-chrome"?: "" } {
+  return browserSelected ? { "data-browser-chrome": "" } : {};
+}
+
 /**
  * Windows and Linux caption buttons cover the rail's top strip, so the toggle
  * stays in row 1 there. Elsewhere the strip is free, and the toggle lands where
@@ -1172,13 +1177,17 @@ export function RightPanel() {
     >
       <div className="flex min-h-0 flex-1 flex-row overflow-hidden">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <PanelHeader
-            maximized={maximized}
-            leadingRef={setHeaderLeading}
-            row2Ref={setHeaderRow2}
-            onToggleMaximized={toggleMaximized}
-            panelToggle={panelToggle.row1}
-          />
+          {/* Marks only the header, not the page below it, as Browser chrome so
+              Browser keys work from the shell's own row-1 controls too. */}
+          <div className="contents" {...browserChromeMarker(previewActive)}>
+            <PanelHeader
+              maximized={maximized}
+              leadingRef={setHeaderLeading}
+              row2Ref={setHeaderRow2}
+              onToggleMaximized={toggleMaximized}
+              panelToggle={panelToggle.row1}
+            />
+          </div>
           <RightPanelContent
             activeThreadId={activeThreadId}
             activeWorkspaceId={activeWorkspaceId}
