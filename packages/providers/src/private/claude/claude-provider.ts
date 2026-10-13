@@ -2223,7 +2223,6 @@ export class ClaudeProvider
 
   /** Provider teardown: close the SDK query handle. */
   async close(state: ClaudeSessionState): Promise<void> {
-    this.streamStates.get(state.query)?.subagentApprovalOrigins.clear();
     const results = await Promise.allSettled([
       Promise.resolve().then(() => { if (state.browserLease) this.host.browser.release(state.browserLease.leaseId); }),
       Promise.resolve().then(() => this.host.threadControl.close(state.sessionId)),
