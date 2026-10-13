@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubagentDetail, SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
 import { useMessageRevealStore } from "@/features/conversation/messages/message-reveal-store";
+import { useUiStore } from "@/stores/uiStore";
 import { useSubagentRosterStore } from "../../state/subagentRosterStore";
 import { SubagentDetailTab } from "../SubagentDetailTab";
 
@@ -62,6 +63,7 @@ describe("SubagentDetailTab", () => {
   });
 
   it("explains a meta-tier entry and reveals the reply that carries its result", async () => {
+    useUiStore.setState({ rightPanelMaximized: true });
     await renderTab([entry({ provider: "cursor", tier: "meta" })]);
 
     expect(screen.getByText(
@@ -69,6 +71,7 @@ describe("SubagentDetailTab", () => {
     )).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Show in chat" }));
     expect(useMessageRevealStore.getState().request).toEqual({ threadId: "thread-1", messageId: "message-7" });
+    expect(useUiStore.getState().rightPanelMaximized).toBe(false);
     expect(transport.loadSubagentDetail).not.toHaveBeenCalled();
   });
 

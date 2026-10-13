@@ -11,6 +11,7 @@ import { MODEL_PROVIDERS } from "@/lib/model-registry";
 import { cn } from "@/lib/utils";
 import { useThreadRecord } from "@/stores/thread-selectors";
 import { useToastStore } from "@/stores/toastStore";
+import { useUiStore } from "@/stores/uiStore";
 import { getTransport } from "@/transport";
 import { useSubagentRoster, useSubagentRosterStore } from "../state/subagentRosterStore";
 import { subagentStatusLabel } from "../subagent-status";
@@ -125,7 +126,11 @@ function MetaTier({ threadId, entry }: { readonly threadId: string; readonly ent
     </p>
     {sourceMessageId && (
       <Button type="button" variant="secondary" size="compact" shape="round" className="self-start bg-selected"
-        onClick={() => useMessageRevealStore.getState().requestReveal(threadId, sourceMessageId)}>
+        onClick={() => {
+          // A maximized panel covers the chat, so the reveal would scroll a transcript nobody can see.
+          useUiStore.getState().setRightPanelMaximized(false);
+          useMessageRevealStore.getState().requestReveal(threadId, sourceMessageId);
+        }}>
         Show in chat
       </Button>
     )}
