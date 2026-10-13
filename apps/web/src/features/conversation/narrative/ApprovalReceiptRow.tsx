@@ -46,11 +46,34 @@ function isApprovedOutcome(outcome: ApprovalOutcome): boolean {
   return outcome.status === "allowed" || outcome.status === "answered";
 }
 
+/**
+ * The deny note the agent already received with the deny or as a steer. A note that waits for
+ * the next turn becomes its own user message when it sends, and one whose delivery is unknown
+ * may never have arrived, so neither shows here.
+ */
+export function deliveredDenyNote(outcome: ApprovalOutcome): string | undefined {
+  if (outcome.status !== "denied") return undefined;
+  return outcome.noteDelivery === "native" || outcome.noteDelivery === "steer" ? outcome.note : undefined;
+}
+
+/** Paper 06e: the user's deny note, drawn as their own bubble under the receipt. */
+function DenyNoteBubble({ note }: { note: string }) {
+  return (
+    <div className="flex justify-end">
+      <p className="min-w-0 max-w-[min(82%,56rem)] overflow-hidden break-words whitespace-pre-wrap rounded-lg rounded-br-md bg-selected px-3 py-1.5 text-sm leading-relaxed text-ink">
+        {note}
+      </p>
+    </div>
+  );
+}
+
 /** Paper "Decided records" row: a check or cross, the decision, then the subject in mono. */
 export function ApprovalReceiptRow({ receipt }: { receipt: ApprovalReceipt }) {
   const { label, showsSubject } = approvalReceiptCopy(receipt.outcome);
   const approved = isApprovedOutcome(receipt.outcome);
+  const note = deliveredDenyNote(receipt.outcome);
   return (
+    <>
     <div className="flex h-7 min-w-0 max-w-full items-center gap-2 px-2" data-approval-receipt={receipt.requestId}>
       <svg
         viewBox="0 0 24 24"
@@ -76,5 +99,7 @@ export function ApprovalReceiptRow({ receipt }: { receipt: ApprovalReceipt }) {
         </Tooltip>
       ) : null}
     </div>
+    {note ? <DenyNoteBubble note={note} /> : null}
+    </>
   );
 }

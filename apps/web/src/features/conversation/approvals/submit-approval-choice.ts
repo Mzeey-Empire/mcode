@@ -1,4 +1,5 @@
-import type { ApprovalRequest } from "@mcode/contracts";
+import type { ApprovalRequest, ApprovalRespondResult } from "@mcode/contracts";
+import { queueApprovalNote } from "@/features/conversation/composer/queue/queued-approval-note";
 import { getTransport } from "@/transport";
 import { useApprovalStore } from "@/stores/approvalStore";
 import { useThreadStore } from "@/stores/threadStore";
@@ -7,18 +8,33 @@ import { useThreadStore } from "@/stores/threadStore";
 const DEVIN_SWITCH_BYPASS_CHOICE_ID = "switch_bypass";
 
 /**
+ * A note the provider did not take with the deny goes to the thread's queue: one waiting for
+ * the next turn as an ordinary queued item, one whose fate is unknown as a held item.
+ */
+function queueUndeliveredNote(request: ApprovalRequest, note: string, result: ApprovalRespondResult): void {
+  if (result.status === "resolved") {
+    if (result.noteDelivery === "next_turn") queueApprovalNote(request.threadId, request.requestId, note, "queued");
+    if (result.noteDelivery === "unknown") queueApprovalNote(request.threadId, request.requestId, note, "delivery_unknown");
+    return;
+  }
+  if (result.status === "not_pending" && result.note) queueApprovalNote(request.threadId, request.requestId, note, result.note);
+}
+
+/**
  * Sends the user's exact choice and settles the request locally once the provider
  * acknowledges it, so the dock advances without waiting for the broadcast.
  */
-export async function submitApprovalChoice(request: ApprovalRequest, choiceId: string): Promise<void> {
+export async function submitApprovalChoice(request: ApprovalRequest, choiceId: string, note?: string): Promise<void> {
   const store = useApprovalStore.getState();
-  store.setSubmission(request.requestId, { choiceId, state: "submitting" });
+  const attempt = { choiceId, ...(note ? { note } : {}) };
+  store.setSubmission(request.requestId, { ...attempt, state: "submitting" });
   try {
-    const result = await getTransport().respondToApproval(request.requestId, { choiceId });
+    const result = await getTransport().respondToApproval(request.requestId, attempt);
     if (result.status === "failed") {
-      store.setSubmission(request.requestId, { choiceId, state: "failed" });
+      store.setSubmission(request.requestId, { ...attempt, state: "failed" });
       return;
     }
+    if (note) queueUndeliveredNote(request, note, result);
     if (result.status === "not_pending") {
       store.remove(request.requestId);
       return;
@@ -28,6 +44,6 @@ export async function submitApprovalChoice(request: ApprovalRequest, choiceId: s
       void useThreadStore.getState().setThreadSettings(request.threadId, { devinMode: "bypass" });
     }
   } catch {
-    store.setSubmission(request.requestId, { choiceId, state: "failed" });
+    store.setSubmission(request.requestId, { ...attempt, state: "failed" });
   }
 }

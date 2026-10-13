@@ -5,9 +5,10 @@ import type { ApprovalChoice, ApprovalSubject as ApprovalSubjectModel } from "@m
 import { Button } from "@/components/ui/button";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { selectDockApprovals, useApprovalStore, type StoredApproval } from "@/stores/approvalStore";
+import { selectDockApprovals, useApprovalStore, type ApprovalSubmission, type StoredApproval } from "@/stores/approvalStore";
 import { approvalActorName, approvalTitle, noteRowLabel, submittingLabel } from "./approval-copy";
-import { ApprovalChoiceRow, ApprovalNoteRow } from "./ApprovalChoiceRow";
+import { ApprovalChoiceRow } from "./ApprovalChoiceRow";
+import { ApprovalNoteRow } from "./ApprovalNoteRow";
 import { ApprovalPager } from "./ApprovalPager";
 import { ApprovalSubject } from "./ApprovalSubject";
 import { submitApprovalChoice } from "./submit-approval-choice";
@@ -53,6 +54,26 @@ function useActiveRequest(requests: readonly StoredApproval[]) {
 function useFocusedRow(requestId: string) {
   const [focus, setFocus] = useState({ requestId, row: 0 });
   return [focus.requestId === requestId ? focus.row : 0, (row: number) => setFocus({ requestId, row })] as const;
+}
+
+/**
+ * The deny-with-a-note row's state. Drafts are kept per request, so paging away and back keeps
+ * what the user started typing. The row hides while an answer is in flight.
+ */
+function useDockNote(active: StoredApproval, submission: ApprovalSubmission | undefined) {
+  const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
+  const choiceId = active.noteDelivery === "none" ? undefined : active.noteChoiceId;
+  const submitting = submission?.state === "submitting";
+  // A note cannot be sent by a stray click or key, so it skips the misclick guard.
+  const submit = (note: string) => {
+    if (choiceId !== undefined && !submitting) void submitApprovalChoice(active, choiceId, note);
+  };
+  return {
+    shown: choiceId !== undefined && !submitting,
+    draft: drafts[active.requestId] ?? "",
+    setDraft: (value: string) => setDrafts((current) => ({ ...current, [active.requestId]: value })),
+    submit,
+  };
 }
 
 type DockKeyAction = { readonly kind: "page" | "move" | "digit" | "arm"; readonly value: number };
@@ -107,13 +128,16 @@ export interface ApprovalDockProps {
 export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, isStopPending, onStop, onFocusComposer }: ApprovalDockProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const noteInputRef = useRef<HTMLTextAreaElement>(null);
   const guardUntilRef = useRef(0);
   const pagedToRef = useRef<string | undefined>(undefined);
   const { active, index, page } = useActiveRequest(requests);
   const [focusedRow, setFocusedRow] = useFocusedRow(active.requestId);
   const submission = useApprovalStore((state) => state.submissions[active.requestId]);
   const title = approvalTitle(active);
-  const noteShown = active.noteDelivery !== "none" && submission?.state !== "submitting";
+  const note = useDockNote(active, submission);
+  const noteRow = active.choices.length;
+  const lastRow = note.shown ? noteRow : noteRow - 1;
 
   const arm = () => { guardUntilRef.current = Date.now() + APPROVAL_ARM_DELAY_MS; };
 
@@ -145,16 +169,22 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
   };
 
   const moveFocus = (row: number) => {
-    const target = Math.max(0, Math.min(active.choices.length - 1, row));
+    const target = Math.max(0, Math.min(lastRow, row));
     setFocusedRow(target);
-    rowRefs.current[target]?.focus();
+    if (target === noteRow) noteInputRef.current?.focus();
+    else rowRefs.current[target]?.focus();
   };
+
 
   const goTo = (delta: number) => {
     pagedToRef.current = page(delta);
   };
 
   const chooseRow = (row: number) => {
+    if (row === noteRow && note.shown) {
+      moveFocus(noteRow);
+      return;
+    }
     const choice = active.choices[row];
     if (choice) choose(choice);
   };
@@ -176,7 +206,7 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
 
   const retry = () => {
     const choice = active.choices.find((item) => item.id === submission?.choiceId);
-    if (choice) void submitApprovalChoice(active, choice.id);
+    if (choice) void submitApprovalChoice(active, choice.id, submission?.note);
   };
 
   const Icon = SUBJECT_ICONS[active.subject.kind];
@@ -215,7 +245,19 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
             onFocus={() => setFocusedRow(row)}
           />
         ))}
-        {noteShown && <ApprovalNoteRow index={active.choices.length} label={noteRowLabel(active)} />}
+        {note.shown && (
+          <ApprovalNoteRow
+            index={noteRow}
+            placeholder={noteRowLabel(active)}
+            value={note.draft}
+            focused={focusedRow === noteRow}
+            inputRef={noteInputRef}
+            onChange={note.setDraft}
+            onSubmit={note.submit}
+            onLeave={() => moveFocus(noteRow - 1)}
+            onFocus={() => setFocusedRow(noteRow)}
+          />
+        )}
       </div>
       {submission?.state === "failed" && (
         <div role="alert" className="flex items-center gap-2 text-sm">

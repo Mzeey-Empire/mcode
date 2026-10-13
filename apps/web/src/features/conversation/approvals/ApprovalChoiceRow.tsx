@@ -2,9 +2,11 @@ import type { ApprovalChoice } from "@mcode/contracts";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 
-const ROW_CLASS = "flex min-h-9 w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left";
+/** Layout shared by every dock row, so the note row lines up with the choices. */
+export const ROW_CLASS = "flex min-h-9 w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left";
 
-function KeyChip({ index }: { readonly index: number }) {
+/** The row's number, which its digit key answers. */
+export function KeyChip({ index }: { readonly index: number }) {
   return (
     <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-[0.5rem] border border-border px-[0.5rem] font-mono text-caption text-muted">
       {index + 1}
@@ -59,15 +61,5 @@ export function ApprovalChoiceRow({ choice, index, focused, submitting, dimmed, 
         {choice.description && <span className="text-xs text-muted">{choice.description}</span>}
       </span>
     </button>
-  );
-}
-
-/** The deny-with-a-note row. It shows its number but stays inert until notes can be delivered. */
-export function ApprovalNoteRow({ index, label }: { readonly index: number; readonly label: string }) {
-  return (
-    <div aria-disabled="true" className={ROW_CLASS}>
-      <KeyChip index={index} />
-      <span className="min-w-0 flex-1 text-sm text-muted">{label}</span>
-    </div>
   );
 }

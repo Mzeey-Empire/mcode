@@ -12,6 +12,8 @@ export type StoredApproval = ApprovalRequest & { settled: boolean };
 export interface ApprovalSubmission {
   readonly choiceId: string;
   readonly state: "submitting" | "failed";
+  /** The deny note sent with the choice, so Try again resends the same text. */
+  readonly note?: string;
 }
 
 interface ApprovalState {

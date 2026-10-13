@@ -1,6 +1,8 @@
 import { createMockApproval, createMockThread } from "@/__tests__/mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useApprovalStore } from "@/stores/approvalStore";
+import { useQueueStore } from "@/stores/queueStore";
+import { useThreadStore } from "@/stores/threadStore";
 import type { McodeTransport } from "@/transport/types";
 import type { ApprovalRequest, ApprovalSubject } from "@mcode/contracts";
 import { disposeHighlighter } from "@pierre/diffs";
@@ -62,6 +64,8 @@ beforeEach(() => {
   respondToApproval.mockReset().mockResolvedValue({ status: "resolved" });
   useApprovalStore.setState({ approvals: [], submissions: {} });
   useWorkspaceStore.setState({ threads: [] });
+  useQueueStore.setState({ queues: {} });
+  useThreadStore.setState({ runningThreadIds: new Set() });
 });
 
 afterEach(() => {
@@ -327,14 +331,14 @@ describe("ApprovalDock subjects", () => {
     addApproval({ noteDelivery: "none", noteChoiceId: undefined });
     render(<DockHarness />);
 
-    expect(screen.queryByText("Tell Codex what to do instead…")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Tell Codex what to do instead…" })).not.toBeInTheDocument();
   });
 
   it("shows the note row when the provider can take a note", () => {
     addApproval();
     render(<DockHarness />);
 
-    expect(screen.getByText("Tell Codex what to do instead…")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Tell Codex what to do instead…" })).toBeInTheDocument();
   });
 
   it("names a subagent in its chip rather than the title", () => {
@@ -465,5 +469,99 @@ describe("ApprovalDock file edits", () => {
     expect(screen.getByText("devin.ts")).toBeInTheDocument();
     expect(screen.queryByTestId("approval-patch-preview")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open diff" })).not.toBeInTheDocument();
+  });
+});
+
+describe("ApprovalDock deny with a note", () => {
+  const NOTE = "Tell Codex what to do instead…";
+
+  it("denies with the typed note when Enter is pressed in the note row", async () => {
+    const user = setupUser();
+    addApproval();
+    render(<DockHarness />);
+    await elapseGuard();
+
+    await user.keyboard("3");
+    expect(screen.getByRole("textbox", { name: NOTE })).toHaveFocus();
+    await user.keyboard("Only lint 2 apps{Enter}");
+
+    expect(respondToApproval).toHaveBeenCalledWith("req-1", { choiceId: "deny", note: "Only lint 2 apps" });
+  });
+
+  it("does nothing on Enter while the note is empty", async () => {
+    const user = setupUser();
+    addApproval();
+    render(<DockHarness />);
+    await elapseGuard();
+
+    await user.click(screen.getByRole("textbox", { name: NOTE }));
+    await user.keyboard("   {Enter}");
+
+    expect(respondToApproval).not.toHaveBeenCalled();
+    expect(screen.getByTestId("approval-dock")).toBeInTheDocument();
+  });
+
+  it("returns to the choice rows on Escape without sending the note", async () => {
+    const user = setupUser();
+    addApproval();
+    render(<DockHarness />);
+    await elapseGuard();
+
+    await user.click(screen.getByRole("textbox", { name: NOTE }));
+    await user.keyboard("draft{Escape}{Enter}");
+
+    expect(respondToApproval).toHaveBeenCalledWith("req-1", { choiceId: "deny" });
+  });
+
+  it("resends the note with the same choice when Try again is pressed", async () => {
+    respondToApproval.mockResolvedValueOnce({ status: "failed", message: "offline" });
+    const user = setupUser();
+    addApproval();
+    render(<DockHarness />);
+    await elapseGuard();
+
+    await user.click(screen.getByRole("textbox", { name: NOTE }));
+    await user.keyboard("Only lint{Enter}");
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(respondToApproval.mock.calls).toEqual([
+      ["req-1", { choiceId: "deny", note: "Only lint" }],
+      ["req-1", { choiceId: "deny", note: "Only lint" }],
+    ]);
+  });
+
+  it.each([
+    [{ status: "resolved", noteDelivery: "next_turn" }, "queued"],
+    [{ status: "resolved", noteDelivery: "unknown" }, "delivery_unknown"],
+    [{ status: "not_pending", note: "delivery_unknown" }, "delivery_unknown"],
+  ] as const)("queues a note the provider did not take after %o", async (result, state) => {
+    // A running turn keeps the queued note from draining, so the test sees it in the tray.
+    useThreadStore.setState({ runningThreadIds: new Set(["thread-1"]) });
+    respondToApproval.mockResolvedValueOnce(result);
+    const user = setupUser();
+    addApproval();
+    render(<DockHarness />);
+    await elapseGuard();
+
+    await user.click(screen.getByRole("textbox", { name: NOTE }));
+    await user.keyboard("Only lint{Enter}");
+
+    expect(useQueueStore.getState().queues["thread-1"]?.map((m) => [m.content, m.approvalNote])).toEqual([
+      ["Only lint", { requestId: "req-1", state }],
+    ]);
+  });
+
+  it("does not queue a note the provider took with the deny", async () => {
+    respondToApproval.mockResolvedValueOnce({ status: "resolved", noteDelivery: "steer" });
+    const user = setupUser();
+    addApproval();
+    render(<DockHarness />);
+    await elapseGuard();
+
+    await user.click(screen.getByRole("textbox", { name: NOTE }));
+    await user.keyboard("Only lint{Enter}");
+
+    expect(useQueueStore.getState().queues["thread-1"] ?? []).toEqual([]);
   });
 });
