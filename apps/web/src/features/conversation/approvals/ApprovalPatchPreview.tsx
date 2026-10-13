@@ -1,11 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { ApprovalSubject } from "@mcode/contracts";
+import { areThemesAttached, getHighlighterIfLoaded, getHighlighterOptions, preloadHighlighter } from "@pierre/diffs";
 import { PatchDiff } from "@pierre/diffs/react";
-import type { FileDiffOptions } from "@pierre/diffs/react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useShikiTheme } from "@/hooks/useTheme";
+import { useShikiTheme, type ShikiTheme } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
 
 type ApprovalFilePatch = Extract<ApprovalSubject, { kind: "file_edit" }>["files"][number];
@@ -61,9 +61,31 @@ function previewPatch(patch: string): { patch: string; truncated: boolean } {
   };
 }
 
-function usePatchOptions(unsafeCSS: string): FileDiffOptions<undefined, undefined> {
+function isHighlighterReady(theme: ShikiTheme): boolean {
+  return getHighlighterIfLoaded() != null && areThemesAttached(theme);
+}
+
+// StrictMode runs the ref twice on one node. With a cold highlighter the first pass leaves an empty <pre>,
+// which the second pass hydrates as finished output, so nothing ever draws. A warm one renders synchronously.
+function useHighlighterReady(theme: ShikiTheme): boolean {
+  const [ready, setReady] = useState(() => isHighlighterReady(theme));
+  useEffect(() => {
+    if (ready) return;
+    let mounted = true;
+    void preloadHighlighter(getHighlighterOptions("text", { theme })).then(() => {
+      if (mounted) setReady(true);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [ready, theme]);
+  return ready;
+}
+
+function ApprovalPatchDiff({ patch, unsafeCSS }: { readonly patch: string; readonly unsafeCSS: string }) {
   const theme = useShikiTheme();
-  return useMemo(() => ({
+  const ready = useHighlighterReady(theme);
+  const options = useMemo(() => ({
     theme,
     diffStyle: "unified",
     diffIndicators: "classic",
@@ -73,7 +95,8 @@ function usePatchOptions(unsafeCSS: string): FileDiffOptions<undefined, undefine
     disableLineNumbers: true,
     hunkSeparators: "simple",
     unsafeCSS,
-  }), [theme, unsafeCSS]);
+  } as const), [theme, unsafeCSS]);
+  return ready ? <PatchDiff patch={patch} options={options} disableWorkerPool /> : null;
 }
 
 function FullPatchDialog({ files, open, onOpenChange }: {
@@ -81,7 +104,6 @@ function FullPatchDialog({ files, open, onOpenChange }: {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
 }) {
-  const options = usePatchOptions(PATCH_UNSAFE_CSS);
   // The popup is portaled, but React still bubbles its keys to the dock, where a digit would answer the request.
   const keepKeysInDialog = (event: KeyboardEvent<HTMLDivElement>) => event.stopPropagation();
   return (
@@ -93,7 +115,7 @@ function FullPatchDialog({ files, open, onOpenChange }: {
             <section key={file.path} aria-label={file.path} className="flex flex-col gap-1.5">
               <p className="font-code text-code-small text-ink text-fade">{file.path}</p>
               {file.patch
-                ? <PatchDiff patch={file.patch} options={options} disableWorkerPool />
+                ? <ApprovalPatchDiff patch={file.patch} unsafeCSS={PATCH_UNSAFE_CSS} />
                 : <p className="text-xs text-muted">No diff available</p>}
             </section>
           ))}
@@ -109,7 +131,6 @@ function FullPatchDialog({ files, open, onOpenChange }: {
  * file's full patch in a dialog rather than the review panel.
  */
 export function ApprovalPatchPreview({ files }: { readonly files: readonly ApprovalFilePatch[] }) {
-  const options = usePatchOptions(PREVIEW_UNSAFE_CSS);
   const [open, setOpen] = useState(false);
   const firstPatch = files[0]?.patch;
   const preview = useMemo(() => (firstPatch ? previewPatch(firstPatch) : undefined), [firstPatch]);
@@ -120,7 +141,7 @@ export function ApprovalPatchPreview({ files }: { readonly files: readonly Appro
       <div className="relative">
         {preview && (
           <div data-testid="approval-patch-preview" className="h-[60px] w-full overflow-hidden mask-r-from-[calc(100%-var(--spacing-text-fade))]">
-            <PatchDiff patch={preview.patch} options={options} disableWorkerPool />
+            <ApprovalPatchDiff patch={preview.patch} unsafeCSS={PREVIEW_UNSAFE_CSS} />
           </div>
         )}
         {hasMore && (

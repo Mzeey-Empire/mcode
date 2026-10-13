@@ -3,9 +3,10 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useApprovalStore } from "@/stores/approvalStore";
 import type { McodeTransport } from "@/transport/types";
 import type { ApprovalRequest, ApprovalSubject } from "@mcode/contracts";
+import { disposeHighlighter } from "@pierre/diffs";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useRef } from "react";
+import { StrictMode, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { APPROVAL_ARM_DELAY_MS, ApprovalAnnouncer, ApprovalDock, useDockApprovals } from "../ApprovalDock";
 
@@ -378,6 +379,14 @@ describe("ApprovalDock file edits", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Proposed changes" });
     await vi.waitFor(() => expect(renderedDiffText(dialog)).toContain("tail();"));
+  });
+
+  it("draws the preview under StrictMode while the highlighter is still loading", async () => {
+    await disposeHighlighter();
+    addFileEdit([{ path: "src/a.ts", change: "edited", additions: 1, deletions: 1, patch: LONG_PATCH }]);
+    render(<StrictMode><DockHarness /></StrictMode>);
+
+    await vi.waitFor(() => expect(renderedDiffText(screen.getByTestId("approval-patch-preview"))).toContain("next();"));
   });
 
   it("offers Open diff when a later hunk would not fit", () => {
