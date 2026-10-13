@@ -32,9 +32,9 @@ describe("SnapshotService unified output", () => {
     fake.setResponse(args, { stdout: PATCH, stderr: "" });
 
     await expect(service.getDiff("/repo", "before", "after")).resolves.toBe(PATCH);
-    await expect(service.getDiff("/repo", "before", "after", undefined, 20)).resolves.toBe(PATCH);
-    await expect(service.getDiff("/repo", "before", "after", undefined, 9)).resolves.toBe(PATCH.slice(0, -1));
-    await expect(service.getDiff("/repo", "before", "after", undefined, 8)).resolves.toBe("");
+    await expect(service.getDiff("/repo", "before", "after", { maxLines: 20 })).resolves.toBe(PATCH);
+    await expect(service.getDiff("/repo", "before", "after", { maxLines: 9 })).resolves.toBe(PATCH.slice(0, -1));
+    await expect(service.getDiff("/repo", "before", "after", { maxLines: 8 })).resolves.toBe("");
   });
 
   it("preserves the trailing blank context of every attributed path batch", async () => {
@@ -45,22 +45,22 @@ describe("SnapshotService unified output", () => {
     fake.setResponse([...args, "--", ...pathspecs.slice(128)], { stdout: secondPatch, stderr: "" });
 
     await expect(service.getDiff(
-      "/repo", "before", "after", undefined, undefined, paths,
+      "/repo", "before", "after", { allowedPaths: paths },
     )).resolves.toBe(`${PATCH}\n${secondPatch}`);
   });
 
-  it("still parses newline-terminated stats and file statuses", async () => {
+  it("reads NUL-delimited stats and file statuses with paths left unquoted", async () => {
     fake.setResponse(
-      ["diff", "--numstat", "--find-renames", "before", "after"],
-      { stdout: "\n1\t2\texample.txt\n\n", stderr: "" },
+      ["diff", "--numstat", "-z", "--find-renames", "before", "after"],
+      { stdout: "1\t2\tcafé.txt\0", stderr: "" },
     );
     fake.setResponse(
-      ["diff", "--name-status", "--find-renames", "before", "after"],
-      { stdout: "\nM\texample.txt\n\n", stderr: "" },
+      ["diff", "--name-status", "-z", "--find-renames", "before", "after"],
+      { stdout: "M\0café.txt\0", stderr: "" },
     );
 
     await expect(service.getDiffStats("/repo", "before", "after")).resolves.toEqual([
-      { filePath: "example.txt", additions: 1, deletions: 2, changeType: "modified" },
+      { filePath: "café.txt", additions: 1, deletions: 2, changeType: "modified" },
     ]);
   });
 });
@@ -194,22 +194,19 @@ describe("SnapshotService ref and numstat validation", () => {
     expect(fake.calls).toHaveLength(0);
   });
 
-  it("returns destination paths for simple and brace-form numstat renames", async () => {
+  it("returns destination paths for renames and keeps tab-containing paths whole", async () => {
     const executor: GitExecutor = {
       async exec(args) {
         return args.includes("--name-status")
-          ? { stdout: "R100\told.txt\tnew.txt\nM\tarch/x86/Makefile\n", stderr: "" }
-          : {
-              stdout: "0\t0\told.txt => new.txt\n1\t2\tarch/{i386 => x86}/Makefile\n",
-              stderr: "",
-            };
+          ? { stdout: "R100\0old.txt\0new.txt\0M\0tab\there.txt\0", stderr: "" }
+          : { stdout: "0\t0\t\0old.txt\0new.txt\0" + "1\t2\ttab\there.txt\0", stderr: "" };
       },
     };
     const service = new SnapshotService(executor);
 
     await expect(service.getDiffStats("/repo", "before", "after")).resolves.toEqual([
       { filePath: "new.txt", additions: 0, deletions: 0, changeType: "renamed" },
-      { filePath: "arch/x86/Makefile", additions: 1, deletions: 2, changeType: "modified" },
+      { filePath: "tab\there.txt", additions: 1, deletions: 2, changeType: "modified" },
     ]);
   });
 });
@@ -227,7 +224,7 @@ describe("SnapshotService attributed path batching", () => {
     const service = new SnapshotService(executor);
     const paths = Array.from({ length: 600 }, (_, index) => `src/file-${index}.ts`);
 
-    const diff = await service.getDiff("/repo", "before", "after", undefined, undefined, paths);
+    const diff = await service.getDiff("/repo", "before", "after", { allowedPaths: paths });
 
     expect(calls).toHaveLength(5);
     expect(calls.every((args) => args.filter((arg) => arg.startsWith(":(literal)")).length <= 128)).toBe(true);
@@ -252,10 +249,7 @@ describe("SnapshotService attributed path batching", () => {
       "/repo",
       "before",
       "after",
-      undefined,
-      undefined,
-      groups.flat(),
-      groups,
+      { allowedPaths: groups.flat(), allowedPathGroups: groups },
     );
 
     expect(calls).toHaveLength(2);

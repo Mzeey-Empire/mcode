@@ -3,11 +3,82 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { routeTurnDiffRpc } from "../turn-diff-rpc.js";
 import { deriveTurnAssistantMessageId } from "../../../../agents/turns/turn-assistant-message-id.js";
 import { createSnapshotRangeFixture } from "../../snapshots/__tests__/turn-snapshot-range-fixture.js";
+import { SnapshotService } from "../../snapshots/snapshot-service.js";
+import { FakeGitExecutor } from "../../../git/execution/fake-git-executor.js";
 
 describe("turn diff route outcomes", { timeout: 30_000 }, () => {
   let fixture: Awaited<ReturnType<typeof createSnapshotRangeFixture>>;
   beforeEach(async () => { fixture = await createSnapshotRangeFixture(); });
   afterEach(async () => { await fixture.close(); });
+
+  it("passes -w to Git fallback reads and excludes whitespace-only recorded files", async () => {
+    const row = await fixture.attempt({ id: "one", edits: { "space.ts": "a b\n", "code.ts": "code\n" } });
+    if (!row) throw new Error("Fixture snapshot missing");
+    const fake = new FakeGitExecutor();
+    fake.setResponse(["cat-file", "-t", row.ref_before], { stdout: "tree\n", stderr: "" });
+    fake.setResponse(["cat-file", "-t", row.ref_after], { stdout: "tree\n", stderr: "" });
+    fixture.deps.snapshotService = new SnapshotService(fake);
+    const patch = "diff --git a/code.ts b/code.ts\n--- a/code.ts\n+++ b/code.ts\n@@ -1 +1 @@\n-before\n+after\n";
+    for (const ignoreWhitespace of [false, true]) {
+      const flags = ignoreWhitespace ? ["-w"] : [];
+      const range = ["--find-renames", row.ref_before, row.ref_after, ...flags];
+      const paths = ["--", ":(literal)space.ts", ":(literal)code.ts"];
+      fake.setResponse(["diff", "--name-status", "-z", ...range, ...paths], { stdout: "M\0space.ts\0M\0code.ts\0", stderr: "" });
+      fake.setResponse(["diff", "--numstat", "-z", ...range, ...paths], { stdout: "1\t1\tcode.ts\0" + (ignoreWhitespace ? "" : "2\t2\tspace.ts\0"), stderr: "" });
+      fake.setResponse(["diff", ...range, "--", ":(literal)code.ts"], { stdout: patch, stderr: "" });
+      const comparison = await routeTurnDiffRpc("turnDiff.getComparison", { threadId: "thread", messageId: "message-one", ignoreWhitespace }, fixture.deps);
+      expect(comparison).toMatchObject({ status: "ready", comparison: {
+        files: ignoreWhitespace ? [{ path: "code.ts", additions: 1, deletions: 1 }] : [
+          { path: "space.ts", additions: 2, deletions: 2 }, { path: "code.ts", additions: 1, deletions: 1 },
+        ], additions: ignoreWhitespace ? 1 : 3, deletions: ignoreWhitespace ? 1 : 3,
+      } });
+      expect(await routeTurnDiffRpc("turnDiff.getFileDiff", {
+        threadId: "thread", comparisonId: `git:${row.id}`, filePath: "code.ts", ignoreWhitespace,
+      }, fixture.deps)).toBe(patch);
+      expect(fake.calls.filter((call) => call.args.includes("diff")).slice(-3).map((call) => call.args.includes("-w")))
+        .toEqual([ignoreWhitespace, ignoreWhitespace, ignoreWhitespace]);
+    }
+  });
+
+  it("hides whitespace-only Git fallback files and patches with real Git", async () => {
+    await fixture.attempt({ id: "base", edits: { "space.ts": "a b\n" } });
+    const row = await fixture.attempt({ id: "one", edits: { "space.ts": "a  b\n" } });
+    if (!row) throw new Error("Fixture snapshot missing");
+    expect(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: "thread", messageId: "message-one", ignoreWhitespace: true }, fixture.deps))
+      .toMatchObject({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } });
+    expect(await routeTurnDiffRpc("turnDiff.getFileDiff", { threadId: "thread", comparisonId: `git:${row.id}`, filePath: "space.ts", ignoreWhitespace: true }, fixture.deps)).toBe("");
+    expect(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: "thread", messageId: "message-one" }, fixture.deps))
+      .toMatchObject({ status: "ready", comparison: { files: [{ path: "space.ts", additions: 1, deletions: 1 }], additions: 1, deletions: 1 } });
+  });
+
+  it("keeps substantive edits to non-ASCII paths when hiding whitespace with real Git", async () => {
+    await fixture.attempt({ id: "base", edits: { "café.ts": "before\n" } });
+    await fixture.attempt({ id: "one", edits: { "café.ts": "after\n" } });
+    expect(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: "thread", messageId: "message-one", ignoreWhitespace: true }, fixture.deps))
+      .toMatchObject({ status: "ready", comparison: { files: [{ path: "café.ts", additions: 1, deletions: 1 }], additions: 1, deletions: 1 } });
+  });
+
+  it.each(["native", "tracked", "live"] as const)("leaves %s whitespace patches and comparisons unchanged", async (source) => {
+    const patch = "diff --git a/space.ts b/space.ts\n--- a/space.ts\n+++ b/space.ts\n@@ -1 +1 @@\n-a b\n+a  b\n";
+    let comparisonId = "native-one";
+    if (source === "live") {
+      const identity = { threadId: "thread", turnId: "one", turnExecutionId: "execution-one", deliveryAttempt: 1 };
+      fixture.deps.turnDiffs.begin(identity);
+      fixture.deps.turnDiffs.push({ ...identity, revision: 1, state: "snapshot", patch });
+      comparisonId = "live:one:execution-one:1:1";
+    } else {
+      await fixture.attempt({ id: "one", edits: { "space.ts": "a  b\n" } });
+      fixture.native("one", patch, source);
+    }
+    const original = await routeTurnDiffRpc("turnDiff.getComparison", { threadId: "thread" }, fixture.deps);
+    expect(original).toMatchObject({ status: "ready", comparison: {
+      files: [{ path: "space.ts", changeType: "modified", additions: 1, deletions: 1 }], additions: 1, deletions: 1,
+    } });
+    expect(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: "thread", ignoreWhitespace: true }, fixture.deps)).toEqual(original);
+    for (const ignoreWhitespace of [undefined, true]) {
+      expect(await routeTurnDiffRpc("turnDiff.getFileDiff", { threadId: "thread", comparisonId, filePath: "space.ts", ignoreWhitespace }, fixture.deps)).toBe(patch);
+    }
+  });
 
   it("returns snapshot-expired for absent evidence", async () => {
     await fixture.attempt({ id: "one", missing: true });

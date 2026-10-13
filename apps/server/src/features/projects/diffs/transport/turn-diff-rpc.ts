@@ -24,12 +24,17 @@ export function isTurnDiffRpcMethod(method: WsMethodName): method is TurnDiffMet
 export async function routeTurnDiffRpc<M extends TurnDiffMethod>(method: M, params: TurnDiffParams[M], deps: TurnDiffRouterDeps): Promise<unknown> {
   if (!deps.threadService.findById(params.threadId)) throw new Error("Thread not found");
   if (method === "turnDiff.listTurns") return deps.turnSnapshotRanges.listTurns(params.threadId).map((turn) => listEntry(deps, params.threadId, turn));
-  if (method === "turnDiff.getComparison") return comparison(deps, params.threadId, "includeLive" in params ? params.includeLive : undefined, "messageId" in params ? params.messageId : undefined);
+  if (method === "turnDiff.getComparison") return comparison(deps, params.threadId, {
+    includeLive: "includeLive" in params ? params.includeLive : undefined,
+    messageId: "messageId" in params ? params.messageId : undefined,
+    ignoreWhitespace: "ignoreWhitespace" in params ? params.ignoreWhitespace : undefined,
+  });
   if ("comparisonId" in params) return fileDiff(deps, params);
   throw new Error("Invalid turn diff request");
 }
 
-async function comparison(deps: TurnDiffRouterDeps, threadId: string, includeLive = true, messageId?: string): Promise<ReviewComparisonResult> {
+async function comparison(deps: TurnDiffRouterDeps, threadId: string, options: Omit<TurnDiffParams["turnDiff.getComparison"], "threadId">): Promise<ReviewComparisonResult> {
+  const { includeLive = true, messageId, ignoreWhitespace } = options;
   const live = liveResult(deps, threadId, includeLive, messageId);
   if (live) return live;
   const selected = messageId ?? latestSettledMessage(deps, threadId);
@@ -38,7 +43,7 @@ async function comparison(deps: TurnDiffRouterDeps, threadId: string, includeLiv
     : { status: "unavailable", reason: "snapshot-expired" };
   const range = deps.turnSnapshotRanges.turnSnapshotRange(threadId, selected);
   if (range.status !== "ready") return range;
-  return settledComparison(deps, threadId, range);
+  return settledComparison(deps, threadId, range, ignoreWhitespace);
 }
 
 function liveResult(deps: TurnDiffRouterDeps, threadId: string, includeLive: boolean, messageId?: string): ReviewComparisonResult | null {
@@ -67,7 +72,7 @@ function latestSettledMessage(deps: TurnDiffRouterDeps, threadId: string): strin
   return deps.turnSnapshotRepo.listByThread(threadId).find((row) => row.id === legacyId)?.message_id;
 }
 
-async function settledComparison(deps: TurnDiffRouterDeps, threadId: string, range: Extract<TurnSnapshotRange, { status: "ready" }>): Promise<ReviewComparisonResult> {
+async function settledComparison(deps: TurnDiffRouterDeps, threadId: string, range: Extract<TurnSnapshotRange, { status: "ready" }>, ignoreWhitespace?: boolean): Promise<ReviewComparisonResult> {
   const last = range.rows.at(-1)!;
   const record = deps.turnDiffs.forMessage(threadId, last.message_id);
   if (range.rows.length === 1 && record && record.source !== "git") {
@@ -77,19 +82,25 @@ async function settledComparison(deps: TurnDiffRouterDeps, threadId: string, ran
       return reviewComparisonFailure(error);
     }
   }
-  const result = await readSnapshotRangeComparison(deps, range);
+  const result = await readSnapshotRangeComparison(deps, range, false, ignoreWhitespace);
   if (result.status !== "ready") return result;
   const metadata = { id: range.rows.length === 1 && record ? record.id : `git:${last.id}`,
     phase: "settled" as const, source: "git" as const, fidelity: "same-file-changes-possible" as const, revision: 0 };
   if (range.rows.length === 1) {
-    result.comparison.files = singleSnapshotFiles(last, result.comparison.files);
+    result.comparison.files = singleSnapshotFiles(last, result.comparison.files, ignoreWhitespace);
+    if (ignoreWhitespace) {
+      result.comparison.additions = result.comparison.files.reduce((sum, file) => sum + (file.additions ?? 0), 0);
+      result.comparison.deletions = result.comparison.files.reduce((sum, file) => sum + (file.deletions ?? 0), 0);
+    }
   }
   return { status: "ready", comparison: { ...result.comparison, turnDiff: metadata } };
 }
 
-function singleSnapshotFiles(snapshot: TurnSnapshot, files: ReviewFileChange[]): ReviewFileChange[] {
+function singleSnapshotFiles(snapshot: TurnSnapshot, files: ReviewFileChange[], ignoreWhitespace = false): ReviewFileChange[] {
   const stats = new Map(files.map((file) => [file.path, file]));
-  return fallbackFiles(snapshot).map((file) => ({ ...file,
+  const recordedFiles = fallbackFiles(snapshot);
+  const visibleFiles = ignoreWhitespace ? recordedFiles.filter((file) => stats.has(file.path)) : recordedFiles;
+  return visibleFiles.map((file) => ({ ...file,
     additions: file.binary ? null : stats.get(file.path)?.additions ?? null,
     deletions: file.binary ? null : stats.get(file.path)?.deletions ?? null,
   }));
@@ -124,7 +135,7 @@ async function fileDiff(deps: TurnDiffRouterDeps, params: TurnDiffParams["turnDi
 
 async function settledFileDiff(deps: TurnDiffRouterDeps, params: TurnDiffParams["turnDiff.getFileDiff"], range: Extract<TurnSnapshotRange, { status: "ready" }>): Promise<ReviewFileDiffResult> {
   const latest = deps.turnDiffs.forMessage(params.threadId, range.rows.at(-1)!.message_id);
-  if (range.rows.length !== 1 || !latest || latest.source === "git") return readSnapshotRangeDiff(deps, range, params.filePath);
+  if (range.rows.length !== 1 || !latest || latest.source === "git") return readSnapshotRangeDiff(deps, range, params.filePath, undefined, params.ignoreWhitespace);
   if (!latest.patch) return "";
   const parsed = parseTurnDiff(latest.patch);
   return parsed ? parsed.filePatches.get(params.filePath) ?? "" : reviewComparisonFailure(new Error("Invalid stored turn diff"));

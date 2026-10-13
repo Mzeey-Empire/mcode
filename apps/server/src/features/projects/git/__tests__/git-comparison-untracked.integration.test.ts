@@ -69,7 +69,7 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
       });
     }
     expect(indexHash()).toBeNull();
-    const patch = await service.readWorkingTreeDiff("fixture", false, "[notes].md", undefined, cwd, true);
+    const patch = await service.readWorkingTreeDiff("fixture", false, { filePath: "[notes].md", repoPath: cwd, untracked: true });
     expect(patch).toContain("@@ -0,0 +1,2 @@\n+one\n+two\n");
     expect(indexHash()).toBeNull();
     expect(temporaryIndexes()).toEqual([]);
@@ -85,7 +85,7 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
         { path: "new.txt", previousPath: "old.txt", changeType: "renamed", binary: false, additions: 0, deletions: 0, untracked: true },
       ]);
     }
-    const patch = await service.readWorkingTreeDiff("fixture", false, "new.txt", undefined, cwd, true, "old.txt");
+    const patch = await service.readWorkingTreeDiff("fixture", false, { filePath: "new.txt", repoPath: cwd, untracked: true, previousPath: "old.txt" });
     expect(patch).toContain("similarity index 100%\nrename from old.txt\nrename to new.txt");
     expect(patch).not.toContain("new file mode");
   });
@@ -120,8 +120,8 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
       },
     });
     if (singleFile) {
-      expect(await service.readWorkingTreeDiff("fixture", false, "gone.txt", undefined, cwd, true)).toBe("");
-      expect(await service.readWorkingTreeDiff("fixture", false, "gone.txt", undefined, cwd, true)).toBe("");
+      expect(await service.readWorkingTreeDiff("fixture", false, { filePath: "gone.txt", repoPath: cwd, untracked: true })).toBe("");
+      expect(await service.readWorkingTreeDiff("fixture", false, { filePath: "gone.txt", repoPath: cwd, untracked: true })).toBe("");
     } else {
       expect(await read("unstaged")).toEqual({ files: [], additions: 0, deletions: 0 });
     }
@@ -178,7 +178,7 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
     commit();
     NodeFS.unlinkSync(NodePath.join(cwd, "old.txt"));
     const before = indexHash();
-    expect(await service.readWorkingTreeDiff("fixture", false, "new.txt", undefined, cwd, true, "old.txt")).toBe("");
+    expect(await service.readWorkingTreeDiff("fixture", false, { filePath: "new.txt", repoPath: cwd, untracked: true, previousPath: "old.txt" })).toBe("");
     expect(indexHash()).toBe(before);
     expect(temporaryIndexes()).toEqual([]);
   });
@@ -194,7 +194,7 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
       expect(indexHash(), view).toBe(before);
     }
     for (const staged of [false, true]) {
-      expect(await service.readWorkingTreeDiff("fixture", staged, "tracked.txt", undefined, cwd)).toBe("");
+      expect(await service.readWorkingTreeDiff("fixture", staged, { filePath: "tracked.txt", repoPath: cwd })).toBe("");
       expect(indexHash(), `working-tree staged=${staged}`).toBe(before);
     }
   });
@@ -394,6 +394,47 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
       branchDefault: { base: "main", compare: "feature" },
     });
     expect(indexHash()).toBe(before);
+  });
+
+  it("hides whitespace-only edits but retains mode-only changes and pure renames", async () => {
+    write("space.txt", "a b\n");
+    write("mode.txt", "mode\n");
+    write("old.txt", "rename\n");
+    write("code.txt", "before\n");
+    commit();
+    write("space.txt", "a  b\n");
+    write("code.txt", "after\n");
+    git("mv", "old.txt", "new.txt");
+    git("add", ".");
+    git("update-index", "--chmod=+x", "mode.txt");
+
+    const before = indexHash();
+    expect(await service.readReviewComparison("fixture", "staged", { ignoreWhitespace: true }, cwd)).toEqual({
+      status: "ready", comparison: { files: [
+        { path: "code.txt", previousPath: null, changeType: "modified", binary: false, additions: 1, deletions: 1, untracked: false },
+        { path: "mode.txt", previousPath: null, changeType: "modified", binary: false, additions: 0, deletions: 0, untracked: false },
+        { path: "new.txt", previousPath: "old.txt", changeType: "renamed", binary: false, additions: 0, deletions: 0, untracked: false },
+      ], additions: 1, deletions: 1 },
+    });
+    expect((await read("staged")).files.map((file) => file.path)).toEqual(["code.txt", "mode.txt", "new.txt", "space.txt"]);
+    expect(await service.readWorkingTreeDiff("fixture", true, { filePath: "space.txt", repoPath: cwd, ignoreWhitespace: true })).toBe("");
+    expect(await service.readWorkingTreeDiff("fixture", true, { filePath: "mode.txt", repoPath: cwd, ignoreWhitespace: true })).toContain("new mode 100755");
+    expect(indexHash()).toBe(before);
+  });
+
+  it("uses -w through the intent-to-add path without dropping new files", async () => {
+    write("space.txt", "a b\n");
+    commit();
+    write("space.txt", "a  b\n");
+    write("new.txt", "new\n");
+    const before = indexHash();
+    expect(await service.readReviewComparison("fixture", "unstaged", { ignoreWhitespace: true }, cwd)).toMatchObject({
+      status: "ready", comparison: { files: [{ path: "new.txt", changeType: "added", untracked: true }], additions: 1, deletions: 0 },
+    });
+    expect(await service.readWorkingTreeDiff("fixture", false, { filePath: "space.txt", repoPath: cwd, untracked: true, ignoreWhitespace: true })).toBe("");
+    expect(await service.readWorkingTreeDiff("fixture", false, { filePath: "new.txt", repoPath: cwd, untracked: true, ignoreWhitespace: true })).toContain("+new");
+    expect(indexHash()).toBe(before);
+    expect(temporaryIndexes()).toEqual([]);
   });
 
   it("diffs only the selected paths from HEAD, untracked included, without touching the real index", async () => {

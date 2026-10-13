@@ -100,23 +100,23 @@ describe("GitComparisonService unified output", () => {
     {
       view: "commit",
       args: ["diff", "--find-renames", "abc1234~1..abc1234", "--", "example.txt"],
-      read: (maxLines?: number) => service.readCommitDiff(workspaceId, "abc1234", "example.txt", maxLines),
+      read: (maxLines?: number) => service.readCommitDiff(workspaceId, "abc1234", { filePath: "example.txt", maxLines }),
     },
     {
       view: "unstaged",
       args: ["-c", "diff.autoRefreshIndex=false", "diff", "--find-renames", "--", ":(literal)example.txt"],
-      read: (maxLines?: number) => service.readWorkingTreeDiff(workspaceId, false, "example.txt", maxLines),
+      read: (maxLines?: number) => service.readWorkingTreeDiff(workspaceId, false, { filePath: "example.txt", maxLines }),
     },
     {
       view: "staged",
       args: ["-c", "diff.autoRefreshIndex=false", "diff", "--find-renames", "--cached", "--", ":(literal)example.txt"],
-      read: (maxLines?: number) => service.readWorkingTreeDiff(workspaceId, true, "example.txt", maxLines),
+      read: (maxLines?: number) => service.readWorkingTreeDiff(workspaceId, true, { filePath: "example.txt", maxLines }),
     },
     {
       view: "branch",
       args: ["diff", "--find-renames", "main...HEAD", "--", "example.txt"],
       read: (maxLines?: number) => service.readBranchComparisonDiff(
-        workspaceId, "main", "HEAD", "example.txt", maxLines,
+        workspaceId, "main", "HEAD", { filePath: "example.txt", maxLines },
       ),
     },
   ])("$view", ({ args, read }) => {
@@ -153,7 +153,7 @@ describe("GitComparisonService unified output", () => {
     );
 
     await expect(service.readCommitDiff(workspaceId, "abc1234")).resolves.toBe(patch);
-    await expect(service.readCommitDiff(workspaceId, "abc1234", undefined, 20)).resolves.toBe(patch);
+    await expect(service.readCommitDiff(workspaceId, "abc1234", { maxLines: 20 })).resolves.toBe(patch);
   });
 
   it("still trims diff stat summaries", async () => {
@@ -181,6 +181,56 @@ describe("GitComparisonService unified output", () => {
         { path: "notes.md", previousPath: null, changeType: "added", binary: false, additions: 3, deletions: 0, untracked: false },
       ], additions: 5, deletions: 1 },
     });
+  });
+
+  it.each([false, true])("filters comparison files and totals only when ignoreWhitespace is %s", async (ignoreWhitespace) => {
+    const suffix = ignoreWhitespace ? ["--cached", "-w"] : ["--cached"];
+    fake.setResponse(["diff", "--name-status", "-z", "--find-renames", "--find-copies", ...suffix], {
+      stdout: "M\0space.txt\0M\0code.txt\0M\0binary.bin\0A\0added.txt\0D\0deleted.txt\0R100\0old.txt\0renamed.txt\0C100\0source.txt\0copied.txt\0", stderr: "",
+    });
+    fake.setResponse(["diff", "--numstat", "-z", "--find-renames", "--find-copies", ...suffix], {
+      stdout: "2\t1\tcode.txt\0-\t-\tbinary.bin\0" + (ignoreWhitespace ? "" : "3\t3\tspace.txt\0"), stderr: "",
+    });
+    const result = await service.readReviewComparison(workspaceId, "staged", { ignoreWhitespace });
+    if (result.status !== "ready") throw new Error(JSON.stringify(result));
+    expect(result.comparison.files.map((file) => file.path)).toEqual(ignoreWhitespace
+      ? ["added.txt", "binary.bin", "code.txt", "copied.txt", "deleted.txt", "renamed.txt"]
+      : ["added.txt", "binary.bin", "code.txt", "copied.txt", "deleted.txt", "renamed.txt", "space.txt"]);
+    expect(result.comparison.additions).toBe(ignoreWhitespace ? 2 : 5);
+    expect(result.comparison.deletions).toBe(ignoreWhitespace ? 1 : 4);
+    expect(result.comparison.files.find((file) => file.path === "binary.bin")).toMatchObject({ binary: true, additions: null, deletions: null });
+    expect(fake.calls.map((call) => call.args.includes("-w"))).toEqual([ignoreWhitespace, ignoreWhitespace]);
+  });
+
+  it("applies the file cap after hiding whitespace-only modifications", async () => {
+    fake.setResponse(["diff", "--name-status", "-z", "--find-renames", "--find-copies", "--cached", "-w"], {
+      stdout: Array.from({ length: 10_001 }, (_, index) => `M\0file-${index}.ts\0`).join(""), stderr: "",
+    });
+    expect(await service.readReviewComparison(workspaceId, "staged", { ignoreWhitespace: true }))
+      .toEqual({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } });
+  });
+
+  it("keeps -w in the shortstat cap fallback", async () => {
+    fake.setResponse(["diff", "--name-status", "-z", "--find-renames", "--find-copies", "--cached", "-w"], {
+      stdout: Array.from({ length: 10_001 }, (_, index) => `A\0file-${index}.ts\0`).join(""), stderr: "",
+    });
+    fake.setResponse(["diff", "--shortstat", "--find-renames", "--find-copies", "--cached", "-w"], {
+      stdout: " 12480 files changed, 12480 insertions(+)\n", stderr: "",
+    });
+    expect(await service.readReviewComparison(workspaceId, "staged", { ignoreWhitespace: true }))
+      .toEqual({ status: "too-many-files", fileCount: 12_480, limit: 10_000 });
+  });
+
+  it("reads filtered patches for working tree, staged, commit and branch views", async () => {
+    fake.setResponse(["-c", "diff.autoRefreshIndex=false", "diff", "--find-renames", "-w", "--", ":(literal)example.txt"], { stdout: PATCH, stderr: "" });
+    fake.setResponse(["-c", "diff.autoRefreshIndex=false", "diff", "--find-renames", "-w", "--cached", "--", ":(literal)example.txt"], { stdout: PATCH, stderr: "" });
+    fake.setResponse(["diff", "--find-renames", "abc1234~1..abc1234", "-w", "--", "example.txt"], { stdout: PATCH, stderr: "" });
+    fake.setResponse(["diff", "--find-renames", "main...HEAD", "-w", "--", "example.txt"], { stdout: PATCH, stderr: "" });
+    const options = { filePath: "example.txt", ignoreWhitespace: true };
+    expect(await service.readWorkingTreeDiff(workspaceId, false, options)).toBe(PATCH);
+    expect(await service.readWorkingTreeDiff(workspaceId, true, options)).toBe(PATCH);
+    expect(await service.readCommitDiff(workspaceId, "abc1234", options)).toBe(PATCH);
+    expect(await service.readBranchComparisonDiff(workspaceId, "main", "HEAD", options)).toBe(PATCH);
   });
 
 });

@@ -47,9 +47,9 @@ const snapshotHandlers: SnapshotHandlerMap = {
   },
   "snapshot.getCumulativeDiff": (deps, params) => {
     const range = cumulativeRange(deps, params.threadId, params.afterSequence);
-    return range.status === "ready" ? readSnapshotRangeDiff(deps, range, params.filePath, params.maxLines) : "";
+    return range.status === "ready" ? readSnapshotRangeDiff(deps, range, params.filePath, params.maxLines, params.ignoreWhitespace) : "";
   },
-  "snapshot.getCumulativeDiffStats": (deps, params) => readSnapshotRangeComparison(deps, cumulativeRange(deps, params.threadId, params.afterSequence), true),
+  "snapshot.getCumulativeDiffStats": (deps, params) => readSnapshotRangeComparison(deps, cumulativeRange(deps, params.threadId, params.afterSequence), true, params.ignoreWhitespace),
 };
 
 /** Checks whether a method belongs to the snapshot RPC family. */
@@ -94,9 +94,9 @@ export async function validateSnapshotRange(deps: SnapshotRouterDeps, range: Rea
 }
 
 /** Read Git metadata across all joined attempts, retaining truthful failure outcomes. */
-export async function readSnapshotRangeComparison(deps: SnapshotRouterDeps, range: TurnSnapshotRange, emptyIsReady = false): Promise<ReviewComparisonResult> {
+export async function readSnapshotRangeComparison(deps: SnapshotRouterDeps, range: TurnSnapshotRange, emptyIsReady = false, ignoreWhitespace = false): Promise<ReviewComparisonResult> {
   if (range.status !== "ready") return emptyIsReady ? { status: "ready", comparison: { files: [], additions: 0, deletions: 0 } } : range;
-  const stats = await readSnapshotRangeStats(deps, range);
+  const stats = await readSnapshotRangeStats(deps, range, ignoreWhitespace);
   if (!Array.isArray(stats)) return stats;
   return { status: "ready", comparison: {
     files: stats.map(diffStatsFile),
@@ -110,12 +110,14 @@ function diffStatsFile(file: DiffStats): ReviewFileChange {
     additions: file.additions, deletions: file.deletions, untracked: false };
 }
 
-async function readSnapshotRangeStats(deps: SnapshotRouterDeps, range: TurnSnapshotRange): Promise<DiffStats[] | Exclude<ReviewComparisonResult, { status: "ready" }>> {
+async function readSnapshotRangeStats(deps: SnapshotRouterDeps, range: TurnSnapshotRange, ignoreWhitespace = false): Promise<DiffStats[] | Exclude<ReviewComparisonResult, { status: "ready" }>> {
   if (range.status !== "ready") return range;
   const cwd = await validateSnapshotRange(deps, range);
   if (typeof cwd !== "string") return cwd;
   try {
-    const stats = await deps.snapshotService.getDiffStats(cwd, range.refBefore, range.refAfter, range.paths, range.pathGroups);
+    const stats = await deps.snapshotService.getDiffStats(cwd, range.refBefore, range.refAfter, {
+      allowedPaths: range.paths, allowedPathGroups: range.pathGroups, ignoreWhitespace,
+    });
     if (stats.length > 10_000) throw new ReviewComparisonLimitError(stats.length);
     return stats;
   } catch (error) {
@@ -124,13 +126,15 @@ async function readSnapshotRangeStats(deps: SnapshotRouterDeps, range: TurnSnaps
 }
 
 /** Read a file patch from the same complete attempt range as its comparison. */
-export async function readSnapshotRangeDiff(deps: SnapshotRouterDeps, range: TurnSnapshotRange, filePath?: string, maxLines?: number): Promise<ReviewFileDiffResult> {
+export async function readSnapshotRangeDiff(deps: SnapshotRouterDeps, range: TurnSnapshotRange, filePath?: string, maxLines?: number, ignoreWhitespace = false): Promise<ReviewFileDiffResult> {
   if (range.status !== "ready") return range;
   const cwd = await validateSnapshotRange(deps, range);
   if (typeof cwd !== "string") return cwd;
   if (filePath && !range.paths.some((path) => path.replaceAll("\\", "/") === filePath.replaceAll("\\", "/"))) return "";
   try {
-    return await deps.snapshotService.getDiff(cwd, range.refBefore, range.refAfter, filePath, maxLines, range.paths, range.pathGroups);
+    return await deps.snapshotService.getDiff(cwd, range.refBefore, range.refAfter, {
+      filePath, maxLines, allowedPaths: range.paths, allowedPathGroups: range.pathGroups, ignoreWhitespace,
+    });
   } catch (error) {
     return reviewComparisonFailure(error);
   }

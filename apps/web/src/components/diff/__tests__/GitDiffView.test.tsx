@@ -17,6 +17,7 @@ const resolved = {
   source: "commit" as const,
   id: "bbbbbbbb2",
   cacheVersion: 0,
+  ignoreWhitespace: false,
 };
 
 describe("GitDiffView", () => {

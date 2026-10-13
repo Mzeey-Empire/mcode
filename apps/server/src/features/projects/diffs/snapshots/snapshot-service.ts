@@ -82,19 +82,29 @@ function selectedPathGroups(
   return pathGroups.filter((group) => group.some((path) => connected.has(normalize(path))));
 }
 
+// Stats are read with -z so paths arrive verbatim; Git otherwise quotes non-ASCII
+// names, and those would no longer match the recorded turn paths.
 function parseNumstat(stdout: string): Omit<DiffStats, "changeType">[] {
-  return stdout
-    .trim()
-    .split("\n")
-    .filter((line) => line.includes("\t"))
-    .map((line) => {
-      const [addStr, delStr, ...pathParts] = line.split("\t");
-      return {
-        filePath: numstatDestinationPath(pathParts.join("\t")),
-        additions: addStr === "-" ? 0 : parseInt(addStr ?? "0", 10),
-        deletions: delStr === "-" ? 0 : parseInt(delStr ?? "0", 10),
-      };
-    });
+  const fields = stdout.split("\0");
+  const stats: Omit<DiffStats, "changeType">[] = [];
+  for (let index = 0; index < fields.length;) {
+    const [addStr, delStr, ...pathParts] = (fields[index++] ?? "").split("\t");
+    if (pathParts.length === 0) continue;
+    // Renames leave the path empty and follow with the old and new paths.
+    let filePath = pathParts.join("\t");
+    if (!filePath) {
+      index++;
+      filePath = fields[index++] ?? "";
+    }
+    if (!filePath) continue;
+    stats.push({ filePath, additions: numstatCount(addStr), deletions: numstatCount(delStr) });
+  }
+  return stats;
+}
+
+/** Binary files report "-" instead of a line count. */
+function numstatCount(value: string | undefined): number {
+  return value === "-" ? 0 : parseInt(value ?? "0", 10);
 }
 
 /** Map a --name-status letter (A/M/D/R/C/T/U…) to the shared change type. */
@@ -106,26 +116,31 @@ function nameStatusChangeType(letter: string): DiffStats["changeType"] {
   return "modified";
 }
 
-function parseNameStatus(stdout: string): Map<string, DiffStats["changeType"]> {
-  const types = new Map<string, DiffStats["changeType"]>();
-  for (const line of stdout.trim().split("\n")) {
-    if (!line.includes("\t")) continue;
-    const [status, ...paths] = line.split("\t");
-    // Rename/copy rows carry "old\tnew"; the destination is the diff file path.
-    const filePath = paths[paths.length - 1];
-    if (!filePath) continue;
-    types.set(filePath, nameStatusChangeType(status?.[0] ?? "M"));
+function parseNameStatus(stdout: string): Map<string, string> {
+  const fields = stdout.split("\0");
+  const types = new Map<string, string>();
+  for (let index = 0; index < fields.length;) {
+    const status = (fields[index++] ?? "").trim();
+    if (!status) continue;
+    // Rename/copy rows carry the old path before the destination diff path.
+    if (status[0] === "R" || status[0] === "C") index++;
+    const filePath = fields[index++];
+    if (filePath) types.set(filePath, status[0] ?? "M");
   }
   return types;
 }
 
-function numstatDestinationPath(path: string): string {
-  const braceRename = path.match(/^(.*)\{([^{}]*) => ([^{}]*)\}(.*)$/);
-  if (braceRename) {
-    return `${braceRename[1]}${braceRename[3]}${braceRename[4]}`;
-  }
-  const separatorIndex = path.lastIndexOf(" => ");
-  return separatorIndex >= 0 ? path.slice(separatorIndex + 4) : path;
+/** Which paths a snapshot diff reads, and whether it hides whitespace changes. */
+export interface SnapshotDiffScope {
+  readonly allowedPaths?: readonly string[];
+  readonly allowedPathGroups?: readonly (readonly string[])[];
+  readonly ignoreWhitespace?: boolean;
+}
+
+/** A snapshot patch read, optionally narrowed to one file and capped in length. */
+export interface SnapshotPatchOptions extends SnapshotDiffScope {
+  readonly filePath?: string;
+  readonly maxLines?: number;
 }
 
 function hasUnsafeDiffRefs(refBefore: string, refAfter: string): boolean {
@@ -149,10 +164,12 @@ function gitDiffArgs(
   format: "unified" | "numstat" | "name-status",
   refBefore: string,
   refAfter: string,
-  pathspecs: string[] | undefined,
+  options: { pathspecs?: string[]; ignoreWhitespace?: boolean },
 ): string[] {
-  const formatArgs = format === "unified" ? [] : [`--${format}`];
+  const formatArgs = format === "unified" ? [] : [`--${format}`, "-z"];
   const args = ["-C", cwd, "diff", ...formatArgs, "--find-renames", refBefore, refAfter];
+  const { pathspecs, ignoreWhitespace } = options;
+  if (ignoreWhitespace) args.push("-w");
   if (pathspecs) args.push("--", ...pathspecs);
   return args;
 }
@@ -163,12 +180,12 @@ async function executeDiffBatches(
   format: "unified" | "numstat" | "name-status",
   refBefore: string,
   refAfter: string,
-  pathspecBatches: (string[] | undefined)[],
+  options: { pathspecBatches: (string[] | undefined)[]; ignoreWhitespace?: boolean },
 ): Promise<string[]> {
   const outputs: string[] = [];
-  for (const pathspecs of pathspecBatches) {
+  for (const pathspecs of options.pathspecBatches) {
     const { stdout } = await gitExecutor.exec(
-      gitDiffArgs(cwd, format, refBefore, refAfter, pathspecs),
+      gitDiffArgs(cwd, format, refBefore, refAfter, { pathspecs, ignoreWhitespace: options.ignoreWhitespace }),
       { timeout: RealGitExecutor.DEFAULT_TIMEOUT },
     );
     const output = format === "unified" ? stdout : stdout.trim();
@@ -182,11 +199,12 @@ async function executeDiffBatches(
 function collectDiffStats(
   outputs: readonly string[],
   statusOutputs: readonly string[],
+  ignoreWhitespace?: boolean,
 ): DiffStats[] {
-  const changeTypes = new Map<string, DiffStats["changeType"]>();
+  const statuses = new Map<string, string>();
   for (const output of statusOutputs) {
-    for (const [filePath, changeType] of parseNameStatus(output)) {
-      changeTypes.set(filePath, changeType);
+    for (const [filePath, status] of parseNameStatus(output)) {
+      statuses.set(filePath, status);
     }
   }
   const stats = new Map<string, DiffStats>();
@@ -194,8 +212,15 @@ function collectDiffStats(
     for (const entry of parseNumstat(output)) {
       stats.set(entry.filePath, {
         ...entry,
-        changeType: changeTypes.get(entry.filePath) ?? "modified",
+        changeType: nameStatusChangeType(statuses.get(entry.filePath) ?? "M"),
       });
+    }
+  }
+  if (ignoreWhitespace) {
+    for (const [filePath, status] of statuses) {
+      if (status !== "M" && !stats.has(filePath)) {
+        stats.set(filePath, { filePath, changeType: nameStatusChangeType(status), additions: 0, deletions: 0 });
+      }
     }
   }
   return [...stats.values()];
@@ -323,17 +348,15 @@ export class SnapshotService {
   /**
    * Get a unified diff between two refs (tree or commit SHAs).
    * Optionally scoped to a single file path.
-   * @param maxLines - If provided, truncate output to this many lines.
+   * options.maxLines limits the returned patch length when provided.
    */
   async getDiff(
     cwd: string,
     refBefore: string,
     refAfter: string,
-    filePath?: string,
-    maxLines?: number,
-    allowedPaths?: readonly string[],
-    allowedPathGroups?: readonly (readonly string[])[],
+    options: SnapshotPatchOptions = {},
   ): Promise<string> {
+    const { filePath, maxLines, allowedPaths, allowedPathGroups, ignoreWhitespace } = options;
     if (hasUnsafeDiffRefs(refBefore, refAfter)) return "";
     const pathspecBatches = getDiffPathspecBatches(filePath, allowedPaths, allowedPathGroups);
     if (pathspecBatches.length === 0) return "";
@@ -344,7 +367,7 @@ export class SnapshotService {
       "unified",
       refBefore,
       refAfter,
-      pathspecBatches,
+      { pathspecBatches, ignoreWhitespace },
     );
     return truncateUnifiedDiff(outputs.join("\n"), maxLines);
   }
@@ -424,18 +447,18 @@ export class SnapshotService {
     cwd: string,
     refBefore: string,
     refAfter: string,
-    allowedPaths?: readonly string[],
-    allowedPathGroups?: readonly (readonly string[])[],
+    options: SnapshotDiffScope = {},
   ): Promise<DiffStats[]> {
+    const { allowedPaths, allowedPathGroups, ignoreWhitespace } = options;
     if (hasUnsafeDiffRefs(refBefore, refAfter) || refBefore === refAfter) return [];
     const pathspecBatches = getDiffPathspecBatches(undefined, allowedPaths, allowedPathGroups);
     if (pathspecBatches.length === 0) return [];
 
     const [outputs, statusOutputs] = await Promise.all([
-      executeDiffBatches(this.gitExecutor, cwd, "numstat", refBefore, refAfter, pathspecBatches),
-      executeDiffBatches(this.gitExecutor, cwd, "name-status", refBefore, refAfter, pathspecBatches),
+      executeDiffBatches(this.gitExecutor, cwd, "numstat", refBefore, refAfter, { pathspecBatches, ignoreWhitespace }),
+      executeDiffBatches(this.gitExecutor, cwd, "name-status", refBefore, refAfter, { pathspecBatches, ignoreWhitespace }),
     ]);
-    return collectDiffStats(outputs, statusOutputs);
+    return collectDiffStats(outputs, statusOutputs, ignoreWhitespace);
   }
 
   /**

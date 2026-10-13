@@ -295,6 +295,12 @@ export interface OpenInApp {
   readonly detected: boolean;
 }
 
+/** Options shared by Review diff reads. */
+export interface DiffReadOptions {
+  /** Hide whitespace changes in Git diffs; the server returns agent patches unchanged. */
+  readonly ignoreWhitespace?: boolean;
+}
+
 /** Transport interface consumed by the web app to communicate with the backend. */
 export interface McodeTransport {
   /** Register this renderer connection as an authorized visible-browser host. */
@@ -776,9 +782,9 @@ export interface McodeTransport {
   /** Get a unified diff for a specific file from a turn snapshot. */
   getSnapshotDiff(snapshotId: string, filePath?: string, maxLines?: number): Promise<ReviewFileDiffResult>;
   /** Read the active or settled latest turn comparison, or one picked turn when `messageId` is given. */
-  getTurnDiffComparison(threadId: string, messageId?: string): Promise<ReviewComparisonResult>;
+  getTurnDiffComparison(threadId: string, messageId?: string, options?: DiffReadOptions): Promise<ReviewComparisonResult>;
   /** Read a file from one exact native or fallback comparison. */
-  getTurnDiffFile(threadId: string, comparisonId: string, filePath: string): Promise<ReviewFileDiffResult>;
+  getTurnDiffFile(threadId: string, comparisonId: string, filePath: string, options?: DiffReadOptions): Promise<ReviewFileDiffResult>;
   /** Get per-file change classification and line counts for a turn snapshot. */
   getSnapshotDiffStats(snapshotId: string): Promise<DiffStats[] | Exclude<ReviewComparisonResult, { status: "ready" }>>;
   /** Run garbage collection on expired snapshot refs. */
@@ -794,12 +800,12 @@ export interface McodeTransport {
   /** Undo a committed revert. Resending the same `requestId` replays the first outcome. */
   undoTurnRevert(threadId: string, revertId: string, requestId: string): Promise<TurnRevertResult>;
   /** With `afterSequence`, reads only whole turns that settled after that message sequence. */
-  getCumulativeDiff(threadId: string, filePath?: string, maxLines?: number, afterSequence?: number): Promise<ReviewFileDiffResult>;
+  getCumulativeDiff(threadId: string, filePath?: string, maxLines?: number, afterSequence?: number, options?: DiffReadOptions): Promise<ReviewFileDiffResult>;
   /**
    * Return authoritative net file stats from the first turn ref to the final turn ref. With
    * `afterSequence`, only whole turns that settled after that message sequence count.
    */
-  getCumulativeDiffStats(threadId: string, afterSequence?: number): Promise<ReviewComparisonResult>;
+  getCumulativeDiffStats(threadId: string, afterSequence?: number, options?: DiffReadOptions): Promise<ReviewComparisonResult>;
   /** Get commit log for a workspace branch. Pass threadId so the server runs git from the thread's worktree path. */
   getGitLog(
     workspaceId: string,
@@ -810,15 +816,15 @@ export interface McodeTransport {
     options?: { skip?: number; includeStats?: boolean },
   ): Promise<GitCommit[]>;
   /** Get unified diff for a specific git commit. Implemented in Phase 4. */
-  getCommitDiff(workspaceId: string, sha: string, filePath?: string, maxLines?: number): Promise<string>;
+  getCommitDiff(workspaceId: string, sha: string, filePath?: string, maxLines?: number, options?: DiffReadOptions): Promise<string>;
   /** Get the list of files changed in a specific git commit. */
   getCommitFiles(workspaceId: string, sha: string): Promise<string[]>;
   /** Get the unified diff for the working tree (staged or unstaged), optionally per file. Pass threadId to read the thread's worktree. */
-  getWorkingTreeDiff(workspaceId: string, staged: boolean, filePath?: string, maxLines?: number, threadId?: string, untracked?: boolean, previousPath?: string): Promise<string>;
+  getWorkingTreeDiff(workspaceId: string, staged: boolean, filePath?: string, maxLines?: number, threadId?: string, untracked?: boolean, previousPath?: string, options?: DiffReadOptions): Promise<string>;
   /** Read a file's contents at a revision. `ref` follows `git show` rules; "" reads the staged index blob and "A...B" reads at the merge base. Pass threadId to read the thread's worktree. Rejects when the ref or file is absent. */
   readFileAtRef(workspaceId: string, ref: string, filePath: string, threadId?: string): Promise<string>;
   /** Get the unified diff between two refs (`base...target`, three-dot), optionally per file. Omit base/target to use the detected default branch → HEAD. Pass threadId to read the thread's worktree. */
-  getBranchDiff(workspaceId: string, base?: string, target?: string, filePath?: string, maxLines?: number, threadId?: string): Promise<string>;
+  getBranchDiff(workspaceId: string, base?: string, target?: string, filePath?: string, maxLines?: number, threadId?: string, options?: DiffReadOptions): Promise<string>;
   /** Resolve the default Branch comparison (base→target per ADR 0007) plus the refs that populate the pickers. Pass threadId so "current branch" is the thread's worktree branch. */
   getBranchComparison(workspaceId: string, threadId?: string): Promise<BranchComparison>;
   /** Resolve a workspace or thread checkout's origin remote into a normalized web URL and repository label. */
@@ -833,6 +839,7 @@ export interface McodeTransport {
     target?: string;
     sha?: string;
     threadId?: string;
+    ignoreWhitespace?: boolean;
   }): Promise<import("@mcode/contracts").ReviewComparisonResult>;
 
   // GitHub PR (advanced)
