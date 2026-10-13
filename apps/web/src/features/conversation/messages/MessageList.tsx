@@ -33,6 +33,8 @@ import { useMessageRevealStore, type MessageRevealRequest } from "./message-reve
 const SOURCE_NAVIGATION_MAX_FRAMES = 20;
 const FILL_VIEWPORT_RATIO = 1.5;
 const MAX_FILL_PAGES = 3;
+/** Bounds a Show in chat search so a message that history no longer holds ends in a miss, not endless paging. */
+const MAX_REVEAL_PAGES = 20;
 
 /** A card source request that MessageList resolves through its resident transcript. */
 export interface SelectedTextCommentSourceNavigationRequest {
@@ -134,6 +136,14 @@ function useSourceNavigationCallbacks(
     onOpened: (completedTarget) => complete(completedTarget, callbacks.onOpened),
     onUnavailable: (completedTarget) => complete(completedTarget, callbacks.onUnavailable),
   }), [callbacks, complete]);
+}
+
+/** Progress of paging history for one reveal request. */
+interface RevealSearch {
+  readonly request: MessageRevealRequest;
+  direction: "older" | "newer";
+  pages: number;
+  inFlight: boolean;
 }
 
 /** Ends a reveal whose message history no longer holds, so the request cannot fire a later surprise jump. */
@@ -492,6 +502,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
       setHighlightedKey(row.key);
     }
   }, []);
+  const revealSearch = useRef<RevealSearch | null>(null);
   const revealRequest = useMessageRevealStore((state) =>
     state.request?.threadId === data.renderedThreadId ? state.request : null);
   useEffect(() => {
@@ -502,13 +513,26 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
       return;
     }
     if (data.isLoadingMore || data.isLoadingNewer) return;
-    const loadPage = data.hasMore ? data.loadOlderMessages : data.hasNewer ? data.loadNewerMessages : null;
-    if (!loadPage) {
+    const search = revealSearch.current?.request === revealRequest
+      ? revealSearch.current
+      : { request: revealRequest, direction: "older" as const, pages: 0, inFlight: false };
+    revealSearch.current = search;
+    if (search.inFlight) return;
+    // The history window evicts as it pages, so its flags flip back; one pass older, then one newer, ends the search.
+    if (search.direction === "older" && !data.hasMore) search.direction = "newer";
+    if ((search.direction === "newer" && !data.hasNewer) || search.pages >= MAX_REVEAL_PAGES) {
       missReveal(revealRequest);
       return;
     }
+    const loadPage = search.direction === "older" ? data.loadOlderMessages : data.loadNewerMessages;
+    search.pages += 1;
+    search.inFlight = true;
     void loadPage(revealRequest.threadId).then(
-      (result) => { if (result === "failed") missReveal(revealRequest); },
+      (result) => {
+        search.inFlight = false;
+        // A skipped page changes nothing, so no later render would retry it.
+        if (result !== "loaded") missReveal(revealRequest);
+      },
       () => missReveal(revealRequest),
     );
   }, [revealRequest, items, scrollToMessage, data.hasMore, data.hasNewer, data.isLoadingMore, data.isLoadingNewer, data.loadOlderMessages, data.loadNewerMessages]);

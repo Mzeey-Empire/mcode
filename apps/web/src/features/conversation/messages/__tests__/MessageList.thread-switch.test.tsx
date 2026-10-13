@@ -409,6 +409,31 @@ describe("MessageList thread switch", () => {
     expect(loadOlderMessagesSpy).not.toHaveBeenCalled();
   });
 
+  it("stops paging for a reveal when the history window keeps reporting more", async () => {
+    useToastStore.setState({ toasts: [] });
+    messagesValue = [{ id: "page-0", sequence: 100, thread_id: "thread-A", role: "assistant", content: "Page 0" }];
+    hasMoreMessagesValue = true;
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(5000);
+    let page = 0;
+    loadOlderMessagesSpy.mockImplementation(async () => {
+      page += 1;
+      // An evicting window: each page replaces the last and still reports older history.
+      messagesValue = [{ id: `page-${page}`, sequence: 100 - page, thread_id: "thread-A", role: "assistant", content: `Page ${page}` }];
+      return "loaded";
+    });
+    useMessageRevealStore.setState({ request: { threadId: "thread-A", messageId: "gone" } });
+    const { rerender } = render(<MessageList />);
+
+    for (let attempt = 0; attempt < 30 && useMessageRevealStore.getState().request; attempt += 1) {
+      await act(async () => {});
+      rerender(<MessageList />);
+    }
+
+    expect(useMessageRevealStore.getState().request).toBeNull();
+    expect(loadOlderMessagesSpy).toHaveBeenCalledTimes(20);
+    expect(useToastStore.getState().toasts.map((toast) => toast.title)).toEqual(["Couldn't find that reply in the chat"]);
+  });
+
   it("marks a source unavailable only after its resident message fails canonical reconstruction", async () => {
     messagesValue = [{ id: "m1", sequence: 1, thread_id: "thread-A", role: "assistant", content: "Loaded message" }];
     const comment: SelectedTextComment = {
