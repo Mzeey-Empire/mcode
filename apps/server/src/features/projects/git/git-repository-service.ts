@@ -366,16 +366,17 @@ export class GitRepositoryService {
     options: Omit<GitRefsListParams, "workspaceId" | "threadId">,
   ): Promise<GitRefsListResult> {
     try {
-      const [refs, worktrees] = await Promise.all([
+      const [refs, worktrees, defaultBranch] = await Promise.all([
         this.gitExecutor.exec([
           "-C", repoPath, "for-each-ref",
           "--format=%(refname)%00%(refname:short)%00%(objectname)%00%(HEAD)%00%(worktreepath)%00%(committerdate:iso-strict)%00%(symref)",
           "refs/heads", "refs/remotes",
         ]),
         this.gitExecutor.exec(["-C", repoPath, "worktree", "list", "--porcelain", "-z"]),
+        this.getDefaultBranchAt(repoPath),
       ]);
       if (refs.stderr.trim()) throw Object.assign(new Error("Git could not list every ref"), { stderr: refs.stderr });
-      return buildRefPage(refs.stdout, worktrees.stdout, repoPath, options);
+      return buildRefPage(refs.stdout, worktrees.stdout, repoPath, options, defaultBranch);
     } catch (error) {
       return { ok: false, error: gitListError(error) };
     }

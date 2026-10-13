@@ -235,6 +235,21 @@ describe("GitRepositoryService.listRefsAt", () => {
     expect(matches.items.map((item) => item.kind === "ref" ? item.shortName : item.kind)).toEqual(["branch-010", "branch-011", "branch-012"]);
   });
 
+  it("marks local main as the default in a repo with no origin/HEAD", async () => {
+    const local = NodePath.join(directory, "local-only");
+    const run = (...args: string[]) => NodeChildProcess.execFileSync("git", ["-C", local, ...args], { encoding: "utf8" });
+    NodeFS.mkdirSync(local);
+    run("init", "-b", "main");
+    run("-c", "user.name=Refs", "-c", "user.email=refs@example.invalid", "-c", "commit.gpgSign=false",
+      "-c", `core.hooksPath=${directory}`, "commit", "--allow-empty", "-m", "base");
+    run("checkout", "-b", "feature");
+    const result = await list({ purpose: "review", side: "local" }, local);
+    expect(result.items).toMatchObject([
+      { fullName: "refs/heads/main", isDefault: true },
+      { fullName: "refs/heads/feature", isDefault: false },
+    ]);
+  });
+
   it("returns git_failed and the first stderr line for a corrupt ref", async () => {
     const ref = NodePath.join(root, ".git", "refs", "heads", "broken");
     NodeFS.writeFileSync(ref, `${"f".repeat(40)}\n`);
