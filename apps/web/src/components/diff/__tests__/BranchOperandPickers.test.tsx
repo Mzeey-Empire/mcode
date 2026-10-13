@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BranchComparison, GitRef, GitRefsListParams, GitRefsListResult } from "@mcode/contracts";
 
 import { mockTransport } from "@/__tests__/mocks/transport";
-import { installListboxLayout } from "@/__tests__/helpers/picker-layout";
+import { installListboxLayout, LISTBOX_ROW_PX as ROW_PX, scrollListTo } from "@/__tests__/helpers/picker-layout";
 import { effectiveBranchOperands, useDiffStore } from "@/stores/diffStore";
 import { BranchOperandPickers } from "../BranchOperandPickers";
 
@@ -143,6 +143,17 @@ describe("BranchOperandPickers", () => {
     expect(vi.mocked(mockTransport.listRefs)).toHaveBeenLastCalledWith(
       expect.objectContaining({ purpose: "review", side: "origin", workspaceId, threadId: "thread-1" }),
     );
+  });
+
+  it("appends the next page of refs when the list scrolls near its end", async () => {
+    await renderPickers();
+    await open("compare");
+    showTab("Local");
+    expect(await screen.findByText("Showing 100 of 150")).toBeInTheDocument();
+    scrollListTo(ROW_PX * 2);
+    expect(await screen.findByText("Showing 150 of 150")).toBeInTheDocument();
+    expect(listedNames().slice(98, 102)).toEqual(["topic-096", "topic-097", "topic-098", "topic-099"]);
+    expect(listedNames().at(-1)).toBe("topic-147");
   });
 
   it("stores origin/main as compare and mcode-3f2a as base, each picked on its own side", async () => {
