@@ -6,7 +6,7 @@ import { DeterministicCanonicalSink } from "../../../conformance/deterministic-s
 import { loadProviderFixtureManifest } from "../../../conformance/fixture-safety.js";
 import * as NodeURL from "node:url";
 
-const sdk = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), forceStop: vi.fn(), create: vi.fn(), resume: vi.fn(), models: vi.fn(), session: undefined as FakeSession | undefined }));
+const sdk = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), forceStop: vi.fn(), getState: vi.fn(), create: vi.fn(), resume: vi.fn(), models: vi.fn(), session: undefined as FakeSession | undefined }));
 vi.mock("@github/copilot-sdk", () => ({
   approveAll: () => ({ kind: "approved" }),
   CopilotClient: class {
@@ -14,6 +14,7 @@ vi.mock("@github/copilot-sdk", () => ({
     start = sdk.start;
     stop = sdk.stop;
     forceStop = sdk.forceStop;
+    getState = sdk.getState;
     createSession = sdk.create;
     resumeSession = sdk.resume;
     listModels = sdk.models;
@@ -76,7 +77,7 @@ describe("Copilot public factory", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     session = new FakeSession(); sdk.session = session;
-    sdk.start.mockResolvedValue(undefined); sdk.stop.mockResolvedValue([]); sdk.forceStop.mockResolvedValue(undefined);
+    sdk.start.mockResolvedValue(undefined); sdk.stop.mockResolvedValue([]); sdk.forceStop.mockResolvedValue(undefined); sdk.getState.mockReturnValue("connected");
     sdk.create.mockResolvedValue(session); sdk.resume.mockResolvedValue(session);
     sdk.models.mockResolvedValue(["model", "other-model"].map((id) => ({ id, name: id, capabilities: { supports: { reasoningEffort: true } }, supportedReasoningEfforts: ["low", "high", "xhigh"], defaultReasoningEffort: "low" })));
     sink = new DeterministicCanonicalSink({ maxEvents: 2_000, maxDiagnostics: 32 }); ports = host(sink);
@@ -480,6 +481,44 @@ describe("Copilot public factory", () => {
     session.emit({ type: "session.idle", ephemeral: true, data: {} });
     await vi.waitFor(() => expect(projections(sink).at(-1)?.type).toBe("ended"));
     expect(projections(sink).filter((event) => event.type === "ended")).toEqual([expect.objectContaining({ outcome: "errored" })]);
+  });
+
+  describe("after the Copilot CLI exits", () => {
+    beforeEach(() => { vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] }); });
+    afterEach(() => { vi.useRealTimers(); });
+    async function crashCli() {
+      sdk.getState.mockReturnValue("disconnected");
+      session.disconnect.mockRejectedValue(new Error("Connection is closed."));
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
+    async function resumeOnFreshClient(endedBefore: number) {
+      sdk.getState.mockReturnValue("connected");
+      const replacement = new FakeSession(); sdk.resume.mockResolvedValueOnce(replacement);
+      await provider.sendTurn(request({ turnId: "turn-2", turnExecutionId: "00000000-0000-4000-8000-000000000002", resumeFrom: session.sessionId }));
+      replacement.emit({ type: "session.idle", ephemeral: true, data: {} });
+      await vi.waitFor(() => expect(projections(sink).filter((event) => event.type === "ended")).toHaveLength(endedBefore + 1));
+      expect(sdk.start).toHaveBeenCalledTimes(2);
+      expect(sdk.resume).toHaveBeenCalledWith(session.sessionId, expect.anything());
+      expect(projections(sink).at(-1)).toEqual(expect.objectContaining({ type: "ended", turnExecutionId: "00000000-0000-4000-8000-000000000002" }));
+      expect(projections(sink).at(-1)).not.toHaveProperty("outcome");
+    }
+
+    it("fails the running turn instead of leaving it waiting for Stop", async () => {
+      await provider.sendTurn(request());
+      await crashCli();
+      await vi.waitFor(() => expect(projections(sink).at(-1)).toEqual(expect.objectContaining({ type: "ended", outcome: "errored" })));
+      expect(projections(sink)).toContainEqual(expect.objectContaining({ type: "error", error: "Copilot CLI disconnected" }));
+      expect(sdk.forceStop).toHaveBeenCalledOnce();
+      await resumeOnFreshClient(1);
+    });
+
+    it("drops an idle session bound to the dead client", async () => {
+      await provider.sendTurn(request());
+      await finish();
+      await crashCli();
+      await vi.waitFor(() => expect(sdk.forceStop).toHaveBeenCalledOnce());
+      await resumeOnFreshClient(1);
+    });
   });
 
   it("propagates durable resume failure without silently starting fresh", async () => {

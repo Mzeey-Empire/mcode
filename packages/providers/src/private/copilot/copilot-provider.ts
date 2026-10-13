@@ -34,6 +34,7 @@ interface CopilotSessionState {
   utilityBusy?: boolean;
   sessionGrants: Set<string>;
   retireRequested?: boolean;
+  clientLost?: boolean;
 }
 
 /** Private SDK protocol adapter; SessionRuntime is its sole session lifecycle owner. */
@@ -57,6 +58,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
   private clientTask?: Promise<CopilotClient>;
   private transportFailure?: Error;
   private forceStopTask?: Promise<void>;
+  private connectionWatch?: ReturnType<typeof setInterval>;
   private shuttingDown = false;
   private shutdownTask?: Promise<void>;
   private modelCache?: { at: number; models: ProviderModelInfo[] };
@@ -142,7 +144,39 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     catch (error) { await bounded(client.forceStop(), 5_000, "Copilot failed startup cleanup"); throw error; }
     finally { this.startingClient = undefined; }
     this.client = client;
+    this.watchConnection(client);
     return client;
+  }
+
+  // A CLI that exits emits no session event and the SDK has no public close event, so polling is the only way to see it.
+  private watchConnection(client: CopilotClient): void {
+    this.connectionWatch = setInterval(() => {
+      const connection = client.getState();
+      if (connection !== "disconnected" && connection !== "error") return;
+      void this.retireLostClient(client).catch((error: unknown) => logger.error("Copilot lost client retirement failed", { error: toError(error).message }));
+    }, 1_000);
+    this.connectionWatch.unref?.();
+  }
+
+  // Unlike failTransport this does not fence the provider: the CLI is gone, so a fresh client can resume the native sessions.
+  private async retireLostClient(client: CopilotClient): Promise<void> {
+    if (this.client !== client || this.shuttingDown) return;
+    clearInterval(this.connectionWatch);
+    this.connectionWatch = undefined;
+    this.client = undefined;
+    this.clientTask = undefined;
+    const error = new Error("Copilot CLI disconnected");
+    for (const admission of this.admissions.values()) admission.controller.abort(error);
+    const idle: string[] = [];
+    for (const state of this.runtime.states()) {
+      state.clientLost = true;
+      const turn = state.turn;
+      if (!turn) { idle.push(state.sessionId); continue; }
+      turn.settle("failed", error);
+      this.publishTurnError(state, turn, error.message);
+    }
+    await Promise.allSettled(idle.map((sessionId) => this.runtime.stop(sessionId)));
+    await bounded(client.forceStop(), 5_000, "Copilot lost client cleanup");
   }
 
   /** Creates one SDK session, preserving discovery and explicit resume failures. */
@@ -412,7 +446,8 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     state.sessionGrants.clear();
     try {
       try { await state.controls; }
-      finally { await this.awaitNativeResource(state.session.disconnect(), 5_000, "Copilot session close"); }
+      // A session on a lost client rejects every RPC, so disconnect has nothing left to release.
+      finally { if (!state.clientLost) await this.awaitNativeResource(state.session.disconnect(), 5_000, "Copilot session close"); }
     }
     finally {
       if (state.browserGrant) this.host.browser.release(state.browserGrant.leaseId);
@@ -505,6 +540,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
   /** Fences admission, awaits native cleanup, and stops the SDK's publicly owned client. */
   shutdown(): Promise<void> {
     this.shuttingDown = true;
+    clearInterval(this.connectionWatch);
     this.shutdownTask ??= this.performShutdown();
     return this.shutdownTask;
   }
