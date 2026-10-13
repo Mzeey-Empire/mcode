@@ -1,4 +1,4 @@
-import type { ApprovalChoice, ApprovalOutcome, ApprovalRequestBody, ApprovalResponse } from "@mcode/contracts";
+import { ApprovalChoiceSchema, type ApprovalChoice, type ApprovalOutcome, type ApprovalRequestBody, type ApprovalResponse } from "@mcode/contracts";
 
 /** Resolve a response against the choices the adapter actually advertised. */
 export function approvalChoice(body: ApprovalRequestBody, response: ApprovalResponse): ApprovalChoice | undefined {
@@ -15,14 +15,11 @@ export function approvalOutcome(choice: ApprovalChoice | undefined, response: Ap
   return { status: "allowed", intent: choice.intent, choiceLabel: choice.label };
 }
 
+type AcpPermissionOption = { optionId: string; name: string; kind?: string | null; description?: string };
+
 /** ACP preserves both reject kinds and uses cancellation only when no reject exists. */
-export function acpApprovalChoices(options: readonly { optionId: string; name: string; kind?: string | null; description?: string }[]): ApprovalChoice[] {
-  const choices = options.filter((option) => option.optionId !== "allow_always_global").map((option): ApprovalChoice => ({
-    id: option.optionId,
-    label: option.name,
-    intent: option.kind?.startsWith("reject") ? "deny" : option.kind === "allow_once" ? "allow_once" : "provider",
-    ...(option.description ? { description: option.description } : {}),
-  }));
+export function acpApprovalChoices(options: readonly AcpPermissionOption[]): ApprovalChoice[] {
+  const choices = options.filter((option) => option.optionId !== "allow_always_global").flatMap((option) => acpChoice(option) ?? []);
   if (!choices.some((choice) => choice.intent === "deny")) {
     let id = "mcode-deny";
     while (choices.some((choice) => choice.id === id)) id += "-";
@@ -31,8 +28,20 @@ export function acpApprovalChoices(options: readonly { optionId: string; name: s
   return choices;
 }
 
+// An option the card cannot show in full must not invalidate the whole request, which would auto-deny it.
+// Allows are dropped rather than shown with an unstated scope; a reject needs no scope, so it keeps its native id.
+function acpChoice(option: AcpPermissionOption): ApprovalChoice | undefined {
+  const intent = option.kind?.startsWith("reject") ? "deny" : option.kind === "allow_once" ? "allow_once" : "provider";
+  const choice: ApprovalChoice = { id: option.optionId, label: option.name, intent, ...(option.description ? { description: option.description } : {}) };
+  if (ApprovalChoiceSchema().safeParse(choice).success) return choice;
+  if (intent !== "deny") return undefined;
+  const plain: ApprovalChoice = { id: option.optionId, label: "Deny", intent };
+  return ApprovalChoiceSchema().safeParse(plain).success ? plain : undefined;
+}
+
 /** Prefer the native one-off reject for the future deny-note action. */
 export function acpNoteChoiceId(options: readonly { optionId: string; kind?: string | null }[], choices: ApprovalChoice[]): string | undefined {
-  return options.find((option) => option.kind === "reject_once")?.optionId
+  const rejectOnceId = options.find((option) => option.kind === "reject_once")?.optionId;
+  return choices.find((choice) => choice.id === rejectOnceId)?.id
     ?? choices.find((choice) => choice.intent === "deny")?.id;
 }

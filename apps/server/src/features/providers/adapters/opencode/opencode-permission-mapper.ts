@@ -97,7 +97,9 @@ export function synthesizeOpenCodeApprovalRequest(input: {
   if (requestId === undefined) return null;
   const scope = askScopeOf(input.properties);
   const description = grantDescription(scope.grants);
-  const choices: ApprovalChoice[] = [{ id: "once", intent: "allow_once", label: "Allow once" }];
+  // Without save, v2's always reply only allows this request and persists no grant.
+  const onceDescription = description ? undefined : grantDescription(scope.requested);
+  const choices: ApprovalChoice[] = [{ id: "once", intent: "allow_once", label: "Allow once", ...(onceDescription ? { description: onceDescription } : {}) }];
   if (description) choices.push({ id: "always", intent: "allow_scoped", label: "Always allow", description });
   choices.push({ id: "reject", intent: "deny", label: "Deny" });
   const tool = ToolIdentitySchema.safeParse(input.properties.tool);

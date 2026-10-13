@@ -1368,7 +1368,7 @@ export class ClaudeProvider
         return {
           behavior: "allow" as const,
           updatedInput: input,
-          updatedPermissions: options?.suggestions,
+          updatedPermissions: options?.suggestions?.map((update) => ({ ...update, destination: "session" })),
         };
       case "deny":
         return { behavior: "deny" as const, message: "User denied" };

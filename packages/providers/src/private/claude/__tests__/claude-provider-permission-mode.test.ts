@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { Options, PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
 
 /**
  * Minimal SDK mock returning an async generator that yields one "result"
@@ -7,15 +8,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * logic (including teardown on permissionMode change) can call them without blowing up.
  */
 function makeFakeSdkQuery(
-  pushCalls: Array<{ options: Record<string, unknown> }>,
+  pushCalls: Array<{ options: Options }>,
   flagSettingsCalls: Array<Record<string, unknown>>,
+  turnFinished?: Promise<void>,
 ) {
   return ({
     prompt,
     options,
   }: {
     prompt: AsyncIterable<unknown>;
-    options: Record<string, unknown>;
+    options: Options;
   }) => {
     pushCalls.push({ options });
     const iterator = prompt[Symbol.asyncIterator]();
@@ -26,6 +28,7 @@ function makeFakeSdkQuery(
         if (userMsg.done) {
           return { value: undefined as unknown as Record<string, unknown>, done: true };
         }
+        await turnFinished;
         return {
           value: {
             type: "result",
@@ -62,7 +65,7 @@ function makeFakeSdkQuery(
 }
 
 const { sdkCalls, mockQuery } = vi.hoisted(() => {
-  const sdkCalls: Array<{ options: Record<string, unknown> }> = [];
+  const sdkCalls: Array<{ options: Options }> = [];
   return { sdkCalls, mockQuery: vi.fn() };
 });
 
@@ -104,6 +107,102 @@ describe("ClaudeProvider permission mode changes", () => {
       undefined,
       mockProviderHost(),
     );
+  });
+
+  async function askWithSuggestions(suggestions?: PermissionUpdate[]) {
+    const turnFinished = Promise.withResolvers<void>();
+    mockQuery.mockImplementation(makeFakeSdkQuery(sdkCalls, flagSettingsCalls, turnFinished.promise));
+    await provider.sendTurn({
+      turnExecutionId: "test-execution", sessionId: "mcode-scope", threadId: "scope",
+      message: "run npm test", cwd: process.cwd(), model: "claude-sonnet-4-6",
+      permissionMode: "supervised", interactionMode: "build", providerOptions: {},
+    });
+    const canUseTool = sdkCalls[0]?.options.canUseTool;
+    if (!canUseTool) throw new Error("Missing native permission callback");
+    const result = canUseTool("Bash", { command: "npm test" }, {
+      signal: new AbortController().signal, toolUseID: "bash-1", suggestions,
+    });
+    await vi.waitFor(() => expect(provider.listPendingApprovals("scope")).toHaveLength(1));
+    const [pending] = provider.listPendingApprovals("scope");
+    if (!pending) throw new Error("Missing approval");
+    return { result, pending, finishTurn: turnFinished.resolve };
+  }
+
+  it("describes every suggested update and confines native permissions to the session", async () => {
+    const { result, pending, finishTurn } = await askWithSuggestions([
+      { type: "addRules", behavior: "allow", rules: [{ toolName: "Bash", ruleContent: "npm test:*" }], destination: "userSettings" },
+      { type: "replaceRules", behavior: "ask", rules: [{ toolName: "Read", ruleContent: "src/**" }], destination: "projectSettings" },
+      { type: "removeRules", behavior: "deny", rules: [{ toolName: "Write" }], destination: "localSettings" },
+      { type: "addDirectories", directories: ["/fixture/src"], destination: "cliArg" },
+      { type: "removeDirectories", directories: ["/fixture/tmp"], destination: "session" },
+    ]);
+    expect(pending.body.choices).toEqual([
+      { id: "allow", intent: "allow_once", label: "Allow once" },
+      { id: "allow-session", intent: "allow_scoped", label: "Allow for this session", description: "Add session allow rules for: npm test commands; Replace all session ask rules with: Read(src/**); Remove session deny rules for: all Write uses; Add accessible directories: /fixture/src; Remove accessible directories: /fixture/tmp" },
+      { id: "deny", intent: "deny", label: "Deny" },
+    ]);
+    expect(await provider.resolveApproval(pending.requestId, { choiceId: "allow-session" })).toEqual({ status: "resolved" });
+    expect(await result).toEqual({ behavior: "allow", updatedInput: { command: "npm test" }, updatedPermissions: [
+      { type: "addRules", behavior: "allow", rules: [{ toolName: "Bash", ruleContent: "npm test:*" }], destination: "session" },
+      { type: "replaceRules", behavior: "ask", rules: [{ toolName: "Read", ruleContent: "src/**" }], destination: "session" },
+      { type: "removeRules", behavior: "deny", rules: [{ toolName: "Write" }], destination: "session" },
+      { type: "addDirectories", directories: ["/fixture/src"], destination: "session" },
+      { type: "removeDirectories", directories: ["/fixture/tmp"], destination: "session" },
+    ] });
+    finishTurn();
+    await provider.stopSession("mcode-scope");
+  });
+
+  it.each<{ name: string; suggestions?: PermissionUpdate[] }>([
+    { name: "missing suggestions" },
+    { name: "empty suggestions", suggestions: [] },
+    { name: "empty rule content", suggestions: [
+      { type: "addRules", behavior: "allow", rules: [{ toolName: "Bash", ruleContent: "" }], destination: "session" },
+    ] },
+    { name: "an empty command prefix", suggestions: [
+      { type: "addRules", behavior: "allow", rules: [{ toolName: "Bash", ruleContent: ":*" }], destination: "session" },
+    ] },
+    { name: "a blank command prefix mixed with a rule", suggestions: [
+      { type: "addRules", behavior: "allow", rules: [{ toolName: "Read" }, { toolName: "Bash", ruleContent: " \t:*" }], destination: "session" },
+    ] },
+    { name: "an unknown update mixed with a rule", suggestions: [
+      { type: "addRules", behavior: "allow", rules: [{ toolName: "Read" }], destination: "session" },
+      JSON.parse('{"type":"futureUpdate","destination":"userSettings"}'),
+    ] },
+    { name: "missing rules", suggestions: [JSON.parse('{"type":"addRules","behavior":"allow","destination":"session"}')] },
+    { name: "missing directories", suggestions: [JSON.parse('{"type":"addDirectories","destination":"session"}')] },
+    { name: "malformed rules", suggestions: [JSON.parse('{"type":"addRules","behavior":"allow","rules":[{"toolName":"Bash","ruleContent":42}],"destination":"session"}')] },
+    { name: "malformed directories", suggestions: [JSON.parse('{"type":"removeDirectories","directories":[42],"destination":"session"}')] },
+    { name: "unknown rule behavior", suggestions: [JSON.parse('{"type":"addRules","behavior":"futureBehavior","rules":[{"toolName":"Read"}],"destination":"session"}')] },
+    { name: "a mode switch mixed with a rule", suggestions: [
+      { type: "addRules", behavior: "allow", rules: [{ toolName: "Read" }], destination: "session" },
+      { type: "setMode", mode: "bypassPermissions", destination: "localSettings" },
+    ] },
+  ])("keeps deny and omits an unstatable session choice: $name", async ({ suggestions }) => {
+    const { result, pending, finishTurn } = await askWithSuggestions(suggestions);
+    expect(pending.body.choices).toEqual([
+      { id: "allow", intent: "allow_once", label: "Allow once" },
+      { id: "deny", intent: "deny", label: "Deny" },
+    ]);
+    expect(await provider.resolveApproval(pending.requestId, { choiceId: "allow-session" })).toMatchObject({ status: "failed" });
+    await provider.resolveApproval(pending.requestId, { choiceId: "deny" });
+    expect(await result).toMatchObject({ behavior: "deny" });
+    finishTurn();
+    await provider.stopSession("mcode-scope");
+  });
+
+  it.each([472, 473])("never truncates a directory scope of length %s", async (length) => {
+    const { result, pending, finishTurn } = await askWithSuggestions([
+      { type: "addDirectories", directories: ["x".repeat(length)], destination: "projectSettings" },
+    ]);
+    const scoped = pending.body.choices.find((choice) => choice.id === "allow-session");
+    if (length === 472) expect(scoped?.description).toBe("Add accessible directories: " + "x".repeat(472));
+    else expect(scoped).toBeUndefined();
+    expect(pending.body.choices.at(-1)).toEqual({ id: "deny", intent: "deny", label: "Deny" });
+    await provider.resolveApproval(pending.requestId, { choiceId: "allow" });
+    expect(await result).toEqual({ behavior: "allow", updatedInput: { command: "npm test" } });
+    finishTurn();
+    await provider.stopSession("mcode-scope");
   });
 
   it("passes browser MCP through query options without touching process.env", async () => {
