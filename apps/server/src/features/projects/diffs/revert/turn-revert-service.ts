@@ -194,7 +194,7 @@ export class TurnRevertService {
     let failCommit = false;
     try { await this.fault?.("commit", writes); }
     catch (error) { if (error instanceof TurnRevertFaultStop) throw error; failCommit = true; }
-    const content = `${row.kind === "undo" ? "Undid revert of" : "Reverted"} ${row.context.label}${row.kind === "turn" ? ` · ${row.files.length} ${row.files.length === 1 ? "file" : "files"}` : ""}`;
+    const content = `${row.kind === "undo" ? "Undid revert ·" : "Reverted"} ${row.context.label}${row.kind === "turn" ? ` · ${row.files.length} ${row.files.length === 1 ? "file" : "files"}` : ""}`;
     await this.deps.writer.execute(settleTurnRevert, { id: row.id, state: "committed", content, failure: null, failCommit });
   }
 

@@ -3,6 +3,7 @@ import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { routeSnapshotRpc } from "../../transport/snapshot-rpc.js";
+import { MessageStore } from "../../../../agents/conversation/persistence/message-store.js";
 import { revertFixture, renamed, committed, probeSymlinks } from "./turn-revert-fixture.js";
 
 const symlinks = probeSymlinks();
@@ -28,10 +29,13 @@ describe("turn revert server operation", () => {
     expect(await service.preview(request)).toEqual({ status: "nothing_to_revert" });
     const undo = { threadId: "thread", revertId: first.revert.id, requestId: NodeCrypto.randomUUID() };
     const undone = committed(await service.undo(undo));
+    expect(undone.receipt).toMatchObject({ content: "Undid revert · Turn 1",
+      systemNotice: { kind: "turn-revert-undone", revertId: undone.revert.id, undoesRevertId: first.revert.id } });
+    expect(new MessageStore(f.db).findById(first.receipt.id)?.systemNotice).toMatchObject({ kind: "turn-reverted", undoneByRevertId: undone.revert.id });
     expect(f.read("a")).toEqual(Buffer.from("after\n")); expect(f.read("binary")).toEqual(Buffer.from([0, 254, 2]));
     const again = await f.request(turn.messageId), second = committed(await service.apply(again));
     expect(second.revert.id).not.toBe(first.revert.id);
-    expect(await service.apply(request)).toEqual(first);
+    expect(await service.apply(request)).toEqual({ ...first, receipt: { ...first.receipt, systemNotice: { ...first.receipt.systemNotice, undoneByRevertId: undone.revert.id } } });
     expect(await service.undo(undo)).toEqual(undone); expect(await service.apply(again)).toEqual(second);
     expect(f.read("a")).toEqual(Buffer.from("before\n")); expect(f.published).toHaveLength(3);
     await expect(service.apply({ ...request, scope: { kind: "file", path: "a" } })).rejects.toThrow(/requestId/);

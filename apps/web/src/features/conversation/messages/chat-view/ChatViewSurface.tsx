@@ -32,6 +32,7 @@ import { TurnSavingNotice } from "../../saving/TurnSavingNotice";
 import { MessageBubble } from "../MessageBubble";
 import { MessageList, type SelectedTextCommentSourceNavigationRequest } from "../MessageList";
 import { tryGetConversationResidency } from "../../residency/conversation-residency";
+import { TurnRevertAnnouncer } from "../../turn-revert/TurnRevertAnnouncer";
 import type { ChatViewState } from "./useChatViewState";
 import { NewThreadStartColumn } from "./NewThreadStartColumn";
 
@@ -560,6 +561,7 @@ function ChatMessageStage({ state, interactions, startupTrail, selectedTextComme
   return (
     <div data-testid="chat-message-stage" className="animate-fade-up-in flex-1 min-h-0">
       <ConversationStageContent stage={getConversationStage(state)} state={state} thread={thread} leadingContent={undefined} afterFirstUserContent={startupTrail} messageListProps={messageListProps} />
+      <TurnRevertAnnouncer threadId={thread.id} />
     </div>
   );
 }

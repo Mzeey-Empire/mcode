@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -33,6 +33,7 @@ import {
   type ChangesTree,
   type TurnChanges,
 } from "./changes-tree";
+import { TurnRevertBarConfirm, useRevertTurnDisabledReason } from "../turn-revert/TurnRevertBarConfirm";
 import { TurnMenu } from "./TurnMenu";
 import { useTurnChanges } from "./useTurnChanges";
 
@@ -95,7 +96,7 @@ function useTurnExpanded(
   messageId: string,
   isLatestTurn: boolean,
   manualExpandRef: TurnChangesBarProps["manualExpandRef"],
-): [boolean, () => void] {
+): [boolean, () => void, () => void] {
   const [expanded, setExpanded] = useState(() => manualExpandRef?.current?.get(messageId) ?? isLatestTurn);
 
   useEffect(() => {
@@ -110,7 +111,12 @@ function useTurnExpanded(
     });
   }, [messageId, manualExpandRef]);
 
-  return [expanded, toggle];
+  const collapse = useCallback(() => {
+    manualExpandRef?.current?.set(messageId, false);
+    setExpanded(false);
+  }, [messageId, manualExpandRef]);
+
+  return [expanded, toggle, collapse];
 }
 
 /** Absolute root of the thread's checkout, for opening files in an editor. */
@@ -124,11 +130,15 @@ function useCheckoutRoot(threadId: string | null | undefined): string | null {
 
 /** Stand-in rows while counts load or after they fail: names only. */
 function filesWithoutCounts(paths: readonly string[]): ChangedFile[] {
-  return paths.map((path) => ({ path, kind: "modified", counts: { kind: "uncounted" }, editedLater: false }));
+  return paths.map((path) => ({ path, kind: "modified", counts: { kind: "uncounted" }, editedLater: false, reverted: false }));
 }
 
 function listedFiles(changes: TurnChanges): readonly ChangedFile[] {
   return changes.status === "ready" ? changes.files : filesWithoutCounts(changes.paths);
+}
+
+function allFilesReverted(changes: TurnChanges): boolean {
+  return changes.status === "ready" && changes.files.length > 0 && changes.files.every((file) => file.reverted);
 }
 
 /** Collapsed folders, reset to the tree's initial collapse whenever the file list changes. */
@@ -148,8 +158,11 @@ function useCollapsedFolders(tree: ChangesTree, treeKey: string) {
  * line counts and a way into Review. Collapsed it is a single summary row.
  */
 export function TurnChangesBar({ threadId, messageId, filesChanged, isLatestTurn, manualExpandRef }: TurnChangesBarProps) {
-  const changes = useTurnChanges(threadId, messageId, filesChanged);
-  const [expanded, toggleExpanded] = useTurnExpanded(messageId, isLatestTurn, manualExpandRef);
+  const { changes, snapshot, serverMessageId, listLoaded } = useTurnChanges(threadId, messageId, filesChanged);
+  const [expanded, toggleExpanded, collapseList] = useTurnExpanded(messageId, isLatestTurn, manualExpandRef);
+  const [confirming, setConfirming] = useState(false);
+  const allReverted = allFilesReverted(changes);
+  const revertDisabledReason = useRevertTurnDisabledReason(threadId, { snapshot, listLoaded, allReverted });
   const files = useMemo(() => listedFiles(changes), [changes]);
   const treeKey = files.map((file) => file.path).join("\n");
   const tree = useMemo(() => buildChangesTree(files), [files]);
@@ -168,6 +181,15 @@ export function TurnChangesBar({ threadId, messageId, filesChanged, isLatestTurn
   const copyPaths = useCallback(() => {
     copyText(turnChangePaths(changes).join("\n"), "File paths copied", "Couldn't copy file paths");
   }, [changes]);
+  const openRevert = useCallback(() => {
+    collapseList();
+    setConfirming(true);
+  }, [collapseList]);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const closeRevert = useCallback(() => {
+    setConfirming(false);
+    menuTriggerRef.current?.focus();
+  }, []);
 
   const folderIds = useMemo(() => allFolderIds(tree), [tree]);
   const collapseControl = expanded && folderIds.length > 0
@@ -187,31 +209,41 @@ export function TurnChangesBar({ threadId, messageId, filesChanged, isLatestTurn
       collapseControl={collapseControl}
       onReview={openReview}
       onCopyPaths={copyPaths}
+      allReverted={allReverted}
+      onRevertTurn={openRevert}
+      revertDisabledReason={revertDisabledReason}
+      menuTriggerRef={menuTriggerRef}
     />
   );
 
-  if (!expanded) {
-    return (
-      <div className="flex h-[4.4rem] items-center rounded-control bg-panel pr-2 pl-3" data-testid="turn-changes-bar">
-        {header}
-      </div>
-    );
-  }
+  const bar = expanded
+    ? (
+        <div className="flex flex-col gap-1.5 rounded-control bg-panel pt-2 pr-2 pb-2.5 pl-3" data-testid="turn-changes-bar">
+          {header}
+          <ChangesList
+            id={listId}
+            threadId={threadId}
+            tree={tree}
+            status={changes.status}
+            collapsed={collapsed}
+            rowLimit={initial.rowLimit}
+            footer={initial.footer}
+            onToggleFolder={(folderId) => setCollapsed(toggled(collapsed, folderId))}
+            onOpenFile={openFile}
+            onReview={openReview}
+          />
+        </div>
+      )
+    : (
+        <div className="flex h-[4.4rem] items-center rounded-control bg-panel pr-2 pl-3" data-testid="turn-changes-bar">
+          {header}
+        </div>
+      );
+  // One wrapper in both states keeps the bar mounted, so closing the confirm can return focus to its menu.
   return (
-    <div className="flex flex-col gap-1.5 rounded-control bg-panel pt-2 pr-2 pb-2.5 pl-3" data-testid="turn-changes-bar">
-      {header}
-      <ChangesList
-        id={listId}
-        threadId={threadId}
-        tree={tree}
-        status={changes.status}
-        collapsed={collapsed}
-        rowLimit={initial.rowLimit}
-        footer={initial.footer}
-        onToggleFolder={(folderId) => setCollapsed(toggled(collapsed, folderId))}
-        onOpenFile={openFile}
-        onReview={openReview}
-      />
+    <div className="flex flex-col gap-2">
+      {bar}
+      {confirming && threadId && <TurnRevertBarConfirm threadId={threadId} messageId={serverMessageId} onClose={closeRevert} />}
     </div>
   );
 }
@@ -232,9 +264,14 @@ interface BarHeaderProps {
   readonly collapseControl: { readonly anyCollapsed: boolean; readonly toggle: () => void } | null;
   readonly onReview: () => void;
   readonly onCopyPaths: () => void;
+  readonly allReverted: boolean;
+  readonly onRevertTurn: () => void;
+  readonly revertDisabledReason: string | null;
+  readonly menuTriggerRef: RefObject<HTMLButtonElement | null>;
 }
 
-function BarHeader({ changes, fileCount, expanded, listId, onToggle, collapseControl, onReview, onCopyPaths }: BarHeaderProps) {
+function BarHeader(props: BarHeaderProps) {
+  const { changes, fileCount, expanded, listId, onToggle, collapseControl, onReview, onCopyPaths } = props;
   const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
     <div className="flex h-8 w-full min-w-0 items-center gap-2">
@@ -250,6 +287,7 @@ function BarHeader({ changes, fileCount, expanded, listId, onToggle, collapseCon
           Changed {fileCount} {fileCount === 1 ? "file" : "files"}
         </span>
         <HeaderCounts changes={changes} />
+        {props.allReverted && <span className="shrink-0 text-caption text-muted">reverted</span>}
         <Chevron aria-hidden size={14} strokeWidth={1.5} className="shrink-0 text-muted" />
       </button>
       <span className="grow" />
@@ -272,7 +310,13 @@ function BarHeader({ changes, fileCount, expanded, listId, onToggle, collapseCon
       >
         Review
       </button>
-      <TurnMenu onReviewChanges={onReview} onCopyFilePaths={onCopyPaths} />
+      <TurnMenu
+        onReviewChanges={onReview}
+        onCopyFilePaths={onCopyPaths}
+        onRevertTurn={props.onRevertTurn}
+        revertDisabledReason={props.revertDisabledReason}
+        triggerRef={props.menuTriggerRef}
+      />
     </div>
   );
 }
@@ -462,7 +506,8 @@ function FileAnnotations({ file }: { readonly file: ChangedFile }) {
   if (file.kind === "deleted") notes.push(<span key="kind" className="text-error">deleted</span>);
   const source = renameSource(file);
   if (source) notes.push(<span key="from" className="text-muted">from {source}</span>);
-  if (file.editedLater) notes.push(<span key="later" className="text-muted">edited later</span>);
+  if (file.reverted) notes.push(<span key="later" className="text-muted">reverted</span>);
+  else if (file.editedLater) notes.push(<span key="later" className="text-muted">edited later</span>);
   if (notes.length === 0) return null;
   return <span className="flex shrink-0 gap-2 text-caption">{notes}</span>;
 }

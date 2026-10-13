@@ -542,6 +542,12 @@ interface ThreadState {
     turnId: string,
     summary: TurnFileEffectSummary,
   ) => void;
+  /**
+   * Append a persisted server notice, such as a revert receipt, once. Threads
+   * without a loaded tail, or still loading one, are skipped, because appending
+   * mid-load would make the load discard itself. Callers retry after the load.
+   */
+  appendServerNotice: (threadId: string, message: Message) => void;
   /** Clear the interrupt file-notice banner for one thread (user dismissed). */
   clearInterruptStopFileNotice: (threadId: string) => void;
 
@@ -4369,6 +4375,16 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     }, event);
     if (!runtime) return;
     dispatchAgentEvent(agentEventHandlers, event, runtime);
+  },
+  appendServerNotice: (threadId, message) => {
+    set((state) => {
+      const rec = state.records.get(threadId);
+      if (!rec || rec.loading || rec.hasNewerMessages || rec.messages.some((m) => m.id === message.id)) return state;
+      const { messages, evicted } = capMessages([...rec.messages, message]);
+      return {
+        records: patchThreadRecord(state.records, threadId, { messages, ...(evicted ? { hasMoreMessages: true } : {}) }),
+      };
+    });
   },
   handleFileEffectsUpdated: (threadId, turnId, summary) => {
     set((state) => {

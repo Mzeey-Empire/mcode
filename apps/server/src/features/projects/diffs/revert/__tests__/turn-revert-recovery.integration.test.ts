@@ -192,6 +192,11 @@ describe("raw revert recovery", () => {
     f.db.prepare("INSERT INTO thread_startups(startup_id,workspace_id,thread_id,kind,state,phase,steps_json,transcript_json,revision) VALUES ('starting','ws','other','direct','running','agent','[]','[]',1)").run();
     expect(await f.service().preview({ threadId: "thread", messageId: turn.messageId, scope: { kind: "turn" } })).toEqual({ status: "busy", reason: "turn_running" });
     f.db.prepare("UPDATE thread_startups SET state='completed' WHERE startup_id='starting'").run();
+    f.runtime.push({ threadId: "other", turnExecutionId: "exec-other", phase: "finalizing" });
+    expect(await f.service().preview({ threadId: "thread", messageId: turn.messageId, scope: { kind: "turn" } })).toEqual({ status: "busy", reason: "turn_running" });
+    f.runtime.splice(0, 1, { threadId: "other", turnExecutionId: "exec-other", phase: "completed" });
+    expect((await f.service().preview({ threadId: "thread", messageId: turn.messageId, scope: { kind: "turn" } })).status).toBe("ready");
+    f.runtime.length = 0;
     f.db.prepare("INSERT INTO threads(id,workspace_id,title,branch,mode) VALUES ('missing-worktree','ws','missing','main','worktree')").run();
     let release = () => {}, entered = () => {};
     const pause = new Promise<void>((resolve) => { release = resolve; }), prepared = new Promise<void>((resolve) => { entered = resolve; });

@@ -23,6 +23,7 @@ import { PtyPidRegistry } from "../../features/terminal/host/pty-pid-registry.js
 
 // Services
 import { TurnResumeScheduler } from "../../features/agents/recovery/turn-resume-scheduler.js";
+import { isRunningRuntime } from "../../features/agents/orchestration/agent-service-helpers.js";
 import {
   FilesystemBrowser,
   GitComparisonService,
@@ -400,7 +401,7 @@ const agentRuntimeCommands = container.resolve(AgentRuntimeCommandPort);
 function sweepSnapshotPins(): Promise<void> {
   return snapshotRefPins.sweep({
     isThreadLive: (threadId) => agentRuntimeCommands.runtimeSnapshots()
-      .some((snapshot) => snapshot.threadId === threadId && snapshot.phase !== "idle"),
+      .some((snapshot) => snapshot.threadId === threadId && isRunningRuntime(snapshot)),
   });
 }
 const cursorProvider = container.resolve<CursorProviderBoundary>("CursorProvider");
@@ -706,7 +707,7 @@ const turnRevertService = new TurnRevertService({
   writer: databaseWriter, lock: container.resolve(RepositoryGitMutationLock), storeId: container.resolve<StoreId>(SNAPSHOT_STORE_ID),
   ...turnRevertContext(db, { turnSnapshotRepo, turnSnapshotRanges: container.resolve(TurnSnapshotRangeReader),
     snapshotService, threadService, workspaceService, gitWorktrees, sweepSnapshotPins },
-  (threadId) => agentRuntimeCommands.runtimeSnapshots().some((snapshot) => snapshot.threadId === threadId && snapshot.phase !== "idle")),
+  () => agentRuntimeCommands.runtimeSnapshots()),
   publish: ({ revert, receipt }) => {
     broadcast("turn.reverted", { threadId: revert.threadId, revert, receipt });
     broadcast("turn.diffChanged", { threadId: revert.threadId });

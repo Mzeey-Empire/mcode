@@ -19,6 +19,14 @@ export interface ChangedFile {
   readonly counts: FileCounts;
   /** A later turn in the same thread also changed this path. */
   readonly editedLater: boolean;
+  /** A revert put this path back to its state before the turn. */
+  readonly reverted: boolean;
+}
+
+/** Per-path annotations the builders stamp onto each {@link ChangedFile}. */
+export interface FileMarks {
+  readonly editedLater: ReadonlySet<string>;
+  readonly reverted: ReadonlySet<string>;
 }
 
 /** What the changes bar knows about a turn's files at a moment in time. */
@@ -244,6 +252,11 @@ export function pathsEditedLater(snapshot: TurnSnapshot, snapshots: readonly Tur
   return paths;
 }
 
+/** Paths of `snapshot` that a revert has put back. */
+export function revertedPaths(snapshot: TurnSnapshot): Set<string> {
+  return new Set(snapshot.reverted_paths.map(toForwardSlashes));
+}
+
 const EFFECT_KINDS: Record<FileEffect["kind"], ChangeKind> = {
   added: "added",
   edited: "modified",
@@ -258,7 +271,7 @@ function effectCounts(effect: FileEffect): FileCounts {
 }
 
 /** Changed files from a snapshot's recorded file effects. External paths are not part of the repo diff. */
-export function filesFromEffects(effects: readonly FileEffect[], editedLater: ReadonlySet<string>): ChangedFile[] {
+export function filesFromEffects(effects: readonly FileEffect[], marks: FileMarks): ChangedFile[] {
   return effects
     .filter((effect) => effect.scope === "workspace")
     .map((effect) => {
@@ -268,7 +281,8 @@ export function filesFromEffects(effects: readonly FileEffect[], editedLater: Re
         kind: EFFECT_KINDS[effect.kind],
         ...(effect.oldPath ? { oldPath: toForwardSlashes(effect.oldPath) } : {}),
         counts: effectCounts(effect),
-        editedLater: editedLater.has(path),
+        editedLater: marks.editedLater.has(path),
+        reverted: marks.reverted.has(path),
       };
     });
 }
@@ -283,14 +297,15 @@ const STAT_KINDS: Record<DiffStats["changeType"], ChangeKind> = {
 };
 
 /** Changed files from git diff stats over the turn's snapshot range. */
-export function filesFromStats(stats: readonly DiffStats[], editedLater: ReadonlySet<string>): ChangedFile[] {
+export function filesFromStats(stats: readonly DiffStats[], marks: FileMarks): ChangedFile[] {
   return stats.map((stat) => {
     const path = toForwardSlashes(stat.filePath);
     return {
       path,
       kind: STAT_KINDS[stat.changeType],
       counts: { kind: "lines", additions: stat.additions, deletions: stat.deletions },
-      editedLater: editedLater.has(path),
+      editedLater: marks.editedLater.has(path),
+      reverted: marks.reverted.has(path),
     };
   });
 }

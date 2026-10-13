@@ -57,7 +57,7 @@ export function turnRevertWriteHandlers(db: Database): ReadonlyMap<string, (inpu
       const receiptMessageId = writeReceipt(db, { ...row, state }, input.content);
       orm.update(turnReverts).set({ state, receiptMessageId, failure: input.failure ? JSON.stringify(input.failure) : null,
         updatedAt: new Date().toISOString() }).where(eq(turnReverts.id, row.id)).run();
-      if (state === "committed" && row.undoesRevertId) orm.update(turnReverts).set({ undoneByRevertId: row.id }).where(eq(turnReverts.id, row.undoesRevertId)).run();
+      if (state === "committed" && row.undoesRevertId) markUndone(db, row.undoesRevertId, row.id);
       if (input.failCommit) throw new Error("Injected revert commit failure");
     })())],
     [expireTurnRevert.name, databaseWriteHandler(expireTurnRevert, ({ id }) => {
@@ -65,6 +65,16 @@ export function turnRevertWriteHandlers(db: Database): ReadonlyMap<string, (inpu
       if (row?.state === "committed" || row?.state === "rolled_back") orm.update(turnReverts).set({ recoveryRef: null }).where(eq(turnReverts.id, id)).run();
     })],
   ]);
+}
+
+function markUndone(db: Database, revertId: string, undoId: string): void {
+  const orm = drizzle(db);
+  const target = orm.update(turnReverts).set({ undoneByRevertId: undoId }).where(eq(turnReverts.id, revertId)).returning().get();
+  if (!target?.receiptMessageId) return;
+  const receipt = new MessageStore(db).findById(target.receiptMessageId);
+  if (!receipt?.systemNotice) return;
+  orm.update(messages).set({ systemNotice: JSON.stringify({ ...receipt.systemNotice, undoneByRevertId: undoId }) })
+    .where(eq(messages.id, receipt.id)).run();
 }
 
 function writeReceipt(db: Database, row: typeof turnReverts.$inferSelect, content: string | null): string | null {
@@ -76,5 +86,5 @@ function writeReceipt(db: Database, row: typeof turnReverts.$inferSelect, conten
   const notices = new MessageStore(db);
   const kind = row.state === "committed" ? (row.kind === "undo" ? "turn-revert-undone" : "turn-reverted") : "turn-revert-interrupted";
   return notices.createSystemNotice(row.threadId, content, notices.getLatestSequenceIncludingInternal(row.threadId) + 1,
-    { kind, presentation: "timeline", revertId: row.id }).id;
+    { kind, presentation: "timeline", revertId: row.id, ...(row.undoesRevertId ? { undoesRevertId: row.undoesRevertId } : {}) }).id;
 }

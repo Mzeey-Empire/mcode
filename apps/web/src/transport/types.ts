@@ -54,6 +54,9 @@ import type {
   ThoughtSegmentRecord,
   HookExecutionRecord,
   TurnSnapshot,
+  TurnRevertPreview,
+  TurnRevertResult,
+  TurnRevertScope,
   Settings,
   PartialSettings,
   GitCommit,
@@ -784,6 +787,12 @@ export interface McodeTransport {
   listSnapshots(threadId: string): Promise<TurnSnapshot[]>;
   /** Get cumulative diff across all turns for a thread. Implemented in Phase 3. */
   listReviewTurns(threadId: string): Promise<ReviewTurn[]>;
+  /** Plan a turn revert without touching the worktree. */
+  previewTurnRevert(threadId: string, messageId: string, scope: TurnRevertScope): Promise<TurnRevertPreview>;
+  /** Apply a previewed revert. Resending the same `requestId` replays the first outcome. */
+  applyTurnRevert(params: { threadId: string; messageId: string; scope: TurnRevertScope; previewToken: string; requestId: string }): Promise<TurnRevertResult>;
+  /** Undo a committed revert. Resending the same `requestId` replays the first outcome. */
+  undoTurnRevert(threadId: string, revertId: string, requestId: string): Promise<TurnRevertResult>;
   /** With `afterSequence`, reads only whole turns that settled after that message sequence. */
   getCumulativeDiff(threadId: string, filePath?: string, maxLines?: number, afterSequence?: number): Promise<ReviewFileDiffResult>;
   /**

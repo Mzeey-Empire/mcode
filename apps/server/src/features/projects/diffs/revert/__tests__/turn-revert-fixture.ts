@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import * as NodeChildProcess from "node:child_process";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
-import type { FileEffect, TurnRevertScope, TurnRevertResult } from "@mcode/contracts";
+import type { FileEffect, TurnRevertScope, TurnRevertResult, TurnRuntimeSnapshot } from "@mcode/contracts";
 import { createSnapshotRangeFixture } from "../../snapshots/__tests__/turn-snapshot-range-fixture.js";
 import { agentStorageTestWriter } from "../../../../agents/__tests__/agent-storage-fixture.js";
 import { TurnRevertStore } from "../../../../agents/turns/persistence/turn-revert-store.js";
@@ -27,8 +27,9 @@ export async function revertFixture() {
   const storeId = StoreIdSchema.parse(NodeCrypto.randomUUID());
   const pins = new SnapshotRefPins(gitExecutor, storeId, base.db, writer, lock, snapshots, hostRuntime);
   const published: TurnRevertResult[] = [];
+  const runtime: TurnRuntimeSnapshot[] = [];
   const deps: TurnRevertDeps = { snapshots, ranges: base.ranges, writer, store, storeId, lock,
-    ...turnRevertContext(base.db, base.deps, () => false), publish: (result) => { published.push(result); } };
+    ...turnRevertContext(base.db, base.deps, () => runtime), publish: (result) => { published.push(result); } };
   let cwd = base.directory;
   const git = (...args: string[]) => NodeChildProcess.execFileSync("git", ["-C", cwd, ...args],
     { encoding: "utf8", env: { ...process.env, ...PIN_COMMIT_ENV }, windowsHide: true }).trim();
@@ -66,7 +67,7 @@ export async function revertFixture() {
     cwd = linked;
     base.db.prepare("UPDATE threads SET mode='worktree', worktree_path=? WHERE id='thread'").run(cwd);
   }
-  return { ...base, snapshotRouterDeps: base.deps, snapshotRepo: base.snapshots, get cwd() { return cwd; }, lock, snapshots, writer, store, storeId, pins, published, deps, git, write, read, exists, remove, rename, service, turn, request, linked };
+  return { ...base, snapshotRouterDeps: base.deps, snapshotRepo: base.snapshots, get cwd() { return cwd; }, lock, snapshots, writer, store, storeId, pins, published, runtime, deps, git, write, read, exists, remove, rename, service, turn, request, linked };
 }
 
 /** Explicit rename evidence independent of similarity heuristics. */
