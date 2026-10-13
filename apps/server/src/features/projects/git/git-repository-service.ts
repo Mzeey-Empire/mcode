@@ -1,9 +1,9 @@
 import * as NodePath from "node:path";
-import { z } from "zod";
 import { inject, injectable } from "tsyringe";
 import { logger, validateBranchName } from "@mcode/shared";
-import type { GitBranch, GitRemoteUrl, GitRefsListParams, GitRefsListResult, GitListError } from "@mcode/contracts";
+import type { GitBranch, GitRemoteUrl, GitRefsListParams, GitRefsListResult } from "@mcode/contracts";
 import { buildRefPage } from "./git-ref-targets.js";
+import { gitCommandFailureSchema, gitListError } from "./git-list-error.js";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import type { GitExecOptions, GitExecutor } from "./execution/index.js";
 
@@ -30,11 +30,6 @@ function assertSafeBranchCreationName(name: string): void {
     throw new Error(`Branch name contains invalid characters: ${name}`);
   }
 }
-
-const gitCommandFailureSchema = z.object({
-  stderr: z.string().optional(), message: z.string().optional(),
-  killed: z.boolean().optional(), code: z.union([z.string(), z.number()]).nullish(),
-});
 
 /** Failure categories the origin-start flow can explain and recover from. */
 export type OriginFetchErrorCode = "no_origin" | "branch_missing" | "network_or_auth" | "timed_out";
@@ -72,20 +67,6 @@ function originFetchError(error: unknown, branch: string): OriginFetchError {
     return new OriginFetchError("branch_missing", `Branch "${branch}" does not exist on origin.`, detail);
   }
   return new OriginFetchError("network_or_auth", "Could not fetch from origin. Check your connection and Git access.", detail);
-}
-
-/** Classify failures shared by ref and commit picker listings. */
-export function gitListError(error: unknown): GitListError {
-  const parsed = gitCommandFailureSchema.safeParse(error);
-  const failure = parsed.success ? parsed.data : {};
-  const detail = (failure.stderr || failure.message || String(error)).split(/\r?\n/)[0]?.slice(0, 2000);
-  if (failure.killed || failure.code === "ETIMEDOUT") {
-    return { code: "timed_out", message: "Git target listing timed out.", detail };
-  }
-  return {
-    code: /not a git repository/i.test(failure.stderr ?? "") ? "not_a_repository" : "git_failed",
-    message: "Could not list Git targets.", detail,
-  };
 }
 
 function fallbackRemoteUrl(repoPath: string): GitRemoteUrl {

@@ -15,7 +15,8 @@ import type {
 } from "@mcode/contracts";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import type { GitExecutor } from "./execution/index.js";
-import { GitRepositoryService, gitListError } from "./git-repository-service.js";
+import { GitRepositoryService } from "./git-repository-service.js";
+import { gitListError } from "./git-list-error.js";
 import { batchLiteralPaths } from "./literal-paths.js";
 import { assertReviewWorktree, reviewComparisonFailure, ReviewComparisonLimitError, UnsafeReviewRefError } from "./review-comparison-errors.js";
 

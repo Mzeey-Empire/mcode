@@ -9,7 +9,7 @@ import type { WorkspaceService } from "../../lifecycle/workspace-service.js";
 import type { WorkspaceRepo } from "../../persistence/workspace-repo.js";
 import type { GitComparisonService } from "../git-comparison-service.js";
 import type { GitRepositoryService } from "../git-repository-service.js";
-import { gitListError } from "../git-repository-service.js";
+import { gitListError } from "../git-list-error.js";
 import type { GitPushService } from "../git-push-service.js";
 import type { CommitMessageGenerator } from "../commits/commit-message-generator.js";
 import type { GitCommitService } from "../commits/git-commit-service.js";
