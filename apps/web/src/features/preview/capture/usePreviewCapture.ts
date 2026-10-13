@@ -119,10 +119,7 @@ interface ScreenshotRequest {
   phase: "syncing" | "armed";
 }
 
-/**
- * Manages capture handlers and busy states for the browser preview:
- * the Screenshot overlay (viewport click or region drag) and element pick.
- */
+/** Screenshot and element-pick capture state and callbacks. */
 export function usePreviewCapture({
   threadId,
   activeTabId,
@@ -132,14 +129,12 @@ export function usePreviewCapture({
 }: UsePreviewCaptureOptions): PreviewCaptureState {
   const [screenshotArmed, setScreenshotArmed] = useState(false);
   const [elementPickBusy, setElementPickBusy] = useState(false);
-  // The ref, not state, decides ownership so two presses in one tick and late
-  // results from a superseded request see the same answer.
+  // React state updates are batched; the ref makes request ownership immediate.
   const screenshotRequestRef = useRef<ScreenshotRequest | null>(null);
   const nextScreenshotIdRef = useRef(0);
 
   const anyCaptureActive = screenshotArmed || elementPickBusy;
 
-  /** Clears the request if it is still current; returns whether it was. */
   const settleScreenshot = useCallback((request: ScreenshotRequest): boolean => {
     if (screenshotRequestRef.current !== request) return false;
     screenshotRequestRef.current = null;
@@ -151,11 +146,9 @@ export function usePreviewCapture({
     const request = screenshotRequestRef.current;
     if (!request) return;
     settleScreenshot(request);
-    // A syncing request has no overlay yet; it notices it is stale after pushSync.
     if (request.phase === "armed") void window.desktopBridge?.preview?.cancelCapture();
   }, [settleScreenshot]);
 
-  /** Syncs bounds, then opens the overlay. Resolves null when superseded or the bridge throws. */
   const runScreenshot = useCallback(async (
     request: ScreenshotRequest,
     capture: () => Promise<CaptureResult>,
@@ -213,8 +206,6 @@ export function usePreviewCapture({
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [cancelScreenshot, screenshotArmed]);
 
-  // A Screenshot belongs to the thread, tab, and visible preview it started in.
-  // Any change, or unmount, cancels it so a late result never lands elsewhere.
   useEffect(() => {
     return () => cancelScreenshot();
   }, [activeTabId, cancelScreenshot, presentationActive, threadId]);

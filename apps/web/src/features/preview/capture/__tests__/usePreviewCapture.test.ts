@@ -25,7 +25,6 @@ vi.mock("../../state/previewReferenceQueueStore", () => ({
 // Helper factories
 // ---------------------------------------------------------------------------
 
-/** Minimal successful capture result. */
 function makeCapturePngResult(overrides?: object) {
   return {
     ok: true as const,

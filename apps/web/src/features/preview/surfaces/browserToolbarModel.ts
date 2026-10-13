@@ -1,8 +1,3 @@
-/**
- * The Browser toolbar's local UI model. Each runtime owner (desktop BrowserChrome,
- * WebRuntimePreview) translates its own capabilities into these shapes, so the
- * rendered controls never choose a target or carry a callable no-op.
- */
 
 /** An action available here, or the reason it cannot run. */
 export type BrowserAction =
@@ -12,10 +7,10 @@ export type BrowserAction =
 /** The three Browser actions that also have keyboard commands. */
 export type BrowserCommandAction = "deviceToolbar" | "developerTools" | "forceReload";
 
-/** The command-backed actions of one Browser owner, keyed by {@link BrowserCommandAction}. */
+/** Command-backed actions for one Browser owner. */
 export type BrowserCommandActions = { readonly [action in BrowserCommandAction]: BrowserAction };
 
-/** Desktop-only page tools beside the address; the web runtime has no guest to pick from or capture. */
+/** Page tools requiring a desktop guest. */
 export type BrowserPageActions =
   | { readonly kind: "unavailable" }
   | {
@@ -33,11 +28,7 @@ export interface BrowserNavigation {
   readonly reload: BrowserAction;
 }
 
-/**
- * Which row-2 layout the page gets. An error wins over an address, and a page
- * that is still loading counts as loaded. A new page has no navigation or page
- * tools to offer.
- */
+/** Toolbar state. Errors take precedence; "loaded" includes pages still loading. */
 export type BrowserToolbarPage =
   | { readonly kind: "new" }
   | { readonly kind: "error"; readonly navigation: BrowserNavigation }
@@ -78,7 +69,7 @@ export interface BrowserTools extends BrowserCommandActions {
   readonly takeover: BrowserTakeover;
 }
 
-/** Wraps `run` as enabled, or disables it with `reason` when `reason` is set. */
+/** A non-null reason disables the action. */
 export function browserAction(reason: string | null, run: () => void): BrowserAction {
   return reason === null ? { kind: "enabled", run } : { kind: "disabled", reason };
 }

@@ -338,10 +338,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     }> {
       return ipcRenderer.invoke("preview:get-navigation-state");
     },
-    /**
-     * Arm the Screenshot overlay. Click captures the viewport, drag captures a
-     * region, Esc or `cancelCapture` resolves `cancelled`.
-     */
+    /** Click captures the viewport, drag captures a region, and Esc or cancelCapture cancels. */
     capturePictureReference(): Promise<unknown> {
       return ipcRenderer.invoke("preview:capture-picture-reference");
     },

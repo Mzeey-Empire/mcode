@@ -32,7 +32,6 @@ function isTerminalFocused(el: Element | null): boolean {
   );
 }
 
-/** Update the focus-derived contexts from the active element. */
 function updateFocusContext(): void {
   const active = document.activeElement;
   setContext("inputFocused", isInputElement(active));

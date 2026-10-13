@@ -263,9 +263,6 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
       });
       return { liveTargets };
     });
-    // Host viewport writes are accepted only at the live revision, and the desktop
-    // coordinator learns its generation once at mount. Without this, a page switch
-    // makes every later user resize or reset stale and Responsive mode can't be left.
     const revision = get().liveTargets.get(key)?.revision;
     if (revision !== undefined) get().viewportCoordinators.get(key)?.setTargetGeneration(revision);
   },

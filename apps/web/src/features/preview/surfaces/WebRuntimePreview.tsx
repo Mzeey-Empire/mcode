@@ -95,17 +95,14 @@ function runtimeVisiblePage(
   return { pageState: visiblePageState, address: visibleAddress };
 }
 
-/** Reason for desktop-only guest tools, which need the guest's webContents. */
 const DESKTOP_ONLY_REASON = "Available in the desktop app";
 
-/** A failed load wins over its address and keeps navigation reachable; no address is a new page. */
 function runtimeToolbarPage(
   address: string | null,
   pageState: BrowserSurfacePageState | null,
   reload: BrowserAction,
 ): BrowserToolbarPage {
   const navigation = {
-    // The web surface host has no history API, so back and forward cannot be offered here.
     back: { kind: "disabled", reason: DESKTOP_ONLY_REASON },
     forward: { kind: "disabled", reason: DESKTOP_ONLY_REASON },
     reload,
@@ -115,7 +112,6 @@ function runtimeToolbarPage(
   return { kind: "loaded", navigation, pageActions: { kind: "unavailable" } };
 }
 
-/** The web runtime has no guest webContents, so only the device toolbar is real here. */
 function runtimeTools(onToggleViewportToolbar: () => void): BrowserTools {
   const desktopOnly = { kind: "disabled", reason: DESKTOP_ONLY_REASON } as const;
   return {

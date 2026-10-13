@@ -1,6 +1,3 @@
-/**
- * In-page Screenshot (click or drag) and element-pick capture helpers for an adopted Preview guest.
- */
 
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -291,18 +288,6 @@ const EP_POLL_JS = `(function(){
   return JSON.stringify({ state: "idle", seq: st.seq });
 })()`;
 
-/**
- * Screenshot overlay runs entirely inside the guest page (parallel to the
- * element-pick pattern in {@link EP_INJECT_JS}). A translucent fixed-position
- * layer captures pointer events at the document's capture phase, blocking the
- * underlying page, and a `window.__mcodeRgState` object holds the pending
- * selection or cancellation flag for the host to drain via executeJavaScript
- * polling.
- *
- * Classification: a press that never moved 4px on either axis is a click
- * (viewport). Otherwise the release point decides: both sides >= 4px is a
- * region, anything thinner cancels so the user can try again.
- */
 const RG_INJECT_JS = `(function(){
   if (window.__mcodeRgTeardown) return;
   var LAYER_ID = "__mcode_rg_layer", BOX_ID = "__mcode_rg_box";
@@ -464,7 +449,6 @@ const RG_REMOVE_JS = `(function(){
   }
 })()`;
 
-/** Polls the guest Screenshot state; the host validates it with {@link BrowserScreenshotOverlayPollSchema}. */
 const RG_POLL_JS = `(function(){
   var st = window.__mcodeRgState;
   if (!st) return JSON.stringify({ state: "gone" });
@@ -1116,15 +1100,7 @@ function finishOverlaySession(
   pending.finish(result);
 }
 
-/**
- * Registers all overlay-related IPC handlers:
- * cancel-capture, capture-picture-reference (Screenshot), capture-picture-element-pick.
- *
- * Element-pick has no dedicated IPC handlers anymore. The pick session runs entirely
- * inside the guest page via {@link EP_INJECT_JS}; the host polls `window.__mcodeEpState`
- * for commit/cancel signals.
- * Call once at app startup.
- */
+/** Registers capture and cancellation IPC handlers. Call once at app startup. */
 export function registerOverlayHandlers(): void {
   ipcMain.handle("preview:cancel-capture", (event): void => {
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -1286,11 +1262,7 @@ async function runRegionPollTick(s: PreviewSession, hostWin: BrowserWindow): Pro
   schedulePollRegion(s, hostWin);
 }
 
-/**
- * Runs the capture for a committed Screenshot selection and produces the payload.
- * Tears down the injected marquee + handlers before capturePage so the dashed
- * frame is not in the PNG.
- */
+/** Remove the marquee before capturePage so it does not appear in the PNG. */
 async function finishScreenshotCapture(s: PreviewSession, selection: BrowserScreenshotSelection): Promise<void> {
   const pending = s.overlayPending;
   if (!pending || pending.mode !== "region") return;
@@ -1494,11 +1466,7 @@ async function finishOverlayCaptureFailure(
   }
 }
 
-/**
- * What to grab from the guest. A viewport capture passes no rect; its bounds
- * only describe the image in the capture metadata. Shell x/y offsets must never
- * become a capture rect because capturePage takes guest coordinates.
- */
+/** capturePage expects guest coordinates; viewport bounds are metadata only. */
 type OverlayCaptureArea =
   | { readonly kind: "viewport"; readonly bounds: Bounds }
   | { readonly kind: "rect"; readonly bounds: Bounds };

@@ -9,11 +9,7 @@ interface BrowserCommandDefinition {
   readonly action: BrowserCommandAction;
 }
 
-/**
- * Browser commands shared by keyboard registration and the More menu rows, so a
- * row's shortcut and its key run the same action. Key chords live in
- * `default-keybindings.json`, never here.
- */
+/** Browser commands shared by keyboard bindings and the More menu. */
 export const browserCommands = [
   { id: "preview.deviceToolbar.toggle", title: "Device toolbar", action: "deviceToolbar" },
   { id: "preview.guestDevTools.open", title: "Developer tools", action: "developerTools" },
@@ -27,12 +23,7 @@ function enabledCommandKey(actions: BrowserCommandActions): string {
     .join(" ");
 }
 
-/**
- * Registers the Browser commands for the visible Browser owner only. The
- * registry is last-wins and a disposer never restores the registration it
- * displaced, so a hidden warm panel must not register at all. Disabled actions
- * stay unregistered so their keys fall through to other bindings.
- */
+/** Registers enabled commands for the visible, uncovered Browser owner. */
 export function useBrowserCommands({
   active,
   actions,
@@ -43,7 +34,6 @@ export function useBrowserCommands({
 }): void {
   const gateOpen = useContext(OverlayGateContext);
   const owns = active && gateOpen;
-  // Handlers read the latest actions so a new tab or URL does not re-register.
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
   const enabledKey = owns ? enabledCommandKey(actions) : "";

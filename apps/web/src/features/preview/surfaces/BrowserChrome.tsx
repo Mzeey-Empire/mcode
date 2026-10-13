@@ -1,6 +1,3 @@
-/**
- * Owns the desktop Browser toolbar, annotation header and viewport toolbar wiring, separate from the page surface and design overlays.
- */
 import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { BrowserToolbar } from "./BrowserToolbar";
 import { BrowserViewportToolbar } from "./BrowserViewportToolbar";
@@ -45,7 +42,7 @@ interface BrowserChromeProps {
   readonly designModeSetActive: ReturnType<typeof useDesignAnnotationState>["designModeSetActive"];
   readonly webviewInputUrl: ReturnType<typeof usePreviewPage>["webviewInputUrl"];
   readonly hasLoadedPage: boolean;
-  /** The page's load or rejected-navigation error; it wins over an address for the toolbar variant. */
+  /** Load or rejected-navigation error, taking precedence over the address. */
   readonly pageError: PreviewPageError | undefined;
   readonly webviewCanBack: ReturnType<typeof usePreviewPage>["webviewCanBack"];
   readonly webviewCanFwd: ReturnType<typeof usePreviewPage>["webviewCanFwd"];
@@ -104,7 +101,6 @@ function desktopNavigation({
   };
 }
 
-/** Error wins over an address; a page with an address counts as loaded even while it loads. */
 function desktopPage(inputs: DesktopToolbarInputs): BrowserToolbarPage {
   const { threadId, hasLoadedPage, pageError, designModeActive, capture, onToggleDesignMode } = inputs;
   if (pageError) return { kind: "error", navigation: desktopNavigation(inputs) };
@@ -178,7 +174,7 @@ function desktopAddress(
   };
 }
 
-/** Puts the Browser or annotation header in the panel header's row 2; the viewport toolbar stays over the page. */
+/** Browser header with annotation controls and a viewport toolbar. */
 export function BrowserChrome(props: BrowserChromeProps) {
   const { threadId, browserWorkspaceId, activeWebviewTabId } = props;
   const invalidateObservation = (): void => {

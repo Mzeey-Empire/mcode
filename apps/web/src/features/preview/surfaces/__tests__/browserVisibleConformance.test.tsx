@@ -331,7 +331,6 @@ function visibleBrowserRun(currentUrl: string | null) {
       controlOwner,
       tabCount: 1,
       currentUrl,
-      // Row 2 shows only the address; the page title lives in the row-1 tab.
       title: null,
       action: null,
       truncated: false,

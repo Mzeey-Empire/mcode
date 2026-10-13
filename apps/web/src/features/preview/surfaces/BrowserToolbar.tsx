@@ -66,11 +66,7 @@ function PageActions({ actions }: { readonly actions: BrowserPageActions }) {
   );
 }
 
-/**
- * Row 2 of the Browser header. A new page offers only the address and More; an
- * errored page adds navigation so the user can go back or retry; a loaded page
- * adds Design and Screenshot.
- */
+/** Browser address and tools, with navigation on loaded or errored pages. */
 export function BrowserToolbar({ page, address, tools, focusRequest }: BrowserToolbarProps) {
   return (
     <div data-testid="browser-toolbar" className="flex h-10 min-w-0 flex-1 items-center gap-2 px-2">

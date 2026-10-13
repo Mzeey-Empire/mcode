@@ -12,7 +12,6 @@ function page(id: string, title: string): BrowserTabInfo {
   return { id, threadId: THREAD, title, url: null, faviconUrl: null, warm: true, active: false };
 }
 
-/** A desktop tab transport that keeps its pages in memory, like the main process. */
 function installFakeTabTransport(initial: readonly BrowserTabInfo[]) {
   let pages = [...initial];
   let activeTabId: string | null = pages[0]?.id ?? null;

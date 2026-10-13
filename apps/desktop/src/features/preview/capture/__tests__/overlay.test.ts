@@ -217,7 +217,6 @@ function pointer(guest: FakeGuest, type: PointerType, x: number, y: number): voi
   }));
 }
 
-/** Presses at the first point, moves through the middle points, and releases at the last. */
 function gesture(guest: FakeGuest, points: ReadonlyArray<readonly [number, number]>): void {
   const [first, ...rest] = points;
   const last = rest.pop() ?? first!;

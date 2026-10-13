@@ -26,24 +26,14 @@ export interface PanelTabStripProps {
   readonly onAdd: () => void;
   /** Trailing content inside one tab, after its label (for example a status glyph). */
   readonly renderAdornment?: (item: PanelTabStripItem) => ReactNode;
-  /**
-   * `"browser"` sizes tabs for Browser pages: the active tab keeps its natural
-   * width, inactive tabs shrink to 96px before the strip scrolls, and overflow
-   * shows only the edge fade, never chevrons. Defaults to `"default"` (Terminal).
-   */
+  /** Browser tabs shrink to 96px and omit scroll chevrons. Defaults to "default". */
   readonly appearance?: PanelTabStripAppearance;
 }
 
 /** Sizing contract for a {@link PanelTabStrip}. */
 export type PanelTabStripAppearance = "default" | "browser";
 
-/**
- * Row-1 tabs for a tool that holds several items (Terminal records, Browser
- * pages), followed by a round + that adds one. Inactive tabs shrink first; once
- * they reach their minimum the strip scrolls, fades each edge that hides tabs,
- * and (in the default appearance) shows scroll chevrons. The + stays pinned
- * outside the scroller. See ADR-0026.
- */
+/** Tool tabs with a pinned add button and scrolling overflow. See ADR-0026. */
 export function PanelTabStrip({
   items,
   activeId,
@@ -240,14 +230,10 @@ function useScrollActiveTabIntoView(
 }
 
 const TAB_SIZING: Readonly<Record<PanelTabStripAppearance, { readonly active: string; readonly inactive: string }>> = {
-  // The active tab keeps its full label unless the strip itself is narrower; the others
-  // give up width before the strip scrolls.
   default: {
     active: "max-w-[min(24rem,100%)] min-w-0 shrink-0",
     inactive: "max-w-60 min-w-28 shrink",
   },
-  // Browser titles are long, so inactive pages start at their title width and shrink to
-  // a 96px floor; only then does the strip scroll.
   browser: {
     active: "max-w-full min-w-0 shrink-0",
     inactive: "min-w-24 flex-[0_1_max-content]",

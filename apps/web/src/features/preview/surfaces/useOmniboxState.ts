@@ -1,6 +1,6 @@
 import { type RefObject, useCallback, useRef, useState } from "react";
 
-/** The address pill's editable draft plus the input handlers that drive it. */
+/** Editable address state and input handlers. */
 export interface OmniboxState {
   /** The draft while edited, else the synced URL. */
   readonly value: string;
@@ -18,18 +18,13 @@ interface Draft {
   readonly dirty: boolean;
 }
 
-/**
- * The address pill's draft. It resets when the synced `url` changes after a
- * navigation, not on submit, so a rejected or ignored navigation keeps what the
- * user typed.
- */
+/** Preserves the draft until the synced URL changes, including after rejected navigation. */
 export function useOmniboxState(url: string): OmniboxState {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState<Draft>(() => ({ sourceUrl: url, value: url, dirty: false }));
   const active = draft.sourceUrl === url ? draft : { sourceUrl: url, value: url, dirty: false };
 
   const onFocus = useCallback(() => {
-    // Select after React commits the focused value, or the selection lands on stale text.
     requestAnimationFrame(() => inputRef.current?.select());
   }, []);
 

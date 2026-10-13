@@ -29,14 +29,9 @@ function runAction(action: BrowserAction): (() => void) | undefined {
   return action.kind === "enabled" ? action.run : undefined;
 }
 
-/**
- * The live zoom factor. The row mounts with each opening of the menu, so the
- * factor is read fresh every time; navigation can reset it behind the menu.
- */
 function useZoomFactor(zoom: BrowserZoom) {
   const [factor, setFactor] = useState<number | null>(null);
   const [applying, setApplying] = useState(false);
-  // Keyed on the reader, not the zoom object, which owners rebuild every render.
   const read = zoom.kind === "enabled" ? zoom.read : null;
   useEffect(() => {
     if (read === null) return undefined;
@@ -106,11 +101,7 @@ function TakeControlItem({ takeover }: { readonly takeover: BrowserTakeover }) {
   );
 }
 
-/**
- * The Browser's More menu: zoom, the keyboard-backed tools with their current
- * shortcuts, takeover from the agent, and session clearing. Every unavailable
- * row stays visible with the reason it cannot run.
- */
+/** Browser tools and shortcuts. Unavailable actions retain their disabled reason. */
 export function BrowserMoreMenu({ tools }: { readonly tools: BrowserTools }) {
   const [open, setOpen] = usePanelHeaderMenuOpen();
   return (

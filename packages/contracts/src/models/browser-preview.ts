@@ -168,10 +168,7 @@ export type BrowserPreviewCaptureKind = z.infer<
   ReturnType<typeof BrowserPreviewCaptureKindSchema>
 >;
 
-/**
- * What the user chose in the Screenshot overlay: a click means the whole
- * viewport, a drag means a guest-coordinate rectangle.
- */
+/** Screenshot selection: viewport or rectangle in guest coordinates. */
 export const BrowserScreenshotSelectionSchema = lazySchema(() =>
   z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("viewport") }),
@@ -191,10 +188,7 @@ export type BrowserScreenshotSelection = z.infer<
   ReturnType<typeof BrowserScreenshotSelectionSchema>
 >;
 
-/**
- * One poll of the Screenshot overlay state in the guest page. The guest is
- * untrusted page context, so desktop main validates this before capturing.
- */
+/** Validates Screenshot overlay state from the untrusted guest page. */
 export const BrowserScreenshotOverlayPollSchema = lazySchema(() =>
   z.discriminatedUnion("state", [
     z.object({ state: z.literal("idle"), seq: z.number() }),

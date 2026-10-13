@@ -8,7 +8,7 @@ import { useOmniboxState } from "./useOmniboxState";
 /** Props for {@link BrowserUrlPill}. */
 export interface BrowserUrlPillProps {
   readonly address: BrowserAddress;
-  /** A new page has no address yet, so the pill asks for one with a focus ring. */
+  /** Shows an address prompt on a new page. */
   readonly newPage: boolean;
   /** Monotonic token: each change focuses the pill and selects its text. */
   readonly focusRequest?: number;
@@ -19,7 +19,6 @@ interface UrlDisplay {
   readonly rest: string;
 }
 
-/** Splits a URL into a muted origin and the inked remainder; anything unparseable shows as plain text. */
 function urlDisplay(url: string): UrlDisplay {
   try {
     const parsed = new URL(url);
@@ -51,11 +50,7 @@ function UrlAtRest({ url }: { readonly url: string }) {
   );
 }
 
-/**
- * The Browser address. At rest it shows the page URL with a muted origin; focused
- * it is a plain editable field. Enter navigates and keeps the draft until the
- * page's URL actually changes, so a rejected address stays editable.
- */
+/** Editable address that preserves the submitted draft until the page URL changes. */
 export function BrowserUrlPill({ address, newPage, focusRequest }: BrowserUrlPillProps) {
   const { url, onNavigate, openExternal, onHumanFocus } = address;
   const omnibox = useOmniboxState(url);
@@ -79,7 +74,6 @@ export function BrowserUrlPill({ address, newPage, focusRequest }: BrowserUrlPil
         newPage && "shadow-[inset_0_0_0_1px_var(--color-focus)]",
       )}
     >
-      {/* The address uses 13/20, which only the code-small role carries; the font stays the UI sans. */}
       <div className="relative min-w-0 flex-1 text-code-small">
         <input
           ref={omnibox.inputRef}

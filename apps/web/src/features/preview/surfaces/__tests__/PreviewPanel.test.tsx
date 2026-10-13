@@ -68,8 +68,6 @@ vi.mock("@/transport", () => ({
   }),
 }));
 
-// The panel only consumes usePreviewTabs for its store subscription; page
-// switching, closing and adding live in the row-1 tab strip.
 vi.mock("../../tabs/usePreviewTabs", () => ({
   usePreviewTabs: mockUsePreviewTabs,
 }));

@@ -11,7 +11,6 @@ import {
 } from "../automation/browserAutomationStore";
 import { usePreviewTabsStore } from "../state/previewTabsStore";
 
-/** Human-readable name for a browser page: its title, else its host, else "New page". */
 function browserPageLabel(page: Pick<BrowserTabInfo, "title" | "url">): string {
   if (page.title && page.title.trim().length > 0) return page.title;
   if (!page.url || page.url.trim().length === 0) return "New page";
@@ -24,7 +23,6 @@ function browserPageLabel(page: Pick<BrowserTabInfo, "title" | "url">): string {
 }
 
 function PageIcon({ faviconUrl, active }: { readonly faviconUrl: string | null; readonly active: boolean }) {
-  // Only the favicon dims, so the close action that replaces it on hover stays full strength.
   return (
     <span className={cn("grid place-items-center", !active && "opacity-60")}>
       {faviconUrl ? (
@@ -68,10 +66,7 @@ export interface BrowserTabStripProps {
   readonly tabSet: BrowserTabSet | null;
 }
 
-/**
- * The Browser tool's row-1 tabs: one per open page, with a round + that opens
- * another. Closing the last page closes the Browser tool. See ADR-0026.
- */
+/** Browser page tabs. Closing the last page closes the Browser tool. See ADR-0026. */
 export function BrowserTabStrip({ workspaceId, threadId, scopeId, tabSet }: BrowserTabStripProps) {
   const pages = tabSet?.tabs;
   const activeId = tabSet?.activeTabId ?? null;
@@ -86,7 +81,6 @@ export function BrowserTabStrip({ workspaceId, threadId, scopeId, tabSet }: Brow
   const store = usePreviewTabsStore.getState;
   return (
     <PanelHeaderSlot slot="leading">
-      {/* Marks the strip as Browser chrome so Browser keys work while a tab has focus. */}
       <div data-browser-chrome="" className="flex min-w-0 flex-1 items-center">
         <PanelTabStrip
           appearance="browser"
