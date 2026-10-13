@@ -16,12 +16,12 @@ vi.mock("@/transport", async () => ({
 installListboxLayout();
 
 function ref(fullName: string, overrides: Partial<GitRef> = {}): GitRef {
-  const remote = fullName.startsWith("refs/remotes/origin/") ? "origin" : null;
-  const branchName = fullName.replace(/^refs\/(heads|remotes\/origin)\//, "");
+  const remote = /^refs\/remotes\/([^/]+)\//.exec(fullName)?.[1] ?? null;
+  const branchName = fullName.replace(/^refs\/(heads|remotes\/[^/]+)\//, "");
   return {
     kind: "ref",
     fullName,
-    shortName: remote ? `origin/${branchName}` : branchName,
+    shortName: remote ? `${remote}/${branchName}` : branchName,
     branchName,
     remote,
     twin: null,
@@ -40,20 +40,22 @@ const LOCAL: readonly GitRef[] = [
   ref("refs/heads/mcode-3f2a", { isCurrent: true, worktree: { path: "C:\\repo\\.worktrees\\mcode-3f2a", folder: "mcode-3f2a" } }),
   ...Array.from({ length: 148 }, (_, index) => ref(`refs/heads/topic-${String(index).padStart(3, "0")}`)),
 ];
-// origin/main has diverged from main, so both are listed and both are pickable.
+// origin/main has diverged from main, so both are listed and both are pickable. upstream/main is a third "main".
 const ORIGIN: readonly GitRef[] = [
   ref("refs/remotes/origin/main", { isDefault: true, headSha: "b".repeat(40) }),
   ref("refs/remotes/origin/release"),
+  ref("refs/remotes/upstream/main"),
 ];
 
 let failNextList = false;
+let originRefs: readonly GitRef[] = ORIGIN;
 
 function refPage(params: GitRefsListParams): GitRefsListResult {
   if (failNextList) {
     failNextList = false;
     return { ok: false, error: { code: "git_failed", message: "git for-each-ref failed", detail: "fatal: bad object" } };
   }
-  const source = params.side === "origin" ? ORIGIN : LOCAL;
+  const source = params.side === "origin" ? originRefs : LOCAL;
   const query = params.query ?? "";
   const matches = source.filter((target) => target.shortName.includes(query));
   const offset = Number(params.cursor ?? 0);
@@ -77,6 +79,7 @@ beforeEach(() => {
   workspaceCount += 1;
   workspaceId = `ws-${workspaceCount}`;
   failNextList = false;
+  originRefs = ORIGIN;
   vi.mocked(mockTransport.listRefs).mockReset().mockImplementation(async (params) => refPage(params));
   vi.mocked(mockTransport.getBranchComparison).mockReset().mockResolvedValue(DEFAULT_COMPARISON);
   useDiffStore.setState({
@@ -139,7 +142,7 @@ describe("BranchOperandPickers", () => {
     expect(await screen.findByText("Showing 100 of 150")).toBeInTheDocument();
     expect(listedNames().slice(0, 3)).toEqual(["main", "mcode-3f2a", "topic-000"]);
     showTab("Origin");
-    await waitFor(() => expect(listedNames()).toEqual(["main", "release"]));
+    await waitFor(() => expect(listedNames()).toEqual(["main", "release", "upstream/main"]));
     expect(vi.mocked(mockTransport.listRefs)).toHaveBeenLastCalledWith(
       expect.objectContaining({ purpose: "review", side: "origin", workspaceId, threadId: "thread-1" }),
     );
@@ -184,7 +187,47 @@ describe("BranchOperandPickers", () => {
     expect(within(alert).getByText("Couldn't load the list")).toBeInTheDocument();
     expect(within(alert).getByText("git for-each-ref failed")).toBeInTheDocument();
     fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(screen.getAllByRole("option").length).toBeGreaterThan(0));
+    // Either tab may be open; each lists its default branch first.
+    await waitFor(() => expect(listedNames()[0]).toBe("main"));
+  });
+
+  it("offers the other tab when the open tab is empty before any search", async () => {
+    originRefs = [];
+    await renderPickers();
+    await open("base");
+    showTab("Origin");
+    fireEvent.click(await screen.findByRole("button", { name: "Show 150 in Local" }));
+    await waitFor(() => expect(listedNames()).toContain("mcode-3f2a"));
+    expect(screen.getByRole("radio", { name: "Local" })).toBeChecked();
+  });
+
+  it("names the selected refs to assistive tech", async () => {
+    await renderPickers();
+    expect(screen.getByRole("button", { name: "Compare: mcode-3f2a" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Base: origin/main" })).toBeInTheDocument();
+  });
+
+  it("restores a branchless HEAD after another compare ref was picked", async () => {
+    vi.mocked(mockTransport.getBranchComparison).mockResolvedValue({
+      base: "refs/heads/main",
+      compare: "HEAD",
+      isUnborn: false,
+      isComparisonAvailable: true,
+    });
+    await renderPickers();
+    await open("compare");
+    expect(screen.queryByRole("button", { name: "Reset to default" })).not.toBeInTheDocument();
+    showTab("Local");
+    await waitFor(() => expect(listedNames()).toContain("topic-000"));
+    fireEvent.click(option("topic-000"));
+    await waitFor(() => expect(storedOperands()).toEqual({ base: "refs/heads/main", compare: "refs/heads/topic-000" }));
+
+    await open("compare");
+    fireEvent.click(screen.getByRole("button", { name: "Reset to default" }));
+
+    await waitFor(() => expect(screen.getByTestId("branch-compare-picker")).toHaveTextContent("HEAD"));
+    expect(storedOperands()).toEqual({ base: "refs/heads/main", compare: "HEAD" });
+    expect(useDiffStore.getState().branchSelectionByScope[scope()]).toBeUndefined();
   });
 
   it("reads HEAD as a branchless compare, with the saved base as base", async () => {

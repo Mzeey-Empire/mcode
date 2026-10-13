@@ -69,7 +69,7 @@ export function CommitOperandPicker({ workspaceId, threadId, diffScopeRevision }
             size="compact"
             data-testid="commit-picker-trigger"
             disabled={empty}
-            aria-label="Pick a commit"
+            aria-label={selected ? `Commit: ${selected.shortSha} ${selected.subject}` : "Pick a commit"}
             aria-expanded={open}
             aria-haspopup="dialog"
             className="h-8 min-w-0 max-w-[32rem] shrink justify-start gap-2 rounded-md px-2 shadow-none aria-expanded:bg-selected"

@@ -101,7 +101,7 @@ export interface PickerProps<T> {
   readonly onRetry?: () => void;
   readonly selectedKey?: string;
   readonly renderItem: (item: T) => PickerRow;
-  /** Offers another tab when the query matches nothing here, e.g. "matches in Pull requests". */
+  /** Offers another tab when this one shows nothing, e.g. "matches in Pull requests". */
   readonly emptySwitch?: { readonly tabId: string; readonly label: string };
   /** Content under the list, set off by a divider, such as a toggle row. */
   readonly footer?: ReactNode;
@@ -619,7 +619,7 @@ function PickerEmptyState<T>({ status, query, emptySwitch, onTabChange, listId }
   return (
     <div id={listId} className="flex flex-col items-start gap-1 px-2 py-2">
       <p className="text-label text-ink">{query ? `Nothing matches “${query}”` : "Nothing to show"}</p>
-      {query && emptySwitch ? (
+      {emptySwitch ? (
         <Button variant="ghost" size="compact" onClick={() => onTabChange?.(emptySwitch.tabId)}>
           Show {emptySwitch.label}
         </Button>

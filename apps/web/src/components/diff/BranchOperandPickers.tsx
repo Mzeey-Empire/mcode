@@ -8,7 +8,7 @@ import { usePanelHeaderMenuOpen } from "@/components/panels/shell/PanelHeader";
 import { useDebouncedQuery } from "@/features/conversation/composer/execution/targets/useBranchTargets";
 import { cn } from "@/lib/utils";
 import { getTransport } from "@/transport";
-import { branchSelectionFor, refLabel, useDiffStore, type BranchSelection } from "@/stores/diffStore";
+import { branchScopeKey, branchSelectionFor, refLabel, useDiffStore, type BranchSelection } from "@/stores/diffStore";
 import { invalidateReviewOperandLists, pickerStatus, useReviewRefs } from "./review-operand-lists";
 
 type OperandSide = keyof BranchSelection;
@@ -23,11 +23,6 @@ const SIDE_LABEL: Record<GitRefSide, string> = { local: "Local", origin: "Origin
 /** The tab each operand picker opens on. Base usually names a remote ref and compare a local one. */
 const lastTabBySide: Record<OperandSide, GitRefSide> = { base: "origin", compare: "local" };
 
-/** The scope key a comparison is resolved against (`workspaceId:threadId`). */
-function scopeKey(workspaceId: string, threadId?: string): string {
-  return `${workspaceId}:${threadId ?? ""}`;
-}
-
 const UNAVAILABLE: BranchComparison = { base: null, compare: null, isUnborn: false, isComparisonAvailable: false };
 
 /**
@@ -35,7 +30,7 @@ const UNAVAILABLE: BranchComparison = { base: null, compare: null, isUnborn: fal
  * guard lives in the store so a remount does not refetch.
  */
 function useResolveBranchComparison(workspaceId: string, threadId: string | undefined, diffScopeRevision: number) {
-  const key = scopeKey(workspaceId, threadId);
+  const key = branchScopeKey(workspaceId, threadId);
   // Another scope's default must not show while this one resolves.
   const comparison = useDiffStore((s) => (s.branchComparisonKey === key ? s.branchComparison : null));
   const resolveBranchComparison = useDiffStore((s) => s.resolveBranchComparison);
@@ -86,9 +81,10 @@ interface BranchOperandPickersProps {
  */
 export function BranchOperandPickers({ workspaceId, threadId, diffScopeRevision }: BranchOperandPickersProps) {
   const { comparison, loading } = useResolveBranchComparison(workspaceId, threadId, diffScopeRevision);
-  const key = scopeKey(workspaceId, threadId);
+  const key = branchScopeKey(workspaceId, threadId);
   const selection = useDiffStore((s) => s.branchSelectionByScope[key]);
   const setBranchSelection = useDiffStore((s) => s.setBranchSelection);
+  const clearBranchSelection = useDiffStore((s) => s.clearBranchSelection);
 
   useEffect(() => {
     if (diffScopeRevision > 0) invalidateReviewOperandLists(workspaceId);
@@ -99,11 +95,13 @@ export function BranchOperandPickers({ workspaceId, threadId, diffScopeRevision 
 
   const sides = branchSelectionFor(comparison, selection);
   const pick = (side: OperandSide, ref: string) => setBranchSelection(key, { ...sides, [side]: ref });
+  // A pick pins the pair, so this is the way back to the default, e.g. a branchless thread's HEAD.
+  const reset = selection ? () => clearBranchSelection(key) : undefined;
   return (
     <div className="flex min-w-0 items-center gap-1" data-testid="branch-operand-pickers" role="group" aria-label="Branch comparison">
-      <RefSidePicker side="compare" value={sides.compare} workspaceId={workspaceId} threadId={threadId} onPick={pick} />
+      <RefSidePicker side="compare" value={sides.compare} workspaceId={workspaceId} threadId={threadId} onPick={pick} onReset={reset} />
       <span aria-hidden className="shrink-0 font-mono text-caption text-muted">→</span>
-      <RefSidePicker side="base" value={sides.base} workspaceId={workspaceId} threadId={threadId} onPick={pick} />
+      <RefSidePicker side="base" value={sides.base} workspaceId={workspaceId} threadId={threadId} onPick={pick} onReset={reset} />
     </div>
   );
 }
@@ -118,10 +116,13 @@ interface RefSidePickerProps {
   readonly workspaceId: string;
   readonly threadId: string | undefined;
   readonly onPick: (side: OperandSide, ref: string) => void;
+  /** Restores the default pair; absent while the default shows. */
+  readonly onReset: (() => void) | undefined;
 }
 
-function RefSidePicker({ side, value, workspaceId, threadId, onPick }: RefSidePickerProps) {
+function RefSidePicker({ side, value, workspaceId, threadId, onPick, onReset }: RefSidePickerProps) {
   const [open, setOpen] = usePanelHeaderMenuOpen();
+  const label = value === null ? (side === "base" ? "Pick a base" : "Pick a ref") : refLabel(value);
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
@@ -131,7 +132,7 @@ function RefSidePicker({ side, value, workspaceId, threadId, onPick }: RefSidePi
             variant="ghost"
             size="compact"
             data-testid={`branch-${side}-picker`}
-            aria-label={side === "compare" ? "Compare ref" : "Base ref"}
+            aria-label={`${side === "compare" ? "Compare" : "Base"}: ${label}`}
             aria-expanded={open}
             aria-haspopup="dialog"
             className={cn(
@@ -140,7 +141,7 @@ function RefSidePicker({ side, value, workspaceId, threadId, onPick }: RefSidePi
             )}
           >
             <span className={cn("min-w-0 text-fade", value === null && "text-muted")}>
-              {value === null ? (side === "base" ? "Pick a base" : "Pick a ref") : refLabel(value)}
+              {label}
             </span>
             <ChevronDown size={11} className="shrink-0 text-muted/65" />
           </Button>
@@ -157,6 +158,10 @@ function RefSidePicker({ side, value, workspaceId, threadId, onPick }: RefSidePi
               onPick(side, ref);
               setOpen(false);
             }}
+            onReset={onReset && (() => {
+              onReset();
+              setOpen(false);
+            })}
           />
         ) : null}
       </PopoverContent>
@@ -170,17 +175,19 @@ interface RefSideListProps {
   readonly workspaceId: string;
   readonly threadId: string | undefined;
   readonly onPick: (ref: string) => void;
+  readonly onReset: (() => void) | undefined;
 }
 
 /** The open picker body. Mounted only while open, so the query starts empty each time. */
-function RefSideList({ side, value, workspaceId, threadId, onPick }: RefSideListProps) {
+function RefSideList({ side, value, workspaceId, threadId, onPick, onReset }: RefSideListProps) {
   const [tab, setTab] = useState<GitRefSide>(lastTabBySide[side]);
   const [query, setQuery] = useState("");
   const searched = useDebouncedQuery(query);
   const list = useReviewRefs({ workspaceId, threadId, side: tab, query: searched });
   const otherTab: GitRefSide = tab === "local" ? "origin" : "local";
+  const empty = list.status.kind === "ready" && list.items.length === 0;
   // A one-row page of the other tab is enough to learn whether it has matches.
-  const other = useReviewRefs(searched === "" ? null : { workspaceId, threadId, side: otherTab, query: searched, limit: 1 });
+  const other = useReviewRefs(searched !== "" || empty ? { workspaceId, threadId, side: otherTab, query: searched, limit: 1 } : null);
   const otherMatches = other.total ?? 0;
 
   const changeTab = (id: string) => {
@@ -190,8 +197,8 @@ function RefSideList({ side, value, workspaceId, threadId, onPick }: RefSideList
   };
   const renderRow = (ref: GitRef): PickerRow => ({
     key: ref.fullName,
-    // Every Origin row starts with the remote, so the tab names it and the row shows the branch.
-    name: ref.remote === null ? ref.shortName : ref.branchName,
+    // The tab already says Origin, so only origin drops its prefix; another remote's prefix tells its twins apart.
+    name: ref.remote === "origin" ? ref.branchName : ref.shortName,
     mono: true,
   });
 
@@ -212,6 +219,11 @@ function RefSideList({ side, value, workspaceId, threadId, onPick }: RefSideList
       renderItem={renderRow}
       emptySwitch={otherMatches > 0 ? { tabId: otherTab, label: `${otherMatches} in ${SIDE_LABEL[otherTab]}` } : undefined}
       onSelect={(ref) => onPick(ref.fullName)}
+      footer={onReset ? (
+        <Button type="button" variant="ghost" size="compact" className="w-full justify-start" onClick={onReset}>
+          Reset to default
+        </Button>
+      ) : undefined}
     />
   );
 }
