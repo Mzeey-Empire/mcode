@@ -128,6 +128,20 @@ describe("durable approval notes", () => {
     expect(test.notes.find("request")).toMatchObject({ note: edited, state: "delivered" });
   });
 
+  it("forgets the oldest replayable answer once 1,000 newer answers are held", async () => {
+    const test = await setup("native");
+    const [request] = test.adapter.pending;
+    const answer = async (requestId: string) => {
+      test.adapter.pending = [{ ...request, requestId }];
+      return test.service.respondToApproval(requestId, { choiceId: "allow" });
+    };
+    for (let index = 0; index < 1_000; index++) await answer(`request-${index}`);
+    expect(await test.service.respondToApproval("request-0", { choiceId: "allow" })).toEqual({ status: "resolved", noteDelivery: "native" });
+    await answer("request-1000");
+    expect(await test.service.respondToApproval("request-0", { choiceId: "allow" })).toEqual({ status: "not_pending" });
+    expect(await test.service.respondToApproval("request-1", { choiceId: "allow" })).toEqual({ status: "resolved", noteDelivery: "native" });
+  });
+
   it.each<Delivery>(["native", "steer", "next_turn"])("recovers a failed %s attempt when the adapter answers not_pending", async (delivery) => {
     const test = await setup(delivery);
     test.adapter.error = true;

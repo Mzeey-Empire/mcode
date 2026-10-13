@@ -9,7 +9,9 @@ import { ApprovalNoteAlreadyDeliveredError, ApprovalNoteRepo, type ApprovalNoteR
 
 type ApprovalProvider = Pick<IAgentProvider, "id" | "on" | "resolveApproval" | "listPendingApprovals">;
 type ApprovalOwner = Pick<IAgentProvider, "resolveApproval" | "listPendingApprovals"> & { id: ProviderId | null };
-type Resolution = { requestId: string; threadId: string; outcome: ApprovalOutcome };
+/** Far more answers than a user can retry within one reconnect window. */
+const REMEMBERED_RESPONSES = 1_000;
+type Resolution ={ requestId: string; threadId: string; outcome: ApprovalOutcome };
 type ThreadApprovalSource = {
   listPendingApprovals(threadId?: string): ApprovalRequest[];
   respondToApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult>;
@@ -231,9 +233,20 @@ export class ApprovalService {
     if (result.status === "resolved") {
       const note = "autoDeny" in response ? undefined : response.note;
       if (note) await this.notes.settle(envelope.requestId, result.noteDelivery ?? "unknown");
-      this.responses.set(envelope.requestId, { note, result });
+      this.rememberResponse(envelope.requestId, { note, result });
     }
     return result;
+  }
+
+  /**
+   * Keep recent results so a client whose reply was lost can replay its answer. The entry outlives
+   * the respond on purpose, so the map is bounded by age instead of deleted on settle.
+   */
+  private rememberResponse(requestId: string, entry: { note: string | undefined; result: ApprovalRespondResult }): void {
+    this.responses.set(requestId, entry);
+    if (this.responses.size <= REMEMBERED_RESPONSES) return;
+    const oldest = this.responses.keys().next();
+    if (!oldest.done) this.responses.delete(oldest.value);
   }
 
   private async prepareResponse(envelope: ApprovalRequestEnvelope, owner: ApprovalOwner, response: ApprovalResponse): Promise<ApprovalRespondResult | undefined> {
