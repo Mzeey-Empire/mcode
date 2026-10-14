@@ -112,7 +112,9 @@ import {
   TurnResumeUnscheduleParamsSchema,
 } from "../models/turn-recovery.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
-import { PlanSaveVersionSchema, PlanVersionSchema, PlanImplementSchema, PlanImplementReceiptSchema, PlanSnapshotSchema } from "../models/plan.js";
+import { PlanSaveVersionSchema, PlanVersionSchema, PlanImplementSchema, PlanImplementReceiptSchema, PlanSnapshotSchema,
+  PlanCommentSchema, PlanCommentCreateSchema, PlanCommentUpdateSchema, PlanCommentSetStatusSchema,
+  PlanCommentDeleteSchema, PlanCommentIdsSchema } from "../models/plan.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
 import { ReviewComparisonResultSchema, ReviewComparisonUnavailableSchema, ReviewFileDiffResultSchema, ReviewTurnSchema, ReviewStateSchema } from "../models/review-comparison.js";
 import {
@@ -356,6 +358,8 @@ export const SendMessageSchema = lazySchema(() => z.object({
     replyToMessageId: z.string().uuid().optional(),
     /** Highlighted text excerpt from the original message. Absent for full-message replies. */
     quotedText: z.string().max(2000).optional(),
+    /** Saved plan comments to send with this message, read under the admitted turn. */
+    planCommentIds: PlanCommentIdsSchema().optional(),
     /** Objective installed as a provider goal immediately before this turn dispatches. */
     goalObjective: GoalObjectiveSchema().optional(),
     /**
@@ -1218,6 +1222,10 @@ export const WS_METHODS = lazySchema(() => ({
     }),
     result: PlanSnapshotSchema(),
   },
+  "plan.comment.create": { params: PlanCommentCreateSchema(), result: PlanCommentSchema() },
+  "plan.comment.update": { params: PlanCommentUpdateSchema(), result: PlanCommentSchema() },
+  "plan.comment.setStatus": { params: PlanCommentSetStatusSchema(), result: PlanCommentSchema() },
+  "plan.comment.delete": { params: PlanCommentDeleteSchema(), result: z.void() },
   "approval.respond": {
     params: z.object({
       requestId: z.string(),

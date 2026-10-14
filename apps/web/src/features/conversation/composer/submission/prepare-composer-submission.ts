@@ -2,6 +2,7 @@ import type { PreviewAnnotationBundle } from "@mcode/contracts";
 import { useToastStore } from "@/stores/toastStore";
 import type { ComposerFormController } from "../draft/useComposerFormController";
 import { readVisibleDiffComments } from "../draft/draft-diff-comments";
+import { readPlanCommentIdsForSend } from "../draft/sendable-plan-comments";
 import { buildComposerAnnotationBundle } from "./composer-annotations";
 import { createComposerSubmission } from "./composer-submission";
 import type { PreparedComposerSubmission } from "./composer-submission-types";
@@ -11,6 +12,8 @@ export interface PrepareComposerSubmissionOptions {
   annotationScopeId?: string;
   form: ComposerFormController;
   startingThread: boolean;
+  /** Thread whose plan comments this Send may carry; unset when the Send cannot carry them. */
+  planCommentThreadId?: string;
   discardEmptyEdit(): boolean;
   resolvePreviewAnnotations(
     annotations: PreviewAnnotationBundle | undefined,
@@ -22,6 +25,7 @@ export async function prepareComposerSubmission({
   annotationScopeId,
   form,
   startingThread,
+  planCommentThreadId,
   discardEmptyEdit,
   resolvePreviewAnnotations,
 }: PrepareComposerSubmissionOptions): Promise<PreparedComposerSubmission | null> {
@@ -39,10 +43,11 @@ export async function prepareComposerSubmission({
   const currentDiffComments = annotationScopeId ? readVisibleDiffComments(annotationScopeId) : [];
   const currentAnnotations = buildComposerAnnotationBundle(annotationScopeId, currentDiffComments);
   const previewAnnotations = resolvePreviewAnnotations(currentAnnotations);
+  const planCommentIds = planCommentThreadId ? readPlanCommentIdsForSend(planCommentThreadId) : [];
   if (isEmptySubmission(
     snapshot.rawInput,
     snapshot.attachments.length,
-    snapshot.selectedTextComments.length,
+    snapshot.selectedTextComments.length + planCommentIds.length,
     previewAnnotations,
   )) {
     discardEmptyEdit();
@@ -65,6 +70,7 @@ export async function prepareComposerSubmission({
       currentAnnotations,
       currentDiffComments,
       previewAnnotations,
+      planCommentIds,
     };
   } catch (error) {
     showPreparationFailure(error);
@@ -76,12 +82,12 @@ export async function prepareComposerSubmission({
 function isEmptySubmission(
   rawInput: string,
   attachmentCount: number,
-  selectedTextCommentCount: number,
+  attachedCommentCount: number,
   previewAnnotations: PreviewAnnotationBundle | undefined,
 ): boolean {
   return rawInput.trim().length === 0
     && attachmentCount === 0
-    && selectedTextCommentCount === 0
+    && attachedCommentCount === 0
     && !previewAnnotations;
 }
 

@@ -1,7 +1,7 @@
 import * as NodeCrypto from "node:crypto";
 import { PlanImplementSchema, PlanImplementErrorSchema, ProviderIdSchema,
   type PlanSaveError, type PlanSaveVersion, type PlanVersion, type PlanImplement,
-  type PlanImplementError, type PlanImplementReceipt, type IProviderRegistry } from "@mcode/contracts";
+  type PlanImplementError, type PlanImplementReceipt, type IProviderRegistry, type PlanCommentError, type PlanComment } from "@mcode/contracts";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import type { ThreadService } from "../../thread-control/lifecycle/thread-service.js";
 import type { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
@@ -17,6 +17,8 @@ import { mergePlanVersions } from "./merge-plan-versions.js";
 import type { PlanFileWriter } from "./plan-file-writer.js";
 import { planWriteOperations } from "./persistence/plan-write-operations.js";
 import { planImplementWriteOperations as implementWrites, type PlanImplementRequest } from "./persistence/plan-implement-write-operations.js";
+import { planCommentWriteOperations as commentWrites, type PlanCommentWriteResult } from "./persistence/plan-comment-write-operations.js";
+import type { PlanCommentStore } from "./persistence/plan-comment-store.js";
 
 /** Existing runtime owners used to reserve and dispatch Implement. */
 export interface PlanImplementRuntime {
@@ -32,13 +34,13 @@ export interface PlanImplementRuntime {
 
 /** A rejected plan operation, with the current version for explicit conflict resolution. */
 export class PlanServiceError extends Error {
-  readonly code: PlanSaveError["code"] | PlanImplementError["code"];
+  readonly code: PlanSaveError["code"] | PlanImplementError["code"] | PlanCommentError["code"];
   readonly latestVersion: PlanVersion | null;
 
-  constructor(failure: PlanSaveError | PlanImplementError) {
+  constructor(failure: PlanSaveError | PlanImplementError | PlanCommentError) {
     super(failure.code);
     this.code = failure.code;
-    this.latestVersion = failure.latestVersion;
+    this.latestVersion = "latestVersion" in failure ? failure.latestVersion : null;
   }
 }
 
@@ -189,6 +191,44 @@ export class PlanService {
   private async publishVersions(threadId: string): Promise<void> {
     const versions = this.progress?.reloadPlans(threadId) ?? (await this.snapshot({ threadId })).versions;
     for (const version of versions) broadcast("plan.versionUpserted", { threadId, version });
+    await this.publishComments(threadId);
+  }
+
+  /** Replay-safe creation of a saved comment. */
+  async createComment(input: Parameters<PlanCommentStore["create"]>[0]): Promise<PlanComment> {
+    return this.publishCommentResult(await this.writer.execute(commentWrites.create, input));
+  }
+
+  /** Replace the note while retaining its anchor. */
+  async updateComment(input: Parameters<PlanCommentStore["update"]>[0]): Promise<PlanComment> {
+    return this.publishCommentResult(await this.writer.execute(commentWrites.update, input));
+  }
+
+  /** Resolve or reopen a comment. */
+  async setCommentStatus(input: Parameters<PlanCommentStore["setStatus"]>[0]): Promise<PlanComment> {
+    return this.publishCommentResult(await this.writer.execute(commentWrites.setStatus, input));
+  }
+
+  /** Delete once and publish the removed identity after commit. */
+  async deleteComment(input: Parameters<PlanCommentStore["delete"]>[0]): Promise<void> {
+    const result = await this.writer.execute(commentWrites.delete, input);
+    if (!result.ok) throw new PlanServiceError(result);
+    if (result.threadId) {
+      this.progress?.reloadPlans(result.threadId);
+      broadcast("plan.commentsChanged", { threadId: result.threadId, upserted: [], deletedIds: [input.commentId] });
+    }
+  }
+
+  private publishCommentResult(result: PlanCommentWriteResult): PlanComment {
+    if (!result.ok) throw new PlanServiceError(result);
+    this.progress?.reloadPlans(result.comment.threadId);
+    broadcast("plan.commentsChanged", { threadId: result.comment.threadId, upserted: [result.comment], deletedIds: [] });
+    return result.comment;
+  }
+
+  private async publishComments(threadId: string): Promise<void> {
+    const { comments } = await this.snapshot({ threadId });
+    broadcast("plan.commentsChanged", { threadId, upserted: comments, deletedIds: [] });
   }
 
   private async receiptOrFailure(request: PlanImplementRequest): Promise<PlanImplementReceipt> {
@@ -224,6 +264,7 @@ export class PlanService {
     this.progress?.reloadPlans(input.threadId);
     this.runtime?.threads.publishPlanPhase(input.threadId);
     broadcast("plan.versionUpserted", { threadId: input.threadId, version: result.version });
+    await this.publishComments(input.threadId);
     await this.files.writeAfterCommit(input.threadId);
     return result.version;
   }
@@ -233,7 +274,7 @@ export class PlanService {
     const result = await this.writer.execute(planWriteOperations.snapshot, input);
     if (!result.ok) throw new PlanServiceError(result);
     return { versions: mergePlanVersions(result.versions, this.progress?.reloadPlans(input.threadId) ?? result.versions),
-      phase: result.phase, pendingQuestions: result.pendingQuestions };
+      comments: result.comments, phase: result.phase, pendingQuestions: result.pendingQuestions };
   }
 }
 

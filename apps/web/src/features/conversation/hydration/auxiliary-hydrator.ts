@@ -3,7 +3,7 @@ import {
   getThreadRecord,
   patchThreadRecord,
 } from "@/stores/thread-record";
-import type { PlanQuestion, PlanVersion } from "@mcode/contracts";
+import type { PlanComment, PlanQuestion, PlanVersion } from "@mcode/contracts";
 import type { TaskItem } from "@/stores/taskStore";
 import type {
   ThreadHydratorTransport,
@@ -47,6 +47,7 @@ export interface AuxiliaryHydratorDeps {
     pending: { assistantMessageId: string; questions: PlanQuestion[] } | null,
   ) => void;
   getPlanQuestionsRevision: (threadId: string) => number;
+  setPlanCommentsForThread: (threadId: string, comments: readonly PlanComment[]) => void;
   shallowEqualBy: <T>(a: readonly T[], b: readonly T[], keys: (keyof T)[]) => boolean;
   coerceTaskStatus: (status: string) => TaskItem["status"];
 }
@@ -139,6 +140,7 @@ export class AuxiliaryHydrator {
       .getPlanSnapshot(threadId)
       .then((snapshot) => {
         for (const plan of snapshot.versions) this.deps.addPlanForThread(threadId, plan);
+        this.deps.setPlanCommentsForThread(threadId, snapshot.comments);
         this.deps.reconcilePlanQuestions(threadId, questionsRevision, snapshot.pendingQuestions);
       })
       .catch((err: unknown) => {

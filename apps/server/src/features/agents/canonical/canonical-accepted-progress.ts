@@ -962,6 +962,8 @@ export class CanonicalAcceptedProgress {
     if (changesPlanPhase(batch.write)) this.onPlanPhaseChanged?.(batch.execution.threadId);
     if (!batch.write.features?.planRecords?.length) return;
     this.reloadPlans(batch.execution.threadId);
+    broadcast("plan.commentsChanged", { threadId: batch.execution.threadId,
+      upserted: this.canonical.loadAcceptedFeatureSeed(batch.execution.threadId).comments, deletedIds: [] });
     await this.planFiles?.writeAfterCommit(batch.execution.threadId);
   }
 

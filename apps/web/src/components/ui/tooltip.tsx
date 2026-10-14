@@ -1,6 +1,6 @@
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 
-import { Kbd } from "@/components/ui/kbd"
+import { ShortcutKeys } from "@/components/ui/shortcut-keys"
 import { cn } from "@/lib/utils"
 import { useGatedOpen } from "./overlay-gate"
 
@@ -72,11 +72,7 @@ function TooltipContent({
           {children}
           {shortcut && shortcut.length > 0 ? (
             <span data-slot="tooltip-shortcut" className="ml-1 flex shrink-0 items-center gap-1">
-              {shortcut.map((key, index) => (
-                <Kbd key={`${index}-${key}`} variant="keycap">
-                  {key}
-                </Kbd>
-              ))}
+              <ShortcutKeys keys={shortcut} />
             </span>
           ) : null}
           <TooltipPrimitive.Arrow

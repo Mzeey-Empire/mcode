@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DiffAnnotationPayloadSchema, DraftDiffCommentSchema, DraftElementFieldSchema,
   DraftElementMetaSchema, DraftImageMissingErrorSchema, DraftSubmissionSchema,
-  MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS, PlanCommentSelectionSchema, StagedDraftImageSchema,
+  MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS, StagedDraftImageSchema,
   SendMessageSchema, WS_METHODS,
 } from "../../index.js";
 
@@ -30,15 +30,12 @@ describe("next-message draft contracts", () => {
   it("round-trips every draft schema through JSON", () => {
     const image = { stagingId: id, name: "capture.png", mimeType: "image/png", sizeBytes: 4 };
     const meta = { id, revision: 2 };
-    const selection = { planVersionId: "plan-1", includedIds: ["a"], excludedIds: ["b"], revision: 3 };
-    const submission = { messageId: id, elements: [{ ...meta, field: "diffComments" }], planComments: { ridingIds: ["a"], excludedIds: ["b"] }, stagingIds: [id] };
+    const submission = { messageId: id, elements: [{ ...meta, field: "diffComments" }], stagingIds: [id] };
     const draft = { ...annotation, revision: 2 };
     const missing = { code: "draft_image_missing", message: "Missing image", data: { stagingId: id } };
     expect(StagedDraftImageSchema().parse(JSON.parse(JSON.stringify(image)))).toEqual(image);
     expect(DraftElementMetaSchema().parse(JSON.parse(JSON.stringify(meta)))).toEqual(meta);
     expect(DraftElementFieldSchema().parse(JSON.parse('"diffComments"'))).toBe("diffComments");
-    expect(DraftElementFieldSchema().parse(JSON.parse('"planCommentSelection"'))).toBe("planCommentSelection");
-    expect(PlanCommentSelectionSchema().parse(JSON.parse(JSON.stringify(selection)))).toEqual(selection);
     expect(DraftSubmissionSchema().parse(JSON.parse(JSON.stringify(submission)))).toEqual(submission);
     expect(DraftDiffCommentSchema().parse(JSON.parse(JSON.stringify(draft)))).toEqual(draft);
     expect(DraftImageMissingErrorSchema().parse(JSON.parse(JSON.stringify(missing)))).toEqual(missing);

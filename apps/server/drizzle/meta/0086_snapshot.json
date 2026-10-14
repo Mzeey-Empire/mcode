@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "40ea988d-d743-45e4-915e-95d0601f51c7",
+  "id": "89c2afe8-ccb8-42a7-b58f-6a496c688f6c",
   "prevId": "795c2fbf-b124-4b07-a519-67f0ab9dae7b",
   "tables": {
     "approval_receipts": {
@@ -2408,6 +2408,131 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "plan_comments": {
+      "name": "plan_comments",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version_id": {
+          "name": "version_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "anchor_json": {
+          "name": "anchor_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sent_message_id": {
+          "name": "sent_message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "carried_from_comment_id": {
+          "name": "carried_from_comment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_plan_comments_version_status": {
+          "name": "idx_plan_comments_version_status",
+          "columns": [
+            "version_id",
+            "status"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "plan_comments_thread_id_threads_id_fk": {
+          "name": "plan_comments_thread_id_threads_id_fk",
+          "tableFrom": "plan_comments",
+          "tableTo": "threads",
+          "columnsFrom": [
+            "thread_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "plan_comments_version_id_plans_id_fk": {
+          "name": "plan_comments_version_id_plans_id_fk",
+          "tableFrom": "plan_comments",
+          "tableTo": "plans",
+          "columnsFrom": [
+            "version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "plan_implement_requests": {
       "name": "plan_implement_requests",
       "columns": {
@@ -4261,13 +4386,6 @@
         },
         "interaction_mode": {
           "name": "interaction_mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "plan_phase": {
-          "name": "plan_phase",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

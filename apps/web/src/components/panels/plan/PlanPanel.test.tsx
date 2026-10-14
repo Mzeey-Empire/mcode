@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { EditorView } from "@codemirror/view";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlanImplement, PlanImplementReceipt, PlanSaveVersion, PlanVersion } from "@mcode/contracts";
+import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { usePlanStore } from "@/stores/planStore";
 import { useThreadStore } from "@/stores/threadStore";
@@ -10,7 +11,7 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { RpcError } from "@/transport/ws-transport";
 import { executeCommand, getCommand } from "@/lib/command-registry";
 import { usePlanCommands } from "./use-plan-commands";
-import { PlanPanel } from "./PlanPanel";
+import { PlanPanel, planEditorAccess } from "./PlanPanel";
 import { planSaveScheduler } from "./plan-draft-sessions";
 import { IMPLEMENT_FAILED_NOTICE, PLAN_CHANGED_NOTICE, implementPlan as implementPlanAction, usePlanImplementStore } from "./plan-implement";
 
@@ -63,6 +64,7 @@ function typeAtEnd(text: string): void {
 describe("PlanPanel", () => {
   beforeEach(() => {
     usePlanStore.setState({ plansByThread: {}, activeVersionByThread: {} });
+    useComposerDraftStore.setState({ drafts: {} });
     useThreadStore.setState({ runningThreadIds: new Set() });
     savePlanVersion.mockReset();
     implementPlan.mockReset();
@@ -98,6 +100,20 @@ describe("PlanPanel", () => {
     await waitFor(() => expect(editorText()).toContain("Step for v1"));
     expect(editorText()).not.toContain("Step for v2");
     expect(screen.getByTestId("plan-version-picker")).toHaveTextContent("v1Older version");
+  });
+
+  it("reopens on the version an unfinished comment note was written on", () => {
+    const first = makePlan(1, { status: "superseded" });
+    usePlanStore.setState({ plansByThread: { [THREAD]: [first, makePlan(2)] } });
+    const anchor = { kind: "text", start: 2, end: 6, quote: "Plan", prefix: "", suffix: "", section: null } as const;
+    useComposerDraftStore.getState().updateNextMessage(THREAD, (draft) => ({
+      ...draft,
+      planCommentEditor: { planVersionId: first.id, commentId: null, anchor, body: "half" },
+    }));
+
+    render(<PlanPanel threadId={THREAD} />);
+
+    expect(usePlanStore.getState().activeVersionByThread[THREAD]).toBe(1);
   });
 
   it("reads Accepted for an accepted version and offers no Implement action", () => {
@@ -469,5 +485,28 @@ describe("PlanPanel", () => {
       expect(await screen.findByTestId("plan-implement-notice")).toHaveTextContent(IMPLEMENT_FAILED_NOTICE);
       expect(implementPlan).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe("planEditorAccess", () => {
+  const latest = makePlan(2);
+  const target = { versionId: latest.id, baseVersionId: "plan-1", baseRevision: 0 };
+
+  it("allows comments again once an autosave is acknowledged, but not while text is unsaved", () => {
+    const settled = { kind: "editing", target, text: "saved", ackedText: "saved", inFlight: null } as const;
+    const typing = { ...settled, text: "saved plus more" };
+
+    expect(planEditorAccess(latest, latest, settled, false).canComment).toBe(true);
+    expect(planEditorAccess(latest, latest, typing, false).canComment).toBe(false);
+  });
+
+  it("takes comments on a superseded version, but not on an accepted one or during a run", () => {
+    const settled = { kind: "idle" } as const;
+    const superseded = makePlan(1, { status: "superseded" });
+    const accepted = makePlan(2, { status: "accepted" });
+
+    expect(planEditorAccess(superseded, latest, settled, false).canComment).toBe(true);
+    expect(planEditorAccess(accepted, accepted, settled, false).canComment).toBe(false);
+    expect(planEditorAccess(latest, latest, settled, true).canComment).toBe(false);
   });
 });

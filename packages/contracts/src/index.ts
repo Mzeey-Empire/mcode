@@ -918,6 +918,15 @@ export type {
 
 // Plan output
 export {
+  PlanCommentAnchorSchema, PlanCommentSchema, PlanCommentEditorDraftSchema,
+  PlanCommentCreateSchema, PlanCommentUpdateSchema, PlanCommentSetStatusSchema,
+  PlanCommentDeleteSchema, PlanCommentIdsSchema, PlanCommentErrorSchema,
+} from "./models/plan.js";
+export type {
+  PlanCommentAnchor, PlanComment, PlanCommentEditorDraft, PlanCommentError,
+  PlanCommentCreate, PlanCommentUpdate, PlanCommentSetStatus, PlanCommentDelete,
+} from "./models/plan.js";
+export {
   NativePlanFileOutcomeSchema,
   PlanImplementSchema,
   PlanImplementTargetSchema,

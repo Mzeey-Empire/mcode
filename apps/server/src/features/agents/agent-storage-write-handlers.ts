@@ -17,6 +17,8 @@ import { PlanStore } from "./planning/persistence/plan-store.js";
 import { planWriteOperations } from "./planning/persistence/plan-write-operations.js";
 import { planImplementWriteOperations } from "./planning/persistence/plan-implement-write-operations.js";
 import { PlanImplementStore } from "./planning/persistence/plan-implement-store.js";
+import { PlanCommentStore } from "./planning/persistence/plan-comment-store.js";
+import { planCommentWriteOperations } from "./planning/persistence/plan-comment-write-operations.js";
 import { PlanQuestionAnswersStore } from "./planning/persistence/plan-question-answers-store.js";
 import { planQuestionAnswersWriteOperations } from "./planning/persistence/plan-question-answers-write-operations.js";
 import { TurnSnapshotStore } from "./turns/persistence/turn-snapshot-store.js";
@@ -106,7 +108,18 @@ function planAndTurnHandlers(db: Database): ReadonlyMap<string, (input: unknown)
   ]);
 }
 
+function planCommentHandlers(db: Database): ReadonlyMap<string, (input: unknown) => unknown> {
+  const store = new PlanCommentStore(db);
+  const ops = planCommentWriteOperations;
+  return new Map([
+    [ops.create.name, databaseWriteHandler(ops.create, input => store.create(input))],
+    [ops.update.name, databaseWriteHandler(ops.update, input => store.update(input))],
+    [ops.setStatus.name, databaseWriteHandler(ops.setStatus, input => store.setStatus(input))],
+    [ops.delete.name, databaseWriteHandler(ops.delete, input => store.delete(input))],
+  ]);
+}
+
 /** Agent feature operation contribution constructed only against the worker's writable database. */
 export function agentStorageWriteHandlers(db: Database): ReadonlyMap<string, (input: unknown) => unknown> {
-  return new Map([...messageHandlers(db), ...narrativeHandlers(db), ...taskHandlers(db), ...planAndTurnHandlers(db)]);
+  return new Map([...messageHandlers(db), ...narrativeHandlers(db), ...taskHandlers(db), ...planAndTurnHandlers(db), ...planCommentHandlers(db)]);
 }

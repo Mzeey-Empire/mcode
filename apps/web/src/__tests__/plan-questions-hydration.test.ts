@@ -51,7 +51,7 @@ describe("thread hydration with a live plan-questions batch", () => {
     await vi.waitFor(() => expect(mockTransport.getPlanSnapshot).toHaveBeenCalledWith(threadId));
 
     useThreadStore.getState().setPlanQuestions(threadId, liveBatch);
-    resolveSnapshot({ versions: [], phase: null, pendingQuestions: null });
+    resolveSnapshot({ versions: [], comments: [], phase: null, pendingQuestions: null });
     await olderSnapshot;
     await Promise.resolve();
 

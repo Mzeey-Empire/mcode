@@ -44,7 +44,20 @@ const nextMessageFields = {
     note: "@state.ts unsaved",
     mentions: [mention],
   },
-  planCommentSelection: { planVersionId: "plan-v1", includedIds: ["a"], excludedIds: ["b"], revision: 2 },
+  planCommentEditor: {
+    planVersionId: "55555555-5555-4555-8555-555555555555",
+    commentId: null,
+    anchor: {
+      kind: "text" as const,
+      start: 6,
+      end: 11,
+      quote: "Alpha",
+      prefix: "Step ",
+      suffix: " beta",
+      section: "Plan",
+    },
+    body: "unsaved 😀 note",
+  },
   submissions: [{
     messageId: "33333333-3333-4333-8333-333333333333",
     elements: [{ field: "diffComments" as const, id: diffComment.id, revision: 2 }],
@@ -189,17 +202,34 @@ describe("composer-draft-storage", () => {
     expect(restored?.input).toBe("hello");
     expect(restored?.diffComments).toEqual([diffComment]);
     expect(restored?.submissions).toEqual(nextMessageFields.submissions);
-    expect(restored?.planCommentSelection).toEqual(nextMessageFields.planCommentSelection);
     expect(warn).toHaveBeenCalledWith("[composer-draft-storage] Dropped 3 invalid stored draft element(s)");
     warn.mockRestore();
   });
 
-  it("counts a draft holding only comments or only a plan selection as content", () => {
+  it("drops a stored plan comment editor with a bad anchor or an over-long note and keeps the rest", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const stored = JSON.parse(JSON.stringify(serializeComposerDraft({ ...baseDraft, ...nextMessageFields })));
+    const editor = nextMessageFields.planCommentEditor;
+
+    for (const bad of [
+      { ...editor, anchor: { ...editor.anchor, end: 99 } },
+      { ...editor, body: "x".repeat(4001) },
+    ]) {
+      const restored = parseStoredComposerDraft({ ...stored, planCommentEditor: bad });
+
+      expect(restored?.planCommentEditor).toBeUndefined();
+      expect(restored?.diffComments).toEqual([diffComment]);
+      expect(warn).toHaveBeenLastCalledWith("[composer-draft-storage] Dropped 1 invalid stored draft element(s)");
+    }
+    warn.mockRestore();
+  });
+
+  it("counts a draft holding only comments, a plan selection or a plan comment editor as content", () => {
     const empty: ComposerDraft = { ...baseDraft, input: "" };
 
     expect(draftHasNoSendableContent(empty)).toBe(true);
+    expect(draftHasNoSendableContent({ ...empty, planCommentEditor: nextMessageFields.planCommentEditor })).toBe(false);
     expect(draftHasNoSendableContent({ ...empty, diffComments: [diffComment] })).toBe(false);
-    expect(draftHasNoSendableContent({ ...empty, planCommentSelection: nextMessageFields.planCommentSelection })).toBe(false);
     expect(draftHasNoSendableContent({ ...empty, submissions: nextMessageFields.submissions })).toBe(false);
   });
 });
@@ -218,23 +248,6 @@ describe("persisted next-message drafts", () => {
       input: "typed",
       diffComments: [diffComment],
     });
-  });
-
-  it("restores a draft holding only a plan-comment selection after a reload", async () => {
-    localStorage.clear();
-    useComposerDraftStore.setState({ drafts: {} });
-    useComposerDraftStore.getState().updateNextMessage("thread-plan", (draft) => ({
-      ...draft,
-      planCommentSelection: nextMessageFields.planCommentSelection,
-    }));
-    const stored = localStorage.getItem("mcode-composer-drafts");
-    useComposerDraftStore.setState({ drafts: {} });
-    localStorage.setItem("mcode-composer-drafts", stored!);
-
-    await useComposerDraftStore.persist.rehydrate();
-
-    expect(useComposerDraftStore.getState().drafts["thread-plan"]?.planCommentSelection)
-      .toEqual(nextMessageFields.planCommentSelection);
   });
 });
 

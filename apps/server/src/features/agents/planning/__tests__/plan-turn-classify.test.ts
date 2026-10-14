@@ -104,7 +104,7 @@ describe("durable planning phases and attention", () => {
     await f.turns.dismissQuestions(f.thread.id);
     expect(f.threads.findById(f.thread.id)?.plan_phase).toBeNull();
     expect(f.pushes.at(-1)?.waiting).toBeNull();
-    expect(await reloaded.snapshot({ threadId: f.thread.id })).toEqual({ versions: [], phase: null, pendingQuestions: null });
+    expect(await reloaded.snapshot({ threadId: f.thread.id })).toEqual({ versions: [], comments: [], phase: null, pendingQuestions: null });
   });
 
   it("moves answers through planning to ready and exposes Plan ready without opening the thread", async () => {
@@ -161,7 +161,7 @@ describe("durable planning phases and attention", () => {
     const f = await fixture();
     await f.publishQuestions();
     await f.turns.admitted(f.thread.id, f.classify());
-    expect(await f.service.snapshot({ threadId: f.thread.id })).toEqual({ versions: [], phase: null, pendingQuestions: null });
+    expect(await f.service.snapshot({ threadId: f.thread.id })).toEqual({ versions: [], comments: [], phase: null, pendingQuestions: null });
     expect(f.pushes.at(-1)?.waiting).toBeNull();
   });
 });

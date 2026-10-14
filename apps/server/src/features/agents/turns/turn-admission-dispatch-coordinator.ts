@@ -57,7 +57,7 @@ import type { TurnResumeScheduler } from "../recovery/turn-resume-scheduler.js";
 import {
   type ParentTurnDurability,
 } from "./parent-turn-durability.js";
-import { appendSelectedTextComments } from "./selected-text-comment-append.js";
+import { appendSelectedTextComments, appendPlanComments } from "./selected-text-comment-append.js";
 import { ApprovalReviewPolicy, type ApprovalReviewDecision } from "./approval-review-policy.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 
@@ -346,6 +346,7 @@ export class TurnAdmissionDispatchCoordinator {
       replyToMessageId: submission.replyToMessageId,
       quotedText: submission.quotedText,
       selectedTextComments: submission.selectedTextComments ? [...submission.selectedTextComments] : undefined,
+      planCommentIds: submission.planCommentIds,
       markPlanAnswerForMessageId: submission.markPlanAnswerForMessageId,
       sourceTurnId: submission.sourceTurnId,
       sourceThreadId: submission.sourceThreadId,
@@ -532,7 +533,8 @@ export class TurnAdmissionDispatchCoordinator {
   }
 
   private async preparePlanFile(command: SendMessageCommand): Promise<void> {
-    if ((command.interactionMode ?? this.threads.findById(command.threadId)?.interaction_mode) === "plan" || command.markPlanAnswerForMessageId) {
+    if ((command.interactionMode ?? this.threads.findById(command.threadId)?.interaction_mode) === "plan"
+      || command.planCommentIds?.length || command.markPlanAnswerForMessageId) {
       await this.plans.prepareTurn(command.threadId);
     }
   }
@@ -549,8 +551,12 @@ export class TurnAdmissionDispatchCoordinator {
     const revertNotice = prepared.command.providerOriginated
       ? { revertIds: [], paths: [] } : this.reverts.pendingAgentNotice(prepared.thread.id);
     parentStartInput.revertNoticeIds = revertNotice.revertIds;
-    const wirePayload = await this.buildWirePayload(prepared, revertNotice.paths);
+    let wirePayload = await this.buildWirePayload(prepared, revertNotice.paths);
     await this.commitParentStart(prepared, lease, sourceTurnId, parentStartInput);
+    if (prepared.command.planCommentIds?.length) {
+      const { comments, versions } = this.plans.sentComments(prepared.thread.id, prepared.command.planCommentIds);
+      wirePayload = appendPlanComments(wirePayload, comments, versions);
+    }
     await this.publishCommittedEffects(prepared, sourceTurnId);
     const request = await this.buildTurnRequest(prepared, lease, sourceTurnId, attachmentData, cwd, wirePayload, review);
     return {
@@ -770,6 +776,7 @@ export class TurnAdmissionDispatchCoordinator {
         replyToMessageId: command.replyToMessageId,
         quotedText: command.quotedText,
         selectedTextComments: command.selectedTextComments,
+        planCommentIds: command.planCommentIds,
         markPlanAnswerForMessageId: command.markPlanAnswerForMessageId,
         sourceTurnId: command.sourceTurnId,
         sourceThreadId: command.sourceThreadId,
@@ -900,6 +907,7 @@ export class TurnAdmissionDispatchCoordinator {
       reopenThread: prepared.thread.user_completed_at !== null,
       answeredPlanQuestionMessageId: command.markPlanAnswerForMessageId,
       planImplement: command.planImplement,
+      planCommentIds: command.planCommentIds,
     };
   }
 

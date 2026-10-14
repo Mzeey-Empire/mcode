@@ -16,7 +16,11 @@ import { ThreadStartupService } from "../../../thread-startup/thread-startup-ser
 import { describe, expect, it, vi } from "vitest";
 import { routeMessage, type RouterDeps } from "../../../../application/transport/ws-router.js";
 import { routeAgentRpc, type AgentRouterDeps } from "../agent-rpc.js";
-import { PlanServiceError } from "../../planning/plan-service.js";
+import { PlanService, PlanServiceError } from "../../planning/plan-service.js";
+import { PlanStore } from "../../planning/persistence/plan-store.js";
+import { PlanFileWriter } from "../../planning/plan-file-writer.js";
+import { openMigratedTestDatabase } from "../../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
+import { leaseWriterWorker } from "../../../../runtime/persistence/sqlite/testing/reusable-writer-worker.js";
 import { TurnSteerConflictError, TurnSteerError, TurnSteerMentionError } from "../../steering/turn-steer.js";
 import type { PlanVersion } from "@mcode/contracts";
 import type { SendMessageCommand } from "../../turns/turn-admission-dispatch-coordinator.js";
@@ -32,7 +36,8 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
     messageRepo: { listByThread: unused, listByThreadAfter: unused, listSessionNotices: unused, confirmUserMessage: unused },
     narrativeStore: { load: unused },
     planQuestionAnswersRepo: { listAnsweredForThread: unused },
-    planService: { saveVersion: unused, snapshot: unused, implement: unused },
+    planService: { saveVersion: unused, snapshot: unused, implement: unused,
+      createComment: unused, updateComment: unused, setCommentStatus: unused, deleteComment: unused },
     planTurnService: { answerQuestions: unused, dismissQuestions: unused },
     recapService: { generate: unused },
     subagentRosterService: { loadRoster: unused, loadDetail: unused, stop: unused },
@@ -91,6 +96,46 @@ describe("routeMessage Agent RPCs", () => {
     }
   }, 30_000);
 
+  it("routes comment lifecycle RPCs through the SQLite writer and returns comments in snapshots", async () => {
+    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-comment-rpc-"));
+    const path = NodePath.join(directory, "app.sqlite");
+    const db = openMigratedTestDatabase(path);
+    const owner = new ApplicationDatabaseWriter(path, leaseWriterWorker);
+    const fixture = admissionFixture(async () => {});
+    try {
+      db.prepare("INSERT INTO workspaces (id, name, path) VALUES ('w', 'Plans', ?)").run(directory);
+      db.prepare("INSERT INTO threads (id, workspace_id, title, branch) VALUES ('t', 'w', 'Plan', 'main')").run();
+      db.prepare("INSERT INTO messages (id, thread_id, role, content, sequence) VALUES ('a', 't', 'assistant', 'Plan', 0)").run();
+      const plans = new PlanStore(db);
+      const version = plans.create("t", "a", { title: "Plan", contentMd: "# Plan", captureSource: "fence" }, "codex");
+      fixture.deps.planService = new PlanService(owner, undefined, new PlanFileWriter(id => plans.listByThread(id), () => directory));
+      const commentId = NodeCrypto.randomUUID();
+      const input = { commentId, versionId: version.id, body: "  Clarify  ", anchor: { kind: "section" as const, section: "Plan", quote: "" } };
+      const created = await routeAgentRpc("plan.comment.create", input, fixture.deps);
+      expect(created).toMatchObject({ id: commentId, body: "Clarify", status: "open", sentMessageId: null });
+      expect(await routeAgentRpc("plan.comment.create", input, fixture.deps)).toEqual(created);
+      expect(await routeAgentRpc("plan.comment.update", { commentId, body: "Order first" }, fixture.deps)).toMatchObject({ body: "Order first" });
+      expect(await routeAgentRpc("plan.comment.setStatus", { commentId, status: "resolved" }, fixture.deps)).toMatchObject({ status: "resolved" });
+      const reopened = await routeAgentRpc("plan.comment.setStatus", { commentId, status: "open" }, fixture.deps);
+      expect(reopened).toMatchObject({ status: "open", resolvedAt: null });
+      expect(await routeAgentRpc("plan.snapshot", { threadId: "t" }, fixture.deps)).toMatchObject({ versions: [version], comments: [reopened] });
+      await routeAgentRpc("plan.comment.delete", { commentId }, fixture.deps);
+      await routeAgentRpc("plan.comment.delete", { commentId }, fixture.deps);
+      expect(db.prepare("SELECT id FROM plan_comments").all()).toEqual([]);
+      await expect(routeAgentRpc("plan.comment.update", { commentId, body: "Gone" }, fixture.deps)).rejects.toMatchObject({ code: "plan_comment_invalid" });
+    } finally {
+      await owner.close();
+      db.close(true);
+      NodeFS.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves admission's plan_comment_invalid code after the worker boundary", async () => {
+    const fixture = admissionFixture(async () => { throw Object.assign(new Error("Changed in another window"), { code: "plan_comment_invalid" }); });
+    const response = await routeMessage(JSON.stringify({ id: "comments", method: "agent.send",
+      params: { threadId: "thread-one", content: "go", planCommentIds: ["00000000-0000-4000-8000-000000000001"] } }), fixture.deps);
+    expect(response).toMatchObject({ id: "comments", error: { code: "plan_comment_invalid" } });
+  });
   it("records the user as the cause of an agent.stop", async () => {
     const fixture = admissionFixture(async () => {});
     const stopSession = vi.fn<AgentRouterDeps["agentService"]["stopSession"]>(async (threadId) => ({
@@ -123,8 +168,8 @@ describe("routeMessage Agent RPCs", () => {
     expect(settled).toBe(false);
     confirm?.();
     await expect(pending).resolves.toEqual(version);
-    fixture.deps.planService.snapshot = async () => ({ versions: [version] });
-    await expect(routeAgentRpc("plan.snapshot", { threadId: version.threadId }, fixture.deps)).resolves.toEqual({ versions: [version] });
+    fixture.deps.planService.snapshot = async () => ({ versions: [version], comments: [] });
+    await expect(routeAgentRpc("plan.snapshot", { threadId: version.threadId }, fixture.deps)).resolves.toEqual({ versions: [version], comments: [] });
   });
 
   it.each(["plan_busy", "plan_read_only", "plan_conflict"] as const)("preserves the typed %s save failure", async (code) => {

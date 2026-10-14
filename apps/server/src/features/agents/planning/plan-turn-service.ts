@@ -4,6 +4,7 @@ import type {
   AgentEvent,
   PlanCapture,
   ContextWindowMode,
+  InteractionMode,
   IProviderRegistry,
   PermissionMode,
   ProviderId,
@@ -60,15 +61,20 @@ export class PlanTurnService {
   }
 
   /** Classify only after the preceding execution releases its worker and capture state. */
-  classify(command: Pick<SendMessageCommand, "threadId" | "interactionMode" | "markPlanAnswerForMessageId" | "planImplement" | "providerOriginated" | "provider">): PlanTurnClassification {
+  classify(command: Pick<SendMessageCommand, "threadId" | "interactionMode" | "markPlanAnswerForMessageId" | "planImplement" | "planCommentIds" | "providerOriginated" | "provider">): PlanTurnClassification {
     if (command.planImplement) return { kind: "implement" };
     if (command.providerOriginated) return { kind: "none" };
     if (command.markPlanAnswerForMessageId) return this.classifyOutput(command.threadId, "planning", command.provider);
-    const mode = command.interactionMode ?? this.threadRepo.findById(command.threadId)?.interaction_mode;
+    if (command.planCommentIds?.length) return this.classifyOutput(command.threadId, "revise", command.provider);
+    return this.classifyByMode(command.threadId, command.interactionMode, command.provider);
+  }
+
+  private classifyByMode(threadId: string, interactionMode: InteractionMode | undefined, providerId?: ProviderId): PlanTurnClassification {
+    const mode = interactionMode ?? this.threadRepo.findById(threadId)?.interaction_mode;
     if (mode !== "plan") return { kind: "none" };
-    const latest = this.planRepo.getLatestForThread(command.threadId);
-    if (latest && (latest.status === "draft" || latest.status === "ready")) return this.classifyOutput(command.threadId, "revise", command.provider);
-    this.beginQuestionGeneration(command.threadId);
+    const latest = this.planRepo.getLatestForThread(threadId);
+    if (latest && (latest.status === "draft" || latest.status === "ready")) return this.classifyOutput(threadId, "revise", providerId);
+    this.beginQuestionGeneration(threadId);
     return { kind: "questions", planFilePath: null };
   }
 
@@ -86,6 +92,14 @@ export class PlanTurnService {
     } else if (classification.kind === "questions") {
       await this.dismissQuestions(threadId);
     }
+  }
+
+  /** Read committed notes after admission, while the running turn excludes user edits. */
+  sentComments(threadId: string, ids: readonly string[]) {
+    const selected = new Set(ids);
+    const comments = this.planRepo.listComments(threadId).filter(comment => selected.has(comment.id));
+    broadcast("plan.commentsChanged", { threadId, upserted: comments, deletedIds: [] });
+    return { comments, versions: this.planRepo.listByThread(threadId) };
   }
 
   /** Start parsing one plan-question generation turn. */
@@ -237,6 +251,7 @@ ${userMessage}`;
       this.threadRepo.publishPlanPhase(threadId);
       this.projection?.progress?.reloadPlans(threadId);
       for (const version of this.planRepo.listByThread(threadId)) broadcast("plan.versionUpserted", { threadId, version });
+      broadcast("plan.commentsChanged", { threadId, upserted: this.planRepo.listComments(threadId), deletedIds: [] });
       await this.projection?.files.writeAfterCommit(threadId);
     } catch (error) {
       logger.error("Failed to persist plan output", {

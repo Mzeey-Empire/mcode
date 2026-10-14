@@ -12,6 +12,8 @@ import type { PlanPersistenceReady } from "../plan-execution-state.js";
 import type { PlanSaveResult, PlanSnapshotResult } from "./plan-write-operations.js";
 import { ThreadStore } from "../../../thread-control/persistence/thread-store.js";
 import { PlanQuestionParser } from "../plan-question-parser.js";
+import { PlanCommentStore } from "./plan-comment-store.js";
+import { hasPreparingPlanImplement, hasUnfinishedPlanExecution } from "./plan-write-availability.js";
 
 /** Plan queries and transactional operations, used on the application's sole writer. */
 export class PlanStore {
@@ -52,15 +54,12 @@ export class PlanStore {
 
   /** Unfinished canonical executions exclude user plan mutations. */
   hasUnfinishedExecution(threadId: string): boolean {
-    return Boolean(this.db.prepare(`SELECT 1 FROM canonical_agent_ingest_checkpoints checkpoint
-      JOIN canonical_agent_turns turn ON turn.id = checkpoint.turn_id
-      WHERE checkpoint.thread_id = ? AND checkpoint.terminal_outcome IS NULL
-        AND turn.status IN ('Pending', 'Running') LIMIT 1`).get(threadId));
+    return hasUnfinishedPlanExecution(this.db, threadId);
   }
 
   /** A prepared snapshot holds all plan writes until admission or compensation. */
   hasPreparingImplement(threadId: string): boolean {
-    return Boolean(this.db.prepare("SELECT 1 FROM plan_implement_requests WHERE source_thread_id = ? AND status = 'preparing'").get(threadId));
+    return hasPreparingPlanImplement(this.db, threadId);
   }
 
   private saveAvailableVersion(input: PlanSaveVersion, latest: PlanVersion | null): PlanSaveResult {
@@ -79,6 +78,7 @@ export class PlanStore {
       status: "draft", author: "user", providerId: null, captureSource: "edit", baseVersionId: latest.id,
       revision: 1, createdAt: now, updatedAt: now, acceptedAt: null, acceptedMessageId: null };
     this.insert(version);
+    new PlanCommentStore(this.db).carryForward(latest.id, version);
     return { ok: true, version };
   }
 
@@ -91,6 +91,7 @@ export class PlanStore {
       revision: existing.revision + 1, updatedAt: new Date().toISOString() };
     this.orm.update(plans).set({ title: version.title, contentMd: version.contentMd,
       revision: version.revision, updatedAt: version.updatedAt }).where(eq(plans.id, existing.id)).run();
+    new PlanCommentStore(this.db).reanchorDraft(version);
     return { ok: true, version };
   }
 
@@ -99,7 +100,7 @@ export class PlanStore {
     return this.db.transaction((): PlanSnapshotResult => {
       if (!this.threadExists(threadId)) return { ok: false, code: "thread_not_found", latestVersion: null };
       const phase = new ThreadStore(this.db).findById(threadId)?.plan_phase ?? null;
-      return { ok: true, versions: this.listWithHistory(threadId), phase,
+      return { ok: true, versions: this.listWithHistory(threadId), comments: this.listComments(threadId), phase,
         pendingQuestions: phase === "questions" ? this.pendingQuestions(threadId) : null };
     })();
   }
@@ -143,8 +144,15 @@ export class PlanStore {
 
   /** Insert an assigned version without allocating another identity. */
   insert(version: PlanVersion, nativePlanFileJson: string | null = null): void {
+    const predecessor = version.author === "agent" ? this.listByThread(version.threadId).at(-1) : undefined;
     this.orm.insert(plans).values({ ...version, nativePlanFileJson }).run();
+    if (predecessor) new PlanCommentStore(this.db).carryForward(predecessor.id, version);
     if (version.status === "ready" || version.status === "draft") new ThreadStore(this.db).updatePlanPhase(version.threadId, "ready");
+  }
+
+  /** Saved comments for snapshots and post-commit pushes. */
+  listComments(threadId: string) {
+    return new PlanCommentStore(this.db).listByThread(threadId);
   }
 
   /** All durable versions in their per-thread order. */

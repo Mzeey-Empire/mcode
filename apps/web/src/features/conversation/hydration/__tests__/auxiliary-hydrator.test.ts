@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { PlanQuestion, PlanSnapshot, PlanVersion } from "@mcode/contracts";
+import type { PlanComment, PlanQuestion, PlanSnapshot, PlanVersion } from "@mcode/contracts";
 import { HYDRATION_TTL_MS } from "..";
 import { AuxiliaryHydrator } from "../auxiliary-hydrator";
 import {
@@ -33,7 +33,7 @@ function cacheRecord(threadId: string, record: ThreadRecord): void {
   cacheConversationRecord(threadId, projectConversationCacheState(record));
 }
 
-const EMPTY_SNAPSHOT: PlanSnapshot = { versions: [], phase: null, pendingQuestions: null };
+const EMPTY_SNAPSHOT: PlanSnapshot = { versions: [], comments: [], phase: null, pendingQuestions: null };
 
 describe("AuxiliaryHydrator", () => {
   let setStateSpy: ReturnType<typeof vi.fn>;
@@ -45,6 +45,7 @@ describe("AuxiliaryHydrator", () => {
     pending: { assistantMessageId: string; questions: PlanQuestion[] } | null,
   ) => void;
   let planQuestionsRevision: number;
+  let setPlanCommentsForThread: (threadId: string, comments: readonly PlanComment[]) => void;
   let records: Map<string, ThreadRecord>;
   let currentThreadId: string | null;
 
@@ -63,6 +64,7 @@ describe("AuxiliaryHydrator", () => {
     addPlanForThread = vi.fn() as (threadId: string, plan: PlanVersion) => void;
     reconcilePlanQuestions = vi.fn() as typeof reconcilePlanQuestions;
     planQuestionsRevision = 0;
+    setPlanCommentsForThread = vi.fn() as (threadId: string, comments: readonly PlanComment[]) => void;
 
     cacheRecord(THREAD_ID, makeThinRecord());
   });
@@ -107,6 +109,7 @@ describe("AuxiliaryHydrator", () => {
       addPlanForThread,
       reconcilePlanQuestions,
       getPlanQuestionsRevision: () => planQuestionsRevision,
+      setPlanCommentsForThread,
       shallowEqualBy,
       coerceTaskStatus,
     });
