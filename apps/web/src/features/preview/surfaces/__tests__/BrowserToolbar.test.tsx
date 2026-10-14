@@ -7,7 +7,6 @@ import defaultKeybindings from "@/config/default-keybindings.json";
 import { clearKeybindings, loadKeybindings } from "@/lib/keybinding-manager";
 import { useToastStore } from "@/stores/toastStore";
 import {
-  BROWSER_ACTING_LINGER_MS,
   useBrowserAutomationStore,
   type BrowserAutomationActiveRequest,
 } from "../../automation/browserAutomationStore";
@@ -386,9 +385,19 @@ describe("useBrowserControl", () => {
 
     act(() => useBrowserAutomationStore.getState().clearActiveRequest("click-2", 2));
     expect(result.current.kind).toBe("agent-acting");
-    act(() => void vi.advanceTimersByTime(BROWSER_ACTING_LINGER_MS));
+    act(() => void vi.advanceTimersByTime(3_000));
 
     expect(result.current.kind).toBe("none");
+  });
+
+  it("shows the agent pill while a browser_open is still pending", () => {
+    const { result } = renderHook(() => useBrowserControl(...scope));
+
+    act(() => useBrowserAutomationStore.getState().setPendingAgentOpen("open-1", 1, {
+      workspaceId: scope[0], threadId: scope[1], tabId: scope[2], url: null, startedAt: 1,
+    }));
+
+    expect(result.current.kind).toBe("agent-acting");
   });
 
   it("shows Hand back while the user holds the thread, even with no agent activity", () => {

@@ -2,7 +2,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BROWSER_AUTOMATION_MAX_PENDING_REQUESTS } from "@mcode/contracts";
 import {
-  BROWSER_ACTING_LINGER_MS,
   browserAutomationLifecycleKey,
   browserAutomationRequestKey,
   browserAutomationScopeKey,
@@ -576,15 +575,15 @@ describe("browser acting and user hold", () => {
     store.setActiveRequest(activeRequest("click-1", 1, "click"));
     store.clearActiveRequest("click-1", 1);
 
-    vi.advanceTimersByTime(BROWSER_ACTING_LINGER_MS - 1);
+    vi.advanceTimersByTime(2_999);
     expect(useBrowserAutomationStore.getState().actingTargets.has(key)).toBe(true);
 
     store.setActiveRequest(activeRequest("click-2", 2, "click"));
-    vi.advanceTimersByTime(BROWSER_ACTING_LINGER_MS * 2);
+    vi.advanceTimersByTime(6_000);
     expect(useBrowserAutomationStore.getState().actingTargets.has(key)).toBe(true);
 
     store.clearActiveRequest("click-2", 2);
-    vi.advanceTimersByTime(BROWSER_ACTING_LINGER_MS);
+    vi.advanceTimersByTime(3_000);
     expect(useBrowserAutomationStore.getState().actingTargets.has(key)).toBe(false);
   });
 
@@ -595,7 +594,7 @@ describe("browser acting and user hold", () => {
     store.setActiveRequest(activeRequest("type-1", 2, "type"));
     store.clearActiveRequest("click-1", 1);
 
-    vi.advanceTimersByTime(BROWSER_ACTING_LINGER_MS * 2);
+    vi.advanceTimersByTime(6_000);
     expect(useBrowserAutomationStore.getState().actingTargets.has(key)).toBe(true);
   });
 

@@ -2886,7 +2886,7 @@ describe("BrowserAutomationHost", () => {
     frame.remove();
   });
 
-  it("invalidates the exact web target on direct pointer input without cancelling the request", async () => {
+  it("holds the exact web target for the user on direct pointer input and stops the agent's click", async () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
     delete window.desktopBridge;
     const frame = document.createElement("iframe");
@@ -2899,6 +2899,7 @@ describe("BrowserAutomationHost", () => {
     vi.spyOn(button, "getBoundingClientRect").mockReturnValue({ width: 80, height: 20 } as DOMRect);
     const clicked = vi.fn();
     button.addEventListener("click", clicked);
+    useBrowserAutomationStore.getState().setControllerForTarget("workspace-1", "thread-1", "tab-1", { tabId: "tab-1", controller: "agent", controlEpoch: 0 });
     const view = render(<BrowserAutomationHost />);
     await waitFor(() => expect(harness.transport.registerBrowserAutomationHost).toHaveBeenCalledOnce());
     const hostId = sessionStorage.getItem("mcode.browserAutomation.hostId");
@@ -2906,17 +2907,9 @@ describe("BrowserAutomationHost", () => {
     clickDispatch.request = { ...clickDispatch.request, operation: "click", args: { target: { cssSelector: "#save" }, button: "left", clickCount: 1, timeoutMs: 1000 } } as never;
     frameDocument.addEventListener("mousedown", () => frameDocument.dispatchEvent(new frameDocument.defaultView!.Event("pointerdown", { bubbles: true })), true);
     act(() => harness.emit("browserAutomation.request", { hostId, generation: 1, dispatch: clickDispatch }));
-    await waitFor(() => expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenCalledOnce());
     await waitFor(() => expect(useBrowserAutomationStore.getState().activeRequests.size).toBe(0));
-    expect(clicked).toHaveBeenCalledOnce();
-    expect(harness.transport.cancelBrowserAutomationRequest).not.toHaveBeenCalled();
-    expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenCalledWith(
-      hostId,
-      1,
-      expect.objectContaining({ ok: true, result: expect.objectContaining({ operation: "click" }) }),
-      clickDispatch.target,
-    );
-    expect(useBrowserAutomationStore.getState().controllers.size).toBe(0);
+    expect(clicked).not.toHaveBeenCalled();
+    expect(useBrowserAutomationStore.getState().controllers.get(browserAutomationTargetKey("workspace-1", "thread-1", "tab-1"))).toEqual({ tabId: "tab-1", controller: "human", controlEpoch: 1 });
     view.unmount();
     frame.remove();
   });
@@ -2952,6 +2945,50 @@ describe("BrowserAutomationHost", () => {
     await waitFor(() => expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenCalledTimes(2));
     expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenLastCalledWith(hostId, 1, expect.objectContaining({ ok: false, error: expect.objectContaining({ code: "STALE_CONTROL_EPOCH" }) }), staleEpoch.target);
     expect(input.value).toBe("");
+    view.unmount();
+    frame.remove();
+  });
+
+  it("refuses the agent's web click while the user holds the tab and accepts the new epoch after Hand back", async () => {
+    vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
+    delete window.desktopBridge;
+    const frame = document.createElement("iframe");
+    setIframeIdentity(frame, "tab-1");
+    document.body.append(frame);
+    Object.defineProperty(frame, "contentWindow", { configurable: true, value: { location: { origin: window.location.origin } } });
+    const frameDocument = frame.contentDocument!;
+    frameDocument.body.innerHTML = '<button id="save">Save</button>';
+    const button = frameDocument.querySelector("button")!;
+    vi.spyOn(button, "getBoundingClientRect").mockReturnValue({ width: 80, height: 20 } as DOMRect);
+    const clicked = vi.fn();
+    button.addEventListener("click", clicked);
+    const store = useBrowserAutomationStore.getState();
+    store.setControllerForTarget("workspace-1", "thread-1", "tab-1", { tabId: "tab-1", controller: "agent", controlEpoch: 0 });
+    const view = render(<BrowserAutomationHost />);
+    await waitFor(() => expect(harness.transport.registerBrowserAutomationHost).toHaveBeenCalledOnce());
+    const hostId = sessionStorage.getItem("mcode.browserAutomation.hostId");
+    const click = (sequence: number, expectedControlEpoch: number) => {
+      const next = dispatch(1, sequence, { targetGeneration: 1, expectedControlEpoch });
+      next.request = { ...next.request, operation: "click", args: { target: { cssSelector: "#save" }, button: "left", clickCount: 1, timeoutMs: 1000 } } as never;
+      act(() => harness.emit("browserAutomation.request", { hostId, generation: 1, dispatch: next }));
+      return next;
+    };
+
+    act(() => interruptBrowserAutomationTarget("workspace-1", "thread-1", "tab-1", "user-stopped"));
+    const whileHeld = click(40, 0);
+    await waitFor(() => expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenCalledOnce());
+    expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenLastCalledWith(
+      hostId, 1, expect.objectContaining({ ok: false }), whileHeld.target,
+    );
+    expect(clicked).not.toHaveBeenCalled();
+
+    await act(async () => void (await handBackBrowserControl("workspace-1", "thread-1")));
+    const afterHandBack = click(41, 2);
+    await waitFor(() => expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenCalledTimes(2));
+    expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenLastCalledWith(
+      hostId, 1, expect.objectContaining({ ok: true }), afterHandBack.target,
+    );
+    expect(clicked).toHaveBeenCalledOnce();
     view.unmount();
     frame.remove();
   });

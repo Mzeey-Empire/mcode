@@ -14,6 +14,7 @@ import {
   browserAction,
   type BrowserAction,
   type BrowserAddress,
+  type BrowserControl,
   type BrowserNavigation,
   type BrowserToolbarPage,
   type BrowserTools,
@@ -186,7 +187,7 @@ export function BrowserChrome(props: BrowserChromeProps) {
         {/* A block wrapper so the header's own flex row spans the full row. */}
         <div data-browser-chrome="" className="min-w-0 flex-1">
           {props.showAnnotationCommandBar ? (
-            <AnnotationHeader {...props} />
+            <AnnotationHeader {...props} control={control} />
           ) : (
             <BrowserToolbar
               page={desktopPage({ ...props, invalidateObservation })}
@@ -212,9 +213,11 @@ function AnnotationHeader({
   requestComposerSubmit,
   clearTransientAnnotationState,
   designModeSetActive,
-}: BrowserChromeProps) {
+  control,
+}: BrowserChromeProps & { readonly control: BrowserControl }) {
   return (
     <PreviewAnnotationHeader
+      control={control}
       pageCount={pageAnnotations.length}
       bundleCount={bundleCount}
       pageLabel={annotationHeaderPageLabel}

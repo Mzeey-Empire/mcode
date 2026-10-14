@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import type { BrowserControl } from "./browserToolbarModel";
 
@@ -20,13 +21,15 @@ export function BrowserControlPill({ control }: BrowserControlPillProps) {
       className="flex h-8 shrink-0 items-center gap-2 rounded-full bg-selected py-0 pr-[3px] pl-3"
     >
       <ProviderIcon provider={control.provider} size={16} />
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        shape="round"
         onClick={onPress}
-        className="h-[26px] rounded-full bg-border px-2.5 text-button whitespace-nowrap text-ink transition-colors hover:bg-control-border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-focus"
+        className="h-[26px] bg-border px-2.5 whitespace-nowrap hover:bg-control-border"
       >
         {label}
-      </button>
+      </Button>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { browserAutomationTargetKey, useBrowserAutomationStore } from "../automation/browserAutomationStore";
+import { browserAutomationTargetKey, isBrowserAutomationAgentControlled, useBrowserAutomationStore } from "../automation/browserAutomationStore";
 
 /**
  * Whether the agent is visibly acting on one Browser tab: it holds the tab and either has an
@@ -8,7 +8,7 @@ import { browserAutomationTargetKey, useBrowserAutomationStore } from "../automa
 export function useBrowserActing(workspaceId: string, threadId: string, tabId: string): boolean {
   return useBrowserAutomationStore((state) => {
     const key = browserAutomationTargetKey(workspaceId, threadId, tabId);
-    return state.actingTargets.has(key) && state.controllers.get(key)?.controller === "agent";
+    return isBrowserAutomationAgentControlled(state, workspaceId, threadId, tabId) && state.controllers.get(key)?.controller !== "human";
   });
 }
 

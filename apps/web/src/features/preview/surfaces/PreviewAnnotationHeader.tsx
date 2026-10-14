@@ -14,6 +14,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { BrowserControlPill } from "./BrowserControlPill";
+import type { BrowserControl } from "./browserToolbarModel";
 
 /** Props for the Preview annotation mode header. */
 export interface PreviewAnnotationHeaderProps {
@@ -29,6 +31,8 @@ export interface PreviewAnnotationHeaderProps {
   readonly onSend: () => void;
   /** Exit Preview annotation mode. */
   readonly onExit: () => void;
+  /** Who holds the Browser; the pill stays here so Hand back is reachable while designing. */
+  readonly control?: BrowserControl;
 }
 
 /** Header shown while the Preview is in annotation mode, replacing normal browser chrome. */
@@ -39,6 +43,7 @@ export function PreviewAnnotationHeader({
   onDiscardPage,
   onSend,
   onExit,
+  control,
 }: PreviewAnnotationHeaderProps) {
   const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
   const countLabel = `${bundleCount} annotation${bundleCount === 1 ? "" : "s"}`;
@@ -103,6 +108,7 @@ export function PreviewAnnotationHeader({
           />
           <TooltipContent side="top">{titleLabel}</TooltipContent>
         </Tooltip>
+        {control && control.kind !== "none" ? <BrowserControlPill control={control} /> : null}
         <Button
           type="button"
           variant="default"

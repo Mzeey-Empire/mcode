@@ -19,6 +19,7 @@ import {
   browserAutomationRequestKey,
   browserAutomationScopeKey,
   browserAutomationTargetKey,
+  interruptBrowserAutomationTarget,
   invalidateBrowserAutomationTargetObservation,
   onBrowserAutomationObservationInvalidation,
   onBrowserAutomationInterruption,
@@ -1012,7 +1013,10 @@ export function BrowserAutomationHost() {
         const targetKey = browserAutomationTargetKey(dispatch.scope.workspaceId, dispatch.target.threadId, dispatch.target.tabId);
         return useBrowserAutomationStore.getState().liveTargets.get(targetKey)?.revision ?? 0;
       },
-      onHumanInput: (dispatch) => invalidateBrowserAutomationTargetObservation(dispatch.scope.workspaceId, dispatch.target.threadId, dispatch.target.tabId),
+      onHumanInput: (dispatch) => {
+        interruptBrowserAutomationTarget(dispatch.scope.workspaceId, dispatch.target.threadId, dispatch.target.tabId, "human-interrupted");
+        invalidateBrowserAutomationTargetObservation(dispatch.scope.workspaceId, dispatch.target.threadId, dispatch.target.tabId);
+      },
       onObserver: (dispatch, dispose) => webObserverRef.current.set(browserAutomationRequestKey(dispatch.request.requestId, dispatch.request.sequence), dispose),
       executeNonInteraction: (dispatch, signal) => executeBrowserDispatch(undefined, recorderRef.current, dispatch, signal, executorDescriptor.operations),
     });

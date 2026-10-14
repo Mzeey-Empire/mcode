@@ -290,9 +290,15 @@ function bindViewportCoordinatorDispatch(dispatch: BrowserAutomationHostDispatch
   if (coordinator) viewportCoordinatorDispatches.set(coordinator, dispatch);
 }
 
+function projectsWebAgentControl(dispatch: BrowserAutomationHostDispatch): boolean {
+  if (window.desktopBridge?.preview?.automation) return false;
+  return isBrowserEffectOperation(dispatch.request.operation) &&
+    useThreadStore.getState().runningThreadIds.has(dispatch.target.threadId);
+}
+
 /** Project web agent control before the browser operation begins. */
 export function projectAgentControl(dispatch: BrowserAutomationHostDispatch): void {
-  if (window.desktopBridge?.preview?.automation || !isBrowserEffectOperation(dispatch.request.operation) || !useThreadStore.getState().runningThreadIds.has(dispatch.target.threadId)) return;
+  if (!projectsWebAgentControl(dispatch)) return;
   const operation = dispatch.request.operation;
   const held = useBrowserAutomationStore.getState().controllers.get(browserAutomationTargetKey(
     dispatch.scope.workspaceId,
@@ -307,7 +313,8 @@ export function projectAgentControl(dispatch: BrowserAutomationHostDispatch): vo
     {
       tabId: dispatch.target.tabId,
       controller: "agent",
-      controlEpoch: dispatch.request.expectedControlEpoch,
+      // A stored epoch is authoritative: copying the request's would let a pre-takeover act pass the epoch check.
+      controlEpoch: held?.controlEpoch ?? dispatch.request.expectedControlEpoch,
       providerSessionId: dispatch.request.providerSessionId,
       ...(!["inspect", "act", "tabs"].includes(operation) ? { operation } : {}),
     },
