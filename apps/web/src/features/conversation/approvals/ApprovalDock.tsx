@@ -78,6 +78,12 @@ function dockKeyAction(event: KeyboardEvent): DockKeyAction | undefined {
   return event.key.length === 1 && event.key !== " " ? { kind: "arm", value: 0 } : undefined;
 }
 
+/** A question body owns its keys, except `[` and `]` it left unhandled at its first or last question. */
+function questionBodyOwnsKey(active: StoredApproval, action: DockKeyAction, event: KeyboardEvent): boolean {
+  if (active.subject.kind !== "question") return false;
+  return action.kind !== "page" || event.defaultPrevented || event.target instanceof HTMLInputElement;
+}
+
 /**
  * Always-mounted live region. A region inserted together with its text is often
  * not read, so it stays in the DOM and changes text when a request arrives.
@@ -167,10 +173,8 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    // A question body owns its keys: a digit there picks an option, not a choice row.
-    if (active.subject.kind === "question") return;
     const action = dockKeyAction(event);
-    if (!action) return;
+    if (!action || questionBodyOwnsKey(active, action, event)) return;
     event.preventDefault();
     runKey[action.kind](action.value);
   };

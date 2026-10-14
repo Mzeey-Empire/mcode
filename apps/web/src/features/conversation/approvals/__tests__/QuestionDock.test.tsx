@@ -191,7 +191,7 @@ describe("QuestionDock", () => {
     expect(screen.getByText("How wide should the change be?")).toBeTruthy();
   });
 
-  it("leaves the write-your-own input on Escape before a second Escape dismisses", async () => {
+  it("dismisses the batch with Escape from the write-your-own input", async () => {
     const user = setup();
     render(<DockHarness />);
     await elapseGuard();
@@ -200,10 +200,7 @@ describe("QuestionDock", () => {
     await user.keyboard("Only the parser");
 
     await user.keyboard("{Escape}");
-    expect(dismissPlanQuestions).not.toHaveBeenCalled();
-    expect(screen.getByRole("group").contains(document.activeElement)).toBe(true);
 
-    await user.keyboard("{Escape}");
     expect(dismissPlanQuestions).toHaveBeenCalledWith(THREAD_ID);
   });
 

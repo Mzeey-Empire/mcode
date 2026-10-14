@@ -159,8 +159,7 @@ function QuestionPanel({ threadId, providerId, composerContainerRef, isAgentRunn
   };
 
   const runKey: Record<QuestionKeyAction["kind"], (value: number, inInput: boolean) => void> = {
-    // Selecting Other unmounts its row, so focus falls back to whichever row is still mounted.
-    escape: (_, inInput) => (inInput ? rowRefs.current.find(Boolean)?.focus() : clearPlanQuestions(threadId)),
+    escape: () => clearPlanQuestions(threadId),
     enter: (_, inInput) => {
       if (!inInput && selectedRow !== focusedRow) select(focusedRow);
       advance();

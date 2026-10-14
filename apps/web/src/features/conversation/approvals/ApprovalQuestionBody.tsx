@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { CircleAlert } from "lucide-react";
 import { MAX_APPROVAL_ANSWER_LENGTH, type ApprovalAnswers, type ApprovalQuestion } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
@@ -11,10 +11,51 @@ import { pageKeyDelta, questionKeyAction, type QuestionKeyAction } from "./quest
 import { submitApprovalChoice } from "./submit-approval-choice";
 
 /** Answer for one question: the picked labels, plus the typed answer when the provider allows one. */
-function answerFor(question: ApprovalQuestion, selected: readonly string[], custom: string): string[] {
+function answerFor(question: ApprovalQuestion, selected: readonly string[] = [], custom = ""): string[] {
   const typed = custom.trim();
   if (!typed) return [...selected];
   return question.multiple ? [...selected, typed] : [typed];
+}
+
+function hasAnswer(answer: readonly string[]): boolean {
+  return answer.length > 0;
+}
+
+/** Next disables itself until the new question is answered, which would drop focus and silence the number keys. */
+function useFocusOptionsOnPage(index: number, groupRef: RefObject<HTMLDivElement | null>): void {
+  const shownIndexRef = useRef(index);
+  useEffect(() => {
+    if (shownIndexRef.current === index) return;
+    shownIndexRef.current = index;
+    groupRef.current?.querySelector("button")?.focus();
+  }, [index, groupRef]);
+}
+
+interface QuestionFooterProps {
+  readonly request: StoredApproval;
+  readonly failed: boolean;
+  readonly submitting: boolean;
+  readonly canAdvance: boolean;
+  readonly isLast: boolean;
+  readonly onSkip: () => void;
+  readonly onAdvance: () => void;
+}
+
+function QuestionFooter({ request, failed, submitting, canAdvance, isLast, onSkip, onAdvance }: QuestionFooterProps) {
+  return (
+    <>
+      {failed && (
+        <div role="alert" className="flex items-center gap-2 text-sm">
+          <CircleAlert size={14} strokeWidth={1.5} className="shrink-0 text-error" aria-hidden />
+          <span className="min-w-0 text-error">Your answer didn&apos;t reach {approvalActorName(request)}.</span>
+        </div>
+      )}
+      <div className="flex items-center justify-end gap-2">
+        <Button variant="ghost" shape="round" disabled={submitting} onClick={onSkip}>Skip</Button>
+        <Button shape="round" disabled={!canAdvance} onClick={onAdvance}>{isLast ? "Submit" : "Next"}</Button>
+      </div>
+    </>
+  );
 }
 
 function QuestionPager({ index, count, page }: { readonly index: number; readonly count: number; readonly page: (delta: number) => void }) {
@@ -47,13 +88,9 @@ export function ApprovalQuestionBody({ request, questions, isArmed, arm }: Appro
   const submitting = submission?.state === "submitting";
   const question = questions[index]!;
   const isLast = index === questions.length - 1;
-  const answers = questions.map((item, row) => answerFor(item, selected[row] ?? [], custom[row] ?? ""));
-  const canAdvance = answers[index]!.length > 0 && !submitting;
-
-  // Next disables itself until the new question is answered, which would drop focus and silence the number keys.
-  useEffect(() => {
-    if (index > 0) groupRef.current?.querySelector("button")?.focus();
-  }, [index]);
+  const answers = questions.map((item, row) => answerFor(item, selected[row], custom[row]));
+  const canAdvance = !submitting && (isLast ? answers.every(hasAnswer) : hasAnswer(answers[index]!));
+  useFocusOptionsOnPage(index, groupRef);
 
   const respond = (intent: "allow_once" | "deny", payload?: ApprovalAnswers) => {
     const choice = request.choices.find((item) => item.intent === intent);
@@ -67,10 +104,8 @@ export function ApprovalQuestionBody({ request, questions, isArmed, arm }: Appro
     else setIndex(index + 1);
   };
 
-  const page = (delta: number) => {
-    const target = index + delta;
-    if (target >= 0 && target < questions.length) setIndex(target);
-  };
+  const canPage = (delta: number) => index + delta >= 0 && index + delta < questions.length;
+  const page = (delta: number) => { if (canPage(delta)) setIndex(index + delta); };
 
   const pick = (label: string) => {
     setSelected((current) => current.map((picked, row) => {
@@ -100,8 +135,11 @@ export function ApprovalQuestionBody({ request, questions, isArmed, arm }: Appro
     const typing = event.target instanceof HTMLInputElement;
     const pageDelta = pageKeyDelta(event, typing);
     if (pageDelta) {
-      event.preventDefault();
-      page(pageDelta);
+      // At the first or last question the key is left unhandled so the dock can page between requests.
+      if (canPage(pageDelta)) {
+        event.preventDefault();
+        page(pageDelta);
+      }
       return;
     }
     const action = questionKeyAction(event, typing);
@@ -149,16 +187,15 @@ export function ApprovalQuestionBody({ request, questions, isArmed, arm }: Appro
           </div>
         )}
       </div>
-      {submission?.state === "failed" && (
-        <div role="alert" className="flex items-center gap-2 text-sm">
-          <CircleAlert size={14} strokeWidth={1.5} className="shrink-0 text-error" aria-hidden />
-          <span className="min-w-0 text-error">Your answer didn&apos;t reach {approvalActorName(request)}.</span>
-        </div>
-      )}
-      <div className="flex items-center justify-end gap-2">
-        <Button variant="ghost" shape="round" disabled={submitting} onClick={() => isArmed() && respond("deny")}>Skip</Button>
-        <Button shape="round" disabled={!canAdvance} onClick={advance}>{isLast ? "Submit" : "Next"}</Button>
-      </div>
+      <QuestionFooter
+        request={request}
+        failed={submission?.state === "failed"}
+        submitting={submitting}
+        canAdvance={canAdvance}
+        isLast={isLast}
+        onSkip={() => isArmed() && respond("deny")}
+        onAdvance={advance}
+      />
     </div>
   );
 }

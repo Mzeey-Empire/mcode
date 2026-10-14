@@ -189,6 +189,24 @@ describe("ApprovalDock queue", () => {
     expect(respondToApproval).toHaveBeenCalledTimes(1);
   });
 
+  it("pages between question requests with the brackets once a body is on its last question", async () => {
+    const user = setupUser();
+    const subject = (question: string): ApprovalSubject => ({
+      kind: "question",
+      questions: [{ header: "Scope", question, options: [{ label: "Narrow" }, { label: "Wide" }], multiple: false, custom: false }],
+    });
+    addApproval({ requestId: "first", requestedAt: "2026-10-10T10:00:01Z", subject: subject("First question?") });
+    addApproval({ requestId: "second", requestedAt: "2026-10-10T10:00:02Z", subject: subject("Second question?") });
+    render(<DockHarness />);
+    await elapseGuard();
+    act(() => screen.getAllByRole("button", { name: /Narrow/ })[0]!.focus());
+
+    await user.keyboard("]");
+
+    expect(screen.getByText("Second question?")).toBeInTheDocument();
+    expect(screen.getByText("2 of 2")).toBeInTheDocument();
+  });
+
   it("dims the other rows while an answer is in flight", async () => {
     respondToApproval.mockReturnValue(new Promise(() => {}));
     const user = setupUser();

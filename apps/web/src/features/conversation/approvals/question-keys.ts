@@ -23,12 +23,12 @@ export function pageKeyDelta(event: KeyboardEvent, typing: boolean): -1 | 0 | 1 
 /**
  * Classifies a key press for question surfaces. A digit picks a row only while the user
  * is not typing an answer; any other printable key counts as typing, so it re-arms the
- * misclick guard.
+ * misclick guard. Space is a click on the focused row, so it only counts while typing.
  */
 export function questionKeyAction(event: KeyboardEvent, typing: boolean): QuestionKeyAction | undefined {
   if (event.ctrlKey || event.metaKey || event.altKey) return undefined;
   const named = NAMED_KEYS[event.key];
   if (named) return named;
   if (!typing && /^[1-9]$/.test(event.key)) return { kind: "digit", value: Number(event.key) - 1 };
-  return event.key.length === 1 ? { kind: "arm", value: 0 } : undefined;
+  return event.key.length === 1 && (typing || event.key !== " ") ? { kind: "arm", value: 0 } : undefined;
 }

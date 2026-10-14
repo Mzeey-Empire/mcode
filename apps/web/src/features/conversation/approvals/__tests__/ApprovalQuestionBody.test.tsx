@@ -183,6 +183,43 @@ describe("ApprovalQuestionBody", () => {
     expect(screen.getByText("Which checks?")).toBeInTheDocument();
   });
 
+  it("keeps Submit disabled until every question has an answer", async () => {
+    const user = setupUser();
+    renderBody([SINGLE, MULTIPLE]);
+    await elapseGuard();
+
+    await user.keyboard("]");
+    await user.keyboard("1");
+    expect(screen.getByRole("button", { name: "Submit" })).toBeDisabled();
+
+    await user.keyboard("[[");
+    await user.keyboard("1");
+    await user.keyboard("]");
+    expect(screen.getByRole("button", { name: "Submit" })).toBeEnabled();
+  });
+
+  it("returns focus to the options when paging back to an earlier question", async () => {
+    const user = setupUser();
+    renderBody([SINGLE, MULTIPLE]);
+    await elapseGuard();
+
+    await user.keyboard("]");
+    await user.keyboard("[[");
+    await user.keyboard("2");
+
+    expect(screen.getByRole("button", { name: /Wide/ })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("lets Space click the focused option without re-arming the guard", async () => {
+    const user = setupUser();
+    renderBody([SINGLE]);
+    await elapseGuard();
+
+    await user.keyboard(" ");
+
+    expect(screen.getByRole("button", { name: /Narrow/ })).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("shows an alert when the provider does not acknowledge the answer", async () => {
     respondToApproval.mockResolvedValue({ status: "failed", message: "gone" });
     const user = setupUser();
