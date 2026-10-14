@@ -17,7 +17,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { getKeybindingForCommand, formatKeybinding } from "@/lib/keybinding-manager";
+import { getKeybindingForCommand, keybindingKeycaps } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
 import {
   PANEL_TAB_TYPES,
@@ -196,11 +196,11 @@ function railDomId(id: RightPanelTool): string {
   return id === "changes" ? "review" : id;
 }
 
-/** The mcode keycap for a tab type, or null when it has no binding. */
-function tabKeycap(type: PanelTabType): string | null {
-  if (!type.commandId) return null;
+/** The keys of a tab type's shortcut, or undefined when it has no binding. */
+function tabKeycaps(type: PanelTabType): readonly string[] | undefined {
+  if (!type.commandId) return undefined;
   const binding = getKeybindingForCommand(type.commandId);
-  return binding ? formatKeybinding(binding.key, isMac) : null;
+  return binding ? keybindingKeycaps(binding.key, isMac) : undefined;
 }
 
 /**
@@ -519,7 +519,7 @@ function RailAddControl({
               key={type.id}
               label={type.label}
               icon={<type.icon />}
-              shortcut={tabKeycap(type) ?? undefined}
+              shortcut={tabKeycaps(type)}
               disabledReason={unavailableReason}
               onClick={unavailableReason ? undefined : () => onCreate(type.id as RightPanelTool)}
             />

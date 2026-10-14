@@ -85,9 +85,9 @@ function ZoomRow({ zoom }: { readonly zoom: BrowserZoom }) {
   );
 }
 
-function commandShortcut(commandId: string): string | undefined {
+function commandShortcut(commandId: string): readonly string[] | undefined {
   const key = getKeybindingForCommand(commandId)?.key;
-  return key === undefined ? undefined : keybindingKeycaps(key, isMac).join(" ");
+  return key === undefined ? undefined : keybindingKeycaps(key, isMac);
 }
 
 function TakeControlItem({ takeover }: { readonly takeover: BrowserTakeover }) {

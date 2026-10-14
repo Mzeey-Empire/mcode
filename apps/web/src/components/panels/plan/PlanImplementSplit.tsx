@@ -1,7 +1,7 @@
 import type { PlanVersion } from "@mcode/contracts";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { SplitButton } from "@/components/ui/split-button";
-import { formatKeybinding, getKeybindingForCommand } from "@/lib/keybinding-manager";
+import { getKeybindingForCommand, keybindingKeycaps } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
 import { implementPlan, isPlanVersionImplementable, usePlanImplementStore } from "./plan-implement";
 
@@ -40,7 +40,7 @@ export function PlanImplementSplit({ threadId, viewed, executing }: PlanImplemen
         <>
           <DropdownMenuItem
             label={label}
-            shortcut={binding ? formatKeybinding(binding.key, isMac) : undefined}
+            shortcut={binding ? keybindingKeycaps(binding.key, isMac) : undefined}
             onClick={implement}
           />
           <DropdownMenuItem label={`${label} in a new thread`} onClick={() => void implementPlan(threadId, "new-thread")} />
