@@ -13,6 +13,7 @@ import {
   parseBrowserAutomationTargetKey,
   useBrowserAutomationStore,
 } from "../automation/browserAutomationStore";
+import { usePreviewPageScrollStore } from "../state/previewPageScrollStore";
 import { usePreviewTabsStore } from "../state/previewTabsStore";
 import { BrowserSurfacePresentationCoordinator } from "./BrowserSurfacePresentationCoordinator";
 
@@ -42,6 +43,10 @@ export const browserSurfaceHost = new BrowserSurfaceHost({
             surfaceIdentity.scope.id,
             surfaceIdentity.tabId,
           );
+        },
+        onGuestScroll: (surfaceIdentity, scroll) => {
+          if (surfaceIdentity.scope.kind !== "thread") return;
+          usePreviewPageScrollStore.getState().report(surfaceIdentity.scope.id, surfaceIdentity.tabId, scroll);
         },
       });
     }

@@ -31,6 +31,8 @@ export interface ElectronWebviewBrowserSurfaceAdapterOptions {
   readonly tabsBridge?: Pick<PreviewTabsBridge, "list">;
   readonly title?: string;
   readonly onHumanInput?: (identity: BrowserSurfaceIdentity, generation: number) => void;
+  /** Receives the guest document's scroll offset each time it settles on a frame. */
+  readonly onGuestScroll?: (identity: BrowserSurfaceIdentity, scroll: { readonly x: number; readonly y: number }) => void;
 }
 
 interface ElectronWebviewElement extends HTMLElement {
@@ -53,6 +55,7 @@ type WebviewEvent = Event & {
 };
 
 const PREVIEW_GUEST_HUMAN_INPUT_CHANNEL = "mcode:browser-human-input";
+const PREVIEW_GUEST_SCROLL_CHANNEL = "mcode:browser-scroll";
 const HUMAN_INPUT_KINDS = new Set(["keyboard", "pointer", "touch", "wheel"]);
 const ADOPTION_DISCOVERY_ATTEMPTS = 40;
 const ADOPTION_DISCOVERY_RETRY_MS = 50;
@@ -149,6 +152,7 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
   private readonly frame: ElectronWebviewElement;
   private readonly controlIndicator: BrowserSurfaceControlIndicator;
   private readonly onHumanInput?: ElectronWebviewBrowserSurfaceAdapterOptions["onHumanInput"];
+  private readonly onGuestScroll?: ElectronWebviewBrowserSurfaceAdapterOptions["onGuestScroll"];
 
   /** Creates and mounts a blank Electron webview for one identity and generation. */
   public constructor(
@@ -161,6 +165,7 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
       throw new Error("Electron Browser surface bridge is unavailable");
     })();
     this.onHumanInput = options.onHumanInput;
+    this.onGuestScroll = options.onGuestScroll;
     this.surface = surfaceRef(identity, generation);
     this.adoptionToken = opaqueToken();
     this.frame = this.documentRef.createElement("webview") as ElectronWebviewElement;
@@ -493,6 +498,10 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
 
   private readonly onIpcMessage = (event: Event): void => {
     const typed = event as WebviewEvent;
+    if (typed.channel === PREVIEW_GUEST_SCROLL_CHANNEL) {
+      this.forwardGuestScroll(typed.args?.[0]);
+      return;
+    }
     if (typed.channel !== PREVIEW_GUEST_HUMAN_INPUT_CHANNEL) return;
     const message = typed.args?.[0];
     if (!message || typeof message !== "object" || Array.isArray(message)) return;
@@ -500,6 +509,13 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     if (typeof kind !== "string" || !HUMAN_INPUT_KINDS.has(kind)) return;
     this.onHumanInput?.(this.identity, this.generation);
   };
+
+  private forwardGuestScroll(message: unknown): void {
+    if (!message || typeof message !== "object" || Array.isArray(message)) return;
+    const { x, y } = message as { readonly x?: unknown; readonly y?: unknown };
+    if (typeof x !== "number" || typeof y !== "number" || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    this.onGuestScroll?.(this.identity, { x, y });
+  }
 
   private readonly onRenderProcessGone = (): void => {
     this.emit({ type: "surface-lost" });

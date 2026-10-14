@@ -5,7 +5,12 @@ const ipcRenderer = vi.hoisted(() => ({
   send: vi.fn(),
   sendToHost: vi.fn(),
 }));
-const windowMock = vi.hoisted(() => ({ addEventListener: vi.fn() }));
+const windowMock = vi.hoisted(() => ({
+  addEventListener: vi.fn(),
+  requestAnimationFrame: vi.fn(),
+  scrollX: 0,
+  scrollY: 0,
+}));
 
 vi.mock("electron", () => ({ ipcRenderer }));
 
@@ -62,5 +67,28 @@ describe("preview guest preload", () => {
     dispatch("pointerdown", false);
     expect(ipcRenderer.send).toHaveBeenCalledTimes(1);
     expect(ipcRenderer.sendToHost).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports the latest scroll offset once per frame and again on load", async () => {
+    await import("../guest-input.js");
+    windowMock.requestAnimationFrame.mockClear();
+
+    windowMock.scrollY = 40;
+    dispatch("scroll", true);
+    windowMock.scrollY = 90;
+    dispatch("scroll", true);
+    expect(windowMock.requestAnimationFrame).toHaveBeenCalledTimes(1);
+    expect(ipcRenderer.sendToHost).not.toHaveBeenCalled();
+
+    (windowMock.requestAnimationFrame.mock.calls[0]?.[0] as () => void)();
+    expect(ipcRenderer.sendToHost).toHaveBeenCalledWith("mcode:browser-scroll", { x: 0, y: 90 });
+
+    dispatch("scroll", true);
+    expect(windowMock.requestAnimationFrame).toHaveBeenCalledTimes(2);
+
+    ipcRenderer.sendToHost.mockClear();
+    windowMock.scrollY = 12;
+    dispatch("load", true);
+    expect(ipcRenderer.sendToHost).toHaveBeenCalledWith("mcode:browser-scroll", { x: 0, y: 12 });
   });
 });

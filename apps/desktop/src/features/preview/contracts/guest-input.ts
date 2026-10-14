@@ -1,6 +1,15 @@
 /** Webview host channel emitted for trusted human interaction inside a preview guest. */
 export const PREVIEW_GUEST_HUMAN_INPUT_CHANNEL = "mcode:browser-human-input";
 
+/** Webview host channel carrying the guest document's scroll offset so the host can pin overlays to page content. */
+export const PREVIEW_GUEST_SCROLL_CHANNEL = "mcode:browser-scroll";
+
+/** Scroll offset of the guest main document in CSS pixels. */
+export interface PreviewGuestScrollMessage {
+  readonly x: number;
+  readonly y: number;
+}
+
 /** Main-process channel for one trusted, unsuppressed pointer click. */
 export const PREVIEW_GUEST_CLIPBOARD_TRUST_CHANNEL = "mcode:browser-clipboard-trust";
 
