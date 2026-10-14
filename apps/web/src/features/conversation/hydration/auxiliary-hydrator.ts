@@ -41,7 +41,7 @@ export interface AuxiliaryHydratorDeps {
   setTasksForThread: (threadId: string, tasks: readonly TaskItem[]) => void;
   addPlanForThread: (threadId: string, plan: PlanVersion) => void;
   /** Re-open the question dock after a reload; a no-op once the user has answered or dismissed. */
-  restorePlanQuestions: (threadId: string, questions: PlanQuestion[]) => void;
+  restorePlanQuestions: (threadId: string, assistantMessageId: string, questions: PlanQuestion[]) => void;
   shallowEqualBy: <T>(a: readonly T[], b: readonly T[], keys: (keyof T)[]) => boolean;
   coerceTaskStatus: (status: string) => TaskItem["status"];
 }
@@ -133,7 +133,8 @@ export class AuxiliaryHydrator {
       .getPlanSnapshot(threadId)
       .then((snapshot) => {
         for (const plan of snapshot.versions) this.deps.addPlanForThread(threadId, plan);
-        if (snapshot.pendingQuestions) this.deps.restorePlanQuestions(threadId, snapshot.pendingQuestions.questions);
+        const pending = snapshot.pendingQuestions;
+        if (pending) this.deps.restorePlanQuestions(threadId, pending.assistantMessageId, pending.questions);
       })
       .catch((err: unknown) => {
         console.debug("[planHydration] Failed to load plans for thread %s:", threadId, err);

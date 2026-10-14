@@ -3,9 +3,12 @@ import { lazySchema } from "../utils/lazySchema.js";
 import { ProviderIdSchema } from "./settings.js";
 import { THREAD_SEND_MESSAGE_MAX_LENGTH } from "../thread-control.js";
 
+/** Longest answer or option label an approval accepts. */
+export const MAX_APPROVAL_ANSWER_LENGTH = 100;
+
 /** A provider-offered answer whose label is also its native reply identity. */
 export const ApprovalQuestionOptionSchema = lazySchema(() => z.object({
-  label: z.string().min(1).max(100).refine((label) => label.trim().length > 0),
+  label: z.string().min(1).max(MAX_APPROVAL_ANSWER_LENGTH).refine((label) => label.trim().length > 0),
   description: z.string().min(1).max(500).optional(),
 }).strict());
 /** One question carried by an approval. */
@@ -16,7 +19,7 @@ export const ApprovalQuestionSchema = lazySchema(() => z.object({
 }).strict());
 /** Ordered answers using exact provider labels. */
 export const ApprovalAnswersSchema = lazySchema(() => z.array(
-  z.array(z.string().min(1).max(100).refine((answer) => answer.trim().length > 0)).min(1).max(10),
+  z.array(z.string().min(1).max(MAX_APPROVAL_ANSWER_LENGTH).refine((answer) => answer.trim().length > 0)).min(1).max(10),
 ).min(1).max(10));
 /** File scope and optional display-only patch. */
 export const ApprovalFilePatchSchema = lazySchema(() => z.object({

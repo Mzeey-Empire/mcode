@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { CircleAlert } from "lucide-react";
-import type { ApprovalAnswers, ApprovalQuestion } from "@mcode/contracts";
+import { MAX_APPROVAL_ANSWER_LENGTH, type ApprovalAnswers, type ApprovalQuestion } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useApprovalStore, type StoredApproval } from "@/stores/approvalStore";
@@ -8,9 +8,6 @@ import { approvalActorName } from "./approval-copy";
 import { choiceRowClass, KeyChip, ROW_CLASS } from "./ApprovalChoiceRow";
 import { questionKeyAction, type QuestionKeyAction } from "./question-keys";
 import { submitApprovalChoice } from "./submit-approval-choice";
-
-/** Longest answer the approval contract accepts; the input stops there so a long reply cannot fail validation after Submit. */
-const MAX_ANSWER_LENGTH = 100;
 
 /** Answer for one question: the picked labels, plus the typed answer when the provider allows one. */
 function answerFor(question: ApprovalQuestion, selected: readonly string[], custom: string): string[] {
@@ -72,11 +69,9 @@ export function ApprovalQuestionBody({ request, questions, isArmed, arm }: Appro
     if (!question.multiple) setCustom((current) => current.map((typed, row) => (row === index ? "" : typed)));
   };
 
-  const runKey: Record<QuestionKeyAction["kind"], (value: number) => void> = {
+  const runKey: Record<Exclude<QuestionKeyAction["kind"], "move">, (value: number) => void> = {
     escape: () => { if (isArmed()) respond("deny"); },
     enter: advance,
-    // Arrows keep their native focus movement between rows.
-    move: () => {},
     digit: (row) => {
       const option = question.options[row];
       if (!isArmed()) arm();
@@ -120,7 +115,7 @@ export function ApprovalQuestionBody({ request, questions, isArmed, arm }: Appro
             <input
               value={custom[index] ?? ""}
               aria-label="Your own answer"
-              maxLength={MAX_ANSWER_LENGTH}
+              maxLength={MAX_APPROVAL_ANSWER_LENGTH}
               placeholder="Write your own answer…"
               className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
               onChange={(event) => setCustom((current) => current.map((typed, row) => (row === index ? event.target.value : typed)))}

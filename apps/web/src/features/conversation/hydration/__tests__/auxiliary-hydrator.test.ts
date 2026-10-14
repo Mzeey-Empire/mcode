@@ -39,7 +39,7 @@ describe("AuxiliaryHydrator", () => {
   let setStateSpy: ReturnType<typeof vi.fn>;
   let setTasksForThread: (threadId: string, tasks: readonly unknown[]) => void;
   let addPlanForThread: (threadId: string, plan: PlanVersion) => void;
-  let restorePlanQuestions: (threadId: string, questions: PlanQuestion[]) => void;
+  let restorePlanQuestions: (threadId: string, assistantMessageId: string, questions: PlanQuestion[]) => void;
   let records: Map<string, ThreadRecord>;
   let currentThreadId: string | null;
 
@@ -56,7 +56,7 @@ describe("AuxiliaryHydrator", () => {
     setStateSpy = vi.fn();
     setTasksForThread = vi.fn() as (threadId: string, tasks: readonly unknown[]) => void;
     addPlanForThread = vi.fn() as (threadId: string, plan: PlanVersion) => void;
-    restorePlanQuestions = vi.fn() as (threadId: string, questions: PlanQuestion[]) => void;
+    restorePlanQuestions = vi.fn() as (threadId: string, assistantMessageId: string, questions: PlanQuestion[]) => void;
 
     cacheRecord(THREAD_ID, makeThinRecord());
   });
@@ -175,7 +175,7 @@ describe("AuxiliaryHydrator", () => {
     createAux().hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
 
     await vi.waitFor(() => {
-      expect(restorePlanQuestions).toHaveBeenCalledWith(THREAD_ID, questions);
+      expect(restorePlanQuestions).toHaveBeenCalledWith(THREAD_ID, "a1", questions);
     });
   });
 

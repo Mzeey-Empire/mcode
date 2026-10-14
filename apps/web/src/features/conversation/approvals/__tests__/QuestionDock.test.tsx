@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import type { PlanQuestion } from "@mcode/contracts";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

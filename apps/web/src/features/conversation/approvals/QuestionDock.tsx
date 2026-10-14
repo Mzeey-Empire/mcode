@@ -15,7 +15,6 @@ import { useDockFocus } from "./use-dock-focus";
 /** Answer id for the user-written row; the server reads `freeText` and ignores the id. */
 export const OTHER_OPTION_ID = "__other__";
 
-/** Whether an answer is complete enough to move past its question. */
 function isAnswered(answer: PlanAnswer | undefined): boolean {
   if (!answer?.selectedOptionId) return false;
   return answer.selectedOptionId !== OTHER_OPTION_ID || Boolean(answer.freeText?.trim());
@@ -127,7 +126,6 @@ function QuestionPanel({ threadId, providerId, composerContainerRef, isAgentRunn
 
   const focusedRowRef = useRef(focusedRow);
   focusedRowRef.current = focusedRow;
-  // A new question is a surprise to guard against, like a new approval request.
   useEffect(arm, [question.id]);
   useDockFocus(rootRef, composerContainerRef, onFocusComposer, () => inputRef.current ?? rowRefs.current[focusedRowRef.current], question.id);
 

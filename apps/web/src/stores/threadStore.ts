@@ -73,6 +73,7 @@ import {
   getThreadRecord,
   patchThreadRecord,
   deleteThreadRecord,
+  canRestorePlanQuestions,
 } from "./thread-record";
 import {
   applyCanonicalPushEvents,
@@ -1440,9 +1441,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       useWorkspaceStore.getState().threads.find((t) => t.id === threadId),
     flushPendingTextDeltas,
     loadNarrativeForMessage: (messageId, threadId) => get().loadNarrativeForMessage(messageId, threadId),
-    restorePlanQuestions: (threadId, questions) => {
-      // A stale snapshot must not reopen a batch the user answered or dismissed since it was requested.
-      if (getRec(threadId).planQuestionsStatus === "idle") get().setPlanQuestions(threadId, questions);
+    restorePlanQuestions: (threadId, assistantMessageId, questions) => {
+      if (canRestorePlanQuestions(getRec(threadId), assistantMessageId)) get().setPlanQuestions(threadId, questions);
     },
     getTasksForThread: (threadId) => useTaskStore.getState().tasksByThread[threadId] ?? [],
     // Persisted tasks carry no turn link, so the latest user message is the best available source.

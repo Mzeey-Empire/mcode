@@ -956,6 +956,7 @@ export {
   ApprovalAnswersSchema,
   ApprovalChoiceSchema,
   ApprovalRequestSchema,
+  MAX_APPROVAL_ANSWER_LENGTH,
 } from "./models/approval.js";
 export type {
   ApprovalRequestBody,

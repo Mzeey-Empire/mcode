@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { createMockApproval } from "@/__tests__/mocks/transport";
 import { useApprovalStore } from "@/stores/approvalStore";
 import type { McodeTransport } from "@/transport/types";
@@ -50,7 +49,6 @@ function renderBody(questions: ApprovalQuestion[]) {
       arm={() => { armedAt = Date.now() + APPROVAL_ARM_DELAY_MS; }}
     />,
   );
-  // The dock hands focus to the first option, which is where keys are read.
   act(() => screen.getAllByRole("button", { name: /./ })[0]!.focus());
 }
 

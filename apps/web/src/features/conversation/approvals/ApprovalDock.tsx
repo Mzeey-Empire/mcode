@@ -88,7 +88,6 @@ export function ApprovalAnnouncer({ requests }: { readonly requests: readonly St
   return <p aria-live="assertive" className="sr-only">{newest ? `${approvalTitle(newest)}${waiting}` : ""}</p>;
 }
 
-/** Names the subagent that raised the request; renders nothing for the main agent. */
 function SubagentOrigin({ request }: { readonly request: StoredApproval }) {
   if (request.origin.kind !== "subagent" || !request.providerId) return null;
   return (

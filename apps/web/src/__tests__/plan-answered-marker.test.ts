@@ -5,7 +5,7 @@ import {
   getTestThreadPlanQuestions,
   getTestThreadPlanQuestionsStatus,
 } from "@/stores/thread-store-test-utils";
-import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
+import { canRestorePlanQuestions, createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach } from "vitest";
 import { useThreadStore } from "../stores/threadStore";
 
@@ -105,5 +105,25 @@ describe("useThreadStore.markPlanDismissed", () => {
     expect(
       useThreadStore.getState().recentlyAnsweredPlanMessageIds.has("a1"),
     ).toBe(false);
+  });
+});
+
+describe("canRestorePlanQuestions", () => {
+  beforeEach(() => {
+    resetThreadStoreForTests();
+  });
+
+  it("allows a batch for a thread with no local state", () => {
+    expect(canRestorePlanQuestions(createEmptyThreadRecord(), "a1")).toBe(true);
+  });
+
+  it("refuses a batch dismissed while the snapshot was in flight", () => {
+    useThreadStore.getState().markPlanDismissed("t1", "a1");
+    expect(canRestorePlanQuestions(useThreadStore.getState().records.get("t1")!, "a1")).toBe(false);
+  });
+
+  it("refuses to replace a batch the user is already answering", () => {
+    const answering = { ...createEmptyThreadRecord(), planQuestionsStatus: "pending" as const };
+    expect(canRestorePlanQuestions(answering, "a2")).toBe(false);
   });
 });

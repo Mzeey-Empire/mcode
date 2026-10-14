@@ -268,6 +268,14 @@ export function createEmptyThreadRecord(): ThreadRecord {
   };
 }
 
+/**
+ * Whether a stored question batch may reopen the dock. The snapshot is requested before it
+ * resolves, so a batch the user answered or dismissed in between must stay closed.
+ */
+export function canRestorePlanQuestions(record: ThreadRecord, assistantMessageId: string): boolean {
+  return record.planQuestionsStatus === "idle" && !record.answeredPlanMessageIds.has(assistantMessageId);
+}
+
 /** Read a thread record, normalizing missing nullable persistence fields. */
 export function getThreadRecord(
   records: Map<string, ThreadRecord>,
