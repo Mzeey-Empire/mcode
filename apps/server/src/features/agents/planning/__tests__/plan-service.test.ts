@@ -166,7 +166,7 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
       await admission;
       expect(plans.getById(ready.id)?.status).toBe("accepted");
       expect(plans.listByThread(targetId)).toMatchObject([{ version: 1, contentMd: "# Original", status: "accepted",
-        captureSource: "copy", baseVersionId: ready.id }]);
+        captureSource: "copy", baseVersionId: ready.id, acceptedMessageId: prepared.request.messageId }]);
       expect(db.prepare("SELECT content FROM messages WHERE thread_id = ?").all(targetId)).toEqual([{ content: "Implement plan v1" }]);
       expect(await owner.execute(planImplementWriteOperations.read, requestId)).toMatchObject({ status: "admitted", targetThreadId: targetId });
     }

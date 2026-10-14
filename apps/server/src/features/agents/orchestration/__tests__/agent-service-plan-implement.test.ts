@@ -128,6 +128,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
   afterEach(async () => {
     database.run("DROP TRIGGER IF EXISTS fail_implement");
     database.run("DROP TRIGGER IF EXISTS fail_admission");
+    database.run("DROP TRIGGER IF EXISTS cancel_before_admission");
     await agent.stopSession(threadId, { by: "user" });
   });
 
@@ -162,7 +163,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     expect(turns()).toEqual([]);
   }
 
-  it("replays a new direct thread while starting and after admission, retaining Accepted after Stop", async () => {
+  it("replays a new direct thread while starting and after admission, retaining Accepted after startup cancellation", async () => {
     const starting = deferred();
     provider.prepareImplement = async () => {
       await starting.promise;
@@ -180,11 +181,17 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     expect(runtime.threads.findById(receipt.targetThreadId)).toMatchObject({ mode: "direct", worktree_path: null });
     expect(database.prepare("SELECT id, content FROM messages WHERE thread_id = ? AND role = 'user'").all(receipt.targetThreadId))
       .toEqual([{ id: receipt.messageId, content: "Implement plan v1" }]);
-    expect(plans.listByThread(receipt.targetThreadId)).toMatchObject([{ status: "accepted", captureSource: "copy", baseVersionId: ready.id }]);
+    expect(plans.listByThread(receipt.targetThreadId)).toMatchObject([{ status: "accepted", captureSource: "copy",
+      baseVersionId: ready.id, acceptedMessageId: receipt.messageId }]);
     expect(database.prepare("SELECT target_thread_id FROM plan_implement_requests WHERE request_id = ?").all(input.requestId))
       .toEqual([{ target_thread_id: receipt.targetThreadId }]);
     expect(runtime.reservations.get(threadId)).toBeUndefined();
-    await agent.stopSession(receipt.targetThreadId, { by: "user" });
+    await routeThreadStartupRpc("thread.startup.cancel", { startupId: input.requestId }, {
+      threadStartupService: container.resolve(ThreadStartupService),
+      threadStartupFetchDecisions: container.resolve(ThreadStartupFetchDecisions),
+      workspaceEnvironmentService: container.resolve(WorkspaceEnvironmentService), agentService: agent,
+    });
+    expect(runtime.startups.get(input.requestId)).toMatchObject({ state: "cancelled", cancellation: "requested" });
     expect(plans.getById(ready.id)?.status).toBe("accepted");
     expect(database.prepare("SELECT content FROM messages WHERE id = ?").get(receipt.messageId)).toEqual({ content: "Implement plan v1" });
   });
@@ -213,6 +220,18 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     expect(NodeFS.readFileSync(files.path(threadId), "utf8")).toBe("# Original\nExact plan text.");
   });
 
+  it("refuses a worktree source without a checkout before creating a thread", async () => {
+    database.prepare("UPDATE threads SET mode = 'worktree', worktree_path = NULL WHERE id = ?").run(threadId);
+    const before = database.prepare("SELECT id FROM threads ORDER BY id").all();
+    const input: PlanImplement = { ...request(), target: "new-thread" };
+    await expect(service.implement(input)).rejects.toMatchObject({ code: "implement_failed" });
+    expect(database.prepare("SELECT id FROM threads ORDER BY id").all()).toEqual(before);
+    expect(runtime.startups.get(input.requestId)).toBeNull();
+    expect(new PlanImplementStore(database).read(input.requestId)).toMatchObject({ status: "failed", failureCode: "implement_failed" });
+    expect(runtime.reservations.get(threadId)).toBeUndefined();
+    assertUnaccepted();
+  });
+
   async function worktreeSource() {
     database.prepare("UPDATE threads SET mode = 'worktree', worktree_path = ? WHERE id = ?").run(directory, threadId);
     const worktrees = container.resolve(GitWorktreeService);
@@ -232,7 +251,8 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     const receipt = await service.implement(input);
     expect(receipt.state).toBe("admitted");
     expect(runtime.threads.findById(receipt.targetThreadId)).toMatchObject({ mode: "worktree", worktree_path: directory, worktree_managed: false });
-    expect(runtime.startups.get(input.requestId)?.steps[2]).toMatchObject({ state: "skipped", detail: { skipReason: "plan-implement" } });
+    expect(runtime.startups.get(input.requestId)?.steps.find(step => step.phase === "setup"))
+      .toMatchObject({ state: "skipped", detail: { skipReason: "plan-implement" } });
     expect(setup).not.toHaveBeenCalled();
     expect(environment.getAutomaticSetup({ threadId: receipt.targetThreadId }).queuedTurns).toEqual([]);
     expect(new PlanImplementStore(database).read(input.requestId)?.status).toBe("admitted");
@@ -273,6 +293,28 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     expect(new PlanImplementStore(database).read(input.requestId)).toMatchObject({ status: "failed", failureCode: "startup_cancelled" });
     pause.mockRestore();
     listed.mockRestore();
+  });
+
+  it("settles cancellation that vetoes admission after the Setup skip checkpoint", async () => {
+    const listed = await worktreeSource();
+    // Intent must land after Setup's checkpoint to exercise admission's cancellation veto.
+    database.run(`CREATE TRIGGER cancel_before_admission AFTER UPDATE OF phase ON thread_startups
+      WHEN NEW.phase = 'agent' AND OLD.phase <> 'agent'
+      BEGIN UPDATE thread_startups SET cancellation = 'requested' WHERE startup_id = NEW.startup_id; END`);
+    const before = database.prepare("SELECT id FROM threads ORDER BY id").all();
+    const input: PlanImplement = { ...request(), target: "new-thread" };
+    try {
+      await expect(service.implement(input)).rejects.toMatchObject({ code: "startup_cancelled" });
+      expect(runtime.startups.get(input.requestId)).toMatchObject({ state: "cancelled", cancellation: "requested" });
+      expect(database.prepare("SELECT id FROM threads ORDER BY id").all()).toEqual(before);
+      expect(new PlanImplementStore(database).read(input.requestId))
+        .toMatchObject({ status: "failed", failureCode: "startup_cancelled" });
+      expect(runtime.reservations.get(threadId)).toBeUndefined();
+      expect(sent).toEqual([]);
+      assertUnaccepted();
+    } finally {
+      listed.mockRestore();
+    }
   });
 
   it.each(["empty", "visible", "internal"])("recovers a crash after creation, preserving a target with %s messages", async (messageKind) => {

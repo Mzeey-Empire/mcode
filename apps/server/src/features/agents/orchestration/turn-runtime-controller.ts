@@ -66,6 +66,7 @@ import { TURN_RUNTIME_PERSISTENCE, type TurnRuntimePersistence } from "../turns/
 import {
   ThreadCreationCoordinator,
   type CreateAndSendCommand,
+  type CreateAndSendOptions,
   type CreatedInitialTurn,
 } from "../turns/thread-creation-coordinator.js";
 import {
@@ -1316,10 +1317,10 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
         providerAdmitted = true;
         resolveStarted();
       },
-      onAdmissionComplete: () => {
-        command.onAdmissionComplete?.();
+      onAdmissionComplete: (turnAdmitted) => {
+        command.onAdmissionComplete?.(turnAdmitted);
         if (!command.planImplement) return;
-        providerAdmitted = true;
+        providerAdmitted = turnAdmitted;
         resolveStarted();
       },
     }, canReserve);
@@ -2183,7 +2184,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   }
 
   /** Provision a thread through its coordinator, then start its generic first-turn command. */
-  async createAndSend(command: CreateAndSendCommand, options?: import("../turns/thread-creation-coordinator.js").CreateAndSendOptions): Promise<Thread & { runtimeSnapshot: TurnRuntimeSnapshot; warnings?: string[] }> {
+  async createAndSend(command: CreateAndSendCommand, options?: CreateAndSendOptions): Promise<Thread & { runtimeSnapshot: TurnRuntimeSnapshot; warnings?: string[] }> {
     const created = await this.threadCreation.createInitialTurn(command, options);
     if (created.kind === "replay") {
       return {

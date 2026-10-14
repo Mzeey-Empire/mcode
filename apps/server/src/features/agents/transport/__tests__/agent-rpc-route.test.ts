@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import { container } from "tsyringe";
@@ -47,9 +48,7 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
 
 describe("routeMessage Agent RPCs", () => {
   it("keeps an attached worktree behind configured Setup when wire params forge setupSkip", async () => {
-    const scratchRoot = NodePath.resolve("../../.codex/tmp");
-    NodeFS.mkdirSync(scratchRoot, { recursive: true });
-    const root = NodeFS.mkdtempSync(NodePath.join(scratchRoot, "rpc-setup-"));
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "rpc-setup-"));
     const oldDatabase = process.env.MCODE_DB_PATH;
     process.env.MCODE_DB_PATH = NodePath.join(root, "app.sqlite");
     container.reset();
@@ -78,7 +77,7 @@ describe("routeMessage Agent RPCs", () => {
       const snapshot = environment.getAutomaticSetup({ threadId: startup.threadId });
       expect(snapshot.gate).toBe("blocked");
       expect(snapshot.queuedTurns.map(turn => turn.state)).toEqual(["queued"]);
-      expect(startup.steps[2].state).not.toBe("skipped");
+      expect(startup.steps.find(step => step.phase === "setup")).toMatchObject({ state: "running" });
     } finally {
       await environment.dispose();
       await workers.close();
@@ -331,7 +330,7 @@ describe("routeAgentRpc", () => {
     const fixture = admissionFixture(sendMessage);
     try {
       const rpc = routeAgentRpc("agent.send", { threadId: "thread-1", content: "Long work" }, fixture.deps);
-      command?.onAdmissionComplete?.();
+      command?.onAdmissionComplete?.(true);
       await expect(rpc).resolves.toBeUndefined();
       finish();
       await dispatch;

@@ -75,8 +75,8 @@ export interface AgentTurnCommand {
   interactionMode?: "build" | "plan";
   mutationReservationToken?: string;
   planImplement?: { requestId: string };
-  /** Acknowledges durable admission before provider dispatch continues. */
-  onAdmissionComplete?: () => void;
+  /** Reports whether admission produced a turn before provider dispatch. */
+  onAdmissionComplete?: (turnAdmitted: boolean) => void;
   permissionMode?: PermissionMode | "default";
   model?: string;
   attachments: AttachmentMeta[];

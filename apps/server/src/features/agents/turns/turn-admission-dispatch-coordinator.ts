@@ -91,8 +91,8 @@ export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "prov
   setupSkip?: { reason: "plan-implement"; sourceThreadId: string };
   /** Resolves the authoritative first-turn handshake before provider I/O continues. */
   onTurnStarted?: (snapshot: TurnRuntimeSnapshot) => void;
-  /** Acknowledges successful admission, including queued rows, before provider dispatch. */
-  onAdmissionComplete?: () => void;
+  /** Reports whether admission produced a turn before provider dispatch. */
+  onAdmissionComplete?: (turnAdmitted: boolean) => void;
   /** Starts a new provider execution instead of continuing the thread's prior native session. */
   forceFreshSession?: boolean;
   /** Interrupted execution consumed atomically when the replacement turn starts. */
@@ -244,7 +244,7 @@ export class TurnAdmissionDispatchCoordinator {
       const admitted = await this.admitLeased(command, runtime, canReserve);
       // A schedule can be requested while preparation awaits I/O and the old attempt is still latest.
       await this.resumeScheduler?.unschedule(command.threadId);
-      command.onAdmissionComplete?.();
+      command.onAdmissionComplete?.(admitted.kind === "dispatch");
       return admitted;
     } finally {
       release?.();

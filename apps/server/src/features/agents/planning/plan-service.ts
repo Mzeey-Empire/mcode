@@ -116,6 +116,9 @@ export class PlanService {
   }
 
   private async admitNewThread(request: PlanImplementRequest, thread: NonNullable<ReturnType<ThreadRepo["findById"]>>, runtime: PlanImplementRuntime): Promise<void> {
+    if (thread.mode === "worktree" && !thread.worktree_path) {
+      throw new PlanServiceError({ code: "implement_failed", latestVersion: null });
+    }
     await runtime.commands.createAndSend({ workspaceId: thread.workspace_id, startupId: request.requestId,
       content: request.wireText, displayContent: `Implement plan v${request.version}`,
       mode: thread.mode, branch: thread.branch, interactionMode: "build",

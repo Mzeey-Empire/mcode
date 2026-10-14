@@ -206,11 +206,11 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
     const created = await coordinator.createInitialTurn(command, options);
     expect(created.kind).toBe("dispatch");
     expect(created.thread).toMatchObject({ mode: "worktree", worktree_path: "/project/existing", worktree_managed: false });
-    expect(startups.get(managedStartupId)?.steps[2]).toMatchObject({ state: "skipped",
+    expect(startups.get(managedStartupId)?.steps.find(step => step.phase === "setup")).toMatchObject({ state: "skipped",
       detail: { phase: "setup", skipReason: "plan-implement" } });
     expect(admissions.admitInitialAutomaticTurn).not.toHaveBeenCalled();
     expect((await coordinator.createInitialTurn(command, options)).thread.id).toBe(created.thread.id);
-    await expect(coordinator.createInitialTurn(command)).rejects.toThrow();
+    await expect(coordinator.createInitialTurn(command)).rejects.toThrow("already assigned to a different request");
     expect(threads.listByWorkspace(workspace.id)).toHaveLength(2);
   });
 
