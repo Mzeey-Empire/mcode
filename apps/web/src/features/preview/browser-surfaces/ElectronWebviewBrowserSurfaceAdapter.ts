@@ -502,13 +502,15 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
       this.forwardGuestScroll(typed.args?.[0]);
       return;
     }
-    if (typed.channel !== PREVIEW_GUEST_HUMAN_INPUT_CHANNEL) return;
-    const message = typed.args?.[0];
+    if (typed.channel === PREVIEW_GUEST_HUMAN_INPUT_CHANNEL) this.forwardHumanInput(typed.args?.[0]);
+  };
+
+  private forwardHumanInput(message: unknown): void {
     if (!message || typeof message !== "object" || Array.isArray(message)) return;
     const kind = (message as { readonly kind?: unknown }).kind;
     if (typeof kind !== "string" || !HUMAN_INPUT_KINDS.has(kind)) return;
     this.onHumanInput?.(this.identity, this.generation);
-  };
+  }
 
   private forwardGuestScroll(message: unknown): void {
     if (!message || typeof message !== "object" || Array.isArray(message)) return;

@@ -80,7 +80,8 @@ describe("preview guest preload", () => {
     expect(windowMock.requestAnimationFrame).toHaveBeenCalledTimes(1);
     expect(ipcRenderer.sendToHost).not.toHaveBeenCalled();
 
-    (windowMock.requestAnimationFrame.mock.calls[0]?.[0] as () => void)();
+    const flushFrame = windowMock.requestAnimationFrame.mock.calls[0]?.[0] as () => void;
+    flushFrame();
     expect(ipcRenderer.sendToHost).toHaveBeenCalledWith("mcode:browser-scroll", { x: 0, y: 90 });
 
     dispatch("scroll", true);
