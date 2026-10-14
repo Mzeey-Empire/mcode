@@ -365,6 +365,23 @@ describe("PlanSaveScheduler", () => {
       await expect(basis).resolves.toEqual({ versionId: AGENT_ID, expectedRevision: 0 });
     });
 
+    it("implements the saved revision of a pressed draft when the picker moves to its base", async () => {
+      const { scheduler, saves } = setup();
+      const existing = draft(MINTED_ID, 1, "mine");
+      scheduler.edit("mine, more", existing);
+      await vi.advanceTimersByTimeAsync(500);
+
+      const saved = draft(MINTED_ID, 2, "mine, more");
+      let target = existing;
+      let latest = existing;
+      const basis = scheduler.beginImplement(() => ({ target, latest }));
+      target = ready;
+      latest = saved;
+      saves[0].resolve(saved);
+
+      await expect(basis).resolves.toEqual({ versionId: MINTED_ID, expectedRevision: 2 });
+    });
+
     it("carries unsent text on the latest version instead of autosaving it", async () => {
       const { scheduler, payloads } = setup();
       scheduler.edit("mine", ready);

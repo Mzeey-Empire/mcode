@@ -114,18 +114,18 @@ function unsentEditOfLatest(editing: EditingState | null, { target, latest }: Im
   return { ...editing.target, contentMd: editing.text };
 }
 
-// The user pressed Implement on one version. Only the session's own save may
-// move the request onto another, by forking the version into its draft; a
-// picker change while that save is in flight must not.
+// The user pressed Implement on one version. Sessions edit the latest version,
+// so a save that lands while Implement waits replaces the pressed version only
+// when it was the latest; a picker change during that save must not move it.
 function pickAfterSave(
   pressed: ImplementPick | null,
   current: ImplementPick | null,
-  session: DraftTarget | null,
+  saved: PlanVersion | null,
 ): ImplementPick | null {
   if (pressed === null || current === null) return null;
+  if (saved !== null && pressed.target.id === pressed.latest.id) return { target: saved, latest: current.latest };
   if (current.target.id === pressed.target.id) return current;
-  const savedInto = session !== null && pressed.target.id === session.baseVersionId && current.target.id === session.versionId;
-  return savedInto ? current : { target: pressed.target, latest: current.latest };
+  return { target: pressed.target, latest: current.latest };
 }
 
 function revisionAfterSaving(carried: ImplementPending): number {
@@ -156,6 +156,7 @@ export class PlanSaveScheduler {
   #retry: TimerHandle | null = null;
   #retryAttempt = 0;
   #paused = false;
+  #lastSaved: PlanVersion | null = null;
   readonly #settled = new Set<() => void>();
 
   constructor(
@@ -227,7 +228,8 @@ export class PlanSaveScheduler {
    * Hands the session to an Implement request. Waits for the save in flight,
    * since its response decides the revision on screen, then calls `pick` for
    * the version to implement and its thread's latest. The version picked at
-   * the press stays the target unless that save forked it into the draft. Unsent text rides the
+   * the press stays the target unless it was the latest, in which case the
+   * version that save returned replaces it. Unsent text rides the
    * request only when the latest version is the one on screen. Returns null,
    * and resumes autosave, when there is nothing to implement or a conflict
    * waits for the user.
@@ -235,12 +237,12 @@ export class PlanSaveScheduler {
   async beginImplement(pick: () => ImplementPick | null): Promise<ImplementBasis | null> {
     if (!canHandOff(this.#state)) return null;
     const pressed = pick();
-    const session = this.#state.kind === "editing" ? this.#state.target : null;
     this.#paused = true;
     this.#clearDebounce();
+    this.#lastSaved = null;
     await this.#untilNoSaveInFlight();
     const state = this.getSnapshot();
-    const picked = pickAfterSave(pressed, pick(), session);
+    const picked = pickAfterSave(pressed, pick(), this.#lastSaved);
     if (!canHandOff(state) || picked === null) {
       this.#resumeAutosave();
       return null;
@@ -330,6 +332,7 @@ export class PlanSaveScheduler {
     const state = this.#ownFlight(payload);
     if (!state) return;
     this.#retryAttempt = 0;
+    this.#lastSaved = version;
     this.#set({
       ...state,
       target: { ...state.target, baseRevision: version.revision },
