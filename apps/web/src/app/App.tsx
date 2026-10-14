@@ -28,6 +28,7 @@ import {
 import { useUiStore } from "@/stores/uiStore";
 import { initShortcuts } from "@/lib/shortcuts";
 import { summonTab } from "@/lib/summon-tab";
+import { openGoToFile } from "@/features/files/go-to-file-command";
 import { executeCommand, registerCommand } from "@/lib/command-registry";
 import { registerSettingsSectionCommands, registerWindowCommands } from "./window-commands";
 import { setContext } from "@/lib/context-tracker";
@@ -686,17 +687,6 @@ export function App() {
         category: "Navigation",
         handler: () => navigateHistory("forward"),
       }),
-      // Backward-compat alias — mod+p still opens the palette
-      registerCommand({
-        id: "commandPalette.toggle",
-        title: "Command Palette",
-        category: "General",
-        handler: () => {
-          const palette = useCommandPaletteStore.getState();
-          if (palette.isOpen) palette.close();
-          else palette.open();
-        },
-      }),
       registerCommand({
         id: "escape.handle",
         title: "Escape",
@@ -803,6 +793,18 @@ export function App() {
         // Terminal creation on open is handled by RightPanel's
         // ensureTerminalForScope effect (fires for every open path).
         handler: () => summonTab("terminal"),
+      }),
+      registerCommand({
+        id: "files.toggle",
+        title: "Toggle Files",
+        category: "View",
+        handler: () => summonTab("files"),
+      }),
+      registerCommand({
+        id: "files.goToFile",
+        title: "Go to File",
+        category: "Navigation",
+        handler: openGoToFile,
       }),
       registerCommand({
         id: "settings.open",

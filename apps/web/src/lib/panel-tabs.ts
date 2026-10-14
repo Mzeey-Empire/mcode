@@ -10,19 +10,12 @@ import type { RightPanelTool } from "@/stores/diffStore";
 export type PanelScope = "threadless" | "thread";
 
 /**
- * Identifier for a creatable panel tool. Openable types map 1:1 onto the
- * store's {@link RightPanelTool}; `"files"` is a coming-soon teaser that is shown
- * but never actually opened, so it has no backing {@link RightPanelTool}.
- */
-export type PanelTabTypeId = RightPanelTool | "files";
-
-/**
  * Static metadata describing one panel tab type for the availability model and
  * the empty-state card grid. Pure data — no store or React state.
  */
 export interface PanelTabType {
-  /** Stable id; openable ids are {@link RightPanelTool}, `"files"` is coming-soon only. */
-  readonly id: PanelTabTypeId;
+  /** Stable id, one per {@link RightPanelTool}. */
+  readonly id: RightPanelTool;
   /** Product-facing name shown on the card (e.g. "Browser", "Review"). */
   readonly label: string;
   /** Card glyph. */
@@ -31,12 +24,7 @@ export interface PanelTabType {
   readonly blurb: string;
   /** Only creatable once a thread exists; dropped by the scope filter when threadless. */
   readonly needsThread: boolean;
-  /** Shown as a disabled teaser and excluded from the creatable set (Files). */
-  readonly comingSoon?: boolean;
-  /**
-   * Command id whose keybinding renders as the card's keycap. Absent for
-   * coming-soon types, which have no binding yet.
-   */
+  /** Command id whose keybinding renders as the card's keycap, when it has one. */
   readonly commandId?: string;
 }
 
@@ -70,7 +58,7 @@ export const PANEL_TAB_TYPES: readonly PanelTabType[] = [
     icon: Files,
     blurb: "Browse project files",
     needsThread: false,
-    comingSoon: true,
+    commandId: "files.toggle",
   },
   {
     id: "changes",
@@ -112,27 +100,15 @@ export const PANEL_TAB_TYPES: readonly PanelTabType[] = [
  * Tools displayed in the current scope, in catalog order: scope-filtered
  * (thread-only types dropped when threadless) then cardinality-filtered (open
  * tools dropped, since the rail lists each tool once and Terminal and Browser
- * add items from their own row-1 tab strip; ADR-0026). Coming-soon teasers
- * (Files) are kept so the empty-state grid can render them disabled. Pure.
+ * add items from their own row-1 tab strip; ADR-0026). Every shown type is
+ * creatable. Pure.
  */
 export function shownTabTypes(
   scope: PanelScope,
-  openTabs: readonly PanelTabTypeId[],
+  openTabs: readonly RightPanelTool[],
 ): readonly PanelTabType[] {
   return PANEL_TAB_TYPES.filter((type) => {
     const allowedInScope = scope === "thread" || !type.needsThread;
     return allowedInScope && !openTabs.includes(type.id);
   });
-}
-
-/**
- * The creatable tab types in the current scope: {@link shownTabTypes} minus the
- * coming-soon teasers. This is the set the user can actually open, used for the
- * creatable count and (in the rail) the add control. Pure.
- */
-export function creatableTypes(
-  scope: PanelScope,
-  openTabs: readonly PanelTabTypeId[],
-): readonly PanelTabType[] {
-  return shownTabTypes(scope, openTabs).filter((type) => !type.comingSoon);
 }

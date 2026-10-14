@@ -22,7 +22,6 @@ import { isMac } from "@/lib/platform";
 import {
   PANEL_TAB_TYPES,
   shownTabTypes,
-  creatableTypes,
   type PanelScope,
   type PanelTabType,
 } from "@/lib/panel-tabs";
@@ -451,10 +450,9 @@ function RailAddControl({
   onCreate: (id: RightPanelTool) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const shown = shownTabTypes(scope, openTabs);
-  const creatable = creatableTypes(scope, openTabs);
+  const creatable = shownTabTypes(scope, openTabs);
 
-  // Nothing openable hides the control entirely, even if a coming-soon teaser remains.
+  // Nothing openable hides the control entirely.
   if (creatable.length === 0) return null;
 
   // Exactly one creatable type opens directly; no pointless menu.
@@ -468,7 +466,7 @@ function RailAddControl({
             size="compact"
             className="relative h-8 w-full justify-start overflow-hidden rounded-lg px-2 text-muted hover:text-ink"
             aria-label={`New ${only.label}`}
-            onClick={() => onCreate(only.id as RightPanelTool)}
+            onClick={() => onCreate(only.id)}
           >
             <Plus />
             <span
@@ -512,19 +510,15 @@ function RailAddControl({
         />
       </RailTooltip>
       <DropdownMenuContent side="left" align="start" sideOffset={6} className="min-w-[184px]">
-        {shown.map((type) => {
-          const unavailableReason = type.comingSoon ? "Coming soon" : null;
-          return (
-            <DropdownMenuItem
-              key={type.id}
-              label={type.label}
-              icon={<type.icon />}
-              shortcut={tabKeycaps(type)}
-              disabledReason={unavailableReason}
-              onClick={unavailableReason ? undefined : () => onCreate(type.id as RightPanelTool)}
-            />
-          );
-        })}
+        {creatable.map((type) => (
+          <DropdownMenuItem
+            key={type.id}
+            label={type.label}
+            icon={<type.icon />}
+            shortcut={tabKeycaps(type)}
+            onClick={() => onCreate(type.id)}
+          />
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   );

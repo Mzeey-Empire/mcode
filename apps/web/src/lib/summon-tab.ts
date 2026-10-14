@@ -138,3 +138,19 @@ export function summonTab(tab: RightPanelTool, onFocus?: () => void): void {
   runPanelAction(action, wid, tid, tab, ui.primarySurface);
   if (action !== "hide") onFocus?.();
 }
+
+/**
+ * Like {@link summonTab} but never hides: opens the panel and focuses `tab`
+ * when needed, and leaves an already-active tab alone. Returns the scope it
+ * showed, or null when there is no workspace (or the tab needs a thread).
+ */
+export function showTab(tab: RightPanelTool): { readonly workspaceId: string; readonly threadId: string | null } | null {
+  const { activeWorkspaceId: wid, activeThreadId: tid } = useWorkspaceStore.getState();
+  if (!wid) return null;
+  if (tabNeedsThread(tab) && !tid) return null;
+  const { getRightPanel, getRightPanelVisible } = useDiffStore.getState();
+  const ui = useUiStore.getState();
+  const action = resolvePanelAction(ui.primarySurface, getRightPanelVisible(wid, tid), getRightPanel(wid, tid), tab);
+  if (action !== "hide") runPanelAction(action, wid, tid, tab, ui.primarySurface);
+  return { workspaceId: wid, threadId: tid };
+}

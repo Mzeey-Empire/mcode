@@ -17,12 +17,12 @@ import { CommitControls } from "./CommitControls";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { WorktreeFilesPane } from "./WorktreeFilesPane";
 import { cumulativeReviewFiles } from "@/lib/review-comparison";
+import { SIDE_PANE_CONTENT_MIN_WIDTH, sidePaneDocks } from "@/lib/side-pane-dock";
 
 const FILES_PANEL_MIN_WIDTH = 280;
 const FILES_PANEL_DEFAULT_WIDTH = 320;
 const FILES_PANEL_WIDE_WIDTH = 480;
-const DIFF_VIEWPORT_MIN_WIDTH = 520;
-const DOCKED_FILES_MIN_WIDTH = FILES_PANEL_MIN_WIDTH + DIFF_VIEWPORT_MIN_WIDTH;
+const DIFF_VIEWPORT_MIN_WIDTH = SIDE_PANE_CONTENT_MIN_WIDTH;
 
 /** The threadless git working-tree view ids. */
 const GIT_VIEWS: readonly GitView[] = ["unstaged", "staged", "commit", "branch"];
@@ -424,7 +424,7 @@ function useFilesPanelController({
 
   return {
     activeWorktreePath,
-    filesPaneFits: panelWidth >= DOCKED_FILES_MIN_WIDTH,
+    filesPaneFits: sidePaneDocks(panelWidth, FILES_PANEL_MIN_WIDTH),
     filesPanelWidth,
     getFilesPanelMaxWidth,
     setActiveWorktreePath,

@@ -1021,12 +1021,24 @@ connection resends it instead of committing twice. A rejection or a hook
 failure leaves the checked files and the message in place.
 _Avoid_: Commit dialog, Commit-or-push (the old action that asked the agent to commit)
 
+### Files tab
+The right-panel tool that shows every project file in the panel scope: the
+thread's checkout when a thread is active, otherwise the workspace root. Each
+open file is a row-1 tab; closing the last one shows the tree. The tree docks
+beside the code when both fit and otherwise replaces it in the body. Files
+changed since HEAD carry M or A marks, folders containing them carry a dot, and
+changed lines carry a bar. **Go to file** (Ctrl/Cmd+P) fuzzy-finds a path;
+Enter opens it, Ctrl/Cmd+Enter opens it beside the current tab without
+switching. The view is read-only; Open in editor hands the file to the user's
+editor.
+_Avoid_: Files navigator (the changed-files tree inside Review)
+
 ### Files navigator
 The collapsible file-tree surface within Review, labelled **Files** in the UI.
 When sourced from a [[Comparison]], it lists only that comparison's changed
 files and navigates within the same diff. The Files navigator is distinct from
-the Comparison and its diff; its stable name leaves room for other sources,
-such as project files, without renaming the surface.
+the Comparison and its diff, and from the [[Files tab]], which lists every
+project file.
 _Avoid_: Worktree files, Changed files (names for a source, not the surface)
 
 ### Comparison

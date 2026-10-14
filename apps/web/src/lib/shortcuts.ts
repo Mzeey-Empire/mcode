@@ -37,6 +37,7 @@ function updateFocusContext(): void {
   setContext("inputFocused", isInputElement(active));
   setContext("terminalFocused", isTerminalFocused(active));
   setContext("browserFocused", !!active?.closest("[data-browser-chrome]"));
+  setContext("filesFocused", !!active?.closest("[data-files-tool]"));
 }
 
 function handleKeyDown(e: KeyboardEvent): void {

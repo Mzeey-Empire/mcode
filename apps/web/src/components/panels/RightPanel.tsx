@@ -88,6 +88,7 @@ export function reconcileWarmPreviewScopes(
 import { SubagentDetailTab, SubagentsPanel, useSubagentRoster } from "@/features/subagents";
 import { ProjectEnvironmentPanel } from "@/features/projects/environment";
 import { TerminalTool } from "./TerminalTool";
+import { FilesTool } from "@/features/files/FilesTool";
 
 const EMPTY_SCOPE_TERMINALS: readonly TerminalInstance[] = [];
 
@@ -664,6 +665,9 @@ function RightPanelContent({
           threadId={activeThreadId}
           workspaceId={activeWorkspaceId}
         />
+        {renderedActiveTab === "files" && renderedOpenTabs.includes("files") && panelScopeId ? (
+          <FilesTool key={panelScopeId} workspaceId={activeWorkspaceId} threadId={activeThreadId} scopeId={panelScopeId} />
+        ) : null}
         <PanelHeaderSlotScope active={changesActive} elements={headerElements}>
           <ChangesPanelContent active={changesActive} />
         </PanelHeaderSlotScope>
