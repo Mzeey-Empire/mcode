@@ -922,7 +922,10 @@ export {
   PlanCommentCreateSchema, PlanCommentUpdateSchema, PlanCommentSetStatusSchema,
   PlanCommentDeleteSchema, PlanCommentIdsSchema, PlanCommentErrorSchema,
 } from "./models/plan.js";
-export type { PlanCommentAnchor, PlanComment, PlanCommentEditorDraft, PlanCommentError } from "./models/plan.js";
+export type {
+  PlanCommentAnchor, PlanComment, PlanCommentEditorDraft, PlanCommentError,
+  PlanCommentCreate, PlanCommentUpdate, PlanCommentSetStatus, PlanCommentDelete,
+} from "./models/plan.js";
 export {
   NativePlanFileOutcomeSchema,
   PlanImplementSchema,

@@ -52,6 +52,14 @@ export const PlanCommentSetStatusSchema = lazySchema(() => z.object({
 }));
 /** Idempotent deletion by saved identity. */
 export const PlanCommentDeleteSchema = lazySchema(() => z.object({ commentId: z.string().uuid() }));
+/** Parameters of `plan.comment.create`. */
+export type PlanCommentCreate = z.infer<ReturnType<typeof PlanCommentCreateSchema>>;
+/** Parameters of `plan.comment.update`. */
+export type PlanCommentUpdate = z.infer<ReturnType<typeof PlanCommentUpdateSchema>>;
+/** Parameters of `plan.comment.setStatus`. */
+export type PlanCommentSetStatus = z.infer<ReturnType<typeof PlanCommentSetStatusSchema>>;
+/** Parameters of `plan.comment.delete`. */
+export type PlanCommentDelete = z.infer<ReturnType<typeof PlanCommentDeleteSchema>>;
 /** Frozen selection of comments riding one send. */
 export const PlanCommentIdsSchema = lazySchema(() => z.array(z.string().uuid()).max(128));
 /** Comment mutations and admission preserve these codes across writer and RPC boundaries. */

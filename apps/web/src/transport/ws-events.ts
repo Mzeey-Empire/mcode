@@ -601,6 +601,14 @@ export function startPushListeners(): void {
     }),
   );
 
+  unsubs.push(
+    pushEmitter.on("plan.commentsChanged", (data) => {
+      const { threadId, upserted, deletedIds } = WS_CHANNELS["plan.commentsChanged"].parse(data);
+
+      usePlanStore.getState().applyCommentsChanged(threadId, upserted, deletedIds);
+    }),
+  );
+
   // approval.requested: approval awaiting a user decision
   unsubs.push(
     pushEmitter.on("approval.requested", (data) => {

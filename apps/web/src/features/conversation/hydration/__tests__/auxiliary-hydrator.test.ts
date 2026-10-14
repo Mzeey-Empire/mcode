@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { PlanVersion } from "@mcode/contracts";
+import type { PlanComment, PlanVersion } from "@mcode/contracts";
 import { HYDRATION_TTL_MS } from "..";
 import { AuxiliaryHydrator } from "../auxiliary-hydrator";
 import {
@@ -37,6 +37,7 @@ describe("AuxiliaryHydrator", () => {
   let setStateSpy: ReturnType<typeof vi.fn>;
   let setTasksForThread: (threadId: string, tasks: readonly unknown[]) => void;
   let addPlanForThread: (threadId: string, plan: PlanVersion) => void;
+  let setPlanCommentsForThread: (threadId: string, comments: readonly PlanComment[]) => void;
   let records: Map<string, ThreadRecord>;
   let currentThreadId: string | null;
 
@@ -47,12 +48,13 @@ describe("AuxiliaryHydrator", () => {
     currentThreadId = THREAD_ID;
 
     (mockTransport.getThreadTasks as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-    (mockTransport.getThreadPlans as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (mockTransport.getThreadPlans as ReturnType<typeof vi.fn>).mockResolvedValue({ versions: [], comments: [] });
     (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
     setStateSpy = vi.fn();
     setTasksForThread = vi.fn() as (threadId: string, tasks: readonly unknown[]) => void;
     addPlanForThread = vi.fn() as (threadId: string, plan: PlanVersion) => void;
+    setPlanCommentsForThread = vi.fn() as (threadId: string, comments: readonly PlanComment[]) => void;
 
     cacheRecord(THREAD_ID, makeThinRecord());
   });
@@ -95,6 +97,7 @@ describe("AuxiliaryHydrator", () => {
       getTasksForThread: overrides?.getTasksForThread ?? (() => []),
       setTasksForThread,
       addPlanForThread,
+      setPlanCommentsForThread,
       shallowEqualBy,
       coerceTaskStatus,
     });
@@ -149,7 +152,7 @@ describe("AuxiliaryHydrator", () => {
     (mockTransport.getThreadTasks as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("tasks down"),
     );
-    (mockTransport.getThreadPlans as ReturnType<typeof vi.fn>).mockResolvedValue([plan]);
+    (mockTransport.getThreadPlans as ReturnType<typeof vi.fn>).mockResolvedValue({ versions: [plan], comments: [] });
     const aux = createAux();
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
 

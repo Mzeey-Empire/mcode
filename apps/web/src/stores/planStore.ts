@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { getCatalogEntry, type PlanVersion, type PlanVersionStatus } from "@mcode/contracts";
+import { getCatalogEntry, type PlanComment, type PlanVersion, type PlanVersionStatus } from "@mcode/contracts";
 
 const statusOrder: Record<PlanVersionStatus, number> = { draft: 0, ready: 0, superseded: 1, accepted: 2 };
 
@@ -71,8 +71,33 @@ interface PlanState {
   /** Set the actively viewed version for a thread (null = latest). */
   setActiveVersion: (threadId: string, version: number | null) => void;
 
+  /** Plan comments keyed by thread ID, across all of the thread's versions. */
+  commentsByThread: Record<string, readonly PlanComment[]>;
+
+  /** Replace a thread's comments with the server's snapshot. */
+  setComments: (threadId: string, comments: readonly PlanComment[]) => void;
+
+  /** Apply a `plan.commentsChanged` push, or the result of a comment write. */
+  applyCommentsChanged: (threadId: string, upserted: readonly PlanComment[], deletedIds: readonly string[]) => void;
+
   /** Clear plan state for a thread. */
   clearPlans: (threadId: string) => void;
+}
+
+// A write's result and its push can arrive in either order, so an upsert never
+// replaces a comment the store already has at a later update.
+function upsertComments(
+  current: readonly PlanComment[],
+  upserted: readonly PlanComment[],
+  deletedIds: readonly string[],
+): readonly PlanComment[] {
+  const deleted = new Set(deletedIds);
+  const byId = new Map(current.filter((comment) => !deleted.has(comment.id)).map((comment) => [comment.id, comment]));
+  for (const comment of upserted) {
+    const existing = byId.get(comment.id);
+    if (!existing || existing.updatedAt <= comment.updatedAt) byId.set(comment.id, comment);
+  }
+  return [...byId.values()];
 }
 
 /** Zustand store for per-thread plan versions. */
@@ -91,6 +116,19 @@ export const usePlanStore = create<PlanState>((set) => ({
       return { plansByThread: { ...state.plansByThread, [threadId]: updated } };
     }),
 
+  commentsByThread: {},
+
+  setComments: (threadId, comments) =>
+    set((state) => ({ commentsByThread: { ...state.commentsByThread, [threadId]: comments } })),
+
+  applyCommentsChanged: (threadId, upserted, deletedIds) =>
+    set((state) => ({
+      commentsByThread: {
+        ...state.commentsByThread,
+        [threadId]: upsertComments(state.commentsByThread[threadId] ?? [], upserted, deletedIds),
+      },
+    })),
+
   setActiveVersion: (threadId, version) =>
     set((state) => ({
       activeVersionByThread: {
@@ -105,6 +143,8 @@ export const usePlanStore = create<PlanState>((set) => ({
       const { [threadId]: _omitPlans, ...rest } = state.plansByThread;
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { [threadId]: _omitVersion, ...restVersions } = state.activeVersionByThread;
-      return { plansByThread: rest, activeVersionByThread: restVersions };
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [threadId]: _omitComments, ...restComments } = state.commentsByThread;
+      return { plansByThread: rest, activeVersionByThread: restVersions, commentsByThread: restComments };
     }),
 }));

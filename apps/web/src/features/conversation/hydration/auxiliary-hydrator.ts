@@ -3,7 +3,7 @@ import {
   getThreadRecord,
   patchThreadRecord,
 } from "@/stores/thread-record";
-import type { PlanVersion } from "@mcode/contracts";
+import type { PlanComment, PlanVersion } from "@mcode/contracts";
 import type { TaskItem } from "@/stores/taskStore";
 import type {
   ThreadHydratorTransport,
@@ -40,6 +40,7 @@ export interface AuxiliaryHydratorDeps {
   getTasksForThread: (threadId: string) => readonly TaskItem[];
   setTasksForThread: (threadId: string, tasks: readonly TaskItem[]) => void;
   addPlanForThread: (threadId: string, plan: PlanVersion) => void;
+  setPlanCommentsForThread: (threadId: string, comments: readonly PlanComment[]) => void;
   shallowEqualBy: <T>(a: readonly T[], b: readonly T[], keys: (keyof T)[]) => boolean;
   coerceTaskStatus: (status: string) => TaskItem["status"];
 }
@@ -129,12 +130,11 @@ export class AuxiliaryHydrator {
   private hydratePlans(threadId: string): void {
     this.transport()
       .getThreadPlans(threadId)
-      .then((plans) => {
-        if (plans && plans.length > 0) {
-          for (const plan of plans) {
-            this.deps.addPlanForThread(threadId, plan);
-          }
+      .then((snapshot) => {
+        for (const plan of snapshot.versions) {
+          this.deps.addPlanForThread(threadId, plan);
         }
+        this.deps.setPlanCommentsForThread(threadId, snapshot.comments);
       })
       .catch((err: unknown) => {
         console.debug("[planHydration] Failed to load plans for thread %s:", threadId, err);

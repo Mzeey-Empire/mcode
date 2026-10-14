@@ -100,6 +100,7 @@ function createStoreHydrator(): ThreadHydrator {
     getTasksForThread: (threadId) => useTaskStore.getState().tasksByThread[threadId] ?? [],
     setTasksForThread: (threadId, tasks) => useTaskStore.getState().setTasks(threadId, tasks),
     addPlanForThread: (threadId, plan) => usePlanStore.getState().addPlan(threadId, plan),
+    setPlanCommentsForThread: (threadId, comments) => usePlanStore.getState().setComments(threadId, comments),
     shallowEqualBy,
     coerceTaskStatus,
     getWorkspaceThreadSettings: () => ({
@@ -166,7 +167,7 @@ function resetStores() {
   );
   (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   (mockTransport.getThreadTasks as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-  (mockTransport.getThreadPlans as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+  (mockTransport.getThreadPlans as ReturnType<typeof vi.fn>).mockResolvedValue({ versions: [], comments: [] });
   (mockTransport.loadTurn as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   (mockTransport.getThreadGoal as ReturnType<typeof vi.fn>).mockResolvedValue({
     goal: null,
