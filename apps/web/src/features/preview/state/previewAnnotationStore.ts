@@ -54,8 +54,6 @@ interface PreviewAnnotationStore {
   saveAnnotation(threadId: string, draft: PreviewDraftAnnotation, id?: string): SavedPreviewAnnotation;
   /** Deletes one saved annotation by stable id. */
   deleteAnnotation(threadId: string, id: string): void;
-  /** Deletes saved annotations for the current page identity only. */
-  discardPage(threadId: string, pageIdentity: string): void;
   /** Clears the full annotation set for a thread. */
   clearThread(threadId: string): void;
   /** Restores the Browser annotations of a validated outbound bundle; diff comments belong to the composer draft. */
@@ -148,13 +146,6 @@ export const usePreviewAnnotationStore = create<PreviewAnnotationStore>((set, ge
 
   deleteAnnotation(threadId, id) {
     const next = renumberAnnotations((get().byThread[threadId] ?? []).filter((row) => row.id !== id));
-    set((state) => ({ byThread: { ...state.byThread, [threadId]: next } }));
-  },
-
-  discardPage(threadId, pageIdentity) {
-    const next = renumberAnnotations(
-      (get().byThread[threadId] ?? []).filter((row) => row.pageIdentity !== pageIdentity),
-    );
     set((state) => ({ byThread: { ...state.byThread, [threadId]: next } }));
   },
 

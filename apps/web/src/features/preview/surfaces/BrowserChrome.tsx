@@ -1,14 +1,11 @@
 import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { BrowserToolbar } from "./BrowserToolbar";
 import { BrowserDeviceRow } from "./BrowserDeviceRow";
-import { PreviewAnnotationHeader } from "./PreviewAnnotationHeader";
-import { usePreviewAnnotationStore } from "../state/previewAnnotationStore";
 import {
   interruptBrowserAutomationTarget,
   invalidateBrowserAutomationTargetObservation,
 } from "../automation/browserAutomationStore";
 import type { usePreviewViewport } from "./usePreviewViewport";
-import type { useDesignAnnotationEditor } from "../design/useDesignAnnotationEditor";
 import type { useDesignPicker } from "../design/useDesignPicker";
 import type { useDesignAnnotationState } from "../design/useDesignAnnotationState";
 import type { usePreviewPage } from "./usePreviewPage";
@@ -31,15 +28,7 @@ interface BrowserChromeProps {
   readonly closeViewportToolbar: ReturnType<typeof usePreviewViewport>["closeViewportToolbar"];
   readonly invalidateActiveViewportObservation: ReturnType<typeof usePreviewViewport>["invalidateActiveViewportObservation"];
   readonly coveredRight: number | undefined;
-  readonly showAnnotationCommandBar: boolean;
-  readonly pageAnnotations: ReturnType<typeof useDesignAnnotationEditor>["pageAnnotations"];
-  readonly bundleCount: ReturnType<typeof useDesignAnnotationEditor>["bundleCount"];
-  readonly annotationHeaderPageLabel: ReturnType<typeof useDesignAnnotationEditor>["annotationHeaderPageLabel"];
   readonly threadId: string;
-  readonly currentPageIdentity: ReturnType<typeof useDesignAnnotationEditor>["currentPageIdentity"];
-  readonly requestComposerSubmit: () => void;
-  readonly clearTransientAnnotationState: ReturnType<typeof useDesignPicker>["clearTransientAnnotationState"];
-  readonly designModeSetActive: ReturnType<typeof useDesignAnnotationState>["designModeSetActive"];
   readonly webviewInputUrl: ReturnType<typeof usePreviewPage>["webviewInputUrl"];
   readonly hasLoadedPage: boolean;
   /** Load or rejected-navigation error, taking precedence over the address. */
@@ -111,7 +100,7 @@ function desktopPage(inputs: DesktopToolbarInputs): BrowserToolbarPage {
     pageActions: {
       kind: "desktop",
       designActive: designModeActive,
-      design: browserAction(threadId ? null : "Open a thread first", onToggleDesignMode),
+      design: browserAction(threadId ? null : "Open a thread to add notes", onToggleDesignMode),
       screenshotArmed: capture.screenshotArmed,
       screenshot: browserAction(
         capture.elementPickBusy ? "Finish picking an element first" : null,
@@ -195,48 +184,16 @@ export function BrowserChrome(props: BrowserChromeProps) {
       <PanelHeaderSlot slot="row2">
         {/* A block wrapper so the header's own flex row spans the full row. */}
         <div data-browser-chrome="" className="min-w-0 flex-1">
-          {props.showAnnotationCommandBar ? (
-            <AnnotationHeader {...props} />
-          ) : (
-            <BrowserToolbar
-              page={desktopPage({ ...props, invalidateObservation })}
-              address={desktopAddress(props, invalidateObservation)}
-              tools={tools}
-              focusRequest={props.omniboxFocusTick}
-            />
-          )}
+          <BrowserToolbar
+            page={desktopPage({ ...props, invalidateObservation })}
+            address={desktopAddress(props, invalidateObservation)}
+            tools={tools}
+            focusRequest={props.omniboxFocusTick}
+          />
         </div>
       </PanelHeaderSlot>
       <DeviceRow {...props} />
     </div>
-  );
-}
-
-function AnnotationHeader({
-  pageAnnotations,
-  bundleCount,
-  annotationHeaderPageLabel,
-  threadId,
-  currentPageIdentity,
-  requestComposerSubmit,
-  clearTransientAnnotationState,
-  designModeSetActive,
-}: BrowserChromeProps) {
-  return (
-    <PreviewAnnotationHeader
-      pageCount={pageAnnotations.length}
-      bundleCount={bundleCount}
-      pageLabel={annotationHeaderPageLabel}
-      onDiscardPage={() => {
-        usePreviewAnnotationStore.getState().discardPage(threadId, currentPageIdentity);
-      }}
-      onSend={requestComposerSubmit}
-      onExit={() => {
-        clearTransientAnnotationState();
-        designModeSetActive(threadId, false);
-        void window.desktopBridge?.preview?.cancelCapture();
-      }}
-    />
   );
 }
 

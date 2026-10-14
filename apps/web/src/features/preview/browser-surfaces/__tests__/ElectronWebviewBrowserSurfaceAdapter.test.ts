@@ -69,6 +69,24 @@ it("notifies main once per hide transition and retains the adopted guest until c
 describe("ElectronWebviewBrowserSurfaceAdapter", () => {
   afterEach(() => vi.useRealTimers());
 
+  it("forwards well-formed guest scroll offsets and drops malformed ones", () => {
+    const onGuestScroll = vi.fn();
+    const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 1, { bridge: bridge(), onGuestScroll });
+    adapter.create();
+    const send = (args: unknown[]): void => {
+      adapter.element.dispatchEvent(Object.assign(new Event("ipc-message"), { channel: "mcode:browser-scroll", args }));
+    };
+
+    send([{ x: 4, y: 120 }]);
+    send([{ x: "4", y: 120 }]);
+    send([{ x: Number.NaN, y: 0 }]);
+    send([null]);
+    send([]);
+
+    expect(onGuestScroll.mock.calls).toEqual([[IDENTITY, { x: 4, y: 120 }]]);
+    adapter.dispose();
+  });
+
   it("adopts a cold guest after early discovery expires without reporting a load failure", async () => {
     vi.useFakeTimers();
     const surfaceBridge = bridge();

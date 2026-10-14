@@ -20,7 +20,8 @@ import { usePreviewPage } from "./usePreviewPage";
 import { useDesignAnnotationEditor } from "../design/useDesignAnnotationEditor";
 import { useDesignPicker } from "../design/useDesignPicker";
 import { WebRuntimePreview } from "./WebRuntimePreview";
-import { previewSurfaceWidth, shouldShowAnnotationCommandBar } from "../design/annotationBubble";
+import { usePreviewPageScroll } from "../state/previewPageScrollStore";
+import { previewSurfaceHeight, previewSurfaceWidth } from "../design/annotationBubble";
 import { BrowserChrome } from "./BrowserChrome";
 import { BrowserPageLayer } from "./BrowserPageLayer";
 import { DesignLayer } from "../design/DesignLayer";
@@ -145,7 +146,6 @@ export function PreviewPanel({
   }, []);
 
   const {
-    annotationSignal,
     editingAnnotationId,
     draftAnnotation,
     selectBubbleFileSuggestion,
@@ -156,6 +156,9 @@ export function PreviewPanel({
     bubbleFileOpen,
     dismissBubbleFile,
     designModeActive,
+    designPickerPhase,
+    designPickerArmId,
+    designPickerDispatch,
     setEditingAnnotationId,
     dismissBubbleSlash,
     linkedVisualPairs,
@@ -163,8 +166,6 @@ export function PreviewPanel({
     setColorFormats,
     bubbleRef,
     bubbleSlashOpen,
-    designModeSetActive,
-    designModeToggle,
     onBubbleSlashSelect,
     onBubbleSlashKeyDown,
     bubbleSlashItems,
@@ -266,16 +267,12 @@ export function PreviewPanel({
     editingSavedAnnotation,
     setBubbleNote,
     bubbleFilePopup,
-    bundleCount,
-    annotationHeaderPageLabel,
-    currentPageIdentity,
     bubbleAdvancedOpen,
     handleBubbleMentionSelect,
   } = useDesignAnnotationEditor({
     webviewPageStatus,
     webviewInputUrl,
     threadId,
-    annotationSignal,
     editingAnnotationId,
     draftAnnotation,
     selectBubbleFileSuggestion,
@@ -306,7 +303,6 @@ export function PreviewPanel({
   }, [browserWorkspaceId, threadId]);
 
   const {
-    clearTransientAnnotationState,
     onToggleDesignMode,
     updateBubbleVisualControl,
     updateColorFormat,
@@ -333,10 +329,12 @@ export function PreviewPanel({
     bubbleRef,
     bubbleSlashOpen,
     bubbleFileOpen,
-    designModeSetActive,
-    designModeToggle,
+    designPickerPhase,
+    designPickerArmId,
+    designPickerDispatch,
     capture,
   });
+  const pageScroll = usePreviewPageScroll(threadId, activeWebviewTabId);
   const hasDesktopPreview = !!window.desktopBridge?.preview;
   const webRuntimeEnabled = isBrowserAutomationWebRuntimeEnabled();
   if (shouldUseWebRuntimePreview(hasDesktopPreview, webRuntimeEnabled)) {
@@ -394,10 +392,7 @@ export function PreviewPanel({
   };
 
   const surfaceWidth = previewSurfaceWidth(surfaceRef.current);
-  const showAnnotationCommandBar = shouldShowAnnotationCommandBar(
-    designModeActive,
-    bundleCount,
-  );
+  const surfaceHeight = previewSurfaceHeight(surfaceRef.current);
   const {
     size: responsiveViewportSize,
     scale: responsiveViewportScale,
@@ -421,15 +416,7 @@ export function PreviewPanel({
         closeViewportToolbar={closeViewportToolbar}
         invalidateActiveViewportObservation={invalidateActiveViewportObservation}
         coveredRight={coveredRight}
-        showAnnotationCommandBar={showAnnotationCommandBar}
-        pageAnnotations={pageAnnotations}
-        bundleCount={bundleCount}
-        annotationHeaderPageLabel={annotationHeaderPageLabel}
         threadId={threadId}
-        currentPageIdentity={currentPageIdentity}
-        requestComposerSubmit={requestComposerSubmit}
-        clearTransientAnnotationState={clearTransientAnnotationState}
-        designModeSetActive={designModeSetActive}
         webviewInputUrl={webviewInputUrl}
         hasLoadedPage={hasLoadedPage}
         pageError={pageError}
@@ -520,6 +507,8 @@ export function PreviewPanel({
             bubbleInputFocused={bubbleInputFocused}
             bubbleAdvancedOpen={bubbleAdvancedOpen}
             surfaceWidth={surfaceWidth}
+            surfaceHeight={surfaceHeight}
+            pageScroll={pageScroll}
             onBubbleSlashInputChange={onBubbleSlashInputChange}
             onBubbleFileInputChange={onBubbleFileInputChange}
             setBubbleInputFocused={setBubbleInputFocused}

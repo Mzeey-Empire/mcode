@@ -274,7 +274,7 @@ export function BrowserPageLayer({
             host root, so Design overlays need a higher layer to stay visible. */}
         <div
           data-testid="preview-design-layer"
-          className="pointer-events-none absolute inset-0 z-(--layer-browser-overlay)"
+          className="pointer-events-none absolute inset-0 z-(--layer-browser-overlay) overflow-hidden"
           style={{ clipPath: coveredRight ? `inset(0 ${coveredRight}px 0 0)` : undefined }}
         >
           {designLayer}

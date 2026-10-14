@@ -2,11 +2,12 @@
  * Owns annotation bubble geometry, draft conversion and local edit state, shared by design rendering and its ordered lifecycle hooks.
  */
 import { useCallback, useState, type CSSProperties, type Dispatch, type SetStateAction } from "react";
-import type { PreviewAnnotationVisualProposal } from "@mcode/contracts";
+import type { McodeBrowserCaptureV2, PreviewAnnotationVisualProposal } from "@mcode/contracts";
 import type { PreviewAnnotationSnapshotRequest } from "@/transport/desktop-bridge";
 import { cn } from "@/lib/utils";
 import type { PreviewDraftAnnotation, SavedPreviewAnnotation } from "../state/previewAnnotationStore";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
+import type { PreviewPageScroll } from "../state/previewPageScrollStore";
 import {
   visualProposalBounds,
   cleanVisualProposal,
@@ -14,9 +15,12 @@ import {
   initialVisualControls,
 } from "./visualProposalModel";
 
-const ANNOTATION_BUBBLE_MAX_WIDTH_PX = 336;
+const ANNOTATION_BUBBLE_WIDTH_PX = 290;
 
 const ANNOTATION_BUBBLE_MARGIN_PX = 8;
+
+/** Room the bubble needs below its element before it flips above; the note editor is about this tall. */
+const ANNOTATION_BUBBLE_FLIP_HEIGHT_PX = 220;
 
 // Opaque role surfaces keep annotations legible over arbitrary user page content in both themes.
 /** Primary bubble surface used on the main row and the inspector panel. */
@@ -43,35 +47,44 @@ export function isAnnotationBubbleInteractionTarget(
     ANNOTATION_BUBBLE_KEEP_OPEN_SELECTORS.some((selector) => target.closest(selector));
 }
 
-/** Positions the note bubble within the available preview width. */
+/**
+ * Moves viewport bounds captured at one scroll offset to where the page shows them at another.
+ */
+export function boundsAtScroll(
+  bounds: PreviewDraftAnnotation["bounds"],
+  capturedAt: McodeBrowserCaptureV2["viewportScroll"],
+  current: PreviewPageScroll,
+): PreviewDraftAnnotation["bounds"] {
+  return {
+    ...bounds,
+    x: bounds.x + (capturedAt?.scrollX ?? 0) - current.x,
+    y: bounds.y + (capturedAt?.scrollY ?? 0) - current.y,
+  };
+}
+
+/**
+ * Places the note bubble under its element, kept inside the preview width. It flips above the
+ * element when there is too little room below and more room above.
+ */
 export function annotationBubbleStyle(
   bounds: PreviewDraftAnnotation["bounds"],
   surfaceWidth: number,
+  surfaceHeight: number,
 ): CSSProperties {
-  const bubbleWidth =
-    surfaceWidth > 0
-      ? Math.min(
-          ANNOTATION_BUBBLE_MAX_WIDTH_PX,
-          Math.max(0, surfaceWidth - ANNOTATION_BUBBLE_MARGIN_PX * 2),
-        )
-      : ANNOTATION_BUBBLE_MAX_WIDTH_PX;
-  const preferredLeft = bounds.x + bounds.width + ANNOTATION_BUBBLE_MARGIN_PX;
   const maxLeft =
     surfaceWidth > 0
-      ? Math.max(
-          ANNOTATION_BUBBLE_MARGIN_PX,
-          surfaceWidth - bubbleWidth - ANNOTATION_BUBBLE_MARGIN_PX,
-        )
-      : preferredLeft;
-
-  return {
-    left: Math.min(
-      Math.max(ANNOTATION_BUBBLE_MARGIN_PX, preferredLeft),
-      maxLeft,
-    ),
-    top: Math.max(ANNOTATION_BUBBLE_MARGIN_PX, bounds.y),
-    maxWidth: `calc(100% - ${ANNOTATION_BUBBLE_MARGIN_PX * 2}px)`,
-  };
+      ? Math.max(ANNOTATION_BUBBLE_MARGIN_PX, surfaceWidth - ANNOTATION_BUBBLE_WIDTH_PX - ANNOTATION_BUBBLE_MARGIN_PX)
+      : bounds.x;
+  const left = Math.min(Math.max(ANNOTATION_BUBBLE_MARGIN_PX, bounds.x), maxLeft);
+  const below = Math.max(ANNOTATION_BUBBLE_MARGIN_PX, bounds.y + bounds.height + ANNOTATION_BUBBLE_MARGIN_PX);
+  const roomBelow = surfaceHeight - below;
+  const roomAbove = bounds.y - ANNOTATION_BUBBLE_MARGIN_PX;
+  const flipsAbove =
+    surfaceHeight > 0 && roomBelow < ANNOTATION_BUBBLE_FLIP_HEIGHT_PX && roomAbove > roomBelow;
+  if (flipsAbove) {
+    return { width: ANNOTATION_BUBBLE_WIDTH_PX, left, bottom: surfaceHeight - bounds.y + ANNOTATION_BUBBLE_MARGIN_PX };
+  }
+  return { width: ANNOTATION_BUBBLE_WIDTH_PX, left, top: below };
 }
 
 function draftFromSaved(
@@ -303,14 +316,6 @@ export function useAnnotationBubbleEditor(
   };
 }
 
-/** Chooses the existing page label for the annotation header. */
-export function annotationPageLabel(
-  pageIdentity: string,
-  inputUrl: string,
-): string {
-  return pageIdentity || inputUrl || "current page";
-}
-
 /** Hides annotation markers and proposals while design mode is inactive. */
 export function visibleAnnotationState(
   designModeActive: boolean,
@@ -335,15 +340,12 @@ export function previewSurfaceWidth(surface: HTMLDivElement | null): number {
   return surface?.clientWidth ?? 0;
 }
 
-/** Shows the annotation header while design mode has saved annotations. */
-export function shouldShowAnnotationCommandBar(
-  designModeActive: boolean,
-  annotationCount: number,
-): boolean {
-  return designModeActive && annotationCount > 0;
+/** Reads the available height used to flip the annotation bubble above its element. */
+export function previewSurfaceHeight(surface: HTMLDivElement | null): number {
+  return surface?.clientHeight ?? 0;
 }
 
-/** Chooses the existing bubble border and size for its editing state. */
+/** Chooses the bubble border for its editing state. */
 export function annotationBubbleClassName(
   outsideWarned: boolean,
   bubbleInputFocused: boolean,
@@ -355,9 +357,9 @@ export function annotationBubbleClassName(
       ? "border-focus ring-1 ring-focus"
       : "border-border ring-1 ring-border";
   return cn(
-    "pointer-events-auto absolute z-(--layer-floating-panel) w-[min(20.5rem,calc(100%-1rem))] overflow-hidden rounded-[1.55rem] border shadow-floating transition-[border-color,box-shadow] duration-150",
+    "pointer-events-auto absolute z-(--layer-floating-panel) overflow-hidden rounded-[14px] border shadow-floating transition-[border-color,box-shadow] duration-150",
     focusClassName,
-    bubbleAdvancedOpen ? "max-h-[20.5rem]" : "min-h-11",
+    bubbleAdvancedOpen && "max-h-[20.5rem]",
   );
 }
 

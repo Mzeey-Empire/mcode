@@ -3,6 +3,7 @@ import {
   PREVIEW_GUEST_AGENT_INPUT_CHANNEL,
   PREVIEW_GUEST_CLIPBOARD_TRUST_CHANNEL,
   PREVIEW_GUEST_HUMAN_INPUT_CHANNEL,
+  PREVIEW_GUEST_SCROLL_CHANNEL,
   PreviewGuestInputSuppressor,
   toPreviewGuestHumanInputMessage,
 } from "../contracts/guest-input.js";
@@ -36,3 +37,22 @@ for (const eventType of ["keydown", "pointerdown", "touchstart", "wheel"] as con
     { capture: true, passive: true },
   );
 }
+
+let scrollReportPending = false;
+
+function reportScroll(): void {
+  scrollReportPending = false;
+  ipcRenderer.sendToHost(PREVIEW_GUEST_SCROLL_CHANNEL, { x: window.scrollX, y: window.scrollY });
+}
+
+window.addEventListener(
+  "scroll",
+  () => {
+    if (scrollReportPending) return;
+    scrollReportPending = true;
+    window.requestAnimationFrame(reportScroll);
+  },
+  { passive: true },
+);
+
+window.addEventListener("load", reportScroll);

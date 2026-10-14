@@ -428,6 +428,33 @@ describe("Preview overlay capture handlers", () => {
     expect(session.elementPickPollTimer).toBeNull();
   });
 
+  it("labels the hovered element as tag · label above an amber ring", async () => {
+    const window = makeWindow(13);
+    overlayTest.allWindows.push(window);
+    makeSession(window, "tab-active", ["tab-active"]);
+    const guest = new FakeGuest(window, "active-token");
+    configureElementHitTest(guest);
+    prepareAndAdopt(window, "tab-active", guest, "active-token");
+
+    const pending = invoke("preview:capture-picture-element-pick", window.webContents) as Promise<unknown>;
+    await waitForOverlayReady();
+    const guestWindow = guest.dom.window;
+    // jsdom has no animation frames without pretendToBeVisual; paint synchronously.
+    Object.assign(guestWindow, { requestAnimationFrame: (paint: FrameRequestCallback) => { paint(0); return 1; } });
+    guestWindow.document.dispatchEvent(new guestWindow.MouseEvent("mousemove", { bubbles: true, clientX: 20, clientY: 40 }));
+    await vi.advanceTimersByTimeAsync(50);
+
+    const document = guest.dom.window.document;
+    const tip = document.getElementById("__mcode_ep_tip")!;
+    expect(tip.textContent).toBe("button · #target");
+    expect(tip.style.display).toBe("flex");
+    expect(document.getElementById("__mcode_ep_hl")!.style.display).toBe("block");
+    expect(document.querySelector("style[data-mcode-ep]")!.textContent).toContain("0 0 0 2px #fff,0 0 0 4px");
+
+    await invoke("preview:cancel-capture", window.webContents);
+    await pending;
+  });
+
   it("does not install a late region overlay after cancellation during injection", async () => {
     const window = makeWindow(19);
     overlayTest.allWindows.push(window);
