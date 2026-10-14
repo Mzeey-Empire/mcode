@@ -68,6 +68,18 @@ describe("PlanQuestionAnswersStore", () => {
     expect(repo.listAnsweredForThread(threadId)).toEqual([assistantMsgId]);
   });
 
+  it("settles durable question attention once without clearing a later batch on replay", () => {
+    const threads = new ThreadStore(db);
+    threads.updateSettings(threadId, { interaction_mode: "plan" });
+    threads.updatePlanPhase(threadId, "questions");
+    repo.markAnswered(assistantMsgId, threadId);
+    expect(threads.findById(threadId)?.plan_phase).toBeNull();
+    messageRepo.create(threadId, "assistant", "```plan-questions\n[]\n```", 2);
+    threads.updatePlanPhase(threadId, "questions");
+    repo.markAnswered(assistantMsgId, threadId);
+    expect(threads.findById(threadId)?.plan_phase).toBe("questions");
+  });
+
   it("FK cascade: deleting the parent message removes the marker", () => {
     repo.markAnswered(assistantMsgId, threadId);
     expect(repo.isAnswered(assistantMsgId)).toBe(true);

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AcknowledgeSeenResultSchema, ContextWindowModeSchema, ThreadModeSchema, ThreadSchema, ThreadStatusSchema, TurnOutcomeSchema } from "@mcode/contracts";
+import { AcknowledgeSeenResultSchema, ContextWindowModeSchema, PlanPhaseSchema, ThreadModeSchema, ThreadSchema, ThreadStatusSchema, TurnOutcomeSchema } from "@mcode/contracts";
 import { databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 
 const settings = z.object({
@@ -23,6 +23,7 @@ const threadByPair = (name: string) => databaseWriteOperation(name, pairInput, n
 
 /** Allowlisted complete thread lifecycle operations on the shared writer. */
 export const threadWriteOperations = {
+  updatePlanPhase: databaseWriteOperation("thread.updatePlanPhase", z.tuple([z.string(), PlanPhaseSchema.nullable()]), z.boolean()),
   create: databaseWriteOperation("thread.create", z.tuple([
     z.string(), z.string(), ThreadModeSchema, z.string(), z.boolean().optional(), z.string().optional(),
     z.object({ parentThreadId: z.string(), forkedFromMessageId: z.string() }).optional(),

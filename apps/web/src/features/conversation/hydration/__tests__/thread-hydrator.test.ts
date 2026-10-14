@@ -14,7 +14,7 @@ import {
  * Asserts on store state after hydrate(), not internal sub-module calls.
  */
 import { describe, it, expect, beforeEach, onTestFinished, vi } from "vitest";
-import { useThreadStore, extractPendingPlanQuestions, HISTORY_PAGE_SIZE } from "@/stores/threadStore";
+import { useThreadStore, HISTORY_PAGE_SIZE } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { usePlanStore } from "@/stores/planStore";
@@ -94,12 +94,11 @@ function createStoreHydrator(): ThreadHydrator {
     flushPendingTextDeltas: () => {},
     loadNarrativeForMessage: (messageId, threadId) =>
       useThreadStore.getState().loadNarrativeForMessage(messageId, threadId),
-    setPlanQuestions: (threadId, questions) =>
-      useThreadStore.getState().setPlanQuestions(threadId, questions),
-    extractPendingPlanQuestions,
     getTasksForThread: (threadId) => useTaskStore.getState().tasksByThread[threadId] ?? [],
     setTasksForThread: (threadId, tasks) => useTaskStore.getState().setTasks(threadId, tasks),
     addPlanForThread: (threadId, plan) => usePlanStore.getState().addPlan(threadId, plan),
+    reconcilePlanQuestions: vi.fn(),
+    getPlanQuestionsRevision: () => 0,
     setPlanCommentsForThread: (threadId, comments) => usePlanStore.getState().setComments(threadId, comments),
     shallowEqualBy,
     coerceTaskStatus,
@@ -167,7 +166,7 @@ function resetStores() {
   );
   (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   (mockTransport.getThreadTasks as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-  (mockTransport.getThreadPlans as ReturnType<typeof vi.fn>).mockResolvedValue({ versions: [], comments: [] });
+  (mockTransport.getPlanSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue({ versions: [], comments: [], phase: null, pendingQuestions: null });
   (mockTransport.loadTurn as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   (mockTransport.getThreadGoal as ReturnType<typeof vi.fn>).mockResolvedValue({
     goal: null,

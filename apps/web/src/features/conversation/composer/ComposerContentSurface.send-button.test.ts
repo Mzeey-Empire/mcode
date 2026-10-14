@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { createMockThread } from "@/__tests__/mocks/transport";
 import {
+  getComposerDock,
   getComposerSendButtonVisualState,
+  getEditorPlaceholder,
   isComposerSendButtonDisabled,
 } from "./ComposerContentSurface";
 
@@ -92,5 +95,45 @@ describe("composer send button while the thread is starting", () => {
 
   it("disables Stop once cancellation is requested", () => {
     expect(isComposerSendButtonDisabled({ ...starting, canCancelStartup: false })).toBe(true);
+  });
+});
+
+describe("composer dock selection", () => {
+  it("mounts only the question dock when plan questions are pending and no approval is", () => {
+    expect(getComposerDock({ approvalCount: 0, planPending: true, threadId: "thread-1" })).toBe("questions");
+  });
+
+  it("lets a pending approval take the dock over plan questions", () => {
+    expect(getComposerDock({ approvalCount: 1, planPending: true, threadId: "thread-1" })).toBe("approvals");
+  });
+
+  it("leaves the composer showing when nothing is waiting on the user", () => {
+    expect(getComposerDock({ approvalCount: 0, planPending: false, threadId: "thread-1" })).toBeNull();
+  });
+});
+
+describe("composer placeholder for a thread with a ready plan", () => {
+  const readyIdle = {
+    startingThread: false,
+    isStaleWorktree: false,
+    goalPending: false,
+    editingFromQueue: null,
+    isAgentRunning: false,
+    activeThread: createMockThread({ plan_phase: "ready" }),
+    effectiveProviderId: "codex",
+  } as const;
+
+  it("names the thread's provider when the next send revises the plan", () => {
+    expect(getEditorPlaceholder(readyIdle)).toBe("Tell Codex what to change");
+    expect(getEditorPlaceholder({ ...readyIdle, effectiveProviderId: "claude" })).toBe("Tell Claude what to change");
+  });
+
+  it("offers a queued follow-up while the agent is running", () => {
+    expect(getEditorPlaceholder({ ...readyIdle, isAgentRunning: true })).toBe("Queue a follow-up");
+  });
+
+  it("keeps the branch and starting copy over the plan revision copy", () => {
+    expect(getEditorPlaceholder({ ...readyIdle, branchFromMessageId: "m1" })).toBe("What should the branch work on?");
+    expect(getEditorPlaceholder({ ...readyIdle, startingThread: true })).toBe("Do anything");
   });
 });

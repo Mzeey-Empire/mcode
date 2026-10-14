@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
-import type { DraftDiffComment } from "@mcode/contracts";
+import { getCatalogEntry, type DraftDiffComment } from "@mcode/contracts";
 import { getModelContextWindow } from "@mcode/shared/model-context";
 import type {
   ContextWindowMode,
@@ -41,6 +41,7 @@ import { NewThreadTargetRail } from "./execution/NewThreadTargetRail";
 import { ComposerTray } from "./ComposerTray";
 import { useDraftWriteFailureStore } from "@/lib/composer-draft-storage";
 import { ApprovalAnnouncer, ApprovalDock, useDockApprovals } from "@/features/conversation/approvals/ApprovalDock";
+import { QuestionDock } from "@/features/conversation/approvals/QuestionDock";
 import { DiffCommentsComposerAttachment } from "./DiffCommentsComposerAttachment";
 import { SelectedTextCommentsComposerAttachment } from "./SelectedTextCommentsComposerAttachment";
 
@@ -256,14 +257,28 @@ function ComposerQueueEditNotice({
   );
 }
 
-function getEditorPlaceholder(model: ComposerContentSurfaceProps["model"]) {
+/** Editor placeholder copy for the composer's current state; earlier states take precedence. */
+export function getEditorPlaceholder(
+  model: Pick<
+    ComposerContentSurfaceProps["model"],
+    | "startingThread"
+    | "isStaleWorktree"
+    | "goalPending"
+    | "branchFromMessageId"
+    | "editingFromQueue"
+    | "isAgentRunning"
+    | "activeThread"
+    | "effectiveProviderId"
+  >,
+) {
   if (model.startingThread) return "Do anything";
   if (model.isStaleWorktree) return "Worktree directory no longer exists. This thread is read-only.";
-  if (model.planPending) return "Answer the planning questions above";
   if (model.goalPending) return "Describe the goal...";
   if (model.branchFromMessageId) return "What should the branch work on?";
   if (model.editingFromQueue) return "Edit the queued message - send to save.";
   if (model.isAgentRunning) return "Queue a follow-up";
+  // A send in this state revises the plan; the server classifies it, so the copy is what tells the user.
+  if (model.activeThread?.plan_phase === "ready") return `Tell ${getCatalogEntry(model.effectiveProviderId).name} what to change`;
   return "Do anything";
 }
 
@@ -730,19 +745,42 @@ function DraftWriteFailureNotice() {
   );
 }
 
+/** Which dock takes the composer's place: pending approvals first, then the plan questions. */
+export function getComposerDock(args: {
+  readonly approvalCount: number;
+  readonly planPending: boolean;
+  readonly threadId: string | undefined;
+}): "approvals" | "questions" | null {
+  if (args.approvalCount > 0) return "approvals";
+  return args.planPending && args.threadId ? "questions" : null;
+}
+
 export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
   const { model, actions } = props;
   const approvals = useDockApprovals(model.threadId);
-  const docked = approvals.length > 0;
+  const dock = getComposerDock({ approvalCount: approvals.length, planPending: model.planPending, threadId: model.threadId });
+  const docked = dock !== null;
   return (
     <>
       <ComposerNewThreadSurface {...props} />
       <ComposerTraySurface {...props} />
       <ApprovalAnnouncer requests={approvals} />
-      {docked && (
+      {dock === "approvals" && (
         <ApprovalDock
           key={model.threadId}
           requests={approvals}
+          composerContainerRef={model.composerContainerRef}
+          isAgentRunning={model.isAgentRunning}
+          isStopPending={model.isStopPending}
+          onStop={actions.onStop}
+          onFocusComposer={actions.onFocusComposer}
+        />
+      )}
+      {dock === "questions" && model.threadId && (
+        <QuestionDock
+          key={model.threadId}
+          threadId={model.threadId}
+          providerId={model.effectiveProviderId}
           composerContainerRef={model.composerContainerRef}
           isAgentRunning={model.isAgentRunning}
           isStopPending={model.isStopPending}

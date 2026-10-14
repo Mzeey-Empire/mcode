@@ -149,6 +149,7 @@ export function buildPlaceholderWorkspaceThread(
     last_context_tokens: null,
     context_window: null,
     last_compact_summary: null,
+    plan_phase: null,
     default_open_in_app: null,
     clientPreparing: true,
     clientError: null,

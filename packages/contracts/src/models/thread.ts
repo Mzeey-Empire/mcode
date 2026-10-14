@@ -4,6 +4,11 @@ import { ScheduledTurnResumeSchema } from "./turn-recovery.js";
 import { DevinModeSchema, ThreadStatusSchema, ThreadModeSchema, InteractionModeSchema, OrchestrationModeSchema, PermissionModeSchema } from "./enums.js";
 import { ContextWindowModeSchema, ReasoningLevelSchema } from "./settings.js";
 
+/** Durable progress of the thread's current planning conversation. */
+export const PlanPhaseSchema = z.enum(["questions", "planning", "ready", "no_plan"]);
+/** Planning state shared by thread hydration and attention. */
+export type PlanPhase = z.infer<typeof PlanPhaseSchema>;
+
 /** Whether a worktree thread is on a named branch or still branchless on HEAD. */
 export const ThreadCheckoutStateSchema = z.enum(["named", "branchless"]);
 /** Thread checkout state discriminator. */
@@ -59,6 +64,7 @@ export const ThreadSchema = lazySchema(() =>
   reasoning_level: ReasoningLevelSchema.nullable(),
   /** Interaction mode last used (chat or plan). */
   interaction_mode: InteractionModeSchema.nullable(),
+  plan_phase: PlanPhaseSchema.nullable(),
   /** Provider-agnostic proactive orchestration mode last used in this thread. */
   orchestration_mode: OrchestrationModeSchema.nullable(),
   /** Permission mode last used (full or supervised). */

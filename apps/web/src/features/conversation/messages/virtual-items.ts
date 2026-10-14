@@ -150,8 +150,6 @@ export interface TranscriptProjectionInput {
   streamingText: string | undefined;
   /** Text openness does not describe the execution lifecycle. */
   responseTextIsStreaming?: boolean;
-  /** Permission requests for the active turn. */
-  permissions?: Parameters<typeof buildVolatileItems>[4];
   /** Hook events for the active turn. */
   hooks?: readonly HookExecution[];
   /** Approvals decided during the active turn. */
@@ -244,7 +242,6 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       input.agentDisplayState,
       input.agentStartTime,
       input.streamingText,
-      input.permissions,
       input.hooks,
       input.thoughtSegments,
       input.currentTurn,
@@ -315,11 +312,6 @@ export type ChatVirtualItem =
       messageId: string;
       filesChanged: string[];
       isLatestTurn: boolean;
-    }
-  | {
-      key: string;
-      type: "permission-request";
-      request: import("@/stores/approvalStore").StoredApproval;
     }
   | {
       key: string;
@@ -542,7 +534,7 @@ function definedItems(items: ReadonlyArray<ChatVirtualItem | undefined>): ChatVi
 }
 
 /**
- * Build the volatile segment: permission requests and a single narrative-flow item
+ * Build the volatile segment: a single narrative-flow item
  * that consolidates tool calls, hooks, thought segments, streaming text, and indicator.
  * This changes on every tool call event but doesn't depend on messages.
  */
@@ -551,7 +543,6 @@ export function buildVolatileItems(
   agentDisplayState: AgentDisplayState | undefined,
   agentStartTime: number | undefined,
   streamingText: string | undefined,
-  permissions?: readonly import("@/stores/approvalStore").StoredApproval[],
   hooks?: readonly HookExecution[],
   thoughtSegments?: readonly ThoughtSegment[],
   currentTurn?: CurrentTurnResponseIdentity,
@@ -575,7 +566,6 @@ export function buildVolatileItems(
     narrativeFlowItem(toolCalls, resolvedHooks, approvals ?? EMPTY_APPROVALS, resolvedThoughtSegments, resolvedStreamingText, liveText, isAgentRunning, agentStartTime, committedAssistantBody),
     liveResponseItem(liveText, currentTurn, agentDisplayState, responseTextIsStreaming),
     narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime: agentStartTime, thoughts: resolvedThoughtSegments, answering: liveText.length > 0, holdingSignals }),
-    ...permissionRequestItems(permissions),
   ].filter((item): item is ChatVirtualItem => item !== undefined);
 }
 
@@ -602,8 +592,8 @@ interface NarrativeIndicatorInput {
 const NO_HOLDING_SIGNALS: RunHoldingSignals = { stopPending: false, compacting: false };
 
 function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts, answering, holdingSignals }: NarrativeIndicatorInput): ChatVirtualItem | undefined {
-  // An integration can ask for approval on an idle thread; the status line still has to say the thread waits.
-  const live = isAgentRunning || holdingSignals?.waitingFor === "approval";
+  // An integration can ask for approval, and plan questions wait on the user after their turn ends; the status line still has to say the thread waits.
+  const live = isAgentRunning || holdingSignals?.waitingFor !== undefined;
   if (!live && toolCalls.length === 0 && !holdingSignals?.exiting) return undefined;
   const topLevelTools = toolCalls.filter((toolCall) => toolCall.parentToolCallId == null);
   const running = topLevelTools.filter(isTurnWorkRunning);
@@ -615,11 +605,6 @@ function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts
     summaryHeading: currentActivityHeading(thoughts),
   });
   return { key: "narrative-indicator", type: "narrative-indicator", stepCount: topLevelTools.length, status, startTime, isAgentRunning: live };
-}
-
-function permissionRequestItems(permissions: Parameters<typeof buildVolatileItems>[4]): ChatVirtualItem[] {
-  // A settled request is a tombstone whose receipt renders in the narrative; other approvals live in the dock.
-  return permissions?.filter((request) => !request.settled && request.subject.kind === "question").map((request) => ({ key: `permission-${request.requestId}`, type: "permission-request" as const, request })) ?? [];
 }
 
 function sameAgentDisplayState(
@@ -662,10 +647,6 @@ function sameTurnChangesItem(left: ChatVirtualItem, right: ChatVirtualItem): boo
   return left.type === "turn-changes" && right.type === "turn-changes" && [left.messageId === right.messageId, left.filesChanged === right.filesChanged, left.isLatestTurn === right.isLatestTurn].every(Boolean);
 }
 
-function sameApprovalRequestItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "permission-request" && right.type === "permission-request" && left.request === right.request;
-}
-
 function sameNarrativeFlowItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
   return left.type === "narrative-flow" && right.type === "narrative-flow" && [left.toolCalls === right.toolCalls, left.hooks === right.hooks, left.approvals === right.approvals, left.thoughtSegments === right.thoughtSegments, left.streamingText === right.streamingText, left.isAgentRunning === right.isAgentRunning, left.startTime === right.startTime, left.committedAssistantBody === right.committedAssistantBody].every(Boolean);
 }
@@ -689,7 +670,6 @@ function sameNarrativeIndicatorItem(left: ChatVirtualItem, right: ChatVirtualIte
 const VIRTUAL_ITEM_EQUALITY: Record<ChatVirtualItem["type"], (left: ChatVirtualItem, right: ChatVirtualItem) => boolean> = {
   message: sameMessageVirtualItem,
   "turn-changes": sameTurnChangesItem,
-  "permission-request": sameApprovalRequestItem,
   "narrative-flow": sameNarrativeFlowItem,
   "work-fold": sameWorkFoldItem,
   "turn-meta-line": sameTurnMetaLineItem,

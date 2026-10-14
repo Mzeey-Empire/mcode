@@ -12,7 +12,6 @@ import { CollapsibleError } from "@/components/chat/CollapsibleError";
 import { ConversationHoldOverlay } from "@/components/chat/ConversationHoldOverlay";
 import { HandoffDocDialog, useHandoffFallback } from "@/components/chat/handoff-fallback";
 import { HeaderActions } from "@/components/chat/HeaderActions";
-import { PlanQuestionWizard } from "@/components/chat/PlanQuestionWizard";
 import { ThreadTitleEditor } from "@/components/chat/ThreadTitleEditor";
 import { CanvasHeader } from "@/components/shell/CanvasHeader";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -571,7 +570,6 @@ function ActiveThreadComposer({ state, interactions, pendingSelectedTextComment,
   const thread = state.activeThread!;
   return (
     <div data-testid="chat-composer-stage" className="relative flex-shrink-0" style={{ paddingRight: state.overviewPaddingRight }}>
-      <PlanQuestionWizard threadId={thread.id} />
       <Composer threadId={thread.id} workspaceId={state.activeWorkspaceId ?? undefined} branchFromMessageId={state.branchFromMessageId} branchFromMessageContent={state.branchFromMessageContent} selectedTextComment={pendingSelectedTextComment ?? undefined} onSelectedTextCommentConsumed={interactions.onSelectedTextCommentConsumed} selectedTextCommentDeletion={pendingSelectedTextCommentDeletion ?? undefined} onSelectedTextCommentDeletionConsumed={interactions.onSelectedTextCommentDeletionConsumed} selectedTextCommentEditorUpdate={pendingSelectedTextCommentEditor} onSelectedTextCommentEditorUpdateConsumed={interactions.onSelectedTextCommentEditorChangeConsumed} onOpenSelectedTextCommentSource={interactions.onOpenSelectedTextCommentSource} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} onBranchModeExit={interactions.onExitForkMode} startingThread={startingThread} />
     </div>
   );

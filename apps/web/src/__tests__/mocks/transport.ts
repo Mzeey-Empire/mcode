@@ -85,6 +85,7 @@ export function createMockThread(overrides?: Partial<Thread>): Thread {
     parent_thread_id: null,
     forked_from_message_id: null,
     last_compact_summary: null,
+    plan_phase: null,
     has_file_changes: false,
     ...overrides,
   };
@@ -365,7 +366,7 @@ export const mockTransport: McodeTransport = {
   listNarrative: vi.fn().mockResolvedValue({ tools: [], thoughts: [], hooks: [] }),
   loadTurn: vi.fn().mockResolvedValue([]),
   getThreadTasks: vi.fn().mockResolvedValue(null),
-  getThreadPlans: vi.fn().mockResolvedValue({ versions: [], comments: [] }),
+  getPlanSnapshot: vi.fn().mockResolvedValue({ versions: [], comments: [], phase: null, pendingQuestions: null }),
   createPlanComment: vi.fn(),
   updatePlanComment: vi.fn(),
   setPlanCommentStatus: vi.fn(),

@@ -97,6 +97,22 @@ async function fixture(providerId: ProviderId = "codex", beforeCommit: () => Pro
 }
 
 describe("plan file admission", () => {
+  it("turns a normal Plan-ready send into a revision with its file path and comments", async () => {
+    const f = await fixture();
+    const assistant = await f.messages.create(f.thread.id, "assistant", "Use SQLite", 1);
+    await f.planRepo.create(f.thread.id, assistant.id, { title: "Storage", contentMd: "# Storage\nUse SQLite", captureSource: "fence" }, "codex");
+    const comments = [{ id: NodeCrypto.randomUUID(), displayNumber: 1,
+      source: { threadId: f.thread.id, messageId: assistant.id, sourceRole: "assistant" as const,
+        start: 0, end: 10, quote: "Use SQLite" }, note: "Keep the database local", mentions: [] }];
+    const result = await f.send([], { interactionMode: "plan", content: "Add backups", selectedTextComments: comments });
+    if (result.kind !== "dispatch") throw new Error("Expected revision admission");
+    expect(result.request.planTurn).toEqual({ kind: "revise", planFilePath: resolveThreadPlanFile(directory, f.thread.id) });
+    expect(result.request.message).toContain("Add backups");
+    expect(result.request.message).toContain(`Mcode plan file: ${resolveThreadPlanFile(directory, f.thread.id)}`);
+    expect(result.request.message).toContain(JSON.stringify({ schemaVersion: 1, comments }));
+    expect(result.request.message).not.toContain("plan-questions");
+  });
+
   it("sends the note committed at admission, enables revision capture, and retains the plain user message", async () => {
     let editBeforeCommit: (() => Promise<unknown>) | undefined;
     const f = await fixture("codex", async () => { await editBeforeCommit?.(); });
@@ -157,7 +173,7 @@ describe("plan file admission", () => {
   });
 
   const commands: Partial<SendMessageCommand>[] = [
-    { interactionMode: "plan" }, { planAction: "revise" }, { planAction: "implement" },
+    { interactionMode: "plan" },
     { markPlanAnswerForMessageId: "question-message" },
   ];
 

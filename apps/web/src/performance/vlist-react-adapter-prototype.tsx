@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { createVList, type VList, type VListPlugin } from "vlist";
 import "vlist/styles";
 
-type ProbeRowKind = "message" | "narrative-flow" | "narrative-indicator" | "permission-request" | "turn-changes";
+type ProbeRowKind = "message" | "narrative-flow" | "narrative-indicator" | "turn-changes";
 
 type ProbeRow = {
   readonly id: string;
@@ -152,12 +152,6 @@ const STATIC_ROWS: readonly ProbeRow[] = [
     kind: "narrative-indicator",
     title: "Narrative indicator",
     initialDraft: "indicator-draft",
-  },
-  {
-    id: "permission-request:permission-vlist-probe",
-    kind: "permission-request",
-    title: "Permission request",
-    initialDraft: "permission-draft",
   },
   {
     id: "turn-changes:message-vlist-probe",

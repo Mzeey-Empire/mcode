@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { PlanComment, PlanVersion } from "@mcode/contracts";
+import type { PlanComment, PlanQuestion, PlanSnapshot, PlanVersion } from "@mcode/contracts";
 import { HYDRATION_TTL_MS } from "..";
 import { AuxiliaryHydrator } from "../auxiliary-hydrator";
 import {
@@ -33,10 +33,18 @@ function cacheRecord(threadId: string, record: ThreadRecord): void {
   cacheConversationRecord(threadId, projectConversationCacheState(record));
 }
 
+const EMPTY_SNAPSHOT: PlanSnapshot = { versions: [], comments: [], phase: null, pendingQuestions: null };
+
 describe("AuxiliaryHydrator", () => {
   let setStateSpy: ReturnType<typeof vi.fn>;
   let setTasksForThread: (threadId: string, tasks: readonly unknown[]) => void;
   let addPlanForThread: (threadId: string, plan: PlanVersion) => void;
+  let reconcilePlanQuestions: (
+    threadId: string,
+    revision: number,
+    pending: { assistantMessageId: string; questions: PlanQuestion[] } | null,
+  ) => void;
+  let planQuestionsRevision: number;
   let setPlanCommentsForThread: (threadId: string, comments: readonly PlanComment[]) => void;
   let records: Map<string, ThreadRecord>;
   let currentThreadId: string | null;
@@ -48,12 +56,14 @@ describe("AuxiliaryHydrator", () => {
     currentThreadId = THREAD_ID;
 
     (mockTransport.getThreadTasks as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-    (mockTransport.getThreadPlans as ReturnType<typeof vi.fn>).mockResolvedValue({ versions: [], comments: [] });
+    (mockTransport.getPlanSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue(EMPTY_SNAPSHOT);
     (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
     setStateSpy = vi.fn();
     setTasksForThread = vi.fn() as (threadId: string, tasks: readonly unknown[]) => void;
     addPlanForThread = vi.fn() as (threadId: string, plan: PlanVersion) => void;
+    reconcilePlanQuestions = vi.fn() as typeof reconcilePlanQuestions;
+    planQuestionsRevision = 0;
     setPlanCommentsForThread = vi.fn() as (threadId: string, comments: readonly PlanComment[]) => void;
 
     cacheRecord(THREAD_ID, makeThinRecord());
@@ -97,6 +107,8 @@ describe("AuxiliaryHydrator", () => {
       getTasksForThread: overrides?.getTasksForThread ?? (() => []),
       setTasksForThread,
       addPlanForThread,
+      reconcilePlanQuestions,
+      getPlanQuestionsRevision: () => planQuestionsRevision,
       setPlanCommentsForThread,
       shallowEqualBy,
       coerceTaskStatus,
@@ -152,12 +164,38 @@ describe("AuxiliaryHydrator", () => {
     (mockTransport.getThreadTasks as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("tasks down"),
     );
-    (mockTransport.getThreadPlans as ReturnType<typeof vi.fn>).mockResolvedValue({ versions: [plan], comments: [] });
+    (mockTransport.getPlanSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue({ ...EMPTY_SNAPSHOT, versions: [plan] });
     const aux = createAux();
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
 
     await vi.waitFor(() => {
       expect(addPlanForThread).toHaveBeenCalledWith(THREAD_ID, plan);
+    });
+  });
+
+  it("handed the stored batch to the store with the revision read before the request", async () => {
+    const questions: PlanQuestion[] = [
+      { id: "q1", category: "AUTH", question: "Which provider?", options: [{ id: "a", title: "A", description: "" }, { id: "b", title: "B", description: "" }] },
+    ];
+    (mockTransport.getPlanSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...EMPTY_SNAPSHOT,
+      phase: "questions",
+      pendingQuestions: { assistantMessageId: "a1", questions },
+    });
+    planQuestionsRevision = 4;
+    createAux().hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
+    planQuestionsRevision = 5;
+
+    await vi.waitFor(() => {
+      expect(reconcilePlanQuestions).toHaveBeenCalledWith(THREAD_ID, 4, { assistantMessageId: "a1", questions });
+    });
+  });
+
+  it("told the store when the snapshot has no pending batch", async () => {
+    createAux().hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
+
+    await vi.waitFor(() => {
+      expect(reconcilePlanQuestions).toHaveBeenCalledWith(THREAD_ID, 0, null);
     });
   });
 

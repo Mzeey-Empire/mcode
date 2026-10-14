@@ -4,6 +4,7 @@ import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/a
 import { ThreadStore, MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS } from "./thread-store.js";
 import { threadWriteOperations } from "./thread-write-operations.js";
 import type { ThreadAttentionService } from "../attention/thread-attention-service.js";
+import { broadcast } from "../../../application/transport/push.js";
 export type { ActiveWorktreePathSet, CompletedThreadRetentionRecord, CompletedThreadDeadlineUpdate } from "./thread-store.js";
 export { MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS } from "./thread-store.js";
 
@@ -45,7 +46,7 @@ export class ThreadRepo {
   /** Commit the terminal facts before publishing changed attention. */
   async recordTurnOutcome(...input: Parameters<ThreadStore["recordTurnOutcome"]>): Promise<boolean> {
     const changed = await this.writer.execute(threadWriteOperations.recordTurnOutcome, input);
-    if (changed) this.attention?.invalidate(input[0]);
+    if (changed) this.publishPlanPhase(input[0]);
     return changed;
   }
 
@@ -133,8 +134,22 @@ export class ThreadRepo {
     return this.writer.execute(threadWriteOperations.updateContextUsage, [id, lastContextTokens, contextWindow]);
   }
 
-  updateSettings(id: Parameters<ThreadStore["updateSettings"]>[0], settings: Parameters<ThreadStore["updateSettings"]>[1]): Promise<ReturnType<ThreadStore["updateSettings"]>> {
-    return this.writer.execute(threadWriteOperations.updateSettings, [id, settings]);
+  async updateSettings(id: Parameters<ThreadStore["updateSettings"]>[0], settings: Parameters<ThreadStore["updateSettings"]>[1]): Promise<ReturnType<ThreadStore["updateSettings"]>> {
+    const changed = await this.writer.execute(threadWriteOperations.updateSettings, [id, settings]);
+    if (changed && settings.interaction_mode !== undefined) this.publishPlanPhase(id);
+    return changed;
+  }
+
+  /** Publish planning changes after their transaction has committed. */
+  publishPlanPhase(threadId: string): void {
+    this.attention?.invalidate(threadId);
+    const thread = this.findById(threadId);
+    if (thread) broadcast("thread.lifecycleChanged", { thread });
+  }
+
+  /** Persist and refresh the planning phase for background and active clients alike. */
+  async updatePlanPhase(...input: Parameters<ThreadStore["updatePlanPhase"]>): Promise<void> {
+    if (await this.writer.execute(threadWriteOperations.updatePlanPhase, input)) this.publishPlanPhase(input[0]);
   }
 
   updateTitle(id: Parameters<ThreadStore["updateTitle"]>[0], title: Parameters<ThreadStore["updateTitle"]>[1]): Promise<ReturnType<ThreadStore["updateTitle"]>> {

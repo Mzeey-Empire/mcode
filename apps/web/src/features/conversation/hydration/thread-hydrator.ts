@@ -340,6 +340,8 @@ export class ThreadHydrator {
       getTasksForThread: deps.getTasksForThread,
       setTasksForThread: deps.setTasksForThread,
       addPlanForThread: deps.addPlanForThread,
+      reconcilePlanQuestions: deps.reconcilePlanQuestions,
+      getPlanQuestionsRevision: deps.getPlanQuestionsRevision,
       setPlanCommentsForThread: deps.setPlanCommentsForThread,
       shallowEqualBy: deps.shallowEqualBy,
       coerceTaskStatus: deps.coerceTaskStatus,
@@ -1283,7 +1285,6 @@ export class ThreadHydrator {
       this.prefetchVisibleNarrative(threadId);
       this.scheduleFetchedConversationAuxiliaries(threadId, opts, context.epoch);
       const tailFollowupInvalidated = loaded.usedTail && await this.hydrateTailNarrative(threadId, context);
-      this.publishPendingPlanQuestions(threadId);
       this.cacheFetchedConversation(threadId, context, tailFollowupInvalidated);
       this.applyDeferredFetchResults(threadId, context.epoch, loaded, commitOpts);
     } catch (e) {
@@ -1432,13 +1433,6 @@ export class ThreadHydrator {
         }),
       };
     });
-  }
-
-  private publishPendingPlanQuestions(threadId: string): void {
-    const committed = getThreadRecord(this.deps.getState().records, threadId);
-    if (committed.planQuestionsStatus === "pending") return;
-    const pendingQuestions = this.deps.extractPendingPlanQuestions(committed.messages, committed.answeredPlanMessageIds);
-    if (pendingQuestions) this.deps.setPlanQuestions(threadId, pendingQuestions);
   }
 
   private cacheFetchedConversation(threadId: string, context: FetchCommitContext, tailFollowupInvalidated: boolean): void {

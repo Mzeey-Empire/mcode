@@ -141,7 +141,6 @@ import type {
 } from "@mcode/contracts";
 
 // Re-export shared types from the contracts package (single source of truth).
-export type { PlanAction } from "@mcode/contracts";
 export type {
   GitRefsListResult,
   PullRequestTargetsListResult,
@@ -780,7 +779,7 @@ export interface McodeTransport {
   getThreadTasks(threadId: string): Promise<Array<{ id?: string; content: string; status: "pending" | "in_progress" | "completed" | "cancelled"; activeForm?: string; group?: string }> | null>;
 
   /** Fetch persisted plans for a thread (hydration on page load). */
-  getThreadPlans(threadId: string): Promise<PlanSnapshot>;
+  getPlanSnapshot(threadId: string): Promise<import("@mcode/contracts").PlanSnapshot>;
   /** Save a plan comment; the client-chosen id makes a retried create return the same comment. */
   createPlanComment(payload: import("@mcode/contracts").PlanCommentCreate): Promise<import("@mcode/contracts").PlanComment>;
   /** Replace a saved comment's note. */

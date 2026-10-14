@@ -1,0 +1,1 @@
+ALTER TABLE `threads` ADD `plan_phase` text;

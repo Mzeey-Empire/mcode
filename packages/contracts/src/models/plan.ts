@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
 import { ProviderIdSchema } from "./settings.js";
+import { PlanPhaseSchema } from "./thread.js";
+import { PlanQuestionSchema } from "./plan-questions.js";
 
 /** Maximum UTF-16 content length accepted for a new plan write. */
 export const PLAN_MAX_CONTENT_CHARS = 64 * 1024;
@@ -84,14 +86,6 @@ export const PlanVersionStatusSchema = lazySchema(() =>
 /** Lifecycle state of a durable plan version. */
 export type PlanVersionStatus = z.infer<ReturnType<typeof PlanVersionStatusSchema>>;
 
-/**
- * Legacy plan-tab action hint. Revise bypasses the plan-questions prompt.
- * Implement uses `plan.implement`; its literal remains until S07-09 retires this contract.
- */
-export const PlanActionSchema = lazySchema(() => z.enum(["revise", "implement"]));
-
-export type PlanAction = z.infer<ReturnType<typeof PlanActionSchema>>;
-
 /** Public durable plan version; provider-owned file paths stay on the server. */
 export const PlanVersionSchema = lazySchema(() =>
   z.object({
@@ -116,6 +110,20 @@ export const PlanVersionSchema = lazySchema(() =>
 
 /** Validated public plan version. */
 export type PlanVersion = z.infer<ReturnType<typeof PlanVersionSchema>>;
+
+/** Stored question identity and content needed to restore an unanswered dock. */
+export const PendingPlanQuestionsSchema = lazySchema(() => z.object({
+  assistantMessageId: z.string(), questions: z.array(PlanQuestionSchema()).min(1).max(15),
+}));
+
+/** Durable planning state returned when opening or reloading a thread. */
+export const PlanSnapshotSchema = lazySchema(() => z.object({
+  versions: z.array(PlanVersionSchema()), comments: z.array(PlanCommentSchema()), phase: PlanPhaseSchema.nullable(),
+  pendingQuestions: PendingPlanQuestionsSchema().nullable(),
+}));
+
+/** Durable planning state returned when opening or reloading a thread. */
+export type PlanSnapshot = z.infer<ReturnType<typeof PlanSnapshotSchema>>;
 
 /** Revision precondition shared by the RPC boundary and sole database writer. */
 export const PlanSaveVersionSchema = lazySchema(() => z.object({

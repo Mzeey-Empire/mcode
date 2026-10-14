@@ -1412,8 +1412,8 @@ export function createWsTransport(
         "thread.getTasks", { threadId },
       ),
 
-    getThreadPlans: (threadId: string) =>
-      rpc<import("./types").PlanSnapshot>("plan.snapshot", { threadId }),
+    getPlanSnapshot: (threadId: string) =>
+      rpc<import("@mcode/contracts").PlanSnapshot>("plan.snapshot", { threadId }),
     createPlanComment: (payload) => rpc<import("@mcode/contracts").PlanComment>("plan.comment.create", payload),
     updatePlanComment: (payload) => rpc<import("@mcode/contracts").PlanComment>("plan.comment.update", payload),
     setPlanCommentStatus: (payload) => rpc<import("@mcode/contracts").PlanComment>("plan.comment.setStatus", payload),

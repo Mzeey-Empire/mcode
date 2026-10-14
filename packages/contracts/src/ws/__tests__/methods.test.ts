@@ -63,6 +63,7 @@ describe("thread switching WebSocket contracts", () => {
       parent_thread_id: null,
       forked_from_message_id: null,
       last_compact_summary: null,
+      plan_phase: null,
     };
 
     expect(method.result.safeParse(thread).success).toBe(false);

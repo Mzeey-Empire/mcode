@@ -35,6 +35,7 @@ import { startPushListeners, stopPushListeners } from "@/transport/ws-events";
 import { useIdleReclamation } from "@/hooks/useIdleReclamation";
 import { useComposerLayoutGuard } from "@/hooks/useComposerLayoutGuard";
 import { showRightPanelAdaptive, toggleRightPanelAdaptive } from "@/lib/right-panel-layout";
+import { useOpenPlanWhenReady } from "@/components/panels/plan/use-open-plan-when-ready";
 import { usePlanCommands } from "@/components/panels/plan/use-plan-commands";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ToastLane } from "@/components/ui/toast";
@@ -359,6 +360,7 @@ function AppLayout(props: AppLayoutProps) {
   const [mainElement, setMainElement] = useState<HTMLElement | null>(null);
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
   usePlanCommands(activeThreadId);
+  useOpenPlanWhenReady(activeThreadId);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const overviewClosed = useOverviewStore((s) => activeThreadId !== null && s.closedSubjects.has(threadOverviewKey(activeThreadId)));
   const rightPanelVisible = useDiffStore((s) =>

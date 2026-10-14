@@ -20,7 +20,6 @@ export const DEFAULT_MESSAGE_LIST_ITEM_HEIGHT = 80;
 const PROVISIONAL_HEIGHT_BY_ITEM_TYPE: Record<ChatVirtualItem["type"], number> = {
   "message": 128,
   "turn-changes": 76,
-  "permission-request": 72,
   "narrative-flow": 144,
   "work-fold": 32,
   "turn-meta-line": 24,

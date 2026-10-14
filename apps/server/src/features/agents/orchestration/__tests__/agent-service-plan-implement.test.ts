@@ -7,7 +7,10 @@ import * as NodeEvents from "node:events";
 import { Database } from "bun:sqlite";
 import { container } from "tsyringe";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { IAgentProvider, IProviderRegistry, PlanImplement, PlanVersion, TurnRequest } from "@mcode/contracts";
+import { AgentEventSchema, type AgentEvent, type IAgentProvider, type IProviderRegistry, type PlanImplement, type PlanVersion, type TurnRequest } from "@mcode/contracts";
+import { logger } from "@mcode/shared";
+import { PlanTurnService } from "../../planning/plan-turn-service.js";
+import { PlanQuestionService } from "../../planning/plan-question-service.js";
 import { setupContainer } from "../../../../application/composition/container.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { WorkerOwnedTurnRuntime } from "../../execution/worker-owned-turn-runtime.js";
@@ -107,6 +110,9 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     publications.start();
     plans = container.resolve(PlanRepo);
     files = new PlanFileWriter(id => plans.listByThread(id), () => directory);
+    container.resolve(PlanTurnService).bindPlanProjection(workers.progress, files);
+    if (workers.progress) container.resolve(PlanQuestionService).bindAcceptedProgress(workers.progress);
+    workers.bindPlanPhaseChanged(id => container.resolve(ThreadRepo).publishPlanPhase(id));
     runtime = { threads: container.resolve(ThreadRepo), providers,
       startups: container.resolve(ThreadStartupService), messages: container.resolve(MessageRepo),
       threadService: container.resolve(ThreadService),
@@ -118,6 +124,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     sent = [];
     atDispatch = [];
     provider.prepareImplement = undefined;
+    Object.assign(provider, { fenceCanonicalTurnEvents: async () => undefined });
     threadId = (await container.resolve(ThreadRepo).create(workspaceId, "Plan", "direct", "main", false, "codex")).id;
     await container.resolve(ThreadRepo).updateSettings(threadId, { interaction_mode: "plan", model: "gpt-5.6-luna" });
     const message = await container.resolve(MessageRepo).create(threadId, "assistant", "Plan summary", 1);
@@ -149,6 +156,64 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
   function request(version = ready): PlanImplement {
     return { requestId: NodeCrypto.randomUUID(), threadId, versionId: version.id, expectedRevision: version.revision, target: "thread" };
   }
+
+  async function providerEvent(request: TurnRequest, type: AgentEvent["type"], fields: Record<string, unknown> = {}) {
+    const execution = { threadId, turnId: request.turnId, executionId: request.turnExecutionId };
+    const route = workers.providerEvents.resolve(execution.executionId, "codex");
+    if (route.kind !== "worker") throw new Error("Expected worker event route");
+    const event = AgentEventSchema().parse({ type, threadId, turnExecutionId: execution.executionId,
+      ...(type === "turnComplete" ? { reason: "completed", costUsd: 0, tokensIn: 0, tokensOut: 0 } : {}), ...fields });
+    const itemId = NodeCrypto.randomUUID();
+    const now = new Date().toISOString();
+    return route.submit({ ...execution, batchId: itemId, deliveryAttempt: 1, phase: "running", events: [{
+      eventId: itemId, routing: { ...execution, itemId }, sourceProviderId: "codex", sourceIdentities: [],
+      payload: { type: "item.recorded", item: { id: itemId, threadId, turnId: execution.turnId, kind: "system",
+        providerIdentities: [], payload: { projection: "providerRuntimeEvent", runtimeEvent: { event } }, createdAt: now, updatedAt: now } },
+    }] });
+  }
+
+  it("arms an answer after the previous worker release and saves its plan without a missing-capture warning", async () => {
+    database.prepare("DELETE FROM plans WHERE thread_id = ?").run(threadId);
+    await container.resolve(ThreadRepo).updatePlanPhase(threadId, null);
+    const planTurns = container.resolve(PlanTurnService);
+    const warnings = vi.spyOn(logger, "warn");
+    const releasing = deferred();
+    const release = deferred();
+    Object.assign(provider, { fenceCanonicalTurnEvents: async () => { releasing.resolve(); await release.promise; } });
+    await agent.sendMessage({ threadId, content: "Plan storage", interactionMode: "plan", provider: "codex" });
+    const first = sent[0]!;
+    const questions = "```plan-questions\n" + JSON.stringify([{ id: "q1", category: "Storage", question: "Where?", options: [
+      { id: "local", title: "Local", description: "SQLite" }, { id: "remote", title: "Remote", description: "Cloud" },
+    ] }]) + "\n```";
+    await providerEvent(first, "textDelta", { delta: questions, isFinalResponse: true });
+    await providerEvent(first, "message", { content: questions, tokens: null });
+    await providerEvent(first, "turnComplete");
+    await providerEvent(first, "ended", { outcome: "completed" });
+    await releasing.promise;
+    const answer = planTurns.answerQuestions(threadId, [{ questionId: "q1", selectedOptionId: "local", freeText: null }]);
+    try {
+      await workers.progress?.waitForTerminalSaves(threadId);
+      expect(sent).toHaveLength(1);
+      expect((await service.snapshot({ threadId })).phase).toBe("questions");
+    } finally {
+      release.resolve();
+    }
+    await answer;
+    const second = sent[1]!;
+    expect(second.planTurn).toEqual({ kind: "planning", planFilePath: files.path(threadId) });
+    expect(second.message).toContain("**Where?**: Local");
+    const content = "````mcode-plan\n# Storage plan\nUse SQLite.\n````";
+    expect(planTurns.needsAssistantMaterialization({ type: "message", threadId, messageId: "pending", content })).toBe(true);
+    await providerEvent(second, "textDelta", { delta: content, isFinalResponse: true });
+    await providerEvent(second, "message", { content, tokens: null });
+    await providerEvent(second, "turnComplete");
+    await providerEvent(second, "ended", { outcome: "completed" });
+    await workers.progress?.waitForTerminalSaves(threadId);
+    expect((await service.snapshot({ threadId })).phase).toBe("ready");
+    expect(plans.listByThread(threadId).map(plan => plan.contentMd)).toEqual(["# Storage plan\nUse SQLite."]);
+    expect(warnings.mock.calls.filter(([message]) => /Plan capture missing|Planning turn produced no plan/.test(String(message)))).toEqual([]);
+    warnings.mockRestore();
+  });
 
   function userMessages() {
     return database.prepare("SELECT id, content FROM messages WHERE thread_id = ? AND role = 'user'").all(threadId);
@@ -406,6 +471,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     ]);
     expect(atDispatch).toEqual([{ text: "# Original\nExact plan text.", status: "accepted" }]);
     expect(runtime.threads.findById(threadId)?.interaction_mode).toBe("build");
+    expect(runtime.threads.findById(threadId)?.plan_phase).toBeNull();
     expect((await service.snapshot({ threadId })).versions).toMatchObject([{ id: ready.id, status: "accepted", acceptedMessageId: first.messageId }]);
     expect(new PlanImplementStore(database).read(input.requestId)).toMatchObject({ status: "admitted",
       turnId: sent[0]?.turnId, executionId: sent[0]?.turnExecutionId });
@@ -557,11 +623,22 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     NodeFS.rmdirSync(path);
   });
 
-  it("rolls back Accepted and the user message when admission fails after plan acceptance", async () => {
+  it.each(["questions", "planning", "ready", "no_plan", null] as const)("rolls back phase %s, Accepted and the user message when admission fails", async (phase) => {
+    await container.resolve(ThreadRepo).updatePlanPhase(threadId, phase);
     database.run("CREATE TRIGGER fail_admission BEFORE INSERT ON canonical_agent_turns BEGIN SELECT RAISE(ABORT, 'injected admission failure'); END");
     await expect(service.implement(request())).rejects.toMatchObject({ code: "implement_failed" });
     assertUnaccepted();
     expect(runtime.threads.findById(threadId)?.interaction_mode).toBe("plan");
+    expect(runtime.threads.findById(threadId)?.plan_phase).toBe(phase);
+  });
+
+  it.each(["questions", "planning", "no_plan", null] as const)("clears phase %s with Implement admission", async (phase) => {
+    await container.resolve(ThreadRepo).updatePlanPhase(threadId, phase);
+    await service.implement(request());
+    expect(runtime.threads.findById(threadId)?.plan_phase).toBeNull();
+    expect(plans.getById(ready.id)?.status).toBe("accepted");
+    expect(turns()).toEqual([{ status: "Running" }]);
+    await untilDispatched();
   });
 
   it("rechecks the recorded revision inside worker admission", async () => {

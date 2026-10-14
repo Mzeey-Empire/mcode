@@ -10,6 +10,8 @@ import { mergePlanVersions } from "../merge-plan-versions.js";
 import { planTitle } from "../plan-title.js";
 import type { PlanPersistenceReady } from "../plan-execution-state.js";
 import type { PlanSaveResult, PlanSnapshotResult } from "./plan-write-operations.js";
+import { ThreadStore } from "../../../thread-control/persistence/thread-store.js";
+import { PlanQuestionParser } from "../plan-question-parser.js";
 import { PlanCommentStore } from "./plan-comment-store.js";
 import { hasPreparingPlanImplement, hasUnfinishedPlanExecution } from "./plan-write-availability.js";
 
@@ -97,8 +99,19 @@ export class PlanStore {
   snapshot(threadId: string): PlanSnapshotResult {
     return this.db.transaction((): PlanSnapshotResult => {
       if (!this.threadExists(threadId)) return { ok: false, code: "thread_not_found", latestVersion: null };
-      return { ok: true, versions: this.listWithHistory(threadId), comments: this.listComments(threadId) };
+      const phase = new ThreadStore(this.db).findById(threadId)?.plan_phase ?? null;
+      return { ok: true, versions: this.listWithHistory(threadId), comments: this.listComments(threadId), phase,
+        pendingQuestions: phase === "questions" ? this.pendingQuestions(threadId) : null };
     })();
+  }
+
+  private pendingQuestions(threadId: string) {
+    const message = this.db.query<{ id: string; content: string }, [string, string]>(`SELECT id, content FROM messages
+      WHERE thread_id = ? AND role = 'assistant' AND instr(content, ?) > 0
+      ORDER BY sequence DESC LIMIT 1`).get(threadId, "```plan-questions");
+    if (!message || this.db.prepare("SELECT 1 FROM plan_question_answers WHERE assistant_message_id = ?").get(message.id)) return null;
+    const questions = new PlanQuestionParser().feed(message.content);
+    return questions ? { assistantMessageId: message.id, questions } : null;
   }
 
   /** Read retained plan projections alongside the authoritative version rows. */
@@ -134,6 +147,7 @@ export class PlanStore {
     const predecessor = version.author === "agent" ? this.listByThread(version.threadId).at(-1) : undefined;
     this.orm.insert(plans).values({ ...version, nativePlanFileJson }).run();
     if (predecessor) new PlanCommentStore(this.db).carryForward(predecessor.id, version);
+    if (version.status === "ready" || version.status === "draft") new ThreadStore(this.db).updatePlanPhase(version.threadId, "ready");
   }
 
   /** Saved comments for snapshots and post-commit pushes. */

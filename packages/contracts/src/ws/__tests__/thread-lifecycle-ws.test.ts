@@ -59,6 +59,7 @@ describe("thread completion transport", () => {
       parent_thread_id: null,
       forked_from_message_id: null,
       last_compact_summary: null,
+      plan_phase: null,
     };
 
     expect(WS_CHANNELS["thread.lifecycleChanged"].parse({ thread })).toEqual({ thread });

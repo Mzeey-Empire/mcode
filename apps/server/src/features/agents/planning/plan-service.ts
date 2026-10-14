@@ -22,7 +22,7 @@ import type { PlanCommentStore } from "./persistence/plan-comment-store.js";
 
 /** Existing runtime owners used to reserve and dispatch Implement. */
 export interface PlanImplementRuntime {
-  threads: Pick<ThreadRepo, "findById">;
+  threads: Pick<ThreadRepo, "findById" | "publishPlanPhase">;
   providers: IProviderRegistry;
   reservations: ThreadControlMutationReservationService;
   commands: Pick<AgentTurnCommandPort, "sendMessage" | "createAndSend">;
@@ -262,6 +262,7 @@ export class PlanService {
     const result = await this.writer.execute(planWriteOperations.saveVersion, input);
     if (!result.ok) throw new PlanServiceError(result);
     this.progress?.reloadPlans(input.threadId);
+    this.runtime?.threads.publishPlanPhase(input.threadId);
     broadcast("plan.versionUpserted", { threadId: input.threadId, version: result.version });
     await this.publishComments(input.threadId);
     await this.files.writeAfterCommit(input.threadId);
@@ -269,10 +270,11 @@ export class PlanService {
   }
 
   /** Read a serialized snapshot and preserve any later accepted status in memory. */
-  async snapshot(input: { threadId: string }): Promise<{ versions: PlanVersion[]; comments: PlanComment[] }> {
+  async snapshot(input: { threadId: string }) {
     const result = await this.writer.execute(planWriteOperations.snapshot, input);
     if (!result.ok) throw new PlanServiceError(result);
-    return { versions: mergePlanVersions(result.versions, this.progress?.reloadPlans(input.threadId) ?? result.versions), comments: result.comments };
+    return { versions: mergePlanVersions(result.versions, this.progress?.reloadPlans(input.threadId) ?? result.versions),
+      comments: result.comments, phase: result.phase, pendingQuestions: result.pendingQuestions };
   }
 }
 

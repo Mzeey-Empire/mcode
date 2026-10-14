@@ -295,8 +295,8 @@ export {
   looksLikeWorkspaceRelativeFileRef,
 } from "./models/workspace-preview-uri.js";
 
-export { ThreadSchema, RecentThreadSchema, ThreadCheckoutStateSchema } from "./models/thread.js";
-export type { Thread, RecentThread, ThreadCheckoutState } from "./models/thread.js";
+export { ThreadSchema, RecentThreadSchema, ThreadCheckoutStateSchema, PlanPhaseSchema } from "./models/thread.js";
+export type { Thread, RecentThread, ThreadCheckoutState, PlanPhase } from "./models/thread.js";
 
 export {
   MAX_TURN_RECOVERIES,
@@ -937,8 +937,9 @@ export {
   PlanVersionStatusSchema,
   PlanSaveVersionSchema,
   PlanSaveErrorSchema,
-  PlanActionSchema,
   PlanVersionSchema,
+  PlanSnapshotSchema,
+  PendingPlanQuestionsSchema,
 } from "./models/plan.js";
 export type {
   NativePlanFileOutcome,
@@ -948,8 +949,8 @@ export type {
   PlanVersionStatus,
   PlanSaveVersion,
   PlanSaveError,
-  PlanAction,
   PlanVersion,
+  PlanSnapshot,
 } from "./models/plan.js";
 
 // Permissions
@@ -964,6 +965,7 @@ export {
   ApprovalAnswersSchema,
   ApprovalChoiceSchema,
   ApprovalRequestSchema,
+  MAX_APPROVAL_ANSWER_LENGTH,
 } from "./models/approval.js";
 export type {
   ApprovalRequestBody,

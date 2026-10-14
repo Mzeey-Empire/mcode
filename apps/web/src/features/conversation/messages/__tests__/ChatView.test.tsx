@@ -196,9 +196,6 @@ vi.mock("@/components/chat/HeaderActions", () => ({
   HeaderActions: () => <div data-testid="header-actions" />,
 }));
 
-vi.mock("@/components/chat/PlanQuestionWizard", () => ({
-  PlanQuestionWizard: () => null,
-}));
 
 vi.mock("@/components/chat/cli-error", () => ({
   describeCliError: () => ({ headline: "", installCommand: null, settingsHint: null }),
@@ -258,6 +255,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     parent_thread_id: null,
     forked_from_message_id: null,
     last_compact_summary: null,
+    plan_phase: null,
     default_open_in_app: null,
     has_file_changes: false,
     ...overrides,

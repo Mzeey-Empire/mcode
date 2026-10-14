@@ -348,7 +348,8 @@ S07-01 declares `TurnRequest.planTurn?: { kind: "questions" | "planning" | "revi
 | `questions` | Questions dismissed or expired | none |
 | none or `ready` | Revise starts | `planning` |
 | `planning` | Version captured | `ready` |
-| `planning` | Turn ends with no capture | `no_plan` |
+| `planning` | Turn ends with no capture, a draft or ready version exists | `ready` |
+| `planning` | Turn ends with no capture, no draft or ready version | `no_plan` |
 | `planning` | Turn stops or fails, a draft or ready version exists | `ready` |
 | `planning` | Turn stops or fails, no draft or ready version | none |
 | any | Implement admitted (inside the admission transaction) | none |

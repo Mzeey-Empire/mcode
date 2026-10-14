@@ -112,7 +112,7 @@ import {
   TurnResumeUnscheduleParamsSchema,
 } from "../models/turn-recovery.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
-import { PlanSaveVersionSchema, PlanVersionSchema, PlanActionSchema, PlanImplementSchema, PlanImplementReceiptSchema,
+import { PlanSaveVersionSchema, PlanVersionSchema, PlanImplementSchema, PlanImplementReceiptSchema, PlanSnapshotSchema,
   PlanCommentSchema, PlanCommentCreateSchema, PlanCommentUpdateSchema, PlanCommentSetStatusSchema,
   PlanCommentDeleteSchema, PlanCommentIdsSchema } from "../models/plan.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
@@ -358,11 +358,7 @@ export const SendMessageSchema = lazySchema(() => z.object({
     replyToMessageId: z.string().uuid().optional(),
     /** Highlighted text excerpt from the original message. Absent for full-message replies. */
     quotedText: z.string().max(2000).optional(),
-    /**
-     * Legacy plan-tab action hint. `revise` enables plan capture.
-     * Implement uses the revision-checked `plan.implement` method.
-     */
-    planAction: PlanActionSchema().optional(),
+    /** Saved plan comments to send with this message, read under the admitted turn. */
     planCommentIds: PlanCommentIdsSchema().optional(),
     /** Objective installed as a provider goal immediately before this turn dispatches. */
     goalObjective: GoalObjectiveSchema().optional(),
@@ -1224,7 +1220,7 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({
       threadId: z.string(),
     }),
-    result: z.object({ versions: z.array(PlanVersionSchema()), comments: z.array(PlanCommentSchema()) }),
+    result: PlanSnapshotSchema(),
   },
   "plan.comment.create": { params: PlanCommentCreateSchema(), result: PlanCommentSchema() },
   "plan.comment.update": { params: PlanCommentUpdateSchema(), result: PlanCommentSchema() },

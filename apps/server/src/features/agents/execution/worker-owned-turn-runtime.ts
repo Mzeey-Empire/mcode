@@ -41,6 +41,7 @@ export class WorkerOwnedTurnRuntime {
   private readonly initialWorkers: ExecutionThreadWorkerPort[] = [];
   private readonly rejectedRecoveries = new Map<string, Promise<void>>();
   private onRecovered: ((execution: ExecutionIdentity) => void) | undefined;
+  private onPlanPhaseChanged: ((threadId: string) => void) | undefined;
 
   constructor(writer: CanonicalAgentWriterClient, publication: AgentEventPublicationRegistry, canonical?: CanonicalAgentBoundary) {
     this.writer = writer;
@@ -51,6 +52,7 @@ export class WorkerOwnedTurnRuntime {
       publishCanonicalAgentEvents,
       new ExecutionLivePublicationRelease(publication),
       new ExecutionPlanQuestionRelease((threadId, questions) => {
+        this.onPlanPhaseChanged?.(threadId);
         broadcast("plan.questions", { threadId, questions: [...questions] });
       }),
       this.progress,
@@ -65,6 +67,7 @@ export class WorkerOwnedTurnRuntime {
       },
     }, (assignment) => {
       this.owner.forgetRecovered(assignment.execution, assignment.lease);
+      this.onPlanPhaseChanged?.(assignment.execution.threadId);
       this.onRecovered?.(assignment.execution);
     });
     this.scheduler = this.workerLoss.scheduler;
@@ -76,6 +79,12 @@ export class WorkerOwnedTurnRuntime {
   /** Notify the runtime controller only after writer-backed worker-loss recovery releases the lease. */
   bindRecovered(onRecovered: (execution: ExecutionIdentity) => void): void {
     this.onRecovered = onRecovered;
+  }
+
+  /** Connect durable plan publication to thread hydration and background attention. */
+  bindPlanPhaseChanged(listener: (threadId: string) => void): void {
+    this.onPlanPhaseChanged = listener;
+    this.progress?.bindPlanPhaseChanged(listener);
   }
 
   /** Interrupt and release only the rejected execution; other assignments keep their worker. */

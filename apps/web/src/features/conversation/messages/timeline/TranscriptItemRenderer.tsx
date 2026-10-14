@@ -1,5 +1,4 @@
 import { memo, type ComponentType, type RefObject } from "react";
-import { PermissionRequestCard } from "@/components/chat/PermissionRequestCard";
 import { NarrativeFlow, type SubagentRosterTarget } from "@/features/conversation/narrative";
 import { NarrativeIndicator } from "@/features/conversation/narrative/NarrativeIndicator";
 import { TurnChangesBar } from "../../turn/TurnChangesBar";
@@ -89,12 +88,6 @@ function TurnChangesTranscriptItemRenderer({ item, threadId, turnExpandRef }: Tr
   );
 }
 
-/** Renders a permission request row. */
-function PermissionRequestTranscriptItemRenderer({ item }: TranscriptItemRendererProps) {
-  if (item.type !== "permission-request") return null;
-  return <PermissionRequestCard request={item.request} />;
-}
-
 /** Renders the live narrative flow. */
 function NarrativeFlowTranscriptItemRenderer({ item, onSubagentSelect, onOpenSubagents }: TranscriptItemRendererProps) {
   const flow = item as Extract<ChatVirtualItem, { type: "narrative-flow" }>;
@@ -158,7 +151,6 @@ function TurnEndNoticeTranscriptItemRenderer({ item, threadId }: TranscriptItemR
 const TRANSCRIPT_ITEM_COMPONENTS: Record<ChatVirtualItem["type"], TranscriptItemComponent> = {
   message: MessageTranscriptItemRenderer,
   "turn-changes": TurnChangesTranscriptItemRenderer,
-  "permission-request": PermissionRequestTranscriptItemRenderer,
   "narrative-flow": NarrativeFlowTranscriptItemRenderer,
   "work-fold": WorkFoldTranscriptItemRenderer,
   "turn-meta-line": TurnMetaLineTranscriptItemRenderer,

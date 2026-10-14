@@ -34,6 +34,10 @@ import { ThoughtSegmentRepo as RealThoughtSegmentRepo } from "../../conversation
 import { HookExecutionRepo as RealHookExecutionRepo } from "../../events/persistence/hook-execution-repo.js";
 import { AgentService } from "../agent-service.js";
 import { PlanTurnService } from "../../planning/plan-turn-service.js";
+import { PlanQuestionService } from "../../planning/plan-question-service.js";
+import { PlanRepo } from "../../planning/persistence/plan-repo.js";
+import { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
+import { AgentRuntimeCommandPort, AgentTurnCommandPort } from "../agent-turn-command-port.js";
 import {
   createAgentServiceForTest,
   turnDiffsForAgentServiceTest,
@@ -1463,18 +1467,13 @@ describe("AgentService Ended finalization", () => {
     const progress = new CanonicalAcceptedProgress(canonicalSink, canonicalWriter);
     canonicalSink.bindAcceptedSynthesizedPublications((threadId, events) => progress.acceptSynthesizedPublications(threadId, events));
     pendingPlanOutputs = new Map<string, string>();
-    const planTurns = Object.assign(Object.create(PlanTurnService.prototype), {
-      beginOutputGeneration: () => undefined,
-      beginQuestionGeneration: () => undefined,
-      buildQuestionPrompt: (content: string) => content,
-      buildPlanOutputInstructions: () => "",
-      onTextDelta: () => undefined,
-      needsAssistantMaterialization: () => false,
-      persistAssistantMessage: () => undefined,
+    const planTurns = Object.assign(new PlanTurnService(threadRepo, providerRegistry,
+      new PlanQuestionService(messageRepo, new PlanQuestionAnswersRepo(db, agentStorageTestWriter(db))),
+      new PlanRepo(db, agentStorageTestWriter(db)), new AgentTurnCommandPort(new AgentRuntimeCommandPort())), {
       clearTurn: (threadId: string) => {
         pendingPlanOutputs.delete(threadId);
       },
-    }) as PlanTurnService;
+    });
     service = createAgentServiceForTest(
       threadRepo,
       workspaceRepo,

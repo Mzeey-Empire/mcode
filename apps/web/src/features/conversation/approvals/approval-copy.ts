@@ -16,9 +16,8 @@ const THREAD_OPERATION_ACTIONS: Record<ThreadOperation, string> = {
   thread_stop: "stop another thread",
 };
 
-function subjectAction(subject: ApprovalSubject): string {
+function subjectAction(subject: Exclude<ApprovalSubject, { kind: "question" }>): string {
   if (subject.kind === "thread_operation") return THREAD_OPERATION_ACTIONS[subject.operation];
-  if (subject.kind === "question") return "ask you something";
   return SUBJECT_ACTIONS[subject.kind];
 }
 
@@ -30,7 +29,9 @@ export function approvalActorName(request: ApprovalRequest): string {
 
 /** Dock header. A subagent request drops the provider name because its chip already names who asked. */
 export function approvalTitle(request: ApprovalRequest): string {
-  const action = subjectAction(request.subject);
+  const { subject } = request;
+  if (subject.kind === "question") return request.origin.kind === "subagent" ? "Has a question" : `${approvalActorName(request)} has a question`;
+  const action = subjectAction(subject);
   if (request.origin.kind === "subagent") return `Wants to ${action}`;
   return `${approvalActorName(request)} wants to ${action}`;
 }

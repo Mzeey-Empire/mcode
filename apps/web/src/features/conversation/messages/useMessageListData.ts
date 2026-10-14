@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { ToolCall } from "@/transport/types";
 import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { useWorkspaceThread } from "@/features/projects/state/workspace-selectors";
 import { useThreadStore } from "@/stores/threadStore";
 import { getCanonicalLifecycleTurn, getThreadRuntimePhase } from "@/stores/thread-lifecycle";
 import { getHandoffStatus, getThreadRecord, useThreadRecord } from "../state";
@@ -88,21 +89,25 @@ function resolveCanonicalTurnIdentity(
 }
 
 /** Turn-level states that hold the status line, plus whether it is fading out after going off. */
-function useRunHoldingSignals(threadId: string | null | undefined, isAgentRunning: boolean, awaitingApproval: boolean): RunHoldingSignals {
+function useRunHoldingSignals(threadId: string | null | undefined, isAgentRunning: boolean, awaitingApproval: boolean, awaitingNativeAnswers: boolean): RunHoldingSignals {
+  const awaitingPlanAnswers = useThreadRecord(threadId, (record) => record.planQuestionsStatus === "pending");
+  const awaitingAnswers = awaitingPlanAnswers || awaitingNativeAnswers;
+  const planning = useWorkspaceThread(threadId, (thread) => thread?.plan_phase === "planning");
   const stopPending = useThreadStore((state) => threadId ? (state.pendingStopCounts[threadId] ?? 0) > 0 : false);
   const compacting = useThreadRecord(threadId, (record) => record.isCompacting);
   // Primitive selectors: an object-returning selector yields a fresh reference per store update and loops rerenders.
   const retryKind = useThreadRecord(threadId, (record): RunRetry["kind"] | undefined =>
     record.rateLimit ? "rate-limited" : record.apiRetry ? "retrying" : undefined);
   const retryErrorStatus = useThreadRecord(threadId, (record) => record.apiRetry?.errorStatus);
-  const exiting = useStatusLineExit(threadId, isAgentRunning || awaitingApproval);
+  const exiting = useStatusLineExit(threadId, isAgentRunning || awaitingApproval || awaitingAnswers);
+  const waitingFor = awaitingApproval ? "approval" : awaitingAnswers ? "answers" : undefined;
   return useMemo<RunHoldingSignals>(() => {
     const retry: RunRetry | undefined =
       retryKind === "retrying" ? { kind: "retrying", errorStatus: retryErrorStatus }
         : retryKind === "rate-limited" ? { kind: "rate-limited" }
           : undefined;
-    return { stopPending, compacting, retry, ...(awaitingApproval ? { waitingFor: "approval" as const } : {}), ...(exiting ? { exiting: true } : {}) };
-  }, [stopPending, compacting, retryKind, retryErrorStatus, awaitingApproval, exiting]);
+    return { stopPending, compacting, retry, ...(waitingFor ? { waitingFor } : {}), ...(planning ? { planning } : {}), ...(exiting ? { exiting: true } : {}) };
+  }, [stopPending, compacting, retryKind, retryErrorStatus, waitingFor, planning, exiting]);
 }
 
 /** Reads and normalizes the transcript data needed by the conversation viewport. */
@@ -192,11 +197,12 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const loadOlderMessages = useThreadStore((state) => state.loadOlderMessages);
   const loadNewerMessages = useThreadStore((state) => state.loadNewerMessages);
   const approvals = useApprovalStore((state) => state.approvals);
-  const permissions = useMemo(() => approvals.filter((request) => request.threadId === renderedThreadId), [approvals, renderedThreadId]);
-  const awaitingApproval = useMemo(() => permissions.some(isDockApproval), [permissions]);
+  const docked = useMemo(() => approvals.filter((request) => request.threadId === renderedThreadId && isDockApproval(request)), [approvals, renderedThreadId]);
+  const awaitingApproval = useMemo(() => docked.some((request) => request.subject.kind !== "question"), [docked]);
+  const awaitingNativeAnswers = useMemo(() => docked.some((request) => request.subject.kind === "question"), [docked]);
   const hooks = useThreadRecord(renderedThreadId, (record) => record.hooks);
   const decidedApprovals = useThreadRecord(renderedThreadId, (record) => record.approvals);
-  const holdingSignals = useRunHoldingSignals(renderedThreadId, isAgentDisplayActive(canonicalContent.agentDisplayState), awaitingApproval);
+  const holdingSignals = useRunHoldingSignals(renderedThreadId, isAgentDisplayActive(canonicalContent.agentDisplayState), awaitingApproval, awaitingNativeAnswers);
   const persistedNarrativeByMessage = useThreadRecord(renderedThreadId, (record) => record.narrativeByMessage);
   const legacyCurrentTurnMessageId = useThreadRecord(renderedThreadId, (record) => record.currentTurnMessageId);
   const legacyCurrentTurnResponseKey = useThreadRecord(renderedThreadId, (record) => record.currentTurnResponseKey);
@@ -235,7 +241,6 @@ export function useMessageListData(displayThreadId: string | undefined) {
     loadOlderMessages,
     loadNewerMessages,
     transcriptThreadId: canonicalContent.messages[0]?.thread_id ?? null,
-    permissions,
     hooks,
     approvals: decidedApprovals,
     holdingSignals,

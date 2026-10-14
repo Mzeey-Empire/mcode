@@ -118,7 +118,7 @@ describe("routeMessage Agent RPCs", () => {
       expect(await routeAgentRpc("plan.comment.setStatus", { commentId, status: "resolved" }, fixture.deps)).toMatchObject({ status: "resolved" });
       const reopened = await routeAgentRpc("plan.comment.setStatus", { commentId, status: "open" }, fixture.deps);
       expect(reopened).toMatchObject({ status: "open", resolvedAt: null });
-      expect(await routeAgentRpc("plan.snapshot", { threadId: "t" }, fixture.deps)).toEqual({ versions: [version], comments: [reopened] });
+      expect(await routeAgentRpc("plan.snapshot", { threadId: "t" }, fixture.deps)).toMatchObject({ versions: [version], comments: [reopened] });
       await routeAgentRpc("plan.comment.delete", { commentId }, fixture.deps);
       await routeAgentRpc("plan.comment.delete", { commentId }, fixture.deps);
       expect(db.prepare("SELECT id FROM plan_comments").all()).toEqual([]);

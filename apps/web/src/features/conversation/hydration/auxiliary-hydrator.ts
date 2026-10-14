@@ -3,7 +3,7 @@ import {
   getThreadRecord,
   patchThreadRecord,
 } from "@/stores/thread-record";
-import type { PlanComment, PlanVersion } from "@mcode/contracts";
+import type { PlanComment, PlanQuestion, PlanVersion } from "@mcode/contracts";
 import type { TaskItem } from "@/stores/taskStore";
 import type {
   ThreadHydratorTransport,
@@ -40,6 +40,13 @@ export interface AuxiliaryHydratorDeps {
   getTasksForThread: (threadId: string) => readonly TaskItem[];
   setTasksForThread: (threadId: string, tasks: readonly TaskItem[]) => void;
   addPlanForThread: (threadId: string, plan: PlanVersion) => void;
+  /** Apply the stored question batch; dropped when the question state changed after `revision`. */
+  reconcilePlanQuestions: (
+    threadId: string,
+    revision: number,
+    pending: { assistantMessageId: string; questions: PlanQuestion[] } | null,
+  ) => void;
+  getPlanQuestionsRevision: (threadId: string) => number;
   setPlanCommentsForThread: (threadId: string, comments: readonly PlanComment[]) => void;
   shallowEqualBy: <T>(a: readonly T[], b: readonly T[], keys: (keyof T)[]) => boolean;
   coerceTaskStatus: (status: string) => TaskItem["status"];
@@ -128,13 +135,13 @@ export class AuxiliaryHydrator {
   }
 
   private hydratePlans(threadId: string): void {
+    const questionsRevision = this.deps.getPlanQuestionsRevision(threadId);
     this.transport()
-      .getThreadPlans(threadId)
+      .getPlanSnapshot(threadId)
       .then((snapshot) => {
-        for (const plan of snapshot.versions) {
-          this.deps.addPlanForThread(threadId, plan);
-        }
+        for (const plan of snapshot.versions) this.deps.addPlanForThread(threadId, plan);
         this.deps.setPlanCommentsForThread(threadId, snapshot.comments);
+        this.deps.reconcilePlanQuestions(threadId, questionsRevision, snapshot.pendingQuestions);
       })
       .catch((err: unknown) => {
         console.debug("[planHydration] Failed to load plans for thread %s:", threadId, err);

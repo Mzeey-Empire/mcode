@@ -53,7 +53,10 @@ import { InternalThreadControlMcpRuntime, ThreadControlMutationReservationServic
 import { ProviderEventIngress } from "../../../providers/composition/provider-event-ingress.js";
 import { ThreadBranchingService } from "../../../projects/worktrees/thread-branching-service.js";
 import { AgentService } from "../agent-service.js";
-import { AgentRuntimeCommandPort } from "../agent-turn-command-port.js";
+import { AgentRuntimeCommandPort, AgentTurnCommandPort } from "../agent-turn-command-port.js";
+import { PlanQuestionService } from "../../planning/plan-question-service.js";
+import { PlanRepo } from "../../planning/persistence/plan-repo.js";
+import { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
 import { AgentEventPublicationRegistry } from "../agent-event-publication-registry.js";
 import { AgentReliabilityPort } from "../agent-runtime-internal-ports.js";
 import { TurnFeatureEffects } from "../../turns/turn-feature-effects.js";
@@ -251,7 +254,7 @@ export function createAgentServiceForTest(
   );
   const runtimeCommands = new AgentRuntimeCommandPort();
   const { plans: resolvedPlans, goals: resolvedGoals, effects: featureEffects } = createTestFeatureEffects({
-    threadRepo, providerRegistry, writer, runtimeCommands, parentDurability, planTurns, goals, subagents, taskPersistence,
+    db, messageRepo, threadRepo, providerRegistry, writer, runtimeCommands, parentDurability, planTurns, goals, subagents, taskPersistence,
   });
   const admissions = new TurnAdmissionDispatchCoordinator(
     threadRepo,
@@ -350,21 +353,15 @@ export function createAgentServiceForTest(
   return service;
 }
 
-function createTestFeatureEffects({ threadRepo, providerRegistry, writer, runtimeCommands, parentDurability, planTurns, goals, subagents, taskPersistence }: {
+function createTestFeatureEffects({ db, messageRepo, threadRepo, providerRegistry, writer, runtimeCommands, parentDurability, planTurns, goals, subagents, taskPersistence }: {
+  db: Database; messageRepo: MessageRepo;
   threadRepo: ThreadRepo; providerRegistry: IProviderRegistry; writer: ApplicationDatabaseWriter;
   runtimeCommands: AgentRuntimeCommandPort; parentDurability: ParentTurnDurability;
   planTurns?: PlanTurnService; goals?: GoalLifecycleService; subagents?: SubagentRosterService; taskPersistence?: TaskPersistenceService;
 }) {
-  const resolvedPlans = planTurns ?? Object.assign(Object.create(PlanTurnService.prototype), {
-    beginOutputGeneration: () => undefined,
-    beginQuestionGeneration: () => undefined,
-    buildQuestionPrompt: (content: string) => content,
-    buildPlanOutputInstructions: () => "",
-    onTextDelta: () => undefined,
-    needsAssistantMaterialization: () => false,
-    persistAssistantMessage: () => undefined,
-    clearTurn: () => undefined,
-  }) as PlanTurnService;
+  const resolvedPlans = planTurns ?? new PlanTurnService(threadRepo, providerRegistry,
+    new PlanQuestionService(messageRepo, new PlanQuestionAnswersRepo(db, writer)), new PlanRepo(db, writer),
+    new AgentTurnCommandPort(runtimeCommands));
   const resolvedGoals = goals ?? new GoalLifecycleService(
     threadRepo,
     providerRegistry,
