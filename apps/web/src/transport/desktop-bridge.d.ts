@@ -315,6 +315,8 @@ export interface PreviewAutomationBridge {
   >;
   /** Transfer one exact tab from agent control to the human. */
   interrupt(target: { threadId: string; tabId: string }): Promise<boolean>;
+  /** Release the user's hold on a thread's Browser so the agent may act again. */
+  handBack(target: { threadId: string }): Promise<boolean>;
   /** Clear retained agent presentation after its owning turn completes. */
   releaseAgentControl(target: {
     threadId: string;

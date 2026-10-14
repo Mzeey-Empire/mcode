@@ -11,6 +11,9 @@ import type {
 } from "./services/viewportCoordinator";
 import type { BrowserSessionLifecycleTab } from "./services/browserSessionDriver";
 
+/** How long the agent still counts as acting after its last Browser effect finishes. */
+export const BROWSER_ACTING_LINGER_MS = 3_000;
+
 /** Maximum number of inactive, non-busy Browser targets retained warm. */
 export const BROWSER_AUTOMATION_WARM_TARGET_LIMIT = 3;
 
@@ -47,6 +50,8 @@ interface BrowserAutomationState {
   readonly controllers: ReadonlyMap<string, BrowserAutomationControllerState>;
   readonly activeRequests: ReadonlyMap<string, BrowserAutomationActiveRequest>;
   readonly pendingAgentOpens: ReadonlyMap<string, BrowserAutomationPendingAgentOpen>;
+  /** Targets whose agent has a Browser effect running or finished within {@link BROWSER_ACTING_LINGER_MS}. */
+  readonly actingTargets: ReadonlySet<string>;
   readonly registered: boolean;
   readonly status: BrowserAutomationHostStatus;
   readonly viewportByTarget: ReadonlyMap<string, { readonly width: number; readonly height: number }>;
@@ -180,16 +185,15 @@ export function findPendingBrowserAutomationOpen(
   return null;
 }
 
-/** Whether an agent controls or is opening one exact Browser target. */
+/** Whether an agent is acting on, or opening, one exact Browser target. Holding it while idle does not count. */
 export function isBrowserAutomationAgentControlled(
-  state: Pick<BrowserAutomationState, "controllers" | "pendingAgentOpens">,
+  state: Pick<BrowserAutomationState, "controllers" | "pendingAgentOpens" | "actingTargets">,
   workspaceId: string,
   threadId: string,
   tabId: string,
 ): boolean {
-  if (state.controllers.get(browserAutomationTargetKey(workspaceId, threadId, tabId))?.controller === "agent") {
-    return true;
-  }
+  const key = browserAutomationTargetKey(workspaceId, threadId, tabId);
+  if (state.actingTargets.has(key) && state.controllers.get(key)?.controller === "agent") return true;
   return findPendingBrowserAutomationOpen(
     state.pendingAgentOpens,
     workspaceId,
@@ -211,6 +215,41 @@ function interruptViewportCoordinator(coordinator: ViewportCoordinator | undefin
   coordinator?.interrupt();
 }
 
+/** Whether an operation changes the page or tabs; only these show the agent as acting. */
+export function isBrowserEffectOperation(operation: BrowserAutomationHostDispatch["request"]["operation"]): boolean {
+  return operation !== "inspect" && operation !== "status";
+}
+
+function dispatchTargetKey(dispatch: BrowserAutomationHostDispatch): string {
+  return browserAutomationTargetKey(dispatch.request.workspaceId, dispatch.target.threadId, dispatch.target.tabId);
+}
+
+const actingExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function cancelActingExpiry(targetKey: string): void {
+  const timer = actingExpiryTimers.get(targetKey);
+  if (timer === undefined) return;
+  clearTimeout(timer);
+  actingExpiryTimers.delete(targetKey);
+}
+
+function scheduleActingExpiry(targetKey: string, get: () => BrowserAutomationState): void {
+  cancelActingExpiry(targetKey);
+  const stillRunning = [...get().activeRequests.values()].some(
+    ({ dispatch }) => isBrowserEffectOperation(dispatch.request.operation) && dispatchTargetKey(dispatch) === targetKey,
+  );
+  if (stillRunning) return;
+  actingExpiryTimers.set(targetKey, setTimeout(() => {
+    actingExpiryTimers.delete(targetKey);
+    useBrowserAutomationStore.setState((state) => {
+      if (!state.actingTargets.has(targetKey)) return state;
+      const actingTargets = new Set(state.actingTargets);
+      actingTargets.delete(targetKey);
+      return { actingTargets };
+    });
+  }, BROWSER_ACTING_LINGER_MS));
+}
+
 /** Shared renderer state for browser host discovery, control, and warm leases. */
 export const useBrowserAutomationStore = create<BrowserAutomationState>((set, get) => ({
   liveTargets: new Map(),
@@ -218,6 +257,7 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
   controllers: new Map(),
   activeRequests: new Map(),
   pendingAgentOpens: new Map(),
+  actingTargets: new Set(),
   registered: false,
   status: "unavailable",
   viewportByTarget: new Map(),
@@ -451,16 +491,25 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
         if (!oldest) break;
         activeRequests.delete(oldest);
       }
-      return { activeRequests };
+      if (!isBrowserEffectOperation(request.dispatch.request.operation)) return { activeRequests };
+      const actingKey = dispatchTargetKey(request.dispatch);
+      cancelActingExpiry(actingKey);
+      if (state.actingTargets.has(actingKey)) return { activeRequests };
+      return { activeRequests, actingTargets: new Set(state.actingTargets).add(actingKey) };
     }),
-  clearActiveRequest: (requestId, sequence) =>
+  clearActiveRequest: (requestId, sequence) => {
+    const finished = get().activeRequests.get(browserAutomationRequestKey(requestId, sequence));
     set((state) => {
       const key = browserAutomationRequestKey(requestId, sequence);
       if (!state.activeRequests.has(key)) return state;
       const activeRequests = new Map(state.activeRequests);
       activeRequests.delete(key);
       return { activeRequests };
-    }),
+    });
+    if (finished && isBrowserEffectOperation(finished.dispatch.request.operation)) {
+      scheduleActingExpiry(dispatchTargetKey(finished.dispatch), get);
+    }
+  },
   setPendingAgentOpen: (requestId, sequence, pending) =>
     set((state) => {
       const pendingAgentOpens = new Map(state.pendingAgentOpens);
@@ -631,6 +680,64 @@ export function onBrowserAutomationInterruption(listener: InterruptionListener):
   return () => interruptionListeners.delete(listener);
 }
 
+function holdWebBrowserForUser(workspaceId: string, threadId: string, tabId: string): void {
+  const store = useBrowserAutomationStore.getState();
+  const current = store.controllers.get(browserAutomationTargetKey(workspaceId, threadId, tabId));
+  const opening = findPendingBrowserAutomationOpen(store.pendingAgentOpens, workspaceId, threadId, tabId) !== null;
+  const holdable = current?.controller === "agent" || (opening && current?.controller !== "human");
+  if (!holdable) return;
+  store.setControllerForTarget(workspaceId, threadId, tabId, {
+    tabId,
+    controller: "human",
+    controlEpoch: (current?.controlEpoch ?? 0) + 1,
+  });
+}
+
+/**
+ * Release the user's hold on one thread's Browser. Sending a message never calls this; only the
+ * Hand back button does. Resolves false when nothing was held.
+ */
+export async function handBackBrowserControl(workspaceId: string, threadId: string): Promise<boolean> {
+  const bridge = window.desktopBridge?.preview?.automation;
+  if (bridge) return bridge.handBack({ threadId });
+  const store = useBrowserAutomationStore.getState();
+  let released = false;
+  for (const target of store.liveTargets.values()) {
+    if (target.workspaceId !== workspaceId || target.threadId !== threadId) continue;
+    const current = store.controllers.get(browserAutomationTargetKey(workspaceId, threadId, target.tabId));
+    if (current?.controller !== "human") continue;
+    store.setControllerForTarget(workspaceId, threadId, target.tabId, {
+      tabId: target.tabId,
+      controller: "none",
+      controlEpoch: current.controlEpoch + 1,
+    });
+    released = true;
+  }
+  return released;
+}
+
+type AutomationBridge = NonNullable<NonNullable<Window["desktopBridge"]>["preview"]>["automation"];
+
+async function interruptThroughBridge(
+  bridge: AutomationBridge,
+  workspaceId: string,
+  threadId: string,
+  tabId: string,
+): Promise<boolean> {
+  if (await bridge.interrupt({ threadId, tabId })) return true;
+  const opening = () =>
+    findPendingBrowserAutomationOpen(useBrowserAutomationStore.getState().pendingAgentOpens, workspaceId, threadId, tabId) !== null;
+  if (!opening()) return false;
+  await new Promise<void>((resolve) => {
+    const unsubscribe = useBrowserAutomationStore.subscribe(() => {
+      if (opening()) return;
+      unsubscribe();
+      resolve();
+    });
+  });
+  return bridge.interrupt({ threadId, tabId });
+}
+
 /** Transfer one exact target to the human after desktop-main accepts takeover. */
 export function interruptBrowserAutomationTarget(
   workspaceId: string,
@@ -640,12 +747,13 @@ export function interruptBrowserAutomationTarget(
 ): void {
   const bridge = window.desktopBridge?.preview?.automation;
   if (!bridge) {
+    holdWebBrowserForUser(workspaceId, threadId, tabId);
     for (const listener of interruptionListeners) listener(workspaceId, threadId, tabId, reason);
     return;
   }
   const key = browserAutomationTargetKey(workspaceId, threadId, tabId);
   if (pendingInterruptions.has(key)) return;
-  const interruption = bridge.interrupt({ threadId, tabId });
+  const interruption = interruptThroughBridge(bridge, workspaceId, threadId, tabId);
   pendingInterruptions.set(key, interruption);
   void interruption.then((accepted) => {
     if (!accepted) return;

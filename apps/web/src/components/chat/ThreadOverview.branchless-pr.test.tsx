@@ -592,6 +592,7 @@ describe("ThreadOverview branchless Create PR", () => {
       controllers: new Map([
         [browserAutomationTargetKey("ws-1", "thread-1", "agent-tab"), { tabId: "agent-tab", controller: "agent", controlEpoch: 1 }],
       ]),
+      actingTargets: new Set([browserAutomationTargetKey("ws-1", "thread-1", "agent-tab")]),
     });
     usePreviewTabsStore.setState({
       tabSetByScope: {
@@ -618,6 +619,7 @@ describe("ThreadOverview branchless Create PR", () => {
       lifecycleTabs: useBrowserAutomationStore.getState().lifecycleTabs,
       liveTargets: useBrowserAutomationStore.getState().liveTargets,
       controllers: useBrowserAutomationStore.getState().controllers,
+      actingTargets: useBrowserAutomationStore.getState().actingTargets,
     });
     expect(rows.map((row) => row.tab.id)).toEqual(["agent-tab", "claimed-tab", "ordinary-tab"]);
 
@@ -820,6 +822,7 @@ describe("ThreadOverview branchless Create PR", () => {
       controllers: new Map([
         [browserAutomationTargetKey("ws-1", "thread-1", "released-tab"), { tabId: "released-tab", controller: "agent" as const, controlEpoch: 2 }],
       ]),
+      actingTargets: new Set(),
     });
 
     expect(rows.map((row) => row.tab.id)).toEqual(["released-tab"]);

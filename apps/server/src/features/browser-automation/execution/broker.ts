@@ -463,7 +463,7 @@ function inspectGuidance(
   target: BrowserAutomationHostDispatchTarget | undefined,
   capabilities: BrowserAutomationPublicOperation[],
 ): string {
-  if (target?.controller?.controller === "human") return "Visible Preview under human control. Yield to user before effects.";
+  if (target?.controller?.controller === "human") return "The user has control of the Browser. Do not act until browser_inspect reports ready; the user hands control back.";
   return `Visible browser executor (${descriptor.runtime}) supports: ${capabilities.join(", ") || "none"}.`;
 }
 
@@ -1681,6 +1681,11 @@ export class BrowserAutomationBroker {
   }
 
   private targetDeliveryError(pending: PendingRequest): BrowserAutomationResponse | null {
+    if (pending.request.operation !== "inspect" && [...pending.host.targets.values()].some((target) =>
+      target.threadId === pending.request.threadId && target.controller?.controller === "human"
+    )) {
+      return failure(pending.request, "HUMAN_INTERRUPTED", "The user has control of the Browser until Hand back", true);
+    }
     if (!pending.target) return null;
     const currentTarget = pending.host.targets.get(targetKey(pending.target));
     if (!currentTarget) return failure(pending.request, "TAB_UNAVAILABLE", "Browser target changed before delivery", true);

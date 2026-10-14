@@ -773,6 +773,13 @@ describe("PreviewPanel: full panel state", () => {
           },
         ],
       ]),
+      actingTargets: new Set([
+        browserAutomationTargetKey(
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          PREVIEW_WEBVIEW_FALLBACK_TAB_ID,
+        ),
+      ]),
     });
 
     render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" coveredRight={112} />);

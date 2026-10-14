@@ -103,7 +103,7 @@ interface PreviewPageOptions {
   readonly browserWorkspaceId: ReturnType<typeof usePreviewViewport>["browserWorkspaceId"];
   readonly activeWebviewTabId: ReturnType<typeof usePreviewViewport>["activeWebviewTabId"];
   readonly automationControllers: ReturnType<typeof usePreviewViewport>["automationControllers"];
-  readonly automationActiveRequests: ReturnType<typeof usePreviewViewport>["automationActiveRequests"];
+  readonly actingTargets: ReturnType<typeof usePreviewViewport>["actingTargets"];
   readonly pendingAgentOpens: ReturnType<typeof usePreviewViewport>["pendingAgentOpens"];
   readonly webviewRefs: RefObject<Record<string, PreviewWebviewHandle | null>>;
   readonly activeBrowserTargetKey: ReturnType<typeof usePreviewViewport>["activeBrowserTargetKey"];
@@ -122,7 +122,7 @@ export function usePreviewPage({
   browserWorkspaceId,
   activeWebviewTabId,
   automationControllers,
-  automationActiveRequests,
+  actingTargets,
   pendingAgentOpens,
   webviewRefs,
   activeBrowserTargetKey,
@@ -277,13 +277,8 @@ export function usePreviewPage({
   const activeAutomationController = automationControllers.get(
     browserAutomationTargetKey(browserWorkspaceId, threadId, activeWebviewTabId),
   );
-  const activeAutomationRequest = [...automationActiveRequests.values()].find(
-    ({ dispatch }) =>
-      dispatch.request.workspaceId === browserWorkspaceId &&
-      dispatch.target.threadId === threadId && dispatch.target.tabId === activeWebviewTabId,
-  );
   const agentControlsBrowser = isBrowserAutomationAgentControlled(
-    { controllers: automationControllers, pendingAgentOpens },
+    { controllers: automationControllers, pendingAgentOpens, actingTargets },
     browserWorkspaceId,
     threadId,
     activeWebviewTabId,
@@ -547,7 +542,6 @@ export function usePreviewPage({
     onWebviewGetZoom,
     onWebviewSetZoom,
     activeAutomationController,
-    activeAutomationRequest,
     webviewNavError,
     lastCapture,
     agentControlsBrowser,

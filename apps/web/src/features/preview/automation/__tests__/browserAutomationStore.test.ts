@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BROWSER_AUTOMATION_MAX_PENDING_REQUESTS } from "@mcode/contracts";
 import {
   browserAutomationLifecycleKey,
@@ -8,7 +8,10 @@ import {
   browserAutomationTargetKey,
   parseBrowserAutomationScopeKey,
   parseBrowserAutomationTargetKey,
+  onBrowserAutomationInterruption,
   onBrowserAutomationScopeRelease,
+  handBackBrowserControl,
+  interruptBrowserAutomationTarget,
   invalidateBrowserAutomationTargetObservation,
   onBrowserAutomationObservationInvalidation,
   releaseBrowserAutomationThreadScope,
@@ -531,5 +534,143 @@ describe("browser automation renderer scope", () => {
     )).toEqual({ tabId: "tab-second", controller: "agent", controlEpoch: 2 });
 
     store.releaseThreadTargets("workspace-agent", "thread-agent");
+  });
+});
+
+describe("browser acting and user hold", () => {
+  const key = browserAutomationTargetKey("workspace-acting", "thread-acting", "tab-acting");
+
+  function activeRequest(
+    requestId: string,
+    sequence: number,
+    operation: string,
+  ): BrowserAutomationActiveRequest {
+    return {
+      dispatch: {
+        request: { workspaceId: "workspace-acting", requestId, sequence, operation },
+        target: { threadId: "thread-acting", tabId: "tab-acting" },
+      } as unknown as BrowserAutomationActiveRequest["dispatch"],
+      startedAt: sequence,
+    };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+    useBrowserAutomationStore.getState().releaseThreadTargets("workspace-acting", "thread-acting");
+    useBrowserAutomationStore.setState({ activeRequests: new Map(), actingTargets: new Set() });
+  });
+
+  it("marks a target acting for effect operations only", () => {
+    const store = useBrowserAutomationStore.getState();
+    store.setActiveRequest(activeRequest("inspect", 1, "inspect"));
+    store.setActiveRequest(activeRequest("status", 2, "status"));
+    expect(useBrowserAutomationStore.getState().actingTargets.has(key)).toBe(false);
+
+    store.setActiveRequest(activeRequest("click", 3, "click"));
+    expect(useBrowserAutomationStore.getState().actingTargets.has(key)).toBe(true);
+  });
+
+  it("keeps acting for the linger window after the last effect, and a new effect cancels the expiry", () => {
+    vi.useFakeTimers();
+    const store = useBrowserAutomationStore.getState();
+    store.setActiveRequest(activeRequest("click-1", 1, "click"));
+    store.clearActiveRequest("click-1", 1);
+
+    vi.advanceTimersByTime(2_999);
+    expect(useBrowserAutomationStore.getState().actingTargets.has(key)).toBe(true);
+
+    store.setActiveRequest(activeRequest("click-2", 2, "click"));
+    vi.advanceTimersByTime(6_000);
+    expect(useBrowserAutomationStore.getState().actingTargets.has(key)).toBe(true);
+
+    store.clearActiveRequest("click-2", 2);
+    vi.advanceTimersByTime(3_000);
+    expect(useBrowserAutomationStore.getState().actingTargets.has(key)).toBe(false);
+  });
+
+  it("does not expire acting while another effect is still running on the target", () => {
+    vi.useFakeTimers();
+    const store = useBrowserAutomationStore.getState();
+    store.setActiveRequest(activeRequest("click-1", 1, "click"));
+    store.setActiveRequest(activeRequest("type-1", 2, "type"));
+    store.clearActiveRequest("click-1", 1);
+
+    vi.advanceTimersByTime(6_000);
+    expect(useBrowserAutomationStore.getState().actingTargets.has(key)).toBe(true);
+  });
+
+  it("holds the web browser for the user on take control and releases it only on hand back", async () => {
+    const store = useBrowserAutomationStore.getState();
+    store.registerTarget("workspace-acting", "thread-acting", "tab-acting");
+    store.setControllerForTarget("workspace-acting", "thread-acting", "tab-acting", {
+      tabId: "tab-acting",
+      controller: "agent",
+      controlEpoch: 4,
+    });
+
+    interruptBrowserAutomationTarget("workspace-acting", "thread-acting", "tab-acting", "user-stopped");
+    expect(useBrowserAutomationStore.getState().controllers.get(key)).toEqual({
+      tabId: "tab-acting",
+      controller: "human",
+      controlEpoch: 5,
+    });
+
+    await expect(handBackBrowserControl("workspace-acting", "thread-acting")).resolves.toBe(true);
+    expect(useBrowserAutomationStore.getState().controllers.get(key)).toEqual({
+      tabId: "tab-acting",
+      controller: "none",
+      controlEpoch: 6,
+    });
+    await expect(handBackBrowserControl("workspace-acting", "thread-acting")).resolves.toBe(false);
+  });
+
+  it("lets Take control hold a tab whose browser_open has not produced a controller yet", () => {
+    const store = useBrowserAutomationStore.getState();
+    store.registerTarget("workspace-acting", "thread-acting", "tab-acting");
+    store.setPendingAgentOpen("open-1", 1, {
+      workspaceId: "workspace-acting", threadId: "thread-acting", tabId: "tab-acting", url: null, startedAt: 1,
+    });
+
+    interruptBrowserAutomationTarget("workspace-acting", "thread-acting", "tab-acting", "user-stopped");
+
+    expect(useBrowserAutomationStore.getState().controllers.get(key)).toEqual({
+      tabId: "tab-acting",
+      controller: "human",
+      controlEpoch: 1,
+    });
+    store.clearPendingAgentOpen("open-1", 1);
+  });
+
+  it("retries Take control on desktop once the agent's first open has created the target", async () => {
+    const interrupt = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    window.desktopBridge = { preview: { automation: { interrupt } } } as unknown as NonNullable<typeof window.desktopBridge>;
+    const heard = vi.fn();
+    const unlisten = onBrowserAutomationInterruption(heard);
+    const store = useBrowserAutomationStore.getState();
+    store.setPendingAgentOpen("open-1", 1, {
+      workspaceId: "workspace-acting", threadId: "thread-acting", tabId: "tab-acting", url: null, startedAt: 1,
+    });
+
+    interruptBrowserAutomationTarget("workspace-acting", "thread-acting", "tab-acting", "user-stopped");
+    await vi.waitFor(() => expect(interrupt).toHaveBeenCalledTimes(1));
+    expect(heard).not.toHaveBeenCalled();
+
+    store.clearPendingAgentOpen("open-1", 1);
+    await vi.waitFor(() => expect(heard).toHaveBeenCalledOnce());
+    expect(interrupt).toHaveBeenCalledTimes(2);
+    unlisten();
+    delete window.desktopBridge;
+  });
+
+  it("does not retry a refused desktop interrupt when no open is pending", async () => {
+    const interrupt = vi.fn().mockResolvedValue(false);
+    window.desktopBridge = { preview: { automation: { interrupt } } } as unknown as NonNullable<typeof window.desktopBridge>;
+
+    interruptBrowserAutomationTarget("workspace-acting", "thread-acting", "tab-acting", "user-stopped");
+    await vi.waitFor(() => expect(interrupt).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+
+    expect(interrupt).toHaveBeenCalledTimes(1);
+    delete window.desktopBridge;
   });
 });

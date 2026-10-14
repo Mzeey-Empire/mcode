@@ -1,8 +1,10 @@
 import { ArrowLeft, ArrowRight, Camera, MousePointer2, RotateCw } from "lucide-react";
 import { BrowserActionButton } from "./BrowserActionButton";
+import { BrowserControlPill } from "./BrowserControlPill";
 import { BrowserMoreMenu } from "./BrowserMoreMenu";
 import type {
   BrowserAddress,
+  BrowserControl,
   BrowserNavigation,
   BrowserPageActions,
   BrowserToolbarPage,
@@ -15,6 +17,7 @@ export interface BrowserToolbarProps {
   readonly page: BrowserToolbarPage;
   readonly address: BrowserAddress;
   readonly tools: BrowserTools;
+  readonly control: BrowserControl;
   /** Monotonic token: each change focuses the address and selects it. */
   readonly focusRequest?: number;
 }
@@ -67,12 +70,14 @@ function PageActions({ actions }: { readonly actions: BrowserPageActions }) {
 }
 
 /** Browser address and tools, with navigation on loaded or errored pages. */
-export function BrowserToolbar({ page, address, tools, focusRequest }: BrowserToolbarProps) {
+export function BrowserToolbar({ page, address, tools, control, focusRequest }: BrowserToolbarProps) {
+  const showPageActions = page.kind === "loaded" && control.kind !== "agent-acting";
   return (
     <div data-testid="browser-toolbar" className="flex h-10 min-w-0 flex-1 items-center gap-2 px-2">
       {page.kind === "new" ? null : <NavigationGroup navigation={page.navigation} />}
       <BrowserUrlPill address={address} newPage={page.kind === "new"} focusRequest={focusRequest} />
-      {page.kind === "loaded" ? <PageActions actions={page.pageActions} /> : null}
+      {showPageActions ? <PageActions actions={page.pageActions} /> : null}
+      {control.kind === "none" ? null : <BrowserControlPill control={control} />}
       <BrowserMoreMenu tools={tools} />
     </div>
   );

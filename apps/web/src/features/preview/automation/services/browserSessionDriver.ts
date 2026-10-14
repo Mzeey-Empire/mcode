@@ -1390,7 +1390,10 @@ export class BrowserSessionDriver {
     this.observations.set(observationRef, {
       hostRevision: current.connectionGeneration,
       documentRevision: current.targetGeneration,
-      controlRevision: prepared.dispatch.request.expectedControlEpoch,
+      controlRevision: this.currentControlRevision({
+        ...prepared.dispatch,
+        target: { ...prepared.dispatch.target, threadId: current.threadId, tabId: current.tabId },
+      }),
       capabilityRevision: prepared.capabilityRevision,
       humanInteractionRevision: this.currentHumanInteractionRevisionForTarget(prepared.session.workspaceId, current.threadId, current.tabId),
       targetKey: observationTargetKey(prepared.session.workspaceId, current.threadId, current.tabId),
@@ -1660,7 +1663,7 @@ export class BrowserSessionDriver {
     return {
       hostRevision: dispatch.connection?.connectionGeneration ?? 0,
       documentRevision: dispatch.target.targetGeneration,
-      controlRevision: dispatch.request.expectedControlEpoch,
+      controlRevision: this.currentControlRevision(dispatch),
       capabilityRevision: dispatch.connection?.capabilityRevision ?? this.options.getCapabilityRevision?.() ?? 1,
       humanInteractionRevision: this.currentHumanInteractionRevision(dispatch),
       targetKey: observationTargetKey(dispatch.request.workspaceId, dispatch.target.threadId, dispatch.target.tabId),
@@ -1677,9 +1680,13 @@ export class BrowserSessionDriver {
     return {
       hostRevision: this.options.getHostRevision?.(dispatch) ?? dispatch.connection?.connectionGeneration ?? 0,
       documentRevision: this.options.getDocumentRevision?.(dispatch) ?? dispatch.target.targetGeneration,
-      controlRevision: this.options.getControlRevision?.(dispatch) ?? dispatch.request.expectedControlEpoch,
+      controlRevision: this.currentControlRevision(dispatch),
       capabilityRevision,
     };
+  }
+
+  private currentControlRevision(dispatch: BrowserAutomationHostDispatch): number {
+    return this.options.getControlRevision?.(dispatch) ?? dispatch.request.expectedControlEpoch;
   }
 
   private currentHumanInteractionRevision(dispatch: BrowserAutomationHostDispatch): number {

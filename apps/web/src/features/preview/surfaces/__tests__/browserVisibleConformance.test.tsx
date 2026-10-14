@@ -20,7 +20,7 @@ import { buildPersistedNarrativeItems } from "@/features/conversation/narrative/
 import { ToolSummaryLine } from "@/features/conversation/narrative/ToolSummaryLine";
 import type { ToolCall, ToolCallRecord } from "@/transport/types";
 import { BrowserToolbar } from "../BrowserToolbar";
-import type { BrowserTools } from "../browserToolbarModel";
+import type { BrowserControl, BrowserTools } from "../browserToolbarModel";
 import { BrowserDeviceRow } from "../BrowserDeviceRow";
 import { ThreadOverview } from "@/components/chat/ThreadOverview";
 import type { Thread } from "@/transport";
@@ -273,7 +273,7 @@ function visibleThread(): Thread {
 
 function VisibleBrowserToolbar({ onStopAutomation }: { readonly onStopAutomation: () => void }) {
   const controller = useBrowserAutomationStore((state) => state.controllers.get(TARGET_KEY) ?? null);
-  const activeRequest = useBrowserAutomationStore((state) => state.activeRequests.size > 0);
+  const acting = useBrowserAutomationStore((state) => state.actingTargets.has(TARGET_KEY));
   const enabled = { kind: "enabled", run: vi.fn() } as const;
   const tools: BrowserTools = {
     deviceToolbar: enabled,
@@ -282,10 +282,10 @@ function VisibleBrowserToolbar({ onStopAutomation }: { readonly onStopAutomation
     zoom: { kind: "enabled", read: async () => 1, set: async (factor) => factor },
     clearCookies: enabled,
     clearCache: enabled,
-    takeover: controller?.controller === "agent"
-      ? { kind: "agent", busy: activeRequest, takeControl: onStopAutomation }
-      : { kind: "none" },
   };
+  const control: BrowserControl = controller?.controller === "agent" && acting
+    ? { kind: "agent-acting", provider: "codex", takeControl: onStopAutomation }
+    : { kind: "none" };
   return (
     <TooltipProvider>
       <BrowserToolbar
@@ -301,16 +301,14 @@ function VisibleBrowserToolbar({ onStopAutomation }: { readonly onStopAutomation
           onHumanFocus: vi.fn(),
         }}
         tools={tools}
+        control={control}
       />
     </TooltipProvider>
   );
 }
 
 function visibleBrowserRun(currentUrl: string | null) {
-  const menu = screen.queryByRole("menu");
-  const ownsBrowser = menu
-    ? Boolean(within(menu).queryByRole("menuitem", { name: "Take control" }))
-    : false;
+  const ownsBrowser = screen.queryByRole("button", { name: "Take control" }) !== null;
   const controlOwner = ownsBrowser ? "agent" : "none";
   return normalizeBrowserConformanceRun({
     outcome: { status: "completed", effect: "none", recovery: "none", ownership: controlOwner },
@@ -437,6 +435,7 @@ describe("visible Browser conformance observer", () => {
       liveTargets: new Map(),
       controllers: new Map(),
       activeRequests: new Map(),
+      actingTargets: new Set(),
       pendingAgentOpens: new Map(),
       lifecycleTabs: new Map(),
       viewportByTarget: new Map(),
@@ -466,14 +465,14 @@ describe("visible Browser conformance observer", () => {
       providerSessionId: "provider-visible",
       operation: "click",
     } satisfies BrowserAutomationControllerState);
+    useBrowserAutomationStore.setState({ actingTargets: new Set([TARGET_KEY]) });
     expect(useBrowserAutomationStore.getState().controllers.get(TARGET_KEY)?.controller).toBe("agent");
     const onStopAutomation = vi.fn();
     render(<VisibleBrowserToolbar onStopAutomation={onStopAutomation} />);
 
     const initialUrl = await visibleBrowserCurrentUrl(user);
     expect(initialUrl).toBe("https://example.test/checkout?token=redacted");
-    await user.click(screen.getByRole("button", { name: "More" }));
-    const takeover = await screen.findByRole("menuitem", { name: "Take control" });
+    const takeover = await screen.findByRole("button", { name: "Take control" });
     expect(takeover).toBeInTheDocument();
     const agentRun = visibleBrowserRun(initialUrl);
     expect(agentRun.visibleObservations[0]).toMatchObject({
@@ -495,8 +494,7 @@ describe("visible Browser conformance observer", () => {
     });
     const releasedUrl = await visibleBrowserCurrentUrl(user);
     expect(releasedUrl).toBe(initialUrl);
-    await user.click(screen.getByRole("button", { name: "More" }));
-    expect(screen.queryByRole("menuitem", { name: "Take control" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Take control" })).not.toBeInTheDocument();
     expect(visibleBrowserRun(releasedUrl).visibleObservations[0]?.controlOwner).toBe("none");
   });
 
@@ -605,6 +603,7 @@ describe("visible Browser conformance observer", () => {
       ]]),
       lifecycleTabs: new Map([["lifecycle-visible", lifecycle]]),
       controllers: new Map([[TARGET_KEY, { tabId: TAB_ID, controller: "agent", controlEpoch: 1 }]]),
+      actingTargets: new Set([TARGET_KEY]),
     });
     usePreviewTabsStore.setState({
       tabSetByScope: { [previewTabsScopeKey("workspace-visible", THREAD_ID)]: tabSet },
@@ -775,16 +774,15 @@ describe("visible Browser conformance observer", () => {
   });
 
   it("does not resurrect visible ownership after scope cleanup and a late controller event", async () => {
-    const user = userEvent.setup();
     useBrowserAutomationStore.getState().registerTarget(WORKSPACE_ID, THREAD_ID, TAB_ID);
     useBrowserAutomationStore.getState().setControllerForTarget(WORKSPACE_ID, THREAD_ID, TAB_ID, {
       tabId: TAB_ID,
       controller: "agent",
       controlEpoch: 7,
     });
+    useBrowserAutomationStore.setState({ actingTargets: new Set([TARGET_KEY]) });
     render(<VisibleBrowserToolbar onStopAutomation={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "More" }));
-    expect(await screen.findByRole("menuitem", { name: "Take control" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Take control" })).toBeInTheDocument();
 
     act(() => {
       releaseBrowserAutomationThreadScope(WORKSPACE_ID, THREAD_ID);
@@ -798,7 +796,7 @@ describe("visible Browser conformance observer", () => {
     await waitFor(() => {
       expect(useBrowserAutomationStore.getState().liveTargets.size).toBe(0);
       expect(useBrowserAutomationStore.getState().controllers.size).toBe(0);
-      expect(screen.queryByRole("menuitem", { name: "Take control" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Take control" })).not.toBeInTheDocument();
     });
     expect(browserTargetRegistry.get(WORKSPACE_ID, THREAD_ID, TAB_ID)).toBeNull();
   });

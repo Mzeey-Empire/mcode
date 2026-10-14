@@ -19,6 +19,7 @@ import {
   browserAutomationRequestKey,
   browserAutomationScopeKey,
   browserAutomationTargetKey,
+  interruptBrowserAutomationTarget,
   invalidateBrowserAutomationTargetObservation,
   onBrowserAutomationObservationInvalidation,
   onBrowserAutomationInterruption,
@@ -597,6 +598,9 @@ async function executeWebOpen(context: BrowserAutomationRequestContext): Promise
   if (!requestedUrl) return context.state.sessionDriver.execute(context.dispatch, context.controller.signal);
   const staleResponse = staleCurrentWebTargetResponse(context);
   if (staleResponse) return staleResponse;
+  if (!context.initialControlEpochMatches) {
+    return failureResponse(context.dispatch.request, "STALE_CONTROL_EPOCH", "Browser operation is stale");
+  }
   const target = useBrowserAutomationStore.getState().liveTargets.get(context.targetKey)!;
   const iframe = startWebOpenNavigation(context, requestedUrl, target.revision);
   await waitForWebOpenNavigation(context, requestedUrl, iframe);
@@ -605,9 +609,18 @@ async function executeWebOpen(context: BrowserAutomationRequestContext): Promise
   return context.state.sessionDriver.execute(webOpenExecutionDispatch(context), context.controller.signal);
 }
 
+function userHoldResponse(context: BrowserAutomationRequestContext): BrowserAutomationResponse | null {
+  const operation = context.dispatch.request.operation;
+  if (operation === "inspect" || operation === "status") return null;
+  if (useBrowserAutomationStore.getState().controllers.get(context.targetKey)?.controller !== "human") return null;
+  return failureResponse(context.dispatch.request, "HUMAN_INTERRUPTED", "The user has control of the Browser until Hand back");
+}
+
 function selectBrowserAutomationOperation(
   context: BrowserAutomationRequestContext,
 ): Promise<BrowserAutomationResponse> {
+  const heldByUser = userHoldResponse(context);
+  if (heldByUser) return Promise.resolve(heldByUser);
   if (context.flags.interaction) return executeWebInteraction(context);
   if (context.flags.open) return executeWebOpen(context);
   if (context.bridge || context.flags.executor) {
@@ -1012,7 +1025,10 @@ export function BrowserAutomationHost() {
         const targetKey = browserAutomationTargetKey(dispatch.scope.workspaceId, dispatch.target.threadId, dispatch.target.tabId);
         return useBrowserAutomationStore.getState().liveTargets.get(targetKey)?.revision ?? 0;
       },
-      onHumanInput: (dispatch) => invalidateBrowserAutomationTargetObservation(dispatch.scope.workspaceId, dispatch.target.threadId, dispatch.target.tabId),
+      onHumanInput: (dispatch) => {
+        interruptBrowserAutomationTarget(dispatch.scope.workspaceId, dispatch.target.threadId, dispatch.target.tabId, "human-interrupted");
+        invalidateBrowserAutomationTargetObservation(dispatch.scope.workspaceId, dispatch.target.threadId, dispatch.target.tabId);
+      },
       onObserver: (dispatch, dispose) => webObserverRef.current.set(browserAutomationRequestKey(dispatch.request.requestId, dispatch.request.sequence), dispose),
       executeNonInteraction: (dispatch, signal) => executeBrowserDispatch(undefined, recorderRef.current, dispatch, signal, executorDescriptor.operations),
     });
@@ -1543,7 +1559,7 @@ export function BrowserAutomationHost() {
         store.setControllerForTarget(target.workspaceId, target.threadId, target.tabId, {
           tabId: target.tabId,
           controller: "none",
-          controlEpoch: controller.controlEpoch,
+          controlEpoch: controller.controlEpoch + 1,
         });
       }
     }

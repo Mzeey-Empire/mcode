@@ -117,6 +117,7 @@ describe("Preview feature public interface", () => {
       "preview:automation.finish-renderer-operation",
       "preview:automation.cancel",
       "preview:automation.interrupt",
+      "preview:automation.hand-back",
       "preview:automation.release-agent-control",
       "preview:automation.describe-target",
       "preview:automation.media-source",

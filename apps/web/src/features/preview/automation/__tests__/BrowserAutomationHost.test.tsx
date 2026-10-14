@@ -12,6 +12,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import {
   browserAutomationScopeKey,
   browserAutomationTargetKey,
+  handBackBrowserControl,
   interruptBrowserAutomationTarget,
   releaseBrowserAutomationThreadScope,
   useBrowserAutomationStore,
@@ -210,6 +211,7 @@ describe("BrowserAutomationHost", () => {
   const finishRendererOperation = vi.fn();
   const cancel = vi.fn();
   const interrupt = vi.fn();
+  const handBack = vi.fn();
   const releaseAgentControl = vi.fn();
   const describeTarget = vi.fn();
   const createTab = vi.fn();
@@ -240,6 +242,7 @@ describe("BrowserAutomationHost", () => {
     });
     cancel.mockResolvedValue(true);
     interrupt.mockResolvedValue(true);
+    handBack.mockResolvedValue(true);
     releaseAgentControl.mockImplementation(async (target: { tabId: string; controlEpoch: number }) => {
       controllerChanged?.({
         tabId: target.tabId,
@@ -260,6 +263,7 @@ describe("BrowserAutomationHost", () => {
           finishRendererOperation,
           cancel,
           interrupt,
+          handBack,
           releaseAgentControl,
           describeTarget,
           getMediaSourceId: vi.fn(),
@@ -1411,6 +1415,36 @@ describe("BrowserAutomationHost", () => {
     await act(async () => executing.promise);
     expect(harness.transport.respondToBrowserAutomationRequest).not.toHaveBeenCalled();
     clearTargetReplay.mockRestore();
+    view.unmount();
+  });
+
+  it("refuses a desktop tab finalize while the user holds the Browser so the held tab is not closed", async () => {
+    const executeTabs = vi.spyOn(BrowserSessionDriver.prototype, "execute");
+    useBrowserAutomationStore.getState().setControllerForTarget("workspace-1", "thread-1", "tab-1", {
+      tabId: "tab-1", controller: "human", controlEpoch: 1,
+    });
+    const view = render(<BrowserAutomationHost />);
+    await waitFor(() => expect(harness.transport.registerBrowserAutomationHost).toHaveBeenCalledOnce());
+    const hostId = sessionStorage.getItem("mcode.browserAutomation.hostId");
+    const finalize = dispatch(1, 25);
+    finalize.request = {
+      ...finalize.request,
+      operation: "tabs",
+      args: {
+        action: "finalize",
+        observationRef: "observation-1",
+        idempotencyKey: "finalize-held",
+        dispositions: [{ tabId: "tab-1", disposition: "close" }],
+      },
+    };
+
+    act(() => harness.emit("browserAutomation.request", { hostId, generation: 1, dispatch: finalize }));
+
+    await waitFor(() => expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenCalledWith(
+      hostId, 1, expect.objectContaining({ ok: false, error: expect.objectContaining({ code: "HUMAN_INTERRUPTED" }) }), finalize.target,
+    ));
+    expect(executeTabs).not.toHaveBeenCalled();
+    executeTabs.mockRestore();
     view.unmount();
   });
 
@@ -2882,7 +2916,7 @@ describe("BrowserAutomationHost", () => {
     frame.remove();
   });
 
-  it("invalidates the exact web target on direct pointer input without cancelling the request", async () => {
+  it("holds the exact web target for the user on direct pointer input and stops the agent's click", async () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
     delete window.desktopBridge;
     const frame = document.createElement("iframe");
@@ -2895,6 +2929,7 @@ describe("BrowserAutomationHost", () => {
     vi.spyOn(button, "getBoundingClientRect").mockReturnValue({ width: 80, height: 20 } as DOMRect);
     const clicked = vi.fn();
     button.addEventListener("click", clicked);
+    useBrowserAutomationStore.getState().setControllerForTarget("workspace-1", "thread-1", "tab-1", { tabId: "tab-1", controller: "agent", controlEpoch: 0 });
     const view = render(<BrowserAutomationHost />);
     await waitFor(() => expect(harness.transport.registerBrowserAutomationHost).toHaveBeenCalledOnce());
     const hostId = sessionStorage.getItem("mcode.browserAutomation.hostId");
@@ -2902,17 +2937,9 @@ describe("BrowserAutomationHost", () => {
     clickDispatch.request = { ...clickDispatch.request, operation: "click", args: { target: { cssSelector: "#save" }, button: "left", clickCount: 1, timeoutMs: 1000 } } as never;
     frameDocument.addEventListener("mousedown", () => frameDocument.dispatchEvent(new frameDocument.defaultView!.Event("pointerdown", { bubbles: true })), true);
     act(() => harness.emit("browserAutomation.request", { hostId, generation: 1, dispatch: clickDispatch }));
-    await waitFor(() => expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenCalledOnce());
     await waitFor(() => expect(useBrowserAutomationStore.getState().activeRequests.size).toBe(0));
-    expect(clicked).toHaveBeenCalledOnce();
-    expect(harness.transport.cancelBrowserAutomationRequest).not.toHaveBeenCalled();
-    expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenCalledWith(
-      hostId,
-      1,
-      expect.objectContaining({ ok: true, result: expect.objectContaining({ operation: "click" }) }),
-      clickDispatch.target,
-    );
-    expect(useBrowserAutomationStore.getState().controllers.size).toBe(0);
+    expect(clicked).not.toHaveBeenCalled();
+    expect(useBrowserAutomationStore.getState().controllers.get(browserAutomationTargetKey("workspace-1", "thread-1", "tab-1"))).toEqual({ tabId: "tab-1", controller: "human", controlEpoch: 1 });
     view.unmount();
     frame.remove();
   });
@@ -2950,6 +2977,69 @@ describe("BrowserAutomationHost", () => {
     expect(input.value).toBe("");
     view.unmount();
     frame.remove();
+  });
+
+  it("refuses the agent's web click while the user holds the tab and accepts the new epoch after Hand back", async () => {
+    vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
+    delete window.desktopBridge;
+    const frame = document.createElement("iframe");
+    setIframeIdentity(frame, "tab-1");
+    document.body.append(frame);
+    Object.defineProperty(frame, "contentWindow", { configurable: true, value: { location: { origin: window.location.origin } } });
+    const frameDocument = frame.contentDocument!;
+    frameDocument.body.innerHTML = '<button id="save">Save</button>';
+    const button = frameDocument.querySelector("button")!;
+    vi.spyOn(button, "getBoundingClientRect").mockReturnValue({ width: 80, height: 20 } as DOMRect);
+    const clicked = vi.fn();
+    button.addEventListener("click", clicked);
+    const store = useBrowserAutomationStore.getState();
+    store.setControllerForTarget("workspace-1", "thread-1", "tab-1", { tabId: "tab-1", controller: "agent", controlEpoch: 0 });
+    const view = render(<BrowserAutomationHost />);
+    await waitFor(() => expect(harness.transport.registerBrowserAutomationHost).toHaveBeenCalledOnce());
+    const hostId = sessionStorage.getItem("mcode.browserAutomation.hostId");
+    const click = (sequence: number, expectedControlEpoch: number) => {
+      const next = dispatch(1, sequence, { targetGeneration: 1, expectedControlEpoch });
+      next.request = { ...next.request, operation: "click", args: { target: { cssSelector: "#save" }, button: "left", clickCount: 1, timeoutMs: 1000 } } as never;
+      act(() => harness.emit("browserAutomation.request", { hostId, generation: 1, dispatch: next }));
+      return next;
+    };
+
+    act(() => interruptBrowserAutomationTarget("workspace-1", "thread-1", "tab-1", "user-stopped"));
+    const whileHeld = click(40, 1);
+    await waitFor(() => expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenCalledOnce());
+    expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenLastCalledWith(
+      hostId, 1, expect.objectContaining({ ok: false, error: expect.objectContaining({ code: "HUMAN_INTERRUPTED" }) }), whileHeld.target,
+    );
+    expect(clicked).not.toHaveBeenCalled();
+
+    await act(async () => void (await handBackBrowserControl("workspace-1", "thread-1")));
+    const afterHandBack = click(41, 2);
+    await waitFor(() => expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenCalledTimes(2));
+    expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenLastCalledWith(
+      hostId, 1, expect.objectContaining({ ok: true }), afterHandBack.target,
+    );
+    expect(clicked).toHaveBeenCalledOnce();
+    view.unmount();
+    frame.remove();
+  });
+
+  it("advances the web control epoch when the agent's turn ends", async () => {
+    vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
+    delete window.desktopBridge;
+    const store = useBrowserAutomationStore.getState();
+    store.registerTarget("workspace-1", "thread-1", "tab-1");
+    store.setControllerForTarget("workspace-1", "thread-1", "tab-1", {
+      tabId: "tab-1", controller: "agent", controlEpoch: 3, providerSessionId: "session-1",
+    });
+    act(() => useThreadStore.setState({ runningThreadIds: new Set(["thread-1"]) }));
+    const view = render(<BrowserAutomationHost />);
+
+    act(() => useThreadStore.setState({ runningThreadIds: new Set() }));
+
+    expect(useBrowserAutomationStore.getState().controllers.get(browserAutomationTargetKey("workspace-1", "thread-1", "tab-1"))).toEqual({
+      tabId: "tab-1", controller: "none", controlEpoch: 4,
+    });
+    view.unmount();
   });
 
   it("rejects a pending request after web iframe replacement without mutating the new document", async () => {
@@ -3032,5 +3122,25 @@ describe("BrowserAutomationHost", () => {
     expect(disposeTarget).toHaveBeenCalledWith("workspace-1", "thread-1", "tab-1");
     view.unmount();
     disposeTarget.mockRestore();
+  });
+
+  it("keeps the user's hold across turns and hands back only on the Hand back action", async () => {
+    const view = render(<BrowserAutomationHost />);
+    await waitFor(() => expect(harness.transport.registerBrowserAutomationHost).toHaveBeenCalledOnce());
+    await waitFor(() => expect(controllerChanged).not.toBeNull());
+    useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-1", "tab-1");
+    act(() => controllerChanged?.({ tabId: "tab-1", controller: "human", controlEpoch: 2 }));
+    const key = browserAutomationTargetKey("workspace-1", "thread-1", "tab-1");
+
+    act(() => useThreadStore.setState({ runningThreadIds: new Set(["thread-1"]) }));
+    act(() => useThreadStore.setState({ runningThreadIds: new Set() }));
+
+    expect(handBack).not.toHaveBeenCalled();
+    expect(useBrowserAutomationStore.getState().controllers.get(key)?.controller).toBe("human");
+
+    await expect(handBackBrowserControl("workspace-1", "thread-1")).resolves.toBe(true);
+    expect(handBack).toHaveBeenCalledOnce();
+    expect(handBack).toHaveBeenCalledWith({ threadId: "thread-1" });
+    view.unmount();
   });
 });

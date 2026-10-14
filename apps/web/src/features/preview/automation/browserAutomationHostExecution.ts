@@ -10,6 +10,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import {
   browserAutomationRequestKey,
   browserAutomationTargetKey,
+  isBrowserEffectOperation,
   useBrowserAutomationStore,
 } from "./browserAutomationStore";
 import { BrowserAutomationRecorder } from "./browserAutomationRecorder";
@@ -289,10 +290,22 @@ function bindViewportCoordinatorDispatch(dispatch: BrowserAutomationHostDispatch
   if (coordinator) viewportCoordinatorDispatches.set(coordinator, dispatch);
 }
 
+function projectsWebAgentControl(dispatch: BrowserAutomationHostDispatch): boolean {
+  if (window.desktopBridge?.preview?.automation) return false;
+  return isBrowserEffectOperation(dispatch.request.operation) &&
+    useThreadStore.getState().runningThreadIds.has(dispatch.target.threadId);
+}
+
 /** Project web agent control before the browser operation begins. */
 export function projectAgentControl(dispatch: BrowserAutomationHostDispatch): void {
-  if (window.desktopBridge?.preview?.automation || dispatch.request.operation === "status" || !useThreadStore.getState().runningThreadIds.has(dispatch.target.threadId)) return;
+  if (!projectsWebAgentControl(dispatch)) return;
   const operation = dispatch.request.operation;
+  const held = useBrowserAutomationStore.getState().controllers.get(browserAutomationTargetKey(
+    dispatch.scope.workspaceId,
+    dispatch.target.threadId,
+    dispatch.target.tabId,
+  ));
+  if (held?.controller === "human") return;
   useBrowserAutomationStore.getState().setControllerForTarget(
     dispatch.scope.workspaceId,
     dispatch.target.threadId,
@@ -300,7 +313,7 @@ export function projectAgentControl(dispatch: BrowserAutomationHostDispatch): vo
     {
       tabId: dispatch.target.tabId,
       controller: "agent",
-      controlEpoch: dispatch.request.expectedControlEpoch,
+      controlEpoch: held?.controlEpoch ?? dispatch.request.expectedControlEpoch,
       providerSessionId: dispatch.request.providerSessionId,
       ...(!["inspect", "act", "tabs"].includes(operation) ? { operation } : {}),
     },

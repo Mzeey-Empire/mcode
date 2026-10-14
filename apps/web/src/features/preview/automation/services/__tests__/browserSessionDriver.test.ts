@@ -988,7 +988,7 @@ describe("BrowserSessionDriver", () => {
         sequence: value.request.sequence,
         ok: true,
         result: value.request.operation === "inspect"
-          ? { operation: "inspect", tabs: [...liveTargets.values()] }
+          ? { operation: "inspect", tabs: [...liveTargets.values()], controlEpoch: 0 }
           : { operation: "open", url: "about:blank", title: "", controlEpoch: 0 },
       } as unknown as BrowserAutomationResponse;
     });
@@ -1051,7 +1051,7 @@ describe("BrowserSessionDriver", () => {
         sequence: value.request.sequence,
         ok: true,
         result: value.request.operation === "inspect"
-          ? { operation: "inspect", tabs: [...liveTargets.values()] }
+          ? { operation: "inspect", tabs: [...liveTargets.values()], controlEpoch: 0 }
           : { operation: "open", url: "about:blank", title: "", controlEpoch: 0 },
       } as unknown as BrowserAutomationResponse;
     });
@@ -1112,7 +1112,7 @@ describe("BrowserSessionDriver", () => {
         sequence: value.request.sequence,
         ok: true,
         result: value.request.operation === "inspect"
-          ? { operation: "inspect", tabs: [...liveTargets.values()] }
+          ? { operation: "inspect", tabs: [...liveTargets.values()], controlEpoch: 0 }
           : { operation: "open", url: "about:blank", title: "", controlEpoch: 0 },
       } as unknown as BrowserAutomationResponse;
     });
@@ -1160,7 +1160,7 @@ describe("BrowserSessionDriver", () => {
         sequence: value.request.sequence,
         ok: true,
         result: value.request.operation === "inspect"
-          ? { operation: "inspect", tabs: [...liveTargets.values()] }
+          ? { operation: "inspect", tabs: [...liveTargets.values()], controlEpoch: 0 }
           : { operation: "open", url: "about:blank", title: "", controlEpoch: 0 },
       } as unknown as BrowserAutomationResponse;
     });
@@ -1209,7 +1209,7 @@ describe("BrowserSessionDriver", () => {
         sequence: value.request.sequence,
         ok: true,
         result: value.request.operation === "inspect"
-          ? { operation: "inspect", tabs: [...liveTargets.values()] }
+          ? { operation: "inspect", tabs: [...liveTargets.values()], controlEpoch: 0 }
           : { operation: "open", url: "about:blank", title: "", controlEpoch: 0 },
       } as unknown as BrowserAutomationResponse;
     });
@@ -1250,7 +1250,7 @@ describe("BrowserSessionDriver", () => {
         sequence: value.request.sequence,
         ok: true,
         result: value.request.operation === "inspect"
-          ? { operation: "inspect", tabs: [...liveTargets.values()] }
+          ? { operation: "inspect", tabs: [...liveTargets.values()], controlEpoch: 0 }
           : { operation: "open", url: "about:blank", title: "", controlEpoch: 0 },
       } as unknown as BrowserAutomationResponse;
     });
@@ -1287,7 +1287,7 @@ describe("BrowserSessionDriver", () => {
         sequence: value.request.sequence,
         ok: true,
         result: value.request.operation === "inspect"
-          ? { operation: "inspect", tabs: [...liveTargets.values()] }
+          ? { operation: "inspect", tabs: [...liveTargets.values()], controlEpoch: 0 }
           : { operation: "open", url: "about:blank", title: "", controlEpoch: 0 },
       } as unknown as BrowserAutomationResponse;
     });
@@ -1578,7 +1578,7 @@ describe("BrowserSessionDriver", () => {
       return {
         contractVersion: 1, requestId: value.request.requestId, sequence: value.request.sequence, ok: true,
         result: value.request.operation === "inspect"
-          ? { operation: "inspect", tabs: [...liveTargets.values()] }
+          ? { operation: "inspect", tabs: [...liveTargets.values()], controlEpoch: 0 }
           : { operation: "open", url: "about:blank", title: "", controlEpoch: 0 },
       } as BrowserAutomationResponse;
     });
