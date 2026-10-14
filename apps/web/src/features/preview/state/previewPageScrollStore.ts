@@ -7,9 +7,7 @@ export interface PreviewPageScroll {
 }
 
 interface PreviewPageScrollStore {
-  /** Latest guest scroll offset keyed by `pageScrollKey`. */
   readonly byTab: Record<string, PreviewPageScroll>;
-  /** Records the offset the guest reported for a tab. */
   report: (threadId: string, tabId: string, scroll: PreviewPageScroll) => void;
 }
 
@@ -20,10 +18,7 @@ export function pageScrollKey(threadId: string, tabId: string): string {
   return `${threadId}:${tabId}`;
 }
 
-/**
- * Live scroll offset of each guest page. Design markers are anchored in document space,
- * so they read this to stay on their elements while the page scrolls.
- */
+/** Live scroll offset of each guest page. */
 export const usePreviewPageScrollStore = create<PreviewPageScrollStore>((set, get) => ({
   byTab: {},
   report: (threadId, tabId, scroll) => {

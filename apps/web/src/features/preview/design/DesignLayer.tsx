@@ -78,7 +78,6 @@ interface DesignLayerProps {
   readonly bubbleInputFocused: ReturnType<typeof useDesignAnnotationState>["bubbleInputFocused"];
   readonly bubbleAdvancedOpen: ReturnType<typeof useDesignAnnotationEditor>["bubbleAdvancedOpen"];
   readonly surfaceWidth: number;
-  /** Live scroll offset of the active page, used to keep markers on their elements. */
   readonly pageScroll: PreviewPageScroll;
   readonly onBubbleSlashInputChange: ReturnType<typeof useDesignAnnotationState>["onBubbleSlashInputChange"];
   readonly onBubbleFileInputChange: ReturnType<typeof useDesignAnnotationState>["onBubbleFileInputChange"];
@@ -314,7 +313,6 @@ export function DesignLayer({
                   style={
                     {
                       backgroundColor: BUBBLE_SURFACE_INSET,
-                      // Arrow color is set via CSS variable on this element
                       "--tooltip-arrow-bg": BUBBLE_SURFACE_INSET,
                     } as React.CSSProperties
                   }

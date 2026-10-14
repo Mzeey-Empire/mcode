@@ -242,18 +242,12 @@ export function useDesignPicker({
     designPickerDispatch(threadId, { type: "toggle" });
   };
 
-  // The machine decides when a bubble is open; the draft and the editing id only report it.
   useEffect(() => {
     designPickerDispatch(threadId, { type: hasOpenBubble ? "edit" : "bubbleClosed" });
   }, [designPickerDispatch, hasOpenBubble, threadId]);
 
-  // `capture` is a new object on every render, and starting a pick flips its busy flag.
-  // Reading it through an effect event keeps the effect keyed on primitives, so one arming
-  // sends one pick request. Each extra request makes the desktop host abort the pending
-  // pick and reinject the guest overlay, so the hover highlight never appears.
   const requestElementPick = useEffectEvent(() => capture.onAddElementAnnotation());
 
-  // An already-open note owns the page, so arming over it would pick an element nobody asked for.
   useEffect(() => {
     if (designPickerPhase !== "picking" || hasOpenBubble) return;
     let settled = false;

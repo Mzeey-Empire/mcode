@@ -46,7 +46,6 @@ export function isAnnotationBubbleInteractionTarget(
 
 /**
  * Moves viewport bounds captured at one scroll offset to where the page shows them at another.
- * Annotations store bounds at capture time, so the renderer re-anchors them as the page scrolls.
  */
 export function boundsAtScroll(
   bounds: PreviewDraftAnnotation["bounds"],
@@ -70,6 +69,7 @@ export function annotationBubbleStyle(
       ? Math.max(ANNOTATION_BUBBLE_MARGIN_PX, surfaceWidth - ANNOTATION_BUBBLE_WIDTH_PX - ANNOTATION_BUBBLE_MARGIN_PX)
       : bounds.x;
   return {
+    width: ANNOTATION_BUBBLE_WIDTH_PX,
     left: Math.min(Math.max(ANNOTATION_BUBBLE_MARGIN_PX, bounds.x), maxLeft),
     top: Math.max(ANNOTATION_BUBBLE_MARGIN_PX, bounds.y + bounds.height + ANNOTATION_BUBBLE_MARGIN_PX),
   };
@@ -328,7 +328,7 @@ export function previewSurfaceWidth(surface: HTMLDivElement | null): number {
   return surface?.clientWidth ?? 0;
 }
 
-/** Chooses the bubble border for its editing state; the width matches `ANNOTATION_BUBBLE_WIDTH_PX`. */
+/** Chooses the bubble border for its editing state. */
 export function annotationBubbleClassName(
   outsideWarned: boolean,
   bubbleInputFocused: boolean,
@@ -340,7 +340,7 @@ export function annotationBubbleClassName(
       ? "border-focus ring-1 ring-focus"
       : "border-border ring-1 ring-border";
   return cn(
-    "pointer-events-auto absolute z-(--layer-floating-panel) w-[290px] overflow-hidden rounded-[14px] border shadow-floating transition-[border-color,box-shadow] duration-150",
+    "pointer-events-auto absolute z-(--layer-floating-panel) overflow-hidden rounded-[14px] border shadow-floating transition-[border-color,box-shadow] duration-150",
     focusClassName,
     bubbleAdvancedOpen && "max-h-[20.5rem]",
   );

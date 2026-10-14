@@ -40,7 +40,6 @@ for (const eventType of ["keydown", "pointerdown", "touchstart", "wheel"] as con
 
 let scrollReportPending = false;
 
-// One report per frame keeps a fling from flooding the host; Design markers only need the latest offset.
 function reportScroll(): void {
   scrollReportPending = false;
   ipcRenderer.sendToHost(PREVIEW_GUEST_SCROLL_CHANNEL, { x: window.scrollX, y: window.scrollY });
@@ -56,5 +55,4 @@ window.addEventListener(
   { passive: true },
 );
 
-// A reload can restore a scroll offset without a scroll event the host observes.
 window.addEventListener("load", reportScroll);

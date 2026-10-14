@@ -46,8 +46,7 @@ const EP_INJECT_JS = `(function(){
   var HL_ID = "__mcode_ep_hl", TIP_ID = "__mcode_ep_tip";
   var style = document.createElement("style");
   style.setAttribute("data-mcode-ep", "1");
-  // Highlight and tip use the app's amber primary, inlined because injected JS cannot read
-  // host CSS vars. The white inner ring keeps the box legible on amber or dark pages.
+  // Inlined because injected JS cannot read host CSS vars.
   style.textContent = "#__mcode_ep_hl{position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;box-sizing:border-box;z-index:2147483646;display:none;border-radius:2px;box-shadow:0 0 0 2px #fff,0 0 0 4px oklch(0.72 0.17 75)}#__mcode_ep_tip{position:fixed;left:0;top:0;height:24px;display:none;align-items:center;pointer-events:none;z-index:2147483647;max-width:min(360px,calc(100vw - 12px));box-sizing:border-box;font:500 11px/14px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#14110D;background:oklch(0.72 0.17 75);border-radius:6px;padding:0 8px;white-space:nowrap;overflow:hidden}html.__mcode_ep_active,html.__mcode_ep_active *{cursor:${EP_CHAT_CURSOR_CSS} !important}";
   (document.head || document.documentElement).appendChild(style);
   var box = document.createElement("div");
@@ -146,9 +145,9 @@ const EP_INJECT_JS = `(function(){
     box.style.height = r.height + "px";
     tip.textContent = tipTextFor(el);
     tip.style.display = "flex";
-    // Sit above the 4px ring with a 4px gap; drop below the element when there is no room.
     var pad = 4;
-    var gap = 8;
+    var ringWidth = 4, clearance = 4;
+    var gap = ringWidth + clearance;
     var vw = window.innerWidth || 1;
     var th = tip.offsetHeight || 24;
     var tw = tip.offsetWidth || 80;

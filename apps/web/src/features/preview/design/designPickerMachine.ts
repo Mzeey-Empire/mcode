@@ -10,7 +10,7 @@ export interface DesignPickerState {
   readonly armId: number;
 }
 
-/** Everything that can move the Design picker. */
+/** Inputs that move the Design picker between phases. */
 export type DesignPickerEvent =
   | { readonly type: "toggle" }
   | { readonly type: "exit" }
