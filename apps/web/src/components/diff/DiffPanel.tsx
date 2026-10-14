@@ -13,6 +13,7 @@ import type { DiffSource } from "@/stores/diffStore";
 import { filesPaneNotice, reviewBody, type ReviewBody, type ReviewOutcome } from "./review-body";
 import { ReviewLoadingPulse, ReviewStateBody } from "./ReviewStateBody";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { CommitControls } from "./CommitControls";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { WorktreeFilesPane } from "./WorktreeFilesPane";
 import { cumulativeReviewFiles } from "@/lib/review-comparison";
@@ -848,6 +849,14 @@ export function DiffPanel() {
         scopeId={reviewScopeId(activeThreadId, activeWorkspaceId, viewMode)}
         viewMode={viewMode}
       />
+      {activeWorkspaceId && diffScopeId ? (
+        <CommitControls
+          workspaceId={activeWorkspaceId}
+          threadId={activeThreadId}
+          scopeId={diffScopeId}
+          activePath={activeWorktreePath}
+        />
+      ) : null}
       <ReviewFilesPane
         activePath={activeWorktreePath}
         comparisonFiles={comparison.comparisonFiles}
@@ -891,18 +900,21 @@ function DiffPanelLayout({
   header,
   panelRootRef,
 }: {
-  readonly children: readonly [ReactNode, ReactNode];
+  readonly children: readonly [ReactNode, ReactNode, ReactNode];
   readonly header: ReactNode;
   readonly panelRootRef: RefObject<HTMLDivElement | null>;
 }) {
-  const [view, filesPane] = children;
+  const [view, commitControls, filesPane] = children;
   return (
     <div ref={panelRootRef} className="flex flex-1 flex-col overflow-hidden min-h-0">
       {header}
       <div className="relative flex min-h-0 flex-1">
-        <ScrollArea className="min-h-0 min-w-0 flex-1">
-          {view}
-        </ScrollArea>
+        <div className="relative flex min-h-0 min-w-0 flex-1">
+          <ScrollArea className="min-h-0 min-w-0 flex-1">
+            {view}
+          </ScrollArea>
+          {commitControls}
+        </div>
         {filesPane}
       </div>
     </div>
