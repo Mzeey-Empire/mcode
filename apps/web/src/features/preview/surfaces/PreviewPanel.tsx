@@ -21,7 +21,7 @@ import { useDesignAnnotationEditor } from "../design/useDesignAnnotationEditor";
 import { useDesignPicker } from "../design/useDesignPicker";
 import { WebRuntimePreview } from "./WebRuntimePreview";
 import { usePreviewPageScroll } from "../state/previewPageScrollStore";
-import { previewSurfaceWidth } from "../design/annotationBubble";
+import { previewSurfaceHeight, previewSurfaceWidth } from "../design/annotationBubble";
 import { BrowserChrome } from "./BrowserChrome";
 import { BrowserPageLayer } from "./BrowserPageLayer";
 import { DesignLayer } from "../design/DesignLayer";
@@ -392,6 +392,7 @@ export function PreviewPanel({
   };
 
   const surfaceWidth = previewSurfaceWidth(surfaceRef.current);
+  const surfaceHeight = previewSurfaceHeight(surfaceRef.current);
   const {
     size: responsiveViewportSize,
     scale: responsiveViewportScale,
@@ -506,6 +507,7 @@ export function PreviewPanel({
             bubbleInputFocused={bubbleInputFocused}
             bubbleAdvancedOpen={bubbleAdvancedOpen}
             surfaceWidth={surfaceWidth}
+            surfaceHeight={surfaceHeight}
             pageScroll={pageScroll}
             onBubbleSlashInputChange={onBubbleSlashInputChange}
             onBubbleFileInputChange={onBubbleFileInputChange}

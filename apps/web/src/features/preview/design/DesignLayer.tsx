@@ -78,6 +78,7 @@ interface DesignLayerProps {
   readonly bubbleInputFocused: ReturnType<typeof useDesignAnnotationState>["bubbleInputFocused"];
   readonly bubbleAdvancedOpen: ReturnType<typeof useDesignAnnotationEditor>["bubbleAdvancedOpen"];
   readonly surfaceWidth: number;
+  readonly surfaceHeight: number;
   readonly pageScroll: PreviewPageScroll;
   readonly onBubbleSlashInputChange: ReturnType<typeof useDesignAnnotationState>["onBubbleSlashInputChange"];
   readonly onBubbleFileInputChange: ReturnType<typeof useDesignAnnotationState>["onBubbleFileInputChange"];
@@ -133,6 +134,7 @@ export function DesignLayer({
   bubbleInputFocused,
   bubbleAdvancedOpen,
   surfaceWidth,
+  surfaceHeight,
   pageScroll,
   onBubbleSlashInputChange,
   onBubbleFileInputChange,
@@ -386,6 +388,7 @@ export function DesignLayer({
               ...annotationBubbleStyle(
                 openBubble.bounds,
                 surfaceWidth,
+                surfaceHeight,
               ),
               backgroundColor: BUBBLE_SURFACE,
               color: "var(--ink)",

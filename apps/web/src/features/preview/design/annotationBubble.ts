@@ -19,6 +19,9 @@ const ANNOTATION_BUBBLE_WIDTH_PX = 290;
 
 const ANNOTATION_BUBBLE_MARGIN_PX = 8;
 
+/** Room the bubble needs below its element before it flips above; the note editor is about this tall. */
+const ANNOTATION_BUBBLE_FLIP_HEIGHT_PX = 220;
+
 // Opaque role surfaces keep annotations legible over arbitrary user page content in both themes.
 /** Primary bubble surface used on the main row and the inspector panel. */
 export const BUBBLE_SURFACE = "var(--panel)";
@@ -59,20 +62,29 @@ export function boundsAtScroll(
   };
 }
 
-/** Places the note bubble under its element, kept inside the preview width. */
+/**
+ * Places the note bubble under its element, kept inside the preview width. It flips above the
+ * element when there is too little room below and more room above.
+ */
 export function annotationBubbleStyle(
   bounds: PreviewDraftAnnotation["bounds"],
   surfaceWidth: number,
+  surfaceHeight: number,
 ): CSSProperties {
   const maxLeft =
     surfaceWidth > 0
       ? Math.max(ANNOTATION_BUBBLE_MARGIN_PX, surfaceWidth - ANNOTATION_BUBBLE_WIDTH_PX - ANNOTATION_BUBBLE_MARGIN_PX)
       : bounds.x;
-  return {
-    width: ANNOTATION_BUBBLE_WIDTH_PX,
-    left: Math.min(Math.max(ANNOTATION_BUBBLE_MARGIN_PX, bounds.x), maxLeft),
-    top: Math.max(ANNOTATION_BUBBLE_MARGIN_PX, bounds.y + bounds.height + ANNOTATION_BUBBLE_MARGIN_PX),
-  };
+  const left = Math.min(Math.max(ANNOTATION_BUBBLE_MARGIN_PX, bounds.x), maxLeft);
+  const below = Math.max(ANNOTATION_BUBBLE_MARGIN_PX, bounds.y + bounds.height + ANNOTATION_BUBBLE_MARGIN_PX);
+  const roomBelow = surfaceHeight - below;
+  const roomAbove = bounds.y - ANNOTATION_BUBBLE_MARGIN_PX;
+  const flipsAbove =
+    surfaceHeight > 0 && roomBelow < ANNOTATION_BUBBLE_FLIP_HEIGHT_PX && roomAbove > roomBelow;
+  if (flipsAbove) {
+    return { width: ANNOTATION_BUBBLE_WIDTH_PX, left, bottom: surfaceHeight - bounds.y + ANNOTATION_BUBBLE_MARGIN_PX };
+  }
+  return { width: ANNOTATION_BUBBLE_WIDTH_PX, left, top: below };
 }
 
 function draftFromSaved(
@@ -326,6 +338,11 @@ export function visibleAnnotationState(
 /** Reads the available width used to position the annotation bubble. */
 export function previewSurfaceWidth(surface: HTMLDivElement | null): number {
   return surface?.clientWidth ?? 0;
+}
+
+/** Reads the available height used to flip the annotation bubble above its element. */
+export function previewSurfaceHeight(surface: HTMLDivElement | null): number {
+  return surface?.clientHeight ?? 0;
 }
 
 /** Chooses the bubble border for its editing state. */
