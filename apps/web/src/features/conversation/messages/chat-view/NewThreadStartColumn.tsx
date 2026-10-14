@@ -1,5 +1,5 @@
 import { useMemo, useRef } from "react";
-import { Folder } from "lucide-react";
+import { CanvasBreadcrumb } from "@/components/shell/CanvasBreadcrumb";
 import { CanvasHeader } from "@/components/shell/CanvasHeader";
 import { OverviewLayer } from "@/features/thread-overview/overview-layer";
 import { OverviewMount } from "@/features/thread-overview/overview-mount";
@@ -17,7 +17,6 @@ import { cn } from "@/lib/utils";
 import { recordFirstSend } from "@/features/thread-startup";
 import { Composer } from "../../composer/Composer";
 import { ProjectSlotHeading } from "./ProjectSlotHeading";
-import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
 
 /** Props for {@link NewThreadStartColumn}. */
 export interface NewThreadStartColumnProps {
@@ -45,7 +44,9 @@ export function NewThreadStartColumn({ projectName, workspaceId, draftId }: NewT
     <div ref={canvasRef} className={cn("relative flex h-full min-h-0 flex-col bg-background", docked && "[--chat-gutter:--spacing(6)]")}>
       <OverviewLayer>
         <CanvasHeader>
-          <NewThreadBreadcrumb projectName={projectName} workspaceId={workspaceId} />
+          <CanvasBreadcrumb projectName={projectName} workspaceId={workspaceId}>
+            <span aria-current="page" className="shrink-0 text-label text-ink">New thread</span>
+          </CanvasBreadcrumb>
           {scope ? <NewThreadOverview scope={scope} overview={overview} /> : null}
         </CanvasHeader>
         <div
@@ -81,22 +82,5 @@ function NewThreadOverview({ scope, overview }: { scope: OverviewScope; overview
     <div className="ml-auto flex items-center justify-end gap-1">
       <OverviewMount subject={subject} subjectKey={scope.key} presentation={overview} />
     </div>
-  );
-}
-
-function NewThreadBreadcrumb({ projectName, workspaceId }: { projectName: string | undefined; workspaceId: string | undefined }) {
-  return (
-    <nav aria-label="Breadcrumb" className="flex h-control-compact min-w-0 items-center gap-2 rounded-2xl bg-selected px-3 text-body-small text-muted">
-      {projectName && workspaceId
-        ? <ProjectIcon workspaceId={workspaceId} name={projectName} size={14} />
-        : <Folder size={14} className="shrink-0" aria-hidden />}
-      {projectName && (
-        <>
-          <span className="text-fade">{projectName}</span>
-          <span aria-hidden>/</span>
-        </>
-      )}
-      <span aria-current="page" className="shrink-0 text-label text-ink">New thread</span>
-    </nav>
   );
 }

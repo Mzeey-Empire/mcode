@@ -6,8 +6,7 @@ import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { resolveThreadDirPath } from "@/lib/worktree";
 import { toggleRightPanelAdaptive } from "@/lib/right-panel-layout";
-import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { IconButton } from "@/components/ui/button";
 import { getKeybindingForCommand, keybindingKeycaps } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
 import type { Thread } from "@/transport";
@@ -19,8 +18,8 @@ interface HeaderActionsProps {
 }
 
 /**
- * Renders the chat-header action strip: open-in, thread Overview, and the
- * workspace-global right-panel toggle.
+ * Renders the chat-header action strip as Paper draws it: the open-in pill, then round
+ * thread Overview and workspace-global right-panel buttons.
  */
 export function HeaderActions({ thread, threadPaneWidth }: HeaderActionsProps) {
   const workspacePath = useWorkspaceStore((s) =>
@@ -46,40 +45,26 @@ export function HeaderActions({ thread, threadPaneWidth }: HeaderActionsProps) {
   );
 
   return (
-    <div className="flex items-center justify-end gap-1">
-      <div className="flex items-center gap-0.5 bg-hover/20 rounded-md px-1 py-0.5">
-        <OpenInAppButton
-          dirPath={resolveThreadDirPath(thread, workspacePath)}
-          threadId={thread.id}
-          threadOverride={thread.default_open_in_app ?? null}
-        />
-      </div>
-
-      <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+    <div className="flex items-center justify-end gap-2">
+      <OpenInAppButton
+        dirPath={resolveThreadDirPath(thread, workspacePath)}
+        threadId={thread.id}
+        threadOverride={thread.default_open_in_app ?? null}
+      />
 
       <ThreadOverview thread={thread} threadPaneWidth={threadPaneWidth} />
 
       {/* While open, the panel header owns this toggle at the same spot. */}
       {panelVisible ? null : (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-compact"
-                onClick={togglePanel}
-                aria-label="Toggle panel"
-                data-testid="header-panel-toggle"
-                className="cursor-pointer text-ink/70 hover:text-ink hover:bg-hover/40"
-              >
-                <PanelRight size={14} />
-              </Button>
-            }
-          />
-          <TooltipContent side="bottom" shortcut={panelShortcut}>
-            Toggle panel
-          </TooltipContent>
-        </Tooltip>
+        <IconButton
+          shape="round"
+          onClick={togglePanel}
+          aria-label="Toggle panel"
+          tooltipShortcut={panelShortcut}
+          data-testid="header-panel-toggle"
+        >
+          <PanelRight size={16} aria-hidden />
+        </IconButton>
       )}
     </div>
   );
