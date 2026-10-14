@@ -45,6 +45,20 @@ const nextMessageFields = {
     mentions: [mention],
   },
   planCommentSelection: { planVersionId: "plan-v1", includedIds: ["a"], excludedIds: ["b"], revision: 2 },
+  planCommentEditor: {
+    planVersionId: "55555555-5555-4555-8555-555555555555",
+    commentId: null,
+    anchor: {
+      kind: "text" as const,
+      start: 6,
+      end: 11,
+      quote: "Alpha",
+      prefix: "Step ",
+      suffix: " beta",
+      section: "Plan",
+    },
+    body: "unsaved 😀 note",
+  },
   submissions: [{
     messageId: "33333333-3333-4333-8333-333333333333",
     elements: [{ field: "diffComments" as const, id: diffComment.id, revision: 2 }],
@@ -194,10 +208,29 @@ describe("composer-draft-storage", () => {
     warn.mockRestore();
   });
 
-  it("counts a draft holding only comments or only a plan selection as content", () => {
+  it("drops a stored plan comment editor with a bad anchor or an over-long note and keeps the rest", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const stored = JSON.parse(JSON.stringify(serializeComposerDraft({ ...baseDraft, ...nextMessageFields })));
+    const editor = nextMessageFields.planCommentEditor;
+
+    for (const bad of [
+      { ...editor, anchor: { ...editor.anchor, end: 99 } },
+      { ...editor, body: "x".repeat(4001) },
+    ]) {
+      const restored = parseStoredComposerDraft({ ...stored, planCommentEditor: bad });
+
+      expect(restored?.planCommentEditor).toBeUndefined();
+      expect(restored?.diffComments).toEqual([diffComment]);
+      expect(warn).toHaveBeenLastCalledWith("[composer-draft-storage] Dropped 1 invalid stored draft element(s)");
+    }
+    warn.mockRestore();
+  });
+
+  it("counts a draft holding only comments, a plan selection or a plan comment editor as content", () => {
     const empty: ComposerDraft = { ...baseDraft, input: "" };
 
     expect(draftHasNoSendableContent(empty)).toBe(true);
+    expect(draftHasNoSendableContent({ ...empty, planCommentEditor: nextMessageFields.planCommentEditor })).toBe(false);
     expect(draftHasNoSendableContent({ ...empty, diffComments: [diffComment] })).toBe(false);
     expect(draftHasNoSendableContent({ ...empty, planCommentSelection: nextMessageFields.planCommentSelection })).toBe(false);
     expect(draftHasNoSendableContent({ ...empty, submissions: nextMessageFields.submissions })).toBe(false);
