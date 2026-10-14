@@ -200,8 +200,38 @@ async function waitForOverlayReady(): Promise<void> {
   await vi.advanceTimersByTimeAsync(0);
 }
 
-function commitRegion(guest: FakeGuest, rect: { x: number; y: number; width: number; height: number }): void {
-  guest.dom.window.eval(`window.__mcodeRgState.commit = ${JSON.stringify(rect)}`);
+type PointerType = "pointerdown" | "pointermove" | "pointerup" | "pointercancel";
+
+function pointer(guest: FakeGuest, type: PointerType, x: number, y: number): void {
+  const guestWindow = guest.dom.window;
+  const layer = guestWindow.document.getElementById("__mcode_rg_layer");
+  if (!layer) throw new Error("Screenshot overlay is not installed");
+  layer.dispatchEvent(new guestWindow.PointerEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    pointerId: 1,
+    pointerType: "mouse",
+    button: 0,
+    clientX: x,
+    clientY: y,
+  }));
+}
+
+function gesture(guest: FakeGuest, points: ReadonlyArray<readonly [number, number]>): void {
+  const [first, ...rest] = points;
+  const last = rest.pop() ?? first!;
+  pointer(guest, "pointerdown", first![0], first![1]);
+  for (const [x, y] of rest) pointer(guest, "pointermove", x, y);
+  pointer(guest, "pointerup", last[0], last[1]);
+}
+
+function dragRegion(guest: FakeGuest, rect: { x: number; y: number; width: number; height: number }): void {
+  gesture(guest, [[rect.x, rect.y], [rect.x + rect.width, rect.y + rect.height]]);
+}
+
+function pressEscape(guest: FakeGuest): void {
+  const guestWindow = guest.dom.window;
+  guestWindow.document.dispatchEvent(new guestWindow.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
 }
 
 function commitElement(guest: FakeGuest, x: number, y: number): void {
@@ -249,7 +279,84 @@ describe("Preview overlay capture handlers", () => {
     sessions.clear();
   });
 
-  it("captures a clamped region from the active adopted guest after removing its marquee", async () => {
+  it("captures the whole viewport on a click without passing a capture rect", async () => {
+    const window = makeWindow(23);
+    overlayTest.allWindows.push(window);
+    const session = makeSession(window, "tab-active", ["tab-active"]);
+    const guest = new FakeGuest(window, "active-token");
+    prepareAndAdopt(window, "tab-active", guest, "active-token");
+    guest.capturePage.mockImplementation(async () => {
+      expect(guest.dom.window.document.getElementById("__mcode_rg_layer")).toBeNull();
+      return captureImage();
+    });
+
+    const pending = invoke("preview:capture-picture-reference", window.webContents) as Promise<unknown>;
+    await waitForOverlayReady();
+    gesture(guest, [[30, 30], [33, 32]]);
+    await vi.advanceTimersByTimeAsync(120);
+
+    const result = await pending as { ok: boolean; meta?: { name: string }; capture?: Record<string, unknown> };
+    expect(result).toMatchObject({
+      ok: true,
+      meta: { name: expect.stringMatching(/^preview-viewport-example\.test-\d+\.png$/) },
+      capture: { captureKind: "viewport", bounds: { x: 0, y: 0, width: 100, height: 80 } },
+    });
+    expect(guest.capturePage).toHaveBeenCalledOnce();
+    expect(guest.capturePage).toHaveBeenCalledWith();
+    expect(session.regionPollTimer).toBeNull();
+  });
+
+  it.each([
+    ["a thin 50x2 drag", (guest: FakeGuest) => gesture(guest, [[10, 10], [60, 12]])],
+    ["a drag back to its origin", (guest: FakeGuest) => gesture(guest, [[10, 10], [40, 40], [10, 10]])],
+    ["a pointercancel mid-drag", (guest: FakeGuest) => {
+      pointer(guest, "pointerdown", 10, 10);
+      pointer(guest, "pointermove", 40, 40);
+      pointer(guest, "pointercancel", 40, 40);
+    }],
+    ["Escape in the page", (guest: FakeGuest) => pressEscape(guest)],
+  ])("cancels without capturing after %s", async (_label, act) => {
+    const window = makeWindow(24);
+    overlayTest.allWindows.push(window);
+    const session = makeSession(window, "tab-active", ["tab-active"]);
+    const guest = new FakeGuest(window, "active-token");
+    prepareAndAdopt(window, "tab-active", guest, "active-token");
+
+    const pending = invoke("preview:capture-picture-reference", window.webContents) as Promise<unknown>;
+    await waitForOverlayReady();
+    act(guest);
+    await vi.advanceTimersByTimeAsync(120);
+
+    expect(await pending).toEqual({ ok: false, error: "cancelled" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(guest.dom.window.document.getElementById("__mcode_rg_layer")).toBeNull();
+    expect(guest.capturePage).not.toHaveBeenCalled();
+    expect(session.regionPollTimer).toBeNull();
+  });
+
+  it.each([
+    ["a non-finite rect", "{ kind: 'region', rect: { x: 1, y: 1, width: Infinity, height: 20 } }"],
+    ["a string coordinate", "{ kind: 'region', rect: { x: '1', y: 1, width: 20, height: 20 } }"],
+    ["an unknown selection kind", "{ kind: 'page' }"],
+  ])("fails and removes the overlay when the guest commits %s", async (_label, commit) => {
+    const window = makeWindow(25);
+    overlayTest.allWindows.push(window);
+    const session = makeSession(window, "tab-active", ["tab-active"]);
+    const guest = new FakeGuest(window, "active-token");
+    prepareAndAdopt(window, "tab-active", guest, "active-token");
+
+    const pending = invoke("preview:capture-picture-reference", window.webContents) as Promise<unknown>;
+    await waitForOverlayReady();
+    guest.dom.window.eval(`window.__mcodeRgState.commit = ${commit}`);
+    await vi.advanceTimersByTimeAsync(120);
+
+    expect(await pending).toEqual({ ok: false, error: "capture-failed" });
+    expect(guest.dom.window.document.getElementById("__mcode_rg_layer")).toBeNull();
+    expect(guest.capturePage).not.toHaveBeenCalled();
+    expect(session.regionPollTimer).toBeNull();
+  });
+
+  it("captures a clamped region from a reverse drag using the release point", async () => {
     const window = makeWindow(11);
     overlayTest.allWindows.push(window);
     const session = makeSession(window, "tab-active", ["tab-active", "tab-inactive"]);
@@ -265,10 +372,10 @@ describe("Preview overlay capture handlers", () => {
       return captureImage();
     });
 
-    const pending = invoke("preview:capture-picture-region", window.webContents) as Promise<unknown>;
+    const pending = invoke("preview:capture-picture-reference", window.webContents) as Promise<unknown>;
     await waitForOverlayReady();
     expect(activeGuest.dom.window.document.getElementById("__mcode_rg_layer")).not.toBeNull();
-    commitRegion(activeGuest, { x: -2, y: 70, width: 40, height: 30 });
+    gesture(activeGuest, [[38, 100], [20, 85], [-2, 70]]);
     await vi.advanceTimersByTimeAsync(120);
 
     const result = await pending as { ok: boolean; previewBytes?: Uint8Array; capture?: Record<string, unknown> };
@@ -331,7 +438,7 @@ describe("Preview overlay capture handlers", () => {
     guest.injectionGate = new Promise<void>((resolve) => { releaseInjection = resolve; });
     prepareAndAdopt(window, "tab-active", guest, "active-token");
 
-    const pending = invoke("preview:capture-picture-region", window.webContents) as Promise<unknown>;
+    const pending = invoke("preview:capture-picture-reference", window.webContents) as Promise<unknown>;
     await waitForOverlayReady();
     await invoke("preview:cancel-capture", window.webContents);
     releaseInjection();
@@ -373,7 +480,7 @@ describe("Preview overlay capture handlers", () => {
     const guest = new FakeGuest(window, "active-token");
     prepareAndAdopt(window, "tab-active", guest, "active-token");
 
-    const pending = invoke("preview:capture-picture-region", window.webContents) as Promise<unknown>;
+    const pending = invoke("preview:capture-picture-reference", window.webContents) as Promise<unknown>;
     await waitForOverlayReady();
     guest.emit("did-start-navigation", {}, "https://example.test/next", false, true);
     const result = await pending;
@@ -401,9 +508,9 @@ describe("Preview overlay capture handlers", () => {
     });
     prepareAndAdopt(window, "tab-active", guest, "old-token");
 
-    const pending = invoke("preview:capture-picture-region", window.webContents) as Promise<unknown>;
+    const pending = invoke("preview:capture-picture-reference", window.webContents) as Promise<unknown>;
     await waitForOverlayReady();
-    commitRegion(guest, { x: 10, y: 10, width: 20, height: 20 });
+    dragRegion(guest, { x: 10, y: 10, width: 20, height: 20 });
     await vi.advanceTimersByTimeAsync(120);
 
     expect(await pending).toEqual({ ok: false, error: "no-preview" });
@@ -451,11 +558,15 @@ describe("Preview overlay capture handlers", () => {
       return guest.dom.window.eval(script);
     });
 
-    const pending = invoke("preview:capture-picture-region", window.webContents) as Promise<unknown>;
+    const pending = invoke("preview:capture-picture-reference", window.webContents) as Promise<unknown>;
     await waitForOverlayReady();
     await vi.advanceTimersByTimeAsync(120);
     await invoke("preview:cancel-capture", window.webContents);
-    releasePoll(JSON.stringify({ state: "commit", seq: 1, x: 1, y: 1, width: 20, height: 20 }));
+    releasePoll(JSON.stringify({
+      state: "commit",
+      seq: 1,
+      selection: { kind: "region", rect: { x: 1, y: 1, width: 20, height: 20 } },
+    }));
     await vi.advanceTimersByTimeAsync(0);
 
     expect(await pending).toEqual({ ok: false, error: "cancelled" });
@@ -495,9 +606,9 @@ describe("Preview overlay capture handlers", () => {
     guest.capturePage.mockRejectedValue(new Error("capture failed"));
     prepareAndAdopt(window, "tab-active", guest, "active-token");
 
-    const pending = invoke("preview:capture-picture-region", window.webContents) as Promise<unknown>;
+    const pending = invoke("preview:capture-picture-reference", window.webContents) as Promise<unknown>;
     await waitForOverlayReady();
-    commitRegion(guest, { x: 10, y: 10, width: 20, height: 20 });
+    dragRegion(guest, { x: 10, y: 10, width: 20, height: 20 });
     await vi.advanceTimersByTimeAsync(120);
 
     expect(await pending).toEqual({ ok: false, error: "capture-failed" });
@@ -515,7 +626,7 @@ describe("Preview overlay capture handlers", () => {
     guest.destroyed = true;
     guest.emit("destroyed");
 
-    expect(await invoke("preview:capture-picture-region", window.webContents)).toEqual({
+    expect(await invoke("preview:capture-picture-reference", window.webContents)).toEqual({
       ok: false,
       error: "no-preview",
     });
@@ -530,11 +641,11 @@ describe("Preview overlay capture handlers", () => {
     const oldGuest = new FakeGuest(window, "old-token");
     prepareAndAdopt(window, "tab-active", oldGuest, "old-token");
 
-    const pending = invoke("preview:capture-picture-region", window.webContents) as Promise<unknown>;
+    const pending = invoke("preview:capture-picture-reference", window.webContents) as Promise<unknown>;
     await waitForOverlayReady();
     const replacementGuest = new FakeGuest(window, "replacement-token");
     prepareAndAdopt(window, "tab-active", replacementGuest, "replacement-token", 2);
-    commitRegion(oldGuest, { x: 10, y: 10, width: 20, height: 20 });
+    dragRegion(oldGuest, { x: 10, y: 10, width: 20, height: 20 });
     await vi.advanceTimersByTimeAsync(120);
 
     expect(await pending).toEqual({ ok: false, error: "no-preview" });

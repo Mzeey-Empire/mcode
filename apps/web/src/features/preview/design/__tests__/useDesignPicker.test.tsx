@@ -31,7 +31,12 @@ const dismissBubbleFile = vi.fn();
  * every render, including the renders caused by its own busy flags.
  */
 function useDesignPickerHarness(): void {
-  const capture = usePreviewCapture({ threadId: THREAD_ID, pushSync });
+  const capture = usePreviewCapture({
+    threadId: THREAD_ID,
+    activeTabId: "tab-1",
+    presentationActive: true,
+    pushSync,
+  });
   const designModeActive = usePreviewDesignModeStore((s) => s.modes[THREAD_ID] === true);
   const designModeToggle = usePreviewDesignModeStore((s) => s.toggle);
   const designModeSetActive = usePreviewDesignModeStore((s) => s.setActive);

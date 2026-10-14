@@ -37,11 +37,9 @@
     "command": "preview.toggle",
     "when": "!inputFocused"
   },
-  {
-    "key": "mod+shift+y",
-    "command": "preview.guestDevTools.open",
-    "when": "!inputFocused"
-  },
+  { "key": "F12", "command": "preview.guestDevTools.open", "when": "browserFocused" },
+  { "key": "mod+shift+m", "command": "preview.deviceToolbar.toggle", "when": "browserFocused" },
+  { "key": "mod+shift+r", "command": "preview.forceReload", "when": "browserFocused" },
   { "key": "mod+shift+c", "command": "checks.open", "when": "!inputFocused" },
   { "key": "mod+1", "command": "thread.goTo1", "when": "!inputFocused" },
   { "key": "mod+2", "command": "thread.goTo2", "when": "!inputFocused" },

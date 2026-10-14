@@ -24,6 +24,7 @@ import type { PanelScope } from "@/lib/panel-tabs";
 import { DiffPanel } from "@/components/diff";
 import {
   BROWSER_AUTOMATION_WARM_TARGET_LIMIT,
+  BrowserTabStrip,
   PreviewPanel,
   browserAutomationScopeKey,
   browserAutomationTargetKey,
@@ -87,7 +88,6 @@ export function reconcileWarmPreviewScopes(
 import { SubagentDetailTab, SubagentsPanel, useSubagentRoster } from "@/features/subagents";
 import { ProjectEnvironmentPanel } from "@/features/projects/environment";
 import { TerminalTool } from "./TerminalTool";
-import { BrowserToolHeader } from "./BrowserToolHeader";
 
 const EMPTY_SCOPE_TERMINALS: readonly TerminalInstance[] = [];
 
@@ -676,7 +676,7 @@ function RightPanelContent({
           scopes={warmPreviewScopes}
         />
         {previewActive && panelScopeId ? (
-          <BrowserToolHeader
+          <BrowserTabStrip
             workspaceId={activeWorkspaceId}
             threadId={activeThreadId}
             scopeId={panelScopeId}
@@ -795,6 +795,10 @@ function WarmPreviewSurfaces({
       </PanelHeaderSlotScope>
     );
   });
+}
+
+function browserChromeMarker(browserSelected: boolean): { readonly "data-browser-chrome"?: "" } {
+  return browserSelected ? { "data-browser-chrome": "" } : {};
 }
 
 /**
@@ -1183,13 +1187,15 @@ export function RightPanel() {
     >
       <div className="flex min-h-0 flex-1 flex-row overflow-hidden">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <PanelHeader
-            maximized={maximized}
-            leadingRef={setHeaderLeading}
-            row2Ref={setHeaderRow2}
-            onToggleMaximized={toggleMaximized}
-            panelToggle={panelToggle.row1}
-          />
+          <div className="contents" {...browserChromeMarker(previewActive)}>
+            <PanelHeader
+              maximized={maximized}
+              leadingRef={setHeaderLeading}
+              row2Ref={setHeaderRow2}
+              onToggleMaximized={toggleMaximized}
+              panelToggle={panelToggle.row1}
+            />
+          </div>
           <RightPanelContent
             activeThreadId={activeThreadId}
             activeWorkspaceId={activeWorkspaceId}

@@ -845,14 +845,6 @@ export function App() {
             usePreviewFocusStore.getState().requestOmniboxFocus(),
           ),
       }),
-      registerCommand({
-        id: "preview.guestDevTools.open",
-        title: "Open Guest Page DevTools",
-        category: "View",
-        handler: () => {
-          void window.desktopBridge?.preview.openGuestDevTools();
-        },
-      }),
       ...registerSettingsSectionCommands(),
       ...(window.desktopBridge?.window ? registerWindowCommands(window.desktopBridge.window) : []),
       // Thread switching: Cmd+1 through Cmd+9

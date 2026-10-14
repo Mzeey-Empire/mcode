@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { renderHook, act, waitFor } from "@testing-library/react";
-import { MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME } from "@mcode/contracts";
-import { usePreviewCapture } from "../usePreviewCapture";
+import { renderHook, act } from "@testing-library/react";
+import { usePreviewCapture, type UsePreviewCaptureOptions } from "../usePreviewCapture";
 import { usePreviewAnnotationStore } from "../../state/previewAnnotationStore";
 
 // ---------------------------------------------------------------------------
@@ -26,7 +25,6 @@ vi.mock("../../state/previewReferenceQueueStore", () => ({
 // Helper factories
 // ---------------------------------------------------------------------------
 
-/** Minimal successful full-viewport capture result. */
 function makeCapturePngResult(overrides?: object) {
   return {
     ok: true as const,
@@ -43,13 +41,20 @@ function makeCapturePngResult(overrides?: object) {
   };
 }
 
-/** Minimal successful page-context capture result. */
-function makeContextResult(overrides?: object) {
-  return {
-    ok: true as const,
-    capture: {} as never,
-    ...overrides,
-  };
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+function pressEscape(): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  act(() => {
+    window.dispatchEvent(event);
+  });
+  return event;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,22 +63,25 @@ function makeContextResult(overrides?: object) {
 
 const mockPreview = {
   capturePictureReference: vi.fn(),
-  capturePictureReferenceRegion: vi.fn(),
   capturePictureReferenceElementPick: vi.fn(),
   captureAnnotationSnapshot: vi.fn(),
-  capturePageContext: vi.fn(),
+  cancelCapture: vi.fn(),
 };
 
 const THREAD_ID = "thread-abc";
 const defaultOptions = () => ({
   threadId: THREAD_ID,
+  activeTabId: "tab-1",
+  presentationActive: true,
   pushSync: vi.fn().mockResolvedValue(undefined),
+  onSuccess: vi.fn(),
 });
 
 beforeEach(() => {
   window.desktopBridge = {
     preview: mockPreview,
   } as unknown as typeof window.desktopBridge;
+  mockPreview.cancelCapture.mockResolvedValue(undefined);
   usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
 
   // jsdom does not implement URL.createObjectURL
@@ -91,255 +99,212 @@ afterEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
-/**
- * Tests for the usePreviewCapture hook.
- * Covers initial state, all four capture handlers, error paths, and busy state
- * composition (anyCaptureActive).
- */
 describe("usePreviewCapture", () => {
-  describe("initial state", () => {
-    it("returns all busy flags as false and anyCaptureActive as false", () => {
+  describe("onToggleScreenshot", () => {
+    it.each(["viewport", "region"] as const)(
+      "syncs bounds, then attaches one %s capture and confirms that kind",
+      async (captureKind) => {
+        const opts = defaultOptions();
+        mockPreview.capturePictureReference.mockResolvedValue(
+          makeCapturePngResult({ capture: { captureKind } }),
+        );
+        const { result } = renderHook(() => usePreviewCapture(opts));
+
+        await act(async () => {
+          await result.current.onToggleScreenshot();
+        });
+
+        expect(opts.pushSync.mock.invocationCallOrder[0]).toBeLessThan(
+          mockPreview.capturePictureReference.mock.invocationCallOrder[0],
+        );
+        expect(mockEnqueue).toHaveBeenCalledOnce();
+        expect(mockEnqueue).toHaveBeenCalledWith(
+          THREAD_ID,
+          expect.objectContaining({ id: "capture-id-1", previewUrl: "blob:mock-url" }),
+        );
+        expect(opts.onSuccess).toHaveBeenCalledWith(captureKind);
+        expect(result.current.screenshotArmed).toBe(false);
+      },
+    );
+
+    it("stays armed until the overlay resolves, and a second press cancels it", async () => {
+      const capture = deferred<unknown>();
+      mockPreview.capturePictureReference.mockReturnValue(capture.promise);
       const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
 
-      expect(result.current.captureBusy).toBe(false);
-      expect(result.current.regionBusy).toBe(false);
-      expect(result.current.elementPickBusy).toBe(false);
-      expect(result.current.contextBusy).toBe(false);
-      expect(result.current.anyCaptureActive).toBe(false);
+      await act(async () => {
+        void result.current.onToggleScreenshot();
+      });
+      expect(result.current.screenshotArmed).toBe(true);
+      expect(result.current.anyCaptureActive).toBe(true);
+
+      await act(async () => {
+        await result.current.onToggleScreenshot();
+      });
+      expect(mockPreview.cancelCapture).toHaveBeenCalledOnce();
+      expect(mockPreview.capturePictureReference).toHaveBeenCalledOnce();
+      expect(result.current.screenshotArmed).toBe(false);
+
+      await act(async () => {
+        capture.resolve(makeCapturePngResult());
+      });
+      expect(mockEnqueue).not.toHaveBeenCalled();
     });
 
-    it("exposes all four handler functions", () => {
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
-
-      expect(typeof result.current.onAddPictureReference).toBe("function");
-      expect(typeof result.current.onAddRegionPictureReference).toBe("function");
-      expect(typeof result.current.onAddElementPickPictureReference).toBe("function");
-      expect(typeof result.current.onAddPageContextOnly).toBe("function");
-      expect(typeof result.current.captureAnnotationSnapshot).toBe("function");
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // onAddPictureReference
-  // -------------------------------------------------------------------------
-
-  describe("onAddPictureReference", () => {
-    it("calls pushSync(true) before capturePictureReference", async () => {
+    it("Escape before bounds sync resolves skips the overlay entirely", async () => {
       const opts = defaultOptions();
-      const pushSync = opts.pushSync;
-      mockPreview.capturePictureReference.mockResolvedValue(makeCapturePngResult());
-
+      const sync = deferred<undefined>();
+      opts.pushSync.mockReturnValue(sync.promise);
       const { result } = renderHook(() => usePreviewCapture(opts));
 
-      await act(async () => {
-        await result.current.onAddPictureReference();
+      act(() => {
+        void result.current.onToggleScreenshot();
       });
-
-      expect(pushSync).toHaveBeenCalledWith(true);
-      const pushOrder = pushSync.mock.invocationCallOrder[0];
-      const captureOrder = mockPreview.capturePictureReference.mock.invocationCallOrder[0];
-      expect(pushOrder).toBeLessThan(captureOrder);
-    });
-
-    it("enqueues the attachment on success", async () => {
-      mockPreview.capturePictureReference.mockResolvedValue(makeCapturePngResult());
-
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
+      const escape = pressEscape();
+      expect(escape.defaultPrevented).toBe(true);
 
       await act(async () => {
-        await result.current.onAddPictureReference();
+        sync.resolve(undefined);
       });
-
-      expect(mockEnqueue).toHaveBeenCalledOnce();
-      const [calledThreadId, attachment] = mockEnqueue.mock.calls[0] as [string, unknown];
-      expect(calledThreadId).toBe(THREAD_ID);
-      expect(attachment).toMatchObject({
-        id: "capture-id-1",
-        name: "screenshot.png",
-        mimeType: "image/png",
-        sizeBytes: 3,
-      });
-    });
-
-    it("resets captureBusy to false after success", async () => {
-      mockPreview.capturePictureReference.mockResolvedValue(makeCapturePngResult());
-
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
-
-      await act(async () => {
-        await result.current.onAddPictureReference();
-      });
-
-      expect(result.current.captureBusy).toBe(false);
-    });
-
-    it("shows a toast on error result (non-silent code)", async () => {
-      mockPreview.capturePictureReference.mockResolvedValue({
-        ok: false,
-        error: "capture-failed",
-      });
-
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
-
-      await act(async () => {
-        await result.current.onAddPictureReference();
-      });
-
-      expect(mockShow).toHaveBeenCalledOnce();
-      expect(mockShow).toHaveBeenCalledWith({ kind: "failed", title: "Could not capture preview", meta: expect.any(String) });
-      expect(mockEnqueue).not.toHaveBeenCalled();
-    });
-
-    it("does NOT show a toast for silent error 'cancelled'", async () => {
-      mockPreview.capturePictureReference.mockResolvedValue({
-        ok: false,
-        error: "cancelled",
-      });
-
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
-
-      await act(async () => {
-        await result.current.onAddPictureReference();
-      });
-
-      expect(mockShow).not.toHaveBeenCalled();
-      expect(mockEnqueue).not.toHaveBeenCalled();
-    });
-
-    it("does NOT show a toast for silent error 'capture-interrupted'", async () => {
-      mockPreview.capturePictureReference.mockResolvedValue({
-        ok: false,
-        error: "capture-interrupted",
-      });
-
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
-
-      await act(async () => {
-        await result.current.onAddPictureReference();
-      });
-
-      expect(mockShow).not.toHaveBeenCalled();
-    });
-
-    it("does NOT show a toast for silent error 'navigated-away'", async () => {
-      mockPreview.capturePictureReference.mockResolvedValue({
-        ok: false,
-        error: "navigated-away",
-      });
-
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
-
-      await act(async () => {
-        await result.current.onAddPictureReference();
-      });
-
-      expect(mockShow).not.toHaveBeenCalled();
-    });
-
-    it("shows a toast and resets busy when capturePictureReference throws", async () => {
-      mockPreview.capturePictureReference.mockRejectedValue(new Error("IPC failure"));
-
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
-
-      await act(async () => {
-        await result.current.onAddPictureReference();
-      });
-
-      expect(mockShow).toHaveBeenCalledWith({ kind: "failed", title: "Could not capture preview", meta: "Screenshot failed." });
-      expect(result.current.captureBusy).toBe(false);
-    });
-
-    it("does nothing when desktopBridge is absent", async () => {
-      delete (window as unknown as Record<string, unknown>).desktopBridge;
-
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
-
-      await act(async () => {
-        await result.current.onAddPictureReference();
-      });
-
       expect(mockPreview.capturePictureReference).not.toHaveBeenCalled();
+      expect(mockPreview.cancelCapture).not.toHaveBeenCalled();
       expect(mockEnqueue).not.toHaveBeenCalled();
+      expect(result.current.screenshotArmed).toBe(false);
     });
-  });
 
-  // -------------------------------------------------------------------------
-  // onAddRegionPictureReference
-  // -------------------------------------------------------------------------
-
-  describe("onAddRegionPictureReference", () => {
-    it("calls pushSync(true) before capturePictureReferenceRegion", async () => {
-      const opts = defaultOptions();
-      mockPreview.capturePictureReferenceRegion.mockResolvedValue(makeCapturePngResult());
-
-      const { result } = renderHook(() => usePreviewCapture(opts));
+    it("Escape after the overlay arms cancels it and attaches nothing", async () => {
+      const capture = deferred<unknown>();
+      mockPreview.capturePictureReference.mockReturnValue(capture.promise);
+      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
 
       await act(async () => {
-        await result.current.onAddRegionPictureReference();
+        void result.current.onToggleScreenshot();
       });
+      pressEscape();
+      expect(mockPreview.cancelCapture).toHaveBeenCalledOnce();
 
-      expect(opts.pushSync).toHaveBeenCalledWith(true);
-      const pushOrder = opts.pushSync.mock.invocationCallOrder[0];
-      const captureOrder = mockPreview.capturePictureReferenceRegion.mock.invocationCallOrder[0];
-      expect(pushOrder).toBeLessThan(captureOrder);
+      await act(async () => {
+        capture.resolve(makeCapturePngResult());
+      });
+      expect(mockEnqueue).not.toHaveBeenCalled();
+      expect(result.current.screenshotArmed).toBe(false);
     });
 
-    it("enqueues the attachment on success", async () => {
-      mockPreview.capturePictureReferenceRegion.mockResolvedValue(
-        makeCapturePngResult({ meta: { id: "region-1", name: "region.png", mimeType: "image/png", sizeBytes: 5, sourcePath: "/tmp/region.png" } }),
+    it("leaves Escape alone when no Screenshot is open", () => {
+      renderHook(() => usePreviewCapture(defaultOptions()));
+      expect(pressEscape().defaultPrevented).toBe(false);
+    });
+
+    it.each([
+      ["tab change", { activeTabId: "tab-2" }],
+      ["thread change", { threadId: "thread-other" }],
+      ["preview hidden", { presentationActive: false }],
+    ] as const)("%s mid-capture cancels and drops the late result", async (_label, change) => {
+      const opts = defaultOptions();
+      const capture = deferred<unknown>();
+      mockPreview.capturePictureReference.mockReturnValue(capture.promise);
+      const { result, rerender } = renderHook(
+        (props: UsePreviewCaptureOptions) => usePreviewCapture(props),
+        { initialProps: opts },
       );
 
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
+      await act(async () => {
+        void result.current.onToggleScreenshot();
+      });
+      rerender({ ...opts, ...change });
+      expect(mockPreview.cancelCapture).toHaveBeenCalledOnce();
+      expect(result.current.screenshotArmed).toBe(false);
 
       await act(async () => {
-        await result.current.onAddRegionPictureReference();
+        capture.resolve(makeCapturePngResult());
       });
-
-      expect(mockEnqueue).toHaveBeenCalledOnce();
-      const [calledThreadId] = mockEnqueue.mock.calls[0] as [string, unknown];
-      expect(calledThreadId).toBe(THREAD_ID);
+      expect(mockEnqueue).not.toHaveBeenCalled();
+      expect(opts.onSuccess).not.toHaveBeenCalled();
     });
 
-    it("shows a toast on non-silent error", async () => {
-      mockPreview.capturePictureReferenceRegion.mockResolvedValue({
-        ok: false,
-        error: "region-too-small",
-      });
-
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
+    it("unmount mid-capture cancels the overlay and drops the late result", async () => {
+      const capture = deferred<unknown>();
+      mockPreview.capturePictureReference.mockReturnValue(capture.promise);
+      const { result, unmount } = renderHook(() => usePreviewCapture(defaultOptions()));
 
       await act(async () => {
-        await result.current.onAddRegionPictureReference();
+        void result.current.onToggleScreenshot();
       });
+      unmount();
+      expect(mockPreview.cancelCapture).toHaveBeenCalledOnce();
 
-      expect(mockShow).toHaveBeenCalledOnce();
+      await act(async () => {
+        capture.resolve(makeCapturePngResult());
+      });
       expect(mockEnqueue).not.toHaveBeenCalled();
     });
 
-    it("does NOT show a toast for silent error 'cancelled'", async () => {
-      mockPreview.capturePictureReferenceRegion.mockResolvedValue({ ok: false, error: "cancelled" });
+    it("two presses in one tick start a single request", async () => {
+      const opts = defaultOptions();
+      const { result } = renderHook(() => usePreviewCapture(opts));
 
+      await act(async () => {
+        void result.current.onToggleScreenshot();
+        void result.current.onToggleScreenshot();
+      });
+
+      expect(opts.pushSync).toHaveBeenCalledOnce();
+      expect(mockPreview.capturePictureReference).not.toHaveBeenCalled();
+      expect(result.current.screenshotArmed).toBe(false);
+    });
+
+    it("does not arm while the preview is hidden", async () => {
+      const opts = { ...defaultOptions(), presentationActive: false };
+      const { result } = renderHook(() => usePreviewCapture(opts));
+
+      await act(async () => {
+        await result.current.onToggleScreenshot();
+      });
+
+      expect(opts.pushSync).not.toHaveBeenCalled();
+      expect(result.current.screenshotArmed).toBe(false);
+    });
+
+    it("stays silent when the user cancels in the overlay", async () => {
+      mockPreview.capturePictureReference.mockResolvedValue({ ok: false, error: "cancelled" });
       const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
 
       await act(async () => {
-        await result.current.onAddRegionPictureReference();
+        await result.current.onToggleScreenshot();
       });
 
       expect(mockShow).not.toHaveBeenCalled();
+      expect(mockEnqueue).not.toHaveBeenCalled();
     });
 
-    it("resets regionBusy to false after completion", async () => {
-      mockPreview.capturePictureReferenceRegion.mockResolvedValue(makeCapturePngResult());
-
+    it("shows a failure toast for capture-failed", async () => {
+      mockPreview.capturePictureReference.mockResolvedValue({ ok: false, error: "capture-failed" });
       const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
 
       await act(async () => {
-        await result.current.onAddRegionPictureReference();
+        await result.current.onToggleScreenshot();
       });
 
-      expect(result.current.regionBusy).toBe(false);
+      expect(mockShow).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "failed", meta: "Screenshot failed." }),
+      );
+      expect(mockEnqueue).not.toHaveBeenCalled();
+      expect(result.current.screenshotArmed).toBe(false);
+    });
+
+    it("shows a failure toast and disarms when the bridge throws", async () => {
+      mockPreview.capturePictureReference.mockRejectedValue(new Error("ipc down"));
+      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
+
+      await act(async () => {
+        await result.current.onToggleScreenshot();
+      });
+
+      expect(mockShow).toHaveBeenCalledOnce();
+      expect(result.current.screenshotArmed).toBe(false);
     });
   });
+
 
   // -------------------------------------------------------------------------
   // captureAnnotationSnapshot
@@ -546,172 +511,6 @@ describe("usePreviewCapture", () => {
       expect(outcome).toEqual({ ok: false });
       expect(usePreviewAnnotationStore.getState().drafts[THREAD_ID]).toBeUndefined();
       expect(onSuccess).not.toHaveBeenCalled();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // onAddPageContextOnly
-  // -------------------------------------------------------------------------
-
-  describe("onAddPageContextOnly", () => {
-    it("calls pushSync(true) before capturePageContext", async () => {
-      const opts = defaultOptions();
-      mockPreview.capturePageContext.mockResolvedValue(makeContextResult());
-
-      const { result } = renderHook(() => usePreviewCapture(opts));
-
-      await act(async () => {
-        await result.current.onAddPageContextOnly();
-      });
-
-      expect(opts.pushSync).toHaveBeenCalledWith(true);
-      const pushOrder = opts.pushSync.mock.invocationCallOrder[0];
-      const captureOrder = mockPreview.capturePageContext.mock.invocationCallOrder[0];
-      expect(pushOrder).toBeLessThan(captureOrder);
-    });
-
-    it("enqueues a contextOnly attachment on success", async () => {
-      mockPreview.capturePageContext.mockResolvedValue(makeContextResult());
-
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
-
-      await act(async () => {
-        await result.current.onAddPageContextOnly();
-      });
-
-      expect(mockEnqueue).toHaveBeenCalledOnce();
-      const [calledThreadId, attachment] = mockEnqueue.mock.calls[0] as [string, Record<string, unknown>];
-      expect(calledThreadId).toBe(THREAD_ID);
-      expect(attachment.contextOnly).toBe(true);
-      expect(attachment.mimeType).toBe(MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME);
-      expect(attachment.name).toBe("Page context");
-      expect(attachment.sizeBytes).toBe(0);
-      expect(attachment.previewUrl).toBe("");
-      expect(attachment.filePath).toBeNull();
-    });
-
-    it("assigns a UUID as attachment id", async () => {
-      mockPreview.capturePageContext.mockResolvedValue(makeContextResult());
-
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
-
-      await act(async () => {
-        await result.current.onAddPageContextOnly();
-      });
-
-      const [, attachment] = mockEnqueue.mock.calls[0] as [string, Record<string, unknown>];
-      // UUID pattern: 8-4-4-4-12 hex digits
-      expect(typeof attachment.id).toBe("string");
-      expect((attachment.id as string).length).toBeGreaterThan(0);
-    });
-
-    it("shows a toast on non-silent error", async () => {
-      mockPreview.capturePageContext.mockResolvedValue({
-        ok: false,
-        error: "no-preview",
-      });
-
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
-
-      await act(async () => {
-        await result.current.onAddPageContextOnly();
-      });
-
-      expect(mockShow).toHaveBeenCalledOnce();
-      expect(mockEnqueue).not.toHaveBeenCalled();
-    });
-
-    it("does NOT show a toast for silent error 'cancelled'", async () => {
-      mockPreview.capturePageContext.mockResolvedValue({ ok: false, error: "cancelled" });
-
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
-
-      await act(async () => {
-        await result.current.onAddPageContextOnly();
-      });
-
-      expect(mockShow).not.toHaveBeenCalled();
-    });
-
-    it("shows a toast and resets contextBusy when capturePageContext throws", async () => {
-      mockPreview.capturePageContext.mockRejectedValue(new Error("IPC failure"));
-
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
-
-      await act(async () => {
-        await result.current.onAddPageContextOnly();
-      });
-
-      expect(mockShow).toHaveBeenCalledWith({ kind: "failed", title: "Could not capture preview", meta: "Context capture failed." });
-      expect(result.current.contextBusy).toBe(false);
-    });
-
-    it("resets contextBusy to false after success", async () => {
-      mockPreview.capturePageContext.mockResolvedValue(makeContextResult());
-
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
-
-      await act(async () => {
-        await result.current.onAddPageContextOnly();
-      });
-
-      expect(result.current.contextBusy).toBe(false);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // anyCaptureActive composition
-  // -------------------------------------------------------------------------
-
-  describe("anyCaptureActive", () => {
-    it("is true while capturePictureReference is in-flight", async () => {
-      let resolveCapture!: (v: unknown) => void;
-      mockPreview.capturePictureReference.mockReturnValue(
-        new Promise((res) => {
-          resolveCapture = res;
-        }),
-      );
-
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
-
-      // Start but do not await
-      act(() => {
-        void result.current.onAddPictureReference();
-      });
-
-      await waitFor(() => expect(result.current.captureBusy).toBe(true));
-      expect(result.current.anyCaptureActive).toBe(true);
-
-      // Let the capture settle
-      await act(async () => {
-        resolveCapture({ ok: false, error: "cancelled" });
-      });
-
-      expect(result.current.anyCaptureActive).toBe(false);
-    });
-
-    it("is true while capturePageContext is in-flight", async () => {
-      let resolveCapture!: (v: unknown) => void;
-      mockPreview.capturePageContext.mockReturnValue(
-        new Promise((res) => {
-          resolveCapture = res;
-        }),
-      );
-
-      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
-
-      act(() => {
-        void result.current.onAddPageContextOnly();
-      });
-
-      await waitFor(() => expect(result.current.contextBusy).toBe(true));
-      expect(result.current.anyCaptureActive).toBe(true);
-
-      await act(async () => {
-        resolveCapture({ ok: false, error: "cancelled" });
-      });
-
-      expect(result.current.anyCaptureActive).toBe(false);
     });
   });
 });

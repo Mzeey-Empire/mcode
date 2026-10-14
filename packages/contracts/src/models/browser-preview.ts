@@ -168,6 +168,44 @@ export type BrowserPreviewCaptureKind = z.infer<
   ReturnType<typeof BrowserPreviewCaptureKindSchema>
 >;
 
+/** Screenshot selection: viewport or rectangle in guest coordinates. */
+export const BrowserScreenshotSelectionSchema = lazySchema(() =>
+  z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("viewport") }),
+    z.object({
+      kind: z.literal("region"),
+      rect: z.object({
+        x: z.number().finite(),
+        y: z.number().finite(),
+        width: z.number().finite(),
+        height: z.number().finite(),
+      }),
+    }),
+  ]),
+);
+
+export type BrowserScreenshotSelection = z.infer<
+  ReturnType<typeof BrowserScreenshotSelectionSchema>
+>;
+
+/** Validates Screenshot overlay state from the untrusted guest page. */
+export const BrowserScreenshotOverlayPollSchema = lazySchema(() =>
+  z.discriminatedUnion("state", [
+    z.object({ state: z.literal("idle"), seq: z.number() }),
+    z.object({ state: z.literal("gone") }),
+    z.object({ state: z.literal("cancelled") }),
+    z.object({
+      state: z.literal("commit"),
+      seq: z.number(),
+      selection: BrowserScreenshotSelectionSchema(),
+    }),
+  ]),
+);
+
+export type BrowserScreenshotOverlayPoll = z.infer<
+  ReturnType<typeof BrowserScreenshotOverlayPollSchema>
+>;
+
 /**
  * Versioned payload for what the user pointed at in the embedded preview.
  * Pairs PNG attachments with URL, bounds, and optional DOM context for the agent.

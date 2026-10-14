@@ -37,7 +37,7 @@ const {
   mockOnAddElementAnnotation: vi.fn(),
   mockCaptureAnnotationSnapshot: vi.fn(),
   mockCaptureSuccess: {
-    current: undefined as ((kind: "viewport" | "region" | "element" | "context") => void) | undefined,
+    current: undefined as ((kind: "viewport" | "region" | "element") => void) | undefined,
   },
   mockGetProviderCatalog: vi.fn().mockResolvedValue({
     providerId: "claude",
@@ -68,27 +68,21 @@ vi.mock("@/transport", () => ({
   }),
 }));
 
-// The panel only consumes usePreviewTabs for the header's "New page" action and
-// the store subscription; page switching/closing lives in the activity rail.
 vi.mock("../../tabs/usePreviewTabs", () => ({
   usePreviewTabs: mockUsePreviewTabs,
 }));
 
 vi.mock("../../capture/usePreviewCapture", () => ({
   usePreviewCapture: ({ onSuccess }: {
-    readonly onSuccess?: (kind: "viewport" | "region" | "element" | "context") => void;
+    readonly onSuccess?: (kind: "viewport" | "region" | "element") => void;
   }) => {
     mockCaptureSuccess.current = onSuccess;
     return {
-      captureBusy: false,
-      regionBusy: false,
+      screenshotArmed: false,
       elementPickBusy: false,
-      contextBusy: false,
       anyCaptureActive: false,
-      onAddPictureReference: vi.fn(),
-      onAddRegionPictureReference: vi.fn(),
+      onToggleScreenshot: vi.fn(),
       onAddElementPickPictureReference: vi.fn(),
-      onAddPageContextOnly: vi.fn(),
       onAddElementAnnotation: mockOnAddElementAnnotation,
       captureAnnotationSnapshot: mockCaptureAnnotationSnapshot,
     };
@@ -551,7 +545,7 @@ describe("PreviewPanel: unavailable state", () => {
   });
 
   // Drives several menus with userEvent (about 1s locally); a loaded CI runner pushed it past the 5s default.
-  it("keeps the responsive toolbar available through the web Browser overflow menu", { timeout: 15_000 }, async () => {
+  it("keeps the responsive toolbar available through the web Browser More menu", { timeout: 15_000 }, async () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
     const user = userEvent.setup();
     render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" />);
@@ -560,9 +554,9 @@ describe("PreviewPanel: unavailable state", () => {
       expect(useBrowserAutomationStore.getState().viewportCoordinators.size).toBeGreaterThan(0);
     });
     const iframe = screen.getByTestId("web-runtime-preview-iframe");
-    await user.click(screen.getByRole("button", { name: "More browser tools" }));
-    const menu = await screen.findByTestId("browser-overflow-menu");
-    await user.click(within(menu).getByRole("menuitem", { name: "Show device toolbar" }));
+    await user.click(screen.getByRole("button", { name: "More" }));
+    const menu = await screen.findByRole("menu");
+    await user.click(within(menu).getByRole("menuitem", { name: "Device toolbar" }));
 
     const toolbar = await screen.findByTestId("browser-viewport-toolbar");
     expect(toolbar).toBeInTheDocument();
@@ -598,10 +592,10 @@ describe("PreviewPanel: unavailable state", () => {
     await waitFor(() => {
       expect(useBrowserAutomationStore.getState().viewportCoordinators.size).toBeGreaterThan(0);
     });
-    await user.click(screen.getByRole("button", { name: "More browser tools" }));
-    await user.click(within(await screen.findByTestId("browser-overflow-menu")).getByRole(
+    await user.click(screen.getByRole("button", { name: "More" }));
+    await user.click(within(await screen.findByRole("menu")).getByRole(
       "menuitem",
-      { name: "Show device toolbar" },
+      { name: "Device toolbar" },
     ));
     let toolbar = await screen.findByTestId("browser-viewport-toolbar");
     await user.click(within(toolbar).getByRole("button", { name: "Viewport scale and presentation" }));
@@ -615,10 +609,10 @@ describe("PreviewPanel: unavailable state", () => {
     });
 
     await user.click(within(toolbar).getByRole("button", { name: "Close viewport toolbar" }));
-    await user.click(screen.getByRole("button", { name: "More browser tools" }));
-    await user.click(within(await screen.findByTestId("browser-overflow-menu")).getByRole(
+    await user.click(screen.getByRole("button", { name: "More" }));
+    await user.click(within(await screen.findByRole("menu")).getByRole(
       "menuitem",
-      { name: "Show device toolbar" },
+      { name: "Device toolbar" },
     ));
     toolbar = await screen.findByTestId("browser-viewport-toolbar");
 
@@ -859,10 +853,10 @@ describe("PreviewPanel: full panel state", () => {
     expect(screen.getByLabelText("Preview URL")).toBeInTheDocument();
   });
 
-  it("renders the navigation buttons inside the full panel", () => {
+  it("offers no navigation until a page is loaded", () => {
     render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
-    expect(screen.getByLabelText("Back")).toBeInTheDocument();
-    expect(screen.getByLabelText("Forward")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Back")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Forward")).not.toBeInTheDocument();
   });
 
   it("shows the localhost-ports empty state when no page is loaded", () => {
@@ -915,7 +909,7 @@ describe("PreviewPanel: full panel state", () => {
       "border",
       "bg-hover/10",
     );
-    expect(screen.getByTestId("browser-chrome")).toContainElement(screen.getByTestId("browser-header"));
+    expect(screen.getByTestId("browser-chrome")).toContainElement(screen.getByTestId("browser-toolbar"));
     expect(screen.getByTestId("browser-chrome")).toHaveClass(
       "relative",
       "z-(--layer-dropdown)",
@@ -1296,13 +1290,7 @@ describe("PreviewPanel: full panel state", () => {
     expect(webviews[0]).toHaveAttribute("src", "https://a.example");
     expect(webviews[1]).toHaveAttribute("src", "https://b.example");
     const omnibox = screen.getByLabelText("Preview URL");
-    await waitFor(() => expect(omnibox).toHaveValue("B"));
-    expect(screen.getByTestId("browser-url-bar").querySelector("img")).toHaveAttribute(
-      "src",
-      "https://b.example/favicon.ico",
-    );
-    fireEvent.focus(omnibox);
-    expect(omnibox).toHaveValue("https://b.example");
+    await waitFor(() => expect(omnibox).toHaveValue("https://b.example"));
   });
 
   it("presents every warm tab in the hidden automation host", async () => {
@@ -1728,7 +1716,7 @@ describe("PreviewPanel: full panel state", () => {
     }
   });
 
-  it("keeps the live webview mounted while the overflow menu is open", async () => {
+  it("keeps the live webview mounted while the More menu is open", async () => {
     mockUsePreviewBridge.mockReturnValue(
       mockBridgeState({ storedUrl: "https://example.com" }),
     );
@@ -1736,9 +1724,9 @@ describe("PreviewPanel: full panel state", () => {
     render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     expect(screen.getByTestId("preview-webview")).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText("More browser tools"));
+    fireEvent.click(screen.getByLabelText("More"));
 
-    expect(await screen.findByTestId("browser-overflow-menu")).toBeInTheDocument();
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
     expect(screen.getByTestId("preview-webview")).toBeInTheDocument();
   });
 
@@ -1759,7 +1747,7 @@ describe("PreviewPanel: full panel state", () => {
 
     render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
-    expect(screen.getByTestId("browser-header")).toBeInTheDocument();
+    expect(screen.getByTestId("browser-toolbar")).toBeInTheDocument();
     expect(
       screen.queryByTestId("preview-annotation-header"),
     ).not.toBeInTheDocument();
@@ -1768,7 +1756,6 @@ describe("PreviewPanel: full panel state", () => {
     ).not.toBeInTheDocument();
     const designButton = screen.getByRole("button", { name: "Design" });
     expect(designButton).toHaveAttribute("aria-pressed", "true");
-    expect(designButton).toHaveTextContent("Design");
   });
 
   it("shows the saved-annotation command bar after the first annotation", () => {
@@ -1790,7 +1777,7 @@ describe("PreviewPanel: full panel state", () => {
 
     render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
-    expect(screen.queryByTestId("browser-header")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("browser-toolbar")).not.toBeInTheDocument();
     expect(screen.getByTestId("preview-annotation-header")).toBeInTheDocument();
     expect(screen.getByTestId("preview-annotation-title")).toHaveTextContent(
       `Designing · ${normalizePreviewPageIdentity(pageUrl)}`,

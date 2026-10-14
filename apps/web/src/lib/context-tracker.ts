@@ -4,6 +4,8 @@ export interface ContextState {
   inputFocused: boolean;
   /** The xterm terminal has focus. */
   terminalFocused: boolean;
+  /** Focus is inside Browser chrome (header rows or its More menu), never the guest page. */
+  browserFocused: boolean;
   /** The command palette is currently open. */
   commandPaletteOpen: boolean;
   /** The settings view is visible. */
@@ -28,6 +30,7 @@ function getDefaultContext(): ContextState {
   return {
     inputFocused: false,
     terminalFocused: false,
+    browserFocused: false,
     commandPaletteOpen: false,
     settingsOpen: false,
     showLanding: false,

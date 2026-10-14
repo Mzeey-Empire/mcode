@@ -238,6 +238,7 @@ export function PreviewPanel({
     workspaceId,
     surfaceRef,
     automationOnly,
+    presentationActive,
     tabs,
     browserWorkspaceId,
     activeWebviewTabId,
@@ -430,8 +431,8 @@ export function PreviewPanel({
         clearTransientAnnotationState={clearTransientAnnotationState}
         designModeSetActive={designModeSetActive}
         webviewInputUrl={webviewInputUrl}
-        webviewPageStatus={webviewPageStatus}
         hasLoadedPage={hasLoadedPage}
+        pageError={pageError}
         webviewCanBack={webviewCanBack}
         webviewCanFwd={webviewCanFwd}
         designModeActive={designModeActive}
@@ -443,13 +444,13 @@ export function PreviewPanel({
         activeWebviewRef={activeWebviewRef}
         onWebviewOpenExternal={onWebviewOpenExternal}
         onToggleDesignMode={onToggleDesignMode}
-        tabs={tabs}
         bridge={bridge}
         onWebviewGetZoom={onWebviewGetZoom}
         onWebviewSetZoom={onWebviewSetZoom}
         toggleViewportToolbar={toggleViewportToolbar}
         activeAutomationController={activeAutomationController}
         activeAutomationRequest={activeAutomationRequest}
+        commandsActive={presentationActive && !automationOnly}
       />
 
       <BrowserPageLayer

@@ -13,9 +13,12 @@ import {
 } from "react";
 import { pushEmitter } from "@/transport/ws-transport";
 import { useDiffStore } from "@/stores/diffStore";
-import { BrowserHeader } from "./BrowserHeader";
+import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
+import { BrowserToolbar } from "./BrowserToolbar";
 import { BrowserViewportToolbar } from "./BrowserViewportToolbar";
 import { BrowserViewportCanvas } from "./BrowserViewportCanvas";
+import type { BrowserAction, BrowserToolbarPage, BrowserTools } from "./browserToolbarModel";
+import { useBrowserCommands } from "./useBrowserCommands";
 import {
   invalidateBrowserAutomationTargetObservation,
   useBrowserAutomationStore,
@@ -92,34 +95,33 @@ function runtimeVisiblePage(
   return { pageState: visiblePageState, address: visibleAddress };
 }
 
-function runtimeBrowserHeaderState(
+const DESKTOP_ONLY_REASON = "Available in the desktop app";
+
+function runtimeToolbarPage(
   address: string | null,
   pageState: BrowserSurfacePageState | null,
-): {
-  readonly url: string;
-  readonly pageTitle: string | null;
-  readonly faviconUrl: string | null;
-  readonly canBack: boolean;
-  readonly canFwd: boolean;
-} {
-  const navigation = runtimePageNavigation(pageState);
-  return {
-    url: address ?? "",
-    pageTitle: pageState?.title || null,
-    faviconUrl: pageState?.favicon ?? null,
-    ...navigation,
-  };
+  reload: BrowserAction,
+): BrowserToolbarPage {
+  const navigation = {
+    back: { kind: "disabled", reason: DESKTOP_ONLY_REASON },
+    forward: { kind: "disabled", reason: DESKTOP_ONLY_REASON },
+    reload,
+  } as const;
+  if (pageState?.phase === "error") return { kind: "error", navigation };
+  if (!address) return { kind: "new" };
+  return { kind: "loaded", navigation, pageActions: { kind: "unavailable" } };
 }
 
-function runtimePageNavigation(
-  pageState: BrowserSurfacePageState | null,
-): {
-  readonly canBack: boolean;
-  readonly canFwd: boolean;
-} {
+function runtimeTools(onToggleViewportToolbar: () => void): BrowserTools {
+  const desktopOnly = { kind: "disabled", reason: DESKTOP_ONLY_REASON } as const;
   return {
-    canBack: pageState?.navigation?.canGoBack ?? false,
-    canFwd: pageState?.navigation?.canGoForward ?? false,
+    deviceToolbar: { kind: "enabled", run: onToggleViewportToolbar },
+    developerTools: desktopOnly,
+    forceReload: desktopOnly,
+    zoom: desktopOnly,
+    clearCookies: desktopOnly,
+    clearCache: desktopOnly,
+    takeover: { kind: "none" },
   };
 }
 
@@ -210,7 +212,6 @@ export function WebRuntimePreview({
 }) {
   const storedUrl = useDiffStore((state) => state.previewUrlByThread[threadId] ?? "");
   const fixtureUrl = `${window.location.origin}${WEB_AUTOMATION_FIXTURE_URL}`;
-  const [inputUrl, setInputUrl] = useState(storedUrl);
   const [requestedAddress, setRequestedAddress] = useState<string | null>(
     () => normalizeWebPreviewUrl(storedUrl) ?? fixtureUrl,
   );
@@ -218,7 +219,6 @@ export function WebRuntimePreview({
   requestedAddressRef.current = requestedAddress;
   const [pageState, setPageState] = useState<BrowserSurfacePageState | null>(null);
   const [crossOriginObserved, setCrossOriginObserved] = useState(false);
-  const [zoom, setZoom] = useState(1);
   const [canvasBounds, setCanvasBounds] = useState({ width: 0, height: 0 });
   const surfaceRef = useRef<HTMLDivElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
@@ -317,8 +317,6 @@ export function WebRuntimePreview({
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect -- A stored URL change is an external BrowserSurface session switch that must replace stale local navigation state.
-    setInputUrl(storedUrl);
-    // oxlint-disable-next-line react/set-state-in-effect -- A stored URL change is an external BrowserSurface session switch that must replace stale local navigation state.
     setRequestedAddress(normalizeWebPreviewUrl(storedUrl) ?? fixtureUrl);
     // oxlint-disable-next-line react/set-state-in-effect -- A stored URL change is an external BrowserSurface session switch that must replace stale local navigation state.
     setCrossOriginObserved(false);
@@ -369,7 +367,7 @@ export function WebRuntimePreview({
     };
   }, [automationOnly, identity, pageState, presentationActive, presentationSource, publishPresentation, responsiveViewportScale, responsiveViewportSize, state]);
 
-  const navigate = (candidate = inputUrl): void => {
+  const navigate = (candidate: string): void => {
     const next = normalizeWebPreviewUrl(candidate);
     if (!next) {
       setRequestedAddress(null);
@@ -381,7 +379,9 @@ export function WebRuntimePreview({
     useDiffStore.getState().setPreviewUrlForThread(threadId, next);
   };
 
-  const noOp = (): void => undefined;
+  const tools = runtimeTools(onToggleViewportToolbar);
+  useBrowserCommands({ active: presentationActive && !automationOnly, actions: tools });
+
   const invalidateViewportObservation = (): void => {
     invalidateBrowserAutomationTargetObservation(identity.workspaceId, threadId, WEB_RUNTIME_PREVIEW_TAB_ID);
   };
@@ -390,59 +390,33 @@ export function WebRuntimePreview({
     pageState,
     requestedAddress,
   );
-  const headerState = runtimeBrowserHeaderState(
-    visiblePage.address,
-    visiblePage.pageState,
-  );
+  const reload: BrowserAction = {
+    kind: "enabled",
+    run: () => {
+      invalidateViewportObservation();
+      browserSurfaceHost.navigate(identity, visiblePage.address ?? fixtureUrl);
+    },
+  };
 
   return (
     <div data-testid="web-runtime-preview" className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <BrowserHeader
-        url={headerState.url}
-        pageTitle={headerState.pageTitle}
-        faviconUrl={headerState.faviconUrl}
-        hasLoadedPage={Boolean(visiblePage.address)}
-        canBack={headerState.canBack}
-        canFwd={headerState.canFwd}
-        threadId=""
-        designModeActive={false}
-        elementPickBusy={false}
-        captureBusy={false}
-        regionBusy={false}
-        onNavigate={(url) => {
-          invalidateBrowserAutomationTargetObservation(identity.workspaceId, threadId, WEB_RUNTIME_PREVIEW_TAB_ID);
-          setInputUrl(url);
-          navigate(url);
-        }}
-        onGoBack={noOp}
-        onGoForward={noOp}
-        onReload={() => {
-          invalidateBrowserAutomationTargetObservation(identity.workspaceId, threadId, WEB_RUNTIME_PREVIEW_TAB_ID);
-          browserSurfaceHost.navigate(identity, visiblePage.address ?? fixtureUrl);
-        }}
-        onOpenExternal={noOp}
-        onToggleDesign={noOp}
-        onScreenshot={noOp}
-        onNewPage={noOp}
-        onForceReload={() => {
-          invalidateBrowserAutomationTargetObservation(identity.workspaceId, threadId, WEB_RUNTIME_PREVIEW_TAB_ID);
-          browserSurfaceHost.navigate(identity, visiblePage.address ?? fixtureUrl);
-        }}
-        onRegionCapture={noOp}
-        onDumpContent={noOp}
-        onClearCookies={noOp}
-        onClearCache={noOp}
-        onGetZoom={async () => zoom}
-        onSetZoom={async (factor) => {
-          const next = Math.min(2, Math.max(0.25, factor));
-          setZoom(next);
-          return next;
-        }}
-        onOpenDevTools={noOp}
-        onToggleViewportToolbar={onToggleViewportToolbar}
-        viewportToolbarVisible={viewportToolbarOpen || responsiveViewportSize !== null}
-        onHumanFocus={() => invalidateBrowserAutomationTargetObservation(identity.workspaceId, threadId, WEB_RUNTIME_PREVIEW_TAB_ID)}
-      />
+      <PanelHeaderSlot slot="row2">
+        <div data-browser-chrome="" className="min-w-0 flex-1">
+          <BrowserToolbar
+            page={runtimeToolbarPage(visiblePage.address, visiblePage.pageState, reload)}
+            address={{
+              url: visiblePage.address ?? "",
+              onNavigate: (url) => {
+                invalidateViewportObservation();
+                navigate(url);
+              },
+              openExternal: { kind: "disabled", reason: DESKTOP_ONLY_REASON },
+              onHumanFocus: invalidateViewportObservation,
+            }}
+            tools={tools}
+          />
+        </div>
+      </PanelHeaderSlot>
       <RuntimeViewportToolbar
         visible={viewportToolbarOpen || responsiveViewportSize !== null}
         coordinator={viewportCoordinator}

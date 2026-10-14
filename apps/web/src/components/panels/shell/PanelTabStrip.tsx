@@ -26,14 +26,14 @@ export interface PanelTabStripProps {
   readonly onAdd: () => void;
   /** Trailing content inside one tab, after its label (for example a status glyph). */
   readonly renderAdornment?: (item: PanelTabStripItem) => ReactNode;
+  /** Browser tabs shrink to 96px and omit scroll chevrons. Defaults to "default". */
+  readonly appearance?: PanelTabStripAppearance;
 }
 
-/**
- * Row-1 tabs for a tool that holds several items (Terminal records, Browser
- * pages), followed by a round + that adds one. Inactive tabs shrink first; once
- * they reach their minimum the strip scrolls, fades each edge that hides tabs,
- * and shows scroll chevrons. The + stays pinned outside the scroller. See ADR-0026.
- */
+/** Sizing contract for a {@link PanelTabStrip}. */
+export type PanelTabStripAppearance = "default" | "browser";
+
+/** Tool tabs with a pinned add button and scrolling overflow. See ADR-0026. */
 export function PanelTabStrip({
   items,
   activeId,
@@ -44,15 +44,16 @@ export function PanelTabStrip({
   onClose,
   onAdd,
   renderAdornment,
+  appearance = "default",
 }: PanelTabStripProps) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   useScrollActiveTabIntoView(scrollerRef, activeId);
   const overflow = useHorizontalOverflow(scrollerRef, items);
-  const overflowing = overflow.start || overflow.end;
+  const showChevrons = appearance === "default" && (overflow.start || overflow.end);
   return (
     <div data-testid="panel-tab-strip" className="flex min-w-0 flex-1 items-center gap-2">
       <div className="flex min-w-0 items-center">
-        {overflowing ? (
+        {showChevrons ? (
           <PanelTabScrollButton direction="start" disabled={!overflow.start} scrollerRef={scrollerRef} />
         ) : null}
         <div
@@ -69,13 +70,14 @@ export function PanelTabStrip({
               key={item.id}
               item={item}
               active={item.id === activeId}
+              appearance={appearance}
               onSelect={onSelect}
               onClose={onClose}
               adornment={renderAdornment?.(item)}
             />
           ))}
         </div>
-        {overflowing ? (
+        {showChevrons ? (
           <PanelTabScrollButton direction="end" disabled={!overflow.end} scrollerRef={scrollerRef} />
         ) : null}
       </div>
@@ -227,15 +229,28 @@ function useScrollActiveTabIntoView(
   }, [scrollerRef, activeId]);
 }
 
+const TAB_SIZING: Readonly<Record<PanelTabStripAppearance, { readonly active: string; readonly inactive: string }>> = {
+  default: {
+    active: "max-w-[min(24rem,100%)] min-w-0 shrink-0",
+    inactive: "max-w-60 min-w-28 shrink",
+  },
+  browser: {
+    active: "max-w-full min-w-0 shrink-0",
+    inactive: "min-w-24 flex-[0_1_max-content]",
+  },
+};
+
 function PanelTab({
   item,
   active,
+  appearance,
   adornment,
   onSelect,
   onClose,
 }: {
   readonly item: PanelTabStripItem;
   readonly active: boolean;
+  readonly appearance: PanelTabStripAppearance;
   readonly adornment: ReactNode;
   readonly onSelect: (id: string) => void;
   readonly onClose: (id: string) => void;
@@ -245,12 +260,9 @@ function PanelTab({
       data-panel-tab={item.id}
       data-active={active ? "true" : undefined}
       className={cn(
-        "group/tab relative flex h-8 max-w-60 min-w-28 items-center gap-2 rounded-control pr-3 pl-2.5 text-sm/5 font-medium transition-colors",
-        // The active tab keeps its full label unless the strip itself is narrower; the others
-        // give up width before the strip scrolls.
-        active
-          ? "max-w-[min(24rem,100%)] min-w-0 shrink-0 bg-selected text-ink"
-          : "shrink text-muted hover:bg-hover hover:text-ink",
+        "group/tab relative flex h-8 items-center gap-2 rounded-control pr-3 pl-2.5 text-sm/5 font-medium transition-colors",
+        active ? TAB_SIZING[appearance].active : TAB_SIZING[appearance].inactive,
+        active ? "bg-selected text-ink" : "text-muted hover:bg-hover hover:text-ink",
       )}
     >
       <span className="relative grid size-3.5 shrink-0 place-items-center [&_svg]:size-3.5">

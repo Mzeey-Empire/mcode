@@ -249,9 +249,9 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
       viewportCoordinators.delete(key);
       return { liveTargets, viewportCoordinators };
     }),
-  refreshTarget: (workspaceId, threadId, tabId) =>
+  refreshTarget: (workspaceId, threadId, tabId) => {
+    const key = browserAutomationTargetKey(workspaceId, threadId, tabId);
     set((state) => {
-      const key = browserAutomationTargetKey(workspaceId, threadId, tabId);
       if (!state.liveTargets.has(key)) return state;
       const current = browserTargetRegistry.refresh(workspaceId, threadId, tabId);
       if (!current) return state;
@@ -262,7 +262,10 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
         lastUsedAt: Date.now(),
       });
       return { liveTargets };
-    }),
+    });
+    const revision = get().liveTargets.get(key)?.revision;
+    if (revision !== undefined) get().viewportCoordinators.get(key)?.setTargetGeneration(revision);
+  },
   detachTarget: (workspaceId, threadId, tabId) => {
     const key = browserAutomationTargetKey(workspaceId, threadId, tabId);
     const coordinator = useBrowserAutomationStore.getState().viewportCoordinators.get(key);

@@ -3,10 +3,7 @@
  * Wires all IPC handlers and re-exports the symbols that app composition roots need.
  */
 
-export type {
-  PreviewPictureReferenceResult,
-  PreviewContextReferenceResult,
-} from "./capture/handlers.js";
+export type { PreviewPictureReferenceResult } from "./capture/handlers.js";
 
 import { ipcMain } from "electron";
 import { registerNavigationHandlers } from "./navigation/handlers.js";

@@ -25,11 +25,6 @@ import { resolveActivePreviewWebContents } from "../surfaces/active-web-contents
  */
 export type PreviewPictureReferenceResult = CaptureFinishResult;
 
-/** Structured preview context without PNG bytes (fence-only composer attachment). */
-export type PreviewContextReferenceResult =
-  | { ok: true; capture: McodeBrowserCaptureV2 }
-  | { ok: false; error: string };
-
 type AnnotationSnapshotMarker = {
   displayNumber: number;
   bounds: Bounds;
@@ -554,10 +549,6 @@ function recordFailedPreviewRequest(details: Electron.OnCompletedListenerDetails
   }
 }
 
-/**
- * Registers the `preview:capture-picture-reference` and `preview:capture-context-reference`
- * IPC handlers. Call once at app startup.
- */
 interface ActiveCapture {
   readonly session: PreviewSession;
   readonly webContents: WebContents;
@@ -575,7 +566,7 @@ function isCaptureError(value: ActiveCapture | PreviewPictureReferenceResult): v
   return "ok" in value;
 }
 
-async function persistCapturedPng(webContents: WebContents, prefix: string): Promise<{ meta: AttachmentMeta; bytes: Uint8Array; bounds: Bounds } | PreviewPictureReferenceResult> {
+async function persistCapturedPng(webContents: WebContents, prefix: string): Promise<{ meta: AttachmentMeta; bytes: Uint8Array } | PreviewPictureReferenceResult> {
   const image = await webContents.capturePage();
   const buffer = image.toPNG();
   if (buffer.length === 0) return { ok: false, error: "empty-capture" };
@@ -585,33 +576,17 @@ async function persistCapturedPng(webContents: WebContents, prefix: string): Pro
   const tempPath = NodePath.join(tempDir, `${id}.png`);
   await NodeFSPromises.mkdir(tempDir, { recursive: true });
   await NodeFSPromises.writeFile(tempPath, buffer);
-  const size = image.getSize();
   return {
     meta: { id, name: `${prefix}-${stem}-${Date.now()}.png`, mimeType: "image/png", sizeBytes: buffer.length, sourcePath: tempPath },
     bytes: Uint8Array.from(buffer),
-    bounds: viewportBoundsFallback(size.width, size.height),
   };
 }
 
-function captureBounds(session: PreviewSession, fallback: Bounds): Bounds {
-  return session.lastBounds ? viewportBoundsFallback(session.lastBounds.width, session.lastBounds.height) : fallback;
-}
-
-async function buildPictureResult(capture: ActiveCapture, prefix: string, bounds: Bounds | null): Promise<PreviewPictureReferenceResult> {
+async function buildPictureResult(capture: ActiveCapture, prefix: string, bounds: Bounds): Promise<PreviewPictureReferenceResult> {
   const persisted = await persistCapturedPng(capture.webContents, prefix);
   if ("ok" in persisted) return persisted;
-  const capturePayload = await buildBrowserCapturePayload(capture.webContents, bounds ?? captureBounds(capture.session, persisted.bounds), capture.session.consoleBuffer, snapshotFailedRequestsForCapture(capture.session), capture.session.workspaceId, { captureKind: "viewport" });
+  const capturePayload = await buildBrowserCapturePayload(capture.webContents, bounds, capture.session.consoleBuffer, snapshotFailedRequestsForCapture(capture.session), capture.session.workspaceId, { captureKind: "viewport" });
   return { ok: true, meta: persisted.meta, previewBytes: persisted.bytes, capture: capturePayload };
-}
-
-async function handlePictureCapture(event: Electron.IpcMainInvokeEvent): Promise<PreviewPictureReferenceResult> {
-  const capture = activeCapture(event);
-  if (isCaptureError(capture)) return capture;
-  try {
-    return await buildPictureResult(capture, "preview", null);
-  } catch {
-    return { ok: false, error: "capture-failed" };
-  }
 }
 
 async function removeAnnotationOverlay(webContents: WebContents): Promise<void> {
@@ -646,23 +621,7 @@ async function handleAnnotationCapture(event: Electron.IpcMainInvokeEvent, paylo
   }
 }
 
-async function handleContextCapture(event: Electron.IpcMainInvokeEvent): Promise<PreviewContextReferenceResult> {
-  const capture = activeCapture(event);
-  if (isCaptureError(capture)) return capture;
-  const lastBounds = capture.session.lastBounds;
-  if (!lastBounds) return { ok: false, error: "no-bounds" };
-  try {
-    const bounds = viewportBoundsFallback(lastBounds.width, lastBounds.height);
-    const payload = await buildBrowserCapturePayload(capture.webContents, bounds, capture.session.consoleBuffer, snapshotFailedRequestsForCapture(capture.session), capture.session.workspaceId, { captureKind: "viewport" });
-    return { ok: true, capture: payload };
-  } catch {
-    return { ok: false, error: "capture-failed" };
-  }
-}
-
 /** Registers the Preview capture IPC handlers. */
 export function registerCaptureHandlers(): void {
-  ipcMain.handle("preview:capture-picture-reference", handlePictureCapture);
   ipcMain.handle("preview:capture-annotation-snapshot", handleAnnotationCapture);
-  ipcMain.handle("preview:capture-context-reference", handleContextCapture);
 }

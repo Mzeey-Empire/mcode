@@ -112,24 +112,34 @@ describe("Preview capture handlers", () => {
     registerCaptureHandlers();
   });
 
-  it("returns the picture and context result shapes from the active Preview guest", async () => {
-    const event = { sender: {} };
+  function stubAnnotationPaint(): void {
+    captureTest.webContents.executeJavaScript.mockImplementation(async (script: string) => {
+      if (script.includes("requestAnimationFrame")) return true;
+      if (script.includes("visibleText")) return contextResult();
+      return undefined;
+    });
+  }
 
-    const picture = await captureTest.ipcHandlers["preview:capture-picture-reference"]!(event) as {
+  const annotationRequest = {
+    activeDisplayNumber: 1,
+    activeBounds: { x: 10, y: 10, width: 40, height: 40 },
+    markers: [{ displayNumber: 1, bounds: { x: 10, y: 10, width: 40, height: 40 } }],
+  };
+
+  it("returns the annotation picture shape from the active Preview guest", async () => {
+    stubAnnotationPaint();
+
+    const picture = await captureTest.ipcHandlers["preview:capture-annotation-snapshot"]!({ sender: {} }, annotationRequest) as {
       ok: true;
       meta: { name: string; mimeType: string; sizeBytes: number; sourcePath: string };
       previewBytes: Uint8Array;
-      capture: { pageUrl: string; pageTitle: string; bounds: unknown; visibleTextExcerpt?: string };
-    };
-    const context = await captureTest.ipcHandlers["preview:capture-context-reference"]!(event) as {
-      ok: true;
       capture: { pageUrl: string; pageTitle: string; bounds: unknown; visibleTextExcerpt?: string };
     };
 
     expect(picture).toMatchObject({
       ok: true,
       meta: {
-        name: expect.stringMatching(/^preview-example\.test-\d+\.png$/),
+        name: expect.stringMatching(/^preview-annotation-example\.test-\d+\.png$/),
         mimeType: "image/png",
         sizeBytes: 9,
         sourcePath: expect.stringMatching(/[\\/]mcode-attachments[\\/][0-9a-f-]+\.png$/),
@@ -142,46 +152,26 @@ describe("Preview capture handlers", () => {
       },
     });
     expect([...picture.previewBytes]).toEqual([...Buffer.from("png-bytes")]);
-    expect(context).toMatchObject({
-      ok: true,
-      capture: {
-        pageUrl: "https://example.test/page",
-        pageTitle: "Example page",
-        bounds: { x: 0, y: 0, width: 800, height: 600 },
-        visibleTextExcerpt: "Visible text",
-      },
-    });
     expect(captureTest.webContents.capturePage).toHaveBeenCalledOnce();
   });
 
   it("keeps the established capture errors for missing state and capture failures", async () => {
-    const event = { sender: {} };
+    const capture = () => captureTest.ipcHandlers["preview:capture-annotation-snapshot"]!({ sender: {} }, annotationRequest);
+    stubAnnotationPaint();
     captureTest.currentWindow = null;
-    await expect(captureTest.ipcHandlers["preview:capture-picture-reference"]!(event)).resolves.toEqual({
-      ok: false,
-      error: "no-window",
-    });
+    await expect(capture()).resolves.toEqual({ ok: false, error: "no-window" });
 
     captureTest.currentWindow = captureTest.window;
     captureTest.activeWebContents = null;
-    await expect(captureTest.ipcHandlers["preview:capture-context-reference"]!(event)).resolves.toEqual({
-      ok: false,
-      error: "no-preview",
-    });
+    await expect(capture()).resolves.toEqual({ ok: false, error: "no-preview" });
 
     captureTest.activeWebContents = captureTest.webContents;
     captureTest.session.lastBounds = null as never;
-    await expect(captureTest.ipcHandlers["preview:capture-context-reference"]!(event)).resolves.toEqual({
-      ok: false,
-      error: "no-bounds",
-    });
+    await expect(capture()).resolves.toEqual({ ok: false, error: "no-bounds" });
 
     captureTest.session.lastBounds = { x: 0, y: 0, width: 800, height: 600 };
     captureTest.webContents.capturePage.mockRejectedValueOnce(new Error("capture failed"));
-    await expect(captureTest.ipcHandlers["preview:capture-picture-reference"]!(event)).resolves.toEqual({
-      ok: false,
-      error: "capture-failed",
-    });
+    await expect(capture()).resolves.toEqual({ ok: false, error: "capture-failed" });
   });
 
   it("clamps annotation rectangles to the visible viewport before capture", async () => {

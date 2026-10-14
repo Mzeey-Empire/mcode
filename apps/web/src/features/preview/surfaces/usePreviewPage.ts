@@ -98,6 +98,7 @@ interface PreviewPageOptions {
   readonly workspaceId: string | null | undefined;
   readonly surfaceRef: RefObject<HTMLDivElement | null>;
   readonly automationOnly: boolean;
+  readonly presentationActive: boolean;
   readonly tabs: ReturnType<typeof usePreviewViewport>["tabs"];
   readonly browserWorkspaceId: ReturnType<typeof usePreviewViewport>["browserWorkspaceId"];
   readonly activeWebviewTabId: ReturnType<typeof usePreviewViewport>["activeWebviewTabId"];
@@ -116,6 +117,7 @@ export function usePreviewPage({
   workspaceId,
   surfaceRef,
   automationOnly,
+  presentationActive,
   tabs,
   browserWorkspaceId,
   activeWebviewTabId,
@@ -227,6 +229,8 @@ export function usePreviewPage({
 
   const capture = usePreviewCapture({
     threadId,
+    activeTabId: activeWebviewTabId,
+    presentationActive,
     pushSync: bridge.pushSync,
     onSuccess: onCaptureSuccess,
   });
