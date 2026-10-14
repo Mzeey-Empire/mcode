@@ -147,6 +147,11 @@ function FilesBody({
   const activePath = state.activePath;
   return (
     <>
+      {layout.dockedTree ? (
+        <DockedTreePane scopeId={scopeId} width={state.treeWidth}>
+          {treeView}
+        </DockedTreePane>
+      ) : null}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <CodeFileView
           path={activePath}
@@ -155,11 +160,6 @@ function FilesBody({
           onCloseTab={() => useFilesTabsStore.getState().closeFile(scopeId, activePath)}
         />
       </div>
-      {layout.dockedTree ? (
-        <DockedTreePane scopeId={scopeId} width={state.treeWidth}>
-          {treeView}
-        </DockedTreePane>
-      ) : null}
     </>
   );
 }
@@ -171,8 +171,8 @@ function DockedTreePane({ scopeId, width, children }: { readonly scopeId: string
     const target = event.currentTarget;
     target.setPointerCapture(event.pointerId);
     const onMove = (move: PointerEvent) =>
-      // The pane sits on the right, so dragging left widens it.
-      useFilesTabsStore.getState().setTreeWidth(scopeId, startWidth + (startX - move.clientX));
+      // The pane sits left of the code, so dragging right widens it.
+      useFilesTabsStore.getState().setTreeWidth(scopeId, startWidth + (move.clientX - startX));
     const onUp = () => {
       target.removeEventListener("pointermove", onMove);
       target.removeEventListener("pointerup", onUp);
@@ -183,14 +183,14 @@ function DockedTreePane({ scopeId, width, children }: { readonly scopeId: string
   return (
     <div
       data-testid="files-docked-tree"
-      className="relative flex min-h-0 shrink-0 flex-col p-1.5 border-l border-border"
+      className="relative flex min-h-0 shrink-0 flex-col border-r border-border p-1.5"
       style={{ width }}
     >
       <div
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize files tree"
-        className="absolute inset-y-0 left-0 w-1 cursor-col-resize"
+        className="absolute inset-y-0 right-0 w-1 cursor-col-resize"
         onPointerDown={onPointerDown}
       />
       {children}
