@@ -34,6 +34,9 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** Marks (`\p{M}`) belong to the word so a decomposed "é" or an Indic vowel sign does not end it. */
+const WORD_CHAR = "[\\p{L}\\p{M}\\p{N}_]";
+
 function compile(source: string, flags: string): RegExp | null {
   try {
     return new RegExp(source, flags);
@@ -49,7 +52,7 @@ function buildPattern(query: string, options: FindOptions): RegExp | null {
   // `\b` is ASCII-only, so it splits "café". Unicode lookarounds need the `u` flag, which rejects some
   // escapes (`\-`) that a plain regex accepts; those patterns fall back to `\b`.
   return (
-    compile(`(?<![\\p{L}\\p{N}_])(?:${body})(?![\\p{L}\\p{N}_])`, `${flags}u`) ?? compile(`\\b(?:${body})\\b`, flags)
+    compile(`(?<!${WORD_CHAR})(?:${body})(?!${WORD_CHAR})`, `${flags}u`) ?? compile(`\\b(?:${body})\\b`, flags)
   );
 }
 

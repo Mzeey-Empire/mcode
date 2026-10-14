@@ -32,6 +32,8 @@ describe("findInLines", () => {
   it("treats accented letters as word characters in whole-word mode", () => {
     expect(ranges(["café caf"], "café", { wholeWord: true })).toEqual([[0, 0, 4]]);
     expect(ranges(["café"], "caf", { wholeWord: true })).toEqual([]);
+    expect(ranges(["cafés"], "cafe", { wholeWord: true })).toEqual([]);
+    expect(ranges(["किताब"], "क", { wholeWord: true })).toEqual([]);
   });
 
   it("keeps whole-word regexes that only a non-unicode pattern accepts", () => {
