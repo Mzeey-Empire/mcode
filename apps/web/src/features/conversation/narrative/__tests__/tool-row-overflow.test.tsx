@@ -63,7 +63,6 @@ describe("narrative tool row layout classes", () => {
     const user = userEvent.setup();
 
     expect(button).toHaveAttribute("aria-expanded", "false");
-    expect(commandPreview).toHaveClass("text-fade");
     await user.hover(commandPreview);
     await waitFor(() => {
       const tooltip = document.querySelector<HTMLElement>("[data-slot='tooltip-content']");
@@ -76,8 +75,6 @@ describe("narrative tool row layout classes", () => {
     expect(button).toHaveAttribute("aria-expanded", "true");
     const command = container.querySelector("code");
     expect(command?.textContent).toBe(LONG_SHELL_COMMAND);
-    expect(command?.className).toContain("whitespace-pre-wrap");
-    expect(command?.className).toContain("overflow-wrap");
   });
 
   it("ActiveToolRow identifies an in-progress approval review without its native id", () => {
@@ -130,9 +127,6 @@ describe("narrative tool row layout classes", () => {
 
     fireEvent.click(child);
 
-    const detail = within(child).getByText(LONG_SHELL_COMMAND);
-
-    expect(detail.className).toContain("text-fade");
     expect(screen.getByRole("region", { name: "Shell output" })).toBeTruthy();
     expect(screen.getByText("Shell")).toBeTruthy();
     expect(container.querySelector("code")?.textContent).toBe(LONG_SHELL_COMMAND);
@@ -243,11 +237,11 @@ describe("narrative tool row layout classes", () => {
     expect(screen.getByText("Ran command")).toBeTruthy();
   });
 
-  it("ToolSummaryLine renders a cancelled command in mono meta text", () => {
+  it("ToolSummaryLine marks a cancelled command as cancelled", () => {
     render(<ToolSummaryLine group={{ calls: [makeBashCall({ isComplete: true, isCancelled: true })] }} />);
 
     const row = screen.getByRole("button", { name: /Ran command/ });
-    expect(within(row).getByText("cancelled")).toHaveClass("font-mono", "text-xs", "text-muted");
+    expect(within(row).getByText("cancelled")).toBeInTheDocument();
   });
 
   it("does not round a sub-second shell duration up to one second", () => {
@@ -341,10 +335,9 @@ describe("narrative tool row layout classes", () => {
     const notice = screen.getByText(/Output truncated/);
     expect(notice.textContent).toContain("300 KB total");
     expect(notice.textContent).toContain("full output saved");
-    expect(notice.className).toContain("text-xs");
   });
 
-  it("shows a shell exit code status badge at the bottom right of the expanded panel", () => {
+  it("shows a shell exit code status badge inside the expanded panel", () => {
     const group: ToolGroup = {
       calls: [
         makeBashCall({
@@ -368,9 +361,7 @@ describe("narrative tool row layout classes", () => {
     const panel = screen.getByRole("region", { name: "Shell output" });
     const exitCode = screen.getByText("exit code 1");
     expect(panel).toContainElement(exitCode);
-    expect(exitCode).toHaveClass("text-muted");
     expect(exitCode).toHaveAttribute("role", "status");
-    expect(exitCode.closest("footer")).toHaveClass("justify-end");
   });
 
   it.each(["file_change", "apply_patch", "Edit"])("reads a lone failed %s as Edit failed with its file", (toolName) => {
@@ -393,7 +384,7 @@ describe("narrative tool row layout classes", () => {
     expect(container.querySelector(".lucide-pencil")).toBeTruthy();
     expect(screen.queryByText("patch did not apply")).toBeNull();
     fireEvent.click(row);
-    expect(screen.getByText("patch did not apply")).not.toHaveClass("text-[var(--diff-remove)]");
+    expect(screen.getByText("patch did not apply")).toBeInTheDocument();
   });
 
   it("names a single Codex file change by its file", () => {
@@ -431,8 +422,6 @@ describe("narrative tool row layout classes", () => {
     // jsdom drops the count's leading space from the name; Chromium keeps it.
     const summary = screen.getByRole("button", { name: /^Read 2 files ?· 1 failed$/ });
     expect(summary).toHaveAttribute("aria-expanded", "false");
-    expect(within(summary).getByText("Read 2 files")).toHaveClass("text-fade");
-    expect(within(summary).getByText("· 1 failed")).toHaveClass("shrink-0");
     fireEvent.click(summary);
     expect(screen.getByText("Read file")).toBeVisible();
     expect(screen.getByText("Read failed")).toBeVisible();

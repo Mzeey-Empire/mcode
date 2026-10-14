@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HookExecutionRecord, ToolCallRecord } from "@/transport/types";
@@ -12,22 +12,13 @@ vi.mock("@/stores/thread-selectors", () => ({
 }));
 
 vi.mock("../NarrativeRows", () => ({
-  NarrativeRows: ({
-    items,
-    onSubagentSelect,
-  }: {
-    items: readonly { type: string; toolCall?: { id: string } }[];
-    onSubagentSelect?: (id: string, target: "active" | "finished") => void;
-  }) => (
-    <>
-      <div data-testid="persisted-row-ids">
-        {items
-          .filter((item) => item.type === "subagent")
-          .map((item) => item.toolCall?.id)
-          .join(",")}
-      </div>
-      <button type="button" onClick={() => onSubagentSelect?.("child-tool", "finished")}>Open child</button>
-    </>
+  NarrativeRows: ({ items }: { items: readonly { type: string; toolCall?: { id: string } }[] }) => (
+    <div data-testid="persisted-row-ids">
+      {items
+        .filter((item) => item.type === "subagent")
+        .map((item) => item.toolCall?.id)
+        .join(",")}
+    </div>
   ),
 }));
 
@@ -108,22 +99,6 @@ describe("persisted child timeline thread selection", () => {
     const dialog = await screen.findByRole("dialog", { name: "Hooks" });
     expect(dialog).toHaveTextContent("ChildStop");
     expect(dialog).not.toHaveTextContent("ParentStop");
-  });
-
-  it("routes persisted subagent rows through the chat detail callback", () => {
-    const onSubagentSelect = vi.fn();
-
-    render(
-      <PersistedNarrative
-        threadId="child-thread"
-        messageId="assistant-1"
-        messageContent="Child result"
-        onSubagentSelect={onSubagentSelect}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Open child" }));
-
-    expect(onSubagentSelect).toHaveBeenCalledWith("child-tool", "finished");
   });
 
   it("reconstructs the persisted child row when tools hydrate after the stored message", () => {

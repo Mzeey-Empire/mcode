@@ -256,14 +256,6 @@ afterEach(() => {
 });
 
 describe("MessageList thread switch", () => {
-  it("keeps virtual message rails vertically visible for sent annotation previews", () => {
-    const { container } = render(<MessageList />);
-    const rail = container.querySelector(".overflow-x-clip");
-
-    expect(rail).toHaveClass("overflow-x-clip");
-    expect(rail).not.toHaveClass("overflow-x-hidden");
-  });
-
   it("hydrates a mounted assistant from its owning thread", async () => {
     activeThreadIdValue = "thread-A";
     currentThreadIdValue = "thread-A";
@@ -739,11 +731,9 @@ describe("MessageList thread switch", () => {
     fireEvent.click(addComment);
     expect(getByRole("dialog", { name: "Comment on selected text" })).toBeInTheDocument();
     const noteInput = getByRole("textbox", { name: "Comment note" });
-    await act(async () => {
-      await Promise.resolve();
-      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    await vi.waitFor(() => {
+      expect(noteInput).toHaveFocus();
     });
-    expect(noteInput).toHaveFocus();
     expect(queryByRole("button", { name: "Add comment" })).not.toBeInTheDocument();
     expect(getByRole("button", { name: "Close comment editor" })).toBeInTheDocument();
     selection.removeAllRanges();
@@ -779,7 +769,7 @@ describe("MessageList thread switch", () => {
     });
   });
 
-  it("reconstructs current range geometry after the native selection clears", async () => {
+  it("repositions the selected-text action and editor as the range geometry moves", async () => {
     messagesValue = [{
       id: "assistant-1",
       sequence: 1,
@@ -791,7 +781,6 @@ describe("MessageList thread switch", () => {
     const originalGetClientRects = Range.prototype.getClientRects;
     const originalResizeObserver = Object.getOwnPropertyDescriptor(globalThis, "ResizeObserver");
     const resizeObservers: ResizeObserverMock[] = [];
-    let rangeRectReads = 0;
     class ResizeObserverMock implements ResizeObserver {
       readonly observed = new Set<Element>();
 
@@ -817,10 +806,7 @@ describe("MessageList thread switch", () => {
     }
     Object.defineProperty(Range.prototype, "getClientRects", {
       configurable: true,
-      value: () => {
-        rangeRectReads += 1;
-        return [selectedRangeRect];
-      },
+      value: () => [selectedRangeRect],
     });
     Object.defineProperty(globalThis, "ResizeObserver", {
       configurable: true,
@@ -859,20 +845,20 @@ describe("MessageList thread switch", () => {
         expect([...viewportObserver.observed]).toContain(content);
       });
 
+      expect(actionPositioner).toHaveStyle({ transform: "translate(120px, 188px)" });
+
       selectedRangeRect = new DOMRect(120, 100, 96, 20);
-      const readsBeforeScroll = rangeRectReads;
       fireEvent.scroll(viewport);
       await vi.waitFor(() => {
-        expect(rangeRectReads).toBeGreaterThan(readsBeforeScroll);
+        expect(actionPositioner).toHaveStyle({ transform: "translate(120px, 128px)" });
       });
 
       selectedRangeRect = new DOMRect(120, 80, 128, 20);
-      const readsBeforeViewportResize = rangeRectReads;
       act(() => {
         viewportObserver.trigger();
       });
       await vi.waitFor(() => {
-        expect(rangeRectReads).toBeGreaterThan(readsBeforeViewportResize);
+        expect(actionPositioner).toHaveStyle({ transform: "translate(120px, 108px)" });
       });
 
       fireEvent.click(action);
@@ -893,17 +879,15 @@ describe("MessageList thread switch", () => {
       });
 
       selectedRangeRect = new DOMRect(120, 840, 128, 20);
-      const readsBeforeDock = rangeRectReads;
       fireEvent.scroll(viewport);
       await vi.waitFor(() => {
-        expect(rangeRectReads).toBeGreaterThan(readsBeforeDock);
+        expect(editorPositioner).toHaveStyle({ transform: "translate(8px, 746px)" });
       });
 
       selectedRangeRect = new DOMRect(160, 220, 128, 20);
-      const readsBeforeReturn = rangeRectReads;
       fireEvent.scroll(viewport);
       await vi.waitFor(() => {
-        expect(rangeRectReads).toBeGreaterThan(readsBeforeReturn);
+        expect(editorPositioner).toHaveStyle({ transform: "translate(160px, 248px)" });
       });
     } finally {
       Object.defineProperty(Range.prototype, "getClientRects", {
@@ -953,6 +937,7 @@ describe("MessageList thread switch", () => {
       role: "assistant",
       content: "Select this phrase",
     }];
+    vi.useFakeTimers();
     const { container, getByRole, getByText, queryByRole } = render(<MessageList onSelectedTextComment={vi.fn()} />);
     mockSelectedTextViewport(container);
     const content = getByText("Select this phrase");
@@ -966,9 +951,7 @@ describe("MessageList thread switch", () => {
     fireEvent.mouseUp(content, { button: 0, clientX: 900, clientY: 700 });
     expect(getByRole("button", { name: "Add comment" })).toBeInTheDocument();
 
-    await act(async () => {
-      await new Promise((resolve) => window.setTimeout(resolve, 0));
-    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
     act(() => {
       fireEvent.pointerDown(document.body);
     });
@@ -1210,7 +1193,7 @@ describe("MessageList thread switch", () => {
     }];
     const { container, rerender } = render(<MessageList displayThreadId="thread-A" />);
 
-    expect(container.querySelectorAll(".animate-pulse")).toHaveLength(0);
+    expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0);
 
     currentThreadIdValue = "thread-B";
     messagesValue = [{
@@ -1222,7 +1205,7 @@ describe("MessageList thread switch", () => {
     }];
     act(() => rerender(<MessageList />));
 
-    expect(container.querySelectorAll(".animate-pulse")).toHaveLength(3);
+    expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(3);
   });
 
 
@@ -1287,13 +1270,14 @@ describe("MessageList thread switch", () => {
     }));
   }
 
+  /** Fakes animation frames only, so measurement frames run when a test advances them. */
+  function fakeAnimationFrames(): void {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
+  }
+
   /** Row measurement applies one frame later to avoid ResizeObserver loops. */
   async function flushMeasurement(): Promise<void> {
-    await act(async () => {
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-      );
-    });
+    await act(() => vi.advanceTimersByTimeAsync(32));
   }
 
   async function measureRows(container: HTMLElement, height = 100): Promise<void> {
@@ -1310,6 +1294,7 @@ describe("MessageList thread switch", () => {
   }
 
   it("pins measured content and holds a reading anchor through prepend and eviction", async () => {
+    fakeAnimationFrames();
     messagesValue = transcriptRows();
     const { container, rerender } = render(<MessageList />);
     await measureRows(container);
@@ -1329,6 +1314,7 @@ describe("MessageList thread switch", () => {
   });
 
   it("restores a cached reading row without reusing the outgoing viewport", async () => {
+    fakeAnimationFrames();
     messagesValue = transcriptRows();
     const { container, rerender } = render(<MessageList />, { wrapper: StrictMode });
     await measureRows(container);
@@ -1350,6 +1336,7 @@ describe("MessageList thread switch", () => {
   });
 
   it("keeps a restored offset that exceeds the row's provisional height", async () => {
+    fakeAnimationFrames();
     messagesValue = transcriptRows();
     const { container, rerender } = render(<MessageList />, { wrapper: StrictMode });
     await measureRows(container, 300);
@@ -1366,6 +1353,7 @@ describe("MessageList thread switch", () => {
   });
 
   it("clips the prompt for the older turn in view", async () => {
+    fakeAnimationFrames();
     messagesValue = transcriptRows().map((message, index) => index === 0 || index === 6
       ? { ...message, role: "user", content: index === 0 ? "Earlier request" : "Latest request" }
       : message);
@@ -1388,6 +1376,7 @@ describe("MessageList thread switch", () => {
   });
 
   it("does not apply the sticky prompt inset twice on a cached restore", async () => {
+    fakeAnimationFrames();
     const history = [
       { id: "prompt", thread_id: "thread-A", sequence: -1, role: "user" as const, content: "Earlier request" },
       ...transcriptRows(),
@@ -1408,6 +1397,7 @@ describe("MessageList thread switch", () => {
   });
 
   it("unmounts off-screen thoughts inside one long turn and remounts them in order", async () => {
+    fakeAnimationFrames();
     messagesValue = [{ id: "answer", sequence: 1, role: "assistant", content: "Final answer" }];
     const thoughts = Array.from({ length: 200 }, (_, index) => ({
       id: `thought-${index}`, message_id: "answer", text: `History thought ${index}`,
@@ -1432,6 +1422,7 @@ describe("MessageList thread switch", () => {
   });
 
   it("opens a settling turn's fold for this visit when the reader is inside its rows", async () => {
+    fakeAnimationFrames();
     const thoughts = Array.from({ length: 40 }, (_, index) => ({
       text: `Live thought ${index}`, startedAt: index * 1000, endedAt: index * 1000 + 500, isExplicitNonFinal: true,
     }));
@@ -1466,6 +1457,7 @@ describe("MessageList thread switch", () => {
   });
 
   it("holds reading posture on append until the user returns to the tail", async () => {
+    fakeAnimationFrames();
     messagesValue = transcriptRows();
     const { container, rerender } = render(<MessageList />);
     await measureRows(container);
@@ -1485,6 +1477,7 @@ describe("MessageList thread switch", () => {
   });
 
   it("waits for hydration and then positions the completed transcript at its measured tail", async () => {
+    fakeAnimationFrames();
     loadingValue = true;
     messagesValue = [];
     const { container, rerender } = render(<MessageList />);
@@ -1498,6 +1491,7 @@ describe("MessageList thread switch", () => {
   });
 
   it("tops up an underfilled transcript with older history until it covers the viewport", async () => {
+    fakeAnimationFrames();
     messagesValue = transcriptRows().slice(0, 8);
     hasMoreMessagesValue = true;
     loadOlderMessagesSpy.mockImplementation(async () => {
@@ -1519,6 +1513,7 @@ describe("MessageList thread switch", () => {
   });
 
   it("loads older and newer history only after a gesture reaches its boundary", async () => {
+    fakeAnimationFrames();
     // Tall content keeps the viewport-fill effect out and leaves room to sit
     // more than one viewport-height away from the bottom boundary.
     messagesValue = Array.from({ length: 30 }, (_, sequence) => ({

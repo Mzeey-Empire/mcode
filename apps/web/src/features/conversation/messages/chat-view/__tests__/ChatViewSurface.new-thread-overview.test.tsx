@@ -233,7 +233,7 @@ describe("new-thread Overview", () => {
 
     await user.click(row);
     expect(await screen.findByRole("group", { name: "Workspace" })).toBeInTheDocument();
-    expect(row).toHaveClass("bg-hover");
+    expect(row).toHaveAttribute("aria-expanded", "true");
     await user.click(screen.getByRole("menuitemradio", { name: /Local/ }));
 
     expect(within(card).getByTestId("overview-target-workspace")).toHaveTextContent("Local · fixture-repo");

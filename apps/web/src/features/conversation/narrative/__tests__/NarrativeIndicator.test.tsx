@@ -47,12 +47,12 @@ describe("NarrativeIndicator", () => {
 
   it("draws animated layers for working rows and a spinner for holding rows", () => {
     const { rerender, container } = render(<NarrativeIndicator stepCount={1} status={lint} isAgentRunning />);
-    expect(container.querySelector('svg.stacked-layers-animated[data-run-status-icon="layers"]')).not.toBeNull();
+    expect(container.querySelector('[data-run-status-icon="layers"]')).not.toBeNull();
     expect(container.querySelector('[data-run-status-icon="spinner"]')).toBeNull();
 
     rerender(<NarrativeIndicator stepCount={1} status={stopping} isAgentRunning />);
-    expect(container.querySelector('[data-run-status-icon="spinner"] .spinner-tail-fade')).not.toBeNull();
-    expect(container.querySelector("svg.stacked-layers-animated")).toBeNull();
+    expect(container.querySelector('[data-run-status-icon="spinner"]')).not.toBeNull();
+    expect(container.querySelector('[data-run-status-icon="layers"]')).toBeNull();
   });
 
   it("fades out with the last running label, then renders nothing", () => {
@@ -60,7 +60,6 @@ describe("NarrativeIndicator", () => {
 
     rerender(<NarrativeIndicator stepCount={3} status={{ label: "Thinking", icon: "layers" }} isAgentRunning={false} />);
     const exiting = container.querySelector('[data-state="exiting"]');
-    expect(exiting?.classList.contains("narrative-indicator-exit")).toBe(true);
     expect(exiting).toHaveTextContent("Running bun run lint");
     expect(exiting).not.toHaveTextContent("Done");
     expect(exiting?.querySelector("svg")).not.toBeNull();

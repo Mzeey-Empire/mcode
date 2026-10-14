@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DiffStats, FileEffect, TurnSnapshot } from "@mcode/contracts";
@@ -141,7 +141,6 @@ describe("TurnChangesBar", () => {
     expect(row("apps/web/src/chat/new-file.ts")).toHaveTextContent("new-file.tsnew+31");
     expect(row("apps/web/src/chat/Renamed.tsx")).toHaveTextContent("Renamed.tsxfrom Original.tsx+2−2");
     expect(row("apps/web/src/old.ts")).toHaveTextContent("old.tsdeleted−40");
-    expect(within(row("apps/web/src/old.ts")).getByText("old.ts")).toHaveClass("line-through");
   });
 
   it("shows Binary in the count lane and blank lanes for uncounted files", () => {

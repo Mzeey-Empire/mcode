@@ -204,7 +204,7 @@ describe("ThreadHydrator", () => {
   let hydrator: ThreadHydrator;
 
   beforeEach(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    fakeTimeouts();
     resetStores();
     hydrator = createStoreHydrator();
   });
@@ -1034,7 +1034,7 @@ describe("ThreadHydrator", () => {
       records: patchThreadRecord(s.records, THREAD_B, { messages: [] }),
     }));
     await hydrator.hydrate(THREAD_A, "active");
-    await new Promise((r) => setTimeout(r, 20));
+    await vi.advanceTimersByTimeAsync(20);
 
     expect(mockTransport.getThreadTasks).not.toHaveBeenCalled();
   });
@@ -1051,7 +1051,7 @@ describe("ThreadHydrator", () => {
     vi.clearAllMocks();
 
     await hydrator.hydrate(THREAD_A, "active");
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.advanceTimersByTimeAsync(20);
 
     expect(mockTransport.getThreadTasks).not.toHaveBeenCalled();
   });
@@ -1162,7 +1162,7 @@ describe("ThreadHydrator", () => {
     cacheRecord(THREAD_B, makeCachedRecord([msgB]));
 
     await hydrator.hydrate(THREAD_B, "active");
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.advanceTimersByTimeAsync(20);
 
     expect(useThreadStore.getState().records.has(THREAD_A)).toBe(false);
     expect(getCachedRecord(THREAD_A)?.messages).toEqual(history.slice(-MESSAGE_FETCH_SIZE));
@@ -1177,7 +1177,7 @@ describe("ThreadHydrator", () => {
     cacheRecord(THREAD_B, makeCachedRecord([msgB]));
 
     await hydrator.hydrate(THREAD_B, "active");
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.advanceTimersByTimeAsync(20);
 
     expect(useThreadStore.getState().records.has(THREAD_A)).toBe(false);
     expect(getCachedRecord(THREAD_A)?.messages).toEqual([]);
@@ -1224,7 +1224,7 @@ describe("ThreadHydrator", () => {
     cacheRecord(THREAD_B, makeCachedRecord([msgB]));
 
     await hydrator.hydrate(THREAD_B, "active");
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.advanceTimersByTimeAsync(20);
 
     expect(getCachedRecord(THREAD_A)?.messages).toEqual([]);
     useThreadStore.setState((state) => {
@@ -1275,7 +1275,6 @@ describe("ThreadHydrator", () => {
   });
 
   it("uses auxiliary TTL by default and when force is false for resident hydration", async () => {
-    fakeTimeouts();
     resetThreadStoreForTests({
       currentThreadId: THREAD_B,
       runningThreadIds: new Set([THREAD_A]),
@@ -1781,7 +1780,7 @@ describe("ThreadHydrator", () => {
     cacheRecord(THREAD_B, { ...makeCachedRecord(tailB), hasMoreMessages: true });
     for (let index = 0; index < 20; index++) {
       await hydrator.hydrate(index % 2 === 0 ? THREAD_A : THREAD_B, "active");
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.advanceTimersByTimeAsync(0);
     }
 
     expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
@@ -2476,7 +2475,6 @@ describe("ThreadHydrator", () => {
   });
 
   it("defers background hydration while active hydration is in flight", async () => {
-    fakeTimeouts();
     let resolveActive!: (value: {
       messages: typeof msgA[];
       hasMore: boolean;

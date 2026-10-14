@@ -60,14 +60,14 @@ describe("SubagentRow authoritative roster", () => {
   });
 
   it.each([
-    ["running", "working", "text-muted"], ["done", "finished", "text-muted"],
-    ["failed", "failed", "text-error"], ["stopped", "stopped", "text-muted"],
-  ] as const)("shows %s as %s in %s inside the chip", (status, word, color) => {
+    ["running", "working"], ["done", "finished"],
+    ["failed", "failed"], ["stopped", "stopped"],
+  ] as const)("shows %s as %s inside the chip", (status, word) => {
     seed([entry("agent-1", { status })]);
     mount();
     expect(screen.getByRole("status")).toHaveTextContent(word);
     const chip = screen.getByRole("button", { name: "Open Read detection module subagent details" });
-    expect(within(chip).getByText(word)).toHaveClass(color);
+    expect(within(chip).getByText(word)).toBeInTheDocument();
   });
 
   it("shows each subagent under its own provider after the thread switched providers", () => {

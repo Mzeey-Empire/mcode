@@ -21,7 +21,7 @@ function makeHook(overrides: Partial<HookExecution> = {}): HookExecution {
 
 describe("HookRow", () => {
   function closestCollapsible(element: HTMLElement): HTMLElement {
-    const collapsible = element.closest(".grid");
+    const collapsible = element.closest("[aria-hidden]");
     if (!(collapsible instanceof HTMLElement)) {
       throw new Error("Expected hook detail to be inside AnimatedCollapsible");
     }
@@ -35,25 +35,27 @@ describe("HookRow", () => {
     expect(screen.getByText("Ran hook").parentElement).toHaveTextContent(/^Ran hookSessionStart:startupon Bash32ms$/);
   });
 
-  it("reads a blocked hook as blocked in its meta without error colors", () => {
+  it("reads a blocked hook as blocked in its meta", () => {
     render(<HookRow hook={makeHook({ didBlock: true, durationMs: 1_200, outputLines: ["denied"], fullOutput: ["denied"] })} />);
 
     const row = screen.getByRole("button", { name: /SessionStart:startup/ });
-    expect(within(row).getByText("blocked · 1.2s")).toHaveClass("text-muted");
-    expect(screen.getByText("denied")).toHaveClass("text-ink/75");
+    expect(within(row).getByText("blocked · 1.2s")).toBeInTheDocument();
+    expect(screen.getByText("denied")).toBeInTheDocument();
   });
 
-  it("renders expanded output at narrative text size", async () => {
+  it("reveals the output when the row is expanded", async () => {
     const user = userEvent.setup();
     render(<HookRow hook={makeHook({ outputLines: ["startup ok"], fullOutput: ["startup ok"] })} />);
 
     const detail = screen.getByText("startup ok");
-    expect(closestCollapsible(detail)).toHaveClass("grid-rows-[0fr]");
+    const row = screen.getByRole("button", { name: /SessionStart:startup/ });
+    expect(row).toHaveAttribute("aria-expanded", "false");
+    expect(closestCollapsible(detail)).toHaveAttribute("aria-hidden", "true");
 
-    await user.click(screen.getByRole("button", { name: /SessionStart:startup/ }));
+    await user.click(row);
 
-    expect(detail).toHaveClass("text-sm");
-    expect(closestCollapsible(detail)).toHaveClass("grid-rows-[1fr]");
+    expect(row).toHaveAttribute("aria-expanded", "true");
+    expect(closestCollapsible(detail)).toHaveAttribute("aria-hidden", "false");
   });
 
   it("previews live output lines and expands to full output", async () => {
@@ -68,12 +70,12 @@ describe("HookRow", () => {
     );
 
     const detail = screen.getByText("preview line");
-    expect(screen.getByText("full line")).toHaveClass("text-sm");
-    expect(closestCollapsible(detail)).toHaveClass("grid-rows-[0fr]");
+    expect(screen.getByText("full line")).toBeInTheDocument();
+    expect(closestCollapsible(detail)).toHaveAttribute("aria-hidden", "true");
 
     await user.click(screen.getByRole("button", { name: /SessionStart:startup/ }));
 
-    expect(closestCollapsible(detail)).toHaveClass("grid-rows-[1fr]");
+    expect(closestCollapsible(detail)).toHaveAttribute("aria-hidden", "false");
   });
 
   it("renders persisted hook detail after expansion when stdout is unavailable", async () => {
@@ -90,12 +92,12 @@ describe("HookRow", () => {
     );
 
     const detail = screen.getByText(/phase: stop/);
-    expect(screen.getByText(/tool: Bash/)).toHaveClass("text-sm");
-    expect(screen.getByText(/blocked: yes/)).toHaveClass("text-sm");
-    expect(closestCollapsible(detail)).toHaveClass("grid-rows-[0fr]");
+    expect(screen.getByText(/tool: Bash/)).toBeInTheDocument();
+    expect(screen.getByText(/blocked: yes/)).toBeInTheDocument();
+    expect(closestCollapsible(detail)).toHaveAttribute("aria-hidden", "true");
 
     await user.click(screen.getByRole("button", { name: /SessionStart:startup/ }));
 
-    expect(closestCollapsible(detail)).toHaveClass("grid-rows-[1fr]");
+    expect(closestCollapsible(detail)).toHaveAttribute("aria-hidden", "false");
   });
 });

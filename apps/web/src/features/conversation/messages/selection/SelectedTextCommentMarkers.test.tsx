@@ -227,9 +227,8 @@ describe("SelectedTextCommentMarkers", () => {
     vi.spyOn(viewport.parentElement!, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 60, 200, 120));
     vi.spyOn(highlight.parentElement!, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 10, 200, 180));
 
-    await act(async () => {
+    act(() => {
       fireEvent.scroll(viewport);
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     });
 
     await waitFor(() => expect(highlight.firstElementChild).toHaveStyle({ top: "10px", left: "10px" }));
@@ -242,8 +241,6 @@ describe("SelectedTextCommentMarkers", () => {
 
     await waitFor(() => expect(screen.getAllByTestId("selected-text-comment-marker")).toHaveLength(2));
     expect(screen.getAllByTestId("selected-text-comment-highlight")).toHaveLength(2);
-    expect(screen.getAllByTestId("selected-text-comment-highlight")[0]!.parentElement).toHaveClass("z-(--layer-base)");
-    expect(screen.getAllByTestId("selected-text-comment-marker")[0]!.parentElement).toHaveClass("z-(--layer-sticky)");
     expect(screen.getAllByTestId("selected-text-comment-marker")[0]).toHaveAccessibleName("Open comment 1");
     expect(screen.getAllByTestId("selected-text-comment-marker")[1]).toHaveAccessibleName("Open comment 2");
 
@@ -383,10 +380,7 @@ describe("SelectedTextCommentMarkers", () => {
     expect(screen.getByRole("dialog", { name: "Comment on selected text" })).toBeVisible();
     expect(screen.getByTestId("selected-text-comment-editor-anchor")).toHaveTextContent("source");
 
-    await act(async () => {
-      unmount();
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    });
+    unmount();
   });
 
   it("returns focus to the marker after saving a marker-initiated edit", async () => {

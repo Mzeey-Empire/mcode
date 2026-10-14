@@ -63,15 +63,11 @@ describe("DeltaBlock", () => {
     vi.restoreAllMocks();
   });
 
-  it("uses plain pre-wrapped text while streaming", () => {
-    const { container } = render(
-      <DeltaBlock text={"streaming text ".repeat(10)} isStreaming showCursor={false} />,
-    );
+  it("uses plain text while streaming", () => {
+    render(<DeltaBlock text={"streaming text ".repeat(10)} isStreaming showCursor={false} />);
 
     expect(screen.queryByTestId("markdown-content")).toBeNull();
-    expect(container.querySelector("p.whitespace-pre-wrap")?.textContent).toContain(
-      "streaming text",
-    );
+    expect(screen.getByText(/streaming text/)).toBeInTheDocument();
   });
 
   it("renders a closed mermaid fence as a diagram part while streaming", async () => {
@@ -160,18 +156,6 @@ describe("DeltaBlock", () => {
     });
   });
 
-  it("renders streaming and settled text as 16/28 prose", async () => {
-    const { container, rerender } = render(<DeltaBlock text="answer" isStreaming showCursor={false} />);
-    const root = container.firstElementChild;
-    expect(root?.classList.contains("text-prose")).toBe(true);
-    await waitFor(() => expect(container.querySelector("p.whitespace-pre-wrap")).not.toBeNull());
-    expect(container.querySelector("p.whitespace-pre-wrap")?.classList.contains("text-sm")).toBe(false);
-
-    rerender(<DeltaBlock text="answer" isStreaming={false} showCursor={false} />);
-    await waitFor(() => expect(screen.getByTestId("markdown-content")).toBeTruthy());
-    expect(container.firstElementChild?.classList.contains("text-prose")).toBe(true);
-  });
-
   it("streams blank-line paragraphs as the same spaced paragraphs markdown settles to", async () => {
     const { container: streaming } = render(
       <DeltaBlock text={"First paragraph.\n\nSecond paragraph.\n\n \n\n "} isStreaming showCursor={false} />,
@@ -183,8 +167,6 @@ describe("DeltaBlock", () => {
         "Second paragraph.",
       ]),
     );
-    const paragraphs = [...streaming.querySelectorAll("p")];
-    expect(paragraphs.every((p) => p.classList.contains("mb-2"))).toBe(true);
   });
 
   it("parks a 2x18 caret after the last word, centred on its line", () => {

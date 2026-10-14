@@ -23,7 +23,7 @@ class LayoutObserver implements ResizeObserver {
 }
 
 /** Measurement application is deferred one frame to avoid ResizeObserver loops. */
-const nextFrame = () => new Promise((resolve) => setTimeout(resolve, 30));
+const nextFrame = () => vi.advanceTimersByTimeAsync(16);
 
 describe("transcript viewport", () => {
   let view: VirtualViewport;
@@ -33,6 +33,7 @@ describe("transcript viewport", () => {
   const rows = Array.from({ length: 20 }, (_, index) => ({ id: String(index), height: 100 }));
 
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
     LayoutObserver.instances = [];
     vi.stubGlobal("ResizeObserver", LayoutObserver);
     vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(200);
