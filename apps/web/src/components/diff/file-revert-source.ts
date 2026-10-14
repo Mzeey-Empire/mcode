@@ -33,11 +33,7 @@ function turnGroups(snapshots: readonly TurnSnapshot[]): TurnSnapshot[][] {
   return groups;
 }
 
-function hasBothRefs(snapshot: TurnSnapshot): boolean {
-  return Boolean(snapshot.ref_before && snapshot.ref_after);
-}
-
-/** A turn's first attempt row that has both refs, and the settled attempt whose message id the turn list carries. */
+/** A turn's boundary attempt row, and the settled attempt whose message id the turn list carries. */
 interface TurnEnd {
   readonly row: TurnSnapshot;
   readonly settledMessageId: string;
@@ -49,7 +45,7 @@ function turnEnds(
   pick: (rows: TurnSnapshot[]) => TurnSnapshot | undefined,
 ): TurnEnd[] {
   return turnGroups(snapshots).flatMap((group) => {
-    const row = pick(group.filter(hasBothRefs));
+    const row = pick(group);
     const settled = group.at(-1);
     // A turn retrying live has no settled row yet, so its group is not in the turn list.
     return row && settled && ordinalOf(settled.message_id, turns) !== null ? [{ row, settledMessageId: settled.message_id }] : [];
@@ -57,13 +53,13 @@ function turnEnds(
 }
 
 /**
- * All turns' source, filtered row by row like the server's cumulative diff: from the first turn with
- * a usable attempt to the last. Any attempt's message id resolves to its whole turn on the server.
+ * All turns' source. The server reverts whole turns, from the first attempt's ref_before to the settled
+ * attempt's ref_after, so the range runs from the first turn that has the former to the last that has the latter.
  */
 export function allTurnsRevertSource(snapshots: readonly TurnSnapshot[], turns: readonly ReviewTurn[] | undefined): FileRevertSource | null {
   if (!turns) return null;
-  const first = turnEnds(snapshots, turns, (rows) => rows[0])[0];
-  const last = turnEnds(snapshots, turns, (rows) => rows.at(-1)).at(-1);
+  const first = turnEnds(snapshots, turns, (rows) => (rows[0]?.ref_before ? rows[0] : undefined))[0];
+  const last = turnEnds(snapshots, turns, (rows) => (rows.at(-1)?.ref_after ? rows.at(-1) : undefined)).at(-1);
   if (!first || !last) return null;
   const from = ordinalOf(first.settledMessageId, turns);
   const to = ordinalOf(last.settledMessageId, turns);

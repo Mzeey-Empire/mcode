@@ -44,14 +44,19 @@ describe("allTurnsRevertSource", () => {
     expect(allTurnsRevertSource(snapshots, turns)).toEqual({ messageId: "m2", fromMessageId: "m1-first", range: { from: 1, to: 2 } });
   });
 
-  it("keeps a retried first turn whose earlier attempt has no refs", () => {
+  it("keeps a retried first turn whose earlier attempt lacks only ref_after", () => {
     const snapshots = [row("m1-first", 2, { ref_after: "" }), row("m1", 2), row("m2")];
-    expect(allTurnsRevertSource(snapshots, turns)).toEqual({ messageId: "m2", fromMessageId: "m1", range: { from: 1, to: 2 } });
+    expect(allTurnsRevertSource(snapshots, turns)).toEqual({ messageId: "m2", fromMessageId: "m1-first", range: { from: 1, to: 2 } });
   });
 
-  it("keeps a turn whose settled attempt lacks refs but an earlier attempt has them", () => {
+  it("starts after a turn whose first attempt lacks ref_before, which the server rejects", () => {
+    const snapshots = [row("m1-first", 2, { ref_before: "" }), row("m1", 2), row("m2"), row("m3")];
+    expect(allTurnsRevertSource(snapshots, turns)).toEqual({ messageId: "m3", fromMessageId: "m2", range: { from: 2, to: 3 } });
+  });
+
+  it("ends before a turn whose settled attempt lacks ref_after, which the server rejects", () => {
     const snapshots = [row("m1"), row("m2-first", 2), row("m2", 2, { ref_after: "" })];
-    expect(allTurnsRevertSource(snapshots, turns)).toEqual({ messageId: "m2-first", fromMessageId: "m1", range: { from: 1, to: 2 } });
+    expect(allTurnsRevertSource(snapshots, turns)).toEqual({ messageId: "m1", range: { from: 1, to: 1 } });
   });
 
   it("ends before a turn that is retrying live and has no settled row yet", () => {
