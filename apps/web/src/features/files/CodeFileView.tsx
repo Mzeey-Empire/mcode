@@ -51,7 +51,7 @@ function ReadResultView({
   switch (result.kind) {
     case "too-large":
       return <StateMessage text={`Too large to show · ${formatFileSize(result.size)}`}>{openButton}</StateMessage>;
-    // Images render in S12P-06; until then they take the binary state so they never crash the view.
+    // OpenFileView routes images to ImageFileView; this only guards a direct caller.
     case "image":
     case "binary":
       return <StateMessage text={`Binary file · ${formatFileSize(result.size)}`}>{openButton}</StateMessage>;
@@ -89,7 +89,8 @@ function changedLineSet(changedLines: readonly (readonly [number, number])[] | n
   return set;
 }
 
-function CodeLines({
+/** Virtualized, syntax-highlighted line view shared by code files and markdown or SVG source. */
+export function CodeLines({
   path,
   content,
   changedLines,

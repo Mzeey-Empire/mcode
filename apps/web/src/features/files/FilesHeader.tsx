@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { FolderTree, MoreHorizontal, Search } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/button";
@@ -57,17 +57,19 @@ export interface FilesControlsRowProps {
   readonly onToggleTree: () => void;
   readonly onRevealFolder: (folder: string) => void;
   readonly onGoToFile: () => void;
+  readonly controls?: ReactNode;
 }
 
-/** Row 2: tree toggle, then the path pill (or the Go to file field when no file shows), then More. */
-export function FilesControlsRow({ treeOpen, shownPath, actions, onToggleTree, onRevealFolder, onGoToFile }: FilesControlsRowProps) {
+/** Row 2: tree toggle, then the path pill (or the Go to file field when no file shows), view controls, then More. */
+export function FilesControlsRow({ treeOpen, shownPath, actions, onToggleTree, onRevealFolder, onGoToFile, controls }: FilesControlsRowProps) {
   return (
     <PanelHeaderSlot slot="row2">
-      <div className="flex h-10 min-w-0 flex-1 items-center gap-2">
+      <div className="@container flex h-10 min-w-0 flex-1 items-center gap-2">
         <IconButton shape="round" aria-label={treeOpen ? "Hide files tree" : "Show files tree"} pressed={treeOpen} onClick={onToggleTree}>
           <FolderTree />
         </IconButton>
         {shownPath ? <PathPill path={shownPath} onRevealFolder={onRevealFolder} /> : <GoToFileField onClick={onGoToFile} />}
+        {shownPath ? controls : null}
         <MoreMenu path={shownPath} actions={actions} />
       </div>
     </PanelHeaderSlot>

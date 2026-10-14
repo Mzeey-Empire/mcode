@@ -1,10 +1,13 @@
-import { useCallback, useMemo, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { SIDE_PANE_CONTENT_MIN_WIDTH, sidePaneDocks } from "@/lib/side-pane-dock";
-import { CodeFileView } from "./CodeFileView";
 import { FileTree } from "./FileTree";
 import { FilesControlsRow, FilesTabStrip } from "./FilesHeader";
+import { FilesViewControls } from "./FilesViewControls";
 import { GoToFilePopover } from "./GoToFilePopover";
+import type { ImageDimensions } from "./ImageFileView";
+import { OpenFileView } from "./OpenFileView";
+import { fileViewKind } from "./file-view-kind";
 import { buildFilesTree, flattenFileTree, folderNodesToReveal, indexFileChanges } from "./file-tree-model";
 import { FILES_SCOPE_DEFAULTS, getFilesScope, useFilesTabsStore, type FilesScopeState } from "./filesTabsStore";
 import { useFileActions } from "./useFileActions";
@@ -55,6 +58,12 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
   const setGoToFileOpen = (open: boolean) => store().setGoToFileOpen(scopeId, open);
   const tree = useMemo(() => buildFilesTree(data.list?.paths ?? EMPTY_PATHS), [data.list]);
   const shownPath = layout.body === "file" ? state.activePath : null;
+  // Transient: measured from the loaded <img>, so it is not worth persisting with the tabs.
+  const [dimensions, setDimensions] = useState<Readonly<Record<string, ImageDimensions>>>({});
+  const onDimensions = useCallback(
+    (path: string, next: ImageDimensions) => setDimensions((current) => ({ ...current, [path]: next })),
+    [],
+  );
 
   const openFile = useCallback(
     (path: string, beside = false) => {
@@ -87,9 +96,20 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
         onToggleTree={() => store().setTreeOpen(scopeId, !(layout.dockedTree || layout.body === "tree"))}
         onRevealFolder={revealFolder}
         onGoToFile={() => setGoToFileOpen(true)}
+        controls={shownPath ? <ShownFileControls scopeId={scopeId} path={shownPath} state={state} data={data} dimensions={dimensions[shownPath] ?? null} /> : null}
       />
       <div ref={bodyRef} className="relative flex min-h-0 flex-1 flex-row overflow-hidden">
-        <FilesBody scopeId={scopeId} state={state} layout={layout} data={data} tree={tree} actions={actions} onOpenFile={openFile} />
+        <FilesBody
+          scope={scope}
+          scopeId={scopeId}
+          state={state}
+          layout={layout}
+          data={data}
+          tree={tree}
+          actions={actions}
+          onOpenFile={openFile}
+          onDimensions={onDimensions}
+        />
         {state.goToFileOpen ? (
           <GoToFilePopover
             paths={data.list?.paths ?? EMPTY_PATHS}
@@ -105,7 +125,35 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
   );
 }
 
+function ShownFileControls({
+  scopeId,
+  path,
+  state,
+  data,
+  dimensions,
+}: {
+  readonly scopeId: string;
+  readonly path: string;
+  readonly state: FilesScopeState;
+  readonly data: FilesData;
+  readonly dimensions: ImageDimensions | null;
+}) {
+  const read = data.reads[path];
+  return (
+    <FilesViewControls
+      kind={fileViewKind(path, read)}
+      mode={state.viewModes[path] ?? "rendered"}
+      scale={state.imageScales[path] ?? "fit"}
+      size={read?.status === "ready" ? read.result.size : 0}
+      dimensions={dimensions}
+      onModeChange={(mode) => useFilesTabsStore.getState().setViewMode(scopeId, path, mode)}
+      onScaleChange={(scale) => useFilesTabsStore.getState().setImageScale(scopeId, path, scale)}
+    />
+  );
+}
+
 function FilesBody({
+  scope,
   scopeId,
   state,
   layout,
@@ -113,7 +161,9 @@ function FilesBody({
   tree,
   actions,
   onOpenFile,
+  onDimensions,
 }: {
+  readonly scope: { readonly workspaceId: string; readonly threadId: string | null };
   readonly scopeId: string;
   readonly state: FilesScopeState;
   readonly layout: FilesLayout;
@@ -121,7 +171,9 @@ function FilesBody({
   readonly tree: ReturnType<typeof buildFilesTree>;
   readonly actions: ReturnType<typeof useFileActions>;
   readonly onOpenFile: (path: string) => void;
+  readonly onDimensions: (path: string, dimensions: ImageDimensions) => void;
 }) {
+  const { knownPaths, pathsTruncated } = useKnownPaths(data);
   const changeIndex = useMemo(() => indexFileChanges(data.changes), [data.changes]);
   const rows = useMemo(() => flattenFileTree(tree, state.expandedFolders, changeIndex), [tree, state.expandedFolders, changeIndex]);
   const clearReveal = useCallback(() => useFilesTabsStore.getState().clearReveal(scopeId), [scopeId]);
@@ -151,15 +203,29 @@ function FilesBody({
         </DockedTreePane>
       ) : null}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <CodeFileView
+        <OpenFileView
+          workspaceId={scope.workspaceId}
+          threadId={scope.threadId}
           path={activePath}
           state={data.reads[activePath] ?? { status: "loading" }}
+          mode={state.viewModes[activePath] ?? "rendered"}
+          scale={state.imageScales[activePath] ?? "fit"}
+          knownPaths={knownPaths}
+          pathsTruncated={pathsTruncated}
+          onOpenFile={onOpenFile}
+          onDimensions={(dimensions) => onDimensions(activePath, dimensions)}
           onOpenInEditor={(line) => actions.openInEditor(activePath, line)}
           onCloseTab={() => useFilesTabsStore.getState().closeFile(scopeId, activePath)}
         />
       </div>
     </>
   );
+}
+
+function useKnownPaths(data: FilesData): { readonly knownPaths: ReadonlySet<string>; readonly pathsTruncated: boolean } {
+  const knownPaths = useMemo(() => new Set(data.list?.paths ?? EMPTY_PATHS), [data.list]);
+  // Until the list loads, or when it is capped, a missing entry proves nothing.
+  return { knownPaths, pathsTruncated: data.list?.truncated ?? true };
 }
 
 function DockedTreePane({ scopeId, width, children }: { readonly scopeId: string; readonly width: number; readonly children: React.ReactNode }) {
