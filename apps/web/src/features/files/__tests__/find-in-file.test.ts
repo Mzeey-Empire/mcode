@@ -29,6 +29,19 @@ describe("findInLines", () => {
     expect(ranges(["cat concat cat."], "cat", { wholeWord: true })).toEqual([[0, 0, 3], [0, 11, 14]]);
   });
 
+  it("treats accented letters as word characters in whole-word mode", () => {
+    expect(ranges(["café caf"], "café", { wholeWord: true })).toEqual([[0, 0, 4]]);
+    expect(ranges(["café"], "caf", { wholeWord: true })).toEqual([]);
+  });
+
+  it("keeps whole-word regexes that only a non-unicode pattern accepts", () => {
+    expect(ranges(["a-b a b"], "a\\-b", { wholeWord: true, regex: true })).toEqual([[0, 0, 3]]);
+  });
+
+  it("terminates on an empty-matching whole-word regex over astral characters", () => {
+    expect(ranges(["😀 a"], "a*", { wholeWord: true, regex: true })).toEqual([[0, 3, 4]]);
+  });
+
   it("skips empty matches so a pattern like a* terminates", () => {
     expect(ranges(["bbab"], "a*", { regex: true })).toEqual([[0, 2, 3]]);
   });

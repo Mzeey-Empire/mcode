@@ -34,14 +34,23 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function buildPattern(query: string, options: FindOptions): RegExp | null {
-  const body = options.regex ? query : escapeRegExp(query);
-  const source = options.wholeWord ? `\\b(?:${body})\\b` : body;
+function compile(source: string, flags: string): RegExp | null {
   try {
-    return new RegExp(source, options.caseSensitive ? "g" : "gi");
+    return new RegExp(source, flags);
   } catch {
     return null;
   }
+}
+
+function buildPattern(query: string, options: FindOptions): RegExp | null {
+  const body = options.regex ? query : escapeRegExp(query);
+  const flags = options.caseSensitive ? "g" : "gi";
+  if (!options.wholeWord) return compile(body, flags);
+  // `\b` is ASCII-only, so it splits "café". Unicode lookarounds need the `u` flag, which rejects some
+  // escapes (`\-`) that a plain regex accepts; those patterns fall back to `\b`.
+  return (
+    compile(`(?<![\\p{L}\\p{N}_])(?:${body})(?![\\p{L}\\p{N}_])`, `${flags}u`) ?? compile(`\\b(?:${body})\\b`, flags)
+  );
 }
 
 /**
@@ -60,7 +69,8 @@ export function findInLines(lines: readonly string[], query: string, options: Fi
     pattern.lastIndex = 0;
     for (let hit = pattern.exec(lines[line]!); hit; hit = pattern.exec(lines[line]!)) {
       if (hit[0].length === 0) {
-        pattern.lastIndex += 1;
+        // Step a whole code point: a `u` regex resumed mid-surrogate-pair backs up and would match the same spot forever.
+        pattern.lastIndex += (lines[line]!.codePointAt(pattern.lastIndex) ?? 0) > 0xffff ? 2 : 1;
         continue;
       }
       matches.push({ line, start: hit.index, end: hit.index + hit[0].length });
