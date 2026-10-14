@@ -8,13 +8,14 @@ import { getKeybindingForCommand, keybindingKeycaps } from "@/lib/keybinding-man
 import { isMac } from "@/lib/platform";
 import { OverlayGateContext } from "@/components/ui/overlay-gate";
 
-/** The DOM hosts that row 1's leading slot and row 2 expose to the active tool. */
+/** The DOM hosts that row 1's leading slot, row 2 and row 3 expose to the active tool. */
 export interface PanelHeaderElements {
   readonly leading: HTMLElement | null;
   readonly row2: HTMLElement | null;
+  readonly row3: HTMLElement | null;
 }
 
-type PanelHeaderSlotName = "leading" | "row2";
+type PanelHeaderSlotName = "leading" | "row2" | "row3";
 
 /**
  * Where a tool's header content goes. Each tool portals into its own detached
@@ -61,16 +62,22 @@ export function PanelHeaderSlotScope({
   readonly children: ReactNode;
 }) {
   const scopeActive = useContext(OverlayGateContext) && active;
-  const [hosts] = useState(() => ({ leading: createSlotHost("leading"), row2: createSlotHost("row2") }));
-  const [claims, setClaims] = useState<Readonly<Record<PanelHeaderSlotName, number>>>({ leading: 0, row2: 0 });
+  const [hosts] = useState(() => ({
+    leading: createSlotHost("leading"),
+    row2: createSlotHost("row2"),
+    row3: createSlotHost("row3"),
+  }));
+  const [claims, setClaims] = useState<Readonly<Record<PanelHeaderSlotName, number>>>({ leading: 0, row2: 0, row3: 0 });
   const claim = useCallback((slot: PanelHeaderSlotName) => {
     setClaims((current) => ({ ...current, [slot]: current[slot] + 1 }));
     return () => setClaims((current) => ({ ...current, [slot]: current[slot] - 1 }));
   }, []);
   const leadingRow = scopeActive && claims.leading > 0 ? elements.leading : null;
   const row2Row = scopeActive && claims.row2 > 0 ? elements.row2 : null;
+  const row3Row = scopeActive && claims.row3 > 0 ? elements.row3 : null;
   useLayoutEffect(() => attachSlotHost(leadingRow, hosts.leading), [leadingRow, hosts]);
   useLayoutEffect(() => attachSlotHost(row2Row, hosts.row2), [row2Row, hosts]);
+  useLayoutEffect(() => attachSlotHost(row3Row, hosts.row3), [row3Row, hosts]);
   const target = useMemo<PanelHeaderSlotTarget>(() => ({ hosts, claim }), [hosts, claim]);
   return (
     <OverlayGateContext.Provider value={scopeActive}>
@@ -91,7 +98,7 @@ export function usePanelHeaderMenuOpen(): readonly [boolean, (open: boolean) => 
   return [open, setOpen];
 }
 
-/** Renders a tool's header content into row 1's leading slot or into row 2. */
+/** Renders a tool's header content into row 1's leading slot, row 2 or row 3. */
 export function PanelHeaderSlot({
   slot,
   children,
@@ -163,21 +170,24 @@ interface PanelHeaderProps {
   readonly maximized: boolean;
   readonly leadingRef: Ref<HTMLDivElement>;
   readonly row2Ref: Ref<HTMLDivElement>;
+  readonly row3Ref: Ref<HTMLDivElement>;
   readonly onToggleMaximized: () => void;
   /** Row 1's trailing Close panel button, or null when the rail's caption strip hosts it. */
   readonly panelToggle: ReactNode;
 }
 
 /**
- * The right panel's two-row header. Row 1 (48) shares the window caption
- * overlay: its right padding clears the caption buttons that hang over it, and
- * its empty space drags the window. Row 2 (40) exists only while the active
- * tool puts controls in it, so a tool without controls gets no blank strip.
+ * The right panel's header. Row 1 (48) shares the window caption overlay: its
+ * right padding clears the caption buttons that hang over it, and its empty
+ * space drags the window. Rows 2 and 3 (40 each) exist only while the active
+ * tool puts controls in them, so a tool without controls gets no blank strip.
+ * Row 3 sits below row 2 and appears or disappears without moving rows 1 and 2.
  */
 export function PanelHeader({
   maximized,
   leadingRef,
   row2Ref,
+  row3Ref,
   onToggleMaximized,
   panelToggle,
 }: PanelHeaderProps) {
@@ -205,6 +215,11 @@ export function PanelHeader({
       <div
         ref={row2Ref}
         data-testid="panel-header-row-2"
+        className="flex h-10 shrink-0 items-center gap-2 px-2 empty:hidden"
+      />
+      <div
+        ref={row3Ref}
+        data-testid="panel-header-row-3"
         className="flex h-10 shrink-0 items-center gap-2 px-2 empty:hidden"
       />
     </>

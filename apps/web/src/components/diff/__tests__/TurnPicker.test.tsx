@@ -142,7 +142,7 @@ describe("TurnPicker", () => {
 
   it("closes when another tool takes the panel header and stays closed on return", async () => {
     seedTurns([turn("msg-new", 1, 3)]);
-    const elements = { leading: document.createElement("div"), row2: document.createElement("div") };
+    const elements = { leading: document.createElement("div"), row2: document.createElement("div"), row3: null };
     const picker = (active: boolean) => (
       <PanelHeaderSlotScope active={active} elements={elements}>
         <TurnPicker threadId="thread-1" />

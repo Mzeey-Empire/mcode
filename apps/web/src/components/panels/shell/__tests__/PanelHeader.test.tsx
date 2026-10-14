@@ -13,6 +13,7 @@ function renderHeader(maximized: boolean, sidebarDocked: boolean) {
         maximized={maximized}
         leadingRef={null}
         row2Ref={null}
+        row3Ref={null}
         onToggleMaximized={vi.fn()}
         panelToggle={<PanelToggleButton onClick={vi.fn()} />}
       />
@@ -48,7 +49,7 @@ describe("PanelHeaderSlot", () => {
     const leading = document.createElement("div");
     const row2 = document.createElement("div");
     render(
-      <PanelHeaderSlotScope active={active} elements={{ leading, row2 }}>
+      <PanelHeaderSlotScope active={active} elements={{ leading, row2, row3: null }}>
         <PanelHeaderSlot slot="leading">title</PanelHeaderSlot>
         <PanelHeaderSlot slot="row2">controls</PanelHeaderSlot>
       </PanelHeaderSlotScope>,
@@ -75,7 +76,7 @@ describe("PanelHeaderSlot", () => {
     const leading = document.createElement("div");
     const row2 = document.createElement("div");
     const header = (active: boolean) => (
-      <PanelHeaderSlotScope active={active} elements={{ leading, row2 }}>
+      <PanelHeaderSlotScope active={active} elements={{ leading, row2, row3: null }}>
         <PanelHeaderSlot slot="row2">
           <input aria-label="Address" />
         </PanelHeaderSlot>
@@ -98,13 +99,36 @@ describe("PanelHeaderSlot", () => {
     const leading = document.createElement("div");
     const row2 = document.createElement("div");
     render(
-      <PanelHeaderSlotScope active elements={{ leading, row2 }}>
+      <PanelHeaderSlotScope active elements={{ leading, row2, row3: null }}>
         <PanelHeaderSlot slot="leading">title</PanelHeaderSlot>
       </PanelHeaderSlotScope>,
     );
 
     expect(leading).toHaveTextContent("title");
     expect(row2).toBeEmptyDOMElement();
+  });
+
+  it("mounts row 3 only while claimed and leaves rows 1 and 2 untouched", () => {
+    const leading = document.createElement("div");
+    const row2 = document.createElement("div");
+    const row3 = document.createElement("div");
+    const header = (deviceRow: boolean) => (
+      <PanelHeaderSlotScope active elements={{ leading, row2, row3 }}>
+        <PanelHeaderSlot slot="row2">toolbar</PanelHeaderSlot>
+        {deviceRow ? <PanelHeaderSlot slot="row3">device row</PanelHeaderSlot> : null}
+      </PanelHeaderSlotScope>
+    );
+    const { rerender } = render(header(false));
+    const row2Before = row2.innerHTML;
+    expect(row3).toBeEmptyDOMElement();
+
+    rerender(header(true));
+    expect(row3).toHaveTextContent("device row");
+    expect(row2.innerHTML).toBe(row2Before);
+
+    rerender(header(false));
+    expect(row3).toBeEmptyDOMElement();
+    expect(row2.innerHTML).toBe(row2Before);
   });
 
   it("stays inline outside the panel shell", () => {
@@ -118,7 +142,7 @@ describe("PanelHeaderSlotScope inside a closed panel", () => {
   function ScopedMenu({ panelVisible, row2 }: { readonly panelVisible: boolean; readonly row2: HTMLElement }) {
     return (
       <OverlayGateContext.Provider value={panelVisible}>
-        <PanelHeaderSlotScope active elements={{ leading: null, row2 }}>
+        <PanelHeaderSlotScope active elements={{ leading: null, row2, row3: null }}>
           <PanelHeaderSlot slot="row2">
             <DropdownMenu>
               <DropdownMenuTrigger>Review options</DropdownMenuTrigger>
