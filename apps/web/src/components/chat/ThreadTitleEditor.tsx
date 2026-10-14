@@ -66,7 +66,7 @@ export function ThreadTitleEditor({
   };
 
   if (!isEditing) {
-    return <span className="text-sm font-medium text-ink">{title}</span>;
+    return <span className="text-fade text-label text-ink">{title}</span>;
   }
 
   return (

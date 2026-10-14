@@ -14,6 +14,7 @@ import { HandoffDocDialog, useHandoffFallback } from "@/components/chat/handoff-
 import { HeaderActions } from "@/components/chat/HeaderActions";
 import { PlanQuestionWizard } from "@/components/chat/PlanQuestionWizard";
 import { ThreadTitleEditor } from "@/components/chat/ThreadTitleEditor";
+import { CanvasBreadcrumb } from "@/components/shell/CanvasBreadcrumb";
 import { CanvasHeader } from "@/components/shell/CanvasHeader";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useToastStore } from "@/stores/toastStore";
@@ -313,16 +314,18 @@ interface ThreadHeaderRename {
 function ThreadHeader({ state, rename }: { state: ChatViewState; rename?: ThreadHeaderRename }) {
   const thread = state.activeThread!;
   return (
-    <CanvasHeader className="border-b border-border">
+    <CanvasHeader>
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        {rename ? (
-          // Double-click renames, so the title must not hand the gesture to the window.
-          <div data-testid="chat-header-title" onDoubleClick={() => rename.onEditingThreadIdChange(thread.id)} className="window-no-drag cursor-text">
-            <ThreadTitleEditor title={thread.title} isEditing={rename.editingThreadId === thread.id} onSave={rename.onSaveTitle} onCancel={() => rename.onEditingThreadIdChange(null)} />
-          </div>
-        ) : (
-          <span data-testid="chat-header-title" className="text-fade text-sm font-medium">{thread.title}</span>
-        )}
+        <CanvasBreadcrumb projectName={state.activeWorkspaceName || undefined} workspaceId={thread.workspace_id}>
+          {rename ? (
+            // Double-click renames, so the title must not hand the gesture to the window.
+            <div data-testid="chat-header-title" onDoubleClick={() => rename.onEditingThreadIdChange(thread.id)} className="window-no-drag flex min-w-0 cursor-text">
+              <ThreadTitleEditor title={thread.title} isEditing={rename.editingThreadId === thread.id} onSave={rename.onSaveTitle} onCancel={() => rename.onEditingThreadIdChange(null)} />
+            </div>
+          ) : (
+            <span data-testid="chat-header-title" className="text-fade text-label text-ink">{thread.title}</span>
+          )}
+        </CanvasBreadcrumb>
         {thread.parent_thread_id && state.parentThreadExists && (
           <Tooltip>
             <TooltipTrigger render={<button type="button" onClick={() => state.setActiveThread(thread.parent_thread_id!)} className="flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-xs font-medium text-primary/80 transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"><GitFork size={10} /><span>Forked</span></button>} />

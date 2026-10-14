@@ -557,6 +557,14 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(chatViewTransportMock.continueAutomaticSetup).toHaveBeenCalledWith(thread.id);
   });
 
+  it("names the project before the thread title in the header breadcrumb", () => {
+    render(<ChatView />);
+
+    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(breadcrumb).toHaveTextContent(/Test Project\s*\/\s*My Thread$/);
+    expect(within(breadcrumb).getByTestId("chat-header-title")).toHaveTextContent("My Thread");
+  });
+
   it("enters edit mode on double click", async () => {
     const user = userEvent.setup();
     render(<ChatView />);
