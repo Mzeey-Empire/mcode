@@ -89,7 +89,7 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
         onGoToFile={() => setGoToFileOpen(true)}
       />
       <div ref={bodyRef} className="relative flex min-h-0 flex-1 flex-row overflow-hidden">
-        <FilesBody scopeId={scopeId} state={state} layout={layout} data={data} tree={tree} actions={actions} onOpenFile={openFile} />
+        <FilesBody scopeId={scopeId} workspaceId={workspaceId} threadId={threadId} state={state} layout={layout} data={data} tree={tree} actions={actions} onOpenFile={openFile} />
         {state.goToFileOpen ? (
           <GoToFilePopover
             paths={data.list?.paths ?? EMPTY_PATHS}
@@ -107,6 +107,8 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
 
 function FilesBody({
   scopeId,
+  workspaceId,
+  threadId,
   state,
   layout,
   data,
@@ -115,6 +117,8 @@ function FilesBody({
   onOpenFile,
 }: {
   readonly scopeId: string;
+  readonly workspaceId: string;
+  readonly threadId: string | null;
   readonly state: FilesScopeState;
   readonly layout: FilesLayout;
   readonly data: FilesData;
@@ -156,6 +160,9 @@ function FilesBody({
           state={data.reads[activePath] ?? { status: "loading" }}
           onOpenInEditor={(line) => actions.openInEditor(activePath, line)}
           onCloseTab={() => useFilesTabsStore.getState().closeFile(scopeId, activePath)}
+          threadId={threadId}
+          scopeId={scopeId}
+          workspaceId={workspaceId}
         />
       </div>
     </>

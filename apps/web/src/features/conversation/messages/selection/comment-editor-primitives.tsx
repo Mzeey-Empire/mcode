@@ -127,6 +127,7 @@ export function CommentEditorComposer({
   rootRef,
   isPopupOpenRef,
   maxHeight,
+  submitOnEnter = false,
   onChange,
   onSubmit,
 }: {
@@ -140,6 +141,8 @@ export function CommentEditorComposer({
   readonly rootRef: RefObject<HTMLElement | null>;
   readonly isPopupOpenRef: RefObject<boolean>;
   readonly maxHeight?: number;
+  /** Plain Enter submits and Shift+Enter inserts a newline. Off by default: Enter adds a newline and Ctrl/Cmd+Enter submits. */
+  readonly submitOnEnter?: boolean;
   readonly onChange: (note: string, mentions: MessageMention[]) => void;
   readonly onSubmit: () => void;
 }) {
@@ -229,7 +232,7 @@ export function CommentEditorComposer({
         id="selected-text-comment-note"
         ariaLabel="Comment note"
         placeholder="Write a note"
-        submitOnEnter={false}
+        submitOnEnter={submitOnEnter}
         compact
         compactMaxHeight={maxHeight}
         isPopupOpen={isPopupOpenRef.current}
