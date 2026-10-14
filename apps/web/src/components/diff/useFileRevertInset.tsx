@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { FileRevertConfirm } from "./FileRevertConfirm";
 import type { FileRevertSource } from "./file-revert-source";
 
@@ -19,11 +19,17 @@ export interface FileRevertInset {
  */
 export function useFileRevertInset(threadId: string, comparisonScope: string, revert: FileRevertSource | null | undefined): FileRevertInset {
   const [open, setOpen] = useState<{ readonly scope: string; readonly path: string } | null>(null);
+  const opener = useRef<HTMLElement | null>(null);
   const scope = `${comparisonScope}:${revert?.messageId ?? ""}:${revert?.fromMessageId ?? ""}`;
   const openPath = revert && open?.scope === scope ? open.path : null;
   return {
     actionProps: (path) => ({
-      onRevert: revert ? () => setOpen(openPath === path ? null : { scope, path }) : undefined,
+      onRevert: revert
+        ? () => {
+            opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            setOpen(openPath === path ? null : { scope, path });
+          }
+        : undefined,
       revertOpen: openPath === path,
     }),
     inset: (path) =>
@@ -34,7 +40,10 @@ export function useFileRevertInset(threadId: string, comparisonScope: string, re
           messageId={revert.messageId}
           fromMessageId={revert.fromMessageId}
           range={revert.range}
-          onClose={() => setOpen(null)}
+          onClose={() => {
+            setOpen(null);
+            if (opener.current?.isConnected) opener.current.focus();
+          }}
         />
       ) : null,
   };

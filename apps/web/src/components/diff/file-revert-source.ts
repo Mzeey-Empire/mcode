@@ -23,23 +23,28 @@ export function turnRevertSource(turnMessageId: string | null, turns: readonly R
   return ordinal === null ? null : { messageId: turnMessageId, range: { from: ordinal, to: ordinal } };
 }
 
-function settledAttemptOfFirstTurn(rows: readonly TurnSnapshot[]): TurnSnapshot | undefined {
-  const first = rows[0];
-  return first ? rows[first.attempt_count - 1] : undefined;
+function turnGroups(snapshots: readonly TurnSnapshot[]): TurnSnapshot[][] {
+  const groups: TurnSnapshot[][] = [];
+  for (let index = 0; index < snapshots.length; ) {
+    const size = Math.max(1, snapshots[index]?.attempt_count ?? 1);
+    groups.push(snapshots.slice(index, index + size));
+    index += size;
+  }
+  return groups;
 }
 
-/** All turns' source: from the first snapshot to the last one with both refs. */
+/** All turns' source: from the first turn to the last one whose settled attempt has both refs. */
 export function allTurnsRevertSource(snapshots: readonly TurnSnapshot[], turns: readonly ReviewTurn[] | undefined): FileRevertSource | null {
-  const rows = snapshots.filter((snapshot) => snapshot.ref_before && snapshot.ref_after);
-  const first = rows[0];
-  const last = rows.at(-1);
-  if (!first || !last || !turns) return null;
-  const firstSettled = settledAttemptOfFirstTurn(rows);
-  const from = firstSettled ? ordinalOf(firstSettled.message_id, turns) : null;
+  const settledGroups = turnGroups(snapshots).filter((group) => group.at(-1)?.ref_before && group.at(-1)?.ref_after);
+  const first = settledGroups[0];
+  const last = settledGroups.at(-1)?.at(-1);
+  const firstSettled = first?.at(-1);
+  if (!first || !last || !firstSettled || !turns) return null;
+  const from = ordinalOf(firstSettled.message_id, turns);
   const to = ordinalOf(last.message_id, turns);
   if (from === null || to === null) return null;
   if (from === to) return { messageId: last.message_id, range: { from, to } };
-  return { messageId: last.message_id, fromMessageId: first.message_id, range: { from, to } };
+  return { messageId: last.message_id, fromMessageId: first[0]?.message_id, range: { from, to } };
 }
 
 /**
