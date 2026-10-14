@@ -1,13 +1,17 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import type { EditorView } from "@codemirror/view";
 import type { PlanVersion } from "@mcode/contracts";
 import { isPlanVersionEditable, selectViewedPlanVersion, usePlanStore } from "@/stores/planStore";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { PlanCommentLayer } from "./PlanCommentLayer";
+import { createPlanCommentBinding } from "./plan-comment-extension";
 import { PlanConflictNotice } from "./PlanConflictNotice";
 import { PlanEditor } from "./PlanEditor";
 import { PlanPanelHeader } from "./PlanPanelHeader";
 import { planSaveScheduler } from "./plan-draft-sessions";
+import type { PlanDraftState } from "./plan-save-scheduler";
 import { dismissImplementNotice, showPlanPanel, usePlanImplementStore } from "./plan-implement";
 
 /** Stable empty array to avoid new-reference-per-render in Zustand selectors. */
@@ -31,6 +35,8 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
   const draft = useSyncExternalStore(scheduler.subscribe, scheduler.getSnapshot);
   const viewed = selectViewedPlanVersion(versions, activeVersion);
   const latest = versions.at(-1) ?? null;
+  const [commentBinding] = useState(createPlanCommentBinding);
+  const [editorView, setEditorView] = useState<EditorView | null>(null);
 
   useRegisterPlanPanelVisibility(threadId);
   useEffect(() => scheduler.reconcile(latest), [scheduler, latest]);
@@ -39,7 +45,7 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
 
   if (!viewed || !latest) return null;
 
-  const heldText = viewed.id === latest.id && draft.kind !== "idle" ? draft.text : null;
+  const { heldText, editable, canComment } = planEditorAccess(viewed, latest, draft, executing);
 
   return (
     <div className="flex min-h-0 flex-1 basis-0 flex-col overflow-hidden">
@@ -50,7 +56,7 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
       <PlanImplementNotice threadId={threadId} />
       <PlanEditor
         contentMd={heldText ?? viewed.contentMd}
-        editable={(draft.kind === "idle" || draft.kind === "editing") && isPlanVersionEditable(viewed, latest, executing)}
+        editable={editable}
         onChange={(text) => {
           // Only the latest version is editable, and the first save makes a
           // newer one, so a pinned pick must follow it or the edit vanishes.
@@ -59,9 +65,33 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
           scheduler.edit(text, latest);
         }}
         onBlur={() => scheduler.flush()}
+        extensions={commentBinding.extension}
+        onViewChange={setEditorView}
+      />
+      <PlanCommentLayer
+        threadId={threadId}
+        binding={commentBinding}
+        view={editorView}
+        viewed={viewed}
+        docText={heldText ?? viewed.contentMd}
+        canComment={canComment}
       />
     </div>
   );
+}
+
+/**
+ * What the editor shows and allows. Unsaved typing is held text; commenting
+ * waits for it to land because the server checks a comment's range against
+ * the saved text.
+ */
+function planEditorAccess(viewed: PlanVersion, latest: PlanVersion, draft: PlanDraftState, executing: boolean) {
+  const isLatest = viewed.id === latest.id;
+  return {
+    heldText: isLatest && draft.kind !== "idle" ? draft.text : null,
+    editable: (draft.kind === "idle" || draft.kind === "editing") && isPlanVersionEditable(viewed, latest, executing),
+    canComment: draft.kind === "idle" && isLatest && latest.status !== "accepted",
+  };
 }
 
 function PlanImplementNotice({ threadId }: { readonly threadId: string }) {

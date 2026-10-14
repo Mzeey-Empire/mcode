@@ -135,19 +135,26 @@ interface PlanEditorProps {
   /** Receives the full document after each user edit. */
   readonly onChange?: (text: string) => void;
   readonly onBlur?: () => void;
+  /** Extra extensions, fixed for the life of the editor. */
+  readonly extensions?: Extension;
+  /** Receives the view once it exists, and null when it is torn down. */
+  readonly onViewChange?: (view: EditorView | null) => void;
 }
 
 /**
  * CodeMirror live preview of a plan version. Markdown syntax stays in the
  * document but its marks are hidden, except on the lines being edited.
  */
-export function PlanEditor({ contentMd, editable, onChange, onBlur }: PlanEditorProps) {
+export function PlanEditor({ contentMd, editable, onChange, onBlur, extensions, onViewChange }: PlanEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const editableCompartment = useRef(new Compartment()).current;
   const initialRef = useRef({ contentMd, editable });
   const onChangeRef = useRef(onChange);
   const onBlurRef = useRef(onBlur);
+  const extensionsRef = useRef(extensions);
+  const onViewChangeRef = useRef(onViewChange);
+  onViewChangeRef.current = onViewChange;
   onChangeRef.current = onChange;
   onBlurRef.current = onBlur;
 
@@ -170,11 +177,14 @@ export function PlanEditor({ contentMd, editable, onChange, onBlur }: PlanEditor
           planDecorations,
           planTheme,
           listener,
+          extensionsRef.current ?? [],
         ],
       }),
     });
     viewRef.current = view;
+    onViewChangeRef.current?.(view);
     return () => {
+      onViewChangeRef.current?.(null);
       view.destroy();
       viewRef.current = null;
     };
