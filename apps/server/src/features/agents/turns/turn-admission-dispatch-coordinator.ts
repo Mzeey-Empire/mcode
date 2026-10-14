@@ -551,7 +551,8 @@ export class TurnAdmissionDispatchCoordinator {
     let wirePayload = await this.buildWirePayload(prepared, revertNotice.paths);
     await this.commitParentStart(prepared, lease, sourceTurnId, parentStartInput);
     if (prepared.command.planCommentIds?.length) {
-      wirePayload = appendPlanComments(wirePayload, this.plans.sentComments(prepared.thread.id, prepared.command.planCommentIds));
+      const { comments, versions } = this.plans.sentComments(prepared.thread.id, prepared.command.planCommentIds);
+      wirePayload = appendPlanComments(wirePayload, comments, versions);
     }
     await this.publishCommittedEffects(prepared, sourceTurnId);
     const request = await this.buildTurnRequest(prepared, lease, sourceTurnId, attachmentData, cwd, wirePayload, review);

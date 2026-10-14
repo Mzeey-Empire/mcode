@@ -58,7 +58,7 @@ export class PlanTurnService {
     const selected = new Set(ids);
     const comments = this.planRepo.listComments(threadId).filter(comment => selected.has(comment.id));
     broadcast("plan.commentsChanged", { threadId, upserted: comments, deletedIds: [] });
-    return comments;
+    return { comments, versions: this.planRepo.listByThread(threadId) };
   }
 
   /** Start parsing one plan-question generation turn. */
