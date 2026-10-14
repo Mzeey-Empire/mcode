@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { useCallback, useMemo, useRef, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { SIDE_PANE_CONTENT_MIN_WIDTH, sidePaneDocks } from "@/lib/side-pane-dock";
 import { CodeFileView, splitLines } from "./CodeFileView";
@@ -50,10 +50,17 @@ function useFindBar(scopeId: string, requested: boolean, read: FileReadState | u
     useFilesTabsStore.getState().setFindOpen(scopeId, next);
     if (!next) bodyRef.current?.querySelector<HTMLElement>("[data-code-viewport]")?.focus();
   };
+  // The bar handles its own Escape; this catches it once focus has moved into the code.
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (!open || event.key !== "Escape" || event.defaultPrevented) return;
+    event.stopPropagation();
+    setOpen(false);
+  };
   return {
     header: text === null ? null : { open, onToggle: () => setOpen(!open) },
     bar: open ? <FindInFileBar find={find} onClose={() => setOpen(false)} /> : null,
     highlight: open ? find : null,
+    onKeyDown,
   };
 }
 
@@ -96,7 +103,7 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
   );
 
   return (
-    <div data-files-tool="" className="absolute inset-0 flex min-h-0 flex-col overflow-hidden">
+    <div data-files-tool="" onKeyDown={findBar.onKeyDown} className="absolute inset-0 flex min-h-0 flex-col overflow-hidden">
       <FilesTabStrip
         openPaths={state.openPaths}
         activePath={state.activePath}

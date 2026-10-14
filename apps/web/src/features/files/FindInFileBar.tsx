@@ -60,7 +60,7 @@ export function FindInFileBar({ find, onClose }: FindInFileBarProps) {
   const invalid = find.result.status === "invalid";
   return (
     <PanelHeaderSlot slot="row3">
-      <div data-testid="find-in-file-bar" onKeyDown={onBarKeyDown} className="flex h-10 min-w-0 flex-1 items-center gap-1.5 px-2">
+      <div data-files-tool="" data-testid="find-in-file-bar" onKeyDown={onBarKeyDown} className="flex h-10 min-w-0 flex-1 items-center gap-1.5 px-2">
         <label
           className={cn(
             "flex h-8 min-w-0 flex-1 items-center gap-2 rounded-[18px] bg-selected pl-3 pr-1 shadow-[inset_0_0_0_1px_var(--color-focus)]",

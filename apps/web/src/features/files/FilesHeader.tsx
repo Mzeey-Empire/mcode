@@ -36,15 +36,17 @@ export function FilesTabStrip({
   );
   return (
     <PanelHeaderSlot slot="leading">
-      <PanelTabStrip
-        items={items}
-        activeId={activePath}
-        label="Open files"
-        addLabel="Go to file"
-        onSelect={onSelect}
-        onClose={onClose}
-        onAdd={onAdd}
-      />
+      <div data-files-tool="" className="contents">
+        <PanelTabStrip
+          items={items}
+          activeId={activePath}
+          label="Open files"
+          addLabel="Go to file"
+          onSelect={onSelect}
+          onClose={onClose}
+          onAdd={onAdd}
+        />
+      </div>
     </PanelHeaderSlot>
   );
 }
@@ -66,7 +68,7 @@ export function FilesControlsRow({ treeOpen, shownPath, actions, onToggleTree, o
   const findShortcut = keybindingKeycaps(getKeybindingForCommand("files.findInFile")?.key ?? "mod+f", isMac);
   return (
     <PanelHeaderSlot slot="row2">
-      <div className="flex h-10 min-w-0 flex-1 items-center gap-2">
+      <div data-files-tool="" className="flex h-10 min-w-0 flex-1 items-center gap-2">
         <IconButton shape="round" aria-label={treeOpen ? "Hide files tree" : "Show files tree"} pressed={treeOpen} onClick={onToggleTree}>
           <FolderTree />
         </IconButton>

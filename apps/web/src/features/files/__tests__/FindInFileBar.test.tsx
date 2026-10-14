@@ -113,6 +113,17 @@ describe("Find in file", () => {
     expect(document.activeElement).toBe(screen.getByTestId("code-file-view"));
   });
 
+  it("closes on Escape pressed in the code after focus left the bar", async () => {
+    const field = await openFind();
+    fireEvent.change(field, { target: { value: "needle" } });
+    await screen.findByText("1 of 100");
+
+    fireEvent.keyDown(screen.getByTestId("code-file-view"), { key: "Escape" });
+
+    expect(screen.queryByRole("textbox", { name: "Find" })).toBeNull();
+    expect(document.querySelector("mark")).toBeNull();
+  });
+
   it("handles Escape and Ctrl+F while focus sits on a toggle instead of the field", async () => {
     const field = await openFind();
     const toggle = screen.getByRole("button", { name: "Match case" });
