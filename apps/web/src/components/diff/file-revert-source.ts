@@ -33,18 +33,36 @@ function turnGroups(snapshots: readonly TurnSnapshot[]): TurnSnapshot[][] {
   return groups;
 }
 
+function hasBothRefs(snapshot: TurnSnapshot | undefined): snapshot is TurnSnapshot {
+  return Boolean(snapshot?.ref_before && snapshot.ref_after);
+}
+
+interface TurnBounds {
+  readonly firstAttempt: TurnSnapshot;
+  readonly firstSettled: TurnSnapshot;
+  readonly last: TurnSnapshot;
+}
+
+/** The first and last turns whose settled attempt has both refs, with the first turn's earliest attempt. */
+function turnBounds(snapshots: readonly TurnSnapshot[]): TurnBounds | null {
+  const settledGroups = turnGroups(snapshots).filter((group) => hasBothRefs(group.at(-1)));
+  const firstAttempt = settledGroups[0]?.[0];
+  const firstSettled = settledGroups[0]?.at(-1);
+  const last = settledGroups.at(-1)?.at(-1);
+  return firstAttempt && firstSettled && last ? { firstAttempt, firstSettled, last } : null;
+}
+
 /** All turns' source: from the first turn to the last one whose settled attempt has both refs. */
 export function allTurnsRevertSource(snapshots: readonly TurnSnapshot[], turns: readonly ReviewTurn[] | undefined): FileRevertSource | null {
-  const settledGroups = turnGroups(snapshots).filter((group) => group.at(-1)?.ref_before && group.at(-1)?.ref_after);
-  const first = settledGroups[0];
-  const last = settledGroups.at(-1)?.at(-1);
-  const firstSettled = first?.at(-1);
-  if (!first || !last || !firstSettled || !turns) return null;
-  const from = ordinalOf(firstSettled.message_id, turns);
-  const to = ordinalOf(last.message_id, turns);
+  const bounds = turnBounds(snapshots);
+  if (!bounds || !turns) return null;
+  const from = ordinalOf(bounds.firstSettled.message_id, turns);
+  const to = ordinalOf(bounds.last.message_id, turns);
   if (from === null || to === null) return null;
-  if (from === to) return { messageId: last.message_id, range: { from, to } };
-  return { messageId: last.message_id, fromMessageId: first[0]?.message_id, range: { from, to } };
+  const range = { from, to };
+  return from === to
+    ? { messageId: bounds.last.message_id, range }
+    : { messageId: bounds.last.message_id, fromMessageId: bounds.firstAttempt.message_id, range };
 }
 
 /**
