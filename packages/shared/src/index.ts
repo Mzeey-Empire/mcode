@@ -37,5 +37,7 @@ export {
 
 export { redactMcodeBrowserCaptureV2 } from "./browser-preview/redact.js";
 export { browserPartitionFor } from "./browser-preview/browser-partition.js";
+export { createBrowserThreadControl, reduceBrowserControl } from "./browser-preview/browser-control.js";
+export type { BrowserHolder, BrowserThreadControl, BrowserControlEvent, BrowserControlDecision } from "./browser-preview/browser-control.js";
 
 export { PlanFenceParser, isPlanFenceOpener } from "./plan-fence-parser.js";

@@ -3,6 +3,7 @@
 
 import { BrowserWindow, nativeImage, type IpcMainInvokeEvent, type WebContents } from "electron";
 import * as NodeCrypto from "node:crypto";
+import { createBrowserThreadControl, reduceBrowserControl, type BrowserThreadControl, type BrowserControlEvent } from "@mcode/shared/browser-control";
 import {
   BROWSER_AUTOMATION_CONTRACT_VERSION,
   BROWSER_AUTOMATION_MAX_AX_NODES,
@@ -611,6 +612,7 @@ export class BrowserAutomationKernel {
 
   private readonly scheduler = new BrowserAutomationScheduler(5, BROWSER_AUTOMATION_MAX_PENDING_REQUESTS);
   private readonly targets = new Map<string, TargetState>();
+  private readonly threadControls = new Map<string, BrowserThreadControl>();
   private readonly targetGenerations = new Map<string, number>();
   private readonly cancellations = new Map<string, { cancel: () => void }>();
   private readonly subscribers = new Map<number, Set<(state: unknown) => void>>();
@@ -629,6 +631,7 @@ export class BrowserAutomationKernel {
       }
       const target = this.resolveTarget(event, parsedInput.request.threadId, parsedInput.target);
       resolved = target;
+      this.validateControlAdmission(target.state, request);
       const scheduled = this.scheduler.enqueue(target.state.key, (signal) =>
         this.runOperation(target, parsedInput.request, signal),
       );
@@ -680,6 +683,7 @@ export class BrowserAutomationKernel {
         throw new KernelError("INVALID_REQUEST", "Browser request id is already active", false);
       }
       const resolved = this.resolveTarget(event, request.threadId, parsedInput.target);
+      this.validateControlAdmission(resolved.state, request);
       const leaseId = NodeCrypto.randomUUID();
       let resolveReady!: (value: { ok: true; leaseId: string } | { ok: false; response: BrowserAutomationResponse }) => void;
       const ready = new Promise<{ ok: true; leaseId: string } | { ok: false; response: BrowserAutomationResponse }>((resolve) => {
@@ -692,16 +696,10 @@ export class BrowserAutomationKernel {
       let started = false;
       const scheduled = this.scheduler.enqueue(resolved.state.key, async (signal) => {
         const { state, webContents } = resolved;
-        if (webContents.isDestroyed()) throw new KernelError("TAB_UNAVAILABLE", "Browser tab was closed", true);
-        if (request!.expectedControlEpoch !== state.controlEpoch) {
-          throw new KernelError("STALE_CONTROL_EPOCH", `Control epoch is stale; current epoch is ${state.controlEpoch}`, true);
-        }
-        if (request!.deadline <= Date.now()) {
-          throw new KernelError("DEADLINE_EXCEEDED", "Browser operation deadline elapsed", true);
-        }
+        this.validateOperationStart(webContents, request!);
+        this.admitAgentEffect(state, request!);
         started = true;
         state.actions.push({ timestamp: Date.now(), operation: request!.operation, outcome: "started" });
-        this.emitController(state, "agent", request!);
         this.rendererOperationLeases.set(leaseId, {
           sender: event.sender,
           requestId: request!.requestId,
@@ -782,8 +780,26 @@ export class BrowserAutomationKernel {
     const state = this.targets.get(targetKey(win.id, threadId, tabId));
     if (!state) return false;
     if (state.controller.controller === "human") return false;
-    this.humanInterrupt(state);
+    this.applyControlEvent(state, { type: "take-control", tabId });
     return true;
+  }
+
+  /** Releases only an explicit user hold and invalidates the held tab's observations. */
+  handBack(event: IpcMainInvokeEvent, target: unknown): boolean {
+    const input = asRecord(target);
+    let threadId: string;
+    try {
+      threadId = assertShortId(input.threadId, "threadId");
+    } catch {
+      return false;
+    }
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) return false;
+    const control = this.threadControls.get(JSON.stringify([win.id, threadId]));
+    if (control?.holder !== "user" || control.heldTabId === null) return false;
+    const state = this.targets.get(targetKey(win.id, threadId, control.heldTabId));
+    if (!state) return false;
+    return this.applyControlEvent(state, { type: "hand-back" });
   }
 
   /** Releases retained agent presentation after its owning turn completes. */
@@ -803,15 +819,21 @@ export class BrowserAutomationKernel {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win.isDestroyed()) return false;
     const state = this.targets.get(targetKey(win.id, threadId, tabId));
-    if (
-      !state ||
-      state.controller.controller !== "agent" ||
-      state.controlEpoch !== input.controlEpoch ||
-      state.controller.providerSessionId !== providerSessionId
-    ) return false;
-    this.revokeAgentCapability(state);
+    if (!state) return false;
+    if (!this.endAgentTurn(state, input.controlEpoch, providerSessionId)) return false;
     this.restoreActivePreviewGuestFocus({ state, webContents: state.webContents, window: win });
     return true;
+  }
+
+  private endAgentTurn(state: TargetState, controlEpoch: unknown, providerSessionId: string): boolean {
+    if (state.controller.controller === "human") {
+      this.applyControlEvent(state, { type: "agent-turn-ended" });
+      return false;
+    }
+    if (state.controller.controller !== "agent" ||
+      state.controlEpoch !== controlEpoch ||
+      state.controller.providerSessionId !== providerSessionId) return false;
+    return this.applyControlEvent(state, { type: "agent-turn-ended" });
   }
 
   /** Describes the exact renderer-owned browser target without exposing WebContents details. */
@@ -963,6 +985,9 @@ export class BrowserAutomationKernel {
     for (const key of this.targetGenerations.keys()) {
       if (key.startsWith(`[${windowId},`)) this.targetGenerations.delete(key);
     }
+    for (const key of this.threadControls.keys()) {
+      if (key.startsWith(`[${windowId},`)) this.threadControls.delete(key);
+    }
     this.subscribers.delete(windowId);
   }
 
@@ -1067,6 +1092,8 @@ export class BrowserAutomationKernel {
     webContents: WebContents,
     generation: number,
   ): TargetState {
+    const control = this.threadControls.get(JSON.stringify([windowId, threadId]));
+    const controlEpoch = control?.epochByTab.get(tabId) ?? 0;
     const state: TargetState = {
       key,
       windowId,
@@ -1076,8 +1103,8 @@ export class BrowserAutomationKernel {
       targetGeneration: generation,
       semanticGeneration: 0,
       capabilityRevision: 1,
-      controlEpoch: 0,
-      controller: { tabId, controller: "none", controlEpoch: 0 },
+      controlEpoch,
+      controller: { tabId, controller: control?.holder === "user" ? "human" : "none", controlEpoch },
       syntheticInputDepth: 0,
       syntheticInputUntil: 0,
       guestInputGeneration: 0,
@@ -1096,9 +1123,14 @@ export class BrowserAutomationKernel {
     };
     const onDestroyed = () => {
       this.scheduler.cancelTarget(key);
+      this.applyControlEvent(state, { type: "tab-closed", tabId });
       state.semanticGeneration += 1;
       state.isolatedContextId = null;
       this.targets.delete(key);
+      const hasThreadTarget = [...this.targets.values()].some((target) =>
+        target.windowId === windowId && target.threadId === threadId,
+      );
+      if (!hasThreadTarget) this.threadControls.delete(JSON.stringify([windowId, threadId]));
       state.dispose();
     };
     const onNavigation = (_event: unknown, _url: string, _sameDocument: boolean, isMainFrame: boolean) => {
@@ -1148,28 +1180,68 @@ export class BrowserAutomationKernel {
   }
 
   private humanInterrupt(state: TargetState): void {
-    if (state.controller.controller === "human") return;
-    this.revokeAgentCapability(state, "human");
+    this.applyControlEvent(state, { type: "user-input", tabId: state.tabId });
   }
 
-  private revokeAgentCapability(
+  private applyControlEvent(
     state: TargetState,
-    nextController: "none" | "human" = "none",
-  ): void {
-    state.controlEpoch += 1;
-    this.scheduler.cancelTarget(
-      state.key,
-      nextController === "human"
-        ? new KernelError("HUMAN_INTERRUPTED", "Human input took control of the browser", true)
-        : new KernelError("STALE_CONTROL_EPOCH", "Agent browser capability was revoked", true),
-    );
-    state.actions.push({
-      timestamp: Date.now(),
-      operation: "status",
-      outcome: "interrupted",
-      detail: nextController === "human" ? "Human input took control" : "Agent browser capability was revoked",
-    });
-    this.emitController(state, nextController);
+    event: BrowserControlEvent,
+    request?: BrowserAutomationRequest,
+    pointer?: { x: number; y: number },
+  ): boolean {
+    const key = JSON.stringify([state.windowId, state.threadId]);
+    const previous = this.threadControls.get(key) ?? createBrowserThreadControl();
+    const next = this.nextControlState(state, event);
+    if (next === previous) return false;
+    this.threadControls.set(key, next);
+    if (event.type === "agent-effect") {
+      state.controlEpoch = next.epochByTab.get(state.tabId) ?? 0;
+      this.emitController(state, "agent", request, pointer);
+    } else {
+      this.publishThreadControl(state, next);
+    }
+    return true;
+  }
+
+  private nextControlState(state: TargetState, event: BrowserControlEvent): BrowserThreadControl {
+    const key = JSON.stringify([state.windowId, state.threadId]);
+    const previous = this.threadControls.get(key) ?? createBrowserThreadControl();
+    const decision = reduceBrowserControl(previous, event);
+    if (!decision.admitted) {
+      const message = decision.code === "HUMAN_INTERRUPTED"
+        ? "The user has control of the Browser until Hand back"
+        : `Control epoch is stale; current epoch is ${state.controlEpoch}`;
+      throw new KernelError(decision.code, message, true);
+    }
+    return decision.next;
+  }
+
+  private validateControlAdmission(state: TargetState, request: BrowserAutomationRequest): void {
+    if (request.operation === "inspect" || request.operation === "status") return;
+    this.nextControlState(state, { type: "agent-effect", tabId: state.tabId, expectedEpoch: request.expectedControlEpoch });
+  }
+
+  private publishThreadControl(source: TargetState, control: BrowserThreadControl): void {
+    for (const state of this.targets.values()) {
+      if (state.windowId !== source.windowId || state.threadId !== source.threadId) continue;
+      state.controlEpoch = control.epochByTab.get(state.tabId) ?? 0;
+      if (control.holder === "agent") continue;
+      const human = control.holder === "user";
+      this.scheduler.cancelTarget(state.key, new KernelError(
+        human ? "HUMAN_INTERRUPTED" : "STALE_CONTROL_EPOCH",
+        human ? "Human input took control of the browser" : "Agent browser capability was revoked",
+        true,
+      ));
+      this.emitController(state, human ? "human" : "none");
+    }
+  }
+
+  private admitAgentEffect(state: TargetState, request: BrowserAutomationRequest, pointer?: { x: number; y: number }): void {
+    this.applyControlEvent(state, {
+      type: "agent-effect",
+      tabId: state.tabId,
+      expectedEpoch: request.expectedControlEpoch,
+    }, request, pointer);
   }
 
   private emitController(
@@ -1198,9 +1270,9 @@ export class BrowserAutomationKernel {
 
   private async runOperation(resolved: ResolvedTarget, request: BrowserAutomationRequest, signal: AbortSignal): Promise<unknown> {
     const { state, webContents } = resolved;
-    this.validateOperationStart(state, webContents, request);
+    this.validateOperationStart(webContents, request);
     state.actions.push({ timestamp: Date.now(), operation: request.operation, outcome: "started" });
-    if (request.operation !== "status") this.emitController(state, "agent", request);
+    if (request.operation !== "status" && request.operation !== "inspect") this.admitAgentEffect(state, request);
     updateBrowserAutomationAgentOperationDepth(webContents, 1);
     let effect: KernelErrorEffect = "none";
     const markEffect = () => {
@@ -1218,11 +1290,8 @@ export class BrowserAutomationKernel {
     }
   }
 
-  private validateOperationStart(state: TargetState, webContents: WebContents, request: BrowserAutomationRequest): void {
+  private validateOperationStart(webContents: WebContents, request: BrowserAutomationRequest): void {
     if (webContents.isDestroyed()) throw new KernelError("TAB_UNAVAILABLE", "Browser tab was closed", true);
-    if (request.operation !== "status" && request.expectedControlEpoch !== state.controlEpoch) {
-      throw new KernelError("STALE_CONTROL_EPOCH", `Control epoch is stale; current epoch is ${state.controlEpoch}`, true);
-    }
     if (request.deadline <= Date.now()) throw new KernelError("DEADLINE_EXCEEDED", "Browser operation deadline elapsed", true);
   }
 
@@ -1315,6 +1384,7 @@ export class BrowserAutomationKernel {
       : undefined;
     return {
       operation: "inspect",
+      controlEpoch: state.controlEpoch,
       target: { threadId: state.threadId, tabId: state.tabId, targetGeneration: state.targetGeneration, sticky: true },
       tabs: [this.inspectTab(resolved)],
       snapshot: snapshot as MechanicalInspectResult["snapshot"],
@@ -1335,6 +1405,7 @@ export class BrowserAutomationKernel {
       active: getThreadTabSet(getSession(window), state.threadId)?.activeTabId === state.tabId,
       focused: webContents.isFocused(),
       lastUsedAt: Date.now(),
+      controller: state.controller,
     };
   }
 
@@ -1524,7 +1595,7 @@ export class BrowserAutomationKernel {
   ): Promise<unknown> {
     const { state, webContents } = resolved;
     const point = await this.resolvePoint(resolved, request.args.target);
-    this.emitController(state, "agent", request, point);
+    this.admitAgentEffect(state, request, point);
     await this.withSyntheticInput(state, async () => {
       await this.dispatchClick(state, webContents, point, request, signal, markEffect);
       this.throwIfAborted(signal);
@@ -1590,7 +1661,7 @@ export class BrowserAutomationKernel {
   ): Promise<void> {
     if (!request.args.target) return;
     const point = await this.resolvePoint(resolved, request.args.target);
-    this.emitController(resolved.state, "agent", request, point);
+    this.admitAgentEffect(resolved.state, request, point);
     await this.withSyntheticInput(resolved.state, () => this.clickPoint(resolved.state, point, markEffect));
     this.throwIfAborted(signal);
   }
@@ -2472,7 +2543,7 @@ export class BrowserAutomationKernel {
         retryable: mapped.retryable,
         stage: this.failureStage(mapped),
         effect: this.failureEffect(mapped),
-        recovery: mapped.retryable ? "retry" : "manual",
+        recovery: this.failureRecovery(mapped),
         correlationId: NodeCrypto.randomUUID(),
       },
     };
@@ -2483,6 +2554,12 @@ export class BrowserAutomationKernel {
     if (cause instanceof BrowserAutomationCancelledError) return new KernelError("OPERATION_CANCELLED", cause.message, true);
     if (cause instanceof BrowserAutomationQueueFullError) return new KernelError("HOST_UNAVAILABLE", cause.message, true);
     return new KernelError("INTERNAL_ERROR", "Browser automation failed", true);
+  }
+
+  private failureRecovery(cause: KernelError): "yield_to_user" | "inspect" | "retry" | "manual" {
+    if (cause.code === "HUMAN_INTERRUPTED") return "yield_to_user";
+    if (cause.code === "STALE_CONTROL_EPOCH") return "inspect";
+    return cause.retryable ? "retry" : "manual";
   }
 
   private failureStage(cause: KernelError): "allocation" | "effect" {

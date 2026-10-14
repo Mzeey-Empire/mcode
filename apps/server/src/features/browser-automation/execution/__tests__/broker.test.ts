@@ -107,6 +107,7 @@ function request(scope: BrowserAutomationCredentialClaims, sequence = 1): Browse
 function inspectResult() {
   return {
     operation: "inspect" as const,
+    controlEpoch: 0,
     tabs: [],
     capabilities: ["inspect" as const],
   };
@@ -243,6 +244,52 @@ describe("BrowserAutomationBroker", () => {
     });
   });
 
+  it.each([
+    { operation: "open", args: { url: "https://example.test/", idempotencyKey: "held-open" } },
+    { operation: "act", args: { observationRef: "observation", idempotencyKey: "held-act", deadlineMs: 1_000, steps: [{ operation: "press", key: "A", modifiers: [] }] } },
+    { operation: "tabs", args: { action: "select", tabId: "tab-thread-a", idempotencyKey: "held-tabs", observationRef: "observation" } },
+    { operation: "evaluate", args: { expression: "1", observationRef: "observation", idempotencyKey: "held-evaluate", deadlineMs: 1_000 } },
+  ] as const)("refuses $operation before dispatch while the thread is held", async (effect) => {
+    const send = vi.fn(() => true);
+    const broker = new BrowserAutomationBroker(options({ now: () => 10, send }));
+    const hostSocket = socket("held");
+    const generation = register(broker, hostSocket, "held", "workspace-a");
+    broker.updateTargets(hostSocket, "held", generation, [browserTarget("held", generation, 0, {
+      tabId: "tab-thread-a", controller: "human", controlEpoch: 1,
+    })]);
+    const scope = { ...claims("thread-a", "workspace-a"), permissionCapability: "privileged" as const, allowedOperations: BROWSER_AUTOMATION_OPERATIONS };
+    await expect(broker.execute(scope, { ...request(scope), ...effect, expectedControlEpoch: 1 })).resolves.toMatchObject({
+      ok: false, error: { code: "HUMAN_INTERRUPTED", effect: "none", recovery: "yield_to_user" },
+    });
+    expect(send).not.toHaveBeenCalled();
+    broker.disconnect(hostSocket);
+  });
+
+  it("inspects a held Browser and tells the agent to wait for Hand back", async () => {
+    const broker = new BrowserAutomationBroker(options({ now: () => 10, send: () => true }));
+    const hostSocket = socket("held-inspect");
+    const generation = register(broker, hostSocket, "held-inspect", "workspace-a");
+    broker.updateTargets(hostSocket, "held-inspect", generation, [browserTarget("held-inspect", generation, 0, {
+      tabId: "tab-thread-a", controller: "human", controlEpoch: 3,
+    })]);
+    const scope = claims("thread-a", "workspace-a");
+    const inspection = request(scope);
+    const pending = broker.execute(scope, inspection);
+    broker.respond(hostSocket, "held-inspect", generation, {
+      contractVersion: 1, requestId: inspection.requestId, sequence: inspection.sequence, ok: true,
+      result: { ...inspectResult(), controlEpoch: 3 },
+    });
+    await expect(pending).resolves.toMatchObject({
+      ok: true,
+      result: {
+        controlEpoch: 3,
+        readiness: { ready: false, state: "human-control" },
+        guidance: "The user has control of the Browser. Do not act until browser_inspect reports ready; the user hands control back.",
+      },
+    });
+    broker.disconnect(hostSocket);
+  });
+
   it("derives bounded inspect metadata from descriptor, credential, host, and target state", async () => {
     const deliveries: Array<{ channel: string; data: any }> = [];
     const broker = new BrowserAutomationBroker(options({ now: () => 10, send: (_socket, channel, data) => {
@@ -274,6 +321,7 @@ describe("BrowserAutomationBroker", () => {
       result: {
         operation: "inspect",
         observationRef: "driver-issued",
+        controlEpoch: 0,
         tabs: [target, { ...target, tabId: "extra-tab" }],
         snapshot: {
           url: "https://example.test/",
@@ -332,7 +380,7 @@ describe("BrowserAutomationBroker", () => {
       requestId: dispatch.request.requestId,
       sequence: dispatch.request.sequence,
       ok: true,
-      result: { operation: "inspect", tabs: [target] },
+      result: { operation: "inspect", controlEpoch: 0, tabs: [target] },
     });
     await expect(pending).resolves.toMatchObject({
       ok: true,

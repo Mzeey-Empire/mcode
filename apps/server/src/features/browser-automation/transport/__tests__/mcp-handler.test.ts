@@ -46,6 +46,7 @@ describe("BrowserAutomationMcpHandler", () => {
         operation: "inspect",
         tabs: [],
         viewport: { width: 1280, height: 720 },
+        controlEpoch: 0,
         capabilities: [],
       },
     }));
@@ -392,6 +393,7 @@ describe("BrowserAutomationMcpHandler", () => {
           height: 180,
           truncation: { truncated: false },
         },
+        controlEpoch: 0,
       },
     }));
 
@@ -427,7 +429,7 @@ describe("BrowserAutomationMcpHandler", () => {
       allowedOperations: ["inspect"],
     });
     const authorization = `Bearer ${inspect.token}`;
-    const inspectResult = { operation: "inspect", tabs: [] };
+    const inspectResult = { operation: "inspect", controlEpoch: 0, tabs: [] };
     execute.mockImplementationOnce(async (_claims, request) => ({
       contractVersion: 1,
       requestId: request.requestId,

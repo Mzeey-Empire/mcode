@@ -325,6 +325,7 @@ describe("BrowserAutomationKernel", () => {
       ok: true,
       result: {
         operation: "inspect",
+        controlEpoch: 0,
         target: { threadId: "thread", tabId: "tab", sticky: true },
         tabs: [{ threadId: "thread", tabId: "tab" }],
         snapshot: { visibleText: "Example" },
@@ -337,6 +338,70 @@ describe("BrowserAutomationKernel", () => {
     expect(first.result).not.toHaveProperty("observationRef");
     expect(first.result).not.toHaveProperty("readiness");
     expect(second.result).not.toHaveProperty("capabilityRevision");
+  });
+
+  it("inspect never claims control, including while the user holds it", async () => {
+    await kernel.execute(event(), payload(request("inspect")));
+    await expect(kernel.execute(event(), payload(request("status")))).resolves.toMatchObject({
+      ok: true, result: { controller: { controller: "none", controlEpoch: 0 } },
+    });
+    await kernel.execute(event(), payload(request("press", { key: "A", modifiers: [] })));
+    kernel.interrupt(event(), { threadId: "thread", tabId: "tab" });
+    await expect(kernel.execute(event(), payload(request("inspect")))).resolves.toMatchObject({
+      ok: true, result: { controlEpoch: 1 },
+    });
+    await expect(kernel.execute(event(), payload(request("status")))).resolves.toMatchObject({
+      ok: true, result: { controller: { controller: "human", controlEpoch: 1 } },
+    });
+  });
+
+  it("keeps the thread held across turn end and a new turn on another tab", async () => {
+    await kernel.execute(event(), payload(request("press", { key: "A", modifiers: [] })));
+    kernel.interrupt(event(), { threadId: "thread", tabId: "tab" });
+    kernel.releaseAgentControl(event(), {
+      threadId: "thread", tabId: "tab", controlEpoch: 1, providerSessionId: "provider-session",
+    });
+    seedFakeTab("thread", "other-tab");
+    adoptedWebContents.set(JSON.stringify(["thread", "other-tab"]), new FakeWebContents(11));
+    const nextTurn = { ...request("press", { key: "B", modifiers: [] }), providerSessionId: "new-turn" };
+    await expect(kernel.execute(event(), payload(nextTurn, 0, "other-tab"))).resolves.toMatchObject({
+      ok: false, error: { code: "HUMAN_INTERRUPTED", recovery: "yield_to_user" },
+    });
+    await expect(kernel.execute(event(), payload(request("status"), 0, "other-tab"))).resolves.toMatchObject({
+      ok: true, result: { controller: { controller: "human", controlEpoch: 0 } },
+    });
+  });
+
+  it("hands back once, rejects the old epoch, and admits an effect after inspection", async () => {
+    await kernel.execute(event(), payload(request("press", { key: "A", modifiers: [] })));
+    kernel.interrupt(event(), { threadId: "thread", tabId: "tab" });
+    await expect(kernel.execute(event(), payload(request("press", { key: "B", modifiers: [] }, { expectedControlEpoch: 1 })))).resolves.toMatchObject({
+      ok: false, error: { code: "HUMAN_INTERRUPTED", recovery: "yield_to_user" },
+    });
+    expect(kernel.handBack(event(), { threadId: "thread" })).toBe(true);
+    expect(kernel.handBack(event(), { threadId: "thread" })).toBe(false);
+    await expect(kernel.execute(event(), payload(request("press", { key: "B", modifiers: [] }, { expectedControlEpoch: 1 })))).resolves.toMatchObject({
+      ok: false, error: { code: "STALE_CONTROL_EPOCH", recovery: "inspect" },
+    });
+    const inspected = await kernel.execute(event(), payload(request("inspect")));
+    expect(inspected).toMatchObject({ ok: true, result: { controlEpoch: 2 } });
+    if (!inspected.ok || inspected.result.operation !== "inspect") throw new Error("Expected inspection");
+    await expect(kernel.execute(event(), payload(request("press", { key: "B", modifiers: [] }, {
+      expectedControlEpoch: inspected.result.controlEpoch,
+    })))).resolves.toMatchObject({ ok: true, result: { operation: "press", controlEpoch: 2 } });
+  });
+
+  it.each([
+    ["open", { url: "https://example.test/" }],
+    ["act", { idempotencyKey: "held-act", observationRef: "observation", deadlineMs: 1_000, steps: [{ operation: "press", key: "A", modifiers: [] }] }],
+    ["tabs", { action: "select", tabId: "tab", idempotencyKey: "held-tabs", observationRef: "observation" }],
+    ["evaluate", { expression: "1", awaitPromise: false, timeoutMs: 1_000 }],
+  ] as const)("refuses public %s while held even with the latest epoch", async (operation, args) => {
+    await kernel.execute(event(), payload(request("press", { key: "A", modifiers: [] })));
+    kernel.interrupt(event(), { threadId: "thread", tabId: "tab" });
+    await expect(kernel.execute(event(), payload(request(operation, args, { expectedControlEpoch: 1 })))).resolves.toMatchObject({
+      ok: false, error: { code: "HUMAN_INTERRUPTED", recovery: "yield_to_user" },
+    });
   });
 
   it("keeps capabilityRevision stable across navigation", async () => {
@@ -375,13 +440,13 @@ describe("BrowserAutomationKernel", () => {
     expect(selectAllModifierMask("linux")).toBe(2);
   });
 
-  it("rejects stale renderer operation epochs before local UI work begins", async () => {
+  it("rejects renderer operations while held before local UI work begins", async () => {
     await kernel.execute(event(), payload(request("status", {}, { requestId: "seed-status" })));
     kernel.interrupt(event(), { threadId: "thread", tabId: "tab" });
     const stale = request("resize", { width: 800, height: 600 }, { requestId: "stale-resize" });
     await expect(kernel.beginRendererOperation(event(), payload(stale))).resolves.toMatchObject({
       ok: false,
-      response: { ok: false, error: { code: "STALE_CONTROL_EPOCH" } },
+      response: { ok: false, error: { code: "HUMAN_INTERRUPTED", recovery: "yield_to_user" } },
     });
   });
 
@@ -496,7 +561,7 @@ describe("BrowserAutomationKernel", () => {
     });
     await expect(kernel.execute(event(), payload(request("press", { key: "A", modifiers: [] })))).resolves.toMatchObject({
       ok: false,
-      error: { code: "STALE_CONTROL_EPOCH" },
+      error: { code: "HUMAN_INTERRUPTED", recovery: "yield_to_user" },
     });
   });
 
@@ -683,18 +748,18 @@ describe("BrowserAutomationKernel", () => {
     expect(userWebContents.focus).toHaveBeenCalledOnce();
   });
 
-  it("rejects sessionless and stale same-epoch releases after a newer inspect turn", async () => {
-    const oldInspect = {
-      ...request("inspect", {}, { requestId: "inspect-old-turn" }),
+  it("rejects sessionless and stale same-epoch releases after a newer effect turn", async () => {
+    const oldEffect = {
+      ...request("press", { key: "A", modifiers: [] }, { requestId: "effect-old-turn" }),
       providerSessionId: "provider-session-old",
     } as BrowserAutomationRequest;
-    const newInspect = {
-      ...request("inspect", {}, { requestId: "inspect-new-turn" }),
+    const newEffect = {
+      ...request("press", { key: "B", modifiers: [] }, { requestId: "effect-new-turn" }),
       providerSessionId: "provider-session-new",
     } as BrowserAutomationRequest;
 
-    await expect(kernel.execute(event(), payload(oldInspect))).resolves.toMatchObject({ ok: true });
-    await expect(kernel.execute(event(), payload(newInspect))).resolves.toMatchObject({ ok: true });
+    await expect(kernel.execute(event(), payload(oldEffect))).resolves.toMatchObject({ ok: true });
+    await expect(kernel.execute(event(), payload(newEffect))).resolves.toMatchObject({ ok: true });
 
     expect(kernel.releaseAgentControl(event(), {
       threadId: "thread",

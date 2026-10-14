@@ -613,7 +613,7 @@ export type BrowserAutomationPerformanceMetrics = z.infer<
   ReturnType<typeof BrowserAutomationPerformanceMetricsSchema>
 >;
 
-/** Browser controller identity and interruption epoch for one tab. */
+/** Browser controller identity and interruption epoch; human control is held until Hand back. */
 export const BrowserAutomationControllerStateSchema = lazySchema(() =>
   z
     .object({
@@ -630,7 +630,7 @@ export const BrowserAutomationControllerStateSchema = lazySchema(() =>
     .strict(),
 );
 
-/** Browser controller state for one tab. */
+/** Browser controller state for one tab; human means held until Hand back. */
 export type BrowserAutomationControllerState = z.infer<
   ReturnType<typeof BrowserAutomationControllerStateSchema>
 >;
@@ -1145,6 +1145,7 @@ export const BrowserAutomationResultSchema = lazySchema(() =>
   z.union([
     z.object({
       operation: z.literal("inspect"),
+      controlEpoch: z.number().int().nonnegative(),
       readiness: BrowserAutomationInspectReadinessSchema().optional(),
       target: BrowserAutomationInspectTargetSchema().optional(),
       tabs: z.array(BrowserAutomationHostDispatchTargetSchema()).max(BROWSER_AUTOMATION_MAX_INSPECT_TABS),
@@ -1239,7 +1240,6 @@ export const BROWSER_AUTOMATION_ERROR_CODES = [
   "TIMEOUT",
   "DEADLINE_EXCEEDED",
   "TARGET_NOT_FOUND",
-  "CROSS_ORIGIN",
   "NAVIGATION_FAILED",
   "RESULT_TOO_LARGE",
   "RECORDING_NOT_ACTIVE",

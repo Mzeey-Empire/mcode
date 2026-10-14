@@ -237,7 +237,7 @@ function createInspectionResponse(dispatch: BrowserAutomationHostDispatch): Brow
     sequence: dispatch.request.sequence,
     ok: true,
     result: {
-      operation: "inspect", tabs: [], capabilities: ["inspect", "act"], observationRef: "observation-conformance-1",
+      operation: "inspect", controlEpoch: 7, tabs: [], capabilities: ["inspect", "act"], observationRef: "observation-conformance-1",
     },
   });
 }
@@ -317,7 +317,7 @@ function assertInspectionConformance(
   expect(normalized.outcome.recovery).toBe("none");
   expect(normalized.receipts.some((receipt) => receipt.status === "unknown" || receipt.operation === "unknown")).toBe(false);
   expect(JSON.parse(inspection.payload.result.content[0].text))
-    .toMatchObject({ operation: "inspect", capabilities: ["inspect", "act"] });
+    .toMatchObject({ operation: "inspect", controlEpoch: 7, capabilities: ["inspect", "act"] });
 }
 
 async function runAct(fixture: McpConformanceFixture): Promise<{

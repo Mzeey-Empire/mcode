@@ -18,6 +18,7 @@ export function registerBrowserAutomationHandlers(platform: NodeJS.Platform): vo
   ipcMain.handle("preview:automation.finish-renderer-operation", (event, payload: unknown) => automationKernel.finishRendererOperation(event, payload));
   ipcMain.handle("preview:automation.cancel", (_event, requestId: unknown) => automationKernel.cancel(requestId));
   ipcMain.handle("preview:automation.interrupt", (event, target: unknown) => automationKernel.interrupt(event, target));
+  ipcMain.handle("preview:automation.hand-back", (event, target: unknown) => automationKernel.handBack(event, target));
   ipcMain.handle("preview:automation.release-agent-control", (event, target: unknown) => automationKernel.releaseAgentControl(event, target));
   ipcMain.handle("preview:automation.describe-target", (event, target: unknown) => automationKernel.describeTarget(event, target));
   ipcMain.handle("preview:automation.media-source", (event, target: unknown) => automationKernel.getMediaSourceId(event, target));

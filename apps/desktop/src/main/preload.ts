@@ -481,6 +481,9 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       interrupt(target: { threadId: string; tabId: string }): Promise<boolean> {
         return ipcRenderer.invoke("preview:automation.interrupt", target);
       },
+      handBack(target: { threadId: string }): Promise<boolean> {
+        return ipcRenderer.invoke("preview:automation.hand-back", target);
+      },
       releaseAgentControl(target: {
         threadId: string;
         tabId: string;

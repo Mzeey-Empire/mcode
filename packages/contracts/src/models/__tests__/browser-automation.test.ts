@@ -99,6 +99,7 @@ const resultByOperation = {
   open: actionResult("open"),
   inspect: {
     operation: "inspect",
+    controlEpoch: 0,
     tabs: [],
     readiness: { ready: true, state: "ready" },
     capabilities: [...BROWSER_AUTOMATION_OPERATIONS],
@@ -322,6 +323,7 @@ describe("browser automation operation contract", () => {
       result: {
         operation: "inspect",
         readiness: { ready: true, state: "ready" },
+        controlEpoch: 0,
         target: { threadId: "thread-1", tabId: "tab-1", targetGeneration: 1, sticky: true },
         tabs: [{ desktopInstanceId: "desktop-1", windowId: 1, connectionGeneration: 1, threadId: "thread-1", tabId: "tab-1", targetGeneration: 1, active: true, focused: true, lastUsedAt: 1 }],
         snapshot,

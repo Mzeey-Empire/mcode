@@ -116,6 +116,8 @@ class FakeDebugger extends NodeEvents.EventEmitter {
   private commandResult(method: string, params: unknown): unknown {
     if (method === "Page.getFrameTree") return { frameTree: { frame: { id: "main-frame" } } };
     if (method === "Page.createIsolatedWorld") return { executionContextId: 7 };
+    if (method === "DOM.getDocument") return { root: { backendNodeId: 1 } };
+    if (method === "Accessibility.getPartialAXTree") return { nodes: [] };
     if (method === "Runtime.callFunctionOn") return this.callFunctionResult(params);
     return {};
   }
@@ -123,6 +125,9 @@ class FakeDebugger extends NodeEvents.EventEmitter {
   private callFunctionResult(params: unknown): unknown {
     const input = params as { functionDeclaration?: string; arguments?: Array<{ value?: unknown }> } | undefined;
     const source = input?.functionDeclaration ?? "";
+    if (source.includes("snapshotPage")) {
+      return { result: { value: { url: this.owner.url, title: this.owner.title, loading: false, visibleText: "Example", elements: [] } } };
+    }
     if (source.includes("inspectPageTarget")) return { result: { value: { attached: true, visible: true, x: 10, y: 20 } } };
     if (source.includes("evaluateIsolatedExpression")) return this.evaluateIsolatedExpression(input);
     return { result: { value: false } };
@@ -547,7 +552,7 @@ describe("BrowserAutomationKernel race conformance", () => {
     expect(heldResponse).toMatchObject({
       ok: false,
       requestId: "takeover",
-      error: { code: "HUMAN_INTERRUPTED", effect: "preserved", recovery: "retry" },
+      error: { code: "HUMAN_INTERRUPTED", effect: "preserved", recovery: "yield_to_user" },
     });
     await settleLateWork();
     const enterKeyDown = currentWebContents.debugger.commands.findIndex((command) =>
@@ -593,7 +598,7 @@ describe("BrowserAutomationKernel race conformance", () => {
     expect(response).toMatchObject({
       ok: false,
       requestId: "clear-takeover",
-      error: { code: "HUMAN_INTERRUPTED", effect: "preserved", recovery: "retry" },
+      error: { code: "HUMAN_INTERRUPTED", effect: "preserved", recovery: "yield_to_user" },
     });
     await settleLateWork();
     expect(currentWebContents.debugger.commands.filter((command) => command.method === "Input.insertText")).toHaveLength(0);
@@ -622,7 +627,7 @@ describe("BrowserAutomationKernel race conformance", () => {
     expect(parseResponse(await pending)).toMatchObject({
       ok: false,
       requestId: "click-takeover",
-      error: { code: "HUMAN_INTERRUPTED", effect: "preserved", recovery: "retry" },
+      error: { code: "HUMAN_INTERRUPTED", effect: "preserved", recovery: "yield_to_user" },
     });
     await settleLateWork();
     const pointReleases = currentWebContents.debugger.commands.filter((command) =>
@@ -654,10 +659,78 @@ describe("BrowserAutomationKernel race conformance", () => {
     expect(parseResponse(await pending)).toMatchObject({
       ok: false,
       requestId: "target-click-takeover",
-      error: { code: "HUMAN_INTERRUPTED", effect: "preserved", recovery: "retry" },
+      error: { code: "HUMAN_INTERRUPTED", effect: "preserved", recovery: "yield_to_user" },
     });
     await settleLateWork();
     expect(currentWebContents.debugger.commands.filter((command) => command.method === "Input.insertText")).toHaveLength(0);
+  });
+
+  it("does not resume a deferred effect when takeover is immediately handed back", async () => {
+    const gate = currentWebContents.debugger.blockNext((command) => command.method === "Runtime.callFunctionOn");
+    const pending = kernel.execute(event(), dispatch(request("click", {
+      target: { semanticId: "button" }, button: "left", clickCount: 1, timeoutMs: 5_000,
+    })));
+    await gate.reached.promise;
+    expect(kernel.interrupt(event(), { threadId: "thread", tabId: "tab" })).toBe(true);
+    expect(kernel.handBack(event(), { threadId: "thread" })).toBe(true);
+    gate.release.resolve(undefined);
+    await expect(pending).resolves.toMatchObject({
+      ok: false, error: { code: "HUMAN_INTERRUPTED", recovery: "yield_to_user" },
+    });
+    await settleLateWork();
+    expect(currentWebContents.debugger.commands.filter((command) => command.method === "Input.dispatchMouseEvent")).toEqual([]);
+    await expect(kernel.execute(event(), dispatch(request("press", { key: "A", modifiers: [] }, {
+      expectedControlEpoch: 1,
+    })))).resolves.toMatchObject({ ok: false, error: { code: "STALE_CONTROL_EPOCH", recovery: "inspect" } });
+    await expect(kernel.execute(event(), dispatch(request("status", {})))).resolves.toMatchObject({
+      ok: true, result: { controller: { controller: "none", controlEpoch: 2 } },
+    });
+  });
+
+  it("executes browser_act through the Electron adapter after Hand back and a fresh inspect", async () => {
+    await kernel.execute(event(), dispatch(request("press", { key: "A", modifiers: [] })));
+    kernel.interrupt(event(), { threadId: "thread", tabId: "tab" });
+    expect(kernel.handBack(event(), { threadId: "thread" })).toBe(true);
+    const adapter = new ElectronBrowserSessionAdapter((input) => kernel.execute(event(), input));
+    const driver = new BrowserSessionDriver({ web: adapter, electron: adapter, isElectron: () => true });
+    const signal = new AbortController().signal;
+    const inspection = await driver.execute(dispatch(request("inspect", {
+      includeScreenshot: false, includeDiagnostics: false,
+    }, { expectedControlEpoch: 2 })), signal);
+    expect(inspection, JSON.stringify(inspection)).toMatchObject({ ok: true, result: { operation: "inspect", controlEpoch: 2 } });
+    if (!inspection.ok || inspection.result.operation !== "inspect" || !inspection.result.observationRef) {
+      throw new Error("Expected fresh observation");
+    }
+    const result = await driver.execute(dispatch(request("act", {
+      observationRef: inspection.result.observationRef,
+      idempotencyKey: "handed-back-act",
+      deadlineMs: 5_000,
+      steps: [{ operation: "click", target: { x: 10, y: 20 }, button: "left", clickCount: 1, timeoutMs: 1_000 }],
+    }, { expectedControlEpoch: 2 })), signal);
+    expect(result).toMatchObject({
+      ok: true, result: { operation: "act", outcome: "completed", receipts: [{ index: 0, operation: "click", status: "applied" }] },
+    });
+    expect(currentWebContents.debugger.commands.filter((command) =>
+      command.method === "Input.dispatchMouseEvent" && (command.params as { type?: string }).type === "mousePressed",
+    )).toHaveLength(1);
+    await driver.releaseProviderSession("provider-session");
+  });
+
+  it("refuses an effect received during the hold even if another tab's inspect delays execution until Hand back", async () => {
+    await kernel.execute(event(), dispatch(request("press", { key: "A", modifiers: [] })));
+    kernel.interrupt(event(), { threadId: "thread", tabId: "tab" });
+    seedTab("other-tab");
+    currentWebContents = new FakeWebContents(2);
+    const gate = currentWebContents.debugger.blockNext((command) => command.method === "Runtime.callFunctionOn");
+    const inspection = kernel.execute(event(), dispatch(request("inspect", {}), 0, "other-tab"));
+    await gate.reached.promise;
+    const effect = kernel.execute(event(), dispatch(request("press", { key: "B", modifiers: [] }), 0, "other-tab"));
+    expect(kernel.handBack(event(), { threadId: "thread" })).toBe(true);
+    gate.release.resolve(undefined);
+    await inspection;
+    await expect(effect).resolves.toMatchObject({ ok: false, error: { code: "HUMAN_INTERRUPTED", recovery: "yield_to_user" } });
+    await settleLateWork();
+    expect(currentWebContents.debugger.commands.filter((command) => command.method === "Input.dispatchKeyEvent")).toEqual([]);
   });
 
   it("reports evaluation oversize and timeout after dispatch as bounded failures", async () => {
