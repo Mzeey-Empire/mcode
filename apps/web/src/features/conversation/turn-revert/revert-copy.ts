@@ -58,7 +58,7 @@ export function fileRevertTitle(path: string, range: FileRevertRange): string {
 }
 
 function renameChainLead(preview: ReadyPreview, clickedPath: string): string | null {
-  const normalize = (path: string) => path.replaceAll("\\", "/");
+  const normalize = (path: string) => path.split("\\").join("/");
   if (!preview.files.some((file) => normalize(file.path) !== normalize(clickedPath))) return null;
   const names = (actions: readonly RevertFilePlan["action"][]) =>
     revertableFiles(preview).filter((file) => actions.includes(file.action)).map((file) => basename(file.path));
