@@ -73,7 +73,7 @@ export function beginDraftSubmission(
   inFlightMessageIds.add(messageId);
   useComposerDraftStore.getState().updateNextMessage(
     threadId,
-    (draft) => freezeDraftSubmission(draft, messageId, content).draft,
+    (draft) => freezeDraftSubmission(draft, messageId, { ...content, planComments: planCommentCount > 0 ? content.planComments : undefined }).draft,
   );
   return {
     messageId,

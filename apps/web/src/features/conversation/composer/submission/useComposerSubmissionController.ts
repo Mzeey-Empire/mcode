@@ -73,6 +73,16 @@ export interface UseComposerSubmissionControllerOptions {
 type SubmitAttemptOutcome = "complete" | "checkout-pending";
 
 /** Owns Composer submit routing, dispatch cleanup, and Direct-mode checkout confirmation. */
+/** A queued send or a branch starts no plan turn, so only a direct send to an existing thread carries plan comments. */
+function planCommentThreadFor(send: {
+  isNewThread: boolean;
+  branchFromMessageId?: string | null;
+  isAgentRunning: boolean;
+  threadId?: string;
+}): string | undefined {
+  return !send.isNewThread && !send.branchFromMessageId && !send.isAgentRunning ? send.threadId : undefined;
+}
+
 export function useComposerSubmissionController({
   threadId,
   workspaceId,
@@ -198,7 +208,7 @@ export function useComposerSubmissionController({
       annotationScopeId,
       form,
       startingThread,
-      planCommentThreadId: !isNewThread && !branchFromMessageId && !isAgentRunning ? threadId : undefined,
+      planCommentThreadId: planCommentThreadFor({ isNewThread, branchFromMessageId, isAgentRunning, threadId }),
       discardEmptyEdit: queue.discardEmptyEdit,
       resolvePreviewAnnotations: queue.resolvePreviewAnnotations,
     });

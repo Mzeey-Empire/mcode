@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { PlanComment, PlanVersion } from "@mcode/contracts";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { usePlanStore } from "@/stores/planStore";
+import type { NextMessageDraft } from "./draft-submission";
 import { beginDraftSubmission } from "./draft-submission-lifecycle";
 import {
+  excludeAllPlanComments,
   excludePlanComment,
   includePlanComment,
   readPlanCommentsForSend,
@@ -30,6 +32,8 @@ function comment(id: string, versionId: string, extra: Partial<PlanComment> = {}
   } as PlanComment;
 }
 
+const NO_DRAFT: NextMessageDraft = {};
+
 describe("sendable plan comments", () => {
   it("offers the open, unsent comments of the latest version", () => {
     const sendable = sendablePlanComments(
@@ -55,7 +59,7 @@ describe("plan-comment selection sync", () => {
   const versions = [version(V1, 1, "superseded"), version(V2, 2, "ready")];
 
   it("keeps an exclusion on the comment carried into a new version", () => {
-    const first = syncPlanCommentSelection({}, sendablePlanComments([version(V1, 1, "ready")], [comment("a", V1), comment("b", V1)]));
+    const first = syncPlanCommentSelection(NO_DRAFT, sendablePlanComments([version(V1, 1, "ready")], [comment("a", V1), comment("b", V1)]));
     const excluded = excludePlanComment(first, "b");
 
     const carried = syncPlanCommentSelection(
@@ -67,21 +71,33 @@ describe("plan-comment selection sync", () => {
   });
 
   it("empties the selection when its comments are gone and never creates one for none", () => {
-    const selected = syncPlanCommentSelection({}, sendablePlanComments(versions, [comment("a", V2)]));
+    const selected = syncPlanCommentSelection(NO_DRAFT, sendablePlanComments(versions, [comment("a", V2)]));
 
     expect(syncPlanCommentSelection(selected, sendablePlanComments(versions, [])).planCommentSelection)
       .toMatchObject({ includedIds: [], excludedIds: [] });
-    expect(syncPlanCommentSelection({}, sendablePlanComments(versions, []))).toEqual({});
+    expect(syncPlanCommentSelection(NO_DRAFT, sendablePlanComments(versions, []))).toEqual(NO_DRAFT);
   });
 
   it("excludes a comment for one Send and brings it back on request", () => {
-    const selected = syncPlanCommentSelection({}, sendablePlanComments(versions, [comment("a", V2)]));
+    const selected = syncPlanCommentSelection(NO_DRAFT, sendablePlanComments(versions, [comment("a", V2)]));
 
     const excluded = excludePlanComment(selected, "a");
     const restored = includePlanComment(excluded, "a");
 
     expect(excluded.planCommentSelection).toMatchObject({ includedIds: ["a"], excludedIds: ["a"] });
     expect(restored.planCommentSelection).toMatchObject({ includedIds: ["a"], excludedIds: [] });
+  });
+});
+
+describe("excludeAllPlanComments", () => {
+  it("leaves every riding comment out of this Send and keeps them selectable", () => {
+    const versions = [version(V2, 2, "ready")];
+    const selected = syncPlanCommentSelection(NO_DRAFT, sendablePlanComments(versions, [comment("a", V2), comment("b", V2)]));
+
+    const excluded = excludeAllPlanComments(selected);
+
+    expect(excluded.planCommentSelection).toMatchObject({ includedIds: ["a", "b"], excludedIds: ["a", "b"] });
+    expect(excludeAllPlanComments(NO_DRAFT)).toBe(NO_DRAFT);
   });
 });
 

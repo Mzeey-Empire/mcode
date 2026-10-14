@@ -85,6 +85,22 @@ export function includePlanComment<T extends NextMessageDraft>(draft: T, comment
   };
 }
 
+/** Leaves every riding comment out of the next Send; the comments stay open in the plan. */
+export function excludeAllPlanComments<T extends NextMessageDraft>(draft: T): T {
+  const selection = draft.planCommentSelection;
+  if (!selection) return draft;
+  const riding = selection.includedIds.filter((id) => !selection.excludedIds.includes(id));
+  if (riding.length === 0) return draft;
+  return {
+    ...draft,
+    planCommentSelection: {
+      ...selection,
+      excludedIds: [...selection.excludedIds, ...riding],
+      revision: selection.revision + 1,
+    },
+  };
+}
+
 /** Syncs a thread's selection from the plan store, then applies the change. */
 export function updatePlanCommentSelection(threadId: string, change?: (draft: ComposerDraft) => ComposerDraft): void {
   const plans = usePlanStore.getState();
