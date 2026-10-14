@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Camera, PenTool, RotateCw } from "lucide-react";
+import { ArrowLeft, ArrowRight, Camera, MousePointer2, RotateCw } from "lucide-react";
 import { BrowserActionButton } from "./BrowserActionButton";
 import { BrowserMoreMenu } from "./BrowserMoreMenu";
 import type {
@@ -50,7 +50,7 @@ function PageActions({ actions }: { readonly actions: BrowserPageActions }) {
         pressed={actions.designActive}
         className="aria-disabled:opacity-50"
       >
-        <PenTool aria-hidden />
+        <MousePointer2 aria-hidden />
       </BrowserActionButton>
       <BrowserActionButton
         label="Screenshot"

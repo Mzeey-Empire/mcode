@@ -100,6 +100,7 @@ import {
   usePreviewAnnotationStore,
 } from "../../state/previewAnnotationStore";
 import { usePreviewDesignModeStore } from "../../state/previewDesignModeStore";
+import { usePreviewPageScrollStore } from "../../state/previewPageScrollStore";
 import { useProviderCatalogStore } from "@/stores/providerCatalogStore";
 import { previewTabsScopeKey, usePreviewTabsStore } from "../../state/previewTabsStore";
 import { useDiffStore } from "@/stores/diffStore";
@@ -707,6 +708,7 @@ describe("PreviewPanel: full panel state", () => {
     useSettingsStore.getState()._applyPush(getDefaultSettings());
     usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
     usePreviewDesignModeStore.setState({ pickers: {} });
+    usePreviewPageScrollStore.setState({ byTab: {} });
     usePreviewTabsStore.setState({ tabSetByScope: {}, liveChromeByScope: {}, persistentTabIdsByScope: {}, pendingNavErrorsByScope: {} });
     useDiffStore.setState({ previewUrlByThread: {} });
     useBrowserAutomationStore.setState({ controllers: new Map(), pendingAgentOpens: new Map() });
@@ -728,6 +730,7 @@ describe("PreviewPanel: full panel state", () => {
     useSettingsStore.getState()._applyPush(getDefaultSettings());
     usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
     usePreviewDesignModeStore.setState({ pickers: {} });
+    usePreviewPageScrollStore.setState({ byTab: {} });
     usePreviewTabsStore.setState({ tabSetByScope: {}, liveChromeByScope: {}, persistentTabIdsByScope: {}, pendingNavErrorsByScope: {} });
     useBrowserAutomationStore.setState({ controllers: new Map(), pendingAgentOpens: new Map() });
     useProviderCatalogStore.getState().reset();
@@ -1687,10 +1690,10 @@ describe("PreviewPanel: full panel state", () => {
     expect(designButton).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("shows the saved-annotation command bar after the first annotation", () => {
+  it("keeps the browser toolbar in place once a note is saved", () => {
     usePreviewDesignModeStore.getState().setActive("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", true);
-    const pageUrl = "https://example.com/product-preview?productCode=QUAELE2010";
     installSavedAnnotation();
+    const pageUrl = "https://example.com/product-preview?productCode=QUAELE2010";
     mockUsePreviewBridge.mockReturnValue(
       mockBridgeState({
         inputUrl: pageUrl,
@@ -1706,21 +1709,15 @@ describe("PreviewPanel: full panel state", () => {
 
     render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
-    expect(screen.queryByTestId("browser-toolbar")).not.toBeInTheDocument();
-    expect(screen.getByTestId("preview-annotation-header")).toBeInTheDocument();
-    expect(screen.getByTestId("preview-annotation-title")).toHaveTextContent(
-      `Designing · ${normalizePreviewPageIdentity(pageUrl)}`,
-    );
-    expect(screen.getByTestId("preview-annotation-send-state")).toHaveAccessibleName(
-      "Send 1 annotation",
-    );
+    expect(screen.getByTestId("browser-toolbar")).toBeInTheDocument();
+    expect(screen.queryByTestId("preview-annotation-header")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit annotation 1" })).toBeInTheDocument();
   });
 
-  it("confirms before discarding saved page annotations", async () => {
-    const user = userEvent.setup();
+  it("anchors a marker on the element's top-left corner and keeps it there while the page scrolls", () => {
     usePreviewDesignModeStore.getState().setActive("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", true);
-    const pageUrl = "https://example.com/product-preview?productCode=QUAELE2010";
     installSavedAnnotation();
+    const pageUrl = "https://example.com/product-preview?productCode=QUAELE2010";
     mockUsePreviewBridge.mockReturnValue(
       mockBridgeState({
         inputUrl: pageUrl,
@@ -1736,48 +1733,86 @@ describe("PreviewPanel: full panel state", () => {
 
     render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
-    expect(usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]).toHaveLength(
-      1,
+    const marker = screen.getByRole("button", { name: "Edit annotation 1" });
+    const outline = screen.getByTestId("preview-annotation-outline");
+    expect(marker).toHaveStyle({ left: "10px", top: "14px" });
+    expect(outline).toHaveStyle({ left: "20px", top: "24px", width: "120px", height: "32px" });
+
+    act(() => {
+      usePreviewPageScrollStore
+        .getState()
+        .report("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", PREVIEW_WEBVIEW_FALLBACK_TAB_ID, { x: 5, y: 100 });
+    });
+
+    expect(marker).toHaveStyle({ left: "5px", top: "-86px" });
+    expect(outline).toHaveStyle({ left: "15px", top: "-76px" });
+  });
+
+  it("treats the scroll position at capture time as the origin of the marker", () => {
+    usePreviewDesignModeStore.getState().setActive("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", true);
+    installSavedAnnotation({
+      pageContext: {
+        schemaVersion: 2,
+        pageUrl: "https://example.com/product-preview?productCode=QUAELE2010",
+        pageTitle: "Example",
+        capturedAt: "2026-07-01T00:00:00.000Z",
+        captureKind: "element",
+        bounds: { x: 20, y: 24, width: 120, height: 32 },
+        layoutViewport: { width: 800, height: 600 },
+        viewportScroll: { scrollX: 0, scrollY: 300 },
+      },
+    });
+    const pageUrl = "https://example.com/product-preview?productCode=QUAELE2010";
+    mockUsePreviewBridge.mockReturnValue(
+      mockBridgeState({
+        inputUrl: pageUrl,
+        storedUrl: pageUrl,
+        pageStatus: {
+          url: pageUrl,
+          title: "Example",
+          favicon: null,
+          phase: "loaded",
+        },
+      }),
     );
-    await user.click(screen.getByLabelText("Discard page annotations"));
 
-    const cancelDialog = await screen.findByRole("dialog", {
-      name: "Delete page annotations?",
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
+
+    act(() => {
+      usePreviewPageScrollStore
+        .getState()
+        .report("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", PREVIEW_WEBVIEW_FALLBACK_TAB_ID, { x: 0, y: 250 });
     });
-    expect(
-      within(cancelDialog).getByText(
-        "This removes 1 saved annotation from this page.",
-      ),
-    ).toBeInTheDocument();
-    expect(usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]).toHaveLength(
-      1,
+
+    expect(screen.getByRole("button", { name: "Edit annotation 1" })).toHaveStyle({ top: "64px" });
+  });
+
+  it("numbers markers from 1 on each page and hides the markers of other pages", () => {
+    usePreviewDesignModeStore.getState().setActive("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", true);
+    installSavedAnnotation({
+      pageIdentity: normalizePreviewPageIdentity("https://example.com/other-page"),
+    });
+    installSavedAnnotation();
+    const pageUrl = "https://example.com/product-preview?productCode=QUAELE2010";
+    mockUsePreviewBridge.mockReturnValue(
+      mockBridgeState({
+        inputUrl: pageUrl,
+        storedUrl: pageUrl,
+        pageStatus: {
+          url: pageUrl,
+          title: "Example",
+          favicon: null,
+          phase: "loaded",
+        },
+      }),
     );
 
-    await user.click(within(cancelDialog).getByRole("button", { name: "Cancel" }));
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
-    await waitFor(() => {
-      expect(
-        screen.queryByRole("dialog", { name: "Delete page annotations?" }),
-      ).not.toBeInTheDocument();
-    });
-    expect(usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]).toHaveLength(
-      1,
-    );
-
-    await user.click(screen.getByLabelText("Discard page annotations"));
-    const deleteDialog = await screen.findByRole("dialog", {
-      name: "Delete page annotations?",
-    });
-    await user.click(within(deleteDialog).getByRole("button", { name: "Delete" }));
-
-    await waitFor(() => {
-      expect(usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]).toHaveLength(
-        0,
-      );
-    });
-    expect(
-      screen.queryByRole("button", { name: "Edit annotation 1" }),
-    ).not.toBeInTheDocument();
+    const markers = screen.getAllByTestId("preview-annotation-marker");
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toHaveTextContent("1");
+    expect(screen.getAllByTestId("preview-annotation-outline")).toHaveLength(1);
   });
 
   it("hides saved annotation markers when design mode is inactive", () => {

@@ -2,11 +2,12 @@
  * Owns annotation bubble geometry, draft conversion and local edit state, shared by design rendering and its ordered lifecycle hooks.
  */
 import { useCallback, useState, type CSSProperties, type Dispatch, type SetStateAction } from "react";
-import type { PreviewAnnotationVisualProposal } from "@mcode/contracts";
+import type { McodeBrowserCaptureV2, PreviewAnnotationVisualProposal } from "@mcode/contracts";
 import type { PreviewAnnotationSnapshotRequest } from "@/transport/desktop-bridge";
 import { cn } from "@/lib/utils";
 import type { PreviewDraftAnnotation, SavedPreviewAnnotation } from "../state/previewAnnotationStore";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
+import type { PreviewPageScroll } from "../state/previewPageScrollStore";
 import {
   visualProposalBounds,
   cleanVisualProposal,
@@ -14,7 +15,7 @@ import {
   initialVisualControls,
 } from "./visualProposalModel";
 
-const ANNOTATION_BUBBLE_MAX_WIDTH_PX = 336;
+const ANNOTATION_BUBBLE_WIDTH_PX = 290;
 
 const ANNOTATION_BUBBLE_MARGIN_PX = 8;
 
@@ -43,34 +44,34 @@ export function isAnnotationBubbleInteractionTarget(
     ANNOTATION_BUBBLE_KEEP_OPEN_SELECTORS.some((selector) => target.closest(selector));
 }
 
-/** Positions the note bubble within the available preview width. */
+/**
+ * Moves viewport bounds captured at one scroll offset to where the page shows them at another.
+ * Annotations store bounds at capture time, so the renderer re-anchors them as the page scrolls.
+ */
+export function boundsAtScroll(
+  bounds: PreviewDraftAnnotation["bounds"],
+  capturedAt: McodeBrowserCaptureV2["viewportScroll"],
+  current: PreviewPageScroll,
+): PreviewDraftAnnotation["bounds"] {
+  return {
+    ...bounds,
+    x: bounds.x + (capturedAt?.scrollX ?? 0) - current.x,
+    y: bounds.y + (capturedAt?.scrollY ?? 0) - current.y,
+  };
+}
+
+/** Places the note bubble under its element, kept inside the preview width. */
 export function annotationBubbleStyle(
   bounds: PreviewDraftAnnotation["bounds"],
   surfaceWidth: number,
 ): CSSProperties {
-  const bubbleWidth =
-    surfaceWidth > 0
-      ? Math.min(
-          ANNOTATION_BUBBLE_MAX_WIDTH_PX,
-          Math.max(0, surfaceWidth - ANNOTATION_BUBBLE_MARGIN_PX * 2),
-        )
-      : ANNOTATION_BUBBLE_MAX_WIDTH_PX;
-  const preferredLeft = bounds.x + bounds.width + ANNOTATION_BUBBLE_MARGIN_PX;
   const maxLeft =
     surfaceWidth > 0
-      ? Math.max(
-          ANNOTATION_BUBBLE_MARGIN_PX,
-          surfaceWidth - bubbleWidth - ANNOTATION_BUBBLE_MARGIN_PX,
-        )
-      : preferredLeft;
-
+      ? Math.max(ANNOTATION_BUBBLE_MARGIN_PX, surfaceWidth - ANNOTATION_BUBBLE_WIDTH_PX - ANNOTATION_BUBBLE_MARGIN_PX)
+      : bounds.x;
   return {
-    left: Math.min(
-      Math.max(ANNOTATION_BUBBLE_MARGIN_PX, preferredLeft),
-      maxLeft,
-    ),
-    top: Math.max(ANNOTATION_BUBBLE_MARGIN_PX, bounds.y),
-    maxWidth: `calc(100% - ${ANNOTATION_BUBBLE_MARGIN_PX * 2}px)`,
+    left: Math.min(Math.max(ANNOTATION_BUBBLE_MARGIN_PX, bounds.x), maxLeft),
+    top: Math.max(ANNOTATION_BUBBLE_MARGIN_PX, bounds.y + bounds.height + ANNOTATION_BUBBLE_MARGIN_PX),
   };
 }
 
@@ -303,14 +304,6 @@ export function useAnnotationBubbleEditor(
   };
 }
 
-/** Chooses the existing page label for the annotation header. */
-export function annotationPageLabel(
-  pageIdentity: string,
-  inputUrl: string,
-): string {
-  return pageIdentity || inputUrl || "current page";
-}
-
 /** Hides annotation markers and proposals while design mode is inactive. */
 export function visibleAnnotationState(
   designModeActive: boolean,
@@ -335,15 +328,7 @@ export function previewSurfaceWidth(surface: HTMLDivElement | null): number {
   return surface?.clientWidth ?? 0;
 }
 
-/** Shows the annotation header while design mode has saved annotations. */
-export function shouldShowAnnotationCommandBar(
-  designModeActive: boolean,
-  annotationCount: number,
-): boolean {
-  return designModeActive && annotationCount > 0;
-}
-
-/** Chooses the existing bubble border and size for its editing state. */
+/** Chooses the bubble border for its editing state; the width matches `ANNOTATION_BUBBLE_WIDTH_PX`. */
 export function annotationBubbleClassName(
   outsideWarned: boolean,
   bubbleInputFocused: boolean,
@@ -355,9 +340,9 @@ export function annotationBubbleClassName(
       ? "border-focus ring-1 ring-focus"
       : "border-border ring-1 ring-border";
   return cn(
-    "pointer-events-auto absolute z-(--layer-floating-panel) w-[min(20.5rem,calc(100%-1rem))] overflow-hidden rounded-[1.55rem] border shadow-floating transition-[border-color,box-shadow] duration-150",
+    "pointer-events-auto absolute z-(--layer-floating-panel) w-[290px] overflow-hidden rounded-[14px] border shadow-floating transition-[border-color,box-shadow] duration-150",
     focusClassName,
-    bubbleAdvancedOpen ? "max-h-[20.5rem]" : "min-h-11",
+    bubbleAdvancedOpen && "max-h-[20.5rem]",
   );
 }
 

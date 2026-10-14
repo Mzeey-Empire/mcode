@@ -33,10 +33,6 @@ export function useDesignAnnotationState({
   );
   const designModeActive = designPickerPhase !== "off";
   const designPickerDispatch = usePreviewDesignModeStore((s) => s.dispatch);
-  const designModeSetActive = usePreviewDesignModeStore((s) => s.setActive);
-  const annotationSignal = usePreviewAnnotationStore(
-    (s) => s.byThread[threadId]?.length ?? 0,
-  );
   const draftAnnotation = usePreviewAnnotationStore((s) => s.drafts[threadId]);
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(
     null,
@@ -116,7 +112,6 @@ export function useDesignAnnotationState({
   }, [bubbleFileOpen]);
 
   return {
-    annotationSignal,
     editingAnnotationId,
     draftAnnotation,
     selectBubbleFileSuggestion,
@@ -137,7 +132,6 @@ export function useDesignAnnotationState({
     setColorFormats,
     bubbleRef,
     bubbleSlashOpen,
-    designModeSetActive,
     onBubbleSlashSelect,
     onBubbleSlashKeyDown,
     bubbleSlashItems,
