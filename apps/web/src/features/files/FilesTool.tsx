@@ -41,10 +41,6 @@ function useFilesScopeState(scopeId: string): FilesScopeState {
   return useFilesTabsStore((store) => store.scopes[scopeId] ?? FILES_SCOPE_DEFAULTS);
 }
 
-/**
- * Find state for the file the body shows. The bar only exists while that file has text,
- * so opening Find on the tree or a binary file waits until a searchable file shows.
- */
 function useFindBar(scopeId: string, requested: boolean, read: FileReadState | undefined, bodyRef: RefObject<HTMLElement | null>) {
   const text = textOf(read);
   const open = requested && text !== null;
@@ -52,7 +48,6 @@ function useFindBar(scopeId: string, requested: boolean, read: FileReadState | u
   const find = useFindInFile(lines);
   const setOpen = (next: boolean) => {
     useFilesTabsStore.getState().setFindOpen(scopeId, next);
-    // Closing from the field leaves focus on a vanished input; the code is where reading continues.
     if (!next) bodyRef.current?.querySelector<HTMLElement>("[data-code-viewport]")?.focus();
   };
   return {
@@ -62,7 +57,6 @@ function useFindBar(scopeId: string, requested: boolean, read: FileReadState | u
   };
 }
 
-/** The searchable text of a loaded file, or null for anything else (loading, binary, empty, too large). */
 function textOf(read: FileReadState | undefined): string | null {
   return read?.status === "ready" && read.result.kind === "text" && read.result.content.length > 0 ? read.result.content : null;
 }

@@ -24,10 +24,7 @@ interface Cursor {
   readonly navigation: number;
 }
 
-/**
- * Find state for one file's lines. Searching runs against a deferred query so
- * typing never waits on a scan of a large file. A new result restarts at the first match.
- */
+/** Find state for one file's lines. A new result restarts at the first match. */
 export function useFindInFile(lines: readonly string[]): FindInFile {
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState(DEFAULT_FIND_OPTIONS);

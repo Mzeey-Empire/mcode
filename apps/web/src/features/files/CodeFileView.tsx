@@ -97,7 +97,6 @@ function changedLineSet(changedLines: readonly (readonly [number, number])[] | n
 }
 
 interface IndexedMatch extends FindMatch {
-  /** Position in the full match list, so the current match can be told apart. */
   readonly index: number;
 }
 
@@ -142,7 +141,6 @@ function CodeLines({
   const currentIndex = find?.index ?? -1;
   const currentLine = currentMatch(find)?.line ?? null;
   const navigation = find?.navigation;
-  // Only the first paint after a navigation scrolls sideways, so scrolling away later never snaps back.
   const revealedNavigation = useRef<number | undefined>(undefined);
   const revealCurrent = (element: HTMLElement | null) => {
     if (!element || revealedNavigation.current === navigation) return;

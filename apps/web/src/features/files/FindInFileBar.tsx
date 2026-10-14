@@ -32,7 +32,6 @@ export interface FindInFileBarProps {
  */
 export function FindInFileBar({ find, onClose }: FindInFileBarProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  // The header row mounts the field into a detached host first; focus lands only once the shell attaches it.
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       inputRef.current?.focus();
@@ -41,15 +40,12 @@ export function FindInFileBar({ find, onClose }: FindInFileBarProps) {
     return () => cancelAnimationFrame(frame);
   }, []);
 
-  // On the whole bar, so Escape and Ctrl/Cmd+F also work while focus sits on a toggle or button.
   const onBarKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
-      // The app also binds Escape; the find bar owns this press.
       event.stopPropagation();
       onClose();
     } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
-      // The bar sits in the shell header, outside the Files tool, so the global binding does not see it.
       event.preventDefault();
       inputRef.current?.focus();
       inputRef.current?.select();
