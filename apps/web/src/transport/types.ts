@@ -1,6 +1,12 @@
 /** A rendered message keeps server sequence provenance separate from live ordering guesses. */
 export type Message = import("@mcode/contracts").Message & { serverSequence?: number };
 
+/** What `plan.snapshot` returns: every plan version of a thread and its comments. */
+export interface PlanSnapshot {
+  readonly versions: import("@mcode/contracts").PlanVersion[];
+  readonly comments: import("@mcode/contracts").PlanComment[];
+}
+
 // Import shared types for local use in the McodeTransport interface.
 import type {
   DiffStats,
@@ -774,7 +780,15 @@ export interface McodeTransport {
   getThreadTasks(threadId: string): Promise<Array<{ id?: string; content: string; status: "pending" | "in_progress" | "completed" | "cancelled"; activeForm?: string; group?: string }> | null>;
 
   /** Fetch persisted plans for a thread (hydration on page load). */
-  getThreadPlans(threadId: string): Promise<import("@mcode/contracts").PlanVersion[]>;
+  getThreadPlans(threadId: string): Promise<PlanSnapshot>;
+  /** Save a plan comment; the client-chosen id makes a retried create return the same comment. */
+  createPlanComment(payload: import("@mcode/contracts").PlanCommentCreate): Promise<import("@mcode/contracts").PlanComment>;
+  /** Replace a saved comment's note. */
+  updatePlanComment(payload: import("@mcode/contracts").PlanCommentUpdate): Promise<import("@mcode/contracts").PlanComment>;
+  /** Resolve or reopen a saved comment. */
+  setPlanCommentStatus(payload: import("@mcode/contracts").PlanCommentSetStatus): Promise<import("@mcode/contracts").PlanComment>;
+  /** Delete a saved comment. Deleting a missing comment succeeds. */
+  deletePlanComment(payload: import("@mcode/contracts").PlanCommentDelete): Promise<void>;
   /** Fork the latest plan version into a draft, or save into an existing draft at its revision. */
   savePlanVersion(payload: import("@mcode/contracts").PlanSaveVersion): Promise<import("@mcode/contracts").PlanVersion>;
   /** Admit a durable request to implement a plan version in its own thread. Replays with the same requestId return the stored outcome. */

@@ -7,7 +7,7 @@ import type {
   DraftDiffComment,
   DraftSubmission,
   MessageMention,
-  PlanCommentSelection,
+  PlanCommentEditorDraft,
   ProviderId,
   ReasoningLevel,
   SelectedTextComment,
@@ -98,8 +98,8 @@ export interface ComposerDraft {
   diffComments?: DraftDiffComment[];
   /** Open Review comment editor, restored with this draft. */
   diffCommentEditor?: DiffCommentEditorDraft;
-  /** Plan comments chosen to ride the next Send; S07-06 renders the chip. */
-  planCommentSelection?: PlanCommentSelection;
+  /** Open plan comment editor, restored with this draft. It never rides a Send. */
+  planCommentEditor?: PlanCommentEditorDraft;
   /** Sends whose admission has not settled. */
   submissions?: DraftSubmission[];
 }
@@ -107,14 +107,14 @@ export interface ComposerDraft {
 /** Fields that only {@link ComposerDraftState.updateNextMessage} writes. */
 export type NextMessageFields = Pick<
   ComposerDraft,
-  "diffComments" | "diffCommentEditor" | "planCommentSelection" | "submissions"
+  "diffComments" | "diffCommentEditor" | "planCommentEditor" | "submissions"
 >;
 
 function nextMessageFields(draft: ComposerDraft | undefined): NextMessageFields {
   return {
     diffComments: draft?.diffComments,
     diffCommentEditor: draft?.diffCommentEditor,
-    planCommentSelection: draft?.planCommentSelection,
+    planCommentEditor: draft?.planCommentEditor,
     submissions: draft?.submissions,
   };
 }
@@ -130,7 +130,7 @@ function mergeNextMessageFields(stored: ComposerDraft | undefined, incoming: Com
   return {
     diffComments: kept.diffComments ?? moved.diffComments,
     diffCommentEditor: kept.diffCommentEditor ?? moved.diffCommentEditor,
-    planCommentSelection: kept.planCommentSelection ?? moved.planCommentSelection,
+    planCommentEditor: kept.planCommentEditor ?? moved.planCommentEditor,
     submissions: kept.submissions ?? moved.submissions,
   };
 }
@@ -219,12 +219,8 @@ function hasComposerContent(draft: ComposerDraft): boolean {
 function hasNextMessageContent(draft: ComposerDraft): boolean {
   return (draft.diffComments?.length ?? 0) > 0
     || Boolean(draft.diffCommentEditor)
-    || hasPlanCommentSelection(draft.planCommentSelection)
+    || Boolean(draft.planCommentEditor)
     || (draft.submissions?.length ?? 0) > 0;
-}
-
-function hasPlanCommentSelection(selection: PlanCommentSelection | undefined): boolean {
-  return Boolean(selection && (selection.includedIds.length > 0 || selection.excludedIds.length > 0));
 }
 
 /** Revokes preview URLs and releases capture spill files owned by these attachments. */

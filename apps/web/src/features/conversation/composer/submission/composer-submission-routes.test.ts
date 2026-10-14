@@ -50,6 +50,7 @@ function submission(
 ): PreparedComposerSubmission {
   return {
     currentDiffComments: [],
+    planCommentIds: [],
     snapshot: {
       revision: 1,
       rawInput: content,

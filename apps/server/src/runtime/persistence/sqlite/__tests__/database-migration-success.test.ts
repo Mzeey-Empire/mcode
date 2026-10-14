@@ -171,6 +171,34 @@ describe("successful database migration recovery", () => {
     } finally { db.close(true); }
   });
 
+  it("adds plan comments without losing plans and cascades only their owning version or thread", () => {
+    const current = NodePath.join(process.cwd(), "drizzle");
+    const previous = NodePath.join(directory, "drizzle-through-0085");
+    copyMigrationsThrough(current, previous, "0085_plan_implement_requests");
+    const db = new Database(databasePath, { strict: true });
+    try {
+      db.exec("PRAGMA foreign_keys = ON");
+      migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(previous) });
+      db.prepare("INSERT INTO workspaces (id, name, path) VALUES ('w', 'Plans', '/fixture')").run();
+      db.prepare("INSERT INTO threads (id, workspace_id, title, branch) VALUES ('t', 'w', 'Plan', 'main')").run();
+      db.prepare("INSERT INTO plans (id, thread_id, version, title, content_md, author, capture_source) VALUES ('p', 't', 1, 'Plan', '# Plan', 'agent', 'fence')").run();
+      migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(current) });
+      expect(db.prepare("SELECT content_md FROM plans WHERE id = 'p'").get()).toEqual({ content_md: "# Plan" });
+      const insert = db.prepare("INSERT INTO plan_comments (id, thread_id, version_id, body, anchor_json, status, sent_message_id) VALUES (?, ?, ?, 'Note', ?, 'open', 'compacted-message')");
+      const anchor = JSON.stringify({ kind: "section", section: null, quote: "" });
+      insert.run("c", "t", "p", anchor);
+      expect(() => insert.run("bad-version", "t", "missing", anchor)).toThrow();
+      expect(() => insert.run("bad-thread", "missing", "p", anchor)).toThrow();
+      expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+      db.prepare("DELETE FROM plans WHERE id = 'p'").run();
+      expect(db.prepare("SELECT id FROM plan_comments").all()).toEqual([]);
+      db.prepare("INSERT INTO plans (id, thread_id, version, title, content_md, author, capture_source) VALUES ('p2', 't', 2, 'Plan', '# Plan', 'agent', 'fence')").run();
+      insert.run("c2", "t", "p2", anchor);
+      db.prepare("DELETE FROM threads WHERE id = 't'").run();
+      expect(db.prepare("SELECT id FROM plan_comments").all()).toEqual([]);
+    } finally { db.close(true); }
+  });
+
   it("keeps five generations and preserves public text identifiers", () => {
     const originalDatabase = new Database(databasePath, { strict: true });
     originalDatabase.exec("CREATE TABLE records (id TEXT PRIMARY KEY)");

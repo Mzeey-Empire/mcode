@@ -23,6 +23,7 @@ import {
   isComposerTargetReady,
 } from "./composer-submission-routes";
 import type { PreparedComposerSubmission } from "./composer-submission-types";
+import { planCommentThreadFor } from "../draft/sendable-plan-comments";
 import { prepareComposerSubmission } from "./prepare-composer-submission";
 import { shouldQueueActiveThreadSubmit } from "./composer-submit-policy";
 
@@ -141,7 +142,11 @@ export function useComposerSubmissionController({
       // new-thread and branch Sends settle on their dispatch result alone.
       const sendsToThisThread = target.kind === "existing-thread";
       const draftSubmission = sendsToThisThread
-        ? beginDraftSubmission(threadId, submission.currentDiffComments, messageId)
+        ? beginDraftSubmission(
+          threadId,
+          { diffComments: submission.currentDiffComments },
+          messageId,
+        )
         : null;
       let placeholderAccepted = false;
       const dispatch = dispatchComposerTarget({
@@ -194,6 +199,7 @@ export function useComposerSubmissionController({
       annotationScopeId,
       form,
       startingThread,
+      planCommentThreadId: planCommentThreadFor({ isNewThread, branchFromMessageId, isAgentRunning, threadId }),
       discardEmptyEdit: queue.discardEmptyEdit,
       resolvePreviewAnnotations: queue.resolvePreviewAnnotations,
     });

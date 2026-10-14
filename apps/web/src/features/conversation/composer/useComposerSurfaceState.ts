@@ -6,6 +6,8 @@ import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore
 import type { ProviderId } from "@mcode/contracts";
 import { useNumberedDiffComments } from "./draft/draft-diff-comments";
 import { reconcileOrphanedDraftSubmissions } from "./draft/draft-submission-lifecycle";
+import { planCommentThreadFor } from "./draft/sendable-plan-comments";
+import { usePlanCommentChip } from "./usePlanCommentChip";
 
 interface ComposerSurfaceStateInput {
   readonly threadId?: string;
@@ -86,7 +88,8 @@ export function useComposerSurfaceState(input: ComposerSurfaceStateInput) {
   useEffect(() => {
     if (input.threadId && connected) void reconcileOrphanedDraftSubmissions(input.threadId);
   }, [connected, input.threadId]);
-  const annotationCount = previewAnnotationCount + diffComments.length;
+  const ridingPlanComments = usePlanCommentChip(planCommentThreadFor(input));
+  const annotationCount = previewAnnotationCount + diffComments.length + ridingPlanComments.length;
   const annotationBundleForDisplay = annotationScopeId
     ? usePreviewAnnotationStore.getState().buildBundle(annotationScopeId)
     : undefined;

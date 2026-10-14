@@ -22,6 +22,9 @@ export class PlanRepo {
     return this.reader.listByThread(threadId);
   }
 
+  /** Saved comment rows on the read connection. */
+  listComments(threadId: string) { return this.reader.listComments(threadId); }
+
   getLatestForThread(threadId: Parameters<PlanStore["getLatestForThread"]>[0]): ReturnType<PlanStore["getLatestForThread"]> {
     return this.reader.getLatestForThread(threadId);
   }

@@ -7,6 +7,9 @@ import { ComposerBranchBar } from "@/components/chat/ComposerBranchBar";
 import { ComposerQueueList } from "@/components/chat/ComposerQueueList";
 import { ContextTracker } from "@/components/chat/ContextTracker";
 import { FileTagPopup, type useFileTagPopup } from "@/components/chat/FileTagPopup";
+import { PlanCommentsComposerChip } from "./PlanCommentsComposerChip";
+import { usePlanCommentChip } from "./usePlanCommentChip";
+import { removePlanCommentsFromSend } from "@/components/panels/plan/plan-comment-actions";
 import { PreviewAnnotationBundleChip } from "@/components/chat/PreviewAnnotationBundleChip";
 import { providerUnavailableMessage, type ProviderUnavailableReason } from "@/components/chat/provider-unavailable";
 import { Notice } from "@/components/ui/notice";
@@ -331,9 +334,14 @@ function AnnotationAttachmentRow({
   model,
   actions,
 }: Pick<ComposerContentSurfaceProps, "model" | "actions">) {
+  const planComments = usePlanCommentChip(model.threadId);
   if (!model.annotationScopeId) return null;
   return (
     <>
+      <PlanCommentsComposerChip
+        comments={planComments}
+        onRemove={() => model.threadId && void removePlanCommentsFromSend(model.threadId, planComments)}
+      />
       {model.attachmentBundle ? (
         <div className="px-3 pt-2">
           <PreviewAnnotationBundleChip

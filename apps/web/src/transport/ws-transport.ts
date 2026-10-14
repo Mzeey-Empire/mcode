@@ -1413,7 +1413,11 @@ export function createWsTransport(
       ),
 
     getThreadPlans: (threadId: string) =>
-      rpc<{ versions: import("@mcode/contracts").PlanVersion[] }>("plan.snapshot", { threadId }).then((snapshot) => snapshot.versions),
+      rpc<import("./types").PlanSnapshot>("plan.snapshot", { threadId }),
+    createPlanComment: (payload) => rpc<import("@mcode/contracts").PlanComment>("plan.comment.create", payload),
+    updatePlanComment: (payload) => rpc<import("@mcode/contracts").PlanComment>("plan.comment.update", payload),
+    setPlanCommentStatus: (payload) => rpc<import("@mcode/contracts").PlanComment>("plan.comment.setStatus", payload),
+    deletePlanComment: (payload) => rpc<void>("plan.comment.delete", payload),
 
     savePlanVersion: (payload) => rpc<import("@mcode/contracts").PlanVersion>("plan.saveVersion", payload),
     implementPlan: (payload) => rpc<import("@mcode/contracts").PlanImplementReceipt>("plan.implement", payload),

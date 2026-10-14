@@ -20,12 +20,16 @@ import { PlanStore } from "../persistence/plan-store.js";
 import { PlanFileWriter } from "../plan-file-writer.js";
 import { PlanService, PlanServiceError } from "../plan-service.js";
 import { planImplementWriteOperations } from "../persistence/plan-implement-write-operations.js";
+import { PlanCommentStore } from "../persistence/plan-comment-store.js";
+import { openMigratedTestDatabase } from "../../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
+import { leaseWriterWorker } from "../../../../runtime/persistence/sqlite/testing/reusable-writer-worker.js";
 
-const pushes = vi.hoisted(() => ({ versions: [] as unknown[], frames: [] as unknown[] }));
+const pushes = vi.hoisted(() => ({ versions: [] as unknown[], frames: [] as unknown[], comments: [] as unknown[] }));
 vi.mock("../../../../application/transport/push.js", () => ({
   broadcast: (channel: string, data: unknown) => {
     if (channel === "plan.versionUpserted") pushes.versions.push(data);
     if (channel === "agent.canonical") pushes.frames.push(data);
+    if (channel === "plan.commentsChanged") pushes.comments.push(data);
   },
   subscribedThreadIds: () => new Set<string>(),
 }));
@@ -49,7 +53,7 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
   beforeEach(async () => {
     directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-plan-service-"));
     const dbPath = NodePath.join(directory, "app.sqlite");
-    db = openDatabase({ dbPath });
+    db = openMigratedTestDatabase(dbPath);
     db.prepare("INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)").run("workspace", "Plans", directory);
     db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider) VALUES (?, ?, ?, ?, ?)")
       .run(threadId, "workspace", "Plan", "main", "codex");
@@ -57,7 +61,7 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
       .run("assistant", threadId, "assistant", "Summary", 1);
     plans = new PlanStore(db);
     ready = plans.create(threadId, "assistant", { title: "Original", contentMd: "# Original", captureSource: "fence" }, "codex");
-    owner = new ApplicationDatabaseWriter(dbPath);
+    owner = new ApplicationDatabaseWriter(dbPath, leaseWriterWorker);
     await owner.whenReady();
     canonicalWriter = new CanonicalAgentWriterClient(owner);
     files = new PlanFileWriter((id) => plans.listByThread(id), () => directory);
@@ -66,6 +70,7 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
     service = new PlanService(owner, progress, files);
     pushes.versions.length = 0;
     pushes.frames.length = 0;
+    pushes.comments.length = 0;
   });
 
   afterEach(async () => {
@@ -80,6 +85,115 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
   function fork(contentMd = "# Edited") {
     return { threadId, versionId: NodeCrypto.randomUUID(), baseVersionId: ready.id, baseRevision: 0, contentMd };
   }
+
+  function commentInput(versionId = ready.id) {
+    return { commentId: NodeCrypto.randomUUID(), versionId, body: "Clarify the order",
+      anchor: { kind: "text" as const, start: 2, end: 10, quote: "Original", prefix: "# ", suffix: "", section: "Original" } };
+  }
+
+  it("persists trimmed comments across reopening and replays create without overwriting", async () => {
+    const input = commentInput();
+    const created = await service.createComment({ ...input, body: "  Clarify the order  " });
+    expect(created).toMatchObject({ id: input.commentId, body: "Clarify the order", status: "open", sentMessageId: null });
+    expect(await service.createComment({ ...input, body: "Retry must not replace it" })).toEqual(created);
+    const reopened = openDatabase({ dbPath: NodePath.join(directory, "app.sqlite") });
+    try { expect(new PlanCommentStore(reopened).listByThread(threadId)).toEqual([created]); }
+    finally { reopened.close(true); }
+    expect((await service.snapshot({ threadId })).comments).toEqual([created]);
+    expect(pushes.comments).toContainEqual({ threadId, upserted: [created], deletedIds: [] });
+  });
+
+  it("creates a comment on the displayed superseded version", async () => {
+    await start();
+    await captureAndFinish();
+    expect(plans.getById(ready.id)?.status).toBe("superseded");
+    const created = await service.createComment(commentInput());
+    expect(created).toMatchObject({ versionId: ready.id, body: "Clarify the order",
+      anchor: { quote: "Original" }, status: "open", sentMessageId: null, carriedFromCommentId: null });
+    expect((await service.snapshot({ threadId })).comments).toEqual([created]);
+    expect(pushes.comments.at(-1)).toEqual({ threadId, upserted: [created], deletedIds: [] });
+  });
+
+  it("updates notes, resolves and reopens them, and deletes idempotently", async () => {
+    const input = commentInput();
+    await service.createComment(input);
+    expect(await service.updateComment({ commentId: input.commentId, body: "Use dependency order" }))
+      .toMatchObject({ body: "Use dependency order", anchor: input.anchor });
+    const resolved = await service.setCommentStatus({ commentId: input.commentId, status: "resolved" });
+    expect(resolved.status).toBe("resolved");
+    expect(Number.isFinite(Date.parse(resolved.resolvedAt ?? ""))).toBe(true);
+    expect(await service.setCommentStatus({ commentId: input.commentId, status: "open" }))
+      .toMatchObject({ status: "open", resolvedAt: null, body: "Use dependency order" });
+    await service.deleteComment({ commentId: input.commentId });
+    await service.deleteComment({ commentId: input.commentId });
+    expect((await service.snapshot({ threadId })).comments).toEqual([]);
+    expect(pushes.comments.at(-1)).toEqual({ threadId, upserted: [], deletedIds: [input.commentId] });
+    await expect(service.updateComment({ commentId: input.commentId, body: "Deleted" })).rejects.toMatchObject({ code: "plan_comment_invalid" });
+  });
+
+  it("rejects incorrect anchors and protects accepted versions from every comment mutation", async () => {
+    const input = commentInput();
+    await expect(service.createComment({ ...input, anchor: { ...input.anchor, quote: "Outdated" } }))
+      .rejects.toMatchObject({ code: "plan_comment_invalid" });
+    expect((await service.snapshot({ threadId })).comments).toEqual([]);
+    const created = await service.createComment(input);
+    db.prepare("UPDATE plans SET status = 'accepted' WHERE id = ?").run(ready.id);
+    for (const operation of [
+      () => service.createComment(commentInput()),
+      () => service.updateComment({ commentId: created.id, body: "No" }),
+      () => service.setCommentStatus({ commentId: created.id, status: "resolved" }),
+      () => service.deleteComment({ commentId: created.id }),
+    ]) await expect(operation()).rejects.toMatchObject({ code: "plan_read_only" });
+    expect((await service.snapshot({ threadId })).comments).toEqual([created]);
+  });
+
+  it.each(["running", "preparing"])("blocks comment writes while %s", async state => {
+    const created = await service.createComment(commentInput());
+    if (state === "running") await start();
+    else await owner.execute(planImplementWriteOperations.prepare, { input: { requestId: NodeCrypto.randomUUID(), threadId,
+      versionId: ready.id, expectedRevision: 0, target: "thread" }, fingerprint: "comments", planFilePath: files.path(threadId) });
+    for (const operation of [
+      () => service.createComment(commentInput()),
+      () => service.updateComment({ commentId: created.id, body: "No" }),
+      () => service.setCommentStatus({ commentId: created.id, status: "resolved" }),
+      () => service.deleteComment({ commentId: created.id }),
+    ]) await expect(operation()).rejects.toMatchObject({ code: "plan_busy" });
+    expect((await service.snapshot({ threadId })).comments).toEqual([created]);
+  });
+
+  it("carries only open unsent comments to a fork and reanchors each subsequent draft save", async () => {
+    const open = await service.createComment(commentInput());
+    const resolved = await service.createComment(commentInput());
+    await service.setCommentStatus({ commentId: resolved.id, status: "resolved" });
+    const sent = await service.createComment(commentInput());
+    new PlanCommentStore(db).stampSent(threadId, [sent.id], "previous-user-message");
+    const input = fork("Intro\n# Original");
+    const draft = await service.saveVersion(input);
+    const copied = (await service.snapshot({ threadId })).comments.filter(comment => comment.versionId === draft.id);
+    expect(copied).toHaveLength(1);
+    expect(copied[0]).toMatchObject({ carriedFromCommentId: open.id, anchor: { kind: "text", start: 8, end: 16 }, sentMessageId: null });
+    expect(copied[0]?.id).not.toBe(open.id);
+    await service.saveVersion({ ...input, baseRevision: 1, contentMd: "# Original\nThe words moved." });
+    expect((await service.snapshot({ threadId })).comments.find(comment => comment.versionId === draft.id)?.anchor)
+      .toEqual({ ...open.anchor, start: 2, end: 10 });
+    await service.saveVersion({ ...input, baseRevision: 2, contentMd: "# Changed\nThe words moved." });
+    expect((await service.snapshot({ threadId })).comments.find(comment => comment.versionId === draft.id)?.anchor)
+      .toEqual({ kind: "section", section: null, quote: "Original" });
+    expect(pushes.comments.at(-1)).toMatchObject({ threadId, deletedIds: [] });
+  });
+
+  it("carries predecessor comments through canonical agent capture and publishes after persistence", async () => {
+    const open = await service.createComment(commentInput());
+    await start();
+    await captureAndFinish();
+    const snapshot = await service.snapshot({ threadId });
+    const latest = snapshot.versions.at(-1);
+    const copied = snapshot.comments.filter(comment => comment.versionId === latest?.id);
+    expect(copied).toHaveLength(1);
+    expect(copied[0]).toMatchObject({ carriedFromCommentId: open.id, body: "Clarify the order",
+      anchor: { kind: "section", section: null, quote: "Original" } });
+    expect(pushes.comments).toContainEqual({ threadId, upserted: snapshot.comments, deletedIds: [] });
+  });
 
   function send(ordinal: number, command: ExecutionWorkCommand) {
     return handler.handle({ requestId: ordinal, execution, lease, ordinal, command });

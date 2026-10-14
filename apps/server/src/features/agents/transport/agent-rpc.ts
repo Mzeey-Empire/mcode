@@ -59,6 +59,10 @@ type AgentRpcMethod =
   | "plan.saveVersion"
   | "plan.snapshot"
   | "plan.implement"
+  | "plan.comment.create"
+  | "plan.comment.update"
+  | "plan.comment.setStatus"
+  | "plan.comment.delete"
   | "message.list"
   | "conversation.page"
   | "conversation.olderPage"
@@ -97,7 +101,7 @@ export interface AgentRouterDeps {
   messageRepo: ConversationPageDeps["messageRepo"] & Pick<MessageRepo, "confirmUserMessage">;
   narrativeStore: Pick<NarrativeStore, "load" | "listApprovals">;
   planQuestionAnswersRepo: ConversationPageDeps["planQuestionAnswersRepo"];
-  planService: Pick<PlanService, "saveVersion" | "snapshot" | "implement">;
+  planService: Pick<PlanService, "saveVersion" | "snapshot" | "implement" | "createComment" | "updateComment" | "setCommentStatus" | "deleteComment">;
   planTurnService: Pick<PlanTurnService, "answerQuestions" | "dismissQuestions">;
   recapService: Pick<RecapService, "generate">;
   subagentRosterService: Pick<SubagentRosterService, "loadRoster" | "loadDetail" | "stop">;
@@ -209,6 +213,10 @@ const agentHandlers: AgentRpcHandlerMap = {
   "plan.saveVersion": (deps, params) => deps.planService.saveVersion(params),
   "plan.snapshot": (deps, params) => deps.planService.snapshot(params),
   "plan.implement": (deps, params) => deps.planService.implement(params),
+  "plan.comment.create": (deps, params) => deps.planService.createComment(params),
+  "plan.comment.update": (deps, params) => deps.planService.updateComment(params),
+  "plan.comment.setStatus": (deps, params) => deps.planService.setCommentStatus(params),
+  "plan.comment.delete": (deps, params) => deps.planService.deleteComment(params),
   "message.list": (deps, params) => ({
     ...deps.messageRepo.listByThread(params.threadId, params.limit, params.before),
     answeredPlanMessageIds: deps.planQuestionAnswersRepo.listAnsweredForThread(params.threadId),

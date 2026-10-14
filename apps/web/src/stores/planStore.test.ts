@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { PlanVersion } from "@mcode/contracts";
+import type { PlanComment, PlanVersion } from "@mcode/contracts";
 import { planVersionWord, selectViewedPlanVersion, usePlanStore } from "./planStore";
 
 const THREAD = "thread-plan";
@@ -95,5 +95,50 @@ describe("planVersionWord", () => {
     expect(planVersionWord({ status: "superseded", providerId: "codex" })).toBe("Older version");
     expect(planVersionWord({ status: "ready", providerId: "claude" })).toBe("Claude");
     expect(planVersionWord({ status: "ready", providerId: null })).toBe("Agent");
+  });
+});
+
+describe("planStore comments", () => {
+  const comment = (id: string, updatedAt: string, body = id): PlanComment => ({
+    id,
+    threadId: THREAD,
+    versionId: "plan-1",
+    body,
+    anchor: { kind: "section", section: null, quote: "" },
+    status: "open",
+    sentMessageId: null,
+    carriedFromCommentId: null,
+    createdAt: "2026-07-01T00:00:00.000Z",
+    updatedAt,
+    resolvedAt: null,
+  });
+  const bodies = () => (usePlanStore.getState().commentsByThread[THREAD] ?? []).map((c) => `${c.id}:${c.body}`);
+
+  beforeEach(() => {
+    usePlanStore.setState({ commentsByThread: {} });
+  });
+
+  it("keeps the later write when a push arrives after the write's own result", () => {
+    const { applyCommentsChanged } = usePlanStore.getState();
+    applyCommentsChanged(THREAD, [comment("a", "2026-07-01T00:00:02.000Z", "new note")], []);
+    applyCommentsChanged(THREAD, [comment("a", "2026-07-01T00:00:01.000Z", "old note")], []);
+
+    expect(bodies()).toEqual(["a:new note"]);
+  });
+
+  it("removes deleted comments and leaves the rest", () => {
+    const { setComments, applyCommentsChanged } = usePlanStore.getState();
+    setComments(THREAD, [comment("a", "2026-07-01T00:00:01.000Z"), comment("b", "2026-07-01T00:00:01.000Z")]);
+    applyCommentsChanged(THREAD, [], ["a"]);
+
+    expect(bodies()).toEqual(["b:b"]);
+  });
+
+  it("drops a thread's comments with its plans", () => {
+    const { setComments, clearPlans } = usePlanStore.getState();
+    setComments(THREAD, [comment("a", "2026-07-01T00:00:01.000Z")]);
+    clearPlans(THREAD);
+
+    expect(bodies()).toEqual([]);
   });
 });

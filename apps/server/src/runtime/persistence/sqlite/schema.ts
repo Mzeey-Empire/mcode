@@ -1017,6 +1017,21 @@ export const providerCatalogSnapshots = sqliteTable(
   ],
 );
 
+/** Version-owned comments retain their sent identity after message compaction. */
+export const planComments = sqliteTable("plan_comments", {
+  id: text("id").primaryKey().notNull(),
+  threadId: text("thread_id").notNull().references(() => threads.id, { onDelete: "cascade" }),
+  versionId: text("version_id").notNull().references(() => plans.id, { onDelete: "cascade" }),
+  body: text("body").notNull(),
+  anchorJson: text("anchor_json").notNull(),
+  status: text("status").notNull(),
+  sentMessageId: text("sent_message_id"),
+  carriedFromCommentId: text("carried_from_comment_id"),
+  createdAt: text("created_at").notNull().default(timestampDefault),
+  updatedAt: text("updated_at").notNull().default(timestampDefault),
+  resolvedAt: text("resolved_at"),
+}, table => [index("idx_plan_comments_version_status").on(table.versionId, table.status)]);
+
 export const planQuestionAnswers = sqliteTable(
   "plan_question_answers",
   {

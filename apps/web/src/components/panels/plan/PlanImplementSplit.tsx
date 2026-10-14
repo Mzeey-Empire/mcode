@@ -3,6 +3,7 @@ import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { SplitButton } from "@/components/ui/split-button";
 import { getKeybindingForCommand, keybindingKeycaps } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
+import { usePlanCommentChip } from "@/features/conversation/composer/usePlanCommentChip";
 import { implementPlan, isPlanVersionImplementable, usePlanImplementStore } from "./plan-implement";
 
 interface PlanImplementSplitProps {
@@ -20,6 +21,8 @@ interface PlanImplementSplitProps {
  */
 export function PlanImplementSplit({ threadId, viewed, executing }: PlanImplementSplitProps) {
   const busy = usePlanImplementStore((s) => s.busy[threadId] === true);
+  // Send takes the amber while plan comments ride, so Implement steps back.
+  const commentsRide = usePlanCommentChip(threadId).length > 0;
   if (!isPlanVersionImplementable(viewed)) return null;
 
   const label = `Implement v${viewed.version}`;
@@ -28,7 +31,7 @@ export function PlanImplementSplit({ threadId, viewed, executing }: PlanImplemen
 
   return (
     <SplitButton
-      variant="default"
+      variant={commentsRide ? "secondary" : "default"}
       className="ml-auto"
       disabled={executing}
       loading={busy}

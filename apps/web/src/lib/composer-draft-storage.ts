@@ -4,7 +4,7 @@ import type {
   DraftDiffComment,
   DraftSubmission,
   McodeBrowserCapture,
-  PlanCommentSelection,
+  PlanCommentEditorDraft,
   SelectedTextComment,
 } from "@mcode/contracts";
 import {
@@ -13,7 +13,7 @@ import {
   DraftSubmissionSchema,
   MAX_ATTACHMENTS,
   MessageMentionsSchema,
-  PlanCommentSelectionSchema,
+  PlanCommentEditorDraftSchema,
   SelectedTextCommentSchema,
 } from "@mcode/contracts";
 import type {
@@ -201,15 +201,15 @@ function parseStoredDiffCommentEditor(
 
 function parseStoredNextMessageFields(candidate: Partial<ComposerDraft>): Pick<
   ComposerDraft,
-  "diffComments" | "diffCommentEditor" | "planCommentSelection" | "submissions"
+  "diffComments" | "diffCommentEditor" | "planCommentEditor" | "submissions"
 > {
   const counter: DropCounter = { dropped: 0 };
   const fields = {
     diffComments: parseStoredElements<DraftDiffComment>(candidate.diffComments, DraftDiffCommentSchema(), counter),
     diffCommentEditor: parseStoredDiffCommentEditor(candidate.diffCommentEditor, counter),
-    planCommentSelection: parseStoredElement<PlanCommentSelection>(
-      candidate.planCommentSelection,
-      PlanCommentSelectionSchema(),
+    planCommentEditor: parseStoredElement<PlanCommentEditorDraft>(
+      candidate.planCommentEditor,
+      PlanCommentEditorDraftSchema(),
       counter,
     ),
     submissions: parseStoredElements<DraftSubmission>(candidate.submissions, DraftSubmissionSchema(), counter),

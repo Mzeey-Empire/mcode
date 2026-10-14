@@ -954,6 +954,8 @@ export class CanonicalAcceptedProgress {
   private async projectSavedPlans(batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>): Promise<void> {
     if (!batch.write.features?.planRecords?.length) return;
     this.reloadPlans(batch.execution.threadId);
+    broadcast("plan.commentsChanged", { threadId: batch.execution.threadId,
+      upserted: this.canonical.loadAcceptedFeatureSeed(batch.execution.threadId).comments, deletedIds: [] });
     await this.planFiles?.writeAfterCommit(batch.execution.threadId);
   }
 

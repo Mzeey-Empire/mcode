@@ -56,6 +56,7 @@ export const CanonicalRuntimeParentStartSchema = z.object({
   revertNoticeIds: z.array(z.string().uuid()).optional(),
   reopenThread: z.boolean().optional(), answeredPlanQuestionMessageId: identity.optional(),
   planImplement: z.object({ requestId: z.string().uuid() }).optional(),
+  planCommentIds: z.array(z.string().uuid()).max(128).optional(),
   userMessage: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("existing"), messageId: identity }),
     z.object({ kind: z.literal("create"), messageId: identity.optional(), content: z.string(),
