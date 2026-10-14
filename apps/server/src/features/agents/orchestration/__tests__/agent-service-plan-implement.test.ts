@@ -240,6 +240,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     expect(receipt.nativePlanFile).toEqual({ outcome: "skipped", reason: "changed" });
     expect(await service.implement(input)).toEqual(receipt);
     expect(JSON.stringify(await service.snapshot({ threadId }))).not.toContain("provider-plan.md");
+    await untilDispatched();
   });
 
   it("rejects a reused request id with another expectedRevision both in flight and after admission", async () => {
@@ -404,6 +405,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     await expect(service.implement(request())).rejects.toMatchObject({ code: "plan_conflict", latestVersion: { id: next.id } });
     expect(userMessages()).toEqual([]);
     await service.implement(request(next));
+    await untilDispatched();
     await agent.stopSession(threadId, { by: "user" });
     await expect(service.implement(request(next))).rejects.toMatchObject({ code: "plan_read_only" });
   });
