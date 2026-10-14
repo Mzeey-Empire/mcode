@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  getComposerDock,
   getComposerSendButtonVisualState,
   isComposerSendButtonDisabled,
 } from "./ComposerContentSurface";
@@ -92,5 +93,19 @@ describe("composer send button while the thread is starting", () => {
 
   it("disables Stop once cancellation is requested", () => {
     expect(isComposerSendButtonDisabled({ ...starting, canCancelStartup: false })).toBe(true);
+  });
+});
+
+describe("composer dock selection", () => {
+  it("mounts only the question dock when plan questions are pending and no approval is", () => {
+    expect(getComposerDock({ approvalCount: 0, planPending: true, threadId: "thread-1" })).toBe("questions");
+  });
+
+  it("lets a pending approval take the dock over plan questions", () => {
+    expect(getComposerDock({ approvalCount: 1, planPending: true, threadId: "thread-1" })).toBe("approvals");
+  });
+
+  it("leaves the composer showing when nothing is waiting on the user", () => {
+    expect(getComposerDock({ approvalCount: 0, planPending: false, threadId: "thread-1" })).toBeNull();
   });
 });

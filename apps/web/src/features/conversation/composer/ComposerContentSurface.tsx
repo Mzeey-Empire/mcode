@@ -724,17 +724,27 @@ function DraftWriteFailureNotice() {
   );
 }
 
+/** Which dock takes the composer's place: pending approvals first, then the plan questions. */
+export function getComposerDock(args: {
+  readonly approvalCount: number;
+  readonly planPending: boolean;
+  readonly threadId: string | undefined;
+}): "approvals" | "questions" | null {
+  if (args.approvalCount > 0) return "approvals";
+  return args.planPending && args.threadId ? "questions" : null;
+}
+
 export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
   const { model, actions } = props;
   const approvals = useDockApprovals(model.threadId);
-  const questionThreadId = model.planPending && approvals.length === 0 ? model.threadId : undefined;
-  const docked = approvals.length > 0 || questionThreadId !== undefined;
+  const dock = getComposerDock({ approvalCount: approvals.length, planPending: model.planPending, threadId: model.threadId });
+  const docked = dock !== null;
   return (
     <>
       <ComposerNewThreadSurface {...props} />
       <ComposerTraySurface {...props} />
       <ApprovalAnnouncer requests={approvals} />
-      {docked && (
+      {dock === "approvals" && (
         <ApprovalDock
           key={model.threadId}
           requests={approvals}
@@ -745,10 +755,10 @@ export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
           onFocusComposer={actions.onFocusComposer}
         />
       )}
-      {questionThreadId !== undefined && (
+      {dock === "questions" && model.threadId && (
         <QuestionDock
           key={model.threadId}
-          threadId={questionThreadId}
+          threadId={model.threadId}
           providerId={model.effectiveProviderId}
           composerContainerRef={model.composerContainerRef}
           isAgentRunning={model.isAgentRunning}
