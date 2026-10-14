@@ -77,9 +77,9 @@ export function FindInFileBar({ find, onClose }: FindInFileBarProps) {
             value={find.query}
             onChange={(event) => find.setQuery(event.target.value)}
             onKeyDown={onInputKeyDown}
-            className="min-w-0 flex-1 bg-transparent text-body-small text-ink outline-none placeholder:text-muted"
+            className="min-w-12 flex-1 bg-transparent text-body-small text-ink outline-none placeholder:text-muted"
           />
-          <span role="status" className={cn("shrink-0 font-mono text-caption", invalid ? "text-destructive" : "text-muted")}>
+          <span role="status" className={cn("min-w-0 overflow-hidden whitespace-nowrap font-mono text-caption", invalid ? "text-destructive" : "text-muted")}>
             {findCountLabel(find)}
           </span>
           {OPTION_TOGGLES.map((toggle) => (
