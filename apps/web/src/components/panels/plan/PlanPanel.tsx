@@ -1,7 +1,8 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { EditorView } from "@codemirror/view";
 import type { PlanVersion } from "@mcode/contracts";
 import { isPlanVersionEditable, selectViewedPlanVersion, usePlanStore } from "@/stores/planStore";
+import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -38,6 +39,7 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
   const [commentBinding] = useState(createPlanCommentBinding);
   const [editorView, setEditorView] = useState<EditorView | null>(null);
 
+  useShowCommentEditorVersion(threadId, versions);
   useRegisterPlanPanelVisibility(threadId);
   useEffect(() => scheduler.reconcile(latest), [scheduler, latest]);
   // Closing the panel or switching threads must not strand debounced text.
@@ -78,6 +80,21 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
       />
     </div>
   );
+}
+
+/**
+ * A note left open reopens on the version it was written on, even after a
+ * newer one exists. Runs once per mount so the version picker stays free.
+ */
+function useShowCommentEditorVersion(threadId: string, versions: readonly PlanVersion[]): void {
+  const editorVersionId = useComposerDraftStore((s) => s.drafts[threadId]?.planCommentEditor?.planVersionId);
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || versions.length === 0) return;
+    restored.current = true;
+    const target = versions.find((version) => version.id === editorVersionId);
+    if (target && target !== versions.at(-1)) usePlanStore.getState().setActiveVersion(threadId, target.version);
+  }, [threadId, versions, editorVersionId]);
 }
 
 /**

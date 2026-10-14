@@ -2,6 +2,9 @@ import { useState, type KeyboardEvent } from "react";
 import { Check, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
+/** The most a note can hold; the persisted editor draft is rejected on restore past this. */
+const MAX_NOTE_CHARS = 4000;
+
 /** Props for {@link PlanCommentEditor}. */
 interface PlanCommentEditorProps {
   readonly body: string;
@@ -29,6 +32,7 @@ export function PlanCommentEditor({ body, saved, onBodyChange, onSave, onDelete,
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (pending) return;
     if (event.key === "Escape") {
       event.preventDefault();
       onCancel();
@@ -40,15 +44,17 @@ export function PlanCommentEditor({ body, saved, onBodyChange, onSave, onDelete,
 
   return (
     <div
-      className="bg-panel border-control-border my-1 flex flex-col gap-2 rounded-[10px] border py-2 pr-2 pl-3"
+      className="bg-panel border-control-border my-1 flex flex-col gap-2 rounded-[10px] border pt-2.5 pr-2 pb-2 pl-3"
       data-testid="plan-comment-editor"
     >
       <textarea
         autoFocus
         rows={2}
+        maxLength={MAX_NOTE_CHARS}
+        readOnly={pending}
         value={body}
         aria-label="Comment"
-        className="text-ink w-full resize-none bg-transparent text-sm leading-6 outline-none"
+        className="text-ink w-full resize-none bg-transparent text-sm leading-5 outline-none"
         onChange={(event) => onBodyChange(event.target.value)}
         onKeyDown={onKeyDown}
       />
@@ -57,12 +63,12 @@ export function PlanCommentEditor({ body, saved, onBodyChange, onSave, onDelete,
           {error}
         </p>
       )}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-2">
         {saved && (
           <Button
             type="button"
             variant="ghost"
-            size="icon-inline"
+            size="icon-inline-sm"
             aria-label="Delete comment"
             disabled={pending}
             onClick={() => void run(onDelete)}
@@ -71,12 +77,12 @@ export function PlanCommentEditor({ body, saved, onBodyChange, onSave, onDelete,
           </Button>
         )}
         <span className="flex-1" />
-        <Button type="button" variant="ghost" size="compact" className="text-muted h-7 px-2.5" onClick={onCancel}>
+        <Button type="button" variant="ghost" size="compact" className="text-muted h-7 rounded-lg px-2.5" disabled={pending} onClick={onCancel}>
           Cancel
         </Button>
         <Button
           type="button"
-          size="icon-inline"
+          size="icon-inline-sm"
           className="rounded-full"
           aria-label="Save comment"
           disabled={pending || body.trim() === ""}

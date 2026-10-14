@@ -104,9 +104,11 @@ export function excludeAllPlanComments<T extends NextMessageDraft>(draft: T): T 
 /** Syncs a thread's selection from the plan store, then applies the change. */
 export function updatePlanCommentSelection(threadId: string, change?: (draft: ComposerDraft) => ComposerDraft): void {
   const plans = usePlanStore.getState();
+  // Hydration sets a thread's comments last, even when empty. Syncing before then would drop a restored selection.
+  const loaded = plans.commentsByThread[threadId] !== undefined;
   const sendable = sendablePlanComments(plans.plansByThread[threadId] ?? [], plans.commentsByThread[threadId] ?? []);
   useComposerDraftStore.getState().updateNextMessage(threadId, (draft) => {
-    const synced = syncPlanCommentSelection(draft, sendable);
+    const synced = loaded ? syncPlanCommentSelection(draft, sendable) : draft;
     return change ? change(synced) : synced;
   });
 }
@@ -120,4 +122,14 @@ export function readPlanCommentsForSend(threadId: string): { ridingIds: string[]
   updatePlanCommentSelection(threadId);
   const draft = useComposerDraftStore.getState().drafts[threadId];
   return (draft && readSendableDraftContent(draft).planComments) ?? { ridingIds: [], excludedIds: [] };
+}
+
+/** A queued send or a branch starts no plan turn, so only a direct send to an existing thread carries plan comments. */
+export function planCommentThreadFor(send: {
+  isNewThread: boolean;
+  branchFromMessageId?: string | null;
+  isAgentRunning: boolean;
+  threadId?: string;
+}): string | undefined {
+  return !send.isNewThread && !send.branchFromMessageId && !send.isAgentRunning ? send.threadId : undefined;
 }

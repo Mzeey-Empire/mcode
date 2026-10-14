@@ -42,7 +42,9 @@ function markFor(id: string, docText: string, anchor: PlanComment["anchor"]): Pl
  */
 export function PlanCommentLayer({ threadId, binding, view, viewed, docText, canComment }: PlanCommentLayerProps) {
   const allComments = usePlanStore((s) => s.commentsByThread[threadId] ?? NO_COMMENTS);
-  const editor = useComposerDraftStore((s) => s.drafts[threadId]?.planCommentEditor);
+  const storedEditor = useComposerDraftStore((s) => s.drafts[threadId]?.planCommentEditor);
+  // An editor belongs to the version it was opened on; it stays hidden while another version is on screen.
+  const editor = storedEditor?.planVersionId === viewed.id ? storedEditor : undefined;
   const hosts = useSyncExternalStore(binding.hosts.subscribe, binding.hosts.getSnapshot);
   const newCommentId = useRef<string | null>(null);
 

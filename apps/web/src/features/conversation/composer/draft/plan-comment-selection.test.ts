@@ -11,6 +11,7 @@ import {
   readPlanCommentsForSend,
   sendablePlanComments,
   syncPlanCommentSelection,
+  updatePlanCommentSelection,
 } from "./plan-comment-selection";
 
 const THREAD_ID = "thread-plan-comments";
@@ -128,6 +129,18 @@ describe("plan comments on a Send", () => {
     expect(planComments.ridingIds).toEqual(["a", "b"]);
     expect(useComposerDraftStore.getState().drafts[THREAD_ID]?.planCommentSelection)
       .toMatchObject({ includedIds: ["b"], excludedIds: [] });
+  });
+
+  it("keeps a restored exclusion while the thread's plan has not hydrated yet", () => {
+    readPlanCommentsForSend(THREAD_ID);
+    useComposerDraftStore.getState().updateNextMessage(THREAD_ID, (draft) => excludePlanComment(draft, "b"));
+    usePlanStore.setState({ plansByThread: {}, commentsByThread: {} });
+
+    updatePlanCommentSelection(THREAD_ID);
+    usePlanStore.getState().addPlan(THREAD_ID, version(V2, 2, "ready"));
+    usePlanStore.getState().setComments(THREAD_ID, [comment("a", V2), comment("b", V2)]);
+
+    expect(readPlanCommentsForSend(THREAD_ID)).toEqual({ ridingIds: ["a"], excludedIds: ["b"] });
   });
 
   it("does not freeze a Send that carries no plan comments", () => {

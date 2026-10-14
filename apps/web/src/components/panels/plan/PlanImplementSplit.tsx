@@ -31,7 +31,7 @@ export function PlanImplementSplit({ threadId, viewed, executing }: PlanImplemen
 
   return (
     <SplitButton
-      variant={commentsRide ? "outline" : "default"}
+      variant={commentsRide ? "secondary" : "default"}
       className="ml-auto"
       disabled={executing}
       loading={busy}

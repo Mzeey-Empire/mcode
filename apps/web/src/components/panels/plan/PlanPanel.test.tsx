@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { EditorView } from "@codemirror/view";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlanImplement, PlanImplementReceipt, PlanSaveVersion, PlanVersion } from "@mcode/contracts";
+import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { usePlanStore } from "@/stores/planStore";
 import { useThreadStore } from "@/stores/threadStore";
@@ -63,6 +64,7 @@ function typeAtEnd(text: string): void {
 describe("PlanPanel", () => {
   beforeEach(() => {
     usePlanStore.setState({ plansByThread: {}, activeVersionByThread: {} });
+    useComposerDraftStore.setState({ drafts: {} });
     useThreadStore.setState({ runningThreadIds: new Set() });
     savePlanVersion.mockReset();
     implementPlan.mockReset();
@@ -98,6 +100,20 @@ describe("PlanPanel", () => {
     await waitFor(() => expect(editorText()).toContain("Step for v1"));
     expect(editorText()).not.toContain("Step for v2");
     expect(screen.getByTestId("plan-version-picker")).toHaveTextContent("v1Older version");
+  });
+
+  it("reopens on the version an unfinished comment note was written on", () => {
+    const first = makePlan(1, { status: "superseded" });
+    usePlanStore.setState({ plansByThread: { [THREAD]: [first, makePlan(2)] } });
+    const anchor = { kind: "text", start: 2, end: 6, quote: "Plan", prefix: "", suffix: "", section: null } as const;
+    useComposerDraftStore.getState().updateNextMessage(THREAD, (draft) => ({
+      ...draft,
+      planCommentEditor: { planVersionId: first.id, commentId: null, anchor, body: "half" },
+    }));
+
+    render(<PlanPanel threadId={THREAD} />);
+
+    expect(usePlanStore.getState().activeVersionByThread[THREAD]).toBe(1);
   });
 
   it("reads Accepted for an accepted version and offers no Implement action", () => {

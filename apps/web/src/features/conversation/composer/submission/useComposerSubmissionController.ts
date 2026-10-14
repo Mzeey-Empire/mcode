@@ -23,6 +23,7 @@ import {
   isComposerTargetReady,
 } from "./composer-submission-routes";
 import type { PreparedComposerSubmission } from "./composer-submission-types";
+import { planCommentThreadFor } from "../draft/plan-comment-selection";
 import { prepareComposerSubmission } from "./prepare-composer-submission";
 import { shouldQueueActiveThreadSubmit } from "./composer-submit-policy";
 
@@ -73,16 +74,6 @@ export interface UseComposerSubmissionControllerOptions {
 type SubmitAttemptOutcome = "complete" | "checkout-pending";
 
 /** Owns Composer submit routing, dispatch cleanup, and Direct-mode checkout confirmation. */
-/** A queued send or a branch starts no plan turn, so only a direct send to an existing thread carries plan comments. */
-function planCommentThreadFor(send: {
-  isNewThread: boolean;
-  branchFromMessageId?: string | null;
-  isAgentRunning: boolean;
-  threadId?: string;
-}): string | undefined {
-  return !send.isNewThread && !send.branchFromMessageId && !send.isAgentRunning ? send.threadId : undefined;
-}
-
 export function useComposerSubmissionController({
   threadId,
   workspaceId,

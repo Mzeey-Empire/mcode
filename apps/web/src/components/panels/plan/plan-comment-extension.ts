@@ -100,6 +100,9 @@ function markField(hosts: PlanCommentHosts): StateField<MarkState> {
 }
 
 const commentTheme = EditorView.baseTheme({
+  ".cm-plan-comment-host": {
+    paddingLeft: "40px",
+  },
   ".cm-plan-comment": {
     backgroundColor: "var(--color-selected)",
     borderBottom: "1px solid var(--color-muted)",

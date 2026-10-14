@@ -20,7 +20,7 @@ export function PlanCommentsComposerChip({ comments, onExclude }: PlanCommentsCo
   const label = `${comments.length} plan comment${comments.length === 1 ? "" : "s"}`;
   return (
     <div className="px-3 pt-2" data-testid="composer-plan-comments">
-      <div className="border-border bg-background text-ink inline-flex h-8 items-center gap-1.5 rounded-lg border pr-1 pl-2.5 text-sm">
+      <div className="bg-hover text-ink inline-flex h-7 items-center gap-1.5 rounded-lg pr-0.5 pl-2.5 text-sm">
         <MessageCircle className="text-muted size-3.5" aria-hidden />
         <span>{label}</span>
         <Tooltip>
@@ -29,13 +29,13 @@ export function PlanCommentsComposerChip({ comments, onExclude }: PlanCommentsCo
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-compact"
+                size="icon-inline-sm"
                 aria-label="Leave plan comments out of this message"
                 onClick={onExclude}
               />
             }
           >
-            <X className="size-3.5" />
+            <X className="size-3" />
           </TooltipTrigger>
           <TooltipContent>Leave out of this message</TooltipContent>
         </Tooltip>

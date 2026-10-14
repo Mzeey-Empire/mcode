@@ -25,6 +25,14 @@ export function setPlanCommentEditor(threadId: string, editor: PlanCommentEditor
   useComposerDraftStore.getState().updateNextMessage(threadId, (draft) => ({ ...draft, planCommentEditor: editor }));
 }
 
+/** Closes the editor only if it is still the one a write was issued for; a slow reply must not discard a newer editor. */
+function closePlanCommentEditorFor(threadId: string, submitted: PlanCommentEditorDraft): void {
+  const current = useComposerDraftStore.getState().drafts[threadId]?.planCommentEditor;
+  if (!current || current.commentId !== submitted.commentId || current.planVersionId !== submitted.planVersionId) return;
+  if (current.anchor.kind === "text" && submitted.anchor.kind === "text" && current.anchor.start !== submitted.anchor.start) return;
+  setPlanCommentEditor(threadId, undefined);
+}
+
 /** Edits the note of the open editor. */
 export function setPlanCommentEditorBody(threadId: string, body: string): void {
   useComposerDraftStore.getState().updateNextMessage(threadId, (draft) =>
@@ -67,7 +75,7 @@ export async function savePlanComment(
           body,
         });
     usePlanStore.getState().applyCommentsChanged(threadId, [saved], []);
-    setPlanCommentEditor(threadId, undefined);
+    closePlanCommentEditorFor(threadId, editor);
     return null;
   } catch (error) {
     return planCommentErrorMessage(error);
@@ -79,7 +87,8 @@ export async function deletePlanComment(threadId: string, commentId: string): Pr
   try {
     await getTransport().deletePlanComment({ commentId });
     usePlanStore.getState().applyCommentsChanged(threadId, [], [commentId]);
-    setPlanCommentEditor(threadId, undefined);
+    const open = useComposerDraftStore.getState().drafts[threadId]?.planCommentEditor;
+    if (open?.commentId === commentId) setPlanCommentEditor(threadId, undefined);
     return null;
   } catch (error) {
     return planCommentErrorMessage(error);
