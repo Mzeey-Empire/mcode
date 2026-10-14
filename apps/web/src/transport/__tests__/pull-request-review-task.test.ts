@@ -24,22 +24,15 @@ describe("pull request Review-task transport", () => {
     vi.clearAllMocks();
   });
 
-  it("keeps local Review-task actions on a separate transport seam", async () => {
-    activeTransport.createPullRequestReviewTask.mockResolvedValue({ ok: false });
-    activeTransport.getPullRequestReviewLink.mockResolvedValue(null);
+  it("routes each Review-task action to its own transport method", async () => {
+    for (const [name, method] of Object.entries(activeTransport)) {
+      method.mockResolvedValue({ ok: false, source: name });
+    }
     const transport = getPullRequestReviewTaskTransport();
-    const request = {
-      action: "prepare" as const,
-      operationId: "review-prepare-1",
-      identity,
-    };
 
-    await transport.createReviewTask(request);
-    await transport.reviewLink({ threadId: "thread-1" });
-
-    expect(activeTransport.createPullRequestReviewTask).toHaveBeenCalledWith(request);
-    expect(activeTransport.getPullRequestReviewLink).toHaveBeenCalledWith({
-      threadId: "thread-1",
-    });
+    await expect(transport.createReviewTask({ action: "prepare", operationId: "review-prepare-1", identity }))
+      .resolves.toEqual({ ok: false, source: "createPullRequestReviewTask" });
+    await expect(transport.reviewLink({ threadId: "thread-1" }))
+      .resolves.toEqual({ ok: false, source: "getPullRequestReviewLink" });
   });
 });

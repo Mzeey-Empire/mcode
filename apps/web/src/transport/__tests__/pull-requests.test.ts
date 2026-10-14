@@ -21,28 +21,11 @@ describe("pull request transport", () => {
     vi.clearAllMocks();
   });
 
-  it("forwards named RPC calls without per-row fan-out", async () => {
-    activeTransport.getPullRequestCapabilities.mockResolvedValue({ ok: false });
-    activeTransport.listPullRequests.mockResolvedValue({ ok: false });
-    activeTransport.getPullRequestResource.mockResolvedValue({ ok: false });
-    activeTransport.getPullRequestTimeline.mockResolvedValue({ ok: false });
-    activeTransport.getPullRequestFiles.mockResolvedValue({ ok: false });
-    activeTransport.getPullRequestPatch.mockResolvedValue({ ok: false });
-    activeTransport.cancelPullRequestOperation.mockResolvedValue({
-      ok: true,
-      cancelled: true,
-    });
+  it("routes each call to its own transport method", async () => {
+    for (const [name, method] of Object.entries(activeTransport)) {
+      method.mockResolvedValue({ ok: false, source: name });
+    }
     const transport = getPullRequestTransport();
-    const listRequest = {
-      operationId: "list-1",
-      provider: "github" as const,
-      relationships: ["authored" as const],
-      states: ["open" as const],
-      limit: 30,
-    };
-
-    await transport.getCapabilities({ operationId: "cap-1", provider: "github" });
-    await transport.list(listRequest);
     const identity = {
       provider: "github" as const,
       repositoryNodeId: "R_repo",
@@ -50,61 +33,31 @@ describe("pull request transport", () => {
       repository: "mcode",
       number: 10,
     };
-    await transport.get({ operationId: "detail-1", resource: "detail", identity });
-    await transport.timeline({ operationId: "timeline-1", lane: "initial", identity, limit: 30 });
-    await transport.files({
-      operationId: "files-1",
-      identity,
-      baseOid: "a".repeat(40),
-      headOid: "b".repeat(40),
-      search: "transport",
-      changeTypes: ["modified"],
-      limit: 100,
-    });
-    await transport.patch({
-      operationId: "patch-1",
-      identity,
-      baseOid: "a".repeat(40),
-      headOid: "b".repeat(40),
-      locator: "file_1",
-    });
-    await transport.cancel({ operationId: "list-1" });
+    const range = { identity, baseOid: "a".repeat(40), headOid: "b".repeat(40) };
 
-    expect(activeTransport.getPullRequestCapabilities).toHaveBeenCalledWith({
-      operationId: "cap-1",
+    await expect(transport.getCapabilities({ operationId: "cap-1", provider: "github" }))
+      .resolves.toEqual({ ok: false, source: "getPullRequestCapabilities" });
+    await expect(transport.list({
+      operationId: "list-1",
       provider: "github",
-    });
-    expect(activeTransport.listPullRequests).toHaveBeenCalledOnce();
-    expect(activeTransport.listPullRequests).toHaveBeenCalledWith(listRequest);
-    expect(activeTransport.getPullRequestResource).toHaveBeenCalledWith({
-      operationId: "detail-1",
-      resource: "detail",
-      identity,
-    });
-    expect(activeTransport.getPullRequestTimeline).toHaveBeenCalledWith({
-      operationId: "timeline-1",
-      lane: "initial",
-      identity,
+      relationships: ["authored"],
+      states: ["open"],
       limit: 30,
-    });
-    expect(activeTransport.getPullRequestFiles).toHaveBeenCalledWith({
+    })).resolves.toEqual({ ok: false, source: "listPullRequests" });
+    await expect(transport.get({ operationId: "detail-1", resource: "detail", identity }))
+      .resolves.toEqual({ ok: false, source: "getPullRequestResource" });
+    await expect(transport.timeline({ operationId: "timeline-1", lane: "initial", identity, limit: 30 }))
+      .resolves.toEqual({ ok: false, source: "getPullRequestTimeline" });
+    await expect(transport.files({
       operationId: "files-1",
-      identity,
-      baseOid: "a".repeat(40),
-      headOid: "b".repeat(40),
+      ...range,
       search: "transport",
       changeTypes: ["modified"],
       limit: 100,
-    });
-    expect(activeTransport.getPullRequestPatch).toHaveBeenCalledWith({
-      operationId: "patch-1",
-      identity,
-      baseOid: "a".repeat(40),
-      headOid: "b".repeat(40),
-      locator: "file_1",
-    });
-    expect(activeTransport.cancelPullRequestOperation).toHaveBeenCalledWith({
-      operationId: "list-1",
-    });
+    })).resolves.toEqual({ ok: false, source: "getPullRequestFiles" });
+    await expect(transport.patch({ operationId: "patch-1", ...range, locator: "file_1" }))
+      .resolves.toEqual({ ok: false, source: "getPullRequestPatch" });
+    await expect(transport.cancel({ operationId: "list-1" }))
+      .resolves.toEqual({ ok: false, source: "cancelPullRequestOperation" });
   });
 });

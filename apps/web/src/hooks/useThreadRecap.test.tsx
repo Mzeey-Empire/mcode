@@ -488,10 +488,9 @@ describe("useThreadRecap", () => {
     ];
 
     rerender({ messages: staleChangedMessages, overviewOpen: true });
+    await act(async () => {});
 
-    await waitFor(() => {
-      expect(mockTransport.generateRecap).toHaveBeenCalledTimes(0);
-    });
+    expect(mockTransport.generateRecap).not.toHaveBeenCalled();
   });
 
   it("runs automatic generation when focus returns and gates pass", async () => {

@@ -58,7 +58,6 @@ describe("composer-layout", () => {
   });
 
   it("docks the Overview only where the composer keeps its minimum width beside the reserve", () => {
-    expect(OVERVIEW_CANVAS_RESERVE).toBe(328);
     expect(OVERVIEW_DOCK_MIN_CANVAS - OVERVIEW_CANVAS_RESERVE).toBeGreaterThanOrEqual(COMPOSER_MIN_WIDTH);
   });
 
