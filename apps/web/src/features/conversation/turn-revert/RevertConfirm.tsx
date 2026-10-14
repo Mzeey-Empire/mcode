@@ -11,6 +11,8 @@ export interface RevertConfirmProps {
   readonly state: TurnRevertState;
   /** The question for a ready preview. Revert this turn and Revert file word it differently. */
   readonly title: (preview: ReadyPreview) => string;
+  /** The warning under a ready preview's title. Defaults to the later-edit warning. */
+  readonly body?: (preview: ReadyPreview) => string | null;
   readonly onRevert: () => void;
   readonly onCancel: () => void;
 }
@@ -32,22 +34,22 @@ function failedCopy(state: FailedState, title: RevertConfirmProps["title"]): Con
   return { title: ready ? title(ready) : "Couldn't revert", body: text, note: null, action: retry && ready ? "retry" : "close" };
 }
 
-function confirmCopy(state: TurnRevertState, title: RevertConfirmProps["title"]): ConfirmCopy {
+function confirmCopy(state: TurnRevertState, title: RevertConfirmProps["title"], body: NonNullable<RevertConfirmProps["body"]>): ConfirmCopy {
   if (state.phase === "loading") return { title: "Checking files…", body: null, note: null, action: "revert" };
   if (state.phase === "failed") return failedCopy(state, title);
   const preview = state.preview;
   const blocked = previewBlockedReason(preview);
   if (blocked !== null || preview.status !== "ready") return { title: blocked ?? "", body: null, note: null, action: "close" };
-  return { title: title(preview), body: revertWarning(preview), note: unattributedNote(preview), action: "revert" };
+  return { title: title(preview), body: body(preview), note: unattributedNote(preview), action: "revert" };
 }
 
 /**
  * Inline confirm under a changes bar. Revert stays disabled until the preview
  * arrives, focus starts on Cancel, and Esc cancels.
  */
-export function RevertConfirm({ state, title, onRevert, onCancel }: RevertConfirmProps) {
+export function RevertConfirm({ state, title, body = revertWarning, onRevert, onCancel }: RevertConfirmProps) {
   const cancelRef = useRef<HTMLButtonElement>(null);
-  const copy = confirmCopy(state, title);
+  const copy = confirmCopy(state, title, body);
   const applying = state.phase === "preview" && state.applying;
 
   useEffect(() => {

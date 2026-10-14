@@ -46,6 +46,53 @@ export function turnRevertTitle(preview: ReadyPreview): string {
   return `Revert ${count} ${count === 1 ? "file" : "files"} to before this turn?`;
 }
 
+/** Turn ordinals a file revert spans. `from === to` is a single turn. */
+export interface FileRevertRange {
+  readonly from: number;
+  readonly to: number;
+}
+
+/** "Revert X to before Turn N?" The range's first turn, so a retried turn reads as before its first attempt. */
+export function fileRevertTitle(path: string, range: FileRevertRange): string {
+  return `Revert ${basename(path)} to before Turn ${range.from}?`;
+}
+
+function renameChainLead(preview: ReadyPreview, clickedPath: string): string | null {
+  const normalize = (path: string) => path.replaceAll("\\", "/");
+  if (!preview.files.some((file) => normalize(file.path) !== normalize(clickedPath))) return null;
+  const names = (actions: readonly RevertFilePlan["action"][]) =>
+    revertableFiles(preview).filter((file) => actions.includes(file.action)).map((file) => basename(file.path));
+  const restored = names(["restore", "recreate"]);
+  const removed = names(["delete"]);
+  if (restored.length === 0 && removed.length === 0) return null;
+  const parts = [
+    ...(restored.length > 0 ? [`Restores ${restored.join(", ")}`] : []),
+    ...(removed.length > 0 ? [`${restored.length > 0 ? "removes" : "Removes"} ${removed.join(", ")}`] : []),
+  ];
+  return `${parts.join(" and ")}.`;
+}
+
+function rangeWarning(preview: ReadyPreview, range: FileRevertRange): string | null {
+  const changed = preview.files.filter((file) => file.state === "changed_later");
+  const first = changed[0];
+  if (!first) return null;
+  const others = changed.length - 1;
+  const subject = others > 0 ? `${basename(first.path)} and ${others} other ${others === 1 ? "file" : "files"}` : basename(first.path);
+  return `${subject} changed after Turn ${range.to}. Reverting removes those changes too.`;
+}
+
+/**
+ * Body of the Revert file confirm: what changes, then a warning for edits made
+ * after the range. A rename chain names the paths it restores and removes.
+ */
+export function fileRevertBody(preview: ReadyPreview, clickedPath: string, range: FileRevertRange): string {
+  const single = range.from === range.to;
+  const lead = renameChainLead(preview, clickedPath) ?? "Only this file changes.";
+  const scope = single ? "The turn's other edits stay." : `Its changes from Turns ${range.from}–${range.to} are undone, and other files stay.`;
+  const warning = single ? revertWarning(preview) : rangeWarning(preview, range);
+  return [lead, scope, warning].filter((sentence) => sentence !== null).join(" ");
+}
+
 /** The one warning sentence for edits a revert would also remove, or null for a clean preview. */
 export function revertWarning(preview: ReadyPreview): string | null {
   const changed = preview.files.filter((file) => file.state === "changed_later");
