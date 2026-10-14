@@ -59,7 +59,7 @@ export function CommitFileList({ files, choices, onSetChecked, activePath, locke
         </span>
         {files.length > COMMIT_FLAT_MAX_FILES ? <FilterField value={filter} onChange={setFilter} /> : null}
       </div>
-      <ScrolledRows resetKey={`${layout.kind}:${visible.length}`}>
+      <ScrolledRows>
         {visible.length === 0 ? (
           <p className="px-2 py-3 text-body-small text-muted">No files match</p>
         ) : layout.kind === "flat" ? (
@@ -108,14 +108,14 @@ function FilterField({ value, onChange }: { readonly value: string; readonly onC
   );
 }
 
-function ScrolledRows({ children, resetKey }: { readonly children: ReactNode; readonly resetKey: string }) {
+function ScrolledRows({ children }: { readonly children: ReactNode }) {
   const viewport = useRef<HTMLDivElement>(null);
   const [moreBelow, setMoreBelow] = useState(false);
   const measure = () => {
     const element = viewport.current;
     if (element) setMoreBelow(element.scrollTop + element.clientHeight < element.scrollHeight - 1);
   };
-  useLayoutEffect(measure, [resetKey]);
+  useLayoutEffect(measure);
   return (
     <ScrollArea
       className="min-h-0"
@@ -196,7 +196,7 @@ function FileRow({
         onCheckedChange={(next) => onSetChecked([file], next)}
       />
       <span className="flex min-w-0 flex-1 items-baseline gap-2 whitespace-nowrap">
-        <span className={cn("shrink-0 text-body-small font-medium text-ink", deleted && "line-through")}>
+        <span className={cn("text-fade min-w-0 text-body-small font-medium text-ink", deleted && "line-through")}>
           {basenameOf(file.path)}
         </span>
         {showFolder && folder !== "" ? <span className="text-fade min-w-0 text-caption text-muted">{folder}</span> : null}

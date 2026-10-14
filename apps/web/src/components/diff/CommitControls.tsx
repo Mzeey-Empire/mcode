@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { GitCommitHorizontal } from "lucide-react";
 import { IconButton } from "@/components/ui/button";
 import { useReviewState } from "@/hooks/useReviewState";
@@ -21,25 +22,30 @@ export function CommitControls({ workspaceId, threadId, scopeId, activePath }: C
   const { isDirty } = useReviewState(workspaceId, threadId);
   const open = useDiffStore((store) => store.commitSheetScopeId === scopeId);
   const setCommitSheetScopeId = useDiffStore((store) => store.setCommitSheetScopeId);
+  const trigger = useRef<HTMLButtonElement>(null);
   if (!isDirty && !open) return null;
   return (
-    <div className="pointer-events-none absolute right-4 bottom-4 z-(--layer-sticky) flex max-w-[calc(100%-2rem)] flex-col items-end gap-3">
+    <div className="pointer-events-none absolute right-4 bottom-4 z-(--layer-sticky) flex max-h-[calc(100%-2rem)] max-w-[calc(100%-2rem)] flex-col items-end gap-3">
       {open ? (
         <CommitSheet
           workspaceId={workspaceId}
           threadId={threadId}
           scopeId={scopeId}
           activePath={activePath}
-          onClose={() => setCommitSheetScopeId(null)}
+          onClose={() => {
+            setCommitSheetScopeId(null);
+            trigger.current?.focus();
+          }}
           className="pointer-events-auto"
         />
       ) : null}
       <IconButton
+        ref={trigger}
         shape="round"
         floating
         aria-label="Commit"
         pressed={open}
-        onClick={() => setCommitSheetScopeId(open ? null : scopeId)}
+        onClick={() => setCommitSheetScopeId(scopeId)}
         className="pointer-events-auto"
       >
         <GitCommitHorizontal />

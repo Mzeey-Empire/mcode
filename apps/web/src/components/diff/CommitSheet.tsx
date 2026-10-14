@@ -58,11 +58,11 @@ export function CommitSheet({ workspaceId, threadId, scopeId, activePath, onClos
       aria-label="Commit"
       tabIndex={-1}
       onKeyDown={(event) => {
-        if (event.key === "Escape" && submission.kind !== "committing" && submission.kind !== "pushing") onClose();
+        if (event.key === "Escape" && !inFlight) onClose();
       }}
-      className={cn(DIALOG_SURFACE_CLASS, "flex w-[496px] max-w-full flex-col gap-3 p-4 outline-none", className)}
+      className={cn(DIALOG_SURFACE_CLASS, "flex w-[496px] max-w-full min-h-0 flex-col gap-3 overflow-y-auto p-4 outline-none", className)}
     >
-      <SheetHeader branch={reviewState?.branch ?? null} closeDisabled={submission.kind === "committing" || submission.kind === "pushing"} onClose={onClose} />
+      <SheetHeader branch={reviewState?.branch ?? null} closeDisabled={inFlight} onClose={onClose} />
       <FilesSection uncommitted={uncommitted} model={model} activePath={activePath} locked={inFlight} />
       <CommitMessageBox
         draft={model.draft}

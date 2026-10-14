@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GitCommitParams, GitCommitRejection, GitCommitResult, ReviewFileChange } from "@mcode/contracts";
 import { getTransport } from "@/transport";
+import { RpcError } from "@/transport/ws-transport";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useDiffStore } from "@/stores/diffStore";
 import {
@@ -65,6 +66,10 @@ export interface CommitSheetModel {
 /** True while a commit request is outstanding, including a pending push and a resend awaiting the connection. */
 export function isRequestInFlight(submission: CommitSubmission): boolean {
   return submission.kind === "committing" || submission.kind === "pushing" || submission.kind === "interrupted";
+}
+
+function isPendingPush(result: GitCommitResult): result is Extract<GitCommitResult, { status: "committed" }> {
+  return result.status === "committed" && result.push.status === "pending";
 }
 
 /** Subject, then a blank line and the body when there is one. */
@@ -155,26 +160,40 @@ export function useCommitSheet(options: UseCommitSheetOptions): CommitSheetModel
     [scopeId],
   );
 
+  const settleFailure = useCallback(
+    (error: Error) => {
+      request.current = null;
+      setSubmission({ kind: "rejected", reason: { kind: "failed", summary: "Couldn't commit", detail: error.message } });
+    },
+    [],
+  );
+
   const send = useCallback(
     (params: GitCommitParams) => {
       getTransport()
         .commitChanges(params)
         .then(
           (result) => {
-            if (!lifeRef.current.alive) return;
-            if (result.status === "committed" && result.push.status === "pending") {
+            if (!lifeRef.current.alive) {
+              if (!isPendingPush(result)) useDiffStore.getState().bumpDiffRevision(scopeId);
+              return;
+            }
+            if (isPendingPush(result)) {
               setSubmission({ kind: "pushing", shortSha: result.shortSha });
               lifeRef.current.poll = setTimeout(() => send(params), PUSH_POLL_INTERVAL_MS);
               return;
             }
             settle(result);
           },
-          () => {
-            if (lifeRef.current.alive) setSubmission({ kind: "interrupted" });
+          (error: unknown) => {
+            if (!lifeRef.current.alive) return;
+            // A server error answers the request, so resending the same params would only fail again.
+            if (error instanceof RpcError) return settleFailure(error);
+            setSubmission({ kind: "interrupted" });
           },
         );
     },
-    [settle],
+    [settle, settleFailure, scopeId],
   );
 
   const submit = useCallback(

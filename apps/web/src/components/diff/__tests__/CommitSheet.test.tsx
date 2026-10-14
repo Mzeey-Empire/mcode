@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GitCommitParams, GitCommitResult, ReviewFileChange } from "@mcode/contracts";
 
+import { RpcError } from "@/transport/ws-transport";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { PUSH_POLL_INTERVAL_MS } from "@/hooks/useCommitSheet";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -237,6 +238,32 @@ describe("CommitSheet outcomes", () => {
     expect(sentRequests()).toHaveLength(3);
     expect(new Set(sentRequests().map((params) => params.requestId)).size).toBe(1);
     expect(sentRequests()[0]?.push).toBe(true);
+  });
+
+  it("reports a server error once instead of resending the request", async () => {
+    arrange([change("a.ts")]);
+    vi.mocked(mockTransport.commitChanges).mockRejectedValueOnce(new RpcError("message too long", "INVALID_PARAMS"));
+    renderSheet();
+    await ready();
+
+    fireEvent.click(commitButton());
+
+    await screen.findByText("Couldn't commit");
+    expect(sentRequests()).toHaveLength(1);
+    expect(screen.queryByText(/Connection lost/)).not.toBeInTheDocument();
+    await waitFor(() => expect(commitButton()).toBeEnabled());
+  });
+
+  it("ignores Escape while a request is outstanding", async () => {
+    arrange([change("a.ts")]);
+    vi.mocked(mockTransport.commitChanges).mockReturnValueOnce(new Promise(() => {}));
+    const onClose = renderSheet();
+    await ready();
+
+    fireEvent.click(commitButton());
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Commit" }), { key: "Escape" });
+
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("offers no retry when the outcome is unknown", async () => {

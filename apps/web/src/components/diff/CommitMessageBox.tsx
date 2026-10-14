@@ -2,6 +2,7 @@ import { RefreshCw } from "lucide-react";
 import { IconButton } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import type { CommitDraft, MessageGeneration } from "@/hooks/useCommitSheet";
 
 export interface CommitMessageBoxProps {
@@ -21,7 +22,7 @@ function subjectPlaceholder(generation: MessageGeneration, hasSelection: boolean
 
 function attribution(generation: MessageGeneration): { text: string; failed: boolean } | null {
   if (generation.kind === "written") return { text: `Written by ${generation.modelName}`, failed: false };
-  if (generation.kind === "failed") return { text: "Couldn't write a message", failed: true };
+  if (generation.kind === "failed") return { text: generation.message || "Couldn't write a message", failed: true };
   return null;
 }
 
@@ -51,7 +52,9 @@ export function CommitMessageBox({ draft, onChange, generation, hasSelection, lo
         className="min-h-0 resize-none border-0 bg-transparent p-0 text-muted shadow-none"
       />
       <div className="flex h-8 items-center justify-between gap-2">
-        <span className={note?.failed ? "text-caption text-error" : "text-caption text-muted"}>{note?.text}</span>
+        <span className={cn("text-fade min-w-0 whitespace-nowrap text-caption", note?.failed ? "text-error" : "text-muted")}>
+          {note?.text}
+        </span>
         <IconButton
           shape="round"
           size="inline"
