@@ -29,6 +29,7 @@ export function setPlanCommentEditor(threadId: string, editor: PlanCommentEditor
 function closePlanCommentEditorFor(threadId: string, submitted: PlanCommentEditorDraft): void {
   const current = useComposerDraftStore.getState().drafts[threadId]?.planCommentEditor;
   if (!current || current.commentId !== submitted.commentId || current.planVersionId !== submitted.planVersionId) return;
+  if (current.body.trim() !== submitted.body.trim()) return;
   if (current.anchor.kind === "text" && submitted.anchor.kind === "text" && current.anchor.start !== submitted.anchor.start) return;
   setPlanCommentEditor(threadId, undefined);
 }

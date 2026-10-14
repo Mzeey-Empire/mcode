@@ -84,14 +84,14 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
 
 /**
  * A note left open reopens on the version it was written on, even after a
- * newer one exists. Runs once per mount so the version picker stays free.
+ * newer one exists. Runs once per thread so the version picker stays free.
  */
 function useShowCommentEditorVersion(threadId: string, versions: readonly PlanVersion[]): void {
   const editorVersionId = useComposerDraftStore((s) => s.drafts[threadId]?.planCommentEditor?.planVersionId);
-  const restored = useRef(false);
+  const restoredFor = useRef<string | null>(null);
   useEffect(() => {
-    if (restored.current || versions.length === 0) return;
-    restored.current = true;
+    if (restoredFor.current === threadId || versions.length === 0) return;
+    restoredFor.current = threadId;
     const target = versions.find((version) => version.id === editorVersionId);
     if (target && target !== versions.at(-1)) usePlanStore.getState().setActiveVersion(threadId, target.version);
   }, [threadId, versions, editorVersionId]);

@@ -78,6 +78,19 @@ describe("plan comment writes", () => {
     expect(openEditor()).toEqual(newer);
   });
 
+  it("leaves a note typed into the same comment since the save began", async () => {
+    let finish: (saved: PlanComment) => void = () => {};
+    updatePlanComment.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    usePlanStore.setState({ commentsByThread: { [THREAD]: [comment()] } });
+    const pending = savePlanComment(THREAD, editor("first", COMMENT), { ...input, body: "first" });
+    setPlanCommentEditor(THREAD, editor("a different note", COMMENT));
+
+    finish(comment({ body: "first" }));
+    await pending;
+
+    expect(openEditor()?.body).toBe("a different note");
+  });
+
   it("keeps the editor and its note when the version no longer takes comments", async () => {
     createPlanComment.mockRejectedValue(new RpcError("read only", "plan_read_only"));
     setPlanCommentEditor(THREAD, editor("my note"));
