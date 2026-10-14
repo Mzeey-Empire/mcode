@@ -37,8 +37,11 @@ export interface CommitFileListProps {
  * folder checkboxes and a filter.
  */
 export function CommitFileList({ files, choices, onSetChecked, activePath, locked }: CommitFileListProps) {
-  const [filter, setFilter] = useState("");
-  const [folderToggles, setFolderToggles] = useState<Readonly<Record<string, boolean>>>({});
+  const [typed, setFilter] = useState("");
+  const [folderToggles, setFolderToggles] = useState<ReadonlyMap<string, boolean>>(new Map());
+  const canFilter = files.length > COMMIT_FLAT_MAX_FILES;
+  // A refresh can shrink the list below the filter's threshold, which hides the field; its text must not outlive it.
+  const filter = canFilter ? typed : "";
   const filtering = filter.trim() !== "";
   const layout = layoutCommitFiles(files, filter);
   const visible = layout.kind === "flat" ? layout.files : [...layout.folders.flatMap((folder) => folder.files), ...layout.rootFiles];
@@ -57,7 +60,7 @@ export function CommitFileList({ files, choices, onSetChecked, activePath, locke
         <span className="min-w-0 flex-1 text-body-small text-muted">
           {checkedCount} of {files.length} files
         </span>
-        {files.length > COMMIT_FLAT_MAX_FILES ? <FilterField value={filter} onChange={setFilter} /> : null}
+        {canFilter ? <FilterField value={filter} onChange={setFilter} /> : null}
       </div>
       <ScrolledRows>
         {visible.length === 0 ? (
@@ -77,7 +80,7 @@ export function CommitFileList({ files, choices, onSetChecked, activePath, locke
                   open={open}
                   choices={choices}
                   locked={locked}
-                  onToggleOpen={() => setFolderToggles((current) => ({ ...current, [folder.dir]: !open }))}
+                  onToggleOpen={() => setFolderToggles((current) => new Map(current).set(folder.dir, !open))}
                   onSetChecked={onSetChecked}
                 />
               );

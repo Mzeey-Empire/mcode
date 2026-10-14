@@ -7,6 +7,7 @@ import { RpcError } from "@/transport/ws-transport";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { PUSH_POLL_INTERVAL_MS } from "@/hooks/useCommitSheet";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { useDiffStore } from "@/stores/diffStore";
 import { CommitSheet } from "../CommitSheet";
 
 vi.mock("@/transport", async () => ({
@@ -58,8 +59,12 @@ function committed(push: "skipped" | "pending" = "skipped"): GitCommitResult {
 }
 
 function renderSheet(onClose = vi.fn()) {
-  render(<CommitSheet workspaceId="ws-1" threadId="thread-1" scopeId="thread-1" activePath={null} onClose={onClose} />);
-  return onClose;
+  return renderSheetWith(onClose).onClose;
+}
+
+function renderSheetWith(onClose = vi.fn()) {
+  const view = render(<CommitSheet workspaceId="ws-1" threadId="thread-1" scopeId="thread-1" activePath={null} onClose={onClose} />);
+  return { onClose, ...view };
 }
 
 function commitButton() {
@@ -165,6 +170,45 @@ describe("CommitSheet selection", () => {
   });
 });
 
+describe("CommitSheet file names that collide with object keys", () => {
+  it("leaves an untracked file named constructor unchecked and lets __proto__ be unchecked", async () => {
+    arrange([
+      change("a.ts"),
+      change("constructor", { untracked: true, changeType: "added" }),
+      change("__proto__"),
+    ]);
+    renderSheet();
+    await ready();
+
+    expect(fileBox("constructor")).not.toBeChecked();
+    expect(fileBox("__proto__")).toBeChecked();
+
+    fireEvent.click(fileBox("__proto__"));
+
+    expect(fileBox("__proto__")).not.toBeChecked();
+    expect(commitButton()).toHaveTextContent("Commit 1 file");
+  });
+});
+
+describe("CommitSheet filter", () => {
+  it("drops the filter when a refresh shrinks the list below the point where it is offered", async () => {
+    const names = Array.from({ length: 11 }, (_, index) => `f${index}.ts`);
+    arrange(names.map((name) => change(name)));
+    renderSheet();
+    await ready();
+
+    fireEvent.change(screen.getByLabelText("Filter files"), { target: { value: "nomatch" } });
+    expect(screen.getByText("No files match")).toBeInTheDocument();
+
+    arrange(names.slice(0, 10).map((name) => change(name)));
+    act(() => useDiffStore.getState().bumpDiffRevision("thread-1"));
+
+    await waitFor(() => expect(screen.queryByLabelText("Filter files")).not.toBeInTheDocument());
+    expect(screen.queryByText("No files match")).not.toBeInTheDocument();
+    expect(fileBox("f0.ts")).toBeInTheDocument();
+  });
+});
+
 describe("CommitSheet outcomes", () => {
   it("closes after a plain commit", async () => {
     arrange([change("a.ts")]);
@@ -216,6 +260,25 @@ describe("CommitSheet outcomes", () => {
     await waitFor(() => expect(sentRequests()).toHaveLength(2));
     expect(sentRequests()[1]?.requestId).toBe(sentRequests()[0]?.requestId);
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("finishes a dropped request after the sheet unmounts, with the same request id", async () => {
+    arrange([change("a.ts")]);
+    let drop: (error: Error) => void = () => {};
+    vi.mocked(mockTransport.commitChanges).mockReturnValueOnce(new Promise((_, reject) => (drop = reject)));
+    const { unmount } = renderSheetWith();
+    await ready();
+
+    fireEvent.click(commitButton());
+    await waitFor(() => expect(sentRequests()).toHaveLength(1));
+    act(() => useConnectionStore.setState({ status: "reconnecting" }));
+    unmount();
+    await act(async () => drop(new Error("WebSocket disconnected")));
+
+    act(() => useConnectionStore.setState({ status: "connected" }));
+
+    await waitFor(() => expect(sentRequests()).toHaveLength(2));
+    expect(sentRequests()[1]?.requestId).toBe(sentRequests()[0]?.requestId);
   });
 
   it("shows Pushing… and polls the same request until the push settles", async () => {

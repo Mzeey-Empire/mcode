@@ -6,8 +6,11 @@ export const COMMIT_FLAT_MAX_FILES = 10;
 /** Past this many rows (files plus folder rows) folders start collapsed. */
 export const COMMIT_COLLAPSE_ROW_THRESHOLD = 12;
 
-/** The user's explicit checkbox choices by path; a path with no choice takes its default. */
-export type CommitChoices = Readonly<Record<string, boolean>>;
+/**
+ * The user's explicit checkbox choices by path; a path with no choice takes its default.
+ * A map, because a path such as `constructor` or `__proto__` is a hazard as a record key.
+ */
+export type CommitChoices = ReadonlyMap<string, boolean>;
 
 export interface CommitFolder {
   readonly dir: string;
@@ -45,7 +48,7 @@ export function orderCommitFiles(files: readonly ReviewFileChange[]): ReviewFile
 
 /** A path nobody has toggled is checked unless git does not track it yet. */
 export function isChecked(file: ReviewFileChange, choices: CommitChoices): boolean {
-  return choices[file.path] ?? !file.untracked;
+  return choices.get(file.path) ?? !file.untracked;
 }
 
 /** The checked files, in the order given. */
@@ -71,8 +74,8 @@ export function withChecked(
   files: readonly ReviewFileChange[],
   checked: boolean,
 ): CommitChoices {
-  const next = { ...choices };
-  for (const file of files) next[file.path] = checked;
+  const next = new Map(choices);
+  for (const file of files) next.set(file.path, checked);
   return next;
 }
 
@@ -119,11 +122,11 @@ export function layoutCommitFiles(allFiles: readonly ReviewFileChange[], filter:
 export function isFolderOpen(
   folder: CommitFolder,
   layout: Extract<CommitListLayout, { kind: "grouped" }>,
-  overrides: Readonly<Record<string, boolean>>,
+  overrides: ReadonlyMap<string, boolean>,
   activeDir: string | null,
   filtering: boolean,
 ): boolean {
-  const toggled = overrides[folder.dir];
+  const toggled = overrides.get(folder.dir);
   if (toggled !== undefined) return toggled;
   if (filtering) return true;
   const rows = layout.folders.reduce((sum, entry) => sum + 1 + entry.files.length, layout.rootFiles.length);

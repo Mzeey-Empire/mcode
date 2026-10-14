@@ -72,6 +72,15 @@ function isPendingPush(result: GitCommitResult): result is Extract<GitCommitResu
   return result.status === "committed" && result.push.status === "pending";
 }
 
+/** Runs `resend` once, the next time the connection comes back. */
+function resendOnReconnect(resend: () => void): void {
+  const unsubscribe = useConnectionStore.subscribe((state) => {
+    if (state.status !== "connected") return;
+    unsubscribe();
+    resend();
+  });
+}
+
 /** Subject, then a blank line and the body when there is one. */
 export function composeMessage({ subject, body }: CommitDraft): string {
   return [subject.trim(), body.trim()].filter(Boolean).join("\n\n");
@@ -88,7 +97,7 @@ export function composeMessage({ subject, body }: CommitDraft): string {
  */
 export function useCommitSheet(options: UseCommitSheetOptions): CommitSheetModel {
   const { workspaceId, threadId, scopeId, head, files, onDone } = options;
-  const [choices, setChoices] = useState<CommitChoices>({});
+  const [choices, setChoices] = useState<CommitChoices>(new Map());
   const [draft, setDraft] = useState<CommitDraft>({ subject: "", body: "" });
   const [generation, setGeneration] = useState<MessageGeneration>({ kind: "idle" });
   const [submission, setSubmission] = useState<CommitSubmission>({ kind: "idle" });
@@ -186,7 +195,12 @@ export function useCommitSheet(options: UseCommitSheetOptions): CommitSheetModel
             settle(result);
           },
           (error: unknown) => {
-            if (!lifeRef.current.alive) return;
+            if (!lifeRef.current.alive) {
+              // The user left the thread mid-drop. Finish the request anyway so its result is
+              // recorded and Review refreshes, instead of leaving the outcome unread.
+              if (!(error instanceof RpcError)) resendOnReconnect(() => send(params));
+              return;
+            }
             // A server error answers the request, so resending the same params would only fail again.
             if (error instanceof RpcError) return settleFailure(error);
             setSubmission({ kind: "interrupted" });
