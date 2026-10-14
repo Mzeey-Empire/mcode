@@ -1,6 +1,6 @@
 {
   "bindings": [
-    { "key": "mod+p", "commandId": "commandPalette.toggle" },
+    { "key": "mod+p", "commandId": "files.goToFile" },
     { "key": "mod+n", "commandId": "thread.new" },
     { "key": "mod+shift+n", "commandId": "workspace.new" },
     { "key": "mod+\\", "commandId": "sidebar.toggle" },

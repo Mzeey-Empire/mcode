@@ -1,6 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { BROWSER_AUTOMATION_VIEWPORT_CANVAS_PADDING_PX } from "@mcode/contracts";
 import { cn } from "@/lib/utils";
+import { useViewportDragStore, type ViewportDragEdge } from "../state/viewportDragStore";
 import {
   clampViewportSize,
   DEFAULT_VIEWPORT_SIZE,
@@ -13,50 +14,31 @@ import {
 } from "../automation/services/viewportCoordinator";
 import { useViewportCoordinatorState } from "./useViewportCoordinatorState";
 
-type DragAxis = "width" | "height" | "both";
-type DragHandlePosition =
-  | "top"
-  | "right"
-  | "bottom"
-  | "left"
-  | "top-left"
-  | "top-right"
-  | "bottom-right"
-  | "bottom-left";
+type DragAxis = "width" | "height";
+type DragHandlePosition = ViewportDragEdge;
 
 interface DragHandleDetails {
   readonly axis: DragAxis;
-  readonly direction: { readonly x: -1 | 0 | 1; readonly y: -1 | 0 | 1 };
+  readonly direction: { readonly x: 0 | 1; readonly y: 0 | 1 };
   readonly className: string;
+  readonly pillClassName: string;
 }
 
-const DRAG_HANDLE_POSITIONS: readonly DragHandlePosition[] = [
-  "top",
-  "right",
-  "bottom",
-  "left",
-  "top-left",
-  "top-right",
-  "bottom-right",
-  "bottom-left",
-];
+const DRAG_HANDLE_POSITIONS: readonly DragHandlePosition[] = ["right", "bottom"];
 
 const DRAG_HANDLE_DETAILS: Record<DragHandlePosition, DragHandleDetails> = {
-  top: { axis: "height", direction: { x: 0, y: -1 }, className: "inset-x-8 -top-4 h-8 cursor-ns-resize" },
-  right: { axis: "width", direction: { x: 1, y: 0 }, className: "inset-y-8 -right-4 w-8 cursor-ew-resize" },
-  bottom: { axis: "height", direction: { x: 0, y: 1 }, className: "inset-x-8 -bottom-4 h-8 cursor-ns-resize" },
-  left: { axis: "width", direction: { x: -1, y: 0 }, className: "inset-y-8 -left-4 w-8 cursor-ew-resize" },
-  "top-left": { axis: "both", direction: { x: -1, y: -1 }, className: "-left-4 -top-4 size-8 cursor-nwse-resize rounded-sm" },
-  "top-right": { axis: "both", direction: { x: 1, y: -1 }, className: "-right-4 -top-4 size-8 cursor-nesw-resize rounded-sm" },
-  "bottom-right": { axis: "both", direction: { x: 1, y: 1 }, className: "-bottom-4 -right-4 size-8 cursor-nwse-resize rounded-sm" },
-  "bottom-left": { axis: "both", direction: { x: -1, y: 1 }, className: "-bottom-4 -left-4 size-8 cursor-nesw-resize rounded-sm" },
-};
-
-const CORNER_GLYPH_CLASSES: Record<Exclude<DragHandlePosition, "top" | "right" | "bottom" | "left">, string> = {
-  "top-left": "border-l-2 border-t-2 border-current",
-  "top-right": "border-r-2 border-t-2 border-current",
-  "bottom-right": "border-b-2 border-r-2 border-current",
-  "bottom-left": "border-b-2 border-l-2 border-current",
+  right: {
+    axis: "width",
+    direction: { x: 1, y: 0 },
+    className: "inset-y-8 -right-4 w-4 cursor-ew-resize",
+    pillClassName: "h-8 w-1",
+  },
+  bottom: {
+    axis: "height",
+    direction: { x: 0, y: 1 },
+    className: "inset-x-8 -bottom-4 h-4 cursor-ns-resize",
+    pillClassName: "h-1 w-8",
+  },
 };
 
 /** Props for the responsive Browser viewport canvas and its resize affordances. */
@@ -82,6 +64,8 @@ const INACTIVE_VIEWPORT_STATE: ViewportCoordinatorState = {
   presentationError: null,
   agentActive: false,
 };
+
+const PAGE_FRAME_CLASS = "overflow-visible rounded-[0.6rem] bg-background";
 
 interface DragStart {
   readonly x: number;
@@ -135,6 +119,7 @@ function keyboardDelta(
 
 function useViewportResizeHandlers(
   details: DragHandleDetails,
+  position: DragHandlePosition,
   coordinator: ViewportCoordinator,
   state: ViewportCoordinatorState,
   scale: number,
@@ -143,6 +128,7 @@ function useViewportResizeHandlers(
   const startRef = useRef<DragStart | null>(null);
   const frameRef = useRef<number | null>(null);
   const pendingSizeRef = useRef<ViewportSize | null>(null);
+  const setDragEdge = useViewportDragStore((store) => store.setEdge);
 
   const requestResize = (size: ViewportSize): void => {
     onUserViewportChange?.();
@@ -162,7 +148,10 @@ function useViewportResizeHandlers(
     frameRef.current = null;
   };
 
-  useEffect(() => cancelScheduledResize, []);
+  useEffect(() => () => {
+    cancelScheduledResize();
+    if (startRef.current) useViewportDragStore.getState().setEdge(null);
+  }, []);
 
   const scheduleResize = (size: ViewportSize): void => {
     if (typeof requestAnimationFrame !== "function") {
@@ -180,6 +169,7 @@ function useViewportResizeHandlers(
   const onPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
     event.currentTarget.setPointerCapture?.(event.pointerId);
     startRef.current = { x: event.clientX, y: event.clientY, size: state.confirmed };
+    setDragEdge(position);
   };
 
   const onPointerMove = (event: PointerEvent<HTMLDivElement>): void => {
@@ -190,6 +180,7 @@ function useViewportResizeHandlers(
 
   const onPointerUp = (event: PointerEvent<HTMLDivElement>): void => {
     startRef.current = null;
+    setDragEdge(null);
     cancelScheduledResize();
     flushResize();
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
@@ -211,26 +202,6 @@ function holdsPointerCapture(event: PointerEvent<HTMLDivElement>): boolean {
   return !event.currentTarget.hasPointerCapture || event.currentTarget.hasPointerCapture(event.pointerId);
 }
 
-function BrowserViewportDragHandleGlyph({ position }: { readonly position: DragHandlePosition }) {
-  if (position === "left" || position === "right") {
-    return (
-      <span className="flex gap-1" aria-hidden>
-        <span className="h-8 w-px rounded-full bg-current" />
-        <span className="h-8 w-px rounded-full bg-current" />
-      </span>
-    );
-  }
-  if (position === "top" || position === "bottom") {
-    return (
-      <span className="flex flex-col gap-1" aria-hidden>
-        <span className="h-px w-8 rounded-full bg-current" />
-        <span className="h-px w-8 rounded-full bg-current" />
-      </span>
-    );
-  }
-  return <span className={cn("size-3", CORNER_GLYPH_CLASSES[position])} />;
-}
-
 function BrowserViewportDragHandle({
   position,
   coordinator,
@@ -245,29 +216,35 @@ function BrowserViewportDragHandle({
   readonly onUserViewportChange?: () => void;
 }) {
   const details = DRAG_HANDLE_DETAILS[position];
-  const handlers = useViewportResizeHandlers(details, coordinator, state, scale, onUserViewportChange);
-  const dimension = details.axis === "height" ? "height" : "width";
-  const isCorner = details.axis === "both";
+  const handlers = useViewportResizeHandlers(details, position, coordinator, state, scale, onUserViewportChange);
+  const dragging = useViewportDragStore((store) => store.edge === position);
 
   return (
     <div
       role="separator"
       tabIndex={0}
       aria-label={`Resize viewport from ${position}`}
-      aria-orientation={isCorner ? undefined : details.axis === "height" ? "horizontal" : "vertical"}
-      aria-valuemin={isCorner ? undefined : MIN_VIEWPORT_CSS_PX}
-      aria-valuemax={isCorner ? undefined : MAX_VIEWPORT_CSS_PX}
-      aria-valuenow={isCorner ? undefined : state.confirmed[dimension]}
-      aria-valuetext={isCorner ? `${state.confirmed.width} by ${state.confirmed.height} pixels` : undefined}
+      aria-orientation={details.axis === "height" ? "horizontal" : "vertical"}
+      aria-valuemin={MIN_VIEWPORT_CSS_PX}
+      aria-valuemax={MAX_VIEWPORT_CSS_PX}
+      aria-valuenow={state.confirmed[details.axis]}
       data-position={position}
+      data-dragging={dragging ? "" : undefined}
       className={cn(
-        "pointer-events-auto absolute z-(--layer-floating-panel) flex touch-none select-none items-center justify-center text-muted opacity-75 outline-none transition-colors hover:bg-selected/70 hover:text-ink hover:opacity-100 focus-visible:bg-selected/70 focus-visible:text-ink focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus",
+        "group/handle pointer-events-auto absolute z-(--layer-floating-panel) flex touch-none select-none items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-focus",
         details.className,
       )}
       {...handlers}
       onPointerCancel={handlers.onPointerUp}
     >
-      <BrowserViewportDragHandleGlyph position={position} />
+      <span
+        aria-hidden
+        className={cn(
+          "rounded-full bg-control-border transition-colors group-hover/handle:bg-muted group-focus-visible/handle:bg-muted",
+          dragging && "bg-primary group-hover/handle:bg-primary",
+          details.pillClassName,
+        )}
+      />
     </div>
   );
 }
@@ -278,7 +255,7 @@ function canvasClassName(
   className: string | undefined,
 ): string {
   const overflow = presentation === "actual" ? "overflow-auto" : "overflow-hidden";
-  return cn("pointer-events-none relative h-full min-h-0", responsive && "bg-hover/30", responsive && overflow, className);
+  return cn("pointer-events-none relative h-full min-h-0", responsive && overflow, className);
 }
 
 function stageSize(
@@ -364,17 +341,23 @@ function BrowserViewportStage({
 }: Required<Pick<BrowserViewportCanvasProps, "bounds" | "scale" | "children">> & Omit<BrowserViewportCanvasProps, "bounds" | "scale" | "children" | "state"> & { readonly state: ViewportCoordinatorState }) {
   const responsive = state.mode === "responsive";
   const size = stageSize(state, bounds, scale);
+  const dragging = useViewportDragStore((store) => store.edge !== null);
 
   return (
     <div data-testid="browser-viewport-stage" className={canvasClassName(responsive, state.presentation, className)}>
       <div className="flex min-h-full min-w-full items-center justify-center" style={stageStyle(responsive, size)}>
         <div
           data-testid="responsive-viewport-canvas"
-          className={cn("relative flex-none", responsive && "overflow-visible rounded-md border border-border bg-background")}
+          className={cn(
+            "relative flex-none",
+            responsive && PAGE_FRAME_CLASS,
+            responsive && "ring-1",
+            responsive && (dragging ? "ring-primary" : "ring-border"),
+          )}
           style={viewportCanvasStyle(responsive, size)}
         >
           <div
-            className={cn("absolute left-0 top-0 overflow-hidden", responsive && "rounded-md")}
+            className={cn("absolute left-0 top-0 overflow-hidden", responsive && "rounded-[0.6rem]")}
             style={viewportContentStyle(responsive, state, scale)}
           >
             {children}

@@ -97,6 +97,18 @@ describe("useBrowserCommands", () => {
     outside.remove();
   });
 
+  it("runs the device toolbar action on Ctrl Shift M from the browser chrome", () => {
+    const log: string[] = [];
+    const { getByLabelText } = render(<Owner name="visible" active log={log} />);
+    getByLabelText("visible URL").focus();
+
+    document.activeElement!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "M", ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }),
+    );
+
+    expect(log).toEqual(["visible:device"]);
+  });
+
   it("leaves a disabled action unregistered so its key does nothing", () => {
     const log: string[] = [];
     const { getByLabelText } = render(<Owner name="visible" active log={log} />);

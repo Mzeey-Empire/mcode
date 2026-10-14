@@ -1,16 +1,13 @@
 import { getKeybindingForCommand, formatKeybinding } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
 import { Kbd } from "@/components/ui/kbd";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   shownTabTypes,
   type PanelScope,
   type PanelTabType,
-  type PanelTabTypeId,
 } from "@/lib/panel-tabs";
 import type { RightPanelTool } from "@/stores/diffStore";
-import { cn } from "@/lib/utils";
 
 /** The mcode keycap for a tab type, or null when it has no binding. */
 function tabKeycap(type: PanelTabType): string | null {
@@ -19,21 +16,11 @@ function tabKeycap(type: PanelTabType): string | null {
   return binding ? formatKeybinding(binding.key, isMac) : null;
 }
 
-/** "Soon" tag for tab types that are not openable yet (deferred features). */
-function SoonBadge() {
-  return (
-    <Badge variant="secondary" size="compact" className="uppercase tracking-wide">
-      Soon
-    </Badge>
-  );
-}
-
 /**
  * The empty-state create surface for the right panel: a centered list of the
  * tab types creatable in the current scope, under a short header. Each row
  * carries an icon, label, blurb, and the type's mcode keycap; clicking one opens
- * that tab. Coming-soon types (Files) render as a disabled "Soon" teaser and are
- * excluded from the creatable set. There is intentionally no add control here —
+ * that tab. There is intentionally no add control here —
  * the list is the create surface (ADR-0004, issue #610).
  *
  * A single column (rather than a grid) keeps the surface legible at the panel's
@@ -47,8 +34,8 @@ export function PanelEmptyState({
 }: {
   scope: PanelScope;
   /** Tab types already open, dropped from the list by the cardinality filter. */
-  readonly openTabs: readonly PanelTabTypeId[];
-  /** Open (create-or-focus) a tab type. Never called for coming-soon teasers. */
+  readonly openTabs: readonly RightPanelTool[];
+  /** Open (create-or-focus) a tab type. */
   onOpen: (id: RightPanelTool) => void;
 }) {
   const rows = shownTabTypes(scope, openTabs);
@@ -81,15 +68,9 @@ export function PanelEmptyState({
                 variant="outline"
                 size="compact"
                 data-testid={`panel-card-${type.id}`}
-                disabled={type.comingSoon}
-                aria-label={type.comingSoon ? `${type.label} (coming soon)` : `Open ${type.label}`}
-                onClick={type.comingSoon ? undefined : () => onOpen(type.id as RightPanelTool)}
-                className={cn(
-                  "h-auto w-full justify-start gap-3 whitespace-normal bg-panel px-3 py-3 text-left transition-colors",
-                  type.comingSoon
-                    ? "cursor-default"
-                    : "hover:border-primary/50 hover:bg-panel/80",
-                )}
+                aria-label={`Open ${type.label}`}
+                onClick={() => onOpen(type.id)}
+                className="h-auto w-full justify-start gap-3 whitespace-normal bg-panel px-3 py-3 text-left transition-colors hover:border-primary/50 hover:bg-panel/80"
               >
                 <span className="grid size-9 flex-none place-items-center rounded-md bg-hover/40 text-muted">
                   <Icon size={18} />
@@ -98,7 +79,7 @@ export function PanelEmptyState({
                   <span className="block text-sm font-medium text-ink">{type.label}</span>
                   <span className="block text-fade text-xs text-muted">{type.blurb}</span>
                 </span>
-                {type.comingSoon ? <SoonBadge /> : keycap && <Kbd>{keycap}</Kbd>}
+                {keycap && <Kbd>{keycap}</Kbd>}
               </Button>
             );
           })}

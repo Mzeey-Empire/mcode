@@ -11,6 +11,7 @@ import { isMac } from "@/lib/platform";
 import { resolveDefaultOpenInApp, FILE_EXPLORER_ID } from "@/lib/resolveDefaultOpenInApp";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { FOCUS_RING_CLASS } from "@/components/ui/focus-ring";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -92,14 +93,14 @@ export function OpenInAppButton({ dirPath, threadId, threadOverride }: OpenInApp
 
   return (
     <div className="relative inline-flex">
-      <div className="inline-flex rounded">
+      <div className="inline-flex h-control-compact items-center rounded-2xl bg-selected">
         <Tooltip>
           <TooltipTrigger
             render={
               <Button
                 variant="ghost"
                 size="icon-compact"
-                className="text-ink/70 hover:text-ink hover:bg-hover/40 rounded-r-none"
+                className="w-[38px] rounded-l-2xl rounded-r-none"
                 onClick={openDefault}
                 disabled={disabled}
                 aria-label={`Open in ${resolvedLabel}`}
@@ -118,13 +119,14 @@ export function OpenInAppButton({ dirPath, threadId, threadOverride }: OpenInApp
             aria-label="Choose app to open in"
             disabled={disabled}
             className={cn(
-              "inline-flex h-8 items-center px-1.5 text-xs border-l border-border/20 rounded-r transition-colors outline-none",
-              "text-ink/70 hover:text-ink hover:bg-hover/40 focus-visible:ring-1 focus-visible:ring-focus",
+              "inline-flex h-8 w-[26px] items-center rounded-r-2xl pr-1 text-muted transition-colors",
+              "hover:bg-hover hover:text-ink aria-expanded:bg-hover aria-expanded:text-ink",
+              FOCUS_RING_CLASS,
               "disabled:opacity-50 disabled:pointer-events-none",
             )}
           >
             <ChevronDown
-              size={12}
+              size={16}
               className={cn("transition-transform duration-150", menuOpen && "rotate-180")}
             />
           </DropdownMenuTrigger>

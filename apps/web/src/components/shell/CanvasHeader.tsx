@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { Notice } from "@/components/ui/notice";
-import { cn } from "@/lib/utils";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useShellChrome } from "./shell-chrome-context";
@@ -30,13 +29,13 @@ export function CollapsedSidebarControls() {
  * Top row of the main canvas. Empty space drags the window, and the right edge
  * leaves room for the native caption buttons on Windows and Linux.
  */
-export function CanvasHeader({ children, className }: { readonly children?: ReactNode; readonly className?: string }) {
+export function CanvasHeader({ children }: { readonly children?: ReactNode }) {
   const { sidebarDocked } = useShellChrome();
   return (
     <>
       <header
         data-canvas-header=""
-        className={cn("window-drag flex h-row-comfortable shrink-0 items-center gap-4 pl-4 select-none", className)}
+        className="window-drag flex h-row-comfortable shrink-0 items-center gap-4 pl-4 select-none"
       >
         {sidebarDocked ? null : <CollapsedSidebarControls />}
         {children}

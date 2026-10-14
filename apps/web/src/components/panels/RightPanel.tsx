@@ -88,6 +88,7 @@ export function reconcileWarmPreviewScopes(
 import { SubagentDetailTab, SubagentsPanel, useSubagentRoster } from "@/features/subagents";
 import { ProjectEnvironmentPanel } from "@/features/projects/environment";
 import { TerminalTool } from "./TerminalTool";
+import { FilesTool } from "@/features/files/FilesTool";
 
 const EMPTY_SCOPE_TERMINALS: readonly TerminalInstance[] = [];
 
@@ -664,6 +665,9 @@ function RightPanelContent({
           threadId={activeThreadId}
           workspaceId={activeWorkspaceId}
         />
+        {renderedActiveTab === "files" && renderedOpenTabs.includes("files") && panelScopeId ? (
+          <FilesTool key={panelScopeId} workspaceId={activeWorkspaceId} threadId={activeThreadId} scopeId={panelScopeId} />
+        ) : null}
         <PanelHeaderSlotScope active={changesActive} elements={headerElements}>
           <ChangesPanelContent active={changesActive} />
         </PanelHeaderSlotScope>
@@ -975,9 +979,10 @@ export function RightPanel() {
   const [activityRailExpanded, setActivityRailExpanded] = useState(false);
   const [headerLeading, setHeaderLeading] = useState<HTMLDivElement | null>(null);
   const [headerRow2, setHeaderRow2] = useState<HTMLDivElement | null>(null);
+  const [headerRow3, setHeaderRow3] = useState<HTMLDivElement | null>(null);
   const headerElements = useMemo<PanelHeaderElements>(
-    () => ({ leading: headerLeading, row2: headerRow2 }),
-    [headerLeading, headerRow2],
+    () => ({ leading: headerLeading, row2: headerRow2, row3: headerRow3 }),
+    [headerLeading, headerRow2, headerRow3],
   );
 
   useEffect(() => () => {
@@ -1192,6 +1197,7 @@ export function RightPanel() {
               maximized={maximized}
               leadingRef={setHeaderLeading}
               row2Ref={setHeaderRow2}
+              row3Ref={setHeaderRow3}
               onToggleMaximized={toggleMaximized}
               panelToggle={panelToggle.row1}
             />

@@ -21,7 +21,7 @@ import { ToolSummaryLine } from "@/features/conversation/narrative/ToolSummaryLi
 import type { ToolCall, ToolCallRecord } from "@/transport/types";
 import { BrowserToolbar } from "../BrowserToolbar";
 import type { BrowserControl, BrowserTools } from "../browserToolbarModel";
-import { BrowserViewportToolbar } from "../BrowserViewportToolbar";
+import { BrowserDeviceRow } from "../BrowserDeviceRow";
 import { ThreadOverview } from "@/components/chat/ThreadOverview";
 import type { Thread } from "@/transport";
 import {
@@ -728,7 +728,7 @@ describe("visible Browser conformance observer", () => {
       apply,
     });
     const { rerender } = render(
-      <BrowserViewportToolbar
+      <BrowserDeviceRow
         coordinator={coordinator}
         state={coordinator.snapshot()}
         onClose={vi.fn()}
@@ -742,7 +742,7 @@ describe("visible Browser conformance observer", () => {
       expect.objectContaining({ requested: { width: 393, height: 852 } }),
     ));
     rerender(
-      <BrowserViewportToolbar
+      <BrowserDeviceRow
         coordinator={coordinator}
         state={coordinator.snapshot()}
         onClose={vi.fn()}
@@ -757,7 +757,7 @@ describe("visible Browser conformance observer", () => {
       expect.objectContaining({ requested: { width: 852, height: 393 } }),
     ));
     rerender(
-      <BrowserViewportToolbar
+      <BrowserDeviceRow
         coordinator={coordinator}
         state={coordinator.snapshot()}
         onClose={vi.fn()}

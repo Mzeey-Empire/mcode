@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
   ViewportCoordinator,
   type ViewportHostOperation,
 } from "../../automation/services/viewportCoordinator";
+import { useViewportDragStore } from "../../state/viewportDragStore";
 import { BrowserViewportCanvas } from "../BrowserViewportCanvas";
 
 function setup() {
@@ -22,7 +23,7 @@ function setup() {
 }
 
 describe("BrowserViewportCanvas", () => {
-  it("exposes every edge and corner as a keyboard resize zone", async () => {
+  it("exposes the right and bottom edges as keyboard resize zones and no others", async () => {
     const user = userEvent.setup();
     const { apply, coordinator } = setup();
     render(
@@ -36,16 +37,11 @@ describe("BrowserViewportCanvas", () => {
       </BrowserViewportCanvas>,
     );
 
-    for (const position of [
-      "top",
-      "right",
-      "bottom",
-      "left",
-      "top-left",
-      "top-right",
-      "bottom-right",
-      "bottom-left",
-    ]) {
+    expect(screen.getAllByRole("separator").map((handle) => handle.getAttribute("aria-label"))).toEqual([
+      "Resize viewport from right",
+      "Resize viewport from bottom",
+    ]);
+    for (const position of ["right", "bottom"]) {
       expect(screen.getByRole("separator", { name: `Resize viewport from ${position}` })).toHaveClass(
         "pointer-events-auto",
       );
@@ -56,15 +52,9 @@ describe("BrowserViewportCanvas", () => {
     await user.keyboard("{ArrowRight}");
     await user.click(screen.getByRole("separator", { name: "Resize viewport from bottom" }));
     await user.keyboard("{ArrowDown}");
-    await user.click(screen.getByRole("separator", { name: "Resize viewport from bottom-right" }));
-    await user.keyboard("{ArrowRight}");
-    await user.keyboard("{ArrowDown}");
-    await user.click(screen.getByRole("separator", { name: "Resize viewport from top-left" }));
-    await user.keyboard("{ArrowLeft}");
-    await user.keyboard("{ArrowUp}");
 
     await waitFor(() => expect(apply).toHaveBeenLastCalledWith(expect.objectContaining({
-      requested: { width: 848, height: 648 },
+      requested: { width: 816, height: 616 },
     })));
   });
 
@@ -85,14 +75,52 @@ describe("BrowserViewportCanvas", () => {
     Object.defineProperty(handle, "hasPointerCapture", { value: vi.fn(() => true) });
     Object.defineProperty(handle, "releasePointerCapture", { value: vi.fn() });
 
-    handle.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, clientX: 10, clientY: 10 }));
-    handle.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 1, clientX: 60, clientY: 10 }));
-    handle.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 1, clientX: 110, clientY: 10 }));
-    handle.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, clientX: 110, clientY: 10 }));
+    const frame = screen.getByTestId("responsive-viewport-canvas");
+    expect(useViewportDragStore.getState().edge).toBeNull();
 
+    act(() => {
+      handle.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, clientX: 10, clientY: 10 }));
+    });
+    expect(useViewportDragStore.getState().edge).toBe("right");
+    expect(handle.firstElementChild).toHaveClass("bg-primary");
+    expect(frame).toHaveClass("ring-primary");
+    act(() => {
+      handle.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 1, clientX: 60, clientY: 10 }));
+      handle.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 1, clientX: 110, clientY: 10 }));
+      handle.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, clientX: 110, clientY: 10 }));
+    });
+
+    expect(useViewportDragStore.getState().edge).toBeNull();
+    expect(handle.firstElementChild).not.toHaveClass("bg-primary");
     expect(apply).toHaveBeenLastCalledWith(expect.objectContaining({
       requested: { width: 1_000, height: 600 },
     }));
     expect(apply.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it("clears the dragged edge when the canvas unmounts mid-drag", () => {
+    const { coordinator } = setup();
+    const { unmount } = render(
+      <BrowserViewportCanvas
+        coordinator={coordinator}
+        state={coordinator.snapshot()}
+        bounds={{ width: 1_000, height: 800 }}
+        scale={1}
+      >
+        <div />
+      </BrowserViewportCanvas>,
+    );
+    const handle = screen.getByRole("separator", { name: "Resize viewport from bottom" });
+    Object.defineProperty(handle, "setPointerCapture", { value: vi.fn() });
+    Object.defineProperty(handle, "hasPointerCapture", { value: vi.fn(() => true) });
+    Object.defineProperty(handle, "releasePointerCapture", { value: vi.fn() });
+    act(() => {
+      handle.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, clientX: 10, clientY: 10 }));
+    });
+    expect(useViewportDragStore.getState().edge).toBe("bottom");
+
+    unmount();
+
+    expect(useViewportDragStore.getState().edge).toBeNull();
   });
 });

@@ -3,7 +3,6 @@
  */
 import { useCallback, useEffect, useEffectEvent } from "react";
 import type { PreviewAnnotationVisualProposal } from "@mcode/contracts";
-import { usePreviewDesignModeStore } from "../state/previewDesignModeStore";
 import { usePreviewAnnotationStore } from "../state/previewAnnotationStore";
 import type { useDesignAnnotationEditor } from "./useDesignAnnotationEditor";
 import type { useDesignAnnotationState } from "./useDesignAnnotationState";
@@ -40,8 +39,9 @@ interface DesignPickerOptions {
   readonly bubbleRef: ReturnType<typeof useDesignAnnotationState>["bubbleRef"];
   readonly bubbleSlashOpen: ReturnType<typeof useDesignAnnotationState>["bubbleSlashOpen"];
   readonly bubbleFileOpen: ReturnType<typeof useDesignAnnotationState>["bubbleFileOpen"];
-  readonly designModeSetActive: ReturnType<typeof useDesignAnnotationState>["designModeSetActive"];
-  readonly designModeToggle: ReturnType<typeof useDesignAnnotationState>["designModeToggle"];
+  readonly designPickerPhase: ReturnType<typeof useDesignAnnotationState>["designPickerPhase"];
+  readonly designPickerArmId: ReturnType<typeof useDesignAnnotationState>["designPickerArmId"];
+  readonly designPickerDispatch: ReturnType<typeof useDesignAnnotationState>["designPickerDispatch"];
   readonly capture: ReturnType<typeof usePreviewPage>["capture"];
 }
 
@@ -68,8 +68,9 @@ export function useDesignPicker({
   bubbleRef,
   bubbleSlashOpen,
   bubbleFileOpen,
-  designModeSetActive,
-  designModeToggle,
+  designPickerPhase,
+  designPickerArmId,
+  designPickerDispatch,
   capture,
 }: DesignPickerOptions) {
   useEffect(() => {
@@ -204,7 +205,6 @@ export function useDesignPicker({
       document.removeEventListener("pointerdown", onPointerDown, true);
   }, [bubbleRef, openBubbleBase, requestOutsideBubbleDiscard]);
 
-  const clearTransientAnnotationState = closeOpenAnnotationBubble;
 
   const handleDesignEscape = useCallback((): void => {
     // When an inline autocomplete popup is open inside the bubble (slash
@@ -225,62 +225,46 @@ export function useDesignPicker({
       return;
     }
     closeOpenAnnotationBubble();
-    designModeSetActive(threadId, false);
-    void window.desktopBridge?.preview?.cancelCapture();
+    designPickerDispatch(threadId, { type: "escape" });
   }, [
     bubbleSlashOpen,
     bubbleFileOpen,
     closeOpenAnnotationBubble,
-    designModeSetActive,
+    designPickerDispatch,
     dismissBubbleSlash,
     dismissBubbleFile,
     hasOpenBubble,
     threadId,
   ]);
 
-  // Design mode is a single state: "next click on the page captures the
-  // element under the cursor, repeat until you turn the mode off." Toggling it
-  // off cancels any in-flight capture so the picker never sticks.
   const onToggleDesignMode = () => {
-    const willActivate = !designModeActive;
-    designModeToggle(threadId);
-    if (!willActivate) {
-      clearTransientAnnotationState();
-      void window.desktopBridge?.preview?.cancelCapture();
-    }
+    if (designModeActive) closeOpenAnnotationBubble();
+    designPickerDispatch(threadId, { type: "toggle" });
   };
 
-  // `capture` is a new object on every render, and starting a pick flips its
-  // busy flag. Depending on it re-armed the pick on that render, and each new
-  // request makes the desktop host abort the pending pick and reinject the
-  // guest overlay, so the hover highlight never appeared.
+  useEffect(() => {
+    designPickerDispatch(threadId, { type: hasOpenBubble ? "edit" : "bubbleClosed" });
+  }, [designPickerDispatch, hasOpenBubble, threadId]);
+
   const requestElementPick = useEffectEvent(() => capture.onAddElementAnnotation());
 
   useEffect(() => {
-    if (!designModeActive || hasOpenBubble) return;
-    let cancelled = false;
-    const pickNext = async (): Promise<void> => {
-      if (!usePreviewDesignModeStore.getState().isActive(threadId)) return;
-      const result = await requestElementPick();
-      if (cancelled) return;
-      if (!result.ok) {
-        // Cancel / error / Esc-in-guest: exit the mode entirely so the
-        // user has a single, consistent way to escape a sticky picker.
-        clearTransientAnnotationState();
-        designModeSetActive(threadId, false);
-      }
-    };
-    void pickNext();
+    if (designPickerPhase !== "picking" || hasOpenBubble) return;
+    let settled = false;
+    let superseded = false;
+    void requestElementPick().then((result) => {
+      settled = true;
+      if (superseded) return;
+      designPickerDispatch(threadId, {
+        type: result.ok ? "picked" : "pickFailed",
+        armId: designPickerArmId,
+      });
+    });
     return () => {
-      cancelled = true;
+      superseded = true;
+      if (!settled) void window.desktopBridge?.preview?.cancelCapture();
     };
-  }, [
-    designModeActive,
-    hasOpenBubble,
-    threadId,
-    clearTransientAnnotationState,
-    designModeSetActive,
-  ]);
+  }, [designPickerArmId, designPickerDispatch, designPickerPhase, hasOpenBubble, threadId]);
 
   // Esc must exit design mode no matter where focus is. The global
   // escape.handle binding (default-keybindings.json) closes the current
@@ -313,7 +297,6 @@ export function useDesignPicker({
   }, [designModeActive, handleDesignEscape, threadId]);
 
   return {
-    clearTransientAnnotationState,
     onToggleDesignMode,
     updateBubbleVisualControl,
     updateColorFormat,

@@ -394,7 +394,7 @@ describe("Composer checkout confirmation", () => {
       editingThreadId: null,
     });
     usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
-    usePreviewDesignModeStore.setState({ modes: {} });
+    usePreviewDesignModeStore.setState({ pickers: {} });
     useToastStore.setState({ toasts: [] });
     useWorkspaceStore.setState({
       workspaces: [],
@@ -1000,7 +1000,7 @@ describe("Composer checkout confirmation", () => {
     });
     expect(usePreviewAnnotationStore.getState().byThread[thread.id] ?? []).toEqual([]);
     await waitFor(() => expect(useComposerDraftStore.getState().drafts[thread.id]).toBeUndefined());
-    expect(usePreviewDesignModeStore.getState().modes[thread.id]).toBe(false);
+    expect(usePreviewDesignModeStore.getState().isActive(thread.id)).toBe(false);
   });
 
   it("hides submitted comments while dispatch is pending and keeps them in the draft", async () => {
@@ -1065,7 +1065,7 @@ describe("Composer checkout confirmation", () => {
       elements: [{ field: "diffComments", id: makeDraftDiffComment().id, revision: 1 }],
       stagingIds: [],
     }]);
-    expect(usePreviewDesignModeStore.getState().modes[thread.id]).toBe(false);
+    expect(usePreviewDesignModeStore.getState().isActive(thread.id)).toBe(false);
   });
 
   it("says a draft was not saved while storage is full and keeps the composer working", async () => {
@@ -1179,7 +1179,7 @@ describe("Composer checkout confirmation", () => {
     });
     expect(usePreviewAnnotationStore.getState().byThread["ws-1"] ?? []).toEqual([]);
     await waitFor(() => expect(useComposerDraftStore.getState().drafts["ws-1"]).toBeUndefined());
-    expect(usePreviewDesignModeStore.getState().modes["ws-1"]).toBe(false);
+    expect(usePreviewDesignModeStore.getState().isActive("ws-1")).toBe(false);
   });
 
   it("keeps annotations on a handoff queued send when the handoff becomes ready", async () => {
@@ -1249,7 +1249,7 @@ describe("Composer checkout confirmation", () => {
     expect(screen.queryByTestId("composer-annotation-bundle")).not.toBeInTheDocument();
     expect(screen.getByTestId("attachment-preview")).toBeEmptyDOMElement();
     expect(usePreviewAnnotationStore.getState().byThread[thread.id] ?? []).toEqual([]);
-    expect(usePreviewDesignModeStore.getState().modes[thread.id]).toBe(false);
+    expect(usePreviewDesignModeStore.getState().isActive(thread.id)).toBe(false);
     const sendCommand = (mockTransport.sendMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
     expect(sendCommand?.attachments).toEqual([
       expect.objectContaining({
@@ -1513,7 +1513,7 @@ describe("Composer checkout confirmation", () => {
         note: "Make the content flush with the page edge.",
       },
     ]);
-    expect(usePreviewDesignModeStore.getState().modes[thread.id]).toBe(true);
+    expect(usePreviewDesignModeStore.getState().isActive(thread.id)).toBe(true);
   });
 
   it("keeps rendered stop control through stale A terminal and B text", async () => {

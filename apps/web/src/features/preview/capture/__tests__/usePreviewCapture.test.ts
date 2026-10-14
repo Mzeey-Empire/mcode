@@ -486,6 +486,29 @@ describe("usePreviewCapture", () => {
       });
     });
 
+    it("sends one pick request per call even while the busy flags re-render", async () => {
+      const pick = deferred<unknown>();
+      mockPreview.capturePictureReferenceElementPick.mockReturnValue(pick.promise);
+
+      const { result } = renderHook(() => usePreviewCapture(defaultOptions()));
+      let outcome!: Promise<{ ok: boolean }>;
+      act(() => {
+        outcome = result.current.onAddElementAnnotation();
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(result.current.elementPickBusy).toBe(true);
+      expect(mockPreview.capturePictureReferenceElementPick).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        pick.resolve({ ok: false, error: "cancelled" });
+        await outcome;
+      });
+      expect(mockPreview.capturePictureReferenceElementPick).toHaveBeenCalledTimes(1);
+    });
+
     it("rejects v1 captures so annotation drafts retain v2 context only", async () => {
       const onSuccess = vi.fn();
       mockPreview.capturePictureReferenceElementPick.mockResolvedValue(

@@ -4,6 +4,7 @@ import { initShortcuts, loadKeybindings } from "@/lib/shortcuts";
 import { registerCommand, clearCommands } from "@/lib/command-registry";
 import { clearKeybindings } from "@/lib/keybinding-manager";
 import { resetContext } from "@/lib/context-tracker";
+import defaultKeybindings from "@/config/default-keybindings.json";
 
 function createKeyEvent(overrides: Partial<KeyboardEvent> = {}): KeyboardEvent {
   const event = new KeyboardEvent("keydown", {
@@ -102,6 +103,24 @@ describe("terminal.toggle keybinding (regression #304)", () => {
     expect(terminalToggle).toBeDefined();
     expect(terminalToggle!.key).toBe("mod+j");
     expect(terminalToggle!.when).toBeUndefined();
+  });
+
+  it("runs files.goToFile, not a palette command, for mod+p under the default bindings", () => {
+    const goToFile = vi.fn();
+    const paletteOpen = vi.fn();
+    registerCommand({ id: "files.goToFile", title: "Go to File", category: "Navigation", handler: goToFile });
+    registerCommand({ id: "palette.open", title: "Open Command Palette", category: "Navigation", handler: paletteOpen });
+    loadKeybindings(defaultKeybindings);
+    cleanup = initShortcuts();
+
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    document.dispatchEvent(createKeyEvent({ key: "p", ctrlKey: true }));
+    input.remove();
+
+    expect(goToFile).toHaveBeenCalledTimes(1);
+    expect(paletteOpen).not.toHaveBeenCalled();
   });
 
   it("fires terminal.toggle even when a text input is focused", () => {

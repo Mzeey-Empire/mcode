@@ -16,14 +16,12 @@ import {
   annotationProposedChanges,
   canSaveAnnotation,
   annotationFocusKey,
-  annotationPageLabel,
 } from "./annotationBubble";
 
 interface DesignAnnotationEditorOptions {
   readonly webviewPageStatus: ReturnType<typeof usePreviewPage>["webviewPageStatus"];
   readonly webviewInputUrl: ReturnType<typeof usePreviewPage>["webviewInputUrl"];
   readonly threadId: string;
-  readonly annotationSignal: ReturnType<typeof useDesignAnnotationState>["annotationSignal"];
   readonly editingAnnotationId: ReturnType<typeof useDesignAnnotationState>["editingAnnotationId"];
   readonly draftAnnotation: ReturnType<typeof useDesignAnnotationState>["draftAnnotation"];
   readonly selectBubbleFileSuggestion: ReturnType<typeof useDesignAnnotationState>["selectBubbleFileSuggestion"];
@@ -40,7 +38,6 @@ export function useDesignAnnotationEditor({
   webviewPageStatus,
   webviewInputUrl,
   threadId,
-  annotationSignal,
   editingAnnotationId,
   draftAnnotation,
   selectBubbleFileSuggestion,
@@ -64,7 +61,6 @@ export function useDesignAnnotationEditor({
       ),
     [savedAnnotations, currentPageIdentity],
   );
-  const bundleCount = annotationSignal;
   const editingSavedAnnotation = savedAnnotationById(
     pageAnnotations,
     editingAnnotationId,
@@ -140,10 +136,6 @@ export function useDesignAnnotationEditor({
     draftAnnotation,
     editingAnnotationId,
   );
-  const annotationHeaderPageLabel = annotationPageLabel(
-    currentPageIdentity,
-    webviewInputUrl,
-  );
 
   return {
     openBubbleFocusKey,
@@ -161,9 +153,6 @@ export function useDesignAnnotationEditor({
     editingSavedAnnotation,
     setBubbleNote,
     bubbleFilePopup,
-    bundleCount,
-    annotationHeaderPageLabel,
-    currentPageIdentity,
     bubbleAdvancedOpen,
     handleBubbleMentionSelect,
   };

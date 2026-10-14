@@ -1,10 +1,11 @@
 /**
  * Owns annotation markers, the note bubble, visual inspector and autocomplete rendering. Picker state and effects are supplied explicitly from the parent hooks.
  */
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Check, GripVertical, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Fragment, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { ArrowUp, GripVertical, SlidersHorizontal, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePreviewAnnotationStore } from "../state/previewAnnotationStore";
+import type { PreviewPageScroll } from "../state/previewPageScrollStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -30,6 +31,7 @@ import {
 } from "./visualProposalModel";
 import {
   annotationSnapshotRequest,
+  boundsAtScroll,
   visibleAnnotationState,
   BUBBLE_SURFACE_INSET,
   annotationBubbleClassName,
@@ -76,6 +78,8 @@ interface DesignLayerProps {
   readonly bubbleInputFocused: ReturnType<typeof useDesignAnnotationState>["bubbleInputFocused"];
   readonly bubbleAdvancedOpen: ReturnType<typeof useDesignAnnotationEditor>["bubbleAdvancedOpen"];
   readonly surfaceWidth: number;
+  readonly surfaceHeight: number;
+  readonly pageScroll: PreviewPageScroll;
   readonly onBubbleSlashInputChange: ReturnType<typeof useDesignAnnotationState>["onBubbleSlashInputChange"];
   readonly onBubbleFileInputChange: ReturnType<typeof useDesignAnnotationState>["onBubbleFileInputChange"];
   readonly setBubbleInputFocused: ReturnType<typeof useDesignAnnotationState>["setBubbleInputFocused"];
@@ -96,7 +100,11 @@ interface DesignLayerProps {
   readonly filePopupAnchorRect: ReturnType<typeof useDesignAnnotationState>["filePopupAnchorRect"];
 }
 
-/** Renders the existing annotation markers and editor without adding a DOM wrapper. */
+const SAVED_OUTLINE_SHADOW = "0 0 0 2px color-mix(in srgb, var(--color-primary) 55%, transparent)";
+
+const MARKER_RADIUS_PX = 10;
+
+/** Renders the saved-note outlines and numbered markers, the open note bubble and its editor without adding a DOM wrapper. */
 export function DesignLayer({
   openBubbleBase,
   bubbleVisuals,
@@ -126,6 +134,8 @@ export function DesignLayer({
   bubbleInputFocused,
   bubbleAdvancedOpen,
   surfaceWidth,
+  surfaceHeight,
+  pageScroll,
   onBubbleSlashInputChange,
   onBubbleFileInputChange,
   setBubbleInputFocused,
@@ -245,79 +255,83 @@ export function DesignLayer({
     pageAnnotations,
     bubbleVisuals,
   );
+  const openBubble = visibleOpenBubbleBase && {
+    ...visibleOpenBubbleBase,
+    bounds: boundsAtScroll(
+      visibleOpenBubbleBase.bounds,
+      visibleOpenBubbleBase.pageContext.viewportScroll,
+      pageScroll,
+    ),
+  };
 
   return (
     <>
-        {visiblePageAnnotations.map((annotation) => {
+        {visiblePageAnnotations.map((annotation, index) => {
+          const bounds = boundsAtScroll(
+            annotation.targetContext.bounds,
+            annotation.pageContext.viewportScroll,
+            pageScroll,
+          );
           const targetLabel =
             annotation.targetContext.label?.trim() ||
             annotation.targetContext.selectorHint?.trim() ||
             "Element";
           const note = annotation.note?.trim() || "Visual annotation";
           return (
-            <Tooltip key={annotation.id}>
-              <TooltipTrigger
-                render={
-                  <Button
-                    type="button"
-                    data-testid="preview-annotation-marker"
-                    variant="ghost"
-                    size="icon-compact"
-                    className="pointer-events-auto group/marker absolute z-(--layer-dropdown) flex size-8 items-center justify-center rounded-full bg-transparent p-0 hover:bg-transparent focus-visible:bg-transparent"
-                    style={{
-                      left: Math.max(
-                        16,
-                        annotation.targetContext.bounds.x +
-                          annotation.targetContext.bounds.width / 2,
-                      ),
-                      top: Math.max(
-                        16,
-                        annotation.targetContext.bounds.y +
-                          Math.min(annotation.targetContext.bounds.height / 2, 18),
-                      ),
-                      transform: "translate(-50%, -50%)",
-                    }}
-                    onClick={() => {
-                      setEditingAnnotationId(annotation.id);
-                    }}
-                    aria-label={`Edit annotation ${annotation.displayNumber}`}
-                  >
-                    <span
-                      className="relative flex size-7 items-center justify-center rounded-full bg-primary/80 text-primary-ink/90 shadow-floating ring-1 ring-background/80 transition-transform duration-150 group-hover/marker:scale-105 group-focus-visible/marker:scale-105"
-                      aria-hidden
-                    >
-                      <span className="absolute -bottom-0.5 left-1.5 size-2 rotate-45 rounded-sm bg-primary/80" />
-                      <span className="relative z-(--layer-sticky) text-xs font-semibold tabular-nums">
-                        {annotation.displayNumber}
-                      </span>
-                    </span>
-                  </Button>
-                }
+            <Fragment key={annotation.id}>
+              <div
+                aria-hidden
+                data-testid="preview-annotation-outline"
+                className="pointer-events-none absolute z-(--layer-sticky) rounded-sm"
+                style={{
+                  left: bounds.x,
+                  top: bounds.y,
+                  width: bounds.width,
+                  height: bounds.height,
+                  boxShadow: SAVED_OUTLINE_SHADOW,
+                }}
               />
-              <TooltipContent
-                side="top"
-                sideOffset={8}
-                className="max-w-72 flex-col items-start gap-1.5 rounded-lg border border-border px-3 py-2 text-ink shadow-floating"
-                style={
-                  {
-                    backgroundColor: BUBBLE_SURFACE_INSET,
-                    // Arrow color is set via CSS variable on this element
-                    "--tooltip-arrow-bg": BUBBLE_SURFACE_INSET,
-                  } as React.CSSProperties
-                }
-                arrowClassName="fill-panel stroke-border"
-              >
-                <span className="rounded bg-hover px-1.5 py-0.5 font-mono text-xs text-muted">
-                  {targetLabel}
-                </span>
-                <span className="whitespace-pre-wrap text-xs leading-snug">
-                  {note}
-                </span>
-              </TooltipContent>
-            </Tooltip>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      data-testid="preview-annotation-marker"
+                      className="pointer-events-auto absolute z-(--layer-dropdown) flex size-5 items-center justify-center rounded-full bg-primary text-caption font-bold tabular-nums text-primary-ink shadow-floating"
+                      style={{ left: bounds.x - MARKER_RADIUS_PX, top: bounds.y - MARKER_RADIUS_PX }}
+                      onClick={() => {
+                        setEditingAnnotationId(annotation.id);
+                      }}
+                      aria-label={`Edit annotation ${index + 1}`}
+                    >
+                      {index + 1}
+                    </button>
+                  }
+                />
+                <TooltipContent
+                  side="top"
+                  sideOffset={8}
+                  className="max-w-72 flex-col items-start gap-1.5 rounded-lg border border-border px-3 py-2 text-ink shadow-floating"
+                  style={
+                    {
+                      backgroundColor: BUBBLE_SURFACE_INSET,
+                      "--tooltip-arrow-bg": BUBBLE_SURFACE_INSET,
+                    } as React.CSSProperties
+                  }
+                  arrowClassName="fill-panel stroke-border"
+                >
+                  <span className="rounded bg-hover px-1.5 py-0.5 font-mono text-xs text-muted">
+                    {targetLabel}
+                  </span>
+                  <span className="whitespace-pre-wrap text-xs leading-snug">
+                    {note}
+                  </span>
+                </TooltipContent>
+              </Tooltip>
+            </Fragment>
           );
         })}
-        <RenderValue value={visibleOpenBubbleBase}>
+        <RenderValue value={openBubble}>
           {(annotation) => (
             <div
               data-testid="preview-annotation-active-target-highlight"
@@ -331,7 +345,7 @@ export function DesignLayer({
             />
           )}
         </RenderValue>
-        <RenderValue value={visibleOpenBubbleBase}>
+        <RenderValue value={openBubble}>
           {(annotation) => (
             <RenderValue value={openBubbleVisualProposal}>
               {(proposal) => (
@@ -351,7 +365,7 @@ export function DesignLayer({
             </RenderValue>
           )}
         </RenderValue>
-        <RenderValue value={visibleOpenBubbleBase}>
+        <RenderValue value={openBubble}>
           {() => (
             <div
               aria-hidden
@@ -360,8 +374,8 @@ export function DesignLayer({
             />
           )}
         </RenderValue>
-        <RenderValue value={visibleOpenBubbleBase}>
-          {(visibleOpenBubbleBase) => (
+        <RenderValue value={openBubble}>
+          {(openBubble) => (
           <div
             ref={bubbleRef}
             data-testid="preview-annotation-bubble"
@@ -372,29 +386,15 @@ export function DesignLayer({
             )}
             style={{
               ...annotationBubbleStyle(
-                visibleOpenBubbleBase.bounds,
+                openBubble.bounds,
                 surfaceWidth,
+                surfaceHeight,
               ),
               backgroundColor: BUBBLE_SURFACE,
               color: "var(--ink)",
             }}
           >
-            <div className="flex min-h-11 items-center gap-2 px-3 py-1.5">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-compact"
-                className={cn(
-                  "shrink-0 rounded-full text-muted hover:bg-hover hover:text-ink",
-                  bubbleAdvancedOpen && "bg-hover text-ink",
-                )}
-                data-testid="preview-annotation-advanced-toggle"
-                aria-label="Open annotation visual controls"
-                aria-expanded={bubbleAdvancedOpen}
-                onClick={() => setBubbleAdvancedOpen((value) => !value)}
-              >
-                <SlidersHorizontal size={15} aria-hidden />
-              </Button>
+            <div className="flex flex-col gap-2 p-2.5">
               {/* No relative wrapper needed because FileTagPopup now uses fixed
                   positioning via anchorRect, escaping the overflow-hidden bubble. */}
               <Input
@@ -413,23 +413,41 @@ export function DesignLayer({
                 onKeyDown={onBubbleNoteKeyDown}
                 onFocus={() => setBubbleInputFocused(true)}
                 onBlur={() => setBubbleInputFocused(false)}
-                className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 text-sm text-ink shadow-none outline-none placeholder:text-muted focus-visible:outline-0 focus-visible:ring-0"
+                className="h-5 min-w-0 border-0 bg-transparent p-0 text-body-small text-ink shadow-none outline-none placeholder:text-muted focus-visible:outline-0 focus-visible:ring-0"
                 maxLength={4000}
                 placeholder="Comment · / for skills · @ to mention"
                 aria-label="Annotation note"
               />
-              {canSaveOpenBubble ? (
+              <div className="flex items-center gap-1">
+                <span className="min-w-0 flex-1 text-xs leading-4 text-muted">Enter to save</span>
                 <Button
                   type="button"
-                  data-testid="preview-annotation-save"
+                  variant="ghost"
                   size="icon-compact"
-                  className="size-8 shrink-0 rounded-full bg-ink text-background hover:bg-ink/90"
-                  aria-label="Save annotation"
-                  onClick={() => void saveOpenBubble()}
+                  className={cn(
+                    "shrink-0 rounded-full text-muted hover:bg-hover hover:text-ink",
+                    bubbleAdvancedOpen && "bg-hover text-ink",
+                  )}
+                  data-testid="preview-annotation-advanced-toggle"
+                  aria-label="Open annotation visual controls"
+                  aria-expanded={bubbleAdvancedOpen}
+                  onClick={() => setBubbleAdvancedOpen((value) => !value)}
                 >
-                  <Check size={16} aria-hidden />
+                  <SlidersHorizontal size={15} aria-hidden />
                 </Button>
-              ) : null}
+                {canSaveOpenBubble ? (
+                  <Button
+                    type="button"
+                    data-testid="preview-annotation-save"
+                    size="icon-compact"
+                    className="size-7 shrink-0 rounded-full bg-ink text-background hover:bg-ink/90"
+                    aria-label="Save annotation"
+                    onClick={() => void saveOpenBubble()}
+                  >
+                    <ArrowUp size={14} aria-hidden />
+                  </Button>
+                ) : null}
+              </div>
             </div>
             {bubbleAdvancedOpen ? (
               <div
@@ -441,7 +459,7 @@ export function DesignLayer({
                   className="flex items-center justify-between border-b border-border bg-hover px-4 py-1.5 text-xs text-ink"
                 >
                   <span className="max-w-[15rem] text-fade font-semibold leading-5">
-                    {annotationBubbleTargetLabel(visibleOpenBubbleBase)}
+                    {annotationBubbleTargetLabel(openBubble)}
                   </span>
                   <GripVertical
                     size={14}

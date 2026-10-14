@@ -46,12 +46,8 @@ const EP_INJECT_JS = `(function(){
   var HL_ID = "__mcode_ep_hl", TIP_ID = "__mcode_ep_tip";
   var style = document.createElement("style");
   style.setAttribute("data-mcode-ep", "1");
-  // Highlight + tip use the app's warm-amber primary (oklch(0.72 0.17 75)) so
-  // the in-guest selection reads as part of Mcode, not a stock browser-devtools
-  // cyan. Inlined as a literal because injected JS cannot read host CSS vars.
-  // The tip's foreground sits at oklch(0.18 0.01 75) - very dark, slight warm
-  // tint - which gives high contrast against the amber pill.
-  style.textContent = "#__mcode_ep_hl{position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;border:2px solid oklch(0.72 0.17 75);box-sizing:border-box;z-index:2147483646;display:none;box-shadow:0 0 0 1px rgba(0,0,0,.35) inset;border-radius:2px}#__mcode_ep_tip{position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647;display:none;max-width:min(360px,calc(100vw - 12px));font:600 11px/1.2 ui-sans-serif,system-ui,sans-serif;color:oklch(0.18 0.01 75);background:oklch(0.72 0.17 75);border-radius:3px 3px 0 0;padding:3px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 1px 4px rgba(0,0,0,.25)}#__mcode_ep_tip[data-flipped=\\"1\\"]{border-radius:0 0 3px 3px}html.__mcode_ep_active,html.__mcode_ep_active *{cursor:${EP_CHAT_CURSOR_CSS} !important}";
+  // Inlined because injected JS cannot read host CSS vars.
+  style.textContent = "#__mcode_ep_hl{position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;box-sizing:border-box;z-index:2147483646;display:none;border-radius:2px;box-shadow:0 0 0 2px #fff,0 0 0 4px oklch(0.72 0.17 75)}#__mcode_ep_tip{position:fixed;left:0;top:0;height:24px;display:none;align-items:center;pointer-events:none;z-index:2147483647;max-width:min(360px,calc(100vw - 12px));box-sizing:border-box;font:500 11px/14px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#14110D;background:oklch(0.72 0.17 75);border-radius:6px;padding:0 8px;white-space:nowrap;overflow:hidden}html.__mcode_ep_active,html.__mcode_ep_active *{cursor:${EP_CHAT_CURSOR_CSS} !important}";
   (document.head || document.documentElement).appendChild(style);
   var box = document.createElement("div");
   box.id = HL_ID;
@@ -126,21 +122,17 @@ const EP_INJECT_JS = `(function(){
     if (cands.length) return cands[cands.length - 1].el;
     return null;
   }
-  function labelFor(el){
-    if (!el || !el.tagName) return "Element";
+  function tipTextFor(el){
     var tag = el.tagName.toLowerCase();
+    var label = "";
     try {
-      if (el.id && String(el.id).trim()) return tag + "#" + String(el.id).trim().slice(0, 48);
-      var tid = el.getAttribute && el.getAttribute("data-testid");
-      if (tid) return tag + "[data-testid=" + String(tid).slice(0, 48) + "]";
       var al = el.getAttribute && el.getAttribute("aria-label");
-      if (al && String(al).trim()) return tag + " " + String(al).trim().slice(0, 48);
-      if (typeof el.className === "string" && el.className.trim()) {
-        var first = el.className.trim().split(/\\s+/)[0];
-        if (first) return tag + "." + first.slice(0, 48);
-      }
+      var text = typeof el.innerText === "string" ? el.innerText.trim().split(/\\n/)[0] : "";
+      var cls = typeof el.className === "string" ? el.className.trim().split(/\\s+/)[0] : "";
+      label = (al && al.trim()) || text || (el.id ? "#" + el.id : "") || cls;
     } catch (e) {}
-    return tag;
+    label = String(label || "").trim().slice(0, 40);
+    return label ? tag + " \u00b7 " + label : tag;
   }
   function paintHighlight(el){
     if (!el) { box.style.display = "none"; tip.style.display = "none"; return; }
@@ -151,26 +143,19 @@ const EP_INJECT_JS = `(function(){
     box.style.top = r.top + "px";
     box.style.width = r.width + "px";
     box.style.height = r.height + "px";
-    // Append an action hint so first-timers understand the model: clicking
-    // the page in design mode attaches the element, it does not navigate.
-    // The Esc-to-exit affordance is already carried by the top-right Design
-    // pill, so we only spell out the positive action here to keep the tip tight.
-    tip.textContent = labelFor(el) + " \u00b7 click to attach";
-    tip.style.display = "block";
-    // Measure after content is set so flip detection uses the real tip height.
+    tip.textContent = tipTextFor(el);
+    tip.style.display = "flex";
     var pad = 4;
+    var ringWidth = 4, clearance = 4;
+    var gap = ringWidth + clearance;
     var vw = window.innerWidth || 1;
-    var th = tip.offsetHeight || 20;
+    var th = tip.offsetHeight || 24;
     var tw = tip.offsetWidth || 80;
-    // Anchor to rect's top-left. Sit flush above the top border (DevTools tab look).
-    // If there is no room above, flip inside the rect with rounded bottom corners.
-    var flipped = r.top - th < pad;
-    var ty = flipped ? r.top : Math.max(pad, r.top - th);
+    var above = r.top - th - gap;
+    var ty = above >= pad ? above : r.bottom + gap;
     var tx = Math.max(pad, Math.min(r.left, vw - tw - pad));
     tip.style.left = Math.round(tx) + "px";
     tip.style.top = Math.round(ty) + "px";
-    if (flipped) tip.setAttribute("data-flipped", "1");
-    else tip.removeAttribute("data-flipped");
   }
 
   var rafPending = 0;

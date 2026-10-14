@@ -12,6 +12,7 @@ export type { BranchComparison };
 export type RightPanelTool =
   | "preview"
   | "terminal"
+  | "files"
   | "changes"
   | "environment"
   | "tasks"
@@ -20,6 +21,7 @@ export type RightPanelTool =
 const RIGHT_PANEL_TOOLS: ReadonlySet<string> = new Set<RightPanelTool>([
   "preview",
   "terminal",
+  "files",
   "changes",
   "environment",
   "tasks",
@@ -229,6 +231,7 @@ export function rightPanelToolInstance(type: RightPanelTool): RightPanelToolInst
   switch (type) {
     case "preview": return { id: "singleton:preview", type };
     case "terminal": return { id: "singleton:terminal", type };
+    case "files": return { id: "singleton:files", type };
     case "changes": return { id: "singleton:changes", type };
     case "environment": return { id: "singleton:environment", type };
     case "tasks": return { id: "singleton:tasks", type };

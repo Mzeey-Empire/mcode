@@ -37,9 +37,10 @@ function useDesignPickerHarness(): void {
     presentationActive: true,
     pushSync,
   });
-  const designModeActive = usePreviewDesignModeStore((s) => s.modes[THREAD_ID] === true);
-  const designModeToggle = usePreviewDesignModeStore((s) => s.toggle);
-  const designModeSetActive = usePreviewDesignModeStore((s) => s.setActive);
+  const designPickerPhase = usePreviewDesignModeStore((s) => s.getPicker(THREAD_ID).phase);
+  const designPickerArmId = usePreviewDesignModeStore((s) => s.getPicker(THREAD_ID).armId);
+  const designPickerDispatch = usePreviewDesignModeStore((s) => s.dispatch);
+  const hasOpenBubble = usePreviewAnnotationStore((s) => Boolean(s.drafts[THREAD_ID]));
   const editor = useAnnotationBubbleEditor(undefined, undefined);
   const [, setEditingAnnotationId] = useState<string | null>(null);
   const [linkedVisualPairs, setLinkedVisualPairs] = useState<
@@ -52,8 +53,8 @@ function useDesignPickerHarness(): void {
   useDesignPicker({
     openBubbleFocusKey: null,
     bubbleNoteInputRef,
-    designModeActive,
-    hasOpenBubble: false,
+    designModeActive: designPickerPhase !== "off",
+    hasOpenBubble,
     threadId: THREAD_ID,
     setEditingAnnotationId,
     setBubbleAdvancedOpen: editor.setBubbleAdvancedOpen,
@@ -71,8 +72,9 @@ function useDesignPickerHarness(): void {
     bubbleRef,
     bubbleSlashOpen: false,
     bubbleFileOpen: false,
-    designModeSetActive,
-    designModeToggle,
+    designPickerPhase,
+    designPickerArmId,
+    designPickerDispatch,
     capture,
   });
 }
@@ -81,7 +83,7 @@ beforeEach(() => {
   window.desktopBridge = {
     preview: mockPreview,
   } as unknown as typeof window.desktopBridge;
-  usePreviewDesignModeStore.setState({ modes: {} });
+  usePreviewDesignModeStore.setState({ pickers: {} });
   usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
 });
 
@@ -89,10 +91,40 @@ afterEach(() => {
   // Unmount first so resetting the stores does not re-render the harness outside act().
   cleanup();
   delete (window as unknown as Record<string, unknown>).desktopBridge;
-  usePreviewDesignModeStore.setState({ modes: {} });
+  usePreviewDesignModeStore.setState({ pickers: {} });
   usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
   vi.clearAllMocks();
 });
+
+const PICKED_ELEMENT = {
+  ok: true as const,
+  meta: { id: "pick-1", name: "pick.png", mimeType: "image/png", sizeBytes: 3, sourcePath: "/tmp/pick.png" },
+  previewBytes: new Uint8Array([1, 2, 3]),
+  capture: {
+    schemaVersion: 2,
+    pageUrl: "https://example.com/products",
+    pageTitle: "Products",
+    capturedAt: "2026-07-01T00:00:00.000Z",
+    captureKind: "element",
+    selectorHint: "button.buy",
+    bounds: { x: 10, y: 20, width: 120, height: 40 },
+  },
+};
+
+async function settle(): Promise<void> {
+  // Let the busy-flag re-renders, their effects and the awaited pushSync settle.
+  for (let i = 0; i < 5; i += 1) {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+}
+
+function pressEscape(): void {
+  act(() => {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  });
+}
 
 describe("useDesignPicker", () => {
   it("arms a single element pick while Design mode waits for the user's click", async () => {
@@ -101,16 +133,73 @@ describe("useDesignPicker", () => {
     usePreviewDesignModeStore.getState().setActive(THREAD_ID, true);
 
     renderHook(() => useDesignPickerHarness());
-    // Let the busy-flag re-renders, their effects and the awaited pushSync settle.
-    for (let i = 0; i < 5; i += 1) {
-      await act(async () => {
-        await Promise.resolve();
-      });
-    }
+    await settle();
 
     // Each extra call makes the desktop host abort the pending pick and
     // reinject the guest overlay, so the hover highlight never appears.
     expect(mockPreview.capturePictureReferenceElementPick).toHaveBeenCalledTimes(1);
     expect(usePreviewDesignModeStore.getState().isActive(THREAD_ID)).toBe(true);
+  });
+
+  it("holds the picker while a note is open and re-arms once after it closes", async () => {
+    mockPreview.capturePictureReferenceElementPick
+      .mockResolvedValueOnce(PICKED_ELEMENT)
+      .mockReturnValue(new Promise(() => {}));
+    usePreviewDesignModeStore.getState().setActive(THREAD_ID, true);
+
+    renderHook(() => useDesignPickerHarness());
+    await settle();
+
+    expect(usePreviewAnnotationStore.getState().drafts[THREAD_ID]).toBeDefined();
+    expect(usePreviewDesignModeStore.getState().getPicker(THREAD_ID).phase).toBe("editing");
+    expect(mockPreview.capturePictureReferenceElementPick).toHaveBeenCalledTimes(1);
+
+    act(() => usePreviewAnnotationStore.getState().setDraft(THREAD_ID, undefined));
+    await settle();
+
+    expect(usePreviewDesignModeStore.getState().getPicker(THREAD_ID).phase).toBe("picking");
+    expect(mockPreview.capturePictureReferenceElementPick).toHaveBeenCalledTimes(2);
+  });
+
+  it("closes the note on the first Esc and leaves Design on the second", async () => {
+    mockPreview.capturePictureReferenceElementPick
+      .mockResolvedValueOnce(PICKED_ELEMENT)
+      .mockReturnValue(new Promise(() => {}));
+    usePreviewDesignModeStore.getState().setActive(THREAD_ID, true);
+    renderHook(() => useDesignPickerHarness());
+    await settle();
+
+    pressEscape();
+    await settle();
+
+    expect(usePreviewAnnotationStore.getState().drafts[THREAD_ID]).toBeUndefined();
+    expect(usePreviewDesignModeStore.getState().isActive(THREAD_ID)).toBe(true);
+    expect(mockPreview.capturePictureReferenceElementPick).toHaveBeenCalledTimes(2);
+
+    pressEscape();
+    await settle();
+
+    expect(usePreviewDesignModeStore.getState().isActive(THREAD_ID)).toBe(false);
+    expect(mockPreview.cancelCapture).toHaveBeenCalled();
+    expect(mockPreview.capturePictureReferenceElementPick).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps Design on when a remount cancels the pending pick", async () => {
+    let resolveFirstPick: (result: { ok: false; error: string }) => void = () => {};
+    mockPreview.capturePictureReferenceElementPick
+      .mockReturnValueOnce(new Promise((resolve) => (resolveFirstPick = resolve)))
+      .mockReturnValue(new Promise(() => {}));
+    usePreviewDesignModeStore.getState().setActive(THREAD_ID, true);
+
+    const first = renderHook(() => useDesignPickerHarness());
+    await settle();
+    first.unmount();
+    resolveFirstPick({ ok: false, error: "cancelled" });
+    await settle();
+    renderHook(() => useDesignPickerHarness());
+    await settle();
+
+    expect(usePreviewDesignModeStore.getState().getPicker(THREAD_ID).phase).toBe("picking");
+    expect(mockPreview.capturePictureReferenceElementPick).toHaveBeenCalledTimes(2);
   });
 });
