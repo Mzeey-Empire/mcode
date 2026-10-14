@@ -97,12 +97,6 @@ vi.mock("@/hooks/useHasCommitsAhead", () => ({
   useHasCommitsAhead: vi.fn().mockReturnValue(null),
 }));
 
-vi.mock("@/stores/composerDraftStore", () => ({
-  useComposerDraftStore: vi.fn((selector: (state: unknown) => unknown) =>
-    selector({ setPendingPrefill: vi.fn() }),
-  ),
-}));
-
 vi.mock("@/features/projects/state/workspaceStore", () => {
   const store = Object.assign(
     vi.fn((selector: (state: unknown) => unknown) => selector(mockWorkspaceState)),

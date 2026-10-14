@@ -4,12 +4,12 @@ import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { GitPullRequest } from "lucide-react";
 import { ThreadOverviewTooltipButton, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 
-function CommitOrPushEntry() {
+function CommitEntry() {
   const { branchlessCreatePr } = useOverviewContext();
 
   return (<ThreadOverviewWhen when={branchlessCreatePr}>
     <ThreadOverviewTooltipButton
-      content="Create a branch before committing or pushing"
+      content="Create a branch before committing"
       disabled
     >
       <Button
@@ -21,13 +21,13 @@ function CommitOrPushEntry() {
         className="h-8 w-full justify-start gap-2 px-2 text-left text-xs text-ink/75 disabled:cursor-not-allowed disabled:opacity-50"
       >
         <GitPullRequest size={14} className="shrink-0 text-muted" />
-        <span className="font-medium">Commit or push</span>
+        <span className="font-medium">Commit…</span>
       </Button>
     </ThreadOverviewTooltipButton>
   </ThreadOverviewWhen>);
 }
 
-/** Commit or push block in the thread overview, preserving its existing row position. */
-export function CommitOrPushEntryBlock({ subject }: { subject: OverviewSubject }) {
-  return subject.kind === "thread" ? <CommitOrPushEntry /> : null;
+/** Commit block in the thread overview, preserving its existing row position. */
+export function CommitEntryBlock({ subject }: { subject: OverviewSubject }) {
+  return subject.kind === "thread" ? <CommitEntry /> : null;
 }

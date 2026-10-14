@@ -61,7 +61,7 @@ export function useOverviewState(
     dirPath,
     createPrOpen,
     setCreatePrOpen,
-    handleCommitOrPush,
+    handleCommit: openCommitSheet,
     handleOpenPr,
   } = useThreadGitActions(thread);
   const reviewLink = usePullRequestReviewLink(thread.id, open);
@@ -74,6 +74,10 @@ export function useOverviewState(
     showRightPanelAdaptive(thread.workspace_id, thread.id);
     useDiffStore.getState().setRightPanelTab(thread.workspace_id, thread.id, "environment");
   }, [closeOverlay, thread.id, thread.workspace_id]);
+  const handleCommit = useCallback(() => {
+    closeOverlay();
+    openCommitSheet();
+  }, [closeOverlay, openCommitSheet]);
   const ciDot = useMemo(
     () => getThreadOverviewCiDot(effectivePr, checks),
     [checks, effectivePr],
@@ -81,7 +85,7 @@ export function useOverviewState(
   return {
     open, projectSetup, branchCreation, prable, effectivePr, hasCommitsAhead,
     checks, openPrDetail, dirPath, createPrOpen, setCreatePrOpen,
-    handleCommitOrPush, handleOpenPr, branchlessCreatePr, createPrBranch,
+    handleCommit, handleOpenPr, branchlessCreatePr, createPrBranch,
     createBranchBaseBranch, openProjectSettings, ciDot,
   };
 }
