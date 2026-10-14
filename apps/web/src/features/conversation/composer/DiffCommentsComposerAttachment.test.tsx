@@ -7,6 +7,12 @@ import {
   readVisibleDiffComments,
   saveDraftDiffComment,
 } from "./draft/draft-diff-comments";
+import {
+  numberFileComments,
+  readVisibleFileComments,
+  saveDraftFileComment,
+} from "./draft/draft-file-comments";
+import { useFilesTabsStore } from "@/features/files/filesTabsStore";
 import { DiffCommentsComposerAttachment } from "./DiffCommentsComposerAttachment";
 
 const SCOPE = "thread-1";
@@ -53,6 +59,7 @@ describe("DiffCommentsComposerAttachment", () => {
   beforeEach(() => {
     localStorage.clear();
     useComposerDraftStore.setState({ drafts: {} });
+    useFilesTabsStore.setState({ scopes: {} });
     useDiffStore.setState({
       showRightPanel: vi.fn(),
       setRightPanelTab: vi.fn(),
@@ -119,5 +126,71 @@ describe("DiffCommentsComposerAttachment", () => {
     openPreview();
     expect(screen.getByTestId("diff-comment-preview")).toHaveTextContent("Note 0");
     expect(screen.getByTestId("diff-comment-preview")).toHaveTextContent("Note 1");
+  });
+
+  describe("with a Files comment", () => {
+    function renderMixed() {
+      seedComments(1);
+      saveDraftFileComment(SCOPE, {
+        filePath: "src/main.tsx",
+        line: 7,
+        lineContent: "render(<App />);",
+      }, { note: "Wrap in StrictMode", mentions: [] });
+      const diff = numberDiffComments(readVisibleDiffComments(SCOPE), 0);
+      const files = numberFileComments(readVisibleFileComments(SCOPE), diff.length);
+      render(
+        <DiffCommentsComposerAttachment
+          comments={[...diff, ...files]}
+          scopeId={SCOPE}
+          workspaceId={WORKSPACE}
+          threadId={SCOPE}
+          onFocusComposer={vi.fn()}
+        />,
+      );
+    }
+
+    it("lists Review and Files comments in number order under one count", () => {
+      renderMixed();
+      expect(screen.getByTestId("diff-comment-chip")).toHaveTextContent("2 comments");
+
+      openPreview();
+
+      expect(screen.getByTestId("diff-comment-preview-item-1")).toHaveTextContent("1. src/file-0.ts:10:");
+      expect(screen.getByTestId("diff-comment-preview-item-2")).toHaveTextContent("2. src/main.tsx:7:");
+      expect(screen.getByTestId("diff-comment-preview-item-2")).toHaveTextContent("Wrap in StrictMode");
+    });
+
+    it("opens the Files tool at the comment line", () => {
+      renderMixed();
+      openPreview();
+
+      fireEvent.click(screen.getByRole("button", { name: "Open source for comment 2" }));
+
+      expect(useDiffStore.getState().setRightPanelTab).toHaveBeenCalledWith(WORKSPACE, SCOPE, "files");
+      const scope = useFilesTabsStore.getState().scopes[SCOPE];
+      expect(scope?.activePath).toBe("src/main.tsx");
+      expect(scope?.pendingJump).toEqual({ path: "src/main.tsx", line: 7 });
+      expect(useDiffStore.getState().requestReviewFileJump).not.toHaveBeenCalled();
+    });
+
+    it("deletes only the Files comment from the draft", () => {
+      renderMixed();
+      openPreview();
+
+      fireEvent.pointerEnter(screen.getByTestId("diff-comment-preview-item-2"));
+      fireEvent.click(screen.getByRole("button", { name: "Delete comment 2" }));
+
+      const draft = useComposerDraftStore.getState().drafts[SCOPE];
+      expect(draft?.fileComments).toEqual([]);
+      expect(draft?.diffComments?.map((comment) => comment.filePath)).toEqual(["src/file-0.ts"]);
+    });
+
+    it("clears Review and Files comments together from the chip", () => {
+      renderMixed();
+
+      fireEvent.click(screen.getByRole("button", { name: "Remove 2 comments" }));
+
+      expect(useComposerDraftStore.getState().drafts[SCOPE]).toBeUndefined();
+    });
   });
 });

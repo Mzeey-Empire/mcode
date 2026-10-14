@@ -7,6 +7,7 @@ import {
 } from "../previewAnnotationStore";
 import { buildComposerAnnotationBundle } from "@/features/conversation/composer/submission/composer-annotations";
 import { saveDraftDiffComment } from "@/features/conversation/composer/draft/draft-diff-comments";
+import { saveDraftFileComment } from "@/features/conversation/composer/draft/draft-file-comments";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 
 const capture = {
@@ -112,5 +113,56 @@ describe("previewAnnotationStore", () => {
         mentions: [],
       },
     ]);
+  });
+
+  it("numbers Files comments after Browser annotations and Review comments", () => {
+    saveDraftFileComment("thread-1", {
+      filePath: "apps/web/src/main.tsx",
+      line: 7,
+      lineContent: "render(<App />);",
+    }, { note: "Wrap in StrictMode", mentions: [] });
+    saveDraftDiffComment("thread-1", {
+      filePath: "apps/web/src/App.tsx",
+      side: "right",
+      line: 42,
+      lineContent: "return <App />;",
+    }, { note: "Handle the loading state", mentions: [] });
+    usePreviewAnnotationStore.getState().saveAnnotation("thread-1", draft({ note: "Align the button" }));
+
+    const bundle = buildComposerAnnotationBundle("thread-1");
+
+    expect(bundle?.annotations.map((annotation) => annotation.displayNumber)).toEqual([1, 2, 3]);
+    expect(bundle?.annotations[2]).toEqual({
+      kind: "file",
+      id: expect.any(String),
+      displayNumber: 3,
+      filePath: "apps/web/src/main.tsx",
+      line: 7,
+      lineContent: "render(<App />);",
+      note: "Wrap in StrictMode",
+      mentions: [],
+    });
+  });
+
+  it("does not restore Files comments as Browser annotations", () => {
+    const preview = usePreviewAnnotationStore.getState().saveAnnotation("thread-1", draft({ note: "Align the button" }));
+    const bundle = usePreviewAnnotationStore.getState().buildBundle("thread-1")!;
+    usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
+
+    const restored = usePreviewAnnotationStore.getState().restoreBundle("thread-1", {
+      schemaVersion: 1,
+      annotations: [...bundle.annotations, {
+        kind: "file",
+        id: "00000000-0000-4000-8000-000000000003",
+        displayNumber: 2,
+        filePath: "apps/web/src/main.tsx",
+        line: 7,
+        lineContent: "render(<App />);",
+        note: "Wrap in StrictMode",
+      }],
+    });
+
+    expect(restored).toBe(true);
+    expect(usePreviewAnnotationStore.getState().getThreadAnnotations("thread-1").map((row) => row.id)).toEqual([preview.id]);
   });
 });

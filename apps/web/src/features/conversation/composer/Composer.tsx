@@ -652,7 +652,7 @@ export function Composer({
             workspacePath,
             attachmentBundle: surfaceState.annotationBundleForDisplay,
             annotationScopeId: surfaceState.annotationScopeId,
-            diffComments: surfaceState.diffCommentsForDisplay,
+            codeComments: surfaceState.codeCommentsForDisplay,
             attachments,
             selectedTextComments: form.state.selectedTextComments,
             selectedTextCommentEditor: form.state.selectedTextCommentEditor,

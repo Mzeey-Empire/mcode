@@ -18,6 +18,11 @@ export interface MarkdownFileViewProps {
   /** When the project list is truncated (or not loaded), a path missing from it may still exist. */
   readonly pathsTruncated: boolean;
   readonly onOpenFile: (path: string) => void;
+  /** Thread whose draft receives line comments made in the Source view; null disables commenting. */
+  readonly threadId: string | null;
+  readonly workspaceId?: string;
+  /** Files panel scope, for pending jumps. */
+  readonly scopeId: string;
   /** Find matches to paint in the Source view; rendered markdown has no lines to highlight. */
   readonly find?: FindHighlight | null;
 }
@@ -40,7 +45,18 @@ function showFailure(title: string): void {
 }
 
 /** A markdown tab: rendered with working links, or its highlighted source. */
-export function MarkdownFileView({ path, content, mode, knownPaths, pathsTruncated, onOpenFile, find = null }: MarkdownFileViewProps) {
+export function MarkdownFileView({
+  path,
+  content,
+  mode,
+  knownPaths,
+  pathsTruncated,
+  onOpenFile,
+  threadId,
+  workspaceId,
+  scopeId,
+  find = null,
+}: MarkdownFileViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const onLinkClick = useCallback(
     (href: string, event: MouseEvent<HTMLAnchorElement>) => {
@@ -67,7 +83,9 @@ export function MarkdownFileView({ path, content, mode, knownPaths, pathsTruncat
     [path, knownPaths, pathsTruncated, onOpenFile],
   );
 
-  if (mode === "source") return <CodeLines path={path} content={content} changedLines={null} find={find} />;
+  if (mode === "source") {
+    return <CodeLines path={path} content={content} changedLines={null} threadId={threadId} workspaceId={workspaceId} scopeId={scopeId} find={find} />;
+  }
   return (
     <div ref={containerRef} data-testid="markdown-file-view" className="min-h-0 flex-1 overflow-auto bg-background px-6 py-4 text-body text-ink">
       <Suspense fallback={<p className="font-mono text-code-small text-muted">Loading…</p>}>

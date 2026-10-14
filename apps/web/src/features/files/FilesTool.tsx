@@ -144,18 +144,7 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
       />
       {findBar.bar}
       <div ref={bodyRef} className="relative flex min-h-0 flex-1 flex-row overflow-hidden">
-        <FilesBody
-          scope={scope}
-          scopeId={scopeId}
-          state={state}
-          layout={layout}
-          data={data}
-          tree={tree}
-          actions={actions}
-          findHighlight={findBar.highlight}
-          onOpenFile={openFile}
-          onDimensions={onDimensions}
-        />
+        <FilesBody scopeId={scopeId} workspaceId={workspaceId} threadId={threadId} state={state} layout={layout} data={data} tree={tree} actions={actions} findHighlight={findBar.highlight} onOpenFile={openFile} onDimensions={onDimensions} />
         {state.goToFileOpen ? (
           <GoToFilePopover
             paths={data.list?.paths ?? EMPTY_PATHS}
@@ -199,8 +188,9 @@ function ShownFileControls({
 }
 
 function FilesBody({
-  scope,
   scopeId,
+  workspaceId,
+  threadId,
   state,
   layout,
   data,
@@ -210,8 +200,9 @@ function FilesBody({
   onOpenFile,
   onDimensions,
 }: {
-  readonly scope: { readonly workspaceId: string; readonly threadId: string | null };
   readonly scopeId: string;
+  readonly workspaceId: string;
+  readonly threadId: string | null;
   readonly state: FilesScopeState;
   readonly layout: FilesLayout;
   readonly data: FilesData;
@@ -252,8 +243,9 @@ function FilesBody({
       ) : null}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <OpenFileView
-          workspaceId={scope.workspaceId}
-          threadId={scope.threadId}
+          workspaceId={workspaceId}
+          threadId={threadId}
+          scopeId={scopeId}
           path={activePath}
           state={data.reads[activePath] ?? { status: "loading" }}
           mode={state.viewModes[activePath] ?? "rendered"}

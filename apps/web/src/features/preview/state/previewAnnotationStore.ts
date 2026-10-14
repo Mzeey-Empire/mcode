@@ -7,7 +7,7 @@ import type {
   PreviewAnnotationPayload,
   PreviewAnnotationVisualProposal,
 } from "@mcode/contracts";
-import { isDiffAnnotationPayload, PreviewAnnotationBundleSchema } from "@mcode/contracts";
+import { isPreviewAnnotationPayload, PreviewAnnotationBundleSchema } from "@mcode/contracts";
 
 /** Draft data captured from the Preview before it becomes a saved annotation. */
 export interface PreviewDraftAnnotation {
@@ -172,7 +172,7 @@ export const usePreviewAnnotationStore = create<PreviewAnnotationStore>((set, ge
     const baseCreatedAt = Date.now();
     const preview: SavedPreviewAnnotation[] = [];
     parsed.data.annotations.forEach((annotation, index) => {
-      if (!isDiffAnnotationPayload(annotation)) preview.push({ ...annotation, createdAt: baseCreatedAt + index });
+      if (isPreviewAnnotationPayload(annotation)) preview.push({ ...annotation, createdAt: baseCreatedAt + index });
     });
     set((state) => ({
       byThread: { ...state.byThread, [threadId]: renumberAnnotations(preview) },

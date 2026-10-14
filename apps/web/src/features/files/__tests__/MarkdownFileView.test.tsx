@@ -25,6 +25,8 @@ function renderView(content: string, options: { path?: string; mode?: "rendered"
       knownPaths={KNOWN}
       pathsTruncated={false}
       onOpenFile={onOpenFile}
+      threadId={null}
+      scopeId="test-scope"
     />,
   );
   return { onOpenFile };

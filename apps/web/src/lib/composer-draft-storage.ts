@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
 import type {
   DraftDiffComment,
+  DraftFileComment,
   DraftSubmission,
   McodeBrowserCapture,
   PlanCommentEditorDraft,
@@ -10,7 +11,9 @@ import type {
 import {
   DiffAnnotationPayloadSchema,
   DraftDiffCommentSchema,
+  DraftFileCommentSchema,
   DraftSubmissionSchema,
+  FileAnnotationPayloadSchema,
   MAX_ATTACHMENTS,
   MessageMentionsSchema,
   PlanCommentEditorDraftSchema,
@@ -19,6 +22,7 @@ import {
 import type {
   ComposerDraft,
   DiffCommentEditorDraft,
+  FileCommentEditorDraft,
   SelectedTextCommentEditorDraft,
 } from "@/stores/composerDraftStore";
 
@@ -199,14 +203,44 @@ function parseStoredDiffCommentEditor(
   };
 }
 
+function parseStoredFileCommentEditor(
+  raw: unknown,
+  counter: DropCounter,
+): FileCommentEditorDraft | undefined {
+  if (raw === undefined) return undefined;
+  const editor = raw as Partial<FileCommentEditorDraft> | null;
+  const target = FileAnnotationPayloadSchema().safeParse({
+    kind: "file",
+    id: crypto.randomUUID(),
+    displayNumber: 1,
+    ...editor?.target,
+    note: "target",
+  });
+  const mentions = MessageMentionsSchema().safeParse(editor?.mentions);
+  if (!target.success || !mentions.success || typeof editor?.note !== "string"
+    || (editor.annotationId !== undefined && typeof editor.annotationId !== "string")) {
+    counter.dropped += 1;
+    return undefined;
+  }
+  const { filePath, line, lineContent } = target.data;
+  return {
+    target: { filePath, line, lineContent },
+    annotationId: editor.annotationId,
+    note: editor.note,
+    mentions: mentions.data,
+  };
+}
+
 function parseStoredNextMessageFields(candidate: Partial<ComposerDraft>): Pick<
   ComposerDraft,
-  "diffComments" | "diffCommentEditor" | "planCommentEditor" | "submissions"
+  "diffComments" | "diffCommentEditor" | "fileComments" | "fileCommentEditor" | "planCommentEditor" | "submissions"
 > {
   const counter: DropCounter = { dropped: 0 };
   const fields = {
     diffComments: parseStoredElements<DraftDiffComment>(candidate.diffComments, DraftDiffCommentSchema(), counter),
     diffCommentEditor: parseStoredDiffCommentEditor(candidate.diffCommentEditor, counter),
+    fileComments: parseStoredElements<DraftFileComment>(candidate.fileComments, DraftFileCommentSchema(), counter),
+    fileCommentEditor: parseStoredFileCommentEditor(candidate.fileCommentEditor, counter),
     planCommentEditor: parseStoredElement<PlanCommentEditorDraft>(
       candidate.planCommentEditor,
       PlanCommentEditorDraftSchema(),

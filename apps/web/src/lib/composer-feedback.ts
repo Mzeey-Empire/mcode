@@ -1,5 +1,5 @@
 import {
-  isDiffAnnotationPayload,
+  isPreviewAnnotationPayload,
   type PreviewAnnotationBundle,
 } from "@mcode/contracts";
 
@@ -9,10 +9,10 @@ interface ComposerFeedbackCounts {
 }
 
 function feedbackCounts(bundle: PreviewAnnotationBundle): ComposerFeedbackCounts {
-  const comments = bundle.annotations.filter(isDiffAnnotationPayload).length;
+  const annotations = bundle.annotations.filter(isPreviewAnnotationPayload).length;
   return {
-    annotations: bundle.annotations.length - comments,
-    comments,
+    annotations,
+    comments: bundle.annotations.length - annotations,
   };
 }
 
@@ -28,7 +28,7 @@ function feedbackCountParts(bundle: PreviewAnnotationBundle): string[] {
   ];
 }
 
-/** Formats the compact count shown for Preview annotations and code comments. */
+/** Formats the compact count shown for Preview annotations and Review or Files comments. */
 export function composerFeedbackLabel(bundle: PreviewAnnotationBundle): string {
   return feedbackCountParts(bundle).join(" · ");
 }

@@ -1,6 +1,7 @@
 import {
-  isDiffAnnotationPayload,
+  isPreviewAnnotationPayload,
   type ComposerAnnotationPayload,
+  type PreviewAnnotationPayload,
   type PreviewAnnotationBundle,
 } from "@mcode/contracts";
 import { FileCodeCorner, ImageIcon, MessageCircle, X } from "lucide-react";
@@ -18,7 +19,7 @@ import { useRetriableAttachmentImage } from "./useRetriableAttachmentImage";
 const MAX_DETAIL_LENGTH = 220;
 
 function feedbackTargetLabel(item: ComposerAnnotationPayload): string {
-  if (isDiffAnnotationPayload(item)) {
+  if (!isPreviewAnnotationPayload(item)) {
     return `${item.filePath}:${item.line}`;
   }
   return (
@@ -29,9 +30,9 @@ function feedbackTargetLabel(item: ComposerAnnotationPayload): string {
 }
 
 function feedbackDetail(item: ComposerAnnotationPayload): string {
-  const text = isDiffAnnotationPayload(item)
-    ? item.note.trim()
-    : item.note?.trim() || item.changeSummary?.trim() || "Visual annotation";
+  const text = isPreviewAnnotationPayload(item)
+    ? item.note?.trim() || item.changeSummary?.trim() || "Visual annotation"
+    : item.note.trim();
   return text.length <= MAX_DETAIL_LENGTH
     ? text
     : `${text.slice(0, MAX_DETAIL_LENGTH - 3).trimEnd()}...`;
@@ -141,12 +142,13 @@ export function PreviewAnnotationBundleChip({
       >
         <div className="max-h-80 min-w-0 divide-y divide-border/45 overflow-y-auto">
           {bundle.annotations.map((item) => {
-            const isComment = isDiffAnnotationPayload(item);
-            const snapshotSrc = threadId && !isComment
+            const preview: PreviewAnnotationPayload | null = isPreviewAnnotationPayload(item) ? item : null;
+            const isComment = preview === null;
+            const snapshotSrc = threadId && preview
               ? buildStoredAttachmentImageSrc(
                   threadId,
-                  item.snapshot.id,
-                  item.snapshot.mimeType,
+                  preview.snapshot.id,
+                  preview.snapshot.mimeType,
                 )
               : null;
             return (

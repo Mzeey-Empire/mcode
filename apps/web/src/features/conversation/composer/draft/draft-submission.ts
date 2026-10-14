@@ -1,7 +1,11 @@
 import type {
   DiffAnnotationPayload,
   DraftDiffComment,
+  DraftElementField,
+  DraftElementMeta,
+  DraftFileComment,
   DraftSubmission,
+  FileAnnotationPayload,
   MessageMention,
 } from "@mcode/contracts";
 
@@ -17,12 +21,19 @@ export interface NextMessageDraft {
   readonly submissions?: readonly DraftSubmission[];
   /** Open Review comment editor; only which comment it edits matters here. */
   readonly diffCommentEditor?: { readonly annotationId?: string };
+  /** Saved Files line comments, one element each. */
+  readonly fileComments?: readonly DraftFileComment[];
+  /** Open Files comment editor; only which comment it edits matters here. */
+  readonly fileCommentEditor?: { readonly annotationId?: string };
 }
 
 /** Line target of a Review comment. */
 export type DiffCommentTarget = Pick<DiffAnnotationPayload, "filePath" | "side" | "line" | "lineContent">;
 
-/** Note text and mentions entered for a Review comment. */
+/** Line target of a Files comment. */
+export type FileCommentTarget = Pick<FileAnnotationPayload, "filePath" | "line" | "lineContent">;
+
+/** Note text and mentions entered for a Review or Files comment. */
 export interface DiffCommentContent {
   readonly note: string;
   readonly mentions: readonly MessageMention[];
@@ -31,6 +42,7 @@ export interface DiffCommentContent {
 /** What a Send carries, frozen at the moment of Send. */
 export interface FrozenDraftContent {
   readonly diffComments: readonly DraftDiffComment[];
+  readonly fileComments: readonly DraftFileComment[];
 }
 
 function heldRevisionKeys(draft: NextMessageDraft): Set<string> {
@@ -43,17 +55,28 @@ function heldRevisionKeys(draft: NextMessageDraft): Set<string> {
   return keys;
 }
 
+function unheldElements<E extends DraftElementMeta>(
+  draft: NextMessageDraft,
+  field: DraftElementField,
+  elements: readonly E[] | undefined,
+): E[] {
+  const held = heldRevisionKeys(draft);
+  return (elements ?? []).filter((element) => !held.has(`${field}:${element.id}:${element.revision}`));
+}
+
 /** Comments a user can see and edit: every current revision no pending Send holds. */
 export function visibleDiffComments(draft: NextMessageDraft): DraftDiffComment[] {
-  const held = heldRevisionKeys(draft);
-  return (draft.diffComments ?? []).filter(
-    (comment) => !held.has(`diffComments:${comment.id}:${comment.revision}`),
-  );
+  return unheldElements(draft, "diffComments", draft.diffComments);
+}
+
+/** Files comments a user can see and edit: every current revision no pending Send holds. */
+export function visibleFileComments(draft: NextMessageDraft): DraftFileComment[] {
+  return unheldElements(draft, "fileComments", draft.fileComments);
 }
 
 /** Reads what the next Send would carry now. */
 export function readSendableDraftContent(draft: NextMessageDraft): FrozenDraftContent {
-  return { diffComments: visibleDiffComments(draft) };
+  return { diffComments: visibleDiffComments(draft), fileComments: visibleFileComments(draft) };
 }
 
 /** Saves a new comment at revision 1, or writes the next revision of an existing one. */
@@ -88,6 +111,47 @@ export function removeDiffComment<T extends NextMessageDraft>(draft: T, id: stri
 }
 
 /**
+ * Saves a new Files comment at revision 1, or writes the next revision of an
+ * existing one. A new comment takes the given id when there is one, so a queued
+ * comment returning to the draft keeps its identity.
+ */
+export function saveFileComment<T extends NextMessageDraft>(
+  draft: T,
+  target: FileCommentTarget,
+  content: DiffCommentContent,
+  id?: string,
+): T {
+  const comments = draft.fileComments ?? [];
+  const existing = id ? comments.find((comment) => comment.id === id) : undefined;
+  const comment: DraftFileComment = {
+    kind: "file",
+    id: existing?.id ?? id ?? crypto.randomUUID(),
+    revision: existing ? existing.revision + 1 : 1,
+    displayNumber: existing?.displayNumber ?? comments.length + 1,
+    filePath: target.filePath,
+    line: target.line,
+    lineContent: target.lineContent,
+    note: content.note,
+    mentions: [...content.mentions],
+  };
+  return {
+    ...draft,
+    fileComments: existing
+      ? comments.map((candidate) => (candidate.id === comment.id ? comment : candidate))
+      : [...comments, comment],
+  };
+}
+
+/** Drops this draft's reference to a Files comment. */
+export function removeFileComment<T extends NextMessageDraft>(draft: T, id: string): T {
+  return { ...draft, fileComments: (draft.fileComments ?? []).filter((comment) => comment.id !== id) };
+}
+
+function submittedElements(field: DraftElementField, elements: readonly DraftElementMeta[]) {
+  return elements.map((element) => ({ field, id: element.id, revision: element.revision }));
+}
+
+/**
  * Records what a Send carries. The elements stay in the draft, hidden by the
  * submission, so a failed Send returns them as they are now.
  */
@@ -98,11 +162,10 @@ export function freezeDraftSubmission<T extends NextMessageDraft>(
 ): { draft: T; submission: DraftSubmission } {
   const submission: DraftSubmission = {
     messageId,
-    elements: content.diffComments.map((comment) => ({
-      field: "diffComments" as const,
-      id: comment.id,
-      revision: comment.revision,
-    })),
+    elements: [
+      ...submittedElements("diffComments", content.diffComments),
+      ...submittedElements("fileComments", content.fileComments),
+    ],
     stagingIds: [],
   };
   return { draft: { ...draft, submissions: [...(draft.submissions ?? []), submission] }, submission };
@@ -111,7 +174,7 @@ export function freezeDraftSubmission<T extends NextMessageDraft>(
 /** An unsaved edit of a comment that was just sent keeps its text as a new comment. */
 export function keepEditorOfSentComment<E extends { readonly annotationId?: string }>(
   editor: E | undefined,
-  remaining: readonly DraftDiffComment[],
+  remaining: readonly DraftElementMeta[],
 ): E | undefined {
   if (editor?.annotationId === undefined) return editor;
   return remaining.some((comment) => comment.id === editor.annotationId)
@@ -133,18 +196,19 @@ export function settleDraftSubmission<T extends NextMessageDraft>(
   if (!submission) return draft;
   const submissions = (draft.submissions ?? []).filter((candidate) => candidate !== submission);
   if (outcome === "failure") return { ...draft, submissions };
-  const sent = new Set(
-    submission.elements
-      .filter((element) => element.field === "diffComments")
-      .map((element) => `${element.id}:${element.revision}`),
-  );
+  const sent = new Set(submission.elements.map((element) => `${element.field}:${element.id}:${element.revision}`));
   const diffComments = (draft.diffComments ?? []).filter(
-    (comment) => !sent.has(`${comment.id}:${comment.revision}`),
+    (comment) => !sent.has(`diffComments:${comment.id}:${comment.revision}`),
+  );
+  const fileComments = (draft.fileComments ?? []).filter(
+    (comment) => !sent.has(`fileComments:${comment.id}:${comment.revision}`),
   );
   return {
     ...draft,
     diffComments,
     diffCommentEditor: keepEditorOfSentComment(draft.diffCommentEditor, diffComments),
+    fileComments,
+    fileCommentEditor: keepEditorOfSentComment(draft.fileCommentEditor, fileComments),
     submissions,
   };
 }

@@ -11,6 +11,8 @@ import { useSvgSource } from "./useSvgSource";
 export interface OpenFileViewProps {
   readonly workspaceId: string;
   readonly threadId: string | null;
+  /** Files panel scope, for line comments and pending jumps. */
+  readonly scopeId: string;
   readonly path: string;
   readonly state: FileReadState;
   readonly mode: FileViewMode;
@@ -38,6 +40,9 @@ export function OpenFileView(props: OpenFileViewProps) {
         knownPaths={props.knownPaths}
         pathsTruncated={props.pathsTruncated}
         onOpenFile={props.onOpenFile}
+        threadId={props.threadId}
+        workspaceId={props.workspaceId}
+        scopeId={props.scopeId}
         find={props.find}
       />
     );
@@ -46,13 +51,24 @@ export function OpenFileView(props: OpenFileViewProps) {
     if (kind === "svg") return <SvgFileView {...props} result={state.result} />;
     return <ImageFileView key={path} result={state.result} scale={props.scale} onDimensions={props.onDimensions} />;
   }
-  return <CodeFileView path={path} state={state} onOpenInEditor={props.onOpenInEditor} onCloseTab={props.onCloseTab} find={props.find} />;
+  return (
+    <CodeFileView
+      path={path}
+      state={state}
+      onOpenInEditor={props.onOpenInEditor}
+      onCloseTab={props.onCloseTab}
+      threadId={props.threadId}
+      scopeId={props.scopeId}
+      workspaceId={props.workspaceId}
+      find={props.find}
+    />
+  );
 }
 
-function SvgFileView({ workspaceId, threadId, path, mode, scale, onDimensions, result }: OpenFileViewProps & { readonly result: ImageReadResult }) {
+function SvgFileView({ workspaceId, threadId, scopeId, path, mode, scale, onDimensions, result }: OpenFileViewProps & { readonly result: ImageReadResult }) {
   const source = useSvgSource(workspaceId, threadId, path, mode === "source");
   if (mode === "rendered") return <ImageFileView key={path} result={result} scale={scale} onDimensions={onDimensions} />;
-  if (source.status === "ready") return <CodeLines path={path} content={source.content} changedLines={null} find={null} />;
+  if (source.status === "ready") return <CodeLines path={path} content={source.content} changedLines={null} threadId={threadId} workspaceId={workspaceId} scopeId={scopeId} find={null} />;
   const text = source.status === "failed" ? source.message : "Loading…";
   return <p className="px-4 py-3 font-mono text-code-small text-muted">{text}</p>;
 }

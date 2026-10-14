@@ -5,6 +5,7 @@ import {
   AgentEventType,
   previewAnnotationSnapshotAttachments,
   isDiffAnnotationPayload,
+  isFileAnnotationPayload,
   type AttachmentMeta,
   type ContextWindowMode,
   type DevinMode,
@@ -640,6 +641,7 @@ export class TurnAdmissionDispatchCoordinator {
     const comments = [
       ...(command.selectedTextComments ?? []),
       ...(command.previewAnnotations?.annotations.filter(isDiffAnnotationPayload) ?? []),
+      ...(command.previewAnnotations?.annotations.filter(isFileAnnotationPayload) ?? []),
     ];
     return comments.flatMap((comment) => this.validateMentions({
       workspaceId,
