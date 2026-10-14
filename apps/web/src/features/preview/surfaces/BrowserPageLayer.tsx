@@ -141,6 +141,7 @@ export function BrowserPageLayer({
         presentationSource={automationOnly ? "automation" : "panel"}
         coveredRight={coveredRight}
         viewport={tabViewportState?.mode === "responsive" ? tabViewport : undefined}
+        layoutKey={`${responsiveViewportScale}:${viewportCanvasBounds.width}x${viewportCanvasBounds.height}`}
         className={cn(
           responsiveViewportSize
             ? "absolute left-0 top-0"

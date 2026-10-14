@@ -48,6 +48,12 @@ export interface PreviewWebviewProps {
   /** Optional explicit overlap retained for focused renderer coverage. */
   readonly coveredRight?: number;
   readonly viewport?: { readonly width: number; readonly height: number };
+  /**
+   * Changes whenever the page moves or rescales without its own box changing.
+   * A responsive page is scaled by transform, which ResizeObserver does not
+   * report, so the native view would keep its old bounds until this changes.
+   */
+  readonly layoutKey?: string;
   readonly onPageStatus?: (status: PreviewPageStatus) => void;
   readonly onNavigationStateChange?: (state: {
     canGoBack: boolean;
@@ -137,6 +143,7 @@ export const PreviewWebview = forwardRef<PreviewWebviewHandle, PreviewWebviewPro
       presentationSource,
       coveredRight,
       viewport,
+      layoutKey,
       onPageStatus,
       onNavigationStateChange,
     } = resolvePreviewWebviewProps(props);
@@ -345,7 +352,7 @@ export const PreviewWebview = forwardRef<PreviewWebviewHandle, PreviewWebviewPro
         observer?.disconnect();
         window.removeEventListener("resize", update);
       };
-    }, [active, allowHiddenPresentation, coveredRight, identity, presentationActive, presentationSource, publishPresentation, viewport]);
+    }, [active, allowHiddenPresentation, coveredRight, identity, presentationActive, presentationSource, publishPresentation, viewport, layoutKey]);
 
     return (
       <div
