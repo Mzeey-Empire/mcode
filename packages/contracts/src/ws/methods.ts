@@ -112,7 +112,9 @@ import {
   TurnResumeUnscheduleParamsSchema,
 } from "../models/turn-recovery.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
-import { PlanSaveVersionSchema, PlanVersionSchema, PlanActionSchema, PlanImplementSchema, PlanImplementReceiptSchema } from "../models/plan.js";
+import { PlanSaveVersionSchema, PlanVersionSchema, PlanActionSchema, PlanImplementSchema, PlanImplementReceiptSchema,
+  PlanCommentSchema, PlanCommentCreateSchema, PlanCommentUpdateSchema, PlanCommentSetStatusSchema,
+  PlanCommentDeleteSchema, PlanCommentIdsSchema } from "../models/plan.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
 import { ReviewComparisonResultSchema, ReviewComparisonUnavailableSchema, ReviewFileDiffResultSchema, ReviewTurnSchema, ReviewStateSchema } from "../models/review-comparison.js";
 import {
@@ -361,6 +363,7 @@ export const SendMessageSchema = lazySchema(() => z.object({
      * Implement uses the revision-checked `plan.implement` method.
      */
     planAction: PlanActionSchema().optional(),
+    planCommentIds: PlanCommentIdsSchema().optional(),
     /** Objective installed as a provider goal immediately before this turn dispatches. */
     goalObjective: GoalObjectiveSchema().optional(),
     /**
@@ -1221,8 +1224,12 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({
       threadId: z.string(),
     }),
-    result: z.object({ versions: z.array(PlanVersionSchema()) }),
+    result: z.object({ versions: z.array(PlanVersionSchema()), comments: z.array(PlanCommentSchema()) }),
   },
+  "plan.comment.create": { params: PlanCommentCreateSchema(), result: PlanCommentSchema() },
+  "plan.comment.update": { params: PlanCommentUpdateSchema(), result: PlanCommentSchema() },
+  "plan.comment.setStatus": { params: PlanCommentSetStatusSchema(), result: PlanCommentSchema() },
+  "plan.comment.delete": { params: PlanCommentDeleteSchema(), result: z.void() },
   "approval.respond": {
     params: z.object({
       requestId: z.string(),

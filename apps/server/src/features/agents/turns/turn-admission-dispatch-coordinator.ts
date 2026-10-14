@@ -57,7 +57,7 @@ import type { TurnResumeScheduler } from "../recovery/turn-resume-scheduler.js";
 import {
   type ParentTurnDurability,
 } from "./parent-turn-durability.js";
-import { appendSelectedTextComments } from "./selected-text-comment-append.js";
+import { appendSelectedTextComments, appendPlanComments } from "./selected-text-comment-append.js";
 import { ApprovalReviewPolicy, type ApprovalReviewDecision } from "./approval-review-policy.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 
@@ -346,6 +346,7 @@ export class TurnAdmissionDispatchCoordinator {
       quotedText: submission.quotedText,
       selectedTextComments: submission.selectedTextComments ? [...submission.selectedTextComments] : undefined,
       planAction: submission.planAction,
+      planCommentIds: submission.planCommentIds,
       markPlanAnswerForMessageId: submission.markPlanAnswerForMessageId,
       sourceTurnId: submission.sourceTurnId,
       sourceThreadId: submission.sourceThreadId,
@@ -530,7 +531,7 @@ export class TurnAdmissionDispatchCoordinator {
   }
 
   private async preparePlanFile(command: SendMessageCommand): Promise<void> {
-    if (command.interactionMode === "plan" || command.planAction || command.markPlanAnswerForMessageId) {
+    if (command.interactionMode === "plan" || command.planAction || command.planCommentIds?.length || command.markPlanAnswerForMessageId) {
       await this.plans.prepareTurn(command.threadId);
     }
   }
@@ -547,8 +548,11 @@ export class TurnAdmissionDispatchCoordinator {
     const revertNotice = prepared.command.providerOriginated
       ? { revertIds: [], paths: [] } : this.reverts.pendingAgentNotice(prepared.thread.id);
     parentStartInput.revertNoticeIds = revertNotice.revertIds;
-    const wirePayload = await this.buildWirePayload(prepared, revertNotice.paths);
+    let wirePayload = await this.buildWirePayload(prepared, revertNotice.paths);
     await this.commitParentStart(prepared, lease, sourceTurnId, parentStartInput);
+    if (prepared.command.planCommentIds?.length) {
+      wirePayload = appendPlanComments(wirePayload, this.plans.sentComments(prepared.thread.id, prepared.command.planCommentIds));
+    }
     await this.publishCommittedEffects(prepared, sourceTurnId);
     const request = await this.buildTurnRequest(prepared, lease, sourceTurnId, attachmentData, cwd, wirePayload, review);
     return {
@@ -769,6 +773,7 @@ export class TurnAdmissionDispatchCoordinator {
         quotedText: command.quotedText,
         selectedTextComments: command.selectedTextComments,
         planAction: command.planAction,
+        planCommentIds: command.planCommentIds,
         markPlanAnswerForMessageId: command.markPlanAnswerForMessageId,
         sourceTurnId: command.sourceTurnId,
         sourceThreadId: command.sourceThreadId,
@@ -840,7 +845,7 @@ export class TurnAdmissionDispatchCoordinator {
     if (!this.parentStartOwner) return this.startParentTurn(input);
     const precedingMessageId = input.userMessage.messageId;
     if (!precedingMessageId) throw new Error("Worker-owned turn needs its committed user message identity");
-    const planFeature = prepared.command.planAction === "revise" || prepared.command.markPlanAnswerForMessageId ? "output"
+    const planFeature = prepared.command.planAction === "revise" || prepared.command.planCommentIds?.length || prepared.command.markPlanAnswerForMessageId ? "output"
       : this.effectiveInteractionMode(prepared.command) === "plan" ? "questions" : "none";
     await this.parentStartOwner.start({
       execution: { threadId: lease.threadId, turnId: sourceTurnId, executionId: lease.turnExecutionId },
@@ -900,6 +905,7 @@ export class TurnAdmissionDispatchCoordinator {
       reopenThread: prepared.thread.user_completed_at !== null,
       answeredPlanQuestionMessageId: command.markPlanAnswerForMessageId,
       planImplement: command.planImplement,
+      planCommentIds: command.planCommentIds,
     };
   }
 
@@ -931,7 +937,7 @@ export class TurnAdmissionDispatchCoordinator {
   private async publishCommittedEffects(prepared: PreparedCommand, sourceTurnId: string): Promise<void> {
     this.publishPlanAnswer(prepared.command);
     const command = prepared.command;
-    if (command.planAction === "revise") this.plans.beginOutputGeneration(command.threadId);
+    if (command.planAction === "revise" || command.planCommentIds?.length) this.plans.beginOutputGeneration(command.threadId);
     if (this.effectiveInteractionMode(command) === "plan") this.plans.beginQuestionGeneration(command.threadId);
     await this.persistThreadSettings(prepared);
     void sourceTurnId;
@@ -1007,12 +1013,12 @@ export class TurnAdmissionDispatchCoordinator {
 
   private withPlanInstructions(prepared: PreparedCommand): string {
     const command = prepared.command;
-    if (command.planAction !== "revise") return prepared.content;
+    if (command.planAction !== "revise" && !command.planCommentIds?.length) return prepared.content;
     return `${prepared.content}\n\n${this.plans.buildPlanOutputInstructions()}`;
   }
 
   private effectiveInteractionMode(command: SendMessageCommand): InteractionMode | undefined {
-    return command.planAction === "revise" || command.planAction === "implement" ? undefined : command.interactionMode;
+    return command.planAction === "revise" || command.planAction === "implement" || command.planCommentIds?.length ? undefined : command.interactionMode;
   }
 
   private withReplyContext(prepared: PreparedCommand, payload: string): string {

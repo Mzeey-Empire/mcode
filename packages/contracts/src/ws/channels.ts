@@ -6,7 +6,7 @@ import { ThreadStatusSchema } from "../models/enums.js";
 import { ThreadSchema } from "../models/thread.js";
 import { ProviderIdSchema, SettingsSchema } from "../models/settings.js";
 import { PlanQuestionSchema } from "../models/plan-questions.js";
-import { PlanVersionSchema } from "../models/plan.js";
+import { PlanVersionSchema, PlanCommentSchema } from "../models/plan.js";
 import { ChecksStatusSchema } from "../github.js";
 import { ApprovalRequestSchema, ApprovalOutcomeSchema } from "../models/approval.js";
 import { ProviderAvailabilitySchema } from "../providers/availability.js";
@@ -214,6 +214,10 @@ export const WS_CHANNELS = {
   "plan.versionUpserted": z.object({
     threadId: z.string(),
     version: PlanVersionSchema(),
+  }),
+  /** Comment changes committed by saves, captures, edits or turn admission. */
+  "plan.commentsChanged": z.object({
+    threadId: z.string().min(1).max(256), upserted: z.array(PlanCommentSchema()), deletedIds: z.array(z.string().uuid()),
   }),
   /** A validated approval request awaiting a user decision. */
   "approval.requested": ApprovalRequestSchema(),

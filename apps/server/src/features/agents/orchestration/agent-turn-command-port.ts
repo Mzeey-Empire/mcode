@@ -75,6 +75,7 @@ export interface AgentTurnCommand {
   interactionMode?: "build" | "plan";
   mutationReservationToken?: string;
   planImplement?: { requestId: string };
+  planCommentIds?: string[];
   /** Reports whether admission produced a turn before provider dispatch. */
   onAdmissionComplete?: (turnAdmitted: boolean) => void;
   permissionMode?: PermissionMode | "default";

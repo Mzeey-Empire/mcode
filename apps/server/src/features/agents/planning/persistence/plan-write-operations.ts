@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { PlanVersionSchema, PlanSaveVersionSchema, PlanSaveErrorSchema, ProviderIdSchema } from "@mcode/contracts";
+import { PlanVersionSchema, PlanSaveVersionSchema, PlanSaveErrorSchema, ProviderIdSchema, PlanCommentSchema } from "@mcode/contracts";
 import { databaseWriteOperation } from "../../../../runtime/persistence/sqlite/database-write-operation.js";
 import { PlanPersistenceReadySchema } from "../plan-capture-schema.js";
 
 const failure = PlanSaveErrorSchema().extend({ ok: z.literal(false) });
 const saveResult = z.discriminatedUnion("ok", [z.object({ ok: z.literal(true), version: PlanVersionSchema() }), failure]);
-const snapshotResult = z.discriminatedUnion("ok", [z.object({ ok: z.literal(true), versions: z.array(PlanVersionSchema()) }), failure]);
+const snapshotResult = z.discriminatedUnion("ok", [z.object({ ok: z.literal(true), versions: z.array(PlanVersionSchema()), comments: z.array(PlanCommentSchema()) }), failure]);
 
 /** Cloneable save result preserves typed errors across the worker boundary. */
 export type PlanSaveResult = z.infer<typeof saveResult>;

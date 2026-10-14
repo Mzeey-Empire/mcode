@@ -25,6 +25,7 @@ import { FileService } from "../../../projects/files/file-service.js";
 import { PlanTurnService } from "../../planning/plan-turn-service.js";
 import { PlanQuestionService } from "../../planning/plan-question-service.js";
 import { PlanRepo } from "../../planning/persistence/plan-repo.js";
+import { PlanService } from "../../planning/plan-service.js";
 import { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
 import { GoalLifecycleService } from "../../goals/goal-lifecycle-service.js";
 import { AgentRuntimeCommandPort, AgentTurnCommandPort } from "../../orchestration/agent-turn-command-port.js";
@@ -91,10 +92,45 @@ async function fixture(providerId: ProviderId = "codex", beforeCommit: () => Pro
   const copies = () => NodeFS.readdirSync(NodePath.join(directory, "attachments", thread.id)).filter((name) => name !== "draft");
   const planRepo = new PlanRepo(db, writer);
   plans.bindPlanProjection(undefined, new PlanFileWriter((id) => planRepo.listByThread(id), () => directory));
-  return { admission, runtime, thread, attachments, messages, send, stage, stagedPath, copies, planRepo };
+  const planService = new PlanService(writer, undefined, new PlanFileWriter(id => planRepo.listByThread(id), () => directory));
+  return { admission, runtime, thread, attachments, messages, send, stage, stagedPath, copies, planRepo, planService };
 }
 
 describe("plan file admission", () => {
+  it("sends the note committed at admission, enables revision capture, and retains the plain user message", async () => {
+    let editBeforeCommit: (() => Promise<unknown>) | undefined;
+    const f = await fixture("codex", async () => { await editBeforeCommit?.(); });
+    const assistant = await f.messages.create(f.thread.id, "assistant", "Summary", 1);
+    const version = await f.planRepo.create(f.thread.id, assistant.id, { title: "Plan", contentMd: "# Plan", captureSource: "fence" }, "codex");
+    const comment = await f.planService.createComment({ commentId: NodeCrypto.randomUUID(), versionId: version.id,
+      body: "Original note", anchor: { kind: "text", start: 2, end: 6, quote: "Plan", prefix: "# ", suffix: "", section: "Plan" } });
+    editBeforeCommit = () => f.planService.updateComment({ commentId: comment.id, body: "Changed before admission" });
+    const result = await f.send([], { content: "go", interactionMode: "plan", planCommentIds: [comment.id] });
+    if (result.kind !== "dispatch") throw new Error("Expected admission");
+    expect(result.parentStartInput.planCommentIds).toEqual([comment.id]);
+    expect(result.request.message).toContain("<!-- mcode-plan-comments-v1 -->");
+    expect(result.request.message).toContain('"body":"Changed before admission"');
+    expect(result.request.message).not.toContain("Original note");
+    expect(result.request.message).not.toContain("[PLAN MODE]");
+    expect(result.request.message).toContain("Now generate the full implementation plan based on these decisions.");
+    const user = f.messages.listByThread(f.thread.id, 10).messages.find(message => message.role === "user");
+    expect(user?.content).toBe("go");
+    expect((await f.planService.snapshot({ threadId: f.thread.id })).comments[0]?.sentMessageId).toBe(user?.id);
+  });
+
+  it("rejects a cross-window resolution before admission without projecting the user message", async () => {
+    let resolveBeforeCommit: (() => Promise<unknown>) | undefined;
+    const f = await fixture("codex", async () => { await resolveBeforeCommit?.(); });
+    const assistant = await f.messages.create(f.thread.id, "assistant", "Summary", 1);
+    const version = await f.planRepo.create(f.thread.id, assistant.id, { title: "Plan", contentMd: "# Plan", captureSource: "fence" }, "codex");
+    const comment = await f.planService.createComment({ commentId: NodeCrypto.randomUUID(), versionId: version.id,
+      body: "Resolve elsewhere", anchor: { kind: "section", section: "Plan", quote: "" } });
+    resolveBeforeCommit = () => f.planService.setCommentStatus({ commentId: comment.id, status: "resolved" });
+    await expect(f.send([], { content: "go", planCommentIds: [comment.id] })).rejects.toMatchObject({ code: "plan_comment_invalid" });
+    expect(f.messages.listByThread(f.thread.id, 10).messages.map(message => message.role)).toEqual(["assistant"]);
+    expect((await f.planService.snapshot({ threadId: f.thread.id })).comments[0]?.sentMessageId).toBeNull();
+  });
+
   const commands: Partial<SendMessageCommand>[] = [
     { interactionMode: "plan" }, { planAction: "revise" }, { planAction: "implement" },
     { markPlanAnswerForMessageId: "question-message" },

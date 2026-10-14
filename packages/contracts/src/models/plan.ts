@@ -5,6 +5,62 @@ import { ProviderIdSchema } from "./settings.js";
 /** Maximum UTF-16 content length accepted for a new plan write. */
 export const PLAN_MAX_CONTENT_CHARS = 64 * 1024;
 
+/** Source offsets use UTF-16 code units, matching editor positions. */
+export const PlanCommentAnchorSchema = lazySchema(() => z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("text"), start: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    end: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER), quote: z.string().min(1).max(2000),
+    prefix: z.string().max(64), suffix: z.string().max(64), section: z.string().max(200).nullable() }),
+  z.object({ kind: z.literal("section"), section: z.string().max(200).nullable(), quote: z.string().max(2000) }),
+]).refine(anchor => anchor.kind === "section" || anchor.end - anchor.start === anchor.quote.length, "Invalid comment range"));
+
+/** Validated text selection or section fallback. */
+export type PlanCommentAnchor = z.infer<ReturnType<typeof PlanCommentAnchorSchema>>;
+
+/** Durable comment belonging to one plan version. */
+export const PlanCommentSchema = lazySchema(() => z.object({
+  id: z.string().uuid(), threadId: z.string().min(1).max(256), versionId: z.string().uuid(),
+  body: z.string().max(4000).trim().min(1), anchor: PlanCommentAnchorSchema(),
+  status: z.enum(["open", "resolved"]), sentMessageId: z.string().max(256).nullable(),
+  carriedFromCommentId: z.string().uuid().nullable(), createdAt: z.string().max(64),
+  updatedAt: z.string().max(64), resolvedAt: z.string().max(64).nullable(),
+}));
+
+/** Validated persisted plan comment. */
+export type PlanComment = z.infer<ReturnType<typeof PlanCommentSchema>>;
+
+/** Unsaved composer editor, including an empty note while typing. */
+export const PlanCommentEditorDraftSchema = lazySchema(() => z.object({
+  planVersionId: z.string().uuid(), commentId: z.string().uuid().nullable(),
+  anchor: PlanCommentAnchorSchema(), body: z.string().max(4000),
+}));
+
+/** Persisted composer editor state. */
+export type PlanCommentEditorDraft = z.infer<ReturnType<typeof PlanCommentEditorDraftSchema>>;
+
+/** Client-assigned identity makes comment creation replayable. */
+export const PlanCommentCreateSchema = lazySchema(() => z.object({
+  commentId: z.string().uuid(), versionId: z.string().uuid(), anchor: PlanCommentAnchorSchema(),
+  body: z.string().max(4000).trim().min(1),
+}));
+/** Replace the note without changing its selection. */
+export const PlanCommentUpdateSchema = lazySchema(() => z.object({
+  commentId: z.string().uuid(), body: z.string().max(4000).trim().min(1),
+}));
+/** Resolve or reopen a saved comment. */
+export const PlanCommentSetStatusSchema = lazySchema(() => z.object({
+  commentId: z.string().uuid(), status: z.enum(["open", "resolved"]),
+}));
+/** Idempotent deletion by saved identity. */
+export const PlanCommentDeleteSchema = lazySchema(() => z.object({ commentId: z.string().uuid() }));
+/** Frozen selection of comments riding one send. */
+export const PlanCommentIdsSchema = lazySchema(() => z.array(z.string().uuid()).max(128));
+/** Comment mutations and admission preserve these codes across writer and RPC boundaries. */
+export const PlanCommentErrorSchema = lazySchema(() => z.object({
+  code: z.enum(["plan_comment_invalid", "plan_read_only", "plan_busy"]),
+}));
+/** Comment operation failure. */
+export type PlanCommentError = z.infer<ReturnType<typeof PlanCommentErrorSchema>>;
+
 /** Private provider evidence carried to persistence, never included in public versions. */
 export const NativePlanFileRefSchema = lazySchema(() => z.object({
   path: z.string().min(1).max(32 * 1024),

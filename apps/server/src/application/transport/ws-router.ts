@@ -316,7 +316,7 @@ export interface RouterDeps {
   /** Repository for the plan-question wizard answered marker (sidecar table). */
   planQuestionAnswersRepo: PlanQuestionAnswersRepo;
   /** Repository for structured plan records. */
-  planService: Pick<PlanService, "saveVersion" | "snapshot" | "implement">;
+  planService: Pick<PlanService, "saveVersion" | "snapshot" | "implement" | "createComment" | "updateComment" | "setCommentStatus" | "deleteComment">;
   /** Registry of AI provider adapters for model discovery. */
   providerRegistry: IProviderRegistry;
   /** Tracks per-provider enabled flag and CLI verification state. */
@@ -486,11 +486,18 @@ function domainRouteError(id: string, error: unknown, message: string): WebSocke
   if (error instanceof PlanServiceError) {
     return { id, error: { code: error.code, message, data: { latestVersion: error.latestVersion } } };
   }
+  if (isPlanCommentAdmissionError(error)) {
+    return { id, error: { code: "plan_comment_invalid", message } };
+  }
   if (error instanceof DraftImageMissingError) {
     return { id, error: { code: error.code, message, data: { stagingId: error.stagingId } } };
   }
   if (error instanceof SequenceAheadError || error instanceof TurnRevertValidationError) return { id, error: { code: error.code, message } };
   return steerRouteError(id, error, message);
+}
+
+function isPlanCommentAdmissionError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "plan_comment_invalid";
 }
 
 function steerRouteError(id: string, error: unknown, message: string): WebSocketResponse | null {

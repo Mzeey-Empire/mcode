@@ -53,6 +53,14 @@ export class PlanTurnService {
     await this.projection?.files.write(threadId);
   }
 
+  /** Read committed notes after admission, while the running turn excludes user edits. */
+  sentComments(threadId: string, ids: readonly string[]) {
+    const selected = new Set(ids);
+    const comments = this.planRepo.listComments(threadId).filter(comment => selected.has(comment.id));
+    broadcast("plan.commentsChanged", { threadId, upserted: comments, deletedIds: [] });
+    return comments;
+  }
+
   /** Start parsing one plan-question generation turn. */
   beginQuestionGeneration(threadId: string): void {
     this.execution(threadId).beginQuestionGeneration();
@@ -189,6 +197,7 @@ ${userMessage}`;
       execution.markPlanPersisted();
       this.projection?.progress?.reloadPlans(threadId);
       for (const version of this.planRepo.listByThread(threadId)) broadcast("plan.versionUpserted", { threadId, version });
+      broadcast("plan.commentsChanged", { threadId, upserted: this.planRepo.listComments(threadId), deletedIds: [] });
       await this.projection?.files.writeAfterCommit(threadId);
     } catch (error) {
       logger.error("Failed to persist plan output", {
