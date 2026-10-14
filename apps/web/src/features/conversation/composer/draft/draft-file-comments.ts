@@ -152,17 +152,12 @@ export function removeTakenFileComments(threadId: string, taken: readonly DraftF
 export function restoreQueuedFileComments(threadId: string, comments: readonly FileAnnotationPayload[]): void {
   if (comments.length === 0) return;
   updateThread(threadId, (draft) => comments.reduce<ComposerDraft>((next, comment) => {
-    const existing = next.fileComments?.some((candidate) => candidate.id === comment.id);
     const { filePath, line, lineContent } = comment;
-    const restored = saveFileComment(
+    return saveFileComment(
       next,
       { filePath, line, lineContent },
       { note: comment.note, mentions: comment.mentions ?? [] },
-      existing ? comment.id : undefined,
+      comment.id,
     );
-    if (existing) return restored;
-    // Keep the queued comment's id so a later edit in the queue still targets it.
-    const added = restored.fileComments!.at(-1)!;
-    return { ...restored, fileComments: [...restored.fileComments!.slice(0, -1), { ...added, id: comment.id }] };
   }, draft));
 }

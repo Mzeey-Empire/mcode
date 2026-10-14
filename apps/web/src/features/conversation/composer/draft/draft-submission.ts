@@ -110,7 +110,11 @@ export function removeDiffComment<T extends NextMessageDraft>(draft: T, id: stri
   return { ...draft, diffComments: (draft.diffComments ?? []).filter((comment) => comment.id !== id) };
 }
 
-/** Saves a new Files comment at revision 1, or writes the next revision of an existing one. */
+/**
+ * Saves a new Files comment at revision 1, or writes the next revision of an
+ * existing one. A new comment takes the given id when there is one, so a queued
+ * comment returning to the draft keeps its identity.
+ */
 export function saveFileComment<T extends NextMessageDraft>(
   draft: T,
   target: FileCommentTarget,
@@ -121,10 +125,12 @@ export function saveFileComment<T extends NextMessageDraft>(
   const existing = id ? comments.find((comment) => comment.id === id) : undefined;
   const comment: DraftFileComment = {
     kind: "file",
-    id: existing?.id ?? crypto.randomUUID(),
+    id: existing?.id ?? id ?? crypto.randomUUID(),
     revision: existing ? existing.revision + 1 : 1,
     displayNumber: existing?.displayNumber ?? comments.length + 1,
-    ...target,
+    filePath: target.filePath,
+    line: target.line,
+    lineContent: target.lineContent,
     note: content.note,
     mentions: [...content.mentions],
   };

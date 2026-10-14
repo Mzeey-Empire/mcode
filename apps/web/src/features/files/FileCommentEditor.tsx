@@ -26,7 +26,6 @@ function isEdited(note: string, mentions: readonly MessageMention[], annotation:
     || JSON.stringify(mentions) !== JSON.stringify(annotation?.mentions ?? []);
 }
 
-/** Restores the open editor's unsaved text, else starts from the saved comment. */
 function readInitialContent(
   threadId: string,
   annotation: DraftFileComment | undefined,
@@ -66,9 +65,6 @@ export function FileCommentEditor({ threadId, target, annotation, workspaceId, e
   const [initialDraft] = useState(() => readInitialContent(threadId, annotation));
   const [note, setNote] = useState(initialDraft.note);
   const [mentions, setMentions] = useState<MessageMention[]>(initialDraft.mentions);
-  // The composer rewrites itself when savedNote changes, so it must only see the initial text.
-  const initialNote = useRef(note).current;
-  const initialMentions = useRef(mentions).current;
 
   const isDirty = isEdited(note, mentions, annotation);
   const canSave = canSaveFileComment(note, mentions);
@@ -105,8 +101,8 @@ export function FileCommentEditor({ threadId, target, annotation, workspaceId, e
         <CommentEditorComposer
           threadId={threadId}
           workspaceId={workspaceId}
-          savedNote={initialNote}
-          savedMentions={initialMentions}
+          savedNote={initialDraft.note}
+          savedMentions={initialDraft.mentions}
           editorRef={editorRef}
           contentEditableRef={(element) => element?.focus()}
           rootRef={rootRef}

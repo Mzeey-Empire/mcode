@@ -112,16 +112,11 @@ function changedLineSet(changedLines: readonly (readonly [number, number])[] | n
   return set;
 }
 
-/** One virtual row: a code line, a saved comment card under its line, or the open editor. */
 type CodeRow =
   | { readonly kind: "line"; readonly index: number }
   | { readonly kind: "comment"; readonly comment: DraftFileComment }
   | { readonly kind: "editor"; readonly target: FileCommentTarget; readonly annotation?: DraftFileComment };
 
-/**
- * Interleaves comment rows under their lines. The comment being edited renders
- * as the editor in its card's place, and a new comment's editor follows its line.
- */
 function buildCodeRows(
   path: string,
   lines: readonly string[],
@@ -140,7 +135,6 @@ function buildCodeRows(
     rows.push({ kind: "line", index });
     for (const comment of byLine.get(line) ?? []) {
       const editing = anchor?.kind === "edit" && anchor.annotationId === comment.id;
-      // The target must hold only target fields: the save spreads it over the comment it writes.
       const target = { filePath: comment.filePath, line: comment.line, lineContent: comment.lineContent };
       rows.push(editing ? { kind: "editor", target, annotation: comment } : { kind: "comment", comment });
     }
@@ -158,7 +152,6 @@ function rowKey(row: CodeRow | undefined, index: number): string {
   return `editor:${row.annotation?.id ?? row.target.line}`;
 }
 
-/** Scrolls to a jump another surface asked for once this file's rows exist, then clears it. */
 function usePendingJump(scopeId: string, path: string, rows: readonly CodeRow[], scrollToIndex: (index: number) => void) {
   const jump = useFilesTabsStore((store) => store.scopes[scopeId]?.pendingJump ?? null);
   useEffect(() => {
