@@ -13,9 +13,9 @@ export interface FileRevertInset {
 }
 
 /** Returns focus to the opener unless the user has already moved it somewhere else. */
-function restoreFocus(opener: HTMLElement | null): void {
+function restoreFocus(opener: HTMLElement | null, confirm: HTMLElement | null): void {
   const active = document.activeElement;
-  const focusLost = !active || active === document.body || active.closest('[role="group"][aria-label="Confirm revert"]') !== null;
+  const focusLost = !active || active === document.body || confirm?.contains(active) === true;
   if (opener?.isConnected && focusLost) opener.focus();
 }
 
@@ -27,6 +27,7 @@ function restoreFocus(opener: HTMLElement | null): void {
 export function useFileRevertInset(threadId: string, comparisonScope: string, revert: FileRevertSource | null | undefined): FileRevertInset {
   const [open, setOpen] = useState<{ readonly scope: string; readonly path: string } | null>(null);
   const opener = useRef<HTMLElement | null>(null);
+  const confirmRef = useRef<HTMLDivElement | null>(null);
   const scope = `${comparisonScope}:${revert?.messageId ?? ""}:${revert?.fromMessageId ?? ""}`;
   const openPath = revert && open?.scope === scope ? open.path : null;
   return {
@@ -41,17 +42,19 @@ export function useFileRevertInset(threadId: string, comparisonScope: string, re
     }),
     inset: (path) =>
       revert && openPath === path ? (
-        <FileRevertConfirm
-          threadId={threadId}
-          path={path}
-          messageId={revert.messageId}
-          fromMessageId={revert.fromMessageId}
-          range={revert.range}
-          onClose={() => {
-            setOpen(null);
-            restoreFocus(opener.current);
-          }}
-        />
+        <div ref={confirmRef}>
+          <FileRevertConfirm
+            threadId={threadId}
+            path={path}
+            messageId={revert.messageId}
+            fromMessageId={revert.fromMessageId}
+            range={revert.range}
+            onClose={() => {
+              setOpen(null);
+              restoreFocus(opener.current, confirmRef.current);
+            }}
+          />
+        </div>
       ) : null,
   };
 }

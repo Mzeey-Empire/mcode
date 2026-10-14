@@ -40,19 +40,19 @@ describe("useFileRevertInset", () => {
     expect(screen.getByRole("button", { name: "Revert file" })).toHaveFocus();
   });
 
-  it("leaves focus alone when the user moved it while the revert was applying", async () => {
+  it("leaves focus in another confirm the user opened while the revert was applying", async () => {
     let finish: (value: unknown) => void = () => {};
     transport.applyTurnRevert.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
-    render(<><Header /><input aria-label="Elsewhere" /></>);
+    render(<><Header /><div role="group" aria-label="Confirm revert"><button type="button">Other confirm</button></div></>);
     await userEvent.click(screen.getByRole("button", { name: "Revert file" }));
     await userEvent.click(await screen.findByRole("button", { name: "Revert" }));
-    await userEvent.click(screen.getByLabelText("Elsewhere"));
+    await userEvent.click(screen.getByRole("button", { name: "Other confirm" }));
     finish({
       status: "reverted",
       receipt: { id: "r", thread_id: "thread-1", role: "system", content: "Reverted a.ts · Turn 1", timestamp: "2026-10-14T10:00:00.000Z" },
       revert: { id: "rv", threadId: "thread-1", targetMessageId: "m1", fromMessageId: null, kind: "file", path: "a.ts", undoesRevertId: null, undoneByRevertId: null, files: [], receiptMessageId: "r", createdAt: "2026-10-14T10:00:00.000Z" },
     });
     await waitFor(() => expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument());
-    expect(screen.getByLabelText("Elsewhere")).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Other confirm" })).toHaveFocus();
   });
 });
