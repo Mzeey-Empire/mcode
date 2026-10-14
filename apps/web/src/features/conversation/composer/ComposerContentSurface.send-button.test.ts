@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { createMockThread } from "@/__tests__/mocks/transport";
 import {
   getComposerDock,
   getComposerSendButtonVisualState,
+  getEditorPlaceholder,
   isComposerSendButtonDisabled,
 } from "./ComposerContentSurface";
 
@@ -107,5 +109,31 @@ describe("composer dock selection", () => {
 
   it("leaves the composer showing when nothing is waiting on the user", () => {
     expect(getComposerDock({ approvalCount: 0, planPending: false, threadId: "thread-1" })).toBeNull();
+  });
+});
+
+describe("composer placeholder for a thread with a ready plan", () => {
+  const readyIdle = {
+    startingThread: false,
+    isStaleWorktree: false,
+    goalPending: false,
+    editingFromQueue: null,
+    isAgentRunning: false,
+    activeThread: createMockThread({ plan_phase: "ready" }),
+    effectiveProviderId: "codex",
+  } as const;
+
+  it("names the thread's provider when the next send revises the plan", () => {
+    expect(getEditorPlaceholder(readyIdle)).toBe("Tell Codex what to change");
+    expect(getEditorPlaceholder({ ...readyIdle, effectiveProviderId: "claude" })).toBe("Tell Claude what to change");
+  });
+
+  it("offers a queued follow-up while the agent is running", () => {
+    expect(getEditorPlaceholder({ ...readyIdle, isAgentRunning: true })).toBe("Queue a follow-up");
+  });
+
+  it("keeps the branch and starting copy over the plan revision copy", () => {
+    expect(getEditorPlaceholder({ ...readyIdle, branchFromMessageId: "m1" })).toBe("What should the branch work on?");
+    expect(getEditorPlaceholder({ ...readyIdle, startingThread: true })).toBe("Do anything");
   });
 });

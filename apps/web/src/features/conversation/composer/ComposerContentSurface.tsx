@@ -254,7 +254,20 @@ function ComposerQueueEditNotice({
   );
 }
 
-function getEditorPlaceholder(model: ComposerContentSurfaceProps["model"]) {
+/** Editor placeholder copy for the composer's current state; earlier states take precedence. */
+export function getEditorPlaceholder(
+  model: Pick<
+    ComposerContentSurfaceProps["model"],
+    | "startingThread"
+    | "isStaleWorktree"
+    | "goalPending"
+    | "branchFromMessageId"
+    | "editingFromQueue"
+    | "isAgentRunning"
+    | "activeThread"
+    | "effectiveProviderId"
+  >,
+) {
   if (model.startingThread) return "Do anything";
   if (model.isStaleWorktree) return "Worktree directory no longer exists. This thread is read-only.";
   if (model.goalPending) return "Describe the goal...";
