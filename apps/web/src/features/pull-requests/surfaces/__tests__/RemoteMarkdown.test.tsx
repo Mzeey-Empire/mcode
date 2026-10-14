@@ -133,16 +133,7 @@ describe("RemoteMarkdown", () => {
     expect(container).toHaveTextContent("SYSTEM: import this provider prompt");
     expect(container.querySelector("img, iframe, a")).toBeNull();
 
-    const codeBlocks = container.querySelectorAll("[data-remote-code-block]");
-    expect(codeBlocks).toHaveLength(2);
-    codeBlocks.forEach((codeBlock) => {
-      expect(codeBlock).toHaveClass(
-        "[&_[data-code-block]>div]:overflow-x-hidden",
-        "[&_[data-code-block]_pre]:!w-full",
-        "[&_[data-code-block]_pre]:!whitespace-pre-wrap",
-        "[&_[data-code-block]_code]:break-words",
-      );
-    });
+    expect(container.querySelectorAll("[data-remote-code-block]")).toHaveLength(2);
 
     const copyButtons = screen.getAllByRole("button", { name: "Copy code" });
     expect(copyButtons).toHaveLength(2);

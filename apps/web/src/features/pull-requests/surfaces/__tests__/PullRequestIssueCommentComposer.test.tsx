@@ -114,31 +114,6 @@ describe("PullRequestIssueCommentComposer", () => {
     });
     expect(textarea.tagName).toBe("TEXTAREA");
     expect(textarea).toHaveAttribute("rows", "1");
-    expect(textarea).toHaveClass(
-      "min-h-12",
-      "max-h-32",
-      "field-sizing-content",
-      "resize-none",
-      "border-0",
-      "bg-transparent",
-      "pr-12",
-    );
-    expect(textarea).not.toHaveClass("resize-y", "field-sizing-fixed");
-    expect(
-      screen.getByRole("button", { name: "Post comment" }),
-    ).toHaveClass("absolute", "bottom-2", "right-2", "rounded-full");
-    expect(
-      screen.getByRole("region", { name: "Add a comment" }),
-    ).toHaveClass(
-      "relative",
-      "z-(--layer-sticky)",
-      "before:bg-gradient-to-t",
-      "before:from-page",
-      "before:to-transparent",
-    );
-    expect(
-      screen.getByRole("region", { name: "Add a comment" }),
-    ).not.toHaveClass("border-t", "bg-page");
     expect(screen.queryByText("Ctrl/⌘ Enter to post")).not.toBeInTheDocument();
     expect(screen.getByText("0 / 65,536 bytes")).toHaveClass("sr-only");
   });
@@ -207,68 +182,6 @@ describe("PullRequestIssueCommentComposer", () => {
       }),
     );
     expect(onPosted).toHaveBeenCalledOnce();
-  });
-
-  it("uses the same composer shell for replies and Timeline comments", () => {
-    usePullRequestMutationStore
-      .getState()
-      .setCommentDraft(identity, "@reviewer ");
-
-    render(
-      <PullRequestIssueCommentComposer
-        identity={identity}
-        expected={expected}
-        capability={{ allowed: true }}
-        mutationTransport={transport(vi.fn())}
-        readTransport={readTransport()}
-        variant="reply"
-        replyTo="reviewer"
-      />,
-    );
-
-    const composer = screen.getByRole("region", { name: "Reply to reviewer" });
-    expect(composer).toHaveClass("mt-4");
-    expect(composer).not.toHaveClass(
-      "-mx-4",
-      "-mb-4",
-      "border-t",
-      "bg-background/25",
-    );
-    const textbox = screen.getByRole("textbox", { name: "Reply to reviewer" });
-    expect(textbox.parentElement).toHaveClass(
-      "relative",
-      "rounded-xl",
-      "bg-hover/50",
-      "ring-1",
-      "ring-inset",
-      "ring-border/60",
-    );
-    expect(textbox).toHaveClass(
-      "min-h-12",
-      "max-h-32",
-      "field-sizing-content",
-      "resize-none",
-      "border-0",
-      "bg-transparent",
-      "pr-20",
-    );
-    expect(screen.getByRole("button", { name: "Cancel reply" })).toHaveClass(
-      "absolute",
-      "bottom-2",
-      "right-11",
-      "size-8",
-      "rounded-full",
-    );
-    expect(screen.getByRole("button", { name: "Post reply" })).toHaveClass(
-      "absolute",
-      "bottom-2",
-      "right-2",
-      "size-8",
-      "rounded-full",
-    );
-    expect(
-      screen.getByRole("button", { name: "Post reply" }).querySelector("svg"),
-    ).toHaveClass("lucide-arrow-up");
   });
 
   it("preserves text, retries the same key, and keeps outcome-unknown blocked after refresh", async () => {

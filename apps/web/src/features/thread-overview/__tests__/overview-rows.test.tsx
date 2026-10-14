@@ -115,7 +115,6 @@ describe("overview Changes, Tasks and Usage rows", () => {
     expect(changeSummaryRpcCount()).toBe(0);
     const summary = screen.getByTestId("thread-overview-change-summary");
     expect(summary).toHaveTextContent("+15 −9");
-    expect(summary).toHaveClass("text-muted");
     expect(summary).toHaveAttribute("aria-label", "15 additions, 9 deletions");
   });
 

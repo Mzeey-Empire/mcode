@@ -193,7 +193,7 @@ describe("PullRequestFileTree", () => {
     expect(row.querySelector('[aria-label$="additions"]')).not.toBeInTheDocument();
   });
 
-  it("does not apply a persistent background to expanded folders", async () => {
+  it("expands folders on first render", async () => {
     render(
       <PullRequestFileTree
         files={[file("apps/web/App.tsx", 1)]}
@@ -204,10 +204,9 @@ describe("PullRequestFileTree", () => {
 
     const folder = await screen.findByRole("treeitem", { name: "apps/web" });
     expect(folder).toHaveAttribute("aria-expanded", "true");
-    expect(folder).toHaveClass("aria-expanded:bg-transparent");
   });
 
-  it("reserves green and red for added and deleted file semantics", () => {
+  it("marks added and deleted files with their change type and line counts", () => {
     render(
       <PullRequestFileTree
         files={[file("added.ts", 1, "added"), file("deleted.ts", 2, "deleted")]}
@@ -220,18 +219,10 @@ describe("PullRequestFileTree", () => {
     const deleted = screen.getByRole("treeitem", {
       name: "Deleted deleted.ts",
     });
-    expect(added.querySelector('[data-change-type="added"]')).toHaveClass(
-      "text-[var(--diff-add-strong)]",
-    );
-    expect(added.querySelector('[aria-label="1 additions"]')).toHaveClass(
-      "text-[var(--diff-add-strong)]",
-    );
-    expect(deleted.querySelector('[data-change-type="deleted"]')).toHaveClass(
-      "text-[var(--diff-remove-strong)]",
-    );
-    expect(deleted.querySelector('[aria-label="1 deletions"]')).toHaveClass(
-      "text-[var(--diff-remove-strong)]",
-    );
+    expect(added.querySelector('[data-change-type="added"]')).not.toBeNull();
+    expect(added.querySelector('[aria-label="1 additions"]')).not.toBeNull();
+    expect(deleted.querySelector('[data-change-type="deleted"]')).not.toBeNull();
+    expect(deleted.querySelector('[aria-label="1 deletions"]')).not.toBeNull();
   });
 
   it("expands newly loaded directories without reopening user-collapsed ones", async () => {

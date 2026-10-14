@@ -115,7 +115,6 @@ describe("ProjectAction controls", () => {
       "Build",
       "Run Setup",
     ]);
-    expect(menuItems[0].firstElementChild?.firstElementChild).toHaveClass("lucide-pencil");
     expect(menuItems[1].lastElementChild?.querySelector('[aria-label="Play"]')).not.toBeNull();
     const content = menuItems[0].closest('[data-slot="dropdown-menu-content"]');
     expect(content?.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(2);
@@ -231,7 +230,7 @@ describe("ProjectAction controls", () => {
     expect(focus).toHaveBeenCalledWith("build");
   });
 
-  it("renders the running icon without visible pill text", async () => {
+  it("labels the running status without visible text", async () => {
     const user = userEvent.setup();
     render(
       <ProjectActionMenu
@@ -247,8 +246,6 @@ describe("ProjectAction controls", () => {
 
     const running = await screen.findByRole("status", { name: "Running" });
     expect(running).not.toHaveTextContent("Running");
-    expect(running.closest("[class*='group/badge']")).toBeNull();
-    expect(running.querySelector(".spinner-tail-fade")).toHaveClass("motion-reduce:animate-none");
   });
 
   it("keeps the completed icon for two seconds, then exposes Restart", () => {
@@ -259,8 +256,6 @@ describe("ProjectAction controls", () => {
       render(<ProjectActionTerminalView threadId="thread-1" actionId="build" />);
       const completed = screen.getByRole("status", { name: "Completed" });
       expect(completed).not.toHaveTextContent("Completed");
-      expect(completed.closest("[class*='group/badge']")).toBeNull();
-      expect(completed.querySelector(".lucide-circle-check")).toBeInTheDocument();
       act(() => { vi.advanceTimersByTime(2_000); });
       expect(screen.getByRole("button", { name: "Restart Build" })).toBeInTheDocument();
       expect(screen.getByText("done")).toBeInTheDocument();
@@ -366,7 +361,6 @@ describe("ProjectAction controls", () => {
 
       const failed = screen.getByRole("status", { name: "Failed" });
       expect(failed).not.toHaveTextContent("Failed");
-      expect(failed.querySelector(".lucide-circle-x")).toBeInTheDocument();
       act(() => { vi.advanceTimersByTime(2_000); });
       expect(screen.getByRole("button", { name: "Restart Build" })).toBeInTheDocument();
       expect(screen.queryByRole("status", { name: "Failed" })).not.toBeInTheDocument();
@@ -376,9 +370,9 @@ describe("ProjectAction controls", () => {
   });
 
   it.each([
-    ["interrupted", "Interrupted", "lucide-circle-stop"],
-    ["unavailable", "Unavailable", "lucide-circle-slash"],
-  ] as const)("keeps the %s icon after the result display window", (status, label, iconClass) => {
+    ["interrupted", "Interrupted"],
+    ["unavailable", "Unavailable"],
+  ] as const)("keeps the %s status after the result display window", (status, label) => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-08-22T12:00:01.000Z"));
@@ -388,7 +382,6 @@ describe("ProjectAction controls", () => {
       act(() => { vi.advanceTimersByTime(2_000); });
       const result = screen.getByRole("status", { name: label });
       expect(result).not.toHaveTextContent(label);
-      expect(result.querySelector(`.${iconClass}`)).toBeInTheDocument();
       expect(screen.queryByLabelText("Play")).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();

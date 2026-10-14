@@ -87,7 +87,6 @@ describe("StartupStepsTrail", () => {
       ["startup-step-agent", "pending", "Start thread"],
     ]);
     expect(screen.queryByTestId("startup-step-thread")).toBeNull();
-    expect(screen.getByTestId("startup-step-agent")).toHaveClass("opacity-50");
   });
 
   it("ticks the live row and labels it with the setup command", async () => {

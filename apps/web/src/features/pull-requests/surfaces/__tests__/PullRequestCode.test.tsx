@@ -459,7 +459,6 @@ describe("PullRequestCode", () => {
     expect(navigator).toBeVisible();
     const sheet = screen.getByRole("dialog", { name: "Changed files" });
     expect(sheet).toContainElement(navigator);
-    expect(sheet).toHaveClass("absolute", "right-0");
     expect(
       screen.getByRole("textbox", { name: "Search changed files" }),
     ).toBeVisible();

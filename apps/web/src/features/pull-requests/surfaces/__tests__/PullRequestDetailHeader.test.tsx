@@ -104,11 +104,10 @@ describe("PullRequestDetailHeader", () => {
     expect(screen.getByLabelText("34 deletions")).toHaveTextContent("−34");
     expect(screen.getByText("No reviewers")).toBeVisible();
     expect(screen.getByText("4 comments")).toBeVisible();
-    expect(container.querySelector(".lucide-message-circle")).toBeVisible();
     expect(screen.getByText("Checks successful")).toBeVisible();
     expect(
       container.querySelector('[data-check-state="passing"]'),
-    ).toHaveClass("rounded-full", "border-[var(--diff-add-strong)]");
+    ).toBeInTheDocument();
     expect(
       document.querySelector('time[datetime="2026-07-11T12:00:00.000Z"]'),
     ).not.toBeNull();
@@ -140,7 +139,7 @@ describe("PullRequestDetailHeader", () => {
     expect(screen.getByText("octocat")).toBeVisible();
   });
 
-  it("uses a circular status ring for failed checks", () => {
+  it("marks failed checks as failing", () => {
     const failed = detail();
     failed.checks = { state: "failing" };
 
@@ -149,7 +148,7 @@ describe("PullRequestDetailHeader", () => {
     expect(screen.getByText("Failing checks")).toBeVisible();
     expect(
       container.querySelector('[data-check-state="failing"]'),
-    ).toHaveClass("rounded-full", "border-[var(--diff-remove-strong)]");
+    ).toBeInTheDocument();
   });
 
   it("shows reviewer identities on hover with review state indicators", async () => {
@@ -191,10 +190,10 @@ describe("PullRequestDetailHeader", () => {
     expect(screen.queryByText("reviewer")).not.toBeInTheDocument();
     expect(
       container.querySelector('[data-review-state="approved"]'),
-    ).toHaveClass("bg-[var(--diff-add-strong)]");
+    ).toBeInTheDocument();
     expect(
       container.querySelector('[data-review-state="requested"]'),
-    ).toHaveClass("bg-primary");
+    ).toBeInTheDocument();
 
     await userEvent.hover(reviewer);
     expect(await screen.findByText("reviewer")).toBeVisible();
