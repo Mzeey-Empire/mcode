@@ -815,7 +815,7 @@ _Avoid_: Failed, which states that the write did not happen
 ### Overview
 The card that recaps the active thread's working context (its changes, current
 branch, and pull-request state) and hosts the git actions for that thread
-(Commit-or-push, Create PR), modelled on Codex's "Environment" panel. Its rows
+(Commit…, Create PR), modelled on Codex's "Environment" panel. Its rows
 group into four sections: lane, activity, terminals, and summary. Code symbol:
 `ThreadOverview`.
 
@@ -1009,6 +1009,17 @@ a thread. Each view renders exactly one diff; there is no eager render of
 every turn's diff. A names-only view menu picks the view. A view that cannot
 load stays in the menu, dimmed with its reason, and the default view is
 never one of those.
+
+### Commit sheet
+The sheet over the Review tab where the user picks uncommitted files, edits a
+generated message, and commits, optionally pushing. A floating Commit button
+opens it while the checkout is dirty, and the overview's **Commit…** row opens
+Review with it. It always lists every uncommitted file, whatever view Review
+shows. Tracked files start checked and untracked files start unchecked. One
+commit request keeps its `requestId` until the server answers, so a dropped
+connection resends it instead of committing twice. A rejection or a hook
+failure leaves the checked files and the message in place.
+_Avoid_: Commit dialog, Commit-or-push (the old action that asked the agent to commit)
 
 ### Files navigator
 The collapsible file-tree surface within Review, labelled **Files** in the UI.
