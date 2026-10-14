@@ -12,12 +12,13 @@ import type { Database } from "bun:sqlite";
 import { asc, eq, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { planQuestionAnswers } from "../../../../runtime/persistence/sqlite/schema.js";
+import { runChanges } from "../../../../runtime/persistence/sqlite/drizzle-changes.js";
 
 /** Repository for the `plan_question_answers` sidecar table. */
 export class PlanQuestionAnswersStore {
   private readonly orm: BunSQLiteDatabase;
 
-  constructor(db: Database) {
+  constructor(private readonly db: Database) {
     this.orm = drizzle(db);
   }
 
@@ -26,11 +27,14 @@ export class PlanQuestionAnswersStore {
    * Idempotent: re-marking the same id is a no-op via INSERT OR IGNORE.
    */
   markAnswered(assistantMessageId: string, threadId: string): void {
-    this.orm
-      .insert(planQuestionAnswers)
-      .values({ assistantMessageId, threadId })
-      .onConflictDoNothing()
-      .run();
+    this.db.transaction(() => {
+      const inserted = runChanges(this.orm.insert(planQuestionAnswers)
+        .values({ assistantMessageId, threadId }).onConflictDoNothing());
+      if (inserted.changes === 0) return;
+      // Accepted dismissal can reach storage after its question publication was saved.
+      this.db.prepare("UPDATE threads SET plan_phase = NULL, updated_at = ? WHERE id = ? AND plan_phase = 'questions'")
+        .run(new Date().toISOString(), threadId);
+    })();
   }
 
   /** True iff a marker exists for the given assistant message id. */

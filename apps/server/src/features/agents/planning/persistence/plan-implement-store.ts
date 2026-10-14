@@ -108,7 +108,7 @@ export class PlanImplementStore {
     this.db.prepare("UPDATE plans SET status = 'superseded', updated_at = ? WHERE thread_id = ? AND id <> ? AND status IN ('draft', 'ready')")
       .run(now, request.sourceThreadId, version.id);
     this.orm.update(plans).set({ status: "accepted", acceptedAt: now, updatedAt: now }).where(eq(plans.id, version.id)).run();
-    this.orm.update(threads).set({ interactionMode: "build" }).where(eq(threads.id, request.sourceThreadId)).run();
+    this.orm.update(threads).set({ interactionMode: "build", planPhase: null, updatedAt: now }).where(eq(threads.id, request.sourceThreadId)).run();
     this.orm.update(planImplementRequests).set({ status: "admitted", turnId: input.turnId, executionId: input.executionId, updatedAt: now })
       .where(eq(planImplementRequests.requestId, request.requestId)).run();
   }

@@ -110,6 +110,7 @@ import { ThreadRepo } from "../../features/thread-control/persistence/thread-rep
 import { invalidateAttentionOnSettledTurns, ThreadAttentionService } from "../../features/thread-control/attention/thread-attention-service.js";
 import { subscribeCommittedCanonicalEvents } from "../../features/agents/canonical/committed-canonical-events.js";
 import { approvalWaitingSource } from "../../features/thread-control/attention/approval-waiting-source.js";
+import { planWaitingSource } from "../../features/thread-control/attention/plan-waiting-source.js";
 import { ToolCallRecordRepo } from "../../features/agents/tools/persistence/tool-call-record-repo.js";
 import { ThoughtSegmentRepo } from "../../features/agents/conversation/narrative/persistence/thought-segment-repo.js";
 import { HookExecutionRepo } from "../../features/agents/events/persistence/hook-execution-repo.js";
@@ -504,9 +505,11 @@ const handoffStorage = container.resolve(HandoffStorage);
 const handoffCheckoutService = container.resolve(HandoffCheckoutService);
 const db = container.resolve<Database>("Database");
 const databaseWriter = container.resolve(ApplicationDatabaseWriter);
-const threadAttentionService = new ThreadAttentionService(db, databaseWriter, [approvalWaitingSource(approvalService)],
+const threadAttentionService = new ThreadAttentionService(db, databaseWriter,
+  [approvalWaitingSource(approvalService), planWaitingSource(db, "questions"), planWaitingSource(db, "plan")],
   (attention) => broadcast("thread.attention", attention));
 threadRepo.attention = threadAttentionService;
+workerOwnedTurnRuntime.bindPlanPhaseChanged((threadId) => threadRepo.publishPlanPhase(threadId));
 turnSnapshotRepo.attention = threadAttentionService;
 snapshotRefPins.attention = threadAttentionService;
 invalidateAttentionOnSettledTurns(threadAttentionService, subscribeCommittedCanonicalEvents);

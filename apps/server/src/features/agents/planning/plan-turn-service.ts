@@ -8,6 +8,8 @@ import type {
   PermissionMode,
   ProviderId,
   ReasoningLevel,
+  TurnRequest,
+  PlanQuestion,
 } from "@mcode/contracts";
 import { broadcast } from "../../../application/transport/push.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
@@ -21,6 +23,10 @@ import { PlanRepo } from "./persistence/plan-repo.js";
 import { ProviderIdSchema } from "@mcode/contracts";
 import type { PlanFileWriter } from "./plan-file-writer.js";
 import type { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
+import type { SendMessageCommand } from "../turns/turn-admission-dispatch-coordinator.js";
+
+/** Admission decision shared by the provider request and worker capture setup. */
+export type PlanTurnClassification = NonNullable<TurnRequest["planTurn"]> | { kind: "implement" | "none" };
 
 type PlanMessage = Extract<AgentEvent, { type: "message" }>;
 
@@ -53,15 +59,44 @@ export class PlanTurnService {
     await this.projection?.files.write(threadId);
   }
 
+  /** Classify only after the preceding execution releases its worker and capture state. */
+  classify(command: Pick<SendMessageCommand, "threadId" | "interactionMode" | "markPlanAnswerForMessageId" | "planImplement" | "providerOriginated" | "provider">): PlanTurnClassification {
+    if (command.planImplement) return { kind: "implement" };
+    if (command.providerOriginated) return { kind: "none" };
+    if (command.markPlanAnswerForMessageId) return this.classifyOutput(command.threadId, "planning", command.provider);
+    const mode = command.interactionMode ?? this.threadRepo.findById(command.threadId)?.interaction_mode;
+    if (mode !== "plan") return { kind: "none" };
+    const latest = this.planRepo.getLatestForThread(command.threadId);
+    if (latest && (latest.status === "draft" || latest.status === "ready")) return this.classifyOutput(command.threadId, "revise", command.provider);
+    this.beginQuestionGeneration(command.threadId);
+    return { kind: "questions", planFilePath: null };
+  }
+
+  private classifyOutput(threadId: string, kind: "planning" | "revise", providerId?: ProviderId): NonNullable<TurnRequest["planTurn"]> {
+    this.beginOutputGeneration(threadId, providerId);
+    return { kind, planFilePath: this.projection?.files.path(threadId) ?? null };
+  }
+
+  /** Publish durable phase changes only after the parent turn has been admitted. */
+  async admitted(threadId: string, classification: PlanTurnClassification): Promise<void> {
+    if (classification.kind === "planning" || classification.kind === "revise") {
+      await this.threadRepo.updatePlanPhase(threadId, "planning");
+    } else if (classification.kind === "implement") {
+      this.threadRepo.publishPlanPhase(threadId);
+    } else if (classification.kind === "questions") {
+      await this.dismissQuestions(threadId);
+    }
+  }
+
   /** Start parsing one plan-question generation turn. */
   beginQuestionGeneration(threadId: string): void {
     this.execution(threadId).beginQuestionGeneration();
   }
 
   /** Start parsing one structured plan capture turn and arm its native provider mode. */
-  beginOutputGeneration(threadId: string): void {
+  beginOutputGeneration(threadId: string, providerId?: ProviderId): void {
     this.execution(threadId).beginOutputGeneration();
-    this.armNativeOutputMode(threadId);
+    this.armNativeOutputMode(threadId, providerId);
   }
 
   /** Return the provider prompt used to collect plan questions. */
@@ -104,7 +139,12 @@ ${userMessage}`;
   /** Consume one visible text delta while a plan turn is active. */
   onTextDelta(threadId: string, delta: string): void {
     const ready = this.executionByThread.get(threadId)?.feedText(delta);
-    if (ready) broadcast("plan.questions", { threadId, questions: ready.questions });
+    if (ready) void this.publishQuestions(threadId, ready.questions);
+  }
+
+  private async publishQuestions(threadId: string, questions: PlanQuestion[]): Promise<void> {
+    await this.threadRepo.updatePlanPhase(threadId, "questions");
+    broadcast("plan.questions", { threadId, questions });
   }
 
   /** Capture native plan markdown until its assistant message receives a durable identity. */
@@ -138,7 +178,6 @@ ${userMessage}`;
     const thread = this.threadRepo.findById(threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
     const payload = this.questions.buildAnswerPayload(threadId, answers);
-    this.beginOutputGeneration(threadId);
     await this.commands.sendMessage({
       threadId,
       content: payload.content,
@@ -157,6 +196,8 @@ ${userMessage}`;
   async dismissQuestions(threadId: string): Promise<void> {
     const assistantMessageId = await this.questions.dismiss(threadId);
     if (assistantMessageId) broadcast("plan.dismissed", { threadId, assistantMessageId });
+    if (this.threadRepo.findById(threadId)?.plan_phase === "questions") await this.threadRepo.updatePlanPhase(threadId, null);
+    this.threadRepo.publishPlanPhase(threadId);
   }
 
   /** Record a capture already persisted by the execution worker. */
@@ -169,8 +210,8 @@ ${userMessage}`;
     this.executionByThread.delete(threadId);
   }
 
-  private armNativeOutputMode(threadId: string): void {
-    const providerId = this.threadRepo.findById(threadId)?.provider as ProviderId | undefined;
+  private armNativeOutputMode(threadId: string, requestedProviderId?: ProviderId): void {
+    const providerId = requestedProviderId ?? this.threadRepo.findById(threadId)?.provider;
     if (providerId !== "claude") return;
     const provider = this.providerRegistry.resolve(providerId) as Partial<ClaudePlanAnswerModeProvider>;
     provider.setPlanAnswerMode?.(threadId, true);
@@ -187,6 +228,7 @@ ${userMessage}`;
       const provider = ProviderIdSchema.safeParse(this.threadRepo.findById(threadId)?.provider);
       await this.planRepo.create(threadId, messageId, ready, provider.success ? provider.data : null);
       execution.markPlanPersisted();
+      this.threadRepo.publishPlanPhase(threadId);
       this.projection?.progress?.reloadPlans(threadId);
       for (const version of this.planRepo.listByThread(threadId)) broadcast("plan.versionUpserted", { threadId, version });
       await this.projection?.files.writeAfterCommit(threadId);

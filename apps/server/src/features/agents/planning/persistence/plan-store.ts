@@ -10,6 +10,8 @@ import { mergePlanVersions } from "../merge-plan-versions.js";
 import { planTitle } from "../plan-title.js";
 import type { PlanPersistenceReady } from "../plan-execution-state.js";
 import type { PlanSaveResult, PlanSnapshotResult } from "./plan-write-operations.js";
+import { ThreadStore } from "../../../thread-control/persistence/thread-store.js";
+import { PlanQuestionParser } from "../plan-question-parser.js";
 
 /** Plan queries and transactional operations, used on the application's sole writer. */
 export class PlanStore {
@@ -96,8 +98,19 @@ export class PlanStore {
   snapshot(threadId: string): PlanSnapshotResult {
     return this.db.transaction((): PlanSnapshotResult => {
       if (!this.threadExists(threadId)) return { ok: false, code: "thread_not_found", latestVersion: null };
-      return { ok: true, versions: this.listWithHistory(threadId) };
+      const phase = new ThreadStore(this.db).findById(threadId)?.plan_phase ?? null;
+      return { ok: true, versions: this.listWithHistory(threadId), phase,
+        pendingQuestions: phase === "questions" ? this.pendingQuestions(threadId) : null };
     })();
+  }
+
+  private pendingQuestions(threadId: string) {
+    const message = this.db.query<{ id: string; content: string }, [string, string]>(`SELECT id, content FROM messages
+      WHERE thread_id = ? AND role = 'assistant' AND instr(content, ?) > 0
+      ORDER BY sequence DESC LIMIT 1`).get(threadId, "```plan-questions");
+    if (!message || this.db.prepare("SELECT 1 FROM plan_question_answers WHERE assistant_message_id = ?").get(message.id)) return null;
+    const questions = new PlanQuestionParser().feed(message.content);
+    return questions ? { assistantMessageId: message.id, questions } : null;
   }
 
   /** Read retained plan projections alongside the authoritative version rows. */
@@ -131,6 +144,7 @@ export class PlanStore {
   /** Insert an assigned version without allocating another identity. */
   insert(version: PlanVersion, nativePlanFileJson: string | null = null): void {
     this.orm.insert(plans).values({ ...version, nativePlanFileJson }).run();
+    if (version.status === "ready" || version.status === "draft") new ThreadStore(this.db).updatePlanPhase(version.threadId, "ready");
   }
 
   /** All durable versions in their per-thread order. */

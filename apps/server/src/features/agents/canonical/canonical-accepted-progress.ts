@@ -88,6 +88,12 @@ interface ProgressThread {
 
 /** One bounded live owner retains accepted progress after its execution worker releases. */
 export class CanonicalAcceptedProgress {
+  private onPlanPhaseChanged: ((threadId: string) => void) | undefined;
+
+  /** Refresh planning attention after the saved state becomes visible to readers. */
+  bindPlanPhaseChanged(listener: (threadId: string) => void): void {
+    this.onPlanPhaseChanged = listener;
+  }
   private rosterChangeListener: ((threadId: string, revision: number) => void) | undefined;
 
   /** Observe accepted canonical roster revisions without coupling projections to reads. */
@@ -952,6 +958,7 @@ export class CanonicalAcceptedProgress {
   }
 
   private async projectSavedPlans(batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>): Promise<void> {
+    if (changesPlanPhase(batch.write)) this.onPlanPhaseChanged?.(batch.execution.threadId);
     if (!batch.write.features?.planRecords?.length) return;
     this.reloadPlans(batch.execution.threadId);
     await this.planFiles?.writeAfterCommit(batch.execution.threadId);
@@ -1061,6 +1068,16 @@ export class CanonicalAcceptedProgress {
       broadcast("agent.canonical", { ...frame, threadId: childId, ownerThreadId: frame.threadId });
     }
   }
+}
+
+function changesPlanPhase(write: AcceptedExecutionWriteIntent): boolean {
+  if (write.kind === "plan-answer") return true;
+  if (write.kind !== "execution") return false;
+  if (write.terminal || write.features?.planRecords?.length) return true;
+  const mutation = write.operation.mutation;
+  if (mutation.kind === "live-event") return Boolean(mutation.planQuestions);
+  if (mutation.kind === "append-events") return Boolean(mutation.parentLive?.planQuestions);
+  return false;
 }
 
 function inAcceptedFamily(state: AgentModelState, threadId: string, ownerId: string): boolean {

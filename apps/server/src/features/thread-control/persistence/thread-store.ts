@@ -7,7 +7,7 @@ import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { and, asc, desc, eq, getTableColumns, gt, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import { DevinModeSchema, ReasoningLevelSchema, ScheduledTurnResumeSchema, type AcknowledgeSeenResult, type TurnOutcome } from "@mcode/contracts";
+import { DevinModeSchema, PlanPhaseSchema, ReasoningLevelSchema, ScheduledTurnResumeSchema, type AcknowledgeSeenResult, type PlanPhase, type TurnOutcome } from "@mcode/contracts";
 import type { DevinMode, Thread, RecentThread, ThreadMode, ThreadStatus, ReasoningLevel, InteractionMode, OrchestrationMode, PermissionMode, ContextWindowMode } from "@mcode/contracts";
 import {
   canonicalAgentThreads,
@@ -119,11 +119,12 @@ function rowToThreadLifecycle(row: ThreadRow): Pick<Thread,
 }
 
 function rowToThreadPreferences(row: ThreadRow): Pick<Thread,
-  "reasoning_level" | "interaction_mode" | "orchestration_mode" | "permission_mode" | "context_window_mode"
+  "reasoning_level" | "interaction_mode" | "plan_phase" | "orchestration_mode" | "permission_mode" | "context_window_mode"
 > {
   return {
     reasoning_level: parseStoredReasoningLevel(row.reasoningLevel),
     interaction_mode: (row.interactionMode ?? null) as InteractionMode | null,
+    plan_phase: PlanPhaseSchema.nullable().parse(row.planPhase),
     orchestration_mode: (row.orchestrationMode ?? null) as OrchestrationMode | null,
     permission_mode: (row.permissionMode ?? null) as PermissionMode | null,
     context_window_mode:
@@ -199,6 +200,7 @@ function createThreadRecord(input: ThreadCreateRecordInput): Thread {
     context_window: null,
     reasoning_level: null,
     interaction_mode: null,
+    plan_phase: null,
     orchestration_mode: null,
     permission_mode: null,
     context_window_mode: null,
@@ -338,6 +340,7 @@ const BOOLEAN_SETTING_COLUMNS = [
 
 function buildSettingsSet(settings: ThreadSettings): Partial<typeof threads.$inferInsert> {
   const set: Record<string, unknown> = {};
+  if (settings.interaction_mode !== undefined && settings.interaction_mode !== "plan") set.planPhase = null;
   for (const [key, column] of TEXT_SETTING_COLUMNS) {
     const value = settings[key];
     if (value !== undefined) set[column] = value;
@@ -541,6 +544,10 @@ export class ThreadStore {
   recordTurnOutcome(id: string, outcome: TurnOutcome, endedAt: string): boolean {
     return this.db.transaction(() => runChanges(this.orm, sql`
       UPDATE threads SET status = ${outcome === "cancelled" ? "interrupted" : outcome}, updated_at = ${endedAt}, last_turn_outcome = ${outcome},
+        plan_phase = CASE WHEN plan_phase <> 'planning' OR plan_phase IS NULL THEN plan_phase
+          WHEN ${outcome} = 'completed' THEN 'no_plan'
+          WHEN EXISTS (SELECT 1 FROM plans WHERE thread_id = ${id} AND status IN ('draft', 'ready')) THEN 'ready'
+          ELSE NULL END,
         last_turn_ended_at = ${endedAt}, last_turn_sequence = (
           SELECT MAX(sequence) FROM messages WHERE thread_id = ${id} AND ${transcriptMessageVisibility}
         )
@@ -1059,6 +1066,13 @@ export class ThreadStore {
       .where(eq(threads.id, id))
       );
     return result.changes > 0;
+  }
+
+  /** Change planning progress only while Plan mode still owns the thread. */
+  updatePlanPhase(id: string, phase: PlanPhase | null): boolean {
+    return this.db.prepare(`UPDATE threads SET plan_phase = ?, updated_at = ?
+      WHERE id = ? AND plan_phase IS NOT ? AND (? IS NULL OR interaction_mode = 'plan')`)
+      .run(phase, new Date().toISOString(), id, phase, phase).changes > 0;
   }
 
   /** Update a thread's display title. Returns true if a row was changed. */

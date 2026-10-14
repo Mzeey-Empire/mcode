@@ -669,6 +669,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     if (includeNarrative && mutation.narrative) this.persistNarrativeDelta(mutation.narrative);
     if (mutation.taskIntents) this.applyTaskIntents(operation.execution.threadId, mutation.taskIntents);
     const planOutput = includeNarrative ? this.persistLivePlanOutput(operation.execution.threadId, mutation) : undefined;
+    if (mutation.planQuestions) this.threads.updatePlanPhase(operation.execution.threadId, "questions");
     if (mutation.text.kind === "reclassify") this.resetReclassifiedText(mutation.text, operation.execution);
     const planQuestions = mutation.planQuestions ? {
       publicationId: `${operation.operationId}:plan-questions`,

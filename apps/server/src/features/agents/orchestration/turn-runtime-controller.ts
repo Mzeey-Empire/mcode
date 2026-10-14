@@ -2087,6 +2087,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
    * Admit a complete turn command, then retain only runtime-owned provider dispatch.
    */
   async sendMessage(command: SendMessageCommand, canReserve?: () => boolean): Promise<void> {
+    await this.awaitEndedTurnRelease(command.threadId);
     const admitted = await this.turnAdmissions.admit(command, this.runtimeAdmissionAuthority(), canReserve);
     if (admitted.kind !== "dispatch") return;
     await this.dispatchPreparedTurn(admitted);

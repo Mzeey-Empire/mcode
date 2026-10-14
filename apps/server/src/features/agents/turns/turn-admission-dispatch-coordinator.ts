@@ -51,7 +51,7 @@ import {
   GoalLifecycleService,
   type GoalCommandEffectReceipt,
 } from "../goals/goal-lifecycle-service.js";
-import { PlanTurnService } from "../planning/plan-turn-service.js";
+import { PlanTurnService, type PlanTurnClassification } from "../planning/plan-turn-service.js";
 import type { TurnResumeScheduler } from "../recovery/turn-resume-scheduler.js";
 import {
   type ParentTurnDurability,
@@ -188,6 +188,7 @@ export type TurnAdmissionResult =
   | PreparedTurnDispatch;
 
 interface PreparedCommand {
+  plan: PlanTurnClassification;
   readonly command: SendMessageCommand;
   readonly thread: ReturnType<ThreadRepo["findById"]> extends infer T ? Exclude<T, null> : never;
   readonly workspace: ReturnType<WorkspaceRepo["findById"]> extends infer T ? Exclude<T, null> : never;
@@ -343,7 +344,6 @@ export class TurnAdmissionDispatchCoordinator {
       replyToMessageId: submission.replyToMessageId,
       quotedText: submission.quotedText,
       selectedTextComments: submission.selectedTextComments ? [...submission.selectedTextComments] : undefined,
-      planAction: submission.planAction,
       markPlanAnswerForMessageId: submission.markPlanAnswerForMessageId,
       sourceTurnId: submission.sourceTurnId,
       sourceThreadId: submission.sourceThreadId,
@@ -482,6 +482,7 @@ export class TurnAdmissionDispatchCoordinator {
           commandEffect: routed.commandEffect,
           content: routed.content,
           automaticAttachments: automatic.attachments,
+          plan: { kind: "none" },
         },
       };
     } catch (error) {
@@ -498,11 +499,12 @@ export class TurnAdmissionDispatchCoordinator {
     runtime: TurnRuntimeAdmissionAuthority,
   ): Promise<PreparedTurnDispatch> {
     await this.preparePlanFile(prepared.command);
+    prepared.plan = this.plans.classify(prepared.command);
     const cwd = this.resolveWorkingDirectory(prepared);
     const review = await this.approvalReviews.resolve({
       requestedMode: prepared.command.approvalReviewMode,
       permissionMode: this.effectivePermissionMode(prepared.command.permissionMode, prepared.thread.permission_mode ?? "supervised"),
-      interactionMode: this.effectiveInteractionMode(prepared.command) ?? "build",
+      interactionMode: this.effectiveInteractionMode(prepared),
       model: prepared.command.model ?? "claude-sonnet-4-6",
       provider: prepared.provider,
     });
@@ -519,7 +521,7 @@ export class TurnAdmissionDispatchCoordinator {
   }
 
   private async preparePlanFile(command: SendMessageCommand): Promise<void> {
-    if (command.interactionMode === "plan" || command.planAction || command.markPlanAnswerForMessageId) {
+    if ((command.interactionMode ?? this.threads.findById(command.threadId)?.interaction_mode) === "plan" || command.markPlanAnswerForMessageId) {
       await this.plans.prepareTurn(command.threadId);
     }
   }
@@ -745,7 +747,6 @@ export class TurnAdmissionDispatchCoordinator {
         replyToMessageId: command.replyToMessageId,
         quotedText: command.quotedText,
         selectedTextComments: command.selectedTextComments,
-        planAction: command.planAction,
         markPlanAnswerForMessageId: command.markPlanAnswerForMessageId,
         sourceTurnId: command.sourceTurnId,
         sourceThreadId: command.sourceThreadId,
@@ -817,8 +818,7 @@ export class TurnAdmissionDispatchCoordinator {
     if (!this.parentStartOwner) return this.startParentTurn(input);
     const precedingMessageId = input.userMessage.messageId;
     if (!precedingMessageId) throw new Error("Worker-owned turn needs its committed user message identity");
-    const planFeature = prepared.command.planAction === "revise" || prepared.command.markPlanAnswerForMessageId ? "output"
-      : this.effectiveInteractionMode(prepared.command) === "plan" ? "questions" : "none";
+    const planFeature = this.planFeature(prepared.plan);
     await this.parentStartOwner.start({
       execution: { threadId: lease.threadId, turnId: sourceTurnId, executionId: lease.turnExecutionId },
       ownerEpoch: lease.generation,
@@ -907,10 +907,8 @@ export class TurnAdmissionDispatchCoordinator {
 
   private async publishCommittedEffects(prepared: PreparedCommand, sourceTurnId: string): Promise<void> {
     this.publishPlanAnswer(prepared.command);
-    const command = prepared.command;
-    if (command.planAction === "revise") this.plans.beginOutputGeneration(command.threadId);
-    if (this.effectiveInteractionMode(command) === "plan") this.plans.beginQuestionGeneration(command.threadId);
     await this.persistThreadSettings(prepared);
+    await this.plans.admitted(prepared.command.threadId, prepared.plan);
     void sourceTurnId;
   }
 
@@ -967,7 +965,7 @@ export class TurnAdmissionDispatchCoordinator {
 
   private async buildWirePayload(prepared: PreparedCommand, revertedPaths: readonly string[]): Promise<string> {
     let payload = this.withPlanInstructions(prepared);
-    if (this.effectiveInteractionMode(prepared.command) === "plan" && prepared.command.providerWireOverride === undefined) {
+    if (prepared.plan.kind === "questions" && prepared.command.providerWireOverride === undefined) {
       payload = this.plans.buildQuestionPrompt(payload);
     }
     if (prepared.command.replyToMessageId && prepared.command.providerWireOverride === undefined) {
@@ -983,13 +981,24 @@ export class TurnAdmissionDispatchCoordinator {
   }
 
   private withPlanInstructions(prepared: PreparedCommand): string {
-    const command = prepared.command;
-    if (command.planAction !== "revise") return prepared.content;
-    return `${prepared.content}\n\n${this.plans.buildPlanOutputInstructions()}`;
+    if (prepared.plan.kind !== "revise" && prepared.plan.kind !== "planning") return prepared.content;
+    let content = prepared.content;
+    if (prepared.plan.kind === "revise") content += `\n\n${this.plans.buildPlanOutputInstructions()}`;
+    if (prepared.plan.planFilePath) content += `\n\nMcode plan file: ${prepared.plan.planFilePath}`;
+    return content;
   }
 
-  private effectiveInteractionMode(command: SendMessageCommand): InteractionMode | undefined {
-    return command.planAction === "revise" || command.planAction === "implement" ? undefined : command.interactionMode;
+  private effectiveInteractionMode(prepared: PreparedCommand): InteractionMode {
+    return prepared.plan.kind === "questions" ? "plan" : "build";
+  }
+
+  private planFeature(plan: PlanTurnClassification): "questions" | "output" | "none" {
+    if (plan.kind === "planning" || plan.kind === "revise") return "output";
+    return plan.kind === "questions" ? "questions" : "none";
+  }
+
+  private providerPlanTurn(plan: PlanTurnClassification): TurnRequest["planTurn"] {
+    return "planFilePath" in plan ? plan : undefined;
   }
 
   private withReplyContext(prepared: PreparedCommand, payload: string): string {
@@ -1034,7 +1043,8 @@ export class TurnAdmissionDispatchCoordinator {
       fallbackModel: this.fallbackModel(settings, model),
       permissionMode: this.effectivePermissionMode(prepared.command.permissionMode, prepared.thread.permission_mode ?? "supervised"),
       approvalReviewMode: review.mode,
-      interactionMode: this.effectiveInteractionMode(prepared.command) ?? "build",
+      interactionMode: this.effectiveInteractionMode(prepared),
+      planTurn: this.providerPlanTurn(prepared.plan),
       orchestrationMode: prepared.command.orchestrationMode ?? prepared.thread.orchestration_mode ?? "standard",
       attachments: attachments.persisted.length > 0 ? attachments.persisted : undefined,
       reasoningLevel: prepared.command.reasoningLevel,

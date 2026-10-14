@@ -860,7 +860,6 @@ describe("AgentService.createAndSend defaults", () => {
       attachments: [],
       replyToMessageId: replyTarget.id,
       quotedText: "The precise quoted passage",
-      planAction: "implement",
       markPlanAnswerForMessageId: "00000000-0000-4000-8000-000000000001",
       sourceTurnId: "00000000-0000-4000-8000-000000000002",
       sourceThreadId: "source-thread",
@@ -892,7 +891,6 @@ describe("AgentService.createAndSend defaults", () => {
     expect(persisted).toMatchObject({
       replyToMessageId: replyTarget.id,
       quotedText: "The precise quoted passage",
-      planAction: "implement",
       markPlanAnswerForMessageId: "00000000-0000-4000-8000-000000000001",
       sourceTurnId: "00000000-0000-4000-8000-000000000002",
       sourceThreadId: "source-thread",
