@@ -28,6 +28,8 @@ import { parseFirstHunkLine } from "@/lib/parse-first-hunk-line";
 import { useShikiTheme } from "@/hooks/useTheme";
 import { joinPaths } from "@/lib/path";
 import { FileActionBar } from "./FileActionBar";
+import type { FileRevertSource } from "./file-revert-source";
+import { useFileRevertInset } from "./useFileRevertInset";
 import { ReviewFileHeader } from "./ReviewFileHeader";
 import { DiffCommentEditor } from "./DiffCommentEditor";
 import { DiffPreview } from "./DiffPreview";
@@ -241,6 +243,8 @@ interface ReviewDiffViewProps {
   readonly highlightPath: string | null;
   readonly renderMode: "unified" | "side-by-side";
   readonly lineWrap: boolean;
+  /** Turns a file header can revert one file across. Omit in views that cannot revert. */
+  readonly revert?: FileRevertSource | null;
 }
 
 /**
@@ -261,6 +265,7 @@ export function ReviewDiffView({
   highlightPath,
   renderMode,
   lineWrap,
+  revert,
 }: ReviewDiffViewProps) {
   const handleRef = useRef<CodeViewHandle<DiffRowMeta, undefined>>(null);
   const bulkDiffExpand = useDiffStore((s) => s.bulkDiffExpand);
@@ -272,6 +277,7 @@ export function ReviewDiffView({
   // identity's bytes under the new metadata.
   const cacheVersion = patchCacheVersion(comparisonVersion, ignoreWhitespace);
   const patchScope = `${threadId}:${source}:${id}:${cacheVersion}`;
+  const revertInset = useFileRevertInset(threadId, patchScope, revert);
   const seedPatches = (): Record<string, string> => {
     const cache = useDiffStore.getState().inlineDiffCache;
     const seeded: Record<string, string> = {};
@@ -619,6 +625,7 @@ export function ReviewDiffView({
         isMarkdown={isMarkdownFile(path)}
         previewMode={previewPaths.has(path)}
         onTogglePreview={() => togglePreview(path)}
+        {...revertInset.actionProps(path)}
       />
     );
   };
@@ -640,6 +647,7 @@ export function ReviewDiffView({
             highlighted={highlightPath === item.id}
             onToggle={() => toggleExpanded(item.id)}
             actions={renderFileActions(item.id)}
+            inset={revertInset.inset(item.id)}
           />
         );
       }}

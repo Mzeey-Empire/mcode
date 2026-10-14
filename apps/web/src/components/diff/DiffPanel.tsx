@@ -8,6 +8,7 @@ import { getTransport } from "@/transport";
 import { ReviewHeader } from "./ReviewHeader";
 import { FileList } from "./FileList";
 import { CumulativeView } from "./CumulativeView";
+import { useFileRevertSource } from "./file-revert-source";
 import { GitDiffView, type GitView } from "./GitDiffView";
 import type { DiffSource } from "@/stores/diffStore";
 import { filesPaneNotice, reviewBody, type ReviewBody, type ReviewOutcome } from "./review-body";
@@ -948,6 +949,7 @@ function ReadyComparisonView({
   readonly settled: SettledComparison;
   readonly viewMode: DiffViewMode;
 }) {
+  const revert = useFileRevertSource(viewMode, scopeId, settled.turnMessageId);
   if (isGitView(viewMode)) {
     if (!settled.git) return null;
     return (
@@ -969,6 +971,7 @@ function ReadyComparisonView({
         cacheVersion={settled.cacheVersion}
         ignoreWhitespace={settled.ignoreWhitespace}
         afterSequence={settled.afterSequence}
+        revert={revert}
       />
     );
   }
@@ -986,6 +989,7 @@ function ReadyComparisonView({
         ignoreWhitespace={settled.ignoreWhitespace}
         defaultFilesExpanded
         jumpViewKey={`turn:${settled.turnMessageId ?? ""}`}
+        revert={revert}
       />
     </div>
   );

@@ -12,6 +12,8 @@ interface ReviewFileHeaderProps {
   readonly onToggle: () => void;
   /** Per-file actions, shown only while the file is expanded. */
   readonly actions: ReactNode;
+  /** Content under the 36px row, such as the Revert file confirm. Shown only while expanded. */
+  readonly inset?: ReactNode;
 }
 
 function splitFilePath(path: string): { readonly name: string; readonly folder: string } {
@@ -27,38 +29,46 @@ function splitFilePath(path: string): { readonly name: string; readonly folder: 
  * `renderCustomHeader`, so the node is a light-DOM child of the item host and
  * document CSS (the folder fade, the jump flash) applies to it.
  */
-export function ReviewFileHeader({ file, expanded, highlighted, onToggle, actions }: ReviewFileHeaderProps) {
+export function ReviewFileHeader({ file, expanded, highlighted, onToggle, actions, inset }: ReviewFileHeaderProps) {
   const { name, folder } = splitFilePath(file.path);
   const Chevron = expanded ? ChevronDown : ChevronRight;
   const countsId = useId();
   const countsDescription = describeLineCounts(file.deletions, file.additions);
   return (
-    <div
-      data-jump-highlight={highlighted ? "true" : undefined}
-      className={cn("flex h-9 items-center gap-1.5 border-b border-border pl-2 font-sans", expanded ? "pr-1.5" : "pr-3")}
-    >
-      <button
-        type="button"
-        aria-expanded={expanded}
-        aria-label={expanded ? `Collapse ${file.path}` : `Expand ${file.path}`}
-        aria-describedby={countsDescription ? countsId : undefined}
-        onClick={onToggle}
-        className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus/55"
+    <>
+      <div
+        data-jump-highlight={highlighted ? "true" : undefined}
+        className={cn("flex h-9 items-center gap-1.5 border-b border-border pl-2 font-sans", expanded ? "pr-1.5" : "pr-3")}
       >
-        <span className="flex size-5 shrink-0 items-center justify-center">
-          <Chevron aria-hidden size={14} className="text-muted" />
-        </span>
-        <FileTypeIcon filePath={file.path} />
-        <span aria-hidden className="flex min-w-0 flex-1 items-center gap-2 text-code-small">
-          <span className="text-fade font-medium text-ink">{name}</span>
-          {folder ? <span data-testid="review-file-folder" className="text-fade flex-1 text-muted">{folder}</span> : null}
-        </span>
-        <FileLineCounts deletions={file.deletions} additions={file.additions} />
-      </button>
-      {countsDescription ? <span id={countsId} hidden>{countsDescription}</span> : null}
-      {expanded ? actions : null}
-    </div>
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-label={expanded ? `Collapse ${file.path}` : `Expand ${file.path}`}
+          aria-describedby={countsDescription ? countsId : undefined}
+          onClick={onToggle}
+          className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus/55"
+        >
+          <span className="flex size-5 shrink-0 items-center justify-center">
+            <Chevron aria-hidden size={14} className="text-muted" />
+          </span>
+          <FileTypeIcon filePath={file.path} />
+          <span aria-hidden className="flex min-w-0 flex-1 items-center gap-2 text-code-small">
+            <span className="text-fade font-medium text-ink">{name}</span>
+            {folder ? <span data-testid="review-file-folder" className="text-fade flex-1 text-muted">{folder}</span> : null}
+          </span>
+          <FileLineCounts deletions={file.deletions} additions={file.additions} />
+        </button>
+        {countsDescription ? <span id={countsId} hidden>{countsDescription}</span> : null}
+        {expanded ? actions : null}
+      </div>
+      <HeaderInset expanded={expanded}>{inset}</HeaderInset>
+    </>
   );
+}
+
+function HeaderInset({ expanded, children }: { readonly expanded: boolean; readonly children: ReactNode }) {
+  if (!expanded || !children) return null;
+  return <div className="border-b border-border p-2 font-sans">{children}</div>;
 }
 
 function FileLineCounts({ deletions, additions }: { readonly deletions: number | null; readonly additions: number | null }) {

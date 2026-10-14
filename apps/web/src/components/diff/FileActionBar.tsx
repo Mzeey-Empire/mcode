@@ -1,6 +1,7 @@
 import { useCallback } from "react";
-import { CodeXml, FileText, ClipboardCopy, ExternalLink } from "lucide-react";
+import { CodeXml, FileText, ClipboardCopy, ExternalLink, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useToastStore } from "@/stores/toastStore";
 import { FileEditorPicker } from "./FileEditorPicker";
@@ -34,6 +35,10 @@ interface FileActionBarProps {
   readonly previewMode: boolean;
   /** Flip preview mode on or off. */
   readonly onTogglePreview: () => void;
+  /** Opens the Revert file confirm. Omit in views that cannot revert, so the icon does not render. */
+  readonly onRevert?: () => void;
+  /** Whether the Revert file confirm is open under this header. */
+  readonly revertOpen?: boolean;
 }
 
 const ACTION_BUTTON_CLASS = [
@@ -46,7 +51,7 @@ const ACTION_BUTTON_ACTIVE = "bg-selected text-ink";
 
 /**
  * Per-file actions in the Review file header: a Diff/Preview toggle (markdown
- * only), Copy path, and Open in editor.
+ * only), Copy path, Open in editor, and Revert file where the view can revert.
  */
 export function FileActionBar({
   filePath,
@@ -56,6 +61,8 @@ export function FileActionBar({
   isMarkdown,
   previewMode,
   onTogglePreview,
+  onRevert,
+  revertOpen = false,
 }: FileActionBarProps) {
   const handleCopyPath = useCallback(() => {
     // Prefer the absolute on-disk path so the clipboard value is immediately
@@ -148,6 +155,26 @@ export function FileActionBar({
             </Button>
           }
         />
+      )}
+
+      {onRevert && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                aria-label="Revert file"
+                aria-expanded={revertOpen}
+                onClick={onRevert}
+                className={cn(ACTION_BUTTON_CLASS, revertOpen && ACTION_BUTTON_ACTIVE)}
+              >
+                <Undo2 size={14} />
+              </Button>
+            }
+          />
+          <TooltipContent>Revert file</TooltipContent>
+        </Tooltip>
       )}
     </div>
   );

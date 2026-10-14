@@ -127,4 +127,19 @@ describe("FileActionBar", () => {
       meta: "Clipboard API is unavailable in this environment.",
     });
   });
+
+  it("offers Revert file only when a revert handler is given", async () => {
+    const onRevert = vi.fn();
+    const { rerender } = render(
+      <FileActionBar filePath="x.ts" isMarkdown={false} previewMode={false} onTogglePreview={vi.fn()} />,
+    );
+    expect(screen.queryByRole("button", { name: "Revert file" })).toBeNull();
+    rerender(
+      <FileActionBar filePath="x.ts" isMarkdown={false} previewMode={false} onTogglePreview={vi.fn()} onRevert={onRevert} revertOpen />,
+    );
+    const button = screen.getByRole("button", { name: "Revert file" });
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    await userEvent.click(button);
+    expect(onRevert).toHaveBeenCalledOnce();
+  });
 });

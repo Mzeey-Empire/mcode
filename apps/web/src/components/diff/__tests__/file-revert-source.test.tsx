@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { renderHook } from "@testing-library/react";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { ReviewTurn, TurnSnapshot } from "@mcode/contracts";
-import { allTurnsRevertSource, turnRevertSource } from "../file-revert-source";
+import { useDiffStore } from "@/stores/diffStore";
+import { allTurnsRevertSource, turnRevertSource, useFileRevertSource } from "../file-revert-source";
 
 function turn(messageId: string, ordinal: number): ReviewTurn {
   return { messageId, ordinal, createdAt: "2026-10-14T10:00:00.000Z", phase: "settled", fileCount: 1, additions: 1, deletions: 0, evidence: "native", availability: "available" };
@@ -46,5 +48,25 @@ describe("allTurnsRevertSource", () => {
     expect(allTurnsRevertSource([], turns)).toBeNull();
     expect(allTurnsRevertSource([row("m1")], undefined)).toBeNull();
     expect(allTurnsRevertSource([row("unknown")], turns)).toBeNull();
+  });
+});
+
+describe("useFileRevertSource", () => {
+  beforeEach(() => {
+    useDiffStore.setState({
+      reviewTurnsByThread: { "thread-1": turns },
+      snapshotsByThread: { "thread-1": [row("m1"), row("m2")] },
+    });
+  });
+
+  it.each([
+    ["turn", { messageId: "m2", range: { from: 2, to: 2 } }],
+    ["cumulative", { messageId: "m2", fromMessageId: "m1", range: { from: 1, to: 2 } }],
+    ["since-looked", null],
+    ["unstaged", null],
+    ["staged", null],
+  ] as const)("in the %s view", (viewMode, expected) => {
+    const { result } = renderHook(() => useFileRevertSource(viewMode, "thread-1", "m2"));
+    expect(result.current).toEqual(expected);
   });
 });

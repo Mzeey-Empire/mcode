@@ -16,6 +16,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
+import type { FileRevertSource } from "./file-revert-source";
 import { ReviewDiffView } from "./ReviewDiffView";
 
 const PIERRE_WORKER_POOL_SIZE = 3;
@@ -51,6 +52,8 @@ interface FileListProps {
    * incoming one.
    */
   jumpViewKey?: string;
+  /** Turns a file header can revert one file across. Omit in views that cannot revert. */
+  revert?: FileRevertSource | null;
 }
 
 /**
@@ -67,6 +70,7 @@ export function FileList({
   cacheVersion = 0,
   ignoreWhitespace = false,
   jumpViewKey,
+  revert,
 }: FileListProps) {
   const [jumpTarget, setJumpTarget] = useState<{ path: string; token: number } | null>(null);
   const [highlightPath, setHighlightPath] = useState<string | null>(null);
@@ -166,6 +170,7 @@ export function FileList({
           highlightPath={highlightPath}
           renderMode={renderMode}
           lineWrap={lineWrap}
+          revert={revert}
         />
       ) : (
       <WorkerPoolContextProvider
@@ -185,6 +190,7 @@ export function FileList({
           highlightPath={highlightPath}
           renderMode={renderMode}
           lineWrap={lineWrap}
+          revert={revert}
         />
       </WorkerPoolContextProvider>
       )}

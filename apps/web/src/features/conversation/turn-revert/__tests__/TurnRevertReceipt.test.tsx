@@ -71,6 +71,17 @@ describe("TurnRevertReceipt", () => {
     expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
   });
 
+  it.each([
+    ["Reverted src/a.ts · Turn 3", "Reverted src/a.ts", "Turn 3"],
+    ["Reverted src/a.ts · Turns 1–5", "Reverted src/a.ts", "Turns 1–5"],
+  ])("renders the file receipt %s with Undo", (content, label, detail) => {
+    const receipt = createMockMessage({ ...revertReceipt, content });
+    render(<TurnRevertReceipt message={receipt} />);
+    expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.getByText(detail)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
+  });
+
   it("writes the undo receipt and removes Undo", async () => {
     transport.undoTurnRevert.mockResolvedValue(undone);
     render(<Timeline />);
