@@ -1418,6 +1418,36 @@ describe("BrowserAutomationHost", () => {
     view.unmount();
   });
 
+  it("refuses a desktop tab finalize while the user holds the Browser so the held tab is not closed", async () => {
+    const executeTabs = vi.spyOn(BrowserSessionDriver.prototype, "execute");
+    useBrowserAutomationStore.getState().setControllerForTarget("workspace-1", "thread-1", "tab-1", {
+      tabId: "tab-1", controller: "human", controlEpoch: 1,
+    });
+    const view = render(<BrowserAutomationHost />);
+    await waitFor(() => expect(harness.transport.registerBrowserAutomationHost).toHaveBeenCalledOnce());
+    const hostId = sessionStorage.getItem("mcode.browserAutomation.hostId");
+    const finalize = dispatch(1, 25);
+    finalize.request = {
+      ...finalize.request,
+      operation: "tabs",
+      args: {
+        action: "finalize",
+        observationRef: "observation-1",
+        idempotencyKey: "finalize-held",
+        dispositions: [{ tabId: "tab-1", disposition: "close" }],
+      },
+    };
+
+    act(() => harness.emit("browserAutomation.request", { hostId, generation: 1, dispatch: finalize }));
+
+    await waitFor(() => expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenCalledWith(
+      hostId, 1, expect.objectContaining({ ok: false, error: expect.objectContaining({ code: "HUMAN_INTERRUPTED" }) }), finalize.target,
+    ));
+    expect(executeTabs).not.toHaveBeenCalled();
+    executeTabs.mockRestore();
+    view.unmount();
+  });
+
   it("delivers the receipt when a tab lifecycle request removes its target", async () => {
     const executing = deferred<BrowserAutomationResponse>();
     const executeTabs = vi.spyOn(BrowserSessionDriver.prototype, "execute").mockReturnValueOnce(executing.promise);

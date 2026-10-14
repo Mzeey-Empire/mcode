@@ -8,6 +8,7 @@ import {
   browserAutomationTargetKey,
   parseBrowserAutomationScopeKey,
   parseBrowserAutomationTargetKey,
+  onBrowserAutomationInterruption,
   onBrowserAutomationScopeRelease,
   handBackBrowserControl,
   interruptBrowserAutomationTarget,
@@ -638,5 +639,38 @@ describe("browser acting and user hold", () => {
       controlEpoch: 1,
     });
     store.clearPendingAgentOpen("open-1", 1);
+  });
+
+  it("retries Take control on desktop once the agent's first open has created the target", async () => {
+    const interrupt = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    window.desktopBridge = { preview: { automation: { interrupt } } } as unknown as NonNullable<typeof window.desktopBridge>;
+    const heard = vi.fn();
+    const unlisten = onBrowserAutomationInterruption(heard);
+    const store = useBrowserAutomationStore.getState();
+    store.setPendingAgentOpen("open-1", 1, {
+      workspaceId: "workspace-acting", threadId: "thread-acting", tabId: "tab-acting", url: null, startedAt: 1,
+    });
+
+    interruptBrowserAutomationTarget("workspace-acting", "thread-acting", "tab-acting", "user-stopped");
+    await vi.waitFor(() => expect(interrupt).toHaveBeenCalledTimes(1));
+    expect(heard).not.toHaveBeenCalled();
+
+    store.clearPendingAgentOpen("open-1", 1);
+    await vi.waitFor(() => expect(heard).toHaveBeenCalledOnce());
+    expect(interrupt).toHaveBeenCalledTimes(2);
+    unlisten();
+    delete window.desktopBridge;
+  });
+
+  it("does not retry a refused desktop interrupt when no open is pending", async () => {
+    const interrupt = vi.fn().mockResolvedValue(false);
+    window.desktopBridge = { preview: { automation: { interrupt } } } as unknown as NonNullable<typeof window.desktopBridge>;
+
+    interruptBrowserAutomationTarget("workspace-acting", "thread-acting", "tab-acting", "user-stopped");
+    await vi.waitFor(() => expect(interrupt).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+
+    expect(interrupt).toHaveBeenCalledTimes(1);
+    delete window.desktopBridge;
   });
 });

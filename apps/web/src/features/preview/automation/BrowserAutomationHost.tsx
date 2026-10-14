@@ -610,9 +610,9 @@ async function executeWebOpen(context: BrowserAutomationRequestContext): Promise
   return context.state.sessionDriver.execute(webOpenExecutionDispatch(context), context.controller.signal);
 }
 
-// Mirrors the desktop kernel's admission: only inspect and status may run while the user holds the Browser.
+// Only inspect and status may run while the user holds the Browser. Desktop-main refuses its own
+// effects, but tab operations such as finalize close tabs from this renderer and never reach it.
 function userHoldResponse(context: BrowserAutomationRequestContext): BrowserAutomationResponse | null {
-  if (context.bridge) return null;
   const operation = context.dispatch.request.operation;
   if (operation === "inspect" || operation === "status") return null;
   if (useBrowserAutomationStore.getState().controllers.get(context.targetKey)?.controller !== "human") return null;

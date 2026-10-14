@@ -719,6 +719,32 @@ export async function handBackBrowserControl(workspaceId: string, threadId: stri
   return released;
 }
 
+type AutomationBridge = NonNullable<NonNullable<Window["desktopBridge"]>["preview"]>["automation"];
+
+/**
+ * Desktop-main only creates a tab's target when the first request resolves it, so Take control
+ * pressed during the agent's first open finds nothing to hold. Retry once the open has settled.
+ */
+async function interruptThroughBridge(
+  bridge: AutomationBridge,
+  workspaceId: string,
+  threadId: string,
+  tabId: string,
+): Promise<boolean> {
+  if (await bridge.interrupt({ threadId, tabId })) return true;
+  const opening = () =>
+    findPendingBrowserAutomationOpen(useBrowserAutomationStore.getState().pendingAgentOpens, workspaceId, threadId, tabId) !== null;
+  if (!opening()) return false;
+  await new Promise<void>((resolve) => {
+    const unsubscribe = useBrowserAutomationStore.subscribe(() => {
+      if (opening()) return;
+      unsubscribe();
+      resolve();
+    });
+  });
+  return bridge.interrupt({ threadId, tabId });
+}
+
 /** Transfer one exact target to the human after desktop-main accepts takeover. */
 export function interruptBrowserAutomationTarget(
   workspaceId: string,
@@ -734,7 +760,7 @@ export function interruptBrowserAutomationTarget(
   }
   const key = browserAutomationTargetKey(workspaceId, threadId, tabId);
   if (pendingInterruptions.has(key)) return;
-  const interruption = bridge.interrupt({ threadId, tabId });
+  const interruption = interruptThroughBridge(bridge, workspaceId, threadId, tabId);
   pendingInterruptions.set(key, interruption);
   void interruption.then((accepted) => {
     if (!accepted) return;
