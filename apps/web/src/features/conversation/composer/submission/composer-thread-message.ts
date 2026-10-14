@@ -89,7 +89,7 @@ export function createPreparedThreadMessagePayload(
     goalObjective: submission.goalObjective,
     orchestrationMode: submission.snapshot.selection.orchestrationMode,
     messageId,
-    planCommentIds: submission.planComments.ridingIds.length > 0 ? submission.planComments.ridingIds : undefined,
+    planCommentIds: submission.planCommentIds.length > 0 ? submission.planCommentIds : undefined,
     selectedTextComments: submission.snapshot.selectedTextComments.length > 0
       ? submission.snapshot.selectedTextComments
       : undefined,

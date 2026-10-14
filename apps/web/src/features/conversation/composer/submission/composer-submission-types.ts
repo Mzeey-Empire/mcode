@@ -19,5 +19,5 @@ export interface PreparedComposerSubmission {
    * thread that is not running. A Send that queues or starts a thread leaves
    * the comments riding.
    */
-  planComments: { readonly ridingIds: string[]; readonly excludedIds: string[] };
+  planCommentIds: string[];
 }

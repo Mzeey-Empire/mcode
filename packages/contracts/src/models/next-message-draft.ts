@@ -21,25 +21,14 @@ export const DraftElementMetaSchema = lazySchema(() => z.object({
 export type DraftElementMeta = z.infer<ReturnType<typeof DraftElementMetaSchema>>;
 
 /** Draft fields whose revisions can be frozen by a submission. */
-export const DraftElementFieldSchema = lazySchema(() => z.enum(["diffComments", "planCommentSelection"]));
+export const DraftElementFieldSchema = lazySchema(() => z.enum(["diffComments"]));
 /** Draft fields whose revisions can be frozen by a submission. */
 export type DraftElementField = z.infer<ReturnType<typeof DraftElementFieldSchema>>;
-
-/** Client selection of authoritative plan comments for the next message. */
-export const PlanCommentSelectionSchema = lazySchema(() => z.object({
-  planVersionId: z.string(),
-  includedIds: z.array(z.string()),
-  excludedIds: z.array(z.string()),
-  revision: z.number().int().min(1),
-}));
-/** Client selection of plan comments for the next message. */
-export type PlanCommentSelection = z.infer<ReturnType<typeof PlanCommentSelectionSchema>>;
 
 /** The exact element revisions and image references frozen by a send. */
 export const DraftSubmissionSchema = lazySchema(() => z.object({
   messageId: z.string().uuid(),
   elements: z.array(DraftElementMetaSchema().extend({ field: DraftElementFieldSchema() })),
-  planComments: z.object({ ridingIds: z.array(z.string()), excludedIds: z.array(z.string()) }).optional(),
   stagingIds: z.array(z.string().uuid()),
 }));
 /** The exact element revisions and image references frozen by a send. */

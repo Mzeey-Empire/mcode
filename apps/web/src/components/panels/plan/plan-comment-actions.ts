@@ -83,17 +83,78 @@ export async function savePlanComment(
   }
 }
 
-/** Deletes a saved comment and closes its editor. */
+/**
+ * The comment followed back through the older versions it was carried from,
+ * oldest first. Deleting only the newest copy would put its original back on
+ * the composer chip.
+ */
+function carryChain(comments: readonly PlanComment[], id: string): string[] {
+  const byId = new Map(comments.map((comment) => [comment.id, comment]));
+  const chain: string[] = [];
+  for (let current = byId.get(id); current; current = current.carriedFromCommentId ? byId.get(current.carriedFromCommentId) : undefined) {
+    chain.unshift(current.id);
+  }
+  return chain;
+}
+
+/** Deletes a saved comment with the older copies it was carried from, and closes its editor. */
 export async function deletePlanComment(threadId: string, commentId: string): Promise<string | null> {
+  const chain = carryChain(usePlanStore.getState().commentsByThread[threadId] ?? [], commentId);
   try {
-    await getTransport().deletePlanComment({ commentId });
-    usePlanStore.getState().applyCommentsChanged(threadId, [], [commentId]);
+    // Oldest first, so a failure part way never leaves an older note riding alone.
+    for (const id of chain.length > 0 ? chain : [commentId]) {
+      await getTransport().deletePlanComment({ commentId: id });
+      usePlanStore.getState().applyCommentsChanged(threadId, [], [id]);
+    }
     const open = useComposerDraftStore.getState().drafts[threadId]?.planCommentEditor;
-    if (open?.commentId === commentId) setPlanCommentEditor(threadId, undefined);
+    if (open?.commentId && chain.includes(open.commentId)) setPlanCommentEditor(threadId, undefined);
     return null;
   } catch (error) {
     return planCommentErrorMessage(error);
   }
+}
+
+/** Puts back a deleted comment under its own id on the version it was written on. */
+async function restorePlanComments(threadId: string, comments: readonly PlanComment[]): Promise<void> {
+  try {
+    for (const comment of comments) {
+      const saved = await getTransport().createPlanComment({
+        commentId: comment.id,
+        versionId: comment.versionId,
+        anchor: comment.anchor,
+        body: comment.body,
+      });
+      usePlanStore.getState().applyCommentsChanged(threadId, [saved], []);
+    }
+  } catch (error) {
+    useToastStore.getState().show({
+      kind: "failed",
+      title: "Could not restore the plan comments",
+      meta: planCommentErrorMessage(error),
+    });
+  }
+}
+
+/** Deletes the plan comments riding the next Send, offering an Undo toast that restores them. */
+export async function removePlanCommentsFromSend(threadId: string, comments: readonly PlanComment[]): Promise<void> {
+  const toasts = useToastStore.getState();
+  const removed: PlanComment[] = [];
+  for (const comment of comments) {
+    const failure = await deletePlanComment(threadId, comment.id);
+    if (failure) {
+      toasts.show({ kind: "failed", title: "Could not remove the plan comments", meta: failure });
+      break;
+    }
+    removed.push(comment);
+  }
+  if (removed.length === 0) return;
+  toasts.show({
+    kind: "info",
+    title: removed.length === 1 ? "Plan comment removed" : `${removed.length} plan comments removed`,
+    meta: "Undo",
+    dedupeKey: `plan-comments-removed:${removed[0]!.id}`,
+    onOpen: () => void restorePlanComments(threadId, removed),
+  });
 }
 
 async function writeStatus(threadId: string, commentId: string, status: PlanComment["status"]): Promise<void> {

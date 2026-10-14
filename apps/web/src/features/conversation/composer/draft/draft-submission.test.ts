@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { MessageMention, PlanCommentSelection } from "@mcode/contracts";
+import type { MessageMention } from "@mcode/contracts";
 import { getTransport } from "@/transport";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import {
@@ -13,7 +13,6 @@ import {
   freezeDraftSubmission,
   readSendableDraftContent,
   reconcilePendingSubmissions,
-  reconcilePlanCommentSelection,
   saveDiffComment,
   settleDraftSubmission,
   visibleDiffComments,
@@ -130,54 +129,6 @@ describe("draft submissions", () => {
     expect(edited.diffComments).toEqual([
       expect.objectContaining({ id, revision: 2, note: "@state.ts check again", mentions: [fileMention] }),
     ]);
-  });
-});
-
-describe("plan-comment selection", () => {
-  const selection: PlanCommentSelection = {
-    planVersionId: "plan-v2",
-    includedIds: ["a", "b"],
-    excludedIds: ["c"],
-    revision: 1,
-  };
-
-  it("does not send an excluded comment and ends the exclusion after success", () => {
-    const draft: NextMessageDraft = { planCommentSelection: selection };
-    const content = readSendableDraftContent(draft);
-    const frozen = freezeDraftSubmission(draft, MESSAGE_ID, content);
-
-    const settled = settleDraftSubmission(frozen.draft, MESSAGE_ID, "success");
-
-    expect(content.planComments).toEqual({ ridingIds: ["a", "b"], excludedIds: ["c"] });
-    expect(settled.planCommentSelection).toEqual({ ...selection, includedIds: [], excludedIds: [], revision: 2 });
-  });
-
-  it("includes a comment made in another window and drops closed ones", () => {
-    const reconciled = reconcilePlanCommentSelection(selection, [
-      { id: "a", open: true },
-      { id: "b", open: false },
-      { id: "c", open: true },
-      { id: "d", open: true },
-    ]);
-
-    expect(reconciled).toEqual({ ...selection, includedIds: ["a", "d"], excludedIds: ["c"], revision: 2 });
-  });
-
-  it("keeps a carried-forward comment on the side of the comment it came from", () => {
-    const reconciled = reconcilePlanCommentSelection(selection, [
-      { id: "a", open: true },
-      { id: "b", open: true },
-      { id: "c", open: true },
-      { id: "c2", open: true, carriedFromCommentId: "c" },
-    ]);
-
-    expect(reconciled.excludedIds).toEqual(["c", "c2"]);
-  });
-
-  it("returns the same selection when nothing changed", () => {
-    const comments = ["a", "b", "c"].map((id) => ({ id, open: true }));
-
-    expect(reconcilePlanCommentSelection(selection, comments)).toBe(selection);
   });
 });
 

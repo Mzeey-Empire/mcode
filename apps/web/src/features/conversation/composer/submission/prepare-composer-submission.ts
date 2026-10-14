@@ -2,7 +2,7 @@ import type { PreviewAnnotationBundle } from "@mcode/contracts";
 import { useToastStore } from "@/stores/toastStore";
 import type { ComposerFormController } from "../draft/useComposerFormController";
 import { readVisibleDiffComments } from "../draft/draft-diff-comments";
-import { readPlanCommentsForSend } from "../draft/plan-comment-selection";
+import { readPlanCommentIdsForSend } from "../draft/sendable-plan-comments";
 import { buildComposerAnnotationBundle } from "./composer-annotations";
 import { createComposerSubmission } from "./composer-submission";
 import type { PreparedComposerSubmission } from "./composer-submission-types";
@@ -19,8 +19,6 @@ export interface PrepareComposerSubmissionOptions {
     annotations: PreviewAnnotationBundle | undefined,
   ): PreviewAnnotationBundle | undefined;
 }
-
-const NO_PLAN_COMMENTS = { ridingIds: [], excludedIds: [] };
 
 /** Reads, validates, and normalizes the current Composer form for transport. */
 export async function prepareComposerSubmission({
@@ -45,11 +43,11 @@ export async function prepareComposerSubmission({
   const currentDiffComments = annotationScopeId ? readVisibleDiffComments(annotationScopeId) : [];
   const currentAnnotations = buildComposerAnnotationBundle(annotationScopeId, currentDiffComments);
   const previewAnnotations = resolvePreviewAnnotations(currentAnnotations);
-  const planComments = planCommentThreadId ? readPlanCommentsForSend(planCommentThreadId) : NO_PLAN_COMMENTS;
+  const planCommentIds = planCommentThreadId ? readPlanCommentIdsForSend(planCommentThreadId) : [];
   if (isEmptySubmission(
     snapshot.rawInput,
     snapshot.attachments.length,
-    snapshot.selectedTextComments.length + planComments.ridingIds.length,
+    snapshot.selectedTextComments.length + planCommentIds.length,
     previewAnnotations,
   )) {
     discardEmptyEdit();
@@ -72,7 +70,7 @@ export async function prepareComposerSubmission({
       currentAnnotations,
       currentDiffComments,
       previewAnnotations,
-      planComments,
+      planCommentIds,
     };
   } catch (error) {
     showPreparationFailure(error);

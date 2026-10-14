@@ -23,7 +23,7 @@ import {
   isComposerTargetReady,
 } from "./composer-submission-routes";
 import type { PreparedComposerSubmission } from "./composer-submission-types";
-import { planCommentThreadFor } from "../draft/plan-comment-selection";
+import { planCommentThreadFor } from "../draft/sendable-plan-comments";
 import { prepareComposerSubmission } from "./prepare-composer-submission";
 import { shouldQueueActiveThreadSubmit } from "./composer-submit-policy";
 
@@ -144,7 +144,7 @@ export function useComposerSubmissionController({
       const draftSubmission = sendsToThisThread
         ? beginDraftSubmission(
           threadId,
-          { diffComments: submission.currentDiffComments, planComments: submission.planComments },
+          { diffComments: submission.currentDiffComments },
           messageId,
         )
         : null;

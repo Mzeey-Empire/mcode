@@ -59,21 +59,19 @@ async function confirmServerMessages(
 }
 
 /**
- * Freezes the Review comments and plan comments a Send carries. Returns null
- * when the Send carries none, so plain messages skip the draft entirely.
+ * Freezes the Review comments a Send carries. Returns null when the Send
+ * carries none, so plain messages skip the draft entirely.
  */
 export function beginDraftSubmission(
   threadId: string | undefined,
   content: FrozenDraftContent,
   messageId: string,
 ): DraftSubmissionHandle | null {
-  // Exclusions freeze too: they last one Send, so settling it returns those comments to the chip.
-  const planCommentCount = (content.planComments?.ridingIds.length ?? 0) + (content.planComments?.excludedIds.length ?? 0);
-  if (!threadId || (content.diffComments.length === 0 && planCommentCount === 0)) return null;
+  if (!threadId || content.diffComments.length === 0) return null;
   inFlightMessageIds.add(messageId);
   useComposerDraftStore.getState().updateNextMessage(
     threadId,
-    (draft) => freezeDraftSubmission(draft, messageId, { ...content, planComments: planCommentCount > 0 ? content.planComments : undefined }).draft,
+    (draft) => freezeDraftSubmission(draft, messageId, content).draft,
   );
   return {
     messageId,

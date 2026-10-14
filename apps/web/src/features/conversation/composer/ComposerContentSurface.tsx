@@ -9,7 +9,7 @@ import { ContextTracker } from "@/components/chat/ContextTracker";
 import { FileTagPopup, type useFileTagPopup } from "@/components/chat/FileTagPopup";
 import { PlanCommentsComposerChip } from "./PlanCommentsComposerChip";
 import { usePlanCommentChip } from "./usePlanCommentChip";
-import { excludeAllPlanComments, updatePlanCommentSelection } from "./draft/plan-comment-selection";
+import { removePlanCommentsFromSend } from "@/components/panels/plan/plan-comment-actions";
 import { PreviewAnnotationBundleChip } from "@/components/chat/PreviewAnnotationBundleChip";
 import { providerUnavailableMessage, type ProviderUnavailableReason } from "@/components/chat/provider-unavailable";
 import { Notice } from "@/components/ui/notice";
@@ -340,7 +340,7 @@ function AnnotationAttachmentRow({
     <>
       <PlanCommentsComposerChip
         comments={planComments}
-        onExclude={() => model.threadId && updatePlanCommentSelection(model.threadId, excludeAllPlanComments)}
+        onRemove={() => model.threadId && void removePlanCommentsFromSend(model.threadId, planComments)}
       />
       {model.attachmentBundle ? (
         <div className="px-3 pt-2">

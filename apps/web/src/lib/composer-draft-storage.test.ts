@@ -44,7 +44,6 @@ const nextMessageFields = {
     note: "@state.ts unsaved",
     mentions: [mention],
   },
-  planCommentSelection: { planVersionId: "plan-v1", includedIds: ["a"], excludedIds: ["b"], revision: 2 },
   planCommentEditor: {
     planVersionId: "55555555-5555-4555-8555-555555555555",
     commentId: null,
@@ -203,7 +202,6 @@ describe("composer-draft-storage", () => {
     expect(restored?.input).toBe("hello");
     expect(restored?.diffComments).toEqual([diffComment]);
     expect(restored?.submissions).toEqual(nextMessageFields.submissions);
-    expect(restored?.planCommentSelection).toEqual(nextMessageFields.planCommentSelection);
     expect(warn).toHaveBeenCalledWith("[composer-draft-storage] Dropped 3 invalid stored draft element(s)");
     warn.mockRestore();
   });
@@ -232,7 +230,6 @@ describe("composer-draft-storage", () => {
     expect(draftHasNoSendableContent(empty)).toBe(true);
     expect(draftHasNoSendableContent({ ...empty, planCommentEditor: nextMessageFields.planCommentEditor })).toBe(false);
     expect(draftHasNoSendableContent({ ...empty, diffComments: [diffComment] })).toBe(false);
-    expect(draftHasNoSendableContent({ ...empty, planCommentSelection: nextMessageFields.planCommentSelection })).toBe(false);
     expect(draftHasNoSendableContent({ ...empty, submissions: nextMessageFields.submissions })).toBe(false);
   });
 });
@@ -251,23 +248,6 @@ describe("persisted next-message drafts", () => {
       input: "typed",
       diffComments: [diffComment],
     });
-  });
-
-  it("restores a draft holding only a plan-comment selection after a reload", async () => {
-    localStorage.clear();
-    useComposerDraftStore.setState({ drafts: {} });
-    useComposerDraftStore.getState().updateNextMessage("thread-plan", (draft) => ({
-      ...draft,
-      planCommentSelection: nextMessageFields.planCommentSelection,
-    }));
-    const stored = localStorage.getItem("mcode-composer-drafts");
-    useComposerDraftStore.setState({ drafts: {} });
-    localStorage.setItem("mcode-composer-drafts", stored!);
-
-    await useComposerDraftStore.persist.rehydrate();
-
-    expect(useComposerDraftStore.getState().drafts["thread-plan"]?.planCommentSelection)
-      .toEqual(nextMessageFields.planCommentSelection);
   });
 });
 

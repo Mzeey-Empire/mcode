@@ -4,14 +4,21 @@ import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { usePlanStore } from "@/stores/planStore";
 import { useToastStore } from "@/stores/toastStore";
 import { RpcError } from "@/transport/ws-transport";
-import { resolvePlanComment, savePlanComment, setPlanCommentEditor } from "./plan-comment-actions";
+import {
+  deletePlanComment,
+  removePlanCommentsFromSend,
+  resolvePlanComment,
+  savePlanComment,
+  setPlanCommentEditor,
+} from "./plan-comment-actions";
 
 const createPlanComment = vi.hoisted(() => vi.fn<(payload: { commentId: string; body: string }) => Promise<PlanComment>>());
 const updatePlanComment = vi.hoisted(() => vi.fn<(payload: { commentId: string; body: string }) => Promise<PlanComment>>());
 const setPlanCommentStatus = vi.hoisted(() => vi.fn<(payload: { commentId: string; status: string }) => Promise<PlanComment>>());
+const deleteComment = vi.hoisted(() => vi.fn<(payload: { commentId: string }) => Promise<void>>());
 vi.mock("@/transport", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/transport")>()),
-  getTransport: () => ({ createPlanComment, updatePlanComment, setPlanCommentStatus }),
+  getTransport: () => ({ createPlanComment, updatePlanComment, setPlanCommentStatus, deletePlanComment: deleteComment }),
 }));
 
 const THREAD = "thread-plan";
@@ -139,5 +146,60 @@ describe("plan comment writes", () => {
 
     expect(usePlanStore.getState().commentsByThread[THREAD]?.[0]?.status).toBe("open");
     expect(useToastStore.getState().toasts.map((t) => t.kind)).toEqual(["failed"]);
+  });
+
+  describe("deleting", () => {
+    const OLD = "00000000-0000-4000-8000-0000000000a1";
+    const CARRIED = "00000000-0000-4000-8000-0000000000a2";
+
+    beforeEach(() => {
+      deleteComment.mockResolvedValue(undefined);
+    });
+
+    it("deletes the older copies a comment was carried from, oldest first, so none rides alone", async () => {
+      usePlanStore.getState().setComments(THREAD, [
+        comment({ id: OLD }),
+        comment({ id: CARRIED, carriedFromCommentId: OLD }),
+        comment({ id: COMMENT, carriedFromCommentId: CARRIED }),
+      ]);
+
+      expect(await deletePlanComment(THREAD, COMMENT)).toBeNull();
+
+      expect(deleteComment.mock.calls.map(([payload]) => payload.commentId)).toEqual([OLD, CARRIED, COMMENT]);
+      expect(usePlanStore.getState().commentsByThread[THREAD]).toEqual([]);
+    });
+
+    it("leaves the newest copy in place when an older one cannot be deleted", async () => {
+      usePlanStore.getState().setComments(THREAD, [comment({ id: OLD }), comment({ carriedFromCommentId: OLD })]);
+      deleteComment.mockRejectedValue(new RpcError("busy", "plan_busy"));
+
+      expect(await deletePlanComment(THREAD, COMMENT)).toContain("busy");
+
+      expect(usePlanStore.getState().commentsByThread[THREAD]).toHaveLength(2);
+    });
+
+    it("removes the comments riding a Send and Undo puts them back under their own ids", async () => {
+      const riding = [comment({ id: OLD, body: "first" }), comment({ id: COMMENT, body: "second" })];
+      usePlanStore.getState().setComments(THREAD, riding);
+      createPlanComment.mockImplementation(async ({ commentId }) => riding.find((c) => c.id === commentId)!);
+
+      await removePlanCommentsFromSend(THREAD, riding);
+      expect(usePlanStore.getState().commentsByThread[THREAD]).toEqual([]);
+
+      useToastStore.getState().toasts.find((t) => t.meta === "Undo")?.onOpen?.();
+      await vi.waitFor(() => expect(usePlanStore.getState().commentsByThread[THREAD]).toHaveLength(2));
+      expect(createPlanComment).toHaveBeenCalledWith(expect.objectContaining({ commentId: OLD, body: "first", versionId: VERSION }));
+    });
+
+    it("stops at the first comment it cannot delete and offers Undo only for the ones it removed", async () => {
+      const riding = [comment({ id: OLD }), comment({ id: COMMENT })];
+      usePlanStore.getState().setComments(THREAD, riding);
+      deleteComment.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new RpcError("busy", "plan_busy"));
+
+      await removePlanCommentsFromSend(THREAD, riding);
+
+      expect(usePlanStore.getState().commentsByThread[THREAD]?.map((c) => c.id)).toEqual([COMMENT]);
+      expect(useToastStore.getState().toasts.map((t) => t.kind).sort()).toEqual(["failed", "info"]);
+    });
   });
 });

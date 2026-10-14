@@ -7,15 +7,15 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 export interface PlanCommentsComposerChipProps {
   /** Open plan comments the next Send carries. */
   readonly comments: readonly PlanComment[];
-  /** Leaves every comment out of the next Send. */
-  readonly onExclude: () => void;
+  /** Deletes every comment. */
+  readonly onRemove: () => void;
 }
 
 /**
- * Composer chip for the plan comments riding the next Send. Removing it only
- * leaves them out of that Send; they stay open in the Plan panel.
+ * Composer chip for the plan comments riding the next Send. Like the other
+ * annotation chips, removing it deletes what it holds.
  */
-export function PlanCommentsComposerChip({ comments, onExclude }: PlanCommentsComposerChipProps) {
+export function PlanCommentsComposerChip({ comments, onRemove }: PlanCommentsComposerChipProps) {
   if (comments.length === 0) return null;
   const label = `${comments.length} plan comment${comments.length === 1 ? "" : "s"}`;
   return (
@@ -30,14 +30,14 @@ export function PlanCommentsComposerChip({ comments, onExclude }: PlanCommentsCo
                 type="button"
                 variant="ghost"
                 size="icon-inline-sm"
-                aria-label="Leave plan comments out of this message"
-                onClick={onExclude}
+                aria-label={`Remove ${label}`}
+                onClick={onRemove}
               />
             }
           >
             <X className="size-3" />
           </TooltipTrigger>
-          <TooltipContent>Leave out of this message</TooltipContent>
+          <TooltipContent>Remove {label}</TooltipContent>
         </Tooltip>
       </div>
     </div>

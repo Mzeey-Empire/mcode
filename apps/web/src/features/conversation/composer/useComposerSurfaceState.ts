@@ -6,7 +6,7 @@ import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore
 import type { ProviderId } from "@mcode/contracts";
 import { useNumberedDiffComments } from "./draft/draft-diff-comments";
 import { reconcileOrphanedDraftSubmissions } from "./draft/draft-submission-lifecycle";
-import { planCommentThreadFor } from "./draft/plan-comment-selection";
+import { planCommentThreadFor } from "./draft/sendable-plan-comments";
 import { usePlanCommentChip } from "./usePlanCommentChip";
 
 interface ComposerSurfaceStateInput {
