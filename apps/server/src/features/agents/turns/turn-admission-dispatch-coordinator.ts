@@ -31,6 +31,7 @@ import { WorkspaceEnvironmentService } from "../../projects/index.js";
 import { WorkspaceEnvironmentServiceError } from "../../projects/environment/workspace-environment-errors.js";
 import { isAutomaticSetupThread } from "../../projects/environment/workspace-environment-service.js";
 import { normalizeWorktreePath } from "../../projects/git/worktree-path.js";
+import type { ThreadStartupThreadCreation } from "../../thread-startup/thread-startup-service.js";
 import { injectMentionFileContents, validateMessageMentions } from "./message-mentions.js";
 import type { WorkspaceEnvironmentQueuedTurnSubmission } from "../../projects/environment/workspace-environment-automatic-repository.js";
 import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
@@ -87,10 +88,11 @@ export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "prov
   mutationReservationToken?: string;
   /** Request whose plan acceptance commits with canonical parent start. */
   planImplement?: { requestId: string };
+  setupSkip?: { reason: "plan-implement"; sourceThreadId: string };
   /** Resolves the authoritative first-turn handshake before provider I/O continues. */
   onTurnStarted?: (snapshot: TurnRuntimeSnapshot) => void;
-  /** Acknowledges successful admission, including queued rows, before provider dispatch. */
-  onAdmissionComplete?: () => void;
+  /** Reports whether admission produced a turn before provider dispatch. */
+  onAdmissionComplete?: (turnAdmitted: boolean) => void;
   /** Starts a new provider execution instead of continuing the thread's prior native session. */
   forceFreshSession?: boolean;
   /** Interrupted execution consumed atomically when the replacement turn starts. */
@@ -242,7 +244,7 @@ export class TurnAdmissionDispatchCoordinator {
       const admitted = await this.admitLeased(command, runtime, canReserve);
       // A schedule can be requested while preparation awaits I/O and the old attempt is still latest.
       await this.resumeScheduler?.unschedule(command.threadId);
-      command.onAdmissionComplete?.();
+      command.onAdmissionComplete?.(admitted.kind === "dispatch");
       return admitted;
     } finally {
       release?.();
@@ -368,7 +370,7 @@ export class TurnAdmissionDispatchCoordinator {
     provider: ProviderId;
     baseBranch?: string;
     lineage?: { parentThreadId: string; forkedFromMessageId: string };
-  }): Promise<Thread> {
+  }, createAndBind?: (input: ThreadStartupThreadCreation) => Promise<Thread>): Promise<Thread> {
     const workspace = this.workspaces.findById(params.workspaceId);
     if (!workspace) throw new Error(`Workspace not found: ${params.workspaceId}`);
     const known = await this.worktrees.listWorktrees(params.workspaceId);
@@ -376,15 +378,24 @@ export class TurnAdmissionDispatchCoordinator {
     if (!matched) throw new Error("Path is not a recognized worktree");
     const detached = matched.branch === "(detached)";
     const branch = detached ? params.baseBranch : matched.branch;
-    if (!branch) throw new Error("Base branch is required when attaching a detached worktree");
-    if (detached && branch === "HEAD") throw new Error("Base branch cannot be HEAD when attaching a detached worktree");
-    validateBranchName(branch);
+    const baseBranch = this.requireAttachedBranch(branch, detached);
+    if (createAndBind) {
+      return createAndBind({ args: [params.workspaceId, params.title, "worktree", baseBranch, false,
+        params.provider, params.lineage, detached ? "branchless" : "named", detached ? baseBranch : null], worktreePath: matched.path });
+    }
     const thread = await this.threads.create(
-      params.workspaceId, params.title, "worktree", branch, false, params.provider, params.lineage,
-      detached ? "branchless" : "named", detached ? branch : null,
+      params.workspaceId, params.title, "worktree", baseBranch, false, params.provider, params.lineage,
+      detached ? "branchless" : "named", detached ? baseBranch : null,
     );
     await this.threads.updateWorktreePath(thread.id, matched.path);
     return { ...thread, worktree_path: matched.path };
+  }
+
+  private requireAttachedBranch(branch: string | undefined, detached: boolean): string {
+    if (!branch) throw new Error("Base branch is required when attaching a detached worktree");
+    if (detached && branch === "HEAD") throw new Error("Base branch cannot be HEAD when attaching a detached worktree");
+    validateBranchName(branch);
+    return branch;
   }
 
   /** Persist and gate a worktree thread's first turn before runtime admission starts. */
@@ -677,10 +688,22 @@ export class TurnAdmissionDispatchCoordinator {
   }
 
   private isBlockedAutomaticSetup(command: SendMessageCommand, thread: Exclude<ReturnType<ThreadRepo["findById"]>, null>): boolean {
+    if (command.setupSkip) {
+      this.requireImplementCheckout(command.setupSkip.sourceThreadId, thread);
+      return false;
+    }
     return isAutomaticSetupThread(thread)
       && this.environment !== undefined
       && !command.persistedUserMessage
       && this.environment.getAutomaticSetup({ threadId: command.threadId }).gate === "blocked";
+  }
+
+  private requireImplementCheckout(sourceThreadId: string, thread: PreparedCommand["thread"]): void {
+    const source = this.threads.findById(sourceThreadId);
+    if (!source || source.deleted_at || !source.worktree_path || !thread.worktree_path
+      || thread.worktree_managed || !this.sameWorktreePath(source.worktree_path, thread.worktree_path)) {
+      throw new Error("Plan implementation must attach to its source worktree");
+    }
   }
 
   private suppliedAttachments(command: SendMessageCommand): PersistedAttachmentData | null {

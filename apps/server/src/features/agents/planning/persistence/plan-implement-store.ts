@@ -50,11 +50,18 @@ export class PlanImplementStore {
     const wireText = `Implement plan v${version.version}: "${version.title}".\n\nThis is the plan the user approved. It supersedes any earlier plan or plan file, including your own. Mcode keeps this text at ${planFilePath}.\n\n${version.contentMd}`;
     const request: PlanImplementRequest = { requestId: input.requestId, sourceThreadId: input.threadId, fingerprint,
       versionId: version.id, version: version.version, revision: version.revision, title: version.title, wireText,
-      target: input.target, sourceCommit: null, targetThreadId: input.threadId, startupId: null,
+      target: input.target, sourceCommit: null,
+      ...this.targetIdentity(input),
       messageId: NodeCrypto.randomUUID(), status: "preparing", failureCode: null, nativePlanFile: null,
       turnId: null, executionId: null, createdAt: now, updatedAt: now };
     this.orm.insert(planImplementRequests).values({ ...request, nativePlanFileJson: null }).run();
     return { ok: true, request, contentMd: version.contentMd, nativePlanFile: this.newestNativePlanFile(input.threadId) };
+  }
+
+  private targetIdentity(input: PlanImplement) {
+    const existingThread = input.target === "thread";
+    return { targetThreadId: existingThread ? input.threadId : null,
+      startupId: existingThread ? null : input.requestId };
   }
 
   private requireImplementableVersion(input: PlanImplement, refuse: (code: PlanImplementError["code"]) => never): PlanVersion {
@@ -98,19 +105,32 @@ export class PlanImplementStore {
 
   /** Runs on the canonical start transaction's connection so every effect rolls back together. */
   acceptPlanImplement(input: { requestId: string; threadId: string; messageId: string; turnId: string; executionId: string }): void {
-    const request = this.read(input.requestId);
-    if (!request || request.status !== "preparing" || request.messageId !== input.messageId
-      || request.targetThreadId !== input.threadId || request.sourceThreadId !== input.threadId) {
-      throw Object.assign(new Error("Implement admission identity does not match"), { code: "implement_failed" });
-    }
+    const request = this.requireAdmissionRequest(input);
     const version = this.requireAdmissionVersion(request);
     const now = new Date().toISOString();
     this.db.prepare("UPDATE plans SET status = 'superseded', updated_at = ? WHERE thread_id = ? AND id <> ? AND status IN ('draft', 'ready')")
       .run(now, request.sourceThreadId, version.id);
     this.orm.update(plans).set({ status: "accepted", acceptedAt: now, updatedAt: now }).where(eq(plans.id, version.id)).run();
     this.orm.update(threads).set({ interactionMode: "build" }).where(eq(threads.id, request.sourceThreadId)).run();
-    this.orm.update(planImplementRequests).set({ status: "admitted", turnId: input.turnId, executionId: input.executionId, updatedAt: now })
+    if (request.target === "new-thread") {
+      this.versions.insert({ ...version, id: NodeCrypto.randomUUID(), threadId: input.threadId,
+        messageId: input.messageId, status: "accepted", acceptedAt: now, captureSource: "copy",
+        baseVersionId: version.id, createdAt: now, updatedAt: now });
+    }
+    this.orm.update(planImplementRequests).set({ status: "admitted", targetThreadId: input.threadId,
+      turnId: input.turnId, executionId: input.executionId, updatedAt: now })
       .where(eq(planImplementRequests.requestId, request.requestId)).run();
+  }
+
+  private requireAdmissionRequest(input: { requestId: string; threadId: string; messageId: string }): PlanImplementRequest {
+    const request = this.read(input.requestId);
+    if (!request || request.status !== "preparing" || request.messageId !== input.messageId
+      || (request.targetThreadId !== null && request.targetThreadId !== input.threadId)
+      || (request.target === "thread" && request.sourceThreadId !== input.threadId)
+      || (request.target !== "thread" && request.sourceThreadId === input.threadId)) {
+      throw Object.assign(new Error("Implement admission identity does not match"), { code: "implement_failed" });
+    }
+    return request;
   }
 
   private requireAdmissionVersion(request: PlanImplementRequest): PlanVersion {

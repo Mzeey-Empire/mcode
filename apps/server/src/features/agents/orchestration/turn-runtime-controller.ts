@@ -66,6 +66,7 @@ import { TURN_RUNTIME_PERSISTENCE, type TurnRuntimePersistence } from "../turns/
 import {
   ThreadCreationCoordinator,
   type CreateAndSendCommand,
+  type CreateAndSendOptions,
   type CreatedInitialTurn,
 } from "../turns/thread-creation-coordinator.js";
 import {
@@ -287,6 +288,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
         capture: (event) => workerFiles.capture(event),
       } : undefined);
     runtimeCommands.bind({
+      createAndSend: (command, options) => this.createAndSend(command, options),
       sendMessage: (command) => this.sendMessage(command),
       runtimeSnapshots: () => this.runtimeSnapshots(),
     });
@@ -1199,6 +1201,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Terminalize setup failures while preserving an explicit user-stop winner. */
   private async failPreparedTurnDispatch(prepared: PreparedTurnDispatch, error: unknown): Promise<void> {
+    const stopping = this.stopOperationsByThread.get(prepared.lease.threadId);
+    if (stopping && this.turnGenerations.get(prepared.lease.threadId) === prepared.lease.generation) {
+      // Stop owns finalization even while its terminal write is still pending.
+      await stopping;
+    }
     const runtime = this.turnRuntime.snapshot(prepared.lease.threadId);
     const cancelled = runtime?.turnExecutionId === prepared.lease.turnExecutionId
       && runtime.phase === "cancelled"
@@ -1311,7 +1318,14 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const send = this.sendMessage({
       ...command,
       onTurnStarted: () => {
+        if (command.planImplement) return;
         providerAdmitted = true;
+        resolveStarted();
+      },
+      onAdmissionComplete: (turnAdmitted) => {
+        command.onAdmissionComplete?.(turnAdmitted);
+        if (!command.planImplement) return;
+        providerAdmitted = turnAdmitted;
         resolveStarted();
       },
     }, canReserve);
@@ -2175,8 +2189,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   }
 
   /** Provision a thread through its coordinator, then start its generic first-turn command. */
-  async createAndSend(command: CreateAndSendCommand): Promise<Thread & { runtimeSnapshot: TurnRuntimeSnapshot; warnings?: string[] }> {
-    const created = await this.threadCreation.createInitialTurn(command);
+  async createAndSend(command: CreateAndSendCommand, options?: CreateAndSendOptions): Promise<Thread & { runtimeSnapshot: TurnRuntimeSnapshot; warnings?: string[] }> {
+    const created = await this.threadCreation.createInitialTurn(command, options);
     if (created.kind === "replay") {
       return {
         ...created.thread,

@@ -1,5 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
+import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { inject, injectable } from "tsyringe";
 import type {
   ContextWindowMode,
@@ -18,6 +19,7 @@ import type {
 
 import { ThreadService } from "../../thread-control/index.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
+import { normalizeWorktreePath } from "../../projects/git/worktree-path.js";
 import { GitRepositoryService, OriginFetchError } from "../../projects/git/git-repository-service.js";
 import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import { ThreadStartupFetchDecisions } from "../../thread-startup/thread-startup-fetch-decisions.js";
@@ -42,6 +44,13 @@ export type CreateAndSendCommand = Omit<
   permissionMode?: PermissionMode | "default";
   provider?: ProviderId;
 };
+
+/** Trusted feature metadata, never populated from create-and-send wire params. */
+export interface CreateAndSendOptions {
+  setupSkip?: { reason: "plan-implement"; sourceThreadId: string };
+  planImplement?: { requestId: string };
+  messageId?: string;
+}
 
 /** A newly provisioned thread plus its first admitted runtime command. */
 export type CreatedInitialTurn =
@@ -73,6 +82,7 @@ export interface CreateThreadForTurnInput {
 }
 
 interface BranchedInitialTurnParams {
+  options?: CreateAndSendOptions;
   workspaceId: string;
   content: string;
   model: string;
@@ -107,6 +117,7 @@ interface BranchedInitialTurnParams {
 }
 
 class StartupCancelledError extends Error {
+  readonly code = "startup_cancelled";
   constructor() {
     super("Thread startup was cancelled");
   }
@@ -137,8 +148,10 @@ export class ThreadCreationCoordinator {
   ) {}
 
   /** Provision a thread and prepare its first command without acquiring runtime authority. */
-  async createInitialTurn(command: CreateAndSendCommand): Promise<CreatedInitialTurn> {
+  async createInitialTurn(command: CreateAndSendCommand, options?: CreateAndSendOptions): Promise<CreatedInitialTurn> {
     const params = this.initialTurnParams(command);
+    params.options = options;
+    this.validateSetupSkip(params);
     if (!command.startupId) return this.provisionInitialTurn(command, params);
 
     const fingerprint = NodeCrypto.createHash("sha256").update(JSON.stringify(params)).digest("hex");
@@ -154,6 +167,18 @@ export class ThreadCreationCoordinator {
       return await result;
     } finally {
       this.inFlightStartups.delete(command.startupId);
+    }
+  }
+
+  private validateSetupSkip(params: BranchedInitialTurnParams): void {
+    const skip = params.options?.setupSkip;
+    if (!skip) return;
+    const source = this.threads.findById(skip.sourceThreadId);
+    if (params.parentThreadId || params.mode !== "worktree" || !params.existingWorktreePath
+      || !source || source.deleted_at || !source.worktree_path
+      || normalizeWorktreePath(source.worktree_path, hostRuntime.platform)
+        !== normalizeWorktreePath(params.existingWorktreePath, hostRuntime.platform)) {
+      throw new Error("Plan implementation must attach to its source worktree");
     }
   }
 
@@ -299,6 +324,10 @@ export class ThreadCreationCoordinator {
       const startPoint = params.startFromOrigin ? await this.fetchOrigin(params, startupId) : undefined;
       const thread = await this.createStandaloneThread(params, { ...creation, startPoint }, startupId);
       await this.startManagedSetup(startupId, startup?.kind);
+      if (params.options?.setupSkip) {
+        await this.skipImplementSetup(params, startupId);
+        return this.initialTurnResult(command, params, thread, { kind: "not-managed" }, startupId);
+      }
       const automatic = await this.admitInitialTurn(command, params, thread.id);
       return this.initialTurnResult(command, params, thread, automatic, startupId);
     } catch (error) {
@@ -306,6 +335,14 @@ export class ThreadCreationCoordinator {
       await this.failStartup(startupId, error);
       throw error;
     }
+  }
+
+  private async skipImplementSetup(params: BranchedInitialTurnParams, startupId: string | undefined): Promise<void> {
+    this.validateSetupSkip(params);
+    if (startupId) await this.startups()?.skip(startupId, "setup", {
+      phase: "setup", skipReason: "plan-implement",
+    });
+    await this.cancelIfRequested(startupId);
   }
 
   /** Create and configure a thread without starting a provider runtime. */
@@ -327,13 +364,14 @@ export class ThreadCreationCoordinator {
     startupId: string | undefined,
   ): Promise<Thread & { warnings?: string[] }> {
     if (!params.existingWorktreePath) return await this.create(creation, startupId);
+    const startupService = this.startups();
     const attached = await this.admissions.createAttachedExistingWorktreeThread({
       workspaceId: params.workspaceId,
       title: params.title,
       existingWorktreePath: params.existingWorktreePath,
       provider: params.provider,
       baseBranch: params.existingWorktreeBaseBranch,
-    });
+    }, startupId && startupService ? (input) => startupService.createAndBindThread(startupId, input) : undefined);
     const thread = await this.configure(attached, creation);
     if (startupId) {
       await this.startups()?.bindThread(startupId, thread.id);
@@ -411,6 +449,8 @@ export class ThreadCreationCoordinator {
   ) {
     return await this.admissions.admitInitialAutomaticTurn({
       ...command,
+      messageId: params.options?.messageId,
+      planImplement: params.options?.planImplement,
       threadId,
       content: params.content,
       permissionMode: params.permissionMode,
@@ -448,6 +488,9 @@ export class ThreadCreationCoordinator {
       ...(startupId ? { startupId } : {}),
       command: {
         ...command,
+        planImplement: params.options?.planImplement,
+        messageId: params.options?.messageId,
+        setupSkip: params.options?.setupSkip,
         threadId: thread.id,
         content: params.content,
         permissionMode: params.permissionMode,
