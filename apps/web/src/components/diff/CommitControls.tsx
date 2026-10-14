@@ -4,7 +4,6 @@ import { useReviewState } from "@/hooks/useReviewState";
 import { useDiffStore } from "@/stores/diffStore";
 import { CommitSheet } from "./CommitSheet";
 
-/** Props for {@link CommitControls}. */
 export interface CommitControlsProps {
   readonly workspaceId: string;
   readonly threadId: string | null;

@@ -10,10 +10,10 @@ import {
   type CommitChoices,
 } from "@/lib/commit-selection";
 
-/** How often a pending push's outcome is re-read. Replaying the `requestId` is free; the server answers from its record. */
+/** How often a pending push is re-read; replaying a `requestId` is free because the server answers from its record. */
 export const PUSH_POLL_INTERVAL_MS = 1000;
 
-/** Where the commit request stands. Everything except `idle` locks the file list and message. */
+/** Where the commit request stands. `committing`, `pushing` and `interrupted` lock the file list and message. */
 export type CommitSubmission =
   | { readonly kind: "idle" }
   | { readonly kind: "committing" }
@@ -24,20 +24,17 @@ export type CommitSubmission =
   | { readonly kind: "unknown"; readonly head: string | null; readonly detail: string }
   | { readonly kind: "push-failed"; readonly shortSha: string; readonly summary: string; readonly detail: string };
 
-/** Progress of the generated message. */
 export type MessageGeneration =
   | { readonly kind: "idle" }
   | { readonly kind: "writing" }
   | { readonly kind: "written"; readonly modelName: string }
   | { readonly kind: "failed"; readonly message: string };
 
-/** The editable commit message. */
 export interface CommitDraft {
   readonly subject: string;
   readonly body: string;
 }
 
-/** Inputs for {@link useCommitSheet}. */
 export interface UseCommitSheetOptions {
   readonly workspaceId: string;
   readonly threadId: string | null;
@@ -51,7 +48,6 @@ export interface UseCommitSheetOptions {
   readonly onDone: () => void;
 }
 
-/** What {@link useCommitSheet} exposes to the sheet. */
 export interface CommitSheetModel {
   readonly choices: CommitChoices;
   readonly setChecked: (files: readonly ReviewFileChange[], checked: boolean) => void;
@@ -64,6 +60,11 @@ export interface CommitSheetModel {
   readonly submit: (push: boolean) => void;
   readonly retry: () => void;
   readonly canCommit: boolean;
+}
+
+/** True while a commit request is outstanding, including a pending push and a resend awaiting the connection. */
+export function isRequestInFlight(submission: CommitSubmission): boolean {
+  return submission.kind === "committing" || submission.kind === "pushing" || submission.kind === "interrupted";
 }
 
 /** Subject, then a blank line and the body when there is one. */
@@ -123,7 +124,6 @@ export function useCommitSheet(options: UseCommitSheetOptions): CommitSheetModel
     [workspaceId, threadId],
   );
 
-  // Generate once when the list first loads with something checked; later only on regenerate.
   const generatedOnOpen = useRef(false);
   useEffect(() => {
     if (generatedOnOpen.current || selected.length === 0) return;
@@ -202,7 +202,7 @@ export function useCommitSheet(options: UseCommitSheetOptions): CommitSheetModel
     send(request.current);
   }, [send]);
 
-  // Resend the frozen request once the socket is back; the server answers a known requestId from its record.
+  // The server answers a known requestId from its record, so resending cannot commit twice.
   useEffect(() => {
     if (submission.kind === "interrupted" && connection === "connected") retry();
   }, [submission.kind, connection, retry]);
@@ -217,7 +217,7 @@ export function useCommitSheet(options: UseCommitSheetOptions): CommitSheetModel
     };
   }, []);
 
-  const busy = submission.kind === "committing" || submission.kind === "pushing" || submission.kind === "interrupted";
+  const busy = isRequestInFlight(submission);
   const canCommit =
     head !== undefined &&
     selected.length > 0 &&

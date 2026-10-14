@@ -9,7 +9,6 @@ export const COMMIT_COLLAPSE_ROW_THRESHOLD = 12;
 /** The user's explicit checkbox choices by path; a path with no choice takes its default. */
 export type CommitChoices = Readonly<Record<string, boolean>>;
 
-/** One folder row and the files under it. */
 export interface CommitFolder {
   readonly dir: string;
   readonly files: readonly ReviewFileChange[];

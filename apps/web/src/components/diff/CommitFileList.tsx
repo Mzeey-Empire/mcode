@@ -18,10 +18,8 @@ import {
 import { cn } from "@/lib/utils";
 import { DiffStat } from "./DiffStat";
 
-/** Height of the scrolling list; the sheet keeps it at any file count. */
 const LIST_MAX_HEIGHT_PX = 228;
 
-/** Props for {@link CommitFileList}. */
 export interface CommitFileListProps {
   /** Every uncommitted file, unfiltered. */
   readonly files: readonly ReviewFileChange[];
@@ -110,7 +108,6 @@ function FilterField({ value, onChange }: { readonly value: string; readonly onC
   );
 }
 
-/** The scrolling rows, with a 28px fade at the bottom edge while more rows sit below. */
 function ScrolledRows({ children, resetKey }: { readonly children: ReactNode; readonly resetKey: string }) {
   const viewport = useRef<HTMLDivElement>(null);
   const [moreBelow, setMoreBelow] = useState(false);

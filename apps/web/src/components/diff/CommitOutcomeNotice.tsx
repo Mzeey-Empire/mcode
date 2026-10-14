@@ -52,7 +52,6 @@ function describeSubmission(submission: CommitSubmission): Outcome | null {
   }
 }
 
-/** Props for {@link CommitOutcomeNotice}. */
 export interface CommitOutcomeNoticeProps {
   readonly submission: CommitSubmission;
   /** Resend the interrupted request now instead of waiting for the connection. */

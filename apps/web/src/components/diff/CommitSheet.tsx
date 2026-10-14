@@ -7,7 +7,7 @@ import { DIALOG_SURFACE_CLASS } from "@/components/ui/overlay-surface";
 import { Notice } from "@/components/ui/notice";
 import { Spinner } from "@/components/ui/spinner";
 import { SplitButton } from "@/components/ui/split-button";
-import { useCommitSheet, type CommitSheetModel } from "@/hooks/useCommitSheet";
+import { isRequestInFlight, useCommitSheet, type CommitSheetModel } from "@/hooks/useCommitSheet";
 import { useReviewState } from "@/hooks/useReviewState";
 import { useUncommittedFiles, type UncommittedFiles } from "@/hooks/useUncommittedFiles";
 import { cn } from "@/lib/utils";
@@ -17,7 +17,6 @@ import { CommitOutcomeNotice } from "./CommitOutcomeNotice";
 
 type GitReviewState = Extract<ReviewState, { isGitRepo: true }>;
 
-/** Props for {@link CommitSheet}. */
 export interface CommitSheetProps {
   readonly workspaceId: string;
   readonly threadId: string | null;
@@ -35,7 +34,7 @@ export interface CommitSheetProps {
  * Review shows, and closing it leaves Review as it was.
  */
 export function CommitSheet({ workspaceId, threadId, scopeId, activePath, onClose, className }: CommitSheetProps) {
-  const reviewState = useKeptReviewState(workspaceId, threadId);
+  const reviewState = useReviewStateAcrossRefresh(workspaceId, threadId);
   const uncommitted = useUncommittedFiles(workspaceId, threadId);
   const files = uncommitted.status === "ready" ? uncommitted.files : null;
   const model = useCommitSheet({
@@ -50,7 +49,7 @@ export function CommitSheet({ workspaceId, threadId, scopeId, activePath, onClos
   useEffect(() => sheet.current?.focus(), []);
 
   const { submission } = model;
-  const inFlight = submission.kind === "committing" || submission.kind === "pushing" || submission.kind === "interrupted";
+  const inFlight = isRequestInFlight(submission);
 
   return (
     <section
@@ -163,12 +162,7 @@ function commitLabel(count: number): string {
   return count === 1 ? "Commit 1 file" : `Commit ${count} files`;
 }
 
-/**
- * The latest git state, held across refreshes: `useReviewState` goes null while it
- * refetches after a `diffRevision` bump, which would otherwise blank the branch and
- * disable Commit between a rejection and the retry.
- */
-function useKeptReviewState(workspaceId: string, threadId: string | null): GitReviewState | null {
+function useReviewStateAcrossRefresh(workspaceId: string, threadId: string | null): GitReviewState | null {
   const { state } = useReviewState(workspaceId, threadId);
   const [kept, setKept] = useState<GitReviewState | null>(null);
   if (state?.isGitRepo && state !== kept) setKept(state);

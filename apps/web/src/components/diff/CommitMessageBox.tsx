@@ -4,7 +4,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { CommitDraft, MessageGeneration } from "@/hooks/useCommitSheet";
 
-/** Props for {@link CommitMessageBox}. */
 export interface CommitMessageBoxProps {
   readonly draft: CommitDraft;
   readonly onChange: (draft: CommitDraft) => void;

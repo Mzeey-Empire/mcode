@@ -27,7 +27,6 @@ function CommitEntry() {
   </ThreadOverviewWhen>);
 }
 
-/** Commit block in the thread overview, preserving its existing row position. */
 export function CommitEntryBlock({ subject }: { subject: OverviewSubject }) {
   return subject.kind === "thread" ? <CommitEntry /> : null;
 }
