@@ -1482,6 +1482,10 @@ export function createWsTransport(
     getReviewComparison: (params) =>
       rpc<import("@mcode/contracts").ReviewComparisonResult>("git.reviewComparison", params),
 
+    generateCommitMessage: (params) =>
+      rpc<import("@mcode/contracts").GitGenerateCommitMessageResult>("git.generateCommitMessage", params),
+    commitChanges: (params) => rpc<import("@mcode/contracts").GitCommitResult>("git.commit", params),
+
     // GitHub PR (advanced)
     push: (workspaceId, branch, threadId?) =>
       rpc<{ success: boolean }>("git.push", { workspaceId, branch, threadId }),
