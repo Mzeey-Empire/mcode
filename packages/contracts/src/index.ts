@@ -941,6 +941,7 @@ export type {
   PlanSaveVersion,
   PlanSaveError,
   PlanVersion,
+  PlanSnapshot,
 } from "./models/plan.js";
 
 // Permissions

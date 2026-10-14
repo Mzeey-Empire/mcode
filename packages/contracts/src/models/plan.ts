@@ -58,6 +58,9 @@ export const PlanSnapshotSchema = lazySchema(() => z.object({
   pendingQuestions: PendingPlanQuestionsSchema().nullable(),
 }));
 
+/** Durable planning state returned when opening or reloading a thread. */
+export type PlanSnapshot = z.infer<ReturnType<typeof PlanSnapshotSchema>>;
+
 /** Revision precondition shared by the RPC boundary and sole database writer. */
 export const PlanSaveVersionSchema = lazySchema(() => z.object({
   threadId: z.string(),
