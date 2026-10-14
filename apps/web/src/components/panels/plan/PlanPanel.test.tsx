@@ -11,7 +11,7 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { RpcError } from "@/transport/ws-transport";
 import { executeCommand, getCommand } from "@/lib/command-registry";
 import { usePlanCommands } from "./use-plan-commands";
-import { PlanPanel } from "./PlanPanel";
+import { PlanPanel, planEditorAccess } from "./PlanPanel";
 import { planSaveScheduler } from "./plan-draft-sessions";
 import { IMPLEMENT_FAILED_NOTICE, PLAN_CHANGED_NOTICE, implementPlan as implementPlanAction, usePlanImplementStore } from "./plan-implement";
 
@@ -485,5 +485,18 @@ describe("PlanPanel", () => {
       expect(await screen.findByTestId("plan-implement-notice")).toHaveTextContent(IMPLEMENT_FAILED_NOTICE);
       expect(implementPlan).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe("planEditorAccess", () => {
+  const latest = makePlan(2);
+  const target = { versionId: latest.id, baseVersionId: "plan-1", baseRevision: 0 };
+
+  it("allows comments again once an autosave is acknowledged, but not while text is unsaved", () => {
+    const settled = { kind: "editing", target, text: "saved", ackedText: "saved", inFlight: null } as const;
+    const typing = { ...settled, text: "saved plus more" };
+
+    expect(planEditorAccess(latest, latest, settled, false).canComment).toBe(true);
+    expect(planEditorAccess(latest, latest, typing, false).canComment).toBe(false);
   });
 });

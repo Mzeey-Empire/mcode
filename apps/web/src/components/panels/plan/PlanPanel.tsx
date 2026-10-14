@@ -97,17 +97,22 @@ function useShowCommentEditorVersion(threadId: string, versions: readonly PlanVe
   }, [threadId, versions, editorVersionId]);
 }
 
+/** True when the text on screen is what the server holds: no session, or one whose last edit was acknowledged. */
+function isSavedText(draft: PlanDraftState): boolean {
+  return draft.kind === "idle" || (draft.kind === "editing" && draft.inFlight === null && draft.text === draft.ackedText);
+}
+
 /**
  * What the editor shows and allows. Unsaved typing is held text; commenting
  * waits for it to land because the server checks a comment's range against
  * the saved text.
  */
-function planEditorAccess(viewed: PlanVersion, latest: PlanVersion, draft: PlanDraftState, executing: boolean) {
+export function planEditorAccess(viewed: PlanVersion, latest: PlanVersion, draft: PlanDraftState, executing: boolean) {
   const isLatest = viewed.id === latest.id;
   return {
     heldText: isLatest && draft.kind !== "idle" ? draft.text : null,
     editable: (draft.kind === "idle" || draft.kind === "editing") && isPlanVersionEditable(viewed, latest, executing),
-    canComment: draft.kind === "idle" && isLatest && latest.status !== "accepted",
+    canComment: isSavedText(draft) && isLatest && latest.status !== "accepted",
   };
 }
 
