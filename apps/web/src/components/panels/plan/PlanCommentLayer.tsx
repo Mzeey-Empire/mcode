@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import type { EditorView } from "@codemirror/view";
 import type { PlanComment, PlanCommentEditorDraft, PlanVersion } from "@mcode/contracts";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
-import { usePlanStore } from "@/stores/planStore";
+import { carriedOriginalIds, usePlanStore } from "@/stores/planStore";
 import { PlanCommentEditor } from "./PlanCommentEditor";
 import { PlanCommentRow } from "./PlanCommentRow";
 import {
@@ -28,7 +28,7 @@ interface PlanCommentLayerProps {
   readonly viewed: PlanVersion;
   /** The text the editor shows, which can run ahead of the saved version while typing. */
   readonly docText: string;
-  /** True when the viewed version is the latest, still takes comments, and matches the shown text. */
+  /** True when the viewed version still takes comments and the shown text matches what the server holds. */
   readonly canComment: boolean;
 }
 
@@ -52,6 +52,7 @@ export function PlanCommentLayer({ threadId, binding, view, viewed, docText, can
     () => allComments.filter((comment) => comment.versionId === viewed.id && comment.status === "open"),
     [allComments, viewed.id],
   );
+  const carried = useMemo(() => carriedOriginalIds(allComments), [allComments]);
   const editedComment = editor?.commentId ? comments.find((comment) => comment.id === editor.commentId) : undefined;
   // Editing a comment someone deleted meanwhile reopens as a new comment.
   const pendingNew = editor && !editedComment ? editor : undefined;
@@ -97,6 +98,7 @@ export function PlanCommentLayer({ threadId, binding, view, viewed, docText, can
     <PlanCommentEditor
       body={draft.body}
       saved={editedComment !== undefined}
+      canWrite={canComment}
       onBodyChange={(body) => setPlanCommentEditorBody(threadId, body)}
       onSave={() => save(draft)}
       onDelete={() => deletePlanComment(threadId, editedComment?.id ?? "")}
@@ -115,7 +117,7 @@ export function PlanCommentLayer({ threadId, binding, view, viewed, docText, can
           ) : (
             <PlanCommentRow
               comment={comment}
-              canEdit={canComment}
+              canEdit={canComment && !carried.has(comment.id)}
               onEdit={() =>
                 setPlanCommentEditor(threadId, {
                   planVersionId: viewed.id,

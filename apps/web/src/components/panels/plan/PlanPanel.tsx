@@ -104,15 +104,16 @@ function isSavedText(draft: PlanDraftState): boolean {
 
 /**
  * What the editor shows and allows. Unsaved typing is held text; commenting
- * waits for it to land because the server checks a comment's range against
- * the saved text.
+ * on the latest version waits for it to land because the server checks a
+ * comment's range against the saved text.
  */
 export function planEditorAccess(viewed: PlanVersion, latest: PlanVersion, draft: PlanDraftState, executing: boolean) {
   const isLatest = viewed.id === latest.id;
   return {
     heldText: isLatest && draft.kind !== "idle" ? draft.text : null,
     editable: (draft.kind === "idle" || draft.kind === "editing") && isPlanVersionEditable(viewed, latest, executing),
-    canComment: isSavedText(draft) && isLatest && latest.status !== "accepted",
+    // The server refuses comments on an accepted version and while a run is busy.
+    canComment: viewed.status !== "accepted" && !executing && (!isLatest || isSavedText(draft)),
   };
 }
 

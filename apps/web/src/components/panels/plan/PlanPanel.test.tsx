@@ -499,4 +499,14 @@ describe("planEditorAccess", () => {
     expect(planEditorAccess(latest, latest, settled, false).canComment).toBe(true);
     expect(planEditorAccess(latest, latest, typing, false).canComment).toBe(false);
   });
+
+  it("takes comments on a superseded version, but not on an accepted one or during a run", () => {
+    const settled = { kind: "idle" } as const;
+    const superseded = makePlan(1, { status: "superseded" });
+    const accepted = makePlan(2, { status: "accepted" });
+
+    expect(planEditorAccess(superseded, latest, settled, false).canComment).toBe(true);
+    expect(planEditorAccess(accepted, accepted, settled, false).canComment).toBe(false);
+    expect(planEditorAccess(latest, latest, settled, true).canComment).toBe(false);
+  });
 });

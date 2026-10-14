@@ -10,6 +10,8 @@ interface PlanCommentEditorProps {
   readonly body: string;
   /** True when editing a saved comment, which can also be deleted. */
   readonly saved: boolean;
+  /** False once the version is accepted or a run is busy; the server would refuse the write. */
+  readonly canWrite: boolean;
   readonly onBodyChange: (body: string) => void;
   /** Resolves to an error message, or null once saved. */
   readonly onSave: () => Promise<string | null>;
@@ -21,7 +23,7 @@ interface PlanCommentEditorProps {
  * Note editor under a selection. Enter saves, Shift+Enter adds a line, Esc
  * cancels. A failed write keeps the note and shows the reason in place.
  */
-export function PlanCommentEditor({ body, saved, onBodyChange, onSave, onDelete, onCancel }: PlanCommentEditorProps) {
+export function PlanCommentEditor({ body, saved, canWrite, onBodyChange, onSave, onDelete, onCancel }: PlanCommentEditorProps) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -38,7 +40,7 @@ export function PlanCommentEditor({ body, saved, onBodyChange, onSave, onDelete,
       onCancel();
     } else if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      void run(onSave);
+      if (canWrite) void run(onSave);
     }
   };
 
@@ -70,7 +72,7 @@ export function PlanCommentEditor({ body, saved, onBodyChange, onSave, onDelete,
             variant="ghost"
             size="icon-inline-sm"
             aria-label="Delete comment"
-            disabled={pending}
+            disabled={pending || !canWrite}
             onClick={() => void run(onDelete)}
           >
             <Trash2 className="size-3.5" />
@@ -85,7 +87,7 @@ export function PlanCommentEditor({ body, saved, onBodyChange, onSave, onDelete,
           size="icon-inline-sm"
           className="rounded-full"
           aria-label="Save comment"
-          disabled={pending || body.trim() === ""}
+          disabled={pending || !canWrite || body.trim() === ""}
           onClick={() => void run(onSave)}
         >
           <Check className="size-3.5" />
