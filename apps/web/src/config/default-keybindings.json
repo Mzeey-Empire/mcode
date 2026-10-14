@@ -1,6 +1,7 @@
 [
   { "key": "mod+k", "command": "palette.open" },
   { "key": "mod+p", "command": "files.goToFile" },
+  { "key": "mod+f", "command": "files.findInFile", "when": "filesFocused" },
   { "key": "mod+o", "command": "openin.openDefault", "when": "!inputFocused" },
   { "key": "mod+n", "command": "thread.new", "when": "!inputFocused" },
   { "key": "mod+shift+f", "command": "thread.search", "when": "!inputFocused" },

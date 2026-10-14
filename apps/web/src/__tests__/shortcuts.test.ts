@@ -145,6 +145,49 @@ describe("terminal.toggle keybinding (regression #304)", () => {
   });
 });
 
+describe("files.findInFile keybinding", () => {
+  let cleanup: () => void;
+  const find = vi.fn<() => void>();
+
+  beforeEach(() => {
+    clearKeybindings();
+    clearCommands();
+    resetContext();
+    find.mockClear();
+    registerCommand({ id: "files.findInFile", title: "Find in File", category: "Navigation", handler: find });
+    loadKeybindings(defaultKeybindings);
+    cleanup = initShortcuts();
+  });
+
+  afterEach(() => {
+    cleanup();
+    document.body.replaceChildren();
+  });
+
+  function focusInside(root: HTMLElement): void {
+    const target = document.createElement("div");
+    target.tabIndex = 0;
+    root.appendChild(target);
+    document.body.appendChild(root);
+    target.focus();
+    target.dispatchEvent(createKeyEvent({ key: "f", ctrlKey: true }));
+  }
+
+  it("fires from inside the Files tool", () => {
+    const tool = document.createElement("div");
+    tool.setAttribute("data-files-tool", "");
+    focusInside(tool);
+    expect(find).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves Ctrl F alone in the composer", () => {
+    const composer = document.createElement("div");
+    composer.setAttribute("data-testid", "composer");
+    focusInside(composer);
+    expect(find).not.toHaveBeenCalled();
+  });
+});
+
 describe("window keys", () => {
   const presses: [string, Partial<KeyboardEvent>][] = [
     ["window.zoomIn", { key: "=", ctrlKey: true }],

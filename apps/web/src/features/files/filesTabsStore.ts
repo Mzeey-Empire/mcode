@@ -20,6 +20,8 @@ export interface FilesScopeState {
   readonly treeWidth: number;
   /** Whether Go to file is open; stored here because `files.goToFile` can fire before the tool mounts. */
   readonly goToFileOpen: boolean;
+  /** Whether the find bar is open; stored here for the same reason as `goToFileOpen`. */
+  readonly findOpen: boolean;
 }
 
 export const FILES_SCOPE_DEFAULTS: FilesScopeState = {
@@ -30,6 +32,7 @@ export const FILES_SCOPE_DEFAULTS: FilesScopeState = {
   revealPath: null,
   treeWidth: FILES_TREE_DEFAULT_WIDTH,
   goToFileOpen: false,
+  findOpen: false,
 };
 
 interface FilesTabsStore {
@@ -46,6 +49,7 @@ interface FilesTabsStore {
   clearReveal(scopeId: string): void;
   setTreeWidth(scopeId: string, width: number): void;
   setGoToFileOpen(scopeId: string, open: boolean): void;
+  setFindOpen(scopeId: string, open: boolean): void;
 }
 
 /** Clamps a dragged tree width into the allowed range. */
@@ -110,6 +114,8 @@ export const useFilesTabsStore = create<FilesTabsStore>((set) => {
     setTreeWidth: (scopeId, width) => update(scopeId, (state) => ({ ...state, treeWidth: clampTreeWidth(width) })),
     setGoToFileOpen: (scopeId, open) =>
       update(scopeId, (state) => (state.goToFileOpen === open ? state : { ...state, goToFileOpen: open })),
+    setFindOpen: (scopeId, open) =>
+      update(scopeId, (state) => (state.findOpen === open ? state : { ...state, findOpen: open })),
   };
 });
 

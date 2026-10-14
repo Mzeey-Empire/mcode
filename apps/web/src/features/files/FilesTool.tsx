@@ -1,16 +1,19 @@
-import { useCallback, useMemo, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useMemo, useRef, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { SIDE_PANE_CONTENT_MIN_WIDTH, sidePaneDocks } from "@/lib/side-pane-dock";
-import { CodeFileView } from "./CodeFileView";
+import { CodeFileView, splitLines } from "./CodeFileView";
 import { FileTree } from "./FileTree";
 import { FilesControlsRow, FilesTabStrip } from "./FilesHeader";
+import { FindInFileBar } from "./FindInFileBar";
 import { GoToFilePopover } from "./GoToFilePopover";
 import { buildFilesTree, flattenFileTree, folderNodesToReveal, indexFileChanges } from "./file-tree-model";
 import { FILES_SCOPE_DEFAULTS, getFilesScope, useFilesTabsStore, type FilesScopeState } from "./filesTabsStore";
 import { useFileActions } from "./useFileActions";
-import { useFilesData, type FilesData } from "./useFilesData";
+import { useFilesData, type FileReadState, type FilesData } from "./useFilesData";
+import { useFindInFile, type FindHighlight } from "./useFindInFile";
 
 const EMPTY_PATHS: readonly string[] = [];
+const NO_LINES: readonly string[] = [];
 
 export interface FilesToolProps {
   readonly workspaceId: string;
@@ -39,6 +42,32 @@ function useFilesScopeState(scopeId: string): FilesScopeState {
 }
 
 /**
+ * Find state for the file the body shows. The bar only exists while that file has text,
+ * so opening Find on the tree or a binary file waits until a searchable file shows.
+ */
+function useFindBar(scopeId: string, requested: boolean, read: FileReadState | undefined, bodyRef: RefObject<HTMLElement | null>) {
+  const text = textOf(read);
+  const open = requested && text !== null;
+  const lines = useMemo(() => (open && text !== null ? splitLines(text) : NO_LINES), [open, text]);
+  const find = useFindInFile(lines);
+  const setOpen = (next: boolean) => {
+    useFilesTabsStore.getState().setFindOpen(scopeId, next);
+    // Closing from the field leaves focus on a vanished input; the code is where reading continues.
+    if (!next) bodyRef.current?.querySelector<HTMLElement>("[data-code-viewport]")?.focus();
+  };
+  return {
+    header: text === null ? null : { open, onToggle: () => setOpen(!open) },
+    bar: open ? <FindInFileBar find={find} onClose={() => setOpen(false)} /> : null,
+    highlight: open ? find : null,
+  };
+}
+
+/** The searchable text of a loaded file, or null for anything else (loading, binary, empty, too large). */
+function textOf(read: FileReadState | undefined): string | null {
+  return read?.status === "ready" && read.result.kind === "text" && read.result.content.length > 0 ? read.result.content : null;
+}
+
+/**
  * The Files tool: project files for the panel scope with tabs, a tree, a code
  * view, and Go to file. Distinct from Review's Files navigator, which lists
  * only changed files.
@@ -55,6 +84,7 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
   const setGoToFileOpen = (open: boolean) => store().setGoToFileOpen(scopeId, open);
   const tree = useMemo(() => buildFilesTree(data.list?.paths ?? EMPTY_PATHS), [data.list]);
   const shownPath = layout.body === "file" ? state.activePath : null;
+  const findBar = useFindBar(scopeId, state.findOpen, shownPath ? data.reads[shownPath] : undefined, bodyRef);
 
   const openFile = useCallback(
     (path: string, beside = false) => {
@@ -87,9 +117,11 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
         onToggleTree={() => store().setTreeOpen(scopeId, !(layout.dockedTree || layout.body === "tree"))}
         onRevealFolder={revealFolder}
         onGoToFile={() => setGoToFileOpen(true)}
+        find={findBar.header}
       />
+      {findBar.bar}
       <div ref={bodyRef} className="relative flex min-h-0 flex-1 flex-row overflow-hidden">
-        <FilesBody scopeId={scopeId} state={state} layout={layout} data={data} tree={tree} actions={actions} onOpenFile={openFile} />
+        <FilesBody scopeId={scopeId} state={state} layout={layout} data={data} tree={tree} actions={actions} findHighlight={findBar.highlight} onOpenFile={openFile} />
         {state.goToFileOpen ? (
           <GoToFilePopover
             paths={data.list?.paths ?? EMPTY_PATHS}
@@ -112,6 +144,7 @@ function FilesBody({
   data,
   tree,
   actions,
+  findHighlight,
   onOpenFile,
 }: {
   readonly scopeId: string;
@@ -120,6 +153,7 @@ function FilesBody({
   readonly data: FilesData;
   readonly tree: ReturnType<typeof buildFilesTree>;
   readonly actions: ReturnType<typeof useFileActions>;
+  readonly findHighlight: FindHighlight | null;
   readonly onOpenFile: (path: string) => void;
 }) {
   const changeIndex = useMemo(() => indexFileChanges(data.changes), [data.changes]);
@@ -156,6 +190,7 @@ function FilesBody({
           state={data.reads[activePath] ?? { status: "loading" }}
           onOpenInEditor={(line) => actions.openInEditor(activePath, line)}
           onCloseTab={() => useFilesTabsStore.getState().closeFile(scopeId, activePath)}
+          find={findHighlight}
         />
       </div>
     </>
