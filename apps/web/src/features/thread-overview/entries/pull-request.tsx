@@ -129,20 +129,20 @@ interface ThreadOverviewPrRowProps {
   checks: ChecksStatus | null;
   openPrDetail: { title: string } | null;
   threadId: string;
-  onCommitOrPush: () => void;
+  onCommit: () => void;
   onCreatePr: () => void;
   onOpenPr: (url: string, event?: MouseEvent) => void;
 }
 
 function ThreadOverviewPrActionRow({
   hasCommitsAhead,
-  onCommitOrPush,
+  onCommit,
   onCreatePr,
-}: Pick<ThreadOverviewPrRowProps, "hasCommitsAhead" | "onCommitOrPush" | "onCreatePr">) {
+}: Pick<ThreadOverviewPrRowProps, "hasCommitsAhead" | "onCommit" | "onCreatePr">) {
   if (hasCommitsAhead === false) {
     return (
       <div data-testid="thread-overview-pr">
-        <ThreadOverviewTooltipButton content="Ask the agent to commit and push the changes">
+        <ThreadOverviewTooltipButton content="Review and commit the changes">
           <Button
             variant="ghost"
             size="compact"
@@ -152,10 +152,10 @@ function ThreadOverviewPrActionRow({
               OVERVIEW_ROW_CLASS,
               "cursor-pointer justify-start text-xs text-ink/75 hover:bg-hover/40 hover:text-ink",
             )}
-            onClick={onCommitOrPush}
+            onClick={onCommit}
           >
             <GitPullRequest size={14} className="shrink-0 text-muted" />
-            <span className="font-medium">Commit or push</span>
+            <span className="font-medium">Commit…</span>
           </Button>
         </ThreadOverviewTooltipButton>
       </div>
@@ -302,7 +302,7 @@ function ThreadOverviewPrRow({
   checks,
   openPrDetail,
   threadId,
-  onCommitOrPush,
+  onCommit,
   onCreatePr,
   onOpenPr,
 }: ThreadOverviewPrRowProps) {
@@ -310,7 +310,7 @@ function ThreadOverviewPrRow({
     return (
       <ThreadOverviewPrActionRow
         hasCommitsAhead={hasCommitsAhead}
-        onCommitOrPush={onCommitOrPush}
+        onCommit={onCommit}
         onCreatePr={onCreatePr}
       />
     );
@@ -330,7 +330,7 @@ function ThreadOverviewPrRow({
 }
 
 function PullRequestEntry({ thread }: { thread: Thread }) {
-  const { prable: canShowPrActions, effectivePr, hasCommitsAhead, checks, openPrDetail, handleCommitOrPush, handleOpenPr, setCreatePrOpen } = useOverviewContext();
+  const { prable: canShowPrActions, effectivePr, hasCommitsAhead, checks, openPrDetail, handleCommit, handleOpenPr, setCreatePrOpen } = useOverviewContext();
 
   return (<ThreadOverviewWhen when={canShowPrActions}>
     <>
@@ -340,7 +340,7 @@ function PullRequestEntry({ thread }: { thread: Thread }) {
         checks={checks}
         openPrDetail={openPrDetail}
         threadId={thread.id}
-        onCommitOrPush={handleCommitOrPush}
+        onCommit={handleCommit}
         onCreatePr={() => setCreatePrOpen(true)}
         onOpenPr={handleOpenPr}
       />
