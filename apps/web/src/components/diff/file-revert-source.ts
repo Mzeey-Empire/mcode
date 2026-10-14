@@ -23,18 +23,18 @@ export function turnRevertSource(turnMessageId: string | null, turns: readonly R
   return ordinal === null ? null : { messageId: turnMessageId, range: { from: ordinal, to: ordinal } };
 }
 
-/**
- * All turns' source: from the first snapshot to the last one with both refs.
- * The list holds each turn's attempts in order with its settled attempt last,
- * and only the settled attempt's message id is in the turn list, so the first
- * turn's ordinal comes from the end of its attempt group.
- */
+function settledAttemptOfFirstTurn(rows: readonly TurnSnapshot[]): TurnSnapshot | undefined {
+  const first = rows[0];
+  return first ? rows[first.attempt_count - 1] : undefined;
+}
+
+/** All turns' source: from the first snapshot to the last one with both refs. */
 export function allTurnsRevertSource(snapshots: readonly TurnSnapshot[], turns: readonly ReviewTurn[] | undefined): FileRevertSource | null {
   const rows = snapshots.filter((snapshot) => snapshot.ref_before && snapshot.ref_after);
   const first = rows[0];
   const last = rows.at(-1);
   if (!first || !last || !turns) return null;
-  const firstSettled = rows[first.attempt_count - 1];
+  const firstSettled = settledAttemptOfFirstTurn(rows);
   const from = firstSettled ? ordinalOf(firstSettled.message_id, turns) : null;
   const to = ordinalOf(last.message_id, turns);
   if (from === null || to === null) return null;

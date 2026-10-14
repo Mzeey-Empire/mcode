@@ -2,13 +2,11 @@ import { useState, type ReactNode } from "react";
 import { FileRevertConfirm } from "./FileRevertConfirm";
 import type { FileRevertSource } from "./file-revert-source";
 
-/** What a file's action bar needs to open and mark the Revert file confirm. */
 export interface FileRevertActionProps {
   readonly onRevert?: () => void;
   readonly revertOpen: boolean;
 }
 
-/** The Revert file confirm state of one Review diff: which file's inset is open. */
 export interface FileRevertInset {
   actionProps: (path: string) => FileRevertActionProps;
   inset: (path: string) => ReactNode;

@@ -6,7 +6,6 @@ import { useTurnRevert } from "@/features/conversation/turn-revert/useTurnRevert
 
 type ReadyPreview = Extract<TurnRevertPreview, { status: "ready" }>;
 
-/** Props for {@link FileRevertConfirm}. */
 export interface FileRevertConfirmProps {
   readonly threadId: string;
   /** Workspace-relative path of the file header the inset sits under. */

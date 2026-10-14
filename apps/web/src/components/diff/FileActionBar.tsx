@@ -37,7 +37,6 @@ interface FileActionBarProps {
   readonly onTogglePreview: () => void;
   /** Opens the Revert file confirm. Omit in views that cannot revert, so the icon does not render. */
   readonly onRevert?: () => void;
-  /** Whether the Revert file confirm is open under this header. */
   readonly revertOpen?: boolean;
 }
 
@@ -51,7 +50,7 @@ const ACTION_BUTTON_ACTIVE = "bg-selected text-ink";
 
 /**
  * Per-file actions in the Review file header: a Diff/Preview toggle (markdown
- * only), Copy path, Open in editor, and Revert file where the view can revert.
+ * only), Copy path, and Open in editor.
  */
 export function FileActionBar({
   filePath,
