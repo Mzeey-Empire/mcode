@@ -139,12 +139,18 @@ ${userMessage}`;
   /** Consume one visible text delta while a plan turn is active. */
   onTextDelta(threadId: string, delta: string): void {
     const ready = this.executionByThread.get(threadId)?.feedText(delta);
-    if (ready) void this.publishQuestions(threadId, ready.questions);
+    if (ready) this.publishQuestions(threadId, ready.questions);
   }
 
-  private async publishQuestions(threadId: string, questions: PlanQuestion[]): Promise<void> {
-    await this.threadRepo.updatePlanPhase(threadId, "questions");
+  /** The broadcast stays synchronous with the parsed delta; the phase write follows and republishes the thread. */
+  private publishQuestions(threadId: string, questions: PlanQuestion[]): void {
     broadcast("plan.questions", { threadId, questions });
+    this.threadRepo.updatePlanPhase(threadId, "questions").catch((error: unknown) => {
+      logger.error("Failed to record the questions plan phase", {
+        threadId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   /** Capture native plan markdown until its assistant message receives a durable identity. */

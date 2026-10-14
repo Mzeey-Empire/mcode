@@ -89,17 +89,18 @@ interface ProgressThread {
 /** One bounded live owner retains accepted progress after its execution worker releases. */
 export class CanonicalAcceptedProgress {
   private onPlanPhaseChanged: ((threadId: string) => void) | undefined;
+  private rosterChangeListener: ((threadId: string, revision: number) => void) | undefined;
 
   /** Refresh planning attention after the saved state becomes visible to readers. */
   bindPlanPhaseChanged(listener: (threadId: string) => void): void {
     this.onPlanPhaseChanged = listener;
   }
-  private rosterChangeListener: ((threadId: string, revision: number) => void) | undefined;
 
   /** Observe accepted canonical roster revisions without coupling projections to reads. */
   onSubagentRosterChange(listener: (threadId: string, revision: number) => void): void {
     this.rosterChangeListener = listener;
   }
+
   readonly epoch = NodeCrypto.randomUUID();
   private readonly threads = new Map<string, ProgressThread>();
   private readonly budget = new BoundedProgressRetention({ maxEvents: 98_304, maxBytes: 96 * 1024 * 1024,

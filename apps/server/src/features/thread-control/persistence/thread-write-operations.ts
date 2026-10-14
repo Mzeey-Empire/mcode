@@ -1,7 +1,6 @@
 import { z } from "zod";
-import { AcknowledgeSeenResultSchema, ContextWindowModeSchema, ThreadModeSchema, ThreadSchema, ThreadStatusSchema, TurnOutcomeSchema } from "@mcode/contracts";
+import { AcknowledgeSeenResultSchema, ContextWindowModeSchema, PlanPhaseSchema, ThreadModeSchema, ThreadSchema, ThreadStatusSchema, TurnOutcomeSchema } from "@mcode/contracts";
 import { databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
-import { PlanPhaseSchema } from "@mcode/contracts";
 
 const settings = z.object({
   model: z.string().optional(), provider: z.string().optional(),
