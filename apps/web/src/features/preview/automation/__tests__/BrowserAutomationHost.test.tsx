@@ -2975,10 +2975,10 @@ describe("BrowserAutomationHost", () => {
     };
 
     act(() => interruptBrowserAutomationTarget("workspace-1", "thread-1", "tab-1", "user-stopped"));
-    const whileHeld = click(40, 0);
+    const whileHeld = click(40, 1);
     await waitFor(() => expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenCalledOnce());
     expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenLastCalledWith(
-      hostId, 1, expect.objectContaining({ ok: false }), whileHeld.target,
+      hostId, 1, expect.objectContaining({ ok: false, error: expect.objectContaining({ code: "HUMAN_INTERRUPTED" }) }), whileHeld.target,
     );
     expect(clicked).not.toHaveBeenCalled();
 
@@ -2991,6 +2991,25 @@ describe("BrowserAutomationHost", () => {
     expect(clicked).toHaveBeenCalledOnce();
     view.unmount();
     frame.remove();
+  });
+
+  it("advances the web control epoch when the agent's turn ends", async () => {
+    vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
+    delete window.desktopBridge;
+    const store = useBrowserAutomationStore.getState();
+    store.registerTarget("workspace-1", "thread-1", "tab-1");
+    store.setControllerForTarget("workspace-1", "thread-1", "tab-1", {
+      tabId: "tab-1", controller: "agent", controlEpoch: 3, providerSessionId: "session-1",
+    });
+    act(() => useThreadStore.setState({ runningThreadIds: new Set(["thread-1"]) }));
+    const view = render(<BrowserAutomationHost />);
+
+    act(() => useThreadStore.setState({ runningThreadIds: new Set() }));
+
+    expect(useBrowserAutomationStore.getState().controllers.get(browserAutomationTargetKey("workspace-1", "thread-1", "tab-1"))).toEqual({
+      tabId: "tab-1", controller: "none", controlEpoch: 4,
+    });
+    view.unmount();
   });
 
   it("rejects a pending request after web iframe replacement without mutating the new document", async () => {

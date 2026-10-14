@@ -685,11 +685,14 @@ export function onBrowserAutomationInterruption(listener: InterruptionListener):
 function holdWebBrowserForUser(workspaceId: string, threadId: string, tabId: string): void {
   const store = useBrowserAutomationStore.getState();
   const current = store.controllers.get(browserAutomationTargetKey(workspaceId, threadId, tabId));
-  if (current?.controller !== "agent") return;
+  // An agent that is still opening the tab has no controller yet, but Take control is already offered.
+  const opening = findPendingBrowserAutomationOpen(store.pendingAgentOpens, workspaceId, threadId, tabId) !== null;
+  const holdable = current?.controller === "agent" || (opening && current?.controller !== "human");
+  if (!holdable) return;
   store.setControllerForTarget(workspaceId, threadId, tabId, {
     tabId,
     controller: "human",
-    controlEpoch: current.controlEpoch + 1,
+    controlEpoch: (current?.controlEpoch ?? 0) + 1,
   });
 }
 

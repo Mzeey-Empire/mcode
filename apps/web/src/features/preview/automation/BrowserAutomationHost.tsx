@@ -598,6 +598,10 @@ async function executeWebOpen(context: BrowserAutomationRequestContext): Promise
   if (!requestedUrl) return context.state.sessionDriver.execute(context.dispatch, context.controller.signal);
   const staleResponse = staleCurrentWebTargetResponse(context);
   if (staleResponse) return staleResponse;
+  // Navigating replaces the page, so a stale epoch must be refused before it, not after.
+  if (!context.initialControlEpochMatches) {
+    return failureResponse(context.dispatch.request, "STALE_CONTROL_EPOCH", "Browser operation is stale");
+  }
   const target = useBrowserAutomationStore.getState().liveTargets.get(context.targetKey)!;
   const iframe = startWebOpenNavigation(context, requestedUrl, target.revision);
   await waitForWebOpenNavigation(context, requestedUrl, iframe);
@@ -606,9 +610,20 @@ async function executeWebOpen(context: BrowserAutomationRequestContext): Promise
   return context.state.sessionDriver.execute(webOpenExecutionDispatch(context), context.controller.signal);
 }
 
+// Mirrors the desktop kernel's admission: only inspect and status may run while the user holds the Browser.
+function userHoldResponse(context: BrowserAutomationRequestContext): BrowserAutomationResponse | null {
+  if (context.bridge) return null;
+  const operation = context.dispatch.request.operation;
+  if (operation === "inspect" || operation === "status") return null;
+  if (useBrowserAutomationStore.getState().controllers.get(context.targetKey)?.controller !== "human") return null;
+  return failureResponse(context.dispatch.request, "HUMAN_INTERRUPTED", "The user has control of the Browser until Hand back");
+}
+
 function selectBrowserAutomationOperation(
   context: BrowserAutomationRequestContext,
 ): Promise<BrowserAutomationResponse> {
+  const heldByUser = userHoldResponse(context);
+  if (heldByUser) return Promise.resolve(heldByUser);
   if (context.flags.interaction) return executeWebInteraction(context);
   if (context.flags.open) return executeWebOpen(context);
   if (context.bridge || context.flags.executor) {
@@ -1547,7 +1562,8 @@ export function BrowserAutomationHost() {
         store.setControllerForTarget(target.workspaceId, target.threadId, target.tabId, {
           tabId: target.tabId,
           controller: "none",
-          controlEpoch: controller.controlEpoch,
+          // Ending a turn must invalidate the epoch, as the desktop kernel's agent-turn-ended does.
+          controlEpoch: controller.controlEpoch + 1,
         });
       }
     }

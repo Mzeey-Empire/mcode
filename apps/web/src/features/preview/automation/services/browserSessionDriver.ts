@@ -1390,7 +1390,11 @@ export class BrowserSessionDriver {
     this.observations.set(observationRef, {
       hostRevision: current.connectionGeneration,
       documentRevision: current.targetGeneration,
-      controlRevision: this.currentControlRevision(prepared.dispatch),
+      // A select moves `current` to another tab, so its epoch is that tab's, not the dispatch target's.
+      controlRevision: this.currentControlRevision({
+        ...prepared.dispatch,
+        target: { ...prepared.dispatch.target, threadId: current.threadId, tabId: current.tabId },
+      }),
       capabilityRevision: prepared.capabilityRevision,
       humanInteractionRevision: this.currentHumanInteractionRevisionForTarget(prepared.session.workspaceId, current.threadId, current.tabId),
       targetKey: observationTargetKey(prepared.session.workspaceId, current.threadId, current.tabId),

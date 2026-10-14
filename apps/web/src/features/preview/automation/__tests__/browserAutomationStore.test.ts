@@ -622,4 +622,21 @@ describe("browser acting and user hold", () => {
     });
     await expect(handBackBrowserControl("workspace-acting", "thread-acting")).resolves.toBe(false);
   });
+
+  it("lets Take control hold a tab whose browser_open has not produced a controller yet", () => {
+    const store = useBrowserAutomationStore.getState();
+    store.registerTarget("workspace-acting", "thread-acting", "tab-acting");
+    store.setPendingAgentOpen("open-1", 1, {
+      workspaceId: "workspace-acting", threadId: "thread-acting", tabId: "tab-acting", url: null, startedAt: 1,
+    });
+
+    interruptBrowserAutomationTarget("workspace-acting", "thread-acting", "tab-acting", "user-stopped");
+
+    expect(useBrowserAutomationStore.getState().controllers.get(key)).toEqual({
+      tabId: "tab-acting",
+      controller: "human",
+      controlEpoch: 1,
+    });
+    store.clearPendingAgentOpen("open-1", 1);
+  });
 });
