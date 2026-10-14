@@ -14,4 +14,10 @@ export interface PreparedComposerSubmission {
   /** Review comment revisions read into {@link currentAnnotations}; a Send freezes exactly these. */
   currentDiffComments: readonly DraftDiffComment[];
   previewAnnotations?: PreviewAnnotationBundle;
+  /**
+   * Plan comments this Send carries; empty unless it goes to an existing
+   * thread that is not running. A Send that queues or starts a thread leaves
+   * the comments riding.
+   */
+  planComments: { readonly ridingIds: string[]; readonly excludedIds: string[] };
 }

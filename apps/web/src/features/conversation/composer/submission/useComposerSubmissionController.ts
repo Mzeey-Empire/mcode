@@ -141,7 +141,11 @@ export function useComposerSubmissionController({
       // new-thread and branch Sends settle on their dispatch result alone.
       const sendsToThisThread = target.kind === "existing-thread";
       const draftSubmission = sendsToThisThread
-        ? beginDraftSubmission(threadId, submission.currentDiffComments, messageId)
+        ? beginDraftSubmission(
+          threadId,
+          { diffComments: submission.currentDiffComments, planComments: submission.planComments },
+          messageId,
+        )
         : null;
       let placeholderAccepted = false;
       const dispatch = dispatchComposerTarget({
@@ -194,6 +198,7 @@ export function useComposerSubmissionController({
       annotationScopeId,
       form,
       startingThread,
+      planCommentThreadId: !isNewThread && !branchFromMessageId && !isAgentRunning ? threadId : undefined,
       discardEmptyEdit: queue.discardEmptyEdit,
       resolvePreviewAnnotations: queue.resolvePreviewAnnotations,
     });

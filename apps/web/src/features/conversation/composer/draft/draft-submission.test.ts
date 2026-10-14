@@ -206,7 +206,7 @@ describe("draft submission lifecycle", () => {
   function startSend(messageId = MESSAGE_ID) {
     saveDraftDiffComment(THREAD_ID, target, { note: "review note", mentions: [] });
     const comments = useComposerDraftStore.getState().drafts[THREAD_ID]!.diffComments!;
-    return beginDraftSubmission(THREAD_ID, comments, messageId)!;
+    return beginDraftSubmission(THREAD_ID, { diffComments: comments }, messageId)!;
   }
 
   beforeEach(() => {

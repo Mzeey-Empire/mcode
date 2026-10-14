@@ -1,8 +1,8 @@
-import type { DraftDiffComment } from "@mcode/contracts";
 import { getTransport } from "@/transport";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import {
   freezeDraftSubmission,
+  type FrozenDraftContent,
   reconcilePendingSubmissions,
   settleDraftSubmission,
 } from "./draft-submission";
@@ -59,19 +59,21 @@ async function confirmServerMessages(
 }
 
 /**
- * Freezes the Review comment revisions a Send carries. Returns null when the
- * Send carries none, so plain messages skip the draft entirely.
+ * Freezes the Review comments and plan comments a Send carries. Returns null
+ * when the Send carries none, so plain messages skip the draft entirely.
  */
 export function beginDraftSubmission(
   threadId: string | undefined,
-  diffComments: readonly DraftDiffComment[],
+  content: FrozenDraftContent,
   messageId: string,
 ): DraftSubmissionHandle | null {
-  if (!threadId || diffComments.length === 0) return null;
+  // Exclusions freeze too: they last one Send, so settling it returns those comments to the chip.
+  const planCommentCount = (content.planComments?.ridingIds.length ?? 0) + (content.planComments?.excludedIds.length ?? 0);
+  if (!threadId || (content.diffComments.length === 0 && planCommentCount === 0)) return null;
   inFlightMessageIds.add(messageId);
   useComposerDraftStore.getState().updateNextMessage(
     threadId,
-    (draft) => freezeDraftSubmission(draft, messageId, { diffComments }).draft,
+    (draft) => freezeDraftSubmission(draft, messageId, content).draft,
   );
   return {
     messageId,
