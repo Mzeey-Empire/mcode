@@ -1,16 +1,19 @@
-import { useCallback, useMemo, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useMemo, useRef, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { SIDE_PANE_CONTENT_MIN_WIDTH, sidePaneDocks } from "@/lib/side-pane-dock";
-import { CodeFileView } from "./CodeFileView";
+import { CodeFileView, splitLines } from "./CodeFileView";
 import { FileTree } from "./FileTree";
 import { FilesControlsRow, FilesTabStrip } from "./FilesHeader";
+import { FindInFileBar } from "./FindInFileBar";
 import { GoToFilePopover } from "./GoToFilePopover";
 import { buildFilesTree, flattenFileTree, folderNodesToReveal, indexFileChanges } from "./file-tree-model";
 import { FILES_SCOPE_DEFAULTS, getFilesScope, useFilesTabsStore, type FilesScopeState } from "./filesTabsStore";
 import { useFileActions } from "./useFileActions";
-import { useFilesData, type FilesData } from "./useFilesData";
+import { useFilesData, type FileReadState, type FilesData } from "./useFilesData";
+import { useFindInFile, type FindHighlight } from "./useFindInFile";
 
 const EMPTY_PATHS: readonly string[] = [];
+const NO_LINES: readonly string[] = [];
 
 export interface FilesToolProps {
   readonly workspaceId: string;
@@ -38,6 +41,33 @@ function useFilesScopeState(scopeId: string): FilesScopeState {
   return useFilesTabsStore((store) => store.scopes[scopeId] ?? FILES_SCOPE_DEFAULTS);
 }
 
+function useFindBar(scopeId: string, requested: boolean, read: FileReadState | undefined, bodyRef: RefObject<HTMLElement | null>) {
+  const text = textOf(read);
+  const open = requested && text !== null;
+  const lines = useMemo(() => (open && text !== null ? splitLines(text) : NO_LINES), [open, text]);
+  const find = useFindInFile(lines);
+  const setOpen = (next: boolean) => {
+    useFilesTabsStore.getState().setFindOpen(scopeId, next);
+    if (!next) bodyRef.current?.querySelector<HTMLElement>("[data-code-viewport]")?.focus();
+  };
+  // The bar handles its own Escape; this catches it once focus has moved into the code.
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (!open || event.key !== "Escape" || event.defaultPrevented) return;
+    event.stopPropagation();
+    setOpen(false);
+  };
+  return {
+    header: text === null ? null : { open, onToggle: () => setOpen(!open) },
+    bar: open ? <FindInFileBar find={find} onClose={() => setOpen(false)} /> : null,
+    highlight: open ? find : null,
+    onKeyDown,
+  };
+}
+
+function textOf(read: FileReadState | undefined): string | null {
+  return read?.status === "ready" && read.result.kind === "text" && read.result.content.length > 0 ? read.result.content : null;
+}
+
 /**
  * The Files tool: project files for the panel scope with tabs, a tree, a code
  * view, and Go to file. Distinct from Review's Files navigator, which lists
@@ -55,6 +85,7 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
   const setGoToFileOpen = (open: boolean) => store().setGoToFileOpen(scopeId, open);
   const tree = useMemo(() => buildFilesTree(data.list?.paths ?? EMPTY_PATHS), [data.list]);
   const shownPath = layout.body === "file" ? state.activePath : null;
+  const findBar = useFindBar(scopeId, state.findOpen, shownPath ? data.reads[shownPath] : undefined, bodyRef);
 
   const openFile = useCallback(
     (path: string, beside = false) => {
@@ -72,7 +103,7 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
   );
 
   return (
-    <div data-files-tool="" className="absolute inset-0 flex min-h-0 flex-col overflow-hidden">
+    <div data-files-tool="" onKeyDown={findBar.onKeyDown} className="absolute inset-0 flex min-h-0 flex-col overflow-hidden">
       <FilesTabStrip
         openPaths={state.openPaths}
         activePath={state.activePath}
@@ -87,9 +118,11 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
         onToggleTree={() => store().setTreeOpen(scopeId, !(layout.dockedTree || layout.body === "tree"))}
         onRevealFolder={revealFolder}
         onGoToFile={() => setGoToFileOpen(true)}
+        find={findBar.header}
       />
+      {findBar.bar}
       <div ref={bodyRef} className="relative flex min-h-0 flex-1 flex-row overflow-hidden">
-        <FilesBody scopeId={scopeId} workspaceId={workspaceId} threadId={threadId} state={state} layout={layout} data={data} tree={tree} actions={actions} onOpenFile={openFile} />
+        <FilesBody scopeId={scopeId} workspaceId={workspaceId} threadId={threadId} state={state} layout={layout} data={data} tree={tree} actions={actions} findHighlight={findBar.highlight} onOpenFile={openFile} />
         {state.goToFileOpen ? (
           <GoToFilePopover
             paths={data.list?.paths ?? EMPTY_PATHS}
@@ -114,6 +147,7 @@ function FilesBody({
   data,
   tree,
   actions,
+  findHighlight,
   onOpenFile,
 }: {
   readonly scopeId: string;
@@ -124,6 +158,7 @@ function FilesBody({
   readonly data: FilesData;
   readonly tree: ReturnType<typeof buildFilesTree>;
   readonly actions: ReturnType<typeof useFileActions>;
+  readonly findHighlight: FindHighlight | null;
   readonly onOpenFile: (path: string) => void;
 }) {
   const changeIndex = useMemo(() => indexFileChanges(data.changes), [data.changes]);
@@ -163,6 +198,7 @@ function FilesBody({
           threadId={threadId}
           scopeId={scopeId}
           workspaceId={workspaceId}
+          find={findHighlight}
         />
       </div>
     </>

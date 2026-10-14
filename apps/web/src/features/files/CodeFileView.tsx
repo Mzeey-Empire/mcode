@@ -11,11 +11,14 @@ import {
 } from "@/features/conversation/composer/draft/draft-file-comments";
 import type { FileCommentTarget } from "@/features/conversation/composer/draft/draft-submission";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { TokenSpan } from "@/workers/shiki.worker";
 import type { FileReadState } from "./useFilesData";
 import { useCodeTokens } from "./useCodeTokens";
 import { FILE_COMMENT_CARD_CLASS, FILE_COMMENT_ROW_CLASS, FileCommentEditor } from "./FileCommentEditor";
 import { useFilesTabsStore } from "./filesTabsStore";
+import { splitPieces, type FindMatch, type FindResult, type LineHighlight, type LinePiece } from "./find-in-file";
+import type { FindHighlight } from "./useFindInFile";
 
 const LINE_HEIGHT = 20;
 const OVERSCAN = 20;
@@ -43,10 +46,12 @@ export interface CodeFileViewProps {
   readonly scopeId: string;
   /** Workspace that scopes mention suggestions in the comment editor. */
   readonly workspaceId?: string;
+  /** Find matches to paint in a text file, or null while the find bar is closed. */
+  readonly find?: FindHighlight | null;
 }
 
 /** The Files body for one open file: code, or the state that explains why there is none. */
-export function CodeFileView({ path, state, onOpenInEditor, onCloseTab, ...commentScope }: CodeFileViewProps) {
+export function CodeFileView({ path, state, onOpenInEditor, onCloseTab, find = null, ...commentScope }: CodeFileViewProps) {
   if (state.status === "loading") return <StateLine>Loading…</StateLine>;
   if (state.status === "missing") {
     return (
@@ -56,7 +61,7 @@ export function CodeFileView({ path, state, onOpenInEditor, onCloseTab, ...comme
     );
   }
   if (state.status === "failed") return <StateMessage text={state.message} />;
-  return <ReadResultView path={path} result={state.result} onOpenInEditor={onOpenInEditor} commentScope={commentScope} />;
+  return <ReadResultView path={path} result={state.result} onOpenInEditor={onOpenInEditor} find={find} commentScope={commentScope} />;
 }
 
 function ReadResultView({
@@ -64,11 +69,13 @@ function ReadResultView({
   result,
   onOpenInEditor,
   commentScope,
+  find,
 }: {
   readonly path: string;
   readonly result: FileReadResult;
   readonly onOpenInEditor: (line?: number) => void;
   readonly commentScope: Pick<CodeFileViewProps, "threadId" | "scopeId" | "workspaceId">;
+  readonly find: FindHighlight | null;
 }) {
   const openButton = <Button variant="outline" size="compact" onClick={() => onOpenInEditor()}>Open in editor</Button>;
   switch (result.kind) {
@@ -80,7 +87,7 @@ function ReadResultView({
       return <StateMessage text={`Binary file · ${formatFileSize(result.size)}`}>{openButton}</StateMessage>;
     case "text":
       if (result.content.length === 0) return <StateLine>Empty file</StateLine>;
-      return <CodeLines path={path} content={result.content} changedLines={result.changedLines} {...commentScope} />;
+      return <CodeLines path={path} content={result.content} changedLines={result.changedLines} find={find} {...commentScope} />;
   }
 }
 
@@ -162,6 +169,25 @@ function usePendingJump(scopeId: string, path: string, rows: readonly CodeRow[],
   }, [jump, path, rows, scopeId, scrollToIndex]);
 }
 
+interface IndexedMatch extends FindMatch {
+  readonly index: number;
+}
+
+function matchesByLine(result: FindResult | undefined): ReadonlyMap<number, readonly IndexedMatch[]> {
+  const byLine = new Map<number, IndexedMatch[]>();
+  if (result?.status !== "ready") return byLine;
+  result.matches.forEach((match, index) => {
+    const onLine = byLine.get(match.line);
+    if (onLine) onLine.push({ ...match, index });
+    else byLine.set(match.line, [{ ...match, index }]);
+  });
+  return byLine;
+}
+
+function currentMatch(find: FindHighlight | null): FindMatch | null {
+  return find?.result.status === "ready" ? (find.result.matches[find.index] ?? null) : null;
+}
+
 function CodeLines({
   path,
   content,
@@ -169,6 +195,7 @@ function CodeLines({
   threadId,
   workspaceId,
   scopeId,
+  find,
 }: {
   readonly path: string;
   readonly content: string;
@@ -176,6 +203,7 @@ function CodeLines({
   readonly threadId: string | null;
   readonly workspaceId?: string;
   readonly scopeId: string;
+  readonly find: FindHighlight | null;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const lines = useMemo(() => splitLines(content), [content]);
@@ -211,8 +239,33 @@ function CodeLines({
       mentions: [],
     });
   };
+  const foundByLine = useMemo(() => matchesByLine(find?.result), [find?.result]);
+  const currentIndex = find?.index ?? -1;
+  const currentLine = currentMatch(find)?.line ?? null;
+  const currentRowIndex = useMemo(
+    () => (currentLine === null ? -1 : rows.findIndex((row) => row.kind === "line" && row.index === currentLine)),
+    [currentLine, rows],
+  );
+  const navigation = find?.navigation;
+  const revealedNavigation = useRef<number | undefined>(undefined);
+  const revealCurrent = (element: HTMLElement | null) => {
+    if (!element || revealedNavigation.current === navigation) return;
+    revealedNavigation.current = navigation;
+    element.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  };
+
+  useEffect(() => {
+    if (currentRowIndex >= 0) virtualizer.scrollToIndex(currentRowIndex, { align: "auto" });
+  }, [currentRowIndex, navigation, virtualizer]);
+
   return (
-    <div ref={viewportRef} data-testid="code-file-view" className="@container min-h-0 flex-1 overflow-auto bg-background py-3 font-mono text-code-small">
+    <div
+      ref={viewportRef}
+      data-testid="code-file-view"
+      data-code-viewport=""
+      tabIndex={0}
+      className="@container min-h-0 flex-1 overflow-auto bg-background py-3 font-mono text-code-small outline-none"
+    >
       <div className="relative min-w-full" style={{ height: virtualizer.getTotalSize(), minWidth: trackMinWidth }}>
         {virtualizer.getVirtualItems().map((item) => {
           const row = rows[item.index];
@@ -238,7 +291,13 @@ function CodeLines({
             >
               <LineGutter lineNumber={lineNumber} commentable={threadId !== null} onComment={() => openEditor(row.index)} />
               <span className="pr-4 text-ink">
-                <LineContent text={lines[row.index] ?? ""} tokens={tokens?.[row.index]} />
+                <LineContent
+                  text={lines[row.index] ?? ""}
+                  tokens={tokens?.[row.index]}
+                  found={foundByLine.get(row.index)}
+                  currentIndex={currentIndex}
+                  revealCurrent={revealCurrent}
+                />
               </span>
             </div>
           );
@@ -301,13 +360,47 @@ function LineGutter({
   );
 }
 
-function LineContent({ text, tokens }: { readonly text: string; readonly tokens: TokenSpan[] | undefined }) {
-  if (!tokens) return <>{text}</>;
+function LineContent({
+  text,
+  tokens,
+  found,
+  currentIndex,
+  revealCurrent,
+}: {
+  readonly text: string;
+  readonly tokens: TokenSpan[] | undefined;
+  readonly found: readonly IndexedMatch[] | undefined;
+  readonly currentIndex: number;
+  readonly revealCurrent: (element: HTMLElement | null) => void;
+}) {
+  if (!found && !tokens) return <>{text}</>;
+  const pieces: readonly LinePiece[] = tokens ?? [{ content: text }];
+  if (!found) {
+    return (
+      <>
+        {pieces.map((piece, index) => (
+          <span key={index} style={{ color: piece.color }}>{piece.content}</span>
+        ))}
+      </>
+    );
+  }
+  const highlights: LineHighlight[] = found.map((match) => ({ start: match.start, end: match.end, current: match.index === currentIndex }));
   return (
     <>
-      {tokens.map((token, index) => (
-        <span key={index} style={{ color: token.color }}>{token.content}</span>
-      ))}
+      {splitPieces(pieces, highlights).map((piece, index) =>
+        piece.match ? (
+          <mark
+            key={index}
+            data-find-match={piece.match}
+            ref={piece.match === "current" ? revealCurrent : undefined}
+            className={cn("rounded-[3px] text-inherit", piece.match === "current" ? "bg-primary text-primary-ink" : "bg-primary/30")}
+          >
+            {piece.content}
+          </mark>
+        ) : (
+          <span key={index} style={{ color: piece.color }}>{piece.content}</span>
+        ),
+      )}
     </>
   );
 }

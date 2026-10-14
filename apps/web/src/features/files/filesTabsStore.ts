@@ -20,6 +20,8 @@ export interface FilesScopeState {
   readonly treeWidth: number;
   /** Whether Go to file is open; stored here because `files.goToFile` can fire before the tool mounts. */
   readonly goToFileOpen: boolean;
+  /** Whether the find bar is open; stored here for the same reason as `goToFileOpen`. */
+  readonly findOpen: boolean;
   /** Line the active file view should scroll to, set by a jump from outside Files, or null. */
   readonly pendingJump: FilesPendingJump | null;
 }
@@ -38,6 +40,7 @@ export const FILES_SCOPE_DEFAULTS: FilesScopeState = {
   revealPath: null,
   treeWidth: FILES_TREE_DEFAULT_WIDTH,
   goToFileOpen: false,
+  findOpen: false,
   pendingJump: null,
 };
 
@@ -59,6 +62,7 @@ interface FilesTabsStore {
   jumpTo(scopeId: string, path: string, line: number): void;
   /** Clears the pending jump once the file view has shown it. */
   clearJump(scopeId: string): void;
+  setFindOpen(scopeId: string, open: boolean): void;
 }
 
 /** Clamps a dragged tree width into the allowed range. */
@@ -126,6 +130,8 @@ export const useFilesTabsStore = create<FilesTabsStore>((set) => {
     jumpTo: (scopeId, path, line) =>
       update(scopeId, (state) => ({ ...withOpened(state, path, true), pendingJump: { path, line } })),
     clearJump: (scopeId) => update(scopeId, (state) => (state.pendingJump === null ? state : { ...state, pendingJump: null })),
+    setFindOpen: (scopeId, open) =>
+      update(scopeId, (state) => (state.findOpen === open ? state : { ...state, findOpen: open })),
   };
 });
 
