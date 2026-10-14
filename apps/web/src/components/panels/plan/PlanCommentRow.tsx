@@ -19,7 +19,6 @@ export function PlanCommentRow({ comment, canEdit, onEdit, onResolve }: PlanComm
       {canEdit ? (
         <button
           type="button"
-          aria-label="Edit comment"
           className="text-ink min-w-0 flex-1 cursor-text text-left text-sm leading-5 break-words whitespace-pre-wrap"
           onClick={onEdit}
         >
