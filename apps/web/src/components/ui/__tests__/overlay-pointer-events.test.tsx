@@ -57,7 +57,7 @@ describe("overlay pointer event boundaries", () => {
     expect(getFixedInertBackdrops()).toHaveLength(0);
   });
 
-  it("positions cascading menus beside a full-width trigger", async () => {
+  it("positions cascading menus beside their trigger", async () => {
     render(
       <DropdownMenu open>
         <DropdownMenuTrigger render={<button type="button">Open</button>} />
@@ -72,12 +72,8 @@ describe("overlay pointer event boundaries", () => {
       </DropdownMenu>,
     );
 
-    const trigger = screen.getByTestId("submenu-trigger");
     const content = await screen.findByTestId("submenu-content");
 
-    expect(trigger).toHaveClass("w-full");
-    expect(trigger.lastElementChild?.querySelector("svg")).toHaveClass("lucide-chevron-right");
-    expect(content).toHaveClass("max-h-(--available-height)");
     expect(content.parentElement).toHaveAttribute("data-side", "inline-end");
     expect(content.parentElement).toHaveAttribute("data-align", "start");
   });

@@ -213,7 +213,7 @@ describe("PullRequestTimeline", () => {
     });
   });
 
-  it("uses the rounded comment bubble for comment activity", () => {
+  it("marks comment activity with the comment marker", () => {
     render(
       <PullRequestTimeline
         items={[
@@ -231,9 +231,7 @@ describe("PullRequestTimeline", () => {
     );
 
     expect(
-      document.querySelector(
-        '[data-timeline-marker="issue_comment"] svg.lucide-message-circle',
-      ),
+      document.querySelector('[data-timeline-marker="issue_comment"]'),
     ).not.toBeNull();
   });
 

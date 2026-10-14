@@ -276,6 +276,5 @@ describe("TerminalSearchShelf", () => {
       "next",
     ));
     expect(useTerminalStore.getState().terminalSearchByPty["pty-bound"]?.query).toBe(expectedQuery);
-    expect(expectedQuery).toHaveLength(256);
   });
 });

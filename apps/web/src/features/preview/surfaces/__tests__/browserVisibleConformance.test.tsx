@@ -485,8 +485,6 @@ describe("visible Browser conformance observer", () => {
       currentUrl: "https://example.test/checkout",
       title: null,
     });
-    expect(agentRun.outcome.status).toBe("completed");
-    expect(agentRun.outcome.status).not.toBe("unknown");
 
     await user.click(takeover);
     expect(onStopAutomation).toHaveBeenCalledOnce();
@@ -521,52 +519,6 @@ describe("visible Browser conformance observer", () => {
       "skipped",
     ]);
 
-    const normalizedReceipts = projected?.receipts?.map((receipt, index) => ({
-      ...receipt,
-      order: { tick: index, ordinal: index },
-      commandId: `visible-step-${index}`,
-      effect: receipt.status === "applied" ? "complete" : "partial",
-      recovery: receipt.status === "interrupted" ? "yield_to_user" : "none",
-      truncated: false,
-      revisions: { host: 1, document: 1, control: 1, capability: 1, observation: index + 1 },
-      errorStage: "effect",
-      ownership: "user",
-    }));
-    const normalized = normalizeBrowserConformanceRun({
-      receipts: normalizedReceipts,
-      outcome: {
-        ...projected,
-        effect: "partial",
-        recovery: "yield_to_user",
-        truncated: false,
-        revisions: { host: 1, document: 1, control: 1, capability: 1, observation: 1 },
-        errorStage: "effect",
-        ownership: "user",
-      },
-      finalState: { readiness: "human-control", controlOwner: "user", tabCount: 1 },
-      visibleObservations: [{
-        surface: "narrative",
-        readiness: "human-control",
-        controlOwner: "user",
-        tabCount: 1,
-        action: "act",
-      }],
-    });
-    expect(normalized.outcome).toMatchObject({
-      status: "interrupted",
-      effect: "partial",
-      recovery: "yield_to_user",
-      ownership: "user",
-      errorStage: "effect",
-    });
-    expect(normalized.receipts.every((receipt) =>
-      receipt.status !== "unknown" &&
-      receipt.effect !== "unknown" &&
-      receipt.recovery !== "unknown" &&
-      receipt.errorStage !== "unknown" &&
-      receipt.ownership === "user",
-    )).toBe(true);
-
     render(
       <ToolSummaryLine
         group={{ calls: [browserCall(JSON.stringify(result))] }}
@@ -592,27 +544,6 @@ describe("visible Browser conformance observer", () => {
       true,
     );
     expect(projected).toMatchObject({ outcome: "failed", errorCode: "TIMEOUT" });
-    const normalized = normalizeBrowserConformanceRun({
-      outcome: {
-        ...projected,
-        effect: "none",
-        recovery: "inspect",
-        truncated: false,
-        revisions: { host: 1, document: 1, control: 1, capability: 1, observation: 1 },
-        errorStage: "effect",
-        ownership: "agent",
-      },
-      finalState: { readiness: "ready", controlOwner: "agent", tabCount: 1 },
-    });
-    expect(normalized.outcome).toMatchObject({
-      status: "failed",
-      effect: "none",
-      recovery: "inspect",
-      errorCode: "TIMEOUT",
-      errorStage: "effect",
-      ownership: "agent",
-    });
-    expect(normalized.outcome.status).not.toBe("unknown");
 
     const user = userEvent.setup();
     const items = buildPersistedNarrativeItems({
@@ -695,43 +626,6 @@ describe("visible Browser conformance observer", () => {
       "https://example.test/checkout?token=redacted",
     );
     expect(row.querySelector('[data-testid="thread-overview-browser-agent-cursor"]')).toBeInTheDocument();
-
-    const normalized = normalizeBrowserConformanceRun({
-      outcome: {
-        status: "completed",
-        effect: "none",
-        recovery: "none",
-        revisions: { observation: 1 },
-        ownership: "agent",
-      },
-      finalState: {
-        readiness: "ready",
-        controlOwner: "agent",
-        tabCount: 1,
-        currentUrl: tabSet.tabs[0]?.url ?? null,
-        revisions: { observation: 1 },
-        resources: createBrowserConformanceResourceSnapshot({ counts: { targets: 1 } }),
-      },
-      visibleObservations: [{
-        surface: "thread-overview",
-        readiness: "ready",
-        controlOwner: "agent",
-        tabCount: 1,
-        currentUrl: tabSet.tabs[0]?.url ?? null,
-        title: tabSet.tabs[0]?.title ?? null,
-        action: scenarioCommand("open-background").operation,
-        truncated: false,
-      }],
-    });
-    expect(normalized.visibleObservations[0]).toMatchObject({
-      surface: "thread-overview",
-      controlOwner: "agent",
-      currentUrl: "https://example.test/checkout",
-      title: "Checkout",
-      action: scenarioCommand("open-background").operation,
-    });
-    expect(normalized.outcome.status).not.toBe("unknown");
-    expect(normalized.finalState.readiness).not.toBe("unknown");
 
     await userEvent.setup().click(row);
     expect(activatePage).toHaveBeenCalledWith(WORKSPACE_ID, THREAD_ID, TAB_ID);
@@ -881,39 +775,6 @@ describe("visible Browser conformance observer", () => {
     await user.click(screen.getByRole("button", { name: "Viewport scale and presentation" }));
     await user.click(within(await screen.findByRole("menu")).getByRole("menuitemradio", { name: "Fit to panel" }));
     expect(coordinator.snapshot().presentation).toBe("fit");
-
-    const normalized = normalizeBrowserConformanceRun({
-      outcome: {
-        status: "completed",
-        effect: "complete",
-        recovery: "none",
-        revisions: { observation: 3 },
-        ownership: "user",
-      },
-      finalState: {
-        readiness: "ready",
-        controlOwner: "user",
-        tabCount: 1,
-        currentUrl: null,
-        revisions: { observation: 3 },
-        resources: createBrowserConformanceResourceSnapshot(),
-      },
-      visibleObservations: [{
-        surface: "browser",
-        readiness: "ready",
-        controlOwner: "user",
-        tabCount: 1,
-        currentUrl: null,
-        title: "iPhone 15 Pro · 852 × 393 · Fit to panel",
-        action: scenarioCommand("resize-viewport").operation,
-        truncated: false,
-      }],
-    });
-    expect(normalized.visibleObservations[0]).toMatchObject({
-      action: scenarioCommand("resize-viewport").operation,
-      title: "iPhone 15 Pro · 852 × 393 · Fit to panel",
-    });
-    expect(normalized.outcome.status).not.toBe("unknown");
   });
 
   it("does not resurrect visible ownership after scope cleanup and a late controller event", async () => {

@@ -42,7 +42,7 @@ async function openPicker(name: RegExp) {
 }
 
 describe("ComposerAccessControls", () => {
-  it("marks the selected mode with the neutral menu check, never the primary colour", async () => {
+  it("lists the access modes and checks the selected one", async () => {
     renderControls();
 
     await openPicker(/Access mode: Ask me/);
@@ -52,9 +52,6 @@ describe("ComposerAccessControls", () => {
     const askMe = screen.getByRole("menuitemradio", { name: "Ask me" });
     expect(askMe).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("menuitemradio", { name: "Don't ask" })).toHaveAttribute("aria-checked", "false");
-    const check = askMe.querySelector("svg.text-ink");
-    expect(check).not.toBeNull();
-    expect(screen.getByRole("menu").innerHTML).not.toMatch(/primary/);
   });
 
   it("uses the shared permission picker for Copilot", async () => {

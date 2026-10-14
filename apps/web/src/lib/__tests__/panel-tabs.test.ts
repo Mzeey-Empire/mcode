@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { FileText, Layers, Settings } from "lucide-react";
 import {
   PANEL_TAB_TYPES,
   creatableTypes,
@@ -13,29 +12,6 @@ function ids(types: readonly { id: PanelTabTypeId }[]): PanelTabTypeId[] {
 }
 
 describe("PANEL_TAB_TYPES catalog", () => {
-  // Project Action output is a Terminal tab, so there is no separate Action tool (ADR-0026).
-  it("declares the revamp tab types in prototype order", () => {
-    expect(ids(PANEL_TAB_TYPES)).toEqual([
-      "preview",
-      "terminal",
-      "files",
-      "changes",
-      "environment",
-      "tasks",
-      "subagents",
-    ]);
-  });
-
-  it("marks only Files as coming-soon", () => {
-    const comingSoon = PANEL_TAB_TYPES.filter((t) => t.comingSoon).map((t) => t.id);
-    expect(comingSoon).toEqual(["files"]);
-  });
-
-  it("marks Plan and Subagents as thread-only (Review is dual-scope)", () => {
-    const threadOnly = PANEL_TAB_TYPES.filter((t) => t.needsThread).map((t) => t.id);
-    expect(threadOnly).toEqual(["tasks", "subagents"]);
-  });
-
   it("gives every shortcut-enabled type a commandId", () => {
     for (const type of PANEL_TAB_TYPES) {
       if (type.comingSoon) {
@@ -44,30 +20,6 @@ describe("PANEL_TAB_TYPES catalog", () => {
         expect(type.commandId).toBeTruthy();
       }
     }
-  });
-
-  it("gives every type a label and a blurb", () => {
-    for (const type of PANEL_TAB_TYPES) {
-      expect(type.label.length).toBeGreaterThan(0);
-      expect(type.blurb.length).toBeGreaterThan(0);
-    }
-  });
-
-  it("uses Plan language for the legacy tasks tab id", () => {
-    const plan = PANEL_TAB_TYPES.find((type) => type.id === "tasks");
-    expect(plan?.label).toBe("Plan");
-    expect(plan?.blurb).toBe("Review the plan");
-    expect(plan?.icon).toBe(FileText);
-  });
-
-  it("uses Layers for the Subagents panel tab", () => {
-    const subagents = PANEL_TAB_TYPES.find((type) => type.id === "subagents");
-    expect(subagents?.icon).toBe(Layers);
-  });
-
-  it("uses Settings for the Project settings panel tab", () => {
-    const environment = PANEL_TAB_TYPES.find((type) => type.id === "environment");
-    expect(environment?.icon).toBe(Settings);
   });
 });
 

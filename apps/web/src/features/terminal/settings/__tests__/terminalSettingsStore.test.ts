@@ -63,9 +63,16 @@ describe("terminal settings store", () => {
     });
   });
 
-  it("sends the global default payload and keeps workspace Automatic distinct from inherit", async () => {
+  it("refreshes the global default and keeps workspace Automatic distinct from inherit", async () => {
+    const defaults = getDefaultSettings();
+    useSettingsStore.setState({
+      settings: {
+        ...defaults,
+        terminal: { ...defaults.terminal, defaultProfileId: profile.id, profiles: [profile] },
+      },
+    });
     await useTerminalSettingsStore.getState().setGlobalDefault("automatic");
-    expect(transport.terminalProfileSetDefault).toHaveBeenCalledWith("automatic");
+    expect(useSettingsStore.getState().settings.terminal.defaultProfileId).toBe("automatic");
 
     await useTerminalSettingsStore.getState().setWorkspaceDefault("workspace-1", "automatic");
     expect(transport.terminalWorkspacePreferencesUpdate).toHaveBeenCalledWith("workspace-1", "automatic");
@@ -79,10 +86,14 @@ describe("terminal settings store", () => {
   it("handles profile CRUD and exposes deletion references", async () => {
     await useTerminalSettingsStore.getState().fetchProfiles();
     expect(useTerminalSettingsStore.getState().customProfiles).toEqual([profile]);
-    expect(await useTerminalSettingsStore.getState().createProfile({ name: "Shell", executable: "sh", arguments: [] })).toBe(true);
-    expect(transport.terminalProfileCreate).toHaveBeenCalledWith({ name: "Shell", executable: "sh", arguments: [] });
-    expect(await useTerminalSettingsStore.getState().updateProfile({ ...profile, profileId: profile.id })).toBe(true);
-    expect(transport.terminalProfileUpdate).toHaveBeenCalledWith({ ...profile, profileId: profile.id });
+    const created = { ...profile, id: "custom:33333333-3333-4333-8333-333333333333" as const, name: "Zsh" };
+    transport.terminalProfileCreate.mockResolvedValueOnce(created);
+    expect(await useTerminalSettingsStore.getState().createProfile({ name: "Zsh", executable: "sh", arguments: [] })).toBe(true);
+    expect(useTerminalSettingsStore.getState().customProfiles).toEqual([profile, created]);
+    const renamed = { ...created, name: "Zsh login" };
+    transport.terminalProfileUpdate.mockResolvedValueOnce(renamed);
+    expect(await useTerminalSettingsStore.getState().updateProfile({ ...renamed, profileId: renamed.id })).toBe(true);
+    expect(useTerminalSettingsStore.getState().customProfiles).toEqual([profile, renamed]);
 
     const error = Object.assign(new Error("Profile is in use"), {
       data: { references: { globalDefault: true, workspaceIds: ["workspace-1"] } },

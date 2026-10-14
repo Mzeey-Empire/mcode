@@ -145,10 +145,7 @@ describe("design tokens match the Paper export", () => {
     }
   });
 
-  it("keeps the primary label, focus ring and light secondary hover distinct as the style guide requires", () => {
-    expect(code(themes.dark, "--primary")).toBe("oklch(72% 0.170 75)");
-    expect(code(themes.dark, "--primary-ink")).toBe("oklch(16% 0.005 260)");
-    expect(code(themes.light, "--focus")).toBe("oklch(52% 0.170 264)");
+  it("keeps the light secondary button distinct from its hover", () => {
     expect(code(themes.light, "--button-secondary")).not.toBe(code(themes.light, "--button-secondary-hover"));
   });
 
@@ -167,8 +164,14 @@ describe("design tokens match the Paper export", () => {
   });
 
   it("uses Paper's body and body-small line heights for text-base and text-sm", () => {
-    expect([toPx(theme.get("--text-sm")!), toPx(theme.get("--text-sm--line-height")!)]).toEqual([14, 20]);
-    expect([toPx(theme.get("--text-base")!), toPx(theme.get("--text-base--line-height")!)]).toEqual([16, 24]);
+    expect([toPx(theme.get("--text-sm")!), toPx(theme.get("--text-sm--line-height")!)]).toEqual([
+      toPx(paper("--text-body-small")),
+      toPx(paper("--leading-body-small")),
+    ]);
+    expect([toPx(theme.get("--text-base")!), toPx(theme.get("--text-base--line-height")!)]).toEqual([
+      toPx(paper("--text-body")),
+      toPx(paper("--leading-body")),
+    ]);
   });
 
   it("matches Paper's radius, spacing, size and layout tokens", () => {

@@ -6,7 +6,7 @@ import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-reco
  * has_file_changes is true or when the thread record is absent from the workspace
  * store (race condition during initial workspace load).
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useThreadStore, MESSAGE_FETCH_SIZE } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
@@ -107,6 +107,10 @@ describe("loadMessages (cache-hit) - hydration staleness gate", () => {
     resetState();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("skips getThreadTasks on a cache-hit within the staleness window", async () => {
     const thread = createMockThread({ id: THREAD_ID, has_file_changes: false });
     useWorkspaceStore.setState({ threads: [thread] });
@@ -120,11 +124,11 @@ describe("loadMessages (cache-hit) - hydration staleness gate", () => {
     // Switch away so the next load is a cache-hit.
     useThreadStore.setState({ currentThreadId: "other-thread" });
     vi.clearAllMocks();
+    vi.useFakeTimers();
 
     // Second load within 2s of the first - the gate should suppress the side-effect RPCs.
     await activateTestConversation(THREAD_ID);
-    // Give any erroneously-scheduled microtasks a chance to fire.
-    await new Promise((r) => setTimeout(r, 20));
+    await vi.advanceTimersByTimeAsync(20);
 
     expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
     expect(mockTransport.getMessages).not.toHaveBeenCalled();

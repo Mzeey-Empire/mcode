@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import type { PlanVersion } from "@mcode/contracts";
 import { HYDRATION_TTL_MS } from "..";
 import { AuxiliaryHydrator } from "../auxiliary-hydrator";
 import {
@@ -35,6 +36,7 @@ function cacheRecord(threadId: string, record: ThreadRecord): void {
 describe("AuxiliaryHydrator", () => {
   let setStateSpy: ReturnType<typeof vi.fn>;
   let setTasksForThread: (threadId: string, tasks: readonly unknown[]) => void;
+  let addPlanForThread: (threadId: string, plan: PlanVersion) => void;
   let records: Map<string, ThreadRecord>;
   let currentThreadId: string | null;
 
@@ -50,6 +52,7 @@ describe("AuxiliaryHydrator", () => {
 
     setStateSpy = vi.fn();
     setTasksForThread = vi.fn() as (threadId: string, tasks: readonly unknown[]) => void;
+    addPlanForThread = vi.fn() as (threadId: string, plan: PlanVersion) => void;
 
     cacheRecord(THREAD_ID, makeThinRecord());
   });
@@ -91,7 +94,7 @@ describe("AuxiliaryHydrator", () => {
         (() => createMockThread({ id: THREAD_ID, has_file_changes: false })),
       getTasksForThread: overrides?.getTasksForThread ?? (() => []),
       setTasksForThread,
-      addPlanForThread: vi.fn(),
+      addPlanForThread,
       shallowEqualBy,
       coerceTaskStatus,
     });
@@ -106,7 +109,6 @@ describe("AuxiliaryHydrator", () => {
 
     vi.clearAllMocks();
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: false });
-    await new Promise((r) => setTimeout(r, 20));
 
     expect(mockTransport.getThreadTasks).not.toHaveBeenCalled();
   });
@@ -126,14 +128,33 @@ describe("AuxiliaryHydrator", () => {
   });
 
   it("continued other fanouts when one RPC failed", async () => {
+    const plan: PlanVersion = {
+      id: "plan-1",
+      threadId: THREAD_ID,
+      messageId: "message-1",
+      version: 1,
+      title: "Plan 1",
+      contentMd: "## Plan",
+      author: "agent",
+      providerId: "codex",
+      captureSource: "fence",
+      baseVersionId: null,
+      revision: 0,
+      acceptedAt: null,
+      acceptedMessageId: null,
+      updatedAt: "2026-07-01T00:00:00.000Z",
+      status: "ready",
+      createdAt: "2026-07-01T00:00:00.000Z",
+    };
     (mockTransport.getThreadTasks as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("tasks down"),
     );
+    (mockTransport.getThreadPlans as ReturnType<typeof vi.fn>).mockResolvedValue([plan]);
     const aux = createAux();
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
 
     await vi.waitFor(() => {
-      expect(mockTransport.getThreadPlans).toHaveBeenCalledWith(THREAD_ID);
+      expect(addPlanForThread).toHaveBeenCalledWith(THREAD_ID, plan);
     });
   });
 
@@ -152,10 +173,8 @@ describe("AuxiliaryHydrator", () => {
     });
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
 
-    await vi.waitFor(() => {
-      expect(mockTransport.getThreadTasks).toHaveBeenCalledWith(THREAD_ID);
-    });
-    await new Promise((r) => setTimeout(r, 0));
+    expect(mockTransport.getThreadTasks).toHaveBeenCalledWith(THREAD_ID);
+    await vi.mocked(mockTransport.getThreadTasks).mock.results[0]?.value;
 
     expect(setTasksForThread).not.toHaveBeenCalled();
   });
@@ -181,10 +200,8 @@ describe("AuxiliaryHydrator", () => {
     });
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
 
-    await vi.waitFor(() => {
-      expect(mockTransport.getThreadTasks).toHaveBeenCalledWith(THREAD_ID);
-    });
-    await new Promise((r) => setTimeout(r, 0));
+    expect(mockTransport.getThreadTasks).toHaveBeenCalledWith(THREAD_ID);
+    await vi.mocked(mockTransport.getThreadTasks).mock.results[0]?.value;
 
     expect(setTasksForThread).not.toHaveBeenCalled();
   });

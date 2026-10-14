@@ -98,7 +98,7 @@ describe("hydrateRunningThreadsFromServer", () => {
     const pending = hydrateRunningThreadsFromServer(rpc);
 
     // The running id is added by the optimistic send while the RPC is in flight.
-    await new Promise((r) => setTimeout(r, 0));
+    await vi.waitFor(() => expect(rpc).toHaveBeenCalled());
 
     const threadId = "t-new";
     useThreadStore.setState({ runningThreadIds: new Set([threadId]) });

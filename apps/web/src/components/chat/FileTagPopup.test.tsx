@@ -234,23 +234,7 @@ describe("FileTagPopup", () => {
     expect(screen.getAllByText("src/")).toHaveLength(2);
   });
 
-  it("keeps group labels sticky while scrolling within long sections", () => {
-    render(
-      <FileTagPopup
-        items={items}
-        isOpen={true}
-        anchorRect={ANCHOR_RECT}
-        onSelect={onSelect}
-        listRef={mockListRef}
-        selectedIndex={0}
-      />,
-    );
-
-    expect(screen.getByText("Agents").className).toContain("sticky");
-    expect(screen.getByText("Files").className).toContain("sticky");
-  });
-
-  it("renders agent suggestions with a muted non-robot glyph", () => {
+  it("renders agent suggestions with a non-robot glyph", () => {
     render(
       <FileTagPopup
         items={items}
@@ -265,8 +249,6 @@ describe("FileTagPopup", () => {
     const agentOption = screen.getByRole("option", { name: /planner/i });
     const icon = agentOption.querySelector('[data-entity-icon="agent"]');
     expect(icon).not.toBeNull();
-    expect(icon?.parentElement).toHaveClass("text-muted");
-    expect(icon?.parentElement).not.toHaveClass("text-primary");
     expect(agentOption.querySelector(".lucide-bot")).toBeNull();
   });
 
@@ -285,7 +267,6 @@ describe("FileTagPopup", () => {
     const title = screen.getByText("planner");
     const description = screen.getByText("Plans implementation work.");
     expect(title.parentElement).toBe(description.parentElement);
-    expect(title.parentElement).toHaveClass("gap-1");
   });
 
   it("accepts selectedIndex prop and marks the correct item", () => {

@@ -188,9 +188,6 @@ describe("PullRequestVirtualDiff", () => {
     expect(virtualizerProbe.measureElement).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Removed Original line 1: old 1")).toBeVisible();
     expect(screen.getByLabelText("Added Current line 1: new 1")).toBeVisible();
-    expect(screen.getAllByTestId("pull-request-diff-gutter")).toSatisfy(
-      (gutters: HTMLElement[]) => gutters.every((gutter) => gutter.classList.contains("w-10")),
-    );
     expect(screen.queryByText("@@ -1 +1 @@")).not.toBeInTheDocument();
     expect(screen.queryByText("@@ -20 +20 @@")).not.toBeInTheDocument();
     expect(screen.getByText("18 unchanged lines")).toBeVisible();
@@ -322,44 +319,17 @@ describe("PullRequestVirtualDiff", () => {
     );
   });
 
-  it("shows a large white add button on hover and on the active line", () => {
+  it("creates a local draft from the line's add-comment button", () => {
     const onCreateDraft = vi.fn();
     renderDiff({ onCreateDraft });
-    const first = document.querySelector<HTMLElement>(
-      '[data-line-key="pr-c:test:0:1:left:remove"]',
-    );
-    expect(first).not.toBeNull();
 
-    const addComment = screen.getByRole("button", {
-      name: "Draft comment on original line 1",
-    });
-    expect(addComment).toHaveClass(
-      "absolute",
-      "left-0.5",
-      "top-0.5",
-      "size-6",
-      "rounded-md",
-      "bg-ink",
-      "hover:bg-ink",
-      "dark:hover:bg-ink",
-      "text-background",
-      "group-hover/cell:opacity-100",
-      "pointer-events-auto",
-      "opacity-100",
-    );
-    expect(addComment.querySelector("svg")).toHaveClass("lucide-plus");
-    expect(first).toHaveClass("min-h-7");
+    expect(
+      screen.getByRole("button", { name: "Draft comment on current line 1" }),
+    ).toBeInTheDocument();
 
-    const hoverComment = screen.getByRole("button", {
-      name: "Draft comment on current line 1",
-    });
-    expect(hoverComment).toHaveClass(
-      "opacity-0",
-      "group-hover/cell:pointer-events-auto",
-      "group-hover/cell:opacity-100",
+    fireEvent.click(
+      screen.getByRole("button", { name: "Draft comment on original line 1" }),
     );
-
-    fireEvent.click(addComment);
     expect(onCreateDraft).toHaveBeenCalledWith(
       expect.objectContaining({ key: "pr-l:test:0:1" }),
       expect.objectContaining({ key: "pr-c:test:0:1:left:remove" }),

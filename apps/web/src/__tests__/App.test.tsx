@@ -143,7 +143,7 @@ describe("App", () => {
     expect(within(screen.getByRole("main")).queryByRole("img", { name: "Mcode" })).toBeNull();
   });
 
-  it("gives the floating sidebar an opaque page surface", () => {
+  it("renders the floating sidebar at the stored sidebar width", () => {
     useUiStore.setState({
       sidebarCollapsed: false,
       sidebarCollapsedByLayout: false,
@@ -155,20 +155,8 @@ describe("App", () => {
     render(<App />);
 
     const floatingSidebar = screen.getByTestId("sidebar-floating");
-    expect(floatingSidebar).toHaveClass("bg-page");
-    expect(floatingSidebar.firstElementChild).toHaveClass("max-w-none");
     expect(floatingSidebar.firstElementChild).toHaveStyle({ width: "256px" });
     useSidebarWidthStore.getState().resetWidth();
-    expect(floatingSidebar).toHaveClass(
-      "animate-in",
-      "slide-in-from-left-4",
-      "motion-reduce:animate-none",
-    );
-    expect(screen.getByRole("button", { name: "Close project tree" })).toHaveClass(
-      "animate-in",
-      "fade-in-0",
-      "motion-reduce:animate-none",
-    );
   });
 
   it("retains the floating sidebar during its pointer-inert exit", async () => {
@@ -202,14 +190,8 @@ describe("App", () => {
     if (!backdrop) throw new Error("Floating sidebar backdrop was not retained");
     expect(backdrop).toHaveAttribute("aria-hidden", "true");
     expect(backdrop).toHaveAttribute("inert");
-    expect(backdrop).toHaveClass("pointer-events-none", "animate-out", "fade-out-0");
     expect(floatingSidebar).toHaveAttribute("aria-hidden", "true");
     expect(floatingSidebar).toHaveAttribute("inert");
-    expect(floatingSidebar).toHaveClass(
-      "pointer-events-none",
-      "animate-out",
-      "slide-out-to-left-4",
-    );
 
     await act(async () => vi.advanceTimersByTimeAsync(200));
     expect(screen.queryByTestId("sidebar-floating")).not.toBeInTheDocument();
@@ -250,11 +232,6 @@ describe("App", () => {
     expect(dockedSidebar).toBeInTheDocument();
     expect(dockedSidebar).toHaveAttribute("aria-hidden", "true");
     expect(dockedSidebar).toHaveAttribute("inert");
-    expect(dockedSidebar).toHaveClass(
-      "pointer-events-none",
-      "grid-cols-[0fr]",
-      "motion-reduce:transition-none",
-    );
   });
 
   it("opens the lazy Pull requests surface from primary navigation", async () => {

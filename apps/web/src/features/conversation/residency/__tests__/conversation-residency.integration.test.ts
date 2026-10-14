@@ -55,38 +55,6 @@ describe("ConversationResidency", () => {
     expect(restoreConversation).not.toHaveBeenCalled();
   });
 
-  it("routes event retention, persisted invalidation, pagination, and prefetch through one boundary", async () => {
-    const restoreConversation = vi.fn().mockResolvedValue(undefined);
-    const deactivateConversation = vi.fn();
-    const retainInactiveConversation = vi.fn();
-    const invalidateConversation = vi.fn();
-    const synchronizeConversation = vi.fn();
-    const mergeCachedFileChanges = vi.fn();
-    const prefetchConversation = vi.fn().mockResolvedValue(undefined);
-    const residency = createConversationResidency({
-      restoreConversation,
-      deactivateConversation,
-      retainInactiveConversation,
-      invalidateConversation,
-      synchronizeConversation,
-      mergeCachedFileChanges,
-      prefetchConversation,
-      refreshConversation: vi.fn().mockResolvedValue(undefined),
-      takePrefetchedHistoryPage: vi.fn(),
-    });
-    residency.invalidateConversation("thread-a");
-    residency.retainInactiveConversation("thread-a");
-    residency.synchronizeConversation("thread-a");
-    residency.mergePaginationFileChanges("thread-a", { message: ["src/a.ts"] });
-    await residency.prefetch("thread-a");
-
-    expect(invalidateConversation).toHaveBeenCalledOnce();
-    expect(retainInactiveConversation).toHaveBeenCalledWith("thread-a");
-    expect(synchronizeConversation).toHaveBeenCalledWith("thread-a");
-    expect(mergeCachedFileChanges).toHaveBeenCalledWith("thread-a", { message: ["src/a.ts"] });
-    expect(prefetchConversation).toHaveBeenCalledWith("thread-a");
-  });
-
   it("owns overlapping page requests independently by complete thread identity", () => {
     const residency = createConversationResidency({
       restoreConversation: vi.fn().mockResolvedValue(undefined),

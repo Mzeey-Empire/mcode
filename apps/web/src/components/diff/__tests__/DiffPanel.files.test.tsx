@@ -553,24 +553,21 @@ describe("DiffPanel", () => {
     expect(screen.getByTestId("worktree-files")).toHaveTextContent(notice);
   });
 
-  it("collapses and expands every file from the header, with its icon and tooltip following", async () => {
+  it("collapses and expands every file from the header, with its label following", async () => {
     renderUnstaged(stats("a.ts", "b.ts", "c.ts"));
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("a.ts,b.ts,c.ts"));
     const user = userEvent.setup();
     const toggle = () => screen.getByTestId("review-toggle-all");
 
     expect(toggle()).toHaveAccessibleName("Collapse all");
-    expect(toggle().querySelector(".lucide-chevrons-down-up")).not.toBeNull();
 
     await user.click(toggle());
     expect(useDiffStore.getState().bulkDiffExpand?.expand).toBe(false);
     expect(toggle()).toHaveAccessibleName("Expand all");
-    expect(toggle().querySelector(".lucide-chevrons-up-down")).not.toBeNull();
 
     await user.click(toggle());
     expect(useDiffStore.getState().bulkDiffExpand?.expand).toBe(true);
     expect(toggle()).toHaveAccessibleName("Collapse all");
-    expect(toggle().querySelector(".lucide-chevrons-down-up")).not.toBeNull();
   });
 
   it("starts All turns collapsed, so its toggle offers Expand all", async () => {

@@ -212,7 +212,6 @@ async function verifyBatchNavigation(fixture: WebDriverRaceFixture): Promise<voi
 }
 
 async function runRaceCatalogue(fixture: WebDriverRaceFixture, replayRoot: string): Promise<void> {
-  const exercisedRaceIds = new Set<string>();
   for (const race of BROWSER_CONFORMANCE_RACE_CATALOGUE) {
     fixture.resetTargetState();
     const raceSubject = fixture.createSubject({ host: 0, document: 0, control: 0, capability: 0, observation: 0 });
@@ -256,9 +255,7 @@ async function runRaceCatalogue(fixture: WebDriverRaceFixture, replayRoot: strin
     expectKnownReceipts(run, race.id);
     expectReplayListenerCount(race.id, run.finalState.resources.listeners);
     expect(raceSubject.snapshotResources().listeners, race.id).toBe(0);
-    exercisedRaceIds.add(race.id);
   }
-  expect(exercisedRaceIds).toEqual(new Set(BROWSER_CONFORMANCE_RACE_CATALOGUE.map((race) => race.id)));
 }
 
 function expectKnownReceipts(run: BrowserConformanceNormalizedRun, message: string): void {

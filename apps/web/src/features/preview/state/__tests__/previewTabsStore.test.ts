@@ -117,15 +117,6 @@ describe("previewTabsStore", () => {
     vi.restoreAllMocks();
   });
 
-  it("setTabSet / setLiveChrome reconcile per scope", () => {
-    const { setTabSet, setLiveChrome } = usePreviewTabsStore.getState();
-    const ts = set("a", [page("a")]);
-    setTabSet(WORKSPACE_ID, SCOPE, ts);
-    setLiveChrome(WORKSPACE_ID, SCOPE, { title: "T", url: null, favicon: null });
-    expect(usePreviewTabsStore.getState().tabSetByScope[SCOPE_KEY]).toBe(ts);
-    expect(usePreviewTabsStore.getState().liveChromeByScope[SCOPE_KEY]?.title).toBe("T");
-  });
-
   it("setTabSet preserves state identity for a semantically identical host snapshot", () => {
     const { setTabSet } = usePreviewTabsStore.getState();
     setTabSet(WORKSPACE_ID, SCOPE, set("a", [page("a")]));
@@ -205,8 +196,9 @@ describe("previewTabsStore", () => {
     expect(usePreviewFocusStore.getState().omniboxFocusTick).toBe(1);
   });
 
-  it("openPage passes an exact existing page id to the bridge", async () => {
-    const { open } = mockBridge({});
+  it("openPage passes an exact existing page id to the bridge without focusing the omnibox", async () => {
+    const reopened = set("blank", [page("a"), page("blank")]);
+    const { open } = mockBridge({ open: reopened });
 
     await usePreviewTabsStore.getState().openPage(WORKSPACE_ID, SCOPE, {
       activate: false,
@@ -218,6 +210,8 @@ describe("previewTabsStore", () => {
       activate: false,
       tabId: "blank",
     });
+    expect(usePreviewTabsStore.getState().tabSetByScope[SCOPE_KEY]).toBe(reopened);
+    expect(usePreviewFocusStore.getState().omniboxFocusTick).toBe(0);
   });
 
   it("openPage passes a bounded initial address to the bridge", async () => {

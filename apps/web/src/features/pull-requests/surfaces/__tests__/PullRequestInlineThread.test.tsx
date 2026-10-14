@@ -115,19 +115,6 @@ describe("PullRequestInlineThread", () => {
       screen.queryByText("Line conversation", { exact: true }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("region", { name: "Inline review comments" }),
-    ).toHaveClass("pl-12");
-    expect(
-      screen.getByText("Review thread").closest("article"),
-    ).toHaveClass("rounded-lg", "ring-1");
-    const reviewIcon = screen.getByText("Review thread").previousElementSibling;
-    expect(reviewIcon?.tagName).toBe("svg");
-    expect(reviewIcon).toHaveClass("lucide-message-circle");
-    expect(reviewIcon).not.toHaveClass("rounded-full", "bg-background/70", "ring-1");
-    const draftIcon = screen.getByText("Local comment").previousElementSibling;
-    expect(draftIcon?.tagName).toBe("svg");
-    expect(draftIcon).toHaveClass("lucide-message-circle");
-    expect(
       screen.queryByRole("link", { name: "Open comment" }),
     ).not.toBeInTheDocument();
   });
@@ -152,13 +139,6 @@ describe("PullRequestInlineThread", () => {
 
     const editor = screen.getByRole("textbox", { name: "Review draft" });
     expect(editor).toHaveAttribute("placeholder", "Request change");
-    expect(editor).toHaveClass(
-      "min-h-20",
-      "resize-none",
-      "rounded-control",
-      "text-sm",
-    );
-    expect(editor).not.toHaveClass("font-mono", "rounded-none", "resize-y");
     fireEvent.change(editor, { target: { value: "Revised" } });
     expect(update).toHaveBeenLastCalledWith("draft-1", "Revised");
     await user.click(screen.getByRole("button", { name: "Discard" }));

@@ -172,7 +172,9 @@ describe("dispatchComposerTarget selected-text comments", () => {
       submission: submission("Review this pull request.", []),
     });
 
-    expect(controller.setNewThreadBranchFromPullRequest).toHaveBeenCalledWith("contributor/review", 42);
+    expect(controller.setNewThreadBranch).not.toHaveBeenCalled();
+    expect(vi.mocked(controller.setNewThreadBranchFromPullRequest).mock.invocationCallOrder[0])
+      .toBeLessThan(workspaceActions.createAndSendMessage.mock.invocationCallOrder.at(-1)!);
   });
 
   it("keeps the remote of a remote-only branch pick before dispatch", async () => {
@@ -194,7 +196,9 @@ describe("dispatchComposerTarget selected-text comments", () => {
       submission: submission("Start from the remote branch.", []),
     });
 
-    expect(controller.setNewThreadBranch).toHaveBeenCalledWith("origin/feature/x", "origin");
+    expect(controller.setNewThreadBranchFromPullRequest).not.toHaveBeenCalled();
+    expect(vi.mocked(controller.setNewThreadBranch).mock.invocationCallOrder[0])
+      .toBeLessThan(workspaceActions.createAndSendMessage.mock.invocationCallOrder.at(-1)!);
   });
 });
 

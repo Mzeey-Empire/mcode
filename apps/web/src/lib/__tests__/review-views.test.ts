@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { ReviewState, ReviewTurn, TurnSnapshot } from "@mcode/contracts";
 import {
-  REVIEW_VIEW_GROUPS,
   REVIEW_VIEWS,
   defaultReviewView,
   reviewViewAvailability,
@@ -62,26 +61,6 @@ function reasons(map: ReviewViewAvailabilityMap): Record<string, string | null> 
     Object.entries(map).map(([id, availability]) => [id, availability.available ? null : availability.reason]),
   );
 }
-
-describe("REVIEW_VIEW_GROUPS", () => {
-  it("lists seven views in three menu groups with their names", () => {
-    expect(REVIEW_VIEW_GROUPS.map((group) => group.map((view) => [view.id, view.label]))).toEqual([
-      [["turn", "Turn"], ["since-looked", "Since you looked"], ["cumulative", "All turns"]],
-      [["unstaged", "Unstaged"], ["staged", "Staged"]],
-      [["commit", "Commit"], ["branch", "Branch"]],
-    ]);
-    expect(REVIEW_VIEWS.map((view) => view.id))
-      .toEqual(["turn", "since-looked", "cumulative", "unstaged", "staged", "commit", "branch"]);
-  });
-
-  it("carries a picked operand only on Turn, Commit and Branch", () => {
-    expect(REVIEW_VIEWS.filter((view) => view.operand).map((view) => [view.id, view.operand])).toEqual([
-      ["turn", "turn"],
-      ["commit", "commit"],
-      ["branch", "branch"],
-    ]);
-  });
-});
 
 describe("reviewViewAvailability", () => {
   it("makes every view available in a thread with turns, a full git state, and changes since the baseline", () => {

@@ -70,25 +70,20 @@ function createAssistantMessage(): Message {
 }
 
 describe("MessageBubble", () => {
-  it("keeps a command mention in the standard user-message paragraph flow", () => {
+  it("keeps a command mention inside the user-message paragraph", () => {
     const { container } = render(<MessageBubble message={createUserMessage()} />);
 
     const text = container.querySelector('[data-entity-token="skill"]')?.closest("p");
 
-    expect(text).toHaveClass("mb-2", "leading-relaxed", "whitespace-pre-wrap");
     expect(text).toHaveTextContent("Please review this change");
   });
 
-  it("renders persisted plugin mentions with the frameless capability reference style", () => {
+  it("renders persisted plugin mentions with the plugin icon", () => {
     const { container } = render(<MessageBubble message={createPluginMessage()} />);
 
     const token = container.querySelector('[data-entity-token="plugin"]');
-    const text = token?.closest("p");
 
-    expect(token).toHaveClass("text-primary");
-    expect(token).not.toHaveClass("h-5", "rounded-md", "px-1.5");
     expect(token?.querySelector(".lucide-plug")).toBeInTheDocument();
-    expect(text).toHaveClass("mb-2", "leading-relaxed", "whitespace-pre-wrap");
   });
 
   it("keeps streaming assistant content outside chat coordination", () => {

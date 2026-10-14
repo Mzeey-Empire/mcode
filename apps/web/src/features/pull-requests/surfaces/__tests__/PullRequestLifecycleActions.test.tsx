@@ -346,7 +346,6 @@ describe("PullRequestLifecycleActions", () => {
     const confirm = within(dialog).getByRole("button", {
       name: "Close pull request",
     });
-    expect(confirm).toHaveClass("bg-destructive", "text-destructive-ink");
     await user.click(confirm);
     expect(close).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -141,31 +141,32 @@ describe("ws-events thread.lifecycleChanged", () => {
   });
 
   it("applies a server-authoritative completion push", () => {
-    const applyThreadLifecycle = vi.spyOn(
-      useWorkspaceStore.getState(),
-      "applyThreadLifecycle",
-    );
-    const completed = makeThread({
-      user_completed_at: "2026-08-12T08:00:00.000Z",
-      scheduled_deletion_at: "2026-08-15T08:00:00.000Z",
-    });
+    useWorkspaceStore.setState({ threads: [makeThread()] });
     startPushListeners();
 
-    pushEmitter.emit("thread.lifecycleChanged", { thread: completed });
+    pushEmitter.emit("thread.lifecycleChanged", {
+      thread: makeThread({
+        user_completed_at: "2026-08-12T08:00:00.000Z",
+        scheduled_deletion_at: "2026-08-15T08:00:00.000Z",
+      }),
+    });
 
-    expect(applyThreadLifecycle).toHaveBeenCalledWith(completed);
+    expect(useWorkspaceStore.getState().threads).toEqual([
+      expect.objectContaining({
+        id: "thread-1",
+        user_completed_at: "2026-08-12T08:00:00.000Z",
+        scheduled_deletion_at: "2026-08-15T08:00:00.000Z",
+      }),
+    ]);
   });
 
   it("removes a thread after an automatic deletion push", () => {
-    const applyThreadDeleted = vi.spyOn(
-      useWorkspaceStore.getState(),
-      "applyThreadDeleted",
-    );
+    useWorkspaceStore.setState({ threads: [makeThread(), makeThread({ id: "thread-2" })] });
     startPushListeners();
 
     pushEmitter.emit("thread.deleted", { threadId: "thread-1" });
 
-    expect(applyThreadDeleted).toHaveBeenCalledWith("thread-1");
+    expect(useWorkspaceStore.getState().threads.map((thread) => thread.id)).toEqual(["thread-2"]);
   });
 });
 

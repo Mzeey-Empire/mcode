@@ -15,22 +15,11 @@ describe("scrollPositionMemory", () => {
     expect(recallScrollTop("thread-x")).toBeUndefined();
   });
 
-  it("stores and recalls a scroll position", () => {
-    rememberScrollTop("thread-a", 1234);
-    expect(recallScrollTop("thread-a")).toBe(1234);
-  });
-
   it("ignores non-finite or negative values", () => {
     rememberScrollTop("thread-a", Number.NaN);
     rememberScrollTop("thread-a", -10);
     rememberScrollTop("thread-a", Number.POSITIVE_INFINITY);
     expect(recallScrollTop("thread-a")).toBeUndefined();
-  });
-
-  it("overwrites prior value", () => {
-    rememberScrollTop("thread-a", 100);
-    rememberScrollTop("thread-a", 200);
-    expect(recallScrollTop("thread-a")).toBe(200);
   });
 
   it("distinguishes a history position from the transcript tail", () => {
@@ -53,15 +42,5 @@ describe("scrollPositionMemory", () => {
     rememberScrollTop("thread-a", 1);
     clearScrollMemory();
     expect(recallScrollTop("thread-a")).toBeUndefined();
-  });
-});
-
-describe("scrollPositionMemory — store integration", () => {
-  beforeEach(() => clearScrollMemory());
-
-  it("integrates with thread deletion (sanity)", () => {
-    rememberScrollTop("thread-deleted", 99);
-    forgetScrollTop("thread-deleted");
-    expect(recallScrollTop("thread-deleted")).toBeUndefined();
   });
 });

@@ -419,20 +419,6 @@ describe("ProjectTree thread interactions", () => {
     expect(state.loadThreads).not.toHaveBeenCalled();
   });
 
-  it("fades a long project name with the shared overflow fade", () => {
-    const longName = "A project name long enough to reach the row controls";
-    setupStoreMocks({ workspaces: [{ ...WORKSPACE, name: longName }] });
-
-    render(<ProjectTree />);
-
-    const projectRow = screen.getByTestId("project-row-ws-1");
-    const projectName = within(projectRow).getByText(longName);
-
-    expect(projectName).toHaveClass("text-fade");
-    expect(projectName.getAttribute("class")).not.toMatch(/mask-image/);
-    expect(projectName.getAttribute("style") ?? "").not.toMatch(/mask-image/i);
-  });
-
   it("expands a project from its folder without opening a new composer", () => {
     localStorage.setItem(
       "mcode-expanded-projects",
@@ -515,14 +501,7 @@ describe("ProjectTree thread interactions", () => {
 
     render(<ProjectTree />);
     const action = screen.getByRole("button", { name: "Complete My Thread" });
-    const actions = action.closest(".absolute");
-    expect(actions).toHaveClass(
-      "opacity-0",
-      "group-hover/row:opacity-100",
-      "group-focus-visible/row:opacity-100",
-      "focus-within:opacity-100",
-    );
-    expect(actions).not.toHaveClass("group-focus-within/row:opacity-100");
+    const actions = action.parentElement;
     expect(within(actions as HTMLElement).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
       "Complete My Thread",
       "Thread options for My Thread",
@@ -550,7 +529,6 @@ describe("ProjectTree thread interactions", () => {
 
     await vi.waitFor(() => expect(completeThread).toHaveBeenCalledWith("thread-1"));
     expect(action).toBeDisabled();
-    expect(action).not.toHaveClass("disabled:opacity-0");
     expect(action.querySelector(".status-spin")).toBeInTheDocument();
     expect(screen.queryByLabelText("Running")).toBeNull();
     await act(async () => {
@@ -591,8 +569,6 @@ describe("ProjectTree thread interactions", () => {
     expect(viewSwitch).toHaveAttribute("aria-pressed", "false");
     expect(viewSwitch).toHaveAttribute("data-view", "active");
     expect(within(viewSwitch).getByTestId("project-monogram")).toHaveTextContent("T");
-    expect(viewSwitch.querySelector(".lucide-folder-check")).not.toBeNull();
-    expect(viewSwitch.querySelector(".lucide-folder-open")).toBeNull();
     viewSwitch.focus();
     expect(viewSwitch).toHaveFocus();
     fireEvent.click(viewSwitch);
@@ -608,8 +584,6 @@ describe("ProjectTree thread interactions", () => {
     });
     expect(activeViewSwitch).toBeVisible();
     expect(within(activeViewSwitch).getByTestId("project-monogram")).toHaveTextContent("T");
-    expect(activeViewSwitch.querySelector(".lucide-folder-open")).not.toBeNull();
-    expect(activeViewSwitch.querySelector(".lucide-folder-check")).toBeNull();
   });
 
   it("shows one lifecycle set at a time and remembers the Project view across remounts", () => {
@@ -689,7 +663,7 @@ describe("ProjectTree thread interactions", () => {
     expect(screen.getByRole("button", { name: /^Provider, Claude Second active/i })).toBeVisible();
   });
 
-  it("uses the approved completed-row treatment and hover details", async () => {
+  it("offers Reopen on a completed row and shows its hover details", async () => {
     vi.useRealTimers();
     setupStoreMocks({
       thread: makeThread({
@@ -710,14 +684,7 @@ describe("ProjectTree thread interactions", () => {
       }),
     );
 
-    expect(screen.getByTestId("thread-title")).toHaveClass("line-through");
-    expect(screen.getByLabelText("Provider, Claude")).toHaveClass(
-      "grayscale",
-      "opacity-45",
-    );
-    expect(
-      screen.getByTestId("thread-pr-indicator-thread-1"),
-    ).toHaveClass("grayscale", "opacity-45");
+    expect(screen.getByRole("button", { name: "Reopen Completed work" })).toBeInTheDocument();
     screen.getByRole("button", { name: /^Provider, Claude Completed work/i }).focus();
     const preview = await screen.findByTestId("thread-preview-thread-1");
     expect(preview).toHaveTextContent("Completed");
@@ -916,27 +883,6 @@ describe("ProjectTree thread interactions", () => {
     expect(viewport).toHaveProperty("scrollTop", 240);
   });
 
-  it("reveals project actions when the project row is hovered or focused", () => {
-    setupStoreMocks();
-
-    render(<ProjectTree />);
-
-    expect(
-      screen.getByRole("button", { name: "New thread in Test Project" }),
-    ).toHaveClass(
-      "opacity-0",
-      "group-hover/ws:opacity-100",
-      "group-focus-within/ws:opacity-100",
-    );
-    expect(
-      screen.getByRole("button", { name: "Project options for Test Project" }),
-    ).toHaveClass(
-      "opacity-0",
-      "group-hover/ws:opacity-100",
-      "group-focus-within/ws:opacity-100",
-    );
-  });
-
   it("keeps the thread count trailing and swaps it for an overlaid action group", () => {
     setupStoreMocks();
 
@@ -947,33 +893,9 @@ describe("ProjectTree thread interactions", () => {
       "project-thread-count-ws-1",
     );
     const actions = within(projectRow).getByTestId("project-row-actions-ws-1");
-    const projectName = screen.getByRole("button", {
-      name: "Open project Test Project",
-    });
 
     expect(threadCount).toHaveTextContent("1");
-    expect(threadCount).toHaveClass(
-      "ml-auto",
-      "h-4",
-      "items-center",
-      "text-xs",
-      "leading-4",
-      "group-hover/ws:opacity-0",
-      "group-focus-within/ws:opacity-0",
-    );
-    expect(projectName).toHaveClass(
-      "group-hover/ws:pr-24",
-      "group-focus-within/ws:pr-24",
-    );
     expect(threadCount.nextElementSibling).toBe(actions);
-    expect(actions).toHaveClass(
-      "absolute",
-      "right-1.5",
-      "bg-transparent",
-      "pointer-events-none",
-      "group-hover/ws:pointer-events-auto",
-      "group-focus-within/ws:pointer-events-auto",
-    );
     expect(actions).toContainElement(
       screen.getByRole("button", { name: "Toggle threads for Test Project" }),
     );
@@ -1034,7 +956,7 @@ describe("ProjectTree thread interactions", () => {
     expect(screen.getByRole("button", { name: "Add project" })).toBeInTheDocument();
   });
 
-  it("leads the row with the status lane and fades the title instead of truncating it", () => {
+  it("leads the row with the status lane, then the provider and title", () => {
     setupStoreMocks();
 
     render(<ProjectTree />);
@@ -1045,7 +967,6 @@ describe("ProjectTree thread interactions", () => {
 
     expect(row.firstElementChild).toBe(lane);
     expect(lane).toBeEmptyDOMElement();
-    expect(title).toHaveClass("text-fade");
     expect(title.previousElementSibling).toBe(screen.getByLabelText("Provider, Claude"));
   });
 
@@ -1596,7 +1517,7 @@ describe("ProjectTree action-required indicator", () => {
     render(<ProjectTree />);
 
     expect(screen.getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
-    expect(screen.getByText("Approval required")).toHaveClass("text-primary");
+    expect(screen.getByText("Approval required")).toBeInTheDocument();
   });
 
   it("leaves the status lane empty for a thread with no attention facts", () => {
@@ -1614,16 +1535,15 @@ describe("ProjectTree action-required indicator", () => {
     expect(screen.queryByRole("img", { name: "Running" })).toBeNull();
   });
 
-  it("fades a running row behind its spinner and blocks completion", () => {
+  it("marks a running row with its spinner and blocks completion", () => {
     threadStoreOverrides.runningThreadIds = new Set(["thread-pending"]);
     threadStoreOverrides.runtimeByThread = {
       "thread-pending": { runtimePhase: "running", turnExecutionId: "turn-1" },
     };
     render(<ProjectTree />);
 
-    const row = screen.getByRole("button", { name: /^Running Provider, Claude My Thread/i });
+    expect(screen.getByRole("button", { name: /^Running Provider, Claude My Thread/i })).toBeInTheDocument();
     expect(within(screen.getByTestId("thread-status-lane")).getByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
-    expect(row).toHaveClass("has-[[data-status-mark=running]]:opacity-55");
     expect(screen.getByRole("button", { name: "Complete My Thread" })).toBeDisabled();
   });
 
@@ -1782,22 +1702,6 @@ describe("ProjectTree action-required indicator", () => {
       expect(projectRow.querySelectorAll("[data-status-mark]")).toHaveLength(1);
     });
 
-    it("hides its status mark and CI roll-up when project actions appear", () => {
-      currentChecks = {
-        "thread-pending": { aggregate: "pending", runs: [{ name: "ci", status: "in_progress", conclusion: null }] },
-      };
-      installWorkspaceMock();
-      threadStoreOverrides.runningThreadIds = new Set(["thread-pending"]);
-      render(<ProjectTree />);
-
-      const projectRow = screen.getByTestId("project-row-ws-1");
-      const ciRollup = within(projectRow).getByLabelText("1 thread with checks running");
-      const status = within(projectRow).getByRole("img", { name: "Running" }).parentElement;
-      for (const element of [ciRollup, status]) {
-        expect(element).toHaveClass("group-hover/ws:opacity-0", "group-focus-within/ws:opacity-0");
-      }
-    });
-
     it("keeps showing activity while Stop is pending", () => {
       threadStoreOverrides.pendingStopCounts = { "thread-pending": 1 };
       installWorkspaceMock();
@@ -1944,10 +1848,10 @@ describe("ProjectTree PR-ability gating by mode", () => {
   });
 
   it.each([
-    ["passing", "Passing", "--diff-add-strong"],
-    ["failing", "Failing", "--diff-remove-strong"],
-    ["pending", "Pending", "text-primary"],
-  ])("names %s checks after the PR number", (aggregate, word, tone) => {
+    ["passing", "Passing"],
+    ["failing", "Failing"],
+    ["pending", "Pending"],
+  ])("names %s checks after the PR number", (aggregate, word) => {
     renderWithThread(
       makeThread({ mode: "worktree", pr_number: 42, pr_status: "open" }),
       {
@@ -1961,7 +1865,6 @@ describe("ProjectTree PR-ability gating by mode", () => {
     expect(screen.getByLabelText(`PR #42, open, checks ${word.toLowerCase()}`)).toBeInTheDocument();
     const checks = screen.getByTestId("thread-pr-ci-thread-1");
     expect(checks).toHaveTextContent(word);
-    expect(checks.className).toContain(tone);
   });
 
   it("renders no status mark or PR line for a quiet non-PR row", () => {

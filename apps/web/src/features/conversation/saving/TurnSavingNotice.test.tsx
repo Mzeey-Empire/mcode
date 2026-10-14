@@ -92,7 +92,8 @@ describe("turn saving notice", () => {
       thoughtSegments: [{ text: "Working", startedAt: Date.parse(pending.oldestPendingAt) }] }) });
     render(<ConnectedRuntimeNotice />);
     expect(screen.getByText("Running measure")).toBeInTheDocument();
-    expect(getComposerSendButtonVisualState({ startingThread: false, isAgentRunning: true, isStopPending: false, hasContent: false })).toBe("stop");
+    const runningBefore = useThreadStore.getState().runningThreadIds.has(pending.threadId);
+    expect(getComposerSendButtonVisualState({ startingThread: false, isAgentRunning: runningBefore, isStopPending: false, hasContent: false })).toBe("stop");
     const payloads = [{ type: "execution.checkpoint" as const, operationKind: "worker-lost" as const },
       { type: "turn.response-bound" as const, messageId: "interrupted-response", outcome: "interrupted" as const, endedAt: pending.oldestPendingAt },
       { type: "turn.interrupted" as const, endedAt: pending.oldestPendingAt, reason: "Turn interrupted" }];

@@ -1,6 +1,5 @@
 import type { PullRequestSummary } from "@mcode/contracts";
 import {
-  act,
   fireEvent,
   render,
   screen,
@@ -182,7 +181,10 @@ describe("PullRequestSurface", () => {
     const view = renderSurface(transport);
 
     expect(screen.queryByLabelText("Selected pull request")).toBeNull();
-    expect(screen.getByTestId("pull-request-inbox-pane")).toHaveClass("w-full");
+    expect(screen.queryByTestId("pull-request-detail-panel")).toBeNull();
+    expect(
+      screen.queryByRole("separator", { name: "Resize pull request detail" }),
+    ).toBeNull();
     expect(
       screen.getByRole("listbox", { name: "Pull requests" }).closest("section"),
     ).toHaveAttribute("data-layout", "master-detail");
@@ -192,10 +194,6 @@ describe("PullRequestSurface", () => {
     );
     await waitFor(() =>
       expect(screen.getByLabelText("Selected pull request")).toBeVisible(),
-    );
-    expect(screen.getByTestId("pull-request-inbox-pane")).toHaveClass(
-      "min-w-[360px]",
-      "flex-1",
     );
     expect(
       screen.getByRole("separator", { name: "Resize pull request detail" }),
@@ -228,13 +226,12 @@ describe("PullRequestSurface", () => {
       expect(screen.getByLabelText("Selected pull request")).toBeVisible(),
     );
     fireEvent.click(screen.getByRole("button", { name: "Back to inbox" }));
-    await act(async () => {
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-    });
 
-    expect(
-      screen.getByRole("listbox", { name: "Pull requests" }),
-    ).toHaveFocus();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("listbox", { name: "Pull requests" }),
+      ).toHaveFocus(),
+    );
     expect(transport.list).toHaveBeenCalledTimes(1);
     expect(inboxMounts.count).toBe(1);
   });

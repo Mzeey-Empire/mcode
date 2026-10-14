@@ -182,16 +182,6 @@ describe("MessageBubble user messages", () => {
     });
   });
 
-  it("does not render user message as plain <p>", async () => {
-    const { container } = render(
-      <MessageBubble message={makeMessage("Hello **world**")} />,
-    );
-    await waitFor(() => {
-      const plainP = container.querySelector("p.whitespace-pre-wrap");
-      expect(plainP).not.toBeInTheDocument();
-    });
-  });
-
   it("renders persisted selected-text comments as read-only annotation chips", async () => {
     const user = userEvent.setup();
     const message: Message = {
@@ -219,8 +209,6 @@ describe("MessageBubble user messages", () => {
 
     expect(attachment).toHaveAttribute("data-selected-text-exclude", "true");
     expect(attachment.compareDocumentPosition(textBubble!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(attachment).toHaveClass("flex", "justify-end");
-    expect(getByTestId("selected-text-comment-chip")).toHaveClass("h-8");
     expect(queryByRole("button", { name: "Remove 1 annotation" })).not.toBeInTheDocument();
 
     await user.hover(chip);
@@ -277,9 +265,7 @@ describe("MessageBubble user messages", () => {
     const { container } = render(<MessageBubble message={message} />);
     const command = container.querySelector('[data-entity-token="skill"]');
     expect(command).toHaveTextContent("impeccable");
-    expect(command).toHaveClass("text-primary");
-    expect(command).not.toHaveClass("bg-hover", "ring-1", "rounded-md");
-    expect(command?.querySelector("[data-entity-icon='skill']")).toHaveClass("text-current");
+    expect(command?.querySelector("[data-entity-icon='skill']")).toBeInTheDocument();
     expect(container.querySelector('[data-entity-token="agent"]')).toHaveTextContent("@reviewer_qa");
     expect(container.querySelector('[data-entity-token="file"]')).toHaveTextContent("@App.ts");
   });
@@ -456,10 +442,6 @@ describe("MessageBubble user messages", () => {
     expect(getByTestId("sent-preview-annotation-bundle-chip")).toHaveTextContent(
       "1 annotation",
     );
-    expect(getByTestId("sent-preview-annotation-bundle-chip")).toHaveClass(
-      "bg-selected",
-      "text-ink",
-    );
     expect(queryByText("bundle")).not.toBeInTheDocument();
   });
 
@@ -508,9 +490,6 @@ describe("MessageBubble user messages", () => {
     expect(await findByTestId("preview-annotation-hover-thumbnail")).toHaveAttribute(
       "src",
       `mcode-attachment://${threadUuid}/shot-1.png`,
-    );
-    expect(await findByTestId("preview-annotation-hover-thumbnail")).toHaveClass(
-      "object-contain",
     );
   });
 

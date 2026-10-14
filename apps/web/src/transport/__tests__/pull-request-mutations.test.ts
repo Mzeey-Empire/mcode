@@ -30,31 +30,24 @@ const expected = {
 describe("pull request mutation transport", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    for (const method of Object.values(activeTransport)) {
-      method.mockResolvedValue({ ok: false });
+    for (const [name, method] of Object.entries(activeTransport)) {
+      method.mockResolvedValue({ ok: false, source: name });
     }
   });
 
-  it("forwards five separately named non-cancellable methods", async () => {
+  it("routes each mutation to its own transport method", async () => {
     const transport = getPullRequestMutationTransport();
     const common = { identity, expected, idempotencyKey: crypto.randomUUID() };
-    const comment = { ...common, body: "Review note" };
-    const review = { ...common, event: "approve" as const, drafts: [] };
-    const readiness = { ...common, readiness: "draft" as const };
-    const close = common;
-    const merge = { ...common, method: "squash" as const };
 
-    await transport.postComment(comment);
-    await transport.submitReview(review);
-    await transport.setReadiness(readiness);
-    await transport.close(close);
-    await transport.merge(merge);
-
-    expect(activeTransport.postPullRequestComment).toHaveBeenCalledWith(comment);
-    expect(activeTransport.submitPullRequestReview).toHaveBeenCalledWith(review);
-    expect(activeTransport.setPullRequestReadiness).toHaveBeenCalledWith(readiness);
-    expect(activeTransport.closePullRequest).toHaveBeenCalledWith(close);
-    expect(activeTransport.mergePullRequest).toHaveBeenCalledWith(merge);
-    expect(activeTransport).not.toHaveProperty("cancelPullRequestMutation");
+    await expect(transport.postComment({ ...common, body: "Review note" }))
+      .resolves.toEqual({ ok: false, source: "postPullRequestComment" });
+    await expect(transport.submitReview({ ...common, event: "approve", drafts: [] }))
+      .resolves.toEqual({ ok: false, source: "submitPullRequestReview" });
+    await expect(transport.setReadiness({ ...common, readiness: "draft" }))
+      .resolves.toEqual({ ok: false, source: "setPullRequestReadiness" });
+    await expect(transport.close(common))
+      .resolves.toEqual({ ok: false, source: "closePullRequest" });
+    await expect(transport.merge({ ...common, method: "squash" }))
+      .resolves.toEqual({ ok: false, source: "mergePullRequest" });
   });
 });

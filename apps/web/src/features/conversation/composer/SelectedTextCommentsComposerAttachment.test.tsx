@@ -59,28 +59,6 @@ afterEach(() => {
 });
 
 describe("SelectedTextCommentsComposerAttachment", () => {
-  it("keeps composer padding while right-aligning read-only sent annotations", () => {
-    const handlers = {
-      onRemove: vi.fn(),
-      onOpenSource: vi.fn(),
-      onEdit: vi.fn(),
-      onDelete: vi.fn(),
-      onFocusComposer: vi.fn(),
-      onSave: vi.fn(),
-      onEditorChange: vi.fn(),
-    };
-    const { getByTestId, rerender } = render(
-      <SelectedTextCommentsComposerAttachment comments={[comments[0]!]} {...handlers} />,
-    );
-
-    expect(getByTestId("selected-text-comment-attachment")).toHaveClass("px-3", "pt-2");
-
-    rerender(<SelectedTextCommentsComposerAttachment comments={[comments[0]!]} readOnly {...handlers} />);
-
-    expect(getByTestId("selected-text-comment-attachment")).toHaveClass("flex", "justify-end", "pt-2");
-    expect(getByTestId("selected-text-comment-attachment")).not.toHaveClass("px-3");
-  });
-
   it.each([
     ["above", 400, "top"],
     ["below", 140, "bottom"],
@@ -223,19 +201,16 @@ describe("SelectedTextCommentsComposerAttachment", () => {
     });
     const annotationCount = screen.getByRole("button", { name: "2 annotations. Preview available." });
 
-    expect(screen.getByTestId("selected-text-comment-chip")).toHaveClass("h-8");
     expect(annotationCount).toHaveTextContent("2 annotations");
     expect(screen.queryByTestId("selected-text-comment-preview")).toBeNull();
 
     await user.hover(annotationCount);
 
     const preview = screen.getByTestId("selected-text-comment-preview");
-    expect(preview).toHaveClass("w-[min(38rem,calc(100vw-1.5rem))]");
     const firstItem = within(preview).getByTestId("selected-text-comment-preview-item-1");
     expect(firstItem).toHaveTextContent(/1\. Selected text:[\s\S]*First quote[\s\S]*User comment:[\s\S]*First note/);
     expect(within(preview).getByText("2. Selected text:")).toBeVisible();
     expect(within(preview).getAllByText("User comment:")).toHaveLength(2);
-    expect(within(firstItem).getByText("First quote")).not.toHaveClass("font-mono", "rounded-md");
     expect(within(preview).getByText("Source unavailable")).toBeVisible();
     expect(screen.getByRole("button", { name: "Open source for comment 1" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Open source for comment 2" })).toBeNull();

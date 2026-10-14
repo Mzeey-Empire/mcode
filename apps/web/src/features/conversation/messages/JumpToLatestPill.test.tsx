@@ -41,12 +41,6 @@ describe("Jump to latest pill", () => {
     expect(onJumpToLatest).toHaveBeenCalledTimes(1);
   });
 
-  it("stays neutral with no primary or destructive colour", () => {
-    renderOverlays(true);
-    const pill = screen.getByRole("button", { name: "Jump to latest" });
-    expect(pill.className).not.toMatch(/primary|destructive/);
-  });
-
   it("keeps the docked overview's reserve out of the pill's centring box", () => {
     renderOverlays(true, vi.fn(), "328px");
     const fade = screen.getByRole("button", { name: "Jump to latest" }).parentElement?.parentElement;

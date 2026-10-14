@@ -97,7 +97,6 @@ describe("BrowserActivityRow", () => {
     );
 
     const summary = screen.getByRole("button", { name: "Using the browser" });
-    expect(summary.querySelector(".animate-spin")).toBeNull();
     fireEvent.click(summary);
 
     expect(screen.getByText("Clicking the page")).toBeTruthy();

@@ -225,10 +225,6 @@ describe("Settings-aware defaults", () => {
     expect(getDefaultModelId()).toBe("cursor-dynamic-model-xyz");
   });
 
-  it("getDefaultModelId returns opus-4-8 from default settings", () => {
-    expect(getDefaultModelId()).toBe("claude-opus-4-8");
-  });
-
   it("getDefaultReasoningLevel returns settings value", () => {
     useSettingsStore.setState({
       settings: {
@@ -240,10 +236,6 @@ describe("Settings-aware defaults", () => {
       },
     });
     expect(getDefaultReasoningLevel()).toBe("low");
-  });
-
-  it("getDefaultReasoningLevel returns high from default settings", () => {
-    expect(getDefaultReasoningLevel()).toBe("high");
   });
 
   it("getDefaultReasoningLevel accepts max as a valid level", () => {

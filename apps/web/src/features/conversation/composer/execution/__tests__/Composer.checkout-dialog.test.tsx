@@ -610,7 +610,6 @@ describe("Composer checkout confirmation", () => {
     expect(mockTransport.createAndSendMessage).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Message Mcode")).toHaveValue("Build this");
     expect(screen.getByLabelText("Send message")).toBeEnabled();
-    expect(screen.getByLabelText("Send message")).toHaveClass("size-10");
   });
 
   it("does not inspect or checkout the workspace branch for worktree modes", async () => {
@@ -980,10 +979,6 @@ describe("Composer checkout confirmation", () => {
 
     expect(screen.getByTestId("composer-annotation-bundle")).toHaveTextContent(
       "1 annotation",
-    );
-    expect(screen.getByTestId("composer-annotation-bundle")).toHaveClass(
-      "bg-selected",
-      "text-ink",
     );
     expect(screen.getByTestId("diff-comment-chip")).toHaveTextContent("1 comment");
     await userEvent.click(screen.getByLabelText("Send message"));

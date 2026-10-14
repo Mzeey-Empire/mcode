@@ -207,48 +207,6 @@ describe("ActivityRail expansion", () => {
     expect(rail).toHaveAttribute("data-expanded", "false");
   });
 
-  it("keeps the renderer guest visible and clickable beside the expanded rail", () => {
-    const guestPointerDown = vi.fn();
-    render(
-      <div
-        data-testid="preview-compositing-root"
-        className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
-      >
-        <div
-          data-testid="renderer-guest"
-          className="absolute inset-0 z-(--layer-base)"
-          onPointerDown={guestPointerDown}
-        />
-        <div
-          data-testid="browser-automation-overlay"
-          className="pointer-events-none absolute inset-0 z-(--layer-dropdown)"
-        />
-        <span
-          data-testid="browser-automation-pointer"
-          className="pointer-events-none absolute z-(--layer-floating-panel)"
-        />
-        {railElement()}
-      </div>,
-    );
-
-    const rail = screen.getByTestId("activity-rail");
-    const guest = screen.getByTestId("renderer-guest");
-    const terminal = screen.getByRole("button", { name: "Terminal" });
-
-    fireEvent.pointerEnter(rail, { pointerType: "mouse" });
-    act(() => vi.advanceTimersByTime(EXPECTED_EXPAND_DELAY_MS));
-
-    expect(rail).toHaveAttribute("data-expanded", "true");
-    expect(guest).toBeVisible();
-    fireEvent.click(terminal);
-    expect(handlers.onSelect).toHaveBeenCalledWith(rightPanelSingletonId("terminal"));
-    fireEvent.pointerDown(guest, { clientX: 300, clientY: 200 });
-    expect(guestPointerDown).toHaveBeenCalledTimes(1);
-
-    fireEvent.pointerLeave(rail, { pointerType: "mouse" });
-    act(() => vi.advanceTimersByTime(EXPECTED_COLLAPSE_DELAY_MS));
-    expect(rail).toHaveAttribute("data-expanded", "false");
-  });
   it("reorders only from a focused rail tab keyboard shortcut", () => {
     renderRail();
     const terminal = screen.getByRole("button", { name: "Terminal" });

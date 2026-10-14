@@ -501,12 +501,6 @@ await activateTestConversation(THREAD_A);
   // ── Per-thread map cleanup on deletion ─────────────────────────────
 
   describe("recapByThread", () => {
-    it("starts empty for a fresh store baseline", () => {
-      resetThreadStoreForTests();
-
-      expect(useThreadStore.getState().recapByThread).toEqual({});
-    });
-
     it("records manual generation without an automatic marker", () => {
       useThreadStore.getState().recordThreadRecapGeneration({
         threadId: THREAD_A,

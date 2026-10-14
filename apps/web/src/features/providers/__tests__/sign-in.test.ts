@@ -12,10 +12,6 @@ vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
 
 const ARGV = ["devin", "auth", "login"] as const;
 
-function settle(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
 beforeEach(() => {
   vi.mocked(mockTransport.terminalCreate).mockReset().mockResolvedValue({ ptyId: "pty-home-1", shell: "pwsh" });
   vi.mocked(mockTransport.terminalWrite).mockClear();
@@ -46,17 +42,15 @@ describe("signInToSignedOutProvider", () => {
     useTerminalStore.getState().addTerminal("home", "pty-home-live", "pwsh", { state: "running" });
 
     signInToSignedOutProvider("claude");
-    await settle();
 
-    expect(mockTransport.terminalWrite).toHaveBeenCalledWith("pty-home-live", "claude /login\r");
+    await vi.waitFor(() => expect(mockTransport.terminalWrite).toHaveBeenCalledWith("pty-home-live", "claude /login\r"));
   });
 
-  it("does nothing once the provider is no longer signed out", async () => {
+  it("does nothing once the provider is no longer signed out", () => {
     seedClaude({ state: "signed_in" });
 
     signInToSignedOutProvider("claude");
     signInToSignedOutProvider("codex");
-    await settle();
 
     expect(mockTransport.terminalCreate).not.toHaveBeenCalled();
     expect(mockTransport.terminalWrite).not.toHaveBeenCalled();
@@ -66,21 +60,19 @@ describe("signInToSignedOutProvider", () => {
 describe("signInToProvider", () => {
   it("opens a home-scope terminal with no project and types the login command", async () => {
     signInToProvider(ARGV);
-    await settle();
 
+    await vi.waitFor(() => expect(mockTransport.terminalWrite).toHaveBeenCalledWith("pty-home-1", "devin auth login\r"));
     expect(mockTransport.terminalCreate).toHaveBeenCalledWith("home");
     expect(useTerminalStore.getState().terminals.home?.map(({ id }) => id)).toEqual(["pty-home-1"]);
     expect(useTerminalStore.getState().terminalPanelByThread.home?.activeTerminalId).toBe("pty-home-1");
-    expect(mockTransport.terminalWrite).toHaveBeenCalledWith("pty-home-1", "devin auth login\r");
   });
 
   it("starts one shell when clicked again while the first is still being created", async () => {
     signInToProvider(ARGV);
     signInToProvider(ARGV);
-    await settle();
 
+    await vi.waitFor(() => expect(mockTransport.terminalWrite).toHaveBeenCalledTimes(1));
     expect(mockTransport.terminalCreate).toHaveBeenCalledTimes(1);
-    expect(mockTransport.terminalWrite).toHaveBeenCalledTimes(1);
     expect(useTerminalStore.getState().terminals.home).toHaveLength(1);
   });
 
@@ -88,10 +80,9 @@ describe("signInToProvider", () => {
     useTerminalStore.getState().addTerminal("home", "pty-home-live", "pwsh", { state: "running" });
 
     signInToProvider(["codex", "login"]);
-    await settle();
 
+    await vi.waitFor(() => expect(mockTransport.terminalWrite).toHaveBeenCalledWith("pty-home-live", "codex login\r"));
     expect(mockTransport.terminalCreate).not.toHaveBeenCalled();
-    expect(mockTransport.terminalWrite).toHaveBeenCalledWith("pty-home-live", "codex login\r");
   });
 });
 

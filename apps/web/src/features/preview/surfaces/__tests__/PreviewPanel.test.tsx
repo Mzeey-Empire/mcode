@@ -110,38 +110,6 @@ import {
 import { ViewportCoordinator } from "../../automation/services/viewportCoordinator";
 import { browserSurfaceHost } from "../BrowserSurfaceHostRoot";
 import { pushEmitter } from "@/transport/ws-transport";
-import * as NodeFS from "node:fs";
-import * as NodePath from "node:path";
-import * as NodeURL from "node:url";
-
-/** `--layer-*` values declared in index.css, keyed by variable name. */
-function declaredLayerValues(): Record<string, number> {
-  // Vitest's CSS handling yields an empty string for `index.css?raw`.
-  const here = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
-  // oxlint-disable-next-line mcode/no-source-text-test -- The declared z-index layers are the data whose stacking order is checked.
-  const indexCss = NodeFS.readFileSync(NodePath.resolve(here, "../../../../index.css"), "utf8");
-  const layers: Record<string, number> = {};
-  for (const match of indexCss.matchAll(/(--layer-[a-z-]+):\s*(-?\d+);/g)) {
-    layers[match[1]!] = Number(match[2]);
-  }
-  return layers;
-}
-
-/**
- * jsdom applies no Tailwind, so stacking is read from declared classes: the
- * outermost positioned ancestor with a `z-(--layer-*)` class is the stacking
- * context that competes with the Browser surface host root.
- */
-function outermostLayerToken(element: HTMLElement): string | undefined {
-  let token: string | undefined;
-  for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) {
-    const className = node.getAttribute("class") ?? "";
-    if (!/(?:^|\s)(?:relative|absolute|fixed)(?:\s|$)/.test(className)) continue;
-    const layer = /(?:^|\s)-?z-\((--layer-[a-z-]+)\)/.exec(className)?.[1];
-    if (layer) token = layer;
-  }
-  return token;
-}
 
 function mockBridgeState(overrides: Record<string, unknown> = {}) {
   const state = {
@@ -809,14 +777,6 @@ describe("PreviewPanel: full panel state", () => {
     const overlay = screen.getByTestId("browser-automation-overlay");
     expect(overlay.parentElement).toBe(screen.getByTestId("preview-surface"));
     expect(overlay).toHaveStyle({ clipPath: "inset(0 112px 0 0)" });
-    expect(overlay).not.toHaveClass("border");
-    expect(overlay).not.toHaveClass("border-2");
-    expect(overlay).not.toHaveClass("border-primary");
-    expect(overlay.style.backgroundImage).toContain("transparent 32px");
-    expect(overlay.style.boxShadow).not.toContain("inset 0 0 0 1px");
-    expect(overlay.style.boxShadow).toContain("inset 0 0 40px");
-    expect(overlay.style.boxShadow).toContain("0 0 24px");
-    expect(overlay.style.boxShadow).toContain("var(--primary)");
   });
 
   it("shows the agent frame and cursor while the active page is still opening", () => {
@@ -881,39 +841,9 @@ describe("PreviewPanel: full panel state", () => {
   it("uses the webview preview path by default", () => {
     render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(screen.queryByTestId("preview-webview-surface")).not.toBeInTheDocument();
-    expect(screen.getByTestId("browser-local-ports")).toBeInTheDocument();
-    expect(screen.getByTestId("preview-surface")).toHaveClass(
-      "overflow-hidden",
-      "rounded-tr-md",
-    );
-    expect(mockUsePreviewBridge).toHaveBeenLastCalledWith(
-      expect.objectContaining({ threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }),
-    );
-  });
-
-  it("keeps the webview path flush while preserving the empty state", () => {
-    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
-
-    expect(screen.queryByTestId("preview-webview-surface")).not.toBeInTheDocument();
     expect(screen.queryByTestId("preview-webview")).not.toBeInTheDocument();
     expect(screen.getByTestId("browser-local-ports")).toBeInTheDocument();
-    expect(screen.getByTestId("preview-surface")).toHaveClass(
-      "overflow-hidden",
-      "rounded-tr-md",
-    );
-    expect(screen.getByTestId("preview-surface")).not.toHaveClass(
-      "mx-2",
-      "mb-2",
-      "mt-1",
-      "rounded-md",
-      "border",
-      "bg-hover/10",
-    );
     expect(screen.getByTestId("browser-chrome")).toContainElement(screen.getByTestId("browser-toolbar"));
-    expect(screen.getByTestId("browser-chrome")).toHaveClass(
-      "relative",
-      "z-(--layer-dropdown)",
-    );
     expect(mockUsePreviewBridge).toHaveBeenLastCalledWith(
       expect.objectContaining({ threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }),
     );
@@ -986,7 +916,6 @@ describe("PreviewPanel: full panel state", () => {
       const webview = screen.getByTestId("preview-webview");
       expect(webview).toHaveAttribute("data-tab-id", PREVIEW_WEBVIEW_FALLBACK_TAB_ID);
       expect(webview).toHaveAttribute("src", "https://example.com");
-      expect(webview).toHaveClass("absolute", "inset-0", "z-(--layer-base)", "h-full", "w-full");
       expect(screen.getByTestId("preview-panel")).toHaveClass("pointer-events-none");
       expect(screen.getByTestId("preview-surface")).toHaveClass("pointer-events-none");
       expect(screen.queryByTestId("browser-local-ports")).not.toBeInTheDocument();
@@ -1968,19 +1897,6 @@ describe("PreviewPanel: full panel state", () => {
       width: "120px",
       height: "32px",
     });
-  });
-
-  it("layers the draft annotation bubble above the hosted page and below modals", () => {
-    installDraftAnnotation();
-
-    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
-
-    const layers = declaredLayerValues();
-    const bubbleLayer = outermostLayerToken(screen.getByTestId("preview-annotation-bubble"));
-    expect(bubbleLayer).toBe("--layer-browser-overlay");
-    // The Browser surface host root paints the hosted page at --layer-browser-surface (30).
-    expect(layers["--layer-browser-overlay"]).toBeGreaterThan(30);
-    expect(layers["--layer-browser-overlay"]).toBeLessThan(layers["--layer-modal-backdrop"]!);
   });
 
   it("shows annotation save only after note text or visual edits exist", () => {

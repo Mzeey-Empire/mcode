@@ -1,6 +1,13 @@
 import { act, render, screen } from "@testing-library/react";
 import { Profiler, type ProfilerOnRenderCallback, useSyncExternalStore } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+// The host singleton binds requestAnimationFrame when its module loads, so the
+// frame clock must be faked before the imports below run.
+vi.hoisted(() => {
+  vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
+});
+
 import {
   BrowserSurfaceHostRoot,
   browserSurfaceHost,
@@ -45,13 +52,7 @@ function PanelStoreRerenderHarness() {
 
 async function flushSurfaceFrame(): Promise<void> {
   await act(async () => {
-    await new Promise<void>((resolve) => {
-      if (typeof window.requestAnimationFrame === "function") {
-        window.requestAnimationFrame(() => resolve());
-        return;
-      }
-      window.setTimeout(resolve, 0);
-    });
+    vi.advanceTimersToNextFrame();
   });
 }
 
@@ -76,9 +77,6 @@ describe("BrowserSurfaceHostRoot", () => {
   it("leaves page input to the hosted Browser surface", () => {
     render(<BrowserSurfaceHostRoot />);
 
-    expect(document.querySelector("[data-browser-surface-host]")).toHaveClass(
-      "size-0",
-    );
     expect(document.querySelector("[data-browser-surface-host]")).not.toHaveClass(
       "pointer-events-none",
     );
@@ -114,9 +112,6 @@ describe("BrowserSurfaceHostRoot", () => {
 
     expect(indicator).toHaveStyle({ visibility: "visible", pointerEvents: "none" });
     expect(Number(indicator.style.zIndex)).toBeGreaterThan(Number(frame.style.zIndex));
-    expect(indicator.style.backgroundImage).toContain("transparent 32px");
-    expect(indicator.style.boxShadow).toContain("inset 0 0 40px");
-    expect(indicator.style.boxShadow).toContain("0 0 24px");
 
     act(() => {
       useBrowserAutomationStore.getState().setControllerForTarget(

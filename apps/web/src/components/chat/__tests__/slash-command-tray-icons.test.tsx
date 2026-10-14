@@ -90,40 +90,6 @@ function renderDuplicateSkillPopup() {
   );
 }
 
-function renderLongDuplicateSkillPopup() {
-  const name = "a-very-long-capability-title-that-must-not-collide-with-its-source";
-  const commands: Command[] = [
-    {
-      id: `skill:shared:${name}`,
-      name,
-      description: "Runs the capability",
-      namespace: "skill",
-      capabilityKind: "skill",
-      nativeId: `C:/Users/test/.agents/skills/${name}/SKILL.md`,
-    },
-    {
-      id: `skill:local:${name}`,
-      name,
-      description: "Runs the capability",
-      namespace: "skill",
-      capabilityKind: "skill",
-      nativeId: `C:/workspace/project/.codex/skills/${name}/SKILL.md`,
-    },
-  ];
-
-  return render(
-    <SlashCommandTray
-      state={{ kind: "ready", items: commands }}
-      selectedIndex={1}
-      anchorRect={makeAnchorRect()}
-      workspacePath="C:/workspace/project"
-      onSelect={() => {}}
-      onDismiss={() => {}}
-      onRetry={() => {}}
-    />,
-  );
-}
-
 function renderReservedNameCapabilities() {
   const commands: Command[] = ["goal", "plan", "ultra", "compact"].flatMap(
     (name): Command[] => [
@@ -176,11 +142,9 @@ describe("SlashCommandTray row presentation", () => {
     expect(within(localRow).getByText("Local")).toBeInTheDocument();
     expect(screen.queryByText("Project")).not.toBeInTheDocument();
     expect(screen.queryByText("Provider")).not.toBeInTheDocument();
-    expect(sharedRow).toHaveClass("h-10");
     expect(sharedRow.querySelector(".lucide-badge-check")).not.toBeNull();
 
     const content = within(sharedRow).getByText("grill-with-docs").parentElement;
-    expect(content).toHaveClass("items-baseline");
     expect(content).toContainElement(within(sharedRow).getByText("Interviewing workflow"));
   });
 
@@ -272,25 +236,6 @@ describe("SlashCommandTray row presentation", () => {
     ).toBeInTheDocument();
   });
 
-  it("keeps a long local title bounded before its source badge", () => {
-    renderLongDuplicateSkillPopup();
-
-    const localRow = screen.getByRole("option", {
-      name: /Local$/,
-    });
-    const title = within(localRow).getByText(
-      "a-very-long-capability-title-that-must-not-collide-with-its-source",
-    );
-    const description = within(localRow).getByText("Runs the capability");
-    const badge = within(localRow).getByText("Local");
-
-    expect(localRow).toHaveClass("min-w-0", "overflow-hidden");
-    expect(title).toHaveClass("min-w-0", "text-fade");
-    expect(description).toHaveClass("min-w-12", "text-fade");
-    expect(title.parentElement).toHaveClass("min-w-0", "overflow-hidden", "items-baseline");
-    expect(badge).toHaveClass("shrink-0");
-  });
-
   it("renders rows without namespace headings", () => {
     renderPopup();
     expect(screen.queryByTestId(/slash-command-group/)).not.toBeInTheDocument();
@@ -320,15 +265,6 @@ describe("SlashCommandTray row presentation", () => {
     const description = within(pluginRow).getByText("A plugin skill");
     const content = title.parentElement;
     expect(content).toBe(description.parentElement);
-    expect(content).toHaveClass("items-baseline");
-  });
-
-  it("fades overflowing descriptions instead of showing an ellipsis", () => {
-    renderPopup();
-
-    const description = screen.getByText("A plugin skill");
-    expect(description).toHaveClass("text-fade");
-    expect(description.getAttribute("style") ?? "").not.toMatch(/mask-image/i);
   });
 
   it("keeps slash syntax on genuine commands", () => {

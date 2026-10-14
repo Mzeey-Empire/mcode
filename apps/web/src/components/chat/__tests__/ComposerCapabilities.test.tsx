@@ -148,29 +148,6 @@ describe("composer capabilities", () => {
     expect(planButton.querySelector(".lucide-check")).toBeTruthy();
   });
 
-  it("keeps titles visible while descriptions stay inline and fade", async () => {
-    const user = userEvent.setup();
-    renderAddMenu();
-
-    await user.click(screen.getByRole("button", { name: "Add to composer" }));
-
-    for (const description of [
-      "Images, PDFs, documents, and code",
-      "Explore the work and propose a plan",
-      "Set the objective for the next run",
-      "Proactively delegate work to sub-agents",
-    ]) {
-      const descriptionElement = screen.getByText(description);
-      const titleElement = descriptionElement.previousElementSibling;
-
-      expect(descriptionElement).toHaveClass("flex-1", "text-fade");
-      expect(descriptionElement.getAttribute("style") ?? "").not.toMatch(/mask-image/i);
-      expect(titleElement).toHaveClass("shrink-0");
-      expect(descriptionElement.parentElement).toHaveClass("items-baseline", "overflow-hidden");
-      expect(descriptionElement.parentElement).not.toHaveClass("flex-col");
-    }
-  });
-
   it("hides the capability section when the provider exposes no Mcode capabilities", async () => {
     const user = userEvent.setup();
     renderAddMenu({ capabilities: [] });

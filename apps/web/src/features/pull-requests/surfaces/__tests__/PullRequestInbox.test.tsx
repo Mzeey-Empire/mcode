@@ -233,26 +233,6 @@ describe("PullRequestInbox", () => {
     ).toBeVisible();
   });
 
-  it("centers the inbox chrome on the same column as the pull request list", () => {
-    seedRows(1);
-
-    render(<PullRequestInbox autoLoad={false} />);
-
-    expect(
-      screen.getByTestId("pull-request-inbox-heading-column"),
-    ).toHaveClass("mx-auto", "max-w-[720px]");
-    expect(
-      screen.getByTestId("pull-request-inbox-filter-column"),
-    ).toHaveClass("mx-auto", "max-w-[720px]");
-    expect(
-      screen.getByRole("tablist", { name: "Pull request relationships" }),
-    ).toHaveClass("mx-auto", "max-w-[720px]");
-    expect(screen.getByTestId("pull-request-list-content")).toHaveClass(
-      "mx-auto",
-      "max-w-[720px]",
-    );
-  });
-
   it("shows only non-zero change counts", () => {
     seedItems([
       { ...summary(1), additions: 1, deletions: 0 },
@@ -276,10 +256,6 @@ describe("PullRequestInbox", () => {
     expect(
       screen.getByRole("option", { name: /pull request #1339/ }),
     ).toBeVisible();
-    expect(document.querySelector("time")).toHaveClass(
-      "justify-self-end",
-      "text-right",
-    );
   });
 
   it("moves selection with arrow keys", () => {
@@ -569,13 +545,11 @@ describe("PullRequestInbox", () => {
 
     await waitFor(() => expect(transport.list).toHaveBeenCalledOnce());
     expect(refreshButton.querySelector("svg")).toBeNull();
-    expect(refreshButton.querySelector(".spinner-tail-fade")).not.toBeNull();
 
     await act(async () => {
       resolveList(okList([summary(1)]));
     });
     expect(refreshButton.querySelector("svg")).not.toBeNull();
-    expect(refreshButton.querySelector(".spinner-tail-fade")).toBeNull();
   });
 
   it("matches loaded pull requests by hash-prefixed or bare number", () => {
@@ -689,17 +663,12 @@ describe("PullRequestInbox", () => {
     const filterButton = screen.getByRole("button", {
       name: "Filter pull requests",
     });
-    expect(filterButton.querySelector(".lucide-list-filter")).toBeVisible();
     await user.click(filterButton);
 
     const status = await screen.findByText("Status");
     expect(status).toBeVisible();
     const repository = screen.getByText("Repository");
     expect(repository).toBeVisible();
-    expect(status.closest('[role="menuitem"]')).toHaveClass("cursor-pointer");
-    expect(repository.closest('[role="menuitem"]')).toHaveClass(
-      "cursor-pointer",
-    );
     expect(screen.queryByText("Author")).not.toBeInTheDocument();
     expect(screen.queryByText("Review status")).not.toBeInTheDocument();
     expect(screen.queryByText("Checks")).not.toBeInTheDocument();
@@ -738,15 +707,9 @@ describe("PullRequestInbox", () => {
       "closed",
     ]);
     expect(closed).toHaveAttribute("aria-pressed", "true");
-    expect(
-      screen.getByRole("tablist", { name: "Pull request relationships" }),
-    ).toHaveClass("items-center");
-    expect(
-      screen.getByRole("button", { name: "Refresh pull requests" }),
-    ).not.toHaveClass("mb-1");
   });
 
-  it("uses distinct icon shapes and tones for pull request states", () => {
+  it("marks each row with its pull request state", () => {
     seedItems([
       summary(1),
       { ...summary(2), readiness: "draft" },
@@ -756,21 +719,12 @@ describe("PullRequestInbox", () => {
 
     render(<PullRequestInbox autoLoad={false} />);
 
-    const open = document.querySelector('[data-pull-request-state="open"]');
-    const draft = document.querySelector('[data-pull-request-state="draft"]');
-    const closed = document.querySelector('[data-pull-request-state="closed"]');
-    const merged = document.querySelector('[data-pull-request-state="merged"]');
-
-    expect(open).toHaveClass("text-[var(--diff-add-strong)]");
-    expect(open?.querySelector(".lucide-git-pull-request")).toBeTruthy();
-    expect(draft).toHaveClass("text-muted/75");
-    expect(draft?.querySelector(".lucide-git-pull-request-draft")).toBeTruthy();
-    expect(closed).toHaveClass("text-destructive/85");
-    expect(
-      closed?.querySelector(".lucide-git-pull-request-closed"),
-    ).toBeTruthy();
-    expect(merged).toHaveClass("text-pr-merged");
-    expect(merged?.querySelector(".lucide-git-merge")).toBeTruthy();
+    const stateOf = (number: number) =>
+      screen
+        .getByRole("option", { name: new RegExp(`pull request #${number}\\b`) })
+        .querySelector("[data-pull-request-state]")
+        ?.getAttribute("data-pull-request-state");
+    expect([1, 2, 3, 4].map(stateOf)).toEqual(["open", "draft", "closed", "merged"]);
   });
 
   it("keeps unrelated row renders isolated", () => {

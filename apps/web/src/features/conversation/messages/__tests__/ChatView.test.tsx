@@ -1730,7 +1730,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const afterMount = setThreadSubscriptions.mock.calls.length;
 
     setDisplayedThreadIds(["canonical-child"]);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await act(async () => {});
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(afterMount);
 
     setDisplayedThreadIds([]);
@@ -1942,7 +1942,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     setupWorkspaceMock({ ...defaultWorkspaceState(), activeThreadId: "thread-2", threads: [makeThread({ id: "thread-2" })] });
     rerender(<ChatView />);
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await act(async () => {});
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(1);
 
     // The outgoing transcript stays subscribed through its kept-alive lease.
@@ -2004,7 +2004,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     chatViewConnectionStatusRef.current = "reconnecting";
     rerender(<ChatView />);
     requests[0]?.({ canonicalRecoveries: [deltaRecovery("thread-1")] });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await act(async () => {});
 
     expect(chatViewThreadStoreSetStateMock).not.toHaveBeenCalled();
     expect(chatViewApplyCanonicalRecoveriesMock).not.toHaveBeenCalled();
@@ -2075,7 +2075,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(1);
 
     requests[0]?.({ canonicalRecoveries: [deltaRecovery(thread1.id)] });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await act(async () => {});
 
     expect(chatViewThreadStoreSetStateMock).not.toHaveBeenCalled();
     expect(chatViewApplyCanonicalRecoveriesMock).not.toHaveBeenCalled();
@@ -2084,7 +2084,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledTimes(2));
 
     requests[1]?.({ canonicalRecoveries: [] });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await act(async () => {});
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(2);
   });
 

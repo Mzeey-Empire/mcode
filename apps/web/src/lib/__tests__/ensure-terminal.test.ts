@@ -40,11 +40,10 @@ describe("createTerminalForScope", () => {
       return { ptyId: "8", shell: "pwsh" };
     });
     createTerminalForScope(scopeId);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await vi.waitFor(() => expect(useTerminalStore.getState().terminalPanelByThread[scopeId]?.activeTerminalId).toBe("8"));
     expect(terminalKill).not.toHaveBeenCalled();
     expect(useTerminalStore.getState().terminals[scopeId].map(({ id }) => id)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8"]);
     expect(useDiffStore.getState().getRightPanel(scopeId).activeTabId).toBe("singleton:terminal");
-    expect(useTerminalStore.getState().terminalPanelByThread[scopeId]?.activeTerminalId).toBe("8");
   });
 
   it("reports the attached PTY only when its tab joined a visible panel", async () => {
@@ -60,21 +59,20 @@ describe("createTerminalForScope", () => {
 
     createTerminalForScope("visible-ws", onAttached);
     createTerminalForScope("hidden-ws", onAttached);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await vi.waitFor(() => expect(terminalKill).toHaveBeenCalledWith("p2"));
 
     expect(onAttached.mock.calls).toEqual([["p1"]]);
-    expect(terminalKill).toHaveBeenCalledWith("p2");
   });
 
   it("surfaces the failure and frees the scope for retry", async () => {
     terminalCreate.mockRejectedValue(new Error("PTY host is unhealthy"));
 
     createTerminalForScope("scope-a");
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await vi.waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
     createTerminalForScope("scope-a");
-    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(terminalCreate).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(2));
     expect(useToastStore.getState().toasts).toContainEqual(
       expect.objectContaining({
         kind: "failed",

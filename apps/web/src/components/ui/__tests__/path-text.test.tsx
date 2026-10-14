@@ -40,14 +40,6 @@ describe("PathText", () => {
     expect(visibleParts(container)).toEqual(["~"]);
   });
 
-  it("fades the folder and keeps the name in ink", () => {
-    const { container } = render(<PathText path="/Users/cj/src/mcode" />);
-    const [name, folder] = container.querySelectorAll("[aria-hidden]");
-
-    expect(name).toHaveClass("text-ink");
-    expect(folder).toHaveClass("text-fade", "text-muted");
-  });
-
   it("keeps the full path in the accessible text and the tooltip", async () => {
     const user = userEvent.setup();
     render(<PathText path="/Users/cj/src/mcode" home="/Users/cj" />);

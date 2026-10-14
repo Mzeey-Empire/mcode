@@ -137,21 +137,23 @@ describe("ThreadTurnEndNotice", () => {
     expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
   });
 
-  it("retries the notice's turn", () => {
-    vi.mocked(mockTransport.retryErroredTurn).mockClear();
+  it("retries the notice's own turn and shows the server's refusal", async () => {
+    vi.mocked(mockTransport.retryErroredTurn).mockRejectedValueOnce(new Error("The turn is no longer the latest."));
     render(<ThreadTurnEndNotice threadId="thread-1" turnId="turn-1" providerId="claude" notice={FAILED} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(mockTransport.retryErroredTurn).toHaveBeenCalledWith({ threadId: "thread-1", turnId: "turn-1" });
+    expect((await screen.findByRole("alert")).textContent).toBe("The turn is no longer the latest.");
   });
 
-  it("resumes the notice's turn on its own model", () => {
-    vi.mocked(mockTransport.resumeInterruptedTurn).mockClear();
+  it("resumes the notice's own turn and disables Resume while pending", () => {
+    vi.mocked(mockTransport.resumeInterruptedTurn).mockReturnValueOnce(new Promise(() => {}));
     render(<ThreadTurnEndNotice threadId="thread-1" turnId="turn-1" providerId="codex" notice={INTERRUPTED} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
 
     expect(mockTransport.resumeInterruptedTurn).toHaveBeenCalledWith({ threadId: "thread-1", turnId: "turn-1" });
+    expect(screen.getByRole("button", { name: "Resume" })).toBeDisabled();
   });
 });

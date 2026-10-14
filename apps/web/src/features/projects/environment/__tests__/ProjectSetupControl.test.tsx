@@ -148,30 +148,24 @@ describe("ProjectSetup controls", () => {
     expect(screen.getByLabelText("Setup output")).toHaveTextContent("missing dependency");
   });
 
-  it("renders the accepted icon-led Setup status states without a badge", async () => {
+  it("labels each Setup status in the header without visible status text", async () => {
     const passed = render(<ProjectSetupAttemptCard attempt={{ ...failedAttempt, status: "passed", outcome: "success", exitCode: 0 }} />);
     await act(async () => { await Promise.resolve(); });
-    const passedHeader = screen.getByRole("button", { name: "Setup Passed. Show details" });
-    expect(passedHeader.querySelector(".lucide-circle-check")).toHaveClass("text-[var(--diff-add-strong)]");
+    expect(screen.getByRole("button", { name: "Setup Passed. Show details" })).toBeInTheDocument();
     expect(screen.queryByText("Passed")).not.toBeInTheDocument();
-    expect(passedHeader.querySelector("[class*='group/badge']")).toBeNull();
     passed.unmount();
 
     const running = render(<ProjectSetupAttemptCard attempt={{ ...failedAttempt, status: "running", outcome: null, finishedAt: null, exitCode: null }} />);
     await act(async () => { await Promise.resolve(); });
-    const runningHeader = screen.getByRole("button", { name: "Setup Running. Hide details" });
-    expect(runningHeader.querySelector(".spinner-tail-fade")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Setup Running. Hide details" })).toBeInTheDocument();
     expect(screen.getByText("Setup running")).toHaveClass("sr-only");
     expect(screen.queryByText(/^Running$/)).not.toBeInTheDocument();
-    expect(runningHeader.querySelector("[class*='group/badge']")).toBeNull();
     running.unmount();
 
     render(<ProjectSetupAttemptCard attempt={failedAttempt} />);
     await act(async () => { await Promise.resolve(); });
-    const failedHeader = screen.getByRole("button", { name: "Setup Failed. Hide details" });
-    expect(failedHeader.querySelector(".lucide-octagon-x")).toBeInTheDocument();
-    expect(screen.getByText("failed")).toHaveClass("bg-[var(--diff-remove)]/15", "text-[var(--diff-remove)]");
-    expect(failedHeader.querySelector("[class*='group/badge']")).toBeNull();
+    expect(screen.getByRole("button", { name: "Setup Failed. Hide details" })).toBeInTheDocument();
+    expect(screen.getByText("failed")).toBeInTheDocument();
   });
 
   it("exposes status, command, output, exit code, and keyboard-expandable details", async () => {
@@ -205,24 +199,9 @@ describe("ProjectSetup controls", () => {
       const output = screen.getByLabelText("Setup output");
       expect(command).toHaveTextContent("bun run setup");
       expect(output.querySelector("pre")?.textContent).toBe(tabularOutput);
-      expect(command.querySelector("pre")).toHaveClass("whitespace-pre-wrap", "break-words");
-      expect(output.querySelector("pre")).toHaveClass("min-w-max", "whitespace-pre");
-      expect(output.querySelector("pre")).not.toHaveClass("whitespace-pre-wrap", "break-all");
       const commandScrollArea = command.closest('[data-slot="scroll-area"]');
       const outputScrollArea = output.closest('[data-slot="scroll-area"]');
-      expect(outputScrollArea).toHaveClass("overflow-hidden", "flex", "flex-col");
-      expect(outputScrollArea).not.toHaveClass("pb-2.5");
-      expect(outputScrollArea).not.toHaveClass("max-h-40");
-      expect(output).toHaveClass("min-h-0", "flex-1", "max-h-40");
-      expect(commandScrollArea).not.toHaveClass("flex", "flex-col");
-      expect(commandScrollArea).toHaveClass("max-h-40");
-      expect(command).toHaveClass("size-full");
-      expect(command).not.toHaveClass("max-h-40");
       await waitFor(() => expect(outputScrollArea?.querySelector('[data-slot="scroll-area-scrollbar"][data-orientation="horizontal"]')).not.toBeNull());
-      const outputHorizontalScrollbar = outputScrollArea?.querySelector('[data-slot="scroll-area-scrollbar"][data-orientation="horizontal"]') as HTMLElement;
-      expect(outputHorizontalScrollbar).toHaveClass("data-horizontal:h-2.5", "w-full", "shrink-0");
-      expect(outputHorizontalScrollbar).toHaveStyle({ position: "relative" });
-      expect(outputHorizontalScrollbar.style.bottom).toBe("");
       expect(commandScrollArea?.querySelector('[data-slot="scroll-area-scrollbar"][data-orientation="horizontal"]')).toBeNull();
       expect(screen.getByText("Exit code: 2")).toBeInTheDocument();
 

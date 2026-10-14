@@ -136,7 +136,6 @@ describe("ThreadSearchView", () => {
     expect(screen.getByText("now")).toBeInTheDocument();
     expect(screen.queryByText("quiet-lantern")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Provider, codex")).not.toBeInTheDocument();
-    expect(screen.getByTestId("thread-search-result-thread-search")).toHaveClass("min-h-9");
   });
 
   it("shows the sidebar lane marker for the thread's row state", () => {
