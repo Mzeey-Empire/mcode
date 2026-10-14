@@ -104,9 +104,12 @@ function isConnectionDrop(error: unknown): boolean {
   return error instanceof Error && !(error instanceof RpcError) && error.message === "WebSocket disconnected";
 }
 
+function mayReplay(target: PlanImplement["target"], alreadyReplayed: boolean): boolean {
+  return target === "thread" || !alreadyReplayed;
+}
+
 type ImplementResult = Exclude<ImplementOutcome, { kind: "admitted" }> | { kind: "admitted"; targetThreadId: string };
 
-// A dropped socket leaves admission unknown. A new-thread request replays its identity once.
 async function sendImplementWithReplay(request: PlanImplement): Promise<ImplementResult> {
   let replayed = false;
   while (true) {
@@ -114,7 +117,7 @@ async function sendImplementWithReplay(request: PlanImplement): Promise<Implemen
       const receipt = await getTransport().implementPlan(request);
       return { kind: "admitted", targetThreadId: receipt.targetThreadId };
     } catch (error) {
-      if (!isConnectionDrop(error) || (request.target === "new-thread" && replayed)) return classifyImplementFailure(error);
+      if (!isConnectionDrop(error) || !mayReplay(request.target, replayed)) return classifyImplementFailure(error);
     }
     replayed = true;
     // A closing socket rejects before its close event marks the connection

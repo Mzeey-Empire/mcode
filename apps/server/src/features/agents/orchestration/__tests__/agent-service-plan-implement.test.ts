@@ -297,7 +297,6 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
 
   it("settles cancellation that vetoes admission after the Setup skip checkpoint", async () => {
     const listed = await worktreeSource();
-    // Intent must land after Setup's checkpoint to exercise admission's cancellation veto.
     database.run(`CREATE TRIGGER cancel_before_admission AFTER UPDATE OF phase ON thread_startups
       WHEN NEW.phase = 'agent' AND OLD.phase <> 'agent'
       BEGIN UPDATE thread_startups SET cancellation = 'requested' WHERE startup_id = NEW.startup_id; END`);
