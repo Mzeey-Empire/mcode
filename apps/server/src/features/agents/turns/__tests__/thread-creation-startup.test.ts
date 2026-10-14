@@ -195,6 +195,36 @@ async function branchHarness() {
 }
 
 describe("ThreadCreationCoordinator startup lifecycle", () => {
+  it("attaches an Implement startup without entering automatic Setup and fingerprints the trusted option", async () => {
+    const { workspace, threads, startups, coordinator, admissions } = await harness();
+    const source = await threads.create(workspace.id, "Source", "worktree", "main", false, "codex");
+    await threads.updateWorktreePath(source.id, "/project/existing");
+    admissions.admitInitialAutomaticTurn.mockResolvedValue({ kind: "queued" });
+    const command = { workspaceId: workspace.id, content: "Implement", mode: "worktree" as const,
+      existingWorktreePath: "/project/existing", startupId: managedStartupId };
+    const options = { setupSkip: { reason: "plan-implement" as const, sourceThreadId: source.id } };
+    const created = await coordinator.createInitialTurn(command, options);
+    expect(created.kind).toBe("dispatch");
+    expect(created.thread).toMatchObject({ mode: "worktree", worktree_path: "/project/existing", worktree_managed: false });
+    expect(startups.get(managedStartupId)?.steps[2]).toMatchObject({ state: "skipped",
+      detail: { phase: "setup", skipReason: "plan-implement" } });
+    expect(admissions.admitInitialAutomaticTurn).not.toHaveBeenCalled();
+    expect((await coordinator.createInitialTurn(command, options)).thread.id).toBe(created.thread.id);
+    await expect(coordinator.createInitialTurn(command)).rejects.toThrow();
+    expect(threads.listByWorkspace(workspace.id)).toHaveLength(2);
+  });
+
+  it.each(["different", "missing", "direct"])("refuses a %s source checkout before creating or queuing a thread", async (kind) => {
+    const { workspace, threads, coordinator, admissions } = await harness();
+    const source = await threads.create(workspace.id, "Source", "worktree", "main", false, "codex");
+    await threads.updateWorktreePath(source.id, kind === "different" ? "/project/other" : "/project/existing");
+    await expect(coordinator.createInitialTurn({ workspaceId: workspace.id, content: "Implement",
+      mode: kind === "direct" ? "direct" : "worktree", existingWorktreePath: "/project/existing", startupId: managedStartupId },
+    { setupSkip: { reason: "plan-implement", sourceThreadId: kind === "missing" ? "missing" : source.id } })).rejects.toThrow();
+    expect(threads.listByWorkspace(workspace.id).map(thread => thread.id)).toEqual([source.id]);
+    expect(admissions.admitInitialAutomaticTurn).not.toHaveBeenCalled();
+  });
+
   it("records an attached checkout and runs setup before its queued first turn", async () => {
     const { workspace, startups, coordinator, admissions } = await harness();
     admissions.admitInitialAutomaticTurn.mockResolvedValue({ kind: "queued" });

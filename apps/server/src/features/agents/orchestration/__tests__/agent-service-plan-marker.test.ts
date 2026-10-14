@@ -125,6 +125,7 @@ function buildService(db: Database) {
   );
   const runtimeCommands = new AgentRuntimeCommandPort();
   runtimeCommands.bind({
+    createAndSend: (command) => svc.createAndSend(command),
     sendMessage: (command) => svc.sendMessage(command),
     runtimeSnapshots: () => svc.runtimeAccess().runtimeSnapshots(),
   });

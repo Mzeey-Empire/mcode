@@ -14,7 +14,16 @@ import { WorkerOwnedTurnRuntime } from "../../execution/worker-owned-turn-runtim
 import { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
 import { SnapshotRefPins } from "../../../projects/diffs/snapshots/snapshot-ref-pins.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
+import { GitWorktreeService } from "../../../projects/git/git-worktree-service.js";
+import { WorkspaceEnvironmentService } from "../../../projects/environment/workspace-environment-service.js";
+import { ThreadCreationCoordinator } from "../../turns/thread-creation-coordinator.js";
+import { routeThreadStartupRpc } from "../../../thread-startup/transport/thread-startup-rpc.js";
+import { ThreadStartupFetchDecisions } from "../../../thread-startup/thread-startup-fetch-decisions.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
+import { ThreadService } from "../../../thread-control/lifecycle/thread-service.js";
+import { ThreadDeletionTeardownService } from "../../../thread-control/lifecycle/thread-deletion-teardown-service.js";
+import { CiWatcherService, GithubService } from "../../../pull-requests/index.js";
+import { ThreadStartupService } from "../../../thread-startup/thread-startup-service.js";
 import { ThreadControlMutationReservationService } from "../../../thread-control/authority/thread-control-mutation-reservation-service.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { PlanRepo } from "../../planning/persistence/plan-repo.js";
@@ -90,12 +99,16 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     container.registerInstance("IProviderRegistry", providers);
     vi.spyOn(container.resolve(ProviderAvailabilityService), "assertUsable").mockReturnValue(undefined);
     agent = container.resolve(AgentService);
+    container.registerInstance(CiWatcherService, new CiWatcherService(container.resolve(GithubService), () => {}));
+    container.resolve(ThreadDeletionTeardownService).bindAcceptedProgress(workers.progress);
     const publications = container.resolve(AgentEventPublicationRegistry);
     publications.bind(() => undefined);
     publications.start();
     plans = container.resolve(PlanRepo);
     files = new PlanFileWriter(id => plans.listByThread(id), () => directory);
     runtime = { threads: container.resolve(ThreadRepo), providers,
+      startups: container.resolve(ThreadStartupService), messages: container.resolve(MessageRepo),
+      threadService: container.resolve(ThreadService),
       reservations: container.resolve(ThreadControlMutationReservationService),
       commands: container.resolve(AGENT_TURN_COMMAND_PORT), grants: container.resolve(ScopedPreGrantService) };
   }
@@ -148,6 +161,140 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     expect(userMessages()).toEqual([]);
     expect(turns()).toEqual([]);
   }
+
+  it("replays a new direct thread while starting and after admission, retaining Accepted after Stop", async () => {
+    const starting = deferred();
+    provider.prepareImplement = async () => {
+      await starting.promise;
+      return { outcome: "skipped", reason: "no-file" };
+    };
+    const input: PlanImplement = { ...request(), target: "new-thread" };
+    const first = service.implement(input);
+    await expect.poll(() => runtime.reservations.get(threadId)?.state).toBe("planImplement");
+    const reconnect = service.implement(input);
+    await expect(agent.sendMessage({ threadId, content: "Competing Send", attachments: [] })).rejects.toThrow("pending mutation");
+    starting.resolve();
+    const receipt = await first;
+    expect(await reconnect).toEqual(receipt);
+    expect(await new PlanService(writer, workers.progress, files, runtime).implement(input)).toEqual(receipt);
+    expect(runtime.threads.findById(receipt.targetThreadId)).toMatchObject({ mode: "direct", worktree_path: null });
+    expect(database.prepare("SELECT id, content FROM messages WHERE thread_id = ? AND role = 'user'").all(receipt.targetThreadId))
+      .toEqual([{ id: receipt.messageId, content: "Implement plan v1" }]);
+    expect(plans.listByThread(receipt.targetThreadId)).toMatchObject([{ status: "accepted", captureSource: "copy", baseVersionId: ready.id }]);
+    expect(database.prepare("SELECT target_thread_id FROM plan_implement_requests WHERE request_id = ?").all(input.requestId))
+      .toEqual([{ target_thread_id: receipt.targetThreadId }]);
+    expect(runtime.reservations.get(threadId)).toBeUndefined();
+    await agent.stopSession(receipt.targetThreadId, { by: "user" });
+    expect(plans.getById(ready.id)?.status).toBe("accepted");
+    expect(database.prepare("SELECT content FROM messages WHERE id = ?").get(receipt.messageId)).toEqual({ content: "Implement plan v1" });
+  });
+
+  it("refuses a busy source before creating a new thread", async () => {
+    const before = database.prepare("SELECT id FROM threads ORDER BY id").all();
+    runtime.reservations.reserve(threadId, "activeTurn");
+    const input: PlanImplement = { ...request(), target: "new-thread" };
+    await expect(service.implement(input)).rejects.toMatchObject({ code: "thread_busy" });
+    expect(runtime.startups.get(input.requestId)).toBeNull();
+    expect(new PlanImplementStore(database).read(input.requestId)).toBeNull();
+    expect(database.prepare("SELECT id FROM threads ORDER BY id").all()).toEqual(before);
+    assertUnaccepted();
+  });
+
+  it("removes an empty new thread after admission fails", async () => {
+    const before = database.prepare("SELECT id FROM threads ORDER BY id").all();
+    database.run("CREATE TRIGGER fail_admission BEFORE INSERT ON canonical_agent_turns BEGIN SELECT RAISE(ABORT, 'admission fault'); END");
+    const input: PlanImplement = { ...request(), target: "new-thread" };
+    await expect(service.implement(input)).rejects.toMatchObject({ code: "implement_failed" });
+    const startup = runtime.startups.get(input.requestId);
+    expect(startup?.state).toBe("failed");
+    expect(database.prepare("SELECT id FROM threads ORDER BY id").all()).toEqual(before);
+    expect(plans.getById(ready.id)?.status).toBe("ready");
+    expect(runtime.reservations.get(threadId)).toBeUndefined();
+    expect(NodeFS.readFileSync(files.path(threadId), "utf8")).toBe("# Original\nExact plan text.");
+  });
+
+  async function worktreeSource() {
+    database.prepare("UPDATE threads SET mode = 'worktree', worktree_path = ? WHERE id = ?").run(directory, threadId);
+    const worktrees = container.resolve(GitWorktreeService);
+    const listed = vi.spyOn(worktrees, "listWorktrees").mockResolvedValue([
+      { path: directory, branch: "main", name: "fixture", managed: false },
+    ]);
+    return listed;
+  }
+
+  it("admits in the source checkout with configured Setup skipped and no queued prompt", async () => {
+    const listed = await worktreeSource();
+    const environment = container.resolve(WorkspaceEnvironmentService);
+    await environment.save({ workspaceId, sourceRevision: null,
+      document: { version: "0.0.1", setup: { windows: "echo should-not-run", linux: "echo should-not-run" }, actions: [] } });
+    const setup = vi.spyOn(environment, "admitAutomaticTurn");
+    const input: PlanImplement = { ...request(), target: "new-thread" };
+    const receipt = await service.implement(input);
+    expect(receipt.state).toBe("admitted");
+    expect(runtime.threads.findById(receipt.targetThreadId)).toMatchObject({ mode: "worktree", worktree_path: directory, worktree_managed: false });
+    expect(runtime.startups.get(input.requestId)?.steps[2]).toMatchObject({ state: "skipped", detail: { skipReason: "plan-implement" } });
+    expect(setup).not.toHaveBeenCalled();
+    expect(environment.getAutomaticSetup({ threadId: receipt.targetThreadId }).queuedTurns).toEqual([]);
+    expect(new PlanImplementStore(database).read(input.requestId)?.status).toBe("admitted");
+    await agent.stopSession(receipt.targetThreadId, { by: "user" });
+    setup.mockRestore();
+    listed.mockRestore();
+  });
+
+  it("cancels during worktree preparation, compensates the empty target and releases the source", async () => {
+    const listed = await worktreeSource();
+    const startups = container.resolve(ThreadStartupService);
+    const release = deferred();
+    const reached = deferred();
+    const advance = startups.advance.bind(startups);
+    const pause = vi.spyOn(startups, "advance").mockImplementation(async (...args) => {
+      const result = await advance(...args);
+      if (args[1] === "worktree") {
+        reached.resolve();
+        await release.promise;
+      }
+      return result;
+    });
+    const input: PlanImplement = { ...request(), target: "new-thread" };
+    const pending = service.implement(input);
+    const rejected = expect(pending).rejects.toMatchObject({ code: "startup_cancelled" });
+    await reached.promise;
+    const targetId = startups.get(input.requestId)?.threadId;
+    if (!targetId) throw new Error("Worktree startup must be bound before cancellation");
+    await routeThreadStartupRpc("thread.startup.cancel", { startupId: input.requestId }, {
+      threadStartupService: startups, threadStartupFetchDecisions: container.resolve(ThreadStartupFetchDecisions),
+      workspaceEnvironmentService: container.resolve(WorkspaceEnvironmentService), agentService: agent,
+    });
+    release.resolve();
+    await rejected;
+    expect(runtime.threads.findById(targetId)).toBeNull();
+    expect(runtime.reservations.get(threadId)).toBeUndefined();
+    expect(plans.getById(ready.id)?.status).toBe("ready");
+    expect(new PlanImplementStore(database).read(input.requestId)).toMatchObject({ status: "failed", failureCode: "startup_cancelled" });
+    pause.mockRestore();
+    listed.mockRestore();
+  });
+
+  it.each(["empty", "visible", "internal"])("recovers a crash after creation, preserving a target with %s messages", async (messageKind) => {
+    const input: PlanImplement = { ...request(), target: "new-thread" };
+    await writer.execute(planImplementWriteOperations.prepare, { input, fingerprint: "crashed", planFilePath: files.path(threadId) });
+    const created = await container.resolve(ThreadCreationCoordinator).createInitialTurn({ workspaceId,
+      startupId: input.requestId, content: "Implement plan v1", mode: "direct", provider: "codex" });
+    if (messageKind !== "empty") {
+      await container.resolve(MessageRepo).create(created.thread.id, "user", "Keep my message", 0,
+        undefined, undefined, undefined, undefined, messageKind === "internal");
+    }
+    await container.resolve(ThreadStartupService).interruptNonterminalOnStartup();
+    await service.recoverInterrupted();
+    expect(new PlanImplementStore(database).read(input.requestId)).toMatchObject({ status: "failed", failureCode: "interrupted" });
+    if (messageKind !== "empty") {
+      expect(database.prepare("SELECT content FROM messages WHERE thread_id = ?").all(created.thread.id)).toEqual([{ content: "Keep my message" }]);
+    } else {
+      expect(runtime.threads.findById(created.thread.id)).toBeNull();
+    }
+    expect(plans.getById(ready.id)?.status).toBe("ready");
+    expect(NodeFS.readFileSync(files.path(threadId), "utf8")).toBe("# Original\nExact plan text.");
+  });
 
   async function draft() {
     return service.saveVersion({ threadId, versionId: NodeCrypto.randomUUID(), baseVersionId: ready.id,

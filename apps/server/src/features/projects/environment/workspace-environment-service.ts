@@ -1649,7 +1649,7 @@ export class WorkspaceEnvironmentService {
     await this.options.threadStartups?.resume(startup.startupId);
   }
 
-  private async skipStartupSetup(threadId: string, skipReason: "not-configured" | "user-skipped" | "thread-running-here"): Promise<void> {
+  private async skipStartupSetup(threadId: string, skipReason: "not-configured" | "user-skipped" | "thread-running-here" | "plan-implement"): Promise<void> {
     const startup = this.options.threadStartups?.findByThreadId(threadId);
     if (!startup || startup.phase !== "setup") return;
     if (startup.state !== "running" && startup.state !== "blocked" && startup.state !== "interrupted") return;

@@ -5,6 +5,7 @@ import { RpcError } from "@/transport/ws-transport";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { selectViewedPlanVersion, usePlanStore } from "@/stores/planStore";
 import { useThreadStore } from "@/stores/threadStore";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { planSaveScheduler } from "./plan-draft-sessions";
 import type { ImplementOutcome, ImplementPick } from "./plan-save-scheduler";
 
@@ -103,16 +104,19 @@ function isConnectionDrop(error: unknown): boolean {
   return error instanceof Error && !(error instanceof RpcError) && error.message === "WebSocket disconnected";
 }
 
-// A dropped socket leaves the outcome unknown, and the server admits a
-// requestId at most once, so the same request is resent until one answers.
-async function sendImplementWithReplay(request: PlanImplement): Promise<ImplementOutcome> {
+type ImplementResult = Exclude<ImplementOutcome, { kind: "admitted" }> | { kind: "admitted"; targetThreadId: string };
+
+// A dropped socket leaves admission unknown. A new-thread request replays its identity once.
+async function sendImplementWithReplay(request: PlanImplement): Promise<ImplementResult> {
+  let replayed = false;
   while (true) {
     try {
-      await getTransport().implementPlan(request);
-      return { kind: "admitted" };
+      const receipt = await getTransport().implementPlan(request);
+      return { kind: "admitted", targetThreadId: receipt.targetThreadId };
     } catch (error) {
-      if (!isConnectionDrop(error)) return classifyImplementFailure(error);
+      if (!isConnectionDrop(error) || (request.target === "new-thread" && replayed)) return classifyImplementFailure(error);
     }
+    replayed = true;
     // A closing socket rejects before its close event marks the connection
     // lost, so the status can still read connected until a later task runs.
     await new Promise<void>((resolve) => setTimeout(resolve, 25));
@@ -121,12 +125,12 @@ async function sendImplementWithReplay(request: PlanImplement): Promise<Implemen
 }
 
 /**
- * Implements the thread's target version in the thread. Waits for an
+ * Implements the thread's target version in the selected destination. Waits for an
  * in-flight autosave, carries unsent edits in the request, and reports a
  * changed version or a failure as a notice. A second press while one runs
  * does nothing.
  */
-export async function implementPlan(threadId: string): Promise<void> {
+export async function implementPlan(threadId: string, target: PlanImplement["target"] = "thread"): Promise<void> {
   if (usePlanImplementStore.getState().busy[threadId]) return;
   setBusy(threadId, true);
   dismissImplementNotice(threadId);
@@ -135,10 +139,11 @@ export async function implementPlan(threadId: string): Promise<void> {
     const basis = await scheduler.beginImplement(() => currentTarget(threadId));
     if (!basis) return;
     const carried = basis.pending !== undefined;
-    const outcome = await sendImplementWithReplay({ requestId: crypto.randomUUID(), threadId, target: "thread", ...basis });
+    const outcome = await sendImplementWithReplay({ requestId: crypto.randomUUID(), threadId, target, ...basis });
     scheduler.finishImplement(outcome);
     if (outcome.kind === "admitted") {
       mirrorAdmittedBuildMode(threadId);
+      if (target === "new-thread") await openImplementedThread(threadId, outcome.targetThreadId);
     } else if (outcome.kind === "conflict" && !carried) {
       usePlanStore.getState().setActiveVersion(threadId, null);
       setNotice(threadId, PLAN_CHANGED_NOTICE);
@@ -148,4 +153,14 @@ export async function implementPlan(threadId: string): Promise<void> {
   } finally {
     setBusy(threadId, false);
   }
+}
+
+async function openImplementedThread(sourceThreadId: string, targetThreadId: string): Promise<void> {
+  const workspace = useWorkspaceStore.getState();
+  const source = workspace.threads.find(thread => thread.id === sourceThreadId);
+  if (source) {
+    await workspace.loadThreads(source.workspace_id);
+    workspace.setActiveWorkspace(source.workspace_id, undefined, false);
+  }
+  workspace.setActiveThread(targetThreadId);
 }

@@ -53,6 +53,11 @@ export class MessageRepo {
     return this.reader.getLatestSequenceIncludingInternal(threadId);
   }
 
+  /** Check for any persisted message, including internal and unpublished rows. */
+  hasMessages(threadId: string): boolean {
+    return this.reader.hasMessages(threadId);
+  }
+
   /** Return the newest durable message identity and sequence for terminal publication. */
   latestSequenceMessage(threadId: string): ReturnType<MessageStore["latestSequenceMessage"]> {
     return this.reader.latestSequenceMessage(threadId);

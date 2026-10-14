@@ -137,6 +137,41 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
     expect(await service.saveVersion(fork())).toMatchObject({ status: "draft", revision: 1 });
   });
 
+  it.each([false, true])("commits a new-thread copy atomically on worker start, injected failure: %s", async (failCopy) => {
+    const targetId = "implement-target";
+    db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider) VALUES (?, ?, ?, ?, ?)")
+      .run(targetId, "workspace", "Implement", "main", "codex");
+    const requestId = NodeCrypto.randomUUID();
+    const prepared = await owner.execute(planImplementWriteOperations.prepare, { input: { requestId, threadId,
+      versionId: ready.id, expectedRevision: 0, target: "new-thread" }, fingerprint: "new", planFilePath: files.path(threadId) });
+    if (!prepared.ok) throw new Error(prepared.code);
+    expect(prepared.request).toMatchObject({ targetThreadId: null, startupId: requestId, status: "preparing" });
+    if (failCopy) db.run("CREATE TRIGGER fail_copy AFTER INSERT ON plans WHEN NEW.capture_source = 'copy' BEGIN SELECT RAISE(ABORT, 'copy fault'); END");
+    const targetExecution = { ...execution, threadId: targetId };
+    const admission = handler.handle({ requestId: 1, execution: targetExecution, lease, ordinal: 1,
+      command: { kind: "start", providerId: "codex", publishParentStart: true,
+        parentLive: { planFeature: "none", precedingMessageId: prepared.request.messageId },
+        input: { thread: { id: targetId, workspaceId: "workspace", providerId: "codex", createdAt: now },
+          turnId: execution.turnId, executionId: execution.executionId,
+          permissionMode: "full", providerIdentities: [], planImplement: { requestId },
+          userMessage: { kind: "create", messageId: prepared.request.messageId, content: "Implement plan v1", sequence: 1 } } } });
+    if (failCopy) {
+      await expect(admission).rejects.toThrow();
+      expect(plans.getById(ready.id)?.status).toBe("ready");
+      expect(plans.listByThread(targetId)).toEqual([]);
+      expect(db.prepare("SELECT id FROM messages WHERE thread_id = ?").all(targetId)).toEqual([]);
+      expect(db.prepare("SELECT id FROM canonical_agent_turns WHERE thread_id = ?").all(targetId)).toEqual([]);
+      expect(await owner.execute(planImplementWriteOperations.read, requestId)).toMatchObject({ status: "preparing", targetThreadId: null });
+    } else {
+      await admission;
+      expect(plans.getById(ready.id)?.status).toBe("accepted");
+      expect(plans.listByThread(targetId)).toMatchObject([{ version: 1, contentMd: "# Original", status: "accepted",
+        captureSource: "copy", baseVersionId: ready.id }]);
+      expect(db.prepare("SELECT content FROM messages WHERE thread_id = ?").all(targetId)).toEqual([{ content: "Implement plan v1" }]);
+      expect(await owner.execute(planImplementWriteOperations.read, requestId)).toMatchObject({ status: "admitted", targetThreadId: targetId });
+    }
+  });
+
   it("refuses Implement preparation during an unfinished execution without creating a request", async () => {
     await start();
     const requestId = NodeCrypto.randomUUID();
@@ -152,7 +187,7 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
     const schema = WS_METHODS()["plan.implement"].params;
     for (const invalid of [input, { ...input, expectedRevision: -1 }, { ...input, expectedRevision: 0.5 },
       { ...input, expectedRevision: 1, pending: { versionId: NodeCrypto.randomUUID(), baseVersionId: ready.id, baseRevision: 0, contentMd: "# Edit" } },
-      { ...input, expectedRevision: 0, target: "new-thread" }]) {
+      { ...input, expectedRevision: 0, target: "new-worktree" }]) {
       expect(schema.safeParse(invalid).success).toBe(false);
     }
     expect(schema.parse({ ...input, expectedRevision: 0 })).toEqual({ ...input, expectedRevision: 0 });

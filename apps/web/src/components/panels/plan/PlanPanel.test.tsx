@@ -6,10 +6,11 @@ import type { PlanImplement, PlanImplementReceipt, PlanSaveVersion, PlanVersion 
 import { useConnectionStore } from "@/stores/connectionStore";
 import { usePlanStore } from "@/stores/planStore";
 import { useThreadStore } from "@/stores/threadStore";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { RpcError } from "@/transport/ws-transport";
 import { PlanPanel } from "./PlanPanel";
 import { planSaveScheduler } from "./plan-draft-sessions";
-import { IMPLEMENT_FAILED_NOTICE, PLAN_CHANGED_NOTICE } from "./plan-implement";
+import { IMPLEMENT_FAILED_NOTICE, PLAN_CHANGED_NOTICE, implementPlan as implementPlanAction, usePlanImplementStore } from "./plan-implement";
 
 const savePlanVersion = vi.hoisted(() => vi.fn<(payload: PlanSaveVersion) => Promise<PlanVersion>>());
 const implementPlan = vi.hoisted(() => vi.fn<(payload: PlanImplement) => Promise<PlanImplementReceipt>>());
@@ -245,6 +246,35 @@ describe("PlanPanel", () => {
     function interactionMode(thread: string): string {
       return useThreadStore.getState().getThreadSettings(thread).interactionMode;
     }
+
+    it.each([false, true])("replays a new-thread request once and opens only its receipt target, second drop: %s", async (secondDrop) => {
+      const thread = `thread-new-implement-${secondDrop}`;
+      startInPlan(thread, [makePlan(2, { id: READY_ID })]);
+      useWorkspaceStore.setState({ activeThreadId: thread, threads: [] });
+      implementPlan.mockImplementationOnce(async () => {
+        useConnectionStore.setState({ status: "reconnecting" });
+        throw new Error("WebSocket disconnected");
+      });
+      implementPlan.mockImplementationOnce(async (request) => {
+        if (secondDrop) throw new Error("WebSocket disconnected");
+        return { ...receiptFor(request), targetThreadId: "new-implementation-thread" };
+      });
+      const pending = implementPlanAction(thread, "new-thread");
+      await waitFor(() => expect(useConnectionStore.getState().status).toBe("reconnecting"));
+      act(() => useConnectionStore.setState({ status: "connected" }));
+      await act(async () => pending);
+      expect(implementPlan.mock.calls).toHaveLength(2);
+      expect(implementPlan.mock.calls[1][0]).toEqual(implementPlan.mock.calls[0][0]);
+      expect(implementPlan.mock.calls[0][0].target).toBe("new-thread");
+      if (secondDrop) {
+        expect(useWorkspaceStore.getState().activeThreadId).toBe(thread);
+        expect(usePlanImplementStore.getState().notices[thread]).toBe(IMPLEMENT_FAILED_NOTICE);
+        expect(interactionMode(thread)).toBe("plan");
+      } else {
+        expect(useWorkspaceStore.getState().activeThreadId).toBe("new-implementation-thread");
+        expect(interactionMode(thread)).toBe("build");
+      }
+    });
 
     it("implements a ready version at its revision and switches the thread to Build", async () => {
       const thread = "thread-implement-ready";

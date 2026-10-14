@@ -79,7 +79,7 @@ export const ThreadStartupStepDetailSchema = lazySchema(() => z.discriminatedUni
   z.object({
     phase: z.literal("setup"),
     exitCode: z.number().int().optional(),
-    skipReason: z.enum(["not-configured", "thread-running-here", "user-skipped"]).optional(),
+    skipReason: z.enum(["not-configured", "thread-running-here", "user-skipped", "plan-implement"]).optional(),
   }).strict(),
 ]));
 /** Arguments and outcomes retained for one startup phase. */
