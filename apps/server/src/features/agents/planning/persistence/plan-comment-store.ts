@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { z } from "zod";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import * as NodeCrypto from "node:crypto";
 import { PlanCommentSchema, type PlanComment, type PlanCommentError, type PlanVersion } from "@mcode/contracts";
@@ -107,12 +107,18 @@ export class PlanCommentStore {
   /** Must run in the user-message transaction; any invalid id aborts the whole start. */
   stampSent(threadId: string, ids: readonly string[], messageId: string): void {
     if (ids.length === 0) return;
-    const latest = this.db.prepare<{ id: string }, [string]>(
-      "SELECT id FROM plans WHERE thread_id = ? AND status <> 'accepted' ORDER BY version DESC LIMIT 1").get(threadId);
     const comments = [...new Set(ids)].map(id => this.getById(id));
     for (const comment of comments) {
-      if (!comment || comment.threadId !== threadId || comment.versionId !== latest?.id
+      if (!comment || comment.threadId !== threadId
         || comment.status !== "open" || comment.sentMessageId !== null) throw new PlanCommentAdmissionError();
+      const version = this.orm.select({ id: plans.id }).from(plans).where(and(
+        eq(plans.id, comment.versionId), eq(plans.threadId, threadId), ne(plans.status, "accepted"),
+      )).get();
+      const carried = this.orm.select({ id: planComments.id }).from(planComments)
+        .where(eq(planComments.carriedFromCommentId, comment.id)).get();
+      if (!version || carried) {
+        throw new PlanCommentAdmissionError();
+      }
     }
     for (const id of new Set(ids)) {
       this.orm.update(planComments).set({ sentMessageId: messageId, updatedAt: new Date().toISOString() })

@@ -5,7 +5,7 @@ import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import { PlanStore } from "../../planning/persistence/plan-store.js";
 import { PlanImplementStore } from "../../planning/persistence/plan-implement-store.js";
-import { PlanCommentStore } from "../../planning/persistence/plan-comment-store.js";
+import { PlanCommentAdmissionError, PlanCommentStore } from "../../planning/persistence/plan-comment-store.js";
 import { canonicalRuntimeWriteOperations } from "../canonical-runtime-write-operations.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { openMigratedTestDatabase } from "../../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
@@ -127,9 +127,9 @@ describe("CanonicalParentTurnWrite", () => {
     NodeFS.rmSync(directory, { recursive: true, force: true });
   });
 
-  function seedComment() {
+  function seedComment(versionId?: string) {
     const plans = new PlanStore(db);
-    const existing = plans.listByThread(THREAD_ID).at(-1);
+    const existing = versionId ? plans.getById(versionId) : plans.listByThread(THREAD_ID).at(-1);
     const version = existing ?? plans.create(THREAD_ID, new MessageRepo(db).create(THREAD_ID, "assistant", "Plan", 0).id,
       { title: "Plan", contentMd: "# Plan", captureSource: "fence" }, "codex");
     const result = new PlanCommentStore(db).create({ commentId: NodeCrypto.randomUUID(), versionId: version.id,
@@ -151,21 +151,50 @@ describe("CanonicalParentTurnWrite", () => {
     } finally { await owner?.close(); }
   });
 
-  it.each(["resolved", "sent", "wrong-version", "wrong-thread", "missing"])("rolls back every stamp and admission for a %s comment", async fault => {
-    const valid = seedComment();
+  it.each(["direct", "worker"])("stamps an uncarried superseded comment through %s start", async mode => {
+    const original = seedComment();
+    const plans = new PlanStore(db);
+    const assistant = new MessageRepo(db).create(THREAD_ID, "assistant", "New plan", 1);
+    plans.create(THREAD_ID, assistant.id, { title: "New plan", contentMd: "# New plan", captureSource: "fence" }, "codex");
+    const comment = seedComment(original.versionId);
+    expect(plans.getById(comment.versionId)?.status).toBe("superseded");
+    const owner = mode === "worker" ? new ApplicationDatabaseWriter(path, leaseWriterWorker) : null;
+    try {
+      const input = { ...startInput(), planCommentIds: [comment.id] };
+      if (owner) await owner.execute(canonicalRuntimeWriteOperations.parentStart, input);
+      else writer.start(input);
+      expect(new PlanCommentStore(db).getById(comment.id)?.sentMessageId).toBe("user-1");
+      expect(db.prepare("SELECT id FROM canonical_agent_turns WHERE id = ?").get(TURN_ID)).toEqual({ id: TURN_ID });
+    } finally { await owner?.close(); }
+  });
+
+  function seedInvalidComment(fault: string) {
     const invalid = seedComment();
     const store = new PlanCommentStore(db);
-    if (fault === "resolved") store.setStatus({ commentId: invalid.id, status: "resolved" });
-    if (fault === "sent") store.stampSent(THREAD_ID, [invalid.id], "earlier-message");
-    if (fault === "wrong-version") {
-      const plans = new PlanStore(db);
-      plans.saveVersion({ threadId: THREAD_ID, versionId: NodeCrypto.randomUUID(), baseVersionId: invalid.versionId, baseRevision: 0, contentMd: "# Draft" });
+    const plans = new PlanStore(db);
+    plans.saveVersion({ threadId: THREAD_ID, versionId: NodeCrypto.randomUUID(), baseVersionId: invalid.versionId,
+      baseRevision: 0, contentMd: "# Plan" });
+    const valid = seedComment();
+    if (fault !== "carried-original") {
+      db.prepare("DELETE FROM plan_comments WHERE carried_from_comment_id = ?").run(invalid.id);
+    } else {
+      expect(store.listByThread(THREAD_ID).filter(comment => comment.carriedFromCommentId === invalid.id))
+        .toMatchObject([{ versionId: valid.versionId, sentMessageId: null }]);
     }
-    if (fault === "wrong-thread") {
+    if (fault === "resolved") store.setStatus({ commentId: invalid.id, status: "resolved" });
+    if (fault === "sent") db.prepare("UPDATE plan_comments SET sent_message_id = 'earlier-message' WHERE id = ?").run(invalid.id);
+    if (fault === "accepted") db.prepare("UPDATE plans SET status = 'accepted' WHERE id = ?").run(invalid.versionId);
+    if (fault === "wrong-thread" || fault === "wrong-version-thread") {
       db.prepare("INSERT INTO threads (id, workspace_id, title, branch) VALUES ('other', 'workspace-1', 'Other', 'main')").run();
-      db.prepare("UPDATE plan_comments SET thread_id = 'other' WHERE id = ?").run(invalid.id);
+      if (fault === "wrong-thread") db.prepare("UPDATE plan_comments SET thread_id = 'other' WHERE id = ?").run(invalid.id);
+      else db.prepare("UPDATE plans SET thread_id = 'other' WHERE id = ?").run(invalid.versionId);
     }
     if (fault === "missing") store.delete({ commentId: invalid.id });
+    return { valid, invalid, store };
+  }
+
+  it.each(["resolved", "sent", "carried-original", "accepted", "wrong-thread", "wrong-version-thread", "missing"])("rolls back every stamp and admission for a %s comment", async fault => {
+    const { valid, invalid, store } = seedInvalidComment(fault);
     const before = store.listByThread(THREAD_ID);
     for (const mode of ["direct", "worker"]) {
       const owner = mode === "worker" ? new ApplicationDatabaseWriter(path, leaseWriterWorker) : null;
@@ -173,6 +202,7 @@ describe("CanonicalParentTurnWrite", () => {
         const input = { ...startInput(), planCommentIds: [valid.id, invalid.id] };
         const start = async () => owner ? owner.execute(canonicalRuntimeWriteOperations.parentStart, input) : writer.start(input);
         await expect(start()).rejects.toMatchObject({ code: "plan_comment_invalid" });
+        if (!owner) expect(() => writer.start(input)).toThrow(PlanCommentAdmissionError);
         expect(store.listByThread(THREAD_ID)).toEqual(before);
         expect(db.prepare("SELECT id FROM messages WHERE id = 'user-1'").all()).toEqual([]);
         expect(db.prepare("SELECT id FROM canonical_agent_turns WHERE id = ?").all(TURN_ID)).toEqual([]);

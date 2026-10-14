@@ -103,6 +103,17 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
     expect(pushes.comments).toContainEqual({ threadId, upserted: [created], deletedIds: [] });
   });
 
+  it("creates a comment on the displayed superseded version", async () => {
+    await start();
+    await captureAndFinish();
+    expect(plans.getById(ready.id)?.status).toBe("superseded");
+    const created = await service.createComment(commentInput());
+    expect(created).toMatchObject({ versionId: ready.id, body: "Clarify the order",
+      anchor: { quote: "Original" }, status: "open", sentMessageId: null, carriedFromCommentId: null });
+    expect((await service.snapshot({ threadId })).comments).toEqual([created]);
+    expect(pushes.comments.at(-1)).toEqual({ threadId, upserted: [created], deletedIds: [] });
+  });
+
   it("updates notes, resolves and reopens them, and deletes idempotently", async () => {
     const input = commentInput();
     await service.createComment(input);
