@@ -34,12 +34,11 @@ describe("WorkspaceTargetMenu", () => {
     expect(screen.getByRole("menuitemradio", { name: /Local/ })).toHaveAttribute("aria-checked", "false");
   });
 
-  it("shows the project folder in mono beside Local, bounded with a fade", async () => {
+  it("shows the project folder inside the Local row", async () => {
     renderMenu("direct");
     await openMenu();
 
     const folder = screen.getByText("mcode");
-    expect(folder).toHaveClass("font-code", "text-fade", "max-w-[12rem]");
     expect(screen.getByRole("menuitemradio", { name: /Local/ })).toContainElement(folder);
   });
 

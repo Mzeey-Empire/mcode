@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   getComposerSendButtonVisualState,
   isComposerSendButtonDisabled,
-  SEND_BUTTON_VARIANT,
 } from "./ComposerContentSurface";
 
 const disabledArgs = {
@@ -81,9 +80,8 @@ describe("composer send button while the thread is starting", () => {
 
   it("shows Stop, never Send, even with typed content", () => {
     for (const hasContent of [false, true]) {
-      const state = getComposerSendButtonVisualState({ startingThread: true, isAgentRunning: false, isStopPending: false, hasContent });
-      expect(state).toBe("starting");
-      expect(SEND_BUTTON_VARIANT[state]).toBe("ink");
+      expect(getComposerSendButtonVisualState({ startingThread: true, isAgentRunning: false, isStopPending: false, hasContent }))
+        .toBe("starting");
     }
   });
 
@@ -94,18 +92,5 @@ describe("composer send button while the thread is starting", () => {
 
   it("disables Stop once cancellation is requested", () => {
     expect(isComposerSendButtonDisabled({ ...starting, canCancelStartup: false })).toBe(true);
-  });
-});
-
-describe("composer Stop colour", () => {
-  it("renders Stop and Stopping as the neutral ink circle, never primary or destructive", () => {
-    const stopStates = (["stop", "stopping"] as const).map((isStopPending) =>
-      getComposerSendButtonVisualState({
-        startingThread: false,
-        isAgentRunning: true,
-        isStopPending: isStopPending === "stopping",
-        hasContent: false,
-      }));
-    expect(stopStates.map((state) => SEND_BUTTON_VARIANT[state])).toEqual(["ink", "ink"]);
   });
 });

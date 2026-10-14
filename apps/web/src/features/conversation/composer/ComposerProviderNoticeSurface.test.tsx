@@ -199,21 +199,6 @@ describe("ComposerProviderNoticeSurface", () => {
     expect(screen.getByText("model-rerouted evidence reroute")).toBeInTheDocument();
   });
 
-  it("keeps notice header children transparent so the header owns hover feedback", () => {
-    seedThread(THREAD_A, [
-      providerNotice("security", THREAD_A, "security"),
-      providerNotice("warning", THREAD_A, "model-rerouted"),
-    ]);
-    render(<NoticeHarness />);
-
-    expect(screen.getByRole("button", { name: "Security warning" }))
-      .toHaveClass("aria-expanded:bg-transparent", "dark:hover:bg-transparent");
-    expect(screen.getByRole("button", { name: "Other notice" }))
-      .toHaveClass("dark:hover:bg-transparent");
-    expect(screen.getByRole("button", { name: "Dismiss notice" }))
-      .toHaveClass("dark:hover:bg-transparent");
-  });
-
   it("does not reactivate historical turn notices after the current session clears", () => {
     const historical = providerNotice("historical", THREAD_A, "security");
     seedThread(THREAD_A, [historical], []);

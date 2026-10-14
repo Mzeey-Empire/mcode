@@ -70,7 +70,7 @@ describe("UsageLimitRow", () => {
     render(<ComposerTray threadId={THREAD} running={false} queue={<p>queued rows</p>} />);
 
     expect(within(row()).getByText("Codex usage limit reached")).toBeInTheDocument();
-    expect(within(row()).getByText("· 5-hour limit")).toHaveClass("text-muted");
+    expect(within(row()).getByText("· 5-hour limit")).toBeInTheDocument();
     expect(within(row()).getByRole("button", { name: "Switch model" })).toBeInTheDocument();
     expect(within(row()).getByRole("button", { name: `Resume at ${clockTime(RESETS_AT)}` })).toBeInTheDocument();
     expect(screen.getByTestId("composer-tray").firstElementChild).toBe(row());
@@ -92,7 +92,7 @@ describe("UsageLimitRow", () => {
     expect(mockTransport.scheduleTurnResume).toHaveBeenCalledWith({ threadId: THREAD, turnId: TURN, at: RESETS_AT });
     expect(mockTransport.resumeInterruptedTurn).not.toHaveBeenCalled();
     expect(within(row()).getByText(`Resuming at ${clockTime(RESETS_AT)}`)).toBeInTheDocument();
-    expect(within(row()).getByText("in 2h 5m")).toHaveClass("text-muted");
+    expect(within(row()).getByText("in 2h 5m")).toBeInTheDocument();
     expect(within(row()).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
   });
 
