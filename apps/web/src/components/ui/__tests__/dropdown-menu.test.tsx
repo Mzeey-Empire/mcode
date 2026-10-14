@@ -17,7 +17,7 @@ function ReviewMenu({ onPick }: { onPick: (name: string) => void }) {
     <DropdownMenu>
       <DropdownMenuTrigger>Review view</DropdownMenuTrigger>
       <DropdownMenuContent>
-        <DropdownMenuItem label="Rename" icon={<Pencil />} shortcut="F2" onClick={() => onPick("rename")} />
+        <DropdownMenuItem label="Rename" icon={<Pencil />} shortcut={["F2"]} onClick={() => onPick("rename")} />
         <DropdownMenuItem label="Turn" checked onClick={() => onPick("turn")} />
         <DropdownMenuItem label="All turns" checked={false} onClick={() => onPick("all")} />
         <DropdownMenuItem label="Commit" disabledReason={UNAVAILABLE} onClick={() => onPick("commit")} />
@@ -62,6 +62,27 @@ describe("DropdownMenuItem", () => {
     const row = await screen.findByRole("menuitemradio", { name: /^iPhone 15 Pro/ });
     expect(row).toHaveTextContent("393 × 852");
     expect(row.querySelector("svg")).not.toBeNull();
+  });
+
+  it("shows the shortcut as one keycap joined by plus, drawing Shift and Enter as icons, hidden from the row's name", async () => {
+    const user = userEvent.setup();
+    render(
+      <DropdownMenu>
+        <DropdownMenuTrigger>Plan</DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuItem label="Implement v1" shortcut={["Ctrl", "Shift", "Enter"]} />
+          <DropdownMenuItem label="Implement in a new thread" shortcut={[]} />
+        </DropdownMenuContent>
+      </DropdownMenu>,
+    );
+    await user.click(screen.getByRole("button", { name: "Plan" }));
+    const bound = await screen.findByRole("menuitem", { name: "Implement v1" });
+    const unbound = screen.getByRole("menuitem", { name: "Implement in a new thread" });
+    const keycaps = bound.querySelectorAll("kbd");
+    expect(keycaps).toHaveLength(1);
+    expect(keycaps[0]?.textContent).toBe("Ctrl+Shift+Enter");
+    expect(keycaps[0]?.querySelectorAll("svg")).toHaveLength(2);
+    expect(unbound.querySelectorAll("kbd")).toHaveLength(0);
   });
 
   it("keeps a disabled row focusable, uninvocable, and described by its reason", async () => {

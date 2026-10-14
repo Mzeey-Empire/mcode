@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { CheckIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { ShortcutCombo } from "./shortcut-keys"
 import { FOCUS_RING_CLASS } from "./focus-ring"
 
 /**
@@ -29,8 +30,8 @@ export interface MenuRowContent {
   readonly label: string
   /** A Lucide icon, drawn at 16px in a 20px leading lane. */
   readonly icon?: ReactNode
-  /** The command's keys as plain text, e.g. `"Ctrl Shift M"`, muted on the right. */
-  readonly shortcut?: string
+  /** Keys of the command's shortcut, shown as one muted keycap on the right, e.g. `["Ctrl", "Shift", "M"]`. */
+  readonly shortcut?: readonly string[]
   /** Status shown on the right, such as a run indicator or a "Soon" badge. */
   readonly trailing?: ReactNode
   /** Marks the current choice with a check on the right, after any trailing detail, instead of a fill. */
@@ -44,6 +45,14 @@ export function MenuRowCheck() {
   return <CheckIcon aria-hidden className="size-[1.6rem] text-ink" strokeWidth={1.5} />
 }
 
+function MenuRowShortcut({ keys }: { readonly keys: readonly string[] }) {
+  return (
+    <span aria-hidden data-slot="menu-row-shortcut" className="flex shrink-0 items-center gap-1 text-muted">
+      <ShortcutCombo keys={keys} />
+    </span>
+  )
+}
+
 /** Lays out a row's icon lane, fading label and trailing slot. */
 export function MenuRowBody({
   label,
@@ -53,7 +62,7 @@ export function MenuRowBody({
   checked,
   destructive,
 }: MenuRowContent) {
-  const detail = trailing ?? (shortcut ? <span aria-hidden className="text-caption text-muted">{shortcut}</span> : null)
+  const detail = trailing ?? (shortcut && shortcut.length > 0 ? <MenuRowShortcut keys={shortcut} /> : null)
   const trailingContent = checked ? <>{detail}<MenuRowCheck /></> : detail
   return (
     <>

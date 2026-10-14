@@ -22,6 +22,7 @@ All UI primitives live in `apps/web/src/components/ui/`. **Always use these inst
 | `Separator` | `separator.tsx` | `<hr>` or `<div className="border-b">` |
 | `Switch` | `switch.tsx` | Custom toggle implementations |
 | `Tooltip` | `tooltip.tsx` | `title` attributes or custom hover text |
+| `ShortcutCombo`, `ShortcutKeys` | `shortcut-keys.tsx` | Shortcut text such as `Ctrl+Shift+M`, or hand-built `Kbd` keycaps. `ShortcutCombo` draws a row's whole shortcut in one keycap, which `MenuRowContent.shortcut` and `DropdownMenuItem` already do. `ShortcutKeys` draws one keycap per key for tooltips. Both take the keys from `keybindingKeycaps(...)`, draw Shift, Enter and Mac Cmd as icons, and leave Ctrl as a word because Windows has no standard icon for it |
 | `ToastLane` | `toast.tsx` | A second toast stack. Raise toasts with `useToastStore.show({ kind, title, meta })`; the lane is mounted once in `App.tsx` |
 | `PathText` | `path-text.tsx` | Raw path strings, rtl tricks, or code that cuts a path |
 
