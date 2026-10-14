@@ -97,7 +97,8 @@ function createStoreHydrator(): ThreadHydrator {
     getTasksForThread: (threadId) => useTaskStore.getState().tasksByThread[threadId] ?? [],
     setTasksForThread: (threadId, tasks) => useTaskStore.getState().setTasks(threadId, tasks),
     addPlanForThread: (threadId, plan) => usePlanStore.getState().addPlan(threadId, plan),
-    restorePlanQuestions: vi.fn(),
+    reconcilePlanQuestions: vi.fn(),
+    getPlanQuestionsRevision: () => 0,
     shallowEqualBy,
     coerceTaskStatus,
     getWorkspaceThreadSettings: () => ({

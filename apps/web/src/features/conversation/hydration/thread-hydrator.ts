@@ -340,7 +340,8 @@ export class ThreadHydrator {
       getTasksForThread: deps.getTasksForThread,
       setTasksForThread: deps.setTasksForThread,
       addPlanForThread: deps.addPlanForThread,
-      restorePlanQuestions: deps.restorePlanQuestions,
+      reconcilePlanQuestions: deps.reconcilePlanQuestions,
+      getPlanQuestionsRevision: deps.getPlanQuestionsRevision,
       shallowEqualBy: deps.shallowEqualBy,
       coerceTaskStatus: deps.coerceTaskStatus,
     });

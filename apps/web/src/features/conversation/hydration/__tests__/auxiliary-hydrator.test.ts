@@ -39,7 +39,12 @@ describe("AuxiliaryHydrator", () => {
   let setStateSpy: ReturnType<typeof vi.fn>;
   let setTasksForThread: (threadId: string, tasks: readonly unknown[]) => void;
   let addPlanForThread: (threadId: string, plan: PlanVersion) => void;
-  let restorePlanQuestions: (threadId: string, assistantMessageId: string, questions: PlanQuestion[]) => void;
+  let reconcilePlanQuestions: (
+    threadId: string,
+    revision: number,
+    pending: { assistantMessageId: string; questions: PlanQuestion[] } | null,
+  ) => void;
+  let planQuestionsRevision: number;
   let records: Map<string, ThreadRecord>;
   let currentThreadId: string | null;
 
@@ -56,7 +61,8 @@ describe("AuxiliaryHydrator", () => {
     setStateSpy = vi.fn();
     setTasksForThread = vi.fn() as (threadId: string, tasks: readonly unknown[]) => void;
     addPlanForThread = vi.fn() as (threadId: string, plan: PlanVersion) => void;
-    restorePlanQuestions = vi.fn() as (threadId: string, assistantMessageId: string, questions: PlanQuestion[]) => void;
+    reconcilePlanQuestions = vi.fn() as typeof reconcilePlanQuestions;
+    planQuestionsRevision = 0;
 
     cacheRecord(THREAD_ID, makeThinRecord());
   });
@@ -99,7 +105,8 @@ describe("AuxiliaryHydrator", () => {
       getTasksForThread: overrides?.getTasksForThread ?? (() => []),
       setTasksForThread,
       addPlanForThread,
-      restorePlanQuestions,
+      reconcilePlanQuestions,
+      getPlanQuestionsRevision: () => planQuestionsRevision,
       shallowEqualBy,
       coerceTaskStatus,
     });
@@ -163,7 +170,7 @@ describe("AuxiliaryHydrator", () => {
     });
   });
 
-  it("reopened the question dock from the stored batch on reload", async () => {
+  it("handed the stored batch to the store with the revision read before the request", async () => {
     const questions: PlanQuestion[] = [
       { id: "q1", category: "AUTH", question: "Which provider?", options: [{ id: "a", title: "A", description: "" }, { id: "b", title: "B", description: "" }] },
     ];
@@ -172,10 +179,20 @@ describe("AuxiliaryHydrator", () => {
       phase: "questions",
       pendingQuestions: { assistantMessageId: "a1", questions },
     });
+    planQuestionsRevision = 4;
+    createAux().hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
+    planQuestionsRevision = 5;
+
+    await vi.waitFor(() => {
+      expect(reconcilePlanQuestions).toHaveBeenCalledWith(THREAD_ID, 4, { assistantMessageId: "a1", questions });
+    });
+  });
+
+  it("told the store when the snapshot has no pending batch", async () => {
     createAux().hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
 
     await vi.waitFor(() => {
-      expect(restorePlanQuestions).toHaveBeenCalledWith(THREAD_ID, "a1", questions);
+      expect(reconcilePlanQuestions).toHaveBeenCalledWith(THREAD_ID, 0, null);
     });
   });
 

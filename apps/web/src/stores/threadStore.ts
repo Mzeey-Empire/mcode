@@ -470,10 +470,15 @@ interface ThreadState {
   /** Set questions received from the model and show the wizard. */
   setPlanQuestions: (threadId: string, questions: PlanQuestion[]) => void;
   /**
-   * Reopen the stored question batch after a reload. The snapshot is requested before it
-   * resolves, so a batch answered or dismissed in between stays closed.
+   * Apply the stored question batch from a plan snapshot. `revision` is the question state the
+   * snapshot was requested against; any local change since then makes the snapshot stale and it is dropped.
+   * A null batch closes a dock the server no longer has pending.
    */
-  restorePlanQuestions: (threadId: string, assistantMessageId: string, questions: PlanQuestion[]) => void;
+  reconcilePlanQuestions: (
+    threadId: string,
+    revision: number,
+    pending: { assistantMessageId: string; questions: PlanQuestion[] } | null,
+  ) => void;
   /** Record the user's answer for one question. */
   setPlanAnswer: (threadId: string, questionId: string, answer: PlanAnswer) => void;
   /** Navigate to a specific question index. */
@@ -1445,7 +1450,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       useWorkspaceStore.getState().threads.find((t) => t.id === threadId),
     flushPendingTextDeltas,
     loadNarrativeForMessage: (messageId, threadId) => get().loadNarrativeForMessage(messageId, threadId),
-    restorePlanQuestions: (threadId, assistantMessageId, questions) => get().restorePlanQuestions(threadId, assistantMessageId, questions),
+    reconcilePlanQuestions: (threadId, revision, pending) => get().reconcilePlanQuestions(threadId, revision, pending),
+    getPlanQuestionsRevision: (threadId) => getThreadRecord(get().records, threadId).planQuestionsRevision,
     getTasksForThread: (threadId) => useTaskStore.getState().tasksByThread[threadId] ?? [],
     // Persisted tasks carry no turn link, so the latest user message is the best available source.
     setTasksForThread: (threadId, tasks) =>
@@ -4125,10 +4131,18 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     });
   },
 
-  restorePlanQuestions: (threadId, assistantMessageId, questions) => {
+  reconcilePlanQuestions: (threadId, revision, pending) => {
     const record = getThreadRecord(get().records, threadId);
-    if (record.planQuestionsStatus !== "idle" || record.answeredPlanMessageIds.has(assistantMessageId)) return;
-    get().setPlanQuestions(threadId, questions);
+    if (record.planQuestionsRevision !== revision) return;
+    if (!pending) {
+      if (record.planQuestionsStatus === "pending") {
+        patchRec(threadId, { planQuestions: null, planAnswers: new Map(), activeQuestionIndex: 0, planQuestionsStatus: "idle" });
+      }
+      return;
+    }
+    if (record.planQuestionsStatus === "idle" && !record.answeredPlanMessageIds.has(pending.assistantMessageId)) {
+      get().setPlanQuestions(threadId, pending.questions);
+    }
   },
 
   setPlanAnswer: (threadId, questionId, answer) => {

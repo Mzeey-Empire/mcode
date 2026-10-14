@@ -92,7 +92,12 @@ export interface ThreadHydratorDeps {
   getTasksForThread: (threadId: string) => readonly TaskItem[];
   setTasksForThread: (threadId: string, tasks: readonly TaskItem[]) => void;
   addPlanForThread: (threadId: string, plan: PlanVersion) => void;
-  restorePlanQuestions: (threadId: string, assistantMessageId: string, questions: PlanQuestion[]) => void;
+  reconcilePlanQuestions: (
+    threadId: string,
+    revision: number,
+    pending: { assistantMessageId: string; questions: PlanQuestion[] } | null,
+  ) => void;
+  getPlanQuestionsRevision: (threadId: string) => number;
   shallowEqualBy: <T>(a: readonly T[], b: readonly T[], keys: (keyof T)[]) => boolean;
   coerceTaskStatus: (status: string) => TaskItem["status"];
   getWorkspaceThreadSettings: (threadId: string) => import("@/stores/thread-record").ThreadSettings;

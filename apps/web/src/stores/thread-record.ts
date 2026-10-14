@@ -173,6 +173,8 @@ export interface ThreadRecord {
   planAnswers: Map<string, PlanAnswer>;
   activeQuestionIndex: number;
   planQuestionsStatus: "idle" | "pending" | "answered";
+  /** Bumps whenever the question batch or its status changes, so an in-flight snapshot can tell it is stale. */
+  planQuestionsRevision: number;
 
   handoffMeta?: HandoffMeta;
   forkMode: ThreadForkMode | null;
@@ -263,6 +265,7 @@ export function createEmptyThreadRecord(): ThreadRecord {
     planAnswers: new Map(),
     activeQuestionIndex: 0,
     planQuestionsStatus: "idle",
+    planQuestionsRevision: 0,
 
     forkMode: null,
   };
@@ -313,6 +316,10 @@ export function patchThreadRecord(
   return next;
 }
 
+function changesPlanQuestions(delta: Partial<ThreadRecord>): boolean {
+  return "planQuestions" in delta || "planQuestionsStatus" in delta;
+}
+
 function updatedThreadRecord(current: ThreadRecord, delta: Partial<ThreadRecord>): ThreadRecord {
   const messages = delta.messages;
   const advancesConversation = Object.keys(delta).some((key) => CONVERSATION_REVISION_FIELDS.has(key as keyof ThreadRecord));
@@ -324,6 +331,7 @@ function updatedThreadRecord(current: ThreadRecord, delta: Partial<ThreadRecord>
       newestLoadedSequence: delta.newestLoadedSequence ?? messages.at(-1)?.sequence ?? 0,
     } : {}),
     conversationRevision: advancesConversation ? current.conversationRevision + 1 : current.conversationRevision,
+    planQuestionsRevision: current.planQuestionsRevision + (changesPlanQuestions(delta) ? 1 : 0),
   };
 }
 
