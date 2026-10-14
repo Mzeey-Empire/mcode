@@ -130,6 +130,18 @@ describe("FileRevertConfirm rename chains", () => {
   });
 });
 
+describe("FileRevertConfirm cross-directory renames", () => {
+  it("uses full paths when the restored and removed files share a basename", async () => {
+    transport.previewTurnRevert.mockResolvedValue(ready([
+      plan("src/old/Foo.tsx", { action: "recreate" }),
+      plan("src/new/Foo.tsx", { action: "delete", previousPath: "src/old/Foo.tsx" }),
+    ]));
+    renderConfirm({ messageId: "msg-3", fromMessageId: "msg-1", range: { from: 1, to: 3 } });
+    await settled();
+    expect(screen.getByText(/^Restores src\/old\/Foo\.tsx and removes src\/new\/Foo\.tsx\./)).toBeInTheDocument();
+  });
+});
+
 describe("FileRevertConfirm outcomes", () => {
   it("sends a new requestId for each Revert click and re-renders a stale preview", async () => {
     transport.previewTurnRevert.mockResolvedValue(ready([plan(PATH)]));

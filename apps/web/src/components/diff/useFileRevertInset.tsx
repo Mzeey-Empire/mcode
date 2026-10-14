@@ -12,6 +12,13 @@ export interface FileRevertInset {
   inset: (path: string) => ReactNode;
 }
 
+/** Returns focus to the opener unless the user has already moved it somewhere else. */
+function restoreFocus(opener: HTMLElement | null): void {
+  const active = document.activeElement;
+  const focusLost = !active || active === document.body || active.closest('[role="group"][aria-label="Confirm revert"]') !== null;
+  if (opener?.isConnected && focusLost) opener.focus();
+}
+
 /**
  * Tracks which file in a Review diff has its Revert file confirm open. The open
  * path is keyed by the comparison and the turns it reverts, so a view or turn
@@ -42,7 +49,7 @@ export function useFileRevertInset(threadId: string, comparisonScope: string, re
           range={revert.range}
           onClose={() => {
             setOpen(null);
-            if (opener.current?.isConnected) opener.current.focus();
+            restoreFocus(opener.current);
           }}
         />
       ) : null,

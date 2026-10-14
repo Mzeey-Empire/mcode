@@ -60,8 +60,11 @@ export function fileRevertTitle(path: string, range: FileRevertRange): string {
 function renameChainLead(preview: ReadyPreview, clickedPath: string): string | null {
   const normalize = (path: string) => path.split("\\").join("/");
   if (!preview.files.some((file) => normalize(file.path) !== normalize(clickedPath))) return null;
-  const names = (actions: readonly RevertFilePlan["action"][]) =>
-    revertableFiles(preview).filter((file) => actions.includes(file.action)).map((file) => basename(file.path));
+  const listed = revertableFiles(preview);
+  const basenames = listed.map((file) => basename(file.path));
+  const ambiguous = new Set(basenames).size < basenames.length;
+  const label = (file: RevertFilePlan) => (ambiguous ? file.path : basename(file.path));
+  const names = (actions: readonly RevertFilePlan["action"][]) => listed.filter((file) => actions.includes(file.action)).map(label);
   const restored = names(["restore", "recreate"]);
   const removed = names(["delete"]);
   if (restored.length === 0 && removed.length === 0) return null;
