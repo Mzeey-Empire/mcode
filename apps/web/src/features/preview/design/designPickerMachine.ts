@@ -35,6 +35,28 @@ function editing(state: DesignPickerState): DesignPickerState {
   return state.phase === "editing" ? state : { phase: "editing", armId: state.armId };
 }
 
+function whenPicking(
+  state: DesignPickerState,
+  armId: number,
+  next: (state: DesignPickerState) => DesignPickerState,
+): DesignPickerState {
+  return state.phase === "picking" && armId === state.armId ? next(state) : state;
+}
+
+function whenNotOff(
+  state: DesignPickerState,
+  next: (state: DesignPickerState) => DesignPickerState,
+): DesignPickerState {
+  return state.phase === "off" ? state : next(state);
+}
+
+function whenEditing(
+  state: DesignPickerState,
+  next: (state: DesignPickerState) => DesignPickerState,
+): DesignPickerState {
+  return state.phase === "editing" ? next(state) : state;
+}
+
 /**
  * Pure transition for the Design picker: off, picking, editing, then picking again.
  * Escape closes the note bubble first and leaves Design on the next press. Each arming
@@ -50,15 +72,14 @@ export function designPickerReducer(
     case "exit":
       return off(state);
     case "escape":
-      if (state.phase === "editing") return arm(state);
-      return off(state);
+      return state.phase === "editing" ? arm(state) : off(state);
     case "edit":
-      return state.phase === "off" ? state : editing(state);
+      return whenNotOff(state, editing);
     case "bubbleClosed":
-      return state.phase === "editing" ? arm(state) : state;
+      return whenEditing(state, arm);
     case "picked":
-      return state.phase === "picking" && event.armId === state.armId ? editing(state) : state;
+      return whenPicking(state, event.armId, editing);
     case "pickFailed":
-      return state.phase === "picking" && event.armId === state.armId ? off(state) : state;
+      return whenPicking(state, event.armId, off);
   }
 }

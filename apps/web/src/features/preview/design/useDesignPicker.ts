@@ -205,7 +205,6 @@ export function useDesignPicker({
       document.removeEventListener("pointerdown", onPointerDown, true);
   }, [bubbleRef, openBubbleBase, requestOutsideBubbleDiscard]);
 
-  const clearTransientAnnotationState = closeOpenAnnotationBubble;
 
   const handleDesignEscape = useCallback((): void => {
     // When an inline autocomplete popup is open inside the bubble (slash
@@ -239,7 +238,7 @@ export function useDesignPicker({
   ]);
 
   const onToggleDesignMode = () => {
-    if (designModeActive) clearTransientAnnotationState();
+    if (designModeActive) closeOpenAnnotationBubble();
     designPickerDispatch(threadId, { type: "toggle" });
   };
 
@@ -254,8 +253,9 @@ export function useDesignPicker({
   // pick and reinject the guest overlay, so the hover highlight never appears.
   const requestElementPick = useEffectEvent(() => capture.onAddElementAnnotation());
 
+  // An already-open note owns the page, so arming over it would pick an element nobody asked for.
   useEffect(() => {
-    if (designPickerPhase !== "picking") return;
+    if (designPickerPhase !== "picking" || hasOpenBubble) return;
     let settled = false;
     void requestElementPick().then((result) => {
       settled = true;
@@ -267,7 +267,7 @@ export function useDesignPicker({
     return () => {
       if (!settled) void window.desktopBridge?.preview?.cancelCapture();
     };
-  }, [designPickerArmId, designPickerDispatch, designPickerPhase, threadId]);
+  }, [designPickerArmId, designPickerDispatch, designPickerPhase, hasOpenBubble, threadId]);
 
   // Esc must exit design mode no matter where focus is. The global
   // escape.handle binding (default-keybindings.json) closes the current
@@ -300,7 +300,6 @@ export function useDesignPicker({
   }, [designModeActive, handleDesignEscape, threadId]);
 
   return {
-    clearTransientAnnotationState,
     onToggleDesignMode,
     updateBubbleVisualControl,
     updateColorFormat,
