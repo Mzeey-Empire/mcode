@@ -56,19 +56,14 @@ describe("PanelEmptyState — cardinality filter", () => {
   });
 });
 
-describe("PanelEmptyState — Files coming-soon teaser", () => {
-  it("renders Files disabled with a Soon badge", () => {
-    render(<PanelEmptyState scope="threadless" openTabs={[]} onOpen={vi.fn()} />);
-    const files = screen.getByTestId("panel-card-files");
-    expect(files).toBeDisabled();
-    expect(screen.getByText(/soon/i)).toBeInTheDocument();
-  });
-
-  it("does not open Files when its card is clicked", () => {
+describe("PanelEmptyState — Files", () => {
+  it("opens Files when its card is clicked", () => {
     const onOpen = vi.fn();
     render(<PanelEmptyState scope="threadless" openTabs={[]} onOpen={onOpen} />);
-    fireEvent.click(screen.getByTestId("panel-card-files"));
-    expect(onOpen).not.toHaveBeenCalled();
+    const files = screen.getByTestId("panel-card-files");
+    expect(files).toBeEnabled();
+    fireEvent.click(files);
+    expect(onOpen).toHaveBeenCalledWith("files");
   });
 });
 

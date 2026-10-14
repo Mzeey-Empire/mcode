@@ -6,6 +6,8 @@ export interface ContextState {
   terminalFocused: boolean;
   /** Focus is inside Browser chrome (header rows or its More menu), never the guest page. */
   browserFocused: boolean;
+  /** Focus is inside the Files tool. */
+  filesFocused: boolean;
   /** The command palette is currently open. */
   commandPaletteOpen: boolean;
   /** The settings view is visible. */
@@ -33,6 +35,7 @@ function getDefaultContext(): ContextState {
     inputFocused: false,
     terminalFocused: false,
     browserFocused: false,
+    filesFocused: false,
     commandPaletteOpen: false,
     settingsOpen: false,
     showLanding: false,

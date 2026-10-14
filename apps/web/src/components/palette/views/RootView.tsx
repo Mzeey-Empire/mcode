@@ -15,13 +15,11 @@ import { CommandPaletteResults } from "../CommandPaletteResults";
 import { PALETTE_LIST_HINTS, PaletteFooterHints, type PaletteHint } from "../PaletteFooterHints";
 
 // Commands that should not appear in the palette listing.
-// `palette.open` and `commandPalette.toggle` are both bound to opening the palette
-// itself — listing them inside the palette is circular. Their keybindings (mod+k /
-// mod+p) still fire globally; only the in-palette row is suppressed.
+// `palette.open` opens the palette itself, so listing it inside the palette is
+// circular. Its keybinding (mod+k) still fires globally; only the row is hidden.
 const HIDDEN_COMMANDS = new Set([
   "escape.handle",
   "palette.open",
-  "commandPalette.toggle",
 ]);
 
 const ROOT_HINTS: readonly PaletteHint[] = [

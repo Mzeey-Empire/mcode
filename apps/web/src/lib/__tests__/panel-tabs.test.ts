@@ -1,25 +1,24 @@
 import { describe, it, expect } from "vitest";
-import {
-  PANEL_TAB_TYPES,
-  creatableTypes,
-  shownTabTypes,
-  type PanelTabTypeId,
-} from "../panel-tabs";
+import { PANEL_TAB_TYPES, shownTabTypes } from "../panel-tabs";
+import { rightPanelToolInstance, type RightPanelTool } from "@/stores/diffStore";
 
 /** Pull just the ids out of a result for terse assertions. */
-function ids(types: readonly { id: PanelTabTypeId }[]): PanelTabTypeId[] {
+function ids(types: readonly { id: RightPanelTool }[]): RightPanelTool[] {
   return types.map((t) => t.id);
 }
 
 describe("PANEL_TAB_TYPES catalog", () => {
   it("gives every shortcut-enabled type a commandId", () => {
     for (const type of PANEL_TAB_TYPES) {
-      if (type.comingSoon) {
-        expect(type.commandId).toBeUndefined();
-      } else if (type.id !== "subagents") {
-        expect(type.commandId).toBeTruthy();
-      }
+      if (type.id !== "subagents") expect(type.commandId).toBeTruthy();
     }
+  });
+
+  it("makes Files a real singleton tool toggled by files.toggle", () => {
+    const files = PANEL_TAB_TYPES.find((type) => type.id === "files");
+    expect(files?.commandId).toBe("files.toggle");
+    expect(files?.needsThread).toBe(false);
+    expect(rightPanelToolInstance("files")).toEqual({ id: "singleton:files", type: "files" });
   });
 });
 
@@ -78,71 +77,32 @@ describe("shownTabTypes — cardinality filter", () => {
   });
 });
 
-describe("creatableTypes — coming-soon exclusion", () => {
-  it("excludes Files from the creatable set when threadless", () => {
-    expect(ids(creatableTypes("threadless", []))).toEqual([
-      "preview",
-      "terminal",
-      "changes",
-      "environment",
-    ]);
-  });
-
-  it("excludes Files from the creatable set in a thread", () => {
-    expect(ids(creatableTypes("thread", []))).toEqual([
-      "preview",
-      "terminal",
-      "changes",
-      "environment",
-      "tasks",
-      "subagents",
-    ]);
-  });
-
-  it("never returns Files regardless of scope or open tabs", () => {
-    const scopes = ["threadless", "thread"] as const;
-    for (const scope of scopes) {
-      expect(ids(creatableTypes(scope, [])).includes("files")).toBe(false);
-      expect(ids(creatableTypes(scope, ["preview"])).includes("files")).toBe(false);
+describe("shownTabTypes — Files is creatable", () => {
+  it("offers Files in both scopes until it is open", () => {
+    for (const scope of ["threadless", "thread"] as const) {
+      expect(ids(shownTabTypes(scope, []))).toContain("files");
+      expect(ids(shownTabTypes(scope, ["files"]))).not.toContain("files");
     }
-  });
-});
-
-describe("creatableTypes — combined scope + cardinality", () => {
-  it("drops both scope-filtered and already-open types", () => {
-    expect(ids(creatableTypes("threadless", ["preview"]))).toEqual([
-      "terminal",
-      "changes",
-      "environment",
-    ]);
   });
 
   it("offers nothing when every tool is open", () => {
     expect(
-      ids(creatableTypes("thread", ["preview", "terminal", "changes", "environment", "tasks", "subagents"])),
+      ids(shownTabTypes("thread", ["preview", "terminal", "files", "changes", "environment", "tasks", "subagents"])),
     ).toEqual([]);
-  });
-
-  it("is a strict subset of shownTabTypes (only the coming-soon teaser differs)", () => {
-    const shown = ids(shownTabTypes("thread", []));
-    const creatable = ids(creatableTypes("thread", []));
-    const removed = shown.filter((id) => !creatable.includes(id));
-    expect(removed).toEqual(["files"]);
   });
 });
 
-describe("creatableTypes / shownTabTypes — purity", () => {
+describe("shownTabTypes — purity", () => {
   it("does not mutate the openTabs argument", () => {
-    const open: PanelTabTypeId[] = ["preview"];
-    creatableTypes("thread", open);
+    const open: RightPanelTool[] = ["preview"];
     shownTabTypes("thread", open);
     expect(open).toEqual(["preview"]);
   });
 
   it("returns results in catalog order", () => {
-    // Open tabs given out of order must not reorder the result.
-    expect(ids(creatableTypes("thread", ["tasks", "preview"]))).toEqual([
+    expect(ids(shownTabTypes("thread", ["tasks", "preview"]))).toEqual([
       "terminal",
+      "files",
       "changes",
       "environment",
       "subagents",
