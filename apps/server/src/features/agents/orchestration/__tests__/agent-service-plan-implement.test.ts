@@ -154,6 +154,13 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
       baseRevision: 0, contentMd: "# Edited\nDraft text." });
   }
 
+  // Implement answers on admission. Stopping the session before the worker
+  // hands the turn to the provider races its release, so tests that end
+  // right after admission wait for dispatch first.
+  async function untilDispatched() {
+    await expect.poll(() => sent).toHaveLength(1);
+  }
+
   function pauseFiles() {
     const entered = deferred();
     const release = deferred();
@@ -245,6 +252,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     await first;
     await expect(service.implement({ ...input, expectedRevision: 1 })).rejects.toMatchObject({ code: "implement_request_conflict" });
     expect(turns()).toEqual([{ status: "Running" }]);
+    await untilDispatched();
   });
 
   it("keeps ordinary Send and autosave out while Implement owns the reservation", async () => {
@@ -257,6 +265,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     await implementing;
     expect(turns()).toEqual([{ status: "Running" }]);
     expect(userMessages()).toHaveLength(1);
+    await untilDispatched();
   });
 
   it("refuses Implement when ordinary Send wins admission", async () => {
@@ -387,6 +396,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     assertUnaccepted();
     await service.implement(request());
     expect(turns()).toEqual([{ status: "Running" }]);
+    await untilDispatched();
   });
 
   it("refuses superseded and accepted versions without a new request row", async () => {
