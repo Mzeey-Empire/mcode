@@ -54,6 +54,11 @@ describe("allTurnsRevertSource", () => {
     expect(allTurnsRevertSource(snapshots, turns)).toEqual({ messageId: "m2-first", fromMessageId: "m1", range: { from: 1, to: 2 } });
   });
 
+  it("ends before a turn that is retrying live and has no settled row yet", () => {
+    const snapshots = [row("m1"), row("m2"), row("m3-first", 1)];
+    expect(allTurnsRevertSource(snapshots, turns.slice(0, 2))).toEqual({ messageId: "m2", fromMessageId: "m1", range: { from: 1, to: 2 } });
+  });
+
   it("offers nothing without snapshots or a matching turn list", () => {
     expect(allTurnsRevertSource([], turns)).toBeNull();
     expect(allTurnsRevertSource([row("m1")], undefined)).toBeNull();

@@ -43,11 +43,16 @@ interface TurnEnd {
   readonly settledMessageId: string;
 }
 
-function turnEnds(snapshots: readonly TurnSnapshot[], pick: (rows: TurnSnapshot[]) => TurnSnapshot | undefined): TurnEnd[] {
+function turnEnds(
+  snapshots: readonly TurnSnapshot[],
+  turns: readonly ReviewTurn[],
+  pick: (rows: TurnSnapshot[]) => TurnSnapshot | undefined,
+): TurnEnd[] {
   return turnGroups(snapshots).flatMap((group) => {
     const row = pick(group.filter(hasBothRefs));
     const settled = group.at(-1);
-    return row && settled ? [{ row, settledMessageId: settled.message_id }] : [];
+    // A turn retrying live has no settled row yet, so its group is not in the turn list.
+    return row && settled && ordinalOf(settled.message_id, turns) !== null ? [{ row, settledMessageId: settled.message_id }] : [];
   });
 }
 
@@ -56,9 +61,10 @@ function turnEnds(snapshots: readonly TurnSnapshot[], pick: (rows: TurnSnapshot[
  * a usable attempt to the last. Any attempt's message id resolves to its whole turn on the server.
  */
 export function allTurnsRevertSource(snapshots: readonly TurnSnapshot[], turns: readonly ReviewTurn[] | undefined): FileRevertSource | null {
-  const first = turnEnds(snapshots, (rows) => rows[0])[0];
-  const last = turnEnds(snapshots, (rows) => rows.at(-1)).at(-1);
-  if (!first || !last || !turns) return null;
+  if (!turns) return null;
+  const first = turnEnds(snapshots, turns, (rows) => rows[0])[0];
+  const last = turnEnds(snapshots, turns, (rows) => rows.at(-1)).at(-1);
+  if (!first || !last) return null;
   const from = ordinalOf(first.settledMessageId, turns);
   const to = ordinalOf(last.settledMessageId, turns);
   if (from === null || to === null) return null;
