@@ -1201,6 +1201,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Terminalize setup failures while preserving an explicit user-stop winner. */
   private async failPreparedTurnDispatch(prepared: PreparedTurnDispatch, error: unknown): Promise<void> {
+    const stopping = this.stopOperationsByThread.get(prepared.lease.threadId);
+    if (stopping && this.turnGenerations.get(prepared.lease.threadId) === prepared.lease.generation) {
+      // Stop owns finalization even while its terminal write is still pending.
+      await stopping;
+    }
     const runtime = this.turnRuntime.snapshot(prepared.lease.threadId);
     const cancelled = runtime?.turnExecutionId === prepared.lease.turnExecutionId
       && runtime.phase === "cancelled"

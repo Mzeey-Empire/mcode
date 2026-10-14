@@ -13,6 +13,7 @@ import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlit
 import { WorkerOwnedTurnRuntime } from "../../execution/worker-owned-turn-runtime.js";
 import { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
 import { SnapshotRefPins } from "../../../projects/diffs/snapshots/snapshot-ref-pins.js";
+import { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { GitWorktreeService } from "../../../projects/git/git-worktree-service.js";
 import { WorkspaceEnvironmentService } from "../../../projects/environment/workspace-environment-service.js";
@@ -240,6 +241,38 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     ]);
     return listed;
   }
+
+  it.each(["thread", "new-direct-thread", "new-worktree-thread"] as const)(
+    "stops %s during initial snapshot preparation without losing Accepted",
+    async (target) => {
+      const listed = target === "new-worktree-thread" ? await worktreeSource() : undefined;
+      const entered = deferred();
+      const resume = deferred();
+      const snapshot = vi.spyOn(container.resolve(SnapshotService), "captureRef").mockImplementationOnce(async () => {
+        entered.resolve();
+        await resume.promise;
+        throw new Error("Fixture checkout has no Git snapshot");
+      });
+      try {
+        const receipt = await service.implement({ ...request(), target: target === "thread" ? "thread" : "new-thread" });
+        await entered.promise;
+        const stopped = agent.stopSession(receipt.targetThreadId, { by: "user" });
+        resume.resolve();
+        expect(await stopped).toMatchObject({ status: "cancelled", dispatchState: "not-dispatched" });
+        expect(plans.getById(ready.id)?.status).toBe("accepted");
+        expect(database.prepare("SELECT id, content FROM messages WHERE thread_id = ? AND role = 'user'").all(receipt.targetThreadId))
+          .toEqual([{ id: receipt.messageId, content: "Implement plan v1" }]);
+        await expect.poll(() => database.prepare("SELECT status FROM canonical_agent_turns WHERE thread_id = ?").all(receipt.targetThreadId))
+          .toEqual([{ status: "Cancelled" }]);
+        expect(workers.owner.current(receipt.targetThreadId)).toBeUndefined();
+        expect(sent).toEqual([]);
+      } finally {
+        resume.resolve();
+        snapshot.mockRestore();
+        listed?.mockRestore();
+      }
+    },
+  );
 
   it("admits in the source checkout with configured Setup skipped and no queued prompt", async () => {
     const listed = await worktreeSource();
