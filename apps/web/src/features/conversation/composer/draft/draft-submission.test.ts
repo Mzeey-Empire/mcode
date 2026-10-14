@@ -8,14 +8,17 @@ import {
   saveDraftDiffComment,
   setDraftDiffCommentEditor,
 } from "./draft-diff-comments";
+import { saveDraftFileComment } from "./draft-file-comments";
 import { beginDraftSubmission, reconcileOrphanedDraftSubmissions } from "./draft-submission-lifecycle";
 import {
   freezeDraftSubmission,
   readSendableDraftContent,
   reconcilePendingSubmissions,
   saveDiffComment,
+  saveFileComment,
   settleDraftSubmission,
   visibleDiffComments,
+  visibleFileComments,
   type NextMessageDraft,
 } from "./draft-submission";
 
@@ -40,9 +43,51 @@ function draftWithComments(...notes: string[]): NextMessageDraft {
 
 function send(draft: NextMessageDraft): { draft: NextMessageDraft; sentNotes: string[] } {
   const content = readSendableDraftContent(draft);
-  const frozen = freezeDraftSubmission(draft, MESSAGE_ID, { diffComments: content.diffComments });
+  const frozen = freezeDraftSubmission(draft, MESSAGE_ID, content);
   return { draft: frozen.draft, sentNotes: content.diffComments.map((comment) => comment.note) };
 }
+
+const fileTarget = { filePath: "src/main.tsx", line: 7, lineContent: "render(<App />);" };
+
+describe("draft submissions with Files comments", () => {
+  function draftWithFileComments(...notes: string[]): NextMessageDraft {
+    return notes.reduce<NextMessageDraft>(
+      (draft, note) => saveFileComment(draft, fileTarget, { note, mentions: [] }),
+      saveDiffComment({}, target, { note: "review", mentions: [] }),
+    );
+  }
+
+  it("freezes Files comments with Review comments and hides both while Send is pending", () => {
+    const draft = draftWithFileComments("first");
+    const frozen = freezeDraftSubmission(draft, MESSAGE_ID, readSendableDraftContent(draft));
+
+    expect(frozen.submission.elements.map((element) => element.field)).toEqual(["diffComments", "fileComments"]);
+    expect(visibleFileComments(frozen.draft)).toEqual([]);
+    expect(visibleDiffComments(frozen.draft)).toEqual([]);
+    expect(frozen.draft.fileComments?.map((comment) => comment.note)).toEqual(["first"]);
+  });
+
+  it("deletes sent Files comments on success and keeps a revision edited during Send", () => {
+    const draft = draftWithFileComments("unchanged", "to edit");
+    const frozen = freezeDraftSubmission(draft, MESSAGE_ID, readSendableDraftContent(draft)).draft;
+    const editId = frozen.fileComments![1]!.id;
+    const edited = saveFileComment(frozen, fileTarget, { note: "edited", mentions: [] }, editId);
+
+    const settled = settleDraftSubmission(edited, MESSAGE_ID, "success");
+
+    expect(settled.fileComments?.map((comment) => [comment.note, comment.revision])).toEqual([["edited", 2]]);
+    expect(settled.diffComments).toEqual([]);
+  });
+
+  it("returns Files comments after a failed Send", () => {
+    const draft = draftWithFileComments("first", "second");
+    const frozen = freezeDraftSubmission(draft, MESSAGE_ID, readSendableDraftContent(draft)).draft;
+
+    const settled = settleDraftSubmission(frozen, MESSAGE_ID, "failure");
+
+    expect(visibleFileComments(settled)).toEqual(draft.fileComments);
+  });
+});
 
 describe("draft submissions", () => {
   it("hides submitted comments while Send is pending and leaves them in the draft", () => {
@@ -157,13 +202,25 @@ describe("draft submission lifecycle", () => {
   function startSend(messageId = MESSAGE_ID) {
     saveDraftDiffComment(THREAD_ID, target, { note: "review note", mentions: [] });
     const comments = useComposerDraftStore.getState().drafts[THREAD_ID]!.diffComments!;
-    return beginDraftSubmission(THREAD_ID, { diffComments: comments }, messageId)!;
+    return beginDraftSubmission(THREAD_ID, { diffComments: comments, fileComments: [] }, messageId)!;
   }
 
   beforeEach(() => {
     useComposerDraftStore.setState({ drafts: {} });
     confirmMessage.mockReset();
     vi.mocked(getTransport).mockReturnValue({ confirmMessage } as unknown as ReturnType<typeof getTransport>);
+  });
+
+  it("freezes a Send that carries only Files comments and deletes them once it succeeds", () => {
+    saveDraftFileComment(THREAD_ID, fileTarget, { note: "file note", mentions: [] });
+    const content = readSendableDraftContent(useComposerDraftStore.getState().drafts[THREAD_ID]!);
+
+    const handle = beginDraftSubmission(THREAD_ID, content, MESSAGE_ID);
+
+    expect(handle).not.toBeNull();
+    expect(visibleFileComments(useComposerDraftStore.getState().drafts[THREAD_ID]!)).toEqual([]);
+    handle!.succeeded();
+    expect(useComposerDraftStore.getState().drafts[THREAD_ID]).toBeUndefined();
   });
 
   it("keeps the submission pending when a failed Send cannot be confirmed, then settles it after reconnect", async () => {

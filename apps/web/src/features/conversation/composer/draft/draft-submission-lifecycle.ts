@@ -59,15 +59,15 @@ async function confirmServerMessages(
 }
 
 /**
- * Freezes the Review comments a Send carries. Returns null when the Send
- * carries none, so plain messages skip the draft entirely.
+ * Freezes the Review and Files comments a Send carries. Returns null when the
+ * Send carries none, so plain messages skip the draft entirely.
  */
 export function beginDraftSubmission(
   threadId: string | undefined,
   content: FrozenDraftContent,
   messageId: string,
 ): DraftSubmissionHandle | null {
-  if (!threadId || content.diffComments.length === 0) return null;
+  if (!threadId || (content.diffComments.length === 0 && content.fileComments.length === 0)) return null;
   inFlightMessageIds.add(messageId);
   useComposerDraftStore.getState().updateNextMessage(
     threadId,

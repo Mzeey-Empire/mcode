@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import type { DraftDiffComment } from "@mcode/contracts";
+import type { DraftDiffComment, DraftFileComment } from "@mcode/contracts";
+import { useFilesTabsStore } from "@/features/files/filesTabsStore";
 import { useDiffStore } from "@/stores/diffStore";
 import {
   clearVisibleDiffComments,
@@ -7,22 +8,30 @@ import {
   editDraftDiffComment,
 } from "./draft/draft-diff-comments";
 import {
+  clearVisibleFileComments,
+  deleteDraftFileComment,
+  editDraftFileComment,
+} from "./draft/draft-file-comments";
+import {
   ComposerCommentAttachmentShell,
   ComposerCommentPreviewItem,
   type ComposerCommentCardData,
 } from "./SelectedTextCommentsComposerAttachment";
 
+/** A saved Review or Files line comment shown in the composer. */
+export type ComposerCodeComment = DraftDiffComment | DraftFileComment;
+
 interface DiffCommentCard extends ComposerCommentCardData {
-  readonly annotation: DraftDiffComment;
+  readonly annotation: ComposerCodeComment;
 }
 
-/** Props for the aggregate diff-comment attachment in the composer. */
+/** Props for the aggregate code-comment attachment in the composer. */
 export interface DiffCommentsComposerAttachmentProps {
-  /** Saved Review comments in the thread's composer draft, numbered for display. */
-  readonly comments: readonly DraftDiffComment[];
+  /** Saved Review and Files comments in the thread's composer draft, in display-number order. */
+  readonly comments: readonly ComposerCodeComment[];
   /** Thread whose composer draft owns the comments. */
   readonly scopeId: string;
-  /** Workspace whose right panel hosts the Review surface. */
+  /** Workspace whose right panel hosts the Review and Files surfaces. */
   readonly workspaceId: string;
   /** Owning thread when the composer is bound to one. */
   readonly threadId?: string;
@@ -35,9 +44,10 @@ function diffCommentLabel(count: number): string {
 }
 
 /**
- * Renders saved diff line comments through the same pill and preview card
- * chrome as the selected-text "Add comment" attachment. Opening a card reveals
- * the Review panel jumped to the owning file.
+ * Renders saved Review and Files line comments through the same pill and
+ * preview card chrome as the selected-text "Add comment" attachment. Opening a
+ * card reveals the Review panel at the owning file, or the Files tool at the
+ * owning line.
  */
 export function DiffCommentsComposerAttachment({
   comments,
@@ -58,11 +68,36 @@ export function DiffCommentsComposerAttachment({
   if (comments.length === 0) return null;
 
   const label = diffCommentLabel(comments.length);
+  const openFileComment = (comment: DraftFileComment) => {
+    const store = useDiffStore.getState();
+    store.showRightPanel(workspaceId, threadId);
+    store.setRightPanelTab(workspaceId, threadId, "files");
+    // Files keys its tabs by the right panel scope, which falls back to the workspace when threadless.
+    useFilesTabsStore.getState().jumpTo(threadId ?? workspaceId, comment.filePath, comment.line);
+  };
   const openSource = (item: DiffCommentCard) => {
+    const { annotation } = item;
+    if (annotation.kind === "file") {
+      openFileComment(annotation);
+      return;
+    }
     const store = useDiffStore.getState();
     store.showRightPanel(workspaceId, threadId);
     store.setRightPanelTab(workspaceId, threadId, "changes");
-    store.requestReviewFileJump(scopeId, item.annotation.filePath);
+    store.requestReviewFileJump(scopeId, annotation.filePath);
+  };
+  const handleEdit = (item: DiffCommentCard) => {
+    const { annotation } = item;
+    if (annotation.kind === "diff") {
+      editDraftDiffComment(scopeId, annotation);
+      return;
+    }
+    editDraftFileComment(scopeId, annotation);
+    openFileComment(annotation);
+  };
+  const clearAll = () => {
+    clearVisibleDiffComments(scopeId);
+    clearVisibleFileComments(scopeId);
   };
   const handleDelete = (item: DiffCommentCard) => {
     const index = comments.findIndex((candidate) => candidate.id === item.id);
@@ -70,7 +105,8 @@ export function DiffCommentsComposerAttachment({
     focusAfterDeleteRef.current = nextFocusTarget?.id;
     setAnnouncement("Comment deleted.");
     if (!nextFocusTarget) onFocusComposer();
-    deleteDraftDiffComment(scopeId, item.id);
+    if (item.annotation.kind === "file") deleteDraftFileComment(scopeId, item.id);
+    else deleteDraftDiffComment(scopeId, item.id);
   };
 
   return (
@@ -81,7 +117,7 @@ export function DiffCommentsComposerAttachment({
         testId="diff-comment-attachment"
         chipTestId="diff-comment-chip"
         previewTestId="diff-comment-preview"
-        onRemove={() => clearVisibleDiffComments(scopeId)}
+        onRemove={clearAll}
       >
         {comments.map((annotation) => {
           const item: DiffCommentCard = {
@@ -100,7 +136,7 @@ export function DiffCommentsComposerAttachment({
               sourceUnavailable={false}
               multipleComments={comments.length > 1}
               onOpenSource={openSource}
-              onEdit={(item) => editDraftDiffComment(scopeId, item.annotation)}
+              onEdit={handleEdit}
               onDelete={handleDelete}
               openSourceButtonRef={(element) => {
                 if (element) openSourceButtonsRef.current.set(annotation.id, element);

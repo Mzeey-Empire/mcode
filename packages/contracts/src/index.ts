@@ -611,6 +611,8 @@ export {
   PreviewAnnotationVisualProposalSchema,
   PreviewAnnotationPayloadSchema,
   DiffAnnotationPayloadSchema,
+  FileAnnotationPayloadSchema,
+  isFileAnnotationPayload,
   ComposerAnnotationPayloadSchema,
   PreviewAnnotationBundleSchema,
   isDiffAnnotationPayload,
@@ -640,6 +642,7 @@ export type {
   PreviewAnnotationVisualProposal,
   PreviewAnnotationPayload,
   DiffAnnotationPayload,
+  FileAnnotationPayload,
   ComposerAnnotationPayload,
   PreviewAnnotationBundle,
 } from "./models/browser-preview.js";

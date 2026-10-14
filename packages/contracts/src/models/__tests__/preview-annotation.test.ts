@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  ComposerAnnotationPayloadSchema,
+  FileAnnotationPayloadSchema,
   MAX_ATTACHMENTS,
+  MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS,
+  isPreviewAnnotationPayload,
   PreviewAnnotationBundleSchema,
   SendMessageSchema,
   previewAnnotationSnapshotAttachmentMeta,
@@ -113,5 +117,44 @@ describe("PreviewAnnotationBundleSchema", () => {
       mimeType: "image/png",
       sizeBytes: 123,
     });
+  });
+});
+
+const fileAnnotation = {
+  kind: "file" as const,
+  id: "00000000-0000-4000-8000-000000000003",
+  displayNumber: 3,
+  filePath: "apps/web/src/main.tsx",
+  line: 7,
+  lineContent: "render(<App />);",
+  note: "Wrap this in StrictMode.",
+};
+
+describe("FileAnnotationPayloadSchema", () => {
+  it("accepts a file line comment", () => {
+    expect(FileAnnotationPayloadSchema().safeParse(fileAnnotation).success).toBe(true);
+  });
+
+  it("rejects a blank note", () => {
+    expect(FileAnnotationPayloadSchema().safeParse({ ...fileAnnotation, note: "   " }).success).toBe(false);
+  });
+
+  it("rejects a note whose mentions push it over the message budget", () => {
+    const note = "x".repeat(MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS - 10);
+    const mentions = [{ id: "m1", label: "main.tsx", range: { start: 0, end: 1 }, kind: "file" as const, path: "apps/web/src/main.tsx" }];
+    expect(FileAnnotationPayloadSchema().safeParse({ ...fileAnnotation, note }).success).toBe(true);
+    expect(FileAnnotationPayloadSchema().safeParse({ ...fileAnnotation, note, mentions }).success).toBe(false);
+  });
+
+  it("rejects a comment without a line", () => {
+    const { line: _line, ...withoutLine } = fileAnnotation;
+    expect(FileAnnotationPayloadSchema().safeParse(withoutLine).success).toBe(false);
+  });
+
+  it("parses through the composer union as a file comment, not a Preview annotation", () => {
+    const parsed = ComposerAnnotationPayloadSchema().parse(fileAnnotation);
+    expect(parsed).toEqual(fileAnnotation);
+    expect(isPreviewAnnotationPayload(parsed)).toBe(false);
+    expect(previewAnnotationSnapshotAttachments({ schemaVersion: 1, annotations: [annotation, fileAnnotation] })).toHaveLength(1);
   });
 });

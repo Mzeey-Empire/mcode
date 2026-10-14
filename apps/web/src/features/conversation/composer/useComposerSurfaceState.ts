@@ -1,10 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import type { ProviderId } from "@mcode/contracts";
 import { useNumberedDiffComments } from "./draft/draft-diff-comments";
+import { useNumberedFileComments } from "./draft/draft-file-comments";
 import { reconcileOrphanedDraftSubmissions } from "./draft/draft-submission-lifecycle";
 import { planCommentThreadFor } from "./draft/sendable-plan-comments";
 import { usePlanCommentChip } from "./usePlanCommentChip";
@@ -82,6 +83,11 @@ export function useComposerSurfaceState(input: ComposerSurfaceStateInput) {
     annotationScopeId ? state.byThread[annotationScopeId] : undefined,
   );
   const diffComments = useNumberedDiffComments(annotationScopeId);
+  const fileComments = useNumberedFileComments(annotationScopeId);
+  const codeComments = useMemo(
+    () => (fileComments.length === 0 ? diffComments : [...diffComments, ...fileComments]),
+    [diffComments, fileComments],
+  );
   const previewAnnotationCount = annotationRows?.length ?? 0;
   const connected = useConnectionStore((state) => state.status === "connected");
   // Reruns on reconnect, so a submission a dropped connection left pending settles.
@@ -89,7 +95,7 @@ export function useComposerSurfaceState(input: ComposerSurfaceStateInput) {
     if (input.threadId && connected) void reconcileOrphanedDraftSubmissions(input.threadId);
   }, [connected, input.threadId]);
   const ridingPlanComments = usePlanCommentChip(planCommentThreadFor(input));
-  const annotationCount = previewAnnotationCount + diffComments.length + ridingPlanComments.length;
+  const annotationCount = previewAnnotationCount + codeComments.length + ridingPlanComments.length;
   const annotationBundleForDisplay = annotationScopeId
     ? usePreviewAnnotationStore.getState().buildBundle(annotationScopeId)
     : undefined;
@@ -105,7 +111,7 @@ export function useComposerSurfaceState(input: ComposerSurfaceStateInput) {
   return {
     annotationScopeId,
     annotationBundleForDisplay,
-    diffCommentsForDisplay: diffComments,
+    codeCommentsForDisplay: codeComments,
     ...catalogScope,
     ...composerLocks,
     effectiveProviderId,

@@ -20,6 +20,14 @@ export interface FilesScopeState {
   readonly treeWidth: number;
   /** Whether Go to file is open; stored here because `files.goToFile` can fire before the tool mounts. */
   readonly goToFileOpen: boolean;
+  /** Line the active file view should scroll to, set by a jump from outside Files, or null. */
+  readonly pendingJump: FilesPendingJump | null;
+}
+
+/** A file line another surface asked the Files tool to show. */
+export interface FilesPendingJump {
+  readonly path: string;
+  readonly line: number;
 }
 
 export const FILES_SCOPE_DEFAULTS: FilesScopeState = {
@@ -30,6 +38,7 @@ export const FILES_SCOPE_DEFAULTS: FilesScopeState = {
   revealPath: null,
   treeWidth: FILES_TREE_DEFAULT_WIDTH,
   goToFileOpen: false,
+  pendingJump: null,
 };
 
 interface FilesTabsStore {
@@ -46,6 +55,10 @@ interface FilesTabsStore {
   clearReveal(scopeId: string): void;
   setTreeWidth(scopeId: string, width: number): void;
   setGoToFileOpen(scopeId: string, open: boolean): void;
+  /** Opens and activates `path`, and asks the file view to show `line`. */
+  jumpTo(scopeId: string, path: string, line: number): void;
+  /** Clears the pending jump once the file view has shown it. */
+  clearJump(scopeId: string): void;
 }
 
 /** Clamps a dragged tree width into the allowed range. */
@@ -110,6 +123,9 @@ export const useFilesTabsStore = create<FilesTabsStore>((set) => {
     setTreeWidth: (scopeId, width) => update(scopeId, (state) => ({ ...state, treeWidth: clampTreeWidth(width) })),
     setGoToFileOpen: (scopeId, open) =>
       update(scopeId, (state) => (state.goToFileOpen === open ? state : { ...state, goToFileOpen: open })),
+    jumpTo: (scopeId, path, line) =>
+      update(scopeId, (state) => ({ ...withOpened(state, path, true), pendingJump: { path, line } })),
+    clearJump: (scopeId) => update(scopeId, (state) => (state.pendingJump === null ? state : { ...state, pendingJump: null })),
   };
 });
 
