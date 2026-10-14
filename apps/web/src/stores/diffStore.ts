@@ -629,6 +629,8 @@ interface DiffState {
   readonly rightPanelFallbackByWorkspace: Record<string, RightPanelState>;
   /** Explicit Files visibility choices keyed by Review scope. Missing scopes start closed. */
   readonly reviewFilesVisibleByScope: Record<string, boolean>;
+  /** Diff scope whose Commit sheet is open. One sheet at a time, so no per-scope cleanup; a closed or unmatched scope shows none. */
+  commitSheetScopeId: string | null;
   /** View mode within the Changes tab (the single rendered view). */
   viewMode: DiffViewMode;
   /**
@@ -775,6 +777,8 @@ interface DiffState {
   getReviewFilesVisible: (scopeId: string) => boolean;
   /** Persist an explicit Files visibility choice for a Review scope. */
   setReviewFilesVisible: (scopeId: string, visible: boolean) => void;
+  /** Open the Commit sheet for a diff scope, or close it with null. */
+  setCommitSheetScopeId: (scopeId: string | null) => void;
   setViewMode: (mode: DiffViewMode) => void;
   /**
    * Resolve the Review view a thread should show: the user's sticky pick when
@@ -848,6 +852,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   rightPanelByThread: {},
   rightPanelFallbackByWorkspace: {},
   reviewFilesVisibleByScope: readStoredFlags(REVIEW_FILES_VISIBILITY_STORAGE_KEY),
+  commitSheetScopeId: null,
   viewMode: "turn",
   reviewViewByThread: {},
   reviewViewManuallySelectedByThread: {},
@@ -1021,6 +1026,8 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       writeStoredFlags(REVIEW_FILES_VISIBILITY_STORAGE_KEY, reviewFilesVisibleByScope);
       return { reviewFilesVisibleByScope };
     }),
+
+  setCommitSheetScopeId: (scopeId) => set({ commitSheetScopeId: scopeId }),
 
   setViewMode: (mode) =>
     set({ viewMode: mode, selectedCommitSha: null, reviewFileJumpRequest: null }),
