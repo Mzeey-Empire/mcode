@@ -183,4 +183,23 @@ describe("useDesignPicker", () => {
     expect(mockPreview.cancelCapture).toHaveBeenCalled();
     expect(mockPreview.capturePictureReferenceElementPick).toHaveBeenCalledTimes(2);
   });
+
+  it("keeps Design on when a remount cancels the pending pick", async () => {
+    let resolveFirstPick: (result: { ok: false; error: string }) => void = () => {};
+    mockPreview.capturePictureReferenceElementPick
+      .mockReturnValueOnce(new Promise((resolve) => (resolveFirstPick = resolve)))
+      .mockReturnValue(new Promise(() => {}));
+    usePreviewDesignModeStore.getState().setActive(THREAD_ID, true);
+
+    const first = renderHook(() => useDesignPickerHarness());
+    await settle();
+    first.unmount();
+    resolveFirstPick({ ok: false, error: "cancelled" });
+    await settle();
+    renderHook(() => useDesignPickerHarness());
+    await settle();
+
+    expect(usePreviewDesignModeStore.getState().getPicker(THREAD_ID).phase).toBe("picking");
+    expect(mockPreview.capturePictureReferenceElementPick).toHaveBeenCalledTimes(2);
+  });
 });

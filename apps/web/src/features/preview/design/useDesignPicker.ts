@@ -251,14 +251,17 @@ export function useDesignPicker({
   useEffect(() => {
     if (designPickerPhase !== "picking" || hasOpenBubble) return;
     let settled = false;
+    let superseded = false;
     void requestElementPick().then((result) => {
       settled = true;
+      if (superseded) return;
       designPickerDispatch(threadId, {
         type: result.ok ? "picked" : "pickFailed",
         armId: designPickerArmId,
       });
     });
     return () => {
+      superseded = true;
       if (!settled) void window.desktopBridge?.preview?.cancelCapture();
     };
   }, [designPickerArmId, designPickerDispatch, designPickerPhase, hasOpenBubble, threadId]);
