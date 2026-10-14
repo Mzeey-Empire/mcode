@@ -109,6 +109,29 @@ describe("FilesTool freshness", () => {
     await waitFor(() => expect(within(tree).getByLabelText("Modified")).toBeTruthy());
   });
 
+  it("caps the tree drag at the widest width that still docks", async () => {
+    setBodyWidth(900);
+    useFilesTabsStore.getState().openFile(WORKSPACE, "src/a.ts");
+    renderTool();
+    await screen.findByTestId("code-file-view");
+    const separator = screen.getByRole("separator", { name: "Resize files tree" });
+    separator.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(separator, { clientX: 300, pointerId: 1 });
+    fireEvent.pointerMove(separator, { clientX: 700, pointerId: 1 });
+    // 900 body minus the 520 the code keeps.
+    expect(getFilesScope(WORKSPACE).treeWidth).toBe(380);
+    expect(screen.getByTestId("files-docked-tree")).toBeTruthy();
+  });
+
+  it("numbers a file that ends in a newline without a phantom last line", async () => {
+    setBodyWidth(900);
+    transport.readFileContent.mockResolvedValue({ ...textFile("src/a.ts", null), content: "one\ntwo\n" });
+    useFilesTabsStore.getState().openFile(WORKSPACE, "src/a.ts");
+    renderTool();
+    const view = await screen.findByTestId("code-file-view");
+    expect(view.querySelectorAll("[data-line]")).toHaveLength(2);
+  });
+
   it("ignores files.changed for another workspace", async () => {
     setBodyWidth(900);
     useFilesTabsStore.getState().openFile(WORKSPACE, "src/a.ts");

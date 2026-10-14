@@ -75,6 +75,13 @@ function StateMessage({ text, children }: { readonly text: string; readonly chil
   );
 }
 
+/** Splits on any newline style; a final newline ends the last line rather than starting an empty one. */
+export function splitLines(content: string): string[] {
+  const lines = content.replace(/\r\n?/g, "\n").split("\n");
+  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+
 function changedLineSet(changedLines: readonly (readonly [number, number])[] | null): ReadonlySet<number> {
   const set = new Set<number>();
   for (const [start, end] of changedLines ?? []) {
@@ -93,7 +100,7 @@ function CodeLines({
   readonly changedLines: readonly (readonly [number, number])[] | null;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
-  const lines = useMemo(() => content.replace(/\r\n?/g, "\n").split("\n"), [content]);
+  const lines = useMemo(() => splitLines(content), [content]);
   const changed = useMemo(() => changedLineSet(changedLines), [changedLines]);
   const tokens = useCodeTokens(path, content);
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({

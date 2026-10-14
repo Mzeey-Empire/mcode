@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { useElementWidth } from "@/hooks/useElementWidth";
-import { sidePaneDocks } from "@/lib/side-pane-dock";
+import { SIDE_PANE_CONTENT_MIN_WIDTH, sidePaneDocks } from "@/lib/side-pane-dock";
 import { CodeFileView } from "./CodeFileView";
 import { FileTree } from "./FileTree";
 import { FilesControlsRow, FilesTabStrip } from "./FilesHeader";
@@ -169,10 +169,12 @@ function DockedTreePane({ scopeId, width, children }: { readonly scopeId: string
     const startX = event.clientX;
     const startWidth = width;
     const target = event.currentTarget;
+    const maxDockedWidth = (target.parentElement?.parentElement?.getBoundingClientRect().width ?? Infinity) - SIDE_PANE_CONTENT_MIN_WIDTH;
     target.setPointerCapture(event.pointerId);
     const onMove = (move: PointerEvent) =>
-      // The pane sits left of the code, so dragging right widens it.
-      useFilesTabsStore.getState().setTreeWidth(scopeId, startWidth + (move.clientX - startX));
+      // The pane sits left of the code, so dragging right widens it. Capping at the widest width that still
+      // docks keeps the pane mounted; past it the layout switches to the body view and ends the drag.
+      useFilesTabsStore.getState().setTreeWidth(scopeId, Math.min(startWidth + (move.clientX - startX), maxDockedWidth));
     const onUp = () => {
       target.removeEventListener("pointermove", onMove);
       target.removeEventListener("pointerup", onUp);
