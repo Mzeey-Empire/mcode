@@ -13,6 +13,13 @@ const NAMED_KEYS: Readonly<Record<string, QuestionKeyAction>> = {
   ArrowDown: { kind: "move", value: 1 },
 };
 
+/** `[` and `]` page between questions; typing an answer keeps them as characters. */
+export function pageKeyDelta(event: KeyboardEvent, typing: boolean): -1 | 0 | 1 {
+  if (typing || event.ctrlKey || event.metaKey || event.altKey) return 0;
+  if (event.key === "[") return -1;
+  return event.key === "]" ? 1 : 0;
+}
+
 /**
  * Classifies a key press for question surfaces. A digit picks a row only while the user
  * is not typing an answer; any other printable key counts as typing, so it re-arms the

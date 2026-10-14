@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils";
 import { useApprovalStore, type StoredApproval } from "@/stores/approvalStore";
 import { approvalActorName } from "./approval-copy";
 import { choiceRowClass, KeyChip, ROW_CLASS } from "./ApprovalChoiceRow";
-import { questionKeyAction, type QuestionKeyAction } from "./question-keys";
+import { ApprovalPager } from "./ApprovalPager";
+import { pageKeyDelta, questionKeyAction, type QuestionKeyAction } from "./question-keys";
 import { submitApprovalChoice } from "./submit-approval-choice";
 
 /** Answer for one question: the picked labels, plus the typed answer when the provider allows one. */
@@ -14,6 +15,11 @@ function answerFor(question: ApprovalQuestion, selected: readonly string[], cust
   const typed = custom.trim();
   if (!typed) return [...selected];
   return question.multiple ? [...selected, typed] : [typed];
+}
+
+function QuestionPager({ index, count, page }: { readonly index: number; readonly count: number; readonly page: (delta: number) => void }) {
+  if (count < 2) return null;
+  return <ApprovalPager index={index} count={count} noun="question" onPrevious={() => page(-1)} onNext={() => page(1)} />;
 }
 
 /** Props for {@link ApprovalQuestionBody}. */
@@ -34,6 +40,7 @@ export interface ApprovalQuestionBodyProps {
 export function ApprovalQuestionBody({ request, questions, isArmed, arm }: ApprovalQuestionBodyProps) {
   const [index, setIndex] = useState(0);
   const groupRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const [selected, setSelected] = useState<string[][]>(() => questions.map(() => []));
   const [custom, setCustom] = useState<string[]>(() => questions.map(() => ""));
   const submission = useApprovalStore((state) => state.submissions[request.requestId]);
@@ -60,6 +67,11 @@ export function ApprovalQuestionBody({ request, questions, isArmed, arm }: Appro
     else setIndex(index + 1);
   };
 
+  const page = (delta: number) => {
+    const target = index + delta;
+    if (target >= 0 && target < questions.length) setIndex(target);
+  };
+
   const pick = (label: string) => {
     setSelected((current) => current.map((picked, row) => {
       if (row !== index) return picked;
@@ -72,16 +84,26 @@ export function ApprovalQuestionBody({ request, questions, isArmed, arm }: Appro
   const runKey: Record<Exclude<QuestionKeyAction["kind"], "move">, (value: number) => void> = {
     escape: () => { if (isArmed()) respond("deny"); },
     enter: advance,
+    // Focus follows the pick so a following Enter acts on the chosen row, not the one that had focus.
     digit: (row) => {
       const option = question.options[row];
       if (!isArmed()) arm();
-      else if (option) pick(option.label);
+      else if (option) {
+        pick(option.label);
+        groupRef.current?.querySelectorAll("button")[row]?.focus();
+      } else if (question.custom && row === question.options.length) inputRef.current?.focus();
     },
     arm,
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const typing = event.target instanceof HTMLInputElement;
+    const pageDelta = pageKeyDelta(event, typing);
+    if (pageDelta) {
+      event.preventDefault();
+      page(pageDelta);
+      return;
+    }
     const action = questionKeyAction(event, typing);
     // Enter outside the input stays native so it clicks the focused button.
     if (!action || action.kind === "move" || (action.kind === "enter" && !typing)) return;
@@ -92,7 +114,10 @@ export function ApprovalQuestionBody({ request, questions, isArmed, arm }: Appro
   const picked = selected[index] ?? [];
   return (
     <div className="flex flex-col gap-3" onKeyDown={handleKeyDown}>
-      <p className="text-body font-medium text-ink">{question.question}</p>
+      <div className="flex items-start gap-2">
+        <p className="min-w-0 flex-1 text-body font-medium text-ink">{question.question}</p>
+        <QuestionPager index={index} count={questions.length} page={page} />
+      </div>
       <div ref={groupRef} role="group" aria-label={question.question} className="flex flex-col gap-0.5">
         {question.options.map((option, row) => (
           <button
@@ -113,6 +138,7 @@ export function ApprovalQuestionBody({ request, questions, isArmed, arm }: Appro
           <div className={cn(ROW_CLASS, custom[index] && "bg-hover")}>
             <KeyChip index={question.options.length} />
             <input
+              ref={inputRef}
               value={custom[index] ?? ""}
               aria-label="Your own answer"
               maxLength={MAX_APPROVAL_ANSWER_LENGTH}

@@ -9,7 +9,7 @@ import { APPROVAL_ARM_DELAY_MS } from "./ApprovalDock";
 import { choiceRowClass, KeyChip, ROW_CLASS } from "./ApprovalChoiceRow";
 import { ApprovalPager } from "./ApprovalPager";
 import { DockStopButton } from "./DockStopButton";
-import { questionKeyAction, type QuestionKeyAction } from "./question-keys";
+import { pageKeyDelta, questionKeyAction, type QuestionKeyAction } from "./question-keys";
 import { useDockFocus } from "./use-dock-focus";
 
 /** Answer id for the user-written row; the server reads `freeText` and ignores the id. */
@@ -147,6 +147,11 @@ function QuestionPanel({ threadId, providerId, composerContainerRef, isAgentRunn
     else setActiveQuestionIndex(threadId, activeIndex + 1);
   };
 
+  const page = (delta: number) => {
+    const target = activeIndex + delta;
+    if (target >= 0 && target < questions.length) setActiveQuestionIndex(threadId, target);
+  };
+
   const move = (delta: number) => {
     const target = Math.max(0, Math.min(question.options.length, focusedRow + delta));
     select(target);
@@ -154,7 +159,8 @@ function QuestionPanel({ threadId, providerId, composerContainerRef, isAgentRunn
   };
 
   const runKey: Record<QuestionKeyAction["kind"], (value: number, inInput: boolean) => void> = {
-    escape: (_, inInput) => (inInput ? rowRefs.current[focusedRow]?.focus() : clearPlanQuestions(threadId)),
+    // Selecting Other unmounts its row, so focus falls back to whichever row is still mounted.
+    escape: (_, inInput) => (inInput ? rowRefs.current.find(Boolean)?.focus() : clearPlanQuestions(threadId)),
     enter: (_, inInput) => {
       if (!inInput && selectedRow !== focusedRow) select(focusedRow);
       advance();
@@ -166,6 +172,15 @@ function QuestionPanel({ threadId, providerId, composerContainerRef, isAgentRunn
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const inInput = event.target === inputRef.current;
+    const pageDelta = pageKeyDelta(event, inInput);
+    if (pageDelta) {
+      event.preventDefault();
+      page(pageDelta);
+      return;
+    }
+    // Stop, the pager and Submit keep their native Enter; only the option rows and the input pick and advance.
+    const onFooterControl = event.target instanceof HTMLButtonElement && !rowRefs.current.includes(event.target);
+    if (event.key === "Enter" && onFooterControl) return;
     const action = questionKeyAction(event, inInput);
     if (!action) return;
     if (action.kind !== "arm") event.preventDefault();
@@ -188,8 +203,8 @@ function QuestionPanel({ threadId, providerId, composerContainerRef, isAgentRunn
             index={activeIndex}
             count={questions.length}
             noun="question"
-            onPrevious={() => setActiveQuestionIndex(threadId, activeIndex - 1)}
-            onNext={() => setActiveQuestionIndex(threadId, activeIndex + 1)}
+            onPrevious={() => page(-1)}
+            onNext={() => page(1)}
           />
         )}
       </div>

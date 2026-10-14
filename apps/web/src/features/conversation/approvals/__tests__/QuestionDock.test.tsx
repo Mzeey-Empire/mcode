@@ -40,7 +40,7 @@ const QUESTIONS: PlanQuestion[] = [
   },
 ];
 
-function DockHarness({ isAgentRunning = false }: { readonly isAgentRunning?: boolean }) {
+function DockHarness({ isAgentRunning = false, onStop = () => {} }: { readonly isAgentRunning?: boolean; readonly onStop?: () => void }) {
   const composerRef = useRef<HTMLDivElement>(null);
   return (
     <>
@@ -50,7 +50,7 @@ function DockHarness({ isAgentRunning = false }: { readonly isAgentRunning?: boo
         composerContainerRef={composerRef}
         isAgentRunning={isAgentRunning}
         isStopPending={false}
-        onStop={() => {}}
+        onStop={onStop}
         onFocusComposer={() => {}}
       />
       <div ref={composerRef} hidden><textarea aria-label="Composer" /></div>
@@ -161,6 +161,50 @@ describe("QuestionDock", () => {
 
     expect(screen.getByText("Which tests?")).toBeTruthy();
     expect(answerOf("q1")).toEqual({ questionId: "q1", selectedOptionId: "__other__", freeText: "Only the parser" });
+  });
+
+  it("keeps Enter on Stop as a stop, not a pick-and-advance", async () => {
+    const user = setup();
+    const onStop = vi.fn();
+    render(<DockHarness isAgentRunning onStop={onStop} />);
+    await elapseGuard();
+
+    act(() => screen.getByRole("button", { name: /Stop/ }).focus());
+    await user.keyboard("{Enter}");
+
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("How wide should the change be?")).toBeTruthy();
+  });
+
+  it("pages between questions with the bracket keys and stops at the ends", async () => {
+    const user = setup();
+    render(<DockHarness />);
+    await elapseGuard();
+
+    await user.keyboard("[[");
+    expect(screen.getByText("How wide should the change be?")).toBeTruthy();
+    await user.keyboard("]");
+    expect(screen.getByText("Which tests?")).toBeTruthy();
+    await user.keyboard("]");
+    expect(screen.getByText("Which tests?")).toBeTruthy();
+    await user.keyboard("[[");
+    expect(screen.getByText("How wide should the change be?")).toBeTruthy();
+  });
+
+  it("leaves the write-your-own input on Escape before a second Escape dismisses", async () => {
+    const user = setup();
+    render(<DockHarness />);
+    await elapseGuard();
+    await user.keyboard("3");
+    act(() => vi.advanceTimersByTime(50));
+    await user.keyboard("Only the parser");
+
+    await user.keyboard("{Escape}");
+    expect(dismissPlanQuestions).not.toHaveBeenCalled();
+    expect(screen.getByRole("group").contains(document.activeElement)).toBe(true);
+
+    await user.keyboard("{Escape}");
+    expect(dismissPlanQuestions).toHaveBeenCalledWith(THREAD_ID);
   });
 
   it("dismisses the batch with Escape", async () => {

@@ -73,7 +73,6 @@ import {
   getThreadRecord,
   patchThreadRecord,
   deleteThreadRecord,
-  canRestorePlanQuestions,
 } from "./thread-record";
 import {
   applyCanonicalPushEvents,
@@ -470,6 +469,11 @@ interface ThreadState {
   deactivateConversation: () => void;
   /** Set questions received from the model and show the wizard. */
   setPlanQuestions: (threadId: string, questions: PlanQuestion[]) => void;
+  /**
+   * Reopen the stored question batch after a reload. The snapshot is requested before it
+   * resolves, so a batch answered or dismissed in between stays closed.
+   */
+  restorePlanQuestions: (threadId: string, assistantMessageId: string, questions: PlanQuestion[]) => void;
   /** Record the user's answer for one question. */
   setPlanAnswer: (threadId: string, questionId: string, answer: PlanAnswer) => void;
   /** Navigate to a specific question index. */
@@ -1441,9 +1445,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       useWorkspaceStore.getState().threads.find((t) => t.id === threadId),
     flushPendingTextDeltas,
     loadNarrativeForMessage: (messageId, threadId) => get().loadNarrativeForMessage(messageId, threadId),
-    restorePlanQuestions: (threadId, assistantMessageId, questions) => {
-      if (canRestorePlanQuestions(getRec(threadId), assistantMessageId)) get().setPlanQuestions(threadId, questions);
-    },
+    restorePlanQuestions: (threadId, assistantMessageId, questions) => get().restorePlanQuestions(threadId, assistantMessageId, questions),
     getTasksForThread: (threadId) => useTaskStore.getState().tasksByThread[threadId] ?? [],
     // Persisted tasks carry no turn link, so the latest user message is the best available source.
     setTasksForThread: (threadId, tasks) =>
@@ -4121,6 +4123,12 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       activeQuestionIndex: 0,
       planQuestionsStatus: "pending",
     });
+  },
+
+  restorePlanQuestions: (threadId, assistantMessageId, questions) => {
+    const record = getThreadRecord(get().records, threadId);
+    if (record.planQuestionsStatus !== "idle" || record.answeredPlanMessageIds.has(assistantMessageId)) return;
+    get().setPlanQuestions(threadId, questions);
   },
 
   setPlanAnswer: (threadId, questionId, answer) => {

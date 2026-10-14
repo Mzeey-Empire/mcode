@@ -5,7 +5,7 @@ import {
   getTestThreadPlanQuestions,
   getTestThreadPlanQuestionsStatus,
 } from "@/stores/thread-store-test-utils";
-import { canRestorePlanQuestions, createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach } from "vitest";
 import { useThreadStore } from "../stores/threadStore";
 
@@ -108,22 +108,29 @@ describe("useThreadStore.markPlanDismissed", () => {
   });
 });
 
-describe("canRestorePlanQuestions", () => {
+describe("useThreadStore.restorePlanQuestions", () => {
+  const questions = [{ id: "q1", category: "TEST", question: "?", options: [{ id: "o1", title: "A", description: "" }] }];
+
   beforeEach(() => {
     resetThreadStoreForTests();
   });
 
-  it("allows a batch for a thread with no local state", () => {
-    expect(canRestorePlanQuestions(createEmptyThreadRecord(), "a1")).toBe(true);
+  it("reopens the stored batch on a thread with no local state", () => {
+    useThreadStore.getState().restorePlanQuestions("t1", "a1", questions);
+    expect(getTestThreadPlanQuestions("t1")).toEqual(questions);
+    expect(getTestThreadPlanQuestionsStatus("t1")).toBe("pending");
   });
 
-  it("refuses a batch dismissed while the snapshot was in flight", () => {
+  it("keeps a batch closed when it was dismissed while the snapshot was in flight", () => {
     useThreadStore.getState().markPlanDismissed("t1", "a1");
-    expect(canRestorePlanQuestions(useThreadStore.getState().records.get("t1")!, "a1")).toBe(false);
+    useThreadStore.getState().restorePlanQuestions("t1", "a1", questions);
+    expect(getTestThreadPlanQuestions("t1")).toBeNull();
+    expect(getTestThreadPlanQuestionsStatus("t1")).toBe("idle");
   });
 
-  it("refuses to replace a batch the user is already answering", () => {
-    const answering = { ...createEmptyThreadRecord(), planQuestionsStatus: "pending" as const };
-    expect(canRestorePlanQuestions(answering, "a2")).toBe(false);
+  it("does not replace a batch the user is already answering", () => {
+    useThreadStore.getState().setPlanQuestions("t1", questions);
+    useThreadStore.getState().restorePlanQuestions("t1", "a2", [{ ...questions[0]!, id: "q2" }]);
+    expect(getTestThreadPlanQuestions("t1")?.[0]?.id).toBe("q1");
   });
 });

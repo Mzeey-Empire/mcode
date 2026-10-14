@@ -2,7 +2,7 @@ import { createMockApproval } from "@/__tests__/mocks/transport";
 import { useApprovalStore } from "@/stores/approvalStore";
 import type { McodeTransport } from "@/transport/types";
 import type { ApprovalQuestion, ApprovalRequest } from "@mcode/contracts";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { APPROVAL_ARM_DELAY_MS } from "../ApprovalDock";
@@ -49,7 +49,7 @@ function renderBody(questions: ApprovalQuestion[]) {
       arm={() => { armedAt = Date.now() + APPROVAL_ARM_DELAY_MS; }}
     />,
   );
-  act(() => screen.getAllByRole("button", { name: /./ })[0]!.focus());
+  act(() => within(screen.getByRole("group")).getAllByRole("button")[0]!.focus());
 }
 
 async function elapseGuard() {
@@ -145,6 +145,42 @@ describe("ApprovalQuestionBody", () => {
     await user.keyboard("1");
 
     expect(screen.getByRole("button", { name: /Narrow/ })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("keeps a digit pick when Enter follows, instead of re-picking the row that held focus", async () => {
+    const user = setupUser();
+    renderBody([SINGLE]);
+    await elapseGuard();
+
+    await user.keyboard("2");
+    await elapseGuard();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByRole("button", { name: /Wide/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /Narrow/ })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("moves focus into the custom input when its number key is pressed", async () => {
+    const user = setupUser();
+    renderBody([SINGLE]);
+    await elapseGuard();
+
+    await user.keyboard("3");
+
+    expect(screen.getByLabelText("Your own answer")).toHaveFocus();
+  });
+
+  it("pages with the in-body pager and the bracket keys", async () => {
+    const user = setupUser();
+    renderBody([SINGLE, MULTIPLE]);
+    await elapseGuard();
+
+    await user.keyboard("]");
+    expect(screen.getByText("Which checks?")).toBeInTheDocument();
+    await user.keyboard("[[");
+    expect(screen.getByText("How wide?")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /next question/i }));
+    expect(screen.getByText("Which checks?")).toBeInTheDocument();
   });
 
   it("shows an alert when the provider does not acknowledge the answer", async () => {
