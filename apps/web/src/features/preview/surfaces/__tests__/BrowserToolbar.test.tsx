@@ -207,9 +207,9 @@ describe("BrowserToolbar", () => {
     const menu = await openMore(user);
 
     expect(within(menu).getAllByRole("menuitem").map((row) => row.textContent)).toEqual([
-      "Device toolbarCtrlShiftM",
+      "Device toolbarCtrl+Shift+M",
       "Developer toolsF12",
-      "Force reloadCtrlShiftR",
+      "Force reloadCtrl+Shift+R",
       "Clear cookies",
       "Clear cache",
     ]);
@@ -238,7 +238,7 @@ describe("BrowserToolbar", () => {
     const menu = await openMore(user);
 
     const devTools = within(menu).getByRole("menuitem", { name: "Developer tools" });
-    expect([...devTools.querySelectorAll("kbd")].map((key) => key.textContent)).toEqual(["Ctrl", "Alt", "I"]);
+    expect([...devTools.querySelectorAll("kbd")].map((key) => key.textContent)).toEqual(["Ctrl+Alt+I"]);
     expect(within(menu).getByRole("menuitem", { name: "Force reload" }).textContent).toBe("Force reload");
   });
 

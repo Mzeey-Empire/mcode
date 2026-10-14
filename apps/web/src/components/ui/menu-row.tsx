@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 import { CheckIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { ShortcutKeys } from "./shortcut-keys"
+import { ShortcutCombo } from "./shortcut-keys"
 import { FOCUS_RING_CLASS } from "./focus-ring"
 
 /**
@@ -30,7 +30,7 @@ export interface MenuRowContent {
   readonly label: string
   /** A Lucide icon, drawn at 16px in a 20px leading lane. */
   readonly icon?: ReactNode
-  /** Keys of the command's shortcut, one muted keycap each on the right, e.g. `["Ctrl", "Shift", "M"]`. */
+  /** Keys of the command's shortcut, shown as one muted keycap on the right, e.g. `["Ctrl", "Shift", "M"]`. */
   readonly shortcut?: readonly string[]
   /** Status shown on the right, such as a run indicator or a "Soon" badge. */
   readonly trailing?: ReactNode
@@ -48,7 +48,7 @@ export function MenuRowCheck() {
 function MenuRowShortcut({ keys }: { readonly keys: readonly string[] }) {
   return (
     <span aria-hidden data-slot="menu-row-shortcut" className="flex shrink-0 items-center gap-1 text-muted">
-      <ShortcutKeys keys={keys} />
+      <ShortcutCombo keys={keys} />
     </span>
   )
 }
