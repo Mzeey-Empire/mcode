@@ -1,5 +1,5 @@
 import type { PlanComment, PlanCommentSelection, PlanVersion } from "@mcode/contracts";
-import { usePlanStore } from "@/stores/planStore";
+import { carriedOriginalIds, usePlanStore } from "@/stores/planStore";
 import { useComposerDraftStore, type ComposerDraft } from "@/stores/composerDraftStore";
 import {
   readSendableDraftContent,
@@ -8,17 +8,24 @@ import {
   type PlanCommentRecord,
 } from "./draft-submission";
 
-/** Comments that can ride a Send: open, unsent, and on the plan version a Send would act on. */
+/**
+ * Comments that can ride a Send: open, unsent, and on a version that is not
+ * accepted, since the user picks which version to implement. A comment already
+ * carried into a newer version is left out so it is not sent twice.
+ */
 export function sendablePlanComments(
   versions: readonly PlanVersion[],
   comments: readonly PlanComment[],
 ): { version: PlanVersion; comments: PlanComment[] } | undefined {
   const latest = versions.at(-1);
-  if (!latest || latest.status === "accepted") return undefined;
+  if (!latest) return undefined;
+  const open = new Set(versions.filter((version) => version.status !== "accepted").map((version) => version.id));
+  const carried = carriedOriginalIds(comments);
   return {
     version: latest,
     comments: comments.filter(
-      (comment) => comment.versionId === latest.id && comment.status === "open" && comment.sentMessageId === null,
+      (comment) =>
+        open.has(comment.versionId) && comment.status === "open" && comment.sentMessageId === null && !carried.has(comment.id),
     ),
   };
 }

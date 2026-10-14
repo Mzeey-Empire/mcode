@@ -34,4 +34,14 @@ describe("usePlanCommentChip", () => {
 
     expect(result.current.map((c) => c.id)).toEqual(["a2"]);
   });
+
+  it("carries a comment written on an older version", () => {
+    usePlanStore.getState().addPlan(THREAD, version(V1, 1, "superseded"));
+    usePlanStore.getState().addPlan(THREAD, version(V2, 2, "ready"));
+    usePlanStore.getState().setComments(THREAD, [comment("old", V1), comment("new", V2)]);
+
+    const { result } = renderHook(() => usePlanCommentChip(THREAD));
+
+    expect(result.current.map((c) => c.id)).toEqual(["old", "new"]);
+  });
 });

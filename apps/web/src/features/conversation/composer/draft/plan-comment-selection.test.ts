@@ -36,7 +36,7 @@ function comment(id: string, versionId: string, extra: Partial<PlanComment> = {}
 const NO_DRAFT: NextMessageDraft = {};
 
 describe("sendable plan comments", () => {
-  it("offers the open, unsent comments of the latest version", () => {
+  it("offers the open, unsent comments of every version that is not accepted", () => {
     const sendable = sendablePlanComments(
       [version(V1, 1, "superseded"), version(V2, 2, "ready")],
       [
@@ -48,11 +48,29 @@ describe("sendable plan comments", () => {
     );
 
     expect(sendable?.version.id).toBe(V2);
-    expect(sendable?.comments.map((c) => c.id)).toEqual(["open"]);
+    expect(sendable?.comments.map((c) => c.id)).toEqual(["old", "open"]);
   });
 
-  it("offers nothing once the latest version is accepted", () => {
-    expect(sendablePlanComments([version(V1, 1, "accepted")], [comment("a", V1)])).toBeUndefined();
+  it("leaves out a comment whose carried copy rides instead", () => {
+    const sendable = sendablePlanComments(
+      [version(V1, 1, "superseded"), version(V2, 2, "ready")],
+      [comment("a", V1), comment("b", V1), comment("a2", V2, { carriedFromCommentId: "a" })],
+    );
+
+    expect(sendable?.comments.map((c) => c.id)).toEqual(["b", "a2"]);
+  });
+
+  it("leaves out comments on an accepted version but keeps those on older ones", () => {
+    const sendable = sendablePlanComments(
+      [version(V1, 1, "superseded"), version(V2, 2, "accepted")],
+      [comment("old", V1), comment("accepted", V2)],
+    );
+
+    expect(sendable?.comments.map((c) => c.id)).toEqual(["old"]);
+  });
+
+  it("offers nothing before the thread has a plan", () => {
+    expect(sendablePlanComments([], [comment("a", V1)])).toBeUndefined();
   });
 });
 

@@ -41,6 +41,16 @@ export function isPlanVersionEditable(viewed: PlanVersion, latest: PlanVersion, 
 }
 
 /**
+ * Ids of comments that a newer version already carries a copy of. The copy is
+ * the one that rides a Send and takes edits, so the original is left alone.
+ */
+export function carriedOriginalIds(comments: readonly PlanComment[]): Set<string> {
+  const ids = new Set<string>();
+  for (const comment of comments) if (comment.carriedFromCommentId) ids.add(comment.carriedFromCommentId);
+  return ids;
+}
+
+/**
  * The word that follows "v{N}" in the Plan panel: who or what the version is.
  * A ready version names the provider that wrote it.
  */

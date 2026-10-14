@@ -17,19 +17,12 @@ export function usePlanCommentChip(threadId: string | undefined): readonly PlanC
   const versions = usePlanStore((s) => (threadId ? s.plansByThread[threadId] : undefined));
   const draft = useComposerDraftStore((s) => (threadId ? s.drafts[threadId] : undefined));
 
-  const latestId = versions?.at(-1)?.id;
-
   useEffect(() => {
-    if (!threadId) return;
-    // A new version is pushed before its carried comments, so syncing in between would drop the exclusions.
-    const selection = useComposerDraftStore.getState().drafts[threadId]?.planCommentSelection;
-    const carriedYet = comments.some((comment) => comment.versionId === latestId);
-    if (selection && selection.planVersionId !== latestId && !carriedYet) return;
-    updatePlanCommentSelection(threadId);
-  }, [threadId, comments, latestId]);
+    if (threadId) updatePlanCommentSelection(threadId);
+  }, [threadId, comments, versions]);
 
   const selection = draft && visiblePlanCommentSelection(draft);
   if (!selection) return NO_COMMENTS;
   const riding = new Set(selection.includedIds.filter((id) => !selection.excludedIds.includes(id)));
-  return comments.filter((comment) => riding.has(comment.id) && comment.versionId === latestId);
+  return comments.filter((comment) => riding.has(comment.id));
 }
