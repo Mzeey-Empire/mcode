@@ -301,4 +301,16 @@ describe("draft image admission", () => {
     const invalid = { ...previewAnnotations, annotations: previewAnnotations.annotations.map((annotation) => ({ ...annotation, mentions: [{ ...mention, path: "../escape.txt" }] })) };
     await expect(f.send([], { previewAnnotations: invalid })).rejects.toThrow();
   });
+
+  it("rejects a Files comment whose mention escapes the workspace", async () => {
+    const f = await fixture("claude");
+    NodeFS.writeFileSync(NodePath.join(directory, "example.txt"), "literal file contents");
+    const mention = { kind: "file" as const, id: "file-1", path: "example.txt", label: "example.txt", range: { start: 0, end: 12 } };
+    const fileComment = { kind: "file" as const, id: NodeCrypto.randomUUID(), displayNumber: 1, filePath: "example.txt", line: 1, lineContent: "before", note: "@example.txt explain", mentions: [mention] };
+    const admitted = await f.send([], { previewAnnotations: { schemaVersion: 1 as const, annotations: [fileComment] } });
+    if (admitted.kind !== "dispatch") throw new Error("Expected admission");
+    expect(admitted.request.mentions).toEqual([mention]);
+    const invalid = { ...fileComment, mentions: [{ ...mention, path: "../escape.txt" }] };
+    await expect(f.send([], { previewAnnotations: { schemaVersion: 1 as const, annotations: [invalid] } })).rejects.toThrow();
+  });
 });

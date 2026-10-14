@@ -10,6 +10,7 @@ import type { ComposerExecutionTargetController } from "../execution/useComposer
 import type { ComposerQueueEdit } from "../queue/useComposerQueueEditing";
 import type { HandoffQueuedSend } from "../queue/useHandoffQueuedSend";
 import { removeTakenDiffComments } from "../draft/draft-diff-comments";
+import { removeTakenFileComments } from "../draft/draft-file-comments";
 import { beginDraftSubmission } from "../draft/draft-submission-lifecycle";
 import { completeSuccessfulComposerSubmission } from "./complete-composer-submission";
 import { createComposerAnnotationDispatchGuard } from "./composer-submission-annotations";
@@ -101,6 +102,7 @@ export function useComposerSubmissionController({
         annotationScopeId,
         annotations: submission.currentAnnotations,
         diffComments: submission.currentDiffComments,
+        fileComments: submission.currentFileComments,
         goalObjective: submission.goalObjective,
         form,
         finishEditing: queue.finishEditing,
@@ -144,7 +146,7 @@ export function useComposerSubmissionController({
       const draftSubmission = sendsToThisThread
         ? beginDraftSubmission(
           threadId,
-          { diffComments: submission.currentDiffComments },
+          { diffComments: submission.currentDiffComments, fileComments: submission.currentFileComments },
           messageId,
         )
         : null;
@@ -182,6 +184,7 @@ export function useComposerSubmissionController({
       draftSubmission?.succeeded();
       if (!sendsToThisThread && annotationScopeId) {
         removeTakenDiffComments(annotationScopeId, submission.currentDiffComments);
+        removeTakenFileComments(annotationScopeId, submission.currentFileComments);
       }
       completeSuccessfulComposerSubmission({
         form,

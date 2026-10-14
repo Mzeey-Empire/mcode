@@ -522,9 +522,32 @@ export type DiffAnnotationPayload = z.infer<
   ReturnType<typeof DiffAnnotationPayloadSchema>
 >;
 
+/**
+ * One saved line comment captured on a workspace file in the Files tool.
+ */
+export const FileAnnotationPayloadSchema = lazySchema(() =>
+  z.object({
+    kind: z.literal("file"),
+    id: z.string().uuid(),
+    displayNumber: z.number().int().positive(),
+    filePath: z.string().min(1).max(1024),
+    line: z.number().int().positive(),
+    lineContent: z.string().max(4096),
+    note: z.string().max(MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS).refine((note) => note.trim().length > 0),
+    mentions: MessageMentionsSchema().optional(),
+  }).refine((annotation) =>
+    annotation.note.length + JSON.stringify(annotation.mentions ?? []).length <= MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS,
+  { message: "File comment note and mentions exceed the message payload budget" }),
+);
+
+/** One file line comment with its typed note-relative mentions. */
+export type FileAnnotationPayload = z.infer<
+  ReturnType<typeof FileAnnotationPayloadSchema>
+>;
+
 /** One visual or code target attached to a composer message. */
 export const ComposerAnnotationPayloadSchema = lazySchema(() =>
-  z.union([PreviewAnnotationPayloadSchema(), DiffAnnotationPayloadSchema()]),
+  z.union([PreviewAnnotationPayloadSchema(), DiffAnnotationPayloadSchema(), FileAnnotationPayloadSchema()]),
 );
 
 export type ComposerAnnotationPayload = z.infer<
@@ -538,11 +561,18 @@ export function isDiffAnnotationPayload(
   return "kind" in annotation && annotation.kind === "diff";
 }
 
+/** Returns whether a composer annotation targets a workspace file line. */
+export function isFileAnnotationPayload(
+  annotation: ComposerAnnotationPayload,
+): annotation is FileAnnotationPayload {
+  return "kind" in annotation && annotation.kind === "file";
+}
+
 /** Returns whether a composer annotation targets the browser Preview. */
 export function isPreviewAnnotationPayload(
   annotation: ComposerAnnotationPayload,
 ): annotation is PreviewAnnotationPayload {
-  return !isDiffAnnotationPayload(annotation);
+  return !isDiffAnnotationPayload(annotation) && !isFileAnnotationPayload(annotation);
 }
 
 /**

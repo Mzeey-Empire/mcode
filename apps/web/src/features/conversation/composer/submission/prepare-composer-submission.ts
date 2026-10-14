@@ -2,6 +2,7 @@ import type { PreviewAnnotationBundle } from "@mcode/contracts";
 import { useToastStore } from "@/stores/toastStore";
 import type { ComposerFormController } from "../draft/useComposerFormController";
 import { readVisibleDiffComments } from "../draft/draft-diff-comments";
+import { readVisibleFileComments } from "../draft/draft-file-comments";
 import { readPlanCommentIdsForSend } from "../draft/sendable-plan-comments";
 import { buildComposerAnnotationBundle } from "./composer-annotations";
 import { createComposerSubmission } from "./composer-submission";
@@ -41,7 +42,8 @@ export async function prepareComposerSubmission({
 
   const snapshot = form.readSubmission();
   const currentDiffComments = annotationScopeId ? readVisibleDiffComments(annotationScopeId) : [];
-  const currentAnnotations = buildComposerAnnotationBundle(annotationScopeId, currentDiffComments);
+  const currentFileComments = annotationScopeId ? readVisibleFileComments(annotationScopeId) : [];
+  const currentAnnotations = buildComposerAnnotationBundle(annotationScopeId, currentDiffComments, currentFileComments);
   const previewAnnotations = resolvePreviewAnnotations(currentAnnotations);
   const planCommentIds = planCommentThreadId ? readPlanCommentIdsForSend(planCommentThreadId) : [];
   if (isEmptySubmission(
@@ -69,6 +71,7 @@ export async function prepareComposerSubmission({
       attachmentMetas: form.snapshotAttachmentMetas(),
       currentAnnotations,
       currentDiffComments,
+      currentFileComments,
       previewAnnotations,
       planCommentIds,
     };

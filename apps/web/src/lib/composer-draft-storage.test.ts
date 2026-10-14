@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MAX_ATTACHMENTS,
   type DraftDiffComment,
+  type DraftFileComment,
   type McodeBrowserCapture,
   type MessageMention,
 } from "@mcode/contracts";
@@ -36,6 +37,18 @@ const diffComment: DraftDiffComment = {
   mentions: [mention],
 };
 
+const fileComment: DraftFileComment = {
+  kind: "file",
+  id: "66666666-6666-4666-8666-666666666666",
+  revision: 2,
+  displayNumber: 2,
+  filePath: "src/main.tsx",
+  line: 7,
+  lineContent: "render(<App />);",
+  note: "@state.ts wrap this",
+  mentions: [mention],
+};
+
 const nextMessageFields = {
   diffComments: [diffComment],
   diffCommentEditor: {
@@ -43,6 +56,13 @@ const nextMessageFields = {
     annotationId: diffComment.id,
     note: "@state.ts unsaved",
     mentions: [mention],
+  },
+  fileComments: [fileComment],
+  fileCommentEditor: {
+    target: { filePath: "src/main.tsx", line: 9, lineContent: "export {};" },
+    annotationId: fileComment.id,
+    note: "unsaved file note",
+    mentions: [],
   },
   planCommentEditor: {
     planVersionId: "55555555-5555-4555-8555-555555555555",
@@ -206,6 +226,20 @@ describe("composer-draft-storage", () => {
     warn.mockRestore();
   });
 
+  it("drops an invalid stored Files comment or editor and keeps the valid one", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const stored = JSON.parse(JSON.stringify(serializeComposerDraft({ ...baseDraft, ...nextMessageFields })));
+    stored.fileComments.push({ ...fileComment, id: "77777777-7777-4777-8777-777777777777", line: 0 });
+    stored.fileCommentEditor = { ...stored.fileCommentEditor, target: { filePath: "", line: 1, lineContent: "" } };
+
+    const restored = parseStoredComposerDraft(stored);
+
+    expect(restored?.fileComments).toEqual([fileComment]);
+    expect(restored?.fileCommentEditor).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith("[composer-draft-storage] Dropped 2 invalid stored draft element(s)");
+    warn.mockRestore();
+  });
+
   it("drops a stored plan comment editor with a bad anchor or an over-long note and keeps the rest", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const stored = JSON.parse(JSON.stringify(serializeComposerDraft({ ...baseDraft, ...nextMessageFields })));
@@ -230,6 +264,8 @@ describe("composer-draft-storage", () => {
     expect(draftHasNoSendableContent(empty)).toBe(true);
     expect(draftHasNoSendableContent({ ...empty, planCommentEditor: nextMessageFields.planCommentEditor })).toBe(false);
     expect(draftHasNoSendableContent({ ...empty, diffComments: [diffComment] })).toBe(false);
+    expect(draftHasNoSendableContent({ ...empty, fileComments: [fileComment] })).toBe(false);
+    expect(draftHasNoSendableContent({ ...empty, fileCommentEditor: nextMessageFields.fileCommentEditor })).toBe(false);
     expect(draftHasNoSendableContent({ ...empty, submissions: nextMessageFields.submissions })).toBe(false);
   });
 });

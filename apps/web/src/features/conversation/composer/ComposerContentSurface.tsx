@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
-import { getCatalogEntry, type DraftDiffComment } from "@mcode/contracts";
+import { getCatalogEntry } from "@mcode/contracts";
 import { getModelContextWindow } from "@mcode/shared/model-context";
 import type {
   ContextWindowMode,
@@ -42,7 +42,7 @@ import { ComposerTray } from "./ComposerTray";
 import { useDraftWriteFailureStore } from "@/lib/composer-draft-storage";
 import { ApprovalAnnouncer, ApprovalDock, useDockApprovals } from "@/features/conversation/approvals/ApprovalDock";
 import { QuestionDock } from "@/features/conversation/approvals/QuestionDock";
-import { DiffCommentsComposerAttachment } from "./DiffCommentsComposerAttachment";
+import { DiffCommentsComposerAttachment, type ComposerCodeComment } from "./DiffCommentsComposerAttachment";
 import { SelectedTextCommentsComposerAttachment } from "./SelectedTextCommentsComposerAttachment";
 
 type FileAutocomplete = ReturnType<typeof useFileAutocomplete>;
@@ -86,7 +86,7 @@ interface ComposerContentSurfaceProps {
     readonly workspacePath?: string;
     readonly attachmentBundle?: ComponentProps<typeof PreviewAnnotationBundleChip>["bundle"];
     readonly annotationScopeId?: string;
-    readonly diffComments: readonly DraftDiffComment[];
+    readonly codeComments: readonly ComposerCodeComment[];
     readonly attachments: ComponentProps<typeof AttachmentPreview>["attachments"];
     readonly selectedTextComments: readonly SelectedTextComment[];
     readonly selectedTextCommentEditor?: SelectedTextCommentEditorDraft;
@@ -370,9 +370,9 @@ function AnnotationAttachmentRow({
           />
         </div>
       ) : null}
-      {model.workspaceId && model.diffComments.length > 0 ? (
+      {model.workspaceId && model.codeComments.length > 0 ? (
         <DiffCommentsComposerAttachment
-          comments={model.diffComments}
+          comments={model.codeComments}
           scopeId={model.annotationScopeId}
           workspaceId={model.workspaceId}
           threadId={model.threadId}

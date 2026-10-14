@@ -5,6 +5,7 @@ import type {
   ContextWindowMode,
   DevinMode,
   DraftDiffComment,
+  DraftFileComment,
   DraftSubmission,
   MessageMention,
   PlanCommentEditorDraft,
@@ -13,7 +14,7 @@ import type {
   SelectedTextComment,
   SelectedTextCommentSource,
 } from "@mcode/contracts";
-import type { DiffCommentTarget } from "@/features/conversation/composer/draft/draft-submission";
+import type { DiffCommentTarget, FileCommentTarget } from "@/features/conversation/composer/draft/draft-submission";
 import {
   collectSpillPathsFromPendingAttachments,
   releaseBrowserCaptureSpills,
@@ -55,11 +56,23 @@ export interface DiffCommentEditorDraft {
   mentions: MessageMention[];
 }
 
+/** Restorable open-editor state for one Files line comment. */
+export interface FileCommentEditorDraft {
+  /** Line the editor is anchored to. */
+  target: FileCommentTarget;
+  /** Saved comment being edited. Omit while the editor creates a new comment. */
+  annotationId?: string;
+  /** Current note text, including unsaved changes. */
+  note: string;
+  /** Current structured mention metadata, including unsaved changes. */
+  mentions: MessageMention[];
+}
+
 /**
  * Draft state for a single composer instance, keyed by thread ID.
  *
  * The composer owns the message fields and writes them as one snapshot. The
- * next-message fields (Review comments, their editor, the plan-comment
+ * next-message fields (Review and Files comments, their editors, the plan-comment
  * selection and pending submissions) are written only through
  * {@link ComposerDraftState.updateNextMessage}, because other surfaces edit
  * them while the composer holds an older snapshot.
@@ -98,6 +111,10 @@ export interface ComposerDraft {
   diffComments?: DraftDiffComment[];
   /** Open Review comment editor, restored with this draft. */
   diffCommentEditor?: DiffCommentEditorDraft;
+  /** Saved Files line comments riding the next Send. */
+  fileComments?: DraftFileComment[];
+  /** Open Files comment editor, restored with this draft. */
+  fileCommentEditor?: FileCommentEditorDraft;
   /** Open plan comment editor, restored with this draft. It never rides a Send. */
   planCommentEditor?: PlanCommentEditorDraft;
   /** Sends whose admission has not settled. */
@@ -107,13 +124,15 @@ export interface ComposerDraft {
 /** Fields that only {@link ComposerDraftState.updateNextMessage} writes. */
 export type NextMessageFields = Pick<
   ComposerDraft,
-  "diffComments" | "diffCommentEditor" | "planCommentEditor" | "submissions"
+  "diffComments" | "diffCommentEditor" | "fileComments" | "fileCommentEditor" | "planCommentEditor" | "submissions"
 >;
 
 function nextMessageFields(draft: ComposerDraft | undefined): NextMessageFields {
   return {
     diffComments: draft?.diffComments,
     diffCommentEditor: draft?.diffCommentEditor,
+    fileComments: draft?.fileComments,
+    fileCommentEditor: draft?.fileCommentEditor,
     planCommentEditor: draft?.planCommentEditor,
     submissions: draft?.submissions,
   };
@@ -130,6 +149,8 @@ function mergeNextMessageFields(stored: ComposerDraft | undefined, incoming: Com
   return {
     diffComments: kept.diffComments ?? moved.diffComments,
     diffCommentEditor: kept.diffCommentEditor ?? moved.diffCommentEditor,
+    fileComments: kept.fileComments ?? moved.fileComments,
+    fileCommentEditor: kept.fileCommentEditor ?? moved.fileCommentEditor,
     planCommentEditor: kept.planCommentEditor ?? moved.planCommentEditor,
     submissions: kept.submissions ?? moved.submissions,
   };
@@ -216,9 +237,15 @@ function hasComposerContent(draft: ComposerDraft): boolean {
     || Boolean(draft.selectedTextCommentEditor);
 }
 
-function hasNextMessageContent(draft: ComposerDraft): boolean {
+function hasLineCommentContent(draft: ComposerDraft): boolean {
   return (draft.diffComments?.length ?? 0) > 0
     || Boolean(draft.diffCommentEditor)
+    || (draft.fileComments?.length ?? 0) > 0
+    || Boolean(draft.fileCommentEditor);
+}
+
+function hasNextMessageContent(draft: ComposerDraft): boolean {
+  return hasLineCommentContent(draft)
     || Boolean(draft.planCommentEditor)
     || (draft.submissions?.length ?? 0) > 0;
 }

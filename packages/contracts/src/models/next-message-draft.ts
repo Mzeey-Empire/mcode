@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
-import { DiffAnnotationPayloadSchema } from "./browser-preview.js";
+import { DiffAnnotationPayloadSchema, FileAnnotationPayloadSchema } from "./browser-preview.js";
 
 /** A durable draft image, without a client-owned filesystem path. */
 export const StagedDraftImageSchema = lazySchema(() => z.object({
@@ -21,7 +21,7 @@ export const DraftElementMetaSchema = lazySchema(() => z.object({
 export type DraftElementMeta = z.infer<ReturnType<typeof DraftElementMetaSchema>>;
 
 /** Draft fields whose revisions can be frozen by a submission. */
-export const DraftElementFieldSchema = lazySchema(() => z.enum(["diffComments"]));
+export const DraftElementFieldSchema = lazySchema(() => z.enum(["diffComments", "fileComments"]));
 /** Draft fields whose revisions can be frozen by a submission. */
 export type DraftElementField = z.infer<ReturnType<typeof DraftElementFieldSchema>>;
 
@@ -38,6 +38,11 @@ export type DraftSubmission = z.infer<ReturnType<typeof DraftSubmissionSchema>>;
 export const DraftDiffCommentSchema = lazySchema(() => DiffAnnotationPayloadSchema().and(DraftElementMetaSchema()));
 /** A revisioned diff comment. Its annotation ID is its draft element ID. */
 export type DraftDiffComment = z.infer<ReturnType<typeof DraftDiffCommentSchema>>;
+
+/** A revisioned file comment retaining all annotation payload refinements. */
+export const DraftFileCommentSchema = lazySchema(() => FileAnnotationPayloadSchema().and(DraftElementMetaSchema()));
+/** A revisioned file comment. Its annotation ID is its draft element ID. */
+export type DraftFileComment = z.infer<ReturnType<typeof DraftFileCommentSchema>>;
 
 /** Structured RPC failure when retention or thread deletion removed a draft image. */
 export const DraftImageMissingErrorSchema = lazySchema(() => z.object({
