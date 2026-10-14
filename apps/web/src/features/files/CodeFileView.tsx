@@ -14,12 +14,15 @@ import { Button } from "@/components/ui/button";
 import type { TokenSpan } from "@/workers/shiki.worker";
 import type { FileReadState } from "./useFilesData";
 import { useCodeTokens } from "./useCodeTokens";
-import { FILE_COMMENT_CARD_CLASS, FileCommentEditor } from "./FileCommentEditor";
+import { FILE_COMMENT_CARD_CLASS, FILE_COMMENT_ROW_CLASS, FileCommentEditor } from "./FileCommentEditor";
 import { useFilesTabsStore } from "./filesTabsStore";
 
 const LINE_HEIGHT = 20;
 const OVERSCAN = 20;
 const COMMENT_ROW_ESTIMATE = 72;
+/** The line-number column, `w-11`. Comment cards inset by the same amount. */
+const GUTTER_PX = 44;
+const CODE_END_PAD_PX = 16;
 const CHANGED_LINE_SHADOW = "var(--color-primary) 2px 0 0 inset";
 
 /** Formats a byte count the way the Files states show it ("412 KB", "3.1 MB"). */
@@ -191,6 +194,11 @@ function CodeLines({
     () => (threadId ? buildCodeRows(path, lines, comments, anchor) : buildCodeRows(path, lines, [], undefined)),
     [anchor, comments, lines, path, threadId],
   );
+  // Rows are absolutely positioned, so nothing else gives the track the width of its longest line.
+  const trackMinWidth = useMemo(
+    () => `calc(${GUTTER_PX + CODE_END_PAD_PX}px + ${lines.reduce((widest, line) => Math.max(widest, line.length), 0)}ch)`,
+    [lines],
+  );
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: rows.length,
     getScrollElement: () => viewportRef.current,
@@ -211,15 +219,18 @@ function CodeLines({
     });
   };
   return (
-    <div ref={viewportRef} data-testid="code-file-view" className="min-h-0 flex-1 overflow-auto bg-background py-3 font-mono text-code-small">
-      <div className="relative min-w-max" style={{ height: virtualizer.getTotalSize() }}>
+    <div ref={viewportRef} data-testid="code-file-view" className="@container min-h-0 flex-1 overflow-auto bg-background py-3 font-mono text-code-small">
+      <div className="relative min-w-full" style={{ height: virtualizer.getTotalSize(), minWidth: trackMinWidth }}>
         {virtualizer.getVirtualItems().map((item) => {
           const row = rows[item.index];
           if (!row) return null;
           if (row.kind !== "line") {
             return (
               <div key={item.key} ref={virtualizer.measureElement} data-index={item.index} className="absolute inset-x-0" style={{ top: item.start }}>
-                {threadId ? <CommentRow threadId={threadId} workspaceId={workspaceId} row={row} /> : null}
+                {/* Pinned to the viewport so a long line elsewhere in the file never stretches or scrolls the card away. */}
+                <div className="sticky left-0 w-[100cqw]">
+                  {threadId ? <CommentRow threadId={threadId} workspaceId={workspaceId} row={row} /> : null}
+                </div>
               </div>
             );
           }
@@ -257,11 +268,11 @@ function CommentRow({
     return <FileCommentEditor threadId={threadId} workspaceId={workspaceId} target={row.target} annotation={row.annotation} />;
   }
   return (
-    <div className="py-1 pr-2 font-sans">
+    <div className={FILE_COMMENT_ROW_CLASS}>
       <button
         type="button"
         aria-label={`Edit comment on line ${row.comment.line}`}
-        className={`${FILE_COMMENT_CARD_CLASS} block w-full whitespace-pre-wrap pt-1.5 pr-3 pb-2 pl-11 text-left`}
+        className={`${FILE_COMMENT_CARD_CLASS} block w-full whitespace-pre-wrap px-3 py-2 text-left`}
         onClick={() => editDraftFileComment(threadId, row.comment)}
       >
         {row.comment.note}
@@ -284,8 +295,8 @@ function LineGutter({
   }
   return (
     <span className="relative w-11 shrink-0 cursor-pointer select-none pr-3.5 text-right text-muted" onClick={onComment}>
-      <span aria-hidden>{lineNumber}</span>
-      {/* Absolute so showing it on hover never shifts the number or code columns. */}
+      <span aria-hidden className="group-hover:invisible group-has-[:focus-visible]:invisible">{lineNumber}</span>
+      {/* Absolute so showing it never shifts the columns; it takes the number's place so digits never sit under it. */}
       <button
         type="button"
         aria-label={`Comment on line ${lineNumber}`}

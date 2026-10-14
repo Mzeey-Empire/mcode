@@ -15,8 +15,11 @@ import {
 } from "@/features/conversation/composer/draft/draft-file-comments";
 import type { FileCommentTarget } from "@/features/conversation/composer/draft/draft-submission";
 
-/** Card chrome shared by the open editor and a saved comment, inset so its text sits under the code column. */
+/** Card chrome shared by the open editor and a saved comment. */
 export const FILE_COMMENT_CARD_CLASS = "rounded-[10px] border border-control-border bg-panel text-body-small text-ink";
+
+/** Row wrapper that starts the card at the code column, past the 44px line-number gutter. */
+export const FILE_COMMENT_ROW_CLASS = "pt-1.5 pr-3 pb-2 pl-11 font-sans";
 
 function isEdited(note: string, mentions: readonly MessageMention[], annotation: DraftFileComment | undefined): boolean {
   return note !== (annotation?.note ?? "")
@@ -96,9 +99,9 @@ export function FileCommentEditor({ threadId, target, annotation, workspaceId, e
       role="dialog"
       aria-label={`Comment on ${target.filePath} line ${target.line}`}
       data-shaking={isShaking || undefined}
-      className="py-1 pr-2 font-sans"
+      className={FILE_COMMENT_ROW_CLASS}
     >
-      <div className={`${FILE_COMMENT_CARD_CLASS} pt-1.5 pr-3 pb-2 pl-11`}>
+      <div className={`${FILE_COMMENT_CARD_CLASS} flex flex-col gap-2 pt-2.5 pr-2 pb-2 pl-3`}>
         <CommentEditorComposer
           threadId={threadId}
           workspaceId={workspaceId}
@@ -112,18 +115,19 @@ export function FileCommentEditor({ threadId, target, annotation, workspaceId, e
           onChange={handleChange}
           onSubmit={save}
         />
-        <div className="mt-1 flex items-center justify-end gap-2">
+        <div className="flex items-center gap-2">
           {annotation ? (
             <button
               type="button"
               aria-label="Delete comment"
-              className="flex size-7 items-center justify-center rounded-full text-muted hover:bg-hover"
+              className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-hover"
               onClick={remove}
             >
               <Trash2 size={14} aria-hidden />
             </button>
           ) : null}
-          <button type="button" className="text-label text-muted" onClick={close}>
+          <span className="flex-1" />
+          <button type="button" className="h-7 rounded-lg px-2.5 text-label text-muted hover:bg-hover" onClick={close}>
             Cancel
           </button>
           {canSave ? (
