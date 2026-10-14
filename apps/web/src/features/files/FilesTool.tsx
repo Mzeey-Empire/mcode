@@ -1,11 +1,15 @@
-import { useCallback, useMemo, useRef, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { SIDE_PANE_CONTENT_MIN_WIDTH, sidePaneDocks } from "@/lib/side-pane-dock";
-import { CodeFileView, splitLines } from "./CodeFileView";
+import { splitLines } from "./CodeFileView";
 import { FileTree } from "./FileTree";
 import { FilesControlsRow, FilesTabStrip } from "./FilesHeader";
+import { FilesViewControls } from "./FilesViewControls";
 import { FindInFileBar } from "./FindInFileBar";
 import { GoToFilePopover } from "./GoToFilePopover";
+import type { ImageDimensions } from "./ImageFileView";
+import { OpenFileView } from "./OpenFileView";
+import { fileViewKind } from "./file-view-kind";
 import { buildFilesTree, flattenFileTree, folderNodesToReveal, indexFileChanges } from "./file-tree-model";
 import { FILES_SCOPE_DEFAULTS, getFilesScope, useFilesTabsStore, type FilesScopeState } from "./filesTabsStore";
 import { useFileActions } from "./useFileActions";
@@ -41,8 +45,12 @@ function useFilesScopeState(scopeId: string): FilesScopeState {
   return useFilesTabsStore((store) => store.scopes[scopeId] ?? FILES_SCOPE_DEFAULTS);
 }
 
-function useFindBar(scopeId: string, requested: boolean, read: FileReadState | undefined, bodyRef: RefObject<HTMLElement | null>) {
-  const text = textOf(read);
+function useFindBar(
+  scopeId: string,
+  requested: boolean,
+  text: string | null,
+  bodyRef: RefObject<HTMLElement | null>,
+) {
   const open = requested && text !== null;
   const lines = useMemo(() => (open && text !== null ? splitLines(text) : NO_LINES), [open, text]);
   const find = useFindInFile(lines);
@@ -64,8 +72,15 @@ function useFindBar(scopeId: string, requested: boolean, read: FileReadState | u
   };
 }
 
-function textOf(read: FileReadState | undefined): string | null {
-  return read?.status === "ready" && read.result.kind === "text" && read.result.content.length > 0 ? read.result.content : null;
+/**
+ * The text Find can search: what `CodeLines` paints. Rendered markdown and SVG have
+ * no highlightable lines, so Find is disabled there until the user switches to Source.
+ */
+function searchableText(path: string | null, read: FileReadState | undefined, state: FilesScopeState): string | null {
+  if (!path || read?.status !== "ready" || read.result.kind !== "text" || read.result.content.length === 0) return null;
+  const kind = fileViewKind(path, read);
+  const showsLines = kind === "code" || (kind === "markdown" && state.viewModes[path] === "source");
+  return showsLines ? read.result.content : null;
 }
 
 /**
@@ -85,7 +100,13 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
   const setGoToFileOpen = (open: boolean) => store().setGoToFileOpen(scopeId, open);
   const tree = useMemo(() => buildFilesTree(data.list?.paths ?? EMPTY_PATHS), [data.list]);
   const shownPath = layout.body === "file" ? state.activePath : null;
-  const findBar = useFindBar(scopeId, state.findOpen, shownPath ? data.reads[shownPath] : undefined, bodyRef);
+  // Transient: measured from the loaded <img>, so it is not worth persisting with the tabs.
+  const [dimensions, setDimensions] = useState<Readonly<Record<string, ImageDimensions>>>({});
+  const onDimensions = useCallback(
+    (path: string, next: ImageDimensions) => setDimensions((current) => ({ ...current, [path]: next })),
+    [],
+  );
+  const findBar = useFindBar(scopeId, state.findOpen, searchableText(shownPath, shownPath ? data.reads[shownPath] : undefined, state), bodyRef);
 
   const openFile = useCallback(
     (path: string, beside = false) => {
@@ -119,10 +140,11 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
         onRevealFolder={revealFolder}
         onGoToFile={() => setGoToFileOpen(true)}
         find={findBar.header}
+        controls={shownPath ? <ShownFileControls scopeId={scopeId} path={shownPath} state={state} data={data} dimensions={dimensions[shownPath] ?? null} /> : null}
       />
       {findBar.bar}
       <div ref={bodyRef} className="relative flex min-h-0 flex-1 flex-row overflow-hidden">
-        <FilesBody scopeId={scopeId} workspaceId={workspaceId} threadId={threadId} state={state} layout={layout} data={data} tree={tree} actions={actions} findHighlight={findBar.highlight} onOpenFile={openFile} />
+        <FilesBody scopeId={scopeId} workspaceId={workspaceId} threadId={threadId} state={state} layout={layout} data={data} tree={tree} actions={actions} findHighlight={findBar.highlight} onOpenFile={openFile} onDimensions={onDimensions} />
         {state.goToFileOpen ? (
           <GoToFilePopover
             paths={data.list?.paths ?? EMPTY_PATHS}
@@ -138,6 +160,33 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
   );
 }
 
+function ShownFileControls({
+  scopeId,
+  path,
+  state,
+  data,
+  dimensions,
+}: {
+  readonly scopeId: string;
+  readonly path: string;
+  readonly state: FilesScopeState;
+  readonly data: FilesData;
+  readonly dimensions: ImageDimensions | null;
+}) {
+  const read = data.reads[path];
+  return (
+    <FilesViewControls
+      kind={fileViewKind(path, read)}
+      mode={state.viewModes[path] ?? "rendered"}
+      scale={state.imageScales[path] ?? "fit"}
+      size={read?.status === "ready" ? read.result.size : 0}
+      dimensions={dimensions}
+      onModeChange={(mode) => useFilesTabsStore.getState().setViewMode(scopeId, path, mode)}
+      onScaleChange={(scale) => useFilesTabsStore.getState().setImageScale(scopeId, path, scale)}
+    />
+  );
+}
+
 function FilesBody({
   scopeId,
   workspaceId,
@@ -149,6 +198,7 @@ function FilesBody({
   actions,
   findHighlight,
   onOpenFile,
+  onDimensions,
 }: {
   readonly scopeId: string;
   readonly workspaceId: string;
@@ -160,7 +210,9 @@ function FilesBody({
   readonly actions: ReturnType<typeof useFileActions>;
   readonly findHighlight: FindHighlight | null;
   readonly onOpenFile: (path: string) => void;
+  readonly onDimensions: (path: string, dimensions: ImageDimensions) => void;
 }) {
+  const { knownPaths, pathsTruncated } = useKnownPaths(data);
   const changeIndex = useMemo(() => indexFileChanges(data.changes), [data.changes]);
   const rows = useMemo(() => flattenFileTree(tree, state.expandedFolders, changeIndex), [tree, state.expandedFolders, changeIndex]);
   const clearReveal = useCallback(() => useFilesTabsStore.getState().clearReveal(scopeId), [scopeId]);
@@ -190,19 +242,31 @@ function FilesBody({
         </DockedTreePane>
       ) : null}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <CodeFileView
-          path={activePath}
-          state={data.reads[activePath] ?? { status: "loading" }}
-          onOpenInEditor={(line) => actions.openInEditor(activePath, line)}
-          onCloseTab={() => useFilesTabsStore.getState().closeFile(scopeId, activePath)}
+        <OpenFileView
+          workspaceId={workspaceId}
           threadId={threadId}
           scopeId={scopeId}
-          workspaceId={workspaceId}
+          path={activePath}
+          state={data.reads[activePath] ?? { status: "loading" }}
+          mode={state.viewModes[activePath] ?? "rendered"}
+          scale={state.imageScales[activePath] ?? "fit"}
+          knownPaths={knownPaths}
+          pathsTruncated={pathsTruncated}
+          onOpenFile={onOpenFile}
+          onDimensions={(dimensions) => onDimensions(activePath, dimensions)}
+          onOpenInEditor={(line) => actions.openInEditor(activePath, line)}
+          onCloseTab={() => useFilesTabsStore.getState().closeFile(scopeId, activePath)}
           find={findHighlight}
         />
       </div>
     </>
   );
+}
+
+function useKnownPaths(data: FilesData): { readonly knownPaths: ReadonlySet<string>; readonly pathsTruncated: boolean } {
+  const knownPaths = useMemo(() => new Set(data.list?.paths ?? EMPTY_PATHS), [data.list]);
+  // Until the list loads, or when it is capped, a missing entry proves nothing.
+  return { knownPaths, pathsTruncated: data.list?.truncated ?? true };
 }
 
 function DockedTreePane({ scopeId, width, children }: { readonly scopeId: string; readonly width: number; readonly children: React.ReactNode }) {

@@ -7,21 +7,27 @@ export const FILES_TREE_MIN_WIDTH = 220;
 /** Widest the docked tree can be dragged. */
 export const FILES_TREE_MAX_WIDTH = 480;
 
+/** How a markdown or SVG tab shows: rendered (the default) or as highlighted source. */
+export type FileViewMode = "rendered" | "source";
+/** Image zoom: fit the body (the default), natural size, or twice natural size. */
+export type ImageScale = "fit" | "100" | "200";
+
 /** Files tool state for one panel scope (thread id, or workspace id when threadless). */
 export interface FilesScopeState {
-  /** Open file tabs, in strip order. */
   readonly openPaths: readonly string[];
   readonly activePath: string | null;
-  /** Whether the tree is shown, docked or as the body view. */
   readonly treeOpen: boolean;
   readonly expandedFolders: ReadonlySet<string>;
-  /** Folder or file the tree should scroll into view, or null. */
   readonly revealPath: string | null;
   readonly treeWidth: number;
   /** Whether Go to file is open; stored here because `files.goToFile` can fire before the tool mounts. */
   readonly goToFileOpen: boolean;
   /** Whether the find bar is open; stored here for the same reason as `goToFileOpen`. */
   readonly findOpen: boolean;
+  /** Per-path view mode; absent means "rendered". */
+  readonly viewModes: Readonly<Record<string, FileViewMode>>;
+  /** Per-path image scale; absent means "fit". */
+  readonly imageScales: Readonly<Record<string, ImageScale>>;
   /** Line the active file view should scroll to, set by a jump from outside Files, or null. */
   readonly pendingJump: FilesPendingJump | null;
 }
@@ -41,6 +47,8 @@ export const FILES_SCOPE_DEFAULTS: FilesScopeState = {
   treeWidth: FILES_TREE_DEFAULT_WIDTH,
   goToFileOpen: false,
   findOpen: false,
+  viewModes: {},
+  imageScales: {},
   pendingJump: null,
 };
 
@@ -53,7 +61,6 @@ interface FilesTabsStore {
   setActiveFile(scopeId: string, path: string): void;
   setTreeOpen(scopeId: string, open: boolean): void;
   toggleFolder(scopeId: string, path: string): void;
-  /** Expands `folders` and marks `target` for the tree to scroll to. */
   reveal(scopeId: string, folders: readonly string[], target: string): void;
   clearReveal(scopeId: string): void;
   setTreeWidth(scopeId: string, width: number): void;
@@ -63,6 +70,8 @@ interface FilesTabsStore {
   /** Clears the pending jump once the file view has shown it. */
   clearJump(scopeId: string): void;
   setFindOpen(scopeId: string, open: boolean): void;
+  setViewMode(scopeId: string, path: string, mode: FileViewMode): void;
+  setImageScale(scopeId: string, path: string, scale: ImageScale): void;
 }
 
 /** Clamps a dragged tree width into the allowed range. */
@@ -84,13 +93,20 @@ function withOpened(state: FilesScopeState, path: string, activate: boolean): Fi
   return { ...state, openPaths, activePath };
 }
 
+function without<T>(record: Readonly<Record<string, T>>, key: string): Readonly<Record<string, T>> {
+  if (!(key in record)) return record;
+  const { [key]: _removed, ...rest } = record;
+  return rest;
+}
+
 function withClosed(state: FilesScopeState, path: string): FilesScopeState {
   const index = state.openPaths.indexOf(path);
   if (index < 0) return state;
   const openPaths = state.openPaths.filter((open) => open !== path);
-  if (state.activePath !== path) return { ...state, openPaths };
-  const activePath = openPaths[Math.max(0, index - 1)] ?? null;
-  return { ...state, openPaths, activePath };
+  const viewModes = without(state.viewModes, path);
+  const imageScales = without(state.imageScales, path);
+  const activePath = state.activePath === path ? (openPaths[Math.max(0, index - 1)] ?? null) : state.activePath;
+  return { ...state, openPaths, activePath, viewModes, imageScales };
 }
 
 /**
@@ -132,6 +148,10 @@ export const useFilesTabsStore = create<FilesTabsStore>((set) => {
     clearJump: (scopeId) => update(scopeId, (state) => (state.pendingJump === null ? state : { ...state, pendingJump: null })),
     setFindOpen: (scopeId, open) =>
       update(scopeId, (state) => (state.findOpen === open ? state : { ...state, findOpen: open })),
+    setViewMode: (scopeId, path, mode) =>
+      update(scopeId, (state) => ({ ...state, viewModes: { ...state.viewModes, [path]: mode } })),
+    setImageScale: (scopeId, path, scale) =>
+      update(scopeId, (state) => ({ ...state, imageScales: { ...state.imageScales, [path]: scale } })),
   };
 });
 

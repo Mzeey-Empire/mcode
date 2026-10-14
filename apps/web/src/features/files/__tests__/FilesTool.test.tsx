@@ -68,13 +68,13 @@ describe("FilesTool layout", () => {
     renderTool();
     await screen.findByTestId("files-tree-body");
     fireEvent.click(await screen.findByRole("treeitem", { name: /README\.md/ }));
-    await screen.findByTestId("code-file-view");
+    await screen.findByTestId("markdown-file-view");
     expect(screen.queryByTestId("files-docked-tree")).toBeNull();
     expect(screen.queryByTestId("files-tree-body")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Show files tree" }));
     expect(screen.getByTestId("files-tree-body")).toBeTruthy();
-    expect(screen.queryByTestId("code-file-view")).toBeNull();
+    expect(screen.queryByTestId("markdown-file-view")).toBeNull();
   });
 
   it("shows the tree after the last tab closes", async () => {
@@ -171,5 +171,42 @@ describe("FilesTool Go to file", () => {
     fireEvent.change(input, { target: { value: "b.ts" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(getFilesScope(WORKSPACE).activePath).toBe("src/b.ts");
+  });
+});
+
+describe("FilesTool markdown", () => {
+  it("renders README.md as markdown and opens a linked project file as a tab", async () => {
+    setBodyWidth(900);
+    transport.readFileContent.mockImplementation((_ws: string, path: string) =>
+      Promise.resolve(path === "README.md" ? { ...textFile(path, null), content: "# Readme\n\nSee [b](src/b.ts)." } : textFile(path, null)),
+    );
+    useFilesTabsStore.getState().openFile(WORKSPACE, "README.md");
+    renderTool();
+    await waitFor(() => expect(screen.getByTestId("files-docked-tree")).toBeTruthy());
+    // The first render pays for the lazy react-markdown import, which can exceed the 1s default on a cold cache.
+    fireEvent.click(await screen.findByRole("link", { name: "b" }, { timeout: 5000 }));
+    const scope = getFilesScope(WORKSPACE);
+    expect(scope.openPaths).toEqual(["README.md", "src/b.ts"]);
+    expect(scope.activePath).toBe("src/b.ts");
+  });
+
+  it("enables Find only once markdown shows as source, and highlights matches there", async () => {
+    setBodyWidth(900);
+    transport.readFileContent.mockImplementation((_ws: string, path: string) =>
+      Promise.resolve({ ...textFile(path, null), content: "# Readme\n\nneedle in a haystack" }),
+    );
+    useFilesTabsStore.getState().openFile(WORKSPACE, "README.md");
+    renderTool();
+    await screen.findByTestId("markdown-file-view", undefined, { timeout: 5000 });
+    const findButton = screen.getByRole("button", { name: "Find in file" }) as HTMLButtonElement;
+    expect(findButton.disabled).toBe(true);
+
+    act(() => {
+      useFilesTabsStore.getState().setViewMode(WORKSPACE, "README.md", "source");
+      useFilesTabsStore.getState().setFindOpen(WORKSPACE, true);
+    });
+    expect(((await screen.findByRole("button", { name: "Find in file" })) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.change(await screen.findByRole("textbox", { name: /find/i }), { target: { value: "needle" } });
+    await waitFor(() => expect(document.querySelector("[data-find-match]")?.textContent).toBe("needle"));
   });
 });

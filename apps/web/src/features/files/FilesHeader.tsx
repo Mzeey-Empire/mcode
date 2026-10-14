@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { FolderTree, MoreHorizontal, Search } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/button";
@@ -61,18 +61,21 @@ export interface FilesControlsRowProps {
   readonly onGoToFile: () => void;
   /** Null when the body has no text to search, which disables the Find button. */
   readonly find: { readonly open: boolean; readonly onToggle: () => void } | null;
+  /** View-kind controls (preview/source, image scale), shown only while a file shows. */
+  readonly controls?: ReactNode;
 }
 
-/** Row 2: tree toggle, then the path pill (or the Go to file field when no file shows), Find, then More. */
-export function FilesControlsRow({ treeOpen, shownPath, actions, onToggleTree, onRevealFolder, onGoToFile, find }: FilesControlsRowProps) {
+/** Row 2: tree toggle, then the path pill (or the Go to file field when no file shows), view controls, Find, then More. */
+export function FilesControlsRow({ treeOpen, shownPath, actions, onToggleTree, onRevealFolder, onGoToFile, find, controls }: FilesControlsRowProps) {
   const findShortcut = keybindingKeycaps(getKeybindingForCommand("files.findInFile")?.key ?? "mod+f", isMac);
   return (
     <PanelHeaderSlot slot="row2">
-      <div data-files-tool="" className="flex h-10 min-w-0 flex-1 items-center gap-2">
+      <div data-files-tool="" className="@container flex h-10 min-w-0 flex-1 items-center gap-2">
         <IconButton shape="round" aria-label={treeOpen ? "Hide files tree" : "Show files tree"} pressed={treeOpen} onClick={onToggleTree}>
           <FolderTree />
         </IconButton>
         {shownPath ? <PathPill path={shownPath} onRevealFolder={onRevealFolder} /> : <GoToFileField onClick={onGoToFile} />}
+        {shownPath ? controls : null}
         <IconButton
           shape="round"
           aria-label="Find in file"

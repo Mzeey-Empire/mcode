@@ -1,4 +1,4 @@
-import { useMemo, lazy, Suspense } from "react";
+import { useMemo, lazy, Suspense, type MouseEvent, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { makeRemarkDiffMarkers } from "@/lib/remark-diff-markers";
@@ -8,12 +8,45 @@ const LazyMermaidBlock = lazy(() => import("../chat/MermaidBlock"));
 
 /**
  * react-markdown component overrides for the diff preview. The only behavior
- * we add over the defaults is mermaid handling: fenced ```mermaid blocks must
- * render as diagrams, not raw code (the diff preview previously showed them as
- * plain text). Everything else falls through to react-markdown defaults so the
- * diff markers and global typography styles keep working.
+ * we add over the defaults is mermaid handling (fenced ```mermaid blocks must
+ * render as diagrams, not raw code) and heading ids for in-page links.
+ * Everything else falls through to react-markdown defaults so the diff markers
+ * and global typography styles keep working.
  */
+interface HastLike {
+  readonly type: string;
+  readonly value?: string;
+  readonly children?: readonly HastLike[];
+}
+
+function hastText(node: HastLike | undefined): string {
+  if (!node) return "";
+  if (node.type === "text") return node.value ?? "";
+  return (node.children ?? []).map(hastText).join("");
+}
+
+/** GitHub-style heading slug, so `#some-heading` links in a file can find their target. */
+export function headingSlug(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, "")
+    .replace(/\s/g, "-");
+}
+
+const HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6"] as const;
+
+const HEADINGS: Components = Object.fromEntries(
+  HEADING_TAGS.map((Tag) => [
+    Tag,
+    ({ node, children, ...props }: { node?: HastLike; children?: ReactNode }) => (
+      <Tag id={headingSlug(hastText(node))} {...props}>{children}</Tag>
+    ),
+  ]),
+);
+
 const COMPONENTS: Components = {
+  ...HEADINGS,
   pre({ node, children, ...props }) {
     // Unwrap the <pre> wrapper around a mermaid fence so the rendered diagram
     // isn't boxed inside code-block styling. Non-mermaid code blocks keep their
@@ -55,6 +88,8 @@ interface DiffPreviewMarkdownProps {
   readonly content: string;
   /** 1-based line numbers within `content` that were added by this diff. */
   readonly addedLines: ReadonlySet<number>;
+  /** Takes over link clicks and must cancel default navigation itself; when omitted, links behave as plain anchors. */
+  readonly onLinkClick?: (href: string, event: MouseEvent<HTMLAnchorElement>) => void;
 }
 
 /**
@@ -71,12 +106,26 @@ interface DiffPreviewMarkdownProps {
 export default function DiffPreviewMarkdown({
   content,
   addedLines,
+  onLinkClick,
 }: DiffPreviewMarkdownProps) {
   // Memoise the plugin list so we don't reinstantiate the closures every
   // render — only when the added-lines identity changes.
   const remarkPlugins = useMemo(
     () => [remarkGfm, makeRemarkDiffMarkers(addedLines)],
     [addedLines],
+  );
+
+  const components = useMemo<Components>(
+    () =>
+      onLinkClick
+        ? {
+            ...COMPONENTS,
+            a: ({ node: _node, href, children, ...props }) => (
+              <a {...props} href={href} onClick={(event) => onLinkClick(href ?? "", event)}>{children}</a>
+            ),
+          }
+        : COMPONENTS,
+    [onLinkClick],
   );
 
   return (
@@ -118,7 +167,7 @@ export default function DiffPreviewMarkdown({
         "[&_td]:border [&_td]:border-border/40 [&_td]:px-2 [&_td]:py-1",
       ].join(" ")}
     >
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={COMPONENTS}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
         {content}
       </ReactMarkdown>
     </div>
