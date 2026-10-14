@@ -35,6 +35,7 @@ import { startPushListeners, stopPushListeners } from "@/transport/ws-events";
 import { useIdleReclamation } from "@/hooks/useIdleReclamation";
 import { useComposerLayoutGuard } from "@/hooks/useComposerLayoutGuard";
 import { showRightPanelAdaptive, toggleRightPanelAdaptive } from "@/lib/right-panel-layout";
+import { usePlanCommands } from "@/components/panels/plan/use-plan-commands";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ToastLane } from "@/components/ui/toast";
 import type { SettingsSection } from "@/components/settings/settings-nav";
@@ -357,6 +358,7 @@ function AppLayout(props: AppLayoutProps) {
   // State, not a ref: the toast lane must re-measure when the main surface mounts or unmounts.
   const [mainElement, setMainElement] = useState<HTMLElement | null>(null);
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
+  usePlanCommands(activeThreadId);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const overviewClosed = useOverviewStore((s) => activeThreadId !== null && s.closedSubjects.has(threadOverviewKey(activeThreadId)));
   const rightPanelVisible = useDiffStore((s) =>

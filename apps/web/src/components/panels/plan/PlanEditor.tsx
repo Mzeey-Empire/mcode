@@ -1,9 +1,10 @@
 import { useEffect, useRef } from "react";
-import { Annotation, Compartment, EditorState, type Extension } from "@codemirror/state";
+import { Annotation, Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
   EditorView,
+  keymap,
   ViewPlugin,
   type ViewUpdate,
   WidgetType,
@@ -15,6 +16,7 @@ import {
   type PlanDecorationRange,
   type PlanLineSpan,
 } from "./plan-editor-decorations";
+import { evaluateWhen } from "@/lib/context-tracker";
 
 const hiddenMark = Decoration.replace({});
 
@@ -81,6 +83,10 @@ const planDecorations = ViewPlugin.fromClass(
   },
   { decorations: (plugin) => plugin.decorations },
 );
+
+// Claiming the key inserts no line break; the document shortcut handler still
+// sees the event and runs Implement.
+const implementKey = Prec.highest(keymap.of([{ key: "Mod-Shift-Enter", run: () => evaluateWhen("planImplementable") }]));
 
 const planTheme = EditorView.theme({
   "&": { color: "var(--color-ink)", backgroundColor: "transparent" },
@@ -159,6 +165,7 @@ export function PlanEditor({ contentMd, editable, onChange, onBlur }: PlanEditor
         doc: initialRef.current.contentMd,
         extensions: [
           editableCompartment.of(editability(initialRef.current.editable)),
+          implementKey,
           EditorView.lineWrapping,
           planDecorations,
           planTheme,

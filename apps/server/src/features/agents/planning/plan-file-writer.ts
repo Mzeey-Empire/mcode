@@ -13,8 +13,22 @@ export class PlanFileWriter {
 
   /** Mirror the latest non-superseded committed version, preserving its exact text. */
   write(threadId: string): Promise<void> {
+    return this.enqueue(threadId, () => this.project(threadId));
+  }
+
+  /** Resolve the same private path used by projections and provider wire text. */
+  path(threadId: string): string {
+    return resolveThreadPlanFile(this.mcodeDir(), threadId);
+  }
+
+  /** Serialize the immutable Implement snapshot after any earlier projection. */
+  writeSnapshot(threadId: string, contentMd: string): Promise<void> {
+    return this.enqueue(threadId, () => this.writeContent(threadId, contentMd));
+  }
+
+  private enqueue(threadId: string, write: () => Promise<void>): Promise<void> {
     const preceding = this.pending.get(threadId) ?? Promise.resolve();
-    const next = preceding.then(() => this.project(threadId), () => this.project(threadId));
+    const next = preceding.then(write, write);
     this.pending.set(threadId, next);
     const settled = () => { if (this.pending.get(threadId) === next) this.pending.delete(threadId); };
     void next.then(settled, settled);
@@ -36,11 +50,15 @@ export class PlanFileWriter {
     const latest = this.readPlans(threadId).filter((plan) => plan.status !== "superseded")
       .sort((a, b) => b.version - a.version)[0];
     if (!latest) return;
-    const destination = resolveThreadPlanFile(this.mcodeDir(), threadId);
+    await this.writeContent(threadId, latest.contentMd);
+  }
+
+  private async writeContent(threadId: string, contentMd: string): Promise<void> {
+    const destination = this.path(threadId);
     await NodeFSPromises.mkdir(NodePath.dirname(destination), { recursive: true });
     const temporary = `${destination}.${NodeCrypto.randomUUID()}.tmp`;
     try {
-      await NodeFSPromises.writeFile(temporary, latest.contentMd, { encoding: "utf8", flag: "wx" });
+      await NodeFSPromises.writeFile(temporary, contentMd, { encoding: "utf8", flag: "wx" });
       await NodeFSPromises.rename(temporary, destination);
     } finally { await NodeFSPromises.rm(temporary, { force: true }); }
   }

@@ -77,6 +77,11 @@ describe("selectViewedPlanVersion", () => {
     expect(selectViewedPlanVersion(versions, 9)?.version).toBe(3);
   });
 
+  it("shows the accepted version over a newer draft its Implement superseded", () => {
+    const implemented = [plan(1), { ...plan(2), status: "accepted" as const }, { ...plan(3), status: "superseded" as const }];
+    expect(selectViewedPlanVersion(implemented, null)?.version).toBe(2);
+  });
+
   it("shows nothing for a thread without versions", () => {
     expect(selectViewedPlanVersion([], null)).toBeNull();
     expect(selectViewedPlanVersion(versions, null)?.title).toBe("Plan 3");

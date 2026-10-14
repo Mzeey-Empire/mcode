@@ -112,7 +112,7 @@ import {
   TurnResumeUnscheduleParamsSchema,
 } from "../models/turn-recovery.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
-import { PlanSaveVersionSchema, PlanVersionSchema, PlanActionSchema } from "../models/plan.js";
+import { PlanSaveVersionSchema, PlanVersionSchema, PlanActionSchema, PlanImplementSchema, PlanImplementReceiptSchema } from "../models/plan.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
 import { ReviewComparisonResultSchema, ReviewComparisonUnavailableSchema, ReviewFileDiffResultSchema, ReviewTurnSchema, ReviewStateSchema } from "../models/review-comparison.js";
 import {
@@ -357,8 +357,8 @@ export const SendMessageSchema = lazySchema(() => z.object({
     /** Highlighted text excerpt from the original message. Absent for full-message replies. */
     quotedText: z.string().max(2000).optional(),
     /**
-     * Plan-tab action hint. `revise` enables plan capture; `implement` runs
-     * in chat mode without the plan-questions wrapper.
+     * Legacy plan-tab action hint. `revise` enables plan capture.
+     * Implement uses the revision-checked `plan.implement` method.
      */
     planAction: PlanActionSchema().optional(),
     /** Objective installed as a provider goal immediately before this turn dispatches. */
@@ -1212,6 +1212,10 @@ export const WS_METHODS = lazySchema(() => ({
   "plan.saveVersion": {
     params: PlanSaveVersionSchema(),
     result: PlanVersionSchema(),
+  },
+  "plan.implement": {
+    params: PlanImplementSchema(),
+    result: PlanImplementReceiptSchema(),
   },
   "plan.snapshot": {
     params: z.object({

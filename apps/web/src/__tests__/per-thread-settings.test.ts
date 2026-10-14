@@ -184,31 +184,4 @@ describe("per-thread settings", () => {
     expect(updated?.interaction_mode).toBe("plan");
     expect(updated?.reasoning_level).toBe("max");
   });
-
-  it("sendPlanAction implement switches interaction mode to build", async () => {
-    const thread = createMockThread({
-      id: "thread-implement",
-      interaction_mode: "plan",
-    });
-    useWorkspaceStore.setState({ threads: [thread] });
-
-    await useThreadStore.getState().sendPlanAction(
-      "thread-implement",
-      "Implement the plan.",
-      "implement",
-    );
-
-    expect(useThreadStore.getState().getThreadSettings("thread-implement").interactionMode).toBe("build");
-    expect(
-      useWorkspaceStore.getState().threads.find((t) => t.id === "thread-implement")?.interaction_mode,
-    ).toBe("build");
-    expect(mockTransport.updateThreadSettings).toHaveBeenCalledWith(
-      "thread-implement",
-      expect.objectContaining({ interactionMode: "build" }),
-    );
-
-    const calls = vi.mocked(mockTransport.sendMessage).mock.calls;
-    const sendCall = calls[calls.length - 1]?.[0];
-    expect(sendCall?.interactionMode).toBe("build");
-  });
 });

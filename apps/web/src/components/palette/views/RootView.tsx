@@ -1,8 +1,8 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useRecentThreadsStore } from "@/stores/recentThreadsStore";
-import { getAllCommands, executeCommand } from "@/lib/command-registry";
+import { executeCommand, getCommandsSnapshot, subscribeCommands } from "@/lib/command-registry";
 import { getKeybindingForCommand, formatKeybinding } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
 import {
@@ -62,12 +62,15 @@ export function RootView() {
     fetchRecentThreads();
   }, [fetchRecentThreads]);
 
+  // Command titles can name live state, such as the plan version Implement acts on.
+  const registered = useSyncExternalStore(subscribeCommands, getCommandsSnapshot);
+
   // When query starts with ">" only show actions
   const actionOnly = query.startsWith(">");
   const effectiveQuery = actionOnly ? query.slice(1).trimStart() : query;
 
   const groups = useMemo<PaletteGroup[]>(() => {
-    const commands = getAllCommands().filter((c) => !HIDDEN_COMMANDS.has(c.id));
+    const commands = registered.filter((c) => !HIDDEN_COMMANDS.has(c.id));
 
     const visibleCommands = actionOnly || effectiveQuery
       ? commands
@@ -139,7 +142,7 @@ export function RootView() {
     }
 
     return filterCommandPaletteGroups(result, effectiveQuery);
-  }, [effectiveQuery, actionOnly, recentThreads, workspaces]);
+  }, [effectiveQuery, actionOnly, recentThreads, workspaces, registered]);
 
   const handleSelect = (value: string) => {
     if (value.startsWith("cmd:")) {

@@ -1034,6 +1034,32 @@ export const planQuestionAnswers = sqliteTable(
   ],
 );
 
+/** Durable Implement snapshot and its atomic turn-admission outcome. */
+export const planImplementRequests = sqliteTable("plan_implement_requests", {
+  requestId: text("request_id").primaryKey().notNull(),
+  sourceThreadId: text("source_thread_id").notNull().references(() => threads.id, { onDelete: "cascade" }),
+  fingerprint: text("fingerprint").notNull(),
+  versionId: text("version_id").notNull(),
+  version: integer("version").notNull(),
+  revision: integer("revision").notNull(),
+  title: text("title").notNull(),
+  wireText: text("wire_text").notNull(),
+  target: text("target").notNull(),
+  sourceCommit: text("source_commit"),
+  targetThreadId: text("target_thread_id"),
+  startupId: text("startup_id"),
+  messageId: text("message_id").notNull(),
+  status: text("status").notNull(),
+  failureCode: text("failure_code"),
+  nativePlanFileJson: text("native_plan_file_json"),
+  turnId: text("turn_id"),
+  executionId: text("execution_id"),
+  createdAt: text("created_at").notNull().default(timestampDefault),
+  updatedAt: text("updated_at").notNull().default(timestampDefault),
+}, table => [
+  uniqueIndex("idx_plan_implement_preparing_thread").on(table.sourceThreadId).where(sql`${table.status} = 'preparing'`),
+]);
+
 export const plans = sqliteTable(
   "plans",
   {

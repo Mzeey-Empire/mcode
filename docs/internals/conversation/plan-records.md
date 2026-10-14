@@ -10,8 +10,8 @@ turn ends and allocates capture versions from memory. Its reload must add user
 rows, take their saved content and revision, and preserve the later status in the
 order draft or ready, superseded, accepted. Snapshots use the same merge.
 
-Accepted commits only inside turn admission. The later Implement operation must
-commit the accepted version with the admitted turn; a file write or prepared
+Accepted commits only inside turn admission. The Implement operation
+commits the accepted version with the admitted turn; a file write or prepared
 request alone does not mean implementation started. There is no client status setter.
 
 Native plan files change only with ownership proof. A provider must name the exact

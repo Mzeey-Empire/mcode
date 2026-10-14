@@ -122,7 +122,10 @@ import { PlanQuestionService } from "../../features/agents/planning/plan-questio
 import { PostTerminalHookCompletionEffect } from "../../features/agents/turns/post-terminal-hook-completion-effect.js";
 import { BackgroundToolSettlementEffect } from "../../features/agents/turns/background-tool-settlement-effect.js";
 import { PlanRepo } from "../../features/agents/planning/persistence/plan-repo.js";
-import { PlanService } from "../../features/agents/planning/plan-service.js";
+import { PlanService, type PlanImplementRuntime } from "../../features/agents/planning/plan-service.js";
+import { AGENT_TURN_COMMAND_PORT } from "../../features/agents/orchestration/agent-turn-command-port.js";
+import { ThreadControlMutationReservationService } from "../../features/thread-control/authority/thread-control-mutation-reservation-service.js";
+import { ScopedPreGrantService } from "../../features/agents/permissions/scoped-pre-grant.js";
 import { PlanFileWriter } from "../../features/agents/planning/plan-file-writer.js";
 import { SnapshotService } from "../../features/projects/diffs/snapshots/snapshot-service.js";
 import { SettingsService } from "../../features/settings/settings-service.js";
@@ -164,10 +167,10 @@ import { ApplicationDatabaseWriter } from "../../runtime/persistence/sqlite/appl
 import { TurnSteerService } from "../../features/agents/steering/turn-steer-service.js";
 
 function createPlanService(writer: ApplicationDatabaseWriter, runtime: WorkerOwnedTurnRuntime,
-  plans: PlanRepo, turns: PlanTurnService): PlanService {
+  plans: PlanRepo, turns: PlanTurnService, implement: PlanImplementRuntime): PlanService {
   const files = runtime.planFiles ?? new PlanFileWriter((threadId) => plans.listByThread(threadId));
   turns.bindPlanProjection(runtime.progress, files);
-  return new PlanService(writer, runtime.progress, files);
+  return new PlanService(writer, runtime.progress, files, implement);
 }
 
 /** Start the server runtime and install its shutdown handlers. */
@@ -507,7 +510,11 @@ threadRepo.attention = threadAttentionService;
 turnSnapshotRepo.attention = threadAttentionService;
 snapshotRefPins.attention = threadAttentionService;
 invalidateAttentionOnSettledTurns(threadAttentionService, subscribeCommittedCanonicalEvents);
-const planService = createPlanService(databaseWriter, workerOwnedTurnRuntime, planRepo, planTurnService);
+const planService = createPlanService(databaseWriter, workerOwnedTurnRuntime, planRepo, planTurnService, {
+  threads: threadRepo, providers: providerRegistry, commands: container.resolve(AGENT_TURN_COMMAND_PORT),
+  reservations: container.resolve(ThreadControlMutationReservationService),
+  grants: container.resolve(ScopedPreGrantService),
+});
 const reliabilityHarness = createReliabilityHarnessAdapter(databaseWriter, undefined, {
   streamAssistant: (threadId) => agentReliability.streamAssistantText(threadId),
 });
@@ -1040,6 +1047,7 @@ async function bootstrapServer(): Promise<void> {
       },
     });
     await recoverTurnsAtStartup();
+    await planService.recoverInterrupted();
     await turnResumeScheduler.start();
     recordStartupCheckpoint("turn recovery completed");
     await settleOrphanedBackgroundToolsAtStartup();

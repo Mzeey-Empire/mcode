@@ -2,15 +2,21 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EditorView } from "@codemirror/view";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { PlanSaveVersion, PlanVersion } from "@mcode/contracts";
+import type { PlanImplement, PlanImplementReceipt, PlanSaveVersion, PlanVersion } from "@mcode/contracts";
+import { useConnectionStore } from "@/stores/connectionStore";
 import { usePlanStore } from "@/stores/planStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { RpcError } from "@/transport/ws-transport";
 import { PlanPanel } from "./PlanPanel";
 import { planSaveScheduler } from "./plan-draft-sessions";
+import { IMPLEMENT_FAILED_NOTICE, PLAN_CHANGED_NOTICE } from "./plan-implement";
 
 const savePlanVersion = vi.hoisted(() => vi.fn<(payload: PlanSaveVersion) => Promise<PlanVersion>>());
-vi.mock("@/transport", () => ({ getTransport: () => ({ savePlanVersion }) }));
+const implementPlan = vi.hoisted(() => vi.fn<(payload: PlanImplement) => Promise<PlanImplementReceipt>>());
+vi.mock("@/transport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/transport")>()),
+  getTransport: () => ({ savePlanVersion, implementPlan, updateThreadSettings: vi.fn(async () => true) }),
+}));
 
 const THREAD = "thread-plan";
 
@@ -56,6 +62,8 @@ describe("PlanPanel", () => {
     usePlanStore.setState({ plansByThread: {}, activeVersionByThread: {} });
     useThreadStore.setState({ runningThreadIds: new Set() });
     savePlanVersion.mockReset();
+    implementPlan.mockReset();
+    useConnectionStore.setState({ status: "connected" });
   });
 
   it("shows the latest version and names it in the picker", () => {
@@ -210,5 +218,192 @@ describe("PlanPanel", () => {
     expect(screen.queryByRole("button", { name: "Keep my text" })).toBeNull();
     expect(screen.getByRole("button", { name: "Use saved version" })).toBeInTheDocument();
     expect(editorText()).toContain("My plan");
+  });
+
+  describe("Implement", () => {
+    const READY_ID = "00000000-0000-4000-8000-000000000002";
+
+    function receiptFor(request: PlanImplement): PlanImplementReceipt {
+      return { requestId: request.requestId, versionId: request.versionId, version: 2, targetThreadId: request.threadId,
+        messageId: "00000000-0000-4000-8000-0000000000c1", nativePlanFile: null, state: "admitted" };
+    }
+
+    function theirDraft(): PlanVersion {
+      return makePlan(3, { id: "00000000-0000-4000-8000-0000000000b1", status: "draft", author: "user",
+        revision: 1, baseVersionId: READY_ID, contentMd: "# Their plan\n" });
+    }
+
+    async function pressImplement(label: string): Promise<void> {
+      await userEvent.setup().click(screen.getByRole("button", { name: label }));
+    }
+
+    function startInPlan(thread: string, versions: PlanVersion[]): void {
+      usePlanStore.setState({ plansByThread: { [thread]: versions } });
+      useThreadStore.getState().applyPersistedThreadSettings(thread, { interactionMode: "plan" });
+    }
+
+    function interactionMode(thread: string): string {
+      return useThreadStore.getState().getThreadSettings(thread).interactionMode;
+    }
+
+    it("implements a ready version at its revision and switches the thread to Build", async () => {
+      const thread = "thread-implement-ready";
+      startInPlan(thread, [makePlan(2, { id: READY_ID })]);
+      implementPlan.mockImplementation(async (request) => receiptFor(request));
+      render(<PlanPanel threadId={thread} />);
+
+      await pressImplement("Implement v2");
+
+      await waitFor(() => expect(implementPlan).toHaveBeenCalledTimes(1));
+      expect(implementPlan.mock.calls[0][0]).toEqual({
+        requestId: expect.any(String), threadId: thread, target: "thread", versionId: READY_ID, expectedRevision: 0,
+      });
+      await waitFor(() => expect(interactionMode(thread)).toBe("build"));
+    });
+
+    it("implements a draft at its current revision", async () => {
+      const thread = "thread-implement-draft";
+      usePlanStore.setState({ plansByThread: { [thread]: [makePlan(2, { id: READY_ID, status: "draft", revision: 4 })] } });
+      implementPlan.mockImplementation(async (request) => receiptFor(request));
+      render(<PlanPanel threadId={thread} />);
+
+      await pressImplement("Implement v2");
+
+      await waitFor(() => expect(implementPlan).toHaveBeenCalledTimes(1));
+      expect(implementPlan.mock.calls[0][0]).toMatchObject({ versionId: READY_ID, expectedRevision: 4 });
+    });
+
+    it("carries unsent text and expects the revision its save will make", async () => {
+      const thread = "thread-implement-pending";
+      const ready = makePlan(2, { id: READY_ID });
+      usePlanStore.setState({ plansByThread: { [thread]: [ready] } });
+      implementPlan.mockImplementation(async (request) => receiptFor(request));
+      render(<PlanPanel threadId={thread} />);
+
+      typeAtEnd("Extra");
+      await pressImplement("Implement v2");
+
+      await waitFor(() => expect(implementPlan).toHaveBeenCalledTimes(1));
+      const request = implementPlan.mock.calls[0][0];
+      expect(request.expectedRevision).toBe(1);
+      expect(request.pending).toMatchObject({ baseVersionId: READY_ID, baseRevision: 0, contentMd: `${ready.contentMd}Extra` });
+      expect(request.versionId).toBe(request.pending?.versionId);
+      expect(savePlanVersion).not.toHaveBeenCalled();
+    });
+
+    it("hides the split for a superseded version", async () => {
+      usePlanStore.setState({
+        plansByThread: { [THREAD]: [makePlan(1, { status: "superseded" }), makePlan(2)] },
+        activeVersionByThread: { [THREAD]: 1 },
+      });
+
+      render(<PlanPanel threadId={THREAD} />);
+
+      await waitFor(() => expect(editorText()).toContain("Step for v1"));
+      expect(screen.queryByTestId("plan-implement")).toBeNull();
+    });
+
+    it("shows the newer version and says nothing was sent when the version changed", async () => {
+      const thread = "thread-implement-conflict";
+      usePlanStore.setState({ plansByThread: { [thread]: [makePlan(2, { id: READY_ID })] }, activeVersionByThread: { [thread]: 2 } });
+      implementPlan.mockRejectedValue(new RpcError("Plan changed", "plan_conflict", { latestVersion: theirDraft() }));
+      render(<PlanPanel threadId={thread} />);
+
+      await pressImplement("Implement v2");
+
+      expect(await screen.findByTestId("plan-implement-notice")).toHaveTextContent(PLAN_CHANGED_NOTICE);
+      await waitFor(() => expect(editorText()).toContain("Their plan"));
+      expect(screen.getByRole("button", { name: "Implement v3" })).toBeInTheDocument();
+    });
+
+    it("holds carried text in the conflict notice when the version changed", async () => {
+      const thread = "thread-implement-carried-conflict";
+      usePlanStore.setState({ plansByThread: { [thread]: [makePlan(2, { id: READY_ID })] } });
+      implementPlan.mockRejectedValue(new RpcError("Plan changed", "plan_conflict", { latestVersion: theirDraft() }));
+      render(<PlanPanel threadId={thread} />);
+
+      typeAtEnd("Mine");
+      await pressImplement("Implement v2");
+
+      expect(await screen.findByTestId("plan-conflict-notice")).toBeInTheDocument();
+      expect(screen.queryByTestId("plan-implement-notice")).toBeNull();
+      expect(editorText()).toContain("Mine");
+    });
+
+    it("reports a refused request as interrupted and stays in Plan", async () => {
+      const thread = "thread-implement-failed";
+      startInPlan(thread, [makePlan(2)]);
+      implementPlan.mockRejectedValue(new RpcError("Busy", "thread_busy"));
+      render(<PlanPanel threadId={thread} />);
+
+      await pressImplement("Implement v2");
+
+      expect(await screen.findByTestId("plan-implement-notice")).toHaveTextContent(IMPLEMENT_FAILED_NOTICE);
+      expect(interactionMode(thread)).toBe("plan");
+    });
+
+    it("resends the same request after each connection drop until one answers", async () => {
+      const thread = "thread-implement-reconnect";
+      startInPlan(thread, [makePlan(2, { id: READY_ID })]);
+      const dropConnection = async () => {
+        useConnectionStore.setState({ status: "reconnecting" });
+        throw new Error("WebSocket disconnected");
+      };
+      implementPlan.mockImplementationOnce(dropConnection);
+      implementPlan.mockImplementationOnce(dropConnection);
+      implementPlan.mockImplementationOnce(async (request) => receiptFor(request));
+      render(<PlanPanel threadId={thread} />);
+
+      await pressImplement("Implement v2");
+      await waitFor(() => expect(implementPlan).toHaveBeenCalledTimes(1));
+      expect(interactionMode(thread)).toBe("plan");
+
+      act(() => useConnectionStore.setState({ status: "connected" }));
+      await waitFor(() => expect(implementPlan).toHaveBeenCalledTimes(2));
+      act(() => useConnectionStore.setState({ status: "connected" }));
+
+      await waitFor(() => expect(implementPlan).toHaveBeenCalledTimes(3));
+      expect(implementPlan.mock.calls[2][0]).toEqual(implementPlan.mock.calls[0][0]);
+      await waitFor(() => expect(interactionMode(thread)).toBe("build"));
+      expect(screen.queryByTestId("plan-implement-notice")).toBeNull();
+    });
+
+    it("waits for the dropped socket's close event before resending", async () => {
+      const thread = "thread-implement-closing";
+      startInPlan(thread, [makePlan(2, { id: READY_ID })]);
+      // Drops until the close event has run, capped so a resend that never
+      // yields to it fails the count below instead of starving the worker.
+      let closeEventRan = false;
+      let attempts = 0;
+      implementPlan.mockImplementation(async (request) => {
+        attempts += 1;
+        if (closeEventRan || attempts > 20) return receiptFor(request);
+        setTimeout(() => {
+          closeEventRan = true;
+          useConnectionStore.setState({ status: "reconnecting" });
+        }, 0);
+        throw new Error("WebSocket disconnected");
+      });
+      render(<PlanPanel threadId={thread} />);
+
+      await pressImplement("Implement v2");
+      await waitFor(() => expect(useConnectionStore.getState().status).toBe("reconnecting"));
+      act(() => useConnectionStore.setState({ status: "connected" }));
+
+      await waitFor(() => expect(interactionMode(thread)).toBe("build"));
+      expect(implementPlan).toHaveBeenCalledTimes(2);
+    });
+
+    it("reports a closed transport as interrupted without resending", async () => {
+      const thread = "thread-implement-closed";
+      startInPlan(thread, [makePlan(2, { id: READY_ID })]);
+      implementPlan.mockRejectedValueOnce(new Error("Transport closed"));
+      render(<PlanPanel threadId={thread} />);
+
+      await pressImplement("Implement v2");
+
+      expect(await screen.findByTestId("plan-implement-notice")).toHaveTextContent(IMPLEMENT_FAILED_NOTICE);
+      expect(implementPlan).toHaveBeenCalledTimes(1);
+    });
   });
 });

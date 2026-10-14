@@ -58,6 +58,7 @@ type AgentRpcMethod =
   | "subagent.detail"
   | "plan.saveVersion"
   | "plan.snapshot"
+  | "plan.implement"
   | "message.list"
   | "conversation.page"
   | "conversation.olderPage"
@@ -96,7 +97,7 @@ export interface AgentRouterDeps {
   messageRepo: ConversationPageDeps["messageRepo"] & Pick<MessageRepo, "confirmUserMessage">;
   narrativeStore: Pick<NarrativeStore, "load" | "listApprovals">;
   planQuestionAnswersRepo: ConversationPageDeps["planQuestionAnswersRepo"];
-  planService: Pick<PlanService, "saveVersion" | "snapshot">;
+  planService: Pick<PlanService, "saveVersion" | "snapshot" | "implement">;
   planTurnService: Pick<PlanTurnService, "answerQuestions" | "dismissQuestions">;
   recapService: Pick<RecapService, "generate">;
   subagentRosterService: Pick<SubagentRosterService, "loadRoster" | "loadDetail" | "stop">;
@@ -207,6 +208,7 @@ const agentHandlers: AgentRpcHandlerMap = {
   "subagent.detail": (deps, params) => deps.subagentRosterService.loadDetail(params),
   "plan.saveVersion": (deps, params) => deps.planService.saveVersion(params),
   "plan.snapshot": (deps, params) => deps.planService.snapshot(params),
+  "plan.implement": (deps, params) => deps.planService.implement(params),
   "message.list": (deps, params) => ({
     ...deps.messageRepo.listByThread(params.threadId, params.limit, params.before),
     answeredPlanMessageIds: deps.planQuestionAnswersRepo.listAnsweredForThread(params.threadId),

@@ -15,6 +15,8 @@ import { TaskStore } from "./orchestration/persistence/task-store.js";
 import { taskWriteOperations } from "./orchestration/persistence/task-write-operations.js";
 import { PlanStore } from "./planning/persistence/plan-store.js";
 import { planWriteOperations } from "./planning/persistence/plan-write-operations.js";
+import { planImplementWriteOperations } from "./planning/persistence/plan-implement-write-operations.js";
+import { PlanImplementStore } from "./planning/persistence/plan-implement-store.js";
 import { PlanQuestionAnswersStore } from "./planning/persistence/plan-question-answers-store.js";
 import { planQuestionAnswersWriteOperations } from "./planning/persistence/plan-question-answers-write-operations.js";
 import { TurnSnapshotStore } from "./turns/persistence/turn-snapshot-store.js";
@@ -79,6 +81,8 @@ function taskHandlers(db: Database): ReadonlyMap<string, (input: unknown) => unk
 
 function planAndTurnHandlers(db: Database): ReadonlyMap<string, (input: unknown) => unknown> {
   const plans = new PlanStore(db);
+  const implementsStore = new PlanImplementStore(db);
+  const implement = planImplementWriteOperations;
   const answers = new PlanQuestionAnswersStore(db);
   const snapshots = new TurnSnapshotStore(db);
   const diffs = new TurnDiffStore(db);
@@ -90,6 +94,11 @@ function planAndTurnHandlers(db: Database): ReadonlyMap<string, (input: unknown)
     [plan.create.name, databaseWriteHandler(plan.create, input => plans.create(...input))],
     [plan.saveVersion.name, databaseWriteHandler(plan.saveVersion, input => plans.saveVersion(input))],
     [plan.snapshot.name, databaseWriteHandler(plan.snapshot, input => plans.snapshot(input.threadId))],
+    [implement.prepare.name, databaseWriteHandler(implement.prepare, input => implementsStore.prepare(input))],
+    [implement.read.name, databaseWriteHandler(implement.read, input => implementsStore.read(input))],
+    [implement.nativeFile.name, databaseWriteHandler(implement.nativeFile, input => implementsStore.recordNativeFile(input.requestId, input.outcome))],
+    [implement.fail.name, databaseWriteHandler(implement.fail, input => implementsStore.fail(input.requestId, input.code))],
+    [implement.preparing.name, databaseWriteHandler(implement.preparing, () => implementsStore.preparing())],
     [answer.markAnswered.name, databaseWriteHandler(answer.markAnswered, input => answers.markAnswered(...input))],
     [snapshot.create.name, databaseWriteHandler(snapshot.create, input => snapshots.create(...input))],
     [snapshot.deleteExpired.name, databaseWriteHandler(snapshot.deleteExpired, input => snapshots.deleteExpired(...input))],

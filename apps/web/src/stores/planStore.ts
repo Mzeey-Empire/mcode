@@ -13,14 +13,22 @@ function mergeVersion(current: PlanVersion, incoming: PlanVersion): PlanVersion 
 
 /**
  * The version a thread's Plan panel shows: the picked version while it still
- * exists, else the latest. Null when the thread has no versions.
+ * exists, else the newest version not superseded, else the latest. Null when
+ * the thread has no versions.
  */
 export function selectViewedPlanVersion(
   versions: readonly PlanVersion[],
   activeVersion: number | null,
 ): PlanVersion | null {
   const picked = activeVersion === null ? undefined : versions.find((v) => v.version === activeVersion);
-  return picked ?? versions.at(-1) ?? null;
+  return picked ?? newestUnsuperseded(versions) ?? versions.at(-1) ?? null;
+}
+
+function newestUnsuperseded(versions: readonly PlanVersion[]): PlanVersion | undefined {
+  for (let i = versions.length - 1; i >= 0; i -= 1) {
+    if (versions[i].status !== "superseded") return versions[i];
+  }
+  return undefined;
 }
 
 /**

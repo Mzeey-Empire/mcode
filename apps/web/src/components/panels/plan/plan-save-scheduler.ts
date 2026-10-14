@@ -1,4 +1,4 @@
-import { PlanVersionSchema, type PlanSaveVersion, type PlanVersion } from "@mcode/contracts";
+import { PlanVersionSchema, type PlanImplement, type PlanSaveVersion, type PlanVersion } from "@mcode/contracts";
 import { RpcError } from "@/transport/ws-transport";
 
 /** Quiet period after the last keystroke before a plan draft saves. */
@@ -13,23 +13,43 @@ export interface DraftTarget {
   readonly baseRevision: number;
 }
 
+interface EditingState {
+  readonly kind: "editing";
+  readonly target: DraftTarget;
+  readonly text: string;
+  readonly ackedText: string;
+  readonly inFlight: PlanSaveVersion | null;
+}
+
+type ImplementPending = NonNullable<PlanImplement["pending"]>;
+
 /**
  * One thread's plan edit session. `idle` means the editor follows the store.
  * `editing` holds the local text and what the server has acknowledged.
  * `conflict` holds the local text until the user picks a side.
+ * `implementing` freezes the text on screen while an Implement request runs;
+ * `resume` is the session to restore if the request did not carry its text.
  */
 export type PlanDraftState =
   | { readonly kind: "idle" }
+  | EditingState
+  | { readonly kind: "conflict"; readonly text: string; readonly latest: PlanVersion; readonly canKeep: boolean }
   | {
-      readonly kind: "editing";
-      readonly target: DraftTarget;
+      readonly kind: "implementing";
       readonly text: string;
-      readonly ackedText: string;
-      readonly inFlight: PlanSaveVersion | null;
-    }
-  | { readonly kind: "conflict"; readonly text: string; readonly latest: PlanVersion; readonly canKeep: boolean };
+      readonly carried: ImplementPending | null;
+      readonly resume: EditingState | null;
+    };
 
-type EditingState = Extract<PlanDraftState, { kind: "editing" }>;
+/** The version an Implement request names and the text it carries. */
+export type ImplementBasis = Pick<PlanImplement, "versionId" | "expectedRevision" | "pending">;
+
+/** How an Implement request ended, as the scheduler needs to know it. */
+export type ImplementOutcome =
+  | { readonly kind: "admitted" }
+  | { readonly kind: "conflict"; readonly latest: PlanVersion }
+  | { readonly kind: "failed"; readonly latest: PlanVersion | null };
+
 type TimerHandle = ReturnType<typeof globalThis.setTimeout>;
 
 /** Side effects a {@link PlanSaveScheduler} needs, injected so tests control time and the wire. */
@@ -71,7 +91,57 @@ function targetFor(latest: PlanVersion, newId: () => string): DraftTarget {
   return { versionId: newId(), baseVersionId: latest.id, baseRevision: latest.revision };
 }
 
+function isSessionRevision(version: PlanVersion, target: DraftTarget): boolean {
+  return version.id === target.versionId && version.revision === target.baseRevision;
+}
+
 const IDLE: PlanDraftState = { kind: "idle" };
+
+/** The version an Implement acts on, and the thread's latest version. */
+export interface ImplementPick {
+  readonly target: PlanVersion;
+  readonly latest: PlanVersion;
+}
+
+type ImplementingState = Extract<PlanDraftState, { kind: "implementing" }>;
+
+function canHandOff(state: PlanDraftState): state is Extract<PlanDraftState, { kind: "idle" | "editing" }> {
+  return state.kind === "idle" || state.kind === "editing";
+}
+
+function unsentEditOfLatest(editing: EditingState | null, { target, latest }: ImplementPick): ImplementPending | null {
+  if (editing === null || editing.text === editing.ackedText || target.id !== latest.id) return null;
+  return { ...editing.target, contentMd: editing.text };
+}
+
+// The user pressed Implement on one version. Sessions edit the latest version,
+// so a save that lands while Implement waits replaces the pressed version only
+// when it was the latest; a picker change during that save must not move it.
+function pickAfterSave(
+  pressed: ImplementPick | null,
+  current: ImplementPick | null,
+  saved: PlanVersion | null,
+): ImplementPick | null {
+  if (pressed === null || current === null) return null;
+  if (saved !== null && pressed.target.id === pressed.latest.id) return { target: saved, latest: current.latest };
+  if (current.target.id === pressed.target.id) return current;
+  return { target: pressed.target, latest: current.latest };
+}
+
+function revisionAfterSaving(carried: ImplementPending): number {
+  return carried.baseRevision + 1;
+}
+
+function latestHoldsCarriedEdit(carried: ImplementPending, outcome: ImplementOutcome): boolean {
+  if (outcome.kind === "admitted") return true;
+  return outcome.latest?.id === carried.versionId && outcome.latest.contentMd === carried.contentMd;
+}
+
+function sessionAfterImplement(state: ImplementingState, outcome: ImplementOutcome): PlanDraftState {
+  const { resume, carried } = state;
+  if (resume === null || resume.text === resume.ackedText) return IDLE;
+  return carried !== null && latestHoldsCarriedEdit(carried, outcome) ? IDLE : resume;
+}
 
 /**
  * Autosaves one thread's plan edits through `plan.saveVersion`: debounced,
@@ -85,6 +155,9 @@ export class PlanSaveScheduler {
   #debounce: TimerHandle | null = null;
   #retry: TimerHandle | null = null;
   #retryAttempt = 0;
+  #paused = false;
+  #lastSaved: PlanVersion | null = null;
+  readonly #settled = new Set<() => void>();
 
   constructor(
     private readonly threadId: string,
@@ -103,7 +176,7 @@ export class PlanSaveScheduler {
   /** Records the editor's text. The first edit opens a session against `latest`. */
   edit(text: string, latest: PlanVersion): void {
     const state = this.#state;
-    if (state.kind === "conflict") return;
+    if (state.kind === "conflict" || state.kind === "implementing") return;
     if (state.kind === "editing" && state.text === text) return;
     this.#set(
       state.kind === "editing"
@@ -139,14 +212,71 @@ export class PlanSaveScheduler {
   }
 
   /**
-   * Ends a settled session when the thread's latest version is a different
-   * version, such as a new agent capture. A newer revision of the session's
-   * own draft keeps the session, so the next save surfaces the conflict.
+   * Ends a settled session when the thread's latest version is not the
+   * revision the session saved, such as a new agent capture or another
+   * window's save to the same draft, so the editor shows what Implement
+   * would send. An unsettled session stays, and its next save surfaces the
+   * conflict.
    */
   reconcile(latest: PlanVersion | null): void {
     const state = this.#state;
-    if (state.kind !== "editing" || latest === null || latest.id === state.target.versionId) return;
+    if (state.kind !== "editing" || latest === null || isSessionRevision(latest, state.target)) return;
     if (this.#isSettled(state)) this.#set(IDLE);
+  }
+
+  /**
+   * Hands the session to an Implement request. Waits for the save in flight,
+   * since its response decides the revision on screen, then calls `pick` for
+   * the version to implement and its thread's latest. The version picked at
+   * the press stays the target unless it was the latest, in which case the
+   * version that save returned replaces it. Unsent text rides the
+   * request only when the latest version is the one on screen. Returns null,
+   * and resumes autosave, when there is nothing to implement or a conflict
+   * waits for the user.
+   */
+  async beginImplement(pick: () => ImplementPick | null): Promise<ImplementBasis | null> {
+    if (!canHandOff(this.#state)) return null;
+    const pressed = pick();
+    this.#paused = true;
+    this.#clearDebounce();
+    this.#lastSaved = null;
+    await this.#untilNoSaveInFlight();
+    const state = this.getSnapshot();
+    const picked = pickAfterSave(pressed, pick(), this.#lastSaved);
+    if (!canHandOff(state) || picked === null) {
+      this.#resumeAutosave();
+      return null;
+    }
+    const editing = state.kind === "editing" ? state : null;
+    const carried = unsentEditOfLatest(editing, picked);
+    this.#set({ kind: "implementing", text: editing?.text ?? picked.latest.contentMd, carried, resume: editing });
+    if (carried) return { versionId: carried.versionId, expectedRevision: revisionAfterSaving(carried), pending: carried };
+    return { versionId: picked.target.id, expectedRevision: picked.target.revision };
+  }
+
+  /** Ends the Implement hand-off and resumes autosave for any text the request did not carry. */
+  finishImplement(outcome: ImplementOutcome): void {
+    const state = this.#state;
+    if (state.kind !== "implementing") return;
+    if (state.carried && outcome.kind === "conflict") {
+      this.#paused = false;
+      this.#enterConflict(state.text, outcome.latest);
+      return;
+    }
+    if (outcome.kind !== "admitted" && outcome.latest) this.deps.onVersion(outcome.latest);
+    this.#set(sessionAfterImplement(state, outcome));
+    this.#resumeAutosave();
+  }
+
+  #untilNoSaveInFlight(): Promise<void> {
+    const state = this.#state;
+    if (state.kind !== "editing" || state.inFlight === null) return Promise.resolve();
+    return new Promise((resolve) => this.#settled.add(resolve));
+  }
+
+  #resumeAutosave(): void {
+    this.#paused = false;
+    if (this.#state.kind === "editing") this.#armDebounce();
   }
 
   #isSettled(state: EditingState): boolean {
@@ -156,6 +286,10 @@ export class PlanSaveScheduler {
   #set(next: PlanDraftState): void {
     this.#state = next;
     for (const listener of this.#listeners) listener();
+    if (next.kind === "editing" && next.inFlight !== null) return;
+    const settled = [...this.#settled];
+    this.#settled.clear();
+    for (const resolve of settled) resolve();
   }
 
   #armDebounce(): void {
@@ -174,7 +308,7 @@ export class PlanSaveScheduler {
 
   #sendIfDue(): void {
     const state = this.#state;
-    if (state.kind !== "editing" || state.inFlight !== null || this.#retry !== null) return;
+    if (this.#paused || state.kind !== "editing" || state.inFlight !== null || this.#retry !== null) return;
     if (state.text === state.ackedText) return;
     const payload: PlanSaveVersion = { threadId: this.threadId, ...state.target, contentMd: state.text };
     this.#set({ ...state, inFlight: payload });
@@ -198,6 +332,7 @@ export class PlanSaveScheduler {
     const state = this.#ownFlight(payload);
     if (!state) return;
     this.#retryAttempt = 0;
+    this.#lastSaved = version;
     this.#set({
       ...state,
       target: { ...state.target, baseRevision: version.revision },
@@ -242,7 +377,7 @@ export class PlanSaveScheduler {
   #enterConflict(text: string, latest: PlanVersion): void {
     this.#clearDebounce();
     this.#retryAttempt = 0;
-    this.#set({ kind: "conflict", text, latest, canKeep: latest.status !== "accepted" });
+    this.#set({ kind: "conflict", text, latest, canKeep: latest.status === "draft" || latest.status === "ready" });
     this.deps.onVersion(latest);
   }
 }

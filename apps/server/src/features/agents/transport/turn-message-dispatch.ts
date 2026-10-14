@@ -13,8 +13,14 @@ export function sendRecoveryAttempt(service: Pick<AgentService, "sendMessage">, 
     displayContent: command.content });
 }
 
+/** A turn command that can report its durable admission before provider dispatch. */
+type AdmittableTurnCommand = Pick<SendMessageCommand, "threadId" | "onAdmissionComplete">;
+
 /** Resolve after durable admission rather than keeping the caller open for the provider's whole turn. */
-export async function sendAdmittedTurn(service: Pick<AgentService, "sendMessage">, command: SendMessageCommand): Promise<void> {
+export async function sendAdmittedTurn<Command extends AdmittableTurnCommand>(
+  service: { sendMessage(command: Command): Promise<void> },
+  command: Command,
+): Promise<void> {
   let admitted = false;
   let resolveAdmission!: () => void;
   const admission = new Promise<void>((resolve) => { resolveAdmission = resolve; });

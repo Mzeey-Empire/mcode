@@ -10,6 +10,7 @@
     "command": "workspace.new",
     "when": "showLanding && !commandPaletteOpen && !inputFocused"
   },
+  { "key": "mod+shift+enter", "command": "plan.implement", "when": "planImplementable" },
   { "key": "mod+\\", "command": "sidebar.toggle", "when": "!inputFocused" },
   { "key": "alt+ArrowLeft", "command": "navigation.back", "when": "!inputFocused" },
   { "key": "alt+ArrowRight", "command": "navigation.forward", "when": "!inputFocused" },

@@ -919,6 +919,10 @@ export type {
 // Plan output
 export {
   NativePlanFileOutcomeSchema,
+  PlanImplementSchema,
+  PlanImplementTargetSchema,
+  PlanImplementReceiptSchema,
+  PlanImplementErrorSchema,
   NativePlanFileRefSchema,
   PLAN_MAX_CONTENT_CHARS,
   PlanVersionStatusSchema,
@@ -929,6 +933,9 @@ export {
 } from "./models/plan.js";
 export type {
   NativePlanFileOutcome,
+  PlanImplement,
+  PlanImplementReceipt,
+  PlanImplementError,
   PlanVersionStatus,
   PlanSaveVersion,
   PlanSaveError,

@@ -19,6 +19,7 @@ import { HandoffStorage } from "../../../handoff/persistence/handoff-storage.js"
 import { PlanStore } from "../persistence/plan-store.js";
 import { PlanFileWriter } from "../plan-file-writer.js";
 import { PlanService, PlanServiceError } from "../plan-service.js";
+import { planImplementWriteOperations } from "../persistence/plan-implement-write-operations.js";
 
 const pushes = vi.hoisted(() => ({ versions: [] as unknown[], frames: [] as unknown[] }));
 vi.mock("../../../../application/transport/push.js", () => ({
@@ -123,6 +124,38 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
     await expect(service.saveVersion(fork())).rejects.toMatchObject({ code: "plan_busy", latestVersion: ready });
     expect(plans.listByThread(threadId)).toEqual([ready]);
     expect(pushes.versions).toEqual([]);
+  });
+
+  it("prepares a snapshot on the writer and excludes a second window's save", async () => {
+    const requestId = NodeCrypto.randomUUID();
+    const result = await owner.execute(planImplementWriteOperations.prepare, { input: { requestId, threadId,
+      versionId: ready.id, expectedRevision: 0, target: "thread" }, fingerprint: "fixture", planFilePath: files.path(threadId) });
+    expect(result).toMatchObject({ ok: true, contentMd: "# Original", request: { status: "preparing", revision: 0 } });
+    await expect(service.saveVersion(fork())).rejects.toMatchObject({ code: "plan_busy", latestVersion: ready });
+    expect(plans.listByThread(threadId)).toEqual([ready]);
+    await owner.execute(planImplementWriteOperations.fail, { requestId, code: "interrupted" });
+    expect(await service.saveVersion(fork())).toMatchObject({ status: "draft", revision: 1 });
+  });
+
+  it("refuses Implement preparation during an unfinished execution without creating a request", async () => {
+    await start();
+    const requestId = NodeCrypto.randomUUID();
+    expect(await owner.execute(planImplementWriteOperations.prepare, { input: { requestId, threadId,
+      versionId: ready.id, expectedRevision: 0, target: "thread" }, fingerprint: "fixture", planFilePath: files.path(threadId) }))
+      .toMatchObject({ ok: false, code: "thread_busy" });
+    expect(await owner.execute(planImplementWriteOperations.read, requestId)).toBeNull();
+    expect(plans.listByThread(threadId)).toEqual([ready]);
+  });
+
+  it("rejects missing or invalid revision preconditions and mismatched pending identities at the wire boundary", () => {
+    const input = { requestId: NodeCrypto.randomUUID(), threadId, versionId: ready.id, target: "thread" };
+    const schema = WS_METHODS()["plan.implement"].params;
+    for (const invalid of [input, { ...input, expectedRevision: -1 }, { ...input, expectedRevision: 0.5 },
+      { ...input, expectedRevision: 1, pending: { versionId: NodeCrypto.randomUUID(), baseVersionId: ready.id, baseRevision: 0, contentMd: "# Edit" } },
+      { ...input, expectedRevision: 0, target: "new-thread" }]) {
+      expect(schema.safeParse(invalid).success).toBe(false);
+    }
+    expect(schema.parse({ ...input, expectedRevision: 0 })).toEqual({ ...input, expectedRevision: 0 });
   });
 
   it("keys a fork by client id and replays a lost response without allocating another version", async () => {

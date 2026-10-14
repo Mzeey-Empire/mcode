@@ -1,4 +1,5 @@
 import { CanonicalAgentStore as CanonicalAgentBoundary } from "./canonical-agent-store.js";
+import { PlanImplementStore } from "../planning/persistence/plan-implement-store.js";
 import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
 import {
@@ -101,6 +102,8 @@ export interface DataOnlyParentTurnStartInput extends Omit<ParentTurnStartInput,
   userMessage: ParentUserMessageWrite;
   reopenThread?: boolean;
   answeredPlanQuestionMessageId?: string;
+  /** Durable Implement request accepted atomically with this user message and turn. */
+  planImplement?: { requestId: string };
   /** Uncertain steer whose queued resend this turn sends; claimed with the user message. */
   resendOfSteerId?: string;
   /** Reverts included only in the provider prompt, claimed with the user-message projection. */
@@ -279,6 +282,10 @@ export class CanonicalParentTurnWrite {
         markTurnRevertsAgentNotified(this.db, input.thread.id, input.revertNoticeIds ?? []);
         if (input.answeredPlanQuestionMessageId) {
           this.planAnswers.markAnswered(input.answeredPlanQuestionMessageId, input.thread.id);
+        }
+        if (input.planImplement) {
+          new PlanImplementStore(this.db).acceptPlanImplement({ requestId: input.planImplement.requestId,
+            threadId: input.thread.id, messageId: message.id, turnId: input.turnId, executionId: input.executionId });
         }
         return message;
       },

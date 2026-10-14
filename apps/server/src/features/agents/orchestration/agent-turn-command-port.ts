@@ -57,8 +57,15 @@ export class AgentRuntimeCommandPort {
 export interface AgentTurnCommand {
   threadId: string;
   content: string;
+  messageId?: string;
+  displayContent?: string;
+  interactionMode?: "build" | "plan";
+  mutationReservationToken?: string;
+  planImplement?: { requestId: string };
+  /** Acknowledges durable admission before provider dispatch continues. */
+  onAdmissionComplete?: () => void;
   permissionMode?: PermissionMode | "default";
-  model: string;
+  model?: string;
   attachments: AttachmentMeta[];
   reasoningLevel?: ReasoningLevel;
   provider?: ProviderId;

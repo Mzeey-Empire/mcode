@@ -85,6 +85,8 @@ export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "prov
   originSourceTurnId?: string;
   /** Existing shared mutation reservation supplied by thread-control approval dispatch. */
   mutationReservationToken?: string;
+  /** Request whose plan acceptance commits with canonical parent start. */
+  planImplement?: { requestId: string };
   /** Resolves the authoritative first-turn handshake before provider I/O continues. */
   onTurnStarted?: (snapshot: TurnRuntimeSnapshot) => void;
   /** Acknowledges successful admission, including queued rows, before provider dispatch. */
@@ -874,6 +876,7 @@ export class TurnAdmissionDispatchCoordinator {
       userMessage,
       reopenThread: prepared.thread.user_completed_at !== null,
       answeredPlanQuestionMessageId: command.markPlanAnswerForMessageId,
+      planImplement: command.planImplement,
     };
   }
 
