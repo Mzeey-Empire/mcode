@@ -28,6 +28,7 @@ import {
 import { useUiStore } from "@/stores/uiStore";
 import { initShortcuts } from "@/lib/shortcuts";
 import { summonTab } from "@/lib/summon-tab";
+import { openFindInFile } from "@/features/files/find-in-file-command";
 import { openGoToFile } from "@/features/files/go-to-file-command";
 import { executeCommand, registerCommand } from "@/lib/command-registry";
 import { registerSettingsSectionCommands, registerWindowCommands } from "./window-commands";
@@ -805,6 +806,12 @@ export function App() {
         title: "Go to File",
         category: "Navigation",
         handler: openGoToFile,
+      }),
+      registerCommand({
+        id: "files.findInFile",
+        title: "Find in File",
+        category: "Navigation",
+        handler: openFindInFile,
       }),
       registerCommand({
         id: "settings.open",
