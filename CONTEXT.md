@@ -1169,10 +1169,10 @@ shows its full Visual proposal.
 _Avoid_: treating visual proposals as applied page edits
 
 ### Annotation display number
-The visible number shown on a Preview annotation marker and in the Annotation
-bundle. It is unique within the thread's current Annotation bundle, but it may
-change when annotations are deleted or reordered. Numbers follow creation
-order across the bundle; editing an annotation does not move it.
+The number on a Preview annotation marker. It counts from 1 on each page in
+creation order, so a page's markers never skip a number because of notes on
+other pages. Editing an annotation does not move it. The Annotation bundle
+still carries one thread-wide number per annotation.
 _Avoid_: treating the display number as the annotation identity
 
 ### Preview annotation snapshot
@@ -1213,12 +1213,20 @@ note or change summary, proposed changes, and snapshot.
 _Avoid_: relying on screenshots alone for annotation intent
 
 ### Preview annotation mode
-The Preview state where the user creates and edits Preview annotations. The
-UI may label this state as **Design**, but the product concept is annotation
-because the notes are sent as page-specific change requests. Saving an
-annotation leaves the mode active so the user can create more annotations.
-While active, the Preview uses an annotation header with empty and saved states
-instead of the normal browser header.
+The Preview state where the user creates and edits Preview annotations. The UI
+labels this state **Design** and turns the toolbar button amber; the product
+concept is annotation because the notes are sent as page-specific change
+requests. Design needs a thread to attach notes to, so a Browser without one
+disables the button.
+
+Hovering shows an amber box and a `tag · label` tip on the element under the
+pointer. A click opens the note bubble under that element. Enter saves, mod+Enter
+saves and sends, and Esc closes the bubble. A second Esc leaves Design. Saving
+re-arms the picker once, so the user can keep annotating without leaving the
+mode. Saved notes stay on the live page as a dim amber outline with a numbered
+marker, and clicking a marker reopens its note. Markers are anchored to the
+element in page coordinates, so they follow scrolling and show only on the page
+they were made on. The normal browser header stays in place throughout.
 _Avoid_: treating Design as a separate interaction mode
 
 ### Preview rendering host
