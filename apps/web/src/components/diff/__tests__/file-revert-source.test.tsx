@@ -46,7 +46,12 @@ describe("allTurnsRevertSource", () => {
 
   it("keeps a retried first turn whose earlier attempt has no refs", () => {
     const snapshots = [row("m1-first", 2, { ref_after: "" }), row("m1", 2), row("m2")];
-    expect(allTurnsRevertSource(snapshots, turns)).toEqual({ messageId: "m2", fromMessageId: "m1-first", range: { from: 1, to: 2 } });
+    expect(allTurnsRevertSource(snapshots, turns)).toEqual({ messageId: "m2", fromMessageId: "m1", range: { from: 1, to: 2 } });
+  });
+
+  it("keeps a turn whose settled attempt lacks refs but an earlier attempt has them", () => {
+    const snapshots = [row("m1"), row("m2-first", 2), row("m2", 2, { ref_after: "" })];
+    expect(allTurnsRevertSource(snapshots, turns)).toEqual({ messageId: "m2-first", fromMessageId: "m1", range: { from: 1, to: 2 } });
   });
 
   it("offers nothing without snapshots or a matching turn list", () => {

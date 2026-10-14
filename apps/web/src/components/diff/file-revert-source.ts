@@ -33,36 +33,39 @@ function turnGroups(snapshots: readonly TurnSnapshot[]): TurnSnapshot[][] {
   return groups;
 }
 
-function hasBothRefs(snapshot: TurnSnapshot | undefined): snapshot is TurnSnapshot {
-  return Boolean(snapshot?.ref_before && snapshot.ref_after);
+function hasBothRefs(snapshot: TurnSnapshot): boolean {
+  return Boolean(snapshot.ref_before && snapshot.ref_after);
 }
 
-interface TurnBounds {
-  readonly firstAttempt: TurnSnapshot;
-  readonly firstSettled: TurnSnapshot;
-  readonly last: TurnSnapshot;
+/** A turn's first attempt row that has both refs, and the settled attempt whose message id the turn list carries. */
+interface TurnEnd {
+  readonly row: TurnSnapshot;
+  readonly settledMessageId: string;
 }
 
-/** The first and last turns whose settled attempt has both refs, with the first turn's earliest attempt. */
-function turnBounds(snapshots: readonly TurnSnapshot[]): TurnBounds | null {
-  const settledGroups = turnGroups(snapshots).filter((group) => hasBothRefs(group.at(-1)));
-  const firstAttempt = settledGroups[0]?.[0];
-  const firstSettled = settledGroups[0]?.at(-1);
-  const last = settledGroups.at(-1)?.at(-1);
-  return firstAttempt && firstSettled && last ? { firstAttempt, firstSettled, last } : null;
+function turnEnds(snapshots: readonly TurnSnapshot[], pick: (rows: TurnSnapshot[]) => TurnSnapshot | undefined): TurnEnd[] {
+  return turnGroups(snapshots).flatMap((group) => {
+    const row = pick(group.filter(hasBothRefs));
+    const settled = group.at(-1);
+    return row && settled ? [{ row, settledMessageId: settled.message_id }] : [];
+  });
 }
 
-/** All turns' source: from the first turn to the last one whose settled attempt has both refs. */
+/**
+ * All turns' source, filtered row by row like the server's cumulative diff: from the first turn with
+ * a usable attempt to the last. Any attempt's message id resolves to its whole turn on the server.
+ */
 export function allTurnsRevertSource(snapshots: readonly TurnSnapshot[], turns: readonly ReviewTurn[] | undefined): FileRevertSource | null {
-  const bounds = turnBounds(snapshots);
-  if (!bounds || !turns) return null;
-  const from = ordinalOf(bounds.firstSettled.message_id, turns);
-  const to = ordinalOf(bounds.last.message_id, turns);
+  const first = turnEnds(snapshots, (rows) => rows[0])[0];
+  const last = turnEnds(snapshots, (rows) => rows.at(-1)).at(-1);
+  if (!first || !last || !turns) return null;
+  const from = ordinalOf(first.settledMessageId, turns);
+  const to = ordinalOf(last.settledMessageId, turns);
   if (from === null || to === null) return null;
   const range = { from, to };
   return from === to
-    ? { messageId: bounds.last.message_id, range }
-    : { messageId: bounds.last.message_id, fromMessageId: bounds.firstAttempt.message_id, range };
+    ? { messageId: last.row.message_id, range }
+    : { messageId: last.row.message_id, fromMessageId: first.row.message_id, range };
 }
 
 /**

@@ -16,7 +16,7 @@ export interface FileRevertInset {
 function restoreFocus(opener: HTMLElement | null, confirm: HTMLElement | null): void {
   const active = document.activeElement;
   const focusLost = !active || active === document.body || confirm?.contains(active) === true;
-  if (opener?.isConnected && focusLost) opener.focus();
+  if (opener?.isConnected && focusLost) opener.focus({ preventScroll: true });
 }
 
 /**
