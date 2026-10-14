@@ -313,7 +313,6 @@ export function projectAgentControl(dispatch: BrowserAutomationHostDispatch): vo
     {
       tabId: dispatch.target.tabId,
       controller: "agent",
-      // A stored epoch is authoritative: copying the request's would let a pre-takeover act pass the epoch check.
       controlEpoch: held?.controlEpoch ?? dispatch.request.expectedControlEpoch,
       providerSessionId: dispatch.request.providerSessionId,
       ...(!["inspect", "act", "tabs"].includes(operation) ? { operation } : {}),

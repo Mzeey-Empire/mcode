@@ -80,7 +80,6 @@ describe("reduceBrowserControl", () => {
 
   it.each(["first", "second"])("keeps the hold when a message starts a new turn acting on %s", (tabId) => {
     const ended = reduceBrowserControl(userControl(), { type: "agent-turn-ended" }).next;
-    // Sending a message has no reducer event and cannot release the hold.
     expect(reduceBrowserControl(ended, { type: "agent-effect", tabId, expectedEpoch: tabId === "first" ? 1 : 0 }))
       .toEqual({ admitted: false, code: "HUMAN_INTERRUPTED", next: { holder: "user", heldTabId: "first", epochByTab: new Map([["first", 1]]) } });
   });

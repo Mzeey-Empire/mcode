@@ -598,7 +598,6 @@ async function executeWebOpen(context: BrowserAutomationRequestContext): Promise
   if (!requestedUrl) return context.state.sessionDriver.execute(context.dispatch, context.controller.signal);
   const staleResponse = staleCurrentWebTargetResponse(context);
   if (staleResponse) return staleResponse;
-  // Navigating replaces the page, so a stale epoch must be refused before it, not after.
   if (!context.initialControlEpochMatches) {
     return failureResponse(context.dispatch.request, "STALE_CONTROL_EPOCH", "Browser operation is stale");
   }
@@ -610,8 +609,6 @@ async function executeWebOpen(context: BrowserAutomationRequestContext): Promise
   return context.state.sessionDriver.execute(webOpenExecutionDispatch(context), context.controller.signal);
 }
 
-// Only inspect and status may run while the user holds the Browser. Desktop-main refuses its own
-// effects, but tab operations such as finalize close tabs from this renderer and never reach it.
 function userHoldResponse(context: BrowserAutomationRequestContext): BrowserAutomationResponse | null {
   const operation = context.dispatch.request.operation;
   if (operation === "inspect" || operation === "status") return null;
@@ -1562,7 +1559,6 @@ export function BrowserAutomationHost() {
         store.setControllerForTarget(target.workspaceId, target.threadId, target.tabId, {
           tabId: target.tabId,
           controller: "none",
-          // Ending a turn must invalidate the epoch, as the desktop kernel's agent-turn-ended does.
           controlEpoch: controller.controlEpoch + 1,
         });
       }

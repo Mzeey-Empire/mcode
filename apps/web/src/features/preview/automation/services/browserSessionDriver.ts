@@ -1390,7 +1390,6 @@ export class BrowserSessionDriver {
     this.observations.set(observationRef, {
       hostRevision: current.connectionGeneration,
       documentRevision: current.targetGeneration,
-      // A select moves `current` to another tab, so its epoch is that tab's, not the dispatch target's.
       controlRevision: this.currentControlRevision({
         ...prepared.dispatch,
         target: { ...prepared.dispatch.target, threadId: current.threadId, tabId: current.tabId },
@@ -1686,7 +1685,6 @@ export class BrowserSessionDriver {
     };
   }
 
-  // The runtime's epoch outranks the request's: after Hand back the agent's first inspect still carries the old one.
   private currentControlRevision(dispatch: BrowserAutomationHostDispatch): number {
     return this.options.getControlRevision?.(dispatch) ?? dispatch.request.expectedControlEpoch;
   }

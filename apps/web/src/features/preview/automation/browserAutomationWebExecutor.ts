@@ -510,7 +510,6 @@ function snapshot(dispatch: BrowserAutomationHostDispatch, iframe: WebIframe, si
   });
 }
 
-// Read from the store so the agent learns the epoch it must send after a takeover or Hand back.
 function currentControlEpoch(dispatch: BrowserAutomationHostDispatch): number {
   const key = browserAutomationTargetKey(dispatch.request.workspaceId, dispatch.target.threadId, dispatch.target.tabId);
   return useBrowserAutomationStore.getState().controllers.get(key)?.controlEpoch ?? dispatch.request.expectedControlEpoch;

@@ -224,7 +224,6 @@ function dispatchTargetKey(dispatch: BrowserAutomationHostDispatch): string {
   return browserAutomationTargetKey(dispatch.request.workspaceId, dispatch.target.threadId, dispatch.target.tabId);
 }
 
-// One timer per target, so acting clears itself without a polling loop or per-component clocks.
 const actingExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function cancelActingExpiry(targetKey: string): void {
@@ -681,11 +680,9 @@ export function onBrowserAutomationInterruption(listener: InterruptionListener):
   return () => interruptionListeners.delete(listener);
 }
 
-// The web runtime has no desktop kernel, so the store holds control for the user until Hand back.
 function holdWebBrowserForUser(workspaceId: string, threadId: string, tabId: string): void {
   const store = useBrowserAutomationStore.getState();
   const current = store.controllers.get(browserAutomationTargetKey(workspaceId, threadId, tabId));
-  // An agent that is still opening the tab has no controller yet, but Take control is already offered.
   const opening = findPendingBrowserAutomationOpen(store.pendingAgentOpens, workspaceId, threadId, tabId) !== null;
   const holdable = current?.controller === "agent" || (opening && current?.controller !== "human");
   if (!holdable) return;
@@ -721,10 +718,6 @@ export async function handBackBrowserControl(workspaceId: string, threadId: stri
 
 type AutomationBridge = NonNullable<NonNullable<Window["desktopBridge"]>["preview"]>["automation"];
 
-/**
- * Desktop-main only creates a tab's target when the first request resolves it, so Take control
- * pressed during the agent's first open finds nothing to hold. Retry once the open has settled.
- */
 async function interruptThroughBridge(
   bridge: AutomationBridge,
   workspaceId: string,

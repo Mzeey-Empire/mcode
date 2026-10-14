@@ -71,7 +71,6 @@ function PageActions({ actions }: { readonly actions: BrowserPageActions }) {
 
 /** Browser address and tools, with navigation on loaded or errored pages. */
 export function BrowserToolbar({ page, address, tools, control, focusRequest }: BrowserToolbarProps) {
-  // While the agent acts, its pill takes the place of the page tools.
   const showPageActions = page.kind === "loaded" && control.kind !== "agent-acting";
   return (
     <div data-testid="browser-toolbar" className="flex h-10 min-w-0 flex-1 items-center gap-2 px-2">

@@ -95,7 +95,6 @@ function getBrowserTabController(
   return pendingOpen ? "agent" : undefined;
 }
 
-// An agent that holds the tab but has not acted for a few seconds is idle; only acting shows the cursor.
 function getVisibleBrowserTabController(
   lifecycle: BrowserSessionLifecycleTab | undefined,
   controller: BrowserAutomationControllerState | undefined,
