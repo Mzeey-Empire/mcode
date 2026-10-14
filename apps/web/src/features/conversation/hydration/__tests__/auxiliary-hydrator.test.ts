@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { PlanVersion } from "@mcode/contracts";
+import type { PlanQuestion, PlanSnapshot, PlanVersion } from "@mcode/contracts";
 import { HYDRATION_TTL_MS } from "..";
 import { AuxiliaryHydrator } from "../auxiliary-hydrator";
 import {
@@ -33,10 +33,13 @@ function cacheRecord(threadId: string, record: ThreadRecord): void {
   cacheConversationRecord(threadId, projectConversationCacheState(record));
 }
 
+const EMPTY_SNAPSHOT: PlanSnapshot = { versions: [], phase: null, pendingQuestions: null };
+
 describe("AuxiliaryHydrator", () => {
   let setStateSpy: ReturnType<typeof vi.fn>;
   let setTasksForThread: (threadId: string, tasks: readonly unknown[]) => void;
   let addPlanForThread: (threadId: string, plan: PlanVersion) => void;
+  let restorePlanQuestions: (threadId: string, questions: PlanQuestion[]) => void;
   let records: Map<string, ThreadRecord>;
   let currentThreadId: string | null;
 
@@ -47,12 +50,13 @@ describe("AuxiliaryHydrator", () => {
     currentThreadId = THREAD_ID;
 
     (mockTransport.getThreadTasks as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-    (mockTransport.getThreadPlans as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (mockTransport.getPlanSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue(EMPTY_SNAPSHOT);
     (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
     setStateSpy = vi.fn();
     setTasksForThread = vi.fn() as (threadId: string, tasks: readonly unknown[]) => void;
     addPlanForThread = vi.fn() as (threadId: string, plan: PlanVersion) => void;
+    restorePlanQuestions = vi.fn() as (threadId: string, questions: PlanQuestion[]) => void;
 
     cacheRecord(THREAD_ID, makeThinRecord());
   });
@@ -95,6 +99,7 @@ describe("AuxiliaryHydrator", () => {
       getTasksForThread: overrides?.getTasksForThread ?? (() => []),
       setTasksForThread,
       addPlanForThread,
+      restorePlanQuestions,
       shallowEqualBy,
       coerceTaskStatus,
     });
@@ -149,12 +154,28 @@ describe("AuxiliaryHydrator", () => {
     (mockTransport.getThreadTasks as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("tasks down"),
     );
-    (mockTransport.getThreadPlans as ReturnType<typeof vi.fn>).mockResolvedValue([plan]);
+    (mockTransport.getPlanSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue({ ...EMPTY_SNAPSHOT, versions: [plan] });
     const aux = createAux();
     aux.hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
 
     await vi.waitFor(() => {
       expect(addPlanForThread).toHaveBeenCalledWith(THREAD_ID, plan);
+    });
+  });
+
+  it("reopened the question dock from the stored batch on reload", async () => {
+    const questions: PlanQuestion[] = [
+      { id: "q1", category: "AUTH", question: "Which provider?", options: [{ id: "a", title: "A", description: "" }, { id: "b", title: "B", description: "" }] },
+    ];
+    (mockTransport.getPlanSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...EMPTY_SNAPSHOT,
+      phase: "questions",
+      pendingQuestions: { assistantMessageId: "a1", questions },
+    });
+    createAux().hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
+
+    await vi.waitFor(() => {
+      expect(restorePlanQuestions).toHaveBeenCalledWith(THREAD_ID, questions);
     });
   });
 

@@ -12,7 +12,6 @@ import {
 import type { ChatVirtualItem } from "@/features/conversation/messages/virtual-items";
 import type { ThoughtSegment } from "@/features/conversation/narrative/types";
 import type { Message, ToolCall, HookExecution, ToolCallRecord, HookExecutionRecord } from "@/transport/types";
-import type { ApprovalRequest } from "@mcode/contracts";
 
 const STREAMING_AGENT = { phase: "streaming" } as const;
 const COMPLETED_AGENT = { phase: "completed" } as const;
@@ -27,16 +26,11 @@ it("opens text only for the current active response and keeps historical message
   expect(items.find((item) => item.type === "message" && item.message.id === "current")).toMatchObject({ textIsStreaming: true });
 });
 
-const QUESTION_SUBJECT = {
-  kind: "question",
-  questions: [{ header: "Deploy", question: "Deploy now?", options: [{ label: "Yes" }], multiple: false, custom: false }],
-} satisfies ApprovalRequest["subject"];
-
 describe("activity heading row identity", () => {
   it("updates for heading changes and closure but preserves the row during body deltas", () => {
     const build = createVolatileItemsBuilder();
     const indicator = (text: string, endedAt?: number) => build(
-      [], STREAMING_AGENT, 1000, undefined, undefined, undefined,
+      [], STREAMING_AGENT, 1000, undefined, undefined,
       [{ text, startedAt: 1000, isExplicitNonFinal: true, ...(endedAt === undefined ? {} : { endedAt }) }],
     ).find((item) => item.type === "narrative-indicator");
     const first = indicator("**Inspecting layout**");
@@ -142,9 +136,9 @@ describe("buildStableItems", () => {
 
   it("does not add a separate hook row before the final response", () => {
     const hooks = [{ hookName: "Setup", hookType: "permission" as const, status: "completed" as const, startedAt: 1, outputLines: [], fullOutput: [] }];
-    const active = buildVolatileItems([], STREAMING_AGENT, 1, "Answer", [], hooks);
+    const active = buildVolatileItems([], STREAMING_AGENT, 1, "Answer", hooks);
     expect(active.map((item) => item.type)).toEqual(["narrative-flow", "message", "narrative-indicator"]);
-    const completed = buildVolatileItems([], COMPLETED_AGENT, 1, undefined, [], hooks);
+    const completed = buildVolatileItems([], COMPLETED_AGENT, 1, undefined, hooks);
     expect(completed).toEqual([]);
   });
 
@@ -458,7 +452,7 @@ describe("buildVolatileItems", () => {
 
   it("passes thoughtSegments through on narrative-flow items", () => {
     const thoughtSegments: ThoughtSegment[] = [{ text: "planning", startedAt: 42, endedAt: 100 }];
-    const items = buildVolatileItems([makeToolCall({ id: "t1" })], STREAMING_AGENT, 1000, undefined, undefined, [], thoughtSegments);
+    const items = buildVolatileItems([makeToolCall({ id: "t1" })], STREAMING_AGENT, 1000, undefined, [], thoughtSegments);
     const narrativeItem = items.find((i) => i.type === "narrative-flow") as Extract<
       (typeof items)[number],
       { type: "narrative-flow" }
@@ -475,7 +469,6 @@ describe("buildVolatileItems", () => {
       STREAMING_AGENT,
       1000,
       "codex narration",
-      undefined,
       [],
       thoughtSegments,
     );
@@ -510,7 +503,6 @@ describe("buildVolatileItems", () => {
       STREAMING_AGENT,
       1000,
       "answer",
-      undefined,
       hooks,
       thoughtSegments,
       currentTurn,
@@ -520,7 +512,6 @@ describe("buildVolatileItems", () => {
       STREAMING_AGENT,
       1000,
       "answer",
-      undefined,
       hooks,
       thoughtSegments,
       currentTurn,
@@ -547,7 +538,6 @@ describe("buildVolatileItems", () => {
       STREAMING_AGENT,
       1000,
       "answer one",
-      undefined,
       hooks,
       thoughtSegments,
       currentTurn,
@@ -557,7 +547,6 @@ describe("buildVolatileItems", () => {
       STREAMING_AGENT,
       1000,
       "answer two",
-      undefined,
       hooks,
       thoughtSegments,
       currentTurn,
@@ -674,7 +663,7 @@ describe("buildVirtualItems (combined)", () => {
 
   it.each(["Earlier narration", "Answer"])("places partial final text in the response beside closed owned commentary %j", (commentary) => {
     const id = `assistant-text:${"a".repeat(64)}`;
-    const items = buildVolatileItems([], STREAMING_AGENT, undefined, "Answer", undefined, undefined,
+    const items = buildVolatileItems([], STREAMING_AGENT, undefined, "Answer", undefined,
       [{ id, text: commentary, startedAt: 1, endedAt: 2, isExplicitNonFinal: true }],
       { threadId: "thread-1", responseKey: "response" }, undefined, true);
     const response = items.find((item) => item.type === "message");
@@ -723,7 +712,6 @@ describe("buildVirtualItems (combined)", () => {
       "live response",
       undefined,
       undefined,
-      undefined,
       {
         threadId: "thread-1",
         messageId: "a1",
@@ -759,7 +747,6 @@ describe("buildVirtualItems (combined)", () => {
       STREAMING_AGENT,
       1000,
       "live response",
-      undefined,
       undefined,
       undefined,
       {
@@ -817,7 +804,6 @@ describe("buildVirtualItems (combined)", () => {
       1000,
       undefined,
       undefined,
-      undefined,
       thoughtSegments,
     );
     const indicator = items.find((i) => i.type === "narrative-indicator") as
@@ -847,11 +833,11 @@ describe("buildVirtualItems (combined)", () => {
 
   it("indicator reads Answering exactly when the live response row exists", () => {
     const narration: ThoughtSegment = { text: "**Inspecting layout**", startedAt: 1, isExplicitNonFinal: true };
-    const silent = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, undefined, undefined, [narration]);
+    const silent = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, undefined, [narration]);
     expect(silent.some(isLiveResponse)).toBe(false);
     expect(findIndicator(silent)?.status.label).toBe("Inspecting layout");
 
-    const answering = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, undefined, undefined, [{ ...narration, isExplicitNonFinal: false }]);
+    const answering = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, undefined, [{ ...narration, isExplicitNonFinal: false }]);
     expect(answering.some(isLiveResponse)).toBe(true);
     expect(findIndicator(answering)?.status).toEqual({ label: "Answering", icon: "layers" });
   });
@@ -859,7 +845,7 @@ describe("buildVirtualItems (combined)", () => {
   it("indicator lets a retry signal outrank a running tool", () => {
     const items = buildVolatileItems(
       [makeToolCall({ id: "grep", toolName: "Grep", isComplete: false })],
-      STREAMING_AGENT, 1000, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      STREAMING_AGENT, 1000, undefined, undefined, undefined, undefined, undefined, undefined,
       { stopPending: false, compacting: false, retry: { kind: "rate-limited" } },
     );
     expect(findIndicator(items)?.status).toEqual({ label: "Rate limited", icon: "spinner" });
@@ -871,7 +857,7 @@ describe("buildVirtualItems (combined)", () => {
     const first = findIndicator(build([grep], STREAMING_AGENT, 1000, undefined));
     expect(findIndicator(build([{ ...grep }], STREAMING_AGENT, 1000, undefined))).toBe(first);
     const retrying = findIndicator(build(
-      [grep], STREAMING_AGENT, 1000, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      [grep], STREAMING_AGENT, 1000, undefined, undefined, undefined, undefined, undefined, undefined,
       { stopPending: false, compacting: false, retry: { kind: "retrying" } },
     ));
     expect(retrying).not.toBe(first);
@@ -1088,7 +1074,7 @@ function makeHook(overrides: Partial<HookExecution> = {}): HookExecution {
 describe("buildVolatileItems with hooks", () => {
   it("includes hooks inside narrative-flow when agent is running and hooks are present", () => {
     const hooks = [makeHook()];
-    const items = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, undefined, hooks);
+    const items = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, hooks);
     const narrativeItem = items.find((i) => i.type === "narrative-flow") as Extract<(typeof items)[number], { type: "narrative-flow" }> | undefined;
     expect(narrativeItem).toBeDefined();
     expect(narrativeItem?.hooks).toHaveLength(1);
@@ -1097,38 +1083,13 @@ describe("buildVolatileItems with hooks", () => {
   it("omits narrative-flow when no tool calls and agent not running (even with hooks)", () => {
     // Hooks alone (without agent running or tool calls) do not trigger a narrative-flow item.
     const hooks = [makeHook()];
-    const items = buildVolatileItems([], COMPLETED_AGENT, undefined, undefined, undefined, hooks);
+    const items = buildVolatileItems([], COMPLETED_AGENT, undefined, undefined, hooks);
     expect(items.some((i) => i.type === "narrative-flow")).toBe(false);
-  });
-
-  it("narrative-flow appears before permission-request items", () => {
-    const hooks = [makeHook()];
-    const permissions = [{ ...createMockApproval({ requestId: "p1", subject: QUESTION_SUBJECT }), settled: false }];
-    const items = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, permissions, hooks);
-    const types = items.map((i) => i.type);
-    const narrativeIdx = types.indexOf("narrative-flow");
-    const permIdx = types.indexOf("permission-request");
-    expect(narrativeIdx).toBeLessThan(permIdx);
-  });
-
-  it("drops a decided question card and keeps the pending one", () => {
-    const permissions = [
-      { ...createMockApproval({ requestId: "decided", subject: QUESTION_SUBJECT }), settled: true },
-      { ...createMockApproval({ requestId: "pending", subject: QUESTION_SUBJECT }), settled: false },
-    ];
-    const items = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, permissions);
-    expect(items.filter((i) => i.type === "permission-request").map((i) => i.key)).toEqual(["permission-pending"]);
-  });
-
-  it("leaves pending approvals to the composer dock", () => {
-    const permissions = [{ ...createMockApproval({ requestId: "command" }), settled: false }];
-    const items = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, permissions);
-    expect(items.some((i) => i.type === "permission-request")).toBe(false);
   });
 
   it("narrative-flow item carries the hooks array", () => {
     const hooks = [makeHook({ hookName: "lint" }), makeHook({ hookName: "test", status: "completed", exitCode: 0, durationMs: 150 })];
-    const items = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, undefined, hooks);
+    const items = buildVolatileItems([], STREAMING_AGENT, 1000, undefined, hooks);
     const narrativeItem = items.find((i) => i.type === "narrative-flow") as Extract<(typeof items)[number], { type: "narrative-flow" }>;
     expect(narrativeItem.hooks).toHaveLength(2);
     expect(narrativeItem.hooks[0].hookName).toBe("lint");
@@ -1142,12 +1103,11 @@ function findIndicator(items: readonly ChatVirtualItem[]) {
 function isLiveResponse(item: ChatVirtualItem): boolean {
   return item.type === "message" && item.agentDisplayState?.phase === "streaming";
 }
-import { createMockApproval } from "./mocks/transport";
 
 describe("provider retry status", () => {
   it("names the HTTP status in the running turn's status row", () => {
     const items = buildVolatileItems(
-      [makeToolCall()], STREAMING_AGENT, 1, undefined, [], [], [], undefined, undefined, undefined,
+      [makeToolCall()], STREAMING_AGENT, 1, undefined, [], [], undefined, undefined, undefined,
       { stopPending: false, compacting: false, retry: { kind: "retrying", errorStatus: 502 } },
     );
     expect(findIndicator(items)?.status.label).toBe("Retrying after 502 Bad Gateway");
@@ -1155,7 +1115,7 @@ describe("provider retry status", () => {
 
   it("says the thread waits when an integration asks for approval on an idle thread", () => {
     const items = buildVolatileItems(
-      [], undefined, undefined, undefined, [], [], [], undefined, undefined, undefined,
+      [], undefined, undefined, undefined, [], [], undefined, undefined, undefined,
       { stopPending: false, compacting: false, waitingFor: "approval" },
     );
     expect(findIndicator(items)?.status.label).toBe("Waiting for approval");
@@ -1163,12 +1123,12 @@ describe("provider retry status", () => {
   });
 
   it("keeps the status line row, no longer live, while it fades after the last approval is answered", () => {
-    const items = buildVolatileItems([], undefined, undefined, undefined, [], [], [], undefined, undefined, undefined, { stopPending: false, compacting: false, exiting: true });
+    const items = buildVolatileItems([], undefined, undefined, undefined, [], [], undefined, undefined, undefined, { stopPending: false, compacting: false, exiting: true });
     expect(findIndicator(items)?.isAgentRunning).toBe(false);
   });
 
   it("shows no status line on an idle thread with nothing waiting", () => {
-    const items = buildVolatileItems([], undefined, undefined, undefined, [], [], [], undefined, undefined, undefined, { stopPending: false, compacting: false });
+    const items = buildVolatileItems([], undefined, undefined, undefined, [], [], undefined, undefined, undefined, { stopPending: false, compacting: false });
     expect(findIndicator(items)).toBeUndefined();
   });
 });

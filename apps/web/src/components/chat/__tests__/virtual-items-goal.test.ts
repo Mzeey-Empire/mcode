@@ -56,7 +56,6 @@ describe("goal notices in chat virtual items", () => {
       "",
       [],
       [],
-      [],
       { threadId: "thread-1" },
       "The rendering bug is fixed.",
     );

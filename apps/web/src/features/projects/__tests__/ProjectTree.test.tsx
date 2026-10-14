@@ -296,6 +296,7 @@ function makeThread(
     parent_thread_id: null,
     forked_from_message_id: null,
     last_compact_summary: null,
+    plan_phase: null,
     default_open_in_app: null,
     has_file_changes: false,
     ...overrides,

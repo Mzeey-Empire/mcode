@@ -1,5 +1,5 @@
 import type { Message, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport";
-import type { TurnSnapshot, ApprovalReceiptRecord, PlanVersion, NarrativeEntry, TurnRange, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationPage, ConversationTail, GoalLookupResult } from "@mcode/contracts";
+import type { TurnSnapshot, ApprovalReceiptRecord, PlanSnapshot, PlanVersion, NarrativeEntry, TurnRange, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationPage, ConversationTail, GoalLookupResult } from "@mcode/contracts";
 import type { TaskItem } from "@/stores/taskStore";
 import type { PlanQuestion } from "@mcode/contracts";
 import type { ThreadRecord } from "@/stores/thread-record";
@@ -56,7 +56,7 @@ export interface ThreadHydratorTransport {
   getThreadTasks(
     threadId: string,
   ): Promise<Array<{ id?: string; content: string; status: string; activeForm?: string; group?: string }> | null>;
-  getThreadPlans(threadId: string): Promise<PlanVersion[]>;
+  getPlanSnapshot(threadId: string): Promise<PlanSnapshot>;
 }
 
 /** Workspace thread row fields consulted during hydration. */
@@ -89,14 +89,10 @@ export interface ThreadHydratorDeps {
   getWorkspaceThread: (threadId: string) => HydratorWorkspaceThread | undefined;
   flushPendingTextDeltas: () => void;
   loadNarrativeForMessage: (messageId: string, threadId: string, options?: { continue?: boolean }) => Promise<void>;
-  setPlanQuestions: (threadId: string, questions: PlanQuestion[]) => void;
-  extractPendingPlanQuestions: (
-    messages: Message[],
-    answeredIds: ReadonlySet<string>,
-  ) => PlanQuestion[] | null;
   getTasksForThread: (threadId: string) => readonly TaskItem[];
   setTasksForThread: (threadId: string, tasks: readonly TaskItem[]) => void;
   addPlanForThread: (threadId: string, plan: PlanVersion) => void;
+  restorePlanQuestions: (threadId: string, questions: PlanQuestion[]) => void;
   shallowEqualBy: <T>(a: readonly T[], b: readonly T[], keys: (keyof T)[]) => boolean;
   coerceTaskStatus: (status: string) => TaskItem["status"];
   getWorkspaceThreadSettings: (threadId: string) => import("@/stores/thread-record").ThreadSettings;

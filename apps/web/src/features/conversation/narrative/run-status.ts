@@ -14,6 +14,8 @@ export interface RunHoldingSignals {
   compacting: boolean;
   retry?: RunRetry;
   waitingFor?: "approval" | "answers";
+  /** The server is writing the plan after the questions were answered. */
+  planning?: boolean;
   /** The status line just went off and keeps its row while the exit fade plays. */
   exiting?: boolean;
 }
@@ -50,6 +52,7 @@ const RUN_STATUS_RULES: readonly RunStatusRule[] = [
   { icon: "dot", label: (input) => (input.waitingFor ? WAITING_LABELS[input.waitingFor] : undefined) },
   { icon: "layers", label: (input) => (input.activeTool ? toolActivityLabel(input.activeTool) : undefined) },
   { icon: "layers", label: (input) => (input.subagentsRunning ? "Waiting on subagents" : undefined) },
+  { icon: "layers", label: (input) => (input.planning ? "Planning" : undefined) },
   { icon: "layers", label: (input) => (input.answering ? "Answering" : undefined) },
 ];
 

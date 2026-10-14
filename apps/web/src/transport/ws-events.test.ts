@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { selectDockApprovals, useApprovalStore } from "@/stores/approvalStore";
-import { act, renderHook } from "@testing-library/react";
-import { useMessageListData } from "@/features/conversation/messages/useMessageListData";
+import { act } from "@testing-library/react";
 import { createMockApproval } from "@/__tests__/mocks/transport";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ThreadStartup } from "@mcode/contracts";
@@ -25,7 +24,6 @@ import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 import { onPtyExit } from "@/features/terminal/adapters/pty-data-registry";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useThreadStartupStore } from "@/features/thread-startup";
-import { buildVolatileItems } from "@/features/conversation/messages/virtual-items";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 import { createMockWorkspace } from "@/__tests__/mocks/transport";
 import { useProjectIconStore } from "@/features/projects/icons/projectIconStore";
@@ -129,6 +127,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     parent_thread_id: null,
     forked_from_message_id: null,
     last_compact_summary: null,
+    plan_phase: null,
     has_file_changes: false,
     ...overrides,
   };
@@ -400,20 +399,19 @@ describe("ws-events approval.requested", () => {
     const request = createMockApproval({ requestId: "approval-send", threadId: "thread-A", subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "thread-B", message: "Needs approval." } });
     useApprovalStore.setState({ approvals: [] });
     startPushListeners();
-    const owner = renderHook(() => useMessageListData("thread-A"));
-    const target = renderHook(() => useMessageListData("thread-B"));
-    expect(owner.result.current.permissions).toEqual([]);
-    expect(target.result.current.permissions).toEqual([]);
+    const dockOf = (threadId: string) => selectDockApprovals(useApprovalStore.getState().approvals, threadId);
+    expect(dockOf("thread-A")).toEqual([]);
+    expect(dockOf("thread-B")).toEqual([]);
 
     act(() => pushEmitter.emit("approval.requested", request));
 
-    expect(owner.result.current.permissions.map(({ requestId, threadId, subject, settled }) => ({ requestId, threadId, subject, settled }))).toEqual([{
+    expect(dockOf("thread-A").map(({ requestId, threadId, subject, settled }) => ({ requestId, threadId, subject, settled }))).toEqual([{
       requestId: "approval-send",
       threadId: "thread-A",
       subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "thread-B", message: "Needs approval." },
       settled: false,
     }]);
-    expect(target.result.current.permissions).toEqual([]);
+    expect(dockOf("thread-B")).toEqual([]);
   });
 
   afterEach(() => {
@@ -431,8 +429,6 @@ describe("ws-events approval.requested", () => {
 
     expect(selectDockApprovals(useApprovalStore.getState().approvals, "thread-1"))
       .toMatchObject([{ requestId: "permission-1", subject: { kind: "command", command: "git status" } }]);
-    expect(buildVolatileItems([], undefined, undefined, undefined, useApprovalStore.getState().approvals))
-      .not.toContainEqual(expect.objectContaining({ type: "permission-request" }));
   });
 });
 

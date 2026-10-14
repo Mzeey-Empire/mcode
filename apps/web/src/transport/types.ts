@@ -135,7 +135,6 @@ import type {
 } from "@mcode/contracts";
 
 // Re-export shared types from the contracts package (single source of truth).
-export type { PlanAction } from "@mcode/contracts";
 export type {
   GitRefsListResult,
   PullRequestTargetsListResult,
@@ -774,7 +773,7 @@ export interface McodeTransport {
   getThreadTasks(threadId: string): Promise<Array<{ id?: string; content: string; status: "pending" | "in_progress" | "completed" | "cancelled"; activeForm?: string; group?: string }> | null>;
 
   /** Fetch persisted plans for a thread (hydration on page load). */
-  getThreadPlans(threadId: string): Promise<import("@mcode/contracts").PlanVersion[]>;
+  getPlanSnapshot(threadId: string): Promise<import("@mcode/contracts").PlanSnapshot>;
   /** Fork the latest plan version into a draft, or save into an existing draft at its revision. */
   savePlanVersion(payload: import("@mcode/contracts").PlanSaveVersion): Promise<import("@mcode/contracts").PlanVersion>;
   /** Admit a durable request to implement a plan version in its own thread. Replays with the same requestId return the stored outcome. */

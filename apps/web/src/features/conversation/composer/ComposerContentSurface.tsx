@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
-import type { DraftDiffComment } from "@mcode/contracts";
+import { getCatalogEntry, type DraftDiffComment } from "@mcode/contracts";
 import { getModelContextWindow } from "@mcode/shared/model-context";
 import type {
   ContextWindowMode,
@@ -38,6 +38,7 @@ import { NewThreadTargetRail } from "./execution/NewThreadTargetRail";
 import { ComposerTray } from "./ComposerTray";
 import { useDraftWriteFailureStore } from "@/lib/composer-draft-storage";
 import { ApprovalAnnouncer, ApprovalDock, useDockApprovals } from "@/features/conversation/approvals/ApprovalDock";
+import { QuestionDock } from "@/features/conversation/approvals/QuestionDock";
 import { DiffCommentsComposerAttachment } from "./DiffCommentsComposerAttachment";
 import { SelectedTextCommentsComposerAttachment } from "./SelectedTextCommentsComposerAttachment";
 
@@ -256,11 +257,12 @@ function ComposerQueueEditNotice({
 function getEditorPlaceholder(model: ComposerContentSurfaceProps["model"]) {
   if (model.startingThread) return "Do anything";
   if (model.isStaleWorktree) return "Worktree directory no longer exists. This thread is read-only.";
-  if (model.planPending) return "Answer the planning questions above";
   if (model.goalPending) return "Describe the goal...";
   if (model.branchFromMessageId) return "What should the branch work on?";
   if (model.editingFromQueue) return "Edit the queued message - send to save.";
   if (model.isAgentRunning) return "Queue a follow-up";
+  // A send in this state revises the plan; the server classifies it, so the copy is what tells the user.
+  if (model.activeThread?.plan_phase === "ready") return `Tell ${getCatalogEntry(model.effectiveProviderId).name} what to change`;
   return "Do anything";
 }
 
@@ -725,7 +727,8 @@ function DraftWriteFailureNotice() {
 export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
   const { model, actions } = props;
   const approvals = useDockApprovals(model.threadId);
-  const docked = approvals.length > 0;
+  const questionThreadId = model.planPending && approvals.length === 0 ? model.threadId : undefined;
+  const docked = approvals.length > 0 || questionThreadId !== undefined;
   return (
     <>
       <ComposerNewThreadSurface {...props} />
@@ -735,6 +738,18 @@ export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
         <ApprovalDock
           key={model.threadId}
           requests={approvals}
+          composerContainerRef={model.composerContainerRef}
+          isAgentRunning={model.isAgentRunning}
+          isStopPending={model.isStopPending}
+          onStop={actions.onStop}
+          onFocusComposer={actions.onFocusComposer}
+        />
+      )}
+      {questionThreadId !== undefined && (
+        <QuestionDock
+          key={model.threadId}
+          threadId={questionThreadId}
+          providerId={model.effectiveProviderId}
           composerContainerRef={model.composerContainerRef}
           isAgentRunning={model.isAgentRunning}
           isStopPending={model.isStopPending}

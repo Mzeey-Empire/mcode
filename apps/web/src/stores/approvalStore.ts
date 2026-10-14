@@ -72,9 +72,9 @@ export const useApprovalStore = create<ApprovalState>((set) => ({
   )),
 }));
 
-/** Whether the request belongs in the approval dock; questions stay in the transcript until the question dock lands. */
+/** Whether the request is pending and belongs in the approval dock. */
 export function isDockApproval(request: StoredApproval): boolean {
-  return !request.settled && request.subject.kind !== "question";
+  return !request.settled;
 }
 
 /** Dock requests for one thread, oldest first, so the pager reads in the order the agent asked. */

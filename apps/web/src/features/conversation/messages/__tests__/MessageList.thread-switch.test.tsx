@@ -189,7 +189,6 @@ vi.mock("@/features/conversation/turn/TurnChangesBar", () => ({
     <div data-testid="turn-changes-bar">{filesChanged.join(",")}</div>
   ),
 }));
-vi.mock("@/components/chat/PermissionRequestCard", () => ({ PermissionRequestCard: () => null }));
 vi.mock("@/components/chat/HookActivitySection", () => ({ HookActivitySection: () => null }));
 
 import { MessageList, type SelectedTextCommentSourceNavigationRequest } from "../MessageList";

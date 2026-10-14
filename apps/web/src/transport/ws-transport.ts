@@ -1412,8 +1412,8 @@ export function createWsTransport(
         "thread.getTasks", { threadId },
       ),
 
-    getThreadPlans: (threadId: string) =>
-      rpc<{ versions: import("@mcode/contracts").PlanVersion[] }>("plan.snapshot", { threadId }).then((snapshot) => snapshot.versions),
+    getPlanSnapshot: (threadId: string) =>
+      rpc<import("@mcode/contracts").PlanSnapshot>("plan.snapshot", { threadId }),
 
     savePlanVersion: (payload) => rpc<import("@mcode/contracts").PlanVersion>("plan.saveVersion", payload),
     implementPlan: (payload) => rpc<import("@mcode/contracts").PlanImplementReceipt>("plan.implement", payload),

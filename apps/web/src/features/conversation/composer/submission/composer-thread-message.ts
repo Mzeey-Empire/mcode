@@ -57,7 +57,6 @@ export async function sendComposerThreadMessage(
     scoped.codexFastMode,
     undefined,
     undefined,
-    undefined,
     payload.mentions,
     payload.previewAnnotations,
     payload.goalObjective,

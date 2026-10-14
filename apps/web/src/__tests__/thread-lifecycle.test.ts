@@ -145,7 +145,6 @@ describe("Thread Lifecycle Behavior", () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       comments,
     );
 
@@ -167,7 +166,6 @@ describe("Thread Lifecycle Behavior", () => {
     const persisted = await useThreadStore.getState().sendMessage(
       threadId,
       "",
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -211,7 +209,6 @@ describe("Thread Lifecycle Behavior", () => {
       undefined,
       undefined,
       "fix this",
-      undefined,
       undefined,
       undefined,
       undefined,

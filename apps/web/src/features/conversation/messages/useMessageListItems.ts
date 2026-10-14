@@ -26,7 +26,6 @@ type MessageListItemsInput = Pick<
   | "isAgentRunning"
   | "latestTurnWithChanges"
   | "messages"
-  | "permissions"
   | "persistedFilesChanged"
   | "persistedNarrativeByMessage"
   | "renderedThreadId"
@@ -111,7 +110,6 @@ export function useMessageListItems(input: MessageListItemsInput) {
     isAgentRunning,
     latestTurnWithChanges,
     messages,
-    permissions,
     persistedFilesChanged,
     persistedNarrativeByMessage,
     renderedThreadId,
@@ -156,8 +154,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
       agentStartTime,
       streamingText,
     responseTextIsStreaming,
-      permissions,
-      hooks,
+        hooks,
       approvals,
       thoughtSegments,
       holdingSignals,
@@ -177,8 +174,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
       isAgentRunning,
       latestTurnWithChanges,
       messages,
-      permissions,
-      persistedFilesChanged,
+        persistedFilesChanged,
       persistedNarrativeByMessage,
       renderedThreadId,
       streamingText,

@@ -1,16 +1,17 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { CircleAlert, CircleHelp, Pencil, Send, Shield, Terminal, type LucideIcon } from "lucide-react";
 import { useShallow } from "zustand/shallow";
 import type { ApprovalChoice, ApprovalSubject as ApprovalSubjectModel } from "@mcode/contracts";
-import { Button } from "@/components/ui/button";
 import { ProviderIcon } from "@/components/ui/provider-icon";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { selectDockApprovals, useApprovalStore, type StoredApproval } from "@/stores/approvalStore";
 import { approvalActorName, approvalTitle, noteRowLabel, submittingLabel } from "./approval-copy";
 import { ApprovalChoiceRow, ApprovalNoteRow } from "./ApprovalChoiceRow";
+import { ApprovalQuestionBody } from "./ApprovalQuestionBody";
 import { ApprovalPager } from "./ApprovalPager";
 import { ApprovalSubject } from "./ApprovalSubject";
+import { DockStopButton } from "./DockStopButton";
 import { submitApprovalChoice } from "./submit-approval-choice";
+import { useDockFocus } from "./use-dock-focus";
 
 /** Misclick guard: answers are ignored this long after the dock appears or the user was typing. */
 export const APPROVAL_ARM_DELAY_MS = 600;
@@ -87,6 +88,17 @@ export function ApprovalAnnouncer({ requests }: { readonly requests: readonly St
   return <p aria-live="assertive" className="sr-only">{newest ? `${approvalTitle(newest)}${waiting}` : ""}</p>;
 }
 
+/** Names the subagent that raised the request; renders nothing for the main agent. */
+function SubagentOrigin({ request }: { readonly request: StoredApproval }) {
+  if (request.origin.kind !== "subagent" || !request.providerId) return null;
+  return (
+    <span className="flex min-w-0 items-center gap-1.5 pl-1">
+      <span className="flex h-5 w-4 shrink-0 items-center justify-center"><ProviderIcon provider={request.providerId} size={16} /></span>
+      <span className="text-xs text-muted text-fade">{request.origin.label}</span>
+    </span>
+  );
+}
+
 /** Props for {@link ApprovalDock}. */
 export interface ApprovalDockProps {
   /** Pending requests for the thread, oldest first, never empty. */
@@ -122,22 +134,10 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
     // Paging is a deliberate choice; any other change (first show, a decision advancing) is a surprise to guard.
     if (pagedToRef.current !== activeRequestId) guardUntilRef.current = Date.now() + APPROVAL_ARM_DELAY_MS;
     pagedToRef.current = undefined;
-    const focused = document.activeElement;
-    const attentionHere = !focused || focused === document.body
-      || rootRef.current?.contains(focused) || composerContainerRef.current?.contains(focused);
-    if (attentionHere) rowRefs.current[0]?.focus();
-  }, [activeRequestId, composerContainerRef]);
-
-  // Read through a ref so the cleanup runs only on unmount, not whenever a caller passes a fresh callback.
-  const focusComposerRef = useRef(onFocusComposer);
-  focusComposerRef.current = onFocusComposer;
-  useLayoutEffect(() => {
-    const root = rootRef.current;
-    return () => {
-      // Layout cleanup still sees the dock attached; by the microtask the composer is visible again.
-      if (root?.contains(document.activeElement)) queueMicrotask(() => focusComposerRef.current());
-    };
-  }, []);
+  }, [activeRequestId]);
+  // A question body has no choice rows, so its first option takes the focus.
+  useDockFocus(rootRef, composerContainerRef, onFocusComposer,
+    () => rowRefs.current[0] ?? rootRef.current?.querySelector<HTMLElement>("[role=group] button"), activeRequestId);
 
   const choose = (choice: ApprovalChoice) => {
     if (Date.now() < guardUntilRef.current || submission?.state === "submitting") return;
@@ -168,6 +168,8 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // A question body owns its keys: a digit there picks an option, not a choice row.
+    if (active.subject.kind === "question") return;
     const action = dockKeyAction(event);
     if (!action) return;
     event.preventDefault();
@@ -190,53 +192,51 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
       <div className="flex min-w-0 items-center gap-2">
         <Icon size={14} strokeWidth={1.5} className="shrink-0 text-primary" aria-hidden />
         <h2 className="min-w-0 text-sm font-medium text-ink">{title}</h2>
-        {active.origin.kind === "subagent" && active.providerId && (
-          <span className="flex min-w-0 items-center gap-1.5 pl-1">
-            <span className="flex h-5 w-4 shrink-0 items-center justify-center"><ProviderIcon provider={active.providerId} size={16} /></span>
-            <span className="text-xs text-muted text-fade">{active.origin.label}</span>
-          </span>
-        )}
+        <SubagentOrigin request={active} />
         <span className="flex-1" />
         {requests.length > 1 && <ApprovalPager index={index} count={requests.length} onPrevious={() => goTo(-1)} onNext={() => goTo(1)} />}
       </div>
-      <ApprovalSubject subject={active.subject} />
-      <div role="group" aria-label={title} className="flex flex-col gap-0.5">
-        {active.choices.map((choice, row) => (
-          <ApprovalChoiceRow
-            key={choice.id}
-            choice={choice}
-            index={row}
-            focused={row === focusedRow}
-            submitting={submission?.state === "submitting" && submission.choiceId === choice.id}
-            dimmed={submission?.state === "submitting" && submission.choiceId !== choice.id}
-            submittingLabel={submittingLabel(choice)}
-            buttonRef={(element) => { rowRefs.current[row] = element; }}
-            onChoose={() => choose(choice)}
-            onFocus={() => setFocusedRow(row)}
-          />
-        ))}
-        {noteShown && <ApprovalNoteRow index={active.choices.length} label={noteRowLabel(active)} />}
-      </div>
-      {submission?.state === "failed" && (
-        <div role="alert" className="flex items-center gap-2 text-sm">
-          <CircleAlert size={14} strokeWidth={1.5} className="shrink-0 text-error" aria-hidden />
-          <span className="min-w-0 text-error">Your answer didn&apos;t reach {approvalActorName(active)}.</span>
-          <span className="flex-1" />
-          <button type="button" className="shrink-0 cursor-pointer font-medium text-ink" onClick={retry}>Try again</button>
-        </div>
+      {active.subject.kind === "question" ? (
+        <ApprovalQuestionBody
+          key={active.requestId}
+          request={active}
+          questions={active.subject.questions}
+          isArmed={() => Date.now() >= guardUntilRef.current}
+          arm={arm}
+        />
+      ) : (
+        <>
+          <ApprovalSubject subject={active.subject} />
+          <div role="group" aria-label={title} className="flex flex-col gap-0.5">
+            {active.choices.map((choice, row) => (
+              <ApprovalChoiceRow
+                key={choice.id}
+                choice={choice}
+                index={row}
+                focused={row === focusedRow}
+                submitting={submission?.state === "submitting" && submission.choiceId === choice.id}
+                dimmed={submission?.state === "submitting" && submission.choiceId !== choice.id}
+                submittingLabel={submittingLabel(choice)}
+                buttonRef={(element) => { rowRefs.current[row] = element; }}
+                onChoose={() => choose(choice)}
+                onFocus={() => setFocusedRow(row)}
+              />
+            ))}
+            {noteShown && <ApprovalNoteRow index={active.choices.length} label={noteRowLabel(active)} />}
+          </div>
+          {submission?.state === "failed" && (
+            <div role="alert" className="flex items-center gap-2 text-sm">
+              <CircleAlert size={14} strokeWidth={1.5} className="shrink-0 text-error" aria-hidden />
+              <span className="min-w-0 text-error">Your answer didn&apos;t reach {approvalActorName(active)}.</span>
+              <span className="flex-1" />
+              <button type="button" className="shrink-0 cursor-pointer font-medium text-ink" onClick={retry}>Try again</button>
+            </div>
+          )}
+        </>
       )}
       {isAgentRunning && (
         <div className="-mt-1 -mb-1.5 flex justify-end">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button variant="ghost" shape="round" size="icon-compact" onClick={onStop} disabled={isStopPending} aria-label="Stop agent">
-                  <div className="size-2.5 rounded-[2px] bg-ink" />
-                </Button>
-              }
-            />
-            <TooltipContent>Stop agent</TooltipContent>
-          </Tooltip>
+          <DockStopButton isStopPending={isStopPending} onStop={onStop} />
         </div>
       )}
     </div>

@@ -2,9 +2,11 @@ import type { ApprovalChoice } from "@mcode/contracts";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 
-const ROW_CLASS = "flex min-h-9 w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left";
+/** Row box shared by the approval and question docks. */
+export const ROW_CLASS = "flex min-h-9 w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left";
 
-function KeyChip({ index }: { readonly index: number }) {
+/** Numbered key hint at the left of a dock row. */
+export function KeyChip({ index }: { readonly index: number }) {
   return (
     <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-[0.5rem] border border-border px-[0.5rem] font-mono text-caption text-muted">
       {index + 1}
@@ -16,7 +18,8 @@ function RowSpinner() {
   return <span className="flex h-5 min-w-5 shrink-0 items-center justify-center text-primary"><Spinner size={12} /></span>;
 }
 
-function rowClass(focused: boolean, submitting: boolean, dimmed: boolean): string {
+/** Row styling with the dock focus ring; `focused` fills the row. */
+export function choiceRowClass(focused: boolean, submitting: boolean, dimmed: boolean): string {
   return cn(ROW_CLASS, "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-focus", focused && "bg-hover", dimmed && "opacity-45", submitting || dimmed ? "cursor-default" : "cursor-pointer");
 }
 
@@ -47,7 +50,7 @@ export function ApprovalChoiceRow({ choice, index, focused, submitting, dimmed, 
       type="button"
       tabIndex={focused ? 0 : -1}
       aria-disabled={submitting || dimmed ? true : undefined}
-      className={rowClass(focused, submitting, dimmed)}
+      className={choiceRowClass(focused, submitting, dimmed)}
       onClick={onChoose}
       onFocus={onFocus}
     >
