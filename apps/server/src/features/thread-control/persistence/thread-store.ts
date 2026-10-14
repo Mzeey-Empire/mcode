@@ -545,8 +545,8 @@ export class ThreadStore {
     return this.db.transaction(() => runChanges(this.orm, sql`
       UPDATE threads SET status = ${outcome === "cancelled" ? "interrupted" : outcome}, updated_at = ${endedAt}, last_turn_outcome = ${outcome},
         plan_phase = CASE WHEN plan_phase <> 'planning' OR plan_phase IS NULL THEN plan_phase
-          WHEN ${outcome} = 'completed' THEN 'no_plan'
           WHEN EXISTS (SELECT 1 FROM plans WHERE thread_id = ${id} AND status IN ('draft', 'ready')) THEN 'ready'
+          WHEN ${outcome} = 'completed' THEN 'no_plan'
           ELSE NULL END,
         last_turn_ended_at = ${endedAt}, last_turn_sequence = (
           SELECT MAX(sequence) FROM messages WHERE thread_id = ${id} AND ${transcriptMessageVisibility}

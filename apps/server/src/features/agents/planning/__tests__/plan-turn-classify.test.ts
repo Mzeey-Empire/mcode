@@ -133,7 +133,7 @@ describe("durable planning phases and attention", () => {
 
   const endings: Array<{ outcome: TurnOutcome; prior: boolean; phase: string | null }> = [
     { outcome: "completed", prior: false, phase: "no_plan" },
-    { outcome: "completed", prior: true, phase: "no_plan" },
+    { outcome: "completed", prior: true, phase: "ready" },
     { outcome: "cancelled", prior: false, phase: null },
     { outcome: "cancelled", prior: true, phase: "ready" },
     { outcome: "errored", prior: false, phase: null },
