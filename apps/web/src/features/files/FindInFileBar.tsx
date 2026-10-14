@@ -32,31 +32,39 @@ export interface FindInFileBarProps {
  */
 export function FindInFileBar({ find, onClose }: FindInFileBarProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  // The header row mounts the field into a detached host first; focus lands only once the shell attaches it.
   useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
+    const frame = requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+    return () => cancelAnimationFrame(frame);
   }, []);
 
-  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+  // On the whole bar, so Escape and Ctrl/Cmd+F also work while focus sits on a toggle or button.
+  const onBarKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
       // The app also binds Escape; the find bar owns this press.
       event.stopPropagation();
       onClose();
-    } else if (event.key === "Enter") {
-      event.preventDefault();
-      find.step(event.shiftKey ? -1 : 1);
     } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
-      // The input sits in the shell header, outside the Files tool, so the global binding does not see it.
+      // The bar sits in the shell header, outside the Files tool, so the global binding does not see it.
       event.preventDefault();
+      inputRef.current?.focus();
       inputRef.current?.select();
     }
+  };
+  const onInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    find.step(event.shiftKey ? -1 : 1);
   };
 
   const invalid = find.result.status === "invalid";
   return (
     <PanelHeaderSlot slot="row3">
-      <div data-testid="find-in-file-bar" className="flex h-10 min-w-0 flex-1 items-center gap-1.5 px-2">
+      <div data-testid="find-in-file-bar" onKeyDown={onBarKeyDown} className="flex h-10 min-w-0 flex-1 items-center gap-1.5 px-2">
         <label
           className={cn(
             "flex h-8 min-w-0 flex-1 items-center gap-2 rounded-[18px] bg-selected pl-3 pr-1 shadow-[inset_0_0_0_1px_var(--color-focus)]",
@@ -72,7 +80,7 @@ export function FindInFileBar({ find, onClose }: FindInFileBarProps) {
             spellCheck={false}
             value={find.query}
             onChange={(event) => find.setQuery(event.target.value)}
-            onKeyDown={onKeyDown}
+            onKeyDown={onInputKeyDown}
             className="min-w-0 flex-1 bg-transparent text-body-small text-ink outline-none placeholder:text-muted"
           />
           <span role="status" className={cn("shrink-0 font-mono text-caption", invalid ? "text-destructive" : "text-muted")}>

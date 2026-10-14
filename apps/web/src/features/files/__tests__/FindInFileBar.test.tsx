@@ -112,4 +112,17 @@ describe("Find in file", () => {
     expect(document.querySelector("mark")).toBeNull();
     expect(document.activeElement).toBe(screen.getByTestId("code-file-view"));
   });
+
+  it("handles Escape and Ctrl+F while focus sits on a toggle instead of the field", async () => {
+    const field = await openFind();
+    const toggle = screen.getByRole("button", { name: "Match case" });
+    toggle.focus();
+
+    fireEvent.keyDown(toggle, { key: "f", ctrlKey: true });
+    expect(document.activeElement).toBe(field);
+
+    toggle.focus();
+    fireEvent.keyDown(toggle, { key: "Escape" });
+    expect(screen.queryByRole("textbox", { name: "Find" })).toBeNull();
+  });
 });
