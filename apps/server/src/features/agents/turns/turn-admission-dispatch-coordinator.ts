@@ -519,7 +519,7 @@ export class TurnAdmissionDispatchCoordinator {
   }
 
   private async preparePlanFile(command: SendMessageCommand): Promise<void> {
-    if (command.interactionMode === "plan" || command.planAction === "revise" || command.markPlanAnswerForMessageId) {
+    if (command.interactionMode === "plan" || command.planAction || command.markPlanAnswerForMessageId) {
       await this.plans.prepareTurn(command.threadId);
     }
   }
@@ -989,7 +989,7 @@ export class TurnAdmissionDispatchCoordinator {
   }
 
   private effectiveInteractionMode(command: SendMessageCommand): InteractionMode | undefined {
-    return command.planAction === "revise" ? undefined : command.interactionMode;
+    return command.planAction === "revise" || command.planAction === "implement" ? undefined : command.interactionMode;
   }
 
   private withReplyContext(prepared: PreparedCommand, payload: string): string {
