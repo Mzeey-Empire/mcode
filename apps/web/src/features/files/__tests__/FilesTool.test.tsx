@@ -118,7 +118,6 @@ describe("FilesTool freshness", () => {
     separator.setPointerCapture = vi.fn();
     fireEvent.pointerDown(separator, { clientX: 300, pointerId: 1 });
     fireEvent.pointerMove(separator, { clientX: 700, pointerId: 1 });
-    // 900 body minus the 520 the code keeps.
     expect(getFilesScope(WORKSPACE).treeWidth).toBe(380);
     expect(screen.getByTestId("files-docked-tree")).toBeTruthy();
   });

@@ -4,7 +4,6 @@ import { FileTypeIcon } from "@/components/ui/file-type-icon";
 import { cn } from "@/lib/utils";
 import { rankFilePaths, type RankedFilePath } from "./rank-file-path";
 
-/** Props for {@link GoToFilePopover}. */
 export interface GoToFilePopoverProps {
   readonly paths: readonly string[];
   /** `beside` is true for Ctrl/Cmd+Enter: open after the active tab without switching. */
@@ -127,7 +126,6 @@ function ResultRow({
   );
 }
 
-/** Renders `text[from, to)` with matched letters in ink so the user sees why a row matched. */
 function Highlighted({ text, from, to, matches }: { readonly text: string; readonly from: number; readonly to: number; readonly matches: readonly number[] }) {
   const matched = new Set(matches);
   const parts: ReactNode[] = [];

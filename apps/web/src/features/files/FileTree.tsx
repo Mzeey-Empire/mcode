@@ -15,7 +15,6 @@ const MARK_TEXT_CLASS: Record<FileChangeMark, string> = {
   A: "text-success",
 };
 
-/** Props for {@link FileTree}. */
 export interface FileTreeProps {
   readonly rows: readonly FileTreeRow[];
   readonly activePath: string | null;
@@ -123,7 +122,6 @@ function FileRow({
       aria-selected={active}
       data-path={row.path}
       className={cn(ROW_CLASS, active && "bg-selected")}
-      // Files line up under their folder's name, past the chevron column.
       style={{ paddingLeft: 8 + row.depth * INDENT_PX + 20 }}
       onClick={() => onOpen(row.path)}
     >

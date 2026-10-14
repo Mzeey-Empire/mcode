@@ -9,7 +9,6 @@ export const FILE_NOT_FOUND_MESSAGE = "This file no longer exists.";
 /** Debounce for `turn.diffChanged` bursts while an agent writes many files. */
 export const DIFF_CHANGED_REFRESH_DEBOUNCE_MS = 500;
 
-/** What the code view knows about one open file. */
 export type FileReadState =
   | { readonly status: "loading" }
   | { readonly status: "ready"; readonly result: FileReadResult }
@@ -33,7 +32,6 @@ export interface FilesScope {
   readonly threadId: string | null;
 }
 
-/** File list, change marks, and open-file reads for one Files scope. */
 export interface FilesData {
   readonly list: WorkspaceFileList | null;
   readonly listError: string | null;

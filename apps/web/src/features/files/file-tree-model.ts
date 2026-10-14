@@ -1,7 +1,6 @@
 import type { WorkspaceFileChanges } from "@mcode/contracts";
 import { buildFileTree, type TreeNode } from "@/lib/file-tree";
 
-/** Git mark the Files tree shows beside a changed file. */
 export type FileChangeMark = WorkspaceFileChanges["entries"][number]["mark"];
 
 /** One visible row of the flattened Files tree. */
@@ -55,7 +54,6 @@ export function ancestorFolders(path: string): string[] {
   return folders;
 }
 
-/** Builds the compacted tree once per path list. */
 export function buildFilesTree(paths: readonly string[]): TreeNode[] {
   return buildFileTree(paths);
 }

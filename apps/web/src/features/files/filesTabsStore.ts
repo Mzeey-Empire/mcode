@@ -22,7 +22,6 @@ export interface FilesScopeState {
   readonly goToFileOpen: boolean;
 }
 
-/** The state a scope starts with before the user opens anything. */
 export const FILES_SCOPE_DEFAULTS: FilesScopeState = {
   openPaths: [],
   activePath: null,

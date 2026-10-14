@@ -12,7 +12,6 @@ import { useFilesData, type FilesData } from "./useFilesData";
 
 const EMPTY_PATHS: readonly string[] = [];
 
-/** Props for {@link FilesTool}. */
 export interface FilesToolProps {
   readonly workspaceId: string;
   readonly threadId: string | null;
@@ -20,7 +19,6 @@ export interface FilesToolProps {
   readonly scopeId: string;
 }
 
-/** What the body shows, derived from width, tree visibility, and the active tab. */
 interface FilesLayout {
   readonly dockedTree: boolean;
   readonly body: "tree" | "file";
@@ -171,9 +169,8 @@ function DockedTreePane({ scopeId, width, children }: { readonly scopeId: string
     const target = event.currentTarget;
     const maxDockedWidth = (target.parentElement?.parentElement?.getBoundingClientRect().width ?? Infinity) - SIDE_PANE_CONTENT_MIN_WIDTH;
     target.setPointerCapture(event.pointerId);
+    // Past the widest width that still docks, the layout switches to the body view and ends the drag.
     const onMove = (move: PointerEvent) =>
-      // The pane sits left of the code, so dragging right widens it. Capping at the widest width that still
-      // docks keeps the pane mounted; past it the layout switches to the body view and ends the drag.
       useFilesTabsStore.getState().setTreeWidth(scopeId, Math.min(startWidth + (move.clientX - startX), maxDockedWidth));
     const onUp = () => {
       target.removeEventListener("pointermove", onMove);

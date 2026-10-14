@@ -49,7 +49,6 @@ export function FilesTabStrip({
   );
 }
 
-/** Props for {@link FilesControlsRow}. */
 export interface FilesControlsRowProps {
   readonly treeOpen: boolean;
   /** The file the body shows, or null when the body shows the tree. */

@@ -53,7 +53,6 @@ interface TokenizeRequest {
   }>;
 }
 
-/** Theme name for the Files tool's code view. */
 const FILES_THEME_NAME = "mcode-files";
 
 /**
