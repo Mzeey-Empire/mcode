@@ -706,7 +706,7 @@ describe("PreviewPanel: full panel state", () => {
     });
     useSettingsStore.getState()._applyPush(getDefaultSettings());
     usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
-    usePreviewDesignModeStore.setState({ modes: {} });
+    usePreviewDesignModeStore.setState({ pickers: {} });
     usePreviewTabsStore.setState({ tabSetByScope: {}, liveChromeByScope: {}, persistentTabIdsByScope: {}, pendingNavErrorsByScope: {} });
     useDiffStore.setState({ previewUrlByThread: {} });
     useBrowserAutomationStore.setState({ controllers: new Map(), pendingAgentOpens: new Map() });
@@ -727,7 +727,7 @@ describe("PreviewPanel: full panel state", () => {
     (window as any).desktopBridge = undefined;
     useSettingsStore.getState()._applyPush(getDefaultSettings());
     usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
-    usePreviewDesignModeStore.setState({ modes: {} });
+    usePreviewDesignModeStore.setState({ pickers: {} });
     usePreviewTabsStore.setState({ tabSetByScope: {}, liveChromeByScope: {}, persistentTabIdsByScope: {}, pendingNavErrorsByScope: {} });
     useBrowserAutomationStore.setState({ controllers: new Map(), pendingAgentOpens: new Map() });
     useProviderCatalogStore.getState().reset();

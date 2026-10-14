@@ -1,38 +1,48 @@
 import { create } from "zustand";
+import {
+  DESIGN_PICKER_OFF,
+  designPickerReducer,
+  type DesignPickerEvent,
+  type DesignPickerState,
+} from "../design/designPickerMachine";
 
 interface PreviewDesignModeStore {
-  /** Map of threadId -> whether design mode is currently active for that thread. */
-  readonly modes: Record<string, boolean>;
-  /** Returns the current active flag for a thread, defaulting to false. */
+  /** Picker state per thread; a missing entry is off. */
+  readonly pickers: Record<string, DesignPickerState>;
+  /** Returns the picker state for a thread, defaulting to off. */
+  getPicker: (threadId: string) => DesignPickerState;
+  /** Returns whether Design is on for the thread (picking or editing). */
   isActive: (threadId: string) => boolean;
-  /** Flip active/inactive for the thread. */
+  /** Feeds one event to the thread's picker machine. */
+  dispatch: (threadId: string, event: DesignPickerEvent) => void;
+  /** Turns Design on when it is off and off otherwise. */
   toggle: (threadId: string) => void;
-  /** Explicitly set the active flag (used by the exit pill and by escape handlers). */
+  /** Turns Design on or off without touching an active picker's arming. */
   setActive: (threadId: string, active: boolean) => void;
 }
 
 /**
- * Per-thread persistence for the preview Design mode flag. When active, the
- * toolbar's Design button reads as pressed, the right-side Exit pill appears,
- * and PreviewPanel auto-arms an element-pick session whenever no capture is
- * busy. The mode is the single state behind a "next click on the page
- * captures the element under the cursor, repeat" interaction; it stays on
- * across successful captures and Esc-cancels until the user toggles it off
- * via the toolbar button or pill.
- *
- * State is intentionally scoped to one thread so design sessions do not bleed
- * between contexts when the user switches threads.
+ * Per-thread home of the `designPickerMachine`. The toolbar button reads `isActive`, and
+ * `useDesignPicker` arms one element pick per `armId` of the picking phase. State is scoped
+ * to the thread so Design sessions do not bleed between contexts.
  */
-export const usePreviewDesignModeStore = create<PreviewDesignModeStore>((set, get) => ({
-  modes: {},
-  isActive: (threadId) => get().modes[threadId] === true,
-  toggle: (threadId) => {
-    const current = get().modes[threadId] === true;
-    set({ modes: { ...get().modes, [threadId]: !current } });
-  },
-  setActive: (threadId, active) => {
-    const current = get().modes[threadId] === true;
-    if (current === active) return;
-    set({ modes: { ...get().modes, [threadId]: active } });
-  },
-}));
+export const usePreviewDesignModeStore = create<PreviewDesignModeStore>((set, get) => {
+  const dispatch = (threadId: string, event: DesignPickerEvent): void => {
+    const current = get().pickers[threadId] ?? DESIGN_PICKER_OFF;
+    const next = designPickerReducer(current, event);
+    if (next === current) return;
+    set({ pickers: { ...get().pickers, [threadId]: next } });
+  };
+  return {
+    pickers: {},
+    getPicker: (threadId) => get().pickers[threadId] ?? DESIGN_PICKER_OFF,
+    isActive: (threadId) => (get().pickers[threadId] ?? DESIGN_PICKER_OFF).phase !== "off",
+    dispatch,
+    toggle: (threadId) => dispatch(threadId, { type: "toggle" }),
+    setActive: (threadId, active) => {
+      const isActive = get().isActive(threadId);
+      if (active === isActive) return;
+      dispatch(threadId, { type: active ? "toggle" : "exit" });
+    },
+  };
+});
