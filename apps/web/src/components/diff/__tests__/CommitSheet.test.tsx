@@ -281,6 +281,23 @@ describe("CommitSheet outcomes", () => {
     expect(sentRequests()[1]?.requestId).toBe(sentRequests()[0]?.requestId);
   });
 
+  it("also finishes a request that was already shown as interrupted when the sheet unmounts", async () => {
+    arrange([change("a.ts")]);
+    vi.mocked(mockTransport.commitChanges).mockRejectedValueOnce(new Error("WebSocket disconnected"));
+    const { unmount } = renderSheetWith();
+    await ready();
+
+    act(() => useConnectionStore.setState({ status: "reconnecting" }));
+    fireEvent.click(commitButton());
+    await screen.findByText(/Connection lost/);
+    unmount();
+
+    act(() => useConnectionStore.setState({ status: "connected" }));
+
+    await waitFor(() => expect(sentRequests()).toHaveLength(2));
+    expect(sentRequests()[1]?.requestId).toBe(sentRequests()[0]?.requestId);
+  });
+
   it("shows Pushing… and polls the same request until the push settles", async () => {
     arrange([change("a.ts")]);
     vi.mocked(mockTransport.commitChanges)

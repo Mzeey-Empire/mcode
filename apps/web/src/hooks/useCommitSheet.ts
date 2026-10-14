@@ -110,6 +110,9 @@ export function useCommitSheet(options: UseCommitSheetOptions): CommitSheetModel
   });
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
+  const submissionRef = useRef(submission);
+  submissionRef.current = submission;
+  const sendRef = useRef<(params: GitCommitParams) => void>(() => {});
 
   const selected = useMemo(() => (files ? checkedFiles(files, choices) : []), [files, choices]);
 
@@ -210,6 +213,8 @@ export function useCommitSheet(options: UseCommitSheetOptions): CommitSheetModel
     [settle, settleFailure, scopeId],
   );
 
+  sendRef.current = send;
+
   const submit = useCallback(
     (push: boolean) => {
       if (head === undefined || selected.length === 0 || composeMessage(draft) === "") return;
@@ -247,6 +252,13 @@ export function useCommitSheet(options: UseCommitSheetOptions): CommitSheetModel
       life.alive = false;
       life.generation++;
       if (life.poll) clearTimeout(life.poll);
+      // An already-dropped request has no promise left to hand off, so resume it here.
+      const params = request.current;
+      if (params && submissionRef.current.kind === "interrupted") {
+        const resend = () => sendRef.current(params);
+        if (useConnectionStore.getState().status === "connected") resend();
+        else resendOnReconnect(resend);
+      }
     };
   }, []);
 
