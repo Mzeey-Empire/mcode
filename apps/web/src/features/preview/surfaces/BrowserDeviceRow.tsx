@@ -118,7 +118,7 @@ function DevicePicker({ open, selected, onOpenChange, onResponsive, onPreset }: 
             aria-label="Viewport preset"
           >
             <PresetIcon preset={selected} />
-            <span className="text-fade">{selected?.label ?? "Responsive"}</span>
+            <span className="text-fade @max-[420px]:hidden">{selected?.label ?? "Responsive"}</span>
             <ChevronDown className="size-3 text-muted" aria-hidden />
           </Button>
         }
@@ -159,7 +159,7 @@ function SizeField({ label, value, dragging, onChange, onSubmit }: SizeFieldProp
       onKeyDown={submitOnEnter}
       data-dragging={dragging ? "" : undefined}
       className={cn(
-        "h-7 w-13 shrink-0 rounded-md bg-selected text-center font-mono text-caption text-ink outline-none",
+        "h-7 w-13 shrink-0 rounded-md bg-selected @max-[420px]:w-10 text-center font-mono text-caption text-ink outline-none",
         "focus-visible:shadow-[inset_0_0_0_1px_var(--color-focus)]",
         dragging && "shadow-[inset_0_0_0_1px_var(--color-primary)]",
       )}
@@ -246,15 +246,16 @@ function useDeviceRowSizing(
   return { requested, dimensions, selectedPreset, submitSize, submitDraft, editDraft, clearPreset: () => setSelectedPresetId(null) };
 }
 
+// The panel can shrink to 384px, where the full-width controls overflow, so the row compacts by container width.
 function DeviceRowFrame({ children }: { readonly children: ReactNode }) {
   return (
     <div
       data-testid="browser-device-row"
       role="group"
       aria-label="Browser viewport controls"
-      className="flex h-10 min-w-0 flex-1 items-center gap-2"
+      className="@container h-10 min-w-0 flex-1"
     >
-      {children}
+      <div className="flex h-full items-center gap-2 @max-[420px]:gap-1">{children}</div>
     </div>
   );
 }
