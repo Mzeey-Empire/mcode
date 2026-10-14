@@ -4,16 +4,15 @@ import { describe, it, expect } from "vitest";
 import { ToolCallWrapper } from "../tool-renderers/ToolCallWrapper";
 import { FileText } from "lucide-react";
 describe("ToolCallWrapper active state", () => {
-  it("applies text-ink and font-medium to the label when active", () => {
-    render(<ToolCallWrapper icon={FileText} label="Reading file" isActive />);
-    const label = screen.getByText("Reading file");
-    expect(label.className).toContain("text-ink");
-    expect(label.className).toContain("font-medium");
+  it("replaces the tool icon with a spinner while active", () => {
+    const { container } = render(<ToolCallWrapper icon={FileText} label="Reading file" isActive />);
+    expect(screen.getByText("Reading file")).toBeInTheDocument();
+    expect(container.querySelector(".lucide-file-text")).toBeNull();
   });
 
-  it("applies text-ink/70 to the label when inactive", () => {
-    render(<ToolCallWrapper icon={FileText} label="Reading file" isActive={false} />);
-    const label = screen.getByText("Reading file");
-    expect(label.className).toContain("text-ink/70");
+  it("shows the tool icon when inactive", () => {
+    const { container } = render(<ToolCallWrapper icon={FileText} label="Reading file" isActive={false} />);
+    expect(screen.getByText("Reading file")).toBeInTheDocument();
+    expect(container.querySelector(".lucide-file-text")).toBeInTheDocument();
   });
 });

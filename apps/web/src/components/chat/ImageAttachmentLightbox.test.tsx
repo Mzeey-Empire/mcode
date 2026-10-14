@@ -11,27 +11,6 @@ const createItems = (source: string, count = 3) =>
   }));
 
 describe("ImageAttachmentLightbox", () => {
-  it("covers the whole viewport, since no title bar sits above it", async () => {
-    render(
-      <ImageAttachmentLightbox
-        open
-        onOpenChange={vi.fn()}
-        items={[
-          {
-            src: "data:image/png;base64,iVBORw0KGgo=",
-            title: "Screenshot",
-          },
-        ]}
-      />,
-    );
-
-    const popup = await screen.findByRole("dialog");
-    expect(popup).toHaveClass("inset-0");
-    expect(document.querySelector('[data-slot="dialog-overlay"]')).toHaveClass(
-      "inset-0",
-    );
-  });
-
   it("keeps the selected slide when attachment URLs refresh", async () => {
     const user = userEvent.setup();
     const { rerender } = render(

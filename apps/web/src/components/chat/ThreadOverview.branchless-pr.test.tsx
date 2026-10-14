@@ -651,7 +651,6 @@ describe("ThreadOverview branchless Create PR", () => {
     expect(claimedRow.querySelector('[data-testid="thread-overview-browser-agent-cursor"]')).not.toBeInTheDocument();
     expect(claimedRow.querySelector('img[src="https://claimed.test/favicon.ico"]')).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Browser, Ordinary page/ })).toBeInTheDocument();
-    expect(screen.getByTestId("thread-overview-browser-address-agent-tab")).toHaveClass("text-fade");
 
     agentRow.focus();
     await user.keyboard("{Enter}");

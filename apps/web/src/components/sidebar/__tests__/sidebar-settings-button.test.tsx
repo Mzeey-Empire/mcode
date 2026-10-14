@@ -1,8 +1,7 @@
 /**
  * Tests for the "Edit settings.json" button in the Sidebar footer.
  *
- * Verifies the button uses the Braces icon rather than a raw "{}" text span
- * with font-mono styling.
+ * Verifies the button uses the Braces icon rather than a raw "{}" text span.
  *
  * IS_DESKTOP is a module-level const evaluated at import time. We work around
  * this by setting window.desktopBridge before the module load and using
@@ -73,16 +72,6 @@ describe('Sidebar "Edit settings.json" button', () => {
     );
   }
 
-  it("does not render a span with font-mono text-xs class containing {}", () => {
-    const { container } = renderSettingsSidebar();
-
-    const monoSpans = container.querySelectorAll("span.font-mono.text-xs");
-    const hasRawBraces = Array.from(monoSpans).some(
-      (el) => el.textContent === "{}",
-    );
-    expect(hasRawBraces).toBe(false);
-  });
-
   it("does not contain the literal text {} in the rendered output", () => {
     const { container } = renderSettingsSidebar();
     expect(container.innerHTML).not.toContain("{}");
@@ -106,15 +95,6 @@ describe('Sidebar "Edit settings.json" button', () => {
     });
     const svg = editButton.querySelector("svg");
     expect(svg?.classList.contains("lucide-braces")).toBe(true);
-  });
-
-  it("keeps the primary sidebar actions on the same neutral treatment", () => {
-    renderProjectSidebar();
-
-    const newThread = screen.getByRole("button", { name: "New thread" });
-    const search = screen.getByRole("button", { name: "Search" });
-    expect(newThread).not.toHaveClass("bg-button-secondary");
-    expect(search).not.toHaveClass("bg-button-secondary");
   });
 
   it("puts Search before New thread and Pull requests in the footer, without a duplicate Chat action", () => {

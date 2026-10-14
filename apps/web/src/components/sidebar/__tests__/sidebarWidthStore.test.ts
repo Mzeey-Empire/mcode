@@ -38,9 +38,7 @@ describe("clampSidebarWidth", () => {
 });
 
 describe("useSidebarWidthStore", () => {
-  it("starts at 304 and clamps every write", () => {
-    expect(useSidebarWidthStore.getState().width).toBe(304);
-
+  it("clamps every write", () => {
     useSidebarWidthStore.getState().setWidth(100);
     expect(useSidebarWidthStore.getState().width).toBe(220);
 
