@@ -92,7 +92,7 @@ export function usePreviewViewport({
   const tabs = usePreviewTabs(threadId, workspaceId);
   const automationControllers = useBrowserAutomationStore((state) => state.controllers);
   const pendingAgentOpens = useBrowserAutomationStore((state) => state.pendingAgentOpens);
-  const automationActiveRequests = useBrowserAutomationStore((state) => state.activeRequests);
+  const actingTargets = useBrowserAutomationStore((state) => state.actingTargets);
   const automationLiveTargets = useBrowserAutomationStore((state) => state.liveTargets);
   const automationViewports = useBrowserAutomationStore((state) => state.viewportByTarget);
   const automationViewportStates = useBrowserAutomationStore((state) => state.viewportStateByTarget);
@@ -210,7 +210,7 @@ export function usePreviewViewport({
     browserWorkspaceId,
     activeWebviewTabId,
     automationControllers,
-    automationActiveRequests,
+    actingTargets,
     pendingAgentOpens,
     activeBrowserTargetKey,
     previewScopeKey,

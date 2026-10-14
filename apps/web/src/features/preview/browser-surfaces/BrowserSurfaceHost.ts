@@ -344,7 +344,7 @@ export class BrowserSurfaceHost {
   private retainedRecordFields(
     prior: SurfaceRecord | undefined,
     metadata: RetainedBrowserSurfaceMetadata | undefined,
-  ): Pick<SurfaceRecord, "title" | "favicon" | "listeners" | "publicationPending" | "visible" | "controlled" | "presentation"> {
+  ): Pick<SurfaceRecord, "title" | "favicon" | "listeners" | "publicationPending" | "visible" | "controlled" | "indicated" | "presentation"> {
     return {
       title: this.retainedTitle(metadata),
       favicon: this.retainedFavicon(metadata),
@@ -352,6 +352,7 @@ export class BrowserSurfaceHost {
       publicationPending: prior !== undefined,
       visible: this.priorField(prior, (record) => record.visible, false),
       controlled: this.priorField(prior, (record) => record.controlled, false),
+      indicated: this.priorField(prior, (record) => record.indicated, false),
       presentation: this.priorField(prior, (record) => record.presentation, null),
     };
   }
@@ -396,7 +397,7 @@ export class BrowserSurfaceHost {
     record.stopAdapter = record.adapter!.subscribe((event) => this.handleEvent(event));
     for (const listener of this.materializedListeners) listener(record.identity, record.generation);
     record.adapter!.create?.();
-    record.adapter!.setControlled?.(record.controlled);
+    record.adapter!.setControlled?.(record.indicated);
     if (address !== undefined) void record.adapter!.navigate(address);
     if (record.visible && record.presentation) record.adapter!.present(record.presentation);
     if (record.publicationPending) this.schedulePublication(record);
@@ -534,12 +535,17 @@ export class BrowserSurfaceHost {
     return true;
   }
 
-  /** Changes agent-control protection without changing residency or generation. */
-  public setControlled(identity: BrowserSurfaceIdentity, controlled: boolean): void {
+  /**
+   * Changes agent-control protection without changing residency or generation. `indicated`
+   * drives the visible ring on its own because the agent keeps its hold, and the surface its
+   * protection, while idle between actions.
+   */
+  public setControlled(identity: BrowserSurfaceIdentity, controlled: boolean, indicated = controlled): void {
     const record = this.records.get(surfaceKey(identity));
     if (!record || !sameIdentity(record.identity, identity)) return;
     record.controlled = controlled;
-    record.adapter?.setControlled?.(controlled);
+    record.indicated = indicated;
+    record.adapter?.setControlled?.(indicated);
   }
 
   /** Pins a generation while an automation operation is in flight. */
@@ -805,6 +811,7 @@ interface SurfaceRecord {
   disposed: boolean;
   visible: boolean;
   controlled: boolean;
+  indicated: boolean;
   operationPins: number;
   capturePins: number;
   presentation: BrowserSurfacePresentation | null;

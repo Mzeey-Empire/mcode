@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BROWSER_AUTOMATION_MAX_PENDING_REQUESTS } from "@mcode/contracts";
 import {
+  BROWSER_ACTING_LINGER_MS,
   browserAutomationLifecycleKey,
   browserAutomationRequestKey,
   browserAutomationScopeKey,
@@ -9,6 +10,8 @@ import {
   parseBrowserAutomationScopeKey,
   parseBrowserAutomationTargetKey,
   onBrowserAutomationScopeRelease,
+  handBackBrowserControl,
+  interruptBrowserAutomationTarget,
   invalidateBrowserAutomationTargetObservation,
   onBrowserAutomationObservationInvalidation,
   releaseBrowserAutomationThreadScope,
@@ -531,5 +534,93 @@ describe("browser automation renderer scope", () => {
     )).toEqual({ tabId: "tab-second", controller: "agent", controlEpoch: 2 });
 
     store.releaseThreadTargets("workspace-agent", "thread-agent");
+  });
+});
+
+describe("browser acting and user hold", () => {
+  const key = browserAutomationTargetKey("workspace-acting", "thread-acting", "tab-acting");
+
+  function activeRequest(
+    requestId: string,
+    sequence: number,
+    operation: string,
+  ): BrowserAutomationActiveRequest {
+    return {
+      dispatch: {
+        request: { workspaceId: "workspace-acting", requestId, sequence, operation },
+        target: { threadId: "thread-acting", tabId: "tab-acting" },
+      } as unknown as BrowserAutomationActiveRequest["dispatch"],
+      startedAt: sequence,
+    };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+    useBrowserAutomationStore.getState().releaseThreadTargets("workspace-acting", "thread-acting");
+    useBrowserAutomationStore.setState({ activeRequests: new Map(), actingTargets: new Set() });
+  });
+
+  it("marks a target acting for effect operations only", () => {
+    const store = useBrowserAutomationStore.getState();
+    store.setActiveRequest(activeRequest("inspect", 1, "inspect"));
+    store.setActiveRequest(activeRequest("status", 2, "status"));
+    expect(useBrowserAutomationStore.getState().actingTargets.has(key)).toBe(false);
+
+    store.setActiveRequest(activeRequest("click", 3, "click"));
+    expect(useBrowserAutomationStore.getState().actingTargets.has(key)).toBe(true);
+  });
+
+  it("keeps acting for the linger window after the last effect, and a new effect cancels the expiry", () => {
+    vi.useFakeTimers();
+    const store = useBrowserAutomationStore.getState();
+    store.setActiveRequest(activeRequest("click-1", 1, "click"));
+    store.clearActiveRequest("click-1", 1);
+
+    vi.advanceTimersByTime(BROWSER_ACTING_LINGER_MS - 1);
+    expect(useBrowserAutomationStore.getState().actingTargets.has(key)).toBe(true);
+
+    store.setActiveRequest(activeRequest("click-2", 2, "click"));
+    vi.advanceTimersByTime(BROWSER_ACTING_LINGER_MS * 2);
+    expect(useBrowserAutomationStore.getState().actingTargets.has(key)).toBe(true);
+
+    store.clearActiveRequest("click-2", 2);
+    vi.advanceTimersByTime(BROWSER_ACTING_LINGER_MS);
+    expect(useBrowserAutomationStore.getState().actingTargets.has(key)).toBe(false);
+  });
+
+  it("does not expire acting while another effect is still running on the target", () => {
+    vi.useFakeTimers();
+    const store = useBrowserAutomationStore.getState();
+    store.setActiveRequest(activeRequest("click-1", 1, "click"));
+    store.setActiveRequest(activeRequest("type-1", 2, "type"));
+    store.clearActiveRequest("click-1", 1);
+
+    vi.advanceTimersByTime(BROWSER_ACTING_LINGER_MS * 2);
+    expect(useBrowserAutomationStore.getState().actingTargets.has(key)).toBe(true);
+  });
+
+  it("holds the web browser for the user on take control and releases it only on hand back", async () => {
+    const store = useBrowserAutomationStore.getState();
+    store.registerTarget("workspace-acting", "thread-acting", "tab-acting");
+    store.setControllerForTarget("workspace-acting", "thread-acting", "tab-acting", {
+      tabId: "tab-acting",
+      controller: "agent",
+      controlEpoch: 4,
+    });
+
+    interruptBrowserAutomationTarget("workspace-acting", "thread-acting", "tab-acting", "user-stopped");
+    expect(useBrowserAutomationStore.getState().controllers.get(key)).toEqual({
+      tabId: "tab-acting",
+      controller: "human",
+      controlEpoch: 5,
+    });
+
+    await expect(handBackBrowserControl("workspace-acting", "thread-acting")).resolves.toBe(true);
+    expect(useBrowserAutomationStore.getState().controllers.get(key)).toEqual({
+      tabId: "tab-acting",
+      controller: "none",
+      controlEpoch: 6,
+    });
+    await expect(handBackBrowserControl("workspace-acting", "thread-acting")).resolves.toBe(false);
   });
 });

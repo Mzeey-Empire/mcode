@@ -10,6 +10,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import {
   browserAutomationRequestKey,
   browserAutomationTargetKey,
+  isBrowserEffectOperation,
   useBrowserAutomationStore,
 } from "./browserAutomationStore";
 import { BrowserAutomationRecorder } from "./browserAutomationRecorder";
@@ -291,8 +292,14 @@ function bindViewportCoordinatorDispatch(dispatch: BrowserAutomationHostDispatch
 
 /** Project web agent control before the browser operation begins. */
 export function projectAgentControl(dispatch: BrowserAutomationHostDispatch): void {
-  if (window.desktopBridge?.preview?.automation || dispatch.request.operation === "status" || !useThreadStore.getState().runningThreadIds.has(dispatch.target.threadId)) return;
+  if (window.desktopBridge?.preview?.automation || !isBrowserEffectOperation(dispatch.request.operation) || !useThreadStore.getState().runningThreadIds.has(dispatch.target.threadId)) return;
   const operation = dispatch.request.operation;
+  const held = useBrowserAutomationStore.getState().controllers.get(browserAutomationTargetKey(
+    dispatch.scope.workspaceId,
+    dispatch.target.threadId,
+    dispatch.target.tabId,
+  ));
+  if (held?.controller === "human") return;
   useBrowserAutomationStore.getState().setControllerForTarget(
     dispatch.scope.workspaceId,
     dispatch.target.threadId,

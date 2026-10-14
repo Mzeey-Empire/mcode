@@ -95,6 +95,17 @@ function getBrowserTabController(
   return pendingOpen ? "agent" : undefined;
 }
 
+// An agent that holds the tab but has not acted for a few seconds is idle; only acting shows the cursor.
+function getVisibleBrowserTabController(
+  lifecycle: BrowserSessionLifecycleTab | undefined,
+  controller: BrowserAutomationControllerState | undefined,
+  pendingOpen: BrowserAutomationPendingAgentOpen | null | undefined,
+  acting: boolean,
+): BrowserAutomationControllerState["controller"] | undefined {
+  const resolved = getBrowserTabController(lifecycle, controller, pendingOpen);
+  return resolved === "agent" && !pendingOpen && !acting ? "none" : resolved;
+}
+
 /** Joins a scoped Browser tab with its lifecycle and controller state. */
 function getThreadOverviewBrowserTab({
   tab,
@@ -104,6 +115,7 @@ function getThreadOverviewBrowserTab({
   liveTargets,
   controllers,
   pendingAgentOpens,
+  actingTargets,
 }: {
   tab: BrowserTabInfo;
   workspaceId: string;
@@ -112,6 +124,7 @@ function getThreadOverviewBrowserTab({
   liveTargets: ReadonlyMap<string, BrowserAutomationLiveTarget>;
   controllers: ReadonlyMap<string, BrowserAutomationControllerState>;
   pendingAgentOpens: ReadonlyMap<string, BrowserAutomationPendingAgentOpen>;
+  actingTargets: ReadonlySet<string>;
 }): ThreadOverviewBrowserTab | null {
   if (tab.threadId !== threadId) return null;
   const targetKey = browserAutomationTargetKey(workspaceId, threadId, tab.id);
@@ -122,7 +135,12 @@ function getThreadOverviewBrowserTab({
     return null;
   }
   const lifecycle = lifecycleByTarget.get(targetKey);
-  const controller = getBrowserTabController(lifecycle, controllers.get(targetKey), pendingOpen);
+  const controller = getVisibleBrowserTabController(
+    lifecycle,
+    controllers.get(targetKey),
+    pendingOpen,
+    actingTargets.has(targetKey),
+  );
   return {
     tab: browserPendingTab(tab, pendingUrl),
     ...(lifecycle ? { lifecycle } : {}),
@@ -143,6 +161,7 @@ export function getThreadOverviewBrowserTabs({
   liveTargets,
   controllers,
   pendingAgentOpens = EMPTY_BROWSER_PENDING_OPENS,
+  actingTargets,
 }: {
   workspaceId: string;
   threadId: string;
@@ -151,6 +170,7 @@ export function getThreadOverviewBrowserTabs({
   liveTargets: ReadonlyMap<string, BrowserAutomationLiveTarget>;
   controllers: ReadonlyMap<string, BrowserAutomationControllerState>;
   pendingAgentOpens?: ReadonlyMap<string, BrowserAutomationPendingAgentOpen>;
+  actingTargets: ReadonlySet<string>;
 }): ThreadOverviewBrowserTab[] {
   if (!tabSet || tabSet.threadId !== threadId) return [];
 
@@ -165,6 +185,7 @@ export function getThreadOverviewBrowserTabs({
       liveTargets,
       controllers,
       pendingAgentOpens,
+      actingTargets,
     });
     if (row) rows.push(row);
   }
@@ -251,6 +272,7 @@ function BrowserEntry({ thread }: { thread: Thread }) {
   const browserLiveTargets = useBrowserAutomationStore((state) => state.liveTargets);
   const browserControllers = useBrowserAutomationStore((state) => state.controllers);
   const browserPendingAgentOpens = useBrowserAutomationStore((state) => state.pendingAgentOpens);
+  const browserActingTargets = useBrowserAutomationStore((state) => state.actingTargets);
   const browserHostStatus = useBrowserAutomationStore((state) => state.status);
   const browserHostRegistered = useBrowserAutomationStore((state) => state.registered);
   const browserTabs = useMemo(
@@ -264,9 +286,11 @@ function BrowserEntry({ thread }: { thread: Thread }) {
           liveTargets: browserLiveTargets,
           controllers: browserControllers,
           pendingAgentOpens: browserPendingAgentOpens,
+          actingTargets: browserActingTargets,
         })
         : [],
     [
+      browserActingTargets,
       browserControllers,
       browserHostRegistered,
       browserHostStatus,

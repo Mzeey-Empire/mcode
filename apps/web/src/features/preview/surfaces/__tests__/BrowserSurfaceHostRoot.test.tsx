@@ -14,7 +14,7 @@ import {
 } from "../BrowserSurfaceHostRoot";
 import type { BrowserSurfaceIdentity } from "../../browser-surfaces";
 import { previewTabsScopeKey, usePreviewTabsStore } from "../../state/previewTabsStore";
-import { useBrowserAutomationStore } from "../../automation/browserAutomationStore";
+import { browserAutomationTargetKey, useBrowserAutomationStore } from "../../automation/browserAutomationStore";
 import type {
   PreviewPopupRequest,
   PreviewSurfaceDiscardRequest,
@@ -108,6 +108,14 @@ describe("BrowserSurfaceHostRoot", () => {
         "web-preview",
         { tabId: "web-preview", controller: "agent", controlEpoch: 1 },
       );
+    });
+
+    expect(indicator).toHaveStyle({ visibility: "hidden" });
+
+    act(() => {
+      useBrowserAutomationStore.setState({
+        actingTargets: new Set([browserAutomationTargetKey("workspace-1", "thread-1", "web-preview")]),
+      });
     });
 
     expect(indicator).toHaveStyle({ visibility: "visible", pointerEvents: "none" });

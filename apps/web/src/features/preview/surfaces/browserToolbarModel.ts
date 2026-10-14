@@ -56,17 +56,20 @@ export type BrowserZoom =
       readonly set: (factor: number) => Promise<number>;
     };
 
-/** Whether the human can take the active page back from the agent. */
-export type BrowserTakeover =
+/**
+ * Who holds the Browser, as the toolbar shows it. The provider is the thread's, so the pill names
+ * the agent on the other side of the hold.
+ */
+export type BrowserControl =
   | { readonly kind: "none" }
-  | { readonly kind: "agent"; readonly busy: boolean; readonly takeControl: () => void };
+  | { readonly kind: "agent-acting"; readonly provider: string; readonly takeControl: () => void }
+  | { readonly kind: "user-holding"; readonly provider: string; readonly handBack: () => void };
 
 /** The More menu's tools. Its command-backed actions are the ones the Browser keys run. */
 export interface BrowserTools extends BrowserCommandActions {
   readonly zoom: BrowserZoom;
   readonly clearCookies: BrowserAction;
   readonly clearCache: BrowserAction;
-  readonly takeover: BrowserTakeover;
 }
 
 /** A non-null reason disables the action. */

@@ -7,6 +7,7 @@ import {
   type BrowserAutomationResult,
   type BrowserAutomationResponse,
 } from "@mcode/contracts";
+import { browserAutomationTargetKey, useBrowserAutomationStore } from "./browserAutomationStore";
 import { captureVisibleWebScreenshot } from "./web-browser-automation/capture";
 import { getWebBrowserSemanticRegistry } from "./webBrowserSemanticRegistry";
 
@@ -509,6 +510,12 @@ function snapshot(dispatch: BrowserAutomationHostDispatch, iframe: WebIframe, si
   });
 }
 
+// Read from the store so the agent learns the epoch it must send after a takeover or Hand back.
+function currentControlEpoch(dispatch: BrowserAutomationHostDispatch): number {
+  const key = browserAutomationTargetKey(dispatch.request.workspaceId, dispatch.target.threadId, dispatch.target.tabId);
+  return useBrowserAutomationStore.getState().controllers.get(key)?.controlEpoch ?? dispatch.request.expectedControlEpoch;
+}
+
 async function inspect(dispatch: BrowserAutomationHostDispatch, iframe: WebIframe, signal: AbortSignal): Promise<BrowserAutomationResponse> {
   const observed = snapshot({ ...dispatch, request: { ...dispatch.request, operation: "snapshot", args: { includeScreenshot: false, timeoutMs: 15_000 } } } as BrowserAutomationHostDispatch, iframe, signal);
   if (!observed.ok) return observed;
@@ -524,6 +531,7 @@ async function inspect(dispatch: BrowserAutomationHostDispatch, iframe: WebIfram
     snapshot: observed.result.snapshot,
     ...(screenshotResult?.ok ? { screenshot: screenshotResult.value } : {}),
     ...(dispatch.request.args.includeDiagnostics ? { diagnostics: [] } : {}),
+    controlEpoch: currentControlEpoch(dispatch),
   };
   return response(dispatch, mechanical);
 }

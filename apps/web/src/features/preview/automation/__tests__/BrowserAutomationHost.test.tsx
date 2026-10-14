@@ -12,6 +12,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import {
   browserAutomationScopeKey,
   browserAutomationTargetKey,
+  handBackBrowserControl,
   interruptBrowserAutomationTarget,
   releaseBrowserAutomationThreadScope,
   useBrowserAutomationStore,
@@ -210,6 +211,7 @@ describe("BrowserAutomationHost", () => {
   const finishRendererOperation = vi.fn();
   const cancel = vi.fn();
   const interrupt = vi.fn();
+  const handBack = vi.fn();
   const releaseAgentControl = vi.fn();
   const describeTarget = vi.fn();
   const createTab = vi.fn();
@@ -240,6 +242,7 @@ describe("BrowserAutomationHost", () => {
     });
     cancel.mockResolvedValue(true);
     interrupt.mockResolvedValue(true);
+    handBack.mockResolvedValue(true);
     releaseAgentControl.mockImplementation(async (target: { tabId: string; controlEpoch: number }) => {
       controllerChanged?.({
         tabId: target.tabId,
@@ -260,6 +263,7 @@ describe("BrowserAutomationHost", () => {
           finishRendererOperation,
           cancel,
           interrupt,
+          handBack,
           releaseAgentControl,
           describeTarget,
           getMediaSourceId: vi.fn(),
@@ -3032,5 +3036,25 @@ describe("BrowserAutomationHost", () => {
     expect(disposeTarget).toHaveBeenCalledWith("workspace-1", "thread-1", "tab-1");
     view.unmount();
     disposeTarget.mockRestore();
+  });
+
+  it("keeps the user's hold across turns and hands back only on the Hand back action", async () => {
+    const view = render(<BrowserAutomationHost />);
+    await waitFor(() => expect(harness.transport.registerBrowserAutomationHost).toHaveBeenCalledOnce());
+    await waitFor(() => expect(controllerChanged).not.toBeNull());
+    useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-1", "tab-1");
+    act(() => controllerChanged?.({ tabId: "tab-1", controller: "human", controlEpoch: 2 }));
+    const key = browserAutomationTargetKey("workspace-1", "thread-1", "tab-1");
+
+    act(() => useThreadStore.setState({ runningThreadIds: new Set(["thread-1"]) }));
+    act(() => useThreadStore.setState({ runningThreadIds: new Set() }));
+
+    expect(handBack).not.toHaveBeenCalled();
+    expect(useBrowserAutomationStore.getState().controllers.get(key)?.controller).toBe("human");
+
+    await expect(handBackBrowserControl("workspace-1", "thread-1")).resolves.toBe(true);
+    expect(handBack).toHaveBeenCalledOnce();
+    expect(handBack).toHaveBeenCalledWith({ threadId: "thread-1" });
+    view.unmount();
   });
 });

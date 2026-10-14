@@ -15,6 +15,7 @@ import { pushEmitter } from "@/transport/ws-transport";
 import { useDiffStore } from "@/stores/diffStore";
 import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { BrowserToolbar } from "./BrowserToolbar";
+import { useBrowserControl } from "./useBrowserControl";
 import { BrowserViewportToolbar } from "./BrowserViewportToolbar";
 import { BrowserViewportCanvas } from "./BrowserViewportCanvas";
 import type { BrowserAction, BrowserToolbarPage, BrowserTools } from "./browserToolbarModel";
@@ -121,7 +122,6 @@ function runtimeTools(onToggleViewportToolbar: () => void): BrowserTools {
     zoom: desktopOnly,
     clearCookies: desktopOnly,
     clearCache: desktopOnly,
-    takeover: { kind: "none" },
   };
 }
 
@@ -380,6 +380,7 @@ export function WebRuntimePreview({
   };
 
   const tools = runtimeTools(onToggleViewportToolbar);
+  const control = useBrowserControl(identity.workspaceId, threadId, WEB_RUNTIME_PREVIEW_TAB_ID);
   useBrowserCommands({ active: presentationActive && !automationOnly, actions: tools });
 
   const invalidateViewportObservation = (): void => {
@@ -414,6 +415,7 @@ export function WebRuntimePreview({
               onHumanFocus: invalidateViewportObservation,
             }}
             tools={tools}
+            control={control}
           />
         </div>
       </PanelHeaderSlot>

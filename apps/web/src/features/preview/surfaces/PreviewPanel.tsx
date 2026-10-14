@@ -189,7 +189,7 @@ export function PreviewPanel({
     browserWorkspaceId,
     activeWebviewTabId,
     automationControllers,
-    automationActiveRequests,
+    actingTargets,
     pendingAgentOpens,
     activeBrowserTargetKey,
     previewScopeKey,
@@ -227,7 +227,6 @@ export function PreviewPanel({
     onWebviewGetZoom,
     onWebviewSetZoom,
     activeAutomationController,
-    activeAutomationRequest,
     webviewNavError,
     lastCapture,
     agentControlsBrowser,
@@ -243,7 +242,7 @@ export function PreviewPanel({
     browserWorkspaceId,
     activeWebviewTabId,
     automationControllers,
-    automationActiveRequests,
+    actingTargets,
     pendingAgentOpens,
     webviewRefs,
     activeBrowserTargetKey,
@@ -449,7 +448,6 @@ export function PreviewPanel({
         onWebviewSetZoom={onWebviewSetZoom}
         toggleViewportToolbar={toggleViewportToolbar}
         activeAutomationController={activeAutomationController}
-        activeAutomationRequest={activeAutomationRequest}
         commandsActive={presentationActive && !automationOnly}
       />
 

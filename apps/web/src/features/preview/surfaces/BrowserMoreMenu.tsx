@@ -12,7 +12,7 @@ import {
 import { getKeybindingForCommand, keybindingKeycaps } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
 import { useToastStore } from "@/stores/toastStore";
-import type { BrowserAction, BrowserTakeover, BrowserTools, BrowserZoom } from "./browserToolbarModel";
+import type { BrowserAction, BrowserTools, BrowserZoom } from "./browserToolbarModel";
 import { browserCommands } from "./useBrowserCommands";
 
 const ZOOM_STEP = 0.1;
@@ -90,17 +90,6 @@ function commandShortcut(commandId: string): readonly string[] | undefined {
   return key === undefined ? undefined : keybindingKeycaps(key, isMac);
 }
 
-function TakeControlItem({ takeover }: { readonly takeover: BrowserTakeover }) {
-  if (takeover.kind === "none") return null;
-  return (
-    <DropdownMenuItem
-      label="Take control"
-      onClick={takeover.takeControl}
-      title={takeover.busy ? "Stop the active operation and take control" : undefined}
-    />
-  );
-}
-
 /** Browser tools and shortcuts. Unavailable actions retain their disabled reason. */
 export function BrowserMoreMenu({ tools }: { readonly tools: BrowserTools }) {
   const [open, setOpen] = usePanelHeaderMenuOpen();
@@ -124,7 +113,6 @@ export function BrowserMoreMenu({ tools }: { readonly tools: BrowserTools }) {
             onClick={runAction(tools[command.action])}
           />
         ))}
-        <TakeControlItem takeover={tools.takeover} />
         <DropdownMenuSeparator />
         <DropdownMenuItem label="Clear cookies" disabledReason={disabledReason(tools.clearCookies)} onClick={runAction(tools.clearCookies)} />
         <DropdownMenuItem label="Clear cache" disabledReason={disabledReason(tools.clearCache)} onClick={runAction(tools.clearCache)} />

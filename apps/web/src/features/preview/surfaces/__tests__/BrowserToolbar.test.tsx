@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PanelHeaderSlotScope } from "@/components/panels/shell/PanelHeader";
@@ -6,12 +6,18 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import defaultKeybindings from "@/config/default-keybindings.json";
 import { clearKeybindings, loadKeybindings } from "@/lib/keybinding-manager";
 import { useToastStore } from "@/stores/toastStore";
+import {
+  BROWSER_ACTING_LINGER_MS,
+  useBrowserAutomationStore,
+  type BrowserAutomationActiveRequest,
+} from "../../automation/browserAutomationStore";
 import { BrowserToolbar, type BrowserToolbarProps } from "../BrowserToolbar";
+import { useBrowserControl } from "../useBrowserControl";
 import type {
   BrowserAction,
   BrowserAddress,
   BrowserNavigation,
-  BrowserTakeover,
+  BrowserControl,
   BrowserTools,
 } from "../browserToolbarModel";
 
@@ -33,7 +39,6 @@ function tools(log: string[], overrides: Partial<BrowserTools> = {}): BrowserToo
     zoom: { kind: "enabled", read: async () => 1, set: async (factor) => factor },
     clearCookies: enabled(log, "cookies"),
     clearCache: enabled(log, "cache"),
-    takeover: { kind: "none" },
     ...overrides,
   };
 }
@@ -63,6 +68,7 @@ function loadedProps(log: string[], overrides: Partial<BrowserToolbarProps> = {}
     },
     address: address(log),
     tools: tools(log),
+    control: { kind: "none" },
     ...overrides,
   };
 }
@@ -92,7 +98,7 @@ describe("BrowserToolbar", () => {
 
   it("offers only the address and More on a new page", () => {
     const log: string[] = [];
-    renderToolbar({ page: { kind: "new" }, address: address(log, { url: "" }), tools: tools(log) });
+    renderToolbar({ page: { kind: "new" }, address: address(log, { url: "" }), tools: tools(log), control: { kind: "none" } });
 
     expect(buttonNames()).toEqual(["More"]);
     expect(screen.getByRole("textbox", { name: "Preview URL" })).toHaveAttribute("placeholder", "Search or enter URL");
@@ -100,7 +106,7 @@ describe("BrowserToolbar", () => {
 
   it("keeps navigation on an errored page but drops the page tools", () => {
     const log: string[] = [];
-    renderToolbar({ page: { kind: "error", navigation: navigation(log) }, address: address(log), tools: tools(log) });
+    renderToolbar({ page: { kind: "error", navigation: navigation(log) }, address: address(log), tools: tools(log), control: { kind: "none" } });
 
     expect(buttonNames()).toEqual(["Back", "Forward", "Reload", "Open in browser", "More"]);
   });
@@ -178,26 +184,42 @@ describe("BrowserToolbar", () => {
   });
 
   it("does not render a browser-local automation controller badge", () => {
-    renderToolbar(loadedProps([], { tools: tools([], { takeover: { kind: "agent", busy: true, takeControl: vi.fn() } }) }));
+    renderToolbar(loadedProps([], { control: { kind: "agent-acting", provider: "codex", takeControl: vi.fn() } }));
 
     expect(screen.queryByTestId("browser-controller-badge")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop browser automation" })).not.toBeInTheDocument();
   });
 
-  it.each<[string, BrowserTakeover["kind"], boolean]>([
-    ["busy", "agent", true],
-    ["idle", "agent", false],
-  ])("takes control from a %s agent through More", async (_state, _kind, busy) => {
+  it("replaces Design and Screenshot with a Take control pill while the agent acts", async () => {
     const user = userEvent.setup();
     const takeControl = vi.fn();
-    renderToolbar(loadedProps([], { tools: tools([], { takeover: { kind: "agent", busy, takeControl } }) }));
+    const control: BrowserControl = { kind: "agent-acting", provider: "codex", takeControl };
+    renderToolbar(loadedProps([], { control }));
 
-    const menu = await openMore(user);
-    const row = within(menu).getByRole("menuitem", { name: "Take control" });
-    expect(row.getAttribute("title")).toBe(busy ? "Stop the active operation and take control" : null);
-    await user.click(row);
+    expect(screen.getByTestId("browser-control-pill")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Design/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Screenshot/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Take control" }));
 
     expect(takeControl).toHaveBeenCalledOnce();
+  });
+
+  it("keeps Design and Screenshot beside a Hand back pill while the user holds control", async () => {
+    const user = userEvent.setup();
+    const handBack = vi.fn();
+    renderToolbar(loadedProps([], { control: { kind: "user-holding", provider: "codex", handBack } }));
+
+    expect(screen.getByRole("button", { name: /Design/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Screenshot/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Hand back" }));
+
+    expect(handBack).toHaveBeenCalledOnce();
+  });
+
+  it("shows no control pill when nobody holds the page", () => {
+    renderToolbar(loadedProps([]));
+
+    expect(screen.queryByTestId("browser-control-pill")).not.toBeInTheDocument();
   });
 
   it("has no Take control row while the human controls the page", async () => {
@@ -319,5 +341,65 @@ describe("BrowserToolbar", () => {
 
     rerender(toolbar(true));
     expect(screen.queryByRole("menuitem", { name: "Clear cache" })).not.toBeInTheDocument();
+  });
+});
+
+describe("useBrowserControl", () => {
+  const scope = ["workspace-1", "thread-1", "tab-1"] as const;
+
+  function request(operation: string, sequence: number): BrowserAutomationActiveRequest {
+    return {
+      dispatch: {
+        request: { workspaceId: scope[0], requestId: `${operation}-${sequence}`, sequence, operation },
+        target: { threadId: scope[1], tabId: scope[2] },
+      } as unknown as BrowserAutomationActiveRequest["dispatch"],
+      startedAt: sequence,
+    };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    const store = useBrowserAutomationStore.getState();
+    store.registerTarget(...scope);
+    store.setControllerForTarget(...scope, { tabId: scope[2], controller: "agent", controlEpoch: 1 });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    useBrowserAutomationStore.getState().releaseThreadTargets(scope[0], scope[1]);
+    useBrowserAutomationStore.setState({ activeRequests: new Map(), actingTargets: new Set() });
+  });
+
+  it("never shows the agent pill for plan-mode inspect", () => {
+    const { result } = renderHook(() => useBrowserControl(...scope));
+
+    act(() => useBrowserAutomationStore.getState().setActiveRequest(request("inspect", 1)));
+
+    expect(result.current.kind).toBe("none");
+  });
+
+  it("shows the agent pill during an effect and hides it within 3 s of the last one", () => {
+    const { result } = renderHook(() => useBrowserControl(...scope));
+
+    act(() => useBrowserAutomationStore.getState().setActiveRequest(request("click", 2)));
+    expect(result.current.kind).toBe("agent-acting");
+
+    act(() => useBrowserAutomationStore.getState().clearActiveRequest("click-2", 2));
+    expect(result.current.kind).toBe("agent-acting");
+    act(() => void vi.advanceTimersByTime(BROWSER_ACTING_LINGER_MS));
+
+    expect(result.current.kind).toBe("none");
+  });
+
+  it("shows Hand back while the user holds the thread, even with no agent activity", () => {
+    const { result } = renderHook(() => useBrowserControl(...scope));
+
+    act(() => useBrowserAutomationStore.getState().setControllerForTarget(...scope, {
+      tabId: scope[2],
+      controller: "human",
+      controlEpoch: 2,
+    }));
+
+    expect(result.current.kind).toBe("user-holding");
   });
 });

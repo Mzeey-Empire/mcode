@@ -3,10 +3,8 @@ import { BrowserToolbar } from "./BrowserToolbar";
 import { BrowserViewportToolbar } from "./BrowserViewportToolbar";
 import { PreviewAnnotationHeader } from "./PreviewAnnotationHeader";
 import { usePreviewAnnotationStore } from "../state/previewAnnotationStore";
-import {
-  interruptBrowserAutomationTarget,
-  invalidateBrowserAutomationTargetObservation,
-} from "../automation/browserAutomationStore";
+import { invalidateBrowserAutomationTargetObservation } from "../automation/browserAutomationStore";
+import { useBrowserControl } from "./useBrowserControl";
 import type { usePreviewViewport } from "./usePreviewViewport";
 import type { useDesignAnnotationEditor } from "../design/useDesignAnnotationEditor";
 import type { useDesignPicker } from "../design/useDesignPicker";
@@ -60,7 +58,6 @@ interface BrowserChromeProps {
   readonly onWebviewSetZoom: ReturnType<typeof usePreviewPage>["onWebviewSetZoom"];
   readonly toggleViewportToolbar: ReturnType<typeof usePreviewViewport>["toggleViewportToolbar"];
   readonly activeAutomationController: ReturnType<typeof usePreviewPage>["activeAutomationController"];
-  readonly activeAutomationRequest: ReturnType<typeof usePreviewPage>["activeAutomationRequest"];
   /** Whether this panel is the visible, interactive Browser and so owns the Browser commands. */
   readonly commandsActive: boolean;
 }
@@ -131,9 +128,7 @@ type DesktopToolsInputs = Pick<
   | "onWebviewGetZoom"
   | "onWebviewSetZoom"
   | "toggleViewportToolbar"
-  | "activeAutomationController"
-  | "activeAutomationRequest"
-> & { readonly invalidateObservation: () => void; readonly takeControl: () => void };
+> & { readonly invalidateObservation: () => void };
 
 function desktopTools(inputs: DesktopToolsInputs): BrowserTools {
   const { threadId, hasLoadedPage, activeWebviewTabId, activeWebviewRef, bridge, invalidateObservation } = inputs;
@@ -151,9 +146,6 @@ function desktopTools(inputs: DesktopToolsInputs): BrowserTools {
       : { kind: "disabled", reason: LOAD_A_PAGE_FIRST },
     clearCookies: pageAction(hasLoadedPage, () => void bridge.clearCookies()),
     clearCache: pageAction(hasLoadedPage, () => void bridge.clearCache()),
-    takeover: inputs.activeAutomationController?.controller === "agent"
-      ? { kind: "agent", busy: inputs.activeAutomationRequest !== undefined, takeControl: inputs.takeControl }
-      : { kind: "none" },
   };
 }
 
@@ -180,10 +172,8 @@ export function BrowserChrome(props: BrowserChromeProps) {
   const invalidateObservation = (): void => {
     invalidateBrowserAutomationTargetObservation(browserWorkspaceId, threadId, activeWebviewTabId);
   };
-  const takeControl = (): void => {
-    interruptBrowserAutomationTarget(browserWorkspaceId, threadId, activeWebviewTabId, "user-stopped");
-  };
-  const tools = desktopTools({ ...props, invalidateObservation, takeControl });
+  const control = useBrowserControl(browserWorkspaceId, threadId, activeWebviewTabId);
+  const tools = desktopTools({ ...props, invalidateObservation });
   useBrowserCommands({ active: props.commandsActive, actions: tools });
 
   return (
@@ -202,6 +192,7 @@ export function BrowserChrome(props: BrowserChromeProps) {
               page={desktopPage({ ...props, invalidateObservation })}
               address={desktopAddress(props, invalidateObservation)}
               tools={tools}
+              control={control}
               focusRequest={props.omniboxFocusTick}
             />
           )}
