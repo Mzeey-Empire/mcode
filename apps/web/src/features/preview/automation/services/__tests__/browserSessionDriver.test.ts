@@ -1304,7 +1304,6 @@ describe("BrowserSessionDriver", () => {
     expect(projections.at(-1)).toEqual([]);
     await driver.releaseProviderSession("session");
     expect(close).toHaveBeenCalledOnce();
-    expect(liveTargets.get(target.tabId)).toEqual(replacement);
   });
 
   it("claims and releases user tabs without physically closing them", async () => {

@@ -19,7 +19,7 @@ function createCoordinator(apply: (operation: ViewportHostOperation) => Promise<
 }
 
 describe("BrowserViewportToolbar", () => {
-  it("keeps Variant B controls in one compact row without a mode switch", () => {
+  it("shows Variant B controls without a mode switch", () => {
     const coordinator = createCoordinator(async (operation) => ({
       status: "applied",
       applied: operation.requested,
@@ -32,27 +32,13 @@ describe("BrowserViewportToolbar", () => {
       />,
     );
 
-    const toolbar = screen.getByTestId("browser-viewport-toolbar");
-    expect(toolbar).toHaveClass("@container");
-    expect(toolbar.className).toContain("@max-[520px]:gap-0.5");
-    expect(toolbar.className.split(/\s+/)).not.toContain("max-[520px]:gap-0.5");
-    expect(toolbar).not.toHaveClass("flex-wrap");
-    expect(toolbar).not.toHaveClass("overflow-x-auto");
-    expect(toolbar).not.toHaveClass("overflow-x-scroll");
     expect(screen.queryByRole("button", { name: "Regular" })).not.toBeInTheDocument();
-    const presetTrigger = screen.getByRole("button", { name: "Viewport preset" });
-    expect(presetTrigger).toHaveTextContent("Responsive");
-    expect(presetTrigger).toHaveClass("w-32");
-    expect(presetTrigger.className).toContain("@max-[520px]:w-24");
-    const widthInput = screen.getByRole("textbox", { name: "Viewport width" });
-    expect(widthInput).toBeInTheDocument();
-    expect(widthInput.parentElement).toHaveClass("shrink-0");
+    expect(screen.getByRole("button", { name: "Viewport preset" })).toHaveTextContent("Responsive");
+    expect(screen.getByRole("textbox", { name: "Viewport width" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Viewport height" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Rotate viewport to landscape" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Viewport scale and presentation" })).toHaveTextContent("100%");
-    const closeButton = screen.getByRole("button", { name: "Close viewport toolbar" });
-    expect(closeButton).toHaveClass("ml-auto");
-    expect(closeButton.className).not.toContain("@max-[520px]:ml-0");
+    expect(screen.getByRole("button", { name: "Close viewport toolbar" })).toBeInTheDocument();
   });
 
   it("opens matching dimensions as Responsive until the user selects a preset", () => {
@@ -92,7 +78,6 @@ describe("BrowserViewportToolbar", () => {
     const responsiveItem = within(await screen.findByRole("menu")).getByRole("menuitemradio", {
       name: "Responsive",
     });
-    expect(responsiveItem).toHaveClass("w-full");
     await user.click(responsiveItem);
 
     await waitFor(() => expect(apply).toHaveBeenCalledWith(

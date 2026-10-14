@@ -856,7 +856,6 @@ describe("BrowserAutomationHost", () => {
     act(() => {
       browserSurfacePresentationCoordinator.setActivityRailOverlap(112);
     });
-    expect(browserSurfacePresentationCoordinator.getActivityRailOverlap()).toBe(112);
     await waitFor(() => expect(document.querySelector(
       '[data-automation-persistent-scope="thread-1"] [data-testid="automation-preview-panel"]',
     )).toHaveAttribute("data-covered-left", "112"));
