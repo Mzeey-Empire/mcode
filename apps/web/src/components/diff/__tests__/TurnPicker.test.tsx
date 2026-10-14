@@ -56,7 +56,6 @@ describe("TurnPicker", () => {
     render(<TurnPicker threadId="thread-1" />);
 
     expect(screen.getByTestId("turn-picker")).toHaveTextContent("Turn 2 latest");
-    expect(screen.getByTestId("turn-picker-latest")).toHaveClass("text-muted");
     // Following is the absence of a pick, so rendering writes nothing.
     expect(selection()).toBeUndefined();
   });

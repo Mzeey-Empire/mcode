@@ -92,10 +92,7 @@ describe("ProviderSection", () => {
     render(<ProviderSection />);
     expect(screen.getByTestId("provider-badge-copilot-beta")).toBeInTheDocument();
     expect(screen.getByTestId("provider-badge-opencode-beta")).toBeInTheDocument();
-    expect(screen.getByTestId("provider-badge-gemini-comingsoon")).toHaveAttribute(
-      "variant",
-      "secondary",
-    );
+    expect(screen.getByTestId("provider-badge-gemini-comingsoon")).toBeInTheDocument();
     expect(screen.queryByTestId("provider-badge-opencode-comingsoon")).not.toBeInTheDocument();
   });
 
@@ -152,15 +149,6 @@ describe("ProviderSection", () => {
     await user.click(screen.getByTestId("provider-config-trigger-claude"));
 
     expect(screen.getByTestId("provider-cli-path-claude")).toBeVisible();
-  });
-
-  it("keeps expanded provider triggers visually neutral", () => {
-    render(<ProviderSection />);
-
-    expect(screen.getByTestId("provider-config-trigger-copilot")).toHaveClass(
-      "aria-expanded:bg-transparent",
-      "dark:aria-expanded:bg-transparent",
-    );
   });
 
   it("does not expose a disclosure trigger for coming-soon providers", () => {

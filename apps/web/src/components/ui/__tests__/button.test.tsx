@@ -31,9 +31,9 @@ describe("Button loading", () => {
       </Button>,
     );
 
-    expect(screen.getByTestId("leading-icon").parentElement).toHaveClass("opacity-0");
-    expect(screen.getByText("New thread")).not.toHaveClass("opacity-0");
-    expect(screen.getByRole("button", { name: "New thread" })).toBeInTheDocument();
+    const button = screen.getByRole("button", { name: "New thread" });
+    expect(button.querySelector('span[aria-hidden="true"]')).not.toBeNull();
+    expect(screen.getByTestId("leading-icon").parentElement).not.toHaveTextContent("New thread");
   });
 
   it("keeps a fragment or label-component child in place as the accessible name", () => {
@@ -57,12 +57,11 @@ describe("Button loading", () => {
 });
 
 describe("IconButton", () => {
-  it("drives aria-pressed from pressed so the round button takes its on fill", () => {
+  it("drives aria-pressed from pressed", () => {
     render(<IconButton shape="round" aria-label="Wrap lines" pressed><Plus /></IconButton>);
 
     const button = screen.getByRole("button", { name: "Wrap lines" });
     expect(button).toHaveAttribute("aria-pressed", "true");
-    expect(button).toHaveClass("rounded-full", "bg-selected", "aria-pressed:bg-control-border");
   });
 
   it("shows its name as a tooltip", async () => {

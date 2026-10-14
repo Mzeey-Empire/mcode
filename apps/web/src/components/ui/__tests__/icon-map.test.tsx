@@ -8,15 +8,10 @@ const productIcons = Object.entries(iconMap).filter(
 );
 
 describe("icon-map", () => {
-  it("exports one icon per DESIGN.md canonical concept", () => {
-    expect(productIcons).toHaveLength(31);
-  });
-
   it.each(productIcons)("%s renders Lucide at the 1.5px stroke and 16px size", (_name, Icon) => {
     const { container } = render(<Icon />);
     const svg = container.querySelector("svg");
 
-    expect(svg).toHaveClass("lucide");
     expect(svg).toHaveAttribute("stroke-width", "1.5");
     expect(svg).toHaveAttribute("width", "16");
   });

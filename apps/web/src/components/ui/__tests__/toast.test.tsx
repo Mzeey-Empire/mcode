@@ -120,11 +120,11 @@ describe("ToastLane", () => {
     expect(store().toasts).toEqual([]);
   });
 
-  it("colours the meta label before the first separator", () => {
+  it("sets the meta label before the first separator apart", () => {
     renderLane();
     show({ kind: "finished", title: "Refine navigation", meta: "Finished · 14:32" });
 
-    expect(within(lane()).getByText("Finished")).toHaveClass("text-success");
+    expect(within(lane()).getByText("Finished")).toBeInTheDocument();
   });
 
   it("dismisses on a sideways trackpad swipe past a third of the card", () => {

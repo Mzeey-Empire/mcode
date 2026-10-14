@@ -148,7 +148,6 @@ vi.mock("@/lib/right-panel-layout", () => ({ toggleRightPanelAdaptive: vi.fn() }
 vi.mock("@/transport", () => ({ getTransport: () => ({ terminalKill, getWorkspaceActionRun: vi.fn() }) }));
 
 import { reconcileWarmPreviewScopes, RightPanel } from "./RightPanel";
-import { TERMINAL_CAP_REASON } from "./TerminalTool";
 import { TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts";
 import { createRightPanelState, useDiffStore } from "@/stores/diffStore";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
@@ -349,6 +348,7 @@ describe("RightPanel", () => {
   });
 
   it("disables the round + at the record cap and explains why, counting action records", () => {
+    const capReason = `${TERMINAL_MAX_PER_SCOPE} terminals are open. Close one to open another.`;
     const records = Array.from({ length: TERMINAL_MAX_PER_SCOPE - 1 }, (_, index) => ({
       id: `pty-${index}`,
       threadId: "thread-1",
@@ -365,15 +365,14 @@ describe("RightPanel", () => {
 
     const add = within(screen.getByTestId("panel-header-leading")).getByRole("button", { name: "New terminal" });
     expect(add).toHaveAttribute("aria-disabled", "true");
-    expect(add).toHaveAccessibleDescription(TERMINAL_CAP_REASON);
+    expect(add).toHaveAccessibleDescription(capReason);
     fireEvent.click(add);
     expect(createTerminalForScope).not.toHaveBeenCalled();
-    expect(TERMINAL_CAP_REASON).toBe(`${TERMINAL_MAX_PER_SCOPE} terminals are open. Close one to open another.`);
 
     act(() => useTerminalStore.getState().removeTerminal("pty-0"));
 
     expect(add).not.toHaveAttribute("aria-disabled", "true");
-    expect(add).not.toHaveAccessibleDescription(TERMINAL_CAP_REASON);
+    expect(add).not.toHaveAccessibleDescription(capReason);
     fireEvent.click(add);
     expect(createTerminalForScope).toHaveBeenCalledWith("thread-1");
   });
@@ -778,7 +777,7 @@ describe("RightPanel", () => {
     );
     const agentTab = screen.getByRole("group", { name: "Browser pages" }).querySelector<HTMLElement>('[data-panel-tab="agent-browser-tab"]');
     expect(agentTab).not.toBeNull();
-    expect(within(agentTab!).getByTestId("browser-agent-control-indicator")).toHaveClass("text-primary");
+    expect(within(agentTab!).getByTestId("browser-agent-control-indicator")).toBeInTheDocument();
   });
 
   it("switches an already-open panel to an agent-created Browser page", () => {

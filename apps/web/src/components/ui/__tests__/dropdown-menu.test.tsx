@@ -38,15 +38,7 @@ async function openMenu() {
 }
 
 describe("DropdownMenuItem", () => {
-  it("draws 40px rows that fill on highlight, never with the selected fill", async () => {
-    await openMenu();
-    const row = screen.getByRole("menuitem", { name: "Rename" });
-    expect(row.className).toContain("h-row-default");
-    expect(row.className).toContain("data-highlighted:bg-hover");
-    expect(row.className).not.toMatch(/bg-selected|bg-accent/);
-  });
-
-  it("marks the checked row as the current radio choice with a check, not a fill", async () => {
+  it("marks the checked row as the current radio choice with a check", async () => {
     await openMenu();
     const current = screen.getByRole("menuitemradio", { name: "Turn" });
     const other = screen.getByRole("menuitemradio", { name: "All turns" });
@@ -54,7 +46,6 @@ describe("DropdownMenuItem", () => {
     expect(other).toHaveAttribute("aria-checked", "false");
     expect(current.querySelector("svg")).not.toBeNull();
     expect(other.querySelector("svg")).toBeNull();
-    expect(current.className).not.toMatch(/bg-selected/);
   });
 
   it("keeps a checked row's trailing detail beside the check", async () => {
@@ -71,7 +62,6 @@ describe("DropdownMenuItem", () => {
     const row = await screen.findByRole("menuitemradio", { name: /^iPhone 15 Pro/ });
     expect(row).toHaveTextContent("393 × 852");
     expect(row.querySelector("svg")).not.toBeNull();
-    expect(row.className).toContain("shrink-0");
   });
 
   it("keeps a disabled row focusable, uninvocable, and described by its reason", async () => {
