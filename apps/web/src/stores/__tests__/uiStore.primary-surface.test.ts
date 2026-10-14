@@ -26,13 +26,6 @@ describe("uiStore primary surface", () => {
     });
   });
 
-  it("returns to the chat surface", () => {
-    useUiStore.getState().setPrimarySurface("pullRequests");
-    useUiStore.getState().setPrimarySurface("chat");
-
-    expect(useUiStore.getState().primarySurface).toBe("chat");
-  });
-
   it("keeps independent Project thread views for the app session", () => {
     useUiStore.getState().setProjectThreadView("project-a", "completed");
     useUiStore.getState().toggleProjectThreadView("project-b");

@@ -108,17 +108,16 @@ describe("per-thread settings", () => {
     expect(settings.reasoningLevel).toBeUndefined();
   });
 
-  it("setThreadSettings persists to server via updateThreadSettings RPC", async () => {
-    const thread = createMockThread({ id: "thread-rpc" });
+  it("setThreadSettings mirrors the patch into the workspace thread record", async () => {
+    const thread = createMockThread({ id: "thread-rpc", permission_mode: "full" });
     useWorkspaceStore.setState({ threads: [thread] });
 
     await useThreadStore.getState().setThreadSettings("thread-rpc", {
       permissionMode: "supervised",
     });
 
-    expect(mockTransport.updateThreadSettings).toHaveBeenCalledWith("thread-rpc", {
-      permissionMode: "supervised",
-    });
+    expect(useWorkspaceStore.getState().threads[0]?.permission_mode).toBe("supervised");
+    expect(useThreadStore.getState().getThreadSettings("thread-rpc").permissionMode).toBe("supervised");
   });
 
   it("partial setThreadSettings does not clear other persisted settings", () => {

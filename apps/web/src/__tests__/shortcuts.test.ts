@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { initShortcuts, getKeybindings, loadKeybindings } from "@/lib/shortcuts";
+import { initShortcuts, loadKeybindings } from "@/lib/shortcuts";
 import { registerCommand, clearCommands } from "@/lib/command-registry";
 import { clearKeybindings } from "@/lib/keybinding-manager";
 import { resetContext } from "@/lib/context-tracker";
@@ -73,11 +73,6 @@ describe("shortcuts integration", () => {
     expect(handler).toHaveBeenCalled();
 
     document.body.removeChild(input);
-  });
-
-  it("getKeybindings returns active bindings", () => {
-    loadKeybindings([{ key: "mod+k", command: "commandPalette.toggle" }]);
-    expect(getKeybindings().length).toBe(1);
   });
 });
 

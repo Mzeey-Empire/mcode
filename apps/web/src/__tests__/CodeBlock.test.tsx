@@ -96,7 +96,7 @@ describe("CodeBlock", () => {
     }
   });
 
-  it("adds ready class when highlighted html is available", () => {
+  it("renders the highlighted html when it is available", () => {
     mockUseHighlighter.mockReturnValue({
       html: '<pre class="shiki"><code>highlighted</code></pre>',
     });
@@ -104,7 +104,7 @@ describe("CodeBlock", () => {
       <CodeBlock code="const x = 1;" language="typescript" isStreaming={false} />,
     );
     const wrapper = container.querySelector("[data-code-block]");
-    expect(wrapper?.className).toContain("ready");
+    expect(wrapper).toHaveTextContent("highlighted");
   });
 
   it("skips highlighting when disableHighlighting is true", () => {

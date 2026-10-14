@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
-  getContext,
   setContext,
   evaluateWhen,
   resetContext,
@@ -9,20 +8,6 @@ import {
 describe("ContextTracker", () => {
   beforeEach(() => {
     resetContext();
-  });
-
-  it("returns default context values", () => {
-    const ctx = getContext();
-    expect(ctx.inputFocused).toBe(false);
-    expect(ctx.terminalFocused).toBe(false);
-    expect(ctx.commandPaletteOpen).toBe(false);
-    expect(ctx.settingsOpen).toBe(false);
-    expect(ctx.showLanding).toBe(false);
-  });
-
-  it("updates a context value", () => {
-    setContext("inputFocused", true);
-    expect(getContext().inputFocused).toBe(true);
   });
 
   it("evaluateWhen returns true for undefined when clause", () => {

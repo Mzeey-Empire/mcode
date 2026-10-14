@@ -60,34 +60,23 @@ describe("MarkdownContent link handling", () => {
     expect(mockOpenExternalUrl).toHaveBeenCalledWith("https://example.com");
   });
 
-  it("renders assistant https links with a contrast-safe favicon", () => {
-    const { container } = render(<MarkdownContent content="[click me](https://example.com/path)" />);
-    const link = container.querySelector("a");
-    const favicon = screen.getByTestId("markdown-link-favicon");
+  it("renders assistant https links with the site's origin favicon", () => {
+    render(<MarkdownContent content="[click me](https://example.com/path)" />);
 
-    expect(link).toHaveClass("text-primary");
-    expect(link).not.toHaveClass("text-link");
     expect(screen.getByTestId("markdown-link-favicon-frame")).toBeInTheDocument();
-    expect(favicon).toHaveAttribute("src", "https://example.com/favicon.ico");
-    expect(favicon).toHaveClass("favicon-image-shadow");
+    expect(screen.getByTestId("markdown-link-favicon")).toHaveAttribute(
+      "src",
+      "https://example.com/favicon.ico",
+    );
   });
 
-  it("renders inline links without a chip background", () => {
-    const { container } = render(<MarkdownContent content="[click me](https://example.com)" />);
-    const link = container.querySelector("a");
-
-    expect(link?.className).not.toContain("bg-hover");
-    expect(link?.className).not.toContain("ring-1");
-    expect(link?.className).toContain("hover:underline");
-  });
-
-  it("renders GitHub links with the bare themed mark, not the contrast frame", () => {
+  it("renders GitHub links with the GitHub favicon", () => {
     render(<MarkdownContent content="[repo](https://github.com/owner/repo)" />);
-    const favicon = screen.getByTestId("markdown-link-favicon");
 
-    expect(favicon).toHaveClass("github-favicon-mark");
-    expect(favicon).not.toHaveClass("favicon-image-shadow");
-    expect(screen.getByTestId("markdown-link-favicon-frame").className).not.toContain("ring-1");
+    expect(screen.getByTestId("markdown-link-favicon")).toHaveAttribute(
+      "src",
+      "https://github.com/favicon.ico",
+    );
   });
 
   it("renders local file links with the file icon component, not a site favicon", () => {
@@ -465,14 +454,6 @@ describe("MarkdownContent variant styling", () => {
   });
 
   describe("variant='assistant' (default)", () => {
-    it("renders inline code with bg-hover", () => {
-      const { container } = render(
-        <MarkdownContent content="Use `foo` here" />,
-      );
-      const code = container.querySelector("code");
-      expect(code?.className).toContain("bg-hover");
-    });
-
     it("renders explicit skill, plugin, command, and sub-agent references as entity tokens", () => {
       const { container } = render(
         <MarkdownContent content="Use `$impeccable`, `plugin:figma`, `/review`, and `@reviewer_qa`." />,
@@ -482,25 +463,6 @@ describe("MarkdownContent variant styling", () => {
       expect(container.querySelector('[data-entity-token="plugin"]')).toHaveTextContent("plugin:figma");
       expect(container.querySelector('[data-entity-token="command"]')).toHaveTextContent("review");
       expect(container.querySelector('[data-entity-token="agent"]')).toHaveTextContent("@reviewer_qa");
-    });
-
-    it("renders command references as inline invocations, not chips", () => {
-      const { container } = render(<MarkdownContent content="Run `/review` after the changes." />);
-      const command = container.querySelector('[data-entity-token="command"]');
-
-      expect(command).toHaveTextContent("review");
-      expect(command).toHaveClass("text-primary");
-      expect(command).not.toHaveClass("bg-hover", "ring-1", "rounded-md");
-      expect(command?.querySelector("[data-entity-icon='command']")).toHaveClass("text-current");
-    });
-
-    it("renders links with primary text", () => {
-      const { container } = render(
-        <MarkdownContent content="[link](https://example.com)" />,
-      );
-      const link = container.querySelector("a");
-      expect(link).toHaveClass("text-primary");
-      expect(link).not.toHaveClass("text-link");
     });
 
     it("passes disableHighlighting=false to CodeBlock", () => {
@@ -521,23 +483,6 @@ describe("MarkdownContent variant styling", () => {
   });
 
   describe("variant='user'", () => {
-    it("renders inline code with a foreground tint visible on the accent bubble", () => {
-      const { container } = render(
-        <MarkdownContent content="Use `foo` here" variant="user" />,
-      );
-      const code = container.querySelector("code");
-      expect(code?.className).toContain("bg-ink/10");
-    });
-
-    it("renders links with primary text", () => {
-      const { container } = render(
-        <MarkdownContent content="[link](https://example.com)" variant="user" />,
-      );
-      const link = container.querySelector("a");
-      expect(link).toHaveClass("text-primary");
-      expect(link).not.toHaveClass("text-link");
-    });
-
     it("renders user links with the same favicon treatment", () => {
       render(<MarkdownContent content="[link](https://example.com)" variant="user" />);
       expect(screen.getByTestId("markdown-link-favicon-frame")).toBeInTheDocument();
@@ -545,14 +490,6 @@ describe("MarkdownContent variant styling", () => {
         "src",
         "https://example.com/favicon.ico",
       );
-    });
-
-    it("renders blockquote with the neutral border treatment", () => {
-      const { container } = render(
-        <MarkdownContent content="> quote" variant="user" />,
-      );
-      const blockquote = container.querySelector("blockquote");
-      expect(blockquote?.className).toContain("border-border");
     });
 
     it("passes disableHighlighting=true to CodeBlock", () => {

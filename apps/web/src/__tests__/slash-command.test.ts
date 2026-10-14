@@ -508,9 +508,18 @@ describe("IPC cache", () => {
   });
 });
 
+function scopedCatalogMock(scope: Pick<ProviderCatalogRequest, "providerId" | "cwd">, skillName: string) {
+  return vi.fn(async (request: ProviderCatalogRequest) => snapshotFromSkills(
+    request.providerId === scope.providerId && request.cwd === scope.cwd
+      ? [{ name: skillName, description: "Scoped skill" }]
+      : [],
+    request,
+  ));
+}
+
 describe("cwd passthrough", () => {
-  it("passes cwd to provider.catalog", async () => {
-    const mockCatalog = catalogMock([]);
+  it("lists the skills catalogued for the cwd", async () => {
+    const mockCatalog = scopedCatalogMock({ providerId: "claude", cwd: "/my/project" }, "project-skill");
     vi.mocked(getTransport).mockReturnValue({ getProviderCatalog: mockCatalog } as never);
 
     const ref = makeAnchor();
@@ -521,13 +530,13 @@ describe("cwd passthrough", () => {
     await act(async () => { result.current.onInputChange("/"); });
     await act(async () => {});
 
-    expect(mockCatalog).toHaveBeenCalledWith({ providerId: "claude", cwd: "/my/project" });
+    expect(result.current.items.map((item) => item.name)).toContain("project-skill");
   });
 });
 
 describe("provider-scoped commands", () => {
-  it("passes providerId through to store load", async () => {
-    const mockCatalog = catalogMock([]);
+  it("lists the skills catalogued for the provider and cwd", async () => {
+    const mockCatalog = scopedCatalogMock({ providerId: "codex", cwd: "/my/project" }, "codex-skill");
     vi.mocked(getTransport).mockReturnValue({ getProviderCatalog: mockCatalog } as never);
 
     const ref = makeAnchor();
@@ -538,7 +547,7 @@ describe("provider-scoped commands", () => {
     await act(async () => { result.current.onInputChange("/"); });
     await act(async () => {});
 
-    expect(mockCatalog).toHaveBeenCalledWith({ providerId: "codex", cwd: "/my/project" });
+    expect(result.current.items.map((item) => item.name)).toContain("codex-skill");
   });
 
   it("settles two mounted consumers with different provider scopes", async () => {

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { CONVERSATION_REVISION_GUARD } from "@/features/conversation/hydration/conversation-revision";
 import {
   MATERIAL_REVISION_SERIALIZATION_BYTES,
   createRepresentativeConversation,
@@ -35,7 +34,6 @@ describe("conversation residency certification", () => {
     expect(selectConversationRevisionGuard(MATERIAL_REVISION_SERIALIZATION_BYTES)).toBe(
       "numeric",
     );
-    expect(CONVERSATION_REVISION_GUARD).toBe("numeric");
   });
 
   it("rejects an unbounded sample count", () => {
@@ -44,9 +42,13 @@ describe("conversation residency certification", () => {
     );
   });
 
-  it("reports runtime facts supplied by the Node runner", () => {
-    expect(runConversationResidencyCertification(NODE_RUNNER_RUNTIME, 3).runtime).toEqual(
-      NODE_RUNNER_RUNTIME,
+  it("fails certification when the runner is not Electron's Node runtime", () => {
+    const report = runConversationResidencyCertification(
+      { ...NODE_RUNNER_RUNTIME, electronVersion: null },
+      3,
     );
+
+    expect(report.status).toBe("fail");
+    expect(report.failures).toContain("The certification did not run in Electron's Node runtime.");
   });
 });

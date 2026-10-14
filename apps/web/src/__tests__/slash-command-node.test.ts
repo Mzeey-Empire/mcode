@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { createEditor, $createParagraphNode, $createTextNode, $getRoot } from "lexical";
 import {
@@ -184,18 +184,19 @@ describe("SlashCommandNode", () => {
       path: "C:/repo/.cursor/skills/deploy/SKILL.md",
       range: { start: 0, end: 7 },
     }]);
-    await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(extractComposerMessage(editor)).toEqual({
-      text: "/deploy now",
-      mentions: [{
-        id: "command:skill:deploy",
-        kind: "command",
-        label: "deploy",
-        namespace: "skill",
-        path: "C:/repo/.cursor/skills/deploy/SKILL.md",
-        range: { start: 0, end: 7 },
-      }],
+    await vi.waitFor(() => {
+      expect(extractComposerMessage(editor)).toEqual({
+        text: "/deploy now",
+        mentions: [{
+          id: "command:skill:deploy",
+          kind: "command",
+          label: "deploy",
+          namespace: "skill",
+          path: "C:/repo/.cursor/skills/deploy/SKILL.md",
+          range: { start: 0, end: 7 },
+        }],
+      });
     });
   });
 });

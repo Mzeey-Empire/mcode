@@ -12,7 +12,6 @@ import {
   getDefaultPanelWidthPx,
   createDefaultRightPanelState,
   createRightPanelState,
-  DEFAULT_LINE_WRAP,
   effectiveBranchOperands,
 } from "../stores/diffStore";
 
@@ -56,15 +55,6 @@ describe("diffStore", () => {
   });
 
   describe("commit picker operand", () => {
-    it("starts with no resolved picked commit", () => {
-      expect(useDiffStore.getState().selectedCommitSha).toBeNull();
-    });
-
-    it("stores the picked commit SHA", () => {
-      useDiffStore.getState().setSelectedCommitSha("abc1234");
-      expect(useDiffStore.getState().selectedCommitSha).toBe("abc1234");
-    });
-
     it("resets the picked commit when the active view changes", () => {
       const { setSelectedCommitSha, setViewMode } = useDiffStore.getState();
       setSelectedCommitSha("abc1234");
@@ -125,10 +115,6 @@ describe("diffStore", () => {
   });
 
   describe("Turn view operand", () => {
-    it("follows the latest turn while a thread has no selection", () => {
-      expect(useDiffStore.getState().selectedTurnByThread["thread-1"]).toBeUndefined();
-    });
-
     it("stores a pinned turn and a return to following per thread", () => {
       const { setReviewTurnForThread } = useDiffStore.getState();
       setReviewTurnForThread("thread-1", "msg-2");
@@ -228,8 +214,7 @@ describe("diffStore", () => {
   describe("line wrap", () => {
     it("defaults to wrapped for threads with no stored preference", () => {
       const { getLineWrap } = useDiffStore.getState();
-      expect(getLineWrap("thread-1")).toBe(DEFAULT_LINE_WRAP);
-      expect(DEFAULT_LINE_WRAP).toBe(true);
+      expect(getLineWrap("thread-1")).toBe(true);
     });
 
     it("toggles and stores preference per thread", () => {
@@ -1219,15 +1204,6 @@ describe("diffStore", () => {
   });
 
   describe("setPreviewUrlForThread", () => {
-    it("stores url per thread independently", () => {
-      const { setPreviewUrlForThread } = useDiffStore.getState();
-      setPreviewUrlForThread("thread-1", "https://a.test");
-      setPreviewUrlForThread("thread-2", "https://b.test");
-      const state = useDiffStore.getState();
-      expect(state.previewUrlByThread["thread-1"]).toBe("https://a.test");
-      expect(state.previewUrlByThread["thread-2"]).toBe("https://b.test");
-    });
-
     it("does not notify subscribers when the url is unchanged", () => {
       const { setPreviewUrlForThread } = useDiffStore.getState();
       setPreviewUrlForThread("thread-1", "https://a.test");

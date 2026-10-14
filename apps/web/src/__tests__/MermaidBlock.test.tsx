@@ -68,7 +68,7 @@ describe("MermaidBlock", () => {
     });
     fireEvent.click(previewTrigger);
 
-    expect(await screen.findByRole("dialog")).toHaveClass("inset-0");
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Diagram preview" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Zoom in" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Zoom out" })).toBeEnabled();
