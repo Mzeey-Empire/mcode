@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 import { CheckIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { Kbd } from "./kbd"
+import { ShortcutKeys } from "./shortcut-keys"
 import { FOCUS_RING_CLASS } from "./focus-ring"
 
 /**
@@ -48,11 +48,7 @@ export function MenuRowCheck() {
 function MenuRowShortcut({ keys }: { readonly keys: readonly string[] }) {
   return (
     <span aria-hidden data-slot="menu-row-shortcut" className="flex shrink-0 items-center gap-1 text-muted">
-      {keys.map((key, index) => (
-        <Kbd key={`${index}-${key}`} variant="keycap">
-          {key}
-        </Kbd>
-      ))}
+      <ShortcutKeys keys={keys} />
     </span>
   )
 }

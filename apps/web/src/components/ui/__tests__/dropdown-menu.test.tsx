@@ -64,7 +64,7 @@ describe("DropdownMenuItem", () => {
     expect(row.querySelector("svg")).not.toBeNull();
   });
 
-  it("shows each shortcut key as its own keycap, hidden from the row's name", async () => {
+  it("shows each shortcut key as its own keycap, drawing Shift and Enter as icons, hidden from the row's name", async () => {
     const user = userEvent.setup();
     render(
       <DropdownMenu>
@@ -78,7 +78,9 @@ describe("DropdownMenuItem", () => {
     await user.click(screen.getByRole("button", { name: "Plan" }));
     const bound = await screen.findByRole("menuitem", { name: "Implement v1" });
     const unbound = screen.getByRole("menuitem", { name: "Implement in a new thread" });
-    expect([...bound.querySelectorAll("kbd")].map((key) => key.textContent)).toEqual(["Ctrl", "Shift", "Enter"]);
+    const keycaps = [...bound.querySelectorAll("kbd")];
+    expect(keycaps.map((key) => key.textContent)).toEqual(["Ctrl", "Shift", "Enter"]);
+    expect(keycaps.map((key) => key.querySelector("svg") !== null)).toEqual([false, true, true]);
     expect(unbound.querySelectorAll("kbd")).toHaveLength(0);
   });
 
