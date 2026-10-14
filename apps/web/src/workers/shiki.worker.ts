@@ -1,4 +1,4 @@
-import { createHighlighterCore } from "shiki/core";
+import { createCssVariablesTheme, createHighlighterCore } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import {
   MAX_SHIKI_PERFORMANCE_DURATION_MS,
@@ -49,9 +49,34 @@ interface TokenizeRequest {
     blockId: string;
     code: string;
     language: string;
-    theme: "github-dark" | "github-light";
+    theme: "github-dark" | "github-light" | typeof FILES_THEME_NAME;
   }>;
 }
+
+/** Theme name for the Files tool's code view. */
+const FILES_THEME_NAME = "mcode-files";
+
+/**
+ * The Files code view colors tokens with Paper's CSS roles rather than a fixed
+ * palette, so it follows light and dark mode without re-tokenizing. Token
+ * colors come back as `var(--color-…)` strings the DOM resolves.
+ */
+const filesTheme = createCssVariablesTheme({
+  name: FILES_THEME_NAME,
+  variablePrefix: "--files-token-",
+  variableDefaults: {
+    foreground: "var(--color-ink)",
+    "token-keyword": "var(--color-pr-merged)",
+    "token-string": "var(--color-success)",
+    "token-string-expression": "var(--color-success)",
+    "token-link": "var(--color-link)",
+    "token-comment": "var(--color-muted)",
+    "token-constant": "var(--color-ink)",
+    "token-parameter": "var(--color-ink)",
+    "token-function": "var(--color-ink)",
+    "token-punctuation": "var(--color-ink)",
+  },
+});
 
 /** Tokenize response. */
 interface TokenizeResponse {
@@ -218,6 +243,7 @@ function getHighlighter(onCreate?: (startedAtMs: number) => void) {
       themes: [
         import("@shikijs/themes/github-dark"),
         import("@shikijs/themes/github-light"),
+        filesTheme,
       ],
       langs: [],
     }).catch((err) => {

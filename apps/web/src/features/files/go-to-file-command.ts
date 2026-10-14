@@ -9,5 +9,5 @@ import { useFilesTabsStore } from "./filesTabsStore";
 export function openGoToFile(): void {
   const scope = showTab("files");
   if (!scope) return;
-  useFilesTabsStore.getState().requestGoToFile(scope.threadId ?? scope.workspaceId);
+  useFilesTabsStore.getState().setGoToFileOpen(scope.threadId ?? scope.workspaceId, true);
 }

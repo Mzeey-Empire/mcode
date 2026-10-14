@@ -18,8 +18,8 @@ export interface FilesScopeState {
   /** Folder or file the tree should scroll into view, or null. */
   readonly revealPath: string | null;
   readonly treeWidth: number;
-  /** Bumped by `files.goToFile`; the tool opens the popover when it changes. */
-  readonly goToFileRequest: number;
+  /** Whether Go to file is open; stored here because `files.goToFile` can fire before the tool mounts. */
+  readonly goToFileOpen: boolean;
 }
 
 /** The state a scope starts with before the user opens anything. */
@@ -30,7 +30,7 @@ export const FILES_SCOPE_DEFAULTS: FilesScopeState = {
   expandedFolders: new Set(),
   revealPath: null,
   treeWidth: FILES_TREE_DEFAULT_WIDTH,
-  goToFileRequest: 0,
+  goToFileOpen: false,
 };
 
 interface FilesTabsStore {
@@ -46,7 +46,7 @@ interface FilesTabsStore {
   reveal(scopeId: string, folders: readonly string[], target: string): void;
   clearReveal(scopeId: string): void;
   setTreeWidth(scopeId: string, width: number): void;
-  requestGoToFile(scopeId: string): void;
+  setGoToFileOpen(scopeId: string, open: boolean): void;
 }
 
 /** Clamps a dragged tree width into the allowed range. */
@@ -109,7 +109,8 @@ export const useFilesTabsStore = create<FilesTabsStore>((set) => {
       })),
     clearReveal: (scopeId) => update(scopeId, (state) => (state.revealPath === null ? state : { ...state, revealPath: null })),
     setTreeWidth: (scopeId, width) => update(scopeId, (state) => ({ ...state, treeWidth: clampTreeWidth(width) })),
-    requestGoToFile: (scopeId) => update(scopeId, (state) => ({ ...state, goToFileRequest: state.goToFileRequest + 1 })),
+    setGoToFileOpen: (scopeId, open) =>
+      update(scopeId, (state) => (state.goToFileOpen === open ? state : { ...state, goToFileOpen: open })),
   };
 });
 
