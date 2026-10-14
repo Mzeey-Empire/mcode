@@ -36,15 +36,17 @@ export function FilesTabStrip({
   );
   return (
     <PanelHeaderSlot slot="leading">
-      <PanelTabStrip
-        items={items}
-        activeId={activePath}
-        label="Open files"
-        addLabel="Go to file"
-        onSelect={onSelect}
-        onClose={onClose}
-        onAdd={onAdd}
-      />
+      <div data-files-tool="" className="contents">
+        <PanelTabStrip
+          items={items}
+          activeId={activePath}
+          label="Open files"
+          addLabel="Go to file"
+          onSelect={onSelect}
+          onClose={onClose}
+          onAdd={onAdd}
+        />
+      </div>
     </PanelHeaderSlot>
   );
 }
@@ -57,19 +59,33 @@ export interface FilesControlsRowProps {
   readonly onToggleTree: () => void;
   readonly onRevealFolder: (folder: string) => void;
   readonly onGoToFile: () => void;
+  /** Null when the body has no text to search, which disables the Find button. */
+  readonly find: { readonly open: boolean; readonly onToggle: () => void } | null;
+  /** View-kind controls (preview/source, image scale), shown only while a file shows. */
   readonly controls?: ReactNode;
 }
 
-/** Row 2: tree toggle, then the path pill (or the Go to file field when no file shows), view controls, then More. */
-export function FilesControlsRow({ treeOpen, shownPath, actions, onToggleTree, onRevealFolder, onGoToFile, controls }: FilesControlsRowProps) {
+/** Row 2: tree toggle, then the path pill (or the Go to file field when no file shows), view controls, Find, then More. */
+export function FilesControlsRow({ treeOpen, shownPath, actions, onToggleTree, onRevealFolder, onGoToFile, find, controls }: FilesControlsRowProps) {
+  const findShortcut = keybindingKeycaps(getKeybindingForCommand("files.findInFile")?.key ?? "mod+f", isMac);
   return (
     <PanelHeaderSlot slot="row2">
-      <div className="@container flex h-10 min-w-0 flex-1 items-center gap-2">
+      <div data-files-tool="" className="@container flex h-10 min-w-0 flex-1 items-center gap-2">
         <IconButton shape="round" aria-label={treeOpen ? "Hide files tree" : "Show files tree"} pressed={treeOpen} onClick={onToggleTree}>
           <FolderTree />
         </IconButton>
         {shownPath ? <PathPill path={shownPath} onRevealFolder={onRevealFolder} /> : <GoToFileField onClick={onGoToFile} />}
         {shownPath ? controls : null}
+        <IconButton
+          shape="round"
+          aria-label="Find in file"
+          tooltipShortcut={findShortcut}
+          pressed={find?.open ?? false}
+          disabled={!find}
+          onClick={find?.onToggle}
+        >
+          <Search />
+        </IconButton>
         <MoreMenu path={shownPath} actions={actions} />
       </div>
     </PanelHeaderSlot>

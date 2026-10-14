@@ -1,9 +1,11 @@
-import { useCallback, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { SIDE_PANE_CONTENT_MIN_WIDTH, sidePaneDocks } from "@/lib/side-pane-dock";
+import { splitLines } from "./CodeFileView";
 import { FileTree } from "./FileTree";
 import { FilesControlsRow, FilesTabStrip } from "./FilesHeader";
 import { FilesViewControls } from "./FilesViewControls";
+import { FindInFileBar } from "./FindInFileBar";
 import { GoToFilePopover } from "./GoToFilePopover";
 import type { ImageDimensions } from "./ImageFileView";
 import { OpenFileView } from "./OpenFileView";
@@ -11,9 +13,11 @@ import { fileViewKind } from "./file-view-kind";
 import { buildFilesTree, flattenFileTree, folderNodesToReveal, indexFileChanges } from "./file-tree-model";
 import { FILES_SCOPE_DEFAULTS, getFilesScope, useFilesTabsStore, type FilesScopeState } from "./filesTabsStore";
 import { useFileActions } from "./useFileActions";
-import { useFilesData, type FilesData } from "./useFilesData";
+import { useFilesData, type FileReadState, type FilesData } from "./useFilesData";
+import { useFindInFile, type FindHighlight } from "./useFindInFile";
 
 const EMPTY_PATHS: readonly string[] = [];
+const NO_LINES: readonly string[] = [];
 
 export interface FilesToolProps {
   readonly workspaceId: string;
@@ -41,6 +45,44 @@ function useFilesScopeState(scopeId: string): FilesScopeState {
   return useFilesTabsStore((store) => store.scopes[scopeId] ?? FILES_SCOPE_DEFAULTS);
 }
 
+function useFindBar(
+  scopeId: string,
+  requested: boolean,
+  text: string | null,
+  bodyRef: RefObject<HTMLElement | null>,
+) {
+  const open = requested && text !== null;
+  const lines = useMemo(() => (open && text !== null ? splitLines(text) : NO_LINES), [open, text]);
+  const find = useFindInFile(lines);
+  const setOpen = (next: boolean) => {
+    useFilesTabsStore.getState().setFindOpen(scopeId, next);
+    if (!next) bodyRef.current?.querySelector<HTMLElement>("[data-code-viewport]")?.focus();
+  };
+  // The bar handles its own Escape; this catches it once focus has moved into the code.
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (!open || event.key !== "Escape" || event.defaultPrevented) return;
+    event.stopPropagation();
+    setOpen(false);
+  };
+  return {
+    header: text === null ? null : { open, onToggle: () => setOpen(!open) },
+    bar: open ? <FindInFileBar find={find} onClose={() => setOpen(false)} /> : null,
+    highlight: open ? find : null,
+    onKeyDown,
+  };
+}
+
+/**
+ * The text Find can search: what `CodeLines` paints. Rendered markdown and SVG have
+ * no highlightable lines, so Find is disabled there until the user switches to Source.
+ */
+function searchableText(path: string | null, read: FileReadState | undefined, state: FilesScopeState): string | null {
+  if (!path || read?.status !== "ready" || read.result.kind !== "text" || read.result.content.length === 0) return null;
+  const kind = fileViewKind(path, read);
+  const showsLines = kind === "code" || (kind === "markdown" && state.viewModes[path] === "source");
+  return showsLines ? read.result.content : null;
+}
+
 /**
  * The Files tool: project files for the panel scope with tabs, a tree, a code
  * view, and Go to file. Distinct from Review's Files navigator, which lists
@@ -64,6 +106,7 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
     (path: string, next: ImageDimensions) => setDimensions((current) => ({ ...current, [path]: next })),
     [],
   );
+  const findBar = useFindBar(scopeId, state.findOpen, searchableText(shownPath, shownPath ? data.reads[shownPath] : undefined, state), bodyRef);
 
   const openFile = useCallback(
     (path: string, beside = false) => {
@@ -81,7 +124,7 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
   );
 
   return (
-    <div data-files-tool="" className="absolute inset-0 flex min-h-0 flex-col overflow-hidden">
+    <div data-files-tool="" onKeyDown={findBar.onKeyDown} className="absolute inset-0 flex min-h-0 flex-col overflow-hidden">
       <FilesTabStrip
         openPaths={state.openPaths}
         activePath={state.activePath}
@@ -96,8 +139,10 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
         onToggleTree={() => store().setTreeOpen(scopeId, !(layout.dockedTree || layout.body === "tree"))}
         onRevealFolder={revealFolder}
         onGoToFile={() => setGoToFileOpen(true)}
+        find={findBar.header}
         controls={shownPath ? <ShownFileControls scopeId={scopeId} path={shownPath} state={state} data={data} dimensions={dimensions[shownPath] ?? null} /> : null}
       />
+      {findBar.bar}
       <div ref={bodyRef} className="relative flex min-h-0 flex-1 flex-row overflow-hidden">
         <FilesBody
           scope={scope}
@@ -107,6 +152,7 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
           data={data}
           tree={tree}
           actions={actions}
+          findHighlight={findBar.highlight}
           onOpenFile={openFile}
           onDimensions={onDimensions}
         />
@@ -160,6 +206,7 @@ function FilesBody({
   data,
   tree,
   actions,
+  findHighlight,
   onOpenFile,
   onDimensions,
 }: {
@@ -170,6 +217,7 @@ function FilesBody({
   readonly data: FilesData;
   readonly tree: ReturnType<typeof buildFilesTree>;
   readonly actions: ReturnType<typeof useFileActions>;
+  readonly findHighlight: FindHighlight | null;
   readonly onOpenFile: (path: string) => void;
   readonly onDimensions: (path: string, dimensions: ImageDimensions) => void;
 }) {
@@ -216,6 +264,7 @@ function FilesBody({
           onDimensions={(dimensions) => onDimensions(activePath, dimensions)}
           onOpenInEditor={(line) => actions.openInEditor(activePath, line)}
           onCloseTab={() => useFilesTabsStore.getState().closeFile(scopeId, activePath)}
+          find={findHighlight}
         />
       </div>
     </>

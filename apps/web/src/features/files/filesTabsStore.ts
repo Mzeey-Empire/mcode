@@ -22,6 +22,8 @@ export interface FilesScopeState {
   readonly treeWidth: number;
   /** Whether Go to file is open; stored here because `files.goToFile` can fire before the tool mounts. */
   readonly goToFileOpen: boolean;
+  /** Whether the find bar is open; stored here for the same reason as `goToFileOpen`. */
+  readonly findOpen: boolean;
   /** Per-path view mode; absent means "rendered". */
   readonly viewModes: Readonly<Record<string, FileViewMode>>;
   /** Per-path image scale; absent means "fit". */
@@ -36,6 +38,7 @@ export const FILES_SCOPE_DEFAULTS: FilesScopeState = {
   revealPath: null,
   treeWidth: FILES_TREE_DEFAULT_WIDTH,
   goToFileOpen: false,
+  findOpen: false,
   viewModes: {},
   imageScales: {},
 };
@@ -53,6 +56,7 @@ interface FilesTabsStore {
   clearReveal(scopeId: string): void;
   setTreeWidth(scopeId: string, width: number): void;
   setGoToFileOpen(scopeId: string, open: boolean): void;
+  setFindOpen(scopeId: string, open: boolean): void;
   setViewMode(scopeId: string, path: string, mode: FileViewMode): void;
   setImageScale(scopeId: string, path: string, scale: ImageScale): void;
 }
@@ -126,6 +130,8 @@ export const useFilesTabsStore = create<FilesTabsStore>((set) => {
     setTreeWidth: (scopeId, width) => update(scopeId, (state) => ({ ...state, treeWidth: clampTreeWidth(width) })),
     setGoToFileOpen: (scopeId, open) =>
       update(scopeId, (state) => (state.goToFileOpen === open ? state : { ...state, goToFileOpen: open })),
+    setFindOpen: (scopeId, open) =>
+      update(scopeId, (state) => (state.findOpen === open ? state : { ...state, findOpen: open })),
     setViewMode: (scopeId, path, mode) =>
       update(scopeId, (state) => ({ ...state, viewModes: { ...state.viewModes, [path]: mode } })),
     setImageScale: (scopeId, path, scale) =>
