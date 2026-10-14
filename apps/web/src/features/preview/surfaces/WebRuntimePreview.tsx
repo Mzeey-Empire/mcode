@@ -15,7 +15,7 @@ import { pushEmitter } from "@/transport/ws-transport";
 import { useDiffStore } from "@/stores/diffStore";
 import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { BrowserToolbar } from "./BrowserToolbar";
-import { BrowserViewportToolbar } from "./BrowserViewportToolbar";
+import { BrowserDeviceRow } from "./BrowserDeviceRow";
 import { BrowserViewportCanvas } from "./BrowserViewportCanvas";
 import type { BrowserAction, BrowserToolbarPage, BrowserTools } from "./browserToolbarModel";
 import { useBrowserCommands } from "./useBrowserCommands";
@@ -125,7 +125,7 @@ function runtimeTools(onToggleViewportToolbar: () => void): BrowserTools {
   };
 }
 
-function RuntimeViewportToolbar({
+function RuntimeDeviceRow({
   visible,
   coordinator,
   state,
@@ -142,7 +142,7 @@ function RuntimeViewportToolbar({
 }): ReactNode {
   if (!visible || !coordinator || !state) return null;
   return (
-    <BrowserViewportToolbar
+    <BrowserDeviceRow
       coordinator={coordinator}
       state={state}
       scale={scale}
@@ -417,7 +417,7 @@ export function WebRuntimePreview({
           />
         </div>
       </PanelHeaderSlot>
-      <RuntimeViewportToolbar
+      <RuntimeDeviceRow
         visible={viewportToolbarOpen || responsiveViewportSize !== null}
         coordinator={viewportCoordinator}
         state={viewportState}

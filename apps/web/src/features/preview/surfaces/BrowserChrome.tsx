@@ -1,6 +1,6 @@
 import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { BrowserToolbar } from "./BrowserToolbar";
-import { BrowserViewportToolbar } from "./BrowserViewportToolbar";
+import { BrowserDeviceRow } from "./BrowserDeviceRow";
 import { PreviewAnnotationHeader } from "./PreviewAnnotationHeader";
 import { usePreviewAnnotationStore } from "../state/previewAnnotationStore";
 import {
@@ -207,7 +207,7 @@ export function BrowserChrome(props: BrowserChromeProps) {
           )}
         </div>
       </PanelHeaderSlot>
-      <ViewportToolbar {...props} />
+      <DeviceRow {...props} />
     </div>
   );
 }
@@ -240,7 +240,7 @@ function AnnotationHeader({
   );
 }
 
-function ViewportToolbar({
+function DeviceRow({
   viewportToolbarOpen,
   activeViewportState,
   activeViewportCoordinator,
@@ -251,7 +251,7 @@ function ViewportToolbar({
   if (!viewportToolbarOpen && activeViewportState?.mode !== "responsive") return null;
   if (!activeViewportCoordinator || !activeViewportState) return null;
   return (
-    <BrowserViewportToolbar
+    <BrowserDeviceRow
       coordinator={activeViewportCoordinator}
       state={activeViewportState}
       scale={responsiveViewportScale}

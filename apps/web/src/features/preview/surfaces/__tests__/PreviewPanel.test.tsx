@@ -526,7 +526,7 @@ describe("PreviewPanel: unavailable state", () => {
     const menu = await screen.findByRole("menu");
     await user.click(within(menu).getByRole("menuitem", { name: "Device toolbar" }));
 
-    const toolbar = await screen.findByTestId("browser-viewport-toolbar");
+    const toolbar = await screen.findByTestId("browser-device-row");
     expect(toolbar).toBeInTheDocument();
     await user.click(within(toolbar).getByRole("button", { name: "Viewport preset" }));
     await user.click(within(await screen.findByRole("menu")).getByRole("menuitemradio", { name: "Responsive" }));
@@ -547,7 +547,7 @@ describe("PreviewPanel: unavailable state", () => {
         ),
       ).toMatchObject({ mode: "regular" });
     });
-    expect(screen.queryByTestId("browser-viewport-toolbar")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("browser-device-row")).not.toBeInTheDocument();
     expect(screen.getByTestId("web-runtime-preview-iframe")).toBe(iframe);
   });
 
@@ -565,7 +565,7 @@ describe("PreviewPanel: unavailable state", () => {
       "menuitem",
       { name: "Device toolbar" },
     ));
-    let toolbar = await screen.findByTestId("browser-viewport-toolbar");
+    let toolbar = await screen.findByTestId("browser-device-row");
     await user.click(within(toolbar).getByRole("button", { name: "Viewport scale and presentation" }));
     await user.click(within(await screen.findByRole("menu")).getByRole("menuitemradio", { name: "150%" }));
     await waitFor(() => {
@@ -582,7 +582,7 @@ describe("PreviewPanel: unavailable state", () => {
       "menuitem",
       { name: "Device toolbar" },
     ));
-    toolbar = await screen.findByTestId("browser-viewport-toolbar");
+    toolbar = await screen.findByTestId("browser-device-row");
 
     await waitFor(() => {
       expect(
@@ -607,7 +607,7 @@ describe("PreviewPanel: unavailable state", () => {
     expect(coordinator).toBeDefined();
     await coordinator!.requestAgentResize({ width: 393, height: 852 });
 
-    expect(await screen.findByTestId("browser-viewport-toolbar")).toBeInTheDocument();
+    expect(await screen.findByTestId("browser-device-row")).toBeInTheDocument();
   });
 
   it("shows the toolbar from live agent state before the stored viewport projection catches up", async () => {
@@ -637,8 +637,8 @@ describe("PreviewPanel: unavailable state", () => {
       await coordinator.requestAgentResize({ width: 393, height: 852 });
     });
 
-    expect(screen.getByRole("separator", { name: "Resize viewport from top" })).toBeInTheDocument();
-    expect(screen.getByTestId("browser-viewport-toolbar")).toBeInTheDocument();
+    expect(screen.getByRole("separator", { name: "Resize viewport from right" })).toBeInTheDocument();
+    expect(screen.getByTestId("browser-device-row")).toBeInTheDocument();
   });
 });
 

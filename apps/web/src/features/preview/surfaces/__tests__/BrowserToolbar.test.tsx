@@ -302,7 +302,7 @@ describe("BrowserToolbar", () => {
   });
 
   it("closes More when another tool takes the panel header and keeps it closed on return", async () => {
-    const elements = { leading: document.createElement("div"), row2: document.createElement("div") };
+    const elements = { leading: document.createElement("div"), row2: document.createElement("div"), row3: null };
     const toolbar = (active: boolean) => (
       <TooltipProvider>
         <PanelHeaderSlotScope active={active} elements={elements}>

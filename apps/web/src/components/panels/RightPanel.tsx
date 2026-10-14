@@ -975,9 +975,10 @@ export function RightPanel() {
   const [activityRailExpanded, setActivityRailExpanded] = useState(false);
   const [headerLeading, setHeaderLeading] = useState<HTMLDivElement | null>(null);
   const [headerRow2, setHeaderRow2] = useState<HTMLDivElement | null>(null);
+  const [headerRow3, setHeaderRow3] = useState<HTMLDivElement | null>(null);
   const headerElements = useMemo<PanelHeaderElements>(
-    () => ({ leading: headerLeading, row2: headerRow2 }),
-    [headerLeading, headerRow2],
+    () => ({ leading: headerLeading, row2: headerRow2, row3: headerRow3 }),
+    [headerLeading, headerRow2, headerRow3],
   );
 
   useEffect(() => () => {
@@ -1192,6 +1193,7 @@ export function RightPanel() {
               maximized={maximized}
               leadingRef={setHeaderLeading}
               row2Ref={setHeaderRow2}
+              row3Ref={setHeaderRow3}
               onToggleMaximized={toggleMaximized}
               panelToggle={panelToggle.row1}
             />

@@ -293,6 +293,29 @@ describe("PreviewWebview", () => {
     rect.mockRestore();
   });
 
+  it("re-measures a scaled responsive page when its layout key changes", () => {
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(10, 20, 768, 480),
+    );
+    const props = {
+      threadId: "thread-layout-key",
+      tabId: "tab-layout-key",
+      src: "https://example.com",
+      viewport: { width: 1280, height: 800 },
+    };
+    const { rerender } = render(<PreviewWebview {...props} layoutKey="0.6:832x664" />);
+    const surface = screen.getByTestId("web-runtime-preview-iframe");
+    expect(surface).toHaveStyle({ left: "10px", top: "20px" });
+
+    rect.mockReturnValue(new DOMRect(32, 60, 784, 490));
+    rerender(<PreviewWebview {...props} layoutKey="0.6:832x664" />);
+    expect(surface).toHaveStyle({ left: "10px", top: "20px" });
+
+    rerender(<PreviewWebview {...props} layoutKey="0.61:832x704" />);
+    expect(surface).toHaveStyle({ left: "32px", top: "60px" });
+    rect.mockRestore();
+  });
+
   it("clips the covered edge without changing the Browser viewport geometry", () => {
     const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
       new DOMRect(10, 20, 640, 480),

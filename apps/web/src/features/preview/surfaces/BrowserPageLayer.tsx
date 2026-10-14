@@ -35,7 +35,7 @@ function previewSurfaceClassName(
   return cn(
     "relative min-h-[min(40vh,20rem)] min-w-0 flex-1 basis-0",
     "rounded-tr-md",
-    responsiveViewportSize ? "overflow-auto bg-hover/20" : "overflow-hidden",
+    responsiveViewportSize ? "mx-2 mb-2 overflow-auto rounded-control bg-page" : "overflow-hidden",
     webviewLayerInteractive && "pointer-events-none",
     showLocalPorts && "overflow-y-auto",
   );
@@ -141,6 +141,7 @@ export function BrowserPageLayer({
         presentationSource={automationOnly ? "automation" : "panel"}
         coveredRight={coveredRight}
         viewport={tabViewportState?.mode === "responsive" ? tabViewport : undefined}
+        layoutKey={`${responsiveViewportScale}:${viewportCanvasBounds.width}x${viewportCanvasBounds.height}`}
         className={cn(
           responsiveViewportSize
             ? "absolute left-0 top-0"
