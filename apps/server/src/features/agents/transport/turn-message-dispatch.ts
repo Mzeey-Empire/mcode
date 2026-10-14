@@ -27,9 +27,9 @@ export async function sendAdmittedTurn<Command extends AdmittableTurnCommand>(
   const dispatch = service.sendMessage({
     ...command,
     // onTurnStarted reserves the turn before its user message is committed.
-    onAdmissionComplete: () => {
+    onAdmissionComplete: (turnAdmitted) => {
       admitted = true;
-      command.onAdmissionComplete?.();
+      command.onAdmissionComplete?.(turnAdmitted);
       resolveAdmission();
     },
   });

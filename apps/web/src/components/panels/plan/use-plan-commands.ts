@@ -9,7 +9,7 @@ import { implementPlan, selectImplementTarget, usePlanImplementStore } from "./p
 const EMPTY_PLANS: readonly PlanVersion[] = [];
 
 /**
- * Registers the palette's Implement command for the active thread and sets the
+ * Registers the palette's Implement commands for the active thread and sets the
  * `planImplementable` keybinding context. Both exist only while the target
  * version is implementable, so the shortcut does nothing on history. Mounted
  * at the app level because the shortcut must work from the composer with the
@@ -31,8 +31,15 @@ export function usePlanCommands(threadId: string | null): void {
       category: "Plan",
       handler: () => void implementPlan(threadId),
     });
+    const disposeNewThread = registerCommand({
+      id: "plan.implementInNewThread",
+      title: `Implement v${version} in a new thread`,
+      category: "Plan",
+      handler: () => void implementPlan(threadId, "new-thread"),
+    });
     return () => {
       dispose();
+      disposeNewThread();
       setContext("planImplementable", false);
     };
   }, [threadId, version]);

@@ -7,10 +7,17 @@ import type {
   StoredAttachment,
   TurnRuntimeSnapshot,
 } from "@mcode/contracts";
+import type { CreateAndSendCommand, CreateAndSendOptions } from "../turns/thread-creation-coordinator.js";
+import type { TurnRuntimeController } from "./turn-runtime-controller.js";
 
 /** The narrow execution command surface available to feature-owned turn flows. */
 export class AgentTurnCommandPort {
   constructor(private readonly runtime: AgentRuntimeCommandPort) {}
+
+  /** Create one feature-owned startup and admit its initial turn. */
+  createAndSend(command: CreateAndSendCommand, options?: CreateAndSendOptions) {
+    return this.runtime.createAndSend(command, options);
+  }
 
   /** Dispatch one focused feature turn through the runtime owner. */
   sendMessage(command: AgentTurnCommand): Promise<void> {
@@ -24,6 +31,7 @@ export class AgentTurnCommandPort {
 
 /** The private runtime operations that a command dispatcher needs from its owner. */
 interface AgentRuntimeCommandTarget {
+  createAndSend: TurnRuntimeController["createAndSend"];
   sendMessage(command: AgentTurnCommand): Promise<void>;
   runtimeSnapshots(): TurnRuntimeSnapshot[];
 }
@@ -31,6 +39,11 @@ interface AgentRuntimeCommandTarget {
 /** Bridges feature-owned commands to the runtime owner without a reverse DI dependency. */
 export class AgentRuntimeCommandPort {
   private target: AgentRuntimeCommandTarget | undefined;
+
+  /** Dispatch a trusted startup through the bound runtime owner. */
+  createAndSend(command: CreateAndSendCommand, options?: CreateAndSendOptions) {
+    return this.requireTarget().createAndSend(command, options);
+  }
 
   /** Bind the single runtime owner during server composition. */
   bind(target: AgentRuntimeCommandTarget): void {
@@ -62,8 +75,8 @@ export interface AgentTurnCommand {
   interactionMode?: "build" | "plan";
   mutationReservationToken?: string;
   planImplement?: { requestId: string };
-  /** Acknowledges durable admission before provider dispatch continues. */
-  onAdmissionComplete?: () => void;
+  /** Reports whether admission produced a turn before provider dispatch. */
+  onAdmissionComplete?: (turnAdmitted: boolean) => void;
   permissionMode?: PermissionMode | "default";
   model?: string;
   attachments: AttachmentMeta[];

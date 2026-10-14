@@ -515,6 +515,7 @@ snapshotRefPins.attention = threadAttentionService;
 invalidateAttentionOnSettledTurns(threadAttentionService, subscribeCommittedCanonicalEvents);
 const planService = createPlanService(databaseWriter, workerOwnedTurnRuntime, planRepo, planTurnService, {
   threads: threadRepo, providers: providerRegistry, commands: container.resolve(AGENT_TURN_COMMAND_PORT),
+  startups: threadStartupService, messages: messageRepo, threadService,
   reservations: container.resolve(ThreadControlMutationReservationService),
   grants: container.resolve(ScopedPreGrantService),
 });

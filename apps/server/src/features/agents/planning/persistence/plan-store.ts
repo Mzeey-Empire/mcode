@@ -175,7 +175,9 @@ export class PlanStore {
     const admitted = row.status === "accepted" ? this.db.prepare<{ message_id: string }, [string]>(
       "SELECT message_id FROM plan_implement_requests WHERE version_id = ? AND status = 'admitted' LIMIT 1",
     ).get(row.id) : null;
-    return PlanVersionSchema().parse({ ...row, acceptedMessageId: admitted?.message_id ?? null });
+    const acceptedMessageId = row.status === "accepted" && row.captureSource === "copy"
+      ? row.messageId : admitted?.message_id ?? null;
+    return PlanVersionSchema().parse({ ...row, acceptedMessageId });
   }
 }
 

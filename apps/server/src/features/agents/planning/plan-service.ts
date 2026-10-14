@@ -3,6 +3,9 @@ import { PlanImplementSchema, PlanImplementErrorSchema, ProviderIdSchema,
   type PlanSaveError, type PlanSaveVersion, type PlanVersion, type PlanImplement,
   type PlanImplementError, type PlanImplementReceipt, type IProviderRegistry } from "@mcode/contracts";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
+import type { ThreadService } from "../../thread-control/lifecycle/thread-service.js";
+import type { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
+import type { MessageRepo } from "../conversation/persistence/message-repo.js";
 import type { ThreadControlMutationReservationService } from "../../thread-control/authority/thread-control-mutation-reservation-service.js";
 import type { AgentTurnCommandPort } from "../orchestration/agent-turn-command-port.js";
 import type { ScopedPreGrantService } from "../permissions/scoped-pre-grant.js";
@@ -20,7 +23,10 @@ export interface PlanImplementRuntime {
   threads: Pick<ThreadRepo, "findById" | "publishPlanPhase">;
   providers: IProviderRegistry;
   reservations: ThreadControlMutationReservationService;
-  commands: Pick<AgentTurnCommandPort, "sendMessage">;
+  commands: Pick<AgentTurnCommandPort, "sendMessage" | "createAndSend">;
+  startups: Pick<ThreadStartupService, "get">;
+  messages: Pick<MessageRepo, "hasMessages">;
+  threadService: Pick<ThreadService, "delete">;
   grants: Pick<ScopedPreGrantService, "issue" | "clear">;
 }
 
@@ -71,7 +77,7 @@ export class PlanService {
     }
     const runtime = this.runtime;
     if (!runtime) throw new Error("Plan Implement runtime is not configured");
-    const token = runtime.reservations.reserve(input.threadId, "activeTurn");
+    const token = runtime.reservations.reserve(input.threadId, input.target === "thread" ? "activeTurn" : "planImplement");
     if (!token) throw new PlanServiceError({ code: "thread_busy", latestVersion: null });
     let failure: unknown;
     try {
@@ -93,7 +99,11 @@ export class PlanService {
     const outcome = await provider.prepareImplement?.({ threadId: input.threadId, markdown: prepared.contentMd,
       nativePlanFile: prepared.nativePlanFile }) ?? { outcome: "skipped", reason: "no-file" };
     await this.writer.execute(implementWrites.nativeFile, { requestId: input.requestId, outcome });
-    if (provider.id === "claude" || provider.id === "copilot") {
+    if (input.target === "new-thread") {
+      await this.admitNewThread(prepared.request, thread, runtime);
+      return;
+    }
+    if (["claude", "copilot"].includes(provider.id)) {
       runtime.grants.issue({ threadId: input.threadId, toolName: "Read", path: this.files.path(input.threadId) });
     }
     // The receipt only needs admission. Starting or resuming the provider
@@ -105,16 +115,34 @@ export class PlanService {
       provider: ProviderIdSchema.parse(thread.provider), permissionMode: "default", attachments: [] });
   }
 
+  private async admitNewThread(request: PlanImplementRequest, thread: NonNullable<ReturnType<ThreadRepo["findById"]>>, runtime: PlanImplementRuntime): Promise<void> {
+    if (thread.mode === "worktree" && !thread.worktree_path) {
+      throw new PlanServiceError({ code: "implement_failed", latestVersion: null });
+    }
+    await runtime.commands.createAndSend({ workspaceId: thread.workspace_id, startupId: request.requestId,
+      content: request.wireText, displayContent: `Implement plan v${request.version}`,
+      mode: thread.mode, branch: thread.branch, interactionMode: "build",
+      existingWorktreePath: thread.worktree_path ?? undefined,
+      existingWorktreeBaseBranch: thread.base_branch ?? thread.branch,
+      model: thread.model ?? undefined, reasoningLevel: thread.reasoning_level ?? undefined,
+      provider: ProviderIdSchema.parse(thread.provider), permissionMode: "default", attachments: [],
+    }, { messageId: request.messageId, planImplement: { requestId: request.requestId },
+      setupSkip: thread.worktree_path ? { reason: "plan-implement", sourceThreadId: thread.id } : undefined });
+  }
+
   private async settleImplement(input: PlanImplement, token: string, runtime: PlanImplementRuntime, failure: unknown): Promise<PlanImplementReceipt> {
     let request = await this.writer.execute(implementWrites.read, input.requestId);
     if (request?.status === "preparing") {
-      request = await this.writer.execute(implementWrites.fail, { requestId: input.requestId, code: implementFailureCode(failure) });
+      request = await this.writer.execute(implementWrites.fail, { requestId: input.requestId,
+        code: this.failureCode(request, runtime, failure) });
     }
+    if (input.target === "new-thread") runtime.reservations.release(input.threadId, token);
     if (request?.status === "admitted") {
       return this.publishAdmission(request);
     }
     releaseFailedImplementReservation(input.threadId, token, runtime);
     if (request) {
+      await this.compensateNewThread(request);
       // Preparation may have committed the request's unsent edit before it failed.
       await this.publishVersions(input.threadId);
       await this.files.writeAfterCommit(input.threadId);
@@ -124,9 +152,38 @@ export class PlanService {
     throw new PlanServiceError({ code: "implement_failed", latestVersion: null });
   }
 
+  private failureCode(request: PlanImplementRequest, runtime: PlanImplementRuntime, failure: unknown): string {
+    const startup = request.startupId ? runtime.startups.get(request.startupId) : null;
+    return startup?.cancellation === "requested" ? "startup_cancelled" : implementFailureCode(failure);
+  }
+
   private async publishAdmission(request: PlanImplementRequest): Promise<PlanImplementReceipt> {
     await this.publishVersions(request.sourceThreadId);
+    if (request.targetThreadId && request.targetThreadId !== request.sourceThreadId) {
+      await this.publishVersions(request.targetThreadId);
+    }
     return this.receiptOrFailure(request);
+  }
+
+  private async compensateNewThread(request: PlanImplementRequest): Promise<void> {
+    if (request.target !== "new-thread" || !request.startupId || !this.runtime) return;
+    const startup = this.runtime.startups.get(request.startupId);
+    const targetId = startup?.threadId;
+    if (!targetId) return;
+    if (targetId === request.sourceThreadId) return;
+    await this.removeEmptyTarget(targetId, this.runtime);
+  }
+
+  private async removeEmptyTarget(threadId: string, runtime: PlanImplementRuntime): Promise<void> {
+    const token = runtime.reservations.reserve(threadId, "planImplement");
+    if (!token) return;
+    try {
+      if (runtime.messages.hasMessages(threadId)) return;
+      const thread = runtime.threads.findById(threadId);
+      if (thread?.deleted_at === null) await runtime.threadService.delete(threadId, false);
+    } finally {
+      runtime.reservations.release(threadId, token);
+    }
   }
 
   private async publishVersions(threadId: string): Promise<void> {
@@ -153,6 +210,7 @@ export class PlanService {
     for (const request of requests) {
       const settled = await this.writer.execute(implementWrites.fail, { requestId: request.requestId, code: "interrupted" });
       if (settled?.status !== "failed") continue;
+      await this.compensateNewThread(settled);
       this.progress?.reloadPlans(request.sourceThreadId);
       await this.files.writeAfterCommit(request.sourceThreadId);
     }

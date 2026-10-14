@@ -103,7 +103,7 @@ export const PlanImplementSchema = lazySchema(() => z.object({
   versionId: z.string().uuid(),
   expectedRevision: z.number().int().min(0),
   pending: PlanSaveVersionSchema().omit({ threadId: true }).optional(),
-  target: z.literal("thread"),
+  target: z.enum(["thread", "new-thread"]),
 }).refine(input => !input.pending || input.pending.versionId === input.versionId, {
   message: "Pending version must match the implemented version", path: ["pending", "versionId"],
 }));
@@ -124,7 +124,7 @@ export type PlanImplementReceipt = z.infer<ReturnType<typeof PlanImplementReceip
 /** Typed failures preserve the current version for explicit conflict resolution. */
 export const PlanImplementErrorSchema = lazySchema(() => z.object({
   code: z.enum(["thread_busy", "plan_busy", "plan_read_only", "plan_conflict",
-    "implement_request_conflict", "implement_interrupted", "implement_failed"]),
+    "implement_request_conflict", "implement_interrupted", "implement_failed", "startup_cancelled"]),
   latestVersion: PlanVersionSchema().nullable(),
 }));
 

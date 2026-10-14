@@ -1,4 +1,18 @@
 import "reflect-metadata";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import * as NodeCrypto from "node:crypto";
+import { container } from "tsyringe";
+import type { Database } from "bun:sqlite";
+import { setupContainer } from "../../../../application/composition/container.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { WorkerOwnedTurnRuntime } from "../../execution/worker-owned-turn-runtime.js";
+import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
+import { WorkspaceEnvironmentService } from "../../../projects/environment/workspace-environment-service.js";
+import { GitWorktreeService } from "../../../projects/git/git-worktree-service.js";
+import { AgentService } from "../../orchestration/agent-service.js";
+import { ThreadStartupService } from "../../../thread-startup/thread-startup-service.js";
 import { describe, expect, it, vi } from "vitest";
 import { routeMessage, type RouterDeps } from "../../../../application/transport/ws-router.js";
 import { routeAgentRpc, type AgentRouterDeps } from "../agent-rpc.js";
@@ -33,6 +47,50 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
 }
 
 describe("routeMessage Agent RPCs", () => {
+  it("keeps an attached worktree behind configured Setup when wire params forge setupSkip", async () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "rpc-setup-"));
+    const oldDatabase = process.env.MCODE_DB_PATH;
+    process.env.MCODE_DB_PATH = NodePath.join(root, "app.sqlite");
+    container.reset();
+    await setupContainer(root);
+    const writer = container.resolve(ApplicationDatabaseWriter);
+    const workers = container.resolve(WorkerOwnedTurnRuntime);
+    const environment = container.resolve(WorkspaceEnvironmentService);
+    const worktrees = container.resolve(GitWorktreeService);
+    const listed = vi.spyOn(worktrees, "listWorktrees").mockResolvedValue([
+      { path: root, name: "fixture", branch: "main", managed: false },
+    ]);
+    try {
+      await workers.whenReady();
+      const workspace = await container.resolve(WorkspaceRepo).create("RPC fixture", root, false);
+      await environment.save({ workspaceId: workspace.id, sourceRevision: null,
+        document: { version: "0.0.1", setup: { windows: "echo setup", linux: "echo setup" }, actions: [] } });
+      const fixture = admissionFixture(async () => {});
+      fixture.deps.agentService = container.resolve(AgentService);
+      const startupId = NodeCrypto.randomUUID();
+      const params = { workspaceId: workspace.id, startupId, content: "Implement", mode: "worktree" as const,
+        existingWorktreePath: root, provider: "codex" as const,
+        setupSkip: { reason: "plan-implement", sourceThreadId: "forged-source" } };
+      await routeAgentRpc("agent.createAndSend", params, fixture.deps);
+      const startup = container.resolve(ThreadStartupService).get(startupId);
+      if (!startup?.threadId) throw new Error("Expected attached startup");
+      const snapshot = environment.getAutomaticSetup({ threadId: startup.threadId });
+      expect(snapshot.gate).toBe("blocked");
+      expect(snapshot.queuedTurns.map(turn => turn.state)).toEqual(["queued"]);
+      expect(startup.steps.find(step => step.phase === "setup")).toMatchObject({ state: "running" });
+    } finally {
+      await environment.dispose();
+      await workers.close();
+      await writer.close();
+      container.resolve<Database>("Database").close(true);
+      container.reset();
+      listed.mockRestore();
+      if (oldDatabase === undefined) delete process.env.MCODE_DB_PATH;
+      else process.env.MCODE_DB_PATH = oldDatabase;
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("records the user as the cause of an agent.stop", async () => {
     const fixture = admissionFixture(async () => {});
     const stopSession = vi.fn<AgentRouterDeps["agentService"]["stopSession"]>(async (threadId) => ({
@@ -272,7 +330,7 @@ describe("routeAgentRpc", () => {
     const fixture = admissionFixture(sendMessage);
     try {
       const rpc = routeAgentRpc("agent.send", { threadId: "thread-1", content: "Long work" }, fixture.deps);
-      command?.onAdmissionComplete?.();
+      command?.onAdmissionComplete?.(true);
       await expect(rpc).resolves.toBeUndefined();
       finish();
       await dispatch;

@@ -97,12 +97,6 @@ vi.mock("@/hooks/useHasCommitsAhead", () => ({
   useHasCommitsAhead: vi.fn().mockReturnValue(null),
 }));
 
-vi.mock("@/stores/composerDraftStore", () => ({
-  useComposerDraftStore: vi.fn((selector: (state: unknown) => unknown) =>
-    selector({ setPendingPrefill: vi.fn() }),
-  ),
-}));
-
 vi.mock("@/features/projects/state/workspaceStore", () => {
   const store = Object.assign(
     vi.fn((selector: (state: unknown) => unknown) => selector(mockWorkspaceState)),
@@ -906,6 +900,20 @@ describe("ThreadOverview branchless Create PR", () => {
     expect(screen.getByTestId("thread-overview-subagents")).toHaveAccessibleName("Subagents, 1 active, 2 done");
   });
 
+  it("opens the Commit sheet on Review from the branchless worktree row", async () => {
+    const user = userEvent.setup();
+    const thread = makeThread({ branch: "release", base_branch: "release" });
+    mockWorkspaceState.threads = [thread];
+    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+
+    await user.click(screen.getByTestId("thread-overview-local"));
+    await user.click(await screen.findByTestId("workspace-menu-commit"));
+
+    const diff = useDiffStore.getState();
+    expect(diff.commitSheetScopeId).toBe("thread-1");
+    expect(diff.getRightPanel("ws-1", "thread-1")).toMatchObject({ visible: true, activeTab: "changes" });
+  });
+
   it("creates a named branch from the branchless worktree row", async () => {
     const user = userEvent.setup();
     const thread = makeThread({ branch: "release", base_branch: "release" });
@@ -917,7 +925,7 @@ describe("ThreadOverview branchless Create PR", () => {
     await user.click(screen.getByTestId("thread-overview-local"));
     expect(screen.queryByTestId("workspace-menu-branch")).not.toBeInTheDocument();
     expect(screen.queryByTestId("workspace-menu-create-pr")).not.toBeInTheDocument();
-    expect(screen.getByTestId("workspace-menu-commit")).toBeDisabled();
+    expect(screen.getByTestId("workspace-menu-commit")).toBeEnabled();
 
     fireEvent.click(screen.getByTestId("thread-overview-create-branch"));
     expect(screen.getByRole("heading", { name: "Work here" })).toBeInTheDocument();

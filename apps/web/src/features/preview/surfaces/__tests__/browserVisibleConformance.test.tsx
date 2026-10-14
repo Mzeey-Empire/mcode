@@ -101,17 +101,13 @@ vi.mock("@/hooks/useThreadGitActions", () => ({
     dirPath: null,
     createPrOpen: false,
     setCreatePrOpen: vi.fn(),
-    handleCommitOrPush: vi.fn(),
+    handleCommit: vi.fn(),
     handleOpenPr: vi.fn(),
   }),
 }));
 vi.mock("@/features/subagents", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/subagents")>()),
   openSubagentsPanel: vi.fn(),
-}));
-vi.mock("@/stores/composerDraftStore", () => ({
-  useComposerDraftStore: vi.fn((selector: (state: { setPendingPrefill: () => void }) => unknown) =>
-    selector({ setPendingPrefill: vi.fn() })),
 }));
 vi.mock("@/stores/diffStore", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/stores/diffStore")>();

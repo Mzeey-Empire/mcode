@@ -5,6 +5,7 @@ import { injectable } from "tsyringe";
 export type ThreadMutationReservationState =
   | "pendingApproval"
   | "activeTurn"
+  | "planImplement"
   | "stopping"
   | "completing"
   | "reopening"

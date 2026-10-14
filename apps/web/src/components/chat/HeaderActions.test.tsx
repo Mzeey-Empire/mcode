@@ -10,7 +10,7 @@ import { createMockMessage } from "@/__tests__/mocks/transport";
 const {
   mockUseBranchPr,
   mockUseHasCommitsAhead,
-  mockSetPendingPrefill,
+  mockSetCommitSheetScopeId,
   mockWorkspaceSelector,
   mockGetProviderUsage,
   mockGetRightPanel,
@@ -21,7 +21,7 @@ const {
 } = vi.hoisted(() => ({
   mockUseBranchPr: vi.fn().mockReturnValue(null),
   mockUseHasCommitsAhead: vi.fn().mockReturnValue(null),
-  mockSetPendingPrefill: vi.fn(),
+  mockSetCommitSheetScopeId: vi.fn(),
   mockWorkspaceSelector: vi.fn(),
   mockGetProviderUsage: vi.fn<() => Promise<ProviderUsageInfo>>(),
   mockGetRightPanel: vi.fn().mockReturnValue({
@@ -43,12 +43,6 @@ vi.mock("@/features/projects/state/workspaceStore", () => {
   );
   return { useWorkspaceStore: store };
 });
-
-vi.mock("@/stores/composerDraftStore", () => ({
-  useComposerDraftStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector({ setPendingPrefill: mockSetPendingPrefill }),
-  ),
-}));
 
 vi.mock("@/transport", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/transport")>();
@@ -101,6 +95,7 @@ vi.mock("@/stores/diffStore", async (importOriginal) => {
     toggleRightPanel: vi.fn(),
     setRightPanelTab: mockSetRightPanelTab,
     setRightPanelWidth: mockSetRightPanelWidth,
+    setCommitSheetScopeId: mockSetCommitSheetScopeId,
     setSnapshots: vi.fn(),
   };
   const store = Object.assign(
@@ -157,7 +152,6 @@ vi.mock("@/hooks/useHasCommitsAhead", () => ({
 }));
 
 import { HeaderActions } from "./HeaderActions";
-import { COMMIT_PREFILL } from "@/hooks/useThreadGitActions";
 import { useThreadStore } from "@/stores/threadStore";
 import { createEmptyThreadRecord, patchThreadRecord } from "@/stores/thread-record";
 import {
@@ -291,6 +285,7 @@ beforeEach(() => {
   mockGetRightPanelVisible.mockReset().mockReturnValue(false);
   mockShowRightPanel.mockClear();
   mockSetRightPanelTab.mockClear();
+  mockSetCommitSheetScopeId.mockClear();
   mockSetRightPanelWidth.mockClear();
 });
 
@@ -314,7 +309,7 @@ describe("HeaderActions - Create PR menu item", () => {
     expect(item).not.toBeDisabled();
   });
 
-  it("shows Commit or push instead of Create PR when no commits ahead of base", () => {
+  it("shows Commit… instead of Create PR when no commits ahead of base", () => {
     mockUseHasCommitsAhead.mockReturnValue(false);
     renderHeaderActions();
     expect(screen.getByTestId("workspace-menu-commit")).toBeInTheDocument();
@@ -347,7 +342,7 @@ describe("HeaderActions - Create PR menu item", () => {
     expect(screen.getByTestId("workspace-menu-open-pr")).toHaveTextContent("PR #42");
   });
 
-  it("explains commit-or-push when no commits are ahead", async () => {
+  it("explains Commit… when no commits are ahead", async () => {
     mockUseHasCommitsAhead.mockReturnValue(false);
     renderHeaderActions();
     const item = screen.getByTestId("workspace-menu-commit");
@@ -358,7 +353,7 @@ describe("HeaderActions - Create PR menu item", () => {
     await waitFor(() => {
       const tooltip = document.querySelector<HTMLElement>("[data-slot='tooltip-content']");
       expect(tooltip).toBeVisible();
-      expect(tooltip).toHaveTextContent("Ask the agent to commit and push the changes");
+      expect(tooltip).toHaveTextContent("Review and commit the changes");
     });
   });
 
@@ -780,11 +775,12 @@ describe("HeaderActions - consolidated header", () => {
     expect(screen.queryByText("$12.34 session")).not.toBeInTheDocument();
   });
 
-  it("prefills commit-or-push from the PR row when the branch is not ahead", () => {
+  it("opens the Commit sheet on Review from the PR row when the branch is not ahead", () => {
     mockUseHasCommitsAhead.mockReturnValue(false);
     renderHeaderActions();
     fireEvent.click(screen.getByTestId("workspace-menu-commit"));
-    expect(mockSetPendingPrefill).toHaveBeenCalledWith(COMMIT_PREFILL);
+    expect(mockSetRightPanelTab).toHaveBeenCalledWith("ws-1", "thread-1", "changes");
+    expect(mockSetCommitSheetScopeId).toHaveBeenCalledWith("thread-1");
   });
 
   it("renders the right-panel toggle only while the panel is closed", () => {

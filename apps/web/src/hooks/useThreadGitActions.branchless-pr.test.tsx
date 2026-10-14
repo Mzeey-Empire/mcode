@@ -24,12 +24,6 @@ vi.mock("@/features/projects/state/workspaceStore", () => {
   return { useWorkspaceStore: store };
 });
 
-vi.mock("@/stores/composerDraftStore", () => ({
-  useComposerDraftStore: vi.fn((selector: (state: unknown) => unknown) =>
-    selector({ setPendingPrefill: vi.fn() }),
-  ),
-}));
-
 vi.mock("@/features/preview/navigation/open-url-in-preview", () => ({
   openGitHubUrl: vi.fn(),
 }));

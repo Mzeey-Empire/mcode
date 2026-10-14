@@ -2,14 +2,12 @@ import { useCallback, useEffect, useState, type MouseEvent } from "react";
 import { useBranchPr } from "@/hooks/useBranchPr";
 import { useHasCommitsAhead } from "@/hooks/useHasCommitsAhead";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { useComposerDraftStore } from "@/stores/composerDraftStore";
+import { useDiffStore } from "@/stores/diffStore";
+import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { isPrable } from "@/lib/is-prable";
 import { resolveThreadDirPath } from "@/lib/worktree";
 import { openGitHubUrl } from "@/features/preview/navigation/open-url-in-preview";
 import type { Thread } from "@/transport";
-
-/** Composer prefill the "Commit or push" action drops into the thread for the agent. */
-export const COMMIT_PREFILL = "Commit and push the current changes.";
 
 function resolveStoredPr(
   thread: Thread,
@@ -76,12 +74,11 @@ function useThreadPrState(thread: Thread) {
 }
 
 /**
- * Shared commit-or-push / create-PR orchestration for a thread, so the chat
+ * Shared commit / create-PR orchestration for a thread, so the chat
  * header and the Review toolbar surface the same actions and PR state from one
  * place. Polls the branch PR + commits-ahead, derives the live PR (preferring a
  * freshly-created store entry over a stale poll), and syncs PR state back to the
- * workspace store. "Commit or push" prefills the composer; the agent does the
- * work (there is no direct git-commit transport). "Create PR" opens
+ * workspace store. "Commit…" opens the Commit sheet over Review. "Create PR" opens
  * `CreatePrDialog`, which the consumer renders with `createPrOpen`.
  */
 export function useThreadGitActions(thread: Thread) {
@@ -96,10 +93,13 @@ export function useThreadGitActions(thread: Thread) {
     prable ? thread.id : undefined,
   );
 
-  const setPendingPrefill = useComposerDraftStore((s) => s.setPendingPrefill);
-  const handleCommitOrPush = useCallback(() => {
-    setPendingPrefill(COMMIT_PREFILL);
-  }, [setPendingPrefill]);
+  const { id: threadId, workspace_id: workspaceId } = thread;
+  const handleCommit = useCallback(() => {
+    const diff = useDiffStore.getState();
+    showRightPanelAdaptive(workspaceId, threadId);
+    diff.setRightPanelTab(workspaceId, threadId, "changes");
+    diff.setCommitSheetScopeId(threadId);
+  }, [workspaceId, threadId]);
 
   const handleOpenPr = useCallback(
     (url: string, event?: MouseEvent) => {
@@ -117,7 +117,7 @@ export function useThreadGitActions(thread: Thread) {
     dirPath,
     createPrOpen,
     setCreatePrOpen,
-    handleCommitOrPush,
+    handleCommit,
     handleOpenPr,
   };
 }

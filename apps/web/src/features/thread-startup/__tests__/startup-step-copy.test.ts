@@ -34,6 +34,13 @@ describe("setupCommandLine", () => {
 });
 
 describe("startupTrailRows", () => {
+  it("explains the skipped Setup for an Implement continuation", () => {
+    const rows = startupTrailRows({ kind: "attached-worktree", steps: [
+      { phase: "setup", state: "skipped", detail: { phase: "setup", skipReason: "plan-implement" } },
+    ] }, { now: 0 });
+    expect(rows).toEqual([{ phase: "setup", tone: "skipped", label: "Skipped setup",
+      meta: ["implementing a plan"], title: undefined, expandable: false }]);
+  });
   it("renders the live 04f trail and hides the thread phase", () => {
     const rows = startupTrailRows(managed([
       { phase: "thread", state: "completed", startedAt: at(0), endedAt: at(0) },

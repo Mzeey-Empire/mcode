@@ -845,6 +845,13 @@ export interface McodeTransport {
     ignoreWhitespace?: boolean;
   }): Promise<import("@mcode/contracts").ReviewComparisonResult>;
 
+  /** Draft a commit subject and body for the selected paths with the utility model. */
+  generateCommitMessage(
+    params: import("@mcode/contracts").GitGenerateCommitMessageParams,
+  ): Promise<import("@mcode/contracts").GitGenerateCommitMessageResult>;
+  /** Commit the selected files once per `requestId`, then optionally push. Replaying a `requestId` returns the stored outcome. */
+  commitChanges(params: import("@mcode/contracts").GitCommitParams): Promise<import("@mcode/contracts").GitCommitResult>;
+
   // GitHub PR (advanced)
   /** Push a branch to the remote. */
   push(

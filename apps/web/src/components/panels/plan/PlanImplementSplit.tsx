@@ -37,11 +37,14 @@ export function PlanImplementSplit({ threadId, viewed, executing }: PlanImplemen
       actionProps={{ "data-testid": "plan-implement" }}
       menuTriggerProps={{ "data-testid": "plan-implement-menu" }}
       menu={
-        <DropdownMenuItem
-          label={label}
-          shortcut={binding ? formatKeybinding(binding.key, isMac) : undefined}
-          onClick={implement}
-        />
+        <>
+          <DropdownMenuItem
+            label={label}
+            shortcut={binding ? formatKeybinding(binding.key, isMac) : undefined}
+            onClick={implement}
+          />
+          <DropdownMenuItem label={`${label} in a new thread`} onClick={() => void implementPlan(threadId, "new-thread")} />
+        </>
       }
     >
       {label}

@@ -73,7 +73,8 @@ const TONE_BY_STATE: Record<ThreadStartupStepState, TrailRowTone> = {
   cancelled: "cancelled",
 };
 
-const SKIP_REASON_COPY: Record<"not-configured" | "thread-running-here", string> = {
+const SKIP_REASON_COPY: Record<"not-configured" | "thread-running-here" | "plan-implement", string> = {
+  "plan-implement": "implementing a plan",
   "not-configured": "not configured",
   "thread-running-here": "thread running here",
 };

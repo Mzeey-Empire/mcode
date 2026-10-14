@@ -583,6 +583,11 @@ export class MessageStore {
     this.getPublishAssistantStatement().run({ id: messageId });
   }
 
+  /** Check for any persisted message, including internal and unpublished rows. */
+  hasMessages(threadId: string): boolean {
+    return this.orm.select({ id: messages.id }).from(messages).where(eq(messages.threadId, threadId)).limit(1).get() !== undefined;
+  }
+
   /** Return the newest sequence in a thread, including internal rows. */
   getLatestSequenceIncludingInternal(threadId: string): number {
     const row = this.getLatestSequenceStatement().get({ threadId });
