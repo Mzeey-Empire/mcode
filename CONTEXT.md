@@ -1124,8 +1124,9 @@ schema and authority translation.
 
 ### Browser controller
 The current actor with control of a Preview tab: the user, an agent, or neither.
-Direct user input takes control from the agent and stops the active Browser
-automation action for that tab.
+Direct user input, or the Take control pill, takes control from the agent and
+stops the active Browser automation action. The user then holds the thread's
+Browser until they press Hand back; sending a message does not release it.
 _Avoid_: allowing agent input to compete with user input
 
 ### Browser automation snapshot

@@ -104,6 +104,7 @@ Point-in-time decisions. New ADRs take the next free number below. Numbers
 - [0026: The rail lists tools; terminals and Browser pages are row-1 tabs](adr/0026-rail-lists-tools-terminals-and-pages-are-row-1-tabs.md)
 - [0027: Turn revert restores pre-turn content](adr/0027-turn-revert-restores-pre-turn-content.md)
 - [0028: Branch compares a picked compare ref against a picked base](adr/0028-branch-operands-both-sides.md)
+- [0029: Browser control stays with the user until Hand back](adr/0029-browser-control-stays-with-the-user-until-hand-back.md)
 
 ## Agent runbooks
 
