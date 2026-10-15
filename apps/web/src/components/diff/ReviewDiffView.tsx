@@ -31,6 +31,7 @@ import { FileActionBar } from "./FileActionBar";
 import { ReviewFileHeader } from "./ReviewFileHeader";
 import { DiffCommentEditor } from "./DiffCommentEditor";
 import { DiffPreview } from "./DiffPreview";
+import { useReviewScrollSpy } from "./useReviewScrollSpy";
 
 /** Line-annotation payloads rendered inside a diff item. */
 type DiffRowMeta =
@@ -263,6 +264,8 @@ export function ReviewDiffView({
   lineWrap,
 }: ReviewDiffViewProps) {
   const handleRef = useRef<CodeViewHandle<DiffRowMeta, undefined>>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const spy = useReviewScrollSpy(files, scrollerRef, id);
   const bulkDiffExpand = useDiffStore((s) => s.bulkDiffExpand);
   const shikiTheme = useShikiTheme();
 
@@ -410,9 +413,10 @@ export function ReviewDiffView({
   }
   useEffect(() => {
     if (!jumpTarget || appliedJumpToken !== jumpTarget.token) return;
+    spy.holdForJump(jumpTarget.path);
     handleRef.current?.scrollTo({ type: "item", id: jumpTarget.path, align: "start", offset: -8 });
     onJumpSettled(jumpTarget.token);
-  }, [appliedJumpToken, jumpTarget, onJumpSettled]);
+  }, [appliedJumpToken, jumpTarget, onJumpSettled, spy]);
 
   const toggleExpanded = useCallback((path: string) => {
     setExpanded((prev) => {
@@ -626,6 +630,8 @@ export function ReviewDiffView({
   return (
     <CodeView
       ref={handleRef}
+      containerRef={scrollerRef}
+      onScroll={spy.onScroll}
       items={items}
       options={options}
       className="min-h-0 flex-1 overflow-y-auto"
