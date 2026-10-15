@@ -66,9 +66,14 @@ const turn: TurnRequest<"codex"> = {
   providerOptions: {}, threadControlEligible: false, planTurn: { kind: "planning", planFilePath: null },
 };
 
-function fixture(bind = true) {
-  const child = new NativeProcess();
-  spawn.mockImplementation(() => { setImmediate(() => child.emit("spawn")); return child; });
+function fixture(bind = true, settle: (status: PlanQuestionSettlement) => Promise<void> = async () => {}) {
+  const children: NativeProcess[] = [];
+  spawn.mockImplementation(() => {
+    const spawned = new NativeProcess();
+    children.push(spawned);
+    setImmediate(() => spawned.emit("spawn"));
+    return spawned;
+  });
   const provider = new CodexProvider({ get: async () => ({ provider: { cli: { codex: "codex" } } }) },
     stubEnvService(), { persistGeneratedImageFromPath: () => { throw new Error("Unexpected image"); } }, {
       listModels: async () => [], currentSkills: () => [], currentPrompts: () => [],
@@ -79,11 +84,11 @@ function fixture(bind = true) {
   const events: ProviderRuntimeEvent[] = [];
   if (bind) provider.bindPlanQuestions({
     requested: async batch => { batches.push(batch); },
-    settled: async (_batch, status) => { settlements.push(status); },
+    settled: async (_batch, status) => { settlements.push(status); await settle(status); },
   });
   provider.on("event", event => events.push(event));
-  const starts = () => child.requests.filter(request => request.method === "turn/start");
-  return { provider, child, batches, settlements, events, starts };
+  const starts = () => children.flatMap(spawned => spawned.requests).filter(request => request.method === "turn/start");
+  return { provider, get child() { return children[children.length - 1]!; }, batches, settlements, events, starts };
 }
 
 function capturedQuestion() {
@@ -232,5 +237,45 @@ describe("Codex native planning", () => {
     } finally {
       await f.provider.shutdown();
     }
+  });
+
+  it("ends the turn interrupted even when recording the expiry never finishes", async () => {
+    const f = fixture(true, () => new Promise<void>(() => {}));
+    try {
+      await ask(f);
+      f.child.emit("exit", 1, null);
+      await vi.waitFor(() => expect(f.events.filter(event => event.event.type === "ended").map(event => event.event))
+        .toEqual([{ type: "ended", threadId: "native-plan", turnExecutionId: "execution", outcome: "interrupted" }]));
+    } finally {
+      void f.provider.shutdown();
+    }
+  });
+
+  it("keeps the resumed turn running when the answer receipt cannot be written", async () => {
+    const f = fixture(true, async status => { if (status === "answered") throw new Error("receipt failed"); });
+    try {
+      const batch = await ask(f);
+      expect(await f.provider.respondToPlanQuestions(turn.threadId, batch.requestId, [{
+        questionId: batch.questions[0]!.id, selectedOptionId: null, freeText: "Use a cheerful greeting.",
+      }])).toBe(true);
+      expect(f.child.requests.some(request => request.method === "turn/interrupt")).toBe(false);
+      expect(f.child.requests.find(request => request.id === 90)?.result).toBeDefined();
+      f.child.complete();
+    } finally { await f.provider.shutdown(); }
+  });
+
+  it("still returns the build turn to default after the session was evicted between plan and build", async () => {
+    const f = fixture();
+    try {
+      await f.provider.sendTurn(turn);
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      f.child.complete();
+      await vi.waitFor(() => expect(f.events.some(event => event.event.type === "ended")).toBe(true));
+      await f.provider.discardSession(turn.sessionId);
+      await f.provider.sendTurn({ ...turn, turnId: "build", turnExecutionId: "build-execution", planTurn: undefined, interactionMode: "build" });
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+      expect(f.starts()[1]?.params?.collaborationMode).toMatchObject({ mode: "default" });
+      f.child.complete();
+    } finally { await f.provider.shutdown(); }
   });
 });

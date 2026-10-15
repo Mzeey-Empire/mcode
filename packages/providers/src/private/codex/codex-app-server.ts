@@ -1120,7 +1120,7 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     if (this.handleThreadStartedNotification(message.params, method, diagnosticMethod)) return;
     this.trackTurnNotification(message.params, method);
     if (method === "serverRequest/resolved") {
-      void this.options.questionResolved?.(message.params).catch(() => this.emitFatal("Could not settle a native question", "fatal"));
+      void this.options.questionResolved?.(message.params).catch(() => logger.warn("Codex question resolution was not recorded"));
     }
     const ignoredReason = codexIgnoredNotificationReason(method);
     if (ignoredReason) {

@@ -110,9 +110,10 @@ export class CodexPlanQuestions {
     try {
       await entry.ready;
     } catch (error) {
+      // The request is cancelled cleanly, so a local persistence failure must not read as a transport fatal.
       this.pending.delete(batch.requestId);
+      logger.warn("Codex question could not be recorded", { errorType: error instanceof Error ? error.name : "unknown" });
       await request.cancel();
-      throw error;
     }
   }
 
@@ -140,10 +141,15 @@ export class CodexPlanQuestions {
     await entry.ready;
     try {
       await entry.request.respond(response);
-      await this.settle(entry, answers === "dismiss" ? "dismissed" : "answered");
     } catch (error) {
       await this.settle(entry, "expired");
       throw error;
+    }
+    // Codex already has the answers, so a failed receipt write must not interrupt the resumed turn.
+    try {
+      await this.settle(entry, answers === "dismiss" ? "dismissed" : "answered");
+    } catch (error) {
+      logger.warn("Codex question settlement was not recorded", { errorType: error instanceof Error ? error.name : "unknown" });
     }
     return true;
   }

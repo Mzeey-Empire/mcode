@@ -698,7 +698,11 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private readonly canonicalEventPublisher: CodexCanonicalEventPublisher;
   private readonly planQuestions = new CodexPlanQuestions();
-  private readonly nativePlanSessions = new Set<string>();
+  /**
+   * Sessions whose last native turn ran in plan mode. It outlives session close, because an idle
+   * eviction between the plan and the build must not leave the thread in plan mode.
+   */
+  private readonly planModeSessions = new Set<string>();
 
   /** Native plan mode requires the durable question handler as well as a compatible CLI. */
   async supportsNativePlanQuestions(): Promise<boolean> {
@@ -1288,7 +1292,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   private codexCollaborationOptions(request: TurnRequest<"codex">, nativePlan: boolean): Pick<CodexTurnOptions, "collaborationMode" | "additionalContext"> {
-    if (!nativePlan || (!request.planTurn && !this.nativePlanSessions.has(request.sessionId))) return {};
+    if (!nativePlan || (!request.planTurn && !this.planModeSessions.has(request.sessionId))) return {};
     return {
       collaborationMode: {
         mode: request.planTurn ? "plan" : "default",
@@ -1767,17 +1771,16 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const executionId = entry?.activeParentTurnExecutionId ?? context.stagedExecutionId;
     const emit = this.codexFatalEmitter(entry, executionId);
     const questionsExpired = this.planQuestions.hasPending(context.sessionId);
-    if (questionsExpired) {
-      await this.planQuestions.drain(context.sessionId, "expired").catch((drainError: unknown) => {
-        logger.warn("Codex question expiry failed", { errorType: drainError instanceof Error ? drainError.name : "unknown" });
-      });
-    }
+    // The exit listener already started runtime.stop, whose interrupt reports provider_lost
+    // on a dead transport. The terminal event must be emitted before any await so it wins.
+    const expiry = questionsExpired ? this.expireNativeQuestions(context.sessionId) : undefined;
     this.projectCodexAssistantBoundary(mapper, context.sessionId, emit);
     if (questionsExpired && entry && executionId) {
       emit({ type: AgentEventType.Ended, threadId: context.threadId, turnExecutionId: executionId, outcome: "interrupted" });
     } else {
       this.emitCodexTransportFailure(context.threadId, error, failure, executionId, emit);
     }
+    await expiry;
     if (this.runtime.get(context.sessionId)?.server === server) {
       void this.runtime.stop(context.sessionId);
     }
@@ -2460,7 +2463,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * Drives shutdown, eviction, and stale-discard, but not turn cancellation.
    */
   async close(state: CodexSessionState): Promise<void> {
-    this.nativePlanSessions.delete(state.sessionId);
     if (this.activeCodexServers.get(state.sessionId) === state.server) this.activeCodexServers.delete(state.sessionId);
     await this.host.threadControl.close(state.sessionId);
     const turnExecutionId = executionForDrain(state);
@@ -2852,8 +2854,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     try {
       const turnId = Array.isArray(input) ? await server.sendTurn(input, turnOptions) : await server.startCompaction();
       if (Array.isArray(input)) {
-        if (turnOptions?.collaborationMode?.mode === "plan") this.nativePlanSessions.add(run.entry.sessionId);
-        else this.nativePlanSessions.delete(run.entry.sessionId);
+        const mode = turnOptions?.collaborationMode?.mode;
+        if (mode === "plan") this.planModeSessions.add(run.entry.sessionId);
+        else if (mode === "default") this.planModeSessions.delete(run.entry.sessionId);
       }
       if (run.seq !== run.entry.runTurnSeq) return;
       run.entry.turnStartResponsePending = false;
@@ -3154,9 +3157,18 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * leaving goals and pending permissions intact for the retry turn.
    */
   async discardSession(sessionId: string): Promise<void> {
-    await this.planQuestions.drain(sessionId, "expired");
+    await this.expireNativeQuestions(sessionId);
     if (this.runtime.get(sessionId) === undefined) return;
     await this.runtime.stop(sessionId);
+  }
+
+  /** A failed receipt write must not keep a dead session pooled or a turn open. */
+  private async expireNativeQuestions(sessionId: string): Promise<void> {
+    try {
+      await this.planQuestions.drain(sessionId, "expired");
+    } catch (error) {
+      logger.warn("Codex question expiry failed", { sessionId, errorType: error instanceof Error ? error.name : "unknown" });
+    }
   }
 
   /** Tears down all sessions, drains pending permissions, and stops the eviction timer. */
@@ -3174,7 +3186,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     this.liveSessionIds.clear();
     this.activeCodexServers.clear();
     this.canonicalTurnRoutingsByThread.clear();
-    this.nativePlanSessions.clear();
+    this.planModeSessions.clear();
     const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
     if (failures.length > 0) throw new AggregateError(failures, "Codex provider shutdown failed");
     logger.info("CodexProvider shutdown complete");
