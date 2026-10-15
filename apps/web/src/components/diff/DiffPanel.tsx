@@ -15,7 +15,8 @@ import { ReviewLoadingPulse, ReviewStateBody } from "./ReviewStateBody";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { CommitControls } from "./CommitControls";
 import { useElementWidth } from "@/hooks/useElementWidth";
-import { WorktreeFilesPane } from "./WorktreeFilesPane";
+import { FilesDockedPane } from "./FilesDockedPane";
+import { ReviewActiveFileContext } from "./useReviewScrollSpy";
 import { cumulativeReviewFiles } from "@/lib/review-comparison";
 import { SIDE_PANE_CONTENT_MIN_WIDTH, sidePaneDocks } from "@/lib/side-pane-dock";
 
@@ -825,54 +826,65 @@ export function DiffPanel() {
       branchRange: comparison.branchRange,
     })
     : null;
+  // The diff reports the active file once it scrolls to the jump target.
   const handleActivateFile = (path: string) => {
-    setActiveWorktreePath(path);
     if (diffScopeId) requestReviewFileJump(diffScopeId, path);
+  };
+  const filesNavigator = {
+    files: comparison.comparisonFiles,
+    activePath: activeWorktreePath,
+    loading: !comparison.visibleSettled,
+    error: filesPaneNotice(body),
+    onActivate: handleActivateFile,
   };
 
   return (
-    <DiffPanelLayout
-      panelRootRef={panelRootRef}
-      header={
-        <ReviewHeader
-          scopeId={diffScopeId}
-          comparison={comparison.visibleComparison}
-          refreshing={comparison.comparisonLoading}
-          onRefresh={comparison.onRefreshComparison}
-          defaultFilesExpanded={viewMode !== "cumulative" && viewMode !== "since-looked"}
+    <ReviewActiveFileContext.Provider value={setActiveWorktreePath}>
+      <DiffPanelLayout
+        panelRootRef={panelRootRef}
+        header={
+          <ReviewHeader
+            scopeId={diffScopeId}
+            comparison={comparison.visibleComparison}
+            refreshing={comparison.comparisonLoading}
+            onRefresh={comparison.onRefreshComparison}
+            defaultFilesExpanded={viewMode !== "cumulative" && viewMode !== "since-looked"}
+            filesNavigator={{ ...filesNavigator, docked: filesPaneFits }}
+          />
+        }
+      >
+        <DiffPanelView
+          body={body}
+          comparison={comparison}
+          scopeId={reviewScopeId(activeThreadId, activeWorkspaceId, viewMode)}
+          viewMode={viewMode}
         />
-      }
-    >
-      <DiffPanelView
-        body={body}
-        comparison={comparison}
-        scopeId={reviewScopeId(activeThreadId, activeWorkspaceId, viewMode)}
-        viewMode={viewMode}
-      />
-      {activeWorkspaceId && diffScopeId ? (
-        <CommitControls
-          workspaceId={activeWorkspaceId}
-          threadId={activeThreadId}
-          scopeId={diffScopeId}
-          activePath={activeWorktreePath}
-        />
-      ) : null}
-      <ReviewFilesPane
-        activePath={activeWorktreePath}
-        comparisonFiles={comparison.comparisonFiles}
-        comparisonLoading={comparison.comparisonLoading}
-        filesLoading={!comparison.visibleSettled}
-        filesNotice={filesPaneNotice(body)}
-        filesPaneFits={filesPaneFits}
-        filesPanelWidth={filesPanelWidth}
-        filesVisible={filesVisible}
-        getFilesPanelMaxWidth={getFilesPanelMaxWidth}
-        onActivate={handleActivateFile}
-        onClose={() => setFilesVisible(false)}
-        onRefresh={comparison.onRefreshComparison}
-        onWidthChange={setFilesPanelWidth}
-      />
-    </DiffPanelLayout>
+        {activeWorkspaceId && diffScopeId ? (
+          <CommitControls
+            workspaceId={activeWorkspaceId}
+            threadId={activeThreadId}
+            scopeId={diffScopeId}
+            activePath={activeWorktreePath}
+          />
+        ) : null}
+        {filesVisible && filesPaneFits ? (
+          <FilesDockedPane
+            {...filesNavigator}
+            width={filesPanelWidth}
+            minWidth={FILES_PANEL_MIN_WIDTH}
+            maxWidth={`calc(100% - ${DIFF_VIEWPORT_MIN_WIDTH}px)`}
+            defaultWidth={FILES_PANEL_DEFAULT_WIDTH}
+            wideWidth={FILES_PANEL_WIDE_WIDTH}
+            getMaxWidth={getFilesPanelMaxWidth}
+            onWidthChange={setFilesPanelWidth}
+            onCollapseRequest={() => setFilesVisible(false)}
+            onClose={() => setFilesVisible(false)}
+            refreshing={comparison.comparisonLoading}
+            onRefresh={comparison.onRefreshComparison}
+          />
+        ) : null}
+      </DiffPanelLayout>
+    </ReviewActiveFileContext.Provider>
   );
 }
 
@@ -1000,60 +1012,5 @@ function ReadyComparisonView({
         jumpViewKey={`turn:${settled.turnMessageId ?? ""}`}
       />
     </div>
-  );
-}
-
-function ReviewFilesPane({
-  activePath,
-  comparisonFiles,
-  comparisonLoading,
-  filesLoading,
-  filesNotice,
-  filesPaneFits,
-  filesPanelWidth,
-  filesVisible,
-  getFilesPanelMaxWidth,
-  onActivate,
-  onClose,
-  onRefresh,
-  onWidthChange,
-}: {
-  readonly activePath: string | null;
-  readonly comparisonFiles: readonly ReviewFileChange[];
-  readonly comparisonLoading: boolean;
-  readonly filesLoading: boolean;
-  readonly filesNotice: string | null;
-  readonly filesPaneFits: boolean;
-  readonly filesPanelWidth: number;
-  readonly filesVisible: boolean;
-  readonly getFilesPanelMaxWidth: (panel: HTMLDivElement | null) => number;
-  readonly onActivate: (path: string) => void;
-  readonly onClose: () => void;
-  readonly onRefresh: () => void;
-  readonly onWidthChange: (width: number) => void;
-}) {
-  // Docked only: the pane never floats. When the panel is too narrow to hold
-  // both minimum widths the pane collapses; widening restores it.
-  if (!filesVisible || !filesPaneFits) return null;
-  return (
-    <WorktreeFilesPane
-      files={comparisonFiles}
-      activePath={activePath}
-      loading={filesLoading}
-      error={filesNotice}
-      width={filesPanelWidth}
-      minWidth={FILES_PANEL_MIN_WIDTH}
-      maxWidth={`calc(100% - ${DIFF_VIEWPORT_MIN_WIDTH}px)`}
-      defaultWidth={FILES_PANEL_DEFAULT_WIDTH}
-      wideWidth={FILES_PANEL_WIDE_WIDTH}
-      getMaxWidth={getFilesPanelMaxWidth}
-      onWidthChange={onWidthChange}
-      onCollapseRequest={onClose}
-      onClose={onClose}
-      refreshable
-      refreshing={comparisonLoading}
-      onRefresh={onRefresh}
-      onActivate={onActivate}
-    />
   );
 }

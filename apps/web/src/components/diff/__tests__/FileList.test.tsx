@@ -21,7 +21,7 @@ vi.mock("@/transport", () => ({
   getTransport: () => transport,
 }));
 
-/** The header's jump control and the list it scrolls, as the Review panel pairs them. */
+/** The header's Files popover and the list it scrolls, as the Review panel pairs them below 800. */
 function ReviewWithJump({ files }: { readonly files: ReviewFileChange[] }) {
   return (
     <>
@@ -31,6 +31,14 @@ function ReviewWithJump({ files }: { readonly files: ReviewFileChange[] }) {
         refreshing={false}
         onRefresh={() => {}}
         defaultFilesExpanded={false}
+        filesNavigator={{
+          files,
+          activePath: null,
+          loading: false,
+          error: null,
+          onActivate: (path) => useDiffStore.getState().requestReviewFileJump("thread-1", path),
+          docked: false,
+        }}
       />
       <FileList files={files} source="snapshot" id="snap-1" threadId="thread-1" />
     </>
@@ -66,13 +74,14 @@ describe("FileList jump to file", () => {
   it("opens autocomplete from the header on demand and jumps the list", async () => {
     render(<ReviewWithJump files={pathsToReviewFiles(["apps/web/src/alpha.ts", "apps/web/src/beta.ts"])} />);
 
-    expect(screen.queryByTestId("review-file-filter")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("review-files-popover")).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByTestId("review-file-jump-trigger"));
-    await userEvent.type(screen.getByTestId("review-file-filter"), "beta");
-    await userEvent.click(screen.getByTestId("review-file-jump-item-apps/web/src/beta.ts"));
+    await userEvent.click(screen.getByTestId("review-files-toggle"));
+    await userEvent.type(screen.getByRole("textbox", { name: "Search files" }), "beta");
+    expect(screen.queryByRole("treeitem", { name: /alpha\.ts/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("treeitem", { name: /beta\.ts/ }));
 
-    expect(screen.queryByTestId("review-file-filter")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("review-files-popover")).not.toBeInTheDocument());
 
     await waitFor(() =>
       expect(transport.getSnapshotDiff).toHaveBeenCalledWith(
@@ -94,9 +103,9 @@ describe("FileList jump to file", () => {
       </div>,
     );
 
-    await userEvent.click(screen.getByTestId("review-file-jump-trigger"));
-    expect(screen.getAllByTestId(/^review-file-jump-item-/)).toHaveLength(80);
-    await userEvent.click(screen.getByTestId("review-file-jump-item-apps/web/src/file-79.ts"));
+    await userEvent.click(screen.getByTestId("review-files-toggle"));
+    await userEvent.type(screen.getByRole("textbox", { name: "Search files" }), "file-79");
+    await userEvent.click(screen.getByRole("treeitem", { name: /file-79\.ts/ }));
 
     await waitFor(() =>
       expect(transport.getSnapshotDiff).toHaveBeenCalledWith(

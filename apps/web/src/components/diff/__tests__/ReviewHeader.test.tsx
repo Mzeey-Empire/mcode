@@ -20,7 +20,10 @@ const NOTHING_AHEAD: ReviewState = {
 
 function header() {
   return (
-    <ReviewHeader scopeId="workspace" comparison={null} refreshing={false} onRefresh={() => {}} defaultFilesExpanded />
+    <ReviewHeader
+      scopeId="workspace" comparison={null} refreshing={false} onRefresh={() => {}} defaultFilesExpanded
+      filesNavigator={{ files: [], activePath: null, loading: false, error: null, onActivate: () => {}, docked: true }}
+    />
   );
 }
 

@@ -1,21 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FileSearch } from "lucide-react";
 import type { ReviewFileChange } from "@mcode/contracts";
-import { FileTypeIcon } from "@/components/ui/file-type-icon";
 import { useDiffStore, type DiffSource } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { Button } from "@/components/ui/button";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
+import { orderReviewFiles } from "@/lib/review-file-order";
 import { ReviewDiffView } from "./ReviewDiffView";
 
 const PIERRE_WORKER_POOL_SIZE = 3;
@@ -76,10 +64,7 @@ export function FileList({
   // swapped out (the view's operand changed but its replacement is still
   // loading); arm a one-shot re-jump keyed on the comparison id.
   const reJumpRef = useRef<{ path: string; id: string } | null>(null);
-  const sortedFiles = useMemo(
-    () => files.slice().sort((a, b) => a.path.localeCompare(b.path)),
-    [files],
-  );
+  const orderedFiles = useMemo(() => orderReviewFiles(files), [files]);
 
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
   const renderMode = useDiffStore((s) => s.renderMode);
@@ -117,7 +102,7 @@ export function FileList({
       // outgoing view's still-mounted list must not consume it.
       if (request.viewKey && request.viewKey !== jumpViewKey) return;
       const requested = normalizeJumpPath(request.path);
-      const target = sortedFiles.find((f) => normalizeJumpPath(f.path) === requested);
+      const target = orderedFiles.find((f) => normalizeJumpPath(f.path) === requested);
       if (!target) return;
       useDiffStore.getState().clearReviewFileJump();
       // Only keyed requests arm the re-jump; an unkeyed jump is owned by no
@@ -130,7 +115,7 @@ export function FileList({
     const armed = reJumpRef.current;
     if (armed && armed.id !== id) {
       reJumpRef.current = null;
-      const target = sortedFiles.find(
+      const target = orderedFiles.find(
         (f) => normalizeJumpPath(f.path) === armed.path,
       );
       if (target) jumpToFile(target.path);
@@ -140,7 +125,7 @@ export function FileList({
       if (state.reviewFileJumpRequest === prev.reviewFileJumpRequest) return;
       consumeJumpRequest(state.reviewFileJumpRequest);
     });
-  }, [id, jumpToFile, jumpViewKey, sortedFiles, threadId]);
+  }, [id, jumpToFile, jumpViewKey, orderedFiles, threadId]);
 
   if (files.length === 0) {
     return (
@@ -154,7 +139,7 @@ export function FileList({
           main-thread highlighting when no pool provider is present. */}
       {typeof Worker === "undefined" ? (
         <ReviewDiffView
-          files={sortedFiles}
+          files={orderedFiles}
           source={source}
           id={id}
           threadId={threadId}
@@ -173,7 +158,7 @@ export function FileList({
         highlighterOptions={{}}
       >
         <ReviewDiffView
-          files={sortedFiles}
+          files={orderedFiles}
           source={source}
           id={id}
           threadId={threadId}
@@ -190,100 +175,4 @@ export function FileList({
       )}
     </div>
   );
-}
-
-/** Props for the changed-file jump popover. */
-interface FileJumpPopoverProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  files: string[];
-  onJumpToFile: (path: string) => void;
-}
-
-/** The searchable changed-file jump control that row 2 of the Review header hosts. */
-export function FileJumpPopover({ open, onOpenChange, files, onJumpToFile }: FileJumpPopoverProps) {
-  return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <Tooltip>
-        <TooltipTrigger render={<span className="inline-flex" />}>
-          <PopoverTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-compact"
-                aria-label="Jump to file"
-                data-testid="review-file-jump-trigger"
-                className="h-6 w-6 text-muted/60 hover:bg-ink/10 hover:text-ink"
-              >
-                <FileSearch size={13} aria-hidden="true" />
-              </Button>
-            }
-          />
-        </TooltipTrigger>
-        <TooltipContent side="left" className="text-xs">
-          Jump to file
-        </TooltipContent>
-      </Tooltip>
-      <PopoverContent align="end" sideOffset={6} className="w-[min(360px,calc(100vw-2rem))] p-0">
-        <Command className="rounded-lg">
-          <CommandInput
-            autoFocus
-            placeholder="Jump to file"
-            aria-label="Jump to file"
-            data-testid="review-file-filter"
-            className="h-9 font-mono text-caption"
-          />
-          <CommandList className="max-h-72">
-            <CommandEmpty>No files found</CommandEmpty>
-            <CommandGroup heading="Changed files">
-              {files.map((file) => (
-                <FileJumpItem key={file} filePath={file} onSelect={onJumpToFile} />
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-/** Props for one changed-file jump result. */
-interface FileJumpItemProps {
-  filePath: string;
-  onSelect: (path: string) => void;
-}
-
-/** Renders a changed-file jump result. */
-function FileJumpItem({ filePath, onSelect }: FileJumpItemProps) {
-  const basename = getFileBasename(filePath);
-  const parent = getParentPath(filePath);
-
-  return (
-    <CommandItem
-      value={filePath}
-      data-testid={`review-file-jump-item-${filePath}`}
-      onSelect={() => onSelect(filePath)}
-      className="items-start gap-2 px-2 py-2"
-    >
-      <FileTypeIcon filePath={filePath} size={14} className="mt-0.5" />
-      <span className="min-w-0 flex-1">
-        <span className="block text-fade font-mono text-caption text-ink/85">{basename}</span>
-        {parent && (
-          <span className="block text-fade font-mono text-caption text-muted/65">
-            {parent}/
-          </span>
-        )}
-      </span>
-    </CommandItem>
-  );
-}
-
-function getFileBasename(filePath: string): string {
-  return filePath.split(/[\\/]/).pop() ?? filePath;
-}
-
-function getParentPath(filePath: string): string {
-  const index = filePath.replace(/\\/g, "/").lastIndexOf("/");
-  return index >= 0 ? filePath.slice(0, index) : "";
 }

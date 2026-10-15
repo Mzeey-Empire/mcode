@@ -35,8 +35,8 @@ vi.mock("@/components/ui/scroll-area", () => ({
   ScrollArea: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock("../WorktreeFilesPane", () => ({
-  WorktreeFilesPane: ({ files, error }: { files: readonly { path: string }[]; error: string | null }) => (
+vi.mock("../FilesDockedPane", () => ({
+  FilesDockedPane: ({ files, error }: { files: readonly { path: string }[]; error: string | null }) => (
     <aside data-testid="worktree-files">{error ?? files.map((file) => file.path).join(",")}</aside>
   ),
 }));
@@ -63,7 +63,6 @@ vi.mock("../FileList", () => ({
       {files.map((file) => file.path).join(",")}
     </section>
   ),
-  FileJumpPopover: () => null,
 }));
 
 describe("DiffPanel", () => {
@@ -321,6 +320,65 @@ describe("DiffPanel", () => {
     );
     expect(screen.queryByTestId("worktree-files")).not.toBeInTheDocument();
     expect(transport.listWorkspaceFiles).not.toHaveBeenCalled();
+  });
+
+  it.each<[number, "docks" | "pops over"]>([[800, "docks"], [799, "pops over"]])(
+    "at a %ipx panel the Files tree %s",
+    async (width, mode) => {
+      measuredWidth = width;
+      useWorkspaceStore.setState({ activeThreadId: null, activeWorkspaceId: "workspace-1" });
+      useDiffStore.setState({ viewMode: "unstaged" });
+      transport.getReviewComparison.mockReset().mockResolvedValue(
+        ready({ files: [file("src/a.ts"), file("src/b.ts")], additions: 0, deletions: 0 }),
+      );
+      render(<DiffPanel />);
+      await screen.findByTestId("diff-files");
+
+      await userEvent.click(screen.getByTestId("review-files-toggle"));
+
+      if (mode === "docks") {
+        expect(screen.getByTestId("worktree-files")).toHaveTextContent("src/a.ts,src/b.ts");
+        expect(screen.queryByTestId("review-files-popover")).not.toBeInTheDocument();
+      } else {
+        expect(await screen.findByTestId("review-files-popover")).toBeInTheDocument();
+        expect(screen.queryByTestId("worktree-files")).not.toBeInTheDocument();
+        expect(useDiffStore.getState().reviewFilesVisibleByScope["workspace-1"]).toBeFalsy();
+      }
+    },
+  );
+
+  it("jumps to the picked file and closes the popover", async () => {
+    measuredWidth = 536;
+    useWorkspaceStore.setState({ activeThreadId: null, activeWorkspaceId: "workspace-1" });
+    useDiffStore.setState({ viewMode: "unstaged", reviewFileJumpRequest: null });
+    transport.getReviewComparison.mockReset().mockResolvedValue(
+      ready({ files: [file("src/a.ts"), file("src/b.ts")], additions: 0, deletions: 0 }),
+    );
+    render(<DiffPanel />);
+    await screen.findByTestId("diff-files");
+
+    await userEvent.click(screen.getByTestId("review-files-toggle"));
+    await userEvent.click(await screen.findByRole("treeitem", { name: /b\.ts/ }));
+
+    expect(useDiffStore.getState().reviewFileJumpRequest).toMatchObject({ scopeId: "workspace-1", path: "src/b.ts" });
+    await waitFor(() => expect(screen.queryByTestId("review-files-popover")).not.toBeInTheDocument());
+  });
+
+  it("closes the popover on Escape", async () => {
+    measuredWidth = 536;
+    useWorkspaceStore.setState({ activeThreadId: null, activeWorkspaceId: "workspace-1" });
+    useDiffStore.setState({ viewMode: "unstaged" });
+    transport.getReviewComparison.mockReset().mockResolvedValue(
+      ready({ files: [file("src/a.ts")], additions: 0, deletions: 0 }),
+    );
+    render(<DiffPanel />);
+    await screen.findByTestId("diff-files");
+
+    await userEvent.click(screen.getByTestId("review-files-toggle"));
+    await screen.findByTestId("review-files-popover");
+    await userEvent.keyboard("{Escape}");
+
+    await waitFor(() => expect(screen.queryByTestId("review-files-popover")).not.toBeInTheDocument());
   });
 
   it("publishes one matching diff and Files result after a controlled refresh", async () => {
