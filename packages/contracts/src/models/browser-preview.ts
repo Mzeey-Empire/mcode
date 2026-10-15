@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
-import type { AttachmentMeta, StoredAttachment } from "./attachment.js";
 import { MessageMentionsSchema } from "./mention.js";
 import { MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS } from "./selected-text-comment.js";
 
@@ -498,6 +497,43 @@ export type PreviewAnnotationPayload = z.infer<
   ReturnType<typeof PreviewAnnotationPayloadSchema>
 >;
 
+/** One page and its marked viewport image in a v2 annotation bundle. */
+export const PreviewAnnotationPageSchema = lazySchema(() => z.object({
+  pageIdentity: z.string().min(1).max(PREVIEW_ANNOTATION_STRING_MAX.pageIdentity),
+  url: z.string().max(4096),
+  title: z.string().max(240).nullable(),
+  faviconUrl: z.string().max(4096).nullable(),
+  snapshot: z.object({
+    id: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+    name: z.string().max(255),
+    mimeType: z.literal("image/png"),
+    sizeBytes: z.number().int().nonnegative(),
+    sourcePath: z.string().max(1024),
+    capture: McodeBrowserCaptureV2Schema(),
+    scroll: z.object({ x: z.number(), y: z.number() }).strict(),
+  }).strict(),
+}).strict());
+
+/** Page metadata and its single marked snapshot. */
+export type PreviewAnnotationPage = z.infer<ReturnType<typeof PreviewAnnotationPageSchema>>;
+
+/** A browser note whose number is local to its page and whose bounds are document pixels. */
+export const PreviewAnnotationPayloadV2Schema = lazySchema(() => z.object({
+  id: z.string().uuid(),
+  pageIdentity: z.string().min(1).max(PREVIEW_ANNOTATION_STRING_MAX.pageIdentity),
+  displayNumber: z.number().int().positive(),
+  pageContext: McodeBrowserCaptureV2Schema(),
+  targetContext: z.object({
+    label: z.string().max(PREVIEW_ANNOTATION_STRING_MAX.targetLabel).nullable().optional(),
+    selectorHint: z.string().max(PREVIEW_ANNOTATION_STRING_MAX.targetLabel).nullable().optional(),
+    bounds: BrowserPreviewBoundsSchema(),
+  }).strict(),
+  note: z.string().trim().min(1).max(PREVIEW_ANNOTATION_STRING_MAX.note),
+}).strict());
+
+/** A saved browser note in a v2 bundle. */
+export type PreviewAnnotationPayloadV2 = z.infer<ReturnType<typeof PreviewAnnotationPayloadV2Schema>>;
+
 /**
  * One saved line comment captured while reviewing a local agent diff.
  */
@@ -556,97 +592,182 @@ export type ComposerAnnotationPayload = z.infer<
 
 /** Returns whether a composer annotation targets a local diff line. */
 export function isDiffAnnotationPayload(
-  annotation: ComposerAnnotationPayload,
+  annotation: ComposerAnnotationPayload | PreviewAnnotationPayloadV2,
 ): annotation is DiffAnnotationPayload {
   return "kind" in annotation && annotation.kind === "diff";
 }
 
 /** Returns whether a composer annotation targets a workspace file line. */
 export function isFileAnnotationPayload(
-  annotation: ComposerAnnotationPayload,
+  annotation: ComposerAnnotationPayload | PreviewAnnotationPayloadV2,
 ): annotation is FileAnnotationPayload {
   return "kind" in annotation && annotation.kind === "file";
 }
 
 /** Returns whether a composer annotation targets the browser Preview. */
 export function isPreviewAnnotationPayload(
-  annotation: ComposerAnnotationPayload,
+  annotation: ComposerAnnotationPayload | PreviewAnnotationPayloadV2,
 ): annotation is PreviewAnnotationPayload {
-  return !isDiffAnnotationPayload(annotation) && !isFileAnnotationPayload(annotation);
+  return "snapshot" in annotation;
+}
+
+/** Narrows a parsed composer annotation to a v2 browser note. */
+export function isPreviewAnnotationPayloadV2(
+  annotation: ComposerAnnotationPayload | PreviewAnnotationPayloadV2,
+): annotation is PreviewAnnotationPayloadV2 {
+  return "pageIdentity" in annotation && !("snapshot" in annotation);
 }
 
 /**
  * Structured Annotation bundle payload sent beside normal composer content.
  */
 export const PreviewAnnotationBundleSchema = lazySchema(() =>
-  z.object({
-    schemaVersion: z.literal(1),
-    annotations: z.array(ComposerAnnotationPayloadSchema()).min(1),
-  }),
+  z.union([
+    z.object({
+      schemaVersion: z.literal(1),
+      annotations: z.array(ComposerAnnotationPayloadSchema()).min(1),
+    }),
+    z.object({
+      schemaVersion: z.literal(2),
+      pages: z.array(PreviewAnnotationPageSchema()),
+      annotations: z.array(z.union([
+        PreviewAnnotationPayloadV2Schema(), DiffAnnotationPayloadSchema(), FileAnnotationPayloadSchema(),
+      ])).min(1),
+    }).strict().superRefine((bundle, context) => {
+      const pages = new Set<string>();
+      const snapshots = new Set<string>();
+      const notePages = new Set(bundle.annotations.filter(isPreviewAnnotationPayloadV2).map((note) => note.pageIdentity));
+      for (const [index, page] of bundle.pages.entries()) {
+        if (pages.has(page.pageIdentity) || snapshots.has(page.snapshot.id) || !notePages.has(page.pageIdentity)) {
+          context.addIssue({ code: z.ZodIssueCode.custom, path: ["pages", index], message: "Pages must have unique identities and snapshots and at least one browser note" });
+        }
+        pages.add(page.pageIdentity);
+        snapshots.add(page.snapshot.id);
+      }
+      for (const identity of notePages) {
+        if (!pages.has(identity)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["annotations"], message: "Browser note has no page" });
+      }
+    }),
+  ]),
 );
 
 export type PreviewAnnotationBundle = z.infer<
   ReturnType<typeof PreviewAnnotationBundleSchema>
 >;
 
-/**
- * Returns the filename shown for a saved annotation screenshot attachment.
- */
-export function previewAnnotationSnapshotAttachmentName(displayNumber: number): string {
-  return `Annotation ${displayNumber} screenshot.png`;
+/** Version-independent browser pages and code comments for composer and transcript readers. */
+export type PreviewAnnotationBundleView = {
+  pages: Array<{
+    pageIdentity: string;
+    url: string;
+    title: string | null;
+    faviconUrl: string | null;
+    snapshot: PreviewAnnotationPage["snapshot"] | null;
+    snapshotIds: string[];
+    notes: Array<Pick<PreviewAnnotationPayloadV2, "id" | "displayNumber" | "note" | "targetContext" | "pageContext">>;
+  }>;
+  diffAnnotations: DiffAnnotationPayload[];
+  fileAnnotations: FileAnnotationPayload[];
+};
+
+/** Reads both persisted bundle versions without changing numbers burned into legacy snapshots. */
+export function readPreviewAnnotationBundle(bundle: PreviewAnnotationBundle): PreviewAnnotationBundleView {
+  const pages = new Map<string, PreviewAnnotationBundleView["pages"][number]>();
+  if (bundle.schemaVersion === 2) {
+    for (const page of bundle.pages) {
+      pages.set(page.pageIdentity, { ...page, snapshotIds: [page.snapshot.id], notes: [] });
+    }
+  }
+  for (const annotation of bundle.annotations) {
+    if (!("pageIdentity" in annotation)) continue;
+    appendPreviewNote(pages, annotation);
+  }
+  return { pages: [...pages.values()], diffAnnotations: bundle.annotations.filter(isDiffAnnotationPayload),
+    fileAnnotations: bundle.annotations.filter(isFileAnnotationPayload) };
 }
 
-/**
- * Converts a saved preview annotation snapshot into normal attachment metadata.
- */
-export function previewAnnotationSnapshotAttachmentMeta(
-  annotation: PreviewAnnotationPayload,
-): AttachmentMeta {
-  return {
-    id: annotation.snapshot.id,
-    name: previewAnnotationSnapshotAttachmentName(annotation.displayNumber),
-    mimeType: annotation.snapshot.mimeType,
-    sizeBytes: annotation.snapshot.sizeBytes,
-    sourcePath: annotation.snapshot.sourcePath,
+function appendPreviewNote(
+  pages: Map<string, PreviewAnnotationBundleView["pages"][number]>,
+  annotation: PreviewAnnotationPayload | PreviewAnnotationPayloadV2,
+): void {
+  let page = pages.get(annotation.pageIdentity);
+  if (!page) {
+    page = { pageIdentity: annotation.pageIdentity, url: annotation.pageContext.pageUrl,
+      title: annotation.pageContext.pageTitle ?? null, faviconUrl: null,
+      snapshot: null, snapshotIds: [], notes: [] };
+    pages.set(annotation.pageIdentity, page);
+  }
+  if (isPreviewAnnotationPayload(annotation)) {
+    const scroll = annotation.snapshot.capture.viewportScroll ?? { scrollX: 0, scrollY: 0 };
+    page.snapshot = { ...annotation.snapshot, scroll: { x: scroll.scrollX, y: scroll.scrollY } };
+    page.snapshotIds.push(annotation.snapshot.id);
+  }
+  page.notes.push({ id: annotation.id, displayNumber: annotation.displayNumber,
+    note: annotation.note?.trim() || ("changeSummary" in annotation ? annotation.changeSummary?.trim() : undefined) || "",
+    targetContext: annotation.targetContext, pageContext: annotation.pageContext });
+}
+
+/** Upgrades incoming legacy bundles so new messages and provider prompts write only v2. */
+export function toPreviewAnnotationBundleV2(bundle: PreviewAnnotationBundle): Extract<PreviewAnnotationBundle, { schemaVersion: 2 }> {
+  bundle = PreviewAnnotationBundleSchema().parse(bundle);
+  if (bundle.schemaVersion === 2) return bundle;
+  const view = readPreviewAnnotationBundle(bundle);
+  const snapshotIds = new Set<string>();
+  const upgraded: Extract<PreviewAnnotationBundle, { schemaVersion: 2 }> = {
+    schemaVersion: 2,
+    pages: view.pages.flatMap(({ snapshot, pageIdentity, url, title, faviconUrl }, index) => {
+      if (!snapshot) return [];
+      let id = snapshot.id;
+      while (snapshotIds.has(id)) id = `${id}-${index}`;
+      snapshotIds.add(id);
+      return [{ pageIdentity, url: clampPreviewPageUrl(url), title: title === null ? null : clampPreviewPageLabel(title),
+        faviconUrl, snapshot: { ...snapshot, id } }];
+    }),
+    annotations: bundle.annotations.map((annotation) => {
+      if (!isPreviewAnnotationPayload(annotation)) return annotation;
+      const scroll = annotation.snapshot.capture.viewportScroll;
+      const bounds = annotation.targetContext.bounds;
+      return { id: annotation.id, pageIdentity: annotation.pageIdentity, displayNumber: annotation.displayNumber,
+        note: annotation.note?.trim() || annotation.changeSummary?.trim() || "",
+        targetContext: { ...annotation.targetContext, bounds: { ...bounds,
+          x: bounds.x + (scroll?.scrollX ?? 0), y: bounds.y + (scroll?.scrollY ?? 0) } }, pageContext: annotation.pageContext };
+    }),
   };
+  PreviewAnnotationBundleSchema().parse(upgraded);
+  return upgraded;
 }
 
-/**
- * Converts a saved preview annotation snapshot into stored attachment metadata.
- */
-export function previewAnnotationSnapshotStoredAttachment(
-  annotation: PreviewAnnotationPayload,
-): StoredAttachment {
-  return {
-    id: annotation.snapshot.id,
-    name: previewAnnotationSnapshotAttachmentName(annotation.displayNumber),
-    mimeType: annotation.snapshot.mimeType,
-    sizeBytes: annotation.snapshot.sizeBytes,
-  };
+function clampPreviewString(value: string, maxLength: number): string {
+  let result = "";
+  for (const point of value) {
+    if (result.length + point.length > maxLength) break;
+    result += point;
+  }
+  return result;
 }
 
-/**
- * Converts a preview annotation bundle into normal attachment metadata rows.
- */
-export function previewAnnotationSnapshotAttachments(
-  bundle: PreviewAnnotationBundle | undefined,
-): AttachmentMeta[] {
-  return (
-    bundle?.annotations
-      .filter(isPreviewAnnotationPayload)
-      .map(previewAnnotationSnapshotAttachmentMeta) ?? []
-  );
+/** Fits a page label within the v2 schema limit without splitting a Unicode code point. */
+export function clampPreviewPageLabel(value: string): string {
+  return clampPreviewString(value, 240);
 }
 
-/**
- * Converts a preview annotation bundle into stored attachment metadata rows.
- */
-export function previewAnnotationSnapshotStoredAttachments(
-  bundle: PreviewAnnotationBundle | null | undefined,
-): StoredAttachment[] {
-  return (
-    bundle?.annotations
-      .filter(isPreviewAnnotationPayload)
-      .map(previewAnnotationSnapshotStoredAttachment) ?? []
-  );
+/** Fits a page URL within the v2 schema limit without splitting a Unicode code point. */
+export function clampPreviewPageUrl(value: string): string {
+  return clampPreviewString(value, 4096);
+}
+
+/** Deterministic display filename; callers disambiguate collisions between pages. */
+export function previewAnnotationPageSnapshotName(page: Pick<PreviewAnnotationPage, "title" | "url">): string {
+  let label = page.title?.trim();
+  if (!label) {
+    try {
+      label = new URL(page.url).host;
+    } catch {
+      label = "page";
+    }
+  }
+  const safe = clampPreviewString((label ?? "").replace(/[\u202a-\u202e\u2066-\u2069\u200e\u200f]/g, "")
+    .replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, "_")
+    .replace(/\s+/g, " ").replace(/^[. ]+|[. ]+$/g, ""), 107).replace(/[. ]+$/g, "");
+  return `Notes on ${safe || "page"}.png`;
 }

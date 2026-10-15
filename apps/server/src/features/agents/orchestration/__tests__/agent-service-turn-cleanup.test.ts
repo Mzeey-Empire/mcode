@@ -56,7 +56,7 @@ import { ParentAssistantTextCheckpointService } from "../../turns/parent-assista
 import { broadcast } from "../../../../application/transport/push.js";
 import type { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import type { GitService } from "../../../projects/index.js";
-import type { AttachmentService } from "../../../attachments/storage/attachment-service.js";
+import { AttachmentService } from "../../../attachments/storage/attachment-service.js";
 import type { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
 import type { MemoryPressureService } from "../../../../runtime/memory/memory-pressure-service.js";
 import type { SettingsService } from "../../../settings/settings-service.js";
@@ -65,6 +65,11 @@ import type { ProviderAvailabilityService } from "../../../providers/availabilit
 import { ThreadControlMutationReservationService } from "../../../thread-control/index.js";
 import { publishParentProviderEvent } from "../../events/provider-event-publication.js";
 import { SubagentRosterService } from "../../collaboration/subagent-roster-service.js";
+import { TurnRecoveryService } from "../../recovery/turn-recovery-service.js";
+import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-startup-repo.js";
+import { appendPreviewAnnotations, sendRecoveryAttempt } from "../../transport/turn-message-dispatch.js";
+import { routeAgentRpc } from "../../transport/agent-rpc.js";
+import { WorkspaceEnvironmentService } from "../../../projects/environment/workspace-environment-service.js";
 
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn(), subscribedThreadIds: () => new Set<string>() }));
 
@@ -81,7 +86,7 @@ function startProviderTurn(service: AgentService): string {
   return startProviderTurnForTest(service, THREAD_ID);
 }
 
-function makePreviewAnnotationBundle(): PreviewAnnotationBundle {
+function makePreviewAnnotationBundle(): Extract<PreviewAnnotationBundle, { schemaVersion: 1 }> {
   const capture = {
     schemaVersion: 2 as const,
     pageUrl: "https://www.google.com/",
@@ -120,6 +125,16 @@ function makePreviewAnnotationBundle(): PreviewAnnotationBundle {
   };
 }
 
+async function setupEnvironmentForTest(enabled: boolean, db: Database, cwd: string, workspaceId: string, threads: RealThreadRepo) {
+  if (!enabled) return undefined;
+  const environment = new WorkspaceEnvironmentService({
+    mcodeDir: cwd, database: db, databaseWriter: agentStorageTestWriter(db), threads, platform: "linux",
+  });
+  await environment.save({ workspaceId, sourceRevision: null,
+    document: { version: "0.0.1", setup: { default: "bun run setup" }, actions: [] } });
+  return environment;
+}
+
 /**
  * Build a minimal AgentService wired to a fake EventEmitter-based provider.
  * The returned `providerEmitter` lets the test fire events as if the SDK
@@ -130,6 +145,7 @@ async function buildService(
   mutationReservations = new ThreadControlMutationReservationService(),
   providers?: IAgentProvider[],
   canonicalTurns = false,
+  setup = false,
 ): Promise<{
   service: AgentService;
   providerEmitter: NodeEvents.EventEmitter;
@@ -142,6 +158,10 @@ async function buildService(
   toolCallRecordRepo: RealToolCallRecordRepo;
   canonicalSink: CanonicalAgentBoundary;
   threadRepo: RealThreadRepo;
+  db: Database;
+  providerRegistry: IProviderRegistry;
+  environment: WorkspaceEnvironmentService | undefined;
+  threadService: ThreadService;
 }> {
   const db = openAgentStorageTestDatabase();
   const writer = agentStorageTestWriter(db);
@@ -229,6 +249,7 @@ async function buildService(
     ? new CanonicalAgentBoundary(db, writer, canonicalWriter, () => undefined)
     : createCanonicalAgentBoundaryStub(db, writer);
   const progress = canonicalTurns ? new CanonicalAcceptedProgress(canonicalSink, canonicalWriter) : undefined;
+  const environment = await setupEnvironmentForTest(setup, db, cwd, workspace.id, threadRepo);
   if (progress) {
     canonicalSink.bindAcceptedSynthesizedPublications((threadId, events) => progress.acceptSynthesizedPublications(threadId, events));
   }
@@ -260,7 +281,7 @@ async function buildService(
       undefined,
       mutationReservations,
       canonicalSink,
-      undefined,
+      environment,
       undefined,
   );
   if (progress) registerAgentStorageTestProducer(db, async () => {
@@ -280,6 +301,10 @@ async function buildService(
     toolCallRecordRepo,
     canonicalSink,
     threadRepo,
+    db,
+    providerRegistry,
+    environment,
+    threadService,
   };
 }
 
@@ -920,48 +945,196 @@ describe("AgentService turn cleanup", () => {
     expect(result.snapshot).toMatchObject({ threadId: THREAD_ID, phase: "cancelled" });
   });
 
-  it("persists preview annotation snapshots as visible provider attachments", async () => {
-    const { service, providerEmitter, attachmentService, messageRepo } = await buildService();
-    const bundle = makePreviewAnnotationBundle();
+  it.each([1, 2] as const)("persists one image per page from bundle v%i with distinct filenames", async (schemaVersion) => {
+    const directory = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-page-snapshots-"));
+    vi.stubEnv("MCODE_DATA_DIR", directory);
+    try {
+      const { service, providerEmitter, attachmentService, messageRepo } = await buildService();
+      const storage = new AttachmentService();
+      vi.spyOn(attachmentService, "persist").mockImplementation(storage.persist.bind(storage));
+      const legacy = makePreviewAnnotationBundle();
+      const first = legacy.annotations[0];
+      if (!first || !("snapshot" in first)) throw new Error("missing browser fixture");
+      const sourcePath = NodePath.join(directory, "page.png");
+      const bytes = Buffer.from([137, 80, 78, 71, 1, 2, 3, 4]);
+      await NodeFSPromises.writeFile(sourcePath, bytes);
+      const last = { ...first, id: "550e8400-e29b-41d4-a716-446655440002", displayNumber: 2,
+        snapshot: { ...first.snapshot, id: "last-shot", sourcePath } };
+      const other = { ...first, id: "550e8400-e29b-41d4-a716-446655440003",
+        pageIdentity: "other-page", pageContext: { ...first.pageContext, pageUrl: "https://other.test" },
+        snapshot: { ...first.snapshot, id: "other-shot", sourcePath } };
+      const pages = [last, other].map((note) => ({
+        pageIdentity: note.pageIdentity, url: note.pageContext.pageUrl, title: "Google", faviconUrl: null,
+        snapshot: { ...note.snapshot, scroll: { x: 0, y: 0 } },
+      }));
+      const annotations = [first, last, other].map((note) => ({
+        id: note.id, pageIdentity: note.pageIdentity, displayNumber: note.displayNumber,
+        pageContext: note.pageContext, targetContext: note.targetContext, note: note.note!,
+      }));
+      const v2: PreviewAnnotationBundle = { schemaVersion: 2, pages, annotations };
+      const bundle: PreviewAnnotationBundle = schemaVersion === 1
+        ? { schemaVersion: 1, annotations: [first, last, other] } : v2;
 
-    await service.sendMessage({
-      threadId: THREAD_ID,
-      content: "fix this",
-      permissionMode: "default",
-      model: "claude-sonnet-4-6",
-      attachments: [],
-      provider: "claude",
-      mentions: [],
-      previewAnnotations: bundle,
-    });
+      await service.sendMessage({ threadId: THREAD_ID, content: "fix this", permissionMode: "default",
+        model: "claude-sonnet-4-6", provider: "claude", attachments: [], previewAnnotations: bundle });
 
-    const expectedAttachment = {
-      id: "annotation-shot-1",
-      name: "Annotation 1 screenshot.png",
-      mimeType: "image/png",
-      sizeBytes: 2048,
-      sourcePath: "C:/tmp/annotation-shot-1.png",
-    };
+      const expected = [
+        { id: "last-shot", name: "Notes on Google.png", mimeType: "image/png", sizeBytes: 8 },
+        { id: "other-shot", name: "Notes on Google (2).png", mimeType: "image/png", sizeBytes: 8 },
+      ];
+      expect(messageRepo.listByThread(THREAD_ID, 10).messages).toContainEqual(expect.objectContaining({
+        role: "user", content: "fix this", sequence: 1, attachments: expected, previewAnnotations: v2,
+      }));
+      expect(Reflect.get(providerEmitter, "sendTurn")).toHaveBeenCalledWith(expect.objectContaining({
+        attachments: expected.map((attachment) => ({ ...attachment,
+          sourcePath: NodePath.join(directory, "attachments", THREAD_ID, attachment.id + ".png") })),
+      }));
+      expect((await NodeFSPromises.readdir(NodePath.join(directory, "attachments", THREAD_ID))).sort())
+        .toEqual(["last-shot.png", "other-shot.png"]);
+      for (const attachment of expected) {
+        expect(await NodeFSPromises.readFile(NodePath.join(directory, "attachments", THREAD_ID, attachment.id + ".png"))).toEqual(bytes);
+      }
+    } finally {
+      vi.unstubAllEnvs();
+      await NodeFSPromises.rm(directory, { recursive: true, force: true });
+    }
+  });
 
-    expect(attachmentService.persist).toHaveBeenCalledWith(THREAD_ID, [
-      expectedAttachment,
-    ]);
-    expect(messageRepo.listByThread(THREAD_ID, 10).messages).toContainEqual(expect.objectContaining({
-      role: "user", content: "fix this", sequence: 1,
-      attachments: [
-        {
-          id: "annotation-shot-1",
-          name: "Annotation 1 screenshot.png",
-          mimeType: "image/png",
-          sizeBytes: 2048,
-        },
-      ], previewAnnotations: bundle,
-    }));
-    expect((providerEmitter as any).sendTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        attachments: [expectedAttachment],
-      }),
-    );
+  it("stores only v2 for an initial RPC turn queued behind Project Setup", async () => {
+    const directory = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-page-setup-"));
+    vi.stubEnv("MCODE_DATA_DIR", directory);
+    try {
+      const { service, threadService, threadRepo, messageRepo, db, environment, providerEmitter, attachmentService } =
+        await buildService(directory, undefined, undefined, false, true);
+      db.prepare("UPDATE threads SET mode = 'worktree', worktree_path = ? WHERE id = ?").run(directory, THREAD_ID);
+      const thread = threadRepo.findById(THREAD_ID);
+      if (!thread || !environment) throw new Error("missing Setup fixture");
+      vi.mocked(threadService.create).mockResolvedValue(thread);
+      const storage = new AttachmentService();
+      vi.spyOn(attachmentService, "persist").mockImplementation(storage.persist.bind(storage));
+      const first = makePreviewAnnotationBundle().annotations[0];
+      if (!first || !("snapshot" in first)) throw new Error("missing browser fixture");
+      const sourcePath = NodePath.join(directory, "page.png");
+      await NodeFSPromises.writeFile(sourcePath, Buffer.from([137, 80, 78, 71]));
+      const unexpected = (): never => { throw new Error("Queued admission accessed an unrelated service"); };
+      await routeAgentRpc("agent.createAndSend", { workspaceId: thread.workspace_id, mode: "worktree", branch: "main",
+        content: "queued notes", provider: "claude", previewAnnotations: { schemaVersion: 1,
+          annotations: [{ ...first, snapshot: { ...first.snapshot, sourcePath } }] } }, {
+        agentService: service, messageRepo,
+        approvalService: { respondToApproval: unexpected, listPendingApprovals: unexpected },
+        hookExecutionRepo: { listByMessage: unexpected }, narrativeStore: { load: unexpected, listApprovals: unexpected },
+        planQuestionAnswersRepo: { listAnsweredForThread: unexpected },
+        planService: { saveVersion: unexpected, snapshot: unexpected, implement: unexpected, createComment: unexpected,
+          updateComment: unexpected, setCommentStatus: unexpected, deleteComment: unexpected },
+        planTurnService: { answerQuestions: unexpected, dismissQuestions: unexpected }, recapService: { generate: unexpected },
+        subagentRosterService: { loadRoster: unexpected, loadDetail: unexpected, stop: unexpected }, taskRepo: { get: unexpected },
+        thoughtSegmentRepo: { listByMessage: unexpected }, threadControlService: { respondToApproval: unexpected, listPendingApprovals: unexpected },
+        toolCallRecordRepo: { listByMessage: unexpected, listByParent: unexpected },
+        turnRecoveryService: { retryErroredTurn: unexpected, resumeTurn: unexpected },
+        turnResumeScheduler: { schedule: unexpected, unschedule: unexpected },
+      });
+      const messages = messageRepo.listByThread(THREAD_ID, 10).messages.filter((message) => message.role === "user");
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toMatchObject({ content: "queued notes", previewAnnotations: { schemaVersion: 2,
+        pages: [{ snapshot: { id: "annotation-shot-1" } }], annotations: [{ note: "Move the header down." }] },
+        attachments: [{ id: "annotation-shot-1", name: "Notes on Google.png", sizeBytes: 4 }] });
+      expect(environment.getAutomaticSetup({ threadId: THREAD_ID }).queuedTurns).toHaveLength(1);
+      const queued = db.query<{ submission_json: string }, []>(
+        "SELECT submission_json FROM workspace_environment_queued_turns",
+      ).get();
+      expect(JSON.parse(queued!.submission_json)).toMatchObject({ previewAnnotations: messages[0]!.previewAnnotations });
+      expect(Reflect.get(providerEmitter, "sendTurn")).not.toHaveBeenCalled();
+      await environment.dispose();
+    } finally {
+      vi.unstubAllEnvs();
+      await NodeFSPromises.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("retries page images from stored files exactly once after the original capture is deleted", async () => {
+    const directory = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-page-retry-"));
+    vi.stubEnv("MCODE_DATA_DIR", directory);
+    try {
+      const { service, providerEmitter, attachmentService, messageRepo, canonicalSink, threadRepo, db, providerRegistry } =
+        await buildService(process.cwd(), undefined, undefined, true);
+      const storage = new AttachmentService();
+      vi.spyOn(attachmentService, "persist").mockImplementation(storage.persist.bind(storage));
+      startAgentServiceIngressForTest(service);
+      const first = makePreviewAnnotationBundle().annotations[0];
+      if (!first || !("snapshot" in first)) throw new Error("missing browser fixture");
+      const sourcePath = NodePath.join(directory, "page.png");
+      const bytes = Buffer.from([137, 80, 78, 71]);
+      await NodeFSPromises.writeFile(sourcePath, bytes);
+      const bundle: PreviewAnnotationBundle = { schemaVersion: 1, annotations: [
+        { ...first, snapshot: { ...first.snapshot, sourcePath } },
+      ] };
+      await service.sendMessage({ threadId: THREAD_ID, content: appendPreviewAnnotations("fix this", bundle),
+        displayContent: "fix this", provider: "claude", previewAnnotations: bundle });
+      const executionId = activeExecutionId(service);
+      const turnId = canonicalSink.loadCheckpoint(executionId)?.turnId;
+      if (!turnId) throw new Error("missing original turn");
+      providerEmitter.emit("event", { type: AgentEventType.Error, threadId: THREAD_ID, turnExecutionId: executionId,
+        error: "provider failed", failure: { kind: "fatal" } } satisfies AgentEvent);
+      await waitForAgentServiceIngressForTest(service, THREAD_ID);
+      await vi.waitFor(() => expect(canonicalSink.loadCheckpoint(executionId)?.terminalOutcome).toBe("errored"));
+      await finalizerForAgentServiceTest(service).drain();
+      await NodeFSPromises.unlink(sourcePath);
+      const writer = agentStorageTestWriter(db);
+      const recovery = new TurnRecoveryService(canonicalSink, threadRepo, storage,
+        new ParentAssistantTextCheckpointService(db, writer), new ThreadStartupRepo(db, writer), messageRepo, providerRegistry);
+      const retry = await recovery.retryErroredTurn({ threadId: THREAD_ID, turnId }, (command) => sendRecoveryAttempt(service, command));
+      const message = canonicalSink.loadUserMessage(retry.turnId);
+      if (!message || !message.attachments || message.previewAnnotations?.schemaVersion !== 2) throw new Error("missing v2 retry message");
+      expect(message.attachments.map(({ name, sizeBytes }) => ({ name, sizeBytes })))
+        .toEqual([{ name: "Notes on Google.png", sizeBytes: 4 }]);
+      expect(message.previewAnnotations.pages[0]?.snapshot.id).toBe(message.attachments[0]!.id);
+      const persisted = storage.prepareRetryAttachments(THREAD_ID, message.attachments);
+      expect(await NodeFSPromises.readFile(persisted[0]!.sourcePath)).toEqual(bytes);
+      expect(Reflect.get(providerEmitter, "sendTurn")).toHaveBeenLastCalledWith(expect.objectContaining({
+        attachments: [expect.objectContaining({ name: "Notes on Google.png", sizeBytes: 4 })],
+        message: expect.not.stringMatching(/"sourcePath"|"name"/),
+      }));
+      await service.stopSession(THREAD_ID, { by: "user" });
+    } finally {
+      vi.unstubAllEnvs();
+      await NodeFSPromises.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["missing-source", "unsafe-id"])("rejects a page snapshot with %s before persisting the message", async (failure) => {
+    const directory = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-page-rejected-"));
+    vi.stubEnv("MCODE_DATA_DIR", directory);
+    try {
+      const { service, providerEmitter, attachmentService, messageRepo } = await buildService();
+      const storage = new AttachmentService();
+      vi.spyOn(attachmentService, "persist").mockImplementation(storage.persist.bind(storage));
+      const first = makePreviewAnnotationBundle().annotations[0];
+      if (!first || !("snapshot" in first)) throw new Error("missing browser fixture");
+      const sourcePath = NodePath.join(directory, "page.png");
+      const storedDirectory = NodePath.join(directory, "attachments", THREAD_ID);
+      await NodeFSPromises.mkdir(storedDirectory, { recursive: true });
+      if (failure === "unsafe-id") await NodeFSPromises.writeFile(sourcePath, Buffer.from([137, 80, 78, 71]));
+      const bundle: PreviewAnnotationBundle = { schemaVersion: 2,
+        pages: [{ pageIdentity: first.pageIdentity, url: first.pageContext.pageUrl, title: "Google", faviconUrl: null,
+          snapshot: { ...first.snapshot, id: failure === "unsafe-id" ? "../escape" : "safe", sourcePath, scroll: { x: 0, y: 0 } } }],
+        annotations: [{ id: first.id, pageIdentity: first.pageIdentity, displayNumber: 1,
+          pageContext: first.pageContext, targetContext: first.targetContext, note: "Move the header down." }],
+      };
+      if (failure === "unsafe-id") {
+        bundle.pages.unshift({ ...bundle.pages[0]!, pageIdentity: "safe-page",
+          snapshot: { ...bundle.pages[0]!.snapshot, id: "safe-first" } });
+        bundle.annotations.push({ ...bundle.annotations[0]!, id: "550e8400-e29b-41d4-a716-446655440002", pageIdentity: "safe-page" });
+      }
+      await expect(service.sendMessage({ threadId: THREAD_ID, content: "fix this", permissionMode: "default",
+        model: "claude-sonnet-4-6", provider: "claude", attachments: [], previewAnnotations: bundle })).rejects.toThrow();
+      if (failure === "unsafe-id") expect(attachmentService.persist).not.toHaveBeenCalled();
+      expect(messageRepo.listByThread(THREAD_ID, 10).messages.filter((message) => message.role === "user")).toEqual([]);
+      expect(Reflect.get(providerEmitter, "sendTurn")).not.toHaveBeenCalled();
+      expect(await NodeFSPromises.readdir(NodePath.join(directory, "attachments", THREAD_ID))).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+      await NodeFSPromises.rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("keeps compaction active while materializing a post-terminal goal receipt", async () => {

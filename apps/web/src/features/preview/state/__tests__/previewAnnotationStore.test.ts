@@ -3,6 +3,7 @@ import { normalizePreviewPageIdentity } from "@mcode/shared/browser-page-identit
 import {
   usePreviewAnnotationStore,
   type PreviewDraftAnnotation,
+  type PreviewPageRecord,
 } from "../previewAnnotationStore";
 import { buildComposerAnnotationBundle } from "@/features/conversation/composer/submission/composer-annotations";
 import { saveDraftDiffComment } from "@/features/conversation/composer/draft/draft-diff-comments";
@@ -19,31 +20,53 @@ const capture = {
   bounds: { x: 10, y: 20, width: 100, height: 40 },
 };
 
+const PAGE = normalizePreviewPageIdentity(capture.pageUrl);
+const OTHER_PAGE = "http://localhost:5173/billing";
+
 function draft(overrides: Partial<PreviewDraftAnnotation> = {}): PreviewDraftAnnotation {
   return {
     threadId: "thread-1",
-    pageIdentity: normalizePreviewPageIdentity(capture.pageUrl),
+    pageIdentity: PAGE,
     bounds: capture.bounds,
     selectorHint: "button.buy",
     label: "button.buy",
     pageContext: capture,
-    snapshot: {
-      id: crypto.randomUUID(),
-      name: "preview.png",
-      mimeType: "image/png",
-      sizeBytes: 10,
-      sourcePath: "C:/tmp/preview.png",
-      capture,
-    },
     note: "Change this",
     ...overrides,
   };
 }
 
+function markedSnapshot() {
+  return {
+    id: crypto.randomUUID(),
+    name: "page.png",
+    mimeType: "image/png" as const,
+    sizeBytes: 10,
+    sourcePath: "C:/tmp/page.png",
+    capture,
+    scroll: { x: 0, y: 0 },
+  };
+}
+
+function seedPage(pageIdentity = PAGE, marked = true) {
+  const store = usePreviewAnnotationStore.getState();
+  store.setPageCapture("thread-1", {
+    pageIdentity,
+    url: pageIdentity,
+    title: "Product",
+    faviconUrl: null,
+    clean: { bytes: new Uint8Array([1]), capture, scroll: { x: 0, y: 0 } },
+  });
+  if (marked) store.setPageSnapshot("thread-1", pageIdentity, markedSnapshot(), new Uint8Array([2]));
+}
+
+const store = () => usePreviewAnnotationStore.getState();
+
 describe("previewAnnotationStore", () => {
   beforeEach(() => {
-    usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
+    usePreviewAnnotationStore.setState({ byThread: {}, pages: {}, drafts: {} });
     useComposerDraftStore.setState({ drafts: {} });
+    seedPage();
   });
 
   it("normalizes fragments, query order, and tracking parameters", () => {
@@ -53,57 +76,114 @@ describe("previewAnnotationStore", () => {
   });
 
   it("renumbers display numbers without changing stable ids", () => {
-    const store = usePreviewAnnotationStore.getState();
-    const first = store.saveAnnotation("thread-1", draft({ note: "First" }));
-    const second = usePreviewAnnotationStore.getState().saveAnnotation("thread-1", draft({ note: "Second" }));
+    const first = store().saveAnnotation("thread-1", draft({ note: "First" }));
+    const second = store().saveAnnotation("thread-1", draft({ note: "Second" }));
 
-    usePreviewAnnotationStore.getState().deleteAnnotation("thread-1", first.id);
-    const remaining = usePreviewAnnotationStore.getState().getThreadAnnotations("thread-1");
+    store().deleteAnnotation("thread-1", first.id);
+    const remaining = store().getThreadAnnotations("thread-1");
 
     expect(remaining).toHaveLength(1);
     expect(remaining[0]?.id).toBe(second.id);
     expect(remaining[0]?.displayNumber).toBe(1);
   });
 
-  it("builds a text-only bundle with trimmed note text", () => {
-    usePreviewAnnotationStore.getState().saveAnnotation(
-      "thread-1",
-      draft({
-        note: "  Make the button clearer.  ",
-        snapshot: {
-          id: "snap-1",
-          name: "preview.png",
-          mimeType: "image/png",
-          sizeBytes: 10,
-          sourcePath: "C:/tmp/preview.png",
-          capture,
-        },
-      }),
-    );
+  it("numbers each page from 1 and leaves other pages alone when a note is removed", () => {
+    seedPage(OTHER_PAGE);
+    const a1 = store().saveAnnotation("thread-1", draft({ note: "A1" }));
+    store().saveAnnotation("thread-1", draft({ note: "A2" }));
+    const b1 = store().saveAnnotation("thread-1", draft({ pageIdentity: OTHER_PAGE, note: "B1" }));
 
-    expect(usePreviewAnnotationStore.getState().buildBundle("thread-1")).toEqual({
-      schemaVersion: 1,
-      annotations: [{
-        id: expect.any(String),
-        displayNumber: 1,
-        pageIdentity: "http://localhost:5173/products/1?a=1&b=2",
-        pageContext: capture,
-        targetContext: {
-          label: "button.buy",
-          selectorHint: "button.buy",
-          bounds: { x: 10, y: 20, width: 100, height: 40 },
-        },
-        note: "Make the button clearer.",
-        snapshot: {
-          id: "snap-1",
-          name: "preview.png",
-          mimeType: "image/png",
-          sizeBytes: 10,
-          sourcePath: "C:/tmp/preview.png",
-          capture,
-        },
-      }],
-    });
+    store().deleteAnnotation("thread-1", a1.id);
+
+    expect(store().getPageAnnotations("thread-1", PAGE).map((n) => [n.note, n.displayNumber])).toEqual([["A2", 1]]);
+    expect(store().getPageAnnotations("thread-1", OTHER_PAGE).map((n) => [n.id, n.displayNumber])).toEqual([[b1.id, 1]]);
+  });
+
+  it("stales a page's marked image when one of its notes is removed, and no other page's", () => {
+    seedPage(OTHER_PAGE);
+    const a1 = store().saveAnnotation("thread-1", draft({ note: "A1" }));
+    store().saveAnnotation("thread-1", draft({ note: "A2" }));
+    store().saveAnnotation("thread-1", draft({ pageIdentity: OTHER_PAGE, note: "B1" }));
+
+    store().deleteAnnotation("thread-1", a1.id);
+
+    const pages = store().pages["thread-1"]!;
+    expect(pages[PAGE]?.marked).toBeNull();
+    expect(pages[OTHER_PAGE]?.marked).not.toBeNull();
+  });
+
+  it("drops a page record when its last note is removed", () => {
+    const note = store().saveAnnotation("thread-1", draft());
+    store().deleteAnnotation("thread-1", note.id);
+
+    expect(store().pages["thread-1"]).toEqual({});
+  });
+
+  it("refuses to save a note on a page that was never captured", () => {
+    expect(() => store().saveAnnotation("thread-1", draft({ pageIdentity: OTHER_PAGE }))).toThrow(
+      "page capture is required",
+    );
+  });
+
+  it("stores note bounds in document pixels", () => {
+    const note = store().saveAnnotation("thread-1", draft({
+      pageContext: { ...capture, viewportScroll: { scrollX: 0, scrollY: 300 } },
+    }));
+
+    expect(note.targetContext.bounds).toEqual({ x: 10, y: 320, width: 100, height: 40 });
+  });
+
+  it("keeps Review comments when Browser notes are cleared", () => {
+    saveDraftDiffComment("thread-1", {
+      filePath: "apps/web/src/App.tsx",
+      side: "right",
+      line: 42,
+      lineContent: "return <App />;",
+    }, { note: "Handle the loading state", mentions: [] });
+    store().saveAnnotation("thread-1", draft());
+
+    store().clearPreviewNotes("thread-1");
+
+    expect(store().getThreadAnnotations("thread-1")).toEqual([]);
+    expect(buildComposerAnnotationBundle("thread-1")?.annotations).toEqual([
+      expect.objectContaining({ kind: "diff", note: "Handle the loading state" }),
+    ]);
+  });
+
+  it("trims the note text it stores", () => {
+    const note = store().saveAnnotation("thread-1", draft({ note: "  Make the button clearer.  " }));
+
+    expect(note.note).toBe("Make the button clearer.");
+  });
+
+  it("leaves out notes whose page has no redrawn image yet", () => {
+    seedPage(OTHER_PAGE, false);
+    store().saveAnnotation("thread-1", draft({ note: "Ready" }));
+    store().saveAnnotation("thread-1", draft({ pageIdentity: OTHER_PAGE, note: "Stale" }));
+
+    const bundle = store().buildBundle("thread-1");
+
+    expect(bundle?.pages.map((page) => page.pageIdentity)).toEqual([PAGE]);
+    expect(bundle?.annotations.map((annotation) => "note" in annotation && annotation.note)).toEqual(["Ready"]);
+  });
+
+  it("round-trips a bundle through restore with the same pages and numbering", () => {
+    seedPage(OTHER_PAGE);
+    store().saveAnnotation("thread-1", draft({ note: "A1" }));
+    store().saveAnnotation("thread-1", draft({ pageIdentity: OTHER_PAGE, note: "B1" }));
+    const bundle = store().buildBundle("thread-1")!;
+    usePreviewAnnotationStore.setState({ byThread: {}, pages: {}, drafts: {} });
+
+    expect(store().restoreBundle("thread-1", bundle)).toBe(true);
+
+    const restored: Record<string, PreviewPageRecord> = store().pages["thread-1"]!;
+    expect(Object.keys(restored).sort()).toEqual([OTHER_PAGE, PAGE].sort());
+    expect(restored[PAGE]?.clean).toBeNull();
+    expect(restored[PAGE]?.marked?.id).toBe(bundle.pages.find((p) => p.pageIdentity === PAGE)?.snapshot.id);
+    expect(store().getThreadAnnotations("thread-1").map((n) => [n.note, n.displayNumber])).toEqual([
+      ["A1", 1],
+      ["B1", 1],
+    ]);
   });
 
   it.each(["", "   "])("rejects a blank note %j without discarding its draft", (note) => {
@@ -133,9 +213,7 @@ describe("previewAnnotationStore", () => {
       line: 42,
       lineContent: "return <App />;",
     }, { note: "Handle the loading state", mentions: [] });
-    const preview = usePreviewAnnotationStore
-      .getState()
-      .saveAnnotation("thread-1", draft({ note: "Align the button" }));
+    const preview = store().saveAnnotation("thread-1", draft({ note: "Align the button" }));
 
     const bundle = buildComposerAnnotationBundle("thread-1");
 
@@ -168,7 +246,7 @@ describe("previewAnnotationStore", () => {
       line: 42,
       lineContent: "return <App />;",
     }, { note: "Handle the loading state", mentions: [] });
-    usePreviewAnnotationStore.getState().saveAnnotation("thread-1", draft({ note: "Align the button" }));
+    store().saveAnnotation("thread-1", draft({ note: "Align the button" }));
 
     const bundle = buildComposerAnnotationBundle("thread-1");
 
@@ -186,12 +264,12 @@ describe("previewAnnotationStore", () => {
   });
 
   it("does not restore Files comments as Browser annotations", () => {
-    const preview = usePreviewAnnotationStore.getState().saveAnnotation("thread-1", draft({ note: "Align the button" }));
-    const bundle = usePreviewAnnotationStore.getState().buildBundle("thread-1")!;
-    usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
+    const preview = store().saveAnnotation("thread-1", draft({ note: "Align the button" }));
+    const bundle = store().buildBundle("thread-1")!;
+    usePreviewAnnotationStore.setState({ byThread: {}, pages: {}, drafts: {} });
 
-    const restored = usePreviewAnnotationStore.getState().restoreBundle("thread-1", {
-      schemaVersion: 1,
+    const restored = store().restoreBundle("thread-1", {
+      ...bundle,
       annotations: [...bundle.annotations, {
         kind: "file",
         id: "00000000-0000-4000-8000-000000000003",
@@ -204,6 +282,35 @@ describe("previewAnnotationStore", () => {
     });
 
     expect(restored).toBe(true);
-    expect(usePreviewAnnotationStore.getState().getThreadAnnotations("thread-1").map((row) => row.id)).toEqual([preview.id]);
+    expect(store().getThreadAnnotations("thread-1").map((row) => row.id)).toEqual([preview.id]);
+  });
+
+  it("restores a scrolled v1 note at document coordinates, keeping its sent number", () => {
+    usePreviewAnnotationStore.setState({ byThread: {}, pages: {}, drafts: {} });
+    const scrolledCapture = { ...capture, viewportScroll: { scrollX: 15, scrollY: 300 } };
+
+    store().restoreBundle("thread-1", {
+      schemaVersion: 1,
+      annotations: [{
+        id: "00000000-0000-4000-8000-000000000009",
+        displayNumber: 4,
+        pageIdentity: PAGE,
+        pageContext: scrolledCapture,
+        targetContext: { label: "button.buy", selectorHint: "button.buy", bounds: capture.bounds },
+        note: "Legacy note",
+        snapshot: {
+          id: "snap-legacy",
+          name: "legacy.png",
+          mimeType: "image/png",
+          sizeBytes: 10,
+          sourcePath: "C:/tmp/legacy.png",
+          capture: scrolledCapture,
+        },
+      }],
+    });
+
+    const [restored] = store().getThreadAnnotations("thread-1");
+    expect(restored?.displayNumber).toBe(4);
+    expect(restored?.targetContext.bounds).toEqual({ x: 25, y: 320, width: 100, height: 40 });
   });
 });

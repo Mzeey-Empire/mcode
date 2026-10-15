@@ -1,21 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToastStore } from "@/stores/toastStore";
 import { usePreviewReferenceQueueStore } from "../state/previewReferenceQueueStore";
-import type {
-  McodeBrowserCaptureV2,
-  PreviewAnnotationPayload,
-} from "@mcode/contracts";
-import type {
-  PreviewAnnotationSnapshotRequest,
-  PreviewPictureReferenceResult,
-} from "@/transport/desktop-bridge";
+import type { McodeBrowserCaptureV2 } from "@mcode/contracts";
+import type { PreviewPictureReferenceResult } from "@/transport/desktop-bridge";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
-import { usePreviewAnnotationStore } from "../state/previewAnnotationStore";
+import { usePreviewAnnotationStore, type PreviewCleanCapture } from "../state/previewAnnotationStore";
 import { normalizePreviewPageIdentity } from "@mcode/shared/browser-page-identity";
 
 type CaptureResult = PreviewPictureReferenceResult;
 
 type CapturedPicture = Extract<CaptureResult, { ok: true }>;
+
+function toCleanCapture(res: CaptureResult): PreviewCleanCapture | null {
+  if (!res.ok || res.capture.schemaVersion !== 2) return null;
+  const { scrollX = 0, scrollY = 0 } = res.capture.viewportScroll ?? {};
+  return { bytes: res.previewBytes, capture: res.capture, scroll: { x: scrollX, y: scrollY } };
+}
 
 const CAPTURE_ERROR_SILENT = new Set(["cancelled", "capture-interrupted", "navigated-away"]);
 
@@ -107,10 +107,8 @@ export interface PreviewCaptureState {
   readonly onAddElementPickPictureReference: () => Promise<{ ok: boolean }>;
   /** Create a saved Preview annotation from an element pick instead of a normal attachment. */
   readonly onAddElementAnnotation: () => Promise<{ ok: boolean }>;
-  /** Capture the full visible viewport for a saved Preview annotation. */
-  readonly captureAnnotationSnapshot: (
-    overlay: PreviewAnnotationSnapshotRequest,
-  ) => Promise<PreviewAnnotationPayload["snapshot"] | null>;
+  /** Capture the full visible viewport, unmarked, for a page's notes to be drawn on. */
+  readonly captureCleanPage: () => Promise<PreviewCleanCapture | null>;
 }
 
 interface ScreenshotRequest {
@@ -237,15 +235,13 @@ export function usePreviewCapture({
     }
   }, [pushSync, threadId, onSuccess]);
 
-  const captureAnnotationSnapshot = useCallback(async (
-    overlay: PreviewAnnotationSnapshotRequest,
-  ): Promise<PreviewAnnotationPayload["snapshot"] | null> => {
+  const captureCleanPage = useCallback(async (): Promise<PreviewCleanCapture | null> => {
     const preview = window.desktopBridge?.preview;
     if (!preview?.captureAnnotationSnapshot || !threadId) return null;
     await pushSync(true);
     let res: CaptureResult;
     try {
-      res = await preview.captureAnnotationSnapshot(overlay);
+      res = await preview.captureAnnotationSnapshot();
     } catch {
       useToastStore.getState().show({
         kind: "failed",
@@ -255,15 +251,7 @@ export function usePreviewCapture({
       return null;
     }
     showCaptureErrorIfNeeded(res);
-    if (!res.ok || res.capture.schemaVersion !== 2) return null;
-    return {
-      id: res.meta.id,
-      name: res.meta.name,
-      mimeType: "image/png",
-      sizeBytes: res.meta.sizeBytes,
-      sourcePath: res.meta.sourcePath,
-      capture: res.capture,
-    };
+    return toCleanCapture(res);
   }, [pushSync, threadId]);
 
   const captureElementPick = useCallback(async (): Promise<CaptureResult | null> => {
@@ -312,6 +300,6 @@ export function usePreviewCapture({
     onToggleScreenshot,
     onAddElementPickPictureReference,
     onAddElementAnnotation,
-    captureAnnotationSnapshot,
+    captureCleanPage,
   };
 }

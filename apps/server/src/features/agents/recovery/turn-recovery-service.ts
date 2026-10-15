@@ -1,7 +1,7 @@
 import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
-import { ProviderIdSchema } from "@mcode/contracts";
+import { ProviderIdSchema, toPreviewAnnotationBundleV2 } from "@mcode/contracts";
 import { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
 import { ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-service.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
@@ -325,9 +325,20 @@ export class TurnRecoveryService {
       replyToMessageId: this.optionalValue(message.reply_to_message_id),
       quotedText: this.optionalValue(message.quoted_text),
       mentions: this.optionalValue(message.mentions),
-      previewAnnotations: this.optionalValue(message.previewAnnotations),
+      previewAnnotations: this.retryAnnotations(message, attachments),
       retryOfExecutionId: executionId,
     };
+  }
+
+  private retryAnnotations(message: Message, attachments: ReturnType<AttachmentService["prepareRetryAttachments"]>) {
+    if (!message.previewAnnotations) return undefined;
+    const bundle = toPreviewAnnotationBundleV2(message.previewAnnotations);
+    const replacements = new Map(message.attachments?.map((attachment, index) => [attachment.id, attachments[index]]));
+    return { ...bundle, pages: bundle.pages.map((page) => {
+      const attachment = replacements.get(page.snapshot.id);
+      if (!attachment) throw new Error(`Stored page snapshot not found: ${page.snapshot.id}`);
+      return { ...page, snapshot: { ...page.snapshot, id: attachment.id, sourcePath: attachment.sourcePath } };
+    }) };
   }
 
   private promptResendCommand(target: RecoverableTurn): SendMessageCommand {

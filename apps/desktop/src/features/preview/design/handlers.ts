@@ -6,7 +6,7 @@
  * back to the renderer. No DOM mutations; no clicks captured.
  */
 
-import { BrowserWindow, ipcMain } from "electron";
+import { BrowserWindow, ipcMain, type WebContents } from "electron";
 import { logger } from "@mcode/shared";
 import { getSession } from "../state/window-session.js";
 import { resolveActivePreviewWebContents } from "../surfaces/active-web-contents.js";
@@ -115,8 +115,86 @@ const ANNOTATION_GUARD_TEARDOWN_SCRIPT = String.raw`(() => {
   }
 })();`;
 
+/** Where a Browser note sits on its page, in document pixels. */
+interface RevealNoteTarget {
+  readonly selector: string | null;
+  readonly bounds: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+}
+
+const REVEAL_READY_TIMEOUT_MS = 5_000;
+const REVEAL_POLL_INTERVAL_MS = 100;
+const MAX_REVEAL_SELECTOR_LENGTH = 2_000;
+
+function parseRevealTarget(payload: unknown): RevealNoteTarget | null {
+  const candidate = payload as Partial<RevealNoteTarget> | null;
+  const bounds = candidate?.bounds;
+  if (!bounds) return null;
+  const numbers = [bounds.x, bounds.y, bounds.width, bounds.height];
+  if (!numbers.every((value) => typeof value === "number" && Number.isFinite(value))) return null;
+  const selector = typeof candidate.selector === "string" && candidate.selector.length <= MAX_REVEAL_SELECTOR_LENGTH
+    ? candidate.selector
+    : null;
+  return { selector, bounds };
+}
+
+// A selector hint is not guaranteed to be valid or unique, so it only wins when it names exactly one element.
+function revealScript(target: RevealNoteTarget): string {
+  return `(() => {
+  const target = ${JSON.stringify(target)};
+  let element = null;
+  if (target.selector) {
+    try {
+      const matches = document.querySelectorAll(target.selector);
+      if (matches.length === 1) element = matches[0];
+    } catch {
+      element = null;
+    }
+  }
+  if (element) {
+    element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+    return;
+  }
+  const { x, y, width, height } = target.bounds;
+  window.scrollTo({
+    left: x + width / 2 - window.innerWidth / 2,
+    top: y + height / 2 - window.innerHeight / 2,
+    behavior: 'instant',
+  });
+})();`;
+}
+
+// A tab just opened or activated has no adopted guest, or only a blank one, until its navigation starts.
+async function waitForLoadedGuest(resolve: () => WebContents | null): Promise<WebContents | null> {
+  const deadline = Date.now() + REVEAL_READY_TIMEOUT_MS;
+  for (;;) {
+    const webContents = resolve();
+    const ready = webContents && !webContents.isDestroyed() && !webContents.isLoading()
+      && !webContents.getURL().startsWith("about:blank");
+    if (ready) return webContents;
+    if (Date.now() >= deadline) return webContents;
+    await new Promise((done) => setTimeout(done, REVEAL_POLL_INTERVAL_MS));
+  }
+}
+
 /** Registers the Preview design-mode IPC handlers. */
 export function registerDesignModeHandlers(): void {
+  ipcMain.handle("preview:design.reveal-note", async (event, payload: unknown) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) return { ok: false, error: "no-window" };
+    const target = parseRevealTarget(payload);
+    if (!target) return { ok: false, error: "invalid-target" };
+    const session = getSession(win);
+    const webContents = await waitForLoadedGuest(() => resolveActivePreviewWebContents(session));
+    if (!webContents || webContents.isDestroyed()) return { ok: false, error: "no-view" };
+    try {
+      await webContents.executeJavaScript(revealScript(target), true);
+    } catch (err) {
+      logger.warn("Preview: reveal note script threw", { err: String(err) });
+      return { ok: false, error: "script-failed" };
+    }
+    return { ok: true };
+  });
+
   ipcMain.handle("preview:design.set-inspect", async (event, payload: { enabled?: boolean }) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win.isDestroyed()) return { ok: false, error: "no-window" };

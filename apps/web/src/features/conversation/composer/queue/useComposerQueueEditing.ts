@@ -30,6 +30,8 @@ export interface ComposerQueueEditForm {
 export interface ComposerQueueEditAnnotations {
   restore: (bundle: PreviewAnnotationBundle | undefined) => void;
   clear: () => void;
+  /** Finishes pending page snapshot redraws. Resolves false, after telling the user, when one fails. */
+  settle: () => Promise<boolean>;
 }
 
 /** Inputs that connect queue editing to the current Composer form and annotation state. */
@@ -95,6 +97,7 @@ export function useComposerQueueEditing({
   // While a direct dispatch owns the edit's content, cancel/discard must not
   // reinsert the popped original — it would resend as a ghost queue entry.
   const editConsumedByDispatchRef = useRef(false);
+  const settlingRef = useRef(false);
 
   const finishEditing = useCallback(() => {
     editConsumedByDispatchRef.current = false;
@@ -127,9 +130,9 @@ export function useComposerQueueEditing({
     }
   }, [editing]);
 
-  const loadIntoComposer = useCallback(
+  const swapIntoComposer = useCallback(
     (message: QueuedMessage) => {
-      if (!threadId || editConsumedByDispatchRef.current) return;
+      if (!threadId) return;
 
       const queue = useQueueStore.getState();
       const targetIndex = (queue.queues[threadId] ?? []).findIndex(
@@ -164,6 +167,26 @@ export function useComposerQueueEditing({
       annotations.restore(popped.previewAnnotations);
     },
     [annotations, editing, form, threadId],
+  );
+
+  // Capturing the current edit reads each page's marked image, so a note edited a moment ago must
+  // finish redrawing first or it would be re-queued without its page.
+  const loadIntoComposer = useCallback(
+    (message: QueuedMessage) => {
+      if (!threadId || editConsumedByDispatchRef.current || settlingRef.current) return;
+      if (!editing || !form.hasContent()) {
+        swapIntoComposer(message);
+        return;
+      }
+      const startedFrom = originalMessageRef.current;
+      settlingRef.current = true;
+      void annotations.settle().then((settled) => {
+        settlingRef.current = false;
+        const unchanged = originalMessageRef.current === startedFrom && !editConsumedByDispatchRef.current;
+        if (settled && unchanged) swapIntoComposer(message);
+      });
+    },
+    [annotations, editing, form, swapIntoComposer, threadId],
   );
 
   const cancelEdit = useCallback(() => {

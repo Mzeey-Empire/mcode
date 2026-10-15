@@ -650,7 +650,6 @@ export function Composer({
             filePopupAnchorRect,
             slashCommand,
             workspacePath,
-            attachmentBundle: surfaceState.annotationBundleForDisplay,
             annotationScopeId: surfaceState.annotationScopeId,
             codeComments: surfaceState.codeCommentsForDisplay,
             attachments,

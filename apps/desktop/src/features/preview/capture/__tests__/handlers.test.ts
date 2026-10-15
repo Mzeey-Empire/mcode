@@ -1,7 +1,9 @@
+import { JSDOM } from "jsdom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MCODE_BROWSER_CAPTURE_V2_STRING_MAX } from "@mcode/contracts";
 
 const captureTest = vi.hoisted(() => {
+  let bridge: { preview: { captureAnnotationSnapshot(): Promise<unknown> } } | undefined;
   const ipcHandlers: Record<string, (...args: unknown[]) => unknown> = {};
   const session = {
     lastBounds: { x: 40, y: 60, width: 800, height: 600 },
@@ -19,6 +21,11 @@ const captureTest = vi.hoisted(() => {
   };
   const window = { id: 11, isDestroyed: vi.fn(() => false) };
   return {
+    exposeBridge: (_name: string, value: NonNullable<typeof bridge>) => { bridge = value; },
+    captureFromPreload: () => {
+      if (!bridge) throw new Error("Preload did not expose the bridge");
+      return bridge.preview.captureAnnotationSnapshot();
+    },
     ipcHandlers,
     session,
     webContents,
@@ -30,6 +37,16 @@ const captureTest = vi.hoisted(() => {
 });
 
 vi.mock("electron", () => ({
+  contextBridge: { exposeInMainWorld: captureTest.exposeBridge },
+  ipcRenderer: {
+    on: vi.fn(),
+    invoke: (channel: string, ...args: unknown[]) => {
+      if (args.length !== 0) throw new Error("Clean annotation capture accepts no renderer payload");
+      return captureTest.ipcHandlers[channel]!({ sender: {} });
+    },
+  },
+  webFrame: {},
+  webUtils: {},
   BrowserWindow: {
     fromWebContents: vi.fn(() => captureTest.currentWindow),
   },
@@ -112,24 +129,8 @@ describe("Preview capture handlers", () => {
     registerCaptureHandlers();
   });
 
-  function stubAnnotationPaint(): void {
-    captureTest.webContents.executeJavaScript.mockImplementation(async (script: string) => {
-      if (script.includes("requestAnimationFrame")) return true;
-      if (script.includes("visibleText")) return contextResult();
-      return undefined;
-    });
-  }
-
-  const annotationRequest = {
-    activeDisplayNumber: 1,
-    activeBounds: { x: 10, y: 10, width: 40, height: 40 },
-    markers: [{ displayNumber: 1, bounds: { x: 10, y: 10, width: 40, height: 40 } }],
-  };
-
   it("returns the annotation picture shape from the active Preview guest", async () => {
-    stubAnnotationPaint();
-
-    const picture = await captureTest.ipcHandlers["preview:capture-annotation-snapshot"]!({ sender: {} }, annotationRequest) as {
+    const picture = await captureTest.ipcHandlers["preview:capture-annotation-snapshot"]!({ sender: {} }) as {
       ok: true;
       meta: { name: string; mimeType: string; sizeBytes: number; sourcePath: string };
       previewBytes: Uint8Array;
@@ -149,15 +150,23 @@ describe("Preview capture handlers", () => {
         pageTitle: "Example page",
         bounds: { x: 0, y: 0, width: 800, height: 600 },
         visibleTextExcerpt: "Visible text",
+        viewportScroll: { scrollX: 4, scrollY: 8 },
       },
     });
     expect([...picture.previewBytes]).toEqual([...Buffer.from("png-bytes")]);
     expect(captureTest.webContents.capturePage).toHaveBeenCalledOnce();
   });
 
+  it("captures a clean viewport through the parameterless preload bridge", async () => {
+    await import("../../../../main/preload.js");
+    const picture = await captureTest.captureFromPreload();
+    expect(picture).toMatchObject({ ok: true, previewBytes: new Uint8Array(Buffer.from("png-bytes")),
+      capture: { pageTitle: "Example page", viewportScroll: { scrollX: 4, scrollY: 8 } } });
+  });
+
   it("keeps the established capture errors for missing state and capture failures", async () => {
-    const capture = () => captureTest.ipcHandlers["preview:capture-annotation-snapshot"]!({ sender: {} }, annotationRequest);
-    stubAnnotationPaint();
+    const capture = () => captureTest.ipcHandlers["preview:capture-annotation-snapshot"]!({ sender: {} });
+
     captureTest.currentWindow = null;
     await expect(capture()).resolves.toEqual({ ok: false, error: "no-window" });
 
@@ -174,26 +183,35 @@ describe("Preview capture handlers", () => {
     await expect(capture()).resolves.toEqual({ ok: false, error: "capture-failed" });
   });
 
-  it("clamps annotation rectangles to the visible viewport before capture", async () => {
-    captureTest.webContents.executeJavaScript.mockImplementation(async (script: string) => {
-      if (script.includes("requestAnimationFrame")) return true;
-      if (script.includes("visibleText")) return contextResult();
-      return undefined;
+  it("captures the guest without injecting markers and returns its actual scroll offset", async () => {
+    const dom = new JSDOM("<!doctype html><html><body><button>Target</button></body></html>", { runScripts: "outside-only" });
+    Object.defineProperty(dom.window, "scrollX", { value: 17 });
+    Object.defineProperty(dom.window, "scrollY", { value: 251 });
+    captureTest.webContents.executeJavaScript.mockImplementation(async (script: string) => dom.window.eval(script));
+    captureTest.webContents.capturePage.mockImplementation(async () => {
+      expect(dom.window.document.body.innerHTML).toBe("<button>Target</button>");
+      return captureImage();
     });
+    try {
+      const result = await captureTest.ipcHandlers["preview:capture-annotation-snapshot"]!({ sender: {} });
+      expect(result).toMatchObject({ ok: true, capture: { viewportScroll: { scrollX: 17, scrollY: 251 } } });
+      expect(captureTest.webContents.capturePage).toHaveBeenCalledOnce();
+    } finally {
+      dom.window.close();
+    }
+  });
 
-    const result = await captureTest.ipcHandlers["preview:capture-annotation-snapshot"]!(
-      { sender: {} },
-      {
-        activeDisplayNumber: 2,
-        activeBounds: { x: 790.9, y: 590.2, width: 100, height: 100 },
-        markers: [{ displayNumber: 2, bounds: { x: 790.9, y: 590.2, width: 100, height: 100 } }],
-      },
-    );
+  it("fails without writing a snapshot when scroll context cannot be captured", async () => {
+    captureTest.webContents.executeJavaScript.mockRejectedValueOnce(new Error("guest navigated"));
+    await expect(captureTest.ipcHandlers["preview:capture-annotation-snapshot"]!({ sender: {} }))
+      .resolves.toEqual({ ok: false, error: "capture-failed" });
+    expect(captureTest.webContents.capturePage).not.toHaveBeenCalled();
+  });
 
-    expect(result).toMatchObject({ ok: true });
-    const overlayScript = captureTest.webContents.executeJavaScript.mock.calls[0]![0] as string;
-    expect(overlayScript).toContain('"activeBounds":{"x":790,"y":590,"width":10,"height":10}');
-    expect(captureTest.webContents.capturePage).toHaveBeenCalledWith();
+  it("rejects empty PNG bytes", async () => {
+    captureTest.webContents.capturePage.mockResolvedValueOnce(captureImage(""));
+    await expect(captureTest.ipcHandlers["preview:capture-annotation-snapshot"]!({ sender: {} }))
+      .resolves.toEqual({ ok: false, error: "empty-capture" });
   });
 });
 

@@ -96,9 +96,6 @@ export function useComposerSurfaceState(input: ComposerSurfaceStateInput) {
   }, [connected, input.threadId]);
   const ridingPlanComments = usePlanCommentChip(planCommentThreadFor(input));
   const annotationCount = previewAnnotationCount + codeComments.length + ridingPlanComments.length;
-  const annotationBundleForDisplay = annotationScopeId
-    ? usePreviewAnnotationStore.getState().buildBundle(annotationScopeId)
-    : undefined;
   const effectiveProviderId = input.provider as ProviderId;
   const providerSurfaceState = useProviderSurfaceState(effectiveProviderId);
   const catalogScope = useCatalogScope(input);
@@ -110,7 +107,6 @@ export function useComposerSurfaceState(input: ComposerSurfaceStateInput) {
 
   return {
     annotationScopeId,
-    annotationBundleForDisplay,
     codeCommentsForDisplay: codeComments,
     ...catalogScope,
     ...composerLocks,

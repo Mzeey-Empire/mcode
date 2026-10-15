@@ -3,6 +3,7 @@ import { useToastStore } from "@/stores/toastStore";
 import type { ComposerFormController } from "../draft/useComposerFormController";
 import { readVisibleDiffComments } from "../draft/draft-diff-comments";
 import { readVisibleFileComments } from "../draft/draft-file-comments";
+import { flushPageSnapshots } from "@/features/preview/notes/previewNoteSnapshots";
 import { readPlanCommentIdsForSend } from "../draft/sendable-plan-comments";
 import { buildComposerAnnotationBundle } from "./composer-annotations";
 import { createComposerSubmission } from "./composer-submission";
@@ -30,15 +31,7 @@ export async function prepareComposerSubmission({
   discardEmptyEdit,
   resolvePreviewAnnotations,
 }: PrepareComposerSubmissionOptions): Promise<PreparedComposerSubmission | null> {
-  if (await form.attachmentBindings.awaitPreparation()) return null;
-  const editorDismissalAnnouncement = form.requestSelectedTextCommentEditorDismissal();
-  if (editorDismissalAnnouncement) {
-    useToastStore.getState().show({
-      kind: "failed",
-      title: editorDismissalAnnouncement,
-    });
-    return null;
-  }
+  if (!(await isReadyToSubmit(form, annotationScopeId))) return null;
 
   const snapshot = form.readSubmission();
   const currentDiffComments = annotationScopeId ? readVisibleDiffComments(annotationScopeId) : [];
@@ -81,6 +74,16 @@ export async function prepareComposerSubmission({
   }
 }
 
+async function isReadyToSubmit(form: ComposerFormController, annotationScopeId?: string): Promise<boolean> {
+  if (await form.attachmentBindings.awaitPreparation()) return false;
+  const editorDismissalAnnouncement = form.requestSelectedTextCommentEditorDismissal();
+  if (editorDismissalAnnouncement) {
+    useToastStore.getState().show({ kind: "failed", title: editorDismissalAnnouncement });
+    return false;
+  }
+  return !annotationScopeId || await settlePageSnapshots(annotationScopeId);
+}
+
 /** Determines whether a form snapshot has no message-bearing content. */
 function isEmptySubmission(
   rawInput: string,
@@ -95,10 +98,21 @@ function isEmptySubmission(
 }
 
 /** Displays a payload-normalization failure without mutating the current draft. */
-function showPreparationFailure(error: unknown): void {
+function showPreparationFailure(error: unknown, title = "Could not send message"): void {
   useToastStore.getState().show({
     kind: "failed",
-    title: "Could not send message",
+    title,
     meta: error instanceof Error ? error.message : "Invalid page preview payload",
   });
+}
+
+/** Redraws any stale page snapshot of a scope. Returns false, after a toast titled `failureTitle`, when one cannot be. */
+export async function settlePageSnapshots(scopeId: string, failureTitle?: string): Promise<boolean> {
+  try {
+    await flushPageSnapshots(scopeId);
+    return true;
+  } catch (error) {
+    showPreparationFailure(error, failureTitle);
+    return false;
+  }
 }

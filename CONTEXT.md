@@ -1172,16 +1172,18 @@ _Avoid_: treating draft annotations as sendable annotations
 The number on a Preview annotation marker. It counts from 1 on each page in
 creation order, so a page's markers never skip a number because of notes on
 other pages. Editing an annotation does not move it. The Annotation bundle
-still carries one thread-wide number per annotation.
+carries that per-page number, so two pages can each hold a note 1. A legacy v1
+bundle keeps the thread-wide numbers it was sent with.
 _Avoid_: treating the display number as the annotation identity
 
 ### Preview annotation snapshot
-A frozen full-viewport Preview capture associated with a Preview annotation
-when the user saves it. It preserves the page state the user saw, even if the
-live page later reloads or changes; editing and saving the annotation replaces
-its snapshot. It includes the annotation bubble and a highlight for the related
-page target.
-_Avoid_: keeping annotation snapshot revision history
+One marked screenshot per annotated page, not per annotation. It is the page's
+viewport as the user last saw it with every note on that page drawn on it, each
+box carrying that note's number. The Browser redraws it in the renderer after a
+note is added, edited or removed, so a removed note's number leaves the image
+without another capture. A page keeps one snapshot, replaced whenever the page
+gets a new note. Several notes on one page share it.
+_Avoid_: capturing a separate screenshot for each annotation
 
 ### Preview page identity
 The normalized page target used to decide where Preview annotations appear.
@@ -1194,22 +1196,26 @@ The saved Preview annotations waiting to be sent with the next user message.
 Each annotation is displayed only on its saved Preview page identity; the set
 remains available when Preview navigates elsewhere, Design mode exits, or the
 page refreshes. The Preview header can discard annotations for the current page
-identity; the whole set clears after the annotated message sends successfully.
+identity. The set clears after the annotated message sends successfully, and
+returns when that send fails, so a failed send never loses a note.
 _Avoid_: clearing saved annotations before send success
 
 ### Annotation bundle
-The composer item representing a Preview annotation set as one sendable unit.
-It may contain several snapshots underneath, but the user sees a single bundle.
-It is counted separately from normal composer attachments and is not an editing
-surface; saved annotations are edited from the Preview page where their marker
-is visible. Removing the bundle clears the saved Preview annotation set. There
-is no user-facing count limit for annotations in the bundle.
+The structured set of notes one message carries, with one Preview annotation
+snapshot per annotated page. In the composer it is the Browser notes tile, a
+single stack that shows the page annotated last and a stack edge when several
+pages have notes. Hovering the tile lists the notes grouped by page. A note
+opens its page in the Browser, and hovering a row reveals its remove control.
+Removing a note renumbers its page. Removing the tile drops every Browser note
+and leaves Review and Files comments in the bundle alone. A bundle written
+before page snapshots existed (schema version 1) still reads and renders from
+history. There is no user-facing count limit for annotations in the bundle.
 _Avoid_: showing each annotation snapshot as a separate composer attachment
 
 ### Annotation payload
 The structured information sent to the agent for an Annotation bundle. It pairs
 each Preview annotation with its display number, page context, target context,
-note text and snapshot. Historic messages may carry a generated change summary
+note text and snapshot. Bounds are in document pixels, and the page snapshot rides beside it. Historic messages may carry a generated change summary
 and style edits instead of note text.
 _Avoid_: relying on screenshots alone for annotation intent
 

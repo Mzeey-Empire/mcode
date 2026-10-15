@@ -3,7 +3,7 @@ import type {
   CanonicalSubagentStopRequest,
   WsMethodName,
 } from "@mcode/contracts";
-import { WS_METHODS } from "@mcode/contracts";
+import { toPreviewAnnotationBundleV2, WS_METHODS } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import * as NodePerfHooks from "node:perf_hooks";
 import type { z } from "zod";
@@ -146,9 +146,11 @@ const agentHandlers: AgentRpcHandlerMap = {
     const settleAdmission = registerMessageAdmission(params);
     const started = serverWorkTrace ? NodePerfHooks.performance.now() : 0;
     try {
+      const previewAnnotations = params.previewAnnotations && toPreviewAnnotationBundleV2(params.previewAnnotations);
       await sendAdmittedTurn(deps.agentService, {
         ...params,
-        content: appendPreviewAnnotations(params.content, params.previewAnnotations),
+        previewAnnotations,
+        content: appendPreviewAnnotations(params.content, previewAnnotations),
         displayContent: params.displayContent ?? params.content,
       });
     } finally {
@@ -179,9 +181,11 @@ const agentHandlers: AgentRpcHandlerMap = {
     deps.agentContinuation.continueWithoutSaving(params.executionId);
   },
   "agent.createAndSend": async (deps, params) => {
+    const previewAnnotations = params.previewAnnotations && toPreviewAnnotationBundleV2(params.previewAnnotations);
     const thread = await deps.agentService.createAndSend({
       ...params,
-      content: appendPreviewAnnotations(params.content, params.previewAnnotations),
+      previewAnnotations,
+      content: appendPreviewAnnotations(params.content, previewAnnotations),
       displayContent: params.displayContent ?? params.content,
     });
     watchReturnedThreadWorktree(deps, thread);

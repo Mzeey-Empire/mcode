@@ -46,9 +46,9 @@ function formStub(): ComposerQueueEditForm {
   };
 }
 
-function setup() {
+function setup(settle: () => Promise<boolean> = async () => true) {
   const form = formStub();
-  const annotations = { restore: vi.fn(), clear: vi.fn() };
+  const annotations = { restore: vi.fn(), clear: vi.fn(), settle: vi.fn(settle) };
   const hook = renderHook(() =>
     useComposerQueueEditing({ threadId: THREAD_ID, form, annotations }),
   );
@@ -100,5 +100,60 @@ describe("useComposerQueueEditing dispatch consumption", () => {
 
     expect(queuedContents()).toEqual(["queued original"]);
     expect(hook.result.current.editing).toBeNull();
+  });
+});
+
+describe("useComposerQueueEditing switching between queued messages", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useQueueStore.setState({
+      queues: {},
+      inFlightQueuedMessages: {},
+      editingThreadId: null,
+    });
+  });
+
+  it("settles page snapshots before it captures the edit being left", async () => {
+    const first = enqueue("first");
+    const second = enqueue("second");
+    const { hook, form, annotations } = setup();
+    act(() => hook.result.current.loadIntoComposer(first));
+
+    await act(async () => hook.result.current.loadIntoComposer(second));
+
+    expect(annotations.settle.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(form.capture).mock.invocationCallOrder[0]!,
+    );
+    expect(hook.result.current.editing?.messageId).toBe(second.id);
+    expect(queuedContents()).toEqual(["captured draft"]);
+  });
+
+  it("leaves both messages where they are when a page snapshot cannot settle", async () => {
+    const first = enqueue("first");
+    const second = enqueue("second");
+    const { hook, form } = setup(async () => false);
+    act(() => hook.result.current.loadIntoComposer(first));
+
+    await act(async () => hook.result.current.loadIntoComposer(second));
+
+    expect(form.capture).not.toHaveBeenCalled();
+    expect(hook.result.current.editing?.messageId).toBe(first.id);
+    expect(queuedContents()).toEqual(["second"]);
+  });
+
+  it("drops the switch when the edit is cancelled while snapshots settle", async () => {
+    const first = enqueue("first");
+    const second = enqueue("second");
+    let finish: (settled: boolean) => void = () => {};
+    const { hook, form } = setup(() => new Promise((resolve) => { finish = resolve; }));
+    act(() => hook.result.current.loadIntoComposer(first));
+    act(() => hook.result.current.loadIntoComposer(second));
+
+    act(() => hook.result.current.cancelEdit());
+    await act(async () => finish(true));
+
+    expect(form.capture).not.toHaveBeenCalled();
+    expect(hook.result.current.editing).toBeNull();
+    expect(queuedContents()).toEqual(["first", "second"]);
   });
 });

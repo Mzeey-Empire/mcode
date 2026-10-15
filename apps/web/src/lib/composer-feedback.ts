@@ -1,5 +1,6 @@
 import {
-  isPreviewAnnotationPayload,
+  isDiffAnnotationPayload,
+  isFileAnnotationPayload,
   type PreviewAnnotationBundle,
 } from "@mcode/contracts";
 
@@ -9,11 +10,10 @@ interface ComposerFeedbackCounts {
 }
 
 function feedbackCounts(bundle: PreviewAnnotationBundle): ComposerFeedbackCounts {
-  const annotations = bundle.annotations.filter(isPreviewAnnotationPayload).length;
-  return {
-    annotations,
-    comments: bundle.annotations.length - annotations,
-  };
+  const comments = bundle.annotations.filter(
+    (item) => isDiffAnnotationPayload(item) || isFileAnnotationPayload(item),
+  ).length;
+  return { annotations: bundle.annotations.length - comments, comments };
 }
 
 function countLabel(count: number, singular: string): string {

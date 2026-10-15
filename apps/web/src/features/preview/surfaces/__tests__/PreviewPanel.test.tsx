@@ -18,7 +18,8 @@ const {
   mockUsePreviewBridge,
   mockUsePreviewTabs,
   mockOnAddElementAnnotation,
-  mockCaptureAnnotationSnapshot,
+  mockCaptureCleanPage,
+  mockSchedulePageSnapshot,
   mockCaptureSuccess,
   mockGetProviderCatalog,
 } = vi.hoisted(() => ({
@@ -35,7 +36,8 @@ const {
     closeTab: vi.fn(),
   })),
   mockOnAddElementAnnotation: vi.fn(),
-  mockCaptureAnnotationSnapshot: vi.fn(),
+  mockCaptureCleanPage: vi.fn(),
+  mockSchedulePageSnapshot: vi.fn(),
   mockCaptureSuccess: {
     current: undefined as ((kind: "viewport" | "region" | "element") => void) | undefined,
   },
@@ -84,9 +86,13 @@ vi.mock("../../capture/usePreviewCapture", () => ({
       onToggleScreenshot: vi.fn(),
       onAddElementPickPictureReference: vi.fn(),
       onAddElementAnnotation: mockOnAddElementAnnotation,
-      captureAnnotationSnapshot: mockCaptureAnnotationSnapshot,
+      captureCleanPage: mockCaptureCleanPage,
     };
   },
+}));
+
+vi.mock("../../notes/previewNoteSnapshots", () => ({
+  schedulePageSnapshot: mockSchedulePageSnapshot,
 }));
 
 import {
@@ -256,6 +262,14 @@ function installSavedAnnotation(
   overrides: Record<string, unknown> = {},
 ) {
   const pageUrl = "https://example.com/product-preview?productCode=QUAELE2010";
+  const pageIdentity = (overrides.pageIdentity as string | undefined) ?? normalizePreviewPageIdentity(pageUrl);
+  usePreviewAnnotationStore.getState().setPageCapture("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
+    pageIdentity,
+    url: pageUrl,
+    title: "Example",
+    faviconUrl: null,
+    clean: null,
+  });
   usePreviewAnnotationStore.getState().saveAnnotation("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
     threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     pageIdentity: normalizePreviewPageIdentity(pageUrl),
@@ -272,22 +286,6 @@ function installSavedAnnotation(
       layoutViewport: { width: 800, height: 600 },
     },
     note: "Move this button",
-    snapshot: {
-      id: "capture-saved",
-      name: "Preview annotation",
-      mimeType: "image/png",
-      sizeBytes: 12,
-      sourcePath: "preview/capture-saved.png",
-      capture: {
-        schemaVersion: 2,
-        pageUrl,
-        pageTitle: "Example",
-        capturedAt: "2026-07-01T00:00:00.000Z",
-        captureKind: "element",
-        bounds: { x: 20, y: 24, width: 120, height: 32 },
-        layoutViewport: { width: 800, height: 600 },
-      },
-    },
     ...overrides,
   });
 }
@@ -707,12 +705,9 @@ describe("PreviewPanel: full panel state", () => {
     };
     mockOnAddElementAnnotation.mockResolvedValue({ ok: true });
     mockCaptureSuccess.current = undefined;
-    mockCaptureAnnotationSnapshot.mockResolvedValue({
-      id: "capture-1",
-      name: "Preview annotation 1",
-      mimeType: "image/png",
-      sizeBytes: 12,
-      sourcePath: "preview/capture-1.png",
+    mockCaptureCleanPage.mockResolvedValue({
+      bytes: new Uint8Array([1, 2, 3]),
+      scroll: { x: 0, y: 0 },
       capture: {
         schemaVersion: 2,
         pageUrl: "https://example.com",
@@ -724,7 +719,7 @@ describe("PreviewPanel: full panel state", () => {
       },
     });
     useSettingsStore.getState()._applyPush(getDefaultSettings());
-    usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
+    usePreviewAnnotationStore.setState({ byThread: {}, pages: {}, drafts: {} });
     usePreviewDesignModeStore.setState({ pickers: {} });
     usePreviewPageScrollStore.setState({ byTab: {} });
     usePreviewTabsStore.setState({ tabSetByScope: {}, liveChromeByScope: {}, persistentTabIdsByScope: {}, pendingNavErrorsByScope: {} });
@@ -746,7 +741,7 @@ describe("PreviewPanel: full panel state", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).desktopBridge = undefined;
     useSettingsStore.getState()._applyPush(getDefaultSettings());
-    usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
+    usePreviewAnnotationStore.setState({ byThread: {}, pages: {}, drafts: {} });
     usePreviewDesignModeStore.setState({ pickers: {} });
     usePreviewPageScrollStore.setState({ byTab: {} });
     usePreviewTabsStore.setState({ tabSetByScope: {}, liveChromeByScope: {}, persistentTabIdsByScope: {}, pendingNavErrorsByScope: {} });
@@ -755,7 +750,8 @@ describe("PreviewPanel: full panel state", () => {
     mockUsePreviewBridge.mockClear();
     mockUsePreviewTabs.mockClear();
     mockOnAddElementAnnotation.mockClear();
-    mockCaptureAnnotationSnapshot.mockClear();
+    mockCaptureCleanPage.mockClear();
+    mockSchedulePageSnapshot.mockClear();
   });
 
   it("renders the full panel when desktopBridge is present", () => {
@@ -2158,22 +2154,14 @@ describe("PreviewPanel: full panel state", () => {
         usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
       ).toHaveLength(1);
     });
-    expect(mockCaptureAnnotationSnapshot).toHaveBeenCalledWith({
-      activeDisplayNumber: 1,
-      activeBounds: { x: 20, y: 24, width: 120, height: 32 },
-      markers: [
-        {
-          displayNumber: 1,
-          bounds: { x: 20, y: 24, width: 120, height: 32 },
-        },
-      ],
-    });
+    expect(mockCaptureCleanPage).toHaveBeenCalledTimes(1);
+    expect(mockSchedulePageSnapshot).toHaveBeenCalledWith("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "");
     expect(
       usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]?.[0]?.note,
     ).toBe("Use stronger contrast");
   });
 
-  it("captures a new annotation with only its target highlighted and prior markers visible", async () => {
+  it("numbers a second note on the same page after the first and redraws that page", async () => {
     const pageUrl = "https://example.com/product-preview?productCode=QUAELE2010";
     mockUsePreviewBridge.mockReturnValue(
       mockBridgeState({
@@ -2209,21 +2197,14 @@ describe("PreviewPanel: full panel state", () => {
     fireEvent.keyDown(note, { key: "Enter", code: "Enter" });
 
     await waitFor(() => {
-      expect(mockCaptureAnnotationSnapshot).toHaveBeenCalledWith({
-        activeDisplayNumber: 2,
-        activeBounds: { x: 200, y: 120, width: 180, height: 44 },
-        markers: [
-          {
-            displayNumber: 1,
-            bounds: { x: 20, y: 24, width: 120, height: 32 },
-          },
-          {
-            displayNumber: 2,
-            bounds: { x: 200, y: 120, width: 180, height: 44 },
-          },
-        ],
-      });
+      expect(
+        usePreviewAnnotationStore.getState().byThread["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]?.map((note) => note.displayNumber),
+      ).toEqual([1, 2]);
     });
+    expect(mockSchedulePageSnapshot).toHaveBeenCalledWith(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      normalizePreviewPageIdentity(pageUrl),
+    );
   });
 
   it("saves and requests composer send when Ctrl+Enter is pressed", async () => {

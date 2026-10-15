@@ -7,6 +7,7 @@ import { Composer } from "../../Composer";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
   usePreviewAnnotationStore,
+  type PreviewPageRecord,
   type SavedPreviewAnnotation,
 } from "@/features/preview/state/previewAnnotationStore";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";
@@ -325,29 +326,56 @@ function makeSavedAnnotation(): SavedPreviewAnnotation {
       bounds: { x: 12, y: 16, width: 240, height: 80 },
     },
     note: "Make the content flush with the page edge.",
-    snapshot: {
+    createdAt: 1_783_036_800_000,
+  };
+}
+
+const PAGE_URL = "http://localhost:44354/product-preview";
+
+function makeMarkedPage(): PreviewPageRecord {
+  const capture = {
+    schemaVersion: 2 as const,
+    pageUrl: PAGE_URL,
+    pageTitle: "Product preview",
+    capturedAt: "2026-07-01T00:00:00.000Z",
+    bounds: { x: 0, y: 0, width: 1280, height: 720 },
+  };
+  return {
+    pageIdentity: PAGE_URL,
+    url: PAGE_URL,
+    title: "Product preview",
+    faviconUrl: null,
+    clean: null,
+    marked: {
       id: "shot-1",
       name: "annotation.png",
       mimeType: "image/png",
       sizeBytes: 128,
       sourcePath: "preview/annotation.png",
-      capture: {
-        schemaVersion: 2,
-        pageUrl: "http://localhost:44354/product-preview",
-        pageTitle: "Product preview",
-        capturedAt: "2026-07-01T00:00:00.000Z",
-        bounds: { x: 12, y: 16, width: 240, height: 80 },
-      },
+      capture,
+      scroll: { x: 0, y: 0 },
     },
-    createdAt: 1_783_036_800_000,
+    markedPng: null,
   };
+}
+
+function seedBrowserNotes(scopeId: string) {
+  usePreviewAnnotationStore.setState({
+    drafts: {},
+    byThread: { [scopeId]: [makeSavedAnnotation()] },
+    pages: { [scopeId]: { [PAGE_URL]: makeMarkedPage() } },
+  });
 }
 
 function makePreviewAnnotationBundle() {
   const { createdAt, ...annotation } = makeSavedAnnotation();
   void createdAt;
+  const { clean, marked, markedPng, ...page } = makeMarkedPage();
+  void clean;
+  void markedPng;
   return {
-    schemaVersion: 1 as const,
+    schemaVersion: 2 as const,
+    pages: [{ ...page, snapshot: marked! }],
     annotations: [annotation],
   };
 }
@@ -393,7 +421,7 @@ describe("Composer checkout confirmation", () => {
       toast: null,
       editingThreadId: null,
     });
-    usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
+    usePreviewAnnotationStore.setState({ byThread: {}, pages: {}, drafts: {} });
     usePreviewDesignModeStore.setState({ pickers: {} });
     useToastStore.setState({ toasts: [] });
     useWorkspaceStore.setState({
@@ -963,12 +991,7 @@ describe("Composer checkout confirmation", () => {
       selectedWorktree: null,
     });
     usePreviewDesignModeStore.getState().setActive(thread.id, true);
-    usePreviewAnnotationStore.setState({
-      drafts: {},
-      byThread: {
-        [thread.id]: [makeSavedAnnotation()],
-      },
-    });
+    seedBrowserNotes(thread.id);
     useComposerDraftStore.getState().updateNextMessage(thread.id, (draft) => ({
       ...draft,
       diffComments: [makeDraftDiffComment()],
@@ -977,8 +1000,8 @@ describe("Composer checkout confirmation", () => {
 
     render(<Composer threadId={thread.id} workspaceId="ws-1" />);
 
-    expect(screen.getByTestId("composer-annotation-bundle")).toHaveTextContent(
-      "1 annotation",
+    expect(screen.getByTestId("browser-notes-tile")).toHaveTextContent(
+      "Product preview · 1 note",
     );
     expect(screen.getByTestId("diff-comment-chip")).toHaveTextContent("1 comment");
     await userEvent.click(screen.getByLabelText("Send message"));
@@ -986,7 +1009,7 @@ describe("Composer checkout confirmation", () => {
     await waitFor(() => expect(mockTransport.sendMessage).toHaveBeenCalled());
     const sendCommand = (mockTransport.sendMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
     expect(sendCommand?.previewAnnotations).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       annotations: [
         { id: "550e8400-e29b-41d4-a716-446655440001" },
         {
@@ -1016,12 +1039,7 @@ describe("Composer checkout confirmation", () => {
       selectedWorktree: null,
     });
     usePreviewDesignModeStore.getState().setActive(thread.id, true);
-    usePreviewAnnotationStore.setState({
-      drafts: {},
-      byThread: {
-        [thread.id]: [makeSavedAnnotation()],
-      },
-    });
+    seedBrowserNotes(thread.id);
     useComposerDraftStore.getState().updateNextMessage(thread.id, (draft) => ({
       ...draft,
       diffComments: [makeDraftDiffComment()],
@@ -1038,7 +1056,7 @@ describe("Composer checkout confirmation", () => {
     await waitFor(() => expect(mockTransport.sendMessage).toHaveBeenCalled());
 
     expect(lastComposerText).toBe("");
-    expect(screen.queryByTestId("composer-annotation-bundle")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("browser-notes-tile")).not.toBeInTheDocument();
     expect(usePreviewAnnotationStore.getState().byThread[thread.id] ?? []).toEqual([]);
     expect(screen.queryByTestId("diff-comment-chip")).not.toBeInTheDocument();
     const sendCommand = (mockTransport.sendMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
@@ -1144,12 +1162,7 @@ describe("Composer checkout confirmation", () => {
       newThreadBranch: "main",
     });
     usePreviewDesignModeStore.getState().setActive("ws-1", true);
-    usePreviewAnnotationStore.setState({
-      drafts: {},
-      byThread: {
-        "ws-1": [makeSavedAnnotation()],
-      },
-    });
+    seedBrowserNotes("ws-1");
     useComposerDraftStore.getState().updateNextMessage("ws-1", (draft) => ({
       ...draft,
       diffComments: [makeDraftDiffComment()],
@@ -1157,8 +1170,8 @@ describe("Composer checkout confirmation", () => {
 
     render(<Composer isNewThread workspaceId="ws-1" />);
 
-    expect(screen.getByTestId("composer-annotation-bundle")).toHaveTextContent(
-      "1 annotation",
+    expect(screen.getByTestId("browser-notes-tile")).toHaveTextContent(
+      "Product preview · 1 note",
     );
     expect(screen.getByTestId("diff-comment-chip")).toHaveTextContent("1 comment");
     await userEvent.click(screen.getByLabelText("Send message"));
@@ -1168,7 +1181,7 @@ describe("Composer checkout confirmation", () => {
       mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>
     ).mock.calls.at(-1)?.[0];
     expect(createCommand?.previewAnnotations).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       annotations: [
         {
           id: "550e8400-e29b-41d4-a716-446655440001",
@@ -1199,12 +1212,7 @@ describe("Composer checkout confirmation", () => {
         handoffMeta: { status: "ready" },
       }),
     });
-    usePreviewAnnotationStore.setState({
-      drafts: {},
-      byThread: {
-        [thread.id]: [makeSavedAnnotation()],
-      },
-    });
+    seedBrowserNotes(thread.id);
     usePreviewDesignModeStore.getState().setActive(thread.id, true);
     (mockTransport.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 
@@ -1246,7 +1254,7 @@ describe("Composer checkout confirmation", () => {
     });
 
     await waitFor(() => expect(mockTransport.sendMessage).toHaveBeenCalled());
-    expect(screen.queryByTestId("composer-annotation-bundle")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("browser-notes-tile")).not.toBeInTheDocument();
     expect(screen.getByTestId("attachment-preview")).toBeEmptyDOMElement();
     expect(usePreviewAnnotationStore.getState().byThread[thread.id] ?? []).toEqual([]);
     expect(usePreviewDesignModeStore.getState().isActive(thread.id)).toBe(false);
@@ -1259,7 +1267,7 @@ describe("Composer checkout confirmation", () => {
       }),
     ]);
     expect(sendCommand?.previewAnnotations).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       annotations: [
         {
           id: "550e8400-e29b-41d4-a716-446655440001",
@@ -1345,7 +1353,7 @@ describe("Composer checkout confirmation", () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByLabelText("Edit Fix the preview"));
-    await user.click(screen.getByLabelText("Remove 1 annotation"));
+    await user.click(screen.getByLabelText("Remove Product preview · 1 note"));
     await user.type(screen.getByLabelText("Message Mcode"), "Fix the preview without annotations");
     await user.click(screen.getByLabelText("Queue message"));
 
@@ -1385,7 +1393,7 @@ describe("Composer checkout confirmation", () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByLabelText("Edit Fix the preview"));
-    await user.click(screen.getByLabelText("Remove 1 annotation"));
+    await user.click(screen.getByLabelText("Remove Product preview · 1 note"));
     await user.type(screen.getByLabelText("Message Mcode"), "Fix the preview without annotations");
     await user.click(screen.getByLabelText("Send message"));
 
@@ -1428,7 +1436,7 @@ describe("Composer checkout confirmation", () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByLabelText("Edit Message A"));
-    await user.click(screen.getByLabelText("Remove 1 annotation"));
+    await user.click(screen.getByLabelText("Remove Product preview · 1 note"));
     await user.type(screen.getByLabelText("Message Mcode"), "Message A edited");
     await user.click(screen.getByLabelText("Edit Message B"));
 
@@ -1468,7 +1476,7 @@ describe("Composer checkout confirmation", () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /^Edit\s*$/ }));
-    await user.click(screen.getByLabelText("Remove 1 annotation"));
+    await user.click(screen.getByLabelText("Remove Product preview · 1 note"));
     await user.click(screen.getByLabelText("Send message"));
 
     await waitFor(() => {
@@ -1504,8 +1512,8 @@ describe("Composer checkout confirmation", () => {
 
     await userEvent.click(screen.getByLabelText("Edit Fix the preview"));
 
-    expect(screen.getByTestId("composer-annotation-bundle")).toHaveTextContent(
-      "1 annotation",
+    expect(screen.getByTestId("browser-notes-tile")).toHaveTextContent(
+      "Product preview · 1 note",
     );
     expect(usePreviewAnnotationStore.getState().byThread[thread.id]).toMatchObject([
       {

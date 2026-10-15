@@ -20,26 +20,38 @@ export function createComposerAnnotationDispatchGuard(
 ): ComposerAnnotationDispatchGuard {
   if (!annotationScopeId || !annotations) return EMPTY_ANNOTATION_DISPATCH_GUARD;
 
-  let annotationsCleared = false;
+  let clearedNotes: ClearedNotes | undefined;
   let annotationsChangedAfterClear = false;
   const stopWatching = usePreviewAnnotationStore.subscribe((state, previousState) => {
-    if (annotationsCleared && annotationsChanged(state, previousState, annotationScopeId)) {
+    if (clearedNotes && annotationsChanged(state, previousState, annotationScopeId)) {
       annotationsChangedAfterClear = true;
     }
   });
 
   return {
     clearBeforeDispatch: () => {
-      usePreviewAnnotationStore.getState().clearThread(annotationScopeId);
+      const store = usePreviewAnnotationStore.getState();
+      const removed = {
+        notes: store.byThread[annotationScopeId] ?? [],
+        pages: store.pages[annotationScopeId] ?? {},
+      };
+      store.clearPreviewNotes(annotationScopeId);
+      clearedNotes = removed;
       usePreviewDesignModeStore.getState().setActive(annotationScopeId, false);
-      annotationsCleared = true;
     },
     restoreAfterFailure: () => {
       stopWatching();
-      if (!annotationsChangedAfterClear) restoreAnnotations(annotationScopeId, annotations);
+      if (clearedNotes && !annotationsChangedAfterClear) {
+        restoreAnnotations(annotationScopeId, annotations, clearedNotes);
+      }
     },
     stopWatching,
   };
+}
+
+interface ClearedNotes {
+  readonly notes: ReturnType<typeof usePreviewAnnotationStore.getState>["byThread"][string];
+  readonly pages: ReturnType<typeof usePreviewAnnotationStore.getState>["pages"][string];
 }
 
 const EMPTY_ANNOTATION_DISPATCH_GUARD: ComposerAnnotationDispatchGuard = {
@@ -54,17 +66,19 @@ function annotationsChanged(
   previousState: ReturnType<typeof usePreviewAnnotationStore.getState>,
   annotationScopeId: string,
 ): boolean {
-  return state.byThread[annotationScopeId] !== previousState.byThread[annotationScopeId];
+  return state.byThread[annotationScopeId] !== previousState.byThread[annotationScopeId]
+    || state.pages[annotationScopeId] !== previousState.pages[annotationScopeId];
 }
 
-/** Restores a failed dispatch's annotations and its associated design-mode state. */
 function restoreAnnotations(
   annotationScopeId: string,
   annotations: PreviewAnnotationBundle,
+  cleared: ClearedNotes,
 ): void {
-  const restored = usePreviewAnnotationStore
-    .getState()
-    .restoreBundle(annotationScopeId, annotations);
+  const store = usePreviewAnnotationStore.getState();
+  const restored = cleared.notes.length > 0
+    ? (store.reinstate(annotationScopeId, cleared.notes, cleared.pages), true)
+    : store.restoreBundle(annotationScopeId, annotations);
   usePreviewDesignModeStore
     .getState()
     .setActive(annotationScopeId, restored && annotations.annotations.length > 0);

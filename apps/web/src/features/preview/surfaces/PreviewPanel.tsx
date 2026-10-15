@@ -247,8 +247,6 @@ export function PreviewPanel({
     outsideWarned,
     bubbleNote,
     pageAnnotations,
-    savedAnnotations,
-    editingSavedAnnotation,
     setBubbleNote,
     bubbleFilePopup,
     handleBubbleMentionSelect,
@@ -456,8 +454,6 @@ export function PreviewPanel({
             setOutsideWarned={setOutsideWarned}
             capture={capture}
             pageAnnotations={pageAnnotations}
-            savedAnnotations={savedAnnotations}
-            editingSavedAnnotation={editingSavedAnnotation}
             threadId={threadId}
             editingAnnotationId={editingAnnotationId}
             setEditingAnnotationId={setEditingAnnotationId}

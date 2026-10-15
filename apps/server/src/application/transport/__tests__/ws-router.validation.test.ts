@@ -743,7 +743,18 @@ describe("routeMessage agent commands", () => {
     ],
   };
 
-  it("augments an existing-thread command while preserving its display content and annotations", async () => {
+  const legacyNote = previewAnnotations.annotations[0]!;
+  const { snapshot, ...browserNote } = legacyNote;
+  const v2Annotations = {
+    schemaVersion: 2,
+    pages: [{ pageIdentity: capture.pageUrl, url: capture.pageUrl, title: "Product", faviconUrl: null,
+      snapshot: { ...snapshot, scroll: { x: 0, y: 0 } } }],
+    annotations: [browserNote, previewAnnotations.annotations[1]],
+  };
+  const { sourcePath: _sourcePath, name: _name, ...promptSnapshot } = v2Annotations.pages[0]!.snapshot;
+  const promptAnnotations = { ...v2Annotations, pages: [{ ...v2Annotations.pages[0], snapshot: promptSnapshot }] };
+
+  it.each([previewAnnotations, v2Annotations])("augments existing-thread commands with v2 JSON while accepting either input version", async (inputBundle) => {
     const sendMessage = vi.fn().mockResolvedValue(undefined);
     const deps = { agentService: { sendMessage } } as unknown as RouterDeps;
 
@@ -760,7 +771,7 @@ describe("routeMessage agent commands", () => {
           interactionMode: "build",
           permissionMode: "full",
           thinking: false,
-          previewAnnotations,
+          previewAnnotations: inputBundle,
         },
       }),
       deps,
@@ -769,20 +780,19 @@ describe("routeMessage agent commands", () => {
     expect(response.error).toBeUndefined();
     expect(sendMessage).toHaveBeenCalledWith({
       threadId: "thread-1",
-      content: `Inspect this change
-
-<!-- mcode-preview-annotations:v1
-${JSON.stringify(previewAnnotations)}
-mcode-preview-annotations:end -->`,
+      content: expect.stringMatching(/^Inspect this change\n\n<!-- mcode-preview-annotations:v2\n/),
       displayContent: "Inspect the highlighted button",
       model: "gpt-5",
       provider: "codex",
       interactionMode: "build",
       permissionMode: "full",
       thinking: false,
-      previewAnnotations,
+      previewAnnotations: v2Annotations,
       onAdmissionComplete: expect.any(Function),
     });
+    const promptLines = sendMessage.mock.calls[0]?.[0].content.split("\n");
+    expect(JSON.parse(promptLines[3])).toEqual(promptAnnotations);
+    expect(promptLines[4]).toBe("mcode-preview-annotations:end -->");
     const stagingId = "00000000-0000-4000-8000-000000000003";
     sendMessage.mockRejectedValueOnce(new DraftImageMissingError(stagingId));
     const failure = await routeMessage(JSON.stringify({
@@ -795,7 +805,7 @@ mcode-preview-annotations:end -->`,
     });
   });
 
-  it("augments a new-thread command while falling back to raw display content", async () => {
+  it.each([previewAnnotations, v2Annotations])("augments new-thread commands with v2 JSON while accepting either input version", async (inputBundle) => {
     const createAndSend = vi.fn().mockResolvedValue({
       id: "thread-2",
       mode: "direct",
@@ -813,7 +823,7 @@ mcode-preview-annotations:end -->`,
           model: "gpt-5",
           provider: "codex",
           mode: "direct",
-          previewAnnotations,
+          previewAnnotations: inputBundle,
         },
       }),
       deps,
@@ -822,17 +832,16 @@ mcode-preview-annotations:end -->`,
     expect(response.error).toBeUndefined();
     expect(createAndSend).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
-      content: `Start here
-
-<!-- mcode-preview-annotations:v1
-${JSON.stringify(previewAnnotations)}
-mcode-preview-annotations:end -->`,
+      content: expect.stringMatching(/^Start here\n\n<!-- mcode-preview-annotations:v2\n/),
       displayContent: "Start here",
       model: "gpt-5",
       provider: "codex",
       mode: "direct",
-      previewAnnotations,
+      previewAnnotations: v2Annotations,
     });
+    const promptLines = createAndSend.mock.calls[0]?.[0].content.split("\n");
+    expect(JSON.parse(promptLines[3])).toEqual(promptAnnotations);
+    expect(promptLines[4]).toBe("mcode-preview-annotations:end -->");
   });
 });
 
