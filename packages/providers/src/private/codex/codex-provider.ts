@@ -1233,7 +1233,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private async prepareCodexTurn(request: TurnRequest<"codex">, signal: AbortSignal): Promise<PreparedCodexTurn | undefined> {
     const settings = await this.codexPorts.settings.get();
-    const nativePlan = await this.supportsNativePlanQuestions();
+    const nativePlan = this.mayUseCollaborationMode(request) && await this.supportsNativePlanQuestions();
     signal.throwIfAborted();
     if (request.resumeFrom !== undefined) this.sdkSessionIds.set(request.sessionId, request.resumeFrom);
     const threadId = this.threadIdForSession(request.sessionId);
@@ -1291,8 +1291,13 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     };
   }
 
+  /** Ordinary turns skip the version gate, so each send still checks the CLI exactly once. */
+  private mayUseCollaborationMode(request: TurnRequest<"codex">): boolean {
+    return Boolean(request.planTurn) || this.planModeSessions.has(request.sessionId);
+  }
+
   private codexCollaborationOptions(request: TurnRequest<"codex">, nativePlan: boolean): Pick<CodexTurnOptions, "collaborationMode" | "additionalContext"> {
-    if (!nativePlan || (!request.planTurn && !this.planModeSessions.has(request.sessionId))) return {};
+    if (!nativePlan || !this.mayUseCollaborationMode(request)) return {};
     return {
       collaborationMode: {
         mode: request.planTurn ? "plan" : "default",
@@ -3078,7 +3083,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * A stop before spawn prevents the staged turn from starting.
    */
   async stopSession(sessionId: string): Promise<void> {
-    await this.cancelPlanQuestions(sessionId);
+    if (this.planQuestions.hasPending(sessionId)) await this.cancelPlanQuestions(sessionId);
     const pending = this.pendingTurnRequests.get(sessionId);
     pending?.controller.abort();
     if (pending) this.releaseStagedCodexTurn(sessionId, pending.controller.signal);
@@ -3099,11 +3104,15 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       }
       this.runtime.recordUsage(sessionId);
     } else {
-      this.pendingSpawnTurns.delete(sessionId);
-      const stagedBrowser = this.pendingBrowserAccess.get(sessionId);
-      this.pendingBrowserAccess.delete(sessionId);
-      if (stagedBrowser) this.host.browser.release(stagedBrowser.stage.leaseId);
+      this.releaseUnspawnedStop(sessionId);
     }
+  }
+
+  private releaseUnspawnedStop(sessionId: string): void {
+    this.pendingSpawnTurns.delete(sessionId);
+    const stagedBrowser = this.pendingBrowserAccess.get(sessionId);
+    this.pendingBrowserAccess.delete(sessionId);
+    if (stagedBrowser) this.host.browser.release(stagedBrowser.stage.leaseId);
   }
 
   private async cancelPlanQuestions(sessionId: string): Promise<void> {
@@ -3157,7 +3166,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * leaving goals and pending permissions intact for the retry turn.
    */
   async discardSession(sessionId: string): Promise<void> {
-    await this.expireNativeQuestions(sessionId);
+    if (this.planQuestions.hasPending(sessionId)) await this.expireNativeQuestions(sessionId);
     if (this.runtime.get(sessionId) === undefined) return;
     await this.runtime.stop(sessionId);
   }
