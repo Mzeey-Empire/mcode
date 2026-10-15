@@ -282,4 +282,24 @@ describe("a queued Send owns the draft elements it carries", () => {
     expect(readVisibleDiffComments(THREAD_ID).map((comment) => comment.note)).toEqual(["Rename this"]);
     expect(readVisibleFileComments(THREAD_ID).map((comment) => comment.note)).toEqual(["Explain this render"]);
   });
+
+  it("does not thaw a cancelled edit's comments into the draft while the replacement carries them", async () => {
+    saveDraftDiffComment(THREAD_ID, diffTarget, { note: "Rename this", mentions: [] });
+    const { entry, composer } = await queueSend();
+    (mockTransport.sendMessage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("transport unavailable"));
+    await drainNext();
+    let answer: (result: { admitted: boolean }) => void = () => {};
+    (mockTransport.confirmMessage as ReturnType<typeof vi.fn>).mockReturnValue(new Promise((resolve) => { answer = resolve; }));
+
+    act(() => composer.result.current.queue.loadIntoComposer(queued()[0]!));
+    act(() => composer.result.current.queue.cancelEdit());
+    await act(async () => {
+      answer({ admitted: false });
+    });
+
+    expect(mockTransport.confirmMessage).toHaveBeenCalledWith(THREAD_ID, entry.id);
+    expect(queued()).toHaveLength(1);
+    expect(queued()[0]!.previewAnnotations?.annotations).toHaveLength(1);
+    await waitFor(() => expect(readVisibleDiffComments(THREAD_ID)).toEqual([]));
+  });
 });

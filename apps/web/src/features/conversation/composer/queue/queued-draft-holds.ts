@@ -1,8 +1,8 @@
 import type { PreviewAnnotationBundle } from "@mcode/contracts";
 import { useQueueStore, type QueuedMessage } from "@/stores/queueStore";
-import { readVisibleBrowserNotePages } from "../draft/draft-browser-notes";
-import { readVisibleDiffComments } from "../draft/draft-diff-comments";
-import { readVisibleFileComments } from "../draft/draft-file-comments";
+import { browserNoteElements, readVisibleBrowserNotePages, removeTakenBrowserNotePages } from "../draft/draft-browser-notes";
+import { readVisibleDiffComments, removeTakenDiffComments } from "../draft/draft-diff-comments";
+import { readVisibleFileComments, removeTakenFileComments } from "../draft/draft-file-comments";
 import type { FrozenDraftContent } from "../draft/draft-submission";
 import { beginDraftSubmission, type DraftSubmissionHandle } from "../draft/draft-submission-lifecycle";
 
@@ -15,6 +15,8 @@ interface QueuedDraftHold {
 
 /** Draft holds keyed by the id of the queue entry that owns them. */
 const holds = new Map<string, QueuedDraftHold>();
+/** Confirmations still asking the server whether a dropped, already dispatched entry was admitted. */
+const pendingConfirmations = new Set<Promise<void>>();
 let unsubscribe: (() => void) | null = null;
 
 type QueueSnapshot = Pick<
@@ -44,10 +46,15 @@ function releaseDroppedHolds(state: QueueSnapshot): void {
     }
     if (isQueued(state, hold.threadId, messageId)) continue;
     holds.delete(messageId);
-    if (hold.dispatched) void hold.handle.failed();
+    if (hold.dispatched) trackConfirmation(hold.handle.failed());
     else hold.handle.released();
   }
   if (holds.size === 0) stopWatching();
+}
+
+function trackConfirmation(confirmation: Promise<void>): void {
+  const tracked = confirmation.finally(() => pendingConfirmations.delete(tracked));
+  pendingConfirmations.add(tracked);
 }
 
 function startWatching(): void {
@@ -122,4 +129,23 @@ export function readDraftContentInBundle(
       .map((page) => ({ ...page, notes: page.notes.filter((note) => ids.has(note.id)) }))
       .filter((page) => page.notes.length > 0),
   };
+}
+
+/**
+ * Drops the draft copies of the elements a queued bundle carries once every pending admission
+ * check settles. An entry re-queued without a hold owns its bundle alone, but a check still
+ * running for the entry it replaced can thaw the same elements back into the draft, where a
+ * later Send would carry them a second time.
+ */
+export function dropDraftContentInBundleWhenSettled(
+  threadId: string,
+  bundle: PreviewAnnotationBundle | undefined,
+): void {
+  if (!bundle || pendingConfirmations.size === 0) return;
+  void Promise.allSettled(pendingConfirmations).then(() => {
+    const content = readDraftContentInBundle(threadId, bundle);
+    removeTakenBrowserNotePages(threadId, browserNoteElements(content.browserNotePages));
+    removeTakenDiffComments(threadId, content.diffComments);
+    removeTakenFileComments(threadId, content.fileComments);
+  });
 }
