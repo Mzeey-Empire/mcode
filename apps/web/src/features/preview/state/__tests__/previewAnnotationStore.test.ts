@@ -284,4 +284,33 @@ describe("previewAnnotationStore", () => {
     expect(restored).toBe(true);
     expect(store().getThreadAnnotations("thread-1").map((row) => row.id)).toEqual([preview.id]);
   });
+
+  it("restores a scrolled v1 note at document coordinates, keeping its sent number", () => {
+    usePreviewAnnotationStore.setState({ byThread: {}, pages: {}, drafts: {} });
+    const scrolledCapture = { ...capture, viewportScroll: { scrollX: 15, scrollY: 300 } };
+
+    store().restoreBundle("thread-1", {
+      schemaVersion: 1,
+      annotations: [{
+        id: "00000000-0000-4000-8000-000000000009",
+        displayNumber: 4,
+        pageIdentity: PAGE,
+        pageContext: scrolledCapture,
+        targetContext: { label: "button.buy", selectorHint: "button.buy", bounds: capture.bounds },
+        note: "Legacy note",
+        snapshot: {
+          id: "snap-legacy",
+          name: "legacy.png",
+          mimeType: "image/png",
+          sizeBytes: 10,
+          sourcePath: "C:/tmp/legacy.png",
+          capture: scrolledCapture,
+        },
+      }],
+    });
+
+    const [restored] = store().getThreadAnnotations("thread-1");
+    expect(restored?.displayNumber).toBe(4);
+    expect(restored?.targetContext.bounds).toEqual({ x: 25, y: 320, width: 100, height: 40 });
+  });
 });

@@ -95,6 +95,25 @@ describe("page snapshot redraws", () => {
     expect(page()?.marked).not.toBeNull();
   });
 
+  it("flush waits for the redraw that replaces one an edit overtook", async () => {
+    const first = store().saveAnnotation(threadId, draft(threadId, { note: "A" }));
+    const second = store().saveAnnotation(threadId, draft(threadId, { note: "B" }));
+    store().saveAnnotation(threadId, draft(threadId, { note: "C" }));
+    let release: (file: SavedFile) => void = () => {};
+    saveClipboardFile.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    removePreviewNote(threadId, first.id);
+    const flushed = flushPageSnapshots(threadId);
+    await vi.advanceTimersByTimeAsync(0);
+
+    removePreviewNote(threadId, second.id);
+    release(savedFile("C:/tmp/stale.png"));
+    await flushed;
+
+    expect(mockRender).toHaveBeenCalledTimes(2);
+    expect(mockRender.mock.calls[1]?.[1]).toHaveLength(1);
+    expect(page()?.marked?.sourcePath).toBe("C:/tmp/redrawn.png");
+  });
+
   it("flush rejects when a stale page has no clean screenshot to redraw from", async () => {
     store().saveAnnotation(threadId, draft(threadId, { note: "A" }));
     store().saveAnnotation(threadId, draft(threadId, { note: "B" }));

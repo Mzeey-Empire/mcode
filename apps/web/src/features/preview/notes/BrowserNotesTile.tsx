@@ -1,4 +1,4 @@
-import { useCallback, useId, useMemo } from "react";
+import { useCallback, useId, useMemo, useState } from "react";
 import { MousePointer2, X } from "lucide-react";
 import { normalizePreviewPageIdentity } from "@mcode/shared/browser-page-identity";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -125,6 +125,7 @@ function StackEdge() {
  */
 export function BrowserNotesTile({ scopeId, workspaceId, threadId, onRemoveAll }: BrowserNotesTileProps) {
   const cardId = useId();
+  const [open, setOpen] = useState(false);
   const notes = usePreviewAnnotationStore((state) => state.byThread[scopeId]);
   const pages = usePreviewAnnotationStore((state) => state.pages[scopeId]);
   const groups = useMemo(() => groupBrowserNotes(notes ?? [], pages ?? {}), [notes, pages]);
@@ -135,7 +136,7 @@ export function BrowserNotesTile({ scopeId, workspaceId, threadId, onRemoveAll }
 
   return (
     <section aria-label="Browser notes" className="px-3 pt-2" data-testid="browser-notes-tile">
-      <Popover>
+      <Popover open={open} onOpenChange={setOpen}>
         <div className="group/tile relative h-[144px] w-[188px]">
           {groups.length > 1 ? <StackEdge /> : null}
           <PopoverTrigger
@@ -144,6 +145,9 @@ export function BrowserNotesTile({ scopeId, workspaceId, threadId, onRemoveAll }
             closeDelay={100}
             aria-label={`${label}. Notes available.`}
             aria-controls={cardId}
+            onFocus={(event) => {
+              if (event.currentTarget.matches(":focus-visible")) setOpen(true);
+            }}
             onClick={() => revealNotePage(workspaceId, scopeId, threadId, front.page)}
             className="absolute bottom-0 left-0 flex h-[132px] w-[176px] flex-col overflow-clip rounded-lg border border-border bg-panel text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
@@ -157,9 +161,9 @@ export function BrowserNotesTile({ scopeId, workspaceId, threadId, onRemoveAll }
             type="button"
             aria-label={`Remove ${label}`}
             onClick={onRemoveAll}
-            className="pointer-events-none absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-selected text-ink opacity-0 transition-opacity duration-150 focus-visible:pointer-events-auto focus-visible:opacity-100 group-focus-within/tile:pointer-events-auto group-focus-within/tile:opacity-100 group-hover/tile:pointer-events-auto group-hover/tile:opacity-100 motion-reduce:transition-none"
+            className="pointer-events-none absolute right-1 top-1 flex size-8 items-center justify-center rounded-full bg-selected text-ink opacity-0 transition-opacity duration-150 focus-visible:pointer-events-auto focus-visible:opacity-100 group-focus-within/tile:pointer-events-auto group-focus-within/tile:opacity-100 group-hover/tile:pointer-events-auto group-hover/tile:opacity-100 motion-reduce:transition-none"
           >
-            <X size={12} aria-hidden />
+            <X size={16} aria-hidden />
           </button>
         </div>
         <PopoverContent
@@ -167,7 +171,7 @@ export function BrowserNotesTile({ scopeId, workspaceId, threadId, onRemoveAll }
           aria-label={`${label} notes`}
           side="top"
           align="start"
-          className="w-[340px] rounded-[14px] p-1.5"
+          className="max-h-(--available-height) w-[340px] overflow-y-auto rounded-[14px] p-1.5"
           data-testid="browser-notes-card"
         >
           {groups.map((group, index) => (
@@ -186,7 +190,10 @@ export function BrowserNotesTile({ scopeId, workspaceId, threadId, onRemoveAll }
                     page={group.page}
                     note={note}
                     onOpen={() => revealNotePage(workspaceId, scopeId, threadId, group.page)}
-                    onRemove={() => removePreviewNote(scopeId, note.id)}
+                    onRemove={() => {
+                      removePreviewNote(scopeId, note.id);
+                      if (usePreviewAnnotationStore.getState().byThread[scopeId]?.length === 0) onRemoveAll();
+                    }}
                   />
                 ))}
               </ul>

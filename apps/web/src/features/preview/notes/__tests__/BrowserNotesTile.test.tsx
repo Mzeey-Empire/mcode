@@ -92,6 +92,39 @@ describe("BrowserNotesTile", () => {
     expect(mockSchedule).toHaveBeenCalledWith(SCOPE, first.pageIdentity);
   });
 
+  it("removing the last row clears the queued-bundle fallback like the tile remove does", async () => {
+    store().saveAnnotation(SCOPE, draft(SCOPE, { note: "Only note" }));
+    const onRemoveAll = vi.fn();
+    renderTile(onRemoveAll);
+    await openHoverCard();
+
+    await userEvent.click(screen.getByRole("button", { name: "Remove note 1 on Product" }));
+
+    expect(onRemoveAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the tile's remove callback for rows that leave notes behind", async () => {
+    store().saveAnnotation(SCOPE, draft(SCOPE, { note: "One" }));
+    store().saveAnnotation(SCOPE, draft(SCOPE, { note: "Two" }));
+    const onRemoveAll = vi.fn();
+    renderTile(onRemoveAll);
+    await openHoverCard();
+
+    await userEvent.click(screen.getByRole("button", { name: "Remove note 1 on Product" }));
+
+    expect(onRemoveAll).not.toHaveBeenCalled();
+  });
+
+  it("opens the notes card when the tile takes keyboard focus", async () => {
+    store().saveAnnotation(SCOPE, draft(SCOPE, { note: "Keyboard note" }));
+    renderTile();
+
+    await userEvent.tab();
+
+    expect(await screen.findByTestId("browser-notes-card")).toBeInTheDocument();
+    expect(screen.getByText("Keyboard note")).toBeInTheDocument();
+  });
+
   it("removing the notes tile keeps Review comments", async () => {
     saveDraftDiffComment(SCOPE, {
       filePath: "apps/web/src/App.tsx",

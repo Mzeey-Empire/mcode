@@ -66,23 +66,31 @@ export function schedulePageSnapshot(threadId: string, pageIdentity: string): vo
   }, PAGE_SNAPSHOT_DEBOUNCE_MS));
 }
 
+function pendingRedraw(threadId: string, pageIdentity: string): Promise<void> | undefined {
+  const key = keyOf(threadId, pageIdentity);
+  if (timers.has(key)) {
+    clearTimeout(timers.get(key));
+    timers.delete(key);
+    return startRedraw(threadId, pageIdentity);
+  }
+  const running = inflight.get(key);
+  if (running) return running;
+  const store = usePreviewAnnotationStore.getState();
+  const unmarked = store.pages[threadId]?.[pageIdentity]?.marked === null
+    && store.getPageAnnotations(threadId, pageIdentity).length > 0;
+  return unmarked ? startRedraw(threadId, pageIdentity) : undefined;
+}
+
 /**
  * Settles every page of a thread so each has a marked image that matches its notes. Rejects
- * with the first page that cannot be redrawn, so Send never carries a stale number.
+ * with the first page that cannot be redrawn, so Send never carries a stale number. A redraw
+ * that an edit supersedes mid-save leaves its replacement pending, so each page loops until none is.
  */
 export async function flushPageSnapshots(threadId: string): Promise<void> {
   const pages = Object.values(usePreviewAnnotationStore.getState().pages[threadId] ?? {});
   await Promise.all(pages.map(async ({ pageIdentity }) => {
-    const key = keyOf(threadId, pageIdentity);
-    if (timers.has(key)) {
-      clearTimeout(timers.get(key));
-      timers.delete(key);
-      await startRedraw(threadId, pageIdentity);
-      return;
+    for (let pending = pendingRedraw(threadId, pageIdentity); pending; pending = pendingRedraw(threadId, pageIdentity)) {
+      await pending;
     }
-    const running = inflight.get(key);
-    if (running) await running.catch(() => {});
-    const page = usePreviewAnnotationStore.getState().pages[threadId]?.[pageIdentity];
-    if (page && !page.marked) await startRedraw(threadId, pageIdentity);
   }));
 }

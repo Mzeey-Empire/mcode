@@ -6,7 +6,11 @@ import type {
   PreviewAnnotationPage,
   PreviewAnnotationPayloadV2,
 } from "@mcode/contracts";
-import { PreviewAnnotationBundleSchema, readPreviewAnnotationBundle } from "@mcode/contracts";
+import {
+  PreviewAnnotationBundleSchema,
+  readPreviewAnnotationBundle,
+  toPreviewAnnotationBundleV2,
+} from "@mcode/contracts";
 
 /** The outbound shape; v1 bundles only arrive from history. */
 export type PreviewAnnotationBundleV2 = Extract<PreviewAnnotationBundle, { schemaVersion: 2 }>;
@@ -256,7 +260,8 @@ export const usePreviewAnnotationStore = create<PreviewAnnotationStore>((set, ge
       get().clearThread(threadId);
       return false;
     }
-    const view = readPreviewAnnotationBundle(parsed.data);
+    // v1 bounds are viewport coordinates; the store holds document coordinates.
+    const view = readPreviewAnnotationBundle(toPreviewAnnotationBundleV2(parsed.data));
     const baseCreatedAt = Date.now();
     const notes: SavedPreviewAnnotation[] = [];
     const pages: Record<string, PreviewPageRecord> = {};
