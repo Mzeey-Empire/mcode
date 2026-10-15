@@ -58,16 +58,25 @@ function fallbackPreviewAnnotations(original: QueuedMessage | null): PreviewAnno
   return original?.holdsDraftElements ? undefined : original?.previewAnnotations;
 }
 
-/** Re-queues a message and holds the draft elements its bundle carries under the new entry. */
+/**
+ * Re-queues a message and holds the draft elements its bundle carries under the new entry.
+ * When the user deleted some of them during the edit, the draft cannot hold the whole bundle,
+ * so the entry goes back without a hold and keeps the bundle, as a queued message always did.
+ */
 function requeueHoldingDraft(
   threadId: string,
   index: number,
   payload: Omit<QueuedMessage, "id" | "queuedAt">,
 ): boolean {
+  const content = readDraftContentInBundle(threadId, payload.previewAnnotations);
+  const held = content.diffComments.length
+    + content.fileComments.length
+    + content.browserNotePages.reduce((total, page) => total + page.notes.length, 0);
+  const complete = held === (payload.previewAnnotations?.annotations.length ?? 0);
   return queueHoldingDraftElements(
     threadId,
     payload,
-    readDraftContentInBundle(threadId, payload.previewAnnotations),
+    complete ? content : { diffComments: [], fileComments: [], browserNotePages: [] },
     index,
   );
 }

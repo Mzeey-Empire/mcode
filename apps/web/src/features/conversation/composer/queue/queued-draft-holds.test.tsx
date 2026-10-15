@@ -8,7 +8,7 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { createMockThread, mockTransport } from "@/__tests__/mocks/transport";
 import { seedPage, tickClockPerRead } from "@/features/preview/notes/__tests__/fixtures";
 import { readVisibleBrowserNotePages } from "../draft/draft-browser-notes";
-import { readVisibleDiffComments, saveDraftDiffComment } from "../draft/draft-diff-comments";
+import { deleteDraftDiffComment, readVisibleDiffComments, saveDraftDiffComment } from "../draft/draft-diff-comments";
 import { readVisibleFileComments, saveDraftFileComment } from "../draft/draft-file-comments";
 import { useComposerFormController } from "../draft/useComposerFormController";
 import type { ComposerExecutionTargetController } from "../execution/useComposerExecutionTarget";
@@ -170,7 +170,11 @@ describe("a queued Send owns the draft elements it carries", () => {
 
     expect(mockTransport.confirmMessage).toHaveBeenCalledWith(THREAD_ID, entry.id);
     expect(freshVisibleNotes(notes)).toEqual([]);
-    expect(notes.readVisibleBrowserNotePages(THREAD_ID)).toEqual([]);
+    // Hidden pending notes would also read as empty, so check that reconcile settled the submission.
+    const { useComposerDraftStore: freshStore } = await import("@/stores/composerDraftStore");
+    const stored = freshStore.getState().drafts[THREAD_ID];
+    expect(stored?.browserNotePages ?? []).toEqual([]);
+    expect(stored?.submissions ?? []).toEqual([]);
   });
 
   it("returns a Review comment after a reload when the queued message was never admitted", async () => {
@@ -256,5 +260,26 @@ describe("a queued Send owns the draft elements it carries", () => {
     expect(visibleNotes()).toEqual([]);
     act(() => useQueueStore.getState().removeFromQueue(THREAD_ID, requeued[0]!.id));
     expect(visibleNotes()).toEqual(["Make the button bigger"]);
+  });
+
+  it("cancelling an edit that deleted a comment brings the original back whole", async () => {
+    saveDraftDiffComment(THREAD_ID, diffTarget, { note: "Rename this", mentions: [] });
+    saveDraftFileComment(THREAD_ID, fileTarget, { note: "Explain this render", mentions: [] });
+    const { entry, composer } = await queueSend();
+    act(() => composer.result.current.queue.loadIntoComposer(entry));
+    deleteDraftDiffComment(THREAD_ID, readVisibleDiffComments(THREAD_ID)[0]!.id);
+
+    act(() => composer.result.current.queue.cancelEdit());
+
+    const [requeued] = queued();
+    expect(requeued!.previewAnnotations?.annotations).toHaveLength(2);
+    expect(requeued!.holdsDraftElements).toBeUndefined();
+    expect(readVisibleDiffComments(THREAD_ID)).toEqual([]);
+    expect(readVisibleFileComments(THREAD_ID)).toEqual([]);
+
+    act(() => composer.result.current.queue.loadIntoComposer(requeued!));
+
+    expect(readVisibleDiffComments(THREAD_ID).map((comment) => comment.note)).toEqual(["Rename this"]);
+    expect(readVisibleFileComments(THREAD_ID).map((comment) => comment.note)).toEqual(["Explain this render"]);
   });
 });
