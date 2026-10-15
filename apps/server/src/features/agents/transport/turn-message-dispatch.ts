@@ -43,17 +43,20 @@ export async function sendAdmittedTurn<Command extends AdmittableTurnCommand>(
   await Promise.race([admission, dispatch]);
 }
 
-/** Append provider-facing preview context while preserving the original display content. */
-export function appendPreviewAnnotations(content: string, previewAnnotations: PreviewAnnotationBundle | undefined): string {
-  if (!previewAnnotations || previewAnnotations.annotations.length === 0) return content;
-  if (content.includes(PREVIEW_ANNOTATION_FENCE_START)) return content;
-  const bundle = toPreviewAnnotationBundleV2(previewAnnotations);
-  // Admission persists these images before dispatch; providers receive the stored attachment names.
+/** The provider sees page metadata only. A snapshot's host path and file name stay on this machine. */
+function withoutLocalSnapshotPaths(bundle: ReturnType<typeof toPreviewAnnotationBundleV2>) {
   const pages = bundle.pages.map(({ snapshot, ...page }) => {
     const { sourcePath: _sourcePath, name: _name, ...metadata } = snapshot;
     return { ...page, snapshot: metadata };
   });
-  const serialized = JSON.stringify({ ...bundle, pages })
+  return { ...bundle, pages };
+}
+
+/** Append provider-facing preview context while preserving the original display content. */
+export function appendPreviewAnnotations(content: string, previewAnnotations: PreviewAnnotationBundle | undefined): string {
+  if (!previewAnnotations || previewAnnotations.annotations.length === 0) return content;
+  if (content.includes(PREVIEW_ANNOTATION_FENCE_START)) return content;
+  const serialized = JSON.stringify(withoutLocalSnapshotPaths(toPreviewAnnotationBundleV2(previewAnnotations)))
     .replaceAll("<", "\\u003c").replaceAll(">", "\\u003e").replaceAll("&", "\\u0026");
   return `${content.trim()}\n\n${PREVIEW_ANNOTATION_FENCE_START}\n${serialized}\n${PREVIEW_ANNOTATION_FENCE_END}`.trim();
 }
