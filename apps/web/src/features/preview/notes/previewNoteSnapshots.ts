@@ -25,6 +25,10 @@ function pageLabel(page: Pick<DraftBrowserNotePage, "title" | "url">): string {
   return page.title ?? page.url;
 }
 
+function noteSignature(page: Pick<DraftBrowserNotePage, "notes"> | undefined): string {
+  return (page?.notes ?? []).map((note) => `${note.id}:${note.revision}:${note.displayNumber}`).join(",");
+}
+
 async function redrawPage(threadId: string, pageIdentity: string): Promise<void> {
   const key = keyOf(threadId, pageIdentity);
   const generation = generations.get(key) ?? 0;
@@ -39,6 +43,9 @@ async function redrawPage(threadId: string, pageIdentity: string): Promise<void>
   );
   const snapshot = await stageDraftImage(threadId, marked, previewAnnotationPageSnapshotName(page));
   if (generations.get(key) !== generation) return;
+  // Clearing the tile edits notes without scheduling a redraw, so the notes drawn here may be gone.
+  const current = visiblePages(threadId).find((candidate) => candidate.pageIdentity === pageIdentity);
+  if (noteSignature(current) !== noteSignature(page)) return;
   setDraftBrowserPageSnapshot(threadId, pageIdentity, snapshot);
 }
 

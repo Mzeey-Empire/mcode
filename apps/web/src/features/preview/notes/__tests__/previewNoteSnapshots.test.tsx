@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StagedDraftImage } from "@mcode/contracts";
+import { freezeDraftSubmission, readSendableDraftContent } from "@/features/conversation/composer/draft/draft-submission";
 import {
   browserPagesToBundle,
+  clearVisibleBrowserNotes,
   readVisibleBrowserNotePages,
   removeTakenBrowserNotePages,
 } from "@/features/conversation/composer/draft/draft-browser-notes";
@@ -90,6 +92,25 @@ describe("page snapshot redraws", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(pageOf()?.snapshot).toBeNull();
+  });
+
+  it("discards a redraw whose notes were cleared from the tile while an earlier Send still holds the page", async () => {
+    addNotes(PRODUCT_PAGE, "Product", ["Sent"]);
+    await flushPageSnapshots(threadId);
+    useComposerDraftStore.getState().updateNextMessage(threadId, (draft) =>
+      freezeDraftSubmission(draft, "message-1", readSendableDraftContent(draft)).draft);
+    addNotes(PRODUCT_PAGE, "Product", ["Added after Send"]);
+    let release: (image: StagedDraftImage) => void = () => {};
+    mockStage.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    await vi.advanceTimersByTimeAsync(PAGE_SNAPSHOT_DEBOUNCE_MS);
+    const late = stagedImage("late.png");
+
+    clearVisibleBrowserNotes(threadId);
+    release(late);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const [page] = useComposerDraftStore.getState().drafts[threadId]!.browserNotePages!;
+    expect(page!.snapshot?.stagingId).not.toBe(late.stagingId);
   });
 
   it("flush redraws a pending page immediately so Send never carries a stale number", async () => {
