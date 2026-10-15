@@ -208,6 +208,14 @@ interface PreparedCommand {
 interface PersistedAttachmentData {
   readonly stored: readonly StoredAttachment[];
   readonly persisted: readonly AttachmentMeta[];
+  /** Staged draft images whose file already belonged to an earlier message. */
+  readonly reused?: readonly string[];
+}
+
+/** The copies this admission wrote. A reused draft image belongs to an admitted message and survives a rollback. */
+function ownCopies(data: PersistedAttachmentData): StoredAttachment[] {
+  const reused = new Set(data.reused);
+  return data.stored.filter((attachment) => !reused.has(attachment.id));
 }
 
 /** Owns complete message admission, durable parent-turn projection, and dispatch preparation. */
@@ -419,7 +427,7 @@ export class TurnAdmissionDispatchCoordinator {
 
   private async cleanupAutomaticDraftCopies(prepared: PreparedCommand): Promise<void> {
     if (prepared.command.stagedDraftImageIds?.length && prepared.automaticAttachments) {
-      await this.attachments.removeStoredAttachments(prepared.command.threadId, prepared.automaticAttachments.stored);
+      await this.attachments.removeStoredAttachments(prepared.command.threadId, ownCopies(prepared.automaticAttachments));
     }
   }
 
@@ -448,7 +456,7 @@ export class TurnAdmissionDispatchCoordinator {
       );
       return admission.queued ? { kind: "queued" } : { kind: "ready", attachments };
     } catch (error) {
-      await this.attachments.removeStoredAttachments(command.threadId, [...attachments.stored]);
+      await this.attachments.removeStoredAttachments(command.threadId, ownCopies(attachments));
       throw error;
     }
   }
@@ -502,7 +510,7 @@ export class TurnAdmissionDispatchCoordinator {
       };
     } catch (error) {
       if (command.stagedDraftImageIds?.length && automatic.attachments) {
-        await this.attachments.removeStoredAttachments(command.threadId, automatic.attachments.stored);
+        await this.attachments.removeStoredAttachments(command.threadId, ownCopies(automatic.attachments));
       }
       throw error;
     }
@@ -529,7 +537,7 @@ export class TurnAdmissionDispatchCoordinator {
       return await this.commitWithAttachments(prepared, lease, attachmentData, cwd, review);
     } catch (error) {
       if (prepared.command.stagedDraftImageIds?.length && !prepared.command.persistedUserMessage) {
-        await this.attachments.removeStoredAttachments(prepared.command.threadId, attachmentData.stored);
+        await this.attachments.removeStoredAttachments(prepared.command.threadId, ownCopies(attachmentData));
       }
       throw error;
     }
@@ -691,10 +699,10 @@ export class TurnAdmissionDispatchCoordinator {
         : {
           kind: "continue",
           attachments,
-          handledCommandAttachmentCleanup: attachments.stored,
+          handledCommandAttachmentCleanup: ownCopies(attachments),
         };
     } catch (error) {
-      await this.attachments.removeStoredAttachments(command.threadId, [...attachments.stored]);
+      await this.attachments.removeStoredAttachments(command.threadId, ownCopies(attachments));
       throw error;
     }
   }
@@ -734,7 +742,7 @@ export class TurnAdmissionDispatchCoordinator {
     if (!command.stagedDraftImageIds?.length) return persisted;
     try {
       const drafts = await this.attachments.persistDraftImages(command.threadId, command.stagedDraftImageIds);
-      return { stored: [...persisted.stored, ...drafts.stored], persisted: [...persisted.persisted, ...drafts.persisted] };
+      return { stored: [...persisted.stored, ...drafts.stored], persisted: [...persisted.persisted, ...drafts.persisted], reused: drafts.reused };
     } catch (error) {
       await this.attachments.removeStoredAttachments(command.threadId, persisted.stored);
       throw error;

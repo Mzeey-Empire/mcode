@@ -311,6 +311,21 @@ describe("draft image admission", () => {
     expect(staleWindow.stagingIds).toEqual([]);
   });
 
+  it("keeps an admitted message's image when a stale window resends it and that admission fails", async () => {
+    let fail = false;
+    const f = await fixture("codex", async () => { if (fail) throw new Error("Forced database commit failure"); });
+    const image = await f.stage();
+    const first = await f.send([image.stagingId]);
+    if (first.kind !== "dispatch") throw new Error("Expected admission");
+    const messageCopy = first.request.attachments?.[0]?.sourcePath;
+    if (!messageCopy) throw new Error("Expected message image path");
+    fail = true;
+
+    await expect(f.send([image.stagingId])).rejects.toThrow("Forced database commit failure");
+
+    expect(NodeFS.existsSync(messageCopy)).toBe(true);
+  });
+
   it.each(["codex", "claude", "cursor"] as const)("resolves diff-comment file mentions for %s", async (providerId) => {
     const f = await fixture(providerId);
     NodeFS.writeFileSync(NodePath.join(directory, "example.txt"), "literal file contents");

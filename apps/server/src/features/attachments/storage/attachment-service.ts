@@ -140,11 +140,16 @@ export class AttachmentService {
   /**
    * Copy leased draft images to message attachments, rolling back partial copies. The staging id is
    * the attachment id, so a copy that overwrote an admitted message's file is never rolled back.
+   * `reused` names the images whose file already existed; the caller must not delete those when its own admission fails.
    */
-  async persistDraftImages(threadId: string, stagingIds: readonly string[]): Promise<Awaited<ReturnType<AttachmentService["persist"]>>> {
+  async persistDraftImages(
+    threadId: string,
+    stagingIds: readonly string[],
+  ): Promise<Awaited<ReturnType<AttachmentService["persist"]>> & { readonly reused: readonly string[] }> {
     const stored: StoredAttachment[] = [];
     const persisted: AttachmentMeta[] = [];
     const created: StoredAttachment[] = [];
+    const reused: string[] = [];
     try {
       for (const stagingId of new Set(stagingIds)) {
         assertSafeId("staging ID", stagingId);
@@ -159,9 +164,10 @@ export class AttachmentService {
         });
         stored.push(...result.stored);
         persisted.push(...result.persisted);
-        if (!existed) created.push(...result.stored);
+        if (existed) reused.push(stagingId);
+        else created.push(...result.stored);
       }
-      return { stored, persisted };
+      return { stored, persisted, reused };
     } catch (error) {
       await this.removeStoredAttachments(threadId, created);
       throw error;

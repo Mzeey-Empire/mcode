@@ -103,6 +103,8 @@ export class WorkspaceService {
     const deleted = await this.threadDeletion.deletePersistentData(admitted.threadIds,
       () => this.writer.execute(projectLifecycleWriteOperations.finishWorkspaceDeletion, [id]));
     for (const threadId of deleted) this.attachmentService.removeForThread(threadId);
+    // Browser notes saved before a thread exists stage their images under the workspace id.
+    this.attachmentService.removeForThread(id);
     return true;
   }
 
@@ -119,6 +121,7 @@ export class WorkspaceService {
     const committed = await this.threadDeletion.deletePersistentData(threads.map((thread) => thread.id),
       () => this.writer.execute(projectLifecycleWriteOperations.forceDeleteWorkspace, [id]));
     for (const threadId of committed.threadIds) this.attachmentService.removeForThread(threadId);
+    if (committed.deleted) this.attachmentService.removeForThread(id);
     return committed.deleted;
   }
 
