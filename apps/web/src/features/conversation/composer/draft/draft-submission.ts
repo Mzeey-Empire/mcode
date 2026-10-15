@@ -1,5 +1,7 @@
 import type {
   DiffAnnotationPayload,
+  DraftBrowserNote,
+  DraftBrowserNotePage,
   DraftDiffComment,
   DraftElementField,
   DraftElementMeta,
@@ -7,6 +9,8 @@ import type {
   DraftSubmission,
   FileAnnotationPayload,
   MessageMention,
+  PreviewAnnotationPayloadV2,
+  StagedDraftImage,
 } from "@mcode/contracts";
 
 /**
@@ -15,6 +19,8 @@ import type {
  * what a Send freezes and what settling it leaves behind.
  */
 export interface NextMessageDraft {
+  /** Browser pages with their saved notes and staged captures. */
+  readonly browserNotePages?: readonly DraftBrowserNotePage[];
   /** Saved Review line comments, one element each. */
   readonly diffComments?: readonly DraftDiffComment[];
   /** Sends whose admission has not settled. */
@@ -41,6 +47,8 @@ export interface DiffCommentContent {
 
 /** What a Send carries, frozen at the moment of Send. */
 export interface FrozenDraftContent {
+  /** Pages narrowed to the notes this Send carries. */
+  readonly browserNotePages: readonly DraftBrowserNotePage[];
   readonly diffComments: readonly DraftDiffComment[];
   readonly fileComments: readonly DraftFileComment[];
 }
@@ -74,9 +82,93 @@ export function visibleFileComments(draft: NextMessageDraft): DraftFileComment[]
   return unheldElements(draft, "fileComments", draft.fileComments);
 }
 
+/**
+ * Pages a user can see and edit, narrowed to the notes no pending Send holds
+ * and numbered per page in creation order. A page whose notes are all held is
+ * not visible.
+ */
+export function visibleBrowserNotePages(draft: NextMessageDraft): DraftBrowserNotePage[] {
+  const held = heldRevisionKeys(draft);
+  return (draft.browserNotePages ?? []).flatMap((page) => {
+    const notes = page.notes
+      .filter((note) => !held.has(`browserNotePages:${note.id}:${note.revision}`))
+      .map((note, index) => ({ ...note, displayNumber: index + 1 }));
+    return notes.length > 0 ? [{ ...page, notes }] : [];
+  });
+}
+
+/** What a Browser page keeps besides its notes, taken when a note is saved. */
+export type BrowserPageCapture = Omit<DraftBrowserNotePage, "snapshot" | "notes">;
+
+/** A Browser note before the draft gives it an identity, revision and number. */
+export type BrowserNoteContent = Omit<PreviewAnnotationPayloadV2, "id" | "displayNumber">;
+
+function upsertNote(
+  notes: readonly DraftBrowserNote[],
+  content: BrowserNoteContent,
+  id: string | undefined,
+): DraftBrowserNote[] {
+  const existing = notes.find((candidate) => candidate.id === id);
+  if (!existing) {
+    return [...notes, { ...content, id: crypto.randomUUID(), revision: 1, displayNumber: notes.length + 1 }];
+  }
+  const edited = { ...content, id: existing.id, revision: existing.revision + 1, displayNumber: existing.displayNumber };
+  return notes.map((candidate) => (candidate === existing ? edited : candidate));
+}
+
+/**
+ * Saves a Browser note at revision 1, or writes the next revision of an
+ * existing one. Every save replaces the page's clean capture and voids its
+ * snapshot, so the next redraw shows the notes as they are now.
+ */
+export function saveBrowserNote<T extends NextMessageDraft>(
+  draft: T,
+  page: BrowserPageCapture,
+  content: BrowserNoteContent,
+  id?: string,
+): T {
+  const pages = draft.browserNotePages ?? [];
+  const current = pages.find((candidate) => candidate.pageIdentity === page.pageIdentity);
+  const saved: DraftBrowserNotePage = { ...page, snapshot: null, notes: upsertNote(current?.notes ?? [], content, id) };
+  return {
+    ...draft,
+    // The latest-annotated page goes last, so tile order follows when each page was touched.
+    browserNotePages: [...pages.filter((candidate) => candidate !== current), saved],
+  };
+}
+
+/** Drops this draft's reference to a Browser note and voids its page's snapshot. Staged files stay. */
+export function removeBrowserNote<T extends NextMessageDraft>(draft: T, id: string): T {
+  return {
+    ...draft,
+    browserNotePages: (draft.browserNotePages ?? []).flatMap((page) => {
+      if (!page.notes.some((note) => note.id === id)) return [page];
+      const notes = page.notes.filter((note) => note.id !== id);
+      return notes.length > 0 ? [{ ...page, snapshot: null, notes }] : [];
+    }),
+  };
+}
+
+/** Records the freshly drawn snapshot of a page, replacing the reference to the old one. */
+export function setBrowserPageSnapshot<T extends NextMessageDraft>(
+  draft: T,
+  pageIdentity: string,
+  snapshot: StagedDraftImage,
+): T {
+  return {
+    ...draft,
+    browserNotePages: (draft.browserNotePages ?? []).map((page) =>
+      page.pageIdentity === pageIdentity ? { ...page, snapshot } : page),
+  };
+}
+
 /** Reads what the next Send would carry now. */
 export function readSendableDraftContent(draft: NextMessageDraft): FrozenDraftContent {
-  return { diffComments: visibleDiffComments(draft), fileComments: visibleFileComments(draft) };
+  return {
+    browserNotePages: visibleBrowserNotePages(draft),
+    diffComments: visibleDiffComments(draft),
+    fileComments: visibleFileComments(draft),
+  };
 }
 
 /** Saves a new comment at revision 1, or writes the next revision of an existing one. */
@@ -165,8 +257,9 @@ export function freezeDraftSubmission<T extends NextMessageDraft>(
     elements: [
       ...submittedElements("diffComments", content.diffComments),
       ...submittedElements("fileComments", content.fileComments),
+      ...submittedElements("browserNotePages", content.browserNotePages.flatMap((page) => page.notes)),
     ],
-    stagingIds: [],
+    stagingIds: content.browserNotePages.flatMap((page) => (page.snapshot ? [page.snapshot.stagingId] : [])),
   };
   return { draft: { ...draft, submissions: [...(draft.submissions ?? []), submission] }, submission };
 }
@@ -183,6 +276,45 @@ export function keepEditorOfSentComment<E extends { readonly annotationId?: stri
 }
 
 /**
+ * On success drops the submitted notes still at their submitted revision. A
+ * page that now mixes sent-time and later notes renumbers and loses its
+ * snapshot, since the marks it shows no longer match its notes. A page left
+ * without notes goes away. A failed Send leaves a page alone unless notes
+ * were added to it meanwhile.
+ */
+function settleBrowserNotePages(
+  pages: readonly DraftBrowserNotePage[],
+  sent: ReadonlySet<string>,
+  outcome: "success" | "failure",
+): DraftBrowserNotePage[] {
+  return pages.flatMap((page) => {
+    const carried = page.notes.filter((note) => sent.has(`browserNotePages:${note.id}:${note.revision}`));
+    if (carried.length === 0) return [page];
+    if (outcome === "failure" && carried.length === page.notes.length) return [page];
+    const notes = outcome === "success" ? page.notes.filter((note) => !carried.includes(note)) : page.notes;
+    if (notes.length === 0) return [];
+    return [{
+      ...page,
+      snapshot: null,
+      notes: notes.map((note, index) => ({ ...note, displayNumber: index + 1 })),
+    }];
+  });
+}
+
+/**
+ * Removes Browser notes a queued message took with it, unless they were edited
+ * since; a later revision is a new note the message does not own.
+ */
+export function removeTakenBrowserNotes<T extends NextMessageDraft>(
+  draft: T,
+  taken: readonly DraftElementMeta[],
+): T {
+  if (taken.length === 0) return draft;
+  const keys = new Set(taken.map((note) => `browserNotePages:${note.id}:${note.revision}`));
+  return { ...draft, browserNotePages: settleBrowserNotePages(draft.browserNotePages ?? [], keys, "success") };
+}
+
+/**
  * Settles one Send. Success deletes each submitted element still at its
  * submitted revision and keeps newer revisions. Failure only drops the
  * submission, so every element returns with any later edits.
@@ -195,8 +327,9 @@ export function settleDraftSubmission<T extends NextMessageDraft>(
   const submission = draft.submissions?.find((candidate) => candidate.messageId === messageId);
   if (!submission) return draft;
   const submissions = (draft.submissions ?? []).filter((candidate) => candidate !== submission);
-  if (outcome === "failure") return { ...draft, submissions };
   const sent = new Set(submission.elements.map((element) => `${element.field}:${element.id}:${element.revision}`));
+  const browserNotePages = settleBrowserNotePages(draft.browserNotePages ?? [], sent, outcome);
+  if (outcome === "failure") return { ...draft, browserNotePages, submissions };
   const diffComments = (draft.diffComments ?? []).filter(
     (comment) => !sent.has(`diffComments:${comment.id}:${comment.revision}`),
   );
@@ -205,6 +338,7 @@ export function settleDraftSubmission<T extends NextMessageDraft>(
   );
   return {
     ...draft,
+    browserNotePages,
     diffComments,
     diffCommentEditor: keepEditorOfSentComment(draft.diffCommentEditor, diffComments),
     fileComments,
