@@ -14,6 +14,8 @@ import { claudeApprovalBody } from "./claude-approval.js";
 
 type ClaudeApprovalDecision = "allow" | "allow-session" | "deny" | "cancelled" | "auto-deny";
 import * as NodeFSPromises from "node:fs/promises";
+import * as NodeOS from "node:os";
+import { captureClaudePlanFileRef, isClaudePlanFilePath, isWritableClaudePlanPath, syncClaudePlanFile } from "../../plan/claude-plan-file.js";
 import { z } from "zod";
 import * as NodePath from "node:path";
 import which from "which";
@@ -58,6 +60,8 @@ import type {
   CompletionOptions,
   TurnSteerInput,
   TurnSteerOutcome,
+  NativePlanFileRef,
+  NativePlanFileOutcome,
 } from "@mcode/contracts";
 import { buildReasoningOptions } from "./build-reasoning-options.js";
 import { listClaudeModels } from "./list-models.js";
@@ -130,6 +134,7 @@ import {
  */
 const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-5";
 const claudeMcpServerSchema = z.instanceof(McpServer);
+const claudePlanWriteSchema = z.object({ file_path: z.string() });
 
 /** Max queued messages before push() warns and drops. */
 const MAX_QUEUE_DEPTH = 20;
@@ -164,11 +169,13 @@ interface ClaudeSessionState {
   model: string;
   /**
    * Permission mode the SDK subprocess was spawned with ("full" or "supervised").
-   * Compared against incoming requests; when it differs, the subprocess is torn
-   * down and a new one is spawned with the new mode because permissionMode is
-   * fixed at spawn in the Claude Agent SDK CLI.
+   * A full-access spawn enables later live switches back to bypassPermissions.
    */
   permissionMode: string;
+  planTurn: TurnRequest["planTurn"];
+  planCaptured: boolean;
+  planWrites: Map<string, string>;
+  planRoots: string[];
   /**
    * Context window mode the SDK subprocess was spawned with. The 1M window is
    * encoded into the model slug (`<id>[1m]`), so changing this between turns
@@ -424,6 +431,17 @@ function idlesWithUnansweredSteer(state: ClaudeStreamLoopState, message: Record<
     && message.state === "idle";
 }
 
+const PLAN_READ_ONLY_DENIED_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "Monitor", "EnterWorktree"]);
+const PLAN_FILE_EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit"]);
+
+/** Returns the denial message for a tool call a Plan turn must not run, or undefined when the call may proceed. Claude's own plan file stays writable so a Revise turn can patch it. */
+async function planMutationDenial(session: Pick<ClaudeSessionState, "planRoots" | "cwd">, toolName: string, input: Record<string, unknown>): Promise<string | undefined> {
+  if (!PLAN_READ_ONLY_DENIED_TOOLS.has(toolName)) return undefined;
+  if (PLAN_FILE_EDIT_TOOLS.has(toolName) && typeof input.file_path === "string"
+    && await isWritableClaudePlanPath(input.file_path, session.planRoots, session.cwd)) return undefined;
+  return "Plan mode is read-only. Describe the change in the plan instead.";
+}
+
 /** Convert a plain string message into an SDKUserMessage. */
 function toUserMessage(text: string, sessionId: string): SDKUserMessage {
   return {
@@ -501,6 +519,7 @@ const STDERR_CAPTURE_LIMIT = 8_000;
  * by sessionId. Mirrors the Codex provider's `pendingSpawnTurns`.
  */
 interface PendingSpawnTurn {
+  planTurn: TurnRequest["planTurn"];
   turnExecutionId: string;
   prompt: SDKUserMessage;
   /** Whether this spawn should resume an existing SDK session id. */
@@ -552,6 +571,7 @@ interface ClaudeSendMessageParams {
   /** The saved session must be resumed; a failed resume ends the turn instead of starting fresh. */
   resumeRequired: boolean;
   permissionMode: string;
+  planTurn?: TurnRequest["planTurn"];
   attachments?: AttachmentMeta[];
   reasoningLevel?: ReasoningLevel;
   orchestrationMode: OrchestrationMode;
@@ -709,8 +729,6 @@ export class ClaudeProvider
    * recreation so the handoff stays invisible in the narrative timeline.
    */
   private readonly suppressSessionStartHooks = new Set<string>();
-  /** Threads currently in plan-answer mode. ExitPlanMode is only captured for these. */
-  private planAnswerThreads = new Set<string>();
   /** Pending permission requests awaiting user decision, keyed by requestId. */
   private pendingPermissions = new Map<
     string,
@@ -805,6 +823,7 @@ export class ClaudeProvider
       resume: req.resumeFrom !== undefined,
       resumeRequired: req.resumeRequired === true,
       permissionMode: req.permissionMode,
+      planTurn: req.planTurn,
       attachments: req.attachments,
       reasoningLevel: req.reasoningLevel,
       orchestrationMode: req.orchestrationMode ?? "standard",
@@ -1184,8 +1203,14 @@ export class ClaudeProvider
   private createCanUseTool(threadId: string, spawnRouting?: ClaudeCanonicalEventRouting): CanUseTool {
     return async (toolName, input, options) => {
       try {
-        const planExit = this.handleExitPlanMode(threadId, toolName, input);
+        const planExit = await this.handleExitPlanMode(threadId, toolName, input);
         if (planExit) return planExit;
+        const session = this.runtime.get(`mcode-${threadId}`);
+        if (session?.planTurn) {
+          const denial = await this.denyPlanMutation(session, toolName, input);
+          if (denial) return denial;
+          options = { ...options, suggestions: options.suggestions?.filter(suggestion => suggestion.type !== "setMode") };
+        }
         const preGrant = this.consumeScopedReadGrant(threadId, toolName, input);
         if (preGrant) return preGrant;
         return await this.requestClaudeToolPermission(
@@ -1208,19 +1233,36 @@ export class ClaudeProvider
     };
   }
 
-  private handleExitPlanMode(
+  private async denyPlanMutation(
+    session: ClaudeSessionState,
+    toolName: string,
+    input: Record<string, unknown>,
+  ): Promise<ClaudeToolPermissionResult | undefined> {
+    const message = await planMutationDenial(session, toolName, input);
+    return message ? { behavior: "deny", message } : undefined;
+  }
+
+  private async handleExitPlanMode(
     threadId: string,
     toolName: string,
     input: Record<string, unknown>,
-  ): ClaudeToolPermissionResult | undefined {
+  ): Promise<ClaudeToolPermissionResult | undefined> {
     if (toolName !== "ExitPlanMode") return undefined;
-    if (!this.planAnswerThreads.has(threadId)) {
+    const session = this.runtime.get(`mcode-${threadId}`);
+    if (!session || !session.planTurn) {
       return {
         behavior: "deny" as const,
         message:
           "Plan mode is not active. Continue with the user's request normally.",
       };
     }
+    if (session.planTurn.kind === "questions") {
+      return {
+        behavior: "deny",
+        message: "This Plan turn only collects questions. Reply with the questions in text; do not call ExitPlanMode.",
+      };
+    }
+    if (session.planCaptured) return this.capturedPlanReply();
     const planMarkdown =
       typeof input.plan === "string" ? input.plan.trim() : "";
     if (planMarkdown.length > PLAN_MAX_CONTENT_CHARS) {
@@ -1236,17 +1278,32 @@ export class ClaudeProvider
         message: "No plan was received. Write the full plan inside the ````mcode-plan fence in your reply instead.",
       };
     }
-    this.planAnswerThreads.delete(threadId);
-    const routing = this.runtime.get(`mcode-${threadId}`)?.executionRouting;
-    if (routing) this.canonicalEventPublisher.capturePlan(routing, { markdown: planMarkdown, source: "native" });
-    else logger.warn("Native plan capture has no live execution", { threadId });
-    this.emit("plan_captured", { threadId, markdown: planMarkdown, source: "native" });
+    session.planCaptured = true;
+    const nativePlanFile = await this.captureClaudePlanFile(session, input.planFilePath);
+    const capture = { markdown: planMarkdown, source: "native" as const, ...(nativePlanFile && { nativePlanFile }) };
+    this.canonicalEventPublisher.capturePlan(session.executionRouting, capture);
+    this.emit("plan_captured", { threadId, ...capture });
+    return this.capturedPlanReply();
+  }
+
+  private capturedPlanReply(): ClaudeToolPermissionResult {
     // The plan record anchors to the turn's assistant message, so ask for the short summary the chat shows.
     return {
       behavior: "deny" as const,
       message:
         "The client captured your proposed plan. Reply with a one or two sentence summary of it, then stop and wait for the user to review it.",
     };
+  }
+
+  private async captureClaudePlanFile(session: ClaudeSessionState, path: unknown): Promise<NativePlanFileRef | undefined> {
+    const sessionId = this.sdkSessionIds.get(session.sessionId);
+    if (typeof path !== "string" || !sessionId || session.planWrites.get(path) !== sessionId) return undefined;
+    return await captureClaudePlanFileRef({ path, sessionId, roots: session.planRoots });
+  }
+
+  /** Reconcile a native file from the root its captured ref names, so the proof outlives this process. */
+  async prepareImplement(input: { threadId: string; markdown: string; nativePlanFile: NativePlanFileRef | null }): Promise<NativePlanFileOutcome> {
+    return await syncClaudePlanFile(input);
   }
 
   private consumeScopedReadGrant(
@@ -1462,6 +1519,8 @@ export class ClaudeProvider
     this.markClaudeSessionUsed(context.params.sessionId, existing);
     if (!(await this.reconfigureReusableClaudeSession(context, existing)))
       return "retry_fresh";
+    existing.planTurn = context.params.planTurn;
+    existing.planCaptured = false;
     await this.pushClaudeMessage(existing, context);
     return "handled";
   }
@@ -1525,7 +1584,29 @@ export class ClaudeProvider
   ): Promise<boolean> {
     if (!(await this.updateClaudeOrchestrationMode(context, existing)))
       return false;
-    return await this.updateClaudeSessionModel(context, existing);
+    if (!(await this.updateClaudeSessionModel(context, existing)))
+      return false;
+    return await this.updateClaudePermissionMode(context, existing);
+  }
+
+  private async updateClaudePermissionMode(
+    context: ClaudeTurnContext,
+    existing: ClaudeSessionState,
+  ): Promise<boolean> {
+    const mode = this.claudePermissionMode(context.params);
+    if (mode === this.claudePermissionMode(existing)) return true;
+    try {
+      await existing.query.setPermissionMode(mode);
+      return true;
+    } catch (error) {
+      logger.error("Permission mode change failed, recreating session", {
+        sessionId: context.params.sessionId,
+        permissionMode: mode,
+        error: sideChannelErrorMessage(error),
+      });
+      await this.stopClaudeSessionForRecreation(context.params.sessionId, context.threadId, existing);
+      return false;
+    }
   }
 
   private async updateClaudeOrchestrationMode(
@@ -1649,7 +1730,7 @@ export class ClaudeProvider
 
   private async createClaudeBaseOptions(
     context: ClaudeTurnContext,
-    permissionMode: "bypassPermissions" | "default",
+    permissionMode: "bypassPermissions" | "default" | "plan",
   ): Promise<Record<string, unknown>> {
     const bootstrap = await this.host.threadControl.bootstrap({ providerId: this.id, sessionId: context.params.sessionId, threadId: context.threadId, protocol: "claude" });
     const internalMcpServer = bootstrap == null ? null : claudeMcpServerSchema.parse(bootstrap);
@@ -1673,6 +1754,7 @@ export class ClaudeProvider
         : {},
       disallowedTools: ["EnterPlanMode", "AskUserQuestion"],
       permissionMode,
+      ...(context.params.permissionMode === "full" && { allowDangerouslySkipPermissions: true }),
       canUseTool: this.createCanUseTool(context.threadId, context.routing),
       ...buildReasoningOptions(
         context.params.reasoningLevel,
@@ -1702,8 +1784,37 @@ export class ClaudeProvider
       PostCompact: [{ hooks: [this.createPostCompactHook(context)] }],
       Stop: [{ hooks: [this.createGoalStopHook(context)] }],
       // Only hooks running inside a subagent report the effort it runs at, so read it from its tool calls and its stop.
-      PreToolUse: [{ hooks: [this.createSubagentEffortHook(context)] }],
+      // The plan guard runs here as well as in canUseTool because an allow rule from user or project settings approves a tool before canUseTool is asked.
+      PreToolUse: [{ hooks: [this.createPlanReadOnlyHook(context), this.createSubagentEffortHook(context)] }],
+      PostToolUse: [{ matcher: "Write|Edit|MultiEdit", hooks: [this.createPlanWriteHook(context)] }],
       SubagentStop: [{ hooks: [this.createSubagentEffortHook(context)] }],
+    };
+  }
+
+  private createPlanReadOnlyHook(context: ClaudeTurnContext) {
+    return async (input: HookInput) => {
+      if (input.hook_event_name !== "PreToolUse") return {};
+      const session = this.runtime.get(context.params.sessionId);
+      if (!session?.planTurn || session.spawnRouting !== context.routing) return {};
+      const toolInput = typeof input.tool_input === "object" && input.tool_input !== null
+        ? input.tool_input as Record<string, unknown> : {};
+      const reason = await planMutationDenial(session, input.tool_name, toolInput);
+      if (!reason) return {};
+      return { hookSpecificOutput: { hookEventName: "PreToolUse" as const, permissionDecision: "deny" as const, permissionDecisionReason: reason } };
+    };
+  }
+
+  private createPlanWriteHook(context: ClaudeTurnContext) {
+    return async (input: HookInput) => {
+      if (input.hook_event_name !== "PostToolUse" || !PLAN_FILE_EDIT_TOOLS.has(input.tool_name)) return {};
+      const write = claudePlanWriteSchema.safeParse(input.tool_input);
+      const session = this.runtime.get(context.params.sessionId);
+      if (session && session.spawnRouting === context.routing && write.success
+        && input.session_id === this.sdkSessionIds.get(session.sessionId)
+        && isClaudePlanFilePath(write.data.file_path, session.planRoots)) {
+        session.planWrites.set(write.data.file_path, input.session_id);
+      }
+      return {};
     };
   }
 
@@ -1761,6 +1872,7 @@ export class ClaudeProvider
       resolvedModel: context.model,
       contextWindowMode: context.params.contextWindowMode,
       orchestrationMode: context.params.orchestrationMode,
+      planTurn: context.params.planTurn,
     });
   }
 
@@ -1917,7 +2029,6 @@ export class ClaudeProvider
       message,
       cwd,
       model,
-      permissionMode,
       attachments,
       contextWindowMode,
     } = params;
@@ -1925,10 +2036,7 @@ export class ClaudeProvider
     const existing = this.runtime.get(sessionId);
     const { scope: browserScope, leaseExpired: browserLeaseExpired } =
       this.prepareClaudeBrowserReuseState(sessionId, existing);
-    const isBypass = permissionMode === "full";
-    const sdkPermissionMode = isBypass
-      ? ("bypassPermissions" as const)
-      : ("default" as const);
+    const sdkPermissionMode = this.claudePermissionMode(params);
     const uuid = sessionId.startsWith("mcode-")
       ? sessionId.slice(6)
       : sessionId;
@@ -1985,6 +2093,11 @@ export class ClaudeProvider
       );
     this.pendingSpawnTurns.delete(sessionId);
     return staged;
+  }
+
+  private claudePermissionMode(params: Pick<ClaudeSendMessageParams, "planTurn" | "permissionMode">): "plan" | "bypassPermissions" | "default" {
+    if (params.planTurn) return "plan";
+    return params.permissionMode === "full" ? "bypassPermissions" : "default";
   }
 
   private issueClaudeBrowserGrant(sessionId: string): ClaudeSpawnBrowserAccess {
@@ -2120,6 +2233,14 @@ export class ClaudeProvider
       closeQueue: queue.close,
       model: staged.resolvedModel,
       permissionMode: args.permissionMode,
+      planTurn: staged.planTurn,
+      planCaptured: false,
+      planWrites: new Map(),
+      // The CLI writes plans to the config home unless plansDirectory points into the project; track both roots.
+      planRoots: [
+        NodePath.join(args.cwd, ".claude", "plans"),
+        NodePath.resolve(args.env.CLAUDE_CONFIG_DIR || NodePath.join(NodeOS.homedir(), ".claude"), "plans"),
+      ],
       contextWindowMode: staged.contextWindowMode,
       orchestrationMode: staged.orchestrationMode,
       lastUsedAt: Date.now(),
@@ -2251,9 +2372,8 @@ export class ClaudeProvider
 
   /**
    * A pooled session must be discarded before reuse when its spawn-fixed
-   * parameters changed. permissionMode is fixed at SDK spawn (bypass vs.
-   * default), and contextWindowMode is encoded into the model slug at spawn,
-   * so either change forces a respawn. `doSendMessage` detects the same
+   * parameters changed. The access setting gates bypass and browser grants; plan mode
+   * switches on the live query. `doSendMessage` detects the same
    * mismatch and tears the session down explicitly (with `suppressEnded`)
    * before reaching `acquire`; this is the runtime-side backstop.
    */
@@ -3289,25 +3409,6 @@ export class ClaudeProvider
     return [...this.pendingPermissions.entries()].flatMap(([requestId, entry]) =>
       threadId === undefined || entry.threadId === threadId
         ? [{ requestId, threadId: entry.threadId, body: entry.body }] : []);
-  }
-
-  /**
-   * Toggle plan-answer mode for a thread. When enabled, the canUseTool
-   * callback captures ExitPlanMode calls instead of denying them.
-   * When disabled (or after capture), the model's ExitPlanMode calls
-   * are denied silently.
-   *
-   * Off-interface (like setGoal/clearGoal): no longer an IAgentProvider member;
-   * AgentService invokes it on the concrete ClaudeProvider via a cast. The
-   * question-vs-answer plan distinction cannot be carried by the binary
-   * TurnRequest.interactionMode, so this Claude-only arming stays explicit.
-   */
-  setPlanAnswerMode(threadId: string, enabled: boolean): void {
-    if (enabled) {
-      this.planAnswerThreads.add(threadId);
-    } else {
-      this.planAnswerThreads.delete(threadId);
-    }
   }
 
   /** Tear down all sessions and release resources. */

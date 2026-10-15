@@ -550,7 +550,7 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
   });
 
   it("retains native capture ownership only on the server", async () => {
-    const nativePlanFile = { path: NodePath.join(directory, "native-plan.md"), sessionId: "native-session", sha256: "a".repeat(64) };
+    const nativePlanFile = { path: NodePath.join(directory, "native-plan.md"), sessionId: "native-session", root: directory, sha256: "a".repeat(64) };
     await start("claude");
     await send(2, { kind: "event", phase: "running", nativeCursor: null,
       events: [{ ...event(1, "message", { content: "Native summary", tokens: null },

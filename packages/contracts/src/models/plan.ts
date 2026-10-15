@@ -75,6 +75,7 @@ export type PlanCommentError = z.infer<ReturnType<typeof PlanCommentErrorSchema>
 export const NativePlanFileRefSchema = lazySchema(() => z.object({
   path: z.string().min(1).max(32 * 1024),
   sessionId: z.string().min(1).max(1024),
+  root: z.string().min(1).max(32 * 1024).optional(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
 }).strict());
 

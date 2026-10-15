@@ -30,7 +30,7 @@ const questions = [{ id: "q1", category: "AUTH", question: "Which login?", optio
   { id: "o2", title: "Password", description: "Use passwords." },
 ] }];
 const planOutput = { title: "Login plan", contentMd: "# Login plan\n## Build\nUse passkeys.",
-  captureSource: "native" as const, nativePlanFile: { path: "C:/fixture/plan.md", sessionId: "session-plan", sha256: "a".repeat(64) } };
+  captureSource: "native" as const, nativePlanFile: { path: "C:/fixture/plans/plan.md", sessionId: "session-plan", root: "C:/fixture/plans", sha256: "a".repeat(64) } };
 
 function seedThread(db: Database): void {
   db.prepare("INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
