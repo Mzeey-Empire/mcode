@@ -156,6 +156,8 @@ describe("Claude native plan turns", () => {
       { toolName: "NotebookEdit", input: { notebook_path: edit.file_path, new_source: "new", cell_type: "code" } },
       { toolName: "Bash", input: { command: "touch source.ts" } },
       { toolName: "PowerShell", input: { command: "Set-Content source.ts new" } },
+      { toolName: "Monitor", input: { command: "git checkout -- ." } },
+      { toolName: "EnterWorktree", input: { name: "scratch" } },
     ];
     const transport = installTransport(async (turn, options) => {
       assert(options.canUseTool);
@@ -172,12 +174,12 @@ describe("Claude native plan turns", () => {
     });
     await provider.sendTurn(request({ permissionMode: "full", planTurn: { kind, planFilePath: null } }));
     await completed(events, 1);
-    expect(replies).toEqual(Array.from({ length: 6 }, () => ({ behavior: "deny", message: "Plan mode is read-only. Describe the change in the plan instead." })));
+    expect(replies).toEqual(Array.from({ length: mutations.length }, () => ({ behavior: "deny", message: "Plan mode is read-only. Describe the change in the plan instead." })));
     expect(approval).not.toHaveBeenCalled();
     await provider.sendTurn(request({ permissionMode: "full", turnId: "turn-2", turnExecutionId: execution2 }));
     await completed(events, 2);
     expect(approval).toHaveBeenCalledTimes(1);
-    expect(replies[6]).toEqual({ behavior: "allow", updatedInput: edit });
+    expect(replies[mutations.length]).toEqual({ behavior: "allow", updatedInput: edit });
     expect(transport.optionsSeen).toHaveLength(1);
   });
 

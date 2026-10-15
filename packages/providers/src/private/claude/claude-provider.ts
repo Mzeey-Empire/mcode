@@ -432,7 +432,7 @@ function idlesWithUnansweredSteer(state: ClaudeStreamLoopState, message: Record<
 }
 
 /** Convert a plain string message into an SDKUserMessage. */
-const PLAN_READ_ONLY_DENIED_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell"]);
+const PLAN_READ_ONLY_DENIED_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "Monitor", "EnterWorktree"]);
 const PLAN_FILE_EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit"]);
 
 /** Returns the denial message for a tool call a Plan turn must not run, or undefined when the call may proceed. Claude's own plan file stays writable so a Revise turn can patch it. */
