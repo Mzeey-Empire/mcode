@@ -63,6 +63,11 @@ export interface QueuedMessage {
   queuedAt: number;
   /** Present while a steer of this message is unsettled or it is the resend of one. */
   steer?: QueuedSteer;
+  /**
+   * Set when the draft holds this message's Review comments, Files comments or Browser notes
+   * under its id, so the elements outlive a reload; the message then dispatches with its id.
+   */
+  holdsDraftElements?: true;
 }
 
 /** True while the provider may hold this message, so the dispatcher must not send it. */
@@ -106,9 +111,11 @@ interface QueueState {
 
   /** Mark a thread as having an in-progress queue edit (or clear it). */
   setEditingThreadId: (threadId: string | null) => void;
+  /** Append a message. `id` defaults to a fresh UUID; a caller passes one it already froze draft elements under. */
   enqueue: (
     threadId: string,
     message: Omit<QueuedMessage, "id" | "queuedAt">,
+    id?: string,
   ) => boolean;
   /** Atomically reserve the next visible message for one queued send, skipping held steers. */
   claimNextQueuedMessage: (threadId: string) => QueuedMessage | undefined;
@@ -156,11 +163,13 @@ interface QueueState {
    * back to the same slot it was extracted from, instead of being appended
    * to the tail by `enqueue`. Honours the {@link MAX_QUEUE_DEPTH} cap.
    * Returns false when the queue is full (caller may release spills).
+   * `id` defaults to a fresh UUID, as in `enqueue`.
    */
   insertAt: (
     threadId: string,
     index: number,
     message: Omit<QueuedMessage, "id" | "queuedAt">,
+    id?: string,
   ) => boolean;
 }
 
@@ -238,7 +247,7 @@ export const useQueueStore = create<QueueState>((set, get) => ({
 
   setEditingThreadId: (threadId) => set({ editingThreadId: threadId }),
 
-  enqueue: (threadId, message) => {
+  enqueue: (threadId, message, id = crypto.randomUUID()) => {
     const state = get();
     if (queueDepth(state, threadId) >= MAX_QUEUE_DEPTH) {
       showToast(set, "Queue full");
@@ -247,7 +256,7 @@ export const useQueueStore = create<QueueState>((set, get) => ({
 
     const entry: QueuedMessage = {
       ...message,
-      id: crypto.randomUUID(),
+      id,
       queuedAt: Date.now(),
     };
 
@@ -440,7 +449,7 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     return msg;
   },
 
-  insertAt: (threadId, index, message) => {
+  insertAt: (threadId, index, message, id = crypto.randomUUID()) => {
     const state = get();
     const current = state.queues[threadId] ?? [];
     if (queueDepth(state, threadId) >= MAX_QUEUE_DEPTH) {
@@ -450,7 +459,7 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     const clamped = Math.max(0, Math.min(index, current.length));
     const entry: QueuedMessage = {
       ...message,
-      id: crypto.randomUUID(),
+      id,
       queuedAt: Date.now(),
     };
     const nextList = [...current];
