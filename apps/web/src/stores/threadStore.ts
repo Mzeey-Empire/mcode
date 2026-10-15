@@ -1459,6 +1459,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       useTaskStore.getState().setTasks(threadId, tasks, latestUserMessageId(threadId)),
     addPlanForThread: (threadId, plan) => usePlanStore.getState().addPlan(threadId, plan),
     setPlanCommentsForThread: (threadId, comments) => usePlanStore.getState().setComments(threadId, comments),
+    setPendingImplementForThread: (threadId, pending) => usePlanStore.getState().setPendingImplement(threadId, pending),
     shallowEqualBy,
     coerceTaskStatus,
     getWorkspaceThreadSettings: resolveWorkspaceThreadSettings,

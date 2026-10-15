@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { PlanComment, PlanQuestion, PlanSnapshot, PlanVersion } from "@mcode/contracts";
+import type { PendingPlanImplement, PlanComment, PlanQuestion, PlanSnapshot, PlanVersion } from "@mcode/contracts";
 import { HYDRATION_TTL_MS } from "..";
 import { AuxiliaryHydrator } from "../auxiliary-hydrator";
 import {
@@ -33,7 +33,7 @@ function cacheRecord(threadId: string, record: ThreadRecord): void {
   cacheConversationRecord(threadId, projectConversationCacheState(record));
 }
 
-const EMPTY_SNAPSHOT: PlanSnapshot = { versions: [], comments: [], phase: null, pendingQuestions: null };
+const EMPTY_SNAPSHOT: PlanSnapshot = { versions: [], comments: [], phase: null, pendingQuestions: null, pendingImplement: null };
 
 describe("AuxiliaryHydrator", () => {
   let setStateSpy: ReturnType<typeof vi.fn>;
@@ -46,6 +46,7 @@ describe("AuxiliaryHydrator", () => {
   ) => void;
   let planQuestionsRevision: number;
   let setPlanCommentsForThread: (threadId: string, comments: readonly PlanComment[]) => void;
+  let setPendingImplementForThread: (threadId: string, pending: PendingPlanImplement | null) => void;
   let records: Map<string, ThreadRecord>;
   let currentThreadId: string | null;
 
@@ -65,6 +66,7 @@ describe("AuxiliaryHydrator", () => {
     reconcilePlanQuestions = vi.fn() as typeof reconcilePlanQuestions;
     planQuestionsRevision = 0;
     setPlanCommentsForThread = vi.fn() as (threadId: string, comments: readonly PlanComment[]) => void;
+    setPendingImplementForThread = vi.fn() as (threadId: string, pending: PendingPlanImplement | null) => void;
 
     cacheRecord(THREAD_ID, makeThinRecord());
   });
@@ -110,6 +112,7 @@ describe("AuxiliaryHydrator", () => {
       reconcilePlanQuestions,
       getPlanQuestionsRevision: () => planQuestionsRevision,
       setPlanCommentsForThread,
+      setPendingImplementForThread,
       shallowEqualBy,
       coerceTaskStatus,
     });
@@ -188,6 +191,16 @@ describe("AuxiliaryHydrator", () => {
 
     await vi.waitFor(() => {
       expect(reconcilePlanQuestions).toHaveBeenCalledWith(THREAD_ID, 4, { assistantMessageId: "a1", questions });
+    });
+  });
+
+  it("restored the Implement the server holds behind Setup", async () => {
+    const pending = { targetThreadId: "target-thread", version: 2 };
+    (mockTransport.getPlanSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue({ ...EMPTY_SNAPSHOT, pendingImplement: pending });
+    createAux().hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
+
+    await vi.waitFor(() => {
+      expect(setPendingImplementForThread).toHaveBeenCalledWith(THREAD_ID, pending);
     });
   });
 

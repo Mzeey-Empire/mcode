@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { getCatalogEntry, type PlanComment, type PlanVersion, type PlanVersionStatus } from "@mcode/contracts";
+import { getCatalogEntry, type PendingPlanImplement, type PlanComment, type PlanVersion, type PlanVersionStatus } from "@mcode/contracts";
 
 const statusOrder: Record<PlanVersionStatus, number> = { draft: 0, ready: 0, superseded: 1, accepted: 2 };
 
@@ -90,6 +90,12 @@ interface PlanState {
   /** Apply a `plan.commentsChanged` push, or the result of a comment write. */
   applyCommentsChanged: (threadId: string, upserted: readonly PlanComment[], deletedIds: readonly string[]) => void;
 
+  /** Source threads whose new-worktree Implement waits behind the target's Setup, as the server reports it. */
+  pendingImplementByThread: Record<string, PendingPlanImplement>;
+
+  /** Replace a thread's pending Implement from a snapshot, a push or an Implement receipt. */
+  setPendingImplement: (threadId: string, pending: PendingPlanImplement | null) => void;
+
   /** Clear plan state for a thread. */
   clearPlans: (threadId: string) => void;
 }
@@ -128,6 +134,16 @@ export const usePlanStore = create<PlanState>((set) => ({
 
   commentsByThread: {},
 
+  pendingImplementByThread: {},
+
+  setPendingImplement: (threadId, pending) =>
+    set((state) => {
+      const next = { ...state.pendingImplementByThread };
+      if (pending === null) delete next[threadId];
+      else next[threadId] = pending;
+      return { pendingImplementByThread: next };
+    }),
+
   setComments: (threadId, comments) =>
     set((state) => ({ commentsByThread: { ...state.commentsByThread, [threadId]: comments } })),
 
@@ -155,6 +171,13 @@ export const usePlanStore = create<PlanState>((set) => ({
       const { [threadId]: _omitVersion, ...restVersions } = state.activeVersionByThread;
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { [threadId]: _omitComments, ...restComments } = state.commentsByThread;
-      return { plansByThread: rest, activeVersionByThread: restVersions, commentsByThread: restComments };
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [threadId]: _omitPending, ...restPending } = state.pendingImplementByThread;
+      return {
+        plansByThread: rest,
+        activeVersionByThread: restVersions,
+        commentsByThread: restComments,
+        pendingImplementByThread: restPending,
+      };
     }),
 }));

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { PlanVersionSchema, type PlanImplement, type PlanVersion } from "@mcode/contracts";
+import { PlanVersionSchema, type PendingPlanImplement, type PlanImplement, type PlanVersion } from "@mcode/contracts";
 import { getTransport, INTERACTION_MODES } from "@/transport";
 import { RpcError } from "@/transport/ws-transport";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -20,18 +20,10 @@ interface PlanImplementState {
   readonly notices: Readonly<Record<string, string>>;
   /** Threads whose Plan panel is showing, so Implement targets the version on screen. */
   readonly panelsOnScreen: Readonly<Record<string, true>>;
-  /** Source threads whose new-worktree request is held behind the target's Setup. */
-  readonly waiting: Readonly<Record<string, WaitingForSetup>>;
-}
-
-/** The thread an Implement request is starting while its worktree runs Setup. */
-export interface WaitingForSetup {
-  readonly targetThreadId: string;
-  readonly version: number;
 }
 
 /** Per-thread Implement progress and the notice its last outcome left. */
-export const usePlanImplementStore = create<PlanImplementState>(() => ({ busy: {}, notices: {}, panelsOnScreen: {}, waiting: {} }));
+export const usePlanImplementStore = create<PlanImplementState>(() => ({ busy: {}, notices: {}, panelsOnScreen: {} }));
 
 function withEntry<V>(record: Readonly<Record<string, V>>, threadId: string, value: V | null): Record<string, V> {
   const next = { ...record };
@@ -112,8 +104,17 @@ function isConnectionDrop(error: unknown): boolean {
   return error instanceof Error && !(error instanceof RpcError) && error.message === "WebSocket disconnected";
 }
 
-function setWaiting(threadId: string, waiting: WaitingForSetup | null): void {
-  usePlanImplementStore.setState((s) => ({ waiting: withEntry(s.waiting, threadId, waiting) }));
+/**
+ * Applies the server's report of a held new-worktree Implement. The source switches to Build when the
+ * hold ends on its version being accepted, since only the initiating press mirrors an immediate admission.
+ */
+export function applyPendingImplement(threadId: string, pending: PendingPlanImplement | null): void {
+  const planStore = usePlanStore.getState();
+  const held = planStore.pendingImplementByThread[threadId];
+  planStore.setPendingImplement(threadId, pending);
+  if (pending !== null || !held) return;
+  const version = planStore.plansByThread[threadId]?.find((candidate) => candidate.version === held.version);
+  if (version?.status === "accepted") mirrorAdmittedBuildMode(threadId);
 }
 
 function mayReplay(target: PlanImplement["target"], alreadyReplayed: boolean): boolean {
@@ -165,8 +166,11 @@ export async function implementPlan(threadId: string, target: PlanImplement["tar
     scheduler.finishImplement(outcome);
     if (outcome.kind === "admitted") {
       // The source stays in Plan until the target's first turn is admitted behind Setup.
-      if (outcome.waitingForSetup) setWaiting(threadId, { targetThreadId: outcome.targetThreadId, version: outcome.version });
-      else mirrorAdmittedBuildMode(threadId);
+      if (outcome.waitingForSetup) {
+        usePlanStore.getState().setPendingImplement(threadId, { targetThreadId: outcome.targetThreadId, version: outcome.version });
+      } else {
+        mirrorAdmittedBuildMode(threadId);
+      }
       if (target !== "thread") await openImplementedThread(threadId, outcome.targetThreadId);
     } else if (outcome.kind === "conflict" && !carried) {
       usePlanStore.getState().setActiveVersion(threadId, null);

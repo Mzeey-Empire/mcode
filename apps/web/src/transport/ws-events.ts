@@ -23,6 +23,7 @@ import { useProviderStatusStore } from "@/stores/providerStatusStore";
 import { useProviderCatalogStore } from "@/stores/providerCatalogStore";
 import { useProviderModelsStore } from "@/stores/providerModelsStore";
 import { usePlanStore } from "@/stores/planStore";
+import { applyPendingImplement } from "@/components/panels/plan/plan-implement";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 import { emitPtyData, emitPtyExit } from "@/features/terminal/adapters/pty-data-registry";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
@@ -163,6 +164,7 @@ function handleTerminalData(data: unknown): void {
  * - `plan.questions` -- model-proposed plan questions forwarded to threadStore wizard
  * - `plan.answered` -- server committed an answered marker; dismisses the wizard on this client
  * - `plan.versionUpserted` -- merges the version into planStore
+ * - `plan.implementPending` -- a new-worktree Implement began or stopped waiting for the target's Setup
  * - `approval.requested` -- approval awaiting a user decision
  * - `approval.resolved` -- an approval was settled
  * - `providers.availability` -- server-pushed provider availability snapshot forwarded to providerAvailabilityStore
@@ -598,6 +600,13 @@ export function startPushListeners(): void {
       const { threadId, version: plan } = WS_CHANNELS["plan.versionUpserted"].parse(data);
 
       usePlanStore.getState().addPlan(threadId, plan);
+    }),
+  );
+
+  unsubs.push(
+    pushEmitter.on("plan.implementPending", (data) => {
+      const { threadId, pending } = WS_CHANNELS["plan.implementPending"].parse(data);
+      applyPendingImplement(threadId, pending);
     }),
   );
 

@@ -22,7 +22,7 @@ export function usePlanCommands(threadId: string | null): void {
   const activeVersion = usePlanStore((s) => (threadId ? (s.activeVersionByThread[threadId] ?? null) : null));
   const onScreen = usePlanImplementStore((s) => threadId !== null && s.panelsOnScreen[threadId] === true);
   const running = useThreadStore((s) => threadId !== null && isThreadExecuting(threadId, s));
-  const waiting = useWaitingForSetup(threadId ?? "", versions.at(-1) ?? null) !== null;
+  const waiting = useWaitingForSetup(threadId ?? "") !== null;
   const executing = running || waiting;
   const { isGitRepo } = useSourceCheckout(threadId);
   const version = threadId && !executing ? (selectImplementTarget(versions, activeVersion, onScreen)?.version ?? null) : null;

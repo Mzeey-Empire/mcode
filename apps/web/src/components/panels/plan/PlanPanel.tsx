@@ -38,7 +38,7 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
   const draft = useSyncExternalStore(scheduler.subscribe, scheduler.getSnapshot);
   const viewed = selectViewedPlanVersion(versions, activeVersion);
   const latest = versions.at(-1) ?? null;
-  const waiting = useWaitingForSetup(threadId, latest);
+  const waiting = useWaitingForSetup(threadId);
   // Setup holds the source's reservation, so the server refuses plan writes exactly as during a run.
   const executing = turnRunning || waiting !== null;
   const [commentBinding] = useState(createPlanCommentBinding);
