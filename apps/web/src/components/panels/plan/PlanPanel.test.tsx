@@ -2,7 +2,8 @@ import { act, render, renderHook, screen, waitFor } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { EditorView } from "@codemirror/view";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { PlanImplement, PlanImplementReceipt, PlanSaveVersion, PlanVersion } from "@mcode/contracts";
+import type { PlanImplement, PlanImplementReceipt, PlanSaveVersion, PlanVersion, ReviewState } from "@mcode/contracts";
+import { createMockThread } from "@/__tests__/mocks/transport";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { usePlanStore } from "@/stores/planStore";
@@ -17,12 +18,27 @@ import { IMPLEMENT_FAILED_NOTICE, PLAN_CHANGED_NOTICE, implementPlan as implemen
 
 const savePlanVersion = vi.hoisted(() => vi.fn<(payload: PlanSaveVersion) => Promise<PlanVersion>>());
 const implementPlan = vi.hoisted(() => vi.fn<(payload: PlanImplement) => Promise<PlanImplementReceipt>>());
+const getReviewState = vi.hoisted(() => vi.fn<() => Promise<ReviewState>>());
 vi.mock("@/transport", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/transport")>()),
-  getTransport: () => ({ savePlanVersion, implementPlan, updateThreadSettings: vi.fn(async () => true) }),
+  getTransport: () => ({
+    savePlanVersion,
+    implementPlan,
+    getReviewState,
+    updateThreadSettings: vi.fn(async () => true),
+    touchLastOpened: vi.fn(async () => undefined),
+    listThreads: vi.fn(async () => useWorkspaceStore.getState().threads),
+  }),
 }));
 
 const THREAD = "thread-plan";
+
+function reviewState(uncommitted: number): ReviewState {
+  return {
+    isGitRepo: true, head: "a".repeat(40), branch: "main", uncommitted: { staged: 0, unstaged: uncommitted, untracked: 0 },
+    commitsAhead: null, branchDefault: { unavailable: "no-base" },
+  };
+}
 
 function makePlan(version: number, overrides: Partial<PlanVersion> = {}): PlanVersion {
   return {
@@ -68,6 +84,10 @@ describe("PlanPanel", () => {
     useThreadStore.setState({ runningThreadIds: new Set() });
     savePlanVersion.mockReset();
     implementPlan.mockReset();
+    getReviewState.mockReset();
+    getReviewState.mockResolvedValue(reviewState(0));
+    useWorkspaceStore.setState({ threads: [], activeThreadId: null });
+    usePlanImplementStore.setState({ waiting: {}, notices: {}, busy: {} });
     useConnectionStore.setState({ status: "connected" });
   });
 
@@ -324,6 +344,140 @@ describe("PlanPanel", () => {
         expect(useWorkspaceStore.getState().activeThreadId).toBe("new-implementation-thread");
         expect(interactionMode(thread)).toBe("build");
       }
+    });
+
+    describe("in a new worktree", () => {
+      const SOURCE = "thread-worktree-source";
+      const TARGET = "thread-worktree-target";
+
+      function seedThreads(): void {
+        useWorkspaceStore.setState({
+          threads: [
+            createMockThread({ id: SOURCE, workspace_id: "workspace-1" }),
+            createMockThread({ id: TARGET, workspace_id: "workspace-1", mode: "worktree", worktree_path: "F:\\repo\\.mcode\\worktrees\\main-4f3a2b1c" }),
+          ],
+        });
+      }
+
+      function waitingReceipt(request: PlanImplement): PlanImplementReceipt {
+        return { ...receiptFor(request), targetThreadId: TARGET, state: "waiting-for-setup" };
+      }
+
+      async function openMenu(): Promise<ReturnType<typeof userEvent.setup>> {
+        const user = userEvent.setup();
+        await user.click(screen.getByRole("button", { name: "More ways to implement" }));
+        return user;
+      }
+
+      it("starts the request from the third item and opens the new thread", async () => {
+        startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]);
+        seedThreads();
+        implementPlan.mockImplementation(async (request) => ({ ...receiptFor(request), targetThreadId: TARGET }));
+        render(<PlanPanel threadId={SOURCE} />);
+
+        const user = await openMenu();
+        await user.click(await screen.findByRole("menuitem", { name: "Implement v2 in a new worktree" }));
+
+        await waitFor(() => expect(implementPlan).toHaveBeenCalledTimes(1));
+        expect(implementPlan.mock.calls[0][0]).toMatchObject({ threadId: SOURCE, target: "new-worktree" });
+        await waitFor(() => expect(useWorkspaceStore.getState().activeThreadId).toBe(TARGET));
+        expect(interactionMode(SOURCE)).toBe("build");
+      });
+
+      it("says uncommitted changes stay behind only when the source has some", async () => {
+        startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]);
+        seedThreads();
+        getReviewState.mockResolvedValue(reviewState(3));
+        render(<PlanPanel threadId={SOURCE} />);
+
+        await openMenu();
+        const item = await screen.findByRole("menuitem", { name: /in a new worktree/ });
+        expect(item).toHaveTextContent("Starts from the last commit. Uncommitted changes stay here.");
+      });
+
+      it("shows no second line for a clean source", async () => {
+        startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]);
+        seedThreads();
+        render(<PlanPanel threadId={SOURCE} />);
+
+        await openMenu();
+        const item = await screen.findByRole("menuitem", { name: /in a new worktree/ });
+        expect(item).not.toHaveTextContent("Uncommitted");
+      });
+
+      it("offers neither the item nor the command outside a git repository", async () => {
+        startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]);
+        seedThreads();
+        getReviewState.mockResolvedValue({ isGitRepo: false });
+        const hook = renderHook(() => usePlanCommands(SOURCE));
+        render(<PlanPanel threadId={SOURCE} />);
+
+        await openMenu();
+        await screen.findByRole("menuitem", { name: "Implement v2 in a new thread" });
+        expect(screen.queryByRole("menuitem", { name: /in a new worktree/ })).toBeNull();
+        expect(getCommand("plan.implementInNewWorktree")).toBeUndefined();
+        expect(getCommand("plan.implementInNewThread")).toBeDefined();
+        hook.unmount();
+      });
+
+      it("registers the palette command in a git repository", async () => {
+        startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]);
+        seedThreads();
+        implementPlan.mockImplementation(async (request) => ({ ...receiptFor(request), targetThreadId: TARGET }));
+        const hook = renderHook(() => usePlanCommands(SOURCE));
+
+        await waitFor(() => expect(getCommand("plan.implementInNewWorktree")?.title).toBe("Implement v2 in a new worktree"));
+        act(() => { expect(executeCommand("plan.implementInNewWorktree")).toBe(true); });
+        await waitFor(() => expect(implementPlan.mock.calls[0]?.[0]).toMatchObject({ target: "new-worktree" }));
+        hook.unmount();
+      });
+
+      it("holds the source in Plan, read-only, until the first turn is admitted", async () => {
+        startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]);
+        seedThreads();
+        implementPlan.mockImplementation(async (request) => waitingReceipt(request));
+        render(<PlanPanel threadId={SOURCE} />);
+
+        await pressImplement("Implement v2");
+
+        const notice = await screen.findByTestId("plan-waiting-notice");
+        expect(notice).toHaveTextContent("Waiting for Setup in main-4f3a2b1c");
+        expect(interactionMode(SOURCE)).toBe("plan");
+        expect(isEditable()).toBe(false);
+        expect(screen.getByRole("button", { name: "Implement v2" })).toBeDisabled();
+
+        act(() => usePlanStore.setState({ plansByThread: { [SOURCE]: [makePlan(2, { id: READY_ID, status: "accepted" })] } }));
+        await waitFor(() => expect(screen.queryByTestId("plan-waiting-notice")).toBeNull());
+      });
+
+      it("returns the source to editing when Stop deletes the empty thread", async () => {
+        startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]);
+        seedThreads();
+        implementPlan.mockImplementation(async (request) => waitingReceipt(request));
+        render(<PlanPanel threadId={SOURCE} />);
+        await pressImplement("Implement v2");
+        await screen.findByTestId("plan-waiting-notice");
+
+        act(() => useWorkspaceStore.setState({ threads: useWorkspaceStore.getState().threads.filter((thread) => thread.id !== TARGET) }));
+
+        await waitFor(() => expect(screen.queryByTestId("plan-waiting-notice")).toBeNull());
+        expect(isEditable()).toBe(true);
+        expect(screen.getByRole("button", { name: "Implement v2" })).toBeEnabled();
+      });
+
+      it("opens the waiting thread from the notice", async () => {
+        startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]);
+        seedThreads();
+        implementPlan.mockImplementation(async (request) => waitingReceipt(request));
+        render(<PlanPanel threadId={SOURCE} />);
+        await pressImplement("Implement v2");
+        await screen.findByTestId("plan-waiting-notice");
+        useWorkspaceStore.setState({ activeThreadId: SOURCE });
+
+        await userEvent.setup().click(screen.getByRole("button", { name: "Open thread" }));
+
+        expect(useWorkspaceStore.getState().activeThreadId).toBe(TARGET);
+      });
     });
 
     it("implements a ready version at its revision and switches the thread to Build", async () => {
