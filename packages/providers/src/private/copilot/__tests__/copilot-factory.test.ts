@@ -5,8 +5,15 @@ import { createCopilotProvider, type CopilotProviderBoundary, type ProviderHostP
 import { DeterministicCanonicalSink } from "../../../conformance/deterministic-sink.js";
 import { loadProviderFixtureManifest } from "../../../conformance/fixture-safety.js";
 import * as NodeURL from "node:url";
+import * as NodeFSPromises from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 const sdk = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), forceStop: vi.fn(), getState: vi.fn(), create: vi.fn(), resume: vi.fn(), models: vi.fn(), session: undefined as FakeSession | undefined }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof NodeOS>();
+  return { ...actual, homedir: vi.fn(actual.homedir) };
+});
 vi.mock("@github/copilot-sdk", () => ({
   approveAll: () => ({ kind: "approved" }),
   CopilotClient: class {
@@ -29,7 +36,7 @@ class FakeSession {
   sequence = 0;
   on = (handler: (event: SessionEvent) => void): (() => void) => { this.handlers.add(handler); return () => { this.handlers.delete(handler); }; };
   setModel = vi.fn(async (_model: string, _options?: Parameters<CopilotSession["setModel"]>[1]) => {});
-  rpc = { mode: { set: vi.fn(async () => {}) } };
+  rpc = { mode: { set: vi.fn(async () => {}) }, plan: { read: vi.fn<CopilotSession["rpc"]["plan"]["read"]>(async () => ({ exists: false, content: null, path: null })) } };
   send = vi.fn(async () => "message");
   sendAndWait = vi.fn(async () => ({ data: { content: "utility result" } }));
   disconnect = vi.fn(async () => {});
@@ -103,6 +110,142 @@ describe("Copilot public factory", () => {
     if (!provider.resolveApproval) throw new Error("Provider cannot answer approvals");
     return provider.resolveApproval(requestId, { choiceId });
   }
+
+  describe("native plans", () => {
+    let home: string;
+    let planRoot: string;
+    let planPath: string;
+    beforeEach(async () => {
+      home = await NodeFSPromises.realpath(await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-copilot-plan-")));
+      vi.mocked(NodeOS.homedir).mockReturnValue(home);
+      planRoot = NodePath.join(home, ".copilot", "session-state", session.sessionId);
+      planPath = NodePath.join(planRoot, "plan.md");
+      await NodeFSPromises.mkdir(planRoot, { recursive: true });
+    });
+    afterEach(async () => {
+      vi.mocked(NodeOS.homedir).mockReset();
+      await NodeFSPromises.rm(home, { recursive: true, force: true });
+    });
+
+    it("permits only reads and this SDK session's exact plan file on every plan turn", async () => {
+      for (let turn = 1; turn <= 2; turn++) {
+        await provider.sendTurn(request({ interactionMode: "plan", turnId: `turn-${turn}`, turnExecutionId: `00000000-0000-4000-8000-00000000000${turn}` }));
+        const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
+        expect(options.configDir).toBe(NodePath.join(home, ".copilot"));
+        const invocation = { sessionId: session.sessionId };
+        expect(await options.onPermissionRequest({ kind: "read", fileName: NodePath.join(home, "source.ts") }, invocation)).toEqual({ kind: "approved" });
+        expect(await options.onPermissionRequest({ kind: "write", fileName: planPath }, invocation)).toEqual({ kind: "approved" });
+        const denied: PermissionRequest[] = [
+          { kind: "write", fileName: NodePath.join(planRoot, "..", "another-session", "plan.md") },
+          { kind: "write", fileName: NodePath.join(planRoot, "source.ts") },
+          { kind: "write", fileName: `${planPath}.bak` },
+          { kind: "write", fileName: "plan.md" },
+          { kind: "write", path: planPath },
+          { kind: "write", fileName: 42 },
+          { kind: "shell", fullCommandText: "echo plan > plan.md" },
+          { kind: "mcp", serverName: "writer", toolName: "write" },
+          { kind: "url", url: "https://example.com" },
+          { kind: "custom-tool", toolName: "write" },
+        ];
+        for (const permission of denied) expect(await options.onPermissionRequest(permission, invocation)).toEqual({ kind: "denied-by-rules", rules: [] });
+        expect(await options.onPermissionRequest({ kind: "write", fileName: planPath }, { sessionId: "another-session" })).toEqual({ kind: "denied-by-rules", rules: [] });
+        expect(provider.listPendingApprovals?.()).toEqual([]);
+        await NodeFSPromises.writeFile(planPath, "abc");
+        await finish();
+      }
+      expect(session.rpc.mode.set.mock.calls).toEqual([[{ mode: "plan" }], [{ mode: "plan" }]]);
+    });
+
+    it("denies a plan path redirected through a symlink", async () => {
+      const outside = NodePath.join(home, "outside.md");
+      await NodeFSPromises.writeFile(outside, "keep");
+      await NodeFSPromises.symlink(outside, planPath, "file");
+      await provider.sendTurn(request({ interactionMode: "plan" }));
+      const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
+      expect(await options.onPermissionRequest({ kind: "write", fileName: planPath }, { sessionId: session.sessionId })).toEqual({ kind: "denied-by-rules", rules: [] });
+      await finish();
+      expect(await NodeFSPromises.readFile(outside, "utf8")).toBe("keep");
+    });
+
+    it("captures native evidence before the canonical final message and reconciles only unchanged owned bytes", async () => {
+      await NodeFSPromises.writeFile(planPath, "abc");
+      session.rpc.plan.read.mockResolvedValue({ exists: true, content: "abc", path: planPath });
+      const captured = vi.fn();
+      provider.on("plan_captured", captured);
+      await provider.sendTurn(request({ interactionMode: "plan" }));
+      session.emit({ type: "assistant.message", data: { messageId: "plan-message", content: "The plan is ready." } });
+      await finish();
+      const nativePlanFile = { path: planPath, sessionId: "native-session", sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" };
+      expect(captured.mock.calls).toEqual([[{ threadId: "thread-1", markdown: "abc", source: "native", nativePlanFile }]]);
+      expect(runtimeEvents(sink).filter((event) => event.planCapture).map((event) => ({ type: event.event.type, capture: event.planCapture }))).toEqual([
+        { type: "message", capture: { markdown: "abc", source: "native", nativePlanFile } },
+      ]);
+      const input = { threadId: "thread-1", markdown: "edited", nativePlanFile };
+      expect(await provider.prepareImplement?.({ ...input, nativePlanFile: { ...nativePlanFile, sessionId: "other" } })).toEqual({ outcome: "skipped", reason: "unproven" });
+      expect(await provider.prepareImplement?.({ ...input, threadId: "other-thread" })).toEqual({ outcome: "skipped", reason: "unproven" });
+      expect(await provider.prepareImplement?.(input)).toEqual({ outcome: "synced" });
+      expect(await NodeFSPromises.readFile(planPath, "utf8")).toBe("edited");
+      expect(await provider.prepareImplement?.({ ...input, markdown: "second edit" })).toEqual({ outcome: "skipped", reason: "changed" });
+      expect(await NodeFSPromises.readFile(planPath, "utf8")).toBe("edited");
+      expect(await NodeFSPromises.readdir(planRoot)).toEqual(["plan.md"]);
+    });
+
+    it("keeps valid native text but refuses a reported path outside this session", async () => {
+      const outsideRoot = NodePath.join(home, ".copilot", "session-state", "other-session");
+      await NodeFSPromises.mkdir(outsideRoot);
+      const outsidePath = NodePath.join(outsideRoot, "plan.md");
+      await NodeFSPromises.writeFile(outsidePath, "abc");
+      session.rpc.plan.read.mockResolvedValue({ exists: true, content: "abc", path: outsidePath });
+      const captured = vi.fn();
+      provider.on("plan_captured", captured);
+      await provider.sendTurn(request({ interactionMode: "plan" }));
+      session.emit({ type: "assistant.message", data: { messageId: "plan-message", content: "The plan is ready." } });
+      await finish();
+      expect(captured.mock.calls).toEqual([[{ threadId: "thread-1", markdown: "abc", source: "native" }]]);
+      expect(runtimeEvents(sink).flatMap((event) => event.planCapture ? [event.planCapture] : [])).toEqual([{ markdown: "abc", source: "native" }]);
+      expect(await provider.prepareImplement?.({ threadId: "thread-1", markdown: "edit", nativePlanFile: { path: outsidePath, sessionId: session.sessionId, sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" } })).toEqual({ outcome: "skipped", reason: "unsafe-path" });
+      expect(await NodeFSPromises.readFile(outsidePath, "utf8")).toBe("abc");
+    });
+
+    it.each([null, "", "  ", "x".repeat(65_537)])("ignores missing or invalid native content %#", async (content) => {
+      session.rpc.plan.read.mockResolvedValue({ exists: content !== null, content, path: planPath });
+      const captured = vi.fn();
+      provider.on("plan_captured", captured);
+      await provider.sendTurn(request({ interactionMode: "plan" }));
+      session.emit({ type: "assistant.message", data: { messageId: "plain-message", content: "No structured plan." } });
+      await finish();
+      expect(captured.mock.calls).toEqual([]);
+      expect(runtimeEvents(sink).flatMap((event) => event.planCapture ? [event.planCapture] : [])).toEqual([]);
+      expect(await provider.prepareImplement?.({ threadId: "thread-1", markdown: "edit", nativePlanFile: null })).toEqual({ outcome: "skipped", reason: "no-file" });
+    });
+
+    it("does not recapture a prior plan on a build turn", async () => {
+      session.rpc.plan.read.mockResolvedValue({ exists: true, content: "abc", path: planPath });
+      await provider.sendTurn(request());
+      await finish();
+      expect(session.rpc.plan.read.mock.calls).toEqual([]);
+    });
+
+    it("persists a native plan even when the SDK emits no final assistant message", async () => {
+      session.rpc.plan.read.mockResolvedValue({ exists: true, content: "A native plan", path: null });
+      await provider.sendTurn(request({ interactionMode: "plan" }));
+      await finish();
+      expect(runtimeEvents(sink).filter((event) => event.planCapture).map((event) => ({ event: event.event, capture: event.planCapture }))).toEqual([{
+        event: { type: "message", threadId: "thread-1", turnExecutionId: "00000000-0000-4000-8000-000000000001", content: "A native plan", tokens: null },
+        capture: { markdown: "A native plan", source: "native" },
+      }]);
+    });
+
+    it("reports a failed plan read without publishing a successful turn completion", async () => {
+      session.rpc.plan.read.mockRejectedValue(new Error("Plan read failed"));
+      await provider.sendTurn(request({ interactionMode: "plan" }));
+      await finish();
+      expect(projections(sink).filter((event) => event.type === "turnComplete")).toEqual([]);
+      expect(projections(sink).filter((event) => event.type === "error").map((event) => event.failure)).toEqual([{ kind: "fatal" }]);
+      expect(projections(sink).at(-1)).toMatchObject({ type: "ended", outcome: "errored" });
+      expect(runtimeEvents(sink).flatMap((event) => event.planCapture ? [event.planCapture] : [])).toEqual([]);
+    });
+  });
 
   it("keeps full native command scope and acknowledges a user denial", async () => {
     await provider.sendTurn(request({ permissionMode: "supervised" }));
