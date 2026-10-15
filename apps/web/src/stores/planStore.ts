@@ -196,13 +196,11 @@ export const usePlanStore = create<PlanState>((set) => ({
       const { [threadId]: _omitVersion, ...restVersions } = state.activeVersionByThread;
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { [threadId]: _omitComments, ...restComments } = state.commentsByThread;
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { [threadId]: _omitPending, ...restPending } = state.pendingImplementByThread;
       return {
         plansByThread: rest,
         activeVersionByThread: restVersions,
         commentsByThread: restComments,
-        pendingImplementByThread: restPending,
+        pendingImplementByThread: withPending(state.pendingImplementByThread, threadId, null),
       };
     }),
 }));
