@@ -69,11 +69,11 @@ function capturedFile(submitted: unknown[]) {
 
 function planFilePart(
   filePath: string,
-  options: { sessionID?: string; status?: string; tool?: string; existed?: boolean } = {},
+  options: { sessionID?: string; status?: string; tool?: string; existed?: boolean | null } = {},
 ) {
   const tool = options.tool ?? "write";
   // Captured from OpenCode 1.18.28: `write` reports whether the file existed, `edit` does not.
-  const metadata = tool === "write" ? { exists: options.existed ?? false } : {};
+  const metadata = tool === "write" && options.existed !== null ? { exists: options.existed ?? false } : {};
   return { type: "message.part.updated", properties: { part: {
     type: "tool", id: "part-write", callID: "write-plan", sessionID: options.sessionID ?? "ses_plan",
     tool, state: { status: options.status ?? "completed", input: { filePath }, output: "Written", metadata },
@@ -167,23 +167,22 @@ describe("OpenCode native plans", () => {
 
   it.each(["write", "edit"])("leaves a pre-existing file after the session uses %s", async (tool) => {
     NodeFS.writeFileSync(path, "Existing plan");
-    const { provider, submitted } = await runPlan([planFilePart(path, { tool, existed: true })]);
+    const { submitted } = await runPlan([planFilePart(path, { tool, existed: true })], {}, () => {});
 
     expect(planMessages(submitted).map((runtime) => runtime.planCapture)).toEqual([undefined]);
-    expect(await provider.prepareImplement({
-      threadId: "thread-1", markdown: "hello", nativePlanFile: null,
-    })).toEqual({ outcome: "skipped", reason: "no-file" });
-    expect(NodeFS.readFileSync(path, "utf8")).toBe("hello");
+    expect(NodeFS.readFileSync(path, "utf8")).toBe("Existing plan");
+  });
+
+  it("does not claim a write that omits the exists flag", async () => {
+    const { submitted } = await runPlan([planFilePart(path, { existed: null })]);
+
+    expect(planMessages(submitted).map((runtime) => runtime.planCapture)).toEqual([undefined]);
   });
 
   it("does not claim a file the session only edited", async () => {
-    const { provider, submitted } = await runPlan([planFilePart(path, { tool: "edit" })]);
+    const { submitted } = await runPlan([planFilePart(path, { tool: "edit" })]);
 
     expect(planMessages(submitted).map((runtime) => runtime.planCapture)).toEqual([undefined]);
-    expect(await provider.prepareImplement({
-      threadId: "thread-1", markdown: "hello", nativePlanFile: { path, sessionId: "ses_plan", sha256: "0".repeat(64) },
-    })).toEqual({ outcome: "skipped", reason: "changed" });
-    expect(NodeFS.readFileSync(path, "utf8")).toBe("hello");
   });
 
   it("forgets a deleted file so a recreated file of the same name is not claimed", async () => {

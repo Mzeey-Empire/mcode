@@ -262,6 +262,14 @@ function completedPlanFileWrite(req: TurnRequest<"opencode">, state: OpenCodeTur
   return { path, created: part.data.tool === "write" && part.data.state.metadata?.exists === false };
 }
 
+/** Drop the upstream session and every plan claim made under it, so a replacement session starts unproven. */
+function forgetUpstreamSession(state: OpenCodeTurnState): void {
+  state.upstreamSessionId = "";
+  state.sessionCwd = null;
+  state.nativePlanPath = null;
+  state.createdPlanPaths.clear();
+}
+
 // OpenCode roots plan files at the git root, not the session directory, so a project below the root
 // writes outside this folder and claims nothing.
 function isInsidePlanRoot(cwd: string, path: string): boolean {
@@ -674,7 +682,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     const state = this.turns.get(entry.sessionId);
     if (!state || state.abortController.signal !== entry.signal) return;
     const goneId = state.upstreamSessionId;
-    state.upstreamSessionId = "";
+    forgetUpstreamSession(state);
     this.emitSessionInvalidatedNotice(
       (event) => this.publishTurnEvent(entry.routing, entry.sessionId, event),
       entry.routing.threadId,
@@ -919,10 +927,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
         if (req.resumeRequired) throw new SessionResumeUnavailableError("OpenCode could not resume the saved session", { cause: error });
         logger.info("OpenCode upstream session missing; starting fresh", { sessionId: req.sessionId });
         this.emitSessionInvalidatedNotice(emit, threadId, upstreamId);
-        state.upstreamSessionId = "";
-        state.sessionCwd = null;
-        state.nativePlanPath = null;
-        state.createdPlanPaths.clear();
+        forgetUpstreamSession(state);
         await this.promptUpstream(req, state, endpoint, settler, true);
         return;
       }
