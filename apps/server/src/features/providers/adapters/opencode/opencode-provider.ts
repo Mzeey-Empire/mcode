@@ -262,6 +262,8 @@ function completedPlanFileWrite(req: TurnRequest<"opencode">, state: OpenCodeTur
   return { path, created: part.data.tool === "write" && part.data.state.metadata?.exists === false };
 }
 
+// OpenCode roots plan files at the git root, not the session directory, so a project below the root
+// writes outside this folder and claims nothing.
 function isInsidePlanRoot(cwd: string, path: string): boolean {
   const relative = NodePath.relative(NodePath.join(cwd, ".opencode", "plans"), path);
   return relative !== "" && relative !== ".." && !relative.startsWith(`..${NodePath.sep}`) && !NodePath.isAbsolute(relative);

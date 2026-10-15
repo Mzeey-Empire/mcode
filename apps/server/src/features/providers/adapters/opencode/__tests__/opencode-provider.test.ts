@@ -275,6 +275,17 @@ describe("OpenCode native plans", () => {
       .toEqual({ outcome: "skipped", reason: "no-file" });
   });
 
+  it("claims nothing when the project is a subfolder of the git root OpenCode writes plans under", async () => {
+    const projectDir = NodePath.join(cwd, "sub", "app");
+    NodeFS.mkdirSync(projectDir, { recursive: true });
+    const { submitted } = await runPlan(
+      [planFilePart(path, { sessionID: "ses_plan", status: "completed", tool: "write", existed: false })],
+      { cwd: projectDir },
+    );
+    expect(planMessages(submitted).map((runtime) => runtime.planCapture)).toEqual([undefined]);
+    expect(NodeFS.readFileSync(path, "utf8")).toBe("hello");
+  });
+
   it.each(["build", "outside", "other-session", "running", "read", "no-tool", "missing"])("does not capture a native file for %s evidence", async (kind) => {
     const candidate = kind === "outside" ? NodePath.join(cwd, "outside.md") : path;
     if (kind === "outside") NodeFS.writeFileSync(candidate, "hello");
