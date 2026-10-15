@@ -414,7 +414,10 @@ function useFilesPanelController({
   const getFilesPanelMaxWidth = useCallback(
     (panel: HTMLDivElement | null): number => Math.max(
       FILES_PANEL_MIN_WIDTH,
-      (panel?.parentElement?.clientWidth ?? window.innerWidth) - DIFF_VIEWPORT_MIN_WIDTH,
+      Math.min(
+        FILES_PANEL_WIDE_WIDTH,
+        (panel?.parentElement?.clientWidth ?? window.innerWidth) - DIFF_VIEWPORT_MIN_WIDTH,
+      ),
     ),
     [],
   );
@@ -872,7 +875,7 @@ export function DiffPanel() {
             {...filesNavigator}
             width={filesPanelWidth}
             minWidth={FILES_PANEL_MIN_WIDTH}
-            maxWidth={`calc(100% - ${DIFF_VIEWPORT_MIN_WIDTH}px)`}
+            maxWidth={`min(${FILES_PANEL_WIDE_WIDTH}px, calc(100% - ${DIFF_VIEWPORT_MIN_WIDTH}px))`}
             defaultWidth={FILES_PANEL_DEFAULT_WIDTH}
             wideWidth={FILES_PANEL_WIDE_WIDTH}
             getMaxWidth={getFilesPanelMaxWidth}

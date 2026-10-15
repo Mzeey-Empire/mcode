@@ -31,7 +31,7 @@ export function FilesPopover({ open, onOpenChange, disabled, navigator }: FilesP
       <PopoverContent
         align="end"
         sideOffset={6}
-        className="flex h-[min(420px,70vh)] w-[300px] flex-col overflow-hidden p-0"
+        className="flex max-h-[min(420px,70vh)] w-[300px] flex-col overflow-hidden rounded-[18px] p-2"
         data-testid="review-files-popover"
       >
         <FilesNavigator
