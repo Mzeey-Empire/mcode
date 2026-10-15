@@ -7,6 +7,9 @@ import { fixtureHost } from "../private/claude/__tests__/helpers/provider-fixtur
 import { BrowserAutomationSessionLease } from "../private/claude/__tests__/helpers/provider-fixture.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as NodeURL from "node:url";
+import * as NodeFSPromises from "node:fs/promises";
+import * as NodePath from "node:path";
+import { PLAN_MAX_CONTENT_CHARS, type PlanCapture } from "@mcode/contracts";
 import { loadProviderFixtureManifest, validateProviderFixtureManifest } from "../conformance/fixture-safety.js";
 import { ProviderParentEvidenceSchema } from "@mcode/contracts";
 import { queryMethodStubs } from "../private/claude/__tests__/helpers/mock-sdk-query.js";
@@ -23,23 +26,34 @@ function request(overrides: Partial<TurnRequest<"claude">> = {}): TurnRequest<"c
 
 type NativeMessage = Record<string, unknown>;
 function result(id = "RESULT_1"): NativeMessage { return { type: "result", uuid: id, is_error: false, usage: { input_tokens: 1, output_tokens: 2 }, total_cost_usd: 0.01, num_turns: 1, duration_ms: 3 }; }
-function installTransport(messages: (turn: number, options: Options) => readonly NativeMessage[] = (turn) => [result(`RESULT_${turn}`)], emitInit = true) {
+function installTransport(messages: (turn: number, options: Options) => readonly NativeMessage[] | Promise<readonly NativeMessage[]> = (turn) => [result(`RESULT_${turn}`)], emitInit = true) {
   const optionsSeen: Options[] = [];
   const inputs: unknown[] = [];
+  const consumedModes: Options["permissionMode"][] = [];
+  let rejectModeChange = false;
   sdkQuery.mockImplementation(({ prompt, options }: { prompt: AsyncIterable<unknown>; options: Options }) => {
     optionsSeen.push(options);
+    let mode = options.permissionMode;
     let turn = 0;
     const stream = (async function* () {
       for await (const input of prompt) {
         inputs.push(input);
+        consumedModes.push(mode);
         turn++;
         if (emitInit) yield { type: "system", subtype: "init", session_id: "NATIVE_PARENT", parent_tool_use_id: null, slash_commands: [] };
-        for (const message of messages(turn, options)) yield message;
+        for (const message of await messages(turn, options)) yield message;
       }
     })();
-    return Object.assign(stream, queryMethodStubs(), { close: vi.fn(() => { void stream.return(); }), setModel: vi.fn(async () => undefined) });
+    return Object.assign(stream, queryMethodStubs(), {
+      close: vi.fn(() => { void stream.return(); }), setModel: vi.fn(async () => undefined),
+      setPermissionMode: vi.fn(async (next: NonNullable<Options["permissionMode"]>) => {
+        if (rejectModeChange) throw new Error("Permission switch refused");
+        if (next === "bypassPermissions" && !options.allowDangerouslySkipPermissions) throw new Error("Bypass not enabled at spawn");
+        mode = next;
+      }),
+    });
   });
-  return { optionsSeen, inputs };
+  return { optionsSeen, inputs, consumedModes, rejectPermissionSwitch: () => { rejectModeChange = true; } };
 }
 
 function fixture() {
@@ -53,9 +67,111 @@ function fixture() {
   return { provider, input, drafts, events, sink };
 }
 const providers: ClaudeProviderBoundary[] = [];
+const planDirectories: string[] = [];
 beforeEach(() => { sdkQuery.mockReset(); });
-afterEach(async () => { await Promise.allSettled(providers.splice(0).map((provider) => provider.shutdown())); });
+afterEach(async () => {
+  await Promise.allSettled(providers.splice(0).map((provider) => provider.shutdown()));
+  for (const directory of planDirectories.splice(0)) await NodeFSPromises.rm(directory, { recursive: true, force: true });
+});
 async function completed(events: () => ProviderRuntimeEvent[], count: number) { await vi.waitFor(() => expect(events().filter(({ event }) => event.type === AgentEventType.TurnComplete)).toHaveLength(count)); }
+
+describe("Claude native plan turns", () => {
+  it.each(["full", "supervised"] as const)("switches all plan kinds and build on one %s session", async permissionMode => {
+    const transport = installTransport();
+    const { provider, events } = fixture();
+    await provider.sendTurn(request({ permissionMode, planTurn: { kind: "questions", planFilePath: null } }));
+    await completed(events, 1);
+    for (const [index, kind] of (["planning", "revise", undefined] as const).entries()) {
+      await provider.sendTurn(request({ permissionMode, turnId: `turn-${index + 2}`,
+        turnExecutionId: `00000000-0000-4000-8000-00000000000${index + 2}`,
+        planTurn: kind ? { kind, planFilePath: null } : undefined }));
+      await completed(events, index + 2);
+    }
+    expect(transport.optionsSeen).toHaveLength(1);
+    expect(transport.optionsSeen[0]).toMatchObject({ permissionMode: "plan", allowDangerouslySkipPermissions: permissionMode === "full" });
+    expect(transport.consumedModes).toEqual(["plan", "plan", "plan", permissionMode === "full" ? "bypassPermissions" : "default"]);
+    await provider.sendTurn(request({ permissionMode, turnId: "turn-5", turnExecutionId: "00000000-0000-4000-8000-000000000005",
+      planTurn: { kind: "planning", planFilePath: null } }));
+    await completed(events, 5);
+    expect(transport.consumedModes[4]).toBe("plan");
+    expect(transport.optionsSeen).toHaveLength(1);
+  });
+
+  it("does not enqueue a plan prompt if the live permission switch fails", async () => {
+    const transport = installTransport();
+    const { provider, events } = fixture();
+    await provider.sendTurn(request({ permissionMode: "full" }));
+    await completed(events, 1);
+    transport.rejectPermissionSwitch();
+    await expect(provider.sendTurn(request({ permissionMode: "full", turnId: "turn-2", turnExecutionId: execution2,
+      planTurn: { kind: "planning", planFilePath: null } }))).rejects.toThrow();
+    expect(transport.consumedModes).toEqual(["bypassPermissions"]);
+  });
+
+  it.each(["planning", "revise", "questions", undefined] as const)("captures ExitPlanMode only for planning/revise: %s", async kind => {
+    const replies: unknown[] = [];
+    installTransport(async (_turn, options) => {
+      assert(options.canUseTool);
+      for (const toolUseID of ["plan-1", "plan-2"]) replies.push(await options.canUseTool("ExitPlanMode", { plan: "# Plan" },
+        { signal: new AbortController().signal, toolUseID }));
+      return [result()];
+    });
+    const { provider, events } = fixture();
+    const captures: PlanCapture[] = [];
+    provider.on("plan_captured", capture => captures.push(capture));
+    await provider.sendTurn(request({ planTurn: kind ? { kind, planFilePath: null } : undefined }));
+    await completed(events, 1);
+    const capturing = kind === "planning" || kind === "revise";
+    expect(captures).toEqual(capturing ? [{ threadId: "thread-1", markdown: "# Plan", source: "native" }] : []);
+    expect(replies).toEqual([0, 1].map(() => ({ behavior: "deny", message: capturing
+      ? "The client captured your proposed plan. Reply with a one or two sentence summary of it, then stop and wait for the user to review it."
+      : "Plan mode is not active. Continue with the user's request normally." })));
+  });
+
+  it.each(["proved", "config-root", "no-write", "other-session", "other-path", "missing", "oversized", "outside"])("requires exact Write-session file proof: %s", async proof => {
+    const scratch = NodePath.resolve(import.meta.dirname, "../../../../.dev/claude-plan-tests");
+    await NodeFSPromises.mkdir(scratch, { recursive: true });
+    const cwd = await NodeFSPromises.mkdtemp(NodePath.join(scratch, "case-"));
+    planDirectories.push(cwd);
+    const configDir = NodePath.join(cwd, "config");
+    const parent = proof === "config-root" ? NodePath.join(configDir, "plans") : NodePath.join(cwd, ".claude", "plans");
+    await NodeFSPromises.mkdir(parent, { recursive: true });
+    const path = NodePath.join(proof === "outside" ? cwd : parent, "plan.md");
+    if (proof !== "missing") await NodeFSPromises.writeFile(path, proof === "oversized" ? "x".repeat(PLAN_MAX_CONTENT_CHARS + 1) : "abc");
+    installTransport(async (_turn, options) => {
+      assert(options.canUseTool);
+      if (proof !== "no-write") {
+        const hook = options.hooks?.PostToolUse?.[0]?.hooks[0];
+        assert(hook);
+        await hook({ hook_event_name: "PostToolUse", session_id: proof === "other-session" ? "OTHER" : "NATIVE_PARENT",
+          cwd, transcript_path: "fixture", tool_use_id: "WRITE", tool_name: "Write", tool_response: {},
+          tool_input: { file_path: proof === "other-path" ? NodePath.join(parent, "other.md") : path, content: "abc" } },
+        "WRITE", { signal: new AbortController().signal });
+      }
+      await options.canUseTool("ExitPlanMode", { plan: "# Native plan", planFilePath: path },
+        { signal: new AbortController().signal, toolUseID: "EXIT" });
+      return [{ type: "assistant", uuid: "PLAN_MESSAGE", parent_tool_use_id: null,
+        message: { role: "assistant", content: [{ type: "text", text: "Review this plan." }] } }, result()];
+    });
+    const { provider, input, events } = fixture();
+    input.host.environment.snapshot = () => ({ CLAUDE_CONFIG_DIR: configDir });
+    const captures: PlanCapture[] = [];
+    provider.on("plan_captured", capture => captures.push(capture));
+    await provider.sendTurn(request({ cwd, planTurn: { kind: "planning", planFilePath: null } }));
+    await completed(events, 1);
+    const proved = proof === "proved" || proof === "config-root";
+    const nativePlanFile = { path, sessionId: "NATIVE_PARENT", sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" };
+    const expected = { markdown: "# Native plan", source: "native", ...(proved && { nativePlanFile }) };
+    expect(captures).toEqual([{ threadId: "thread-1", ...expected }]);
+    expect(events().flatMap(runtime => runtime.planCapture ? [runtime.planCapture] : [])).toEqual([expected]);
+    assert(provider.prepareImplement);
+    const captured = captures[0];
+    assert(captured);
+    expect(await provider.prepareImplement({ threadId: "thread-1", markdown: "# Edited", nativePlanFile: captured.nativePlanFile ?? null }))
+      .toEqual(proved ? { outcome: "synced" } : { outcome: "skipped", reason: "unproven" });
+    if (proved) expect(await NodeFSPromises.readFile(path, "utf8")).toBe("# Edited");
+  });
+});
 
 describe("Claude public factory core and capabilities", () => {
   it("publishes one cancellation receipt when stopped", async () => {
@@ -158,8 +274,7 @@ describe("Claude public factory core and capabilities", () => {
     const { provider, events } = fixture();
     const capture = vi.fn();
     provider.on("plan_captured", capture);
-    provider.setPlanAnswerMode("thread-1", true);
-    await provider.sendTurn(request());
+    await provider.sendTurn(request({ planTurn: { kind: "planning", planFilePath: null } }));
     await completed(events, 1);
     expect(await Promise.all(decisions)).toEqual([{ behavior: "deny", message: reply }]);
     expect(capture.mock.calls).toEqual(kind === "captured" ? [[{ threadId: "thread-1", markdown, source: "native" }]] : []);
@@ -180,8 +295,7 @@ describe("Claude public factory core and capabilities", () => {
     const { provider, events } = fixture();
     const capture = vi.fn();
     provider.on("plan_captured", capture);
-    provider.setPlanAnswerMode("thread-1", true);
-    await provider.sendTurn(request());
+    await provider.sendTurn(request({ planTurn: { kind: "planning", planFilePath: null } }));
     await completed(events, 1);
     expect(await Promise.all(decisions)).toEqual([{ behavior: "deny",
       message: "The client captured your proposed plan. Reply with a one or two sentence summary of it, then stop and wait for the user to review it." }]);
@@ -371,9 +485,8 @@ describe("Claude public factory core and capabilities", () => {
     const mcpServer = new McpServer({ name: "fixture", version: "0" });
     input.host.threadControl.bootstrap = vi.fn(async () => mcpServer);
     input.host.threadControl.close = vi.fn(async () => undefined);
-    provider.setPlanAnswerMode("thread-1", true);
     await provider.setGoal("mcode-thread-1", "fixture objective");
-    await provider.sendTurn(request({ interactionMode: "plan", orchestrationMode: "proactive" }));
+    await provider.sendTurn(request({ interactionMode: "plan", planTurn: { kind: "planning", planFilePath: null }, orchestrationMode: "proactive" }));
     await completed(events, 1);
     const options = transport.optionsSeen[0];
     assert(options);
@@ -395,7 +508,6 @@ describe("Claude public factory core and capabilities", () => {
     provider.on("plan_captured", plan);
     await canUseTool("ExitPlanMode", { plan: "fixture plan" }, { signal: new AbortController().signal, toolUseID: "PLAN_1" });
     expect(plan).toHaveBeenCalledExactlyOnceWith({ threadId: "thread-1", markdown: "fixture plan", source: "native" });
-    provider.setPlanAnswerMode("thread-1", false);
     expect(await provider.clearGoal("mcode-thread-1")).toBe(true);
     await provider.discardSession("mcode-thread-1");
     expect(browser.status()).toEqual({ active: 0, pending: 0 });

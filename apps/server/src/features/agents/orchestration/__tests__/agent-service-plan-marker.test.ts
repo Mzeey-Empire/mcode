@@ -64,7 +64,6 @@ function buildService(db: Database) {
     maxInputCharactersPerTurn: 16_000,
     sendTurn: vi.fn(() => Promise.resolve()),
     // Claude-concrete off-interface method invoked by armPlanGenerationTurn via cast.
-    setPlanAnswerMode: vi.fn(),
   });
   const providerRegistry = {
     resolve: vi.fn(() => providerStub),
