@@ -25,17 +25,6 @@ import { resolveActivePreviewWebContents } from "../surfaces/active-web-contents
  */
 export type PreviewPictureReferenceResult = CaptureFinishResult;
 
-type AnnotationSnapshotMarker = {
-  displayNumber: number;
-  bounds: Bounds;
-};
-
-type AnnotationSnapshotRequest = {
-  activeDisplayNumber: number;
-  activeBounds: Bounds;
-  markers: AnnotationSnapshotMarker[];
-};
-
 /** Hard cap per guest-derived string before redaction so hostile pages cannot exhaust memory. */
 const GUEST_TEXT_SAFETY_MAX = 500_000;
 
@@ -47,9 +36,6 @@ export const PREVIEW_CONSOLE_LINE_MAX = 480;
 
 /** Maximum number of failed request entries buffered per session. */
 export const PREVIEW_FAILED_REQUEST_MAX = 24;
-
-/** Maximum annotation markers burned into one snapshot. */
-const PREVIEW_ANNOTATION_SNAPSHOT_MARKER_MAX = 50;
 
 /** Max length for selector hints after guest + main sanitization (keeps prompts small, bounds CSS injection). */
 export const SELECTOR_HINT_MAX_LEN = 512;
@@ -272,127 +258,6 @@ export function clampRectInPlace(rect: Bounds, maxW: number, maxH: number): Boun
   return { x, y, width, height };
 }
 
-function parseDisplayNumber(value: unknown): number | null {
-  if (typeof value !== "number" || !Number.isInteger(value)) return null;
-  if (value < 1 || value > 999) return null;
-  return value;
-}
-
-function clampSnapshotBounds(value: unknown, viewport: Bounds): Bounds | null {
-  const parsed = parseBoundsRecord(value);
-  if (!parsed) return null;
-  const clamped = clampRectInPlace(parsed, viewport.width, viewport.height);
-  if (clamped.width < 1 || clamped.height < 1) return null;
-  return clamped;
-}
-
-function parseAnnotationSnapshotMarker(value: unknown, viewport: Bounds): AnnotationSnapshotMarker | null {
-  if (!value || typeof value !== "object") return null;
-  const marker = value as Record<string, unknown>;
-  const displayNumber = parseDisplayNumber(marker.displayNumber);
-  const bounds = clampSnapshotBounds(marker.bounds, viewport);
-  if (!displayNumber || !bounds) return null;
-  return { displayNumber, bounds };
-}
-
-function parseAnnotationSnapshotRequest(value: unknown, viewport: Bounds): AnnotationSnapshotRequest | null {
-  if (!value || typeof value !== "object") return null;
-  const payload = value as Record<string, unknown>;
-  const activeDisplayNumber = parseDisplayNumber(payload.activeDisplayNumber);
-  const activeBounds = clampSnapshotBounds(payload.activeBounds, viewport);
-  if (!activeDisplayNumber || !activeBounds) return null;
-
-  const markers = Array.isArray(payload.markers)
-    ? payload.markers
-        .slice(0, PREVIEW_ANNOTATION_SNAPSHOT_MARKER_MAX)
-        .map((marker) => parseAnnotationSnapshotMarker(marker, viewport))
-        .filter((marker): marker is AnnotationSnapshotMarker => marker !== null)
-    : [];
-  if (!markers.some((marker) => marker.displayNumber === activeDisplayNumber)) {
-    markers.push({ displayNumber: activeDisplayNumber, bounds: activeBounds });
-  }
-
-  return { activeDisplayNumber, activeBounds, markers };
-}
-
-const REMOVE_ANNOTATION_SNAPSHOT_OVERLAY_JS = `(function(){
-  var root = document.getElementById("__mcode_annotation_snapshot_overlay");
-  if (root) root.remove();
-  document.querySelectorAll('style[data-mcode-annotation-snapshot="1"]').forEach(function (node) { node.remove(); });
-})()`;
-
-const WAIT_FOR_ANNOTATION_SNAPSHOT_OVERLAY_PAINT_JS = `(function(){
-  return new Promise(function(resolve) {
-    try {
-      var root = document.getElementById("__mcode_annotation_snapshot_overlay");
-      if (!root) {
-        resolve(false);
-        return;
-      }
-      var settled = false;
-      var finish = function(value) {
-        if (settled) return;
-        settled = true;
-        resolve(value);
-      };
-      var raf = window.requestAnimationFrame || function(cb) { return setTimeout(cb, 16); };
-      raf(function() {
-        raf(function() {
-          finish(true);
-        });
-      });
-      setTimeout(function() {
-        finish(true);
-      }, 80);
-    } catch (err) {
-      resolve(false);
-    }
-  });
-})()`;
-
-function buildAnnotationSnapshotOverlayJs(payload: AnnotationSnapshotRequest): string {
-  const json = JSON.stringify(payload);
-  return `(function(){
-    var data = ${json};
-    var old = document.getElementById("__mcode_annotation_snapshot_overlay");
-    if (old) old.remove();
-    document.querySelectorAll('style[data-mcode-annotation-snapshot="1"]').forEach(function (node) { node.remove(); });
-    var style = document.createElement("style");
-    style.setAttribute("data-mcode-annotation-snapshot", "1");
-    style.textContent = [
-      "#__mcode_annotation_snapshot_overlay{position:fixed;inset:0;pointer-events:none;z-index:2147483645}",
-      "#__mcode_annotation_snapshot_overlay .mcode-annotation-highlight{position:fixed;box-sizing:border-box;border:3px solid #f59e0b;background:rgba(245,158,11,.18);border-radius:3px;box-shadow:0 0 0 1px rgba(17,24,39,.55) inset,0 0 0 9999px rgba(0,0,0,.08)}",
-      "#__mcode_annotation_snapshot_overlay .mcode-annotation-marker{position:fixed;width:30px;height:30px;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;color:#fff;font:700 12px/1 ui-sans-serif,system-ui,sans-serif;text-shadow:0 1px 1px rgba(0,0,0,.35)}",
-      "#__mcode_annotation_snapshot_overlay .mcode-annotation-marker::before{content:\\"\\";position:absolute;inset:1px;border-radius:999px;background:#f59e0b;box-shadow:0 4px 10px rgba(0,0,0,.28),0 0 0 2px rgba(17,24,39,.78)}",
-      "#__mcode_annotation_snapshot_overlay .mcode-annotation-marker::after{content:\\"\\";position:absolute;left:9px;bottom:1px;width:8px;height:8px;border-radius:2px;background:#f59e0b;transform:rotate(45deg);box-shadow:1px 1px 0 rgba(17,24,39,.78)}",
-      "#__mcode_annotation_snapshot_overlay .mcode-annotation-marker span{position:relative;z-index:1}"
-    ].join("");
-    (document.head || document.documentElement).appendChild(style);
-    var root = document.createElement("div");
-    root.id = "__mcode_annotation_snapshot_overlay";
-    root.setAttribute("aria-hidden", "true");
-    var highlight = document.createElement("div");
-    highlight.className = "mcode-annotation-highlight";
-    highlight.style.left = data.activeBounds.x + "px";
-    highlight.style.top = data.activeBounds.y + "px";
-    highlight.style.width = data.activeBounds.width + "px";
-    highlight.style.height = data.activeBounds.height + "px";
-    root.appendChild(highlight);
-    for (var i = 0; i < data.markers.length; i++) {
-      var marker = data.markers[i];
-      var node = document.createElement("div");
-      node.className = "mcode-annotation-marker";
-      node.style.left = Math.max(16, marker.bounds.x + marker.bounds.width / 2) + "px";
-      node.style.top = Math.max(16, marker.bounds.y + Math.min(marker.bounds.height / 2, 18)) + "px";
-      var label = document.createElement("span");
-      label.textContent = String(marker.displayNumber);
-      node.appendChild(label);
-      root.appendChild(node);
-    }
-    (document.body || document.documentElement).appendChild(root);
-  })()`;
-}
-
 /** Sanitized hostname (or fallback) used in capture filenames for the preview tab. */
 export function previewCaptureFileStem(pageUrl: string): string {
   try {
@@ -583,41 +448,23 @@ async function persistCapturedPng(webContents: WebContents, prefix: string): Pro
 }
 
 async function buildPictureResult(capture: ActiveCapture, prefix: string, bounds: Bounds): Promise<PreviewPictureReferenceResult> {
+  const capturePayload = await buildBrowserCapturePayload(capture.webContents, bounds, capture.session.consoleBuffer, snapshotFailedRequestsForCapture(capture.session), capture.session.workspaceId, { captureKind: "viewport" });
+  if (!capturePayload.viewportScroll) return { ok: false, error: "capture-failed" };
   const persisted = await persistCapturedPng(capture.webContents, prefix);
   if ("ok" in persisted) return persisted;
-  const capturePayload = await buildBrowserCapturePayload(capture.webContents, bounds, capture.session.consoleBuffer, snapshotFailedRequestsForCapture(capture.session), capture.session.workspaceId, { captureKind: "viewport" });
   return { ok: true, meta: persisted.meta, previewBytes: persisted.bytes, capture: capturePayload };
 }
 
-async function removeAnnotationOverlay(webContents: WebContents): Promise<void> {
-  if (webContents.isDestroyed()) return;
-  try {
-    await webContents.executeJavaScript(REMOVE_ANNOTATION_SNAPSHOT_OVERLAY_JS, true);
-  } catch {
-    // Navigation can destroy the isolated page between capture and cleanup.
-  }
-}
-
-async function paintAnnotationOverlay(webContents: WebContents, overlay: AnnotationSnapshotRequest): Promise<boolean> {
-  await webContents.executeJavaScript(buildAnnotationSnapshotOverlayJs(overlay), true);
-  return await webContents.executeJavaScript(WAIT_FOR_ANNOTATION_SNAPSHOT_OVERLAY_PAINT_JS, true) === true;
-}
-
-async function handleAnnotationCapture(event: Electron.IpcMainInvokeEvent, payload: unknown): Promise<PreviewPictureReferenceResult> {
+async function handleAnnotationCapture(event: Electron.IpcMainInvokeEvent): Promise<PreviewPictureReferenceResult> {
   const capture = activeCapture(event);
   if (isCaptureError(capture)) return capture;
   const lastBounds = capture.session.lastBounds;
   if (!lastBounds) return { ok: false, error: "no-bounds" };
   const bounds = viewportBoundsFallback(lastBounds.width, lastBounds.height);
-  const overlay = parseAnnotationSnapshotRequest(payload, bounds);
-  if (!overlay) return { ok: false, error: "capture-failed" };
   try {
-    if (!await paintAnnotationOverlay(capture.webContents, overlay)) return { ok: false, error: "capture-failed" };
     return await buildPictureResult(capture, "preview-annotation", bounds);
   } catch {
     return { ok: false, error: "capture-failed" };
-  } finally {
-    await removeAnnotationOverlay(capture.webContents);
   }
 }
 

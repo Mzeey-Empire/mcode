@@ -56,7 +56,7 @@ import { ParentAssistantTextCheckpointService } from "../../turns/parent-assista
 import { broadcast } from "../../../../application/transport/push.js";
 import type { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import type { GitService } from "../../../projects/index.js";
-import type { AttachmentService } from "../../../attachments/storage/attachment-service.js";
+import { AttachmentService } from "../../../attachments/storage/attachment-service.js";
 import type { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
 import type { MemoryPressureService } from "../../../../runtime/memory/memory-pressure-service.js";
 import type { SettingsService } from "../../../settings/settings-service.js";
@@ -81,7 +81,7 @@ function startProviderTurn(service: AgentService): string {
   return startProviderTurnForTest(service, THREAD_ID);
 }
 
-function makePreviewAnnotationBundle(): PreviewAnnotationBundle {
+function makePreviewAnnotationBundle(): Extract<PreviewAnnotationBundle, { schemaVersion: 1 }> {
   const capture = {
     schemaVersion: 2 as const,
     pageUrl: "https://www.google.com/",
@@ -920,48 +920,87 @@ describe("AgentService turn cleanup", () => {
     expect(result.snapshot).toMatchObject({ threadId: THREAD_ID, phase: "cancelled" });
   });
 
-  it("persists preview annotation snapshots as visible provider attachments", async () => {
-    const { service, providerEmitter, attachmentService, messageRepo } = await buildService();
-    const bundle = makePreviewAnnotationBundle();
+  it.each([1, 2] as const)("persists one image per page from bundle v%i with distinct filenames", async (schemaVersion) => {
+    const directory = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-page-snapshots-"));
+    vi.stubEnv("MCODE_DATA_DIR", directory);
+    try {
+      const { service, providerEmitter, attachmentService, messageRepo } = await buildService();
+      const storage = new AttachmentService();
+      vi.spyOn(attachmentService, "persist").mockImplementation(storage.persist.bind(storage));
+      const legacy = makePreviewAnnotationBundle();
+      const first = legacy.annotations[0];
+      if (!first || !("snapshot" in first)) throw new Error("missing browser fixture");
+      const sourcePath = NodePath.join(directory, "page.png");
+      const bytes = Buffer.from([137, 80, 78, 71, 1, 2, 3, 4]);
+      await NodeFSPromises.writeFile(sourcePath, bytes);
+      const last = { ...first, id: "550e8400-e29b-41d4-a716-446655440002", displayNumber: 2,
+        snapshot: { ...first.snapshot, id: "last-shot", sourcePath } };
+      const other = { ...first, id: "550e8400-e29b-41d4-a716-446655440003",
+        pageIdentity: "other-page", pageContext: { ...first.pageContext, pageUrl: "https://other.test" },
+        snapshot: { ...first.snapshot, id: "other-shot", sourcePath } };
+      const pages = [last, other].map((note) => ({
+        pageIdentity: note.pageIdentity, url: note.pageContext.pageUrl, title: "Google", faviconUrl: null,
+        snapshot: { ...note.snapshot, scroll: { x: 0, y: 0 } },
+      }));
+      const annotations = [first, last, other].map((note) => ({
+        id: note.id, pageIdentity: note.pageIdentity, displayNumber: note.displayNumber,
+        pageContext: note.pageContext, targetContext: note.targetContext, note: note.note!,
+      }));
+      const v2: PreviewAnnotationBundle = { schemaVersion: 2, pages, annotations };
+      const bundle: PreviewAnnotationBundle = schemaVersion === 1
+        ? { schemaVersion: 1, annotations: [first, last, other] } : v2;
 
-    await service.sendMessage({
-      threadId: THREAD_ID,
-      content: "fix this",
-      permissionMode: "default",
-      model: "claude-sonnet-4-6",
-      attachments: [],
-      provider: "claude",
-      mentions: [],
-      previewAnnotations: bundle,
-    });
+      await service.sendMessage({ threadId: THREAD_ID, content: "fix this", permissionMode: "default",
+        model: "claude-sonnet-4-6", provider: "claude", attachments: [], previewAnnotations: bundle });
 
-    const expectedAttachment = {
-      id: "annotation-shot-1",
-      name: "Annotation 1 screenshot.png",
-      mimeType: "image/png",
-      sizeBytes: 2048,
-      sourcePath: "C:/tmp/annotation-shot-1.png",
-    };
+      const expected = [
+        { id: "last-shot", name: "Notes on Google.png", mimeType: "image/png", sizeBytes: 8 },
+        { id: "other-shot", name: "Notes on Google (2).png", mimeType: "image/png", sizeBytes: 8 },
+      ];
+      expect(messageRepo.listByThread(THREAD_ID, 10).messages).toContainEqual(expect.objectContaining({
+        role: "user", content: "fix this", sequence: 1, attachments: expected, previewAnnotations: v2,
+      }));
+      expect(Reflect.get(providerEmitter, "sendTurn")).toHaveBeenCalledWith(expect.objectContaining({
+        attachments: expected.map((attachment) => ({ ...attachment,
+          sourcePath: NodePath.join(directory, "attachments", THREAD_ID, attachment.id + ".png") })),
+      }));
+      expect((await NodeFSPromises.readdir(NodePath.join(directory, "attachments", THREAD_ID))).sort())
+        .toEqual(["last-shot.png", "other-shot.png"]);
+      for (const attachment of expected) {
+        expect(await NodeFSPromises.readFile(NodePath.join(directory, "attachments", THREAD_ID, attachment.id + ".png"))).toEqual(bytes);
+      }
+    } finally {
+      vi.unstubAllEnvs();
+      await NodeFSPromises.rm(directory, { recursive: true, force: true });
+    }
+  });
 
-    expect(attachmentService.persist).toHaveBeenCalledWith(THREAD_ID, [
-      expectedAttachment,
-    ]);
-    expect(messageRepo.listByThread(THREAD_ID, 10).messages).toContainEqual(expect.objectContaining({
-      role: "user", content: "fix this", sequence: 1,
-      attachments: [
-        {
-          id: "annotation-shot-1",
-          name: "Annotation 1 screenshot.png",
-          mimeType: "image/png",
-          sizeBytes: 2048,
-        },
-      ], previewAnnotations: bundle,
-    }));
-    expect((providerEmitter as any).sendTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        attachments: [expectedAttachment],
-      }),
-    );
+  it.each(["missing-source", "unsafe-id"])("rejects a page snapshot with %s before persisting the message", async (failure) => {
+    const directory = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-page-rejected-"));
+    vi.stubEnv("MCODE_DATA_DIR", directory);
+    try {
+      const { service, providerEmitter, attachmentService, messageRepo } = await buildService();
+      const storage = new AttachmentService();
+      vi.spyOn(attachmentService, "persist").mockImplementation(storage.persist.bind(storage));
+      const first = makePreviewAnnotationBundle().annotations[0];
+      if (!first || !("snapshot" in first)) throw new Error("missing browser fixture");
+      const sourcePath = NodePath.join(directory, "page.png");
+      if (failure === "unsafe-id") await NodeFSPromises.writeFile(sourcePath, Buffer.from([137, 80, 78, 71]));
+      const bundle: PreviewAnnotationBundle = { schemaVersion: 2,
+        pages: [{ pageIdentity: first.pageIdentity, url: first.pageContext.pageUrl, title: "Google", faviconUrl: null,
+          snapshot: { ...first.snapshot, id: failure === "unsafe-id" ? "../escape" : "safe", sourcePath, scroll: { x: 0, y: 0 } } }],
+        annotations: [{ id: first.id, pageIdentity: first.pageIdentity, displayNumber: 1,
+          pageContext: first.pageContext, targetContext: first.targetContext, note: "Move the header down." }],
+      };
+      await expect(service.sendMessage({ threadId: THREAD_ID, content: "fix this", permissionMode: "default",
+        model: "claude-sonnet-4-6", provider: "claude", attachments: [], previewAnnotations: bundle })).rejects.toThrow();
+      expect(messageRepo.listByThread(THREAD_ID, 10).messages.filter((message) => message.role === "user")).toEqual([]);
+      expect(Reflect.get(providerEmitter, "sendTurn")).not.toHaveBeenCalled();
+      expect(await NodeFSPromises.readdir(NodePath.join(directory, "attachments", THREAD_ID))).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+      await NodeFSPromises.rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("keeps compaction active while materializing a post-terminal goal receipt", async () => {

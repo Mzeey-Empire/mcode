@@ -620,11 +620,12 @@ export {
   isBrowserCaptureSpillAppDataPath,
   clampMcodeBrowserCaptureV2,
   clampAttachedBrowserCaptureForOutbound,
-  previewAnnotationSnapshotAttachmentName,
-  previewAnnotationSnapshotAttachmentMeta,
-  previewAnnotationSnapshotStoredAttachment,
-  previewAnnotationSnapshotAttachments,
-  previewAnnotationSnapshotStoredAttachments,
+  PreviewAnnotationPageSchema,
+  PreviewAnnotationPayloadV2Schema,
+  isPreviewAnnotationPayloadV2,
+  readPreviewAnnotationBundle,
+  toPreviewAnnotationBundleV2,
+  previewAnnotationPageSnapshotName,
 } from "./models/browser-preview.js";
 export type {
   BrowserPreviewBounds,
@@ -645,6 +646,9 @@ export type {
   FileAnnotationPayload,
   ComposerAnnotationPayload,
   PreviewAnnotationBundle,
+  PreviewAnnotationPage,
+  PreviewAnnotationPayloadV2,
+  PreviewAnnotationBundleView,
 } from "./models/browser-preview.js";
 
 export {

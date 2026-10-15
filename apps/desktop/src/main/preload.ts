@@ -347,7 +347,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       return ipcRenderer.invoke("preview:capture-picture-element-pick");
     },
     /** Capture the visible preview with annotation marker and target highlight context. */
-    captureAnnotationSnapshot(payload: unknown): Promise<unknown> {
+    captureAnnotationSnapshot(payload?: unknown): Promise<unknown> {
       return ipcRenderer.invoke("preview:capture-annotation-snapshot", payload);
     },
     releaseBrowserCaptureSpills(paths: readonly string[]): Promise<void> {

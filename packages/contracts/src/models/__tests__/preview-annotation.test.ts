@@ -7,9 +7,11 @@ import {
   isPreviewAnnotationPayload,
   PreviewAnnotationBundleSchema,
   SendMessageSchema,
-  previewAnnotationSnapshotAttachmentMeta,
-  previewAnnotationSnapshotAttachments,
-  previewAnnotationSnapshotStoredAttachment,
+  PreviewAnnotationPageSchema,
+  PreviewAnnotationPayloadV2Schema,
+  readPreviewAnnotationBundle,
+  toPreviewAnnotationBundleV2,
+  previewAnnotationPageSnapshotName,
 } from "../../index.js";
 
 const capture = {
@@ -87,7 +89,8 @@ describe("PreviewAnnotationBundleSchema", () => {
     };
 
     expect(PreviewAnnotationBundleSchema().safeParse(bundle).success).toBe(true);
-    expect(previewAnnotationSnapshotAttachments(bundle)).toHaveLength(1);
+    expect(readPreviewAnnotationBundle(bundle).diffAnnotations).toEqual([diffAnnotation]);
+    expect(readPreviewAnnotationBundle(bundle).pages.map((page) => page.snapshotIds)).toEqual([["snap-1"]]);
   });
 
   it("rejects annotations without note or proposed changes", () => {
@@ -117,21 +120,7 @@ describe("PreviewAnnotationBundleSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("derives image attachment metadata from the annotation snapshot", () => {
-    expect(previewAnnotationSnapshotAttachmentMeta(annotation)).toEqual({
-      id: "snap-1",
-      name: "Annotation 1 screenshot.png",
-      mimeType: "image/png",
-      sizeBytes: 123,
-      sourcePath: "C:/tmp/preview.png",
-    });
-    expect(previewAnnotationSnapshotStoredAttachment(annotation)).toEqual({
-      id: "snap-1",
-      name: "Annotation 1 screenshot.png",
-      mimeType: "image/png",
-      sizeBytes: 123,
-    });
-  });
+
 });
 
 const fileAnnotation = {
@@ -169,6 +158,111 @@ describe("FileAnnotationPayloadSchema", () => {
     const parsed = ComposerAnnotationPayloadSchema().parse(fileAnnotation);
     expect(parsed).toEqual(fileAnnotation);
     expect(isPreviewAnnotationPayload(parsed)).toBe(false);
-    expect(previewAnnotationSnapshotAttachments({ schemaVersion: 1, annotations: [annotation, fileAnnotation] })).toHaveLength(1);
+    expect(readPreviewAnnotationBundle({ schemaVersion: 1, annotations: [annotation, fileAnnotation] }).fileAnnotations).toEqual([fileAnnotation]);
+  });
+});
+
+const page = {
+  pageIdentity: annotation.pageIdentity, url: capture.pageUrl, title: "Product", faviconUrl: null,
+  snapshot: { ...annotation.snapshot, scroll: { x: 0, y: 80 } },
+};
+const noteV2 = {
+  id: annotation.id, pageIdentity: annotation.pageIdentity, displayNumber: 1,
+  pageContext: capture, targetContext: annotation.targetContext, note: annotation.note,
+};
+
+describe("v2 annotation bundles", () => {
+  it("parses pages, browser notes and both code comment kinds", () => {
+    const bundle = { schemaVersion: 2, pages: [page], annotations: [noteV2, diffAnnotation, fileAnnotation] };
+    expect(PreviewAnnotationBundleSchema().parse(bundle)).toEqual(bundle);
+    expect(PreviewAnnotationPayloadV2Schema().parse({ ...noteV2, note: "  Keep this  " }).note).toBe("Keep this");
+  });
+
+  it("rejects missing snapshots, blank notes and extra v2 fields", () => {
+    const valid = { schemaVersion: 2, pages: [page], annotations: [noteV2] };
+    const malformed = [
+      { ...valid, pages: [{ ...page, snapshot: undefined }] },
+      { ...valid, annotations: [{ ...noteV2, note: "   " }] },
+      { ...valid, annotations: [{ ...noteV2, note: undefined }] },
+      { ...valid, annotations: [{ ...noteV2, changeSummary: "old" }] },
+      { ...valid, annotations: [{ ...noteV2, proposedChanges: { textColor: "red" } }] },
+      { ...valid, annotations: [{ ...noteV2, targetContext: { ...noteV2.targetContext, extra: true } }] },
+      { ...valid, pages: [{ ...page, extra: true }] },
+      { ...valid, pages: [{ ...page, snapshot: { ...page.snapshot, extra: true } }] },
+      { ...valid, extra: true },
+    ];
+    for (const bundle of malformed) expect(PreviewAnnotationBundleSchema().safeParse(bundle).success).toBe(false);
+    expect(PreviewAnnotationPageSchema().safeParse({ ...page, snapshot: null }).success).toBe(false);
+  });
+
+  it("groups legacy notes by first appearance and retains every burned-in number and snapshot id", () => {
+    const secondPage = { ...annotation, id: "00000000-0000-4000-8000-000000000004",
+      pageIdentity: "other", displayNumber: 7, pageContext: { ...capture, pageUrl: "https://other.test", pageTitle: "Other" },
+      snapshot: { ...annotation.snapshot, id: "snap-other" } };
+    const lastNote = { ...annotation, id: "00000000-0000-4000-8000-000000000005",
+      displayNumber: 9, note: undefined, changeSummary: "Make it red", proposedChanges: { textColor: "red" },
+      snapshot: { ...annotation.snapshot, id: "snap-last", capture: { ...capture, viewportScroll: { scrollX: 12, scrollY: 340 } } } };
+    const bundle = PreviewAnnotationBundleSchema().parse({
+      schemaVersion: 1, annotations: [annotation, secondPage, lastNote, diffAnnotation, fileAnnotation],
+    });
+    expect(readPreviewAnnotationBundle(bundle)).toEqual({
+      pages: [
+        { pageIdentity: annotation.pageIdentity, url: capture.pageUrl, title: "Product", faviconUrl: null,
+          snapshot: { ...lastNote.snapshot, scroll: { x: 12, y: 340 } }, snapshotIds: ["snap-1", "snap-last"],
+          notes: [{ id: annotation.id, displayNumber: 1, note: annotation.note,
+            targetContext: annotation.targetContext, pageContext: capture },
+            { id: lastNote.id, displayNumber: 9, note: "Make it red",
+              targetContext: annotation.targetContext, pageContext: capture }],
+        },
+        { pageIdentity: "other", url: "https://other.test", title: "Other", faviconUrl: null,
+          snapshot: { ...secondPage.snapshot, scroll: { x: 0, y: 0 } }, snapshotIds: ["snap-other"],
+          notes: [{ id: secondPage.id, displayNumber: 7, note: annotation.note,
+            targetContext: annotation.targetContext, pageContext: secondPage.pageContext }] },
+      ],
+      diffAnnotations: [diffAnnotation], fileAnnotations: [fileAnnotation],
+    });
+  });
+
+  it("reads v2 page order, snapshot scroll and independent page numbers", () => {
+    const otherPage = { ...page, pageIdentity: "other", title: "Other", snapshot: { ...page.snapshot, id: "other-shot" } };
+    const otherNote = { ...noteV2, id: "00000000-0000-4000-8000-000000000006", pageIdentity: "other" };
+    const view = readPreviewAnnotationBundle({
+      schemaVersion: 2, pages: [page, otherPage], annotations: [otherNote, noteV2, diffAnnotation, fileAnnotation],
+    });
+    expect(view).toEqual({
+      pages: [
+        { ...page, snapshotIds: ["snap-1"], notes: [{ id: noteV2.id, displayNumber: 1, note: annotation.note,
+          targetContext: annotation.targetContext, pageContext: capture }] },
+        { ...otherPage, snapshotIds: ["other-shot"], notes: [{ id: otherNote.id, displayNumber: 1, note: annotation.note,
+          targetContext: annotation.targetContext, pageContext: capture }] },
+      ], diffAnnotations: [diffAnnotation], fileAnnotations: [fileAnnotation],
+    });
+  });
+
+  it.each([undefined, "   "])("upgrades legacy writers without leaking per-note snapshots or visual proposal fields", (note) => {
+    const upgraded = toPreviewAnnotationBundleV2({ schemaVersion: 1, annotations: [
+      { ...annotation, note, changeSummary: "Make it red", proposedChanges: { textColor: "red" } },
+      diffAnnotation, fileAnnotation,
+    ] });
+    expect(upgraded).toEqual({ schemaVersion: 2,
+      pages: [{ ...page, snapshot: { ...annotation.snapshot, scroll: { x: 0, y: 0 } } }],
+      annotations: [{ ...noteV2, note: "Make it red" }, diffAnnotation, fileAnnotation] });
+    expect(PreviewAnnotationBundleSchema().parse(upgraded)).toEqual(upgraded);
+  });
+});
+
+describe("page snapshot filenames", () => {
+  it.each([
+    ["Billing", "https://example.test", "Notes on Billing.png"],
+    ["  ", "https://example.test:8080/path", "Notes on example.test_8080.png"],
+    [null, "not a url", "Notes on page.png"],
+    [null, "about:blank", "Notes on page.png"],
+    [" . ", "https://example.test", "Notes on page.png"],
+    ['A/B\\C:D*E?F"G<H>I|J', "https://example.test", "Notes on A_B_C_D_E_F_G_H_I_J.png"],
+    ["CON", "https://example.test", "Notes on CON.png"],
+    ["Odd\t title\n", "https://example.test", "Notes on Odd_ title.png"],
+    ["x".repeat(200), "https://example.test", `Notes on ${"x".repeat(107)}.png`],
+  ])("sanitizes %j deterministically", (title, url, expected) => {
+    expect(previewAnnotationPageSnapshotName({ title, url })).toBe(expected);
   });
 });

@@ -1,9 +1,9 @@
-import type { PreviewAnnotationBundle } from "@mcode/contracts";
+import { toPreviewAnnotationBundleV2, type PreviewAnnotationBundle } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import type { AgentService } from "../orchestration/agent-service.js";
 import type { SendMessageCommand } from "../turns/turn-admission-dispatch-coordinator.js";
 
-const PREVIEW_ANNOTATION_FENCE_START = "<!-- mcode-preview-annotations:v1";
+const PREVIEW_ANNOTATION_FENCE_START = "<!-- mcode-preview-annotations:v2";
 const PREVIEW_ANNOTATION_FENCE_END = "mcode-preview-annotations:end -->";
 
 /** Dispatch a server-built recovery attempt, rebuilding its provider input the way a composer send does. */
@@ -47,7 +47,7 @@ export async function sendAdmittedTurn<Command extends AdmittableTurnCommand>(
 export function appendPreviewAnnotations(content: string, previewAnnotations: PreviewAnnotationBundle | undefined): string {
   if (!previewAnnotations || previewAnnotations.annotations.length === 0) return content;
   if (content.includes(PREVIEW_ANNOTATION_FENCE_START)) return content;
-  const serialized = JSON.stringify(previewAnnotations)
+  const serialized = JSON.stringify(toPreviewAnnotationBundleV2(previewAnnotations))
     .replaceAll("<", "\\u003c").replaceAll(">", "\\u003e").replaceAll("&", "\\u0026");
   return `${content.trim()}\n\n${PREVIEW_ANNOTATION_FENCE_START}\n${serialized}\n${PREVIEW_ANNOTATION_FENCE_END}`.trim();
 }

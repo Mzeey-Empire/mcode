@@ -3,7 +3,8 @@ import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 import {
   AgentEventType,
-  previewAnnotationSnapshotAttachments,
+  previewAnnotationPageSnapshotName,
+  toPreviewAnnotationBundleV2,
   isDiffAnnotationPayload,
   isFileAnnotationPayload,
   type AttachmentMeta,
@@ -457,6 +458,7 @@ export class TurnAdmissionDispatchCoordinator {
   }
 
   private async prepare(command: SendMessageCommand): Promise<{ kind: "ready"; value: PreparedCommand } | { kind: "handled" } | { kind: "queued" }> {
+    if (command.previewAnnotations) command = { ...command, previewAnnotations: toPreviewAnnotationBundleV2(command.previewAnnotations) };
     this.requireCompleteProvenance(command);
     const thread = this.requireThread(command.threadId);
     this.requireSendableThread(thread);
@@ -727,7 +729,7 @@ export class TurnAdmissionDispatchCoordinator {
   private async persistCommandAttachments(command: SendMessageCommand): Promise<PersistedAttachmentData> {
     const persisted = await this.attachments.persist(command.threadId, [
       ...(command.attachments ?? []),
-      ...previewAnnotationSnapshotAttachments(command.previewAnnotations),
+      ...this.pageSnapshotAttachments(command),
     ]);
     if (!command.stagedDraftImageIds?.length) return persisted;
     try {
@@ -737,6 +739,22 @@ export class TurnAdmissionDispatchCoordinator {
       await this.attachments.removeStoredAttachments(command.threadId, persisted.stored);
       throw error;
     }
+  }
+
+  private pageSnapshotAttachments(command: SendMessageCommand): AttachmentMeta[] {
+    if (!command.previewAnnotations) return [];
+    const names = new Set((command.attachments ?? []).map((attachment) => attachment.name.toLowerCase()));
+    return toPreviewAnnotationBundleV2(command.previewAnnotations).pages.map((page) => {
+      const baseName = previewAnnotationPageSnapshotName(page);
+      let name = baseName;
+      for (let index = 2; names.has(name.toLowerCase()); index += 1) {
+        const suffix = ` (${index}).png`;
+        name = `${baseName.slice(0, -4).slice(0, 120 - suffix.length)}${suffix}`;
+      }
+      names.add(name.toLowerCase());
+      const { id, mimeType, sizeBytes, sourcePath } = page.snapshot;
+      return { id, name, mimeType, sizeBytes, sourcePath };
+    });
   }
 
   private automaticSubmission(
