@@ -699,8 +699,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private readonly canonicalEventPublisher: CodexCanonicalEventPublisher;
   private readonly planQuestions = new CodexPlanQuestions();
   /**
-   * Sessions whose last native turn ran in plan mode. It outlives session close, because an idle
-   * eviction between the plan and the build must not leave the thread in plan mode.
+   * Sessions whose last turn that sent a collaboration mode sent plan. It outlives session close,
+   * because an idle eviction between the plan and the build must not leave the thread in plan mode.
    */
   private readonly planModeSessions = new Set<string>();
 
@@ -1771,8 +1771,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const executionId = entry?.activeParentTurnExecutionId ?? context.stagedExecutionId;
     const emit = this.codexFatalEmitter(entry, executionId);
     const questionsExpired = this.planQuestions.hasPending(context.sessionId);
-    // The exit listener already started runtime.stop, whose interrupt reports provider_lost
-    // on a dead transport. The terminal event must be emitted before any await so it wins.
+    // runtime.stop defers its work by a microtask and its interrupt reports provider_lost on a
+    // dead transport, so the terminal event must be emitted before any await to win.
     const expiry = questionsExpired ? this.expireNativeQuestions(context.sessionId) : undefined;
     this.projectCodexAssistantBoundary(mapper, context.sessionId, emit);
     if (questionsExpired && entry && executionId) {
@@ -1780,10 +1780,10 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     } else {
       this.emitCodexTransportFailure(context.threadId, error, failure, executionId, emit);
     }
-    await expiry;
     if (this.runtime.get(context.sessionId)?.server === server) {
       void this.runtime.stop(context.sessionId);
     }
+    await expiry;
   }
 
   private codexFatalEmitter(entry: CodexSessionState | undefined, executionId: string | undefined): (event: AgentEvent) => void {

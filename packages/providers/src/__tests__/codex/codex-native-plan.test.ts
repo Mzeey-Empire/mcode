@@ -66,7 +66,11 @@ const turn: TurnRequest<"codex"> = {
   providerOptions: {}, threadControlEligible: false, planTurn: { kind: "planning", planFilePath: null },
 };
 
-function fixture(bind = true, settle: (status: PlanQuestionSettlement) => Promise<void> = async () => {}) {
+function fixture(
+  bind = true,
+  settle: (status: PlanQuestionSettlement) => Promise<void> = async () => {},
+  record: (batch: NativePlanQuestionBatch) => Promise<void> = async () => {},
+) {
   const children: NativeProcess[] = [];
   spawn.mockImplementation(() => {
     const spawned = new NativeProcess();
@@ -83,7 +87,7 @@ function fixture(bind = true, settle: (status: PlanQuestionSettlement) => Promis
   const settlements: PlanQuestionSettlement[] = [];
   const events: ProviderRuntimeEvent[] = [];
   if (bind) provider.bindPlanQuestions({
-    requested: async batch => { batches.push(batch); },
+    requested: async batch => { batches.push(batch); await record(batch); },
     settled: async (_batch, status) => { settlements.push(status); await settle(status); },
   });
   provider.on("event", event => events.push(event));
@@ -246,9 +250,33 @@ describe("Codex native planning", () => {
       f.child.emit("exit", 1, null);
       await vi.waitFor(() => expect(f.events.filter(event => event.event.type === "ended").map(event => event.event))
         .toEqual([{ type: "ended", threadId: "native-plan", turnExecutionId: "execution", outcome: "interrupted" }]));
+      await f.provider.discardSession(turn.sessionId);
+      expect(f.events.filter(event => event.event.type === "ended")).toHaveLength(1);
     } finally {
       void f.provider.shutdown();
     }
+  });
+
+  it("stops a discarded session even when recording the expiry fails", async () => {
+    const f = fixture(true, async () => { throw new Error("receipt failed"); });
+    try {
+      await ask(f);
+      await f.provider.discardSession(turn.sessionId);
+      await f.provider.sendTurn({ ...turn, turnId: "next", turnExecutionId: "next-execution" });
+      await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(2));
+    } finally { await f.provider.shutdown(); }
+  });
+
+  it("cancels a question it cannot record without failing the turn", async () => {
+    const f = fixture(true, undefined, async () => { throw new Error("database unavailable"); });
+    try {
+      await f.provider.sendTurn(turn);
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      f.child.stdout.write(JSON.stringify({ id: 90, method: "item/tool/requestUserInput", params: capturedQuestion() }) + "\n");
+      await vi.waitFor(() => expect(f.child.requests.find(request => request.id === 90)?.error?.code).toBe(-32800));
+      expect(f.events.some(event => event.event.type === "error")).toBe(false);
+      f.child.complete();
+    } finally { await f.provider.shutdown(); }
   });
 
   it("keeps the resumed turn running when the answer receipt cannot be written", async () => {
