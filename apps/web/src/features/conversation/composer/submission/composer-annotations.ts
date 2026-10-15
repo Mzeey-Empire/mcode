@@ -2,12 +2,18 @@ import {
   isDiffAnnotationPayload,
   isFileAnnotationPayload,
   type DiffAnnotationPayload,
+  type DraftBrowserNotePage,
   type DraftDiffComment,
   type DraftFileComment,
   type FileAnnotationPayload,
   type PreviewAnnotationBundle,
 } from "@mcode/contracts";
-import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
+import {
+  browserPagesToBundle,
+  clearVisibleBrowserNotes,
+  readVisibleBrowserNotePages,
+  restoreQueuedBrowserNotes,
+} from "../draft/draft-browser-notes";
 import {
   clearVisibleDiffComments,
   numberDiffComments,
@@ -30,23 +36,18 @@ function toFilePayload({ revision: _revision, ...payload }: DraftFileComment): F
   return payload;
 }
 
-function readBrowserNotes(scopeId: string) {
-  const bundle = usePreviewAnnotationStore.getState().buildBundle(scopeId);
-  return { pages: bundle?.pages ?? [], annotations: bundle?.annotations ?? [] };
-}
-
 /**
- * Builds the annotation bundle for the next Send from the scope's Browser
- * annotations and the thread draft's visible Review and Files comments,
- * numbered in that order.
+ * Builds the annotation bundle for the next Send from the thread draft's
+ * visible Browser notes, Review comments and Files comments, numbered in that order.
  */
 export function buildComposerAnnotationBundle(
   scopeId: string | undefined,
   diffComments: readonly DraftDiffComment[] = scopeId ? readVisibleDiffComments(scopeId) : [],
   fileComments: readonly DraftFileComment[] = scopeId ? readVisibleFileComments(scopeId) : [],
+  browserNotePages: readonly DraftBrowserNotePage[] = scopeId ? readVisibleBrowserNotePages(scopeId) : [],
 ): PreviewAnnotationBundle | undefined {
   if (!scopeId) return undefined;
-  const { pages, annotations: preview } = readBrowserNotes(scopeId);
+  const { pages, annotations: preview } = browserPagesToBundle(browserNotePages);
   const annotations = [
     ...preview,
     ...numberDiffComments(diffComments, preview.length).map(toPayload),
@@ -56,19 +57,19 @@ export function buildComposerAnnotationBundle(
   return { schemaVersion: 2, pages, annotations };
 }
 
-/** Clears the scope's Browser annotations and visible Review and Files comments. */
+/** Clears the scope's visible Browser notes, Review comments and Files comments. */
 export function clearComposerAnnotations(scopeId: string): void {
-  usePreviewAnnotationStore.getState().clearPreviewNotes(scopeId);
+  clearVisibleBrowserNotes(scopeId);
   clearVisibleDiffComments(scopeId);
   clearVisibleFileComments(scopeId);
 }
 
-/** Restores a queued bundle: Browser annotations to their store, Review and Files comments to the draft. */
+/** Restores a queued bundle's Browser notes, Review comments and Files comments to the draft. */
 export function restoreComposerAnnotations(
   scopeId: string,
   bundle: PreviewAnnotationBundle | undefined,
 ): boolean {
-  const restored = usePreviewAnnotationStore.getState().restoreBundle(scopeId, bundle);
+  const restored = restoreQueuedBrowserNotes(scopeId, bundle);
   clearVisibleDiffComments(scopeId);
   clearVisibleFileComments(scopeId);
   if (restored && bundle) {

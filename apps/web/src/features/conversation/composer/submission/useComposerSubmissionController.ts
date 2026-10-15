@@ -9,11 +9,13 @@ import type { ComposerFormController } from "../draft/useComposerFormController"
 import type { ComposerExecutionTargetController } from "../execution/useComposerExecutionTarget";
 import type { ComposerQueueEdit } from "../queue/useComposerQueueEditing";
 import type { HandoffQueuedSend } from "../queue/useHandoffQueuedSend";
-import { removeTakenDiffComments } from "../draft/draft-diff-comments";
-import { removeTakenFileComments } from "../draft/draft-file-comments";
 import { beginDraftSubmission } from "../draft/draft-submission-lifecycle";
 import { completeSuccessfulComposerSubmission } from "./complete-composer-submission";
-import { createComposerAnnotationDispatchGuard } from "./composer-submission-annotations";
+import {
+  createComposerAnnotationDispatchGuard,
+  materializeSubmissionSnapshots,
+  removeTakenSubmissionAnnotations,
+} from "./composer-submission-annotations";
 import {
   completeQueuedComposerSubmission,
   createHandoffQueuedSend,
@@ -103,6 +105,7 @@ export function useComposerSubmissionController({
         annotations: submission.currentAnnotations,
         diffComments: submission.currentDiffComments,
         fileComments: submission.currentFileComments,
+        browserNotePages: submission.currentBrowserNotePages,
         goalObjective: submission.goalObjective,
         form,
         finishEditing: queue.finishEditing,
@@ -126,27 +129,38 @@ export function useComposerSubmissionController({
 
   const executePreparedDispatch = useCallback(
     async (
-      submission: PreparedComposerSubmission,
+      preparedSubmission: PreparedComposerSubmission,
       target: ComposerExecutionTargetController["target"],
     ): Promise<void> => {
-      if (shouldQueueActiveSubmit({ threadId, isAgentRunning, branchFromMessageId, isNewThread, submission })) {
-        queuePrepared(submission);
+      if (shouldQueueActiveSubmit({ threadId, isAgentRunning, branchFromMessageId, isNewThread, submission: preparedSubmission })) {
+        queuePrepared(preparedSubmission);
+        return;
+      }
+      // Only an existing-thread Send can be confirmed by its messageId later;
+      // new-thread and branch Sends settle on their dispatch result alone.
+      const sendsToThisThread = target.kind === "existing-thread";
+      let submission: PreparedComposerSubmission;
+      try {
+        submission = await materializeSubmissionSnapshots(annotationScopeId, sendsToThisThread, preparedSubmission);
+      } catch (error) {
+        showDispatchFailure(error, false);
         return;
       }
       const annotations = createComposerAnnotationDispatchGuard(
         annotationScopeId,
         submission.currentAnnotations,
       );
-      annotations.clearBeforeDispatch();
+      annotations.leaveDesignMode();
       queue.consumeEditForDispatch();
       const messageId = crypto.randomUUID();
-      // Only an existing-thread Send can be confirmed by its messageId later;
-      // new-thread and branch Sends settle on their dispatch result alone.
-      const sendsToThisThread = target.kind === "existing-thread";
       const draftSubmission = sendsToThisThread
         ? beginDraftSubmission(
           threadId,
-          { diffComments: submission.currentDiffComments, fileComments: submission.currentFileComments },
+          {
+            diffComments: submission.currentDiffComments,
+            fileComments: submission.currentFileComments,
+            browserNotePages: submission.currentBrowserNotePages,
+          },
           messageId,
         )
         : null;
@@ -175,17 +189,13 @@ export function useComposerSubmissionController({
       } catch (error) {
         queue.releaseConsumedEdit();
         if (draftCleared && !placeholderAccepted) form.restoreFailedDispatch();
-        annotations.restoreAfterFailure();
+        annotations.returnToDesignModeAfterFailure();
         void draftSubmission?.failed();
         showDispatchFailure(error, submission.snapshot.selectedTextComments.length > 0);
         return;
       }
-      annotations.stopWatching();
       draftSubmission?.succeeded();
-      if (!sendsToThisThread && annotationScopeId) {
-        removeTakenDiffComments(annotationScopeId, submission.currentDiffComments);
-        removeTakenFileComments(annotationScopeId, submission.currentFileComments);
-      }
+      removeTakenSubmissionAnnotations(annotationScopeId, sendsToThisThread, submission);
       completeSuccessfulComposerSubmission({
         form,
         submission,

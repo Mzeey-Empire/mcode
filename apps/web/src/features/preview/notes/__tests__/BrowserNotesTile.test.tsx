@@ -7,13 +7,16 @@ import { saveDraftDiffComment } from "@/features/conversation/composer/draft/dra
 import { buildComposerAnnotationBundle } from "@/features/conversation/composer/submission/composer-annotations";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { BrowserNotesTile } from "../BrowserNotesTile";
-import { BILLING_PAGE, seedPage, draft, tickClockPerRead } from "./fixtures";
+import { clearVisibleBrowserNotes } from "@/features/conversation/composer/draft/draft-browser-notes";
+import { BILLING_PAGE, PRODUCT_PAGE, seedPage } from "./fixtures";
 
-const { mockSchedule } = vi.hoisted(() => ({ mockSchedule: vi.fn() }));
+const { mockSchedule, mockRead } = vi.hoisted(() => ({ mockSchedule: vi.fn(), mockRead: vi.fn() }));
 vi.mock("../previewNoteSnapshots", () => ({ schedulePageSnapshot: mockSchedule }));
+vi.mock("../stagedDraftImages", () => ({ readStagedDraftImage: mockRead, stageDraftImage: vi.fn() }));
 
 const SCOPE = "thread-tile";
 const store = () => usePreviewAnnotationStore.getState();
+const firstNote = () => store().getThreadAnnotations(SCOPE)[0]!;
 
 function renderTile(onRemoveAll: () => void = vi.fn()) {
   render(<BrowserNotesTile scopeId={SCOPE} workspaceId="workspace-1" threadId={SCOPE} onRemoveAll={onRemoveAll} />);
@@ -26,17 +29,44 @@ async function openHoverCard() {
 
 describe("BrowserNotesTile", () => {
   beforeEach(() => {
-    tickClockPerRead();
     mockSchedule.mockClear();
+    mockRead.mockReset().mockResolvedValue(new Uint8Array([1]));
+    Object.assign(URL, { createObjectURL: vi.fn(() => "blob:page"), revokeObjectURL: vi.fn() });
     usePreviewAnnotationStore.setState({ byThread: {}, pages: {}, drafts: {} });
     useComposerDraftStore.setState({ drafts: {} });
-    seedPage(SCOPE);
-    seedPage(SCOPE, BILLING_PAGE, "Billing");
   });
 
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+  });
+
+  it("shows the page's drawn image as the tile thumbnail", async () => {
+    seedPage(SCOPE, PRODUCT_PAGE, "Product");
+
+    renderTile();
+
+    await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe("blob:page"));
+    expect(mockRead).toHaveBeenCalledWith(SCOPE, store().pages[SCOPE]![PRODUCT_PAGE]!.snapshot);
+  });
+
+  it("falls back to the clean screenshot while the page waits for a redraw", async () => {
+    seedPage(SCOPE, PRODUCT_PAGE, "Product", { snapshot: false });
+
+    renderTile();
+
+    await waitFor(() => expect(document.querySelector("img")).not.toBeNull());
+    expect(mockRead).toHaveBeenCalledWith(SCOPE, store().pages[SCOPE]![PRODUCT_PAGE]!.clean!.image);
+  });
+
+  it("offers Retake when the staged image is gone", async () => {
+    mockRead.mockResolvedValue(null);
+    seedPage(SCOPE, PRODUCT_PAGE, "Product");
+
+    renderTile();
+
+    expect(await screen.findByText("Retake")).toBeInTheDocument();
+    expect(document.querySelector("img")).toBeNull();
   });
 
   it("renders nothing without Browser notes", () => {
@@ -46,7 +76,7 @@ describe("BrowserNotesTile", () => {
   });
 
   it("labels a single page by name and note count", () => {
-    store().saveAnnotation(SCOPE, draft(SCOPE, { pageIdentity: BILLING_PAGE }));
+    seedPage(SCOPE, BILLING_PAGE, "Billing");
 
     renderTile();
 
@@ -54,9 +84,9 @@ describe("BrowserNotesTile", () => {
   });
 
   it("labels several pages by total notes and page count", () => {
-    store().saveAnnotation(SCOPE, draft(SCOPE));
-    store().saveAnnotation(SCOPE, draft(SCOPE));
-    store().saveAnnotation(SCOPE, draft(SCOPE, { pageIdentity: BILLING_PAGE }));
+    seedPage(SCOPE, PRODUCT_PAGE, "Product");
+    seedPage(SCOPE, PRODUCT_PAGE, "Product");
+    seedPage(SCOPE, BILLING_PAGE, "Billing");
 
     renderTile();
 
@@ -64,9 +94,9 @@ describe("BrowserNotesTile", () => {
   });
 
   it("lists each page's notes under its own numbering on hover", async () => {
-    store().saveAnnotation(SCOPE, draft(SCOPE, { note: "Product one" }));
-    store().saveAnnotation(SCOPE, draft(SCOPE, { note: "Product two" }));
-    store().saveAnnotation(SCOPE, draft(SCOPE, { pageIdentity: BILLING_PAGE, note: "Billing one" }));
+    seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "Product one" });
+    seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "Product two" });
+    seedPage(SCOPE, BILLING_PAGE, "Billing", { note: "Billing one" });
     renderTile();
 
     const card = await openHoverCard();
@@ -79,8 +109,9 @@ describe("BrowserNotesTile", () => {
   });
 
   it("removing a row renumbers its page and queues that page's snapshot redraw", async () => {
-    const first = store().saveAnnotation(SCOPE, draft(SCOPE, { note: "Product one" }));
-    store().saveAnnotation(SCOPE, draft(SCOPE, { note: "Product two" }));
+    seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "Product one" });
+    seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "Product two" });
+    const first = firstNote();
     renderTile();
     await openHoverCard();
 
@@ -94,7 +125,7 @@ describe("BrowserNotesTile", () => {
   });
 
   it("removing the last row clears the queued-bundle fallback like the tile remove does", async () => {
-    store().saveAnnotation(SCOPE, draft(SCOPE, { note: "Only note" }));
+    seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "Only note" });
     const onRemoveAll = vi.fn();
     renderTile(onRemoveAll);
     await openHoverCard();
@@ -105,8 +136,8 @@ describe("BrowserNotesTile", () => {
   });
 
   it("keeps the tile's remove callback for rows that leave notes behind", async () => {
-    store().saveAnnotation(SCOPE, draft(SCOPE, { note: "One" }));
-    store().saveAnnotation(SCOPE, draft(SCOPE, { note: "Two" }));
+    seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "One" });
+    seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "Two" });
     const onRemoveAll = vi.fn();
     renderTile(onRemoveAll);
     await openHoverCard();
@@ -117,7 +148,7 @@ describe("BrowserNotesTile", () => {
   });
 
   it("opens the notes card when the tile takes keyboard focus", async () => {
-    store().saveAnnotation(SCOPE, draft(SCOPE, { note: "Keyboard note" }));
+    seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "Keyboard note" });
     renderTile();
 
     await userEvent.tab();
@@ -127,7 +158,8 @@ describe("BrowserNotesTile", () => {
   });
 
   it("clicking a note shows its page in the Browser, then scrolls to the note", async () => {
-    const note = store().saveAnnotation(SCOPE, draft(SCOPE, { note: "Scroll here" }));
+    seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "Scroll here" });
+    const note = firstNote();
     const order: string[] = [];
     const revealNote = vi.fn(async () => { order.push("reveal"); return { ok: true as const }; });
     Object.assign(window, { desktopBridge: { preview: { design: { revealNote } } } });
@@ -149,7 +181,7 @@ describe("BrowserNotesTile", () => {
   });
 
   it("does not scroll when the page could not be opened", async () => {
-    store().saveAnnotation(SCOPE, draft(SCOPE, { note: "Scroll here" }));
+    seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "Scroll here" });
     const revealNote = vi.fn();
     Object.assign(window, { desktopBridge: { preview: { design: { revealNote } } } });
     const openPage = vi.fn(async () => null);
@@ -171,8 +203,8 @@ describe("BrowserNotesTile", () => {
       line: 42,
       lineContent: "return <App />;",
     }, { note: "Handle the loading state", mentions: [] });
-    store().saveAnnotation(SCOPE, draft(SCOPE));
-    renderTile(() => store().clearPreviewNotes(SCOPE));
+    seedPage(SCOPE, PRODUCT_PAGE, "Product");
+    renderTile(() => clearVisibleBrowserNotes(SCOPE));
 
     await userEvent.click(screen.getByRole("button", { name: "Remove Product · 1 note" }));
 
@@ -183,7 +215,7 @@ describe("BrowserNotesTile", () => {
   });
 
   it("calls onRemoveAll from the tile remove button", async () => {
-    store().saveAnnotation(SCOPE, draft(SCOPE));
+    seedPage(SCOPE, PRODUCT_PAGE, "Product");
     const onRemoveAll = vi.fn();
     renderTile(onRemoveAll);
 

@@ -1,8 +1,7 @@
-import { useCallback, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { MousePointer2, X } from "lucide-react";
 import { normalizePreviewPageIdentity } from "@mcode/shared/browser-page-identity";
 import { Popover, PopoverContent, PopoverTrigger, type PopoverRootChangeEventDetails } from "@/components/ui/popover";
-import { buildStoredAttachmentImageSrc } from "@/lib/attachment-url";
 import { useDiffStore } from "@/stores/diffStore";
 import { usePreviewAnnotationStore, type PreviewPageRecord } from "../state/previewAnnotationStore";
 import { previewTabsScopeKey, usePreviewTabsStore } from "../state/previewTabsStore";
@@ -13,6 +12,7 @@ import {
   type BrowserNoteGroup,
 } from "./browserNoteGroups";
 import { removePreviewNote } from "./previewNotes";
+import { readStagedDraftImage } from "./stagedDraftImages";
 
 /** Props for the composer tile that carries a scope's Browser notes. */
 export interface BrowserNotesTileProps {
@@ -50,24 +50,44 @@ async function revealNotePage(
   await window.desktopBridge?.preview?.design?.revealNote({ selector: selectorHint?.trim() || null, bounds });
 }
 
+type ThumbnailState = { readonly url: string } | "missing" | "loading";
+
+/** Loads the page's image from draft storage, falling back to the clean screenshot while a redraw is pending. */
+function useThumbnail(page: PreviewPageRecord, threadId: string | undefined): ThumbnailState {
+  const image = page.snapshot ?? page.clean?.image ?? null;
+  const [state, setState] = useState<ThumbnailState>("loading");
+  const readable = Boolean(image && threadId);
+  useEffect(() => {
+    if (!image || !threadId) return;
+    let url: string | null = null;
+    let cancelled = false;
+    void readStagedDraftImage(threadId, image).then((bytes) => {
+      if (cancelled) return;
+      if (!bytes) {
+        setState("missing");
+        return;
+      }
+      url = URL.createObjectURL(new Blob([bytes.slice()], { type: "image/png" }));
+      setState({ url });
+    }, () => {
+      if (!cancelled) setState("missing");
+    });
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [image, threadId]);
+  return readable ? state : "missing";
+}
+
 function Thumbnail({ page, threadId }: { readonly page: PreviewPageRecord; readonly threadId?: string }) {
-  const bytes = page.markedPng;
-  const showBytes = useCallback((img: HTMLImageElement | null) => {
-    if (!img || !bytes) return;
-    const url = URL.createObjectURL(new Blob([bytes.slice()], { type: "image/png" }));
-    img.src = url;
-    return () => URL.revokeObjectURL(url);
-  }, [bytes]);
-  const stored = page.marked && threadId
-    ? buildStoredAttachmentImageSrc(threadId, page.marked.id, page.marked.mimeType)
-    : null;
-  const imageClass = "size-full object-cover object-top";
+  const thumbnail = useThumbnail(page, threadId);
   return (
     <span className="block h-[98px] w-full shrink-0 overflow-clip bg-panel">
-      {bytes
-        ? <img ref={showBytes} alt="" className={imageClass} draggable={false} />
-        : stored
-          ? <img src={stored} alt="" className={imageClass} draggable={false} />
+      {typeof thumbnail === "object"
+        ? <img src={thumbnail.url} alt="" className="size-full object-cover object-top" draggable={false} />
+        : thumbnail === "missing"
+          ? <span className="flex size-full items-center justify-center text-body-small text-muted">Retake</span>
           : null}
     </span>
   );
@@ -208,7 +228,7 @@ export function BrowserNotesTile({ scopeId, workspaceId, threadId, onRemoveAll }
                     onOpen={() => void revealNotePage(workspaceId, scopeId, threadId, group.page, note)}
                     onRemove={() => {
                       removePreviewNote(scopeId, note.id);
-                      if (usePreviewAnnotationStore.getState().byThread[scopeId]?.length === 0) onRemoveAll();
+                      if (usePreviewAnnotationStore.getState().getThreadAnnotations(scopeId).length === 0) onRemoveAll();
                     }}
                   />
                 ))}

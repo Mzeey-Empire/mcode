@@ -2,14 +2,16 @@ import React from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ORCHESTRATION_MODES, type AgentEvent, type DraftDiffComment, type SelectedTextComment } from "@mcode/contracts";
+import {
+  ORCHESTRATION_MODES,
+  type AgentEvent,
+  type DraftDiffComment,
+  type PreviewAnnotationPayloadV2,
+  type SelectedTextComment,
+} from "@mcode/contracts";
 import { Composer } from "../../Composer";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import {
-  usePreviewAnnotationStore,
-  type PreviewPageRecord,
-  type SavedPreviewAnnotation,
-} from "@/features/preview/state/previewAnnotationStore";
+import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";
 import { useQueueStore } from "@/stores/queueStore";
 import {
@@ -83,6 +85,12 @@ function gitRef(shortName: string, overrides: Partial<GitRef> = {}): GitRef {
 function refsPage(items: GitRef[]) {
   return { ok: true, items, total: items.length, nextCursor: null };
 }
+
+vi.mock("@/features/preview/notes/stagedDraftImages", () => ({
+  readStagedDraftImage: vi.fn(async () => new Uint8Array([1])),
+  stageDraftImage: vi.fn(),
+  materializeStagedSnapshots: vi.fn(async (_threadId: string, bundle: unknown) => bundle),
+}));
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -308,14 +316,18 @@ async function typeAndSend() {
   return user;
 }
 
-function makeSavedAnnotation(): SavedPreviewAnnotation {
+const PAGE_URL = "http://localhost:44354/product-preview";
+const SNAPSHOT_STAGING_ID = "6f1c2a52-3c1e-4c7a-9a55-0d3f6c1b7e10";
+const CLEAN_STAGING_ID = "9b0a6a12-52a3-4c0a-8d46-5d0a8f4c2b21";
+
+function makeAnnotation(): PreviewAnnotationPayloadV2 {
   return {
     id: "550e8400-e29b-41d4-a716-446655440001",
     displayNumber: 1,
-    pageIdentity: "http://localhost:44354/product-preview",
+    pageIdentity: PAGE_URL,
     pageContext: {
       schemaVersion: 2,
-      pageUrl: "http://localhost:44354/product-preview",
+      pageUrl: PAGE_URL,
       pageTitle: "Product preview",
       capturedAt: "2026-07-01T00:00:00.000Z",
       bounds: { x: 0, y: 0, width: 1280, height: 720 },
@@ -326,56 +338,46 @@ function makeSavedAnnotation(): SavedPreviewAnnotation {
       bounds: { x: 12, y: 16, width: 240, height: 80 },
     },
     note: "Make the content flush with the page edge.",
-    createdAt: 1_783_036_800_000,
-  };
-}
-
-const PAGE_URL = "http://localhost:44354/product-preview";
-
-function makeMarkedPage(): PreviewPageRecord {
-  const capture = {
-    schemaVersion: 2 as const,
-    pageUrl: PAGE_URL,
-    pageTitle: "Product preview",
-    capturedAt: "2026-07-01T00:00:00.000Z",
-    bounds: { x: 0, y: 0, width: 1280, height: 720 },
-  };
-  return {
-    pageIdentity: PAGE_URL,
-    url: PAGE_URL,
-    title: "Product preview",
-    faviconUrl: null,
-    clean: null,
-    marked: {
-      id: "shot-1",
-      name: "annotation.png",
-      mimeType: "image/png",
-      sizeBytes: 128,
-      sourcePath: "preview/annotation.png",
-      capture,
-      scroll: { x: 0, y: 0 },
-    },
-    markedPng: null,
   };
 }
 
 function seedBrowserNotes(scopeId: string) {
-  usePreviewAnnotationStore.setState({
-    drafts: {},
-    byThread: { [scopeId]: [makeSavedAnnotation()] },
-    pages: { [scopeId]: { [PAGE_URL]: makeMarkedPage() } },
-  });
+  const annotation = makeAnnotation();
+  useComposerDraftStore.getState().updateNextMessage(scopeId, (draft) => ({
+    ...draft,
+    browserNotePages: [{
+      pageIdentity: PAGE_URL,
+      url: PAGE_URL,
+      title: "Product preview",
+      faviconUrl: null,
+      capture: annotation.pageContext,
+      scroll: { x: 0, y: 0 },
+      cleanCapture: { stagingId: CLEAN_STAGING_ID, name: "page-capture.png", mimeType: "image/png", sizeBytes: 64 },
+      snapshot: { stagingId: SNAPSHOT_STAGING_ID, name: "annotation.png", mimeType: "image/png", sizeBytes: 128 },
+      notes: [{ ...annotation, revision: 1 }],
+    }],
+  }));
 }
 
 function makePreviewAnnotationBundle() {
-  const { createdAt, ...annotation } = makeSavedAnnotation();
-  void createdAt;
-  const { clean, marked, markedPng, ...page } = makeMarkedPage();
-  void clean;
-  void markedPng;
+  const annotation = makeAnnotation();
   return {
     schemaVersion: 2 as const,
-    pages: [{ ...page, snapshot: marked! }],
+    pages: [{
+      pageIdentity: PAGE_URL,
+      url: PAGE_URL,
+      title: "Product preview",
+      faviconUrl: null,
+      snapshot: {
+        id: SNAPSHOT_STAGING_ID,
+        name: "annotation.png",
+        mimeType: "image/png" as const,
+        sizeBytes: 128,
+        sourcePath: "",
+        capture: annotation.pageContext,
+        scroll: { x: 0, y: 0 },
+      },
+    }],
     annotations: [annotation],
   };
 }
@@ -1080,8 +1082,11 @@ describe("Composer checkout confirmation", () => {
     expect(pendingDraft?.diffComments).toEqual([makeDraftDiffComment()]);
     expect(pendingDraft?.submissions).toEqual([{
       messageId: sendCommand?.messageId,
-      elements: [{ field: "diffComments", id: makeDraftDiffComment().id, revision: 1 }],
-      stagingIds: [],
+      elements: [
+        { field: "diffComments", id: makeDraftDiffComment().id, revision: 1 },
+        { field: "browserNotePages", id: makeAnnotation().id, revision: 1 },
+      ],
+      stagingIds: [SNAPSHOT_STAGING_ID],
     }]);
     expect(usePreviewDesignModeStore.getState().isActive(thread.id)).toBe(false);
   });
