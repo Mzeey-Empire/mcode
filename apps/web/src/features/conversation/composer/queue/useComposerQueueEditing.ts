@@ -8,6 +8,8 @@ import {
 import { useQueueStore, type QueuedMessage } from "@/stores/queueStore";
 import { scheduleDrainAfterEdit } from "@/stores/threadStore";
 import { useToastStore } from "@/stores/toastStore";
+import { dropDraftContentInBundleWhenSettled, readDraftContentInBundle } from "./queued-draft-bundle";
+import { queueHoldingDraftElements } from "./queued-draft-holds";
 
 /** The queue slot currently restored into the Composer for editing. */
 export interface ComposerQueueEdit {
@@ -28,7 +30,8 @@ export interface ComposerQueueEditForm {
 
 /** The preview annotation operations coupled to a queue-edit lifecycle. */
 export interface ComposerQueueEditAnnotations {
-  restore: (bundle: PreviewAnnotationBundle | undefined) => void;
+  /** Shows the comments and notes of a message just taken out of the queue for editing. */
+  restore: (message: QueuedMessage) => void;
   clear: () => void;
   /** Finishes pending page snapshot redraws. Resolves false, after telling the user, when one fails. */
   settle: () => Promise<boolean>;
@@ -46,6 +49,38 @@ function toQueuePayload(message: QueuedMessage): Omit<QueuedMessage, "id" | "que
   void id;
   void queuedAt;
   return payload;
+}
+
+/**
+ * The bundle an edit falls back to when the Composer shows no annotations. A message that held
+ * its draft elements returned them to the draft, so the draft alone says what it still carries.
+ */
+function fallbackPreviewAnnotations(original: QueuedMessage | null): PreviewAnnotationBundle | undefined {
+  return original?.holdsDraftElements ? undefined : original?.previewAnnotations;
+}
+
+/**
+ * Re-queues a message and holds the draft elements its bundle carries under the new entry.
+ * When the user deleted some of them during the edit, the draft cannot hold the whole bundle,
+ * so the entry goes back without a hold and keeps the bundle, as a queued message always did.
+ */
+function requeueHoldingDraft(
+  threadId: string,
+  index: number,
+  payload: Omit<QueuedMessage, "id" | "queuedAt">,
+): boolean {
+  const content = readDraftContentInBundle(threadId, payload.previewAnnotations);
+  const held = content.diffComments.length
+    + content.fileComments.length
+    + content.browserNotePages.reduce((total, page) => total + page.notes.length, 0);
+  const complete = held === (payload.previewAnnotations?.annotations.length ?? 0);
+  if (!complete) dropDraftContentInBundleWhenSettled(threadId, payload.previewAnnotations);
+  return queueHoldingDraftElements(
+    threadId,
+    payload,
+    complete ? content : { diffComments: [], fileComments: [], browserNotePages: [] },
+    index,
+  );
 }
 
 /** Retains a preview capture when a user edits the surrounding queued message text. */
@@ -119,7 +154,7 @@ export function useComposerQueueEditing({
     (currentPreviewAnnotations: PreviewAnnotationBundle | undefined) =>
       currentPreviewAnnotations ??
       (editing && !restoredPreviewAnnotationsClearedRef.current
-        ? originalMessageRef.current?.previewAnnotations
+        ? fallbackPreviewAnnotations(originalMessageRef.current)
         : undefined),
     [editing],
   );
@@ -144,8 +179,8 @@ export function useComposerQueueEditing({
       if (editing && form.hasContent()) {
         const restoredPreviewAnnotations = restoredPreviewAnnotationsClearedRef.current
           ? undefined
-          : originalMessageRef.current?.previewAnnotations;
-        queue.insertAt(
+          : fallbackPreviewAnnotations(originalMessageRef.current);
+        requeueHoldingDraft(
           threadId,
           editing.originalIndex,
           preserveBrowserCapturePayload(
@@ -155,6 +190,8 @@ export function useComposerQueueEditing({
         );
       }
 
+      // Clear first: popping a message that held its elements returns them to the draft at once.
+      annotations.clear();
       const popped = queue.popMessage(threadId, message.id);
       if (!popped) return;
 
@@ -164,7 +201,7 @@ export function useComposerQueueEditing({
       queue.setEditingThreadId(threadId);
 
       form.restore(popped);
-      annotations.restore(popped.previewAnnotations);
+      annotations.restore(popped);
     },
     [annotations, editing, form, threadId],
   );
@@ -194,9 +231,7 @@ export function useComposerQueueEditing({
 
     form.invalidateAttachments();
     const original = originalMessageRef.current;
-    if (original) {
-      useQueueStore.getState().insertAt(threadId, editing.originalIndex, toQueuePayload(original));
-    }
+    if (original) requeueHoldingDraft(threadId, editing.originalIndex, toQueuePayload(original));
     finishEditing();
     annotations.clear();
     scheduleDrainAfterEdit(threadId);

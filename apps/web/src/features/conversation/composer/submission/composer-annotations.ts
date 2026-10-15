@@ -8,6 +8,7 @@ import {
   type FileAnnotationPayload,
   type PreviewAnnotationBundle,
 } from "@mcode/contracts";
+import type { QueuedMessage } from "@/stores/queueStore";
 import {
   browserPagesToBundle,
   clearVisibleBrowserNotes,
@@ -64,11 +65,18 @@ export function clearComposerAnnotations(scopeId: string): void {
   clearVisibleFileComments(scopeId);
 }
 
-/** Restores a queued bundle's Browser notes, Review comments and Files comments to the draft. */
+/**
+ * Restores a queued message's Browser notes, Review comments and Files comments to the draft.
+ * A message that held its elements already returned them when it left the queue, so copying
+ * its bundle too would show each twice; only a message without a hold copies its bundle.
+ * Returns false when that bundle is invalid.
+ */
 export function restoreComposerAnnotations(
   scopeId: string,
-  bundle: PreviewAnnotationBundle | undefined,
+  message: Pick<QueuedMessage, "previewAnnotations" | "holdsDraftElements">,
 ): boolean {
+  if (message.holdsDraftElements) return true;
+  const bundle = message.previewAnnotations;
   const restored = restoreQueuedBrowserNotes(scopeId, bundle);
   clearVisibleDiffComments(scopeId);
   clearVisibleFileComments(scopeId);

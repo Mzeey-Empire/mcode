@@ -23,6 +23,7 @@ import {
 } from "@mcode/contracts";
 import { getTransport, RpcError } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { admitQueuedDraftHold } from "@/features/conversation/composer/queue/queued-draft-holds";
 import { useQueueStore, type QueuedMessage } from "./queueStore";
 import { LruCache } from "@/lib/lru-cache";
 import { useTaskStore, coerceTaskStatus } from "./taskStore";
@@ -774,10 +775,13 @@ function canAutoDrainQueuedMessage(threadId: string): boolean {
 
 /**
  * Sends a claimed queue item and settles its lease. A resend reuses the replacement id the
- * server issued, so admission can claim the held steer it replaces.
+ * server issued, so admission can claim the held steer it replaces. An entry holding draft
+ * elements sends with its own id, the id the draft holds them under, so a later session can
+ * ask the server whether it was admitted.
  */
 export async function sendQueuedMessage(threadId: string, message: QueuedMessage): Promise<void> {
   const resendOfSteerId = message.steer?.state === "resend" ? message.steer.resendOfSteerId : undefined;
+  const sendsWithEntryId = Boolean(resendOfSteerId) || message.holdsDraftElements === true;
   try {
     const sent = await useThreadStore.getState().sendMessage(
       threadId,
@@ -800,9 +804,10 @@ export async function sendQueuedMessage(threadId: string, message: QueuedMessage
       undefined,
       message.approvalReviewMode,
       message.devinMode,
-      resendOfSteerId ? message.id : undefined,
+      sendsWithEntryId ? message.id : undefined,
       resendOfSteerId,
     );
+    if (sent) admitQueuedDraftHold(message.id);
     useQueueStore.getState().settleQueuedDispatch(threadId, message.id, sent);
   } catch {
     useQueueStore.getState().settleQueuedDispatch(threadId, message.id, false);

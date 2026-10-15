@@ -28,6 +28,8 @@ export interface DraftSubmissionHandle {
    * {@link reconcileOrphanedDraftSubmissions} to settle later.
    */
   failed(): Promise<void>;
+  /** Returns every element at once for a Send that never reached the server, so none could hold it. */
+  released(): void;
 }
 
 function settle(threadId: string, messageId: string, outcome: "success" | "failure"): void {
@@ -88,6 +90,7 @@ export function beginDraftSubmission(
       }
       settle(threadId, messageId, found.has(messageId) ? "success" : "failure");
     },
+    released: () => settle(threadId, messageId, "failure"),
   };
 }
 

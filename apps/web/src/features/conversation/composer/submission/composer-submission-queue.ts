@@ -1,20 +1,14 @@
-import type {
-  DraftBrowserNotePage,
-  DraftDiffComment,
-  DraftFileComment,
-  MessageMention,
-  PreviewAnnotationBundle,
-} from "@mcode/contracts";
+import type { MessageMention, PreviewAnnotationBundle } from "@mcode/contracts";
 import { collectBrowserCaptureSpillPaths, releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-capture-spill";
 import { stripPreviewAnnotationFence } from "@/features/preview/capture/preview-annotation-append";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";
-import { useQueueStore } from "@/stores/queueStore";
 import { browserNoteElements, removeTakenBrowserNotePages } from "../draft/draft-browser-notes";
 import { removeTakenDiffComments } from "../draft/draft-diff-comments";
 import { removeTakenFileComments } from "../draft/draft-file-comments";
 import type { ComposerAgentSelection, ComposerFormController } from "../draft/useComposerFormController";
 import type { ComposerQueueEdit } from "../queue/useComposerQueueEditing";
 import type { HandoffQueuedSend } from "../queue/useHandoffQueuedSend";
+import { queueHoldingDraftElements } from "../queue/queued-draft-holds";
 import type { PreparedComposerSubmission } from "./composer-submission-types";
 
 /** Inputs for creating a deferred handoff payload. */
@@ -33,12 +27,6 @@ export interface QueueComposerSubmissionOptions {
 export interface CompleteQueuedComposerSubmissionOptions {
   annotationScopeId?: string;
   annotations?: PreviewAnnotationBundle;
-  /** Review comments the queued message took with it. */
-  diffComments: readonly DraftDiffComment[];
-  /** Files comments the queued message took with it. */
-  fileComments: readonly DraftFileComment[];
-  /** Browser pages whose notes the queued message took with it. */
-  browserNotePages: readonly DraftBrowserNotePage[];
   goalObjective?: string;
   form: ComposerFormController;
   finishEditing(): void;
@@ -63,7 +51,10 @@ export function createHandoffQueuedSend({
   };
 }
 
-/** Persists a prepared Composer submit in its target thread's queue. */
+/**
+ * Persists a prepared Composer submit in its target thread's queue. The draft holds the
+ * comments and notes it carries until the queued message is admitted or leaves the queue.
+ */
 export function queueComposerSubmission({
   threadId,
   editing,
@@ -72,9 +63,11 @@ export function queueComposerSubmission({
   if (!threadId) return false;
   const spillPaths = collectBrowserCaptureSpillPaths(submission.prepared.browserCaptures);
   const payload = createPersistentQueuePayload(submission, spillPaths);
-  const enqueued = editing
-    ? useQueueStore.getState().insertAt(threadId, editing.originalIndex, payload)
-    : useQueueStore.getState().enqueue(threadId, payload);
+  const enqueued = queueHoldingDraftElements(threadId, payload, {
+    diffComments: submission.currentDiffComments,
+    fileComments: submission.currentFileComments,
+    browserNotePages: submission.currentBrowserNotePages,
+  }, editing?.originalIndex);
   if (!enqueued) void releaseBrowserCaptureSpills(spillPaths);
   return enqueued;
 }
@@ -83,15 +76,12 @@ export function queueComposerSubmission({
 export function completeQueuedComposerSubmission({
   annotationScopeId,
   annotations,
-  diffComments,
-  fileComments,
-  browserNotePages,
   goalObjective,
   form,
   finishEditing,
 }: CompleteQueuedComposerSubmissionOptions): void {
   form.clear("dispatch");
-  clearQueuedAnnotations(annotationScopeId, annotations, diffComments, fileComments, browserNotePages);
+  if (annotationScopeId && annotations) usePreviewDesignModeStore.getState().setActive(annotationScopeId, false);
   if (goalObjective) form.setGoalPending(false);
   finishEditing();
   form.focus();
@@ -135,17 +125,16 @@ function optionalCodexFastMode(selection: ComposerAgentSelection): boolean | und
   return selection.provider === "codex" ? selection.codexFastMode ?? undefined : undefined;
 }
 
-/** Clears displayed annotations when their queued payload has been retained. */
-function clearQueuedAnnotations(
+/**
+ * Removes the comments and notes a handoff-deferred submit took. That submit waits in
+ * Composer memory with no queue entry to hold them under, so they leave the draft now.
+ */
+export function removeHandoffTakenAnnotations(
   annotationScopeId: string | undefined,
-  annotations: PreviewAnnotationBundle | undefined,
-  diffComments: readonly DraftDiffComment[],
-  fileComments: readonly DraftFileComment[],
-  browserNotePages: readonly DraftBrowserNotePage[],
+  submission: PreparedComposerSubmission,
 ): void {
-  if (!annotationScopeId || !annotations) return;
-  removeTakenBrowserNotePages(annotationScopeId, browserNoteElements(browserNotePages));
-  removeTakenDiffComments(annotationScopeId, diffComments);
-  removeTakenFileComments(annotationScopeId, fileComments);
-  usePreviewDesignModeStore.getState().setActive(annotationScopeId, false);
+  if (!annotationScopeId || !submission.currentAnnotations) return;
+  removeTakenBrowserNotePages(annotationScopeId, browserNoteElements(submission.currentBrowserNotePages));
+  removeTakenDiffComments(annotationScopeId, submission.currentDiffComments);
+  removeTakenFileComments(annotationScopeId, submission.currentFileComments);
 }
