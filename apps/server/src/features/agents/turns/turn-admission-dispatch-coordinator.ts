@@ -744,7 +744,8 @@ export class TurnAdmissionDispatchCoordinator {
   private pageSnapshotAttachments(command: SendMessageCommand): AttachmentMeta[] {
     if (!command.previewAnnotations) return [];
     const names = new Set((command.attachments ?? []).map((attachment) => attachment.name.toLowerCase()));
-    return toPreviewAnnotationBundleV2(command.previewAnnotations).pages.map((page) => {
+    const attachedIds = new Set((command.attachments ?? []).map((attachment) => attachment.id));
+    return toPreviewAnnotationBundleV2(command.previewAnnotations).pages.filter((page) => !attachedIds.has(page.snapshot.id)).map((page) => {
       const baseName = previewAnnotationPageSnapshotName(page);
       let name = baseName;
       for (let index = 2; names.has(name.toLowerCase()); index += 1) {

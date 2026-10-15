@@ -47,7 +47,13 @@ export async function sendAdmittedTurn<Command extends AdmittableTurnCommand>(
 export function appendPreviewAnnotations(content: string, previewAnnotations: PreviewAnnotationBundle | undefined): string {
   if (!previewAnnotations || previewAnnotations.annotations.length === 0) return content;
   if (content.includes(PREVIEW_ANNOTATION_FENCE_START)) return content;
-  const serialized = JSON.stringify(toPreviewAnnotationBundleV2(previewAnnotations))
+  const bundle = toPreviewAnnotationBundleV2(previewAnnotations);
+  // Admission persists these images before dispatch; providers receive the stored attachment names.
+  const pages = bundle.pages.map(({ snapshot, ...page }) => {
+    const { sourcePath: _sourcePath, name: _name, ...metadata } = snapshot;
+    return { ...page, snapshot: metadata };
+  });
+  const serialized = JSON.stringify({ ...bundle, pages })
     .replaceAll("<", "\\u003c").replaceAll(">", "\\u003e").replaceAll("&", "\\u0026");
   return `${content.trim()}\n\n${PREVIEW_ANNOTATION_FENCE_START}\n${serialized}\n${PREVIEW_ANNOTATION_FENCE_END}`.trim();
 }

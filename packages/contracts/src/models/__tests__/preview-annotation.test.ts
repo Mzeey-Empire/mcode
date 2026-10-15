@@ -12,6 +12,8 @@ import {
   readPreviewAnnotationBundle,
   toPreviewAnnotationBundleV2,
   previewAnnotationPageSnapshotName,
+  clampPreviewPageLabel,
+  clampPreviewPageUrl,
 } from "../../index.js";
 
 const capture = {
@@ -172,6 +174,79 @@ const noteV2 = {
 };
 
 describe("v2 annotation bundles", () => {
+  it("clamps legacy page metadata on code point boundaries before storing v2", () => {
+    const title = "a".repeat(239) + "😀tail";
+    const url = "u".repeat(4095) + "😀tail";
+    const upgraded = toPreviewAnnotationBundleV2({ schemaVersion: 1, annotations: [
+      { ...annotation, pageContext: { ...capture, pageTitle: title, pageUrl: url } },
+    ] });
+    expect(upgraded.pages[0]?.title).toBe("a".repeat(239));
+    expect(upgraded.pages[0]?.url).toBe("u".repeat(4095));
+    expect(clampPreviewPageLabel("😀".repeat(121))).toBe("😀".repeat(120));
+    expect(clampPreviewPageUrl("😀".repeat(2049))).toBe("😀".repeat(2048));
+    expect(PreviewAnnotationBundleSchema().parse(upgraded)).toEqual(upgraded);
+  });
+
+  it("rejects ambiguous pages, reused snapshot IDs, orphan pages and orphan browser notes", () => {
+    const otherPage = { ...page, pageIdentity: "other" };
+    const otherNote = { ...noteV2, pageIdentity: "other" };
+    const invalid = [
+      { pages: [page, { ...page, snapshot: { ...page.snapshot, id: "second" } }], annotations: [noteV2] },
+      { pages: [page, otherPage], annotations: [noteV2, otherNote] },
+      { pages: [page], annotations: [diffAnnotation, fileAnnotation] },
+      { pages: [], annotations: [noteV2] },
+      { pages: [page], annotations: [noteV2, otherNote] },
+    ];
+    for (const bundle of invalid) {
+      expect(PreviewAnnotationBundleSchema().safeParse({ schemaVersion: 2, ...bundle }).success).toBe(false);
+    }
+    expect(PreviewAnnotationBundleSchema().parse({ schemaVersion: 2, pages: [], annotations: [diffAnnotation, fileAnnotation] }))
+      .toEqual({ schemaVersion: 2, pages: [], annotations: [diffAnnotation, fileAnnotation] });
+  });
+
+  it("groups legacy notes sharing an image and disambiguates that image across pages", () => {
+    const upgraded = toPreviewAnnotationBundleV2({ schemaVersion: 1, annotations: [annotation,
+      { ...annotation, id: fileAnnotation.id, displayNumber: 2 },
+      { ...annotation, id: diffAnnotation.id, pageIdentity: "other" },
+    ] });
+    expect(upgraded.pages.map((entry) => [entry.pageIdentity, entry.snapshot.id])).toEqual([
+      [annotation.pageIdentity, "snap-1"], ["other", "snap-1-1"],
+    ]);
+    expect(upgraded.annotations.map((entry) => entry.id)).toEqual([annotation.id, fileAnnotation.id, diffAnnotation.id]);
+    expect(PreviewAnnotationBundleSchema().parse(upgraded)).toEqual(upgraded);
+  });
+
+  it("rejects legacy notes without a snapshot or nonblank text before upgrade", () => {
+    for (const invalid of [
+      { ...annotation, snapshot: undefined },
+      { ...annotation, note: "  ", changeSummary: "  ", proposedChanges: { textColor: "red" } },
+    ]) {
+      expect(PreviewAnnotationBundleSchema().safeParse({ schemaVersion: 1, annotations: [invalid] }).success).toBe(false);
+    }
+    expect(() => toPreviewAnnotationBundleV2({ schemaVersion: 1, annotations: [
+      { ...annotation, note: "  ", changeSummary: "  ", proposedChanges: { textColor: "red" } },
+    ] })).toThrow();
+  });
+
+  it("converts each legacy note using its own capture scroll even when the final page image differs", () => {
+    const upgraded = toPreviewAnnotationBundleV2({ schemaVersion: 1, annotations: [
+      { ...annotation, snapshot: { ...annotation.snapshot, capture: { ...capture, viewportScroll: { scrollX: 12, scrollY: 340 } } } },
+      { ...annotation, id: fileAnnotation.id, snapshot: { ...annotation.snapshot, id: "last", capture: { ...capture, viewportScroll: { scrollX: 2, scrollY: 80 } } } },
+    ] });
+    expect(upgraded.annotations.map((entry) => "targetContext" in entry ? entry.targetContext.bounds : null)).toEqual([
+      { x: 22, y: 360, width: 100, height: 40 }, { x: 12, y: 100, width: 100, height: 40 },
+    ]);
+    expect(upgraded.pages[0]?.snapshot.scroll).toEqual({ x: 2, y: 80 });
+  });
+
+  it("uses the same trimmed fallback in the legacy reader and upgrade", () => {
+    const legacy = { schemaVersion: 1 as const, annotations: [
+      { ...annotation, note: "  ", changeSummary: "  Make it red  ", proposedChanges: { textColor: "red" } },
+    ] };
+    expect(readPreviewAnnotationBundle(legacy).pages[0]?.notes[0]?.note).toBe("Make it red");
+    expect(toPreviewAnnotationBundleV2(legacy).annotations[0]?.note).toBe("Make it red");
+  });
+
   it("parses pages, browser notes and both code comment kinds", () => {
     const bundle = { schemaVersion: 2, pages: [page], annotations: [noteV2, diffAnnotation, fileAnnotation] };
     expect(PreviewAnnotationBundleSchema().parse(bundle)).toEqual(bundle);
@@ -262,6 +337,8 @@ describe("page snapshot filenames", () => {
     ["CON", "https://example.test", "Notes on CON.png"],
     ["Odd\t title\n", "https://example.test", "Notes on Odd_ title.png"],
     ["x".repeat(200), "https://example.test", `Notes on ${"x".repeat(107)}.png`],
+    ["x".repeat(106) + "😀tail", "https://example.test", `Notes on ${"x".repeat(106)}.png`],
+    ["\u202a\u202b\u202c\u202d\u202eBilling\u2066\u2067\u2068\u2069\u200e\u200f", "https://example.test", "Notes on Billing.png"],
   ])("sanitizes %j deterministically", (title, url, expected) => {
     expect(previewAnnotationPageSnapshotName({ title, url })).toBe(expected);
   });

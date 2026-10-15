@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MCODE_BROWSER_CAPTURE_V2_STRING_MAX } from "@mcode/contracts";
 
 const captureTest = vi.hoisted(() => {
+  let bridge: { preview: { captureAnnotationSnapshot(): Promise<unknown> } } | undefined;
   const ipcHandlers: Record<string, (...args: unknown[]) => unknown> = {};
   const session = {
     lastBounds: { x: 40, y: 60, width: 800, height: 600 },
@@ -20,6 +21,11 @@ const captureTest = vi.hoisted(() => {
   };
   const window = { id: 11, isDestroyed: vi.fn(() => false) };
   return {
+    exposeBridge: (_name: string, value: NonNullable<typeof bridge>) => { bridge = value; },
+    captureFromPreload: () => {
+      if (!bridge) throw new Error("Preload did not expose the bridge");
+      return bridge.preview.captureAnnotationSnapshot();
+    },
     ipcHandlers,
     session,
     webContents,
@@ -31,6 +37,16 @@ const captureTest = vi.hoisted(() => {
 });
 
 vi.mock("electron", () => ({
+  contextBridge: { exposeInMainWorld: captureTest.exposeBridge },
+  ipcRenderer: {
+    on: vi.fn(),
+    invoke: (channel: string, ...args: unknown[]) => {
+      if (args.length !== 0) throw new Error("Clean annotation capture accepts no renderer payload");
+      return captureTest.ipcHandlers[channel]!({ sender: {} });
+    },
+  },
+  webFrame: {},
+  webUtils: {},
   BrowserWindow: {
     fromWebContents: vi.fn(() => captureTest.currentWindow),
   },
@@ -139,6 +155,13 @@ describe("Preview capture handlers", () => {
     });
     expect([...picture.previewBytes]).toEqual([...Buffer.from("png-bytes")]);
     expect(captureTest.webContents.capturePage).toHaveBeenCalledOnce();
+  });
+
+  it("captures a clean viewport through the parameterless preload bridge", async () => {
+    await import("../../../../main/preload.js");
+    const picture = await captureTest.captureFromPreload();
+    expect(picture).toMatchObject({ ok: true, previewBytes: new Uint8Array(Buffer.from("png-bytes")),
+      capture: { pageTitle: "Example page", viewportScroll: { scrollX: 4, scrollY: 8 } } });
   });
 
   it("keeps the established capture errors for missing state and capture failures", async () => {

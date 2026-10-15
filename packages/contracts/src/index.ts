@@ -626,6 +626,8 @@ export {
   readPreviewAnnotationBundle,
   toPreviewAnnotationBundleV2,
   previewAnnotationPageSnapshotName,
+  clampPreviewPageLabel,
+  clampPreviewPageUrl,
 } from "./models/browser-preview.js";
 export type {
   BrowserPreviewBounds,

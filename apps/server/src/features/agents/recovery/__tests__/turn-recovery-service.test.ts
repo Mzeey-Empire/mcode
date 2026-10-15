@@ -247,7 +247,7 @@ describe("TurnRecoveryService", () => {
       });
       const retryMessage = sink.loadUserMessage(result.turnId);
       expect(retryMessage).toMatchObject({ content: "repeat only when asked", reply_to_message_id: original.id,
-        quoted_text: "quoted input", mentions, previewAnnotations: annotation });
+        quoted_text: "quoted input", mentions, previewAnnotations: { schemaVersion: 2, pages: [], annotations: annotation.annotations } });
       expect(retryMessage?.attachments?.map(({ name, mimeType, sizeBytes }) => ({ name, mimeType, sizeBytes })))
         .toEqual([{ name: "input.txt", mimeType: "text/plain", sizeBytes: 14 }]);
       const retryFile = attachments.prepareRetryAttachments(THREAD_ID, retryMessage?.attachments ?? [])[0];

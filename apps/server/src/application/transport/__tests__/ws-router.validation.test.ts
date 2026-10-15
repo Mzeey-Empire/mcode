@@ -751,6 +751,8 @@ describe("routeMessage agent commands", () => {
       snapshot: { ...snapshot, scroll: { x: 0, y: 0 } } }],
     annotations: [browserNote, previewAnnotations.annotations[1]],
   };
+  const { sourcePath: _sourcePath, name: _name, ...promptSnapshot } = v2Annotations.pages[0]!.snapshot;
+  const promptAnnotations = { ...v2Annotations, pages: [{ ...v2Annotations.pages[0], snapshot: promptSnapshot }] };
 
   it.each([previewAnnotations, v2Annotations])("augments existing-thread commands with v2 JSON while accepting either input version", async (inputBundle) => {
     const sendMessage = vi.fn().mockResolvedValue(undefined);
@@ -785,11 +787,11 @@ describe("routeMessage agent commands", () => {
       interactionMode: "build",
       permissionMode: "full",
       thinking: false,
-      previewAnnotations: inputBundle,
+      previewAnnotations: v2Annotations,
       onAdmissionComplete: expect.any(Function),
     });
     const promptLines = sendMessage.mock.calls[0]?.[0].content.split("\n");
-    expect(JSON.parse(promptLines[3])).toEqual(v2Annotations);
+    expect(JSON.parse(promptLines[3])).toEqual(promptAnnotations);
     expect(promptLines[4]).toBe("mcode-preview-annotations:end -->");
     const stagingId = "00000000-0000-4000-8000-000000000003";
     sendMessage.mockRejectedValueOnce(new DraftImageMissingError(stagingId));
@@ -835,10 +837,10 @@ describe("routeMessage agent commands", () => {
       model: "gpt-5",
       provider: "codex",
       mode: "direct",
-      previewAnnotations: inputBundle,
+      previewAnnotations: v2Annotations,
     });
     const promptLines = createAndSend.mock.calls[0]?.[0].content.split("\n");
-    expect(JSON.parse(promptLines[3])).toEqual(v2Annotations);
+    expect(JSON.parse(promptLines[3])).toEqual(promptAnnotations);
     expect(promptLines[4]).toBe("mcode-preview-annotations:end -->");
   });
 });

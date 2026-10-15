@@ -504,7 +504,7 @@ export const PreviewAnnotationPageSchema = lazySchema(() => z.object({
   title: z.string().max(240).nullable(),
   faviconUrl: z.string().max(4096).nullable(),
   snapshot: z.object({
-    id: z.string(),
+    id: z.string().regex(/^[a-zA-Z0-9_-]+$/),
     name: z.string().max(255),
     mimeType: z.literal("image/png"),
     sizeBytes: z.number().int().nonnegative(),
@@ -633,7 +633,21 @@ export const PreviewAnnotationBundleSchema = lazySchema(() =>
       annotations: z.array(z.union([
         PreviewAnnotationPayloadV2Schema(), DiffAnnotationPayloadSchema(), FileAnnotationPayloadSchema(),
       ])).min(1),
-    }).strict(),
+    }).strict().superRefine((bundle, context) => {
+      const pages = new Set<string>();
+      const snapshots = new Set<string>();
+      const notePages = new Set(bundle.annotations.filter(isPreviewAnnotationPayloadV2).map((note) => note.pageIdentity));
+      for (const [index, page] of bundle.pages.entries()) {
+        if (pages.has(page.pageIdentity) || snapshots.has(page.snapshot.id) || !notePages.has(page.pageIdentity)) {
+          context.addIssue({ code: z.ZodIssueCode.custom, path: ["pages", index], message: "Pages must have unique identities and snapshots and at least one browser note" });
+        }
+        pages.add(page.pageIdentity);
+        snapshots.add(page.snapshot.id);
+      }
+      for (const identity of notePages) {
+        if (!pages.has(identity)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["annotations"], message: "Browser note has no page" });
+      }
+    }),
   ]),
 );
 
@@ -689,25 +703,57 @@ function appendPreviewNote(
     page.snapshotIds.push(annotation.snapshot.id);
   }
   page.notes.push({ id: annotation.id, displayNumber: annotation.displayNumber,
-    note: annotation.note ?? ("changeSummary" in annotation ? annotation.changeSummary : undefined) ?? "",
+    note: annotation.note?.trim() || ("changeSummary" in annotation ? annotation.changeSummary?.trim() : undefined) || "",
     targetContext: annotation.targetContext, pageContext: annotation.pageContext });
 }
 
 /** Upgrades incoming legacy bundles so new messages and provider prompts write only v2. */
 export function toPreviewAnnotationBundleV2(bundle: PreviewAnnotationBundle): Extract<PreviewAnnotationBundle, { schemaVersion: 2 }> {
+  bundle = PreviewAnnotationBundleSchema().parse(bundle);
   if (bundle.schemaVersion === 2) return bundle;
   const view = readPreviewAnnotationBundle(bundle);
-  return {
+  const snapshotIds = new Set<string>();
+  const upgraded: Extract<PreviewAnnotationBundle, { schemaVersion: 2 }> = {
     schemaVersion: 2,
-    pages: view.pages.flatMap(({ snapshot, pageIdentity, url, title, faviconUrl }) =>
-      snapshot ? [{ pageIdentity, url, title, faviconUrl, snapshot }] : []),
+    pages: view.pages.flatMap(({ snapshot, pageIdentity, url, title, faviconUrl }, index) => {
+      if (!snapshot) return [];
+      let id = snapshot.id;
+      while (snapshotIds.has(id)) id = `${id}-${index}`;
+      snapshotIds.add(id);
+      return [{ pageIdentity, url: clampPreviewPageUrl(url), title: title === null ? null : clampPreviewPageLabel(title),
+        faviconUrl, snapshot: { ...snapshot, id } }];
+    }),
     annotations: bundle.annotations.map((annotation) => {
       if (!isPreviewAnnotationPayload(annotation)) return annotation;
+      const scroll = annotation.snapshot.capture.viewportScroll;
+      const bounds = annotation.targetContext.bounds;
       return { id: annotation.id, pageIdentity: annotation.pageIdentity, displayNumber: annotation.displayNumber,
         note: annotation.note?.trim() || annotation.changeSummary?.trim() || "",
-        targetContext: annotation.targetContext, pageContext: annotation.pageContext };
+        targetContext: { ...annotation.targetContext, bounds: { ...bounds,
+          x: bounds.x + (scroll?.scrollX ?? 0), y: bounds.y + (scroll?.scrollY ?? 0) } }, pageContext: annotation.pageContext };
     }),
   };
+  PreviewAnnotationBundleSchema().parse(upgraded);
+  return upgraded;
+}
+
+function clampPreviewString(value: string, maxLength: number): string {
+  let result = "";
+  for (const point of value) {
+    if (result.length + point.length > maxLength) break;
+    result += point;
+  }
+  return result;
+}
+
+/** Fits a page label within the v2 schema limit without splitting a Unicode code point. */
+export function clampPreviewPageLabel(value: string): string {
+  return clampPreviewString(value, 240);
+}
+
+/** Fits a page URL within the v2 schema limit without splitting a Unicode code point. */
+export function clampPreviewPageUrl(value: string): string {
+  return clampPreviewString(value, 4096);
 }
 
 /** Deterministic display filename; callers disambiguate collisions between pages. */
@@ -720,7 +766,8 @@ export function previewAnnotationPageSnapshotName(page: Pick<PreviewAnnotationPa
       label = "page";
     }
   }
-  const safe = (label ?? "").replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, "_")
-    .replace(/\s+/g, " ").replace(/^[. ]+|[. ]+$/g, "").slice(0, 107).replace(/[. ]+$/g, "");
+  const safe = clampPreviewString((label ?? "").replace(/[\u202a-\u202e\u2066-\u2069\u200e\u200f]/g, "")
+    .replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, "_")
+    .replace(/\s+/g, " ").replace(/^[. ]+|[. ]+$/g, ""), 107).replace(/[. ]+$/g, "");
   return `Notes on ${safe || "page"}.png`;
 }
