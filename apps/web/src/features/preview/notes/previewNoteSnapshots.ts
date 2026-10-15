@@ -16,6 +16,10 @@ function keyOf(threadId: string, pageIdentity: string): string {
   return `${threadId}\u0000${pageIdentity}`;
 }
 
+function generationOf(key: string): number {
+  return generations.get(key) ?? 0;
+}
+
 function visiblePages(threadId: string): DraftBrowserNotePage[] {
   const draft = useComposerDraftStore.getState().drafts[threadId];
   return draft ? visibleBrowserNotePages(draft) : [];
@@ -31,7 +35,7 @@ function noteSignature(page: Pick<DraftBrowserNotePage, "notes"> | undefined): s
 
 async function redrawPage(threadId: string, pageIdentity: string): Promise<void> {
   const key = keyOf(threadId, pageIdentity);
-  const generation = generations.get(key) ?? 0;
+  const generation = generationOf(key);
   const page = visiblePages(threadId).find((candidate) => candidate.pageIdentity === pageIdentity);
   if (!page || page.snapshot) return;
   if (!page.cleanCapture) throw new Error(`Add a note on ${pageLabel(page)} to refresh its snapshot`);
@@ -42,7 +46,7 @@ async function redrawPage(threadId: string, pageIdentity: string): Promise<void>
     page.notes.map((note) => ({ displayNumber: note.displayNumber, bounds: note.targetContext.bounds })),
   );
   const snapshot = await stageDraftImage(threadId, marked, previewAnnotationPageSnapshotName(page));
-  if (generations.get(key) !== generation) return;
+  if (generationOf(key) !== generation) return;
   // Clearing the tile edits notes without scheduling a redraw, so the notes drawn here may be gone.
   const current = visiblePages(threadId).find((candidate) => candidate.pageIdentity === pageIdentity);
   if (noteSignature(current) !== noteSignature(page)) return;
@@ -61,7 +65,7 @@ function startRedraw(threadId: string, pageIdentity: string): Promise<void> {
 /** Redraws a page's marked image after the debounce. A later call restarts the wait and voids any redraw in flight. */
 export function schedulePageSnapshot(threadId: string, pageIdentity: string): void {
   const key = keyOf(threadId, pageIdentity);
-  generations.set(key, (generations.get(key) ?? 0) + 1);
+  generations.set(key, generationOf(key) + 1);
   clearTimeout(timers.get(key));
   timers.set(key, setTimeout(() => {
     timers.delete(key);

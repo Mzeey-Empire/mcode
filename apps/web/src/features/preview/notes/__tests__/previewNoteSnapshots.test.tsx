@@ -190,6 +190,29 @@ describe("page snapshot redraws", () => {
     expect(pageOf()?.snapshot).toBeNull();
   });
 
+  it("flush redraws a page restored without a snapshot before anything scheduled it", async () => {
+    vi.resetModules();
+    const { useComposerDraftStore: store } = await import("@/stores/composerDraftStore");
+    const { saveBrowserNote } = await import("@/features/conversation/composer/draft/draft-submission");
+    const { toBrowserNoteContent } = await import("../../state/previewAnnotationStore");
+    const { draft, capture, stagedImage: stage } = await import("./fixtures");
+    store.getState().updateNextMessage(threadId, (current) => saveBrowserNote(
+      current,
+      { pageIdentity: PRODUCT_PAGE, url: PRODUCT_PAGE, title: "Product", faviconUrl: null, capture, scroll: { x: 0, y: 0 }, cleanCapture: stage("clean.png") },
+      toBrowserNoteContent(draft(threadId)),
+    ));
+    const { flushPageSnapshots: flush } = await import("../previewNoteSnapshots");
+    let stages = 0;
+    mockStage.mockImplementation(async () => {
+      if (++stages > 3) throw new Error("Redraw never settled");
+      return stagedImage();
+    });
+
+    await flush(threadId);
+
+    expect(store.getState().drafts[threadId]?.browserNotePages?.[0]?.snapshot).not.toBeNull();
+  });
+
   it("flush leaves up-to-date pages alone", async () => {
     seedPage(threadId);
     await vi.advanceTimersByTimeAsync(PAGE_SNAPSHOT_DEBOUNCE_MS);
