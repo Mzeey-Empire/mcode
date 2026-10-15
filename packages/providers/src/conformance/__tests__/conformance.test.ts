@@ -137,8 +137,15 @@ describe("Plan protocol research evidence", () => {
       { threadId: "CURSOR_TRACE_THREAD", markdown: "Fixture plan", source: "native" },
     ]);
     const response = captured.input.messages.find((message) => message.kind === "reply" && message.operation === "cursor/create_plan");
-    expect(response?.fields).toContainEqual({ at: "outcome.outcome", kind: "literal", value: "cancelled" });
-    expect(responses).toEqual([{ outcome: { outcome: "cancelled" } }]);
+    assert(response);
+    expect(responses).toHaveLength(1);
+    const reply = responses[0] as { outcome: Record<string, unknown> };
+    for (const field of response.fields) {
+      const value = reply.outcome[field.at.replace("outcome.", "")];
+      if (field.kind === "literal") expect(value).toBe(field.value);
+      if (field.kind === "shape") expect(typeof value).toBe(field.jsonType);
+    }
+    expect(Object.keys(reply.outcome).sort()).toEqual(response.fields.map((field) => field.at.replace("outcome.", "")).sort());
   });
 
   it("rejects private text, extra fields and wrong provenance in synthetic native plan events", () => {

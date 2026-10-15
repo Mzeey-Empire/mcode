@@ -204,13 +204,13 @@ export class CursorAcpClientBridge {
       return { outcome: { outcome: "rejected" }, message: "The plan is too long for the client to capture. Shorten it and call create_plan again." };
     } else if (planMarkdown) {
       this.deps.emitPlanCaptured({ threadId: entry.threadId, markdown: planMarkdown, source: "native" }, entry);
-    } else {
-      logger.warn("cursor/create_plan missing plan markdown", {
-        threadId: entry.threadId,
-        keys: Object.keys(record),
-      });
+      return { outcome: { outcome: "cancelled", feedback: "Keep this plan for review. Do not implement." } };
     }
-    return { outcome: { outcome: "cancelled" } };
+    logger.warn("cursor/create_plan missing plan markdown", {
+      threadId: entry.threadId,
+      keys: Object.keys(record),
+    });
+    return { outcome: { outcome: "cancelled", feedback: "The plan text was missing. Put the full plan in an mcode-plan fence in your reply." } };
   }
 
   private handleTaskExtMethod(

@@ -15,7 +15,7 @@ describe("extractCursorCreatePlanMarkdown", () => {
     expect(await replayCursorPlanRequest(fixture, { plan: "x".repeat(64 * 1024) }, (response) => responses.push(response))).toEqual([
       { threadId: "CURSOR_TRACE_THREAD", markdown: "x".repeat(64 * 1024), source: "native" },
     ]);
-    expect(responses).toEqual([{ outcome: { outcome: "cancelled" } }]);
+    expect(responses).toEqual([{ outcome: { outcome: "cancelled", feedback: "Keep this plan for review. Do not implement." } }]);
   });
   it("reads the S07-00 captured top-level plan field", () => {
     expect(extractCursorCreatePlanMarkdown({ plan: "# Plan\n\nBody", markdown: "Wrong field" })).toBe("# Plan\n\nBody");
@@ -25,6 +25,6 @@ describe("extractCursorCreatePlanMarkdown", () => {
     expect(extractCursorCreatePlanMarkdown(params)).toBeNull();
     const responses: unknown[] = [];
     expect(await replayCursorPlanRequest(fixture, params, (response) => responses.push(response))).toEqual([]);
-    expect(responses).toEqual([{ outcome: { outcome: "cancelled" } }]);
+    expect(responses).toEqual([{ outcome: { outcome: "cancelled", feedback: "The plan text was missing. Put the full plan in an mcode-plan fence in your reply." } }]);
   });
 });
