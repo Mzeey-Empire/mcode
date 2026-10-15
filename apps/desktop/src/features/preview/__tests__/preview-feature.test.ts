@@ -112,6 +112,7 @@ describe("Preview feature public interface", () => {
       "preview.surface.navigate",
       "preview:design.set-inspect",
       "preview:design.set-annotation-guard",
+      "preview:design.reveal-note",
       "preview:automation.execute",
       "preview:automation.begin-renderer-operation",
       "preview:automation.finish-renderer-operation",

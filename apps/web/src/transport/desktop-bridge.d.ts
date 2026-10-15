@@ -330,6 +330,11 @@ export interface PreviewAutomationBridge {
 }
 
 interface PreviewDesignBridge {
+  /** Scrolls the active page to a note, by selector when it names one element, else by document bounds. */
+  revealNote(target: {
+    selector: string | null;
+    bounds: { x: number; y: number; width: number; height: number };
+  }): Promise<{ ok: true } | { ok: false; error: string }>;
   setInspect(
     enabled: boolean,
   ): Promise<{ ok: true } | { ok: false; error: string }>;

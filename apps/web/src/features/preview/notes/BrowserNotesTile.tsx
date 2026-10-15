@@ -1,7 +1,7 @@
-import { useCallback, useId, useMemo, useState } from "react";
+import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { MousePointer2, X } from "lucide-react";
 import { normalizePreviewPageIdentity } from "@mcode/shared/browser-page-identity";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger, type PopoverRootChangeEventDetails } from "@/components/ui/popover";
 import { buildStoredAttachmentImageSrc } from "@/lib/attachment-url";
 import { useDiffStore } from "@/stores/diffStore";
 import { usePreviewAnnotationStore, type PreviewPageRecord } from "../state/previewAnnotationStore";
@@ -26,12 +26,15 @@ export interface BrowserNotesTileProps {
   readonly onRemoveAll: () => void;
 }
 
-function revealNotePage(
+type BrowserNote = BrowserNoteGroup["notes"][number];
+
+async function revealNotePage(
   workspaceId: string,
   scopeId: string,
   threadId: string | undefined,
   page: PreviewPageRecord,
-): void {
+  note: BrowserNote | undefined,
+): Promise<void> {
   const diff = useDiffStore.getState();
   diff.showRightPanel(workspaceId, threadId);
   diff.setRightPanelTab(workspaceId, threadId, "preview");
@@ -40,8 +43,11 @@ function revealNotePage(
   const existing = tabSet?.tabs.find(
     (tab) => tab.url && normalizePreviewPageIdentity(tab.url) === page.pageIdentity,
   );
-  if (existing) void tabs.activatePage(workspaceId, scopeId, existing.id);
-  else void tabs.openPage(workspaceId, scopeId, { activate: true, initialAddress: page.url });
+  if (existing) await tabs.activatePage(workspaceId, scopeId, existing.id);
+  else if (!(await tabs.openPage(workspaceId, scopeId, { activate: true, initialAddress: page.url }))) return;
+  if (!note) return;
+  const { bounds, selectorHint } = note.targetContext;
+  await window.desktopBridge?.preview?.design?.revealNote({ selector: selectorHint?.trim() || null, bounds });
 }
 
 function Thumbnail({ page, threadId }: { readonly page: PreviewPageRecord; readonly threadId?: string }) {
@@ -126,6 +132,12 @@ function StackEdge() {
 export function BrowserNotesTile({ scopeId, workspaceId, threadId, onRemoveAll }: BrowserNotesTileProps) {
   const cardId = useId();
   const [open, setOpen] = useState(false);
+  // Escape from inside the card hands focus back to the trigger; that focus must not reopen it.
+  const escaped = useRef(false);
+  const onOpenChange = (next: boolean, details: PopoverRootChangeEventDetails) => {
+    escaped.current = details.reason === "escape-key";
+    setOpen(next);
+  };
   const notes = usePreviewAnnotationStore((state) => state.byThread[scopeId]);
   const pages = usePreviewAnnotationStore((state) => state.pages[scopeId]);
   const groups = useMemo(() => groupBrowserNotes(notes ?? [], pages ?? {}), [notes, pages]);
@@ -136,7 +148,7 @@ export function BrowserNotesTile({ scopeId, workspaceId, threadId, onRemoveAll }
 
   return (
     <section aria-label="Browser notes" className="px-3 pt-2" data-testid="browser-notes-tile">
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open} onOpenChange={onOpenChange}>
         <div className="group/tile relative h-[144px] w-[188px]">
           {groups.length > 1 ? <StackEdge /> : null}
           <PopoverTrigger
@@ -146,9 +158,13 @@ export function BrowserNotesTile({ scopeId, workspaceId, threadId, onRemoveAll }
             aria-label={`${label}. Notes available.`}
             aria-controls={cardId}
             onFocus={(event) => {
-              if (event.currentTarget.matches(":focus-visible")) setOpen(true);
+              if (!escaped.current && event.currentTarget.matches(":focus-visible")) setOpen(true);
+              escaped.current = false;
             }}
-            onClick={() => revealNotePage(workspaceId, scopeId, threadId, front.page)}
+            onBlur={() => {
+              escaped.current = false;
+            }}
+            onClick={() => void revealNotePage(workspaceId, scopeId, threadId, front.page, front.notes[0])}
             className="absolute bottom-0 left-0 flex h-[132px] w-[176px] flex-col overflow-clip rounded-lg border border-border bg-panel text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
             <Thumbnail page={front.page} threadId={threadId} />
@@ -189,7 +205,7 @@ export function BrowserNotesTile({ scopeId, workspaceId, threadId, onRemoveAll }
                     key={note.id}
                     page={group.page}
                     note={note}
-                    onOpen={() => revealNotePage(workspaceId, scopeId, threadId, group.page)}
+                    onOpen={() => void revealNotePage(workspaceId, scopeId, threadId, group.page, note)}
                     onRemove={() => {
                       removePreviewNote(scopeId, note.id);
                       if (usePreviewAnnotationStore.getState().byThread[scopeId]?.length === 0) onRemoveAll();

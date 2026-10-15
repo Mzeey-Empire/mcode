@@ -42,6 +42,7 @@ interface FakeHostWebContents {
 
 class FakeGuest extends NodeEvents.EventEmitter {
   public destroyed = false;
+  public loading = false;
   public url: string;
   public readonly hostWebContents: FakeHostWebContents;
   public readonly session = previewPartition;
@@ -70,6 +71,10 @@ class FakeGuest extends NodeEvents.EventEmitter {
 
   public isDestroyed(): boolean {
     return this.destroyed;
+  }
+
+  public isLoading(): boolean {
+    return this.loading;
   }
 }
 
@@ -276,6 +281,76 @@ describe("Preview design mode handlers", () => {
     expect(await invoke("preview:design.set-annotation-guard", { enabled: true }, window.webContents)).toEqual({
       ok: false,
       error: "no-window",
+    });
+  });
+
+  describe("reveal-note", () => {
+    function adoptLoadedGuest(windowId: number) {
+      const window = makeWindow(windowId);
+      allWindows.push(window);
+      makeSession(window, "tab-active", ["tab-active"]);
+      const guest = new FakeGuest(window, "active-token");
+      prepareAndAdopt(window, "tab-active", "active-token");
+      guest.url = "https://shop.example/products";
+      const scrollIntoView = vi.fn();
+      const scrollTo = vi.fn();
+      Object.assign(guest.dom.window.Element.prototype, { scrollIntoView });
+      Object.assign(guest.dom.window, { scrollTo });
+      return { window, guest, scrollIntoView, scrollTo };
+    }
+    const bounds = { x: 400, y: 2000, width: 100, height: 40 };
+
+    it("scrolls to the element when the selector names exactly one", async () => {
+      const { window, scrollIntoView, scrollTo } = adoptLoadedGuest(21);
+
+      const result = await invoke("preview:design.reveal-note", { selector: "#target", bounds }, window.webContents);
+
+      expect(result).toEqual({ ok: true });
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollTo).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["matches nothing", "#missing"],
+      ["is not a valid selector", "Buy now (button)"],
+    ])("centres the document bounds when the selector %s", async (_label, selector) => {
+      const { window, guest, scrollIntoView, scrollTo } = adoptLoadedGuest(22);
+
+      const result = await invoke("preview:design.reveal-note", { selector, bounds }, window.webContents);
+
+      expect(result).toEqual({ ok: true });
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(scrollTo).toHaveBeenCalledWith({
+        left: bounds.x + bounds.width / 2 - guest.dom.window.innerWidth / 2,
+        top: bounds.y + bounds.height / 2 - guest.dom.window.innerHeight / 2,
+        behavior: "instant",
+      });
+    });
+
+    it("rejects a target whose bounds are not finite numbers", async () => {
+      const { window, guest } = adoptLoadedGuest(23);
+
+      const result = await invoke(
+        "preview:design.reveal-note",
+        { selector: null, bounds: { ...bounds, y: Number.NaN } },
+        window.webContents,
+      );
+
+      expect(result).toEqual({ ok: false, error: "invalid-target" });
+      expect(guest.executeJavaScript).not.toHaveBeenCalled();
+    });
+
+    it("waits for a page that is still loading before it scrolls", async () => {
+      const { window, guest, scrollTo } = adoptLoadedGuest(24);
+      guest.loading = true;
+
+      const pending = invoke("preview:design.reveal-note", { selector: null, bounds }, window.webContents);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(guest.executeJavaScript).not.toHaveBeenCalled();
+      guest.loading = false;
+
+      expect(await pending).toEqual({ ok: true });
+      expect(scrollTo).toHaveBeenCalledTimes(1);
     });
   });
 });

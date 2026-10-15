@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { usePreviewAnnotationStore } from "../../state/previewAnnotationStore";
+import { usePreviewTabsStore } from "../../state/previewTabsStore";
 import { saveDraftDiffComment } from "@/features/conversation/composer/draft/draft-diff-comments";
 import { buildComposerAnnotationBundle } from "@/features/conversation/composer/submission/composer-annotations";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
@@ -123,6 +124,44 @@ describe("BrowserNotesTile", () => {
 
     expect(await screen.findByTestId("browser-notes-card")).toBeInTheDocument();
     expect(screen.getByText("Keyboard note")).toBeInTheDocument();
+  });
+
+  it("clicking a note shows its page in the Browser, then scrolls to the note", async () => {
+    const note = store().saveAnnotation(SCOPE, draft(SCOPE, { note: "Scroll here" }));
+    const order: string[] = [];
+    const revealNote = vi.fn(async () => { order.push("reveal"); return { ok: true as const }; });
+    Object.assign(window, { desktopBridge: { preview: { design: { revealNote } } } });
+    usePreviewTabsStore.setState({
+      openPage: vi.fn(async () => { order.push("open"); return "tab-1"; }),
+    });
+    renderTile();
+    await openHoverCard();
+
+    await userEvent.click(screen.getByTestId("browser-note-row"));
+
+    await waitFor(() => expect(revealNote).toHaveBeenCalledTimes(1));
+    expect(order).toEqual(["open", "reveal"]);
+    expect(revealNote).toHaveBeenCalledWith({
+      selector: note.targetContext.selectorHint?.trim() || null,
+      bounds: note.targetContext.bounds,
+    });
+    Object.assign(window, { desktopBridge: undefined });
+  });
+
+  it("does not scroll when the page could not be opened", async () => {
+    store().saveAnnotation(SCOPE, draft(SCOPE, { note: "Scroll here" }));
+    const revealNote = vi.fn();
+    Object.assign(window, { desktopBridge: { preview: { design: { revealNote } } } });
+    const openPage = vi.fn(async () => null);
+    usePreviewTabsStore.setState({ openPage });
+    renderTile();
+    await openHoverCard();
+
+    await userEvent.click(screen.getByTestId("browser-note-row"));
+
+    await waitFor(() => expect(openPage).toHaveBeenCalledTimes(1));
+    expect(revealNote).not.toHaveBeenCalled();
+    Object.assign(window, { desktopBridge: undefined });
   });
 
   it("removing the notes tile keeps Review comments", async () => {

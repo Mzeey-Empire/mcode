@@ -517,6 +517,13 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     },
     /** Design mode operations applied to the adopted Browser guest. */
     design: {
+      /** Scrolls the active page to a note, by selector when it names one element, else by document bounds. */
+      revealNote(target: {
+        selector: string | null;
+        bounds: { x: number; y: number; width: number; height: number };
+      }): Promise<unknown> {
+        return ipcRenderer.invoke("preview:design.reveal-note", target);
+      },
       setInspect(enabled: boolean): Promise<unknown> {
         return ipcRenderer.invoke("preview:design.set-inspect", { enabled });
       },
