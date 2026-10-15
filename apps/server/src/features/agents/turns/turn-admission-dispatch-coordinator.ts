@@ -511,8 +511,7 @@ export class TurnAdmissionDispatchCoordinator {
     lease: TurnRuntimeLease,
     runtime: TurnRuntimeAdmissionAuthority,
   ): Promise<PreparedTurnDispatch> {
-    await this.preparePlanFile(prepared.command);
-    await this.plans.prepareNativeQuestions(prepared.command.threadId, prepared.providerId);
+    await this.preparePlanFile(prepared.command, prepared.providerId);
     prepared.plan = this.plans.classify(prepared.command);
     const cwd = this.resolveWorkingDirectory(prepared);
     const review = await this.approvalReviews.resolve({
@@ -534,10 +533,11 @@ export class TurnAdmissionDispatchCoordinator {
     }
   }
 
-  private async preparePlanFile(command: SendMessageCommand): Promise<void> {
+  private async preparePlanFile(command: SendMessageCommand, providerId: ProviderId): Promise<void> {
     if ((command.interactionMode ?? this.threads.findById(command.threadId)?.interaction_mode) === "plan"
       || command.planCommentIds?.length || command.markPlanAnswerForMessageId) {
       await this.plans.prepareTurn(command.threadId);
+      await this.plans.prepareNativeQuestions(command.threadId, providerId);
     }
   }
 
