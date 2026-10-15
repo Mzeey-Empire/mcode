@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from "react";
 import type { PreviewAnnotationBundle } from "@mcode/contracts";
+import type { QueuedMessage } from "@/stores/queueStore";
 import type { ComposerFormController } from "../draft/useComposerFormController";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";
 import { useComposerQueueEditing } from "../queue/useComposerQueueEditing";
@@ -37,10 +38,10 @@ export function useComposerQueueController({
     setPreviewDesignModeActive(annotationScopeId, false);
   }, [annotationScopeId, setPreviewDesignModeActive]);
   const restoreAnnotations = useCallback(
-    (bundle: PreviewAnnotationBundle | undefined) => {
+    (message: QueuedMessage) => {
       if (!annotationScopeId) return;
-      const restored = restoreComposerAnnotations(annotationScopeId, bundle);
-      setPreviewDesignModeActive(annotationScopeId, restored && Boolean(bundle?.annotations.length));
+      const restored = restoreComposerAnnotations(annotationScopeId, message);
+      setPreviewDesignModeActive(annotationScopeId, restored && Boolean(message.previewAnnotations?.annotations.length));
     },
     [annotationScopeId, setPreviewDesignModeActive],
   );

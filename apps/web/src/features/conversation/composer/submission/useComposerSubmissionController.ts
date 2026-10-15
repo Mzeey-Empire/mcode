@@ -20,6 +20,7 @@ import {
   completeQueuedComposerSubmission,
   createHandoffQueuedSend,
   queueComposerSubmission,
+  removeHandoffTakenAnnotations,
 } from "./composer-submission-queue";
 import {
   dispatchComposerTarget,
@@ -103,9 +104,6 @@ export function useComposerSubmissionController({
       completeQueuedComposerSubmission({
         annotationScopeId,
         annotations: submission.currentAnnotations,
-        diffComments: submission.currentDiffComments,
-        fileComments: submission.currentFileComments,
-        browserNotePages: submission.currentBrowserNotePages,
         goalObjective: submission.goalObjective,
         form,
         finishEditing: queue.finishEditing,
@@ -220,6 +218,7 @@ export function useComposerSubmissionController({
     if (submission.snapshot.selectedTextComments.length === 0
       && shouldDeferToHandoff({ threadId, branchFromMessageId, isNewThread })
       && queue.queueIfGenerating(createHandoffQueuedSend({ submission }))) {
+      removeHandoffTakenAnnotations(annotationScopeId, submission);
       completeQueued(submission);
       return "complete";
     }
