@@ -170,7 +170,6 @@ interface ClaudeSessionState {
   /**
    * Permission mode the SDK subprocess was spawned with ("full" or "supervised").
    * A full-access spawn enables later live switches back to bypassPermissions.
-   * Changing the access setting still recreates the process and its browser grants.
    */
   permissionMode: string;
   planTurn: TurnRequest["planTurn"];
@@ -2177,7 +2176,7 @@ export class ClaudeProvider
       planTurn: staged.planTurn,
       planCaptured: false,
       planWrites: new Map(),
-      // C3 proved project-local plans; the diagnostic runs also reported the default config-home path.
+      // The CLI writes plans to the config home unless plansDirectory points into the project; track both roots.
       planRoots: [
         NodePath.join(args.cwd, ".claude", "plans"),
         NodePath.resolve(args.env.CLAUDE_CONFIG_DIR || NodePath.join(NodeOS.homedir(), ".claude"), "plans"),
@@ -2313,8 +2312,8 @@ export class ClaudeProvider
 
   /**
    * A pooled session must be discarded before reuse when its spawn-fixed
-   * parameters changed. The access setting controls bypass eligibility and
-   * browser grants; plan mode itself switches on the live query. `doSendMessage` detects the same
+   * parameters changed. The access setting gates bypass and browser grants; plan mode
+   * switches on the live query. `doSendMessage` detects the same
    * mismatch and tears the session down explicitly (with `suppressEnded`)
    * before reaching `acquire`; this is the runtime-side backstop.
    */

@@ -63,7 +63,6 @@ function buildService(db: Database) {
     sessionForkOnResume: "unsupported" as const,
     maxInputCharactersPerTurn: 16_000,
     sendTurn: vi.fn(() => Promise.resolve()),
-    // Claude-concrete off-interface method invoked by armPlanGenerationTurn via cast.
   });
   const providerRegistry = {
     resolve: vi.fn(() => providerStub),
