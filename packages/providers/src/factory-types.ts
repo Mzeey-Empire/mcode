@@ -54,7 +54,6 @@ export type ClaudeCanonicalEventRouting = import("./private/canonical-live-event
 /** Usable Claude provider with the narrow controls required by server callers. */
 export type ClaudeProviderBoundary = IGoalCapable & ISessionEvictable & ICompletionCapable & ProviderBoundary & ClaudeSideChannelGenerator & {
   waitForSessionExit(sessionId: string, timeoutMs?: number): Promise<void>;
-  setPlanAnswerMode(threadId: string, enabled: boolean): void;
   setCanonicalTurnDeliveryFailureHandler(handler: (routing: ClaudeCanonicalEventRouting, error: Error) => void | Promise<void>): void;
 };
 

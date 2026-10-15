@@ -33,10 +33,6 @@ export type PlanTurnClassification = NonNullable<TurnRequest["planTurn"]> | { ki
 
 type PlanMessage = Extract<AgentEvent, { type: "message" }>;
 
-type ClaudePlanAnswerModeProvider = {
-  setPlanAnswerMode(threadId: string, enabled: boolean): void;
-};
-
 /** Owns plan-question turns and durable plan capture materialization. */
 @injectable()
 export class PlanTurnService {
@@ -114,23 +110,23 @@ export class PlanTurnService {
   classify(command: Pick<SendMessageCommand, "threadId" | "interactionMode" | "markPlanAnswerForMessageId" | "planImplement" | "planCommentIds" | "providerOriginated" | "provider">): PlanTurnClassification {
     if (command.planImplement) return { kind: "implement" };
     if (command.providerOriginated) return { kind: "none" };
-    if (command.markPlanAnswerForMessageId) return this.classifyOutput(command.threadId, "planning", command.provider);
-    if (command.planCommentIds?.length) return this.classifyOutput(command.threadId, "revise", command.provider);
-    return this.classifyByMode(command.threadId, command.interactionMode, command.provider);
+    if (command.markPlanAnswerForMessageId) return this.classifyOutput(command.threadId, "planning");
+    if (command.planCommentIds?.length) return this.classifyOutput(command.threadId, "revise");
+    return this.classifyByMode(command.threadId, command.interactionMode);
   }
 
-  private classifyByMode(threadId: string, interactionMode: InteractionMode | undefined, providerId?: ProviderId): PlanTurnClassification {
+  private classifyByMode(threadId: string, interactionMode: InteractionMode | undefined): PlanTurnClassification {
     const mode = interactionMode ?? this.threadRepo.findById(threadId)?.interaction_mode;
     if (mode !== "plan") return { kind: "none" };
     const latest = this.planRepo.getLatestForThread(threadId);
-    if (latest && (latest.status === "draft" || latest.status === "ready")) return this.classifyOutput(threadId, "revise", providerId);
-    if (this.usesNativeQuestions(threadId)) return this.classifyOutput(threadId, "planning", providerId);
+    if (latest && (latest.status === "draft" || latest.status === "ready")) return this.classifyOutput(threadId, "revise");
+    if (this.usesNativeQuestions(threadId)) return this.classifyOutput(threadId, "planning");
     this.beginQuestionGeneration(threadId);
     return { kind: "questions", planFilePath: null };
   }
 
-  private classifyOutput(threadId: string, kind: "planning" | "revise", providerId?: ProviderId): NonNullable<TurnRequest["planTurn"]> {
-    this.beginOutputGeneration(threadId, providerId);
+  private classifyOutput(threadId: string, kind: "planning" | "revise"): NonNullable<TurnRequest["planTurn"]> {
+    this.beginOutputGeneration(threadId);
     return { kind, planFilePath: this.projection?.files.path(threadId) ?? null };
   }
 
@@ -158,10 +154,9 @@ export class PlanTurnService {
     this.execution(threadId).beginQuestionGeneration();
   }
 
-  /** Start parsing one structured plan capture turn and arm its native provider mode. */
-  beginOutputGeneration(threadId: string, providerId?: ProviderId): void {
+  /** Start parsing one structured plan capture turn. */
+  beginOutputGeneration(threadId: string): void {
     this.execution(threadId).beginOutputGeneration();
-    this.armNativeOutputMode(threadId, providerId);
   }
 
   /** Return the provider prompt used to collect plan questions. */
@@ -298,13 +293,6 @@ ${userMessage}`;
   /** Clear volatile plan state once a turn reaches its terminal lifecycle. */
   clearTurn(threadId: string): void {
     this.executionByThread.delete(threadId);
-  }
-
-  private armNativeOutputMode(threadId: string, requestedProviderId?: ProviderId): void {
-    const providerId = requestedProviderId ?? this.threadRepo.findById(threadId)?.provider;
-    if (providerId !== "claude") return;
-    const provider = this.providerRegistry.resolve(providerId) as Partial<ClaudePlanAnswerModeProvider>;
-    provider.setPlanAnswerMode?.(threadId, true);
   }
 
   private async persistPlan(

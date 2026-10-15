@@ -52,7 +52,7 @@ function makeProvider(lease: BrowserAutomationSessionLease) {
     get: vi.fn(() => existingState),
     recordUsage: vi.fn(),
     acquire: vi.fn(async (args: any) => {
-      const result = await (provider as any).spawn(args);
+      const result = await (provider as any).spawn({ ...args, env: {} });
       spawnedState = result.state;
       return result.state;
     }),
@@ -74,7 +74,6 @@ function makeProvider(lease: BrowserAutomationSessionLease) {
     pendingStops: new Set(),
     suppressEndedQueries: new Set(),
     suppressSessionStartHooks: new Set(),
-    planAnswerThreads: new Set(),
     pendingPermissions: new Map(),
     host: fixtureHost({ browser: lease }),
     configuration: { cliPath: process.execPath, idleSessionTtlMs: 600_000 },

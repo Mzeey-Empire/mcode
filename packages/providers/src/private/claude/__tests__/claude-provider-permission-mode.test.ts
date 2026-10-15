@@ -326,9 +326,9 @@ describe("ClaudeProvider permission mode changes", () => {
     expect(sdkCalls[0]!.options.permissionMode).toBe("default");
     expect(sdkCalls[0]!.options.allowDangerouslySkipPermissions).toBeUndefined();
 
-    // Second spawn is in full (SDK "bypassPermissions") mode, still no CLI bypass flag.
+    // Second spawn is in full (SDK "bypassPermissions") mode and is allowed to return to bypass after a Plan turn.
     expect(sdkCalls[1]!.options.permissionMode).toBe("bypassPermissions");
-    expect(sdkCalls[1]!.options.allowDangerouslySkipPermissions).toBeUndefined();
+    expect(sdkCalls[1]!.options.allowDangerouslySkipPermissions).toBe(true);
   });
 
   it("starts proactive sessions with Ultracode enabled", async () => {

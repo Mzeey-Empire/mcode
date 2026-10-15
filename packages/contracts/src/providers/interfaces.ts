@@ -179,6 +179,8 @@ export type TurnSteerOutcome =
 export interface NativePlanFileRef {
   path: string;
   sessionId: string;
+  /** Plan root a Claude file was proved under, so a later process can validate it without session state. Other providers derive it from their session. */
+  root?: string;
   sha256: string;
 }
 

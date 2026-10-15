@@ -76,7 +76,13 @@ export class PlanImplementStore {
   private newestNativePlanFile(threadId: string) {
     const agent = this.orm.select().from(plans).where(and(eq(plans.threadId, threadId), eq(plans.author, "agent")))
       .orderBy(desc(plans.version)).get();
-    return agent?.nativePlanFileJson ? NativePlanFileRefSchema().parse(JSON.parse(agent.nativePlanFileJson)) : null;
+    if (!agent?.nativePlanFileJson) return null;
+    try {
+      const parsed = NativePlanFileRefSchema().safeParse(JSON.parse(agent.nativePlanFileJson));
+      return parsed.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
   }
 
   read(requestId: string): PlanImplementRequest | null {
