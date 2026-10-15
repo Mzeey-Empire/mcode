@@ -14,7 +14,6 @@ import { isPageEligibleNavError, navCodeToPageError } from "../navigation/nav-er
 import { usePreviewCapture, type PreviewCaptureKind } from "../capture/usePreviewCapture";
 import {
   browserAutomationTargetKey,
-  isBrowserAutomationAgentControlled,
   selectWarmBrowserTabIds,
 } from "../automation/browserAutomationStore";
 import { browserSurfaceHost } from "./BrowserSurfaceHostRoot";
@@ -79,12 +78,6 @@ function requestedWebviewUrl(
   return requestedUrls[tabId] ?? activeTabUrl;
 }
 
-function activeAutomationPointer(
-  controller: { readonly pointer?: { readonly x: number; readonly y: number } | null } | undefined,
-): { readonly x: number; readonly y: number } | null {
-  return controller?.pointer ?? null;
-}
-
 /** Uses live page status before the input address when identifying annotations. */
 export function previewPageIdentityUrl(
   pageStatus: PreviewPageStatus,
@@ -103,8 +96,6 @@ interface PreviewPageOptions {
   readonly browserWorkspaceId: ReturnType<typeof usePreviewViewport>["browserWorkspaceId"];
   readonly activeWebviewTabId: ReturnType<typeof usePreviewViewport>["activeWebviewTabId"];
   readonly automationControllers: ReturnType<typeof usePreviewViewport>["automationControllers"];
-  readonly actingTargets: ReturnType<typeof usePreviewViewport>["actingTargets"];
-  readonly pendingAgentOpens: ReturnType<typeof usePreviewViewport>["pendingAgentOpens"];
   readonly webviewRefs: RefObject<Record<string, PreviewWebviewHandle | null>>;
   readonly activeBrowserTargetKey: ReturnType<typeof usePreviewViewport>["activeBrowserTargetKey"];
   readonly previewScopeKey: ReturnType<typeof usePreviewViewport>["previewScopeKey"];
@@ -122,8 +113,6 @@ export function usePreviewPage({
   browserWorkspaceId,
   activeWebviewTabId,
   automationControllers,
-  actingTargets,
-  pendingAgentOpens,
   webviewRefs,
   activeBrowserTargetKey,
   previewScopeKey,
@@ -277,13 +266,6 @@ export function usePreviewPage({
   const activeAutomationController = automationControllers.get(
     browserAutomationTargetKey(browserWorkspaceId, threadId, activeWebviewTabId),
   );
-  const agentControlsBrowser = isBrowserAutomationAgentControlled(
-    { controllers: automationControllers, pendingAgentOpens, actingTargets },
-    browserWorkspaceId,
-    threadId,
-    activeWebviewTabId,
-  );
-  const automationPointer = activeAutomationPointer(activeAutomationController);
   const activeWebviewRef = useCallback(
     (): PreviewWebviewHandle | null =>
       webviewRefs.current[activeWebviewTabId] ?? null,
@@ -544,8 +526,6 @@ export function usePreviewPage({
     activeAutomationController,
     webviewNavError,
     lastCapture,
-    agentControlsBrowser,
-    automationPointer,
     onPreviewErrorRetry,
   };
 }

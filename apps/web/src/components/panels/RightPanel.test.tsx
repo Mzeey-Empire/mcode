@@ -44,9 +44,11 @@ vi.mock("./ActivityRail", () => ({
     onSelect,
     onExpandedChange,
     captionAction,
+    browserActing,
   }: {
     tabInstances: Array<{ id: string; type: string }>;
     activeTabId: string | null;
+    browserActing?: boolean;
     onClose?: (instanceId: string) => void;
     onSelect?: (instanceId: string) => void;
     onExpandedChange?: (expanded: boolean) => void;
@@ -56,6 +58,7 @@ vi.mock("./ActivityRail", () => ({
       data-testid="activity-rail"
       data-open-tabs={tabInstances.map((instance) => instance.type).join(",")}
       data-active-tab-id={activeTabId}
+      data-browser-acting={String(browserActing)}
     >
       <div data-testid="activity-rail-caption-strip">{captionAction}</div>
       <button type="button" data-testid="expand-activity-rail" onClick={() => onExpandedChange?.(true)} />
@@ -724,7 +727,7 @@ describe("RightPanel", () => {
     expect(activatePreviewPage).not.toHaveBeenCalled();
   });
 
-  it("reveals an agent-created page while its Browser bootstrap is pending", () => {
+  it("reveals the Browser on an empty panel without selecting the agent's page", () => {
     previewTabSet.current = {
       threadId: "workspace-1",
       activeTabId: "default-browser-tab",
@@ -770,17 +773,14 @@ describe("RightPanel", () => {
     expect(screen.queryByTestId("panel-empty-state")).not.toBeInTheDocument();
     expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-open-tabs", "preview");
     expect(screen.getByTestId("preview-panel")).toBeInTheDocument();
-    expect(activatePreviewPage).toHaveBeenCalledWith(
-      "workspace-1",
-      "workspace-1",
-      "agent-browser-tab",
-    );
+    expect(activatePreviewPage).not.toHaveBeenCalled();
     const agentTab = screen.getByRole("group", { name: "Browser pages" }).querySelector<HTMLElement>('[data-panel-tab="agent-browser-tab"]');
     expect(agentTab).not.toBeNull();
     expect(within(agentTab!).getByTestId("browser-agent-control-indicator")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-browser-acting", "true");
   });
 
-  it("switches an already-open panel to an agent-created Browser page", () => {
+  it("keeps the user's tool and page while the agent acts in another Browser page", () => {
     previewTabSet.current = {
       threadId: "workspace-1",
       activeTabId: "existing-browser-tab",
@@ -830,30 +830,16 @@ describe("RightPanel", () => {
       ]),
     });
 
-    const { rerender } = render(<RightPanel />);
+    render(<RightPanel />);
 
-    expect(screen.getByTestId("activity-rail")).toHaveAttribute(
-      "data-open-tabs",
-      "tasks,preview",
-    );
-    expect(screen.getByTestId("activity-rail")).toHaveAttribute(
-      "data-active-tab-id",
-      "singleton:preview",
-    );
-    expect(screen.getByTestId("preview-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-open-tabs", "tasks");
+    expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-browser-acting", "true");
+    expect(screen.queryByTestId("preview-panel")).not.toBeInTheDocument();
     expect(useDiffStore.getState().getRightPanel("workspace-1")).toMatchObject({
-      openTabs: ["tasks", "preview"],
-      activeTab: "preview",
+      openTabs: ["tasks"],
+      activeTab: "tasks",
     });
-    expect(activatePreviewPage).toHaveBeenCalledWith(
-      "workspace-1",
-      "workspace-1",
-      "agent-browser-tab",
-    );
-
-    rerender(<RightPanel />);
-
-    expect(activatePreviewPage).toHaveBeenCalledTimes(1);
+    expect(activatePreviewPage).not.toHaveBeenCalled();
   });
 
   it("does not re-open Browser while the final page close callback is synchronous", () => {

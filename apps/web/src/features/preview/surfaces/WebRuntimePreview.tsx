@@ -17,6 +17,7 @@ import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { BrowserToolbar } from "./BrowserToolbar";
 import { useBrowserControl } from "./useBrowserControl";
 import { BrowserDeviceRow } from "./BrowserDeviceRow";
+import { BrowserActingOverlay } from "./BrowserActingOverlay";
 import { BrowserViewportCanvas } from "./BrowserViewportCanvas";
 import type { BrowserAction, BrowserToolbarPage, BrowserTools } from "./browserToolbarModel";
 import { useBrowserCommands } from "./useBrowserCommands";
@@ -199,6 +200,7 @@ export function WebRuntimePreview({
   onCloseViewportToolbar,
   automationOnly = false,
   presentationActive = true,
+  coveredRight = 0,
 }: {
   readonly threadId: string;
   readonly workspaceId?: string | null;
@@ -209,6 +211,7 @@ export function WebRuntimePreview({
   readonly onCloseViewportToolbar: () => void;
   readonly automationOnly?: boolean;
   readonly presentationActive?: boolean;
+  readonly coveredRight?: number;
 }) {
   const storedUrl = useDiffStore((state) => state.previewUrlByThread[threadId] ?? "");
   const fixtureUrl = `${window.location.origin}${WEB_AUTOMATION_FIXTURE_URL}`;
@@ -442,6 +445,12 @@ export function WebRuntimePreview({
             dockRef={dockRef}
           />
         </BrowserViewportCanvas>
+        <BrowserActingOverlay
+          workspaceId={identity.workspaceId}
+          threadId={threadId}
+          tabId={WEB_RUNTIME_PREVIEW_TAB_ID}
+          coveredRight={coveredRight}
+        />
       </div>
     </div>
   );

@@ -16,7 +16,6 @@ import type {
   BrowserSurfaceIdentity,
   BrowserSurfacePresentation,
 } from "./BrowserSurfaceHost";
-import { BrowserSurfaceControlIndicator } from "./BrowserSurfaceControlIndicator";
 
 const MAX_ADDRESS = BROWSER_TAB_INFO_STRING_MAX.url;
 const MAX_TITLE = BROWSER_TAB_INFO_STRING_MAX.title;
@@ -150,7 +149,6 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
   private disposed = false;
   private visible = false;
   private readonly frame: ElectronWebviewElement;
-  private readonly controlIndicator: BrowserSurfaceControlIndicator;
   private readonly onHumanInput?: ElectronWebviewBrowserSurfaceAdapterOptions["onHumanInput"];
   private readonly onGuestScroll?: ElectronWebviewBrowserSurfaceAdapterOptions["onGuestScroll"];
 
@@ -204,7 +202,6 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     this.preparePromise = this.registerScopeAndPrepare(options.tabsBridge ?? window.desktopBridge?.preview?.tabs)
       .catch(() => ({ ok: false as const, error: "Surface preparation failed" }));
     const root = options.root ?? this.documentRef.body;
-    this.controlIndicator = new BrowserSurfaceControlIndicator(this.documentRef, root);
     void this.preparePromise.then((result) => {
       if (this.disposed) return;
       if (!result.ok) {
@@ -265,13 +262,6 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     this.visible = true;
     this.frame.style.pointerEvents = presentation.inputEnabled === false ? "none" : "auto";
     this.frame.setAttribute("aria-hidden", presentation.accessible === false ? "true" : "false");
-    this.controlIndicator.present(presentation);
-  }
-
-  /** Updates the click-through edge indicator for agent control. */
-  public setControlled(controlled: boolean): void {
-    if (this.disposed) return;
-    this.controlIndicator.setControlled(controlled);
   }
 
   /** Hides the webview without changing its guest document. */
@@ -284,7 +274,6 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     this.frame.style.visibility = "hidden";
     this.frame.style.pointerEvents = "none";
     this.frame.setAttribute("aria-hidden", "true");
-    this.controlIndicator.hide();
   }
 
   /** Requests main-process navigation after trusted adoption. */
@@ -333,7 +322,6 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     void Promise.resolve(this.bridge.release({ surface: this.surface, reason }))
       .catch(() => undefined)
       .finally(() => this.frame.remove());
-    this.controlIndicator.dispose();
     this.frame.style.visibility = "hidden";
     this.frame.style.pointerEvents = "none";
     this.frame.setAttribute("aria-hidden", "true");

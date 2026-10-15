@@ -10,6 +10,8 @@ export interface BrowserUrlPillProps {
   readonly address: BrowserAddress;
   /** Shows an address prompt on a new page. */
   readonly newPage: boolean;
+  /** Rings the pill in the accent while the agent acts on this page. */
+  readonly acting?: boolean;
   /** Monotonic token: each change focuses the pill and selects its text. */
   readonly focusRequest?: number;
 }
@@ -51,7 +53,7 @@ function UrlAtRest({ url }: { readonly url: string }) {
 }
 
 /** Editable address that preserves the submitted draft until the page URL changes. */
-export function BrowserUrlPill({ address, newPage, focusRequest }: BrowserUrlPillProps) {
+export function BrowserUrlPill({ address, newPage, acting = false, focusRequest }: BrowserUrlPillProps) {
   const { url, onNavigate, openExternal, onHumanFocus } = address;
   const omnibox = useOmniboxState(url);
   const [focused, setFocused] = useState(false);
@@ -71,7 +73,8 @@ export function BrowserUrlPill({ address, newPage, focusRequest }: BrowserUrlPil
       className={cn(
         "group/url flex h-8 min-w-0 flex-1 items-center gap-1 rounded-2xl bg-selected pr-0.75 pl-3.5 transition-colors",
         "hover:bg-border focus-within:bg-border",
-        newPage && "shadow-[inset_0_0_0_1px_var(--color-focus)]",
+        newPage && !acting && "shadow-[inset_0_0_0_1px_var(--color-focus)]",
+        acting && "shadow-[inset_0_0_0_1px_var(--color-primary)]",
       )}
     >
       <div className="relative min-w-0 flex-1 text-code-small">

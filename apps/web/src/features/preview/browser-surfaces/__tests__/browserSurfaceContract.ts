@@ -173,7 +173,7 @@ export function runBrowserSurfaceContract(name: string, adapterFactory: BrowserS
       expect(fixture.records[0]?.subscribeCalls).toBe(1);
       expect(fixture.activeAdapterCount()).toBe(1);
       expect(fixture.activeSubscriptionCount()).toBe(1);
-      await vi.waitFor(() => expect(document.body.childElementCount).toBe(baselineChildren + 2));
+      await vi.waitFor(() => expect(document.body.childElementCount).toBe(baselineChildren + 1));
 
       host.dispose(IDENTITY);
       expect(fixture.activeAdapterCount()).toBe(0);

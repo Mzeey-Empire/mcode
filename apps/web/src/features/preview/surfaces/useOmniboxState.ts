@@ -25,7 +25,11 @@ export function useOmniboxState(url: string): OmniboxState {
   const active = draft.sourceUrl === url ? draft : { sourceUrl: url, value: url, dirty: false };
 
   const onFocus = useCallback(() => {
-    requestAnimationFrame(() => inputRef.current?.select());
+    const valueAtFocus = inputRef.current?.value;
+    // Selecting after a keystroke would highlight the typed text and let the next key overwrite it.
+    requestAnimationFrame(() => {
+      if (inputRef.current?.value === valueAtFocus) inputRef.current?.select();
+    });
   }, []);
 
   const onChange = useCallback((value: string) => {

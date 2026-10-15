@@ -6,7 +6,7 @@ import type {
   ReactNode,
 } from "react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { Layers, Plus, X } from "lucide-react";
+import { Layers, MousePointer2, Plus, X } from "lucide-react";
 import type { SubagentRosterEntry } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { ProviderIcon } from "@/components/ui/provider-icon";
@@ -352,6 +352,7 @@ function RailTab({
   expanded,
   changesCount,
   changesFresh,
+  browserActing,
   onSelect,
   onClose,
 }: {
@@ -360,6 +361,7 @@ function RailTab({
   expanded: boolean;
   changesCount: number;
   changesFresh: boolean;
+  browserActing: boolean;
   onSelect: () => void;
   onClose: () => void;
 }) {
@@ -369,7 +371,13 @@ function RailTab({
   return (
     <RailEntry
       domId={railDomId(id)}
-      icon={<Icon size={RAIL_ICON_SIZE} />}
+      icon={
+        id === "preview" && browserActing ? (
+          <MousePointer2 data-testid="rail-browser-acting" size={RAIL_ICON_SIZE} className="fill-primary text-primary" />
+        ) : (
+          <Icon size={RAIL_ICON_SIZE} />
+        )
+      }
       label={label}
       accessibleLabel={railAccessibleLabel(id, label, changesCount, changesFresh)}
       status={<RailStatus id={id} active={active} expanded={expanded} changesCount={changesCount} changesFresh={changesFresh} />}
@@ -532,6 +540,8 @@ interface ActivityRailProps {
   readonly scope: PanelScope;
   readonly changesCount: number;
   readonly changesFresh: boolean;
+  /** Swaps the Browser entry's glyph for a pointer while the agent acts on one of its pages. */
+  readonly browserActing?: boolean;
   onSelect: (instanceId: string) => void;
   onClose: (instanceId: string) => void;
   onReorder: (instanceId: string, direction: -1 | 1) => void;
@@ -560,6 +570,7 @@ function RailTabInstances({
   subagentEntries,
   changesCount,
   changesFresh,
+  browserActing,
   expanded,
   onSelect,
   onClose,
@@ -571,6 +582,7 @@ function RailTabInstances({
   | "subagentEntries"
   | "changesCount"
   | "changesFresh"
+  | "browserActing"
   | "expanded"
   | "onSelect"
   | "onClose"
@@ -597,6 +609,7 @@ function RailTabInstances({
             expanded={expanded}
             changesCount={changesCount}
             changesFresh={changesFresh}
+            browserActing={browserActing ?? false}
             onSelect={() => onSelect(instance.id)}
             onClose={() => onClose(instance.id)}
           />
@@ -636,6 +649,7 @@ function ActivityRailView({
   scope,
   changesCount,
   changesFresh,
+  browserActing,
   onSelect,
   onClose,
   onReorder,
@@ -692,6 +706,7 @@ function ActivityRailView({
           subagentEntries={subagentEntries}
           changesCount={changesCount}
           changesFresh={changesFresh}
+          browserActing={browserActing}
           expanded={expanded}
           onSelect={onSelect}
           onClose={onClose}
@@ -722,6 +737,7 @@ export function ActivityRail({
   scope,
   changesCount,
   changesFresh,
+  browserActing,
   onSelect,
   onClose,
   onReorder,
@@ -827,6 +843,7 @@ export function ActivityRail({
       scope={scope}
       changesCount={changesCount}
       changesFresh={changesFresh}
+      browserActing={browserActing}
       onSelect={onSelect}
       onClose={onClose}
       onReorder={onReorder}

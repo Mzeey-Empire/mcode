@@ -91,8 +91,6 @@ export function usePreviewViewport({
   // activity rail (the page switcher), so this panel no longer renders a strip.
   const tabs = usePreviewTabs(threadId, workspaceId);
   const automationControllers = useBrowserAutomationStore((state) => state.controllers);
-  const pendingAgentOpens = useBrowserAutomationStore((state) => state.pendingAgentOpens);
-  const actingTargets = useBrowserAutomationStore((state) => state.actingTargets);
   const automationLiveTargets = useBrowserAutomationStore((state) => state.liveTargets);
   const automationViewports = useBrowserAutomationStore((state) => state.viewportByTarget);
   const automationViewportStates = useBrowserAutomationStore((state) => state.viewportStateByTarget);
@@ -210,8 +208,6 @@ export function usePreviewViewport({
     browserWorkspaceId,
     activeWebviewTabId,
     automationControllers,
-    actingTargets,
-    pendingAgentOpens,
     activeBrowserTargetKey,
     previewScopeKey,
     pendingNavError,

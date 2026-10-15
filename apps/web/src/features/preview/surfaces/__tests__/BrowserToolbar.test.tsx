@@ -182,6 +182,32 @@ describe("BrowserToolbar", () => {
     expect(log).toEqual(["focus", "navigate:localhost:9999", "reload"]);
   });
 
+  it("selects the address on focus but not text typed before the frame fires", async () => {
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => frames.push(callback));
+    try {
+      const user = userEvent.setup();
+      renderToolbar(loadedProps([]));
+      const input = screen.getByRole("textbox", { name: "Preview URL" }) as HTMLInputElement;
+
+      await user.click(input);
+      const runFocusFrames = () => act(() => frames.splice(0).forEach((frame) => frame(0)));
+      runFocusFrames();
+      expect(input.selectionEnd! - input.selectionStart!).toBe(URL.length);
+
+      await user.clear(input);
+      await user.click(screen.getByTestId("browser-toolbar"));
+      await user.click(input);
+      await user.keyboard("ab");
+      runFocusFrames();
+      await user.keyboard("c");
+
+      expect(input).toHaveValue("abc");
+    } finally {
+      raf.mockRestore();
+    }
+  });
+
   it("does not render a browser-local automation controller badge", () => {
     renderToolbar(loadedProps([], { control: { kind: "agent-acting", provider: "codex", takeControl: vi.fn() } }));
 

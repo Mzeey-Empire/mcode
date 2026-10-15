@@ -104,6 +104,17 @@ describe("ActivityRail expansion", () => {
     expect(screen.getAllByTestId("rail-active-edge")).toHaveLength(1);
   });
 
+  it("swaps only the Browser glyph for a pointer while the agent acts", () => {
+    const { rerender } = render(<ActivityRail {...railElement(["preview", "terminal"]).props} browserActing />);
+
+    expect(screen.getByRole("button", { name: "Browser" })).toContainElement(screen.getByTestId("rail-browser-acting"));
+    expect(screen.getAllByTestId("rail-browser-acting")).toHaveLength(1);
+
+    rerender(<ActivityRail {...railElement(["preview", "terminal"]).props} browserActing={false} />);
+
+    expect(screen.queryByTestId("rail-browser-acting")).not.toBeInTheDocument();
+  });
+
   it("cancels expansion when the pointer only crosses the rail", () => {
     renderRail();
     const rail = screen.getByTestId("activity-rail");

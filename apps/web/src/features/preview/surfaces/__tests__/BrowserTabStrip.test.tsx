@@ -1,7 +1,8 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { BrowserTabInfo, BrowserTabSet } from "@mcode/contracts";
 import { useDiffStore } from "@/stores/diffStore";
+import { browserAutomationTargetKey, useBrowserAutomationStore } from "../../automation/browserAutomationStore";
 import { usePreviewDisplayTabSet, usePreviewTabsStore } from "../../state/previewTabsStore";
 import { BrowserTabStrip } from "../BrowserTabStrip";
 
@@ -86,6 +87,7 @@ describe("BrowserTabStrip", () => {
 
   afterEach(() => {
     cleanup();
+    useBrowserAutomationStore.setState({ controllers: new Map(), actingTargets: new Set() });
     Object.defineProperty(window, "desktopBridge", { configurable: true, value: undefined });
   });
 
@@ -102,6 +104,32 @@ describe("BrowserTabStrip", () => {
 
     expect(calls).toEqual(["activate:b", "close:b", "open:new-1"]);
     expect(pageNames()).toEqual(["Docs", "New page"]);
+  });
+
+  it("swaps the favicon for a pointer only on the page the agent is acting on", () => {
+    installFakeTabTransport([
+      { ...page("a", "Docs"), faviconUrl: "https://docs.example.test/icon.png" },
+      page("b", "Dashboard"),
+    ]);
+    render(<Harness />);
+    const tabOf = (id: string) => document.querySelector<HTMLElement>(`[data-panel-tab="${id}"]`)!;
+    expect(screen.queryByTestId("browser-agent-control-indicator")).not.toBeInTheDocument();
+
+    act(() => {
+      useBrowserAutomationStore.getState().registerTarget(WORKSPACE, THREAD, "a");
+      useBrowserAutomationStore.getState().setControllerForTarget(WORKSPACE, THREAD, "a", {
+        tabId: "a",
+        controller: "agent",
+        controlEpoch: 1,
+      });
+      useBrowserAutomationStore.setState({
+        actingTargets: new Set([browserAutomationTargetKey(WORKSPACE, THREAD, "a")]),
+      });
+    });
+
+    expect(within(tabOf("a")).getByTestId("browser-agent-control-indicator")).toBeInTheDocument();
+    expect(tabOf("a").querySelector("img")).toBeNull();
+    expect(within(tabOf("b")).queryByTestId("browser-agent-control-indicator")).not.toBeInTheDocument();
   });
 
   it("closes an inactive page without selecting it first", async () => {
