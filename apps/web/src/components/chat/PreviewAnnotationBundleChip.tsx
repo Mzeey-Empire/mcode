@@ -1,8 +1,10 @@
 import {
-  isPreviewAnnotationPayload,
+  isDiffAnnotationPayload,
+  isFileAnnotationPayload,
+  readPreviewAnnotationBundle,
   type ComposerAnnotationPayload,
-  type PreviewAnnotationPayload,
   type PreviewAnnotationBundle,
+  type PreviewAnnotationPayloadV2,
 } from "@mcode/contracts";
 import { FileCodeCorner, ImageIcon, MessageCircle, X } from "lucide-react";
 
@@ -18,8 +20,14 @@ import { useRetriableAttachmentImage } from "./useRetriableAttachmentImage";
 
 const MAX_DETAIL_LENGTH = 220;
 
-function feedbackTargetLabel(item: ComposerAnnotationPayload): string {
-  if (!isPreviewAnnotationPayload(item)) {
+type FeedbackItem = ComposerAnnotationPayload | PreviewAnnotationPayloadV2;
+
+function isCodeComment(item: FeedbackItem): boolean {
+  return isDiffAnnotationPayload(item) || isFileAnnotationPayload(item);
+}
+
+function feedbackTargetLabel(item: FeedbackItem): string {
+  if (isFileAnnotationPayload(item) || isDiffAnnotationPayload(item)) {
     return `${item.filePath}:${item.line}`;
   }
   return (
@@ -29,10 +37,10 @@ function feedbackTargetLabel(item: ComposerAnnotationPayload): string {
   );
 }
 
-function feedbackDetail(item: ComposerAnnotationPayload): string {
-  const text = isPreviewAnnotationPayload(item)
-    ? item.note?.trim() || item.changeSummary?.trim() || "Visual annotation"
-    : item.note.trim();
+function feedbackDetail(item: FeedbackItem, notes: ReadonlyMap<string, string>): string {
+  const text = isCodeComment(item)
+    ? (item as { note: string }).note.trim()
+    : notes.get(item.id)?.trim() || "Visual annotation";
   return text.length <= MAX_DETAIL_LENGTH
     ? text
     : `${text.slice(0, MAX_DETAIL_LENGTH - 3).trimEnd()}...`;
@@ -96,6 +104,9 @@ export function PreviewAnnotationBundleChip({
 }: PreviewAnnotationBundleChipProps) {
   if (bundle.annotations.length === 0) return null;
 
+  const view = readPreviewAnnotationBundle(bundle);
+  const noteText = new Map(view.pages.flatMap((page) => page.notes.map((note) => [note.id, note.note] as const)));
+  const snapshotByPage = new Map(view.pages.flatMap((page) => (page.snapshot ? [[page.pageIdentity, page.snapshot] as const] : [])));
   const label = composerFeedbackLabel(bundle);
   const accessibleLabel = composerFeedbackAccessibleLabel(bundle);
 
@@ -142,14 +153,10 @@ export function PreviewAnnotationBundleChip({
       >
         <div className="max-h-80 min-w-0 divide-y divide-border/45 overflow-y-auto">
           {bundle.annotations.map((item) => {
-            const preview: PreviewAnnotationPayload | null = isPreviewAnnotationPayload(item) ? item : null;
-            const isComment = preview === null;
-            const snapshotSrc = threadId && preview
-              ? buildStoredAttachmentImageSrc(
-                  threadId,
-                  preview.snapshot.id,
-                  preview.snapshot.mimeType,
-                )
+            const isComment = isCodeComment(item);
+            const snapshot = "pageIdentity" in item ? snapshotByPage.get(item.pageIdentity) : undefined;
+            const snapshotSrc = threadId && snapshot
+              ? buildStoredAttachmentImageSrc(threadId, snapshot.id, snapshot.mimeType)
               : null;
             return (
               <div
@@ -175,7 +182,7 @@ export function PreviewAnnotationBundleChip({
                     </span>
                   </div>
                   <p className="mt-2 min-w-0 whitespace-pre-wrap break-words text-xs leading-5 text-ink">
-                    {feedbackDetail(item)}
+                    {feedbackDetail(item, noteText)}
                   </p>
                 </div>
                 {snapshotSrc ? <AnnotationSnapshotThumbnail src={snapshotSrc} /> : null}

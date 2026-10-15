@@ -94,7 +94,9 @@ describe("hidden plan messages", () => {
   });
 });
 
-function makePreviewAnnotationBundle(): PreviewAnnotationBundle {
+type V1Bundle = Extract<PreviewAnnotationBundle, { schemaVersion: 1 }>;
+
+function makePreviewAnnotationBundle(): V1Bundle {
   return {
     schemaVersion: 1,
     annotations: [
@@ -134,7 +136,48 @@ function makePreviewAnnotationBundle(): PreviewAnnotationBundle {
   };
 }
 
-function makeCodeCommentBundle(): PreviewAnnotationBundle {
+function makePreviewAnnotationBundleV2(): PreviewAnnotationBundle {
+  const pageUrl = "http://localhost:44354/product-preview";
+  const capture = {
+    schemaVersion: 2 as const,
+    pageUrl,
+    pageTitle: "Product preview",
+    capturedAt: new Date().toISOString(),
+    bounds: { x: 0, y: 0, width: 1280, height: 720 },
+  };
+  return {
+    schemaVersion: 2,
+    pages: [
+      {
+        pageIdentity: pageUrl,
+        url: pageUrl,
+        title: "Product preview",
+        faviconUrl: null,
+        snapshot: {
+          id: "page-shot-1",
+          name: "Product preview.png",
+          mimeType: "image/png",
+          sizeBytes: 128,
+          sourcePath: "preview/page.png",
+          capture,
+          scroll: { x: 0, y: 0 },
+        },
+      },
+    ],
+    annotations: [
+      {
+        id: "550e8400-e29b-41d4-a716-446655440011",
+        displayNumber: 1,
+        pageIdentity: pageUrl,
+        pageContext: capture,
+        targetContext: { label: "html", selectorHint: "html", bounds: { x: 12, y: 16, width: 240, height: 80 } },
+        note: "Make the product content flush with the edge on narrow screens.",
+      },
+    ],
+  };
+}
+
+function makeCodeCommentBundle(): V1Bundle {
   return {
     schemaVersion: 1,
     annotations: [
@@ -152,7 +195,7 @@ function makeCodeCommentBundle(): PreviewAnnotationBundle {
   };
 }
 
-function makeMixedFeedbackBundle(): PreviewAnnotationBundle {
+function makeMixedFeedbackBundle(): V1Bundle {
   const preview = makePreviewAnnotationBundle().annotations[0];
   const comment = makeCodeCommentBundle().annotations[0];
   return {
@@ -443,6 +486,25 @@ describe("MessageBubble user messages", () => {
       "1 annotation",
     );
     expect(queryByText("bundle")).not.toBeInTheDocument();
+  });
+
+  it("renders a v2 bundle's notes with the page snapshot as their thumbnail", async () => {
+    const user = userEvent.setup();
+    const threadUuid = "550e8400-e29b-41d4-a716-446655440000";
+    const message: Message = {
+      ...makeMessage(""),
+      thread_id: threadUuid,
+      previewAnnotations: makePreviewAnnotationBundleV2(),
+    };
+
+    const { findByTestId, getByTestId } = render(<MessageBubble message={message} />);
+
+    expect(getByTestId("sent-preview-annotation-bundle-chip")).toHaveTextContent("1 annotation");
+    await user.hover(getByTestId("sent-preview-annotation-bundle-chip"));
+    expect(await findByTestId("preview-annotation-hover-thumbnail")).toHaveAttribute(
+      "src",
+      `mcode-attachment://${threadUuid}/page-shot-1.png`,
+    );
   });
 
   it("labels code review feedback as comments", async () => {

@@ -30,6 +30,11 @@ function toFilePayload({ revision: _revision, ...payload }: DraftFileComment): F
   return payload;
 }
 
+function readBrowserNotes(scopeId: string) {
+  const bundle = usePreviewAnnotationStore.getState().buildBundle(scopeId);
+  return { pages: bundle?.pages ?? [], annotations: bundle?.annotations ?? [] };
+}
+
 /**
  * Builds the annotation bundle for the next Send from the scope's Browser
  * annotations and the thread draft's visible Review and Files comments,
@@ -41,18 +46,19 @@ export function buildComposerAnnotationBundle(
   fileComments: readonly DraftFileComment[] = scopeId ? readVisibleFileComments(scopeId) : [],
 ): PreviewAnnotationBundle | undefined {
   if (!scopeId) return undefined;
-  const preview = usePreviewAnnotationStore.getState().buildBundle(scopeId)?.annotations ?? [];
+  const { pages, annotations: preview } = readBrowserNotes(scopeId);
   const annotations = [
     ...preview,
     ...numberDiffComments(diffComments, preview.length).map(toPayload),
     ...numberFileComments(fileComments, preview.length + diffComments.length).map(toFilePayload),
   ];
-  return annotations.length > 0 ? { schemaVersion: 1, annotations } : undefined;
+  if (annotations.length === 0) return undefined;
+  return { schemaVersion: 2, pages, annotations };
 }
 
 /** Clears the scope's Browser annotations and visible Review and Files comments. */
 export function clearComposerAnnotations(scopeId: string): void {
-  usePreviewAnnotationStore.getState().clearThread(scopeId);
+  usePreviewAnnotationStore.getState().clearPreviewNotes(scopeId);
   clearVisibleDiffComments(scopeId);
   clearVisibleFileComments(scopeId);
 }

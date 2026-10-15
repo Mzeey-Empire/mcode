@@ -3,7 +3,6 @@
  */
 import { useCallback, useState, type CSSProperties } from "react";
 import type { McodeBrowserCaptureV2 } from "@mcode/contracts";
-import type { PreviewAnnotationSnapshotRequest } from "@/transport/desktop-bridge";
 import { cn } from "@/lib/utils";
 import type { PreviewDraftAnnotation, SavedPreviewAnnotation } from "../state/previewAnnotationStore";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
@@ -88,42 +87,14 @@ function draftFromSaved(
   return {
     threadId,
     pageIdentity: annotation.pageIdentity,
-    bounds: annotation.targetContext.bounds,
+    bounds: boundsAtScroll(annotation.targetContext.bounds, undefined, {
+      x: annotation.pageContext.viewportScroll?.scrollX ?? 0,
+      y: annotation.pageContext.viewportScroll?.scrollY ?? 0,
+    }),
     selectorHint: annotation.targetContext.selectorHint,
     label: annotation.targetContext.label,
-    snapshot: annotation.snapshot,
     pageContext: annotation.pageContext,
     note: annotation.note ?? "",
-  };
-}
-
-/** Builds the existing capture request for a draft or saved annotation. */
-export function annotationSnapshotRequest(
-  pageAnnotations: readonly SavedPreviewAnnotation[],
-  savedAnnotationCount: number,
-  editingAnnotation: SavedPreviewAnnotation | undefined,
-  annotation: PreviewDraftAnnotation,
-): PreviewAnnotationSnapshotRequest {
-  const markerByDisplayNumber = new Map<
-    number,
-    PreviewAnnotationSnapshotRequest["markers"][number]
-  >();
-  for (const savedAnnotation of pageAnnotations) {
-    markerByDisplayNumber.set(savedAnnotation.displayNumber, {
-      displayNumber: savedAnnotation.displayNumber,
-      bounds: savedAnnotation.targetContext.bounds,
-    });
-  }
-  const activeDisplayNumber =
-    editingAnnotation?.displayNumber ?? savedAnnotationCount + 1;
-  markerByDisplayNumber.set(activeDisplayNumber, {
-    displayNumber: activeDisplayNumber,
-    bounds: annotation.bounds,
-  });
-  return {
-    activeDisplayNumber,
-    activeBounds: annotation.bounds,
-    markers: Array.from(markerByDisplayNumber.values()),
   };
 }
 

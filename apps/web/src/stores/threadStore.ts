@@ -14,11 +14,12 @@ import {
   ProviderIdSchema,
   isGoalOpen,
   isTaskListToolName,
-  previewAnnotationSnapshotStoredAttachments,
   CONVERSATION_HISTORY_PAGE_MAX_BYTES,
   createSubagentPresentation,
   mergeSubagentPresentation,
   providerFailureOutcome,
+  previewAnnotationPageSnapshotName,
+  readPreviewAnnotationBundle,
 } from "@mcode/contracts";
 import { getTransport, RpcError } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -3133,6 +3134,19 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     return { isControlCommand, runningBeforeControl };
   };
 
+  const pageSnapshotAttachments = (previewAnnotations: PreviewAnnotationBundle | undefined) =>
+    previewAnnotations
+      ? readPreviewAnnotationBundle(previewAnnotations).pages.flatMap((page) =>
+          page.snapshot
+            ? [{
+                id: page.snapshot.id,
+                name: previewAnnotationPageSnapshotName(page),
+                mimeType: page.snapshot.mimeType,
+                sizeBytes: page.snapshot.sizeBytes,
+              }]
+            : [])
+      : [];
+
   const visibleSendAttachments = (
     attachments: AttachmentMeta[] | undefined,
     previewAnnotations: PreviewAnnotationBundle | undefined,
@@ -3140,7 +3154,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     ...(attachments?.map((attachment) => ({
       id: attachment.id, name: attachment.name, mimeType: attachment.mimeType, sizeBytes: attachment.sizeBytes,
     })) ?? []),
-    ...previewAnnotationSnapshotStoredAttachments(previewAnnotations),
+    ...pageSnapshotAttachments(previewAnnotations),
   ];
 
   const optimisticUserMessage = (

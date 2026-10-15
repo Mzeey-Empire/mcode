@@ -4,6 +4,7 @@
 import { Fragment, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ArrowUp, Trash2 } from "lucide-react";
 import { usePreviewAnnotationStore } from "../state/previewAnnotationStore";
+import { removePreviewNote, savePreviewNote } from "../notes/previewNotes";
 import type { PreviewPageScroll } from "../state/previewPageScrollStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +16,6 @@ import type { useDesignAnnotationEditor } from "./useDesignAnnotationEditor";
 import type { usePreviewPage } from "../surfaces/usePreviewPage";
 import type { useDesignAnnotationState } from "./useDesignAnnotationState";
 import {
-  annotationSnapshotRequest,
   boundsAtScroll,
   visibleAnnotationState,
   BUBBLE_SURFACE_INSET,
@@ -31,8 +31,6 @@ interface DesignLayerProps {
   readonly setOutsideWarned: ReturnType<typeof useDesignAnnotationEditor>["setOutsideWarned"];
   readonly capture: ReturnType<typeof usePreviewPage>["capture"];
   readonly pageAnnotations: ReturnType<typeof useDesignAnnotationEditor>["pageAnnotations"];
-  readonly savedAnnotations: ReturnType<typeof useDesignAnnotationEditor>["savedAnnotations"];
-  readonly editingSavedAnnotation: ReturnType<typeof useDesignAnnotationEditor>["editingSavedAnnotation"];
   readonly threadId: string;
   readonly editingAnnotationId: ReturnType<typeof useDesignAnnotationState>["editingAnnotationId"];
   readonly setEditingAnnotationId: ReturnType<typeof useDesignAnnotationState>["setEditingAnnotationId"];
@@ -77,8 +75,6 @@ export function DesignLayer({
   setOutsideWarned,
   capture,
   pageAnnotations,
-  savedAnnotations,
-  editingSavedAnnotation,
   threadId,
   editingAnnotationId,
   setEditingAnnotationId,
@@ -119,22 +115,12 @@ export function DesignLayer({
       setOutsideWarned(true);
       return;
     }
-    const snapshot = await capture.captureAnnotationSnapshot(
-      annotationSnapshotRequest(
-        pageAnnotations,
-        savedAnnotations.length,
-        editingSavedAnnotation,
-        openBubbleBase,
-      ),
-    );
-    if (!snapshot) return;
-    usePreviewAnnotationStore.getState().saveAnnotation(
+    const clean = await capture.captureCleanPage();
+    if (!clean) return;
+    savePreviewNote(
       threadId,
-      {
-        ...openBubbleBase,
-        note: bubbleNote,
-        snapshot,
-      },
+      { ...openBubbleBase, note: bubbleNote },
+      clean,
       editingAnnotationId ?? undefined,
     );
     setEditingAnnotationId(null);
@@ -184,9 +170,7 @@ export function DesignLayer({
 
   const deleteOpenBubble = (): void => {
     if (editingAnnotationId) {
-      usePreviewAnnotationStore
-        .getState()
-        .deleteAnnotation(threadId, editingAnnotationId);
+      removePreviewNote(threadId, editingAnnotationId);
     } else {
       usePreviewAnnotationStore.getState().setDraft(threadId, undefined);
     }
@@ -213,17 +197,13 @@ export function DesignLayer({
 
   return (
     <>
-        {visiblePageAnnotations.map((annotation, index) => {
-          const bounds = boundsAtScroll(
-            annotation.targetContext.bounds,
-            annotation.pageContext.viewportScroll,
-            pageScroll,
-          );
+        {visiblePageAnnotations.map((annotation) => {
+          const bounds = boundsAtScroll(annotation.targetContext.bounds, undefined, pageScroll);
           const targetLabel =
             annotation.targetContext.label?.trim() ||
             annotation.targetContext.selectorHint?.trim() ||
             "Element";
-          const note = annotation.note?.trim() || "Visual annotation";
+          const { note } = annotation;
           return (
             <Fragment key={annotation.id}>
               <div
@@ -249,9 +229,9 @@ export function DesignLayer({
                       onClick={() => {
                         setEditingAnnotationId(annotation.id);
                       }}
-                      aria-label={`Edit annotation ${index + 1}`}
+                      aria-label={`Edit annotation ${annotation.displayNumber}`}
                     >
-                      {index + 1}
+                      {annotation.displayNumber}
                     </button>
                   }
                 />

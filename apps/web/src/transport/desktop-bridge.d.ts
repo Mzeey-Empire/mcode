@@ -89,19 +89,6 @@ export type PreviewPictureReferenceResult =
     }
   | { readonly ok: false; readonly error: string };
 
-/** One marker to draw into a saved annotation screenshot. */
-export type PreviewAnnotationSnapshotMarker = {
-  readonly displayNumber: number;
-  readonly bounds: PreviewShellBounds;
-};
-
-/** Overlay data burned into a saved annotation screenshot. */
-export type PreviewAnnotationSnapshotRequest = {
-  readonly activeDisplayNumber: number;
-  readonly activeBounds: PreviewShellBounds;
-  readonly markers: readonly PreviewAnnotationSnapshotMarker[];
-};
-
 /** Complete identity and generation for one renderer-hosted Electron surface. */
 export interface PreviewSurfaceRef {
   readonly identity: {
@@ -258,10 +245,8 @@ interface PreviewBridge {
   capturePictureReference(): Promise<PreviewPictureReferenceResult>;
   /** Pick an element by hover and click; captures its box as PNG with selector and excerpt; desktop only. */
   capturePictureReferenceElementPick(): Promise<PreviewPictureReferenceResult>;
-  /** Captures the visible preview with annotation marker and target highlight overlays burned in. */
-  captureAnnotationSnapshot(
-    payload: PreviewAnnotationSnapshotRequest,
-  ): Promise<PreviewPictureReferenceResult>;
+  /** Captures the visible preview with nothing drawn on it; the renderer marks notes onto a copy. */
+  captureAnnotationSnapshot(): Promise<PreviewPictureReferenceResult>;
   /** Deletes workspace-relative preview spill files after the message was sent or the queue dropped them. */
   releaseBrowserCaptureSpills(paths: readonly string[]): Promise<void>;
   /**

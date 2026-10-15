@@ -10,7 +10,7 @@ import { FileTagPopup, type useFileTagPopup } from "@/components/chat/FileTagPop
 import { PlanCommentsComposerChip } from "./PlanCommentsComposerChip";
 import { usePlanCommentChip } from "./usePlanCommentChip";
 import { removePlanCommentsFromSend } from "@/components/panels/plan/plan-comment-actions";
-import { PreviewAnnotationBundleChip } from "@/components/chat/PreviewAnnotationBundleChip";
+import { BrowserNotesTile } from "@/features/preview/notes/BrowserNotesTile";
 import { providerUnavailableMessage, type ProviderUnavailableReason } from "@/components/chat/provider-unavailable";
 import { Notice } from "@/components/ui/notice";
 import { type useSlashCommand } from "@/components/chat/useSlashCommand";
@@ -84,7 +84,6 @@ interface ComposerContentSurfaceProps {
     readonly filePopupAnchorRect: DOMRect | null;
     readonly slashCommand: SlashCommand;
     readonly workspacePath?: string;
-    readonly attachmentBundle?: ComponentProps<typeof PreviewAnnotationBundleChip>["bundle"];
     readonly annotationScopeId?: string;
     readonly codeComments: readonly ComposerCodeComment[];
     readonly attachments: ComponentProps<typeof AttachmentPreview>["attachments"];
@@ -357,18 +356,16 @@ function AnnotationAttachmentRow({
         comments={planComments}
         onRemove={() => model.threadId && void removePlanCommentsFromSend(model.threadId, planComments)}
       />
-      {model.attachmentBundle ? (
-        <div className="px-3 pt-2">
-          <PreviewAnnotationBundleChip
-            bundle={model.attachmentBundle}
-            threadId={model.threadId}
-            testId="composer-annotation-bundle"
-            onRemove={() => {
-              actions.onMarkRestoredPreviewAnnotationsCleared();
-              usePreviewAnnotationStore.getState().clearThread(model.annotationScopeId!);
-            }}
-          />
-        </div>
+      {model.workspaceId ? (
+        <BrowserNotesTile
+          scopeId={model.annotationScopeId}
+          workspaceId={model.workspaceId}
+          threadId={model.threadId}
+          onRemoveAll={() => {
+            actions.onMarkRestoredPreviewAnnotationsCleared();
+            usePreviewAnnotationStore.getState().clearPreviewNotes(model.annotationScopeId!);
+          }}
+        />
       ) : null}
       {model.workspaceId && model.codeComments.length > 0 ? (
         <DiffCommentsComposerAttachment
