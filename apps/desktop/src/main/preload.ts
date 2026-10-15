@@ -108,6 +108,10 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   ): Promise<unknown> =>
     ipcRenderer.invoke("save-clipboard-file", buffer, mimeType, fileName),
 
+  /** Read the bytes of an image the server staged for a thread's draft, or null when gone. */
+  readStagedDraftImage: (threadId: string, stagingId: string): Promise<Uint8Array | null> =>
+    ipcRenderer.invoke("read-staged-draft-image", threadId, stagingId),
+
   /** Get the absolute path to the log directory. */
   getLogPath: (): Promise<string> => ipcRenderer.invoke("get-log-path"),
 

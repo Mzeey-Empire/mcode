@@ -167,7 +167,8 @@ export class AttachmentService {
       const image = StagedDraftImageSchema().parse(JSON.parse(await NodeFSPromises.readFile(NodePath.join(directory, `${stagingId}.json`), "utf8")));
       const sourcePath = resolveStoredAttachmentPath(directory, stagingId, image.mimeType);
       await NodeFSPromises.access(sourcePath);
-      return { id: NodeCrypto.randomUUID(), name: image.name, mimeType: image.mimeType, sizeBytes: image.sizeBytes, sourcePath };
+      // The staging id stays the attachment id so a saved Browser note bundle can name its snapshot before Send.
+      return { id: stagingId, name: image.name, mimeType: image.mimeType, sizeBytes: image.sizeBytes, sourcePath };
     } catch (error) {
       if (isMissingFile(error)) throw new DraftImageMissingError(stagingId);
       throw error;

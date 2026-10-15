@@ -745,6 +745,8 @@ export class TurnAdmissionDispatchCoordinator {
     if (!command.previewAnnotations) return [];
     const names = new Set((command.attachments ?? []).map((attachment) => attachment.name.toLowerCase()));
     const attachedIds = new Set((command.attachments ?? []).map((attachment) => attachment.id));
+    // Staged snapshots persist through persistDraftImages under the same id.
+    for (const stagingId of command.stagedDraftImageIds ?? []) attachedIds.add(stagingId);
     return toPreviewAnnotationBundleV2(command.previewAnnotations).pages.filter((page) => !attachedIds.has(page.snapshot.id)).map((page) => {
       const baseName = previewAnnotationPageSnapshotName(page);
       let name = baseName;

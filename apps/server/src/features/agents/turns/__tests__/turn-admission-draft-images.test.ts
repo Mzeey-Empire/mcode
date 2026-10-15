@@ -243,6 +243,29 @@ describe("draft image admission", () => {
     expect(staleWindow.stagingIds).toEqual([]);
   });
 
+  it("persists a staged page snapshot once under its staging id, matching the saved bundle", async () => {
+    const f = await fixture();
+    const image = await f.stage("page.png");
+    const capture = { schemaVersion: 2 as const, pageUrl: "http://localhost:5173/", pageTitle: "Home", capturedAt: "2026-07-01T00:00:00.000Z", bounds: { x: 0, y: 0, width: 800, height: 600 } };
+    const pageIdentity = "http://localhost:5173/";
+    const previewAnnotations = {
+      schemaVersion: 2 as const,
+      pages: [{ pageIdentity, url: pageIdentity, title: "Home", faviconUrl: null,
+        snapshot: { id: image.stagingId, name: "page.png", mimeType: "image/png" as const, sizeBytes: 4, sourcePath: "", capture, scroll: { x: 0, y: 0 } } }],
+      annotations: [{ id: NodeCrypto.randomUUID(), pageIdentity, displayNumber: 1, note: "Tighten this", pageContext: capture,
+        targetContext: { bounds: { x: 1, y: 2, width: 3, height: 4 } } }],
+    };
+    const messageId = NodeCrypto.randomUUID();
+
+    const result = await f.send([image.stagingId], { messageId, previewAnnotations });
+
+    if (result.kind !== "dispatch") throw new Error("Expected admission");
+    expect(f.messages.findByIdInThread(f.thread.id, messageId)?.attachments).toEqual([
+      { id: image.stagingId, name: "page.png", mimeType: "image/png", sizeBytes: 4 },
+    ]);
+    expect(f.copies()).toHaveLength(1);
+  });
+
   it("fails structurally for a missing image and removes copies made before that failure", async () => {
     const f = await fixture();
     const image = await f.stage();
