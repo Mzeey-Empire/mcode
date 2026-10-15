@@ -75,6 +75,23 @@ afterEach(async () => {
 });
 async function completed(events: () => ProviderRuntimeEvent[], count: number) { await vi.waitFor(() => expect(events().filter(({ event }) => event.type === AgentEventType.TurnComplete)).toHaveLength(count)); }
 
+async function createNativePlanFixture(proof: string) {
+  const scratch = NodePath.resolve(import.meta.dirname, "../../../../.dev/claude-plan-tests");
+  await NodeFSPromises.mkdir(scratch, { recursive: true });
+  const cwd = await NodeFSPromises.mkdtemp(NodePath.join(scratch, "case-"));
+  planDirectories.push(cwd);
+  const configDir = NodePath.join(cwd, "config");
+  const parent = proof === "config-root" ? NodePath.join(configDir, "plans") : NodePath.join(cwd, ".claude", "plans");
+  let fileDirectory = parent;
+  if (proof === "outside") fileDirectory = cwd;
+  if (proof === "sibling-prefix") fileDirectory = `${parent}-other`;
+  await NodeFSPromises.mkdir(fileDirectory, { recursive: true });
+  const filePath = NodePath.join(fileDirectory, "plan.md");
+  const path = proof === "relative" ? NodePath.relative(cwd, filePath) : filePath;
+  if (proof !== "missing") await NodeFSPromises.writeFile(filePath, proof === "oversized" ? "x".repeat(PLAN_MAX_CONTENT_CHARS + 1) : "abc");
+  return { cwd, configDir, parent, path };
+}
+
 describe("Claude native plan turns", () => {
   it.each(["full", "supervised"] as const)("switches all plan kinds and build on one %s session", async permissionMode => {
     const transport = installTransport();
@@ -128,16 +145,8 @@ describe("Claude native plan turns", () => {
       : "Plan mode is not active. Continue with the user's request normally." })));
   });
 
-  it.each(["proved", "config-root", "no-write", "other-session", "other-path", "missing", "oversized", "outside"])("requires exact Write-session file proof: %s", async proof => {
-    const scratch = NodePath.resolve(import.meta.dirname, "../../../../.dev/claude-plan-tests");
-    await NodeFSPromises.mkdir(scratch, { recursive: true });
-    const cwd = await NodeFSPromises.mkdtemp(NodePath.join(scratch, "case-"));
-    planDirectories.push(cwd);
-    const configDir = NodePath.join(cwd, "config");
-    const parent = proof === "config-root" ? NodePath.join(configDir, "plans") : NodePath.join(cwd, ".claude", "plans");
-    await NodeFSPromises.mkdir(parent, { recursive: true });
-    const path = NodePath.join(proof === "outside" ? cwd : parent, "plan.md");
-    if (proof !== "missing") await NodeFSPromises.writeFile(path, proof === "oversized" ? "x".repeat(PLAN_MAX_CONTENT_CHARS + 1) : "abc");
+  it.each(["proved", "config-root", "no-write", "other-session", "other-path", "missing", "oversized", "outside", "sibling-prefix", "relative"])("requires exact Write-session file proof: %s", async proof => {
+    const { cwd, configDir, parent, path } = await createNativePlanFixture(proof);
     installTransport(async (_turn, options) => {
       assert(options.canUseTool);
       if (proof !== "no-write") {

@@ -15,7 +15,7 @@ import { claudeApprovalBody } from "./claude-approval.js";
 type ClaudeApprovalDecision = "allow" | "allow-session" | "deny" | "cancelled" | "auto-deny";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
-import { captureNativePlanFile, syncNativePlanFile } from "../../plan/native-plan-file.js";
+import { captureNativePlanFile, isNativePlanFilePath, syncNativePlanFile } from "../../plan/native-plan-file.js";
 import { z } from "zod";
 import * as NodePath from "node:path";
 import which from "which";
@@ -1750,7 +1750,9 @@ export class ClaudeProvider
       if (input.hook_event_name !== "PostToolUse" || input.tool_name !== "Write") return {};
       const write = claudePlanWriteSchema.safeParse(input.tool_input);
       const session = this.runtime.get(context.params.sessionId);
-      if (session && session.spawnRouting === context.routing && write.success && input.session_id === this.sdkSessionIds.get(session.sessionId)) {
+      if (session && session.spawnRouting === context.routing && write.success
+        && input.session_id === this.sdkSessionIds.get(session.sessionId)
+        && isNativePlanFilePath(write.data.file_path, session.planRoots)) {
         session.planWrites.set(write.data.file_path, input.session_id);
       }
       return {};

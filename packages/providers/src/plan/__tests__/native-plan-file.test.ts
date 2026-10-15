@@ -33,6 +33,21 @@ describe("native plan file validation and reconciliation", () => {
     expect(await NodeFSPromises.readdir(root)).toEqual(["plan.md"]);
   });
 
+  it("captures and syncs a plan through a linked root parent", async () => {
+    const realRoot = root;
+    const realPath = path;
+    const linkedParent = NodePath.join(directory, "linked-parent");
+    await NodeFSPromises.symlink(directory, linkedParent, "junction");
+    root = NodePath.join(linkedParent, "plans");
+    path = NodePath.join(root, "plan.md");
+
+    const captured = await captureNativePlanFile({ path, sessionId: "session", roots: [root] });
+    expect(captured).toEqual(ref());
+    expect(await sync(captured)).toEqual({ outcome: "synced" });
+    expect(await NodeFSPromises.readFile(realPath, "utf8")).toBe("# Edited\n");
+    expect(await NodeFSPromises.readdir(realRoot)).toEqual(["plan.md"]);
+  });
+
   it("leaves a file edited after capture untouched", async () => {
     await NodeFSPromises.writeFile(path, "someone else's edit");
     expect(await sync()).toEqual({ outcome: "skipped", reason: "changed" });
@@ -74,6 +89,7 @@ describe("native plan file validation and reconciliation", () => {
     await NodeFSPromises.writeFile(NodePath.join(outside, "plan.md"), "abc");
     await NodeFSPromises.symlink(outside, NodePath.join(root, "linked"), "junction");
     path = NodePath.join(root, "linked", "plan.md");
+    expect(await captureNativePlanFile({ path, sessionId: "session", roots: [root] })).toBeUndefined();
     expect(await sync()).toEqual({ outcome: "skipped", reason: "unsafe-path" });
     expect(await NodeFSPromises.readFile(path, "utf8")).toBe("abc");
   });
