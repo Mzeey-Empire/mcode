@@ -278,9 +278,6 @@ export function usePreviewCapture({
   }, [threadId]);
 
   const saveElementAnnotation = useCallback((capture: McodeBrowserCaptureV2): void => {
-    const elementStyle = capture.elementStyle && Object.keys(capture.elementStyle).length > 0
-      ? capture.elementStyle
-      : undefined;
     usePreviewAnnotationStore.getState().setDraft(threadId, {
       threadId,
       pageIdentity: normalizePreviewPageIdentity(capture.pageUrl),
@@ -288,7 +285,6 @@ export function usePreviewCapture({
       selectorHint: capture.selectorHint ?? null,
       label: capture.selectorHint ?? null,
       pageContext: capture,
-      ...(elementStyle ? { elementStyle } : {}),
       note: "",
     });
   }, [threadId]);

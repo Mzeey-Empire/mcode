@@ -1,19 +1,13 @@
 /**
  * Owns annotation bubble geometry, draft conversion and local edit state, shared by design rendering and its ordered lifecycle hooks.
  */
-import { useCallback, useState, type CSSProperties, type Dispatch, type SetStateAction } from "react";
-import type { McodeBrowserCaptureV2, PreviewAnnotationVisualProposal } from "@mcode/contracts";
+import { useCallback, useState, type CSSProperties } from "react";
+import type { McodeBrowserCaptureV2 } from "@mcode/contracts";
 import type { PreviewAnnotationSnapshotRequest } from "@/transport/desktop-bridge";
 import { cn } from "@/lib/utils";
 import type { PreviewDraftAnnotation, SavedPreviewAnnotation } from "../state/previewAnnotationStore";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import type { PreviewPageScroll } from "../state/previewPageScrollStore";
-import {
-  visualProposalBounds,
-  cleanVisualProposal,
-  hasVisualProposal,
-  initialVisualControls,
-} from "./visualProposalModel";
 
 const ANNOTATION_BUBBLE_WIDTH_PX = 290;
 
@@ -23,7 +17,7 @@ const ANNOTATION_BUBBLE_MARGIN_PX = 8;
 const ANNOTATION_BUBBLE_FLIP_HEIGHT_PX = 220;
 
 // Opaque role surfaces keep annotations legible over arbitrary user page content in both themes.
-/** Primary bubble surface used on the main row and the inspector panel. */
+/** Primary note bubble surface. */
 export const BUBBLE_SURFACE = "var(--panel)";
 
 /** Inset/footer surface inside the bubble. */
@@ -91,8 +85,6 @@ function draftFromSaved(
   threadId: string,
   annotation: SavedPreviewAnnotation,
 ): PreviewDraftAnnotation {
-  const elementStyle =
-    annotation.pageContext.elementStyle ?? annotation.snapshot.capture.elementStyle;
   return {
     threadId,
     pageIdentity: annotation.pageIdentity,
@@ -101,9 +93,7 @@ function draftFromSaved(
     label: annotation.targetContext.label,
     snapshot: annotation.snapshot,
     pageContext: annotation.pageContext,
-    ...(elementStyle ? { elementStyle } : {}),
     note: annotation.note ?? "",
-    proposedChanges: annotation.proposedChanges,
   };
 }
 
@@ -113,7 +103,6 @@ export function annotationSnapshotRequest(
   savedAnnotationCount: number,
   editingAnnotation: SavedPreviewAnnotation | undefined,
   annotation: PreviewDraftAnnotation,
-  proposedChanges: PreviewAnnotationVisualProposal | undefined,
 ): PreviewAnnotationSnapshotRequest {
   const markerByDisplayNumber = new Map<
     number,
@@ -133,11 +122,7 @@ export function annotationSnapshotRequest(
   });
   return {
     activeDisplayNumber,
-    activeBounds: visualProposalBounds(
-      annotation.bounds,
-      proposedChanges,
-      annotation.elementStyle,
-    ),
+    activeBounds: annotation.bounds,
     markers: Array.from(markerByDisplayNumber.values()),
   };
 }
@@ -161,23 +146,12 @@ export function openAnnotationBase(
   return savedAnnotation ? draftFromSaved(threadId, savedAnnotation) : undefined;
 }
 
-/** Cleans visual edits against the open annotation element style. */
-export function annotationProposedChanges(
-  annotation: PreviewDraftAnnotation | undefined,
-  bubbleVisuals: PreviewAnnotationVisualProposal,
-): PreviewAnnotationVisualProposal | undefined {
-  if (!annotation) return undefined;
-  return cleanVisualProposal(bubbleVisuals, annotation.elementStyle);
-}
-
-/** Allows saving an open annotation with note text or a visual proposal. */
+/** Allows saving an open annotation only when it has note text. */
 export function canSaveAnnotation(
   annotation: PreviewDraftAnnotation | undefined,
   note: string,
-  proposedChanges: PreviewAnnotationVisualProposal | undefined,
 ): boolean {
-  return annotation !== undefined &&
-    (note.trim().length > 0 || hasVisualProposal(proposedChanges));
+  return annotation !== undefined && note.trim().length > 0;
 }
 
 /** Identifies the draft or saved annotation that should receive input focus. */
@@ -197,8 +171,6 @@ type AnnotationBubbleSource = PreviewDraftAnnotation | SavedPreviewAnnotation | 
 interface AnnotationBubbleEditorState {
   readonly source: AnnotationBubbleSource;
   readonly note: string;
-  readonly visuals: PreviewAnnotationVisualProposal;
-  readonly advancedOpen: boolean;
   readonly outsideWarned: boolean;
 }
 
@@ -206,38 +178,10 @@ function newAnnotationBubbleEditorState(
   draftAnnotation: PreviewDraftAnnotation | undefined,
   editingSavedAnnotation: SavedPreviewAnnotation | undefined,
 ): AnnotationBubbleEditorState {
-  if (draftAnnotation) {
-    return {
-      source: draftAnnotation,
-      note: draftAnnotation.note,
-      visuals: initialVisualControls(
-        draftAnnotation.elementStyle,
-        draftAnnotation.proposedChanges,
-      ),
-      advancedOpen: false,
-      outsideWarned: false,
-    };
-  }
-  if (editingSavedAnnotation) {
-    const elementStyle =
-      editingSavedAnnotation.pageContext.elementStyle ??
-      editingSavedAnnotation.snapshot.capture.elementStyle;
-    return {
-      source: editingSavedAnnotation,
-      note: editingSavedAnnotation.note ?? "",
-      visuals: initialVisualControls(
-        elementStyle,
-        editingSavedAnnotation.proposedChanges,
-      ),
-      advancedOpen: false,
-      outsideWarned: false,
-    };
-  }
+  const source = draftAnnotation ?? editingSavedAnnotation;
   return {
-    source: undefined,
-    note: "",
-    visuals: {},
-    advancedOpen: false,
+    source,
+    note: source?.note ?? "",
     outsideWarned: false,
   };
 }
@@ -249,10 +193,6 @@ export function useAnnotationBubbleEditor(
 ): {
   readonly bubbleNote: string;
   readonly setBubbleNote: (note: string) => void;
-  readonly bubbleVisuals: PreviewAnnotationVisualProposal;
-  readonly setBubbleVisuals: Dispatch<SetStateAction<PreviewAnnotationVisualProposal>>;
-  readonly bubbleAdvancedOpen: boolean;
-  readonly setBubbleAdvancedOpen: Dispatch<SetStateAction<boolean>>;
   readonly outsideWarned: boolean;
   readonly setOutsideWarned: (outsideWarned: boolean) => void;
 } {
@@ -277,28 +217,6 @@ export function useAnnotationBubbleEditor(
     (note: string): void => update((state) => ({ ...state, note })),
     [update],
   );
-  const setBubbleVisuals = useCallback(
-    (visuals: SetStateAction<PreviewAnnotationVisualProposal>): void => {
-      update((state) => ({
-        ...state,
-        visuals: typeof visuals === "function"
-          ? visuals(state.visuals)
-          : visuals,
-      }));
-    },
-    [update],
-  );
-  const setBubbleAdvancedOpen = useCallback(
-    (advancedOpen: SetStateAction<boolean>): void => {
-      update((state) => ({
-        ...state,
-        advancedOpen: typeof advancedOpen === "function"
-          ? advancedOpen(state.advancedOpen)
-          : advancedOpen,
-      }));
-    },
-    [update],
-  );
   const setOutsideWarned = useCallback(
     (outsideWarned: boolean): void => update((state) => ({ ...state, outsideWarned })),
     [update],
@@ -307,31 +225,24 @@ export function useAnnotationBubbleEditor(
   return {
     bubbleNote: current.note,
     setBubbleNote,
-    bubbleVisuals: current.visuals,
-    setBubbleVisuals,
-    bubbleAdvancedOpen: current.advancedOpen,
-    setBubbleAdvancedOpen,
     outsideWarned: current.outsideWarned,
     setOutsideWarned,
   };
 }
 
-/** Hides annotation markers and proposals while design mode is inactive. */
+/** Hides annotation markers and the bubble while design mode is inactive. */
 export function visibleAnnotationState(
   designModeActive: boolean,
   openBubbleBase: PreviewDraftAnnotation | undefined,
   pageAnnotations: readonly SavedPreviewAnnotation[],
-  bubbleVisuals: PreviewAnnotationVisualProposal,
 ): {
   readonly openBubbleBase: PreviewDraftAnnotation | undefined;
   readonly pageAnnotations: readonly SavedPreviewAnnotation[];
-  readonly visualProposal: PreviewAnnotationVisualProposal | undefined;
 } {
   const visibleOpenBubbleBase = designModeActive ? openBubbleBase : undefined;
   return {
     openBubbleBase: visibleOpenBubbleBase,
     pageAnnotations: designModeActive ? pageAnnotations : EMPTY_SAVED_ANNOTATIONS,
-    visualProposal: annotationProposedChanges(visibleOpenBubbleBase, bubbleVisuals),
   };
 }
 
@@ -349,7 +260,6 @@ export function previewSurfaceHeight(surface: HTMLDivElement | null): number {
 export function annotationBubbleClassName(
   outsideWarned: boolean,
   bubbleInputFocused: boolean,
-  bubbleAdvancedOpen: boolean,
 ): string {
   const focusClassName = outsideWarned
     ? "animate-preview-annotation-shake border-destructive/80"
@@ -359,13 +269,7 @@ export function annotationBubbleClassName(
   return cn(
     "pointer-events-auto absolute z-(--layer-floating-panel) overflow-hidden rounded-[14px] border shadow-floating transition-[border-color,box-shadow] duration-150",
     focusClassName,
-    bubbleAdvancedOpen && "max-h-[20.5rem]",
   );
-}
-
-/** Chooses the captured element label displayed in the inspector. */
-export function annotationBubbleTargetLabel(annotation: PreviewDraftAnnotation): string {
-  return annotation.label?.trim() || annotation.selectorHint?.trim() || "Element";
 }
 
 /** Resolves the provider used by annotation autocomplete. */

@@ -7,12 +7,6 @@ import { usePreviewAnnotationStore } from "../state/previewAnnotationStore";
 import { useSlashCommand } from "@/components/chat/useSlashCommand";
 import { useFileAutocomplete } from "@/components/chat/useFileAutocomplete";
 import { useWorkspaceThread } from "@/features/projects/state/workspace-selectors";
-import type {
-  ExpandableVisualGroupId,
-  VisualLinkPairId,
-  ColorVisualProposalKey,
-} from "./visualProposalModel";
-import type { ColorFormat } from "./visualProposalColor";
 import { activeThreadProviderId, optionalWorkspaceId } from "./annotationBubble";
 
 interface DesignAnnotationStateOptions {
@@ -37,15 +31,6 @@ export function useDesignAnnotationState({
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(
     null,
   );
-  const [expandedVisualGroups, setExpandedVisualGroups] = useState<
-    Partial<Record<ExpandableVisualGroupId, boolean>>
-  >({});
-  const [linkedVisualPairs, setLinkedVisualPairs] = useState<
-    Partial<Record<VisualLinkPairId, boolean>>
-  >({});
-  const [colorFormats, setColorFormats] = useState<
-    Partial<Record<ColorVisualProposalKey, ColorFormat>>
-  >({});
   // Tracks whether the note input inside the bubble has focus so we can show
   // a subtle ring on the bubble container itself instead of an inner ring on
   // the input (which would conflict with the dark background).
@@ -99,7 +84,7 @@ export function useDesignAnnotationState({
   } = bubbleFileAutocomplete;
 
   // Capture the anchor rect when the file popup opens rather than reading it
-  // on every render. The bubble can shift (advanced panel expand, scroll) after
+  // on every render. The bubble can shift with page scrolling after
   // open, but the popup should stay pinned to where the input was when the
   // trigger fired, consistent with SlashCommandTray's anchorRect behavior.
   const [filePopupAnchorRect, setFilePopupAnchorRect] = useState<DOMRect | null>(null);
@@ -127,9 +112,6 @@ export function useDesignAnnotationState({
     designPickerDispatch,
     setEditingAnnotationId,
     dismissBubbleSlash,
-    linkedVisualPairs,
-    setLinkedVisualPairs,
-    setColorFormats,
     bubbleRef,
     bubbleSlashOpen,
     onBubbleSlashSelect,
@@ -140,9 +122,6 @@ export function useDesignAnnotationState({
     onBubbleSlashInputChange,
     onBubbleFileInputChange,
     setBubbleInputFocused,
-    colorFormats,
-    expandedVisualGroups,
-    setExpandedVisualGroups,
     bubbleSlashState,
     bubbleSlashAnchorRect,
     retryBubbleSlash,

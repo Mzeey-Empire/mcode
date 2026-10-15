@@ -13,7 +13,6 @@ import {
   savedAnnotationById,
   useAnnotationBubbleEditor,
   openAnnotationBase,
-  annotationProposedChanges,
   canSaveAnnotation,
   annotationFocusKey,
 } from "./annotationBubble";
@@ -68,10 +67,6 @@ export function useDesignAnnotationEditor({
   const {
     bubbleNote,
     setBubbleNote,
-    bubbleVisuals,
-    setBubbleVisuals,
-    bubbleAdvancedOpen,
-    setBubbleAdvancedOpen,
     outsideWarned,
     setOutsideWarned,
   } = useAnnotationBubbleEditor(draftAnnotation, editingSavedAnnotation);
@@ -122,14 +117,9 @@ export function useDesignAnnotationEditor({
     draftAnnotation,
     editingSavedAnnotation,
   );
-  const openBubbleProposedChanges = annotationProposedChanges(
-    openBubbleBase,
-    bubbleVisuals,
-  );
   const canSaveOpenBubble = canSaveAnnotation(
     openBubbleBase,
     bubbleNote,
-    openBubbleProposedChanges,
   );
   const hasOpenBubble = Boolean(openBubbleBase);
   const openBubbleFocusKey = annotationFocusKey(
@@ -140,20 +130,16 @@ export function useDesignAnnotationEditor({
   return {
     openBubbleFocusKey,
     hasOpenBubble,
-    setBubbleAdvancedOpen,
     setOutsideWarned,
     openBubbleBase,
     canSaveOpenBubble,
     outsideWarned,
-    setBubbleVisuals,
-    bubbleVisuals,
     bubbleNote,
     pageAnnotations,
     savedAnnotations,
     editingSavedAnnotation,
     setBubbleNote,
     bubbleFilePopup,
-    bubbleAdvancedOpen,
     handleBubbleMentionSelect,
   };
 }

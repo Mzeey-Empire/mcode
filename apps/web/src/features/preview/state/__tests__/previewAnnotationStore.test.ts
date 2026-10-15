@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { isPreviewAnnotationPayload } from "@mcode/contracts";
 import { normalizePreviewPageIdentity } from "@mcode/shared/browser-page-identity";
 import {
   usePreviewAnnotationStore,
@@ -66,23 +65,65 @@ describe("previewAnnotationStore", () => {
     expect(remaining[0]?.displayNumber).toBe(1);
   });
 
-  it("builds a visual-only bundle with a change summary", () => {
+  it("builds a text-only bundle with trimmed note text", () => {
     usePreviewAnnotationStore.getState().saveAnnotation(
       "thread-1",
-      draft({ note: "", proposedChanges: { background: "#fff", fontWeight: "700" } }),
+      draft({
+        note: "  Make the button clearer.  ",
+        snapshot: {
+          id: "snap-1",
+          name: "preview.png",
+          mimeType: "image/png",
+          sizeBytes: 10,
+          sourcePath: "C:/tmp/preview.png",
+          capture,
+        },
+      }),
     );
 
-    const bundle = usePreviewAnnotationStore.getState().buildBundle("thread-1");
-
-    const annotation = bundle?.annotations[0];
-    expect(annotation && isPreviewAnnotationPayload(annotation)).toBe(true);
-    if (!annotation || !isPreviewAnnotationPayload(annotation)) return;
-    expect(annotation.note).toBeUndefined();
-    expect(annotation.changeSummary).toContain("background");
-    expect(annotation.proposedChanges).toEqual({
-      background: "#fff",
-      fontWeight: "700",
+    expect(usePreviewAnnotationStore.getState().buildBundle("thread-1")).toEqual({
+      schemaVersion: 1,
+      annotations: [{
+        id: expect.any(String),
+        displayNumber: 1,
+        pageIdentity: "http://localhost:5173/products/1?a=1&b=2",
+        pageContext: capture,
+        targetContext: {
+          label: "button.buy",
+          selectorHint: "button.buy",
+          bounds: { x: 10, y: 20, width: 100, height: 40 },
+        },
+        note: "Make the button clearer.",
+        snapshot: {
+          id: "snap-1",
+          name: "preview.png",
+          mimeType: "image/png",
+          sizeBytes: 10,
+          sourcePath: "C:/tmp/preview.png",
+          capture,
+        },
+      }],
     });
+  });
+
+  it.each(["", "   "])("rejects a blank note %j without discarding its draft", (note) => {
+    const pending = draft({ note });
+    usePreviewAnnotationStore.getState().setDraft("thread-1", pending);
+
+    expect(() => usePreviewAnnotationStore.getState().saveAnnotation("thread-1", pending)).toThrow();
+    expect(usePreviewAnnotationStore.getState().buildBundle("thread-1")).toBeUndefined();
+    expect(usePreviewAnnotationStore.getState().drafts["thread-1"]).toEqual(pending);
+  });
+
+  it("preserves a saved note when an edit tries to clear its text", () => {
+    const saved = usePreviewAnnotationStore.getState().saveAnnotation("thread-1", draft());
+
+    expect(() => usePreviewAnnotationStore.getState().saveAnnotation(
+      "thread-1",
+      draft({ note: "   " }),
+      saved.id,
+    )).toThrow();
+    expect(usePreviewAnnotationStore.getState().getThreadAnnotations("thread-1")).toEqual([saved]);
   });
 
   it("numbers Review comments after Browser annotations in the outbound bundle", () => {

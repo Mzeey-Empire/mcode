@@ -445,7 +445,7 @@ describe("usePreviewCapture", () => {
   });
 
   describe("onAddElementAnnotation", () => {
-    it("stores selected element style details on the draft", async () => {
+    it("preserves captured element style in the draft page context", async () => {
       mockPreview.capturePictureReferenceElementPick.mockResolvedValue(
         makeCapturePngResult({
           capture: {
@@ -476,12 +476,14 @@ describe("usePreviewCapture", () => {
       expect(usePreviewAnnotationStore.getState().drafts[THREAD_ID]).toMatchObject({
         pageIdentity: "https://example.com/products",
         selectorHint: "button.buy",
-        elementStyle: {
-          textColor: "rgb(255, 255, 255)",
-          background: "rgb(10, 52, 92)",
-          opacity: 0.75,
-          font: "Inter, sans-serif",
-          fontSize: "14px",
+        pageContext: {
+          elementStyle: {
+            textColor: "rgb(255, 255, 255)",
+            background: "rgb(10, 52, 92)",
+            opacity: 0.75,
+            font: "Inter, sans-serif",
+            fontSize: "14px",
+          },
         },
       });
     });
