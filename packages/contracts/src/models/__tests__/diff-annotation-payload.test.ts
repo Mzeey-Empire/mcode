@@ -45,7 +45,8 @@ describe("next-message draft contracts", () => {
     expect(DraftElementMetaSchema().safeParse({ id: "", revision: 1 }).success).toBe(false);
     expect(DraftDiffCommentSchema().safeParse({ ...annotation, revision: 0 }).success).toBe(false);
     expect(DraftDiffCommentSchema().safeParse({ ...annotation, revision: 1.5 }).success).toBe(false);
-    expect(DraftElementFieldSchema().safeParse("browserNotePages").success).toBe(false);
+    expect(DraftElementFieldSchema().safeParse("browserNotePages").success).toBe(true);
+    expect(DraftElementFieldSchema().safeParse("messageText").success).toBe(false);
     expect(SendMessageSchema().safeParse({ threadId: "thread", content: "", stagedDraftImageIds: ["../bad"] }).success).toBe(false);
     const send = { threadId: "thread", content: "", stagedDraftImageIds: [id] };
     expect(SendMessageSchema().parse(send)).toEqual(send);

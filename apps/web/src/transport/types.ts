@@ -502,6 +502,8 @@ export interface McodeTransport {
   readClipboardImage(): Promise<AttachmentMeta | null>;
   /** Save a clipboard file blob to disk via the server. Returns attachment metadata. */
   saveClipboardFile(data: ArrayBuffer, mimeType: string, fileName: string): Promise<AttachmentMeta | null>;
+  /** Copies a saved image into the thread's durable draft storage and returns its staging reference. */
+  stageDraftImage(threadId: string, attachment: AttachmentMeta): Promise<import("@mcode/contracts").StagedDraftImage>;
   getActiveAgentCount(): Promise<number>;
   /**
    * Returns runtime snapshots for live sessions, used to reconcile optimistic

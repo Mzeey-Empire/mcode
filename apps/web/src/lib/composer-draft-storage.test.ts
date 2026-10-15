@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MAX_ATTACHMENTS,
+  type DraftBrowserNotePage,
   type DraftDiffComment,
   type DraftFileComment,
   type McodeBrowserCapture,
@@ -49,7 +50,46 @@ const fileComment: DraftFileComment = {
   mentions: [mention],
 };
 
+const pageCapture: McodeBrowserCapture = {
+  schemaVersion: 2,
+  pageUrl: "https://example.test/pricing",
+  pageTitle: "Pricing",
+  capturedAt: "2026-05-08T12:00:00.000Z",
+  bounds: { x: 0, y: 0, width: 1280, height: 720 },
+};
+
+const browserNotePage: DraftBrowserNotePage = {
+  pageIdentity: "https://example.test/pricing",
+  url: "https://example.test/pricing",
+  title: "Pricing",
+  faviconUrl: null,
+  capture: pageCapture,
+  scroll: { x: 0, y: 240 },
+  cleanCapture: {
+    stagingId: "88888888-8888-4888-8888-888888888888",
+    name: "pricing.png",
+    mimeType: "image/png",
+    sizeBytes: 2048,
+  },
+  snapshot: {
+    stagingId: "99999999-9999-4999-8999-999999999999",
+    name: "pricing-marked.png",
+    mimeType: "image/png",
+    sizeBytes: 4096,
+  },
+  notes: [{
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    revision: 2,
+    pageIdentity: "https://example.test/pricing",
+    displayNumber: 1,
+    pageContext: pageCapture,
+    targetContext: { label: "Buy button", bounds: { x: 10, y: 20, width: 100, height: 40 } },
+    note: "Make this primary",
+  }],
+};
+
 const nextMessageFields = {
+  browserNotePages: [browserNotePage],
   diffComments: [diffComment],
   diffCommentEditor: {
     target: { filePath: "src/state.ts", side: "left" as const, line: 4, lineContent: "let x = 1;" },
@@ -240,6 +280,18 @@ describe("composer-draft-storage", () => {
     warn.mockRestore();
   });
 
+  it("restores Browser note pages and drops a page whose notes are gone", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const stored = JSON.parse(JSON.stringify(serializeComposerDraft({ ...baseDraft, ...nextMessageFields })));
+    stored.browserNotePages.push({ ...browserNotePage, pageIdentity: "https://example.test/empty", notes: [] });
+
+    const restored = parseStoredComposerDraft(stored);
+
+    expect(restored?.browserNotePages).toEqual([browserNotePage]);
+    expect(warn).toHaveBeenCalledWith("[composer-draft-storage] Dropped 1 invalid stored draft element(s)");
+    warn.mockRestore();
+  });
+
   it("drops a stored plan comment editor with a bad anchor or an over-long note and keeps the rest", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const stored = JSON.parse(JSON.stringify(serializeComposerDraft({ ...baseDraft, ...nextMessageFields })));
@@ -265,6 +317,7 @@ describe("composer-draft-storage", () => {
     expect(draftHasNoSendableContent({ ...empty, planCommentEditor: nextMessageFields.planCommentEditor })).toBe(false);
     expect(draftHasNoSendableContent({ ...empty, diffComments: [diffComment] })).toBe(false);
     expect(draftHasNoSendableContent({ ...empty, fileComments: [fileComment] })).toBe(false);
+    expect(draftHasNoSendableContent({ ...empty, browserNotePages: [browserNotePage] })).toBe(false);
     expect(draftHasNoSendableContent({ ...empty, fileCommentEditor: nextMessageFields.fileCommentEditor })).toBe(false);
     expect(draftHasNoSendableContent({ ...empty, submissions: nextMessageFields.submissions })).toBe(false);
   });

@@ -77,6 +77,20 @@ describe("durable draft images", () => {
     expect(service.removeExpiredDraftImages(() => now)).toBe(1);
   });
 
+  it("keeps an admitted message's snapshot when a later send of the same image fails on another", async () => {
+    const staged = await service.stageDraft(threadId, source());
+    const missing = await service.stageDraft(threadId, source("missing.png"));
+    const admitted = service.leaseDraftImages(threadId, [staged.stagingId]);
+    const first = await service.persistDraftImages(threadId, [staged.stagingId]);
+    admitted();
+    NodeFS.unlinkSync(stagedPath(missing.stagingId));
+    const release = service.leaseDraftImages(threadId, [staged.stagingId, missing.stagingId]);
+    await expect(service.persistDraftImages(threadId, [staged.stagingId, missing.stagingId])).rejects.toThrow();
+    release();
+    const messageFile = NodePath.join(directory, "attachments", threadId, `${first.stored[0]!.id}.png`);
+    expect(NodeFS.existsSync(messageFile)).toBe(true);
+  });
+
   it("ages a staged file from staging time, not from its source file", async () => {
     const attachment = source("old-capture.png");
     const sourceTime = new Date(Date.now() - 40 * day);

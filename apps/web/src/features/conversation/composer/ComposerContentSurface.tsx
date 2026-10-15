@@ -21,7 +21,6 @@ import { ComposerEditor } from "@/components/chat/lexical";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
 import { getCatalogEntry } from "@mcode/contracts";
 import { getModelContextWindow } from "@mcode/shared/model-context";
 import type {
@@ -39,6 +38,7 @@ import { ComposerModelControl } from "./controls/ComposerModelControl";
 import type { ComposerMode } from "./execution/composer-mode";
 import { NewThreadTargetRail } from "./execution/NewThreadTargetRail";
 import { ComposerTray } from "./ComposerTray";
+import { clearVisibleBrowserNotes } from "./draft/draft-browser-notes";
 import { useDraftWriteFailureStore } from "@/lib/composer-draft-storage";
 import { ApprovalAnnouncer, ApprovalDock, useDockApprovals } from "@/features/conversation/approvals/ApprovalDock";
 import { QuestionDock } from "@/features/conversation/approvals/QuestionDock";
@@ -363,7 +363,7 @@ function AnnotationAttachmentRow({
           threadId={model.threadId}
           onRemoveAll={() => {
             actions.onMarkRestoredPreviewAnnotationsCleared();
-            usePreviewAnnotationStore.getState().clearPreviewNotes(model.annotationScopeId!);
+            clearVisibleBrowserNotes(model.annotationScopeId!);
           }}
         />
       ) : null}

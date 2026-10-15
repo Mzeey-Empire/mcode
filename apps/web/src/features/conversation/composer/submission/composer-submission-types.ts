@@ -1,5 +1,10 @@
 import type { AttachmentMeta } from "@/transport";
-import type { DraftDiffComment, DraftFileComment, PreviewAnnotationBundle } from "@mcode/contracts";
+import type {
+  DraftBrowserNotePage,
+  DraftDiffComment,
+  DraftFileComment,
+  PreviewAnnotationBundle,
+} from "@mcode/contracts";
 import type { ComposerFormSubmission } from "../draft/useComposerFormController";
 import type { ComposerSubmission } from "./composer-submission";
 
@@ -15,6 +20,8 @@ export interface PreparedComposerSubmission {
   currentDiffComments: readonly DraftDiffComment[];
   /** Files comment revisions read into {@link currentAnnotations}; a Send freezes exactly these. */
   currentFileComments: readonly DraftFileComment[];
+  /** Browser pages read into {@link currentAnnotations}; a Send freezes exactly these notes. */
+  currentBrowserNotePages: readonly DraftBrowserNotePage[];
   previewAnnotations?: PreviewAnnotationBundle;
   /**
    * Plan comments this Send carries; empty unless it goes to an existing

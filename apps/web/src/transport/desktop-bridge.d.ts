@@ -517,6 +517,8 @@ interface DesktopBridge {
     mimeType: string,
     fileName: string,
   ): Promise<AttachmentMeta | null>;
+  /** Read the bytes of an image the server staged for a thread's draft, or null when gone. */
+  readStagedDraftImage(threadId: string, stagingId: string): Promise<Uint8Array | null>;
   /** Return the file path for logging output. */
   getLogPath(): Promise<string>;
   /** Return recent log lines. */

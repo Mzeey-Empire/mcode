@@ -1,6 +1,7 @@
 import type { PreviewAnnotationBundle } from "@mcode/contracts";
 import { useToastStore } from "@/stores/toastStore";
 import type { ComposerFormController } from "../draft/useComposerFormController";
+import { readVisibleBrowserNotePages } from "../draft/draft-browser-notes";
 import { readVisibleDiffComments } from "../draft/draft-diff-comments";
 import { readVisibleFileComments } from "../draft/draft-file-comments";
 import { flushPageSnapshots } from "@/features/preview/notes/previewNoteSnapshots";
@@ -36,7 +37,13 @@ export async function prepareComposerSubmission({
   const snapshot = form.readSubmission();
   const currentDiffComments = annotationScopeId ? readVisibleDiffComments(annotationScopeId) : [];
   const currentFileComments = annotationScopeId ? readVisibleFileComments(annotationScopeId) : [];
-  const currentAnnotations = buildComposerAnnotationBundle(annotationScopeId, currentDiffComments, currentFileComments);
+  const currentBrowserNotePages = annotationScopeId ? readVisibleBrowserNotePages(annotationScopeId) : [];
+  const currentAnnotations = buildComposerAnnotationBundle(
+    annotationScopeId,
+    currentDiffComments,
+    currentFileComments,
+    currentBrowserNotePages,
+  );
   const previewAnnotations = resolvePreviewAnnotations(currentAnnotations);
   const planCommentIds = planCommentThreadId ? readPlanCommentIdsForSend(planCommentThreadId) : [];
   if (isEmptySubmission(
@@ -65,6 +72,7 @@ export async function prepareComposerSubmission({
       currentAnnotations,
       currentDiffComments,
       currentFileComments,
+      currentBrowserNotePages,
       previewAnnotations,
       planCommentIds,
     };

@@ -117,7 +117,7 @@ export function DesignLayer({
     }
     const clean = await capture.captureCleanPage();
     if (!clean) return;
-    savePreviewNote(
+    await savePreviewNote(
       threadId,
       { ...openBubbleBase, note: bubbleNote },
       clean,

@@ -1,175 +1,170 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as NodeFSPromises from "node:fs/promises";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PLAN_MAX_CONTENT_CHARS, type NativePlanFileRef } from "@mcode/contracts";
-import { captureNativePlanFile, isWritableNativePlanPath, syncNativePlanFile } from "../native-plan-file.js";
+import { canWriteNativePlanFile, captureNativePlanFile, rewriteNativePlanFile } from "../native-plan-file.js";
 
-let directory: string;
-let root: string;
-let path: string;
-const sha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
-const ref = (): NativePlanFileRef => ({ path, sessionId: "session", root, sha256 });
-const sync = (nativePlanFile: NativePlanFileRef | null = ref(), markdown = "# Edited\n") =>
-  syncNativePlanFile({ nativePlanFile, markdown });
+vi.mock("node:fs/promises", async (importOriginal) => ({ ...await importOriginal<typeof NodeFSPromises>() }));
 
-beforeEach(async () => {
-  const scratch = NodePath.resolve(import.meta.dirname, "../../../../../.dev/native-plan-tests");
-  await NodeFSPromises.mkdir(scratch, { recursive: true });
-  directory = await NodeFSPromises.mkdtemp(NodePath.join(scratch, "case-"));
-  root = NodePath.join(directory, "plans");
-  await NodeFSPromises.mkdir(root);
-  path = NodePath.join(root, "plan.md");
-  await NodeFSPromises.writeFile(path, "abc");
-});
-afterEach(async () => { await NodeFSPromises.rm(directory, { recursive: true, force: true }); });
+describe("native plan file ownership", () => {
+  let directory: string;
+  let planRoot: string;
+  let path: string;
+  beforeEach(async () => {
+    directory = await NodeFSPromises.realpath(await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-plan-")));
+    planRoot = NodePath.join(directory, "session");
+    await NodeFSPromises.mkdir(planRoot);
+    path = NodePath.join(planRoot, "plan.md");
+    await NodeFSPromises.writeFile(path, "abc");
+  });
+  afterEach(async () => { vi.restoreAllMocks(); await NodeFSPromises.rm(directory, { recursive: true, force: true }); });
 
-describe("native plan file validation and reconciliation", () => {
-  it("captures the SHA-256 of the exact bytes and atomically replaces the file", async () => {
-    expect(await captureNativePlanFile({ path, sessionId: "session", roots: [root] })).toEqual(ref());
-    const original = await NodeFSPromises.stat(path);
-    expect(await sync()).toEqual({ outcome: "synced" });
-    expect(await NodeFSPromises.readFile(path, "utf8")).toBe("# Edited\n");
-    expect((await NodeFSPromises.stat(path)).ino).not.toBe(original.ino);
-    expect(await NodeFSPromises.readdir(root)).toEqual(["plan.md"]);
+  async function capture() {
+    const ref = await captureNativePlanFile({ path, planRoot, sessionId: "session", markdown: await NodeFSPromises.readFile(path, "utf8") });
+    if (!ref) throw new Error("Expected a captured file");
+    return ref;
+  }
+
+  it("hashes the exact bytes and atomically rewrites an unchanged captured file", async () => {
+    const nativePlanFile = await capture();
+    expect(nativePlanFile).toEqual({ path, sessionId: "session", sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" });
+    await NodeFSPromises.writeFile(NodePath.join(planRoot, "other-plan.md"), "keep");
+    const originalFile = await NodeFSPromises.stat(path);
+    expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile, markdown: "# Edited plan\n" })).toEqual({ outcome: "synced" });
+    expect((await NodeFSPromises.stat(path)).ino).not.toBe(originalFile.ino);
+    expect(await NodeFSPromises.readFile(path, "utf8")).toBe("# Edited plan\n");
+    expect(await NodeFSPromises.readFile(NodePath.join(planRoot, "other-plan.md"), "utf8")).toBe("keep");
+    expect((await NodeFSPromises.readdir(planRoot)).sort()).toEqual(["other-plan.md", "plan.md"]);
   });
 
-  it("captures and syncs a plan through a linked root parent", async () => {
-    const realRoot = root;
-    const realPath = path;
-    const linkedParent = NodePath.join(directory, "linked-parent");
-    await NodeFSPromises.symlink(directory, linkedParent, "junction");
-    root = NodePath.join(linkedParent, "plans");
-    path = NodePath.join(root, "plan.md");
-
-    const captured = await captureNativePlanFile({ path, sessionId: "session", roots: [root] });
-    expect(captured).toEqual(ref());
-    expect(await sync(captured)).toEqual({ outcome: "synced" });
-    expect(await NodeFSPromises.readFile(realPath, "utf8")).toBe("# Edited\n");
-    expect(await NodeFSPromises.readdir(realRoot)).toEqual(["plan.md"]);
+  it("does not overwrite changed bytes or touch neighboring files", async () => {
+    const nativePlanFile = await capture();
+    await NodeFSPromises.writeFile(path, "provider revision");
+    expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile, markdown: "user revision" })).toEqual({ outcome: "skipped", reason: "changed" });
+    expect(await NodeFSPromises.readFile(path, "utf8")).toBe("provider revision");
+    expect(await NodeFSPromises.readdir(planRoot)).toEqual(["plan.md"]);
   });
 
-  it("leaves a file edited after capture untouched", async () => {
-    await NodeFSPromises.writeFile(path, "someone else's edit");
-    expect(await sync()).toEqual({ outcome: "skipped", reason: "changed" });
-    expect(await NodeFSPromises.readFile(path, "utf8")).toBe("someone else's edit");
-    expect(await NodeFSPromises.readdir(root)).toEqual(["plan.md"]);
-  });
-
-  it("does nothing without a proved reference", async () => {
-    expect(await sync(null)).toEqual({ outcome: "skipped", reason: "unproven" });
+  it("refuses a different session and a missing reference", async () => {
+    const nativePlanFile = await capture();
+    expect(await rewriteNativePlanFile({ planRoot, sessionId: "other", nativePlanFile, markdown: "edit" })).toEqual({ outcome: "skipped", reason: "unproven" });
+    expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile: null, markdown: "edit" })).toEqual({ outcome: "skipped", reason: "no-file" });
     expect(await NodeFSPromises.readFile(path, "utf8")).toBe("abc");
   });
 
-  it.each(["relative", "outside", "sibling-prefix"])("refuses a %s path", async kind => {
-    if (kind === "relative") path = "plans/plan.md";
-    else {
-      const parent = kind === "outside" ? directory : `${root}-other`;
-      await NodeFSPromises.mkdir(parent, { recursive: true });
-      path = NodePath.join(parent, "unowned.md");
-      await NodeFSPromises.writeFile(path, "abc");
+  it("does not recreate a file removed after capture", async () => {
+    const nativePlanFile = await capture();
+    await NodeFSPromises.unlink(path);
+    expect(await captureNativePlanFile({ path, planRoot, sessionId: "session", markdown: "abc" })).toBeNull();
+    expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile, markdown: "edit" })).toEqual({ outcome: "skipped", reason: "no-file" });
+    expect(await NodeFSPromises.readdir(planRoot)).toEqual([]);
+  });
+
+  it.each(["relative", "sibling", "directory"])("refuses a %s path at capture and rewrite", async (kind) => {
+    const nativePlanFile = await capture();
+    const unsafePath = kind === "relative" ? "plan.md" : kind === "directory" ? NodePath.join(planRoot, "directory") : NodePath.join(directory, "session-other", "plan.md");
+    if (kind === "directory") await NodeFSPromises.mkdir(unsafePath);
+    if (kind === "sibling") {
+      await NodeFSPromises.mkdir(NodePath.join(directory, "session-other"));
+      await NodeFSPromises.writeFile(unsafePath, "abc");
     }
-    expect(await captureNativePlanFile({ path, sessionId: "session", roots: [root] })).toBeUndefined();
-    expect(await sync()).toEqual({ outcome: "skipped", reason: "unsafe-path" });
-    if (kind !== "relative") expect(await NodeFSPromises.readFile(path, "utf8")).toBe("abc");
+    expect(await captureNativePlanFile({ path: unsafePath, planRoot, sessionId: "session", markdown: "abc" })).toBeNull();
+    expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile: { ...nativePlanFile, path: unsafePath }, markdown: "edit" })).toEqual({ outcome: "skipped", reason: "unsafe-path" });
+    expect(await NodeFSPromises.readFile(path, "utf8")).toBe("abc");
+    if (kind === "sibling") expect(await NodeFSPromises.readFile(unsafePath, "utf8")).toBe("abc");
   });
 
-  it("refuses a symlink substituted after capture even when its target is in the root", async () => {
-    const target = NodePath.join(root, "target.md");
-    await NodeFSPromises.rename(path, target);
-    await NodeFSPromises.symlink(target, path, "file");
-    expect(await sync()).toEqual({ outcome: "skipped", reason: "unsafe-path" });
-    expect(await captureNativePlanFile({ path, sessionId: "session", roots: [root] })).toBeUndefined();
-    expect(await NodeFSPromises.readFile(target, "utf8")).toBe("abc");
-    expect((await NodeFSPromises.lstat(path)).isSymbolicLink()).toBe(true);
-  });
-
-  it("refuses a parent directory link that escapes the declared root", async () => {
+  it.each(["file", "ancestor"])("refuses a symlinked %s and preserves its target", async (kind) => {
+    const nativePlanFile = await capture();
     const outside = NodePath.join(directory, "outside");
     await NodeFSPromises.mkdir(outside);
     await NodeFSPromises.writeFile(NodePath.join(outside, "plan.md"), "abc");
-    await NodeFSPromises.symlink(outside, NodePath.join(root, "linked"), "junction");
-    path = NodePath.join(root, "linked", "plan.md");
-    expect(await captureNativePlanFile({ path, sessionId: "session", roots: [root] })).toBeUndefined();
-    expect(await sync()).toEqual({ outcome: "skipped", reason: "unsafe-path" });
+    let linkedPath = path;
+    if (kind === "file") {
+      await NodeFSPromises.unlink(path);
+      await NodeFSPromises.symlink(NodePath.join(outside, "plan.md"), path, "file");
+    } else {
+      await NodeFSPromises.symlink(outside, NodePath.join(planRoot, "link"), "junction");
+      linkedPath = NodePath.join(planRoot, "link", "plan.md");
+    }
+    expect(await captureNativePlanFile({ path: linkedPath, planRoot, sessionId: "session", markdown: "abc" })).toBeNull();
+    expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile: { ...nativePlanFile, path: linkedPath }, markdown: "edit" })).toEqual({ outcome: "skipped", reason: "unsafe-path" });
+    expect(await NodeFSPromises.readFile(NodePath.join(outside, "plan.md"), "utf8")).toBe("abc");
+  });
+
+  it("follows a symlinked session root to its canonical directory", async () => {
+    const linkedRoot = NodePath.join(directory, "linked-session");
+    await NodeFSPromises.symlink(planRoot, linkedRoot, "junction");
+    const linkedPath = NodePath.join(linkedRoot, "plan.md");
+    const nativePlanFile = await captureNativePlanFile({ path: linkedPath, planRoot: linkedRoot, sessionId: "session", markdown: "abc" });
+    expect(nativePlanFile?.path).toBe(path);
+    expect(await rewriteNativePlanFile({ planRoot: linkedRoot, sessionId: "session", nativePlanFile, markdown: "edit" })).toEqual({ outcome: "synced" });
+    expect(await NodeFSPromises.readFile(path, "utf8")).toBe("edit");
+  });
+
+  it("refuses a hard-linked plan before the CLI can overwrite another target", async () => {
+    const nativePlanFile = await capture();
+    const otherPath = NodePath.join(directory, "other.md");
+    await NodeFSPromises.link(path, otherPath);
+    expect(await canWriteNativePlanFile({ path, expectedPath: path })).toBe(false);
+    expect(await captureNativePlanFile({ path, planRoot, sessionId: "session", markdown: "abc" })).toBeNull();
+    expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile, markdown: "edit" })).toEqual({ outcome: "skipped", reason: "unsafe-path" });
+    expect(await NodeFSPromises.readFile(otherPath, "utf8")).toBe("abc");
     expect(await NodeFSPromises.readFile(path, "utf8")).toBe("abc");
   });
 
-  it("bounds captured bytes and refuses oversized replacement content", async () => {
-    await NodeFSPromises.writeFile(path, "x".repeat(PLAN_MAX_CONTENT_CHARS));
-    expect(await captureNativePlanFile({ path, sessionId: "session", roots: [root] })).toMatchObject({ path, sessionId: "session" });
-    await NodeFSPromises.appendFile(path, "x");
-    expect(await captureNativePlanFile({ path, sessionId: "session", roots: [root] })).toBeUndefined();
-    expect(await sync()).toEqual({ outcome: "skipped", reason: "unsafe-path" });
-    await NodeFSPromises.writeFile(path, "abc");
-    expect(await sync(ref(), "é".repeat(PLAN_MAX_CONTENT_CHARS))).toEqual({ outcome: "skipped", reason: "unsafe-path" });
+  it("skips a failed rename and removes the temporary file", async () => {
+    const nativePlanFile = await capture();
+    const rename = NodeFSPromises.rename;
+    vi.spyOn(NodeFSPromises, "rename").mockImplementationOnce(async (from, to) => {
+      await NodeFSPromises.unlink(path);
+      await NodeFSPromises.mkdir(path);
+      return rename(from, to);
+    });
+    expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile, markdown: "edit" })).toEqual({ outcome: "skipped", reason: "unproven" });
+    expect(await NodeFSPromises.readdir(planRoot)).toEqual(["plan.md"]);
+    expect((await NodeFSPromises.stat(path)).isDirectory()).toBe(true);
+  });
+
+  it.each(["EPERM", "EACCES", "EBUSY", "EEXIST", "EROFS", "ENOSPC"])("skips %s write failures without leaving temporary files", async (code) => {
+    const nativePlanFile = await capture();
+    vi.spyOn(NodeFSPromises, "writeFile").mockRejectedValueOnce(Object.assign(new Error("Cannot write"), { code }));
+    expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile, markdown: "edit" })).toEqual({ outcome: "skipped", reason: "unproven" });
     expect(await NodeFSPromises.readFile(path, "utf8")).toBe("abc");
+    expect(await NodeFSPromises.readdir(planRoot)).toEqual(["plan.md"]);
   });
 
-  it("reports missing files and refuses directories without throwing", async () => {
-    await NodeFSPromises.unlink(path);
-    expect(await sync()).toEqual({ outcome: "skipped", reason: "no-file" });
-    await NodeFSPromises.mkdir(path);
-    expect(await sync()).toEqual({ outcome: "skipped", reason: "unsafe-path" });
-  });
-
-  it("syncs from the root recorded in the ref without any session state", async () => {
-    const stored = JSON.parse(JSON.stringify(ref())) as NativePlanFileRef;
-    expect(await syncNativePlanFile({ nativePlanFile: stored, markdown: "# After restart\n" })).toEqual({ outcome: "synced" });
-    expect(await NodeFSPromises.readFile(path, "utf8")).toBe("# After restart\n");
-  });
-
-  it("refuses a ref whose recorded root is not a plans directory", async () => {
-    const forged = { ...ref(), root: directory };
-    expect(await sync(forged)).toEqual({ outcome: "skipped", reason: "unproven" });
+  it("does not hide unexpected write errors and still removes the temporary file", async () => {
+    const nativePlanFile = await capture();
+    const error = new TypeError("Invalid write argument");
+    vi.spyOn(NodeFSPromises, "rename").mockRejectedValueOnce(error);
+    await expect(rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile, markdown: "edit" })).rejects.toBe(error);
     expect(await NodeFSPromises.readFile(path, "utf8")).toBe("abc");
-  });
-});
-
-describe("plan-turn write permission", () => {
-  const writable = (candidate: string) => isWritableNativePlanPath(candidate, [root], NodePath.join(directory, "unrelated-project"));
-
-  it("allows a new or existing markdown file inside the root", async () => {
-    expect(await writable(path)).toBe(true);
-    expect(await writable(NodePath.join(root, "fresh-plan.md"))).toBe(true);
+    expect(await NodeFSPromises.readdir(planRoot)).toEqual(["plan.md"]);
   });
 
-  it("refuses non-markdown files, the root itself and paths outside it", async () => {
-    expect(await writable(NodePath.join(root, "script.sh"))).toBe(false);
-    expect(await writable(root)).toBe(false);
-    expect(await writable(NodePath.join(directory, "elsewhere.md"))).toBe(false);
+  it("captures and rewrites multibyte plans within the character limit", async () => {
+    await NodeFSPromises.writeFile(path, "界".repeat(65_536));
+    const nativePlanFile = await capture();
+    expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile, markdown: "語".repeat(65_536) })).toEqual({ outcome: "synced" });
+    expect(await NodeFSPromises.readFile(path, "utf8")).toBe("語".repeat(65_536));
+    expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile: await capture(), markdown: "語".repeat(65_537) })).toEqual({ outcome: "skipped", reason: "unproven" });
   });
 
-  it("refuses a directory link that carries a new file out of the root", async () => {
-    const outside = NodePath.join(directory, "outside");
-    await NodeFSPromises.mkdir(outside);
-    await NodeFSPromises.symlink(outside, NodePath.join(root, "linked"), "junction");
-    expect(await writable(NodePath.join(root, "linked", "new.md"))).toBe(false);
+  it("refuses to capture when the file no longer holds the text the CLI reported", async () => {
+    expect(await captureNativePlanFile({ path, planRoot, sessionId: "session", markdown: "abd" })).toBeNull();
+    expect(await captureNativePlanFile({ path, planRoot, sessionId: "session", markdown: "abc" })).toMatchObject({ sessionId: "session" });
   });
 
-  it("refuses a project plan root that links out of the project but allows a linked config-home root", async () => {
-    const project = NodePath.join(directory, "project");
-    const outside = NodePath.join(directory, "outside-root");
-    await NodeFSPromises.mkdir(NodePath.join(project, ".claude"), { recursive: true });
-    await NodeFSPromises.mkdir(outside);
-    const projectRoot = NodePath.join(project, ".claude", "plans");
-    await NodeFSPromises.symlink(outside, projectRoot, "junction");
-    expect(await isWritableNativePlanPath(NodePath.join(projectRoot, "new.md"), [projectRoot], project)).toBe(false);
-    expect(await isWritableNativePlanPath(NodePath.join(projectRoot, "new.md"), [projectRoot], NodePath.join(directory, "other"))).toBe(true);
-  });
-
-  it("refuses a project .claude directory that links to the repository root", async () => {
-    const project = NodePath.join(directory, "project");
-    const elsewhere = NodePath.join(directory, "elsewhere");
-    await NodeFSPromises.mkdir(NodePath.join(elsewhere, "plans"), { recursive: true });
-    await NodeFSPromises.mkdir(project);
-    await NodeFSPromises.symlink(elsewhere, NodePath.join(project, ".claude"), "junction");
-    const projectRoot = NodePath.join(project, ".claude", "plans");
-    expect(await isWritableNativePlanPath(NodePath.join(projectRoot, "new.md"), [projectRoot], project)).toBe(false);
-  });
-
-  it("refuses a dangling file symlink that would create its target outside the root", async () => {
-    const link = NodePath.join(root, "dangling.md");
-    await NodeFSPromises.symlink(NodePath.join(directory, "created-outside.md"), link, "file");
-    expect(await writable(link)).toBe(false);
+  it("bounds capture and replacement characters, including the exact limit", async () => {
+    await NodeFSPromises.writeFile(path, "x".repeat(65_536));
+    const nativePlanFile = await capture();
+    expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile, markdown: "y".repeat(65_537) })).toEqual({ outcome: "skipped", reason: "unproven" });
+    expect(await NodeFSPromises.readFile(path, "utf8")).toBe("x".repeat(65_536));
+    expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile, markdown: "y".repeat(65_536) })).toEqual({ outcome: "synced" });
+    expect(await NodeFSPromises.readFile(path, "utf8")).toBe("y".repeat(65_536));
+    await NodeFSPromises.writeFile(path, "x".repeat(65_537));
+    expect(await captureNativePlanFile({ path, planRoot, sessionId: "session", markdown: "x".repeat(65_537) })).toBeNull();
+    expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile, markdown: "edit" })).toEqual({ outcome: "skipped", reason: "unproven" });
   });
 });

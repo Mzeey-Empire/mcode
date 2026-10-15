@@ -15,7 +15,7 @@ import { claudeApprovalBody } from "./claude-approval.js";
 type ClaudeApprovalDecision = "allow" | "allow-session" | "deny" | "cancelled" | "auto-deny";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
-import { captureNativePlanFile, isNativePlanFilePath, isWritableNativePlanPath, syncNativePlanFile } from "../../plan/native-plan-file.js";
+import { captureClaudePlanFileRef, isClaudePlanFilePath, isWritableClaudePlanPath, syncClaudePlanFile } from "../../plan/claude-plan-file.js";
 import { z } from "zod";
 import * as NodePath from "node:path";
 import which from "which";
@@ -438,7 +438,7 @@ const PLAN_FILE_EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit"]);
 async function planMutationDenial(session: Pick<ClaudeSessionState, "planRoots" | "cwd">, toolName: string, input: Record<string, unknown>): Promise<string | undefined> {
   if (!PLAN_READ_ONLY_DENIED_TOOLS.has(toolName)) return undefined;
   if (PLAN_FILE_EDIT_TOOLS.has(toolName) && typeof input.file_path === "string"
-    && await isWritableNativePlanPath(input.file_path, session.planRoots, session.cwd)) return undefined;
+    && await isWritableClaudePlanPath(input.file_path, session.planRoots, session.cwd)) return undefined;
   return "Plan mode is read-only. Describe the change in the plan instead.";
 }
 
@@ -1298,12 +1298,12 @@ export class ClaudeProvider
   private async captureClaudePlanFile(session: ClaudeSessionState, path: unknown): Promise<NativePlanFileRef | undefined> {
     const sessionId = this.sdkSessionIds.get(session.sessionId);
     if (typeof path !== "string" || !sessionId || session.planWrites.get(path) !== sessionId) return undefined;
-    return await captureNativePlanFile({ path, sessionId, roots: session.planRoots });
+    return await captureClaudePlanFileRef({ path, sessionId, roots: session.planRoots });
   }
 
   /** Reconcile a native file from the root its captured ref names, so the proof outlives this process. */
   async prepareImplement(input: { threadId: string; markdown: string; nativePlanFile: NativePlanFileRef | null }): Promise<NativePlanFileOutcome> {
-    return await syncNativePlanFile(input);
+    return await syncClaudePlanFile(input);
   }
 
   private consumeScopedReadGrant(
@@ -1811,7 +1811,7 @@ export class ClaudeProvider
       const session = this.runtime.get(context.params.sessionId);
       if (session && session.spawnRouting === context.routing && write.success
         && input.session_id === this.sdkSessionIds.get(session.sessionId)
-        && isNativePlanFilePath(write.data.file_path, session.planRoots)) {
+        && isClaudePlanFilePath(write.data.file_path, session.planRoots)) {
         session.planWrites.set(write.data.file_path, input.session_id);
       }
       return {};

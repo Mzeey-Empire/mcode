@@ -95,6 +95,16 @@ vi.mock("../../notes/previewNoteSnapshots", () => ({
   schedulePageSnapshot: mockSchedulePageSnapshot,
 }));
 
+vi.mock("../../notes/stagedDraftImages", () => ({
+  stageDraftImage: vi.fn(async (_threadId: string, bytes: Uint8Array, name: string) => ({
+    stagingId: crypto.randomUUID(),
+    name,
+    mimeType: "image/png",
+    sizeBytes: bytes.byteLength,
+  })),
+  readStagedDraftImage: vi.fn(async () => new Uint8Array([1])),
+}));
+
 import {
   PREVIEW_WEBVIEW_FALLBACK_TAB_ID,
   PreviewPanel,
@@ -103,8 +113,12 @@ import { executeWebBrowserDispatch } from "../../automation/browserAutomationWeb
 import { useSettingsStore } from "@/stores/settingsStore";
 import { normalizePreviewPageIdentity } from "@mcode/shared/browser-page-identity";
 import {
+  toBrowserNoteContent,
   usePreviewAnnotationStore,
+  type PreviewDraftAnnotation,
 } from "../../state/previewAnnotationStore";
+import { saveBrowserNote } from "@/features/conversation/composer/draft/draft-submission";
+import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { usePreviewDesignModeStore } from "../../state/previewDesignModeStore";
 import { usePreviewPageScrollStore } from "../../state/previewPageScrollStore";
 import { useProviderCatalogStore } from "@/stores/providerCatalogStore";
@@ -261,17 +275,10 @@ function installDraftAnnotation(overrides: Record<string, unknown> = {}) {
 function installSavedAnnotation(
   overrides: Record<string, unknown> = {},
 ) {
+  const threadId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const pageUrl = "https://example.com/product-preview?productCode=QUAELE2010";
-  const pageIdentity = (overrides.pageIdentity as string | undefined) ?? normalizePreviewPageIdentity(pageUrl);
-  usePreviewAnnotationStore.getState().setPageCapture("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
-    pageIdentity,
-    url: pageUrl,
-    title: "Example",
-    faviconUrl: null,
-    clean: null,
-  });
-  usePreviewAnnotationStore.getState().saveAnnotation("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
-    threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  const annotation = {
+    threadId,
     pageIdentity: normalizePreviewPageIdentity(pageUrl),
     bounds: { x: 20, y: 24, width: 120, height: 32 },
     selectorHint: "button",
@@ -287,7 +294,20 @@ function installSavedAnnotation(
     },
     note: "Move this button",
     ...overrides,
-  });
+  } as PreviewDraftAnnotation;
+  useComposerDraftStore.getState().updateNextMessage(threadId, (draft) => saveBrowserNote(
+    draft,
+    {
+      pageIdentity: annotation.pageIdentity,
+      url: pageUrl,
+      title: "Example",
+      faviconUrl: null,
+      capture: annotation.pageContext,
+      scroll: { x: 0, y: 0 },
+      cleanCapture: null,
+    },
+    toBrowserNoteContent(annotation),
+  ));
 }
 
 describe("PreviewPanel: unavailable state", () => {
@@ -720,6 +740,7 @@ describe("PreviewPanel: full panel state", () => {
     });
     useSettingsStore.getState()._applyPush(getDefaultSettings());
     usePreviewAnnotationStore.setState({ byThread: {}, pages: {}, drafts: {} });
+    useComposerDraftStore.setState({ drafts: {} });
     usePreviewDesignModeStore.setState({ pickers: {} });
     usePreviewPageScrollStore.setState({ byTab: {} });
     usePreviewTabsStore.setState({ tabSetByScope: {}, liveChromeByScope: {}, persistentTabIdsByScope: {}, pendingNavErrorsByScope: {} });
@@ -742,6 +763,7 @@ describe("PreviewPanel: full panel state", () => {
     (window as any).desktopBridge = undefined;
     useSettingsStore.getState()._applyPush(getDefaultSettings());
     usePreviewAnnotationStore.setState({ byThread: {}, pages: {}, drafts: {} });
+    useComposerDraftStore.setState({ drafts: {} });
     usePreviewDesignModeStore.setState({ pickers: {} });
     usePreviewPageScrollStore.setState({ byTab: {} });
     usePreviewTabsStore.setState({ tabSetByScope: {}, liveChromeByScope: {}, persistentTabIdsByScope: {}, pendingNavErrorsByScope: {} });

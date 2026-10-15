@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { usePreviewAnnotationStore } from "../../state/previewAnnotationStore";
 import {
   browserNotesTileLabel,
   browserPageLabel,
   groupBrowserNotes,
 } from "../browserNoteGroups";
-import { BILLING_PAGE, seedPage, draft, PRODUCT_PAGE, tickClockPerRead } from "./fixtures";
+import { BILLING_PAGE, PRODUCT_PAGE, seedPage } from "./fixtures";
 
 const THREAD = "thread-groups";
 const store = () => usePreviewAnnotationStore.getState();
@@ -20,22 +21,20 @@ afterEach(() => {
 
 describe("groupBrowserNotes", () => {
   beforeEach(() => {
-    tickClockPerRead();
     usePreviewAnnotationStore.setState({ byThread: {}, pages: {}, drafts: {} });
-    seedPage(THREAD);
-    seedPage(THREAD, BILLING_PAGE, "Billing");
+    useComposerDraftStore.setState({ drafts: {} });
   });
 
   it("fronts the page that was annotated last", () => {
-    store().saveAnnotation(THREAD, draft(THREAD, { note: "Product note" }));
-    store().saveAnnotation(THREAD, draft(THREAD, { pageIdentity: BILLING_PAGE, note: "Billing note" }));
+    seedPage(THREAD, PRODUCT_PAGE, "Product", { note: "Product note" });
+    seedPage(THREAD, BILLING_PAGE, "Billing", { note: "Billing note" });
 
     expect(groups().map((group) => group.page.pageIdentity)).toEqual([BILLING_PAGE, PRODUCT_PAGE]);
   });
 
   it("keeps each page's notes in that page's numbering order", () => {
-    store().saveAnnotation(THREAD, draft(THREAD, { note: "First" }));
-    store().saveAnnotation(THREAD, draft(THREAD, { note: "Second" }));
+    seedPage(THREAD, PRODUCT_PAGE, "Product", { note: "First" });
+    seedPage(THREAD, PRODUCT_PAGE, "Product", { note: "Second" });
 
     expect(groups()[0]?.notes.map((note) => [note.note, note.displayNumber])).toEqual([
       ["First", 1],
@@ -44,7 +43,7 @@ describe("groupBrowserNotes", () => {
   });
 
   it("drops notes whose page has no record", () => {
-    store().saveAnnotation(THREAD, draft(THREAD));
+    seedPage(THREAD, PRODUCT_PAGE, "Product");
 
     expect(groupBrowserNotes(store().getThreadAnnotations(THREAD), {})).toEqual([]);
   });
@@ -52,23 +51,21 @@ describe("groupBrowserNotes", () => {
 
 describe("browserNotesTileLabel", () => {
   beforeEach(() => {
-    tickClockPerRead();
     usePreviewAnnotationStore.setState({ byThread: {}, pages: {}, drafts: {} });
-    seedPage(THREAD);
-    seedPage(THREAD, BILLING_PAGE, "Billing");
+    useComposerDraftStore.setState({ drafts: {} });
   });
 
   it("names the page for a single page", () => {
-    store().saveAnnotation(THREAD, draft(THREAD, { pageIdentity: BILLING_PAGE }));
+    seedPage(THREAD, BILLING_PAGE, "Billing");
 
     expect(browserNotesTileLabel(groups())).toBe("Billing · 1 note");
   });
 
   it("counts notes and pages for several pages", () => {
-    store().saveAnnotation(THREAD, draft(THREAD));
-    store().saveAnnotation(THREAD, draft(THREAD));
-    store().saveAnnotation(THREAD, draft(THREAD, { pageIdentity: BILLING_PAGE }));
-    store().saveAnnotation(THREAD, draft(THREAD, { pageIdentity: BILLING_PAGE }));
+    seedPage(THREAD, PRODUCT_PAGE, "Product");
+    seedPage(THREAD, PRODUCT_PAGE, "Product");
+    seedPage(THREAD, BILLING_PAGE, "Billing");
+    seedPage(THREAD, BILLING_PAGE, "Billing");
 
     expect(browserNotesTileLabel(groups())).toBe("4 notes · 2 pages");
   });

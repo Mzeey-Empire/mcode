@@ -6,6 +6,10 @@ import { registerClipboardHandlers } from "./clipboard/handlers.js";
 import type { AttachmentProtocolRegistry } from "./protocol/handler.js";
 import { registerAttachmentProtocol } from "./protocol/handler.js";
 import {
+  createStagedDraftImageReader,
+  READ_STAGED_DRAFT_IMAGE_CHANNEL,
+} from "./staging/draft-image-reader.js";
+import {
   createTempAttachmentStore,
   type TempAttachmentStore,
 } from "./staging/temp-store.js";
@@ -43,11 +47,14 @@ export function registerAttachmentsFeature(
     tempStore,
     now: dependencies.now ?? Date.now,
   });
-  registerAttachmentProtocol({
-    protocol: dependencies.protocol ?? protocol,
-    attachmentsDirectory:
-      dependencies.attachmentsDirectory ?? NodePath.join(getMcodeDir(), "attachments"),
-  });
+  const attachmentsDirectory =
+    dependencies.attachmentsDirectory ?? NodePath.join(getMcodeDir(), "attachments");
+  registerAttachmentProtocol({ protocol: dependencies.protocol ?? protocol, attachmentsDirectory });
+  const readStagedDraftImage = createStagedDraftImageReader(attachmentsDirectory);
+  (dependencies.ipc ?? ipcMain).handle(
+    READ_STAGED_DRAFT_IMAGE_CHANNEL,
+    (_event, threadId, stagingId) => readStagedDraftImage(threadId, stagingId),
+  );
   return clipboardHandlers;
 }
 
@@ -66,6 +73,11 @@ export type {
   ClipboardImage,
   ClipboardReader,
 } from "./clipboard/handlers.js";
+export {
+  createStagedDraftImageReader,
+  READ_STAGED_DRAFT_IMAGE_CHANNEL,
+} from "./staging/draft-image-reader.js";
+export type { StagedDraftImageReader } from "./staging/draft-image-reader.js";
 export {
   createTempAttachmentStore,
   TEMP_ATTACHMENT_DIRECTORY_NAME,

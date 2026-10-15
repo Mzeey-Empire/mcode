@@ -3,159 +3,136 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import { PLAN_MAX_CONTENT_CHARS, type NativePlanFileOutcome, type NativePlanFileRef } from "@mcode/contracts";
 
-type FileRead = { outcome: "read"; sha256: string; realPath: string } | Extract<NativePlanFileOutcome, { outcome: "skipped" }>;
+type Skipped = Extract<NativePlanFileOutcome, { outcome: "skipped" }>;
+type PlanLocation = { path: string; planRoot: string; sessionId: string };
+type PlanRead = { ref: NativePlanFileRef; text: string };
+const PLAN_MAX_CONTENT_BYTES = PLAN_MAX_CONTENT_CHARS * 4;
 
-/** Check absolute lexical containment; file validation must also check resolved paths. */
-export function isNativePlanFilePath(path: string, roots: readonly string[]): boolean {
-  if (!NodePath.isAbsolute(path)) return false;
-  return roots.some(root => {
-    if (!NodePath.isAbsolute(root)) return false;
-    const relative = NodePath.relative(root, path);
-    return relative !== "" && relative !== ".." && !relative.startsWith(`..${NodePath.sep}`) && !NodePath.isAbsolute(relative);
-  });
+function skipped(reason: Skipped["reason"]): Skipped { return { outcome: "skipped", reason }; }
+
+/** path.relative folds case only where the file system does, so this is the platform's own equality. */
+function samePath(left: string, right: string): boolean {
+  return NodePath.relative(left, right) === "";
 }
 
-async function resolveThroughExistingAncestor(path: string): Promise<string> {
-  let existing = NodePath.resolve(path);
-  const missing: string[] = [];
-  for (;;) {
-    try {
-      return NodePath.join(await NodeFSPromises.realpath(existing), ...missing.reverse());
-    } catch (error) {
-      const parent = NodePath.dirname(existing);
-      if (!(error instanceof Error && "code" in error && error.code === "ENOENT") || parent === existing) throw error;
-      missing.push(NodePath.basename(existing));
-      existing = parent;
-    }
+function isInside(root: string, path: string): boolean {
+  const suffix = NodePath.relative(root, path);
+  return suffix !== "" && suffix !== ".." && !suffix.startsWith(`..${NodePath.sep}`) && !NodePath.isAbsolute(suffix);
+}
+
+function fileFailure(error: unknown): Skipped {
+  if (error instanceof Error && "code" in error) {
+    if (error.code === "ENOENT" || error.code === "ENOTDIR") return skipped("no-file");
+    if (error.code === "ELOOP") return skipped("unsafe-path");
+    if (["EACCES", "EPERM", "EBUSY", "EEXIST", "EROFS", "ENOSPC", "EDQUOT", "EISDIR", "ENOTEMPTY", "ETXTBSY"].includes(String(error.code))) return skipped("unproven");
   }
+  throw error;
 }
 
-/**
- * Decide whether a Plan turn may write this path: a markdown file whose resolved location,
- * links included, stays inside a plan root. Lexical containment alone lets a committed symlink
- * or junction under `.claude/plans` carry a write out of the root. The project root must also
- * resolve to `<project>/.claude/plans`; a link there would turn the whole project into a plan
- * root. The config-home root may be linked, since dotfile managers do that on purpose.
- */
-export async function isWritableNativePlanPath(path: string, roots: readonly string[], projectDir: string): Promise<boolean> {
-  if (!isNativePlanFilePath(path, roots) || NodePath.extname(path).toLowerCase() !== ".md") return false;
+async function validatePath(path: string, planRoot: string): Promise<Skipped | null> {
+  if (!NodePath.isAbsolute(path) || !NodePath.isAbsolute(planRoot) || !isInside(planRoot, path)) return skipped("unsafe-path");
+  const root = await NodeFSPromises.realpath(planRoot);
+  let ancestor = NodePath.dirname(path);
+  while (true) {
+    if ((await NodeFSPromises.lstat(ancestor)).isSymbolicLink()) return skipped("unsafe-path");
+    if (NodePath.relative(planRoot, ancestor) === "") break;
+    ancestor = NodePath.dirname(ancestor);
+  }
+  const parent = await NodeFSPromises.realpath(NodePath.dirname(path));
+  if (NodePath.relative(root, parent) !== "" && !isInside(root, parent)) return skipped("unsafe-path");
+  return null;
+}
+
+/** Allows only the adapter's exact plan target, including its first creation. */
+export async function canWriteNativePlanFile(input: { path: string; expectedPath: string }): Promise<boolean> {
+  if (!NodePath.isAbsolute(input.path) || !NodePath.isAbsolute(input.expectedPath) || !samePath(input.path, input.expectedPath)) return false;
   try {
-    const leaf = await NodeFSPromises.lstat(path).catch(() => undefined);
-    if (leaf?.isSymbolicLink()) return false;
-    const projectRoot = NodePath.join(projectDir, ".claude", "plans");
-    const realProjectRoot = NodePath.join(await resolveThroughExistingAncestor(projectDir), ".claude", "plans");
-    const realRoots: string[] = [];
-    for (const root of roots.filter(NodePath.isAbsolute)) {
-      const real = await resolveThroughExistingAncestor(root);
-      if (root !== projectRoot || real === realProjectRoot) realRoots.push(real);
+    if (await validatePath(input.path, NodePath.dirname(input.expectedPath))) return false;
+    try {
+      const stat = await NodeFSPromises.lstat(input.path);
+      return stat.isFile() && stat.nlink === 1;
     }
-    return isNativePlanFilePath(await resolveThroughExistingAncestor(path), realRoots);
-  } catch {
+    catch (error) { return fileFailure(error).reason === "no-file"; }
+  } catch (error) {
+    fileFailure(error);
     return false;
   }
 }
 
-function fileFailure(error: unknown): Extract<NativePlanFileOutcome, { outcome: "skipped" }> {
-  if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-    return { outcome: "skipped", reason: "no-file" };
-  }
-  return { outcome: "skipped", reason: "unsafe-path" };
+/**
+ * The CLI may report the plan through a symlinked or differently cased config directory, so the
+ * path is rebased onto the canonical session root before it must be exactly that session's `plan.md`.
+ */
+async function locatePlan(input: PlanLocation): Promise<{ root: string; path: string } | Skipped> {
+  const root = await NodeFSPromises.realpath(input.planRoot);
+  const path = NodePath.isAbsolute(input.path) && isInside(input.planRoot, input.path) ? NodePath.join(root, NodePath.relative(input.planRoot, input.path)) : input.path;
+  if (!samePath(path, NodePath.join(root, "plan.md"))) return skipped("unsafe-path");
+  return await validatePath(path, root) ?? { root, path };
 }
 
-async function readPlanFile(path: string, roots: readonly string[]): Promise<FileRead> {
+async function readPlan(input: PlanLocation): Promise<PlanRead | Skipped> {
   try {
-    if (!isNativePlanFilePath(path, roots) || NodePath.extname(path).toLowerCase() !== ".md") return { outcome: "skipped", reason: "unsafe-path" };
-    const stat = await NodeFSPromises.lstat(path);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > PLAN_MAX_CONTENT_CHARS) {
-      return { outcome: "skipped", reason: "unsafe-path" };
-    }
-    const realPath = await NodeFSPromises.realpath(path);
-    const realRoots = await Promise.all(roots.filter(NodePath.isAbsolute).map(root =>
-      NodeFSPromises.realpath(root).catch(() => root)));
-    if (!isNativePlanFilePath(realPath, realRoots)) return { outcome: "skipped", reason: "unsafe-path" };
-    const file = await NodeFSPromises.open(realPath, "r");
-    try {
-      const opened = await file.stat();
-      if (opened.ino !== stat.ino || opened.dev !== stat.dev) return { outcome: "skipped", reason: "unsafe-path" };
-      return await hashPlanFile(file, realPath);
-    } finally {
-      await file.close();
-    }
-  } catch (error) {
-    return fileFailure(error);
-  }
+    const located = await locatePlan(input);
+    if ("outcome" in located) return located;
+    const stat = await NodeFSPromises.lstat(located.path);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink > 1) return skipped("unsafe-path");
+    const real = await NodeFSPromises.realpath(located.path);
+    if (!isInside(located.root, real)) return skipped("unsafe-path");
+    if (stat.size > PLAN_MAX_CONTENT_BYTES) return skipped("unproven");
+    const bytes = await readPlanBytes(real);
+    if ("outcome" in bytes) return bytes;
+    return { ref: { path: real, sessionId: input.sessionId, sha256: NodeCrypto.createHash("sha256").update(bytes).digest("hex") }, text: bytes.toString("utf8") };
+  } catch (error) { return fileFailure(error); }
 }
 
-async function hashPlanFile(file: NodeFSPromises.FileHandle, realPath: string): Promise<FileRead> {
-  const bytes = Buffer.alloc(PLAN_MAX_CONTENT_CHARS + 1);
-  let length = 0;
-  while (length < bytes.length) {
-    const { bytesRead } = await file.read(bytes, length, bytes.length - length, length);
-    if (bytesRead === 0) break;
-    length += bytesRead;
-  }
-  if (length > PLAN_MAX_CONTENT_CHARS) return { outcome: "skipped", reason: "unsafe-path" };
-  return { outcome: "read", sha256: NodeCrypto.createHash("sha256").update(bytes.subarray(0, length)).digest("hex"), realPath };
-}
-
-/** Validate and hash an exact path whose session ownership the adapter has proved. */
-export async function captureNativePlanFile(input: {
-  path: string; sessionId: string; roots: readonly string[];
-}): Promise<NativePlanFileRef | undefined> {
-  const file = await readPlanFile(input.path, input.roots);
-  if (file.outcome !== "read") return undefined;
-  const root = input.roots.find(candidate => isNativePlanFilePath(input.path, [candidate]));
-  if (!root) return undefined;
-  return { path: input.path, sessionId: input.sessionId, root, sha256: file.sha256 };
+async function readPlanBytes(path: string): Promise<Buffer | Skipped> {
+  const file = await NodeFSPromises.open(path, "r");
+  try {
+    const bytes = Buffer.alloc(PLAN_MAX_CONTENT_BYTES + 1);
+    let length = 0;
+    while (length < bytes.length) {
+      const { bytesRead } = await file.read(bytes, length, bytes.length - length, null);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > PLAN_MAX_CONTENT_BYTES || bytes.toString("utf8", 0, length).length > PLAN_MAX_CONTENT_CHARS) return skipped("unproven");
+    return bytes.subarray(0, length);
+  } finally { await file.close(); }
 }
 
 /**
- * Replace a proved, unchanged plan through a same-directory rename; refusals leave it untouched.
- * The ref names its own root so a stored ref still syncs after a restart or an idle eviction.
+ * Captures file identity only after proving containment and reading bounded bytes. The file must
+ * still hold `markdown`, the text the CLI reported, so a later rewrite never replaces bytes Mcode did not store.
  */
-export async function syncNativePlanFile(input: {
-  nativePlanFile: NativePlanFileRef | null; markdown: string;
-}): Promise<NativePlanFileOutcome> {
-  const ref = input.nativePlanFile;
-  if (!ref || NodePath.basename(ref.root) !== "plans") return { outcome: "skipped", reason: "unproven" };
-  const roots = [ref.root];
-  const file = await readPlanFile(ref.path, roots);
-  if (file.outcome !== "read") return file;
-  if (file.sha256 !== ref.sha256) return { outcome: "skipped", reason: "changed" };
-  if (Buffer.byteLength(input.markdown, "utf8") > PLAN_MAX_CONTENT_CHARS) return { outcome: "skipped", reason: "unsafe-path" };
-  return await replacePlanFile(ref, file.realPath, roots, input.markdown);
+export async function captureNativePlanFile(input: PlanLocation & { markdown: string }): Promise<NativePlanFileRef | null> {
+  const result = await readPlan(input);
+  return "outcome" in result || result.text !== input.markdown ? null : result.ref;
 }
 
-async function replacePlanFile(ref: NativePlanFileRef, realPath: string, roots: readonly string[], markdown: string): Promise<NativePlanFileOutcome> {
-  const temporaryPath = NodePath.join(NodePath.dirname(realPath), `.mcode-plan-${NodeCrypto.randomUUID()}.tmp`);
-  let created = false;
-  let outcome: NativePlanFileOutcome;
+/** Rewrites only a session-owned file whose bytes still match the captured digest. */
+export async function rewriteNativePlanFile(input: {
+  planRoot: string; sessionId: string; nativePlanFile: NativePlanFileRef | null; markdown: string;
+}): Promise<NativePlanFileOutcome> {
+  const ref = input.nativePlanFile;
+  if (!ref) return skipped("no-file");
+  if (ref.sessionId !== input.sessionId) return skipped("unproven");
+  const current = await readPlan({ path: ref.path, planRoot: input.planRoot, sessionId: input.sessionId });
+  if ("outcome" in current) return current;
+  if (current.ref.sha256 !== ref.sha256) return skipped("changed");
+  if (input.markdown.length > PLAN_MAX_CONTENT_CHARS || Buffer.byteLength(input.markdown) > PLAN_MAX_CONTENT_BYTES) return skipped("unproven");
+  const temporary = NodePath.join(NodePath.dirname(current.ref.path), `.mcode-plan-${NodeCrypto.randomUUID()}.tmp`);
   try {
-    const temporaryFile = await NodeFSPromises.open(temporaryPath, "wx", 0o600);
-    created = true;
-    try {
-      await temporaryFile.writeFile(markdown);
-    } finally {
-      await temporaryFile.close();
-    }
-    const current = await readPlanFile(ref.path, roots);
-    if (current.outcome !== "read") outcome = current;
-    else if (current.realPath !== realPath) outcome = { outcome: "skipped", reason: "unsafe-path" };
-    else if (current.sha256 !== ref.sha256) outcome = { outcome: "skipped", reason: "changed" };
-    else {
-      await NodeFSPromises.rename(temporaryPath, realPath);
-      created = false;
-      outcome = { outcome: "synced" };
-    }
+    // The rename swaps the inode, so the original permissions are carried over explicitly.
+    const { mode } = await NodeFSPromises.lstat(current.ref.path);
+    await NodeFSPromises.writeFile(temporary, input.markdown, { flag: "wx", mode: mode & 0o777 });
+    const checked = await readPlan({ path: ref.path, planRoot: input.planRoot, sessionId: input.sessionId });
+    if ("outcome" in checked) return checked;
+    if (checked.ref.sha256 !== ref.sha256) return skipped("changed");
+    await NodeFSPromises.rename(temporary, current.ref.path);
+    return { outcome: "synced" };
   } catch (error) {
-    outcome = fileFailure(error);
+    return fileFailure(error);
+  } finally {
+    await NodeFSPromises.rm(temporary, { force: true });
   }
-  if (created) {
-    try {
-      await NodeFSPromises.rm(temporaryPath, { force: true });
-    } catch (error) {
-      return fileFailure(error);
-    }
-  }
-  return outcome;
 }
