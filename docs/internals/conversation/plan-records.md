@@ -20,3 +20,9 @@ before mutation. Captured paths remain server-side. Mcode's own plan file is a
 separate projection and never authorizes touching a provider's file.
 
 See [ADR 0023](../../adr/0023-durable-plan-versions.md) for the version and replay decisions.
+
+Native questions have two owners: the database retains the batch, while the
+provider adapter retains the live responder. Renderer reconnects restore the
+batch without replacing that responder. An app-server exit or Mcode server
+restart expires the batch because the original request can no longer be answered.
+Persist expiry and its receipt together so a reload cannot reopen a dead request.

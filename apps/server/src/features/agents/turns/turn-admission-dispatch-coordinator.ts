@@ -512,6 +512,7 @@ export class TurnAdmissionDispatchCoordinator {
     runtime: TurnRuntimeAdmissionAuthority,
   ): Promise<PreparedTurnDispatch> {
     await this.preparePlanFile(prepared.command);
+    await this.plans.prepareNativeQuestions(prepared.command.threadId, prepared.providerId);
     prepared.plan = this.plans.classify(prepared.command);
     const cwd = this.resolveWorkingDirectory(prepared);
     const review = await this.approvalReviews.resolve({
@@ -1016,7 +1017,9 @@ export class TurnAdmissionDispatchCoordinator {
   private withPlanInstructions(prepared: PreparedCommand): string {
     if (prepared.plan.kind !== "revise" && prepared.plan.kind !== "planning") return prepared.content;
     let content = prepared.content;
-    if (prepared.plan.kind === "revise") content += `\n\n${this.plans.buildPlanOutputInstructions()}`;
+    if (prepared.plan.kind === "revise" && !this.plans.usesNativeQuestions(prepared.command.threadId)) {
+      content += `\n\n${this.plans.buildPlanOutputInstructions()}`;
+    }
     if (prepared.plan.planFilePath) content += `\n\nMcode plan file: ${prepared.plan.planFilePath}`;
     return content;
   }

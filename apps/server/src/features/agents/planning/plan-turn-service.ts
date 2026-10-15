@@ -11,6 +11,8 @@ import type {
   ReasoningLevel,
   TurnRequest,
   PlanQuestion,
+  NativePlanQuestionBatch,
+  PlanQuestionSettlement,
 } from "@mcode/contracts";
 import { broadcast } from "../../../application/transport/push.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
@@ -39,6 +41,8 @@ type ClaudePlanAnswerModeProvider = {
 @injectable()
 export class PlanTurnService {
   private readonly executionByThread = new Map<string, PlanExecutionState>();
+  private readonly nativeQuestionThreads = new Set<string>();
+  private publishNativeReceipt: ((event: AgentEvent) => void) | undefined;
   private projection: { progress: Pick<CanonicalAcceptedProgress, "reloadPlans" | "waitForTerminalSaves"> | undefined; files: PlanFileWriter } | undefined;
 
   constructor(
@@ -52,6 +56,52 @@ export class PlanTurnService {
   /** Connect the legacy capture path to the same post-commit projections as canonical capture. */
   bindPlanProjection(progress: Pick<CanonicalAcceptedProgress, "reloadPlans" | "waitForTerminalSaves"> | undefined, files: PlanFileWriter): void {
     this.projection = { progress, files };
+  }
+
+  /** Install durable callbacks before an adapter can advertise native planning. */
+  bindNativeQuestions(publish: (event: AgentEvent) => void): void {
+    this.publishNativeReceipt = publish;
+    for (const provider of this.providerRegistry.resolveAll()) {
+      provider.bindPlanQuestions?.({
+        requested: async batch => {
+          await this.questions.createNative(batch);
+          this.threadRepo.publishPlanPhase(batch.threadId);
+          broadcast("plan.questions", { threadId: batch.threadId, questions: batch.questions });
+        },
+        settled: (batch, status) => this.settleNativeQuestions(batch, status),
+      });
+    }
+  }
+
+  /** Freeze the adapter decision before classification and prompt construction. */
+  async prepareNativeQuestions(threadId: string, providerId: ProviderId): Promise<void> {
+    const enabled = await this.providerRegistry.resolve(providerId).supportsNativePlanQuestions?.();
+    if (enabled) this.nativeQuestionThreads.add(threadId);
+    else this.nativeQuestionThreads.delete(threadId);
+  }
+
+  /** Whether this admission uses the provider's question and plan protocol. */
+  usesNativeQuestions(threadId: string): boolean {
+    return this.nativeQuestionThreads.has(threadId);
+  }
+
+  /** A server restart cannot recover JSON-RPC responders from persisted batches. */
+  async recoverNativeQuestions(): Promise<void> {
+    for (const batch of this.questions.pendingNative()) {
+      await this.settleNativeQuestions(batch, "expired");
+    }
+  }
+
+  private async settleNativeQuestions(batch: NativePlanQuestionBatch, status: PlanQuestionSettlement): Promise<void> {
+    const receipt = await this.questions.settleNative(batch, status);
+    if (!receipt) return;
+    broadcast(status === "answered" ? "plan.answered" : "plan.dismissed", {
+      threadId: batch.threadId, assistantMessageId: batch.requestId,
+    });
+    this.threadRepo.publishPlanPhase(batch.threadId);
+    this.publishNativeReceipt?.({ type: "system", threadId: batch.threadId, subtype: "plan.questions.settled",
+      message: receipt.content, messageId: receipt.id,
+      systemNotice: { kind: "diagnostic", presentation: "timeline", scope: "turn", noticeKey: batch.requestId } });
   }
 
   /** Refuse admission when the provider would see a stale plan file. */
@@ -74,6 +124,7 @@ export class PlanTurnService {
     if (mode !== "plan") return { kind: "none" };
     const latest = this.planRepo.getLatestForThread(threadId);
     if (latest && (latest.status === "draft" || latest.status === "ready")) return this.classifyOutput(threadId, "revise", providerId);
+    if (this.usesNativeQuestions(threadId)) return this.classifyOutput(threadId, "planning", providerId);
     this.beginQuestionGeneration(threadId);
     return { kind: "questions", planFilePath: null };
   }
@@ -197,6 +248,16 @@ ${userMessage}`;
   ): Promise<void> {
     const thread = this.threadRepo.findById(threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
+    const native = this.questions.pendingNative(threadId)[0];
+    if (native) {
+      const provider = this.providerRegistry.resolve(ProviderIdSchema.parse(thread.provider));
+      if (!await provider.respondToPlanQuestions?.(threadId, native.requestId, answers)) {
+        await this.settleNativeQuestions(native, "expired");
+        throw new Error("Questions expired");
+      }
+      return;
+    }
+    if (answers.some(answer => /^[0-9a-f-]{36}:/.test(answer.questionId))) throw new Error("Questions expired");
     const payload = this.questions.buildAnswerPayload(threadId, answers);
     await this.commands.sendMessage({
       threadId,
@@ -214,6 +275,15 @@ ${userMessage}`;
 
   /** Settle the latest plan-question batch without sending a provider turn. */
   async dismissQuestions(threadId: string): Promise<void> {
+    const native = this.questions.pendingNative(threadId)[0];
+    if (native) {
+      const thread = this.threadRepo.findById(threadId);
+      const provider = this.providerRegistry.resolve(ProviderIdSchema.parse(thread?.provider));
+      if (!await provider.respondToPlanQuestions?.(threadId, native.requestId, "dismiss")) {
+        await this.settleNativeQuestions(native, "expired");
+      }
+      return;
+    }
     const assistantMessageId = await this.questions.dismiss(threadId);
     if (assistantMessageId) broadcast("plan.dismissed", { threadId, assistantMessageId });
     if (this.threadRepo.findById(threadId)?.plan_phase === "questions") await this.threadRepo.updatePlanPhase(threadId, null);

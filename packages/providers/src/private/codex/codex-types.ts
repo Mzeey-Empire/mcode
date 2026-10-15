@@ -164,6 +164,12 @@ export type TurnInputPart =
 export interface TurnStartParams {
   threadId: string;
   input: TurnInputPart[];
+  /** Native planning and the explicit transition back to building. */
+  collaborationMode?: { mode: "plan" | "default"; settings: {
+    model: string; reasoning_effort: ReasoningEffort | null; developer_instructions: null;
+  } };
+  /** Codex rejects an array here, including an empty array. */
+  additionalContext?: Record<string, string>;
   /** Override model for this turn. */
   model?: string | null;
   /** Override approval policy for this turn and subsequent turns. */
@@ -182,7 +188,7 @@ export interface TurnStartParams {
 }
 
 /** Per-turn overrides passed from {@link CodexProvider} to {@link CodexAppServer.sendTurn}. */
-export type CodexTurnOptions = Pick<TurnStartParams, "model" | "effort" | "serviceTier" | "approvalsReviewer">;
+export type CodexTurnOptions = Pick<TurnStartParams, "model" | "effort" | "serviceTier" | "approvalsReviewer" | "collaborationMode" | "additionalContext">;
 
 /** Result returned by the `turn/start` RPC method. */
 export interface TurnStartResult {

@@ -3,6 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
+import * as NodeURL from "node:url";
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentEventSchema, CanonicalAgentProgressFrameSchema, WS_CHANNELS, WS_METHODS, type AgentEvent, type PlanVersion, type ProviderRuntimeEvent } from "@mcode/contracts";
@@ -23,6 +24,8 @@ import { planImplementWriteOperations } from "../persistence/plan-implement-writ
 import { PlanCommentStore } from "../persistence/plan-comment-store.js";
 import { openMigratedTestDatabase } from "../../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
 import { leaseWriterWorker } from "../../../../runtime/persistence/sqlite/testing/reusable-writer-worker.js";
+import { CodexEventMapper } from "../../../../../../../packages/providers/src/private/codex/codex-event-mapper.js";
+import { loadPlanProtocolFixture } from "../../../../../../../packages/providers/src/conformance/plan-probes/fixture.js";
 
 const pushes = vi.hoisted(() => ({ versions: [] as unknown[], frames: [] as unknown[], comments: [] as unknown[] }));
 vi.mock("../../../../application/transport/push.js", () => ({
@@ -227,6 +230,48 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
       terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
     if (waitForSaves) await expect.poll(() => progress.depth().pending, { timeout: 10_000 }).toBe(0);
   }
+
+  it("saves one native version from the captured Codex plan without streaming plan text", async () => {
+    const capture = loadPlanProtocolFixture(NodeURL.fileURLToPath(new URL(
+      "../../../../../../../packages/providers/src/conformance/fixtures/plan-protocol/r1-codex-plan-02.captured.json",
+      import.meta.url,
+    )));
+    const completed = capture.input.messages.find(message => message.operation === "item/completed"
+      && message.fields.some(field => field.at === "item.type" && field.kind === "literal" && field.value === "plan"));
+    if (!completed) throw new Error("Captured plan item missing");
+    const identity = (at: string) => {
+      const field = completed.fields.find(candidate => candidate.at === at && candidate.kind === "identity");
+      if (field?.kind !== "identity") throw new Error(`Captured identity missing: ${at}`);
+      return field.alias;
+    };
+    const mapper = new CodexEventMapper(threadId);
+    const nativeThreadId = identity("threadId");
+    const nativeTurnId = identity("turnId");
+    const itemId = identity("item.id");
+    await start();
+    expect(mapper.mapNotification({ method: "item/plan/delta", params: {
+      threadId: nativeThreadId, turnId: nativeTurnId, itemId, delta: "# Greeting",
+    } })).toEqual([]);
+    const mapped = mapper.mapNotification({ method: completed.operation, params: {
+      threadId: nativeThreadId, turnId: nativeTurnId,
+      item: { type: "plan", id: itemId, text: "# Greeting\nUse a cheerful greeting." },
+    } });
+    expect(mapped).toHaveLength(1);
+    const message = mapped[0];
+    if (message?.event.type !== "message") throw new Error("Plan capture missing");
+    await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [event(1, "message", message.event, message.planCapture)] });
+    expect(mapper.mapNotification({ method: completed.operation, params: {
+      threadId: nativeThreadId, turnId: nativeTurnId,
+      item: { type: "plan", id: itemId, text: "# Greeting\nUse a cheerful greeting." },
+    } })).toEqual([]);
+    await send(3, { kind: "event", phase: "running", nativeCursor: null, events: [event(2, "turnComplete")],
+      terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+    await expect.poll(() => progress.depth().pending, { timeout: 10_000 }).toBe(0);
+    expect(plans.listByThread(threadId).filter(plan => plan.captureSource === "native")
+      .map(plan => ({ version: plan.version, content: plan.contentMd, status: plan.status })))
+      .toEqual([{ version: 2, content: "# Greeting\nUse a cheerful greeting.", status: "ready" }]);
+  });
 
   function insertCanonicalItem(id: string, payload: string) {
     db.prepare("INSERT INTO canonical_agent_items (id, thread_id, turn_id, kind, payload_json, provider_identities_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")

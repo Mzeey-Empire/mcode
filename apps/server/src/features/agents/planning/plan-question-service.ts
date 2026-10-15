@@ -14,6 +14,7 @@ import { z } from "zod";
 import { MessageRepo } from "../conversation/persistence/message-repo.js";
 import { PlanQuestionAnswersRepo } from "./persistence/plan-question-answers-repo.js";
 import { lazySchema, PLAN_ANSWER_MESSAGE_PREFIX, type Message } from "@mcode/contracts";
+import type { NativePlanQuestionBatch, PlanQuestionSettlement } from "@mcode/contracts";
 
 /** Matches a fenced `plan-questions` block and captures its JSON body. */
 const PLAN_QUESTIONS_RE = /```plan-questions\n([\s\S]*?)```/;
@@ -62,6 +63,21 @@ export class PlanQuestionService {
   /** Compose accepted read-through without making the wizard own execution progress or saving. */
   bindAcceptedProgress(progress: AcceptedPlanQuestionProgress): void {
     this.acceptedProgress = progress;
+  }
+
+  /** Stored native batches are independent of the renderer's connection. */
+  pendingNative(threadId?: string) {
+    return this.planQuestionAnswersRepo.pendingNative(threadId);
+  }
+
+  /** Save the batch before any client can answer it. */
+  createNative(batch: NativePlanQuestionBatch): Promise<void> {
+    return this.planQuestionAnswersRepo.createNative(batch);
+  }
+
+  /** Persist the terminal disposition and its timeline receipt together. */
+  settleNative(batch: NativePlanQuestionBatch, status: PlanQuestionSettlement): Promise<Message | null> {
+    return this.planQuestionAnswersRepo.settleNative(batch, status);
   }
 
   /**

@@ -47,6 +47,25 @@ export const PlanAnswerSchema = lazySchema(() =>
 /** A user's answer to a single plan question. */
 export type PlanAnswer = z.infer<ReturnType<typeof PlanAnswerSchema>>;
 
+/** A provider request whose responder belongs to the running server connection. */
+export const NativePlanQuestionBatchSchema = lazySchema(() => z.object({
+  requestId: z.string().uuid(),
+  threadId: z.string().min(1),
+  questions: z.array(PlanQuestionSchema()).min(1).max(15),
+}));
+
+/** Native question identity retained across renderer reconnects. */
+export type NativePlanQuestionBatch = z.infer<ReturnType<typeof NativePlanQuestionBatchSchema>>;
+
+/** Terminal disposition of a native question request. */
+export type PlanQuestionSettlement = "answered" | "dismissed" | "expired";
+
+/** Persistence acknowledgements gate publication and native response delivery. */
+export interface PlanQuestionHandler {
+  requested(batch: NativePlanQuestionBatch): Promise<void>;
+  settled(batch: NativePlanQuestionBatch, status: PlanQuestionSettlement): Promise<void>;
+}
+
 /** Batch of plan questions emitted by the model. */
 export const PlanQuestionBatchSchema = lazySchema(() =>
   z.object({

@@ -717,6 +717,13 @@ export class ThreadCreationCoordinator {
     if (!thread || thread.deleted_at) await this.startups()?.clearThreadBinding(startup.startupId);
   }
 
+  private async initialPlanPrompt(threadId: string, providerId: ProviderId, mode: InteractionMode | undefined, prompt: string): Promise<string> {
+    const plans = this.plans();
+    if (!plans || mode !== "plan") return prompt;
+    await plans.prepareNativeQuestions(threadId, providerId);
+    return plans.usesNativeQuestions(threadId) ? prompt : plans.buildQuestionPrompt(prompt);
+  }
+
   private async provisionBranchedInitialTurn(
     params: BranchedInitialTurnParams & { parentThreadId: string },
     startup?: ThreadStartup,
@@ -746,9 +753,8 @@ export class ThreadCreationCoordinator {
       orchestrationMode: params.orchestrationMode,
     }, this.branchedLifecycle(startup));
     await this.finishBranchedStartup(startup, provisioned.thread);
-    const providerWireOverride = params.interactionMode === "plan"
-      ? this.plans()?.buildQuestionPrompt(provisioned.providerWireOverride) ?? provisioned.providerWireOverride
-      : provisioned.providerWireOverride;
+    const providerWireOverride = await this.initialPlanPrompt(provisioned.thread.id, params.provider,
+      params.interactionMode, provisioned.providerWireOverride);
     return {
       kind: "dispatch",
       ...(startup ? { startupId: startup.startupId } : {}),

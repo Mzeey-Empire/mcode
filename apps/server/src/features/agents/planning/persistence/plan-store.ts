@@ -12,6 +12,7 @@ import type { PlanPersistenceReady } from "../plan-execution-state.js";
 import type { PlanSaveResult, PlanSnapshotResult } from "./plan-write-operations.js";
 import { ThreadStore } from "../../../thread-control/persistence/thread-store.js";
 import { PlanQuestionParser } from "../plan-question-parser.js";
+import { PlanQuestionAnswersStore } from "./plan-question-answers-store.js";
 import { PlanCommentStore } from "./plan-comment-store.js";
 import { hasPreparingPlanImplement, hasUnfinishedPlanExecution } from "./plan-write-availability.js";
 
@@ -106,6 +107,8 @@ export class PlanStore {
   }
 
   private pendingQuestions(threadId: string) {
+    const native = new PlanQuestionAnswersStore(this.db).pendingNative(threadId)[0];
+    if (native) return { assistantMessageId: native.requestId, questions: native.questions };
     const message = this.db.query<{ id: string; content: string }, [string, string]>(`SELECT id, content FROM messages
       WHERE thread_id = ? AND role = 'assistant' AND instr(content, ?) > 0
       ORDER BY sequence DESC LIMIT 1`).get(threadId, "```plan-questions");

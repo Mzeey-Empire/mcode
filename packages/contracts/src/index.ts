@@ -910,6 +910,7 @@ export {
   PlanQuestionSchema,
   PlanAnswerSchema,
   PlanQuestionBatchSchema,
+  NativePlanQuestionBatchSchema,
   PLAN_ANSWER_MESSAGE_PREFIX,
 } from "./models/plan-questions.js";
 export type {
@@ -917,6 +918,9 @@ export type {
   PlanQuestion,
   PlanAnswer,
   PlanQuestionBatch,
+  NativePlanQuestionBatch,
+  PlanQuestionSettlement,
+  PlanQuestionHandler,
 } from "./models/plan-questions.js";
 
 // Plan output

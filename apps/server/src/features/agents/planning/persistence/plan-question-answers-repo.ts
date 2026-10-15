@@ -17,6 +17,21 @@ export class PlanQuestionAnswersRepo {
     return this.writer.execute(planQuestionAnswersWriteOperations.markAnswered, [assistantMessageId, threadId]);
   }
 
+  /** Publish only after the sole writer has saved this native batch. */
+  createNative(batch: Parameters<PlanQuestionAnswersStore["createNative"]>[0]): Promise<void> {
+    return this.writer.execute(planQuestionAnswersWriteOperations.createNative, batch);
+  }
+
+  /** Retire a native request and its dock through the sole writer. */
+  settleNative(batch: Parameters<PlanQuestionAnswersStore["settleNative"]>[0], status: Parameters<PlanQuestionAnswersStore["settleNative"]>[1]): Promise<ReturnType<PlanQuestionAnswersStore["settleNative"]>> {
+    return this.writer.execute(planQuestionAnswersWriteOperations.settleNative, { batch, status });
+  }
+
+  /** Stored native batches whose connection has not been settled. */
+  pendingNative(threadId?: string) {
+    return this.reader.pendingNative(threadId);
+  }
+
   isAnswered(assistantMessageId: Parameters<PlanQuestionAnswersStore["isAnswered"]>[0]): ReturnType<PlanQuestionAnswersStore["isAnswered"]> {
     return this.reader.isAnswered(assistantMessageId);
   }
