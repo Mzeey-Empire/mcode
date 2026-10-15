@@ -540,6 +540,30 @@ describe("MessageBubble user messages", () => {
     );
   });
 
+  it("re-points the tile thumbnail and viewer when the web transport connects after mount", async () => {
+    const user = userEvent.setup();
+    const threadUuid = "550e8400-e29b-41d4-a716-446655440000";
+    const message: Message = { ...makeMessage(""), thread_id: threadUuid, previewAnnotations: makePreviewAnnotationBundleV2() };
+
+    clearAttachmentTransportWsUrlCache();
+    try {
+      const { getByTestId } = render(<MessageBubble message={message} />);
+      const tile = getByTestId("sent-browser-notes-tile");
+      expect(tile.querySelector("img")).toHaveAttribute("src", `mcode-attachment://${threadUuid}/page-shot-1.png`);
+
+      await act(async () => {
+        setAttachmentTransportWsUrl("ws://127.0.0.1:19400");
+      });
+
+      const httpSrc = `http://127.0.0.1:19400/attachments/${threadUuid}/page-shot-1.png`;
+      expect(tile.querySelector("img")).toHaveAttribute("src", httpSrc);
+      await user.click(tile);
+      expect(getByTestId("mock-lightbox")).toHaveAttribute("data-active-src", httpSrc);
+    } finally {
+      clearAttachmentTransportWsUrlCache();
+    }
+  });
+
   it("keeps note snapshots out of the attachment row and leaves other images", () => {
     const threadUuid = "550e8400-e29b-41d4-a716-446655440000";
     const message: Message = {

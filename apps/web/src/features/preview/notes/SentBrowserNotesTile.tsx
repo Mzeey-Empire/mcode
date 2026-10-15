@@ -1,10 +1,14 @@
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useState, useSyncExternalStore } from "react";
 import { MousePointer2 } from "lucide-react";
 import type { PreviewAnnotationBundle } from "@mcode/contracts";
 import { ImageAttachmentLightbox } from "@/components/chat/ImageAttachmentLightbox";
 import { useRetriableAttachmentImage } from "@/components/chat/useRetriableAttachmentImage";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { buildStoredAttachmentImageSrc } from "@/lib/attachment-url";
+import {
+  buildStoredAttachmentImageSrc,
+  getAttachmentTransportUrlSnapshot,
+  subscribeToAttachmentTransportUrl,
+} from "@/lib/attachment-url";
 import { cn } from "@/lib/utils";
 import { readSentNotes, type SentNotesModel, type SentNotesPage } from "./sentBrowserNotes";
 
@@ -120,12 +124,18 @@ export function SentBrowserNotesTile({ bundle, threadId, variant = "bubble" }: S
   const cardId = useId();
   const [viewer, setViewer] = useState<number | null>(null);
   const model = useMemo(() => readSentNotes(bundle), [bundle]);
+  const attachmentTransportUrl = useSyncExternalStore(
+    subscribeToAttachmentTransportUrl,
+    getAttachmentTransportUrlSnapshot,
+    getAttachmentTransportUrlSnapshot,
+  );
   const slides = useMemo(() => {
+    void attachmentTransportUrl;
     if (!model || !threadId) return [];
     return model.pages.flatMap((page) => page.snapshot
       ? [{ pageIdentity: page.pageIdentity, src: buildStoredAttachmentImageSrc(threadId, page.snapshot.id, page.snapshot.mimeType), title: page.snapshot.name }]
       : []);
-  }, [model, threadId]);
+  }, [attachmentTransportUrl, model, threadId]);
   if (!model) return null;
 
   const open = (page: SentNotesPage | undefined) => {
