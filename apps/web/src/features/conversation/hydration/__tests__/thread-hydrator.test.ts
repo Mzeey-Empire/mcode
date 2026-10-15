@@ -100,7 +100,7 @@ function createStoreHydrator(): ThreadHydrator {
     reconcilePlanQuestions: vi.fn(),
     getPlanQuestionsRevision: () => 0,
     setPlanCommentsForThread: (threadId, comments) => usePlanStore.getState().setComments(threadId, comments),
-    setPendingImplementForThread: (threadId, pending) => usePlanStore.getState().setPendingImplement(threadId, pending),
+    beginPendingImplementRead: (threadId) => usePlanStore.getState().beginPendingImplementRead(threadId),
     shallowEqualBy,
     coerceTaskStatus,
     getWorkspaceThreadSettings: () => ({

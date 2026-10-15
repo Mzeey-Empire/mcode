@@ -48,7 +48,7 @@ export interface AuxiliaryHydratorDeps {
   ) => void;
   getPlanQuestionsRevision: (threadId: string) => number;
   setPlanCommentsForThread: (threadId: string, comments: readonly PlanComment[]) => void;
-  setPendingImplementForThread: (threadId: string, pending: PendingPlanImplement | null) => void;
+  beginPendingImplementRead: (threadId: string) => (pending: PendingPlanImplement | null) => void;
   shallowEqualBy: <T>(a: readonly T[], b: readonly T[], keys: (keyof T)[]) => boolean;
   coerceTaskStatus: (status: string) => TaskItem["status"];
 }
@@ -137,12 +137,13 @@ export class AuxiliaryHydrator {
 
   private hydratePlans(threadId: string): void {
     const questionsRevision = this.deps.getPlanQuestionsRevision(threadId);
+    const applyPendingImplement = this.deps.beginPendingImplementRead(threadId);
     this.transport()
       .getPlanSnapshot(threadId)
       .then((snapshot) => {
         for (const plan of snapshot.versions) this.deps.addPlanForThread(threadId, plan);
         this.deps.setPlanCommentsForThread(threadId, snapshot.comments);
-        this.deps.setPendingImplementForThread(threadId, snapshot.pendingImplement);
+        applyPendingImplement(snapshot.pendingImplement);
         this.deps.reconcilePlanQuestions(threadId, questionsRevision, snapshot.pendingQuestions);
       })
       .catch((err: unknown) => {

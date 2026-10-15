@@ -162,12 +162,13 @@ export async function implementPlan(threadId: string, target: PlanImplement["tar
     const basis = await scheduler.beginImplement(() => currentTarget(threadId));
     if (!basis) return;
     const carried = basis.pending !== undefined;
+    const applyReceiptHold = usePlanStore.getState().beginPendingImplementRead(threadId);
     const outcome = await sendImplementWithReplay({ requestId: crypto.randomUUID(), threadId, target, ...basis });
     scheduler.finishImplement(outcome);
     if (outcome.kind === "admitted") {
       // The source stays in Plan until the target's first turn is admitted behind Setup.
       if (outcome.waitingForSetup) {
-        usePlanStore.getState().setPendingImplement(threadId, { targetThreadId: outcome.targetThreadId, version: outcome.version });
+        applyReceiptHold({ targetThreadId: outcome.targetThreadId, version: outcome.version });
       } else {
         mirrorAdmittedBuildMode(threadId);
       }

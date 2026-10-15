@@ -46,7 +46,7 @@ describe("AuxiliaryHydrator", () => {
   ) => void;
   let planQuestionsRevision: number;
   let setPlanCommentsForThread: (threadId: string, comments: readonly PlanComment[]) => void;
-  let setPendingImplementForThread: (threadId: string, pending: PendingPlanImplement | null) => void;
+  let applyPendingImplementRead: (pending: PendingPlanImplement | null) => void;
   let records: Map<string, ThreadRecord>;
   let currentThreadId: string | null;
 
@@ -66,7 +66,7 @@ describe("AuxiliaryHydrator", () => {
     reconcilePlanQuestions = vi.fn() as typeof reconcilePlanQuestions;
     planQuestionsRevision = 0;
     setPlanCommentsForThread = vi.fn() as (threadId: string, comments: readonly PlanComment[]) => void;
-    setPendingImplementForThread = vi.fn() as (threadId: string, pending: PendingPlanImplement | null) => void;
+    applyPendingImplementRead = vi.fn() as (pending: PendingPlanImplement | null) => void;
 
     cacheRecord(THREAD_ID, makeThinRecord());
   });
@@ -112,7 +112,7 @@ describe("AuxiliaryHydrator", () => {
       reconcilePlanQuestions,
       getPlanQuestionsRevision: () => planQuestionsRevision,
       setPlanCommentsForThread,
-      setPendingImplementForThread,
+      beginPendingImplementRead: () => applyPendingImplementRead,
       shallowEqualBy,
       coerceTaskStatus,
     });
@@ -200,7 +200,7 @@ describe("AuxiliaryHydrator", () => {
     createAux().hydrate(THREAD_ID, { freshnessTtlMs: HYDRATION_TTL_MS, force: true });
 
     await vi.waitFor(() => {
-      expect(setPendingImplementForThread).toHaveBeenCalledWith(THREAD_ID, pending);
+      expect(applyPendingImplementRead).toHaveBeenCalledWith(pending);
     });
   });
 

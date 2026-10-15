@@ -99,7 +99,7 @@ export interface ThreadHydratorDeps {
   ) => void;
   getPlanQuestionsRevision: (threadId: string) => number;
   setPlanCommentsForThread: (threadId: string, comments: readonly PlanComment[]) => void;
-  setPendingImplementForThread: (threadId: string, pending: PendingPlanImplement | null) => void;
+  beginPendingImplementRead: (threadId: string) => (pending: PendingPlanImplement | null) => void;
   shallowEqualBy: <T>(a: readonly T[], b: readonly T[], keys: (keyof T)[]) => boolean;
   coerceTaskStatus: (status: string) => TaskItem["status"];
   getWorkspaceThreadSettings: (threadId: string) => import("@/stores/thread-record").ThreadSettings;
