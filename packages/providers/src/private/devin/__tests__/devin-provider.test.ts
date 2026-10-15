@@ -373,7 +373,7 @@ describe("DevinProvider", () => {
     createProvider(host);
 
     await provider!.sendTurn(turn({ providerOptions: { mode: "smart" } }));
-    await provider!.sendTurn(turn({ interactionMode: "plan" }));
+    await provider!.sendTurn(turn({ interactionMode: "plan", planTurn: { kind: "planning", planFilePath: null } }));
     await provider!.sendTurn(turn({ providerOptions: { mode: "smart" } }));
 
     const modeCalls = fake.connection.setSessionConfigOption.mock.calls
@@ -384,6 +384,49 @@ describe("DevinProvider", () => {
     const modelCalls = fake.connection.setSessionConfigOption.mock.calls
       .filter(([args]) => (args as { configId: string }).configId === "model");
     expect(modelCalls).toHaveLength(1);
+  });
+
+  it.each(["questions", "planning", "revise"] as const)("applies plan for a classified %s turn and leaves it on the next build", async (kind) => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    const p = createProvider(host);
+    let mode = "normal";
+    fake.connection.setSessionConfigOption.mockImplementation(async (input: { configId: string; value: string }) => {
+      if (input.configId === "mode") mode = input.value;
+      return {};
+    });
+    vi.mocked(fake.runtime.prompt).mockImplementation(async () => {
+      await textChunk(fake, "devin-acp-1", `Reply in ${mode}`);
+      return { stopReason: "end_turn", usage: {} };
+    });
+    await p.sendTurn(turn({ planTurn: { kind, planFilePath: null } }));
+    await p.sendTurn(turn({ turnId: "turn-2", turnExecutionId: "execution-2", providerOptions: { mode: "plan" } }));
+    expect(submittedRuntimeEvents(host).filter((event) => event.type === "message").map((event) => event.content))
+      .toEqual(["Reply in plan", "Reply in normal"]);
+  });
+
+  it("restores build mode after an observed native plan switch despite the dedupe cache", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    const p = createProvider(host);
+    let mode = "normal";
+    fake.connection.setSessionConfigOption.mockImplementation(async (input: { configId: string; value: string }) => {
+      if (input.configId === "mode") mode = input.value;
+      return {};
+    });
+    vi.mocked(fake.runtime.prompt).mockImplementation(async () => {
+      await textChunk(fake, "devin-acp-1", `Reply in ${mode}`);
+      mode = "plan";
+      await fake.callbacks.onSessionUpdate?.({ sessionId: "devin-acp-1",
+        update: { sessionUpdate: "current_mode_update", currentModeId: "plan" } });
+      return { stopReason: "end_turn", usage: {} };
+    });
+    await p.sendTurn(turn());
+    await p.sendTurn(turn({ turnId: "turn-2", turnExecutionId: "execution-2", interactionMode: "plan" }));
+    expect(submittedRuntimeEvents(host).filter((event) => event.type === "message").map((event) => event.content))
+      .toEqual(["Reply in normal", "Reply in normal"]);
   });
 
   it("composes the wire model id from the family model and reasoning level", async () => {
@@ -666,7 +709,7 @@ describe("DevinProvider", () => {
 
     await p.sendTurn(turn());
     await p.sendTurn(turn({ providerOptions: { mode: "smart" } }));
-    await p.sendTurn(turn({ interactionMode: "plan" }));
+    await p.sendTurn(turn({ interactionMode: "plan", planTurn: { kind: "planning", planFilePath: null } }));
 
     const modeCalls = fake.connection.setSessionConfigOption.mock.calls
       .filter(([args]) => (args as { configId: string }).configId === "mode")
