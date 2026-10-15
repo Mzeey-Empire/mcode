@@ -346,7 +346,6 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     capturePictureReferenceElementPick(): Promise<unknown> {
       return ipcRenderer.invoke("preview:capture-picture-element-pick");
     },
-    /** Capture the clean visible preview and its page context. */
     captureAnnotationSnapshot(): Promise<unknown> {
       return ipcRenderer.invoke("preview:capture-annotation-snapshot");
     },
