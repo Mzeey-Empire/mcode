@@ -37,6 +37,7 @@ vi.mock("../../../../../../../packages/providers/node_modules/@github/copilot-sd
     start = async () => {};
     stop = async () => [];
     forceStop = async () => {};
+    getState = () => "connected";
     createSession = async () => copilotSdk.session;
     listModels = async () => [{ id: "model", name: "Model", capabilities: { supports: { reasoningEffort: false } } }];
   },
