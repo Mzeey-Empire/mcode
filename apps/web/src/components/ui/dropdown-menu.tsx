@@ -18,7 +18,7 @@ import { POPOVER_FADE_CLASS, POPOVER_SURFACE_CLASS } from "./overlay-surface"
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip"
 
 const MENU_ITEM_ROW_CLASS = cn(MENU_ROW_CLASS, MENU_ROW_DISABLED_CLASS, "data-highlighted:bg-hover")
-const MENU_ITEM_DESCRIBED_CLASS = "h-auto min-h-row-default py-2"
+const MENU_ITEM_DESCRIBED_CLASS = "h-auto min-h-row-default py-0.5"
 
 /**
  * Dropdown menu root that allows pointer interaction outside the popup by default.
