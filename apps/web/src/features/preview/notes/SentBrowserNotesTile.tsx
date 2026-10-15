@@ -71,6 +71,7 @@ function NotesCard({ id, model, label, canOpen, onOpen }: {
       aria-label={`${label} details`}
       side="top"
       align="end"
+      initialFocus={false}
       className="max-h-(--available-height) w-[340px] overflow-y-auto rounded-[14px] p-1.5"
       data-testid="sent-browser-notes-card"
     >
@@ -123,6 +124,7 @@ function NotesCard({ id, model, label, canOpen, onOpen }: {
 export function SentBrowserNotesTile({ bundle, threadId, variant = "bubble" }: SentBrowserNotesTileProps) {
   const cardId = useId();
   const [viewer, setViewer] = useState<number | null>(null);
+  const [cardOpen, setCardOpen] = useState(false);
   const model = useMemo(() => readSentNotes(bundle), [bundle]);
   const attachmentTransportUrl = useSyncExternalStore(
     subscribeToAttachmentTransportUrl,
@@ -148,11 +150,15 @@ export function SentBrowserNotesTile({ bundle, threadId, variant = "bubble" }: S
 
   return (
     <>
-      <Popover>
+      <Popover open={cardOpen} onOpenChange={setCardOpen}>
         <PopoverTrigger
           openOnHover
           delay={0}
           closeDelay={100}
+          onFocus={(event) => {
+            // Keyboard-only: a mouse click focuses the tile too, and would reopen the card after the viewer closes.
+            if (event.currentTarget.matches(":focus-visible")) setCardOpen(true);
+          }}
           aria-label={`${model.label}. Details available.`}
           aria-controls={cardId}
           data-testid="sent-browser-notes-tile"

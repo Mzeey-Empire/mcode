@@ -527,6 +527,21 @@ describe("MessageBubble user messages", () => {
     ]);
   });
 
+  it("opens the notes card on keyboard focus and closes it on Escape", async () => {
+    const user = userEvent.setup();
+    const message: Message = { ...makeMessage(""), previewAnnotations: makeTwoPageV1Bundle() };
+
+    const { findByTestId, getAllByTestId, getByTestId, queryByTestId } = render(<MessageBubble message={message} />);
+    await user.tab();
+
+    expect(getByTestId("sent-browser-notes-tile")).toHaveFocus();
+    expect(await findByTestId("sent-browser-notes-card")).toBeVisible();
+    await user.tab();
+    expect(getAllByTestId("sent-browser-note-row")[0]).toHaveFocus();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(queryByTestId("sent-browser-notes-card")).not.toBeInTheDocument());
+  });
+
   it("reads a v2 bundle's page snapshot as the tile thumbnail", async () => {
     const threadUuid = "550e8400-e29b-41d4-a716-446655440000";
     const message: Message = { ...makeMessage(""), thread_id: threadUuid, previewAnnotations: makePreviewAnnotationBundleV2() };
