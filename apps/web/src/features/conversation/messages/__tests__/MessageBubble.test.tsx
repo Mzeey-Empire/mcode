@@ -195,6 +195,31 @@ function makeCodeCommentBundle(): V1Bundle {
   };
 }
 
+/** Two pages: page one holds notes 1 and 3 (snapshots shot-1, shot-3), page two holds note 2 (shot-2). */
+function makeTwoPageV1Bundle(): V1Bundle {
+  const base = makePreviewAnnotationBundle().annotations[0];
+  if (!("pageIdentity" in base)) throw new Error("fixture must be a browser note");
+  const note = (displayNumber: number, shotId: string, pageUrl: string, pageTitle: string, text: string): V1Bundle["annotations"][number] => ({
+    ...base,
+    id: `550e8400-e29b-41d4-a716-4466554400${displayNumber}0`,
+    displayNumber,
+    pageIdentity: pageUrl,
+    pageContext: { ...base.pageContext, pageUrl, pageTitle },
+    note: text,
+    snapshot: { ...base.snapshot, id: shotId, name: `${shotId}.png` },
+  });
+  const home = "http://localhost:44354/product-preview";
+  const pricing = "http://localhost:44354/pricing";
+  return {
+    schemaVersion: 1,
+    annotations: [
+      note(1, "shot-1", home, "Product preview", "first note"),
+      note(2, "shot-2", pricing, "Pricing", "second note"),
+      note(3, "shot-3", home, "Product preview", "third note"),
+    ],
+  };
+}
+
 function makeMixedFeedbackBundle(): V1Bundle {
   const preview = makePreviewAnnotationBundle().annotations[0];
   const comment = makeCodeCommentBundle().annotations[0];
@@ -474,120 +499,167 @@ describe("MessageBubble user messages", () => {
     expect(lb?.getAttribute("data-active-title")).toBe("two.png");
   });
 
-  it("renders sent preview annotation chips for annotation-only messages", () => {
-    const message: Message = {
-      ...makeMessage(""),
-      previewAnnotations: makePreviewAnnotationBundle(),
-    };
+  it("renders one tile for an annotation-only message", () => {
+    const message: Message = { ...makeMessage(""), previewAnnotations: makePreviewAnnotationBundle() };
 
     const { getByTestId, queryByText } = render(<MessageBubble message={message} />);
 
-    expect(getByTestId("sent-preview-annotation-bundle-chip")).toHaveTextContent(
-      "1 annotation",
-    );
+    expect(getByTestId("sent-browser-notes-tile")).toHaveTextContent("1 note");
+    expect(getByTestId("sent-browser-notes-tile")).toHaveTextContent("Product preview");
     expect(queryByText("bundle")).not.toBeInTheDocument();
   });
 
-  it("renders a v2 bundle's notes with the page snapshot as their thumbnail", async () => {
+  it("shows a v1 message as one card per page with each note's original number", async () => {
     const user = userEvent.setup();
+    const message: Message = { ...makeMessage(""), previewAnnotations: makeTwoPageV1Bundle() };
+
+    const { findByTestId, getByTestId, getAllByTestId } = render(<MessageBubble message={message} />);
+
+    expect(getByTestId("sent-browser-notes-tile")).toHaveTextContent("3 notes");
+    await user.hover(getByTestId("sent-browser-notes-tile"));
+    const card = await findByTestId("sent-browser-notes-card");
+    expect(within(card).getByText("Product preview")).toBeVisible();
+    expect(within(card).getByText("Pricing")).toBeVisible();
+    expect(getAllByTestId("sent-browser-note-row").map((row) => row.textContent)).toEqual([
+      expect.stringMatching(/^1.*first note/),
+      expect.stringMatching(/^3.*third note/),
+      expect.stringMatching(/^2.*second note/),
+    ]);
+  });
+
+  it("opens the notes card on keyboard focus and closes it on Escape", async () => {
+    const user = userEvent.setup();
+    const message: Message = { ...makeMessage(""), previewAnnotations: makeTwoPageV1Bundle() };
+
+    const { findByTestId, getAllByTestId, getByTestId, queryByTestId } = render(<MessageBubble message={message} />);
+    await user.tab();
+
+    expect(getByTestId("sent-browser-notes-tile")).toHaveFocus();
+    expect(await findByTestId("sent-browser-notes-card")).toBeVisible();
+    await user.tab();
+    expect(getAllByTestId("sent-browser-note-row")[0]).toHaveFocus();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(queryByTestId("sent-browser-notes-card")).not.toBeInTheDocument());
+  });
+
+  it("reads a v2 bundle's page snapshot as the tile thumbnail", async () => {
     const threadUuid = "550e8400-e29b-41d4-a716-446655440000";
-    const message: Message = {
-      ...makeMessage(""),
-      thread_id: threadUuid,
-      previewAnnotations: makePreviewAnnotationBundleV2(),
-    };
+    const message: Message = { ...makeMessage(""), thread_id: threadUuid, previewAnnotations: makePreviewAnnotationBundleV2() };
 
-    const { findByTestId, getByTestId } = render(<MessageBubble message={message} />);
+    const { getByTestId } = render(<MessageBubble message={message} />);
 
-    expect(getByTestId("sent-preview-annotation-bundle-chip")).toHaveTextContent("1 annotation");
-    await user.hover(getByTestId("sent-preview-annotation-bundle-chip"));
-    expect(await findByTestId("preview-annotation-hover-thumbnail")).toHaveAttribute(
+    expect(getByTestId("sent-browser-notes-tile")).toHaveTextContent("1 note");
+    expect(getByTestId("sent-browser-notes-tile").querySelector("img")).toHaveAttribute(
       "src",
       `mcode-attachment://${threadUuid}/page-shot-1.png`,
     );
   });
 
-  it("labels code review feedback as comments", async () => {
+  it("re-points the tile thumbnail and viewer when the web transport connects after mount", async () => {
     const user = userEvent.setup();
-    const message: Message = {
-      ...makeMessage(""),
-      previewAnnotations: makeCodeCommentBundle(),
-    };
+    const threadUuid = "550e8400-e29b-41d4-a716-446655440000";
+    const message: Message = { ...makeMessage(""), thread_id: threadUuid, previewAnnotations: makePreviewAnnotationBundleV2() };
 
-    const { findByText, getByTestId } = render(<MessageBubble message={message} />);
+    clearAttachmentTransportWsUrlCache();
+    try {
+      const { getByTestId } = render(<MessageBubble message={message} />);
+      const tile = getByTestId("sent-browser-notes-tile");
+      expect(tile.querySelector("img")).toHaveAttribute("src", `mcode-attachment://${threadUuid}/page-shot-1.png`);
 
-    expect(getByTestId("sent-preview-annotation-bundle-chip")).toHaveTextContent(
-      "1 comment",
-    );
-    await user.hover(getByTestId("sent-preview-annotation-bundle-chip"));
-    expect(await findByText("Comment")).toBeVisible();
+      await act(async () => {
+        setAttachmentTransportWsUrl("ws://127.0.0.1:19400");
+      });
+
+      const httpSrc = `http://127.0.0.1:19400/attachments/${threadUuid}/page-shot-1.png`;
+      expect(tile.querySelector("img")).toHaveAttribute("src", httpSrc);
+      await user.click(tile);
+      expect(getByTestId("mock-lightbox")).toHaveAttribute("data-active-src", httpSrc);
+    } finally {
+      clearAttachmentTransportWsUrlCache();
+    }
   });
 
-  it("keeps annotations and comments distinct in mixed feedback", () => {
-    const message: Message = {
-      ...makeMessage(""),
-      previewAnnotations: makeMixedFeedbackBundle(),
-    };
-
-    const { getByTestId } = render(<MessageBubble message={message} />);
-
-    expect(getByTestId("sent-preview-annotation-bundle-chip")).toHaveTextContent(
-      "1 annotation · 1 comment",
-    );
-  });
-
-  it("shows each annotation screenshot thumbnail in the chip hover", async () => {
-    const user = userEvent.setup();
+  it("keeps note snapshots out of the attachment row and leaves other images", () => {
     const threadUuid = "550e8400-e29b-41d4-a716-446655440000";
     const message: Message = {
       ...makeMessage(""),
       thread_id: threadUuid,
-      previewAnnotations: makePreviewAnnotationBundle(),
-    };
-
-    const { findByTestId, getByTestId } = render(<MessageBubble message={message} />);
-
-    await user.hover(getByTestId("sent-preview-annotation-bundle-chip"));
-
-    expect(await findByTestId("preview-annotation-hover-thumbnail")).toHaveAttribute(
-      "src",
-      `mcode-attachment://${threadUuid}/shot-1.png`,
-    );
-  });
-
-  it("renders preview annotation screenshots as inspectable image attachments", async () => {
-    const user = userEvent.setup();
-    const threadUuid = "550e8400-e29b-41d4-a716-446655440000";
-    const message: Message = {
-      ...makeMessage(""),
-      thread_id: threadUuid,
-      previewAnnotations: makePreviewAnnotationBundle(),
+      previewAnnotations: makePreviewAnnotationBundleV2(),
       attachments: [
-        {
-          id: "shot-1",
-          name: "Annotation 1 screenshot.png",
-          mimeType: "image/png",
-          sizeBytes: 128,
-        },
+        { id: "page-shot-1", name: "Product preview.png", mimeType: "image/png", sizeBytes: 128 },
+        { id: "pasted", name: "pasted.png", mimeType: "image/png", sizeBytes: 64 },
       ],
     };
 
-    const { container, getByTestId } = render(<MessageBubble message={message} />);
-    const btn = container.querySelector(
-      '[aria-label="Preview image Annotation 1 screenshot.png"]',
-    );
-    expect(btn).toBeTruthy();
+    const { container } = render(<MessageBubble message={message} />);
 
-    await user.click(btn!);
+    expect(container.querySelector('[aria-label="Preview image Product preview.png"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Preview image pasted.png"]')).toBeTruthy();
+  });
 
-    expect(getByTestId("sent-preview-annotation-bundle-chip")).toHaveTextContent(
-      "1 annotation",
+  it("hides every v1 per-note snapshot from the attachment row", () => {
+    const message: Message = {
+      ...makeMessage(""),
+      previewAnnotations: makeTwoPageV1Bundle(),
+      attachments: ["shot-1", "shot-2", "shot-3"].map((id) => ({
+        id,
+        name: `Annotation ${id}.png`,
+        mimeType: "image/png",
+        sizeBytes: 128,
+      })),
+    };
+
+    const { container } = render(<MessageBubble message={message} />);
+
+    expect(container.querySelectorAll('[aria-label^="Preview image"]')).toHaveLength(0);
+  });
+
+  it("opens the viewer on the page of the clicked note", async () => {
+    const user = userEvent.setup();
+    const threadUuid = "550e8400-e29b-41d4-a716-446655440000";
+    const message: Message = { ...makeMessage(""), thread_id: threadUuid, previewAnnotations: makeTwoPageV1Bundle() };
+
+    const { container, findByTestId, getAllByTestId } = render(<MessageBubble message={message} />);
+    await user.hover(await findByTestId("sent-browser-notes-tile"));
+    await findByTestId("sent-browser-notes-card");
+    await user.click(getAllByTestId("sent-browser-note-row")[2]);
+
+    const lb = container.ownerDocument.querySelector("[data-testid='mock-lightbox']");
+    expect(lb?.getAttribute("data-slide-count")).toBe("2");
+    expect(lb?.getAttribute("data-initial-index")).toBe("1");
+    expect(lb?.getAttribute("data-active-src")).toBe(`mcode-attachment://${threadUuid}/shot-2.png`);
+  });
+
+  it("opens the viewer on the page annotated last when the tile is clicked", async () => {
+    const user = userEvent.setup();
+    const threadUuid = "550e8400-e29b-41d4-a716-446655440000";
+    const message: Message = { ...makeMessage(""), thread_id: threadUuid, previewAnnotations: makeTwoPageV1Bundle() };
+
+    const { getByTestId } = render(<MessageBubble message={message} />);
+    await user.click(getByTestId("sent-browser-notes-tile"));
+
+    expect(getByTestId("mock-lightbox").getAttribute("data-active-src")).toBe(`mcode-attachment://${threadUuid}/shot-3.png`);
+  });
+
+  it("labels code review feedback as comments", async () => {
+    const user = userEvent.setup();
+    const message: Message = { ...makeMessage(""), previewAnnotations: makeCodeCommentBundle() };
+
+    const { findByTestId, getByTestId } = render(<MessageBubble message={message} />);
+
+    expect(getByTestId("sent-browser-notes-tile")).toHaveTextContent("1 comment");
+    await user.hover(getByTestId("sent-browser-notes-tile"));
+    expect(await findByTestId("sent-code-comment-row")).toHaveTextContent(
+      "apps/web/src/features/conversation/composer/Composer.tsx:946",
     );
-    const lb = container.querySelector("[data-testid='mock-lightbox']");
-    expect(lb?.getAttribute("data-active-src")).toBe(
-      `mcode-attachment://${threadUuid}/shot-1.png`,
-    );
-    expect(lb?.getAttribute("data-active-title")).toBe("Annotation 1 screenshot.png");
+  });
+
+  it("keeps notes and comments distinct in mixed feedback", () => {
+    const message: Message = { ...makeMessage(""), previewAnnotations: makeMixedFeedbackBundle() };
+
+    const { getByTestId } = render(<MessageBubble message={message} />);
+
+    expect(getByTestId("sent-browser-notes-tile")).toHaveTextContent("1 note · 1 comment");
   });
 
 });

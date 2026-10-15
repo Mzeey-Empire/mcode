@@ -15,6 +15,8 @@ import { isHandoffMessage, parseHandoffJson } from "@/components/chat/handoff-ut
 import { HandoffCard } from "@/components/chat/HandoffCard";
 import { FileAttachmentTile } from "@/components/chat/FileAttachmentTile";
 import { ImageAttachmentLightbox } from "@/components/chat/ImageAttachmentLightbox";
+import { SentBrowserNotesTile } from "@/features/preview/notes/SentBrowserNotesTile";
+import { readSentNotes } from "@/features/preview/notes/sentBrowserNotes";
 import { useThreadRecord } from "../state";
 import { AnsweredSummary } from "@/components/chat/plan-questions/AnsweredSummary";
 import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
@@ -22,7 +24,6 @@ import { DeltaBlock } from "../narrative/DeltaBlock";
 import { TURN_PROSE_CLASS } from "../narrative/narrative-layout";
 import { PersistedTurnHooks } from "../narrative/PersistedTurnHooks";
 import { parseGoalStatusNotice } from "@/lib/goal-message";
-import { PreviewAnnotationBundleChip } from "@/components/chat/PreviewAnnotationBundleChip";
 import { useRetriableAttachmentImage } from "@/components/chat/useRetriableAttachmentImage";
 import { EntityToken } from "@/components/chat/EntityToken";
 import { basename } from "@/lib/path";
@@ -498,9 +499,13 @@ function useMessageAttachments(message: Message) {
     getAttachmentTransportUrlSnapshot,
     getAttachmentTransportUrlSnapshot,
   );
+  const noteSnapshotIds = useMemo(
+    () => message.previewAnnotations ? readSentNotes(message.previewAnnotations)?.snapshotIds : undefined,
+    [message.previewAnnotations],
+  );
   const imageAttachments = useMemo(
-    () => message.attachments?.filter((attachment) => attachment.mimeType.startsWith("image/")) ?? [],
-    [message.attachments],
+    () => message.attachments?.filter((attachment) => attachment.mimeType.startsWith("image/") && !noteSnapshotIds?.has(attachment.id)) ?? [],
+    [message.attachments, noteSnapshotIds],
   );
   const fileAttachments = useMemo(
     () => message.attachments?.filter((attachment) => !attachment.mimeType.startsWith("image/")) ?? [],
@@ -681,7 +686,7 @@ function UserMessageFeedback({
     <>
       {message.previewAnnotations && (
         <div className="flex justify-end">
-          <PreviewAnnotationBundleChip bundle={message.previewAnnotations} threadId={message.thread_id} testId="sent-preview-annotation-bundle-chip" />
+          <SentBrowserNotesTile bundle={message.previewAnnotations} threadId={message.thread_id} />
         </div>
       )}
       {showParentAgentProvenance && provenance && (

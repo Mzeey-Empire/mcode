@@ -9,10 +9,10 @@ import {
 import { useSendNowRoute } from "@/features/conversation/composer/queue/useQueuedMessageDispatch";
 import { supportsTurnSteer } from "@/features/conversation/composer/composer-capabilities";
 import { stripPreviewAnnotationFence } from "@/features/preview/capture/preview-annotation-append";
+import { SentBrowserNotesTile } from "@/features/preview/notes/SentBrowserNotesTile";
 import { isDeliveryUnknown, useQueueStore, type QueuedMessage } from "@/stores/queueStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { useThreadStore } from "@/stores/threadStore";
-import { PreviewAnnotationBundleChip } from "./PreviewAnnotationBundleChip";
 
 const EMPTY_QUEUE: QueuedMessage[] = [];
 
@@ -100,11 +100,7 @@ function QueueRowText({ message }: { message: QueuedMessage }) {
           {text || <span className="sr-only">Preview annotation</span>}
         </span>
         {annotations && annotations.annotations.length > 0 ? (
-          <PreviewAnnotationBundleChip
-            bundle={annotations}
-            testId="queue-annotation-bundle"
-            className="shrink-0 rounded-md px-1.5 py-0.5 text-xs"
-          />
+          <SentBrowserNotesTile bundle={annotations} variant="row" />
         ) : null}
         {message.attachments.length > 0 ? (
           <span
