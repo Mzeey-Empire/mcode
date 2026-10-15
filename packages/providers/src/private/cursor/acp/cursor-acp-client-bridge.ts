@@ -210,7 +210,7 @@ export class CursorAcpClientBridge {
         keys: Object.keys(record),
       });
     }
-    return { outcome: { outcome: "accepted" } };
+    return { outcome: { outcome: "cancelled" } };
   }
 
   private handleTaskExtMethod(

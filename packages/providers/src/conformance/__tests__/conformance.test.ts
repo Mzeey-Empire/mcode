@@ -132,9 +132,13 @@ describe("Plan protocol research evidence", () => {
       if (field.kind === "shape" && field.jsonType === "string") params[field.at] = `Fixture ${field.at}`;
       if (field.kind === "shape" && field.jsonType === "array") params[field.at] = [];
     }
-    expect(await replayCursorPlanRequest(fixture, params)).toEqual([
+    const responses: unknown[] = [];
+    expect(await replayCursorPlanRequest(fixture, params, (response) => responses.push(response))).toEqual([
       { threadId: "CURSOR_TRACE_THREAD", markdown: "Fixture plan", source: "native" },
     ]);
+    const response = captured.input.messages.find((message) => message.kind === "reply" && message.operation === "cursor/create_plan");
+    expect(response?.fields).toContainEqual({ at: "outcome.outcome", kind: "literal", value: "cancelled" });
+    expect(responses).toEqual([{ outcome: { outcome: "cancelled" } }]);
   });
 
   it("rejects private text, extra fields and wrong provenance in synthetic native plan events", () => {
