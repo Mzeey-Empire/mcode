@@ -19,6 +19,8 @@ import type {
   PreviewAnnotationBundle,
   TurnRequest,
   ProviderTurnDiffUpdate,
+  NativePlanQuestionBatch,
+  PlanQuestionHandler,
 } from "@mcode/contracts";
 import type { Database } from "bun:sqlite";
 import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases, registerAgentStorageTestProducer } from "../../__tests__/agent-storage-fixture.js";
@@ -1513,6 +1515,43 @@ describe("AgentService Ended finalization", () => {
         publishThreadStatus: (payload) => broadcast("thread.status", payload),
       });
     });
+  });
+
+  it("stops a native question turn through the provider and persists the dismissed dock", async () => {
+    const workspace = await workspaceRepo.create("Test", process.cwd());
+    const thread = await threadRepo.create(workspace.id, "Question stop", "direct", "main", true, "codex");
+    await threadRepo.updateSettings(thread.id, { interaction_mode: "plan" });
+    let handler: PlanQuestionHandler | undefined;
+    const provider: IAgentProvider = Object.assign(providerEmitter, {
+      id: "codex" as const, descriptor: { id: "codex" as const, capabilities: [] },
+      supportsCompletion: false, sessionForkOnResume: "unsupported" as const, maxInputCharactersPerTurn: 100_000,
+      forker: { fork: async () => { throw new Error("Unused fork"); } }, listModels: async () => [],
+      bindPlanQuestions: (bound: PlanQuestionHandler) => { handler = bound; },
+      supportsNativePlanQuestions: async () => true,
+    });
+    const registry: IProviderRegistry = { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} };
+    const records = new PlanQuestionAnswersRepo(db, agentStorageTestWriter(db));
+    const plans = new PlanTurnService(threadRepo, registry, new PlanQuestionService(messageRepo, records),
+      new PlanRepo(db, agentStorageTestWriter(db)), new AgentTurnCommandPort(new AgentRuntimeCommandPort()));
+    plans.bindNativeQuestions(() => {});
+    await service.sendMessage({ threadId: thread.id, content: "Plan", permissionMode: "default",
+      model: "gpt-5", attachments: [], provider: "codex" });
+    const batch: NativePlanQuestionBatch = { threadId: thread.id, requestId: "00000000-0000-4000-8000-000000000090",
+      questions: [{ id: "tone", category: "Tone", question: "Which greeting?",
+        options: [{ id: "0", title: "Brief", description: "One sentence" }, { id: "1", title: "Detailed", description: "A paragraph" }] }] };
+    if (!handler) throw new Error("Question handler was not bound");
+    await handler.requested(batch);
+    const questionHandler = handler;
+    providerEmitter.stopSession.mockImplementation(async (sessionId: string) => {
+      if (sessionId !== `mcode-${thread.id}`) throw new Error("Stop targeted another provider session");
+      await questionHandler.settled(batch, "dismissed");
+    });
+    expect(await service.stopSession(thread.id, { by: "user" })).toMatchObject({ status: "cancelled" });
+    await vi.waitFor(() => expect(records.pendingNative(thread.id)).toEqual([]));
+    expect(threadRepo.findById(thread.id)?.plan_phase).toBeNull();
+    expect(messageRepo.listByThread(thread.id).messages.filter(message => message.role === "system").map(message => message.content))
+      .toContain("Questions dismissed");
+    expect(db.query("SELECT status FROM plan_question_answers WHERE id = ?").get(batch.requestId)).toEqual({ status: "dismissed" });
   });
 
   it.each(["cancelled", "errored"] as const)("persists reported context without completing a turn before %s", async (outcome) => {

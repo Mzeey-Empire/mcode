@@ -196,7 +196,7 @@ export interface IAgentProvider {
   bindPlanQuestions?(handler: PlanQuestionHandler): void;
   /** Inspect the installed transport and handler without starting a turn. */
   supportsNativePlanQuestions?(): Promise<boolean>;
-  /** Answer or decline an exact live request; false means its connection no longer exists. */
+  /** False means no responder remains; an in-flight settlement rejects without expiring the batch. */
   respondToPlanQuestions?(threadId: string, requestId: string, answers: PlanAnswer[] | "dismiss"): Promise<boolean>;
   readonly id: ProviderId;
   /** Static provider capabilities supplied to clients before dispatch. */

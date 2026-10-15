@@ -698,6 +698,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private readonly canonicalEventPublisher: CodexCanonicalEventPublisher;
   private readonly planQuestions = new CodexPlanQuestions();
+  private readonly nativePlanSessions = new Set<string>();
 
   /** Native plan mode requires the durable question handler as well as a compatible CLI. */
   async supportsNativePlanQuestions(): Promise<boolean> {
@@ -1282,13 +1283,18 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       approvalsReviewer: request.approvalReviewMode === "automatic" ? "auto_review" : "user",
       ...(effort ? { effort } : {}),
       ...(fastMode ? { serviceTier: "priority" } : {}),
-      ...(nativePlan ? {
-        collaborationMode: {
-          mode: request.planTurn ? "plan" as const : "default" as const,
-          settings: { model: request.model, reasoning_effort: effort ?? null, developer_instructions: null },
-        },
-        additionalContext: {},
-      } : {}),
+      ...this.codexCollaborationOptions(request, nativePlan),
+    };
+  }
+
+  private codexCollaborationOptions(request: TurnRequest<"codex">, nativePlan: boolean): Pick<CodexTurnOptions, "collaborationMode" | "additionalContext"> {
+    if (!nativePlan || (!request.planTurn && !this.nativePlanSessions.has(request.sessionId))) return {};
+    return {
+      collaborationMode: {
+        mode: request.planTurn ? "plan" : "default",
+        settings: { model: request.model, reasoning_effort: request.reasoningLevel ?? null, developer_instructions: null },
+      },
+      additionalContext: {},
     };
   }
 
@@ -1662,7 +1668,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       }
     });
     server.on("fatal", (error: string) => {
-      void this.handleCodexServerFatal(context, server, mapper, error, { kind: server.lastFatalKind });
+      void this.handleCodexServerFatal(context, server, mapper, error, { kind: server.lastFatalKind }).catch((failure: unknown) => {
+        logger.error("Codex fatal event handling failed", { errorType: failure instanceof Error ? failure.name : "unknown" });
+      });
     });
     this.attachFatalDrain(context.sessionId, server);
     server.on("exit", () => {
@@ -1757,19 +1765,40 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     logger.error("CodexAppServer fatal", { sessionId: context.sessionId, error, breadcrumb: server.lastTransportBreadcrumb });
     const entry = this.runtime.get(context.sessionId);
     const executionId = entry?.activeParentTurnExecutionId ?? context.stagedExecutionId;
-    const questionsExpired = await this.planQuestions.drain(context.sessionId, "expired");
-    this.projectCodexAssistantBoundary(mapper, context.sessionId, (event) => {
-      const runtimeEvent = providerRuntimeEvent(executionId ? { ...event, turnExecutionId: executionId } : event);
-      this.emitRuntimeEvent(entry ? this.withCodexTurnAttempt(entry, runtimeEvent, executionId) : runtimeEvent);
-    });
+    const emit = this.codexFatalEmitter(entry, executionId);
+    const questionsExpired = this.planQuestions.hasPending(context.sessionId);
+    if (questionsExpired) {
+      await this.planQuestions.drain(context.sessionId, "expired").catch((drainError: unknown) => {
+        logger.warn("Codex question expiry failed", { errorType: drainError instanceof Error ? drainError.name : "unknown" });
+      });
+    }
+    this.projectCodexAssistantBoundary(mapper, context.sessionId, emit);
     if (questionsExpired && entry && executionId) {
-      this.emitCodexTurnEvent(entry, { type: AgentEventType.Ended, threadId: context.threadId, turnExecutionId: executionId, outcome: "interrupted" }, executionId);
+      emit({ type: AgentEventType.Ended, threadId: context.threadId, turnExecutionId: executionId, outcome: "interrupted" });
     } else {
-      this.emitCodexTransportFailure(context.threadId, error, failure, entry, executionId);
+      this.emitCodexTransportFailure(context.threadId, error, failure, executionId, emit);
     }
     if (this.runtime.get(context.sessionId)?.server === server) {
       void this.runtime.stop(context.sessionId);
     }
+  }
+
+  private codexFatalEmitter(entry: CodexSessionState | undefined, executionId: string | undefined): (event: AgentEvent) => void {
+    const attempt = entry ? this.nativeTurnAttempt(entry, entry.currentNativeTurnId) : undefined;
+    const deliveryAttempt = attempt?.executionId === executionId ? attempt?.deliveryAttempt : undefined;
+    return event => {
+      const runtimeEvent = providerRuntimeEvent(executionId ? { ...event, turnExecutionId: executionId } : event);
+      this.emitRuntimeEvent({ ...runtimeEvent, ...(deliveryAttempt !== undefined ? { deliveryAttempt } : {}) });
+    };
+  }
+
+  private emitCodexTransportFailure(threadId: string, error: string, failure: TurnFailure, executionId: string | undefined, emit: (event: AgentEvent) => void): void {
+    if (!executionId) {
+      this.emitTurnFailure(threadId, error, failure, "errored", true, executionId);
+      return;
+    }
+    emit({ type: AgentEventType.Error, threadId, error, failure });
+    emit({ type: AgentEventType.Ended, threadId, turnExecutionId: executionId, outcome: "errored" });
   }
 
   private projectCodexAssistantBoundary(mapper: CodexEventMapper, sessionId: string, emit: (event: AgentEvent) => void): void {
@@ -1780,16 +1809,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       logger.warn("Codex assistant boundary projection failed", { sessionId,
         errorType: error instanceof Error ? error.name : typeof error });
     }
-  }
-
-  private emitCodexTransportFailure(threadId: string, error: string, failure: TurnFailure, entry: CodexSessionState | undefined, executionId: string | undefined): void {
-    if (!entry || !executionId) {
-      this.emitTurnFailure(threadId, error, failure, "errored", true, executionId);
-      return;
-    }
-    // Confirmed process failure must retain the active attempt's terminal routing.
-    this.emitCodexTurnEvent(entry, { type: AgentEventType.Error, threadId, error, failure }, executionId);
-    this.emitCodexTurnEvent(entry, { type: AgentEventType.Ended, threadId, turnExecutionId: executionId, outcome: "errored" }, executionId);
   }
 
   private async startCodexAppServer(
@@ -2441,6 +2460,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * Drives shutdown, eviction, and stale-discard, but not turn cancellation.
    */
   async close(state: CodexSessionState): Promise<void> {
+    this.nativePlanSessions.delete(state.sessionId);
     if (this.activeCodexServers.get(state.sessionId) === state.server) this.activeCodexServers.delete(state.sessionId);
     await this.host.threadControl.close(state.sessionId);
     const turnExecutionId = executionForDrain(state);
@@ -2831,6 +2851,10 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   ): Promise<void> {
     try {
       const turnId = Array.isArray(input) ? await server.sendTurn(input, turnOptions) : await server.startCompaction();
+      if (Array.isArray(input)) {
+        if (turnOptions?.collaborationMode?.mode === "plan") this.nativePlanSessions.add(run.entry.sessionId);
+        else this.nativePlanSessions.delete(run.entry.sessionId);
+      }
       if (run.seq !== run.entry.runTurnSeq) return;
       run.entry.turnStartResponsePending = false;
       run.entry.pendingTurnStartNotification = undefined;
@@ -3137,12 +3161,12 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   /** Tears down all sessions, drains pending permissions, and stops the eviction timer. */
   async shutdown(): Promise<void> {
-    for (const sessionId of this.liveSessionIds) await this.planQuestions.drain(sessionId, "expired");
+    const results: PromiseSettledResult<unknown>[] = await Promise.allSettled([...this.liveSessionIds].map(sessionId => this.planQuestions.drain(sessionId, "expired")));
     // Drain everything up front: `runtime.shutdown` stops each session
     // (close drains per-session), but draining all here also clears any
     // permissions whose session never landed in the pool.
     this.drainPending(() => true);
-    const results = await Promise.allSettled([this.runtime.shutdown(), this.codexPorts.catalog.shutdown()]);
+    results.push(...await Promise.allSettled([this.runtime.shutdown(), this.codexPorts.catalog.shutdown()]));
     results.push(...await Promise.allSettled([this.canonicalEventPublisher.stopAdmissionAndDrain()]));
     this.sdkSessionIds.clear();
     this.pendingSpawnTurns.clear();
@@ -3150,6 +3174,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     this.liveSessionIds.clear();
     this.activeCodexServers.clear();
     this.canonicalTurnRoutingsByThread.clear();
+    this.nativePlanSessions.clear();
     const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
     if (failures.length > 0) throw new AggregateError(failures, "Codex provider shutdown failed");
     logger.info("CodexProvider shutdown complete");

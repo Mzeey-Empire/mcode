@@ -65,7 +65,8 @@ export class PlanQuestionAnswersStore {
     this.db.transaction(() => {
       this.orm.insert(planQuestionAnswers).values({ id: batch.requestId, threadId: batch.threadId,
         nativeBatchJson: JSON.stringify(batch), status: "pending" }).run();
-      this.db.prepare("UPDATE threads SET plan_phase = 'questions' WHERE id = ?").run(batch.threadId);
+      this.db.prepare("UPDATE threads SET plan_phase = 'questions', updated_at = ? WHERE id = ? AND plan_phase IN ('planning', 'questions')")
+        .run(new Date().toISOString(), batch.threadId);
     })();
   }
 
@@ -84,7 +85,8 @@ export class PlanQuestionAnswersStore {
         .run(status, new Date().toISOString(), batch.requestId, batch.threadId);
       if (changed.changes === 0) return null;
       const phase = status === "answered" ? "planning" : null;
-      this.db.prepare("UPDATE threads SET plan_phase = ? WHERE id = ? AND plan_phase = 'questions'").run(phase, batch.threadId);
+      this.db.prepare("UPDATE threads SET plan_phase = ?, updated_at = ? WHERE id = ? AND plan_phase = 'questions'")
+        .run(phase, new Date().toISOString(), batch.threadId);
       const messages = new MessageStore(this.db);
       return messages.createSystemNotice(batch.threadId, nativeQuestionReceipt(batch, status),
         messages.getLatestSequenceIncludingInternal(batch.threadId) + 1,

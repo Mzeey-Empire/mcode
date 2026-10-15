@@ -1,5 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import { z } from "zod";
+import { logger } from "@mcode/shared";
 import {
   lazySchema,
   type NativePlanQuestionBatch,
@@ -66,7 +67,17 @@ export class CodexPlanQuestions {
     request: CodexQuestionRequest,
   ): Promise<void> {
     const parsed = requestSchema().safeParse(request.params);
-    if (!parsed.success || !this.handler || this.hasPending(sessionId)) {
+    if (!parsed.success) {
+      logger.warn("Codex question request failed validation", { paths: parsed.error.issues.map(issue => issue.path) });
+      await request.cancel();
+      return;
+    }
+    if (parsed.data.questions.some(question => question.isSecret)) {
+      logger.warn("Codex secret questions are unsupported");
+      await request.cancel();
+      return;
+    }
+    if (!this.handler || this.hasPending(sessionId)) {
       await request.cancel();
       return;
     }
@@ -122,7 +133,8 @@ export class CodexPlanQuestions {
   /** Deliver selected titles or the user's own answer through the original responder. */
   async answer(threadId: string, requestId: string, answers: PlanAnswer[] | "dismiss"): Promise<boolean> {
     const entry = this.pending.get(requestId);
-    if (!entry || entry.batch.threadId !== threadId || entry.settling) return false;
+    if (!entry || entry.batch.threadId !== threadId) return false;
+    if (entry.settling) throw new Error("Questions already settling");
     const response = this.response(entry.batch, answers);
     entry.settling = true;
     await entry.ready;
@@ -158,8 +170,11 @@ export class CodexPlanQuestions {
   }
 
   private async settle(entry: PendingQuestion, status: PlanQuestionSettlement): Promise<void> {
-    this.pending.delete(entry.batch.requestId);
-    await this.handler?.settled(entry.batch, status);
+    try {
+      await this.handler?.settled(entry.batch, status);
+    } finally {
+      this.pending.delete(entry.batch.requestId);
+    }
   }
 
   private response(batch: NativePlanQuestionBatch, answers: PlanAnswer[] | "dismiss") {

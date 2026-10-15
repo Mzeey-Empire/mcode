@@ -119,6 +119,22 @@ async function ask(f: ReturnType<typeof fixture>) {
 afterEach(() => { vi.clearAllMocks(); clearVersionCache(); cli.version = "0.161.0"; });
 
 describe("Codex native planning", () => {
+  it("sends JSON-RPC cancellation for a secret question without publishing a batch", async () => {
+    const f = fixture();
+    try {
+      await f.provider.sendTurn(turn);
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      const params = capturedQuestion();
+      f.child.stdout.write(JSON.stringify({ id: 90, method: "item/tool/requestUserInput", params: {
+        ...params, questions: params.questions.map(question => ({ ...question, isSecret: true })),
+      } }) + "\n");
+      await vi.waitFor(() => expect(f.child.requests.find(request => request.id === 90)?.error?.code).toBe(-32800));
+      expect(f.batches).toEqual([]);
+      expect(f.settlements).toEqual([]);
+      f.child.complete();
+    } finally { await f.provider.shutdown(); }
+  });
+
   it.each([{ version: "0.160.0", bind: true }, { version: "0.161.0-alpha.1", bind: true }, { version: "0.161.0", bind: false }])(
     "does not enable native mode on $version with handler=$bind", async ({ version, bind }) => {
       cli.version = version;
@@ -144,6 +160,21 @@ describe("Codex native planning", () => {
       await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
       expect(f.starts()[1]?.params?.collaborationMode).toEqual({ mode: "default",
         settings: { model: "gpt-6.1-sol", reasoning_effort: "low", developer_instructions: null } });
+      f.child.complete();
+      await vi.waitFor(() => expect(f.events.filter(event => event.event.type === "ended")).toHaveLength(2));
+      await f.provider.sendTurn({ ...turn, turnId: "build-again", turnExecutionId: "build-again-execution", planTurn: undefined, interactionMode: "build" });
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(3));
+      expect(f.starts()[2]?.params).not.toHaveProperty("collaborationMode");
+      f.child.complete();
+    } finally { await f.provider.shutdown(); }
+  });
+
+  it("does not override collaboration settings on an initial build turn", async () => {
+    const f = fixture();
+    try {
+      await f.provider.sendTurn({ ...turn, planTurn: undefined, interactionMode: "build" });
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      expect(f.starts()[0]?.params).not.toHaveProperty("collaborationMode");
       f.child.complete();
     } finally { await f.provider.shutdown(); }
   });
