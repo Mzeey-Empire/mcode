@@ -230,47 +230,33 @@ function selectAgentPageIds(
 
 interface AgentBrowserPage {
   readonly tabId: string;
-  readonly presenting: boolean;
 }
 
 interface ExistingPreviewReveal {
   readonly activeThreadId: string | null;
   readonly activeWorkspaceId: string | null;
-  readonly agentBrowserPage: AgentBrowserPage | null;
   readonly browserTabSet: BrowserTabSet | null;
   readonly panelScopeId: string | null;
   readonly revealExistingPreview: boolean;
   readonly requestedAgentPageActivationRef: RefObject<string | null>;
 }
 
-function canRevealExistingPreview(
-  hasNonPreviewTab: boolean,
-  currentVisible: boolean,
-  agentBrowserPage: AgentBrowserPage | null,
-): boolean {
-  return currentVisible && (!hasNonPreviewTab || agentBrowserPage?.presenting === true);
+function canRevealExistingPreview(hasNonPreviewTab: boolean, currentVisible: boolean): boolean {
+  return currentVisible && !hasNonPreviewTab;
 }
 
 function requestExistingPreviewPageActivation({
   activeWorkspaceId,
-  agentBrowserPage,
   browserTabSet,
   panelScopeId,
   requestedAgentPageActivationRef,
 }: Omit<ExistingPreviewReveal, "activeThreadId" | "revealExistingPreview">): void {
-  const existingPageId = getExistingPreviewPageId(agentBrowserPage, browserTabSet);
+  const existingPageId = browserTabSet?.activeTabId ?? browserTabSet?.tabs[0]?.id;
   if (!panelScopeId || !existingPageId) return;
   const activationKey = `${panelScopeId}:${existingPageId}`;
   if (!shouldActivateExistingPreview(browserTabSet, activationKey, existingPageId, requestedAgentPageActivationRef)) return;
   requestedAgentPageActivationRef.current = activationKey;
   void usePreviewTabsStore.getState().activatePage(activeWorkspaceId!, panelScopeId, existingPageId);
-}
-
-function getExistingPreviewPageId(
-  agentBrowserPage: AgentBrowserPage | null,
-  browserTabSet: BrowserTabSet | null,
-): string | null | undefined {
-  return agentBrowserPage?.tabId ?? browserTabSet?.activeTabId ?? browserTabSet?.tabs[0]?.id;
 }
 
 function shouldActivateExistingPreview(
@@ -286,7 +272,6 @@ function shouldActivateExistingPreview(
 function synchronizeExistingPreview({
   activeThreadId,
   activeWorkspaceId,
-  agentBrowserPage,
   browserTabSet,
   panelScopeId,
   revealExistingPreview: shouldRevealExistingPreview,
@@ -295,13 +280,12 @@ function synchronizeExistingPreview({
   if (!shouldRevealExistingPreview || !activeWorkspaceId) return;
   const current = useDiffStore.getState().getRightPanel(activeWorkspaceId, activeThreadId);
   const hasNonPreviewTab = current.tabInstances.some((instance) => instance.type !== "preview");
-  if (!canRevealExistingPreview(hasNonPreviewTab, current.visible, agentBrowserPage)) return;
+  if (!canRevealExistingPreview(hasNonPreviewTab, current.visible)) return;
   if (current.activeTab !== "preview") {
     useDiffStore.getState().setRightPanelTab(activeWorkspaceId, activeThreadId, "preview");
   }
   requestExistingPreviewPageActivation({
     activeWorkspaceId,
-    agentBrowserPage,
     browserTabSet,
     panelScopeId,
     requestedAgentPageActivationRef,
@@ -375,7 +359,6 @@ function usePreviewPresentation({
     synchronizeExistingPreview({
       activeThreadId,
       activeWorkspaceId,
-      agentBrowserPage,
       browserTabSet,
       panelScopeId,
       revealExistingPreview,
@@ -383,7 +366,6 @@ function usePreviewPresentation({
     });
   }, [
     activeThreadId,
-    agentBrowserPage,
     activeWorkspaceId,
     browserTabSet,
     panelScopeId,
@@ -410,15 +392,9 @@ function getAgentBrowserPage(
   ownedAgentPageId: string | null,
 ): AgentBrowserPage | null {
   if (!activeWorkspaceId || !panelScopeId || !browserTabSet) return null;
-  if (hasBrowserPage(browserTabSet, pendingAgentPageId)) {
-    return { tabId: pendingAgentPageId!, presenting: true };
-  }
-  if (hasBrowserPage(browserTabSet, activeAgentRequestPageId)) {
-    return { tabId: activeAgentRequestPageId!, presenting: true };
-  }
-  return hasBrowserPage(browserTabSet, ownedAgentPageId)
-    ? { tabId: ownedAgentPageId!, presenting: false }
-    : null;
+  const tabId = [pendingAgentPageId, activeAgentRequestPageId, ownedAgentPageId]
+    .find((id) => hasBrowserPage(browserTabSet, id));
+  return tabId ? { tabId } : null;
 }
 
 function hasBrowserPage(browserTabSet: BrowserTabSet, tabId: string | null): boolean {
@@ -433,20 +409,11 @@ function isExistingPreviewVisible(
   panelVisible: boolean,
   tabInstances: ReturnType<typeof projectRightPanelForScope>["tabInstances"],
 ): boolean {
-  const shouldRevealAgentPage = shouldRevealActiveAgentPage(agentBrowserPage, openTabs, panelVisible);
+  const shouldRevealAgentPage = agentBrowserPage !== null && openTabs.length === 0;
   const shouldRestorePreviewTab = isPreviewOnlyTab(tabInstances) && activeTab !== "preview";
   return panelVisible &&
     (shouldRevealAgentPage || shouldRestorePreviewTab) &&
     (browserTabSet?.tabs.length ?? 0) > 0;
-}
-
-function shouldRevealActiveAgentPage(
-  agentBrowserPage: AgentBrowserPage | null,
-  openTabs: ReturnType<typeof projectRightPanelForScope>["openTabs"],
-  panelVisible: boolean,
-): boolean {
-  return agentBrowserPage !== null &&
-    (openTabs.length === 0 || (panelVisible && agentBrowserPage.presenting));
 }
 
 function isPreviewOnlyTab(
