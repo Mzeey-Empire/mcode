@@ -11,15 +11,20 @@ describe("extractCursorCreatePlanMarkdown", () => {
     expect(await replayCursorPlanRequest(fixture, { plan: "x".repeat(64 * 1024 + 1) }, (response) => responses.push(response))).toEqual([]);
     expect(responses).toEqual([{ outcome: { outcome: "rejected" },
       message: "The plan is too long for the client to capture. Shorten it and call create_plan again." }]);
-    expect(await replayCursorPlanRequest(fixture, { plan: "x".repeat(64 * 1024) })).toEqual([
+    responses.length = 0;
+    expect(await replayCursorPlanRequest(fixture, { plan: "x".repeat(64 * 1024) }, (response) => responses.push(response))).toEqual([
       { threadId: "CURSOR_TRACE_THREAD", markdown: "x".repeat(64 * 1024), source: "native" },
     ]);
+    expect(responses).toEqual([{ outcome: { outcome: "cancelled", feedback: "Keep this plan for review. Do not implement." } }]);
   });
   it("reads the S07-00 captured top-level plan field", () => {
     expect(extractCursorCreatePlanMarkdown({ plan: "# Plan\n\nBody", markdown: "Wrong field" })).toBe("# Plan\n\nBody");
   });
 
-  it.each([{}, { plan: "" }, { plan: "  " }, { plan: 42 }, { markdown: "# Wrong field" }, { plan: { markdown: "# Wrong shape" } }])("rejects missing or invalid native plan text: %j", (params) => {
+  it.each([{}, { plan: "" }, { plan: "  " }, { plan: 42 }, { markdown: "# Wrong field" }, { plan: { markdown: "# Wrong shape" } }])("rejects missing or invalid native plan text: %j", async (params) => {
     expect(extractCursorCreatePlanMarkdown(params)).toBeNull();
+    const responses: unknown[] = [];
+    expect(await replayCursorPlanRequest(fixture, params, (response) => responses.push(response))).toEqual([]);
+    expect(responses).toEqual([{ outcome: { outcome: "cancelled", feedback: "The plan text was missing. Put the full plan in an mcode-plan fence in your reply." } }]);
   });
 });
