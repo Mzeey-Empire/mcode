@@ -6,8 +6,8 @@
  * - the authoritative tool name is `_meta["cognition.ai/inferenceToolName"]`,
  *   not `kind` (`kind: "edit"` covers both write and write_plan, and
  *   `run_subagent` has no `kind` at all);
- * - plan-mode plans arrive as `write_plan` tool calls editing `~/.devin/plans/*.md`,
- *   while spec `plan` updates carry the task list and map to TodoWrite;
+ * - plan text is captured from message fences; ACP `plan` updates carry
+ *   the task list and map to TodoWrite, without proving a native plan file;
  * - subagent lifecycles stream orphan `tool_call_update`s keyed by agentId with
  *   `_meta.subagent_started`/`subagent_completed` and no `tool_call` marker;
  *   they enrich and close the owning `run_subagent` call instead of becoming

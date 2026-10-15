@@ -1,8 +1,11 @@
 import "reflect-metadata";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import * as NodeChildProcess from "node:child_process";
 import { z } from "zod";
-import { AgentEventSchema } from "@mcode/contracts";
+import { AgentEventSchema, NativePlanFileRefSchema, ProviderRuntimeEventSchema } from "@mcode/contracts";
 import { OpenCodeProvider, toOpenCodeModelRef } from "../opencode-provider.js";
 import { OpenCodeServerPool } from "../opencode-server-pool.js";
 import { defaultOpenCodeHttpClient, type OpenCodeHttpClient } from "../opencode-http-client.js";
@@ -51,6 +54,255 @@ const submittedBatchSchema = z.object({ events: z.array(z.object({ payload: z.ob
   payload: z.object({ runtimeEvent: z.object({ event: AgentEventSchema() }) }),
 }) }) })) });
 const capturedTraceSchema = z.object({ events: z.array(z.unknown()) });
+const planBatchSchema = z.object({ events: z.array(z.object({ payload: z.object({ item: z.object({
+  payload: z.object({ runtimeEvent: ProviderRuntimeEventSchema() }),
+}) }) })) });
+
+function planMessages(submitted: unknown[]) {
+  return submitted.flatMap((batch) => planBatchSchema.parse(batch).events.map((event) => event.payload.item.payload.runtimeEvent))
+    .filter((runtime) => runtime.event.type === "message");
+}
+
+function capturedFile(submitted: unknown[]) {
+  return NativePlanFileRefSchema().parse(planMessages(submitted)[0]?.planCapture?.nativePlanFile);
+}
+
+function planFilePart(
+  filePath: string,
+  options: { sessionID?: string; status?: string; tool?: string; existed?: boolean | null } = {},
+) {
+  const tool = options.tool ?? "write";
+  // Captured from OpenCode 1.18.28: `write` reports whether the file existed, `edit` does not.
+  const metadata = tool === "write" && options.existed !== null ? { exists: options.existed ?? false } : {};
+  return { type: "message.part.updated", properties: { part: {
+    type: "tool", id: "part-write", callID: "write-plan", sessionID: options.sessionID ?? "ses_plan",
+    tool, state: { status: options.status ?? "completed", input: { filePath }, output: "Written", metadata },
+  } } };
+}
+
+describe("OpenCode native plans", () => {
+  let cwd: string;
+  let planRoot: string;
+  let path: string;
+  const providers: OpenCodeProvider[] = [];
+
+  beforeEach(() => {
+    cwd = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "opencode-plan-"));
+    planRoot = NodePath.join(cwd, ".opencode", "plans");
+    NodeFS.mkdirSync(planRoot, { recursive: true });
+    path = NodePath.join(planRoot, "session.md");
+  });
+
+  afterEach(async () => {
+    for (const provider of providers.splice(0)) await provider.shutdown();
+    NodeFS.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  async function runPlan(
+    frames: unknown[],
+    request: Partial<TurnRequest<"opencode">> = {},
+    beforeFrames = () => NodeFS.writeFileSync(path, "hello"),
+  ) {
+    const pool = new OpenCodeServerPool({
+      spawn: () => ({ pid: 4242, on: () => {}, off: () => {}, kill: () => true }),
+      waitForHealth: async () => {}, terminateTree: async () => {}, findFreePort: async () => 4096,
+      now: () => Date.now(), env: () => ({}),
+    });
+    const bodies: Record<string, unknown>[] = [];
+    const http: OpenCodeHttpClient = { ...defaultOpenCodeHttpClient,
+      createSession: async () => ({ id: "ses_plan" }),
+      promptAsync: async (_endpoint, _sessionId, body) => { bodies.push(body); },
+      abortSession: async () => {}, listSessionMessages: async () => [],
+      getSessionStatus: async () => ({ ses_plan: { type: "idle" } }),
+      subscribeEvents: async (_endpoint, _signal, onEnvelope) => {
+        beforeFrames();
+        for (const frame of frames) onEnvelope(frame);
+        onEnvelope({ type: "message.part.updated", properties: { sessionID: "ses_plan", part: { type: "text", id: "answer" }, delta: "Plan ready" } });
+        onEnvelope({ type: "session.idle", properties: { sessionID: "ses_plan" } });
+      },
+    };
+    const result = testProvider(http, pool);
+    providers.push(result.provider);
+    await result.provider.sendTurn({ ...turnRequest(), cwd, planTurn: { kind: "planning", planFilePath: null }, ...request });
+    return { ...result, bodies };
+  }
+
+  it("anchors proved file capture to the final message and leaves git clean after Implement", async () => {
+    NodeChildProcess.execFileSync("git", ["init", "--quiet", cwd]);
+    const { provider, submitted, bodies } = await runPlan([planFilePart(".opencode/plans/session.md")]);
+    expect(NodeChildProcess.execFileSync("git", ["-C", cwd, "status", "--porcelain"], { encoding: "utf8" }).trim()).toBe("?? .opencode/");
+    expect(bodies).toEqual([{ agent: "plan", model: { providerID: "anthropic", modelID: "claude-sonnet-4-6" }, parts: [{ type: "text", text: "hello" }] }]);
+    expect(planMessages(submitted)).toMatchObject([{ event: { type: "message", content: "Plan ready" }, planCapture: {
+      source: "native", markdown: "hello", nativePlanFile: { path, sessionId: "ses_plan",
+        sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" },
+    } }]);
+    expect(await provider.prepareImplement({ threadId: "thread-1", markdown: "edited plan", nativePlanFile: capturedFile(submitted) }))
+      .toEqual({ outcome: "deleted" });
+    expect(NodeFS.existsSync(path)).toBe(false);
+    expect(NodeFS.statSync(planRoot).isDirectory()).toBe(true);
+    expect(NodeChildProcess.execFileSync("git", ["-C", cwd, "status", "--porcelain"], { encoding: "utf8" })).toBe("");
+  });
+
+  it("deletes only the owned file, leaving another session's plan untouched", async () => {
+    const other = NodePath.join(planRoot, "other.md");
+    NodeFS.writeFileSync(other, "Other session plan");
+    const { provider, submitted } = await runPlan([
+      planFilePart(path),
+      planFilePart(other, { tool: "edit" }),
+      planFilePart(other, { sessionID: "ses_other" }),
+    ]);
+    expect(await provider.prepareImplement({ threadId: "thread-1", markdown: "hello", nativePlanFile: capturedFile(submitted) }))
+      .toEqual({ outcome: "deleted" });
+    expect(NodeFS.existsSync(path)).toBe(false);
+    expect(NodeFS.readFileSync(other, "utf8")).toBe("Other session plan");
+  });
+
+  it("leaves a file edited after capture and reports changed", async () => {
+    const { provider, submitted } = await runPlan([planFilePart(path)]);
+    NodeFS.writeFileSync(path, "HELLO");
+    expect(await provider.prepareImplement({ threadId: "thread-1", markdown: "hello", nativePlanFile: capturedFile(submitted) }))
+      .toEqual({ outcome: "skipped", reason: "changed" });
+    expect(NodeFS.readFileSync(path, "utf8")).toBe("HELLO");
+  });
+
+  it.each(["write", "edit"])("leaves a pre-existing file after the session uses %s", async (tool) => {
+    NodeFS.writeFileSync(path, "Existing plan");
+    const { submitted } = await runPlan([planFilePart(path, { tool, existed: true })], {}, () => {});
+
+    expect(planMessages(submitted).map((runtime) => runtime.planCapture)).toEqual([undefined]);
+    expect(NodeFS.readFileSync(path, "utf8")).toBe("Existing plan");
+  });
+
+  it("does not claim a write that omits the exists flag", async () => {
+    const { submitted } = await runPlan([planFilePart(path, { existed: null })]);
+
+    expect(planMessages(submitted).map((runtime) => runtime.planCapture)).toEqual([undefined]);
+  });
+
+  it("does not claim a file the session only edited", async () => {
+    const { submitted } = await runPlan([planFilePart(path, { tool: "edit" })]);
+
+    expect(planMessages(submitted).map((runtime) => runtime.planCapture)).toEqual([undefined]);
+  });
+
+  it("forgets a deleted file so a recreated file of the same name is not claimed", async () => {
+    const frames = [planFilePart(path)];
+    const { provider, submitted } = await runPlan(frames, {}, () => NodeFS.writeFileSync(path, "hello"));
+    expect(await provider.prepareImplement({
+      threadId: "thread-1", markdown: "hello", nativePlanFile: capturedFile(submitted),
+    })).toEqual({ outcome: "deleted" });
+    submitted.length = 0;
+    frames[0] = planFilePart(path, { tool: "edit" });
+
+    await provider.sendTurn({
+      ...turnRequest(), cwd,
+      turnId: "turn-2", turnExecutionId: "22222222-2222-4222-8222-222222222222",
+      planTurn: { kind: "planning", planFilePath: null },
+    });
+
+    expect(planMessages(submitted).map((runtime) => runtime.planCapture)).toEqual([undefined]);
+  });
+
+  it("captures a file when the plan root did not exist before the turn", async () => {
+    NodeFS.rmdirSync(planRoot);
+    const { submitted } = await runPlan([planFilePart(path)], {}, () => {
+      NodeFS.mkdirSync(planRoot);
+      NodeFS.writeFileSync(path, "hello");
+    });
+
+    expect(planMessages(submitted)).toMatchObject([{
+      planCapture: { source: "native", markdown: "hello", nativePlanFile: { path, sessionId: "ses_plan" } },
+    }]);
+  });
+
+  it("captures a session-created file again when a later turn edits it", async () => {
+    const frames = [planFilePart(path)];
+    let markdown = "hello";
+    const { provider, submitted } = await runPlan(frames, {}, () => NodeFS.writeFileSync(path, markdown));
+    expect(capturedFile(submitted).path).toBe(path);
+    submitted.length = 0;
+    markdown = "Revised plan";
+    frames[0] = planFilePart(path, { tool: "edit" });
+
+    await provider.sendTurn({
+      ...turnRequest(), cwd,
+      turnId: "turn-2", turnExecutionId: "22222222-2222-4222-8222-222222222222",
+      planTurn: { kind: "planning", planFilePath: null },
+    });
+
+    expect(planMessages(submitted)).toMatchObject([{
+      planCapture: { source: "native", markdown: "Revised plan", nativePlanFile: { path, sessionId: "ses_plan" } },
+    }]);
+    expect(await provider.prepareImplement({
+      threadId: "thread-1", markdown, nativePlanFile: capturedFile(submitted),
+    })).toEqual({ outcome: "deleted" });
+    expect(NodeFS.existsSync(path)).toBe(false);
+  });
+
+  it("refuses a symlink substituted after capture", async () => {
+    const { provider, submitted } = await runPlan([planFilePart(path)]);
+    const target = NodePath.join(planRoot, "other.md");
+    NodeFS.renameSync(path, target);
+    NodeFS.symlinkSync(target, path, "file");
+    expect(await provider.prepareImplement({ threadId: "thread-1", markdown: "hello", nativePlanFile: capturedFile(submitted) }))
+      .toEqual({ outcome: "skipped", reason: "unsafe-path" });
+    expect(NodeFS.readFileSync(target, "utf8")).toBe("hello");
+    expect(NodeFS.lstatSync(path).isSymbolicLink()).toBe(true);
+  });
+
+  it("refuses a reference outside the session's known plan root", async () => {
+    const { provider, submitted } = await runPlan([planFilePart(path)]);
+    const outside = NodePath.join(cwd, "outside.md");
+    NodeFS.writeFileSync(outside, "hello");
+    expect(await provider.prepareImplement({ threadId: "thread-1", markdown: "hello", nativePlanFile: { ...capturedFile(submitted), path: outside } }))
+      .toEqual({ outcome: "skipped", reason: "unsafe-path" });
+    expect(NodeFS.readFileSync(outside, "utf8")).toBe("hello");
+  });
+
+  it("refuses wrong-session references and references whose session state was lost", async () => {
+    const { provider, submitted } = await runPlan([planFilePart(path)]);
+    const ref = capturedFile(submitted);
+    expect(await provider.prepareImplement({ threadId: "thread-1", markdown: "hello", nativePlanFile: { ...ref, sessionId: "ses_other" } }))
+      .toEqual({ outcome: "skipped", reason: "unproven" });
+    expect(await provider.prepareImplement({ threadId: "unknown-thread", markdown: "hello", nativePlanFile: ref }))
+      .toEqual({ outcome: "skipped", reason: "unproven" });
+    await provider.discardSession("mcode-thread-1");
+    expect(await provider.prepareImplement({ threadId: "thread-1", markdown: "hello", nativePlanFile: ref }))
+      .toEqual({ outcome: "skipped", reason: "unproven" });
+    expect(NodeFS.readFileSync(path, "utf8")).toBe("hello");
+    expect(await provider.prepareImplement({ threadId: "thread-1", markdown: "hello", nativePlanFile: null }))
+      .toEqual({ outcome: "skipped", reason: "no-file" });
+  });
+
+  it("claims nothing when the project is a subfolder of the git root OpenCode writes plans under", async () => {
+    const projectDir = NodePath.join(cwd, "sub", "app");
+    NodeFS.mkdirSync(projectDir, { recursive: true });
+    const { submitted } = await runPlan(
+      [planFilePart(path, { sessionID: "ses_plan", status: "completed", tool: "write", existed: false })],
+      { cwd: projectDir },
+    );
+    expect(planMessages(submitted).map((runtime) => runtime.planCapture)).toEqual([undefined]);
+    expect(NodeFS.readFileSync(path, "utf8")).toBe("hello");
+  });
+
+  it.each(["build", "outside", "other-session", "running", "read", "no-tool", "missing"])("does not capture a native file for %s evidence", async (kind) => {
+    const candidate = kind === "outside" ? NodePath.join(cwd, "outside.md") : path;
+    if (kind === "outside") NodeFS.writeFileSync(candidate, "hello");
+    const frames = kind === "no-tool" ? [] : [planFilePart(candidate, {
+      sessionID: kind === "other-session" ? "other" : "ses_plan",
+      status: kind === "running" ? "running" : "completed", tool: kind === "read" ? "read" : "write",
+    })];
+    const { submitted, bodies } = await runPlan(
+      frames,
+      kind === "build" ? { planTurn: undefined } : {},
+      () => {
+        if (kind !== "missing") NodeFS.writeFileSync(path, "hello");
+      },
+    );
+    expect(planMessages(submitted).map((runtime) => runtime.planCapture)).toEqual([undefined]);
+    expect(bodies.map((body) => body.agent)).toEqual([kind === "build" ? undefined : "plan"]);
+  });
+});
 
 async function replaySubagentFrames(frames: unknown[], parentSessionId: string, promptError?: Error) {
   const pool = new OpenCodeServerPool({

@@ -86,8 +86,9 @@ interface DevinPendingPermission {
 
 /** Resolves the native Devin mode for one turn. */
 function resolveDevinMode(req: TurnRequest<"devin">): DevinMode {
-  if (req.interactionMode === "plan") return "plan";
-  return req.providerOptions.mode
+  if (req.planTurn) return "plan";
+  const accessMode = req.providerOptions.mode;
+  return (accessMode === "plan" ? undefined : accessMode)
     ?? (req.permissionMode === "full" ? "bypass" : "normal");
 }
 
@@ -428,7 +429,6 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       });
       entry = await this.resolveStopDrain(req, entry, signal);
       signal.throwIfAborted();
-      entry.devinMode = resolveDevinMode(req);
       const run = entry.turnChain.then(() => this.executeTurn(entry, req, routing, signal));
       entry.turnChain = run.then(() => undefined, () => undefined);
       await run;
@@ -500,6 +500,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     entry.replayTurnState = null;
     await this.applyModel(entry, req);
     signal.throwIfAborted();
+    entry.devinMode = resolveDevinMode(req);
     await this.applyMode(entry, entry.devinMode);
     signal.throwIfAborted();
 
@@ -570,9 +571,6 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
   private async applyMode(entry: DevinAcpSessionEntry, mode: DevinMode): Promise<void> {
     const pair = entry.modeAppliedPair;
     if (pair && pair.acpSessionId === entry.acpSessionId && pair.mode === mode) return;
-    // `plan` rides the interaction-mode axis, not the access-mode select, so
-    // it is applied optimistically; the guard only gates access modes Devin
-    // did not advertise for this session.
     if (mode !== "plan" && entry.advertisedModes && !entry.advertisedModes.has(mode)) {
       logger.warn("Devin mode not advertised by this session; skipping set_config_option", {
         threadId: entry.threadId,
@@ -603,8 +601,8 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
    */
   private applyObservedDevinMode(entry: DevinAcpSessionEntry, modeId: unknown): void {
     const parsed = DevinModeSchema.safeParse(modeId);
-    if (!parsed.success || parsed.data === "plan") return;
-    entry.devinMode = parsed.data;
+    if (!parsed.success) return;
+    if (parsed.data !== "plan") entry.devinMode = parsed.data;
     entry.modeAppliedPair = entry.acpSessionId
       ? { acpSessionId: entry.acpSessionId, mode: parsed.data }
       : null;

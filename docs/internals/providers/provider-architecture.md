@@ -195,8 +195,8 @@ covers off-PATH installs.
   (normal / accept-edits / smart / bypass / plan) renders inside the shared
   Access Mode control and persists as `threads.devin_mode`; the coarse
   `permissionMode` fallback maps `supervised` -> `normal` and `full` ->
-  `bypass`. Mcode's Plan interaction mode sends `plan` and restores the
-  thread's native mode on return to Build. The adapter tracks the `mode`
+  `bypass`. Classified plan turns send `plan`; the next non-plan turn restores
+  the thread's access mode. The adapter tracks the `mode`
   select each session advertises, skips unadvertised values, and surfaces
   them through `provider.listModes` so the picker drops account-gated modes.
 - **File access is scoped.** The mandatory `fs/read_text_file` and

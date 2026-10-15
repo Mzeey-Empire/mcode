@@ -93,6 +93,7 @@ export {
 export { approvalChoice, approvalOutcome } from "./approval-scope.js";
 export { isNewer, isSemver, meetsMinVersion } from "./version-policy.js";
 export { approvalReceipt } from "./approvals/approval-receipt.js";
+export { captureOwnedPlanFile, deleteOwnedPlanFile } from "./plan/owned-plan-file.js";
 export {
   ProviderTurnError,
   SESSION_RESUME_UNAVAILABLE_CODE,

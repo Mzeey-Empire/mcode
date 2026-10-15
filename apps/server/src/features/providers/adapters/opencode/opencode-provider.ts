@@ -1,6 +1,7 @@
 import { SUBAGENT_REPORTING } from "@mcode/contracts";
 import * as NodeEvents from "node:events";
 import * as NodeCrypto from "node:crypto";
+import * as NodePath from "node:path";
 import { inject, injectable } from "tsyringe";
 import { z } from "zod";
 import { logger } from "@mcode/shared";
@@ -26,8 +27,10 @@ import type {
   SessionForker,
   TurnRequest,
   TurnFailure,
+  NativePlanFileOutcome,
+  NativePlanFileRef,
 } from "@mcode/contracts";
-import { AgentEventType, providerRuntimeEvent } from "@mcode/contracts";
+import { AgentEventType, lazySchema, providerRuntimeEvent } from "@mcode/contracts";
 import type { ProviderHostPorts } from "@mcode/providers";
 import {
   OpenCodeNativeTurnDiff,
@@ -39,6 +42,8 @@ import {
   readCliStatusVersion,
   resolveCliStatusBinary,
   describeOpenCodeAuth,
+  captureOwnedPlanFile,
+  deleteOwnedPlanFile,
 } from "@mcode/providers";
 import { SettingsService } from "../../../settings/settings-service.js";
 import { EnvService } from "../../../../runtime/environment/env-service.js";
@@ -131,6 +136,10 @@ type OpenCodeServeLease =
   | { kind: "attached"; endpoint: OpenCodeEndpoint };
 
 interface OpenCodeTurnState {
+  threadId: string;
+  sessionCwd: string | null;
+  nativePlanPath: string | null;
+  createdPlanPaths: Set<string>;
   /**
    * Session-wide, not per turn: OpenCode replays a still-pending ask in the next
    * turn under the same id, and receipts are keyed by request id, so a second
@@ -177,6 +186,11 @@ export function toOpenCodeModelRef(model: string | undefined): { providerID: str
   return { providerID: trimmed.slice(0, slash), modelID: trimmed.slice(slash + 1) };
 }
 
+function openCodePromptBody(req: TurnRequest<"opencode">): Record<string, unknown> {
+  return { model: toOpenCodeModelRef(req.model), parts: [{ type: "text", text: req.message }],
+    ...(req.planTurn ? { agent: "plan" } : {}) };
+}
+
 function isMissingSessionError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /\b404\b/.test(message);
@@ -214,6 +228,54 @@ const childTaskPartSchema = z.object({
   type: z.literal("tool"), tool: z.literal("task"), callID: z.string().min(1).max(512),
   state: z.object({ metadata: z.object({ sessionId: z.string().min(1).max(512) }), input: childTaskInputSchema.optional() }),
 });
+
+const nativePlanToolPartSchema = lazySchema(() => z.object({
+  type: z.literal("tool"),
+  sessionID: z.string().min(1),
+  tool: z.enum(["write", "edit"]),
+  state: z.object({
+    status: z.literal("completed"),
+    input: z.object({ filePath: z.string().min(1).max(32 * 1024) }),
+    metadata: z.object({ exists: z.boolean() }).partial().optional(),
+  }),
+}));
+
+function trackNativePlanFile(req: TurnRequest<"opencode">, state: OpenCodeTurnState,
+  normalized: { type: string; properties: Record<string, unknown> }): void {
+  const named = completedPlanFileWrite(req, state, normalized);
+  // An `edit` is trusted only on a path this session already created.
+  if (!named || (!named.created && !state.createdPlanPaths.has(named.path))) return;
+  state.createdPlanPaths.add(named.path);
+  state.nativePlanPath = named.path;
+}
+
+function completedPlanFileWrite(req: TurnRequest<"opencode">, state: OpenCodeTurnState,
+  normalized: { type: string; properties: Record<string, unknown> }): { path: string; created: boolean } | null {
+  if (!req.planTurn || normalized.type !== "message.part.updated") return null;
+  if (sessionIdOfNormalized(normalized) !== state.upstreamSessionId) return null;
+  const part = nativePlanToolPartSchema().safeParse(normalized.properties.part);
+  if (!part.success || part.data.sessionID !== state.upstreamSessionId) return null;
+  const path = NodePath.resolve(req.cwd, part.data.state.input.filePath);
+  if (!isInsidePlanRoot(req.cwd, path)) return null;
+  // OpenCode's `write` reports `exists: false` only when it created the file, the one ownership
+  // proof it gives.
+  return { path, created: part.data.tool === "write" && part.data.state.metadata?.exists === false };
+}
+
+/** Drop the upstream session and every plan claim made under it, so a replacement session starts unproven. */
+function forgetUpstreamSession(state: OpenCodeTurnState): void {
+  state.upstreamSessionId = "";
+  state.sessionCwd = null;
+  state.nativePlanPath = null;
+  state.createdPlanPaths.clear();
+}
+
+// OpenCode roots plan files at the git root, not the session directory, so a project below the root
+// writes outside this folder and claims nothing.
+function isInsidePlanRoot(cwd: string, path: string): boolean {
+  const relative = NodePath.relative(NodePath.join(cwd, ".opencode", "plans"), path);
+  return relative !== "" && relative !== ".." && !relative.startsWith(`..${NodePath.sep}`) && !NodePath.isAbsolute(relative);
+}
 
 function trackChildTask(state: OpenCodeTurnState, normalized: { type: string; properties: Record<string, unknown> }): void {
   if (normalized.type !== "message.part.updated" || !sessionIdOfNormalized(normalized)) return;
@@ -473,10 +535,27 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       deliveryAttempt: req.deliveryAttempt ?? 1,
     };
     this.canonicalRoutings.set(routing.executionId, routing);
-    const state = this.turnStateFor(req.sessionId);
+    const state = this.turnStateFor(req.sessionId, req.threadId);
     const scheduled = state.chain.then(() => this.runTurn(req, routing, state));
     state.chain = scheduled.then(() => {}, () => {});
     await scheduled;
+  }
+
+  /** Reconcile only a plan file proved by this thread's still-known upstream session. */
+  async prepareImplement(input: {
+    threadId: string; markdown: string; nativePlanFile: NativePlanFileRef | null;
+  }): Promise<NativePlanFileOutcome> {
+    if (!input.nativePlanFile) return { outcome: "skipped", reason: "no-file" };
+    const sessions = [...this.turns.values()].filter((state) => state.threadId === input.threadId);
+    const state = sessions.length === 1 ? sessions[0] : undefined;
+    if (!state?.sessionCwd || state.upstreamSessionId !== input.nativePlanFile.sessionId) {
+      return { outcome: "skipped", reason: "unproven" };
+    }
+    const outcome = await deleteOwnedPlanFile({ nativePlanFile: input.nativePlanFile,
+      sessionId: state.upstreamSessionId, planRoot: NodePath.join(state.sessionCwd, ".opencode", "plans") });
+    // A recreated file under the same name is a different file and must not inherit this session's claim.
+    if (outcome.outcome === "deleted") state.createdPlanPaths.delete(input.nativePlanFile.path);
+    return outcome;
   }
 
   async stopSession(sessionId: string): Promise<void> {
@@ -589,7 +668,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   private resolvePendingAsk(entry: OpenCodePendingAsk, outcome: ApprovalOutcome): boolean {
     if (this.pendingPermissions.get(entry.request.requestId) !== entry) return false;
     this.pendingPermissions.delete(entry.request.requestId);
-    const receipts = this.turnStateFor(entry.sessionId).receiptRequestIds;
+    const receipts = this.turnStateFor(entry.sessionId, entry.request.threadId).receiptRequestIds;
     if (!receipts.has(entry.request.requestId)) {
       receipts.add(entry.request.requestId);
       this.publishTurnEvent(entry.routing, entry.sessionId, approvalReceipt(entry.request, outcome));
@@ -603,7 +682,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     const state = this.turns.get(entry.sessionId);
     if (!state || state.abortController.signal !== entry.signal) return;
     const goneId = state.upstreamSessionId;
-    state.upstreamSessionId = "";
+    forgetUpstreamSession(state);
     this.emitSessionInvalidatedNotice(
       (event) => this.publishTurnEvent(entry.routing, entry.sessionId, event),
       entry.routing.threadId,
@@ -670,10 +749,14 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     return sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
   }
 
-  private turnStateFor(sessionId: string): OpenCodeTurnState {
+  private turnStateFor(sessionId: string, threadId: string): OpenCodeTurnState {
     const existing = this.turns.get(sessionId);
     if (existing) return existing;
     const created: OpenCodeTurnState = {
+      threadId,
+      sessionCwd: null,
+      nativePlanPath: null,
+      createdPlanPaths: new Set(),
       receiptRequestIds: new Set(),
       upstreamSessionId: "",
       lease: null,
@@ -737,6 +820,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       this.publishTurnEvent(routing, req.sessionId, event);
     };
     state.aborted = false;
+    state.nativePlanPath = null;
     state.abortController = new AbortController();
     state.messageRoles.clear();
     state.childSessionCalls.clear();
@@ -828,10 +912,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       });
     });
     try {
-      await this.http.promptAsync(endpoint, upstreamId, {
-        model: toOpenCodeModelRef(req.model),
-        parts: [{ type: "text", text: req.message }],
-      });
+      await this.http.promptAsync(endpoint, upstreamId, openCodePromptBody(req));
       await subscribe;
       // The stream ended. An in-flight idle confirmation owns settling now;
       // otherwise settle only if nothing did: an abort cancels, while a dead
@@ -846,7 +927,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
         if (req.resumeRequired) throw new SessionResumeUnavailableError("OpenCode could not resume the saved session", { cause: error });
         logger.info("OpenCode upstream session missing; starting fresh", { sessionId: req.sessionId });
         this.emitSessionInvalidatedNotice(emit, threadId, upstreamId);
-        state.upstreamSessionId = "";
+        forgetUpstreamSession(state);
         await this.promptUpstream(req, state, endpoint, settler, true);
         return;
       }
@@ -880,6 +961,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
           signal: state.abortController.signal,
         });
         state.upstreamSessionId = resumed;
+        state.sessionCwd = req.cwd;
         emit({ type: AgentEventType.System, threadId, subtype: `sdk_session_id:${resumed}` } satisfies AgentEvent);
         return;
       } catch (error) {
@@ -894,6 +976,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     const created = await this.http.createSession(endpoint, req.threadId);
     // Validate the upstream id before it becomes the durable resume cursor.
     state.upstreamSessionId = formatOpenCodeResumeCursor(created.id);
+    state.sessionCwd = req.cwd;
     emit({ type: AgentEventType.System, threadId, subtype: `sdk_session_id:${created.id}` } satisfies AgentEvent);
   }
 
@@ -950,6 +1033,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       this.trackMessageRole(state, normalized);
       partType = trackOpenCodePartType(state.partTypes, normalized);
       trackChildTask(state, normalized);
+      trackNativePlanFile(req, state, normalized);
       if (normalized.type === "session.diff") {
         this.publishNativeTurnDiff(req, state, normalized.properties);
       }
@@ -1052,9 +1136,30 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       const noted = this.noteIdlePoll(confirm, settler, poll);
       if (noted === "next") continue;
       if (noted === "stop") return;
-      break;
+      if (await this.completeIdleTurn(req, state, settler, confirm) === "restart") continue;
+      return;
     }
-    settler.settle(state.aborted ? "cancelled" : "completed");
+  }
+
+  private async completeIdleTurn(req: TurnRequest<"opencode">, state: OpenCodeTurnState,
+    settler: OpenCodeTurnSettler, confirm: IdleConfirmProgress): Promise<"restart" | "stop"> {
+    const capture = await this.readNativePlan(state);
+    const gate = this.idleConfirmGate(req, state, settler, confirm, false);
+    if (gate !== "go") return gate;
+    const routing = this.canonicalRoutings.get(req.turnExecutionId);
+    if (routing && capture?.outcome === "captured") {
+      this.canonicalEventPublisher?.capturePlan(routing, {
+        markdown: capture.markdown, source: "native", nativePlanFile: capture.nativePlanFile,
+      });
+    }
+    settler.settle("completed");
+    return "stop";
+  }
+
+  private async readNativePlan(state: OpenCodeTurnState) {
+    if (!state.nativePlanPath || !state.sessionCwd) return null;
+    return captureOwnedPlanFile({ path: state.nativePlanPath, sessionId: state.upstreamSessionId,
+      planRoot: NodePath.join(state.sessionCwd, ".opencode", "plans") });
   }
 
   /**
@@ -1093,6 +1198,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     state: OpenCodeTurnState,
     settler: OpenCodeTurnSettler,
     confirm: IdleConfirmProgress,
+    checkDeadline = true,
   ): "restart" | "stop" | "go" {
     if (state.aborted || settler.isSettled()) return "stop";
     if (state.idleRestart) {
@@ -1104,7 +1210,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     }
     if (settler.activityCount !== confirm.startedActivity) return "stop";
     if (this.hasPendingAskForSession(req.sessionId)) return "stop";
-    if (Date.now() >= confirm.deadline) {
+    if (checkDeadline && Date.now() >= confirm.deadline) {
       settler.settle("errored", "OpenCode session status confirmation timed out");
       return "stop";
     }

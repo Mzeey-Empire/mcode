@@ -75,6 +75,32 @@ describe("mapDevinAcpSessionNotification", () => {
       threadId: THREAD, source: "fence", markdown: "# Devin plan\n## Build\nDo it.",
     }]);
   });
+  it("forwards plan fence text deltas unchanged", () => {
+    const state = createDevinAcpTurnState();
+    for (const text of ["Summary\n``", "``mcode-plan\n# Plan\n```ts\n", "const answer = 42;\n```\nShip it.\n``", "``"]) {
+      const events = mapDevinAcpSessionNotification({ sessionId: "acp-1",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+      }, THREAD, state);
+      expect(events).toEqual([{ type: "textDelta", threadId: THREAD, delta: text }]);
+    }
+  });
+
+  it("keeps file-path mentions and write_plan tools fence-only without a native file claim", () => {
+    const state = createDevinAcpTurnState();
+    const events = mapDevinAcpSessionNotification({ sessionId: "acp-1", update: {
+      sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Plan saved to /work/plan.md" },
+    } }, THREAD, state);
+    events.push(...mapDevinAcpSessionNotification(notification(toolCall("plan-write", {
+      kind: "edit", rawInput: { path: "/work/plan.md" },
+      _meta: { "cognition.ai/inferenceToolName": "write_plan" },
+    })), THREAD, state));
+    expect(events).toEqual([
+      { type: "textDelta", threadId: THREAD, delta: "Plan saved to /work/plan.md" },
+      { type: "assistantMessageBoundary", threadId: THREAD, isFinalResponse: false },
+      { type: "toolUse", threadId: THREAD, toolCallId: "plan-write", toolName: "Write", toolInput: { path: "/work/plan.md" } },
+    ]);
+  });
+
   it("emits text deltas and accumulates assistant text", () => {
     const state = createDevinAcpTurnState();
     const events = mapDevinAcpSessionNotification(
