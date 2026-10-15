@@ -17,6 +17,7 @@ import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { BrowserToolbar } from "./BrowserToolbar";
 import { useBrowserControl } from "./useBrowserControl";
 import { BrowserDeviceRow } from "./BrowserDeviceRow";
+import { BrowserActingOverlay } from "./BrowserActingOverlay";
 import { BrowserViewportCanvas } from "./BrowserViewportCanvas";
 import type { BrowserAction, BrowserToolbarPage, BrowserTools } from "./browserToolbarModel";
 import { useBrowserCommands } from "./useBrowserCommands";
@@ -442,6 +443,12 @@ export function WebRuntimePreview({
             dockRef={dockRef}
           />
         </BrowserViewportCanvas>
+        <BrowserActingOverlay
+          workspaceId={identity.workspaceId}
+          threadId={threadId}
+          tabId={WEB_RUNTIME_PREVIEW_TAB_ID}
+          coveredRight={0}
+        />
       </div>
     </div>
   );

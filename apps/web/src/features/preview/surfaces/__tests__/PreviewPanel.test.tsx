@@ -332,6 +332,24 @@ describe("PreviewPanel: unavailable state", () => {
     expect(screen.queryByTestId("web-runtime-cross-origin")).not.toBeInTheDocument();
   });
 
+  it("paints the agent overlay over the web preview while the agent acts", () => {
+    vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
+    const threadId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const key = browserAutomationTargetKey(threadId, threadId, "web-preview");
+    useDiffStore.setState({ previewUrlByThread: { [threadId]: window.location.origin + "/fixture" } });
+    useBrowserAutomationStore.setState({
+      controllers: new Map([[key, { tabId: "web-preview", controller: "agent", controlEpoch: 1, pointer: { x: 40, y: 50 } }]]),
+      actingTargets: new Set([key]),
+    });
+    try {
+      render(<PreviewPanel threadId={threadId} />);
+      expect(screen.getByTestId("browser-acting-overlay")).toBeInTheDocument();
+      expect(screen.getByTestId("browser-automation-pointer")).toHaveStyle({ left: "40px", top: "50px" });
+    } finally {
+      useBrowserAutomationStore.setState({ controllers: new Map(), actingTargets: new Set() });
+    }
+  });
+
   it("publishes the web preview target identity used by the executor", async () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
     const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
