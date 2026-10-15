@@ -13,6 +13,23 @@ bun run db:push        # Push schema directly (dev only; can be destructive)
 bun run db:studio      # Drizzle Studio (visual browser)
 ```
 
+## Parallel branches
+
+Two branches that run `db:generate` from the same parent both emit the next number.
+The number is not the danger. Drizzle's `migrate()` skips any migration whose
+journal `when` is older than the newest one a database has applied, so a migration
+that merges late is silently never run on installs that already took the later one.
+[`migration-catalogue-lint.ts`](../../../apps/server/src/runtime/persistence/sqlite/migration-catalogue-lint.ts)
+fails the server tests when numbers repeat or skip, `when` stops rising, or snapshots
+stop chaining. Its legacy exceptions excuse entries that shipped before it existed
+and must not grow.
+
+When the lint fails after a merge, rebase on `main`, delete the `.sql`, snapshot and
+journal entry your branch generated, and run `db:generate` again. Never renumber or
+hand-merge them. The lint only sees the branch it runs on, so also require branches
+to be up to date before merging (or use a merge queue). Without that, two green
+branches can still merge into a broken catalogue.
+
 App startup runs Drizzle `migrate()` programmatically against the user's SQLite file,
 including legacy `_migrations` detection (`bootstrapDrizzle`) so existing installs
 upgrade without manual steps.
