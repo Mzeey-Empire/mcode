@@ -43,7 +43,10 @@ import { AgentService } from "../agent-service.js";
 import { AGENT_TURN_COMMAND_PORT } from "../agent-turn-command-port.js";
 import { AgentEventPublicationRegistry } from "../agent-event-publication-registry.js";
 
-const pushes = vi.hoisted(() => ({ versions: [] as Array<{ threadId: string; version: PlanVersion }> }));
+const pushes = vi.hoisted((): {
+  versions: Array<{ threadId: string; version: PlanVersion }>;
+  events: Array<{ channel: string; payload: unknown }>;
+} => ({ versions: [], events: [] }));
 vi.mock("../../../../runtime/process/containment/process-kill.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../../../runtime/process/containment/process-kill.js")>(),
   killDescendantsByName: async () => undefined,
@@ -51,6 +54,9 @@ vi.mock("../../../../runtime/process/containment/process-kill.js", async (import
 vi.mock("../../../../application/transport/push.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../../application/transport/push.js")>();
   return { ...actual, broadcast: (...args: Parameters<typeof actual.broadcast>) => {
+    if (args[0] === "plan.versionUpserted" || args[0] === "plan.implementPending") {
+      pushes.events.push({ channel: args[0], payload: args[1] });
+    }
     if (args[0] === "plan.versionUpserted") pushes.versions.push(args[1] as { threadId: string; version: PlanVersion });
     actual.broadcast(...args);
   } };
@@ -226,7 +232,18 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     if (!target?.worktree_path) throw new Error("Expected managed checkout");
     const environment = container.resolve(WorkspaceEnvironmentService);
     await expect.poll(() => environment.getAutomaticSetup({ threadId: target.id }).attempt?.state).toBe("awaiting-approval");
+    expect((await service.snapshot({ threadId })).pendingImplement).toEqual({ targetThreadId: target.id, version: 1 });
+    expect(pushes.events.filter(event => event.channel === "plan.implementPending")).toContainEqual({
+      channel: "plan.implementPending", payload: { threadId, pending: { targetThreadId: target.id, version: 1 } },
+    });
     return { ...source, input, receipt, target, checkout: target.worktree_path, environment };
+  }
+
+  async function expectPendingCleared() {
+    expect((await service.snapshot({ threadId })).pendingImplement).toBeNull();
+    expect(pushes.events.filter(event => event.channel === "plan.implementPending").at(-1)).toEqual({
+      channel: "plan.implementPending", payload: { threadId, pending: null },
+    });
   }
 
   async function cleanTarget(thread: string, checkout: string) {
@@ -304,9 +321,30 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     expect(sent[0]?.message).toBe(`Implement plan v1: "Original".\n\nThis is the plan the user approved. It supersedes any earlier plan or plan file, including your own. Mcode keeps this text at ${files.path(threadId)}.\n\n# Original\nExact plan text.`);
     expect(pushes.versions.filter(row => row.version.status === "accepted").map(row => row.threadId))
       .toEqual(expect.arrayContaining([threadId, target.id]));
+    await observer.stop();
+    await expectPendingCleared();
+    const clearIndex = pushes.events.findLastIndex(event => event.channel === "plan.implementPending");
+    expect(pushes.events.slice(0, clearIndex)).toEqual(expect.arrayContaining([
+      { channel: "plan.versionUpserted", payload: { threadId, version: expect.objectContaining({ status: "accepted" }) } },
+      { channel: "plan.versionUpserted", payload: { threadId: target.id, version: expect.objectContaining({ status: "accepted" }) } },
+    ]));
     expect(git(repo, "branch", "--list")).toBe(branches);
     expect(git(repo, "worktree", "list", "--porcelain").match(/^worktree /gm)).toHaveLength(3);
     await agent.stopSession(target.id, { by: "user" });
+  });
+
+  it("settles an admission rejection after Setup dispatch and releases the source", async () => {
+    const { input, target, checkout, environment } = await waitingWorktree();
+    database.run("CREATE TRIGGER fail_admission BEFORE INSERT ON canonical_agent_turns BEGIN SELECT RAISE(ABORT, 'injected admission failure'); END");
+    await environment.continueAutomaticSetup({ threadId: target.id });
+    await expect.poll(() => new PlanImplementStore(database).read(input.requestId)?.status).toBe("failed");
+    await observer.stop();
+    expect(runtime.reservations.get(threadId)).toBeUndefined();
+    expect(runtime.messages.hasMessages(target.id)).toBe(false);
+    await cleanTarget(target.id, checkout);
+    await expect(service.implement(input)).rejects.toMatchObject({ code: "implement_failed" });
+    expect(plans.getById(ready.id)?.status).toBe("ready");
+    await expectPendingCleared();
   });
 
   it("Stop during Setup fails and compensates the empty target without creating or removing a branch", async () => {
@@ -320,6 +358,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     expect(new PlanImplementStore(database).read(input.requestId)).toMatchObject({ status: "failed", failureCode: "startup_cancelled", messageId: receipt.messageId });
     await observer.stop();
     await cleanTarget(target.id, checkout);
+    await expectPendingCleared();
     expect(plans.getById(ready.id)?.status).toBe("ready");
     expect(git(repo, "branch", "--list")).toBe(branches);
   });
@@ -352,6 +391,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     await expect(service.implement(input)).rejects.toMatchObject({ code: "implement_failed" });
     expect(runtime.reservations.get(threadId)).toBeUndefined();
     expect(plans.getById(ready.id)?.status).toBe("ready");
+    await expectPendingCleared();
   });
 
   it("preserves a worktree target that gained a message before cancellation", async () => {
@@ -366,7 +406,18 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     expect(runtime.threads.findById(target.id)?.deleted_at).toBeNull();
     expect(NodeFS.existsSync(checkout)).toBe(true);
     expect(database.prepare("SELECT content FROM messages WHERE thread_id = ?").all(target.id)).toEqual([{ content: "Keep this conversation" }]);
+    await expectPendingCleared();
     await runtime.threadService.delete(target.id, true);
+    await cleanTarget(target.id, checkout);
+  });
+
+  it("publishes the clear when recovering a waiting request in the same service", async () => {
+    const { input, target, checkout } = await waitingWorktree();
+    await observer.stop();
+    await service.recoverInterrupted();
+    await expectPendingCleared();
+    expect(runtime.reservations.get(threadId)).toBeUndefined();
+    await expect(service.implement(input)).rejects.toMatchObject({ code: "implement_interrupted" });
     await cleanTarget(target.id, checkout);
   });
 

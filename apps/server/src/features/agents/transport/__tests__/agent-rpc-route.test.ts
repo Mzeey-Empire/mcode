@@ -170,8 +170,10 @@ describe("routeMessage Agent RPCs", () => {
     expect(settled).toBe(false);
     confirm?.();
     await expect(pending).resolves.toEqual(version);
-    fixture.deps.planService.snapshot = async () => ({ versions: [version], comments: [] });
-    await expect(routeAgentRpc("plan.snapshot", { threadId: version.threadId }, fixture.deps)).resolves.toEqual({ versions: [version], comments: [] });
+    fixture.deps.planService.snapshot = async () => ({ versions: [version], comments: [], phase: null, pendingQuestions: null, pendingImplement: null });
+    await expect(routeAgentRpc("plan.snapshot", { threadId: version.threadId }, fixture.deps)).resolves.toEqual({
+      versions: [version], comments: [], phase: null, pendingQuestions: null, pendingImplement: null,
+    });
   });
 
   it.each(["plan_busy", "plan_read_only", "plan_conflict"] as const)("preserves the typed %s save failure", async (code) => {

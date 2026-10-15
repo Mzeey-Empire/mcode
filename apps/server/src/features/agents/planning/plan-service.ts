@@ -1,6 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import { PlanImplementSchema, PlanImplementErrorSchema, ProviderIdSchema,
-  type PlanSaveError, type PlanSaveVersion, type PlanVersion, type PlanImplement,
+  type PlanSaveError, type PlanSaveVersion, type PlanVersion, type PlanImplement, type PendingPlanImplement,
   type PlanImplementError, type PlanImplementReceipt, type IProviderRegistry, type PlanCommentError, type PlanComment } from "@mcode/contracts";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import type { ThreadService } from "../../thread-control/lifecycle/thread-service.js";
@@ -95,6 +95,8 @@ export class PlanService {
     }
     if (queued) {
       this.waiting.set(input.requestId, { input, token });
+      const pending = await this.pendingImplement(input.threadId);
+      if (pending) broadcast("plan.implementPending", { threadId: input.threadId, pending });
       await this.settleStartup(input.requestId);
       const request = await this.writer.execute(implementWrites.read, input.requestId);
       if (request) return this.receiptOrFailure(request);
@@ -183,6 +185,7 @@ export class PlanService {
       if (!(error instanceof PlanServiceError)) throw error;
     }
     this.waiting.delete(pending.input.requestId);
+    broadcast("plan.implementPending", { threadId: pending.input.threadId, pending: null });
   }
 
   private async settleImplement(input: PlanImplement, token: string, runtime: PlanImplementRuntime, failure: unknown): Promise<PlanImplementReceipt> {
@@ -311,10 +314,11 @@ export class PlanService {
       if (settled?.status !== "failed") continue;
       const pending = this.waiting.get(request.requestId);
       if (pending && this.runtime) releaseFailedImplementReservation(request.sourceThreadId, pending.token, this.runtime);
-      this.waiting.delete(request.requestId);
       await this.compensateNewThread(settled);
-      this.progress?.reloadPlans(request.sourceThreadId);
+      await this.publishVersions(request.sourceThreadId);
       await this.files.writeAfterCommit(request.sourceThreadId);
+      this.waiting.delete(request.requestId);
+      if (pending) broadcast("plan.implementPending", { threadId: request.sourceThreadId, pending: null });
     }
   }
 
@@ -336,7 +340,18 @@ export class PlanService {
     const result = await this.writer.execute(planWriteOperations.snapshot, input);
     if (!result.ok) throw new PlanServiceError(result);
     return { versions: mergePlanVersions(result.versions, this.progress?.reloadPlans(input.threadId) ?? result.versions),
-      comments: result.comments, phase: result.phase, pendingQuestions: result.pendingQuestions };
+      comments: result.comments, phase: result.phase, pendingQuestions: result.pendingQuestions,
+      pendingImplement: await this.pendingImplement(input.threadId) };
+  }
+
+  private async pendingImplement(threadId: string): Promise<PendingPlanImplement | null> {
+    for (const { input } of this.waiting.values()) {
+      if (input.threadId !== threadId) continue;
+      const request = await this.writer.execute(implementWrites.read, input.requestId);
+      const targetThreadId = request ? this.waitingTarget(request) : null;
+      if (request && targetThreadId) return { targetThreadId, version: request.version };
+    }
+    return null;
   }
 }
 

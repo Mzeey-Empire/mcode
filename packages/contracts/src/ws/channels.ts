@@ -6,7 +6,7 @@ import { ThreadStatusSchema } from "../models/enums.js";
 import { ThreadSchema } from "../models/thread.js";
 import { ProviderIdSchema, SettingsSchema } from "../models/settings.js";
 import { PlanQuestionSchema } from "../models/plan-questions.js";
-import { PlanVersionSchema, PlanCommentSchema } from "../models/plan.js";
+import { PlanVersionSchema, PlanCommentSchema, PendingPlanImplementSchema } from "../models/plan.js";
 import { ChecksStatusSchema } from "../github.js";
 import { ApprovalRequestSchema, ApprovalOutcomeSchema } from "../models/approval.js";
 import { ProviderAvailabilitySchema } from "../providers/availability.js";
@@ -214,6 +214,10 @@ export const WS_CHANNELS = {
   "plan.versionUpserted": z.object({
     threadId: z.string(),
     version: PlanVersionSchema(),
+  }),
+  /** Source plan reservation while Implement waits for Setup. */
+  "plan.implementPending": z.object({
+    threadId: z.string(), pending: PendingPlanImplementSchema().nullable(),
   }),
   /** Comment changes committed by saves, captures, edits or turn admission. */
   "plan.commentsChanged": z.object({

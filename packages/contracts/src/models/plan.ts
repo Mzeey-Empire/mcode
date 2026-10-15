@@ -116,10 +116,19 @@ export const PendingPlanQuestionsSchema = lazySchema(() => z.object({
   assistantMessageId: z.string(), questions: z.array(PlanQuestionSchema()).min(1).max(15),
 }));
 
+/** Implement reserved on the source while its target waits for Setup. */
+export const PendingPlanImplementSchema = lazySchema(() => z.object({
+  targetThreadId: z.string(), version: z.number().int().min(1),
+}));
+
+/** Source reservation presented to every client viewing the plan. */
+export type PendingPlanImplement = z.infer<ReturnType<typeof PendingPlanImplementSchema>>;
+
 /** Durable planning state returned when opening or reloading a thread. */
 export const PlanSnapshotSchema = lazySchema(() => z.object({
   versions: z.array(PlanVersionSchema()), comments: z.array(PlanCommentSchema()), phase: PlanPhaseSchema.nullable(),
   pendingQuestions: PendingPlanQuestionsSchema().nullable(),
+  pendingImplement: PendingPlanImplementSchema().nullable(),
 }));
 
 /** Durable planning state returned when opening or reloading a thread. */

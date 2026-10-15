@@ -2258,7 +2258,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     let cancellationWon = false;
     const send = this.sendMessage({
       ...this.turnAdmissions.queuedCommand(submission),
-      onTurnStarted: () => resolveStarted(),
+      onTurnStarted: () => {
+        if (!submission.planImplement) resolveStarted();
+      },
+      onAdmissionComplete: () => {
+        if (submission.planImplement) resolveStarted();
+      },
       onRuntimeReleased: resolveCompletion,
     }, () => {
       const canReserve = this.threadCreation.canAdmitQueuedAgent(submission.threadId, startupId);

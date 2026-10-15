@@ -102,7 +102,7 @@ export class PlanStore {
       if (!this.threadExists(threadId)) return { ok: false, code: "thread_not_found", latestVersion: null };
       const phase = new ThreadStore(this.db).findById(threadId)?.plan_phase ?? null;
       return { ok: true, versions: this.listWithHistory(threadId), comments: this.listComments(threadId), phase,
-        pendingQuestions: phase === "questions" ? this.pendingQuestions(threadId) : null };
+        pendingQuestions: phase === "questions" ? this.pendingQuestions(threadId) : null, pendingImplement: null };
     })();
   }
 
