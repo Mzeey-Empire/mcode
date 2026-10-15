@@ -60,4 +60,20 @@ describe("staged draft image reader", () => {
 
     expect(await createStagedDraftImageReader(root)(THREAD_ID, STAGING_ID)).toBeNull();
   });
+
+  it("does not read from a draft directory that links outside the attachments root", async () => {
+    const { root } = await stagedRoot();
+    const outside = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-draft-outside-"));
+    temporaryDirectories.push(outside);
+    await NodeFSPromises.writeFile(NodePath.join(outside, `${STAGING_ID}.png`), "secret");
+    const draftDirectory = NodePath.join(root, THREAD_ID, "draft");
+    await NodeFSPromises.rm(draftDirectory, { recursive: true });
+    try {
+      await NodeFSPromises.symlink(outside, draftDirectory, "junction");
+    } catch {
+      return;
+    }
+
+    expect(await createStagedDraftImageReader(root)(THREAD_ID, STAGING_ID)).toBeNull();
+  });
 });
