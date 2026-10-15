@@ -1196,6 +1196,12 @@ export class ClaudeProvider
       try {
         const planExit = await this.handleExitPlanMode(threadId, toolName, input);
         if (planExit) return planExit;
+        const session = this.runtime.get(`mcode-${threadId}`);
+        if (session?.planTurn) {
+          const denial = this.denyPlanMutation(session, toolName, input);
+          if (denial) return denial;
+          options = { ...options, suggestions: undefined };
+        }
         const preGrant = this.consumeScopedReadGrant(threadId, toolName, input);
         if (preGrant) return preGrant;
         return await this.requestClaudeToolPermission(
@@ -1218,6 +1224,17 @@ export class ClaudeProvider
     };
   }
 
+  private denyPlanMutation(
+    session: ClaudeSessionState,
+    toolName: string,
+    input: Record<string, unknown>,
+  ): ClaudeToolPermissionResult | undefined {
+    if (!["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell"].includes(toolName)) return undefined;
+    if (toolName === "Write" && typeof input.file_path === "string"
+      && isNativePlanFilePath(input.file_path, session.planRoots)) return undefined;
+    return { behavior: "deny", message: "Plan mode is read-only. Describe the change in the plan instead." };
+  }
+
   private async handleExitPlanMode(
     threadId: string,
     toolName: string,
@@ -1225,11 +1242,17 @@ export class ClaudeProvider
   ): Promise<ClaudeToolPermissionResult | undefined> {
     if (toolName !== "ExitPlanMode") return undefined;
     const session = this.runtime.get(`mcode-${threadId}`);
-    if (!session || !session.planTurn || session.planTurn.kind === "questions") {
+    if (!session || !session.planTurn) {
       return {
         behavior: "deny" as const,
         message:
           "Plan mode is not active. Continue with the user's request normally.",
+      };
+    }
+    if (session.planTurn.kind === "questions") {
+      return {
+        behavior: "deny",
+        message: "This Plan turn only collects questions. Reply with the questions in text; do not call ExitPlanMode.",
       };
     }
     if (session.planCaptured) return this.capturedPlanReply();
@@ -1493,8 +1516,6 @@ export class ClaudeProvider
     this.markClaudeSessionUsed(context.params.sessionId, existing);
     if (!(await this.reconfigureReusableClaudeSession(context, existing)))
       return "retry_fresh";
-    const mode = this.claudePermissionMode(context.params);
-    if (mode !== this.claudePermissionMode(existing)) await existing.query.setPermissionMode(mode);
     existing.planTurn = context.params.planTurn;
     existing.planCaptured = false;
     await this.pushClaudeMessage(existing, context);
@@ -1560,7 +1581,29 @@ export class ClaudeProvider
   ): Promise<boolean> {
     if (!(await this.updateClaudeOrchestrationMode(context, existing)))
       return false;
-    return await this.updateClaudeSessionModel(context, existing);
+    if (!(await this.updateClaudeSessionModel(context, existing)))
+      return false;
+    return await this.updateClaudePermissionMode(context, existing);
+  }
+
+  private async updateClaudePermissionMode(
+    context: ClaudeTurnContext,
+    existing: ClaudeSessionState,
+  ): Promise<boolean> {
+    const mode = this.claudePermissionMode(context.params);
+    if (mode === this.claudePermissionMode(existing)) return true;
+    try {
+      await existing.query.setPermissionMode(mode);
+      return true;
+    } catch (error) {
+      logger.error("Permission mode change failed, recreating session", {
+        sessionId: context.params.sessionId,
+        permissionMode: mode,
+        error: sideChannelErrorMessage(error),
+      });
+      await this.stopClaudeSessionForRecreation(context.params.sessionId, context.threadId, existing);
+      return false;
+    }
   }
 
   private async updateClaudeOrchestrationMode(

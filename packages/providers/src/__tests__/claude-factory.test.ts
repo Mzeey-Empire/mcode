@@ -47,7 +47,10 @@ function installTransport(messages: (turn: number, options: Options) => readonly
     return Object.assign(stream, queryMethodStubs(), {
       close: vi.fn(() => { void stream.return(); }), setModel: vi.fn(async () => undefined),
       setPermissionMode: vi.fn(async (next: NonNullable<Options["permissionMode"]>) => {
-        if (rejectModeChange) throw new Error("Permission switch refused");
+        if (rejectModeChange) {
+          rejectModeChange = false;
+          throw new Error("Permission switch refused");
+        }
         if (next === "bypassPermissions" && !options.allowDangerouslySkipPermissions) throw new Error("Bypass not enabled at spawn");
         mode = next;
       }),
@@ -114,15 +117,90 @@ describe("Claude native plan turns", () => {
     expect(transport.optionsSeen).toHaveLength(1);
   });
 
-  it("does not enqueue a plan prompt if the live permission switch fails", async () => {
-    const transport = installTransport();
+  it.each([false, true])("recovers a failed permission switch with a fresh session (starts in plan: %s)", async startsInPlan => {
+    const transport = installTransport(async (_turn, options) => {
+      assert(options.canUseTool);
+      await options.canUseTool("ExitPlanMode", { plan: "# Plan" }, { signal: new AbortController().signal, toolUseID: "EXIT" });
+      return [result()];
+    });
     const { provider, events } = fixture();
-    await provider.sendTurn(request({ permissionMode: "full" }));
+    const captures: PlanCapture[] = [];
+    provider.on("plan_captured", capture => captures.push(capture));
+    const planTurn = { kind: "planning", planFilePath: null } as const;
+    await provider.sendTurn(request({ permissionMode: "full", planTurn: startsInPlan ? planTurn : undefined }));
     await completed(events, 1);
     transport.rejectPermissionSwitch();
-    await expect(provider.sendTurn(request({ permissionMode: "full", turnId: "turn-2", turnExecutionId: execution2,
-      planTurn: { kind: "planning", planFilePath: null } }))).rejects.toThrow();
-    expect(transport.consumedModes).toEqual(["bypassPermissions"]);
+    await provider.sendTurn(request({ permissionMode: "full", turnId: "turn-2", turnExecutionId: execution2,
+      planTurn: startsInPlan ? undefined : planTurn }));
+    await completed(events, 2);
+    expect(transport.optionsSeen.map(options => options.permissionMode)).toEqual(startsInPlan
+      ? ["plan", "bypassPermissions"] : ["bypassPermissions", "plan"]);
+    await provider.sendTurn(request({ permissionMode: "full", turnId: "turn-3",
+      turnExecutionId: "00000000-0000-4000-8000-000000000003", planTurn: startsInPlan ? planTurn : undefined }));
+    await completed(events, 3);
+    expect(transport.optionsSeen).toHaveLength(2);
+    expect(transport.consumedModes).toEqual(startsInPlan
+      ? ["plan", "bypassPermissions", "plan"] : ["bypassPermissions", "plan", "bypassPermissions"]);
+    expect(captures).toEqual(Array.from({ length: startsInPlan ? 2 : 1 }, () => ({ threadId: "thread-1", markdown: "# Plan", source: "native" })));
+    expect(events().filter(({ event }) => event.type === AgentEventType.Error)).toEqual([]);
+  });
+
+  it.each(["planning", "revise", "questions"] as const)("blocks mutations without approval in full-access %s turns, then permits normal build approval", async kind => {
+    const replies: unknown[] = [];
+    const edit = { file_path: NodePath.join(process.cwd(), "source.ts"), old_string: "old", new_string: "new" };
+    const mutations = [
+      { toolName: "Edit", input: edit },
+      { toolName: "Write", input: { file_path: edit.file_path, content: "new" } },
+      { toolName: "MultiEdit", input: { file_path: edit.file_path, edits: [{ old_string: "old", new_string: "new" }] } },
+      { toolName: "NotebookEdit", input: { notebook_path: edit.file_path, new_source: "new", cell_type: "code" } },
+      { toolName: "Bash", input: { command: "touch source.ts" } },
+      { toolName: "PowerShell", input: { command: "Set-Content source.ts new" } },
+    ];
+    const transport = installTransport(async (turn, options) => {
+      assert(options.canUseTool);
+      for (const { toolName, input } of turn === 1 ? mutations : [{ toolName: "Edit", input: edit }]) {
+        replies.push(await options.canUseTool(toolName, input, { signal: new AbortController().signal, toolUseID: toolName }));
+      }
+      return [result(`RESULT_${turn}`)];
+    });
+    const { provider, events } = fixture();
+    const approval = vi.fn();
+    provider.on("approval_request", req => {
+      approval(req);
+      void provider.resolveApproval?.(req.requestId, { choiceId: "allow" });
+    });
+    await provider.sendTurn(request({ permissionMode: "full", planTurn: { kind, planFilePath: null } }));
+    await completed(events, 1);
+    expect(replies).toEqual(Array.from({ length: 6 }, () => ({ behavior: "deny", message: "Plan mode is read-only. Describe the change in the plan instead." })));
+    expect(approval).not.toHaveBeenCalled();
+    await provider.sendTurn(request({ permissionMode: "full", turnId: "turn-2", turnExecutionId: execution2 }));
+    await completed(events, 2);
+    expect(approval).toHaveBeenCalledTimes(1);
+    expect(replies[6]).toEqual({ behavior: "allow", updatedInput: edit });
+    expect(transport.optionsSeen).toHaveLength(1);
+  });
+
+  it.each(["Write", "Read"])("allows approved plan %s without forwarding session permissions", async toolName => {
+    const { cwd, path } = await createNativePlanFixture("proved");
+    const input = { file_path: path, content: "# Plan" };
+    const replies: unknown[] = [];
+    installTransport(async (_turn, options) => {
+      assert(options.canUseTool);
+      replies.push(await options.canUseTool(toolName, input, { signal: new AbortController().signal, toolUseID: "TOOL",
+        suggestions: [{ type: "addRules", rules: [{ toolName }], behavior: "allow", destination: "session" }] }));
+      return [result()];
+    });
+    const { provider, events } = fixture();
+    const choices: string[][] = [];
+    provider.on("approval_request", req => {
+      const ids = req.body.choices.map(choice => choice.id);
+      choices.push(ids);
+      void provider.resolveApproval?.(req.requestId, { choiceId: ids.includes("allow-session") ? "allow-session" : "allow" });
+    });
+    await provider.sendTurn(request({ cwd, permissionMode: "full", planTurn: { kind: "planning", planFilePath: null } }));
+    await completed(events, 1);
+    expect(replies).toEqual([{ behavior: "allow", updatedInput: input }]);
+    expect(choices).toEqual([["allow", "deny"]]);
   });
 
   it.each(["planning", "revise", "questions", undefined] as const)("captures ExitPlanMode only for planning/revise: %s", async kind => {
@@ -142,7 +220,9 @@ describe("Claude native plan turns", () => {
     expect(captures).toEqual(capturing ? [{ threadId: "thread-1", markdown: "# Plan", source: "native" }] : []);
     expect(replies).toEqual([0, 1].map(() => ({ behavior: "deny", message: capturing
       ? "The client captured your proposed plan. Reply with a one or two sentence summary of it, then stop and wait for the user to review it."
-      : "Plan mode is not active. Continue with the user's request normally." })));
+      : kind === "questions"
+        ? "This Plan turn only collects questions. Reply with the questions in text; do not call ExitPlanMode."
+        : "Plan mode is not active. Continue with the user's request normally." })));
   });
 
   it.each(["proved", "config-root", "no-write", "other-session", "other-path", "missing", "oversized", "outside", "sibling-prefix", "relative"])("requires exact Write-session file proof: %s", async proof => {
