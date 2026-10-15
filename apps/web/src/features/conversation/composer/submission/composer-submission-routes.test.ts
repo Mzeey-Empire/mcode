@@ -51,6 +51,7 @@ function submission(
   return {
     currentDiffComments: [],
     currentFileComments: [],
+    currentBrowserNotePages: [],
     planCommentIds: [],
     snapshot: {
       revision: 1,

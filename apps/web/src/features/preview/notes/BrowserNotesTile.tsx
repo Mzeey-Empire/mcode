@@ -1,8 +1,7 @@
-import { useCallback, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { MousePointer2, X } from "lucide-react";
 import { normalizePreviewPageIdentity } from "@mcode/shared/browser-page-identity";
 import { Popover, PopoverContent, PopoverTrigger, type PopoverRootChangeEventDetails } from "@/components/ui/popover";
-import { buildStoredAttachmentImageSrc } from "@/lib/attachment-url";
 import { useDiffStore } from "@/stores/diffStore";
 import { usePreviewAnnotationStore, type PreviewPageRecord } from "../state/previewAnnotationStore";
 import { previewTabsScopeKey, usePreviewTabsStore } from "../state/previewTabsStore";
@@ -13,6 +12,7 @@ import {
   type BrowserNoteGroup,
 } from "./browserNoteGroups";
 import { removePreviewNote } from "./previewNotes";
+import { readStagedDraftImage } from "./stagedDraftImages";
 
 /** Props for the composer tile that carries a scope's Browser notes. */
 export interface BrowserNotesTileProps {
@@ -20,7 +20,7 @@ export interface BrowserNotesTileProps {
   readonly scopeId: string;
   /** Workspace whose right panel hosts the Browser. */
   readonly workspaceId: string;
-  /** Thread that owns stored page images, when one exists. */
+  /** Thread the right panel is bound to, when one exists. */
   readonly threadId?: string;
   /** Drops every Browser note in the scope. Review and Files comments stay. */
   readonly onRemoveAll: () => void;
@@ -50,27 +50,53 @@ async function revealNotePage(
   await window.desktopBridge?.preview?.design?.revealNote({ selector: selectorHint?.trim() || null, bounds });
 }
 
-function Thumbnail({ page, threadId }: { readonly page: PreviewPageRecord; readonly threadId?: string }) {
-  const bytes = page.markedPng;
-  const showBytes = useCallback((img: HTMLImageElement | null) => {
-    if (!img || !bytes) return;
-    const url = URL.createObjectURL(new Blob([bytes.slice()], { type: "image/png" }));
-    img.src = url;
-    return () => URL.revokeObjectURL(url);
-  }, [bytes]);
-  const stored = page.marked && threadId
-    ? buildStoredAttachmentImageSrc(threadId, page.marked.id, page.marked.mimeType)
-    : null;
-  const imageClass = "size-full object-cover object-top";
+type ThumbnailState = { readonly url: string } | "missing" | "loading";
+
+/** Loads the page's image from draft storage, falling back to the clean screenshot while a redraw is pending. */
+function useThumbnail(page: PreviewPageRecord, scopeId: string): ThumbnailState {
+  const image = page.snapshot ?? page.clean?.image ?? null;
+  const [state, setState] = useState<ThumbnailState>("loading");
+  useEffect(() => {
+    if (!image) return;
+    let url: string | null = null;
+    let cancelled = false;
+    void readStagedDraftImage(scopeId, image).then((bytes) => {
+      if (cancelled) return;
+      if (!bytes) {
+        setState("missing");
+        return;
+      }
+      url = URL.createObjectURL(new Blob([bytes.slice()], { type: "image/png" }));
+      setState({ url });
+    }, () => {
+      if (!cancelled) setState("missing");
+    });
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [image, scopeId]);
+  return image ? state : "missing";
+}
+
+function Thumbnail({ page, scopeId }: { readonly page: PreviewPageRecord; readonly scopeId: string }) {
+  const thumbnail = useThumbnail(page, scopeId);
   return (
     <span className="block h-[98px] w-full shrink-0 overflow-clip bg-panel">
-      {bytes
-        ? <img ref={showBytes} alt="" className={imageClass} draggable={false} />
-        : stored
-          ? <img src={stored} alt="" className={imageClass} draggable={false} />
+      {typeof thumbnail === "object"
+        ? <img src={thumbnail.url} alt="" className="size-full object-cover object-top" draggable={false} />
+        : thumbnail === "missing"
+          ? <span className="flex size-full items-center justify-center text-body-small text-muted">Retake</span>
           : null}
     </span>
   );
+}
+
+/** Flags a page in the card whose image is gone, so a missing snapshot is visible on every page and not only the front one. */
+function RetakeFlag({ page, scopeId }: { readonly page: PreviewPageRecord; readonly scopeId: string }) {
+  return useThumbnail(page, scopeId) === "missing"
+    ? <span className="shrink-0 text-caption text-muted">Retake</span>
+    : null;
 }
 
 function NoteRow({
@@ -167,7 +193,7 @@ export function BrowserNotesTile({ scopeId, workspaceId, threadId, onRemoveAll }
             onClick={() => void revealNotePage(workspaceId, scopeId, threadId, front.page, front.notes[0])}
             className="absolute bottom-0 left-0 flex h-[132px] w-[176px] flex-col overflow-clip rounded-lg border border-border bg-panel text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
-            <Thumbnail page={front.page} threadId={threadId} />
+            <Thumbnail page={front.page} scopeId={scopeId} />
             <span className="flex h-8 w-full shrink-0 items-center gap-2 bg-hover px-2">
               <MousePointer2 size={16} className="shrink-0 text-primary" aria-hidden />
               <span className="text-fade min-w-0 flex-1 text-body-small font-label text-ink">{label}</span>
@@ -198,6 +224,7 @@ export function BrowserNotesTile({ scopeId, workspaceId, threadId, onRemoveAll }
                 <span className="text-fade min-w-0 grow text-xs font-medium text-muted">
                   {browserPageLabel(group.page)}
                 </span>
+                <RetakeFlag page={group.page} scopeId={scopeId} />
               </div>
               <ul>
                 {group.notes.map((note) => (
@@ -208,7 +235,7 @@ export function BrowserNotesTile({ scopeId, workspaceId, threadId, onRemoveAll }
                     onOpen={() => void revealNotePage(workspaceId, scopeId, threadId, group.page, note)}
                     onRemove={() => {
                       removePreviewNote(scopeId, note.id);
-                      if (usePreviewAnnotationStore.getState().byThread[scopeId]?.length === 0) onRemoveAll();
+                      if (usePreviewAnnotationStore.getState().getThreadAnnotations(scopeId).length === 0) onRemoveAll();
                     }}
                   />
                 ))}

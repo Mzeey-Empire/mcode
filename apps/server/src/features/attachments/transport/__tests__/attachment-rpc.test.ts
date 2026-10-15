@@ -1,5 +1,5 @@
 import * as NodeFSPromises from "node:fs/promises";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { routeAttachmentRpc } from "../attachment-rpc.js";
 
 const createdPaths: string[] = [];
@@ -41,5 +41,43 @@ describe("routeAttachmentRpc", () => {
     })).rejects.toThrow(
       "clipboard.saveFile via JSON-RPC requires the data field; use binary upload instead",
     );
+  });
+
+  describe("attachments.stageDraft owner", () => {
+    const attachment = { id: "a", name: "page.png", mimeType: "image/png", sizeBytes: 1, sourcePath: "x" };
+    const staged = { stagingId: "s", name: "page.png", mimeType: "image/png", sizeBytes: 1 };
+
+    function stageWith(owners: { thread?: { deleted_at: string | null }; workspace?: object }) {
+      const stageDraft = vi.fn().mockResolvedValue(staged);
+      const deps = {
+        attachmentService: { stageDraft },
+        threadRepo: { findById: () => owners.thread ?? null },
+        workspaceRepo: { findById: () => owners.workspace ?? null },
+      } as unknown as Parameters<typeof routeAttachmentRpc>[2];
+      return { stageDraft, run: () => routeAttachmentRpc("attachments.stageDraft", { threadId: "owner-1", attachment }, deps) };
+    }
+
+    it("stages for a thread", async () => {
+      const { run, stageDraft } = stageWith({ thread: { deleted_at: null } });
+      await expect(run()).resolves.toEqual(staged);
+      expect(stageDraft).toHaveBeenCalledWith("owner-1", attachment);
+    });
+
+    it("stages under a workspace id before the new thread exists", async () => {
+      const { run, stageDraft } = stageWith({ workspace: {} });
+      await expect(run()).resolves.toEqual(staged);
+      expect(stageDraft).toHaveBeenCalledOnce();
+    });
+
+    it("refuses a deleted thread without falling back to a workspace", async () => {
+      const { run, stageDraft } = stageWith({ thread: { deleted_at: "2026-01-01" }, workspace: {} });
+      await expect(run()).rejects.toThrow("Draft image owner does not exist");
+      expect(stageDraft).not.toHaveBeenCalled();
+    });
+
+    it("refuses an id that is neither a thread nor a workspace", async () => {
+      const { run } = stageWith({});
+      await expect(run()).rejects.toThrow("Draft image owner does not exist");
+    });
   });
 });

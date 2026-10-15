@@ -39,7 +39,7 @@ interface ParsedAttachmentUrl {
   readonly extension: string;
 }
 
-function isContainedPath(parent: string, candidate: string): boolean {
+export function isContainedPath(parent: string, candidate: string): boolean {
   const relativePath = NodePath.relative(parent, candidate);
   return relativePath.length > 0 && !NodePath.isAbsolute(relativePath) && !relativePath.startsWith("..");
 }

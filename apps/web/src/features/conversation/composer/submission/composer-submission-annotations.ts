@@ -1,85 +1,66 @@
 import type { PreviewAnnotationBundle } from "@mcode/contracts";
-import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
+import { materializeStagedSnapshots } from "@/features/preview/notes/stagedDraftImages";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";
+import { browserNoteElements, removeTakenBrowserNotePages } from "../draft/draft-browser-notes";
+import { removeTakenDiffComments } from "../draft/draft-diff-comments";
+import { removeTakenFileComments } from "../draft/draft-file-comments";
+import type { PreparedComposerSubmission } from "./composer-submission-types";
 
-/** Annotation lifecycle operations around a single immediate Composer dispatch. */
+/** Design-mode lifecycle around a single immediate Composer dispatch. */
 export interface ComposerAnnotationDispatchGuard {
-  clearBeforeDispatch(): void;
-  restoreAfterFailure(): void;
-  stopWatching(): void;
+  leaveDesignMode(): void;
+  returnToDesignModeAfterFailure(): void;
 }
 
 /**
- * Preserves Browser annotations when transport fails unless the user changed
- * them meanwhile. Review comments never leave the draft on dispatch; their
- * submission settles them instead.
+ * Turns Design mode off while a Send that carries annotations is in flight and back on if it
+ * fails. The notes themselves stay in the draft: a pending Send holds them and a failed one
+ * releases them, so nothing here copies or restores them.
  */
 export function createComposerAnnotationDispatchGuard(
   annotationScopeId: string | undefined,
   annotations: PreviewAnnotationBundle | undefined,
 ): ComposerAnnotationDispatchGuard {
   if (!annotationScopeId || !annotations) return EMPTY_ANNOTATION_DISPATCH_GUARD;
-
-  let clearedNotes: ClearedNotes | undefined;
-  let annotationsChangedAfterClear = false;
-  const stopWatching = usePreviewAnnotationStore.subscribe((state, previousState) => {
-    if (clearedNotes && annotationsChanged(state, previousState, annotationScopeId)) {
-      annotationsChangedAfterClear = true;
-    }
-  });
-
   return {
-    clearBeforeDispatch: () => {
-      const store = usePreviewAnnotationStore.getState();
-      const removed = {
-        notes: store.byThread[annotationScopeId] ?? [],
-        pages: store.pages[annotationScopeId] ?? {},
-      };
-      store.clearPreviewNotes(annotationScopeId);
-      clearedNotes = removed;
-      usePreviewDesignModeStore.getState().setActive(annotationScopeId, false);
-    },
-    restoreAfterFailure: () => {
-      stopWatching();
-      if (clearedNotes && !annotationsChangedAfterClear) {
-        restoreAnnotations(annotationScopeId, annotations, clearedNotes);
-      }
-    },
-    stopWatching,
+    leaveDesignMode: () => usePreviewDesignModeStore.getState().setActive(annotationScopeId, false),
+    returnToDesignModeAfterFailure: () => usePreviewDesignModeStore.getState().setActive(annotationScopeId, true),
   };
 }
 
-interface ClearedNotes {
-  readonly notes: ReturnType<typeof usePreviewAnnotationStore.getState>["byThread"][string];
-  readonly pages: ReturnType<typeof usePreviewAnnotationStore.getState>["pages"][string];
-}
-
 const EMPTY_ANNOTATION_DISPATCH_GUARD: ComposerAnnotationDispatchGuard = {
-  clearBeforeDispatch: () => {},
-  restoreAfterFailure: () => {},
-  stopWatching: () => {},
+  leaveDesignMode: () => {},
+  returnToDesignModeAfterFailure: () => {},
 };
 
-/** Detects a user edit to the Browser annotations after the dispatch clear. */
-function annotationsChanged(
-  state: ReturnType<typeof usePreviewAnnotationStore.getState>,
-  previousState: ReturnType<typeof usePreviewAnnotationStore.getState>,
-  annotationScopeId: string,
-): boolean {
-  return state.byThread[annotationScopeId] !== previousState.byThread[annotationScopeId]
-    || state.pages[annotationScopeId] !== previousState.pages[annotationScopeId];
+/**
+ * Staged snapshots live under the annotation scope, so a Send that creates a
+ * thread carries their bytes as attachments instead. A Send to this thread
+ * leaves them staged for the server to resolve.
+ */
+export async function materializeSubmissionSnapshots(
+  annotationScopeId: string | undefined,
+  sendsToThisThread: boolean,
+  submission: PreparedComposerSubmission,
+): Promise<PreparedComposerSubmission> {
+  if (sendsToThisThread || !annotationScopeId) return submission;
+  return {
+    ...submission,
+    previewAnnotations: await materializeStagedSnapshots(annotationScopeId, submission.previewAnnotations),
+  };
 }
 
-function restoreAnnotations(
-  annotationScopeId: string,
-  annotations: PreviewAnnotationBundle,
-  cleared: ClearedNotes,
+/**
+ * Removes the notes and comments a delivered Send that created a thread took.
+ * A Send to this thread settles them through its draft submission instead.
+ */
+export function removeTakenSubmissionAnnotations(
+  annotationScopeId: string | undefined,
+  sendsToThisThread: boolean,
+  submission: PreparedComposerSubmission,
 ): void {
-  const store = usePreviewAnnotationStore.getState();
-  const restored = cleared.notes.length > 0
-    ? (store.reinstate(annotationScopeId, cleared.notes, cleared.pages), true)
-    : store.restoreBundle(annotationScopeId, annotations);
-  usePreviewDesignModeStore
-    .getState()
-    .setActive(annotationScopeId, restored && annotations.annotations.length > 0);
+  if (sendsToThisThread || !annotationScopeId) return;
+  removeTakenDiffComments(annotationScopeId, submission.currentDiffComments);
+  removeTakenFileComments(annotationScopeId, submission.currentFileComments);
+  removeTakenBrowserNotePages(annotationScopeId, browserNoteElements(submission.currentBrowserNotePages));
 }

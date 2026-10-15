@@ -1,9 +1,15 @@
-import type { DraftDiffComment, DraftFileComment, MessageMention, PreviewAnnotationBundle } from "@mcode/contracts";
+import type {
+  DraftBrowserNotePage,
+  DraftDiffComment,
+  DraftFileComment,
+  MessageMention,
+  PreviewAnnotationBundle,
+} from "@mcode/contracts";
 import { collectBrowserCaptureSpillPaths, releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-capture-spill";
 import { stripPreviewAnnotationFence } from "@/features/preview/capture/preview-annotation-append";
-import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";
 import { useQueueStore } from "@/stores/queueStore";
+import { browserNoteElements, removeTakenBrowserNotePages } from "../draft/draft-browser-notes";
 import { removeTakenDiffComments } from "../draft/draft-diff-comments";
 import { removeTakenFileComments } from "../draft/draft-file-comments";
 import type { ComposerAgentSelection, ComposerFormController } from "../draft/useComposerFormController";
@@ -31,6 +37,8 @@ export interface CompleteQueuedComposerSubmissionOptions {
   diffComments: readonly DraftDiffComment[];
   /** Files comments the queued message took with it. */
   fileComments: readonly DraftFileComment[];
+  /** Browser pages whose notes the queued message took with it. */
+  browserNotePages: readonly DraftBrowserNotePage[];
   goalObjective?: string;
   form: ComposerFormController;
   finishEditing(): void;
@@ -77,12 +85,13 @@ export function completeQueuedComposerSubmission({
   annotations,
   diffComments,
   fileComments,
+  browserNotePages,
   goalObjective,
   form,
   finishEditing,
 }: CompleteQueuedComposerSubmissionOptions): void {
   form.clear("dispatch");
-  clearQueuedAnnotations(annotationScopeId, annotations, diffComments, fileComments);
+  clearQueuedAnnotations(annotationScopeId, annotations, diffComments, fileComments, browserNotePages);
   if (goalObjective) form.setGoalPending(false);
   finishEditing();
   form.focus();
@@ -132,9 +141,10 @@ function clearQueuedAnnotations(
   annotations: PreviewAnnotationBundle | undefined,
   diffComments: readonly DraftDiffComment[],
   fileComments: readonly DraftFileComment[],
+  browserNotePages: readonly DraftBrowserNotePage[],
 ): void {
   if (!annotationScopeId || !annotations) return;
-  usePreviewAnnotationStore.getState().clearThread(annotationScopeId);
+  removeTakenBrowserNotePages(annotationScopeId, browserNoteElements(browserNotePages));
   removeTakenDiffComments(annotationScopeId, diffComments);
   removeTakenFileComments(annotationScopeId, fileComments);
   usePreviewDesignModeStore.getState().setActive(annotationScopeId, false);

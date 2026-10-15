@@ -75,6 +75,7 @@ import {
   TERMINAL_DATA_TAG,
   decodeTerminalDataFrame,
 } from "@mcode/contracts";
+import { stagedSnapshotIds } from "@/lib/staged-snapshot-ids";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
 import type { ApprovalRequest } from "@mcode/contracts";
@@ -1175,8 +1176,10 @@ export function createWsTransport(
         ? { maxBudgetUsd: state.settings.agent.guardrails.maxBudgetUsd, maxTurns: state.settings.agent.guardrails.maxTurns }
         : {};
       const { replyToMessageId, quotedText, ...command } = input;
+      const stagedDraftImageIds = stagedSnapshotIds(input.previewAnnotations);
       return rpc<void>("agent.send", {
         ...command,
+        ...(stagedDraftImageIds.length > 0 && { stagedDraftImageIds }),
         ...(replyToMessageId && { replyToMessageId }),
         ...(quotedText && { quotedText }),
         ...guardrails,
@@ -1230,6 +1233,10 @@ export function createWsTransport(
       Promise.resolve(null as AttachmentMeta | null),
     saveClipboardFile: (data, mimeType, fileName) =>
       rpcBinary<AttachmentMeta | null>("clipboard.saveFile", { mimeType, fileName }, data),
+    stageDraftImage: async (threadId, attachment) =>
+      WS_METHODS()["attachments.stageDraft"].result.parse(
+        await rpc<unknown>("attachments.stageDraft", { threadId, attachment }),
+      ),
     getActiveAgentCount: () => rpc<number>("agent.activeCount", {}),
     listRunning: () => rpc<import("@mcode/contracts").TurnRuntimeSnapshot[]>("agent.listRunning", {}),
     subscribeThread: (threadId) => rpc<void>("push.subscribeThread", { threadId }),
