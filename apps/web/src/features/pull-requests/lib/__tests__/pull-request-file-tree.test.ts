@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { orderCommitFiles } from "@/lib/commit-selection";
+import { orderReviewFiles } from "@/lib/review-file-order";
 import {
   buildPullRequestFileTree,
   collectPullRequestDirectoryIds,
@@ -76,5 +78,37 @@ describe("pull request file tree", () => {
       { depth: 1, positionInSet: 1, setSize: 2 },
       { depth: 1, positionInSet: 2, setSize: 2 },
     ]);
+  });
+});
+
+describe("review file order", () => {
+  const paths = (ordered: readonly { path: string }[]) => ordered.map((file) => file.path);
+
+  it("matches the tree's depth-first order, folders first and numbers by value", () => {
+    const ordered = orderReviewFiles(
+      ["b.ts", "a/z.ts", "a/b/10.ts", "a/b/9.ts"].map((path) => ({ path })),
+    );
+
+    expect(paths(ordered)).toEqual(["a/b/9.ts", "a/b/10.ts", "a/z.ts", "b.ts"]);
+  });
+
+  it("orders a backslash path by its folders without changing the path it returns", () => {
+    const windowsPath = ["src", "a.ts"].join(String.fromCharCode(92));
+
+    const ordered = orderReviewFiles([{ path: "z.ts" }, { path: windowsPath }]);
+
+    expect(paths(ordered)).toEqual([windowsPath, "z.ts"]);
+  });
+
+  it("gives the Commit sheet the same order within tracked and untracked files", () => {
+    const file = (path: string, untracked: boolean) => ({
+      path, previousPath: null, changeType: "modified" as const, binary: false, additions: null, deletions: null, untracked,
+    });
+
+    const ordered = orderCommitFiles([
+      file("new.ts", true), file("b.ts", false), file("a/z.ts", false), file("a/b/10.ts", false), file("a/b/9.ts", false),
+    ]);
+
+    expect(paths(ordered)).toEqual(["a/b/9.ts", "a/b/10.ts", "a/z.ts", "b.ts", "new.ts"]);
   });
 });

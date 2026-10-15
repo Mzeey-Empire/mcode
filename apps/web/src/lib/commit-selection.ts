@@ -1,5 +1,6 @@
 import type { GitCommitFile, ReviewFileChange } from "@mcode/contracts";
 import type { CheckboxChecked } from "@/components/ui/checkbox";
+import { orderReviewFiles } from "./review-file-order";
 
 /** Past this many files the sheet groups by folder and offers a filter. */
 export const COMMIT_FLAT_MAX_FILES = 10;
@@ -26,10 +27,6 @@ export type CommitListLayout =
 
 const PATH_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
-function comparePaths(a: ReviewFileChange, b: ReviewFileChange): number {
-  return PATH_COLLATOR.compare(a.path, b.path);
-}
-
 /** Folder of a repo-relative path; empty for a file at the root. */
 export function dirnameOf(path: string): string {
   const slash = path.lastIndexOf("/");
@@ -41,9 +38,12 @@ export function basenameOf(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
 }
 
-/** Tracked files by path, then untracked files by path. */
+/** Tracked files, then untracked files, each in the order the Review tree and diff show. */
 export function orderCommitFiles(files: readonly ReviewFileChange[]): ReviewFileChange[] {
-  return [...files].sort((a, b) => Number(a.untracked) - Number(b.untracked) || comparePaths(a, b));
+  return [
+    ...orderReviewFiles(files.filter((file) => !file.untracked)),
+    ...orderReviewFiles(files.filter((file) => file.untracked)),
+  ];
 }
 
 /** A path nobody has toggled is checked unless git does not track it yet. */
